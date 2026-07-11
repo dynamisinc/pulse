@@ -1,0 +1,1 @@
+export { checkEnvironment } from './validateEnv'
