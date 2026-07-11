@@ -30,19 +30,45 @@ Pulse has two visual worlds that must never blur into each other:
 - **Staff surfaces** (controller console, evaluator dashboard) use COBRA, exactly
   like Cadence.
 
-## Tech stack (matches Cadence frontend)
+## Tech stack (latest stable; ahead of Cadence)
 
 | Technology | Version | Notes |
 |------------|---------|-------|
 | React | 19.x | UI framework |
-| TypeScript | 5.x | Strict mode |
-| Vite | 7.x | Build tool (dev server on **5198**) |
-| Material-UI | 7.x | Component library (skinned on participant paths) |
+| TypeScript | **6.0.x** | Pinned <6.1: `typescript-eslint` has no stable TS 7 support yet |
+| Vite | 8.x | Build tool (Rolldown; dev server on **5198**) |
+| Material-UI | **9.x** | Component library (skinned on participant paths) |
 | FontAwesome | 7.x | **Icons (MANDATORY)** — never `@mui/icons-material` |
 | React Query | 5.x | Server state |
 | Axios | 1.x | HTTP client (`src/core/services/api.ts`) |
 | React Router | 7.x | Routing |
 | Vitest + RTL | 4.x / 16.x | Testing |
+
+> **Divergence from Cadence.** The design doc (D0 §1) names MUI 7 "same as Cadence";
+> Pulse was deliberately taken to **latest stable** (MUI 9 / TS 6 / Vite 8), so it now
+> leads Cadence (MUI 7 / TS 5 / Vite 7). The COBRA theme + components under `theme/` are
+> the **MUI 9 port**. When sharing code with Cadence, mind the MUI major gap.
+> **TS 7:** bump `typescript` to 7.x once `typescript-eslint` ships stable support.
+
+### MUI 9 gotcha: system props are `sx`-only
+
+MUI 9 removed direct system style props from layout/typography components. Put them in
+`sx`, not as top-level props (this differs from Cadence's MUI 7):
+
+```tsx
+// ❌ MUI 7 style (breaks type-check on MUI 9)
+<Stack alignItems="center" flexWrap="wrap"><Typography fontWeight={700} /></Stack>
+<Box padding="18px" />
+
+// ✅ MUI 9
+<Stack sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+  <Typography sx={{ fontWeight: 700 }} />
+</Stack>
+<Box sx={{ padding: '18px' }} />
+```
+
+`direction` / `spacing` (Stack), `variant` / `color` (Typography), and `maxWidth`
+(Container) remain valid own-props.
 
 A .NET backend is expected later (real-time feeds, staff APIs), mirroring Cadence's
 `*.Core` / `*.WebApi` split. Not present yet.

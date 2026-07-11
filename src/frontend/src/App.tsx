@@ -24,7 +24,7 @@ const queryClient = new QueryClient({
 })
 
 const NotFoundPage = () => (
-  <Box padding={CobraStyles.Padding.MainWindow}>
+  <Box sx={{ padding: CobraStyles.Padding.MainWindow }}>
     <Typography variant="h4" gutterBottom>
       404 - Not Found
     </Typography>

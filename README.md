@@ -32,9 +32,15 @@ Press **The Wire Room** · Weather **The Weather Desk**.
 
 ## Tech stack
 
-Matches Cadence's frontend: **React 19 · TypeScript 5 · Vite 7 · MUI 7 · FontAwesome 7
-· React Query · Axios · React Router 7 · Vitest**. Styling uses the in-house **COBRA**
-design system (ported under `src/frontend/src/theme/`).
+Same family as Cadence's frontend, on the **latest stable** releases: **React 19 ·
+TypeScript 6 · Vite 8 · MUI 9 · FontAwesome 7 · React Query 5 · Axios · React Router 7
+· Vitest 4**. Styling uses the in-house **COBRA** design system (ported to MUI 9 under
+`src/frontend/src/theme/`).
+
+> **Version note.** Pulse tracks latest-stable, which puts it **ahead of Cadence**
+> (Cadence is on MUI 7 / TS 5 / Vite 7). The COBRA components here are the MUI 9 port.
+> TypeScript is pinned to 6.0.x because `typescript-eslint` does not yet support TS 7
+> in a stable release — bump to 7 once it does. See [`CLAUDE.md`](CLAUDE.md).
 
 ## Repository layout
 

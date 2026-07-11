@@ -43,14 +43,14 @@ export const HomePage = () => {
   return (
     <Container maxWidth="lg" sx={{ py: 6 }}>
       <Stack spacing={1} sx={{ mb: 4 }}>
-        <Stack direction="row" spacing={1.5} alignItems="center">
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
           <FontAwesomeIcon icon={faTowerBroadcast} size="2x" color="#0020c2" />
-          <Typography variant="h3" fontWeight={700}>
+          <Typography variant="h3" sx={{ fontWeight: 700 }}>
             Pulse
           </Typography>
           <Chip label="scaffold" size="small" color="info" variant="outlined" />
         </Stack>
-        <Typography variant="h6" color="text.secondary" fontWeight={400}>
+        <Typography variant="h6" color="text.secondary" sx={{ fontWeight: 400 }}>
           A simulated media environment for emergency-management exercises.
         </Typography>
       </Stack>
@@ -62,7 +62,7 @@ export const HomePage = () => {
       >
         <Card variant="outlined" sx={{ flex: 1 }}>
           <CardContent>
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
               <FontAwesomeIcon icon={faUsers} />
               <Typography variant="h6">Participant world</Typography>
             </Stack>
@@ -70,7 +70,7 @@ export const HomePage = () => {
               The fiction. Consumer apps that mirror the real thing they simulate — warm,
               familiar, per-exercise brandable. Nothing may break fiction; no default MUI look.
             </Typography>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>
               {PARTICIPANT_SURFACES.map(s => (
                 <Chip key={s.brand} label={`${s.brand} · ${s.role}`} size="small" />
               ))}
@@ -80,7 +80,7 @@ export const HomePage = () => {
 
         <Card variant="outlined" sx={{ flex: 1 }}>
           <CardContent>
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
               <FontAwesomeIcon icon={faSliders} />
               <Typography variant="h6">Staff world</Typography>
             </Stack>
@@ -88,7 +88,7 @@ export const HomePage = () => {
               The machine. Cadence-family operator tooling — dark chrome, dense-on-purpose,
               fixed COBRA look. Never confusable with a participant view.
             </Typography>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>
               {STAFF_SURFACES.map(s => (
                 <Chip
                   key={s.brand}
@@ -104,7 +104,7 @@ export const HomePage = () => {
 
       <Card variant="outlined" sx={{ mb: 4, bgcolor: 'notifications.warning' }}>
         <CardContent>
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <FontAwesomeIcon icon={faTriangleExclamation} color="#6F4E37" />
             <Typography variant="body2" color="#6F4E37">
               Compliance chrome (COR-031) frames the participant world; high-risk templates
@@ -127,7 +127,7 @@ export const HomePage = () => {
 
       <Box sx={{ mt: 4 }}>
         <Typography variant="caption" color="text.secondary">
-          Dynamis · Pulse frontend scaffold · React 19 + Vite + MUI 7 + COBRA
+          Dynamis · Pulse frontend scaffold · React 19 + Vite 8 + MUI 9 + COBRA
         </Typography>
       </Box>
     </Container>

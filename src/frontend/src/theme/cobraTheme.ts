@@ -1,7 +1,7 @@
 import { alpha, createTheme } from '@mui/material/styles'
 
 /**
- * COBRA C5 Design System - Material-UI 7 Theme
+ * COBRA C5 Design System - Material-UI 9 Theme
  *
  * Shared Dynamis operator-tooling theme, ported from Cadence.
  *
