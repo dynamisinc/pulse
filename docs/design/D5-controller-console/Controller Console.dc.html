@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><script src="_ds/cadence-design-system-522baecd-866a-4a25-80c8-6d08f632a4e1/_ds_bundle.js"></script><style>
+:root{--bg:#0a1017;--panel:#0f1826;--panel2:#0d1420;--card:#111c2b;--line:#1c2a3a;--line2:#28384b;--ink:#e9eff7;--ink2:#9db1c8;--ink3:#63758b;--navy:#3b6fa8;--navyS:#1e3a5f;--red:#e42217;--amber:#f5a623;--green:#33a06f;--sans:ui-sans-serif,system-ui,"Segoe UI",Helvetica,Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+a{color:var(--navy);text-decoration:none}a:hover{color:#5b8fce}
+::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#213247;border-radius:6px}::-webkit-scrollbar-track{background:transparent}
+.app{height:100vh;width:100vw;max-width:100%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:20px 56px auto minmax(0,1fr);overflow:hidden}
+.exbar{display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:#0c1420;border-bottom:1px solid var(--line);font-size:10px;font-weight:700;letter-spacing:.14em;color:#6f8299;font-family:var(--mono)}
+.exbar b{color:#9db1c8}
+.hdr{display:flex;align-items:center;gap:14px;padding:0 14px;background:linear-gradient(180deg,#101c2c,#0c1622);border-bottom:1px solid var(--line)}
+.brand{display:flex;flex-direction:column;line-height:1.05}
+.brand .b1{font-size:15px;font-weight:800;letter-spacing:.02em}
+.brand .b2{font-size:9.5px;font-weight:700;letter-spacing:.16em;color:var(--ink3)}
+.exsw{position:relative}
+.exsw-btn{display:flex;flex-direction:column;align-items:flex-start;gap:1px;background:#132133;border:1px solid var(--line2);border-radius:8px;padding:5px 11px;cursor:pointer;color:var(--ink)}
+.exsw-btn .e1{font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.exsw-btn .e2{font-size:9.5px;font-weight:700;letter-spacing:.08em;color:var(--navy)}
+.exsw-menu{position:absolute;top:46px;left:0;z-index:60;background:var(--card);border:1px solid var(--line2);border-radius:10px;padding:6px;width:240px;box-shadow:0 18px 40px rgba(0,0,0,.5)}
+.exsw-row{padding:8px 10px;border-radius:7px;cursor:pointer;font-size:12px}
+.exsw-row:hover{background:#17263a}
+.exsw-row .sub{font-size:10.5px;color:var(--ink3)}
+.exsw-row.on{background:#14263c;border:1px solid #234062}
+.clocks{display:flex;align-items:center;gap:14px;padding:0 4px}
+.clk{display:flex;flex-direction:column;align-items:flex-start;line-height:1}
+.clk .t{font-family:var(--mono);font-weight:700}
+.clk .l{font-size:9px;font-weight:700;letter-spacing:.14em;color:var(--ink3);margin-top:3px}
+.clk.scn .t{font-size:22px;color:#fff}
+.clk.scn .l{color:var(--navy)}
+.clk.wall .t{font-size:13px;color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.state-pill{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;letter-spacing:.08em;padding:4px 9px;border-radius:20px;background:rgba(51,160,111,.14);color:#5fce9a;border:1px solid rgba(51,160,111,.35)}
+.state-pill.paused{background:rgba(245,166,35,.14);color:var(--amber);border-color:rgba(245,166,35,.4)}
+.hud{min-width:150px}
+.hud.hud-sm{min-width:168px;flex:none}
+.hud.hud-sm .hud-n{font-size:15px}
+.hud.hud-sm .hud-bar{margin-top:3px}
+.hud-top{display:flex;align-items:baseline;gap:6px}
+.hud-n{font-family:var(--mono);font-size:19px;font-weight:700;color:#fff}
+.hud-u{font-size:10px;color:var(--ink3);font-weight:600}
+.hud-bar{height:5px;background:#1a2838;border-radius:4px;margin-top:5px;overflow:hidden}
+.hud-fill{height:100%;background:linear-gradient(90deg,#2f6f9e,#4d97d1);border-radius:4px;transition:width .5s}
+.hud-fill.over{background:linear-gradient(90deg,var(--amber),#e07d1a)}
+.hud-cap{font-size:10px;color:var(--ink3);margin-top:3px;letter-spacing:.06em}
+.presence{display:flex;align-items:center;gap:-6px}
+.av{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;border:2px solid var(--panel)}
+.presence .av{margin-left:-7px}
+.ic{width:16px;height:16px;display:inline-block;vertical-align:middle;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.ic.sm{width:13px;height:13px}
+.btn{border:1px solid var(--line2);background:#16212e;color:var(--ink);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{background:#1c2a3a;border-color:#33475e}
+.btn.sm{padding:3px 8px;font-size:11px;border-radius:6px}
+.btn.fire{background:var(--navyS);border-color:#2c5686;color:#fff}
+.btn.fire:hover{background:#264e77}
+.btn.ghost{background:transparent;color:var(--ink2)}
+.btn.warn{border-color:rgba(245,166,35,.5);color:var(--amber);background:rgba(245,166,35,.08)}
+.btn.red{background:var(--red);border-color:#c11d13;color:#fff}
+.btn.red:hover{background:#c9200f}
+.kbd{font-family:var(--mono);font-size:10px;font-weight:700;background:#0c1420;border:1px solid var(--line2);border-bottom-width:2px;border-radius:4px;padding:1px 5px;color:var(--ink2)}
+.eng{position:relative}
+.eng-btn{display:flex;align-items:center;gap:8px;background:#1a0f10;border:1px solid #5a2420;border-radius:8px;padding:6px 11px;cursor:pointer;color:#ff9a90;font-weight:700;font-size:12px;white-space:nowrap;flex:none}
+.eng-btn .dot{background:var(--green)}
+.eng-btn.suggest{color:var(--amber);border-color:#5a4620}.eng-btn.suggest .dot{background:var(--amber)}
+.eng-btn.stopped{background:var(--red);color:#fff;border-color:#c11d13}.eng-btn.stopped .dot{background:#fff}
+.eng-menu{position:absolute;top:44px;right:0;z-index:60;background:var(--card);border:1px solid var(--line2);border-radius:10px;padding:6px;width:230px;box-shadow:0 18px 40px rgba(0,0,0,.5)}
+.eng-menu .er{padding:9px 10px;border-radius:7px;cursor:pointer;font-size:12px;display:flex;gap:9px;align-items:flex-start}
+.eng-menu .er:hover{background:#17263a}
+.eng-menu .er .sub{font-size:10.5px;color:var(--ink3);font-weight:400}
+.eng-menu .er.kill{color:#ff9a90}
+.hgrp{display:flex;align-items:center;gap:9px}
+.hdr-div{width:1px;height:28px;background:var(--line2);flex:none;margin:0 2px}
+.guard{display:flex;align-items:center;gap:7px;padding:4px 8px;border:1px dashed rgba(245,166,35,.45);border-radius:10px;flex:none}
+.guard .gl{font-size:9px;font-weight:800;letter-spacing:.12em;color:var(--amber)}
+.body{display:grid;grid-template-columns:302px minmax(0,1fr) 336px 56px;min-height:0;min-width:0;overflow:hidden}
+.rail{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--panel2)}
+.rail.left{border-right:1px solid var(--line)}
+.rail.right{border-left:1px solid var(--line2);background:var(--panel);box-shadow:-12px 0 26px rgba(0,0,0,.38);z-index:5}
+.rl-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 13px;border-bottom:1px solid var(--line);flex:none;flex-wrap:nowrap;min-width:0}
+.rl-hd .t{font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--ink2);white-space:nowrap}
+.rl-hd .c{font-size:10.5px;color:var(--ink3);font-family:var(--mono);white-space:nowrap}
+.scroll{overflow-y:auto;min-height:0;flex:1}
+/* timeline */
+.tl{padding:8px}
+.tl-now{display:flex;align-items:center;gap:8px;margin:10px 2px 6px;color:var(--navy);font-size:10px;font-weight:800;letter-spacing:.1em;font-family:var(--mono)}
+.tl-now::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--navy),transparent)}
+.ti{border:1px solid var(--line);background:var(--card);border-radius:9px;padding:9px 10px;margin-bottom:7px}
+.ti.locked{border-left:3px solid #4a6b96}
+.ti.done{opacity:.6}
+.ti-top{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.ti-time{font-family:var(--mono);font-size:11px;color:var(--ink2);font-weight:600}
+.ti-inj{font-family:var(--mono);font-size:10px;color:var(--ink3);background:#0c1420;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+.lock{display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#7fa3d0}
+.chip{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:5px;display:inline-flex;gap:5px;align-items:center;margin-left:auto}
+.chip .dot{width:6px;height:6px}
+.st-pending{background:#1a2534;color:#8da4c0}.st-pending .dot{background:#6f8bab}
+.st-ready{background:rgba(59,111,168,.18);color:#7fb0e6}.st-ready .dot{background:#4d97d1}
+.st-fired{background:rgba(51,160,111,.16);color:#5fce9a}.st-fired .dot{background:var(--green)}
+.st-skipped{background:#1a2534;color:#7a8ba0}.st-skipped .dot{background:#556377}
+.st-held{background:rgba(245,166,35,.15);color:#f0b45a}.st-held .dot{background:var(--amber)}
+.st-firing{background:rgba(77,151,209,.2);color:#8fc0ee}.st-firing .dot{background:#4d97d1;animation:pulse 1s infinite}
+.ti-title{font-size:12.5px;font-weight:600;line-height:1.3;margin:2px 0 5px}
+.ti-meta{font-size:10.5px;color:var(--ink3);font-family:var(--mono);margin-bottom:7px}
+.ti-acts{display:flex;gap:6px;flex-wrap:wrap}
+.pacing{height:4px;background:#16283c;border-radius:3px;overflow:hidden;margin-bottom:6px}
+.pacing i{display:block;height:100%;background:#4d97d1;transition:width .4s}
+/* columns */
+.cols-wrap{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden;position:relative}
+.cols-wrap::after{content:"";position:absolute;right:0;top:37px;bottom:0;width:34px;background:linear-gradient(90deg,transparent,var(--bg));pointer-events:none;z-index:4}
+.cols-hd{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--line);flex:none;background:var(--panel2)}
+.cols-hd .t{font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--ink2);white-space:nowrap}
+.cols{display:flex;gap:0;flex:1;min-height:0;min-width:0;overflow-x:auto;scroll-snap-type:x mandatory}
+.col{width:auto;flex:0 0 calc(100%/var(--nvis,4));border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;scroll-snap-align:start}
+.col-hd{display:flex;align-items:center;gap:7px;padding:9px 11px;border-bottom:1px solid var(--line);flex:none;background:var(--panel2)}
+.col-hd .ct{font-size:12px;font-weight:700}
+.col-hd .cc{font-size:10px;color:var(--ink3);font-family:var(--mono);background:#0c1420;border-radius:10px;padding:1px 7px}
+.col-hd .tag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px}
+.tag-water{background:rgba(59,111,168,.2);color:#7fb0e6}
+.tag-outage{background:rgba(245,166,35,.16);color:#f0b45a}
+.col-body{overflow-y:auto;min-height:0;flex:1;padding:8px}
+.post{border:1px solid var(--line);background:var(--card);border-radius:9px;padding:9px 10px;margin-bottom:7px;position:relative}
+.post.fresh{animation:postin .45s cubic-bezier(.2,.7,.3,1)}
+@keyframes postin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+@keyframes pulse{50%{opacity:.35}}
+.post-top{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.post-nm{font-size:12px;font-weight:700;display:flex;align-items:center;gap:4px}
+.vf{width:13px;height:13px;flex:none}
+.post-hd{font-size:11px;color:var(--ink3)}
+.post-tm{font-size:10.5px;color:var(--ink3);margin-left:auto;font-family:var(--mono)}
+.post-tx{font-size:12.5px;line-height:1.4;color:#dbe6f2}
+.post-eng{display:flex;gap:14px;margin-top:7px;font-size:10.5px;color:var(--ink3);font-family:var(--mono)}
+.post-acts{display:flex;gap:6px;margin-top:8px;opacity:0;transition:opacity .12s}
+.post:hover .post-acts{opacity:1}
+.mini{font-size:11px;font-weight:600;color:var(--ink2);background:#152232;border:1px solid var(--line2);border-radius:6px;padding:3px 9px;cursor:pointer}
+.mini:hover{background:#1b2a3d;color:var(--ink)}
+.mini.rd{color:#ff9a90;border-color:#4a2420}
+.act{display:flex;gap:8px;padding:8px 10px;margin-bottom:7px;border:1px dashed var(--line2);border-radius:9px;font-size:11.5px;color:var(--ink2);align-items:center;background:rgba(20,30,44,.5)}
+.act .who{font-weight:700;color:var(--ink)}
+.act .tm{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink3)}
+.newpill{position:sticky;top:0;z-index:5;text-align:center;font-size:11px;font-weight:700;color:#7fb0e6;background:#14263c;border:1px solid #26456a;border-radius:16px;padding:5px 10px;margin:0 18px 8px;cursor:pointer;box-shadow:0 6px 16px rgba(0,0,0,.4)}
+.newpill:hover{background:#1a3350}
+/* right rail sections */
+.rsec{border-bottom:1px solid var(--line);display:flex;flex-direction:column;min-height:0;flex:none}
+.rsec.grow{flex:1 1 0;min-height:170px}
+.rsec.st-board{max-height:48%}
+.sl{padding:9px 11px 11px;overflow-y:auto;min-height:0;flex:1}
+.sl-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 11px;margin-bottom:8px}
+.sl-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.sl-nm{font-size:12.5px;font-weight:700}
+.sl-tag{font-size:10px;font-family:var(--mono);color:var(--ink3)}
+.sev{font-size:10px;font-weight:800;letter-spacing:.06em;padding:2px 7px;border-radius:5px;margin-left:auto;display:flex;gap:5px;align-items:center}
+.sev .dot{width:6px;height:6px}
+.sev-esc{background:rgba(228,34,23,.16);color:#f08a80}.sev-esc .dot{background:var(--red)}
+.sev-act{background:rgba(245,166,35,.16);color:#f0b45a}.sev-act .dot{background:var(--amber)}
+.metric{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.metric .ml{font-size:10.5px;color:var(--ink3);width:62px;flex:none;letter-spacing:.04em}
+.mbar{flex:1;height:6px;background:#16283c;border-radius:4px;overflow:hidden}
+.mbar.tgt{overflow:visible;position:relative;cursor:pointer}
+.mbar.tgt i{border-radius:4px}
+.tick{position:absolute;top:-3px;width:3px;height:12px;background:#e9eff7;border-radius:2px;box-shadow:0 0 0 1.5px #0a1017;pointer-events:none}
+.mbar i{display:block;height:100%;border-radius:4px}
+.mbar i.int{background:linear-gradient(90deg,#c9200f,#f5a623)}
+.mbar.senti{background:#16283c;position:relative}
+.mbar.senti i{background:#d8604a}
+.mv{font-size:10.5px;font-family:var(--mono);color:var(--ink2);width:56px;text-align:right;flex:none}
+.mv em{font-style:normal;color:var(--ink3);font-size:10px}
+.dial{display:flex;gap:4px;margin:9px 0 7px}
+.seg{flex:1;height:16px;border-radius:4px;background:#16283c;border:1px solid var(--line);cursor:pointer;transition:.12s}
+.seg:hover{border-color:#33475e}
+.seg.on{background:#3b6fa8;border-color:#4d97d1}
+.seg.on.hot{background:var(--amber);border-color:#f5a623}
+.seg.on.crit{background:var(--red);border-color:#e42217}
+.dial-l{display:flex;justify-content:space-between;font-size:10px;color:var(--ink3);letter-spacing:.08em;font-family:var(--mono)}
+.expect{display:flex;align-items:center;gap:7px;font-size:11px;margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
+.expect .lb{color:var(--ink3)}
+.expect .vv{font-weight:600}
+.expect .met{color:#5fce9a}.expect .wait{color:var(--amber)}
+.sl-foot{display:flex;gap:7px;margin-top:9px}
+.offbadge{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;color:#7fb0e6;background:rgba(59,111,168,.14);border:1px solid rgba(59,111,168,.3);border-radius:5px;padding:3px 7px}
+/* queue */
+.q{padding:8px}
+.qbar{display:flex;align-items:center;gap:8px;padding:2px 4px 9px}
+.qbar .qi{font-size:10.5px;color:var(--ink3)}
+.qitem{border:1px solid var(--line);background:var(--card);border-radius:9px;padding:9px 10px;margin-bottom:7px;cursor:pointer}
+.qitem.focus{border-color:#4d97d1;box-shadow:0 0 0 1px rgba(77,151,209,.4),0 6px 18px rgba(0,0,0,.3)}
+.qitem.prio{border-left:3px solid var(--red)}
+.q-top{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.q-nm{font-size:11.5px;font-weight:700}
+.q-hd{font-size:10.5px;color:var(--ink3)}
+.q-act{font-size:10px;color:var(--navy);font-weight:700;margin-left:auto;font-family:var(--mono)}
+.q-tx{font-size:11.5px;line-height:1.35;color:#cdd9e8;margin-bottom:7px}
+.q-foot{display:flex;align-items:center;gap:7px}
+.q-tag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px}
+.q-count{font-size:10px;font-family:var(--mono);color:var(--amber);display:flex;align-items:center;gap:5px}
+.q-count.rev{color:#8da4c0}
+.qring{width:64px;height:4px;background:#3a2a12;border-radius:3px;overflow:hidden}
+.qring i{display:block;height:100%;background:var(--amber)}
+.q-keys{display:flex;gap:5px;margin-left:auto}
+.q-empty{text-align:center;color:var(--ink3);font-size:11.5px;padding:26px 10px}
+/* toolstrip + flyouts */
+.toolstrip{background:#0b121d;border-left:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:10px}
+.tool{width:44px;display:flex;flex-direction:column;align-items:center;gap:3px;background:transparent;border:1px solid transparent;border-radius:9px;padding:7px 0 5px;cursor:pointer;color:var(--ink2);font-family:inherit}
+.tool:hover{background:#141f2e;border-color:var(--line2)}
+.tool.on{background:#14263c;border-color:#356298;color:#7fb0e6}
+.tool .tl{font-size:8.5px;font-weight:700;letter-spacing:.04em}
+.tool .ic{width:17px;height:17px}
+.tool{position:relative}
+.tbadge{position:absolute;top:2px;right:6px;min-width:15px;height:15px;border-radius:8px;background:var(--red);color:#fff;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 3px;box-shadow:0 0 0 2px #0b121d}
+.tbadge.calm{background:#3b6fa8}
+.tbadge.hot{animation:pulse 1.2s infinite}
+.flyout{position:fixed;right:56px;top:76px;bottom:0;width:322px;background:var(--panel);border-left:1px solid var(--line2);box-shadow:-24px 0 60px rgba(0,0,0,.5);z-index:150;display:flex;flex-direction:column;animation:flyin .18s ease-out}
+@keyframes flyin{from{transform:translateX(14px);opacity:0}to{transform:none;opacity:1}}
+.fly-body{overflow-y:auto;min-height:0;flex:1;padding:10px}
+.flyout .rl-cap{display:block}
+.flyout .pgrid{grid-template-columns:1fr}
+.tcard{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 10px;margin-bottom:8px}
+.sev-ok{background:rgba(51,160,111,.16);color:#5fce9a}.sev-ok .dot{background:var(--green)}
+.dock{padding:9px 10px;overflow-y:auto;min-height:0}
+.dock-cta{width:100%;justify-content:flex-start;padding:8px 11px;margin-bottom:9px;font-size:12.5px}
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.pchip{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 8px;cursor:pointer;position:relative}
+.pchip:hover{border-color:#33475e;background:#16243a}
+.pchip .pn{font-size:11px;font-weight:700;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pchip .ph2{font-size:9.5px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pres{position:absolute;top:5px;right:6px;width:7px;height:7px;border-radius:50%}
+.pres.you{background:var(--green)}.pres.busy{background:var(--amber)}.pres.idle{background:#556377}.pres.live{background:#4d97d1}
+.plabel{font-size:8px;font-weight:700;color:var(--amber);position:absolute;bottom:4px;right:6px;font-family:var(--mono)}
+/* overlays */
+.scrim{position:fixed;inset:0;z-index:200;background:rgba(6,10,16,.55);display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;backdrop-filter:blur(2px)}
+.scrim.mid{align-items:center;padding-top:0}
+.pal{width:560px;background:#0f1826;border:1px solid var(--line2);border-radius:14px;box-shadow:0 30px 70px rgba(0,0,0,.6);overflow:hidden}
+.pal-in{display:flex;align-items:center;gap:11px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.pal-in input{flex:1;background:transparent;border:none;outline:none;color:var(--ink);font-size:16px;font-family:inherit}
+.pal-in .kbd{margin-left:auto}
+.pal-list{max-height:340px;overflow-y:auto;padding:7px}
+.pal-sec{font-size:9.5px;font-weight:800;letter-spacing:.12em;color:var(--ink3);padding:9px 10px 5px}
+.pal-row{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:9px;cursor:pointer}
+.pal-row.sel{background:#17263a}
+.pal-row .pr-nm{font-size:13px;font-weight:600;display:flex;align-items:center;gap:5px}
+.pal-row .pr-sub{font-size:11px;color:var(--ink3)}
+.pal-row .pr-go{margin-left:auto;font-size:10px;color:var(--ink3)}
+/* composer (light COBRA paper) */
+.composer{width:600px;background:#f6f7f9;border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.6);overflow:hidden;color:#1a1a1a}
+.cmp-hd{display:flex;align-items:center;gap:11px;padding:14px 16px;background:#fff;border-bottom:1px solid #e3e6ea}
+.cmp-hd .cn{font-size:14px;font-weight:800;display:flex;align-items:center;gap:5px}
+.cmp-hd .ch{font-size:12px;color:#6b7280}
+.cmp-hd .role{margin-left:auto;font-size:10px;font-weight:700;letter-spacing:.06em;color:#1e3a5f;background:#eaf0f8;border:1px solid #cdddf0;border-radius:6px;padding:3px 8px}
+.cmp-hd.citizen{background:#fbf3e4;border-top:4px solid #c98a2b}
+.cmp-hd.official{background:#e8f0fa;border-top:4px solid #1e3a5f}
+.cmp-hd.news{background:#faeaf0;border-top:4px solid #c23b6b}
+.role.citizen{color:#7a5410;background:#f5e7c8;border-color:#e0c384}
+.role.official{color:#1e3a5f;background:#dce9f8;border-color:#b9d2ee}
+.role.news{color:#8a2350;background:#f6dbe7;border-color:#e8b7cd}
+.cmp-body{display:grid;grid-template-columns:1fr 200px;gap:0}
+.cmp-main{padding:15px 16px}
+.cmp-ctx{font-size:11.5px;color:#4b5563;background:#eef1f5;border-radius:8px;padding:9px 11px;margin-bottom:12px;line-height:1.4}
+.cmp-ctx b{color:#1e3a5f}
+.cmp-side{background:#f0f2f5;border-left:1px solid #e3e6ea;padding:14px 14px}
+.cmp-side .st{font-size:9.5px;font-weight:800;letter-spacing:.1em;color:#6b7280;margin-bottom:9px;display:flex;align-items:center;gap:6px}
+.voice{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.voice li{font-size:11.5px;color:#374151;line-height:1.3;padding-left:14px;position:relative}
+.voice li::before{content:"";position:absolute;left:0;top:6px;width:5px;height:5px;border-radius:50%;background:#1e3a5f}
+.cmp-foot{display:flex;align-items:center;gap:10px;padding:12px 16px;background:#fff;border-top:1px solid #e3e6ea}
+.cmp-count{font-size:11px;color:#9ca3af;font-family:var(--mono)}
+.cmp-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+/* toast */
+.toasts{position:fixed;left:50%;top:106px;transform:translateX(-50%);z-index:250;display:flex;flex-direction:column;gap:9px;align-items:center}
+.toasts.bot{top:auto;bottom:22px}
+.toast{display:flex;align-items:center;gap:14px;background:#131f30;border:1px solid #6a4620;border-left:4px solid var(--amber);border-radius:11px;padding:12px 16px;box-shadow:0 18px 50px rgba(0,0,0,.65);min-width:420px;max-width:660px;animation:postin .25s}
+.toast .t-hd{font-size:9px;font-weight:800;letter-spacing:.14em;color:var(--amber);margin-bottom:4px}
+.toast .tq{font-size:13px;font-weight:600;line-height:1.45}
+.toast .tq b{color:#f0c47a}
+.toast .ty{display:flex;gap:7px;margin-left:auto;flex:none}
+.toast .yn{min-width:62px;height:32px;border-radius:7px;border:1px solid var(--line2);background:#16212e;color:var(--ink);font-weight:700;cursor:pointer;font-size:12px;font-family:inherit;padding:0 10px}
+.toast .yn.y{border-color:#2f6f4e;color:#5fce9a}.toast .yn.n{border-color:#5a2420;color:#ff9a90}
+.toast.ok{border-color:#2f6f4e;border-left-color:var(--green);color:#7ad3a5;min-width:0;font-size:12.5px;font-weight:600}
+.toast.warn{color:#f0c47a;min-width:0;font-size:12.5px;font-weight:600}
+/* light dialog */
+.dlg{width:460px;background:#f6f7f9;border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.6);overflow:hidden;color:#1a1a1a}
+.dlg-hd{padding:15px 18px;font-size:15px;font-weight:800;border-bottom:1px solid #e3e6ea;display:flex;align-items:center;gap:9px}
+.dlg-bd{padding:16px 18px;font-size:13px;color:#374151;line-height:1.5}
+.dlg-ft{display:flex;gap:9px;justify-content:flex-end;padding:13px 18px;background:#fff;border-top:1px solid #e3e6ea}
+.cats{display:flex;flex-direction:column;gap:2px;margin-top:6px}
+.cat{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent;font-size:12.5px}
+.cat:hover{background:#eef1f5}
+.cat.on{background:#eaf0f8;border-color:#1e3a5f}
+.cat .cr{width:15px;height:15px;border-radius:50%;border:2px solid #9ca3af;flex:none}
+.cat.on .cr{border-color:#1e3a5f;background:radial-gradient(#1e3a5f 42%,transparent 46%)}
+.confirm-in{width:100%;font-size:15px;font-family:var(--mono);letter-spacing:.12em;padding:11px 13px;border:2px solid #e42217;border-radius:9px;outline:none;text-align:center;margin-top:10px;color:#111;font-weight:700}
+.warnbox{background:#fdecea;border:1px solid #f5c6c2;border-radius:9px;padding:11px 13px;color:#8a1a12;font-size:12px;line-height:1.45;display:flex;gap:9px}
+.pausepop{position:absolute;top:44px;right:0;z-index:60;width:280px;background:var(--card);border:1px solid var(--line2);border-radius:11px;padding:12px;box-shadow:0 18px 40px rgba(0,0,0,.5)}
+.pp-t{font-size:12px;font-weight:800;margin-bottom:9px;letter-spacing:.03em}
+.pp-opt{display:flex;gap:9px;align-items:flex-start;padding:9px;border:1px solid var(--line);border-radius:8px;margin-bottom:7px;cursor:pointer;font-size:11.5px}
+.pp-opt.on{border-color:#4d97d1;background:#14263c}
+.pp-opt .cr{width:15px;height:15px;border-radius:50%;border:2px solid #55708a;flex:none;margin-top:1px}
+.pp-opt.on .cr{border-color:#4d97d1;background:radial-gradient(#4d97d1 42%,transparent 46%)}
+.pp-opt .sub{color:var(--ink3)}
+/* BROADCAST alien overlay */
+.bc-overlay{position:fixed;inset:0;z-index:400;background:repeating-linear-gradient(45deg,#0a0a0a,#0a0a0a 22px,#141005 22px,#141005 44px);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:var(--mono);color:#ffcf33;text-align:center}
+.bc-frame{border:4px solid #ffcf33;background:#0a0a0a;padding:44px 56px;max-width:760px;box-shadow:0 0 0 10px #0a0a0a,0 0 60px rgba(255,207,51,.25)}
+.bc-tag{font-size:13px;font-weight:800;letter-spacing:.4em;color:#ffcf33;margin-bottom:20px;display:flex;align-items:center;justify-content:center;gap:12px}
+.bc-tag::before,.bc-tag::after{content:"";width:44px;height:0;border-top:3px dashed #ffcf33}
+.bc-hl{font-size:44px;font-weight:800;line-height:1.05;letter-spacing:.02em;color:#fff;text-transform:uppercase}
+.bc-msg{font-size:17px;line-height:1.5;margin-top:22px;color:#ffe9a3;max-width:560px}
+.bc-meta{margin-top:26px;font-size:12px;letter-spacing:.2em;color:#b99a2e}
+.bc-warn{position:absolute;top:26px;left:50%;transform:translateX(-50%);font-size:12px;letter-spacing:.5em;color:#ffcf33;animation:pulse 1.4s infinite}
+.bc-end{margin-top:30px}
+.bc-btn{background:#ffcf33;color:#0a0a0a;border:none;font-family:var(--mono);font-weight:800;font-size:13px;letter-spacing:.2em;padding:13px 26px;border-radius:2px;cursor:pointer}
+.hint{position:fixed;left:16px;bottom:14px;z-index:120;display:flex;gap:14px;align-items:center;font-size:10.5px;color:var(--ink3);background:rgba(12,20,32,.85);border:1px solid var(--line);border-radius:9px;padding:7px 12px}
+.hint b{color:var(--ink2)}
+.actionbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:7px 14px;background:linear-gradient(180deg,#0c1a2b,#0a1420);border-bottom:1px solid var(--line);overflow:hidden}
+.ab-l{display:flex;align-items:center;gap:9px;min-width:0;flex-wrap:wrap}
+.ab-tag{font-size:9.5px;font-weight:800;letter-spacing:.14em;color:var(--amber);flex:none}
+.ab-chip{display:inline-flex;align-items:center;gap:7px;background:#14263c;border:1px solid #26456a;color:#cfe0f2;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit}
+.ab-chip:hover{background:#1a3350;border-color:#356298}
+.ab-chip .ab-dot{width:7px;height:7px;border-radius:50%;background:#4d97d1;flex:none}
+.ab-chip.hot{border-color:#6a4620;background:#231a0d;color:#f0c47a}.ab-chip.hot .ab-dot{background:var(--amber);animation:pulse 1s infinite}
+.ab-chip.fire{border-color:#2f6f4e;background:rgba(51,160,111,.12);color:#7ad3a5}.ab-chip.fire .ab-dot{background:var(--green)}
+.ab-clear{font-size:12px;color:var(--ink3);font-weight:600;display:flex;align-items:center;gap:7px}
+.ab-clear .ab-dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block}
+.ab-hint{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink3);white-space:nowrap;flex:none}
+.ab-hint .ab-x{margin-left:6px;background:transparent;border:1px solid var(--line2);color:var(--ink2);border-radius:6px;padding:3px 9px;font-size:11px;cursor:pointer;font-family:inherit}
+.ab-hint .ab-x:hover{background:#16212e}
+.focus-toggle.on{border-color:#356298;color:#7fb0e6;background:rgba(59,111,168,.12)}
+.tl-collapse{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;color:var(--ink3);padding:7px 9px;margin-bottom:6px;border:1px dashed var(--line2);border-radius:8px;cursor:pointer;background:rgba(20,30,44,.4)}
+.tl-collapse:hover{color:var(--ink2);border-color:#33475e}
+.ti.collapsed{display:none}
+.ti.hl{border-color:var(--amber);box-shadow:0 0 0 2px rgba(245,166,35,.35)}
+.rsec.p-dock{max-height:158px}
+.rl-cap{display:none;font-size:11px;color:var(--ink3);padding:7px 13px 8px;border-bottom:1px solid var(--line);line-height:1.45}
+.focus .rl-cap{display:block}
+.prow{display:flex;gap:8px;overflow-x:auto;padding:2px 1px 4px}
+.pav{position:relative;flex:none;cursor:pointer}
+.pav .av{width:31px;height:31px;font-size:11px;border:2px solid var(--panel)}
+.pav .pres{position:absolute;top:auto;bottom:-1px;right:-2px;border:2px solid var(--panel)}
+.pav:hover .av{border-color:#4d97d1}
+.sl-chev{margin-left:2px;transition:transform .15s;color:var(--ink3);flex:none}
+.sl-chev.open{transform:rotate(180deg)}
+.app.focus .rail.right .sl-card,.app.focus .col.dimmed{opacity:1}
+@media (max-width:1420px){
+.body{grid-template-columns:272px minmax(0,1fr) 312px 56px}
+.col{width:284px}
+.brand .b2{display:none}
+.exsw-btn .e2{display:none}
+.clk.scn .t{font-size:18px}
+.clk.wall{display:none}
+.presence{display:none}
+.hdr{gap:10px}
+.hgrp{gap:6px}
+}
+@media (max-width:1180px){
+.body{grid-template-columns:250px minmax(0,1fr) 296px 56px}
+.state-pill{display:none}
+.guard .gl{display:none}
+.ab-hint{display:none}
+.cols-hd .hud-cap{display:none}
+}
+</style></helmet><div class="app {{appFocus}}"><div class="exbar"><span>EXERCISE — TRAINING USE ONLY · <b>SIMULATED CONTENT</b></span><span>{{exName}} · SIMCELL</span><span>UNCLASSIFIED // FOUO</span></div><div class="hdr"><div class="brand"><span class="b1">PULSE</span><span class="b2">CONTROLLER CONSOLE</span></div><div class="exsw"><div class="exsw-btn" style="cursor:default" title="Exercise identity — fixed while conduct is live, so you can never mistake which world you are operating (COR-005)"><span class="e1">{{exName}}</span><span class="e2">CONTROLLER · SimCell-1</span></div></div><div class="clocks"><div class="clk scn"><span class="t">{{scenarioClock}}</span><span class="l">SCENARIO TIME</span></div><div class="clk wall"><span class="t">{{wallClock}}</span><span class="l">WALL {{wallDate}}</span></div></div><div class="state-pill {{stateClass}}"><span class="dot"></span>{{stateLabel}}</div><div class="f1"></div><div class="presence"><div class="av" style="{{av1}}" title="SimCell-1 (you)">S1</div><div class="av" style="{{av2}}" title="SimCell-2 · J. Okoro">S2</div><div class="av" style="{{av3}}" title="Director · L. Park">DP</div></div><div class="hgrp"><button class="btn ghost sm focus-toggle {{appFocus}}" onClick="{{toggleFocus}}" title="Focus dims completed items and surfaces only what needs a decision"><svg class="ic sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 4v2.5M12 17.5V20M4 12h2.5M17.5 12H20"/></svg>{{focusLabel}}</button><button class="btn ghost sm" onClick="{{togglePause}}" title="Pause — three tiers, from holding injects to freezing the whole world (CTL-023)"><svg class="ic sm" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>{{pauseBtnLabel}}</button><sc-if value="{{pauseOpen}}" hint-placeholder-val="{{false}}"><div style="position:relative"><div class="pausepop"><div class="pp-t">Pause — choose how much stops:</div><div class="pp-opt {{pt1Class}}" onClick="{{setPt1}}"><span class="cr"></span><div><b>Pause injects</b><div class="sub">Scheduled injects hold. The world keeps living.</div></div></div><div class="pp-opt {{pt2Class}}" onClick="{{setPt2}}"><span class="cr"></span><div><b>Pause engine</b><div class="sub">No new AI content. Injects &amp; human posts continue.</div></div></div><div class="pp-opt {{pt3Class}}" onClick="{{setPt3}}" style="border-color:rgba(245,166,35,.5)"><span class="cr"></span><div><b style="color:var(--amber)">Freeze world</b><div class="sub">Full stop — participants will notice. Safety stops only.</div></div></div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px"><x-import component-from-global-scope="CX.Link" from="./cobra.jsx" onClick="{{closePause}}" hint-size="70px,34px">Cancel</x-import><x-import component-from-global-scope="CX.Primary" from="./cobra.jsx" size="small" onClick="{{confirmPause}}" hint-size="90px,34px">Pause</x-import></div></div></div></sc-if><div class="eng"><div class="eng-btn {{engClass}}" onClick="{{toggleEng}}" title="The AI engine auto-drives persona replies. One click to set Suggest-only or stop it entirely (ADP-042)"><span class="dot"></span>ENGINE · {{engLabel}}<svg class="ic sm" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div><sc-if value="{{engOpen}}" hint-placeholder-val="{{false}}"><div class="eng-menu"><div class="er" onClick="{{engLive}}"><span class="dot" style="background:#33a06f;margin-top:4px"></span><div><b>Live</b><div class="sub">Engine fires approved auto-content</div></div></div><div class="er" onClick="{{engSuggest}}"><span class="dot" style="background:#f5a623;margin-top:4px"></span><div><b>Suggest-only</b><div class="sub">Engine drafts; nothing fires without you</div></div></div><div class="er kill" onClick="{{engStop}}"><span class="dot" style="background:#e42217;margin-top:4px"></span><div><b>STOP ENGINE</b><div class="sub">Halt all automated content immediately</div></div></div><div class="er" onClick="{{toggleTimeout}}" style="border-top:1px solid var(--line);margin-top:4px;padding-top:10px"><span class="dot" style="background:#63758b;margin-top:4px"></span><div><b>On timeout: {{timeoutLabel}}</b><div class="sub">{{timeoutSub}}</div></div></div></div></sc-if></div><span class="hdr-div"></span><div class="guard"><span class="gl">GUARDED</span><button class="btn warn sm" onClick="{{clickBroadcast}}" title="Breaks fiction: replaces every participant screen in THIS exercise with a real-world message. Nothing leaves the platform. Director-gated + type-to-confirm, every use logged (CTL-024)."><svg class="ic sm" viewBox="0 0 24 24"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 0 1-5.8-1.1"/></svg>Break Fiction</button><button class="btn ghost sm" onClick="{{toggleRole}}" title="Demo control — switch acting role. Break Fiction arms only for Directors.">Role: {{roleName}}</button></div></div></div><div class="actionbar"><div class="ab-l"><span class="ab-tag">NEEDS YOU</span><sc-for list="{{needsNow}}" as="n" hint-placeholder-count="2"><button class="ab-chip {{n.cls}}" onClick="{{n.onClick}}" title="{{n.tip}}"><span class="ab-dot"></span>{{n.label}}</button></sc-for><sc-if value="{{nothingNow}}" hint-placeholder-val="{{false}}"><span class="ab-clear"><span class="ab-dot"></span>All clear — monitoring the world</span></sc-if></div><div class="hud hud-sm" title="Queue pressure: how many decisions the world is demanding of you per minute. A design budget on the console (CTL-034) — never a measure of the controller."><div class="hud-top"><span class="hud-n">{{perMin}}</span><span class="hud-u">/ 6 · queue pressure</span></div><div class="hud-bar"><div class="hud-fill {{hudMod}}" style="{{hudStyle}}"></div></div></div><sc-if value="{{showHint}}" hint-placeholder-val="{{true}}"><div class="ab-hint"><span class="kbd">⌘K</span> reply as a persona · <span class="kbd">↑↓</span> then <span class="kbd">A</span>/<span class="kbd">V</span> to clear the queue<button class="ab-x" onClick="{{dismissHint}}">Got it</button></div></sc-if></div><div class="body"><div class="rail left"><div class="rl-hd"><span class="t" title="The scripted event list (Cadence MSEL) counting down in scenario time — fire, hold, or skip each inject as it comes due">INJECT SCHEDULE · MSEL</span><button class="btn ghost sm" onClick="{{openBatch}}">Time-jump</button></div><div class="rl-cap">Scripted events in scenario time. Fire, hold, or skip each as it comes due.</div><div class="scroll"><div class="tl"><sc-if value="{{showPastBar}}" hint-placeholder-val="{{false}}"><div class="tl-collapse" onClick="{{togglePast}}"><svg class="ic sm" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>{{pastLabel}}</div></sc-if><sc-for list="{{timelineItems}}" as="ti" hint-placeholder-count="5"><div class="ti {{ti.rowClass}}"><div class="ti-top"><span class="ti-time">{{ti.time}}</span><span class="ti-inj" title="INJ = a single scripted inject · BND = a bundle (paced set of posts). Numbering comes from the Cadence MSEL.">{{ti.inj}}</span><sc-if value="{{ti.locked}}" hint-placeholder-val="{{false}}"><span class="lock"><svg class="ic sm" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Cadence-locked</span></sc-if><span class="chip {{ti.chipClass}}"><span class="dot"></span>{{ti.chipLabel}}</span></div><div class="ti-title">{{ti.title}}</div><sc-if value="{{ti.overdue}}" hint-placeholder-val="{{false}}"><div class="ti-meta" style="color:var(--amber)">Held — {{ti.overdueMin}} min past its scheduled time</div></sc-if><sc-if value="{{ti.isBundle}}" hint-placeholder-val="{{false}}"><div class="ti-meta">{{ti.meta}}</div></sc-if><sc-if value="{{ti.mFiring}}" hint-placeholder-val="{{false}}"><div class="pacing"><i style="{{ti.pacingStyle}}"></i></div><div class="ti-meta">Pacing {{ti.progressLabel}}</div></sc-if><sc-if value="{{ti.mFire}}" hint-placeholder-val="{{false}}"><div class="ti-acts"><button class="btn fire sm" onClick="{{ti.onFire}}"><svg class="ic sm" viewBox="0 0 24 24"><path d="M13 2L4 14h6l-1 8 9-12h-6z"/></svg>Fire</button><button class="btn sm" onClick="{{ti.onHold}}">Hold</button><button class="btn ghost sm" onClick="{{ti.onSkip}}">Skip</button></div></sc-if><sc-if value="{{ti.mLocked}}" hint-placeholder-val="{{false}}"><div class="ti-acts"><button class="btn sm" onClick="{{ti.onTakeLocal}}">Take local control</button><span class="kbd">INT-005</span></div></sc-if><sc-if value="{{ti.mHeld}}" hint-placeholder-val="{{false}}"><div class="ti-acts"><button class="btn fire sm" onClick="{{ti.onFire}}">Release &amp; fire</button><button class="btn ghost sm" onClick="{{ti.onSkip}}">Skip</button></div></sc-if></div><sc-if value="{{ti.showNow}}" hint-placeholder-val="{{false}}"><div class="tl-now">NOW · {{scenarioShort}}</div></sc-if></sc-for></div></div></div><div class="rail" style="background:var(--bg)"><div class="cols-wrap" style="height:100%"><div class="cols-hd"><span class="t">THE LIVE WORLD</span><div style="display:flex;gap:8px;align-items:center"><span class="hud-cap" style="margin:0">{{feedRate}} posts/min · scenario time</span><button class="btn ghost sm" onClick="{{addCol}}"><svg class="ic sm" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Column</button></div></div><div class="rl-cap">The simulated platform the trainees are inside — one feed, sliced into columns. Hover a post to act on it.</div><div class="cols"><sc-for list="{{columns}}" as="col" hint-placeholder-count="4"><div class="col"><div class="col-hd"><span class="ct">{{col.title}}</span><sc-if value="{{col.tagClass}}" hint-placeholder-val="water"><span class="tag {{col.tagClass}}">{{col.tagText}}</span></sc-if><span class="cc">{{col.count}}</span><div class="f1"></div><button class="mini" onClick="{{col.onClose}}">✕</button></div><div class="col-body" onMouseEnter="{{col.onEnter}}" onMouseLeave="{{col.onLeave}}"><sc-if value="{{col.frozen}}" hint-placeholder-val="{{false}}"><div class="newpill" onClick="{{col.onFlush}}">{{col.frozenN}} new — paused while you read · click to catch up</div></sc-if><sc-for list="{{col.items}}" as="p" hint-placeholder-count="4"><sc-if value="{{p.isActivity}}" hint-placeholder-val="{{false}}"><div class="act"><svg class="ic sm" viewBox="0 0 24 24" style="color:#4d97d1"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg><span><span class="who">{{p.actor}}</span> {{p.text}}</span><span class="tm">{{p.time}}</span></div></sc-if><sc-if value="{{p.isPost}}" hint-placeholder-val="{{true}}"><div class="post {{p.freshClass}}"><div class="post-top"><div class="av" style="{{p.avStyle}}">{{p.initials}}</div><div style="min-width:0"><div class="post-nm">{{p.name}}<sc-if value="{{p.verified}}" hint-placeholder-val="{{false}}"><svg class="vf" viewBox="0 0 24 24"><path fill="#4d97d1" d="M12 1l2.4 2.1 3.1-.5 1 3 3 1-.5 3.1L23 15l-2.1 2.4.5 3.1-3 1-1 3-3.1-.5L12 23l-2.4-2.1-3.1.5-1-3-3-1 .5-3.1L1 15l2.1-2.4-.5-3.1 3-1 1-3 3.1.5z"/><path fill="#0d1420" d="M10.6 15.6l-2.8-2.8 1.2-1.2 1.6 1.6 3.8-3.8 1.2 1.2z"/></svg></sc-if></div><span class="post-hd">{{p.handle}}</span></div><span class="post-tm">{{p.time}}</span></div><div class="post-tx">{{p.text}}</div><div class="post-eng"><span>↺ {{p.reposts}}</span><span>♡ {{p.likes}}</span><span>↩ {{p.replies}}</span></div><div class="post-acts"><button class="mini" onClick="{{p.onReply}}" title="Reply to this post in-character as one of your personas">Reply as…</button><button class="mini" onClick="{{p.onMatch}}" title="Evaluator-log question: does this post address a storyline's expected action?">Response match</button><button class="mini" onClick="{{p.onFlag}}" title="Flag this moment for the evaluators' after-action record">Flag</button><button class="mini rd" onClick="{{p.onTakedown}}" title="Remove this post from the simulated platform — two clicks, logs an incident category">Takedown</button></div></div></sc-if></sc-for></div></div></sc-for></div></div></div><div class="rail right"><sc-if value="{{flyStoriesOpen}}" hint-placeholder-val="{{false}}"><div class="flyout"><div class="rl-hd"><span class="t">STORYLINE BOARD</span><button class="mini" onClick="{{closeFly}}">✕</button></div><div class="rl-cap">How hot each narrative arc is running. Click one to steer: escalation dial, intensity target, expected action.</div><div class="fly-body"><sc-for list="{{storylines}}" as="s" hint-placeholder-count="2"><div class="sl-card"><div class="sl-top pointer" onClick="{{s.onToggle}}" title="Click to expand the steering controls for this storyline"><span class="sl-nm">{{s.name}}</span><span class="sl-tag">{{s.tag}}</span><span class="sev {{s.sevClass}}"><span class="dot"></span>{{s.sevLabel}}</span><svg class="ic sm sl-chev {{s.openClass}}" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div><div class="metric"><span class="ml">Intensity</span><div class="mbar tgt" onClick="{{s.onSetTarget}}" title="Actual vs target. The engine drives actual toward your target — click the track to set the target."><i class="int" style="{{s.intStyle}}"></i><span class="tick" style="{{s.tgtStyle}}"></span></div><span class="mv">{{s.intensity}}<em> →{{s.target}}</em></span></div><sc-if value="{{s.open}}" hint-placeholder-val="{{false}}"><div class="metric"><span class="ml">Sentiment</span><div class="mbar senti"><i style="{{s.sentStyle}}"></i></div><span class="mv">{{s.sentLabel}}</span></div><div class="dial" title="Escalation dial — how hard the engine pushes this storyline (CTL-022). Click a segment to set it."><sc-for list="{{s.dots}}" as="d" hint-placeholder-count="6"><div class="seg {{d.cls}}" onClick="{{d.onClick}}"></div></sc-for></div><div class="dial-l"><span>ESCALATION {{s.escLabel}}</span><span>0 — 5</span></div><div class="expect"><span class="lb">Expected action:</span><span class="vv {{s.expClass}}">{{s.expected}}</span></div><div class="expect" style="margin-top:5px;padding-top:5px"><span class="lb">Trainee signal:</span><span class="vv">{{s.traineeSig}}</span></div><div class="sl-foot"><sc-if value="{{s.offPlatform}}" hint-placeholder-val="{{false}}"><span class="offbadge"><svg class="ic sm" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>Off-platform response logged</span></sc-if><sc-if value="{{s.showOffBtn}}" hint-placeholder-val="{{true}}"><button class="btn ghost sm" onClick="{{s.onOffPlatform}}" title="The trainee responded outside the sim (phone call, press briefing…). Log it so the expected action is credited in the evaluator record (CTL-026).">Log off-platform response</button></sc-if></div></sc-if></div></sc-for></div></div></sc-if><div class="rsec grow" style="flex:1 1 auto"><div class="rl-hd"><span class="t" title="Engine review queue — drafts the AI engine wants to post, awaiting your decision">REVIEW QUEUE</span><div style="display:flex;gap:8px;align-items:center"><span class="c">{{queueCount}} pending</span><button class="btn sm" onClick="{{batchApprove}}">Batch approve<span class="kbd">B</span></button></div></div><div class="rl-cap">Engine drafts awaiting your call — approve (A) or veto (V). Expired timers hold the draft for you; nothing posts without a decision.</div><div class="scroll"><div class="q"><sc-for list="{{queue}}" as="q" hint-placeholder-count="4"><div class="qitem {{q.rowClass}}" onClick="{{q.onFocus}}"><div class="q-top"><div class="av" style="{{q.avStyle}}">{{q.initials}}</div><span class="q-nm">{{q.name}}</span><span class="q-hd">{{q.handle}}</span><span class="q-act">{{q.action}}</span></div><div class="q-tx">{{q.preview}}</div><div class="q-foot"><span class="q-tag {{q.tagClass}}">{{q.tagText}}</span><sc-if value="{{q.isAuto}}" hint-placeholder-val="{{true}}"><span class="q-count"><svg class="ic sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>{{q.timerVerb}} {{q.countdown}}</span><div class="qring"><i style="{{q.ringStyle}}"></i></div></sc-if><sc-if value="{{q.needsReview}}" hint-placeholder-val="{{false}}"><span class="q-count rev">{{q.reviewLabel}}</span></sc-if><sc-if value="{{q.focused}}" hint-placeholder-val="{{false}}"><div class="q-keys"><button class="mini" onClick="{{q.onApprove}}" style="color:#5fce9a;border-color:#2f6f4e">A</button><button class="mini rd" onClick="{{q.onVeto}}">V</button><button class="mini" onClick="{{q.onEdit}}">E</button><button class="mini" onClick="{{q.onReroll}}">R</button></div></sc-if></div></div></sc-for><sc-if value="{{queueEmpty}}" hint-placeholder-val="{{false}}"><div class="q-empty">Queue clear. Engine steady.</div></sc-if></div></div></div></div><div class="toolstrip"><button class="tool {{flyStoriesCls}}" onClick="{{toggleFlyStories}}" title="Storyline board — how hot each narrative arc runs. Steer escalation and intensity targets. Badge = escalating storylines."><span class="tbadge {{storyBadgeCls}}">{{storyBadge}}</span><svg class="ic" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="M7 15l4-5 3 3 5-7"/></svg><span class="tl">Stories</span></button><button class="tool" onClick="{{openPalette}}" title="Post or reply in-character — opens the persona picker (⌘K). Shows each persona's voice and who's holding them."><svg class="ic" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 19c.5-3.5 3-5 6.5-5s6 1.5 6.5 5"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.2c2.8.2 4.8 1.5 5.4 4.3"/></svg><span class="tl">Personas</span></button><button class="tool {{flyRumorsCls}}" onClick="{{toggleFlyRumors}}" title="Rumor tracker — each rumor's lifecycle: seeded, spreading, countered, dead"><svg class="ic" viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3.5"/></svg><span class="tl">Rumors</span></button><button class="tool {{flyTraineesCls}}" onClick="{{toggleFlyTrainees}}" title="Trainee monitor — who has responded, and how fast"><svg class="ic" viewBox="0 0 24 24"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="tl">Trainees</span></button></div></div><sc-if value="{{flyRumorsOpen}}" hint-placeholder-val="{{false}}"><div class="flyout"><div class="rl-hd"><span class="t">RUMOR TRACKER</span><button class="mini" onClick="{{closeFly}}">✕</button></div><div class="rl-cap">Every rumor in the world as a first-class object: seeded → spreading → countered → dead. Watch reach and mutation; counter through a persona when it matters.</div><div class="fly-body"><sc-for list="{{rumors}}" as="r" hint-placeholder-count="3"><div class="tcard"><div class="q-top"><span class="q-nm">“{{r.claim}}”</span><span class="sev {{r.stClass}}" style="margin-left:auto"><span class="dot"></span>{{r.status}}</span></div><div class="q-hd" style="margin-bottom:5px">{{r.origin}}</div><div class="metric"><span class="ml">Reach</span><div class="mbar"><i class="int" style="{{r.reachStyle}}"></i></div><span class="mv">{{r.reach}}</span></div><sc-if value="{{r.mutation}}" hint-placeholder-val="{{false}}"><div class="q-tx" style="color:var(--amber)">Mutating: {{r.mutation}}</div></sc-if><sc-if value="{{r.countered}}" hint-placeholder-val="{{false}}"><div class="expect"><span class="lb">Countered by:</span><span class="vv met">{{r.counteredBy}}</span></div></sc-if><sc-if value="{{r.showCounter}}" hint-placeholder-val="{{false}}"><div class="sl-foot"><button class="btn sm" onClick="{{r.onCounter}}">Draft counter as…</button></div></sc-if></div></sc-for></div></div></sc-if><sc-if value="{{flyTraineesOpen}}" hint-placeholder-val="{{false}}"><div class="flyout"><div class="rl-hd"><span class="t">TRAINEE MONITOR</span><button class="mini" onClick="{{closeFly}}">✕</button></div><div class="rl-cap">The people being exercised. Whether — and how fast — they respond is what drives escalation and the after-action record.</div><div class="fly-body"><sc-for list="{{trainees}}" as="t" hint-placeholder-count="3"><div class="tcard"><div class="q-top"><div class="av" style="{{t.avStyle}}">{{t.initials}}</div><span class="q-nm">{{t.name}}</span><span class="sev {{t.stClass}}" style="margin-left:auto"><span class="dot"></span>{{t.status}}</span></div><div class="q-hd" style="margin-bottom:5px">{{t.role}}</div><div class="q-tx">{{t.last}}</div><div class="expect"><span class="lb">{{t.metricL}}</span><span class="vv {{t.metricCls}}">{{t.metric}}</span></div></div></sc-for></div></div></sc-if><div class="hint"><span><b>⌘K</b> reply as persona</span><span><b>A</b> approve · <b>V</b> veto</span><span><b>Esc</b> close</span></div></div><sc-if value="{{paletteOpen}}" hint-placeholder-val="{{false}}"><div class="scrim" onClick="{{closeAll}}"><div class="pal" onClick="{{stop}}"><div class="pal-in"><svg class="ic" viewBox="0 0 24 24" style="color:var(--ink3)"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><input id="palInput" placeholder="Reply as a persona, or run a command…" value="{{paletteQuery}}" onInput="{{onPaletteInput}}" onKeyDown="{{onPaletteKey}}"/><span class="kbd">esc</span></div><div class="pal-list"><div class="pal-sec">PERSONAS</div><sc-for list="{{paletteResults}}" as="r" hint-placeholder-count="4"><div class="pal-row {{r.selClass}}" onClick="{{r.onPick}}"><div class="av" style="{{r.avStyle}}">{{r.initials}}</div><div><div class="pr-nm">{{r.name}}<sc-if value="{{r.verified}}" hint-placeholder-val="{{false}}"><svg class="vf" viewBox="0 0 24 24"><path fill="#4d97d1" d="M12 1l2.4 2.1 3.1-.5 1 3 3 1-.5 3.1L23 15l-2.1 2.4.5 3.1-3 1-1 3-3.1-.5L12 23l-2.4-2.1-3.1.5-1-3-3-1 .5-3.1L1 15l2.1-2.4-.5-3.1 3-1 1-3 3.1.5z"/></svg></sc-if></div><div class="pr-sub">{{r.sub}}</div></div><span class="pres {{r.presClass}}" style="position:static;flex:none"></span><span class="pr-go">↵ compose</span></div></sc-for><sc-if value="{{showCmds}}" hint-placeholder-val="{{true}}"><div class="pal-sec">COMMANDS</div><sc-for list="{{paletteCmds}}" as="c" hint-placeholder-count="3"><div class="pal-row" onClick="{{c.onRun}}"><div class="av" style="background:#1a2838">{{c.icon}}</div><div><div class="pr-nm">{{c.name}}</div><div class="pr-sub">{{c.sub}}</div></div></div></sc-for></sc-if></div></div></div></sc-if><sc-if value="{{composerOpen}}" hint-placeholder-val="{{false}}"><div class="scrim mid" onClick="{{closeAll}}"><div class="composer" onClick="{{stop}}"><div class="cmp-hd {{cmpCatClass}}"><div class="av" style="{{cmpAvStyle}}">{{cmpInitials}}</div><div><div class="cn">{{cmpName}}<sc-if value="{{cmpVerified}}" hint-placeholder-val="{{false}}"><svg class="vf" viewBox="0 0 24 24"><path fill="#1e3a5f" d="M12 1l2.4 2.1 3.1-.5 1 3 3 1-.5 3.1L23 15l-2.1 2.4.5 3.1-3 1-1 3-3.1-.5L12 23l-2.4-2.1-3.1.5-1-3-3-1 .5-3.1L1 15l2.1-2.4-.5-3.1 3-1 1-3 3.1.5z"/></svg></sc-if></div><div class="ch">{{cmpHandle}}</div></div><span class="role {{cmpCatClass}}">{{cmpCatLabel}}</span></div><div class="cmp-body"><div class="cmp-main"><div class="cmp-ctx">{{cmpContext}}</div><x-import component-from-global-scope="CX.Text" from="./cobra.jsx" multiline="{{true}}" rows="{{4}}" fullWidth="{{true}}" autoFocus="{{true}}" placeholder="Write in this persona's voice…" value="{{composerText}}" onChange="{{onComposerChange}}" onKeyDown="{{onComposerKey}}" hint-size="100%,120px"></x-import></div><div class="cmp-side"><div class="st"><svg class="ic sm" viewBox="0 0 24 24" style="color:#1e3a5f"><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/><path d="M9 21h6"/></svg>VOICE NOTES</div><ul class="voice"><sc-for list="{{cmpVoice}}" as="v" hint-placeholder-count="4"><li>{{v.t}}</li></sc-for></ul></div></div><div class="cmp-foot"><span class="cmp-count">{{cmpCount}}</span><div class="cmp-actions"><x-import component-from-global-scope="CX.Link" from="./cobra.jsx" onClick="{{closeAll}}" hint-size="70px,36px">Cancel</x-import><x-import component-from-global-scope="CX.Primary" from="./cobra.jsx" onClick="{{sendReply}}" hint-size="150px,40px">Send in-character ⌘↵</x-import></div></div></div></div></sc-if><sc-if value="{{tdOpen}}" hint-placeholder-val="{{false}}"><div class="scrim mid" onClick="{{closeAll}}"><div class="dlg" onClick="{{stop}}"><div class="dlg-hd"><svg class="ic" viewBox="0 0 24 24" style="color:#e42217"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>Take down content</div><div class="dlg-bd"><div style="margin-bottom:6px">Removing <b>{{tdName}}</b> {{tdHandle}} — “{{tdPreview}}”</div>Log an incident category (evaluator record):<div class="cats"><sc-for list="{{tdCategories}}" as="c" hint-placeholder-count="4"><div class="cat {{c.onClass}}" onClick="{{c.onPick}}"><span class="cr"></span>{{c.label}}</div></sc-for></div></div><div class="dlg-ft"><x-import component-from-global-scope="CX.Link" from="./cobra.jsx" onClick="{{closeAll}}" hint-size="70px,36px">Cancel</x-import><x-import component-from-global-scope="CX.Delete" from="./cobra.jsx" onClick="{{confirmTakedown}}" hint-size="150px,40px">Remove content</x-import></div></div></div></sc-if><sc-if value="{{bcGateOpen}}" hint-placeholder-val="{{false}}"><div class="scrim mid" onClick="{{closeAll}}"><div class="dlg" onClick="{{stop}}"><div class="dlg-hd"><svg class="ic" viewBox="0 0 24 24" style="color:#e42217"><path d="M12 2L1 21h22L12 2z"/><path d="M12 9v5M12 17v.5"/></svg>Break Fiction — Real-World Broadcast</div><div class="dlg-bd"><div class="warnbox"><svg class="ic" viewBox="0 0 24 24" style="flex:none"><path d="M12 2L1 21h22L12 2z"/><path d="M12 9v5M12 17v.5"/></svg><span>This <b>breaks fiction for all participants</b>. Every simulated screen is replaced by a real-world message. Use only for genuine safety or exercise-abort communication. Nothing leaves the platform — this reaches only Bay Shield 2026 participant screens, and every use is logged in the exercise record.</span></div><div style="margin:13px 0 5px;font-weight:700">Participant screens will show:</div><div class="cats"><div class="cat {{bcInClass}}" onClick="{{bcSetIn}}"><span class="cr"></span>Full-screen broadcast overlay (in place)</div><div class="cat {{bcOutClass}}" onClick="{{bcSetOut}}"><span class="cr"></span>Broadcast + freeze all participant input</div></div><div style="margin:14px 0 5px;font-weight:700">Type <span style="font-family:var(--mono);color:#e42217">BROADCAST</span> to confirm:</div><input class="confirm-in" id="bcInput" placeholder="BROADCAST" value="{{bcText}}" onInput="{{onBcInput}}"/></div><div class="dlg-ft"><x-import component-from-global-scope="CX.Link" from="./cobra.jsx" onClick="{{closeAll}}" hint-size="70px,36px">Cancel</x-import><x-import component-from-global-scope="CX.Delete" from="./cobra.jsx" hideIcon="{{true}}" disabled="{{bcDisabled}}" onClick="{{confirmBroadcast}}" hint-size="180px,40px">Arm &amp; broadcast</x-import></div></div></div></sc-if><sc-if value="{{batchOpen}}" hint-placeholder-val="{{false}}"><div class="scrim mid" onClick="{{closeAll}}"><div class="dlg" onClick="{{stop}}"><div class="dlg-hd"><svg class="ic" viewBox="0 0 24 24" style="color:#3b6fa8"><path d="M12 8v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>Time-jump to T+45 min</div><div class="dlg-bd">Batch-dispose <b>4 pending injects</b> spanned by the jump (CTL-015):<div class="cats" style="margin-top:8px"><div class="cat on"><span class="cr"></span>Fire all bundles on schedule</div><div class="cat"><span class="cr"></span>Fire scheduled, hold rumor-wave</div><div class="cat"><span class="cr"></span>Skip all — resume live at T+45</div></div></div><div class="dlg-ft"><x-import component-from-global-scope="CX.Link" from="./cobra.jsx" onClick="{{closeAll}}" hint-size="70px,36px">Cancel</x-import><x-import component-from-global-scope="CX.Primary" from="./cobra.jsx" onClick="{{closeAll}}" hint-size="150px,40px">Apply &amp; jump</x-import></div></div></div></sc-if><sc-if value="{{toastOpen}}" hint-placeholder-val="{{false}}"><div class="toasts {{toastPosCls}}"><div class="toast"><div style="min-width:0"><div class="t-hd">RESPONSE MATCH · EVALUATOR LOG</div><div class="tq">Does <b>{{toastName}}</b>'s post address the expected action for <b>{{toastTag}}</b> — “{{toastExpected}}”?</div></div><div class="ty"><button class="yn y" onClick="{{matchYes}}">Yes · Y</button><button class="yn n" onClick="{{matchNo}}">No · N</button></div></div></div></sc-if><sc-if value="{{confirmOpen}}" hint-placeholder-val="{{false}}"><div class="toasts bot"><div class="toast {{confirmKind}}">{{confirmMsg}}</div></div></sc-if><sc-if value="{{bcActive}}" hint-placeholder-val="{{false}}"><div class="bc-overlay"><div class="bc-warn">◄ REAL-WORLD BROADCAST · EXERCISE CONTROL ►</div><div class="bc-frame"><div class="bc-tag">ATTENTION ALL PARTICIPANTS</div><div class="bc-hl">This is a real message from Exercise Control</div><div class="bc-msg">The simulation is paused. Disregard all in-exercise content on your screens. Await instructions from your facilitator.</div><div class="bc-meta">BAY SHIELD 2026 · SIMCELL · {{wallClock}} WALL</div></div><div class="bc-end"><button class="bc-btn" onClick="{{endBroadcast}}">■ END BROADCAST · RESUME EXERCISE</button></div></div></sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    const P = (id,name,handle,color,initials,verified,voice,pres,label,cat)=>({id,name,handle,color,initials,verified,voice,pres,label,cat});
+    this.personas = [
+      P('darco','Darco Tripp','@darco_tripp','#b4532a','DT',false,['ALL-CAPS outbursts','Distrusts officials','Blames the city first','Never links a source'],'idle',null,'citizen'),
+      P('maria','Maria Solano','@maria_solano7','#2f6f9e','MS',true,['Measured; asks for confirmation','Cites named sources','Neutral, no speculation'],'busy','SimCell-2','news'),
+      P('gov','City of Fairhaven','@FairhavenGov','#1e3a5f','CF',true,['Formal and calm','Links to fairhaven.gov','Uses advisory language'],'you',null,'official'),
+      P('aisha','Dr. Aisha Bello','@dr_aisha_bello','#3a7d5a','AB',true,['Clinical and reassuring','Corrects misinformation directly','Explains risk in plain terms'],'you',null,'official'),
+      P('tommy','Tommy Rourke','@tommyr_fh','#7a5aa0','TR',false,['Anxious and personal','Asks practical questions','Short, lowercase'],'idle',null,'citizen'),
+      P('scoop','The Scoop','@thescoop','#c23b6b','TS',false,['Sensational, clickbait','Runs unverified rumors','Loves a villain'],'idle',null,'news'),
+      P('water','Fairhaven Water Dept','@FHWaterDept','#2b6f6a','FW',true,['Technical: turbidity, PSI','Advisory phrasing','States zones & times'],'live',null,'official'),
+      P('coral','Coral Nguyen','@coral.mama','#c98a2b','CN',false,['Warm and emotive','Shares "helpful tips"','Amplifies rumors kindly'],'idle',null,'citizen'),
+      P('ray','Ray Osei','@ray_osei','#55708a','RO',false,['Practical, community-minded','Calms panic','Speaks from experience'],'idle',null,'citizen'),
+      P('psap','Fairhaven Dispatch','@FairhavenPSAP','#8a3a3a','FD',true,['Terse and official','Outage & rerouting notices','Instructional'],'live',null,'official'),
+    ];
+    this.pById = {}; this.personas.forEach(p=>this.pById[p.id]=p);
+    this.pid = 100;
+    const mk=(pid,text,tags,eng,time)=>({id:++this.pid,pid,text,tags,eng,time,fresh:false});
+    this.state = {
+      tick:0, scenarioSec:9*3600+33*60, running:true, paused:false, pauseChoice:'out', pauseOpen:false,
+      focus:true, pastOpen:false, hintDismissed:false,
+      timeoutMode:'hold', frozen:{}, pauseTier:'injects', fly:null,
+      expandedStory:'water', hlItem:null, confirmMsg:'', confirmKind:'ok', toastName:'', toastExpected:'',
+      engineMode:'live', engOpen:false, exswOpen:false, role:'Controller',
+      decisions:[Date.now()-52000,Date.now()-38000,Date.now()-15000,Date.now()-6000],
+      feedRate:34,
+      posts:[
+        mk('maria','Following two developing stories in Fairhaven: a boil-water advisory and reports of 911 outages. Live updates on Newsline 7.',['water','outage'],{reposts:41,likes:120,replies:33},'1m'),
+        mk('darco','FIRST THE WATER, NOW 911 WON’T PICK UP?? THIS TOWN IS FALLING APART. WHO IS IN CHARGE',['outage'],{reposts:88,likes:210,replies:64},'2m'),
+        mk('tommy','just filled every pot in the house. do we have to boil water for showers too? kids are asking',['water'],{reposts:4,likes:19,replies:12},'3m'),
+        mk('scoop','Is Fairhaven’s water POISONED? The question officials REFUSE to answer 👇 #WaterIssues',['water'],{reposts:156,likes:301,replies:97},'4m'),
+        mk('aisha','Reminder: a "boil-water advisory" is a standard precaution while tests run. It does not mean the water is toxic. Boil 1 minute before use. #WaterIssues',['water'],{reposts:62,likes:188,replies:20},'5m'),
+        mk('gov','A boil-water advisory is in effect for zones 3–7. Do not drink tap water without boiling for 1 minute. Updates: fairhaven.gov/water #WaterIssues',['water'],{reposts:74,likes:96,replies:41},'6m'),
+        mk('psap','We are aware of intermittent 911 connectivity in parts of Fairhaven. If you cannot reach 911, text 911. More to follow.',['outage'],{reposts:52,likes:70,replies:38},'8m'),
+        mk('water','Turbidity is elevated at Reservoir intake B; treatment has been increased. The advisory is precautionary. #WaterIssues',['water'],{reposts:28,likes:44,replies:9},'9m'),
+      ],
+      activity:[
+        {id:'a1',actor:'@FH_PIO',role:'Trainee · PIO',text:'posted a public update to Pulse',time:'2m'},
+        {id:'a2',actor:'@EOC_Director',role:'Trainee',text:'liked @FairhavenGov advisory',time:'4m'},
+        {id:'a3',actor:'@FH_PIO',role:'Trainee · PIO',text:'opened The Weather Desk',time:'6m'},
+        {id:'a4',actor:'@PIO_Deputy',role:'Trainee',text:'is drafting a release in The Wire Room',time:'7m'},
+        {id:'a5',actor:'@EOC_Director',role:'Trainee',text:'joined the exercise',time:'12m'},
+      ],
+      closedCols:{},
+      timeline:[
+        {id:'i31',time:'09:05',inj:'INJ-031',title:'The Weather Desk: no rain impact on reservoir',status:'skipped'},
+        {id:'i39',time:'09:20',inj:'INJ-039',title:'Rumor seed: "chemical smell" reports near reservoir',status:'held'},
+        {id:'i42',time:'09:12',inj:'INJ-042',title:'Boil-water advisory issued (EAS analog)',status:'fired',locked:true},
+        {id:'b07',time:'09:30',inj:'BND-07',title:'Reservoir rumor wave',status:'ready',bundle:{posts:12,personas:8,min:10}},
+        {id:'i48',time:'09:35',inj:'INJ-048',title:'Newsline 7 live remote from the reservoir',status:'pending'},
+        {id:'b09',time:'09:40',inj:'BND-09',title:'Dispatch overwhelmed',status:'ready',bundle:{posts:6,personas:4,min:8}},
+        {id:'i51',time:'09:44',inj:'INJ-051',title:'Mayor press statement (Cadence-scheduled)',status:'pending',locked:true},
+      ],
+      queue:[
+        {id:'q1',pid:'coral',action:'reply → @tommyr_fh',preview:'boiling for 1 full minute is plenty hun, no need to panic 💛 the city said it\u2019s precautionary!',tag:'water',auto:true,exp:Date.now()+128000,dur:150000},
+        {id:'q4',pid:'psap',action:'post',preview:'Temporary 911 outage in the 555 exchange. If you cannot reach 911, text 911 or call (555) 010-0911.',tag:'outage',auto:false,prio:true},
+        {id:'q3',pid:'aisha',action:'reply → @thescoop',preview:'There is no evidence of chemical contamination. The advisory is precautionary while turbidity is tested.',tag:'water',auto:true,exp:Date.now()+186000,dur:210000},
+        {id:'q5',pid:'ray',action:'reply → @tommyr_fh',preview:'kettle\u2019s fine, tap\u2019s fine for washing up. boil for drinking. we\u2019ve got this, neighbor.',tag:'water',auto:true,exp:Date.now()+96000,dur:120000},
+        {id:'q6',pid:'scoop',action:'quote-post',preview:'EXCLUSIVE: is the mayor covering up a toxic spill at the reservoir? Sources say YES.',tag:'water',auto:false,prio:false},
+      ],
+      focusIdx:0,
+      storylines:[
+        {id:'water',name:'Reservoir Contamination',tag:'#WaterIssues',sev:'esc',sevLabel:'ESCALATING',intensity:78,target:60,sentiment:-62,esc:3,expected:'Boil-water advisory acknowledged',expMet:false,off:false,traineeSig:'@FH_PIO posted 2 min ago'},
+        {id:'outage',name:'911 / PSAP Outage',tag:'#911Outage',sev:'act',sevLabel:'ACTIVE',intensity:54,target:45,sentiment:-40,esc:2,expected:'Alt-number PSA issued',expMet:false,off:false,traineeSig:'No official post yet — 21 min'},
+      ],
+      paletteOpen:false, paletteQuery:'', palSel:0,
+      composerOpen:false, composerPid:null, composerText:'', composerTarget:'',
+      toastOpen:false, toastPid:null, toastTag:'',
+      tdOpen:false, tdPost:null, tdCat:'misinfo',
+      bcGateOpen:false, bcText:'', bcChoice:'out', bcActive:false,
+      batchOpen:false,
+    };
+    this.bundleFeeds = {
+      b07:[['scoop','🚨 residents near the reservoir report a "chemical smell." City still silent. #WaterIssues',['water']],['darco','SO THE CITY "SUDDENLY" ISSUES A BOIL ADVISORY. WHAT ARE THEY HIDING FROM US #WaterIssues',['water']],['coral','seeing so much worry about the tap 💧 boiling one minute is enough per the city — stay calm mamas #WaterIssues',['water']],['tommy','is it safe to mix baby formula with boiled tap water?? genuinely scared here #WaterIssues',['water']],['ray','a boil advisory is NOT poison. boil it and you\u2019re fine for now. don\u2019t clear the shelves. #WaterIssues',['water']],['aisha','No contaminant has been identified. Turbidity is being tested; the advisory is precautionary. #WaterIssues',['water']],['gov','Advisory remains in effect for zones 3–7. Water is safe after a 1-minute boil. fairhaven.gov/water #WaterIssues',['water']],['maria','Newsline 7 at the reservoir: the city confirms elevated turbidity, no contaminant identified yet. #WaterIssues',['water']]],
+      b09:[['psap','911 service in the 555 exchange is intermittent. If you cannot reach 911, TEXT 911 or call (555) 010-0911.',['outage']],['tommy','tried calling 911 twice and nothing. this is terrifying with the kids home #911Outage',['outage']],['darco','CAN\u2019T EVEN CALL 911 NOW?? WHILE THE WATER\u2019S BAD?? UNBELIEVABLE #911Outage',['outage']],['ray','if 911 won\u2019t connect: text 911, or use the backup line (555) 010-0911. share this with a neighbor.',['outage']],['psap','Update: crews are rerouting emergency calls. Expected restoration within the hour. #911Outage',['outage']],['maria','Newsline 7 confirms a PSAP outage affecting Fairhaven. Officials advise text-to-911. #911Outage',['outage']]],
+    };
+    this.rerolls = {
+      coral:'okay hear me out — I\u2019m switching my family to bottled just in case 💛 better safe than sorry!',
+      aisha:'To be clear: there is no detected contaminant. "Boil-water" is precautionary language, not an alarm.',
+      scoop:'BREAKING: insider says the reservoir "smell" was reported to the city DAYS ago. Cover-up?',
+      psap:'REMINDER: 911 intermittent in 555 exchange. Text 911 works. Backup line (555) 010-0911.',
+      ray:'kettle on, everyone. boil for drinking, tap\u2019s fine for washing. we handle this together.',
+    };
+    this.tdCategories = [
+      {id:'misinfo',label:'Misinformation / false claim'},
+      {id:'panic',label:'Incitement / panic-inducing'},
+      {id:'impersonation',label:'Impersonation of official account'},
+      {id:'ooc',label:'Out-of-character / player error'},
+    ];
+  }
+  componentDidMount(){
+    this.iv = setInterval(()=>{
+      this.setState(s=>{
+        const dec = s.decisions.filter(t=>Date.now()-t<60000);
+        let sec = s.scenarioSec;
+        if(s.running && !(s.paused && s.pauseTier==='world')) sec += 1;
+        // expired timed drafts: HOLD by default (silence is never approval, ADP-040 rev.)
+        let q = s.queue, posts = s.posts;
+        const engineHalted = s.engineMode==='stopped' || (s.paused && s.pauseTier!=='injects');
+        const due = q.filter(it=>it.auto && it.exp && it.exp<=Date.now());
+        if(due.length && !engineHalted){
+          if(s.timeoutMode==='send' && s.engineMode==='live'){
+            due.forEach(it=>{ posts = this.addPostObj(posts, it.pid, it.preview, [it.tag]); });
+            q = q.filter(it=>!due.includes(it));
+          } else {
+            q = q.map(it=>due.includes(it)?{...it,auto:false,expired:true,exp:null,prio:true}:it);
+          }
+        }
+        return {tick:s.tick+1, decisions:dec, scenarioSec:sec, queue:q, posts};
+      });
+    },1000);
+    this.key = (e)=>this.onKey(e);
+    document.addEventListener('keydown', this.key);
+    // size columns to an exact fraction of the visible track — never show a cut-off column
+    this.fitCols = ()=>{ const el=document.querySelector('.cols'); if(!el) return; const n=Math.max(1,Math.floor(el.clientWidth/300)); el.style.setProperty('--nvis',n); };
+    this.ro = new ResizeObserver(this.fitCols);
+    const colsEl = document.querySelector('.cols'); if(colsEl) this.ro.observe(colsEl);
+    this.fitCols();
+    // simulated trainee response ~20s in — demonstrates the real response-match flow (ADP-002a)
+    this._sim = setTimeout(()=>{
+      const st = this.state.storylines.find(x=>x.id==='water');
+      this.setState(s=>({
+        activity:[{id:'a0',actor:'@FH_PIO',role:'Trainee · PIO',text:'posted: “Boil tap water for 1 minute before use — city advisory is in effect.”',time:'now'},...s.activity],
+        toastOpen:true, toastName:'@FH_PIO (trainee)', toastTag:'#WaterIssues', toastExpected:st?st.expected:''
+      }));
+    }, 20000);
+  }
+  componentWillUnmount(){ clearInterval(this.iv); clearTimeout(this._sim); clearTimeout(this._cT); clearTimeout(this._hlT); if(this.ro)this.ro.disconnect(); document.removeEventListener('keydown', this.key); }
+  confirmToast(msg,kind){ clearTimeout(this._cT); this.setState({confirmMsg:msg,confirmKind:kind||'ok'}); this._cT=setTimeout(()=>this.setState({confirmMsg:''}),3200); }
+  locateItem(id){ clearTimeout(this._hlT); this.setState({hlItem:id}); this._hlT=setTimeout(()=>this.setState({hlItem:null}),2600); }
+  parseHM(t){ const p=t.split(':').map(Number); return p[0]*3600+p[1]*60; }
+  fmt(sec){ sec=((sec%86400)+86400)%86400; const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=Math.floor(sec%60); const p=n=>String(n).padStart(2,'0'); return p(h)+':'+p(m)+':'+p(s); }
+  mmss(ms){ const t=Math.max(0,Math.ceil(ms/1000)); return Math.floor(t/60)+':'+String(t%60).padStart(2,'0'); }
+  pushDecision(){ this.setState(s=>({decisions:[...s.decisions.filter(t=>Date.now()-t<60000),Date.now()]})); }
+  addPostObj(posts, pid, text, tags){ const np={id:++this.pid,pid,text,tags,eng:{reposts:0,likes:0,replies:0},time:'now',fresh:true}; const id=np.id; setTimeout(()=>{ this.setState(s=>({posts:s.posts.map(p=>p.id===id?{...p,fresh:false,time:'now'}:p)})); },1200); return [np,...posts]; }
+  addPost(pid,text,tags){ this.setState(s=>({posts:this.addPostObj(s.posts,pid,text,tags)})); }
+  bump(tag,amt){ this.setState(s=>({storylines:s.storylines.map(x=>x.id===tag?{...x,intensity:Math.min(99,x.intensity+amt)}:x)})); }
+  isTyping(){ const el=document.activeElement; return el && (el.tagName==='INPUT'||el.tagName==='TEXTAREA'); }
+  onKey(e){
+    const st=this.state;
+    if((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==='k'){ e.preventDefault(); this.openPalette(); return; }
+    if(e.key==='Escape'){ this.closeAll(); return; }
+    if(st.composerOpen){ if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){ e.preventDefault(); this.sendReply(); } return; }
+    if(st.paletteOpen||st.tdOpen||st.bcGateOpen||st.batchOpen) return;
+    if(st.toastOpen){ if(e.key.toLowerCase()==='y'){this.matchYes();} if(e.key.toLowerCase()==='n'){this.matchNo();} return; }
+    if(this.isTyping()) return;
+    const vis=this.visibleQueue();
+    if(e.key==='ArrowDown'){ e.preventDefault(); this.setState(s=>({focusIdx:Math.min(vis.length-1,s.focusIdx+1)})); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); this.setState(s=>({focusIdx:Math.max(0,s.focusIdx-1)})); }
+    else if(e.key.toLowerCase()==='a'){ const it=vis[st.focusIdx]; if(it) this.approve(it.id); }
+    else if(e.key.toLowerCase()==='v'){ const it=vis[st.focusIdx]; if(it) this.veto(it.id); }
+    else if(e.key.toLowerCase()==='e'){ const it=vis[st.focusIdx]; if(it) this.editItem(it.id); }
+    else if(e.key.toLowerCase()==='r'){ const it=vis[st.focusIdx]; if(it) this.reroll(it.id); }
+    else if(e.key.toLowerCase()==='b'){ this.batchApprove(); }
+  }
+  visibleQueue(){ return this.state.queue; }
+  closeAll(){ this.setState({paletteOpen:false,composerOpen:false,tdOpen:false,bcGateOpen:false,batchOpen:false,pauseOpen:false,engOpen:false,exswOpen:false,toastOpen:false,fly:null}); }
+  openPalette(){ this.setState({paletteOpen:true,paletteQuery:'',palSel:0,composerOpen:false}); setTimeout(()=>{const i=document.getElementById('palInput');if(i)i.focus();},30); }
+  palettePersonas(){ const q=this.state.paletteQuery.toLowerCase(); return this.personas.filter(p=>!q||p.name.toLowerCase().includes(q)||p.handle.toLowerCase().includes(q)); }
+  openComposer(pid,target){ this.setState({composerOpen:true,paletteOpen:false,composerPid:pid,composerText:'',composerTarget:target||''}); }
+  sendReply(){ const st=this.state; const p=this.pById[st.composerPid]; if(!p) return; const txt=(st.composerText||'').trim()||'(in-character reply)'; const tags=[]; if(/water|reservoir|boil|turbid/i.test(txt)||st.composerTarget==='water')tags.push('water'); if(/911|outage|dispatch/i.test(txt)||st.composerTarget==='outage')tags.push('outage'); this.addPost(p.id,txt,tags.length?tags:['water']); this.pushDecision(); this.setState({composerOpen:false,composerText:''}); this.confirmToast('Posted to the live world as '+p.handle+' ✓','ok'); }
+  approve(id){ this.setState(s=>{ const it=s.queue.find(x=>x.id===id); let posts=s.posts; if(it) posts=this.addPostObj(posts,it.pid,it.preview,[it.tag]); return {queue:s.queue.filter(x=>x.id!==id),posts,focusIdx:Math.max(0,Math.min(s.focusIdx,s.queue.length-2))}; }); this.pushDecision(); }
+  veto(id){ this.setState(s=>({queue:s.queue.filter(x=>x.id!==id),focusIdx:Math.max(0,Math.min(s.focusIdx,s.queue.length-2))})); this.pushDecision(); }
+  editItem(id){ const it=this.state.queue.find(x=>x.id===id); if(!it)return; this.setState({composerOpen:true,composerPid:it.pid,composerText:it.preview,composerTarget:it.tag,queue:this.state.queue.filter(x=>x.id!==id)}); }
+  reroll(id){ this.setState(s=>({queue:s.queue.map(x=>x.id===id?{...x,preview:this.rerolls[x.pid]||x.preview,exp:x.auto?Date.now()+ (x.dur||60000):x.exp}:x)})); this.pushDecision(); }
+  batchApprove(){ this.setState(s=>{ let posts=s.posts; s.queue.filter(x=>x.auto).forEach(it=>{posts=this.addPostObj(posts,it.pid,it.preview,[it.tag]);}); return {queue:s.queue.filter(x=>!x.auto),posts,focusIdx:0}; }); this.pushDecision(); }
+  fireItem(id){ const st=this.state; const it=st.timeline.find(x=>x.id===id); if(!it)return; if(it.bundle){ this.setState(s=>({timeline:s.timeline.map(x=>x.id===id?{...x,status:'firing',prog:0}:x)})); this.pushDecision(); const feed=this.bundleFeeds[id]||[]; let i=0; const step=()=>{ if(i>=feed.length){ this.setState(s=>({timeline:s.timeline.map(x=>x.id===id?{...x,status:'fired'}:x)})); return; } const f=feed[i]; this.addPost(f[0],f[1],f[2]); f[2].forEach(t=>this.bump(t,3)); i++; this.setState(s=>({timeline:s.timeline.map(x=>x.id===id?{...x,prog:i}:x)})); setTimeout(step, id==='b07'?1000:900); }; setTimeout(step,300); } else { this.setState(s=>({timeline:s.timeline.map(x=>x.id===id?{...x,status:'fired'}:x)})); this.pushDecision(); } }
+  holdItem(id){ this.setState(s=>({timeline:s.timeline.map(x=>x.id===id?{...x,status:'held'}:x)})); this.pushDecision(); }
+  skipItem(id){ this.setState(s=>({timeline:s.timeline.map(x=>x.id===id?{...x,status:'skipped'}:x)})); this.pushDecision(); }
+  takeLocal(id){ this.setState(s=>({timeline:s.timeline.map(x=>x.id===id?{...x,locked:false,status:'ready'}:x)})); this.pushDecision(); }
+  setEsc(id,lvl){ this.setState(s=>({storylines:s.storylines.map(x=>x.id===id?{...x,esc:lvl}:x)})); this.pushDecision(); }
+  markOff(id){ this.setState(s=>({storylines:s.storylines.map(x=>x.id===id?{...x,off:true}:x)})); this.pushDecision(); }
+  openTakedown(post){ this.setState({tdOpen:true,tdPost:post,tdCat:'misinfo'}); }
+  confirmTakedown(){ const st=this.state; if(st.tdPost) this.setState({posts:st.posts.filter(p=>p.id!==st.tdPost.id),tdOpen:false,tdPost:null}); this.pushDecision(); }
+  askMatch(post){ const p=this.pById[post.pid]; const tid=(post.tags||[]).includes('outage')?'outage':'water'; const st=this.state.storylines.find(x=>x.id===tid); this.setState({toastOpen:true,toastName:p?p.name:'',toastTag:tid==='outage'?'#911Outage':'#WaterIssues',toastExpected:st?st.expected:''}); }
+  matchYes(){ const st=this.state; const tag=st.toastTag==='#911Outage'?'outage':'water'; this.setState(s=>({toastOpen:false,storylines:s.storylines.map(x=>x.id===tag?{...x,expMet:true}:x)})); this.pushDecision(); }
+  matchNo(){ this.setState({toastOpen:false}); this.pushDecision(); }
+  clickBroadcast(){ if(this.state.role!=='Director'){ this.confirmToast('Break Fiction is Director-gated — use the "Role" button in the header to act as Director.','warn'); return;} this.setState({bcGateOpen:true,bcText:''}); setTimeout(()=>{const i=document.getElementById('bcInput');if(i)i.focus();},30); }
+  confirmBroadcast(){ if(this.state.bcText.trim().toUpperCase()!=='BROADCAST')return; this.setState({bcGateOpen:false,bcActive:true,paused:true,pauseTier:'world'}); }
+  endBroadcast(){ this.setState({bcActive:false,paused:false}); }
+  toggleRole(){ this.setState(s=>({role:s.role==='Director'?'Controller':'Director'})); }
+  renderVals(){
+    const s=this.state;
+    const dec = s.decisions.filter(t=>Date.now()-t<60000);
+    const perMin = dec.length;
+    const pct = Math.min(100, perMin/6*100);
+    const scEsc = t=>t?'':''; 
+    // header
+    const tierLabel={injects:'INJECTS PAUSED',engine:'ENGINE PAUSED',world:'WORLD FROZEN'};
+    const stateLabel = s.bcActive?'BROADCAST':(s.paused?(tierLabel[s.pauseTier]||'PAUSED'):'RUNNING');
+    const stateClass = s.paused?'paused':'';
+    const engLabel = s.engineMode==='live'?'LIVE':(s.engineMode==='suggest'?'SUGGEST-ONLY':'STOPPED');
+    const engClass = s.engineMode==='live'?'':(s.engineMode==='suggest'?'suggest':'stopped');
+    // timeline
+    const chipMap={pending:['st-pending','Pending'],ready:['st-ready','Ready'],fired:['st-fired','Fired'],skipped:['st-skipped','Skipped'],held:['st-held','Held'],firing:['st-firing','Firing']};
+    let nowShown=false;
+    const doneCount=s.timeline.filter(t=>t.status==='fired'||t.status==='skipped').length;
+    const hidePast=s.focus && !s.pastOpen;
+    const timelineItems = s.timeline.map(t=>{
+      const isFired=t.status==='fired'||t.status==='skipped';
+      const cm=chipMap[t.status]||chipMap.pending;
+      const showNow = !nowShown && (t.status==='ready'||t.status==='pending') && !isFired;
+      if(showNow) nowShown=true;
+      const bundle=t.bundle;
+      return {
+        id:t.id,time:t.time,inj:t.inj,title:t.title,locked:!!t.locked,
+        chipClass:cm[0],chipLabel:cm[1],
+        rowClass:(t.locked?'locked ':'')+(isFired?'done ':'')+(isFired&&hidePast?'collapsed ':'')+(t.id===s.hlItem?'hl':''),
+        isBundle:!!bundle && t.status!=='firing', meta:bundle?`${bundle.posts} posts · ${bundle.personas} personas · ${bundle.min} min`:'',
+        mFiring:t.status==='firing', progressLabel:bundle?`${t.prog||0} / ${bundle.posts}`:'', pacingStyle:`width:${bundle?Math.round((t.prog||0)/bundle.posts*100):0}%`,
+        mFire:(t.status==='ready'&&!t.locked), mLocked:(!!t.locked&&t.status!=='fired'), mHeld:t.status==='held',
+        overdue:t.status==='held'&&this.parseHM(t.time)<s.scenarioSec-120, overdueMin:Math.max(1,Math.floor((s.scenarioSec-this.parseHM(t.time))/60)),
+        showNow,
+        onFire:()=>this.fireItem(t.id), onHold:()=>this.holdItem(t.id), onSkip:()=>this.skipItem(t.id), onTakeLocal:()=>this.takeLocal(t.id),
+      };
+    });
+    // columns
+    const postView=(p)=>{ const pr=this.pById[p.pid]; return {id:'p'+p.id,isPost:true,isActivity:false,initials:pr.initials,avStyle:`background:${pr.color}`,name:pr.name,handle:pr.handle,verified:pr.verified,time:p.time,text:p.text,reposts:p.eng.reposts,likes:p.eng.likes,replies:p.eng.replies,freshClass:p.fresh?'fresh':'',onReply:()=>this.openComposer(p.pid,(p.tags||[]).includes('outage')?'outage':'water'),onMatch:()=>this.askMatch(p),onFlag:()=>this.confirmToast('Moment flagged for the evaluators’ after-action record ✓','ok'),onTakedown:()=>this.openTakedown({id:p.id,pid:p.pid,text:p.text})}; };
+    const actView=(a)=>({id:a.id,isActivity:true,isPost:false,actor:a.actor+' ('+a.role+')',text:a.text,time:a.time});
+    const colDefs=[
+      {id:'all',title:'All Posts',tag:null,filter:()=>true},
+      {id:'water',title:'#WaterIssues',tag:null,filter:p=>(p.tags||[]).includes('water')},
+      {id:'outage',title:'911-Outage',tag:['tag-outage','#911Outage'],filter:p=>(p.tags||[]).includes('outage')},
+      {id:'activity',title:'Participant Activity',tag:null,activity:true},
+    ];
+    const columns = colDefs.filter(c=>!s.closedCols[c.id]).map(c=>{
+      let items, frozenN=0;
+      if(c.activity){ items=s.activity.map(actView); }
+      else {
+        const cur=s.posts.filter(c.filter);
+        const snap=s.frozen[c.id];
+        if(snap){ const shown=cur.filter(p=>snap.includes(p.id)); frozenN=cur.length-shown.length; items=shown.map(postView); }
+        else items=cur.map(postView);
+      }
+      return {id:c.id,title:c.title,tagClass:c.tag?c.tag[0]:'',tagText:c.tag?c.tag[1]:'',count:items.length+frozenN,items,frozen:frozenN>0,frozenN,
+        onEnter:()=>{ if(!c.activity && !this.state.frozen[c.id]) this.setState(st=>({frozen:{...st.frozen,[c.id]:st.posts.filter(c.filter).map(p=>p.id)}})); },
+        onLeave:()=>this.setState(st=>{ const f={...st.frozen}; delete f[c.id]; return {frozen:f}; }),
+        onFlush:()=>this.setState(st=>({frozen:{...st.frozen,[c.id]:st.posts.filter(c.filter).map(p=>p.id)}})),
+        onClose:()=>this.setState(st=>({closedCols:{...st.closedCols,[c.id]:true}}))};
+    });
+    // storylines
+    const storylines=s.storylines.map(x=>{
+      const dots=[]; for(let i=1;i<=6;i++){ let cls=''; if(i<=x.esc){ cls='on'; if(x.esc>=5&&i>=5)cls='on crit'; else if(x.esc>=4&&i>=4)cls='on hot'; else if(x.esc>=3&&i>=3)cls='on hot'; } dots.push({cls,onClick:()=>this.setEsc(x.id,i)}); }
+      const isOpen=s.expandedStory===x.id;
+      return {id:x.id,open:isOpen,openClass:isOpen?'open':'',onToggle:()=>this.setState(st=>({expandedStory:st.expandedStory===x.id?null:x.id})),
+        name:x.name,tag:x.tag,sevClass:x.sev==='esc'?'sev-esc':'sev-act',sevLabel:x.sevLabel,
+        intensity:x.intensity,intStyle:`width:${x.intensity}%`,target:x.target,tgtStyle:`left:calc(${x.target}% - 1.5px)`,traineeSig:x.traineeSig,
+        onSetTarget:(e)=>{const r=e.currentTarget.getBoundingClientRect();const pct=Math.round(Math.max(5,Math.min(99,(e.clientX-r.left)/r.width*100)));this.setState(st=>({storylines:st.storylines.map(y=>y.id===x.id?{...y,target:pct}:y)}));this.pushDecision();},
+        sentLabel:(x.sentiment>0?'+':'')+x.sentiment,sentStyle:`width:${Math.abs(x.sentiment)}%`,
+        esc:x.esc,escLabel:x.esc+'/5',dots,expected:x.expected,expClass:x.expMet?'met':'wait',
+        offPlatform:x.off,showOffBtn:!x.off,onOffPlatform:()=>this.markOff(x.id)};
+    });
+    // queue
+    const queue=s.queue.map((it,idx)=>{ const pr=this.pById[it.pid]; const remain=it.exp?it.exp-Date.now():0; const ringPct=it.auto&&it.dur?Math.max(0,Math.min(100,remain/it.dur*100)):0; return {id:it.id,initials:pr.initials,avStyle:`background:${pr.color}`,name:pr.name,handle:pr.handle,action:it.action,preview:it.preview,tagClass:it.tag==='outage'?'tag-outage':'tag-water',tagText:it.tag==='outage'?'#911Outage':'#WaterIssues',isAuto:it.auto,needsReview:!it.auto,timerVerb:s.timeoutMode==='send'?'sends in':'holds in',reviewLabel:it.expired?'timer expired — held for you':'needs review',countdown:it.auto?this.mmss(remain):'',ringStyle:`width:${ringPct}%`,focused:idx===s.focusIdx,rowClass:(idx===s.focusIdx?'focus ':'')+(it.prio?'prio':''),onFocus:()=>this.setState({focusIdx:idx}),onApprove:()=>this.approve(it.id),onVeto:()=>this.veto(it.id),onEdit:()=>this.editItem(it.id),onReroll:()=>this.reroll(it.id)}; });
+    // personas dock
+    const presLabelMap={you:'',busy:'',idle:'',live:''};
+    const personas=this.personas.map(p=>({id:p.id,initials:p.initials,avStyle:`background:${p.color}`,name:p.name,handle:p.handle,verified:p.verified,voice0:p.voice[0],presClass:p.pres,showLabel:!!p.label,presLabel:p.label||'',tipText:p.name+' '+p.handle+' — '+p.voice[0]+(p.label?' · controlled by '+p.label:''),onPick:()=>this.openComposer(p.id,'water')}));
+    const trainees=[
+      {name:'@FH_PIO',initials:'PI',avStyle:'background:#2f6f9e',role:'Trainee · Public Information Officer',status:'ACTIVE',stClass:'sev-ok',last:'Posted the boil-water acknowledgement — 2 min ago',metricL:'Response time:',metric:'4 min (target 10) ✓',metricCls:'met'},
+      {name:'@EOC_Director',initials:'ED',avStyle:'background:#7a5aa0',role:'Trainee · EOC Director',status:'IDLE 21M',stClass:'sev-act',last:'Last action: liked the @FairhavenGov advisory — 21 min ago',metricL:'Expected:',metric:'Alt-number PSA — not yet',metricCls:'wait'},
+      {name:'@PIO_Deputy',initials:'PD',avStyle:'background:#3a7d5a',role:'Trainee · Deputy PIO',status:'DRAFTING',stClass:'sev-ok',last:'Drafting a release in The Wire Room — 7 min',metricL:'Expected:',metric:'Supporting PSA — in progress',metricCls:'wait'},
+    ];
+    // palette
+    const q=s.paletteQuery.toLowerCase();
+    const palP=this.palettePersonas();
+    const paletteResults=palP.map((p,i)=>({id:p.id,initials:p.initials,avStyle:`background:${p.color}`,name:p.name,verified:p.verified,presClass:p.pres,sub:p.handle+' · '+p.voice[0]+(p.label?' · held by '+p.label:''),selClass:i===s.palSel?'sel':'',onPick:()=>this.openComposer(p.id,'water')}));
+    const cmdsAll=[{name:'Fire next bundle',sub:'Reservoir rumor wave (BND-07)',icon:'⚡',run:()=>{this.closeAll();this.fireItem('b07');}},{name:'Pause exercise',sub:'Out-of-fiction notice',icon:'⏸',run:()=>{this.setState({paletteOpen:false});this.togglePause();}},{name:'Break Fiction (Real-World Broadcast)',sub:'Director-gated · replaces participant screens',icon:'⚠',run:()=>{this.setState({paletteOpen:false});this.clickBroadcast();}}];
+    const paletteCmds=cmdsAll.filter(c=>!q||c.name.toLowerCase().includes(q)).map(c=>({name:c.name,sub:c.sub,icon:c.icon,onRun:c.run}));
+    // composer
+    const cp=this.pById[s.composerPid]||{};
+    const ctxTarget=s.composerTarget==='outage'?'#911Outage (PSAP outage)':'#WaterIssues (reservoir contamination)';
+    const cmpContext=`Storyline: ${ctxTarget}. Scenario time ${this.fmt(s.scenarioSec)}. Reply in ${cp.name||''}'s established voice.`;
+    // takedown
+    const tdCategories=this.tdCategories.map(c=>({label:c.label,onClass:s.tdCat===c.id?'on':'',onPick:()=>this.setState({tdCat:c.id})}));
+    const tdP=s.tdPost?this.pById[s.tdPost.pid]:null;
+    // toast
+    const toastP=this.pById[s.toastPid]||{};
+    // action bar — "needs you now"
+    const needsNow=[];
+    const nr=s.timeline.find(t=>t.status==='ready');
+    if(nr) needsNow.push({cls:'fire',label:nr.inj+' ready · '+(nr.title.length>24?nr.title.slice(0,24)+'…':nr.title),tip:'Click to locate it in the inject schedule (left) — nothing fires until you press Fire there',onClick:()=>this.locateItem(nr.id)});
+    const reviewNeeded=s.queue.filter(x=>!x.auto).length;
+    const autoSoon=s.queue.filter(x=>x.auto&&x.exp&&(x.exp-Date.now())<60000).length;
+    if(reviewNeeded) needsNow.push({cls:'',label:reviewNeeded+' of '+s.queue.length+' need review',tip:'Click to highlight the first one in the engine review queue (right)',onClick:()=>{const i=s.queue.findIndex(x=>!x.auto);if(i>=0)this.setState({focusIdx:i});}});
+    if(autoSoon) needsNow.push({cls:'hot',label:autoSoon+' timer'+(autoSoon>1?'s':'')+' under 60s',tip:s.timeoutMode==='send'?'Swamped mode is ON — these drafts post themselves on expiry':'These drafts hold themselves on expiry — review now or later, nothing posts without you',onClick:()=>{const i=s.queue.findIndex(x=>x.auto&&x.exp&&(x.exp-Date.now())<60000);if(i>=0)this.setState({focusIdx:i});}});
+    const oh=s.timeline.find(t=>t.status==='held' && this.parseHM(t.time)<s.scenarioSec-120);
+    if(oh) needsNow.push({cls:'hot',label:oh.inj+' held past its time',tip:'A held inject is now overdue — release & fire it, or skip it',onClick:()=>this.locateItem(oh.id)});
+    return {
+      exName:'BAY SHIELD 2026',
+      appFocus:s.focus?'focus':'', focusLabel:s.focus?'Focus':'Full view',
+      toggleFocus:()=>this.setState(x=>({focus:!x.focus})),
+      needsNow, nothingNow:needsNow.length===0, showHint:s.focus&&!s.hintDismissed, dismissHint:()=>this.setState({hintDismissed:true}),
+      showPastBar:s.focus&&doneCount>0, pastLabel:s.pastOpen?('Hide '+doneCount+' completed'):('Show '+doneCount+' completed injects'), togglePast:()=>this.setState(x=>({pastOpen:!x.pastOpen})),
+      scenarioClock:this.fmt(s.scenarioSec), scenarioShort:this.fmt(s.scenarioSec).slice(0,5),
+      wallClock:new Date().toLocaleTimeString('en-US',{hour12:false}), wallDate:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'}),
+      stateLabel,stateClass,
+      perMin, hudStyle:`width:${pct}%`, hudMod:perMin>6?'over':'',
+      av1:'background:#33a06f',av2:'background:#f5a623',av3:'background:#7a5aa0',
+      engLabel,engClass,
+      exswOpen:s.exswOpen, toggleExsw:()=>this.setState(x=>({exswOpen:!x.exswOpen})),
+      pauseOpen:s.pauseOpen, pauseBtnLabel:s.paused?'Resume':'Pause',
+      togglePause:()=>{ if(s.paused){ this.setState({paused:false,pauseOpen:false}); this.confirmToast('Resumed — '+(s.pauseTier==='world'?'world unfrozen':'exercise running')+'.','ok'); } else this.setState(x=>({pauseOpen:!x.pauseOpen})); },
+      pt1Class:s.pauseTier==='injects'?'on':'', pt2Class:s.pauseTier==='engine'?'on':'', pt3Class:s.pauseTier==='world'?'on':'',
+      setPt1:()=>this.setState({pauseTier:'injects'}), setPt2:()=>this.setState({pauseTier:'engine'}), setPt3:()=>this.setState({pauseTier:'world'}),
+      closePause:()=>this.setState({pauseOpen:false}), confirmPause:()=>{this.setState({paused:true,pauseOpen:false});},
+      toggleTimeout:()=>this.setState(x=>({timeoutMode:x.timeoutMode==='hold'?'send':'hold'})),
+      timeoutLabel:s.timeoutMode==='hold'?'Hold drafts (default)':'Auto-send (swamped mode)',
+      timeoutSub:s.timeoutMode==='hold'?'Expired drafts wait for you — silence is never approval':'You deliberately raised engine autonomy; drafts post on expiry',
+      roleName:s.role, toggleRole:()=>this.toggleRole(), clickBroadcast:()=>this.clickBroadcast(),
+      engOpen:s.engOpen, toggleEng:()=>this.setState(x=>({engOpen:!x.engOpen})),
+      engLive:()=>this.setState({engineMode:'live',engOpen:false}), engSuggest:()=>this.setState({engineMode:'suggest',engOpen:false}), engStop:()=>this.setState({engineMode:'stopped',engOpen:false}),
+      timelineItems, openBatch:()=>{ if(!s.paused){ this.confirmToast('Time-jump is guarded while the exercise is RUNNING — pause first.','warn'); return; } this.setState({batchOpen:true}); },
+      columns, feedRate:s.feedRate, addCol:()=>this.setState({closedCols:{}}),
+      storylines, storyCount:s.storylines.length,
+      queue, queueCount:s.queue.length, queueEmpty:s.queue.length===0, batchApprove:()=>this.batchApprove(),
+      personas, pinnedCount:this.personas.length, trainees,
+      flyStoriesOpen:s.fly==='stories', flyStoriesCls:s.fly==='stories'?'on':'',
+      toggleFlyStories:()=>this.setState(x=>({fly:x.fly==='stories'?null:'stories'})),
+      storyBadge:(s.storylines.filter(x=>x.sev==='esc').length||s.storylines.length),
+      storyBadgeCls:s.storylines.some(x=>x.sev==='esc')?'hot':'calm',
+      flyRumorsOpen:s.fly==='rumors', flyTraineesOpen:s.fly==='trainees',
+      flyRumorsCls:s.fly==='rumors'?'on':'', flyTraineesCls:s.fly==='trainees'?'on':'',
+      toggleFlyRumors:()=>this.setState(x=>({fly:x.fly==='rumors'?null:'rumors'})),
+      toggleFlyTrainees:()=>this.setState(x=>({fly:x.fly==='trainees'?null:'trainees'})),
+      closeFly:()=>this.setState({fly:null}),
+      rumors:[
+        {claim:'Chemical smell at the reservoir',status:'SPREADING',stClass:'sev-esc',origin:'Seeded by INJ-039 · first posted by @thescoop',reach:'4.2k',reachStyle:'width:76%',mutation:'“smell” → “toxic spill cover-up”',countered:false,counteredBy:'',showCounter:true,onCounter:()=>{this.setState({fly:null});this.openPalette();}},
+        {claim:'Water is poisoned — bottled only',status:'COUNTERED',stClass:'sev-ok',origin:'Organic · grew from BND-07 replies',reach:'1.8k ↓',reachStyle:'width:34%',mutation:'',countered:true,counteredBy:'@dr_aisha_bello · 5 min ago',showCounter:false},
+        {claim:'911 is fully down citywide',status:'SEEDED',stClass:'sev-act',origin:'Organic · single @darco_tripp post',reach:'300',reachStyle:'width:8%',mutation:'',countered:false,counteredBy:'',showCounter:true,onCounter:()=>{this.setState({fly:null});this.openPalette();}},
+      ],
+      openPalette:()=>this.openPalette(),
+      paletteOpen:s.paletteOpen, paletteQuery:s.paletteQuery, paletteResults, paletteCmds, showCmds:paletteCmds.length>0,
+      onPaletteInput:(e)=>this.setState({paletteQuery:e.target.value,palSel:0}),
+      onPaletteKey:(e)=>{ if(e.key==='Enter'){ const r=this.palettePersonas()[s.palSel]||this.palettePersonas()[0]; if(r)this.openComposer(r.id,'water'); } else if(e.key==='ArrowDown'){e.preventDefault();this.setState(x=>({palSel:Math.min(this.palettePersonas().length-1,x.palSel+1)}));} else if(e.key==='ArrowUp'){e.preventDefault();this.setState(x=>({palSel:Math.max(0,x.palSel-1)}));} },
+      composerOpen:s.composerOpen, cmpCatClass:cp.cat||'', cmpCatLabel:'POSTING AS '+({citizen:'CITIZEN VOICE',official:'OFFICIAL ACCOUNT',news:'NEWS / MEDIA'}[cp.cat]||'PERSONA'), cmpInitials:cp.initials||'', cmpAvStyle:`background:${cp.color||'#333'}`, cmpName:cp.name||'', cmpHandle:cp.handle||'', cmpVerified:cp.verified, cmpVoice:(cp.voice||[]).map(t=>({t})), cmpContext,
+      composerText:s.composerText, cmpCount:(s.composerText||'').length+' / 280',
+      onComposerChange:(e)=>this.setState({composerText:e.target.value}), onComposerKey:(e)=>{ if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();this.sendReply();} },
+      sendReply:()=>this.sendReply(),
+      toastOpen:s.toastOpen, toastPosCls:(s.composerOpen||s.paletteOpen||s.tdOpen||s.bcGateOpen||s.batchOpen)?'bot':'', toastName:s.toastName, toastTag:s.toastTag, toastExpected:s.toastExpected, matchYes:()=>this.matchYes(), matchNo:()=>this.matchNo(),
+      confirmOpen:!!s.confirmMsg, confirmMsg:s.confirmMsg, confirmKind:s.confirmKind,
+      tdOpen:s.tdOpen, tdName:tdP?tdP.name:'', tdHandle:tdP?tdP.handle:'', tdPreview:s.tdPost?(s.tdPost.text||'').slice(0,60):'', tdCategories, confirmTakedown:()=>this.confirmTakedown(),
+      bcGateOpen:s.bcGateOpen, bcText:s.bcText, onBcInput:(e)=>this.setState({bcText:e.target.value}), bcDisabled:s.bcText.trim().toUpperCase()!=='BROADCAST',
+      bcInClass:s.bcChoice==='in'?'on':'', bcOutClass:s.bcChoice==='out'?'on':'', bcSetIn:()=>this.setState({bcChoice:'in'}), bcSetOut:()=>this.setState({bcChoice:'out'}),
+      confirmBroadcast:()=>this.confirmBroadcast(), bcActive:s.bcActive, endBroadcast:()=>this.endBroadcast(),
+      batchOpen:s.batchOpen,
+      closeAll:()=>this.closeAll(), stop:(e)=>e.stopPropagation(),
+    };
+  }
+}
+</script>
+</body>
+</html>
