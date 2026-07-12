@@ -1,0 +1,85 @@
+# Adversarial Review — Consolidated Findings
+
+> **REMEDIATION STATUS (2026-07-09): all FIX-NOW findings applied to the package.** Key judgment calls resolved with Tom: watermarks = banners at launch, in-content marking fast-follow for high-risk classes (NFR-008); engine miss-safe = slow + controller prompt, never pause (ADP-002a); sentiment overlays evaluator-facing only (EVL-014); JIC = attribution + post-as-org Phase 1, full workflow Phase 3, SME-validation flagged (COR-018); time model = jumps + suspension only (COR-050…054); NFR scale targets sized from real exercise shapes (NFR-002). DECIDE items resolved: TTX in scope Phase 3 (PRT-040, COR-052); hosting = commercial Azure + Gov roadmap (NFR-006). Remaining: SPIKE items (telemetry schema v0, rumor model, E8 cost/latency) and TRACK items (multi-timezone, Cadence lookup migration).
+
+> **Date:** 2026-07-09 · **Method:** two independent adversarial reviews (exercise-practitioner/SME lens; principal-engineer/story-readiness lens) plus synthesis. Findings deduplicated and grouped into four themes, prioritized. Each finding carries a disposition recommendation: **FIX-NOW** (amend package before story decomposition), **DECIDE** (needs a Tom-level product decision), **SPIKE** (needs technical investigation before stories), **TRACK** (acceptable to defer, log it).
+> Where both reviewers independently found the same issue it is marked **[×2]** — treat convergent findings as highest-confidence.
+
+---
+
+## Theme A — "Specifies a platform, not an exercise" (SME-lens criticals)
+
+The package was largely written from the demo scenario (real-time, single-day, one PIO, everything in Pulse, nothing goes wrong) rather than the exercise floor.
+
+| # | Sev | Finding | Disposition |
+|---|---|---|---|
+| A1 | **Critical [×2]** | **No scenario-time model beyond dual timestamps.** Nothing defines time jumps ("it is now D+3, 0800"), compression, overnight suspension, or what queued content / E8 timers / weather timeline / relative timestamps ("2h ago") do across a jump. Multi-day and compressed-time exercises — most functional exercises — are unusable without this. Also unanswered: do participant surfaces display scenario time or wall time? | **FIX-NOW** — add a first-class exercise-clock/time-model feature to E1 (jump/compress/suspend semantics; per-subsystem jump behavior: fire/skip/backfill; scenario-time display rule) and propagate to WX-002, ADP timers, SOC-003, EVL-003. |
+| A2 | **Critical** | **No out-of-fiction real-world emergency broadcast.** Every alert surface is in-fiction; even the pause page. HSEEP conduct requires an unmistakable "REAL-WORLD EVENT — STOP EX" channel (real fire alarm, medical event, participant confusing sim for reality). | **FIX-NOW** — Director-level break-fiction broadcast, visually alien to all sim chrome, all channels/sessions; out-of-fiction pause page option. |
+| A3 | **Critical [×2]** | **Participants can't operate official/org accounts — the core PIO journey has no requirement.** UX narratives show PIOs posting "from their agency account," but persona operation is granted only to controllers (CTL-001); nothing lets a participant post as an org persona, and nothing covers JIC reality: five humans on one shared account, per-human attribution behind the shared handle, concurrent-draft safety, shift handoff. The joint-release "workaround" hands the JIC to controllers — the JIC is exactly what large exercises evaluate. | **FIX-NOW** — participant→org-persona operation grants (E1/E2/E5): assignment, "post as [org]" UX, per-human attribution in telemetry, concurrent presence, participant-role release approvers (upgrades PRS-021). |
+| A4 | **Critical [×2]** | **Screenshot leakage.** Compliance chrome renders outside the app frame and can be disabled — so a cropped fake boil-water notice or fake NWS warning is indistinguishable from real content on the actual internet. This is a public-safety and reputation risk, and the reason LG's ugly banners exist. | **FIX-NOW** — in-content "EXERCISE" watermark baked into rendered articles/warnings/posts/media, on by default; disabling requires org-admin risk acknowledgment; chrome-off + watermark-off simultaneously disallowed. |
+| A5 | **Critical** | **No moderation/takedown workflow.** A participant posting real PII / offensive content mid-exercise has no controller remedy beyond an unresolved open question. | **FIX-NOW** — controller takedown (tombstone + incident tag + ED notification), AAR-safe (removal logged, content not republished). |
+| A6 | **Major** | **Off-platform response blindness.** PIOs answer rumors at press briefings/phone; Pulse sees silence → E8 escalates wrongly and EVL-011 auto-generates false "missed opportunity" findings, destroying evaluator trust. | **FIX-NOW** — one-click controller/evaluator "response occurred off-platform" event that satisfies storyline expectations and annotates metrics. |
+| A7 | **Major** | **No TTX support.** No module-based time advancement, no facilitated big-screen/kiosk display mode. TTXs outnumber functional exercises ~3:1 among target customers. | **DECIDE** — is TTX a launch market? If yes: kiosk/display view (E3) + module-advance mode (E7) become Phase 3 requirements; if no, explicitly out-of-scope it. |
+| A8 | **Major** | **EndEx/hotwash underdefined.** What participants see at EndEx, credential expiry, read-only world browsing during hotwash, and replay/metrics availability latency (hotwash starts ~30 min after EndEx) are unspecified — yet the E10 narrative sells exactly this scene. | **FIX-NOW** — EndEx participant state, credential expiry policy, post-EndEx facilitated read-only access, "replay + core metrics ≤15 min after EndEx." |
+| A9 | **Major** | **Login-triage reality.** No controller-accessible participant admin (password reset, unlock, force-logout, reassign, wrong-account fix) for 100+ variably tech-literate users at StartEx. | **FIX-NOW** — participant-admin panel requirement in E1/E7, audit-logged. |
+| A10 | **Major** | **Government network reality vs. novel subdomains.** Fresh subdomains are what agency web filters/TLS proxies block; no allowlist spec, cert/DNS provisioning SLA, connectivity self-test, or verified locked-down-device operation. "URL + password" onboarding fails if the URL doesn't load from the EOC. | **FIX-NOW** — network-readiness requirement: self-test page, published allowlist/firewall spec, provisioning lead-time SLA; plus hostname ops (wildcard certs, DNS automation, session scoping). |
+| A11 | **Minor** | Read-only sessions can't follow (COR-015) but the citizen default feed is Following (SOC-081) — unusable default for the biggest audience. | **FIX-NOW** (small) — read-only default = All Posts/Portal, or planner-curated pseudo-following. |
+| A12 | **Minor** | Trending purism (SOC-041 "never manually declared") vs. conduct timing needs (#BoilWater trending at 14:00 sharp). | **FIX-NOW** (small) — organic computation stays; add logged controller "boost weight" steering lever. |
+| A13 | **Minor** | Single exercise time zone (XC-008) breaks multi-region/statewide exercises. | **TRACK** — acknowledge constraint in E1; revisit with multi-region demand. |
+
+## Theme B — Engine-first phasing was not propagated into the epics [×2 theme]
+
+The 2026-07-09 phasing revision updated the master PRD and E8 header but left requirement text assuming channels precede the engine.
+
+| # | Sev | Finding | Disposition |
+|---|---|---|---|
+| B1 | **Critical** | **The exercise clock has no owner in Phases 1–2.** SOC-003 gets scenario time "via E9" (Phase 4); the native clock is defined inside E9 (INT-011). But StartEx (COR-043), CTL-023, WX-002, and E8's inaction timers (Phase 2!) all consume a clock. Silence escalation cannot be built. | **FIX-NOW** — define the native exercise clock in E1 with its own requirement IDs (merged with A1's time model); INT-010/011 becomes "swap clock provider." |
+| B2 | **Critical** | **Phase 2 pilots have undefined basics:** login lands on the Portal (Phase 3) — no landing surface; "qualifying official response" leans on press releases (Phase 3) — never stated that social posts qualify; alert bar (EAS analog) lives in E3 while CTL-020 ships Phase 1. | **FIX-NOW** — "Pilot mode" section in master PRD: social-as-landing, social-only qualifying responses, alert delivery pre-portal. |
+| B3 | **Major** | **E7 requirements span all channels but E7 ships Phase 1** (CTL-001 "any enabled channel," CTL-020 portal curation). Story agents can't tell Phase 1 scope from stubs. | **FIX-NOW** — annotate CTL requirements "per enabled channel as channels land." |
+| B4 | **Major** | **Lifecycle vocabulary conflict inside E1:** §3.1 entity says Setup→Active→…, COR-032 says Build→Staged→Live→…, §5 says "flip to Active at StartEx." | **FIX-NOW** — normalize to COR-032 everywhere. |
+| B5 | **Major** | **Identity is both "decided" and "gated":** E9 OQ1 still says SSO decision gates E1; staff federate "with Cadence identity" but Cadence integration is Phase 4 — Phase 1 staff login path unstated. | **FIX-NOW** — Phase 1 staff auth = Dynamis IdP directly; delete stale E9 OQ1. |
+| B6 | **Minor** | ADP-006 (Cadence ExpectedAction binding) listed in E8 "launch set" but depends on E9 (Phase 4); E8 §2.1 asserts storyline auto-detection that OQ1 withholds from v1. | **FIX-NOW** (small) — tag ADP-006 Phase 4; mark detection post-v1 in §2.1. |
+
+## Theme C — The missing non-functional/compliance layer [×2 theme]
+
+Functionally complete, procurement-failing. Both reviewers flagged this as the second systemic hole.
+
+| # | Sev | Finding | Disposition |
+|---|---|---|---|
+| C1 | **Critical [×2]** | **Section 508 / WCAG absent.** Pass/fail procurement gate for government buyers; touches live-feed screen-reader behavior, color-only severity coding, keyboard-only console, PDF releases, replay scrubbing. | **FIX-NOW** — XC requirement: WCAG 2.1 AA on participant + evaluator surfaces, VPAT at launch, live-region behavior for real-time feeds; defined floor for staff tooling. |
+| C2 | **Critical** | **Prompt injection via participant content into E8.** Participants are literally trained information-manipulators; their posts flow into generation context. ADP-023 guards output only. | **FIX-NOW** — ADP requirement: participant content is untrusted data, never instructions (isolation/quoting), plus red-team acceptance tests. |
+| C3 | **Critical** | **Content security absent:** no malware scanning, MIME validation, size caps, HTML sanitization (paste-from-Word!), PDF render sandboxing. Stored XSS defeats tenant isolation from the browser side. | **FIX-NOW** — E1 cross-cutting content-safety requirement set. |
+| C4 | **Critical** | **LLM data governance absent.** Government exercise content flowing to a generation model with no provider constraint (Azure OpenAI in-tenant vs. third-party), residency, or no-training terms. Engine-first phasing makes this a Phase 2 problem. | **FIX-NOW** — pin generation to tenant-bounded, contractually compliant endpoints (E8 + master §6). |
+| C5 | **Major [×2]** | **No scale/perf NFRs.** Only number in the package is trending ≤60s. Concurrent sessions, posts/min burst, feed p95, engine rate-cap defaults — all missing, while committing to "modest Azure infrastructure" and smooth 300-user notification storms. | **FIX-NOW** — NFR table in master §5 + load-rehearsal item on the readiness dashboard (COR-042). Baseline proposal: 500 concurrent sessions/exercise, 120 posts/min burst for 10 min, p95 feed delivery <2s. |
+| C6 | **Major [×2]** | **No availability/DR/degraded-mode requirements for a one-shot event product.** Cadence fires but Pulse unreachable? Clock subscription drops? LLM provider outage mid-burst? Venue connectivity floor? Cadence is offline-first; Pulse says nothing — customers will notice the contrast. | **FIX-NOW** — conduct-window availability target, RPO/RTO, delivery retry + controller alerting, engine auto-fallback to manual, stated connectivity requirement. |
+| C7 | **Major [×2]** | **Shared read-only credential + public hostname = internet-facing shared secret** with no rotation, revocation, lockout, rate limiting; no posting-endpoint rate limits platform-wide (participants can script). | **FIX-NOW** — credential lifecycle + rate-limiting requirements in F1.2. |
+| C8 | **Major [×2]** | **PII / records / monitoring-consent posture missing.** DM surveillance consent handled off-platform; keystroke-level draft history (PRS-004); telemetry about named government employees = records (FOIA/retention schedules); no account purge policy. Plus hosting tier (StateRAMP/FedRAMP/Azure Gov) unaddressed. | **FIX-NOW** (policy section in master) + **DECIDE** (hosting tier roadmap — commercial Azure at launch with Gov roadmap, or Gov-first?). |
+| C9 | **Minor** | Fake-signup "theater" punted to design; it's a product/security decision (phishing-pattern optics on a gov training site). | **FIX-NOW** (small) — decide: omit at launch, normatively. |
+
+## Theme D — Model & metric integrity
+
+| # | Sev | Finding | Disposition |
+|---|---|---|---|
+| D1 | **Major [×2]** | **Follower/audience model incoherent.** Magnitude bands (SOC-050) vs. real follow edges (SOC-051): what renders in a follower *list*? E8 spread (ADP-004) and E10 reach (EVL-012) both compute over the undefined quantity. | **FIX-NOW** — model "audience magnitude" as a persona attribute distinct from the real follow graph; define list rendering + reach formula. |
+| D2 | **Major [×2]** | **Telemetry event schema is nowhere, but capture starts Phase 1.** XC-004/EVL-001/INT-031 share an undefined taxonomy; a schema mistake becomes a cross-phase migration. | **SPIKE** (Phase 1, early) — event schema v0 as a named deliverable referenced by XC-004. |
+| D3 | **Major** | **Sentiment circularity.** The AAR reports a mood the controller partly dialed in; unlabeled, findings are contestable in the hotwash. | **FIX-NOW** — engine/dial config events render as overlays on every sentiment/intensity chart and export as "scenario design inputs" distinct from participant-driven signal. |
+| D4 | **Major** | **Response-matching workload.** Manual storyline↔response linking during bursts, on a 90s veto countdown, by the same lone controller — failure mode: the world berates a PIO who already answered. | **FIX-NOW** — miss-safe default (unmatched official content pauses escalation, never counts as silence) + controller workload budget as E7/E8 acceptance criterion. |
+| D5 | **Major** | **Dual fire-path race** (fire from Cadence *or* Pulse): no lock/authority semantics; Pulse "edit-then-fire" vs. Cadence-approved locked payloads. | **FIX-NOW** — Cadence-sourced items lock in Pulse except explicit audit-logged "take local control." |
+| D6 | **Major** | **INT-002 rests on Cadence's unfinished enum→lookup migration** — external dependency with no owner/status. | **TRACK** — named external dependency with checkpoint before Phase 4. |
+| D7 | **Major** | **Replay over-promises.** EVL-003 says render "as they appeared"; derived state (trending, counts, alert bar) is never snapshotted. | **FIX-NOW** — EVL-003 guarantees ordering fidelity; add periodic derived-state snapshots for what replay shows; label approximation honestly. |
+| D8 | **Minor** | Rumor-object terms undefined ("mutation budget," "spread profile"). | **SPIKE** — rumor model design spike before v1.1 stories. |
+| D9 | **Minor** | View/dwell telemetry (NWS-030) over-claims person-level attribution (shared screens/projectors). | **FIX-NOW** (small) — label as session-level evidence in EVL outputs. |
+| D10 | **Minor** | "Personas served" header conflicts with glossary ("persona" = simulated account). | **FIX-NOW** (small) — rename header to "Roles served." |
+| D11 | **Minor** | Staged-state gaps: pre-clock weather/ambient behavior, backdated-content timestamps in EVL-001. | **FIX-NOW** (small) — define Staged behavior per subsystem. |
+| D12 | **Minor** | INT-004 "2 seconds" unqualified (includes video transcode?). | **FIX-NOW** (small) — SLA scopes to metadata publish; media async. |
+
+---
+
+## Disposition summary
+
+- **FIX-NOW:** 28 findings — package amendments before story decomposition. Largest: A1+B1 (time/clock model — effectively a new E1 feature), A3 (participant org-account operation — new feature across E1/E2/E5), C1–C8 (a new NFR & compliance section in the master PRD + supporting requirements).
+- **DECIDE (Tom):** A7 (TTX in launch scope?), C8-hosting (commercial Azure launch with Gov roadmap vs. Gov-first).
+- **SPIKE:** D2 (telemetry schema v0 — Phase 1, early), D8 (rumor model), plus the pre-existing E8 cost/latency spike.
+- **TRACK:** A13 (multi-timezone), D6 (Cadence lookup migration).
+
+**Root-cause read:** three systemic causes explain ~80% of findings — (1) written from the demo, not the floor; (2) the engine-first rephasing wasn't propagated into requirement text; (3) no NFR/compliance layer existed at all. All three are fixable at the document level before any story is written, which is exactly why this review was worth running now.

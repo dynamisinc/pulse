@@ -8,7 +8,16 @@ Start with the foundations, then the brief for the surface you're building.
 | Doc | Surface | Status |
 |-----|---------|--------|
 | [D0-FOUNDATIONS.md](D0-FOUNDATIONS.md) | Shared house rules, the two worlds, brand set, non-negotiables | Foundations |
+| [D1-social-app.md](D1-social-app.md) | Social app (Pulse) — epic E2 | Brief |
+| [D2-portal.md](D2-portal.md) | Exercise portal ("[City] Today") — epic E3 | Brief |
+| [D3-news-outlets.md](D3-news-outlets.md) | News outlets (TV / paper / wire / tabloid) — epic E4 | Brief |
+| [D4-press-weather.md](D4-press-weather.md) | Press Room + Weather Desk — epics E5/E6 | Brief |
+| [D5-controller-console.md](D5-controller-console.md) | Controller console — design brief (epic E7) | Brief |
 | [D5-controller-console/](D5-controller-console/) | Controller console (SimCell operator surface) | Handoff v1 — ready to implement |
+| [D6-evaluator-dashboard.md](D6-evaluator-dashboard.md) | Evaluator dashboard — epic E10 | Brief |
+
+> The epic docs the briefs cite (`../00-MASTER-PRD.md`, `../01`…`../11`) live one level up in
+> [`docs/`](../). Start any design session with the foundations, then the surface's brief.
 
 Session order (from D0 §6): D5 Controller console · D1 Social app · D2 Portal ·
 D3 News outlets · D4 Press + Weather · D6 Evaluator dashboard.

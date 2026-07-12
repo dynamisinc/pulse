@@ -156,6 +156,24 @@ Never import from `@mui/icons-material`.
 7. **Watermark readiness (NFR-008):** high-risk templates reserve an "EXERCISE"
    watermark slot.
 
+## Agents & the story backlog
+
+Pulse carries a small set of Claude Code subagents in `.claude/agents/`, plus a docs-as-code
+backlog decomposed from the epics:
+
+| Agent | Use for |
+|-------|---------|
+| `story-agent` | Decompose epics into buildable stories under `docs/features/`; write `implementation.md`; fold in design-review amendments (`STORY-UPDATES.md`); mirror to GitHub issues. |
+| `frontend-agent` | Build web surfaces (both worlds) on the React 19 / MUI 9 / COBRA stack. |
+| `testing-agent` | Vitest coverage — isolation, scenario-time, and telemetry first; backend/e2e later. |
+| `code-review` | Review a diff against the two-worlds rule, exercise isolation, and the story's ACs; the orchestration review gate. |
+
+The backlog lives in `docs/features/{feature-slug}/` (`feature.md` + `implementation.md` +
+`NN-<slug>.md` stories), sourced from the epics (`docs/00-MASTER-PRD.md` + `docs/01…11`) and the
+design briefs/amendments (`docs/design/`). GitHub mirroring is an Epic → Feature → Story sub-issue
+hierarchy — see [`docs/GITHUB_TRACKER.md`](docs/GITHUB_TRACKER.md) and
+[`docs/FEATURE_ORCHESTRATION_PLAYBOOK.md`](docs/FEATURE_ORCHESTRATION_PLAYBOOK.md).
+
 ## Common tasks
 
 **Verify the frontend compiles** without killing a running dev server:
