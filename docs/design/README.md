@@ -47,6 +47,10 @@ flow back to the stories (see [DECISIONS.md](D5-controller-console/DECISIONS.md)
   explicitly *not* a controller-performance measure.
 - **CTL-022** — storyline intensity shows **actual + controller-set target** on one track.
 
+The requirement amendments above are tracked as an actionable checklist for the story
+agents in **[STORY-UPDATES.md](D5-controller-console/STORY-UPDATES.md)** (amend / add /
+reconcile / backlog, with a traceability table).
+
 Folder contents: `Controller Console.dc.html` (prototype), `DECISIONS.md` (D5-001…D5-020),
-`README.md` (handoff spec), `cobra.jsx` (provider-wrap pattern reference), `support.js`
-(design-canvas runtime).
+`README.md` (handoff spec), `STORY-UPDATES.md` (requirement-change checklist), `cobra.jsx`
+(provider-wrap pattern reference), `support.js` (design-canvas runtime).
