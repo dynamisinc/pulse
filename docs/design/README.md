@@ -9,6 +9,7 @@ Start with the foundations, then the brief for the surface you're building.
 |-----|---------|--------|
 | [D0-FOUNDATIONS.md](D0-FOUNDATIONS.md) | Shared house rules, the two worlds, brand set, non-negotiables | Foundations |
 | [D1-social-app.md](D1-social-app.md) | Social app (Pulse) — epic E2 | Brief |
+| [D1-social-app/](D1-social-app/) | Social app (Pulse) — participant surface | Handoff v1 — ready to implement |
 | [D2-portal.md](D2-portal.md) | Exercise portal ("[City] Today") — epic E3 | Brief |
 | [D3-news-outlets.md](D3-news-outlets.md) | News outlets (TV / paper / wire / tabloid) — epic E4 | Brief |
 | [D4-press-weather.md](D4-press-weather.md) | Press Room + Weather Desk — epics E5/E6 | Brief |

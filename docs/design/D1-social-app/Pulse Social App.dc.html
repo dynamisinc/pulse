@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0a0d10}
+a{color:#DB3A54;text-decoration:none}a:hover{text-decoration:underline}
+.xb{position:fixed;left:0;right:0;height:22px;background:#2e6b2e;color:#eaf5e6;font:700 10.5px/22px Figtree,sans-serif;text-align:center;letter-spacing:.14em;z-index:99}
+.xbt{top:0}.xbb{bottom:0}
+.app{position:fixed;top:22px;bottom:22px;left:0;right:0;overflow-y:auto;background:var(--bg);color:var(--tx);font-family:Figtree,system-ui,sans-serif;--ac:var(--pulse-ac,#DB3A54);--bg:#fff;--bg2:#f3f5f6;--line:#e5e8ea;--tx:#0e1518;--tx2:#61707a;--hov:rgba(14,21,24,.045)}
+.app.dk{--bg:#0c1116;--bg2:#161e25;--line:#233039;--tx:#e9eef1;--tx2:#8aa0ac;--hov:rgba(255,255,255,.05)}
+.abar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:12px;padding:9px 20px;background:#fff3dd;border-bottom:1px solid #e3b25f;color:#6b4300;font-size:14px}
+.dk .abar{background:#33270e;border-color:#6b5322;color:#f2cf8a}
+.asev{background:#b97a00;color:#fff;font:800 11px Figtree;letter-spacing:.1em;padding:3px 9px;border-radius:5px}
+.alnk{font-weight:700;cursor:pointer;color:inherit}
+.frame{display:flex;justify-content:flex-start;min-height:100%}
+.nav{width:240px;flex:none;position:sticky;top:0;height:calc(100vh - 44px);display:flex;flex-direction:column;padding:10px 14px;box-sizing:border-box}
+.logo{display:flex;align-items:center;gap:9px;font:800 22px Figtree;padding:10px 12px 16px}
+.ni{display:flex;align-items:center;gap:16px;padding:11px 14px;border-radius:999px;font-size:19px;cursor:pointer;width:fit-content;color:var(--tx)}
+.ni:hover{background:var(--hov)}
+.ni.on{font-weight:800}
+.nic{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.hashg{font-weight:800;font-size:21px;width:24px;text-align:center}
+.pbtn{background:var(--ac);color:#fff;border:none;border-radius:999px;font:800 16px Figtree;padding:13px 0;width:196px;margin:14px 0 0 4px;cursor:pointer}
+.pbtn:hover{filter:brightness(1.08)}
+.navft{margin-top:auto;display:flex;flex-direction:column;gap:2px;padding-bottom:8px}
+.nsw{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;font-size:14px;color:var(--tx2);cursor:pointer;border-radius:10px}
+.nsw:hover{background:var(--hov)}
+.swt{width:34px;height:20px;border-radius:999px;background:var(--line);position:relative;flex:none;transition:background .15s}
+.swt.on{background:var(--ac)}
+.kn{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.on .kn{left:16px}
+.mecard{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:999px;cursor:pointer}
+.mecard:hover{background:var(--hov)}
+.main{width:600px;flex:none;border-left:1px solid var(--line);border-right:1px solid var(--line);min-height:calc(100vh - 44px);box-sizing:border-box}
+.main.wide{width:952px}
+.mhd{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
+.mtt{font:800 19px Figtree;padding:13px 16px;display:flex;align-items:center;gap:14px}
+.bk{cursor:pointer;font-size:20px;color:var(--tx);border:none;background:none;padding:2px 6px;border-radius:50%}
+.bk:hover{background:var(--hov)}
+.tabs{display:flex}
+.tab{flex:1;text-align:center;padding:14px 0;font-weight:600;color:var(--tx2);cursor:pointer;position:relative}
+.tab:hover{background:var(--hov)}
+.tab.on{color:var(--tx);font-weight:800}
+.ul{display:none;position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:56px;height:4px;border-radius:4px;background:var(--ac)}
+.on .ul{display:block}
+.npill{position:sticky;top:112px;z-index:6;margin:10px auto -34px;display:flex;align-items:center;gap:7px;width:fit-content;background:var(--ac);color:#fff;border-radius:999px;padding:8px 18px;font:700 14px Figtree;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.post{display:flex;gap:12px;padding:13px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.post:hover{background:var(--hov)}
+.av{width:42px;height:42px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font:700 15px Figtree;color:#fff}
+.pnm{font-weight:700;white-space:nowrap}
+.ph{color:var(--tx2);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chk{flex:none;margin:0 1px}
+.ptx{margin-top:2px;font-size:15px;line-height:1.4;white-space:pre-wrap;text-wrap:pretty}
+.mph{margin-top:10px;border:1px solid var(--line);background:var(--bg2);border-radius:14px;height:170px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;color:var(--tx2)}
+.mpl{font:700 11px Figtree;letter-spacing:.12em;text-transform:uppercase}
+.lc{margin-top:10px;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.lc:hover{background:var(--hov)}
+.lci{height:110px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font:800 13px Figtree;letter-spacing:.14em;color:var(--tx2);border-bottom:1px solid var(--line)}
+.lct{padding:9px 12px;font-size:14px;font-weight:600}
+.lcd{color:var(--tx2);font-size:12px;font-weight:400;margin-bottom:2px}
+.acts{display:flex;justify-content:space-between;margin-top:9px;color:var(--tx2);font-size:13px;max-width:400px}
+.act{display:flex;align-items:center;gap:7px;cursor:pointer}
+.act:hover{color:var(--ac)}
+.aic{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tomb{margin:12px 16px;border:1px solid var(--line);border-radius:14px;padding:14px 16px;color:var(--tx2);font-size:14px;background:var(--bg2)}
+.side{width:344px;flex:none;padding:8px 22px 24px;position:sticky;top:0;height:calc(100vh - 44px);box-sizing:border-box;overflow-y:auto}
+.sbox{display:flex;align-items:center;gap:10px;background:var(--bg2);border-radius:999px;padding:11px 16px;color:var(--tx2);cursor:text;font-size:14px}
+.sic{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;flex:none}
+.card{background:var(--bg2);border-radius:16px;margin-top:16px;overflow:hidden}
+.cht{font:800 18px Figtree;padding:12px 16px 6px}
+.trow{padding:9px 16px;cursor:pointer}
+.trow:hover{background:var(--hov)}
+.tk{font-size:12px;color:var(--tx2)}
+.tn{font-weight:700;font-size:15px}
+.tc{font-size:12.5px;color:var(--tx2)}
+.orow{display:flex;align-items:center;gap:10px;padding:10px 16px;cursor:pointer}
+.orow:hover{background:var(--hov)}
+.fbtn{margin-left:auto;background:var(--tx);color:var(--bg);border:none;border-radius:999px;font:700 13px Figtree;padding:6px 15px;cursor:pointer;flex:none}
+.cmp{display:flex;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.cta{border:none;background:none;resize:none;font:400 19px Figtree;color:var(--tx);outline:none;width:100%;min-height:54px;padding:6px 0}
+.orgchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:3px 12px;font:600 13px Figtree;cursor:pointer;color:var(--tx2);background:none}
+.orgchip.org{border-color:var(--ac);color:var(--ac);background:color-mix(in oklab,var(--ac) 8%,transparent)}
+.cbar{display:flex;align-items:center;gap:14px;margin-top:8px}
+.cnt{font-size:13px;color:var(--tx2)}
+.cnt.low{color:#c47a00;font-weight:800}
+.cring{margin-left:auto}
+.nbdg{background:var(--ac);color:#fff;border-radius:999px;font:700 11px Figtree;padding:2px 7px;margin-left:2px}
+.mi.jb{justify-content:space-between}
+.pbtn2{background:var(--ac);color:#fff;border:none;border-radius:999px;font:700 14px Figtree;padding:8px 20px;cursor:pointer}
+.att{width:20px;height:20px;fill:none;stroke:var(--ac);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;cursor:pointer}
+.ovl{position:fixed;top:22px;bottom:22px;left:0;right:0;background:rgba(10,15,20,.5);z-index:60;display:flex;justify-content:center;align-items:flex-start;padding-top:7vh}
+.mdl{background:var(--bg);color:var(--tx);width:600px;border-radius:18px;padding:10px 16px 16px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.posrel{position:relative}
+.menu{position:absolute;top:110%;left:0;background:var(--bg);border:1px solid var(--line);border-radius:14px;box-shadow:0 10px 34px rgba(0,0,0,.2);z-index:20;min-width:300px;padding:6px}
+.mi{display:flex;gap:10px;padding:9px 12px;border-radius:10px;cursor:pointer;align-items:center}
+.mi:hover{background:var(--hov)}
+.mhint{padding:8px 12px 6px;font-size:11.5px;color:var(--tx2);border-top:1px solid var(--line);margin-top:4px}
+.fpost{padding:14px 16px;border-bottom:1px solid var(--line)}
+.ftx{font-size:22px;line-height:1.35;margin:12px 0;text-wrap:pretty}
+.fstats{display:flex;gap:18px;color:var(--tx2);font-size:14px;padding:12px 0;border-top:1px solid var(--line)}
+.fsn{color:var(--tx);font-weight:800}
+.rline{border-left:2px solid var(--line)}
+.pban{height:170px;background:color-mix(in oklab,var(--ac) 30%,var(--bg2))}
+.pav{width:110px;height:110px;border-radius:50%;border:4px solid var(--bg);margin-top:-62px;font-size:32px}
+.pbio{padding:0 16px 12px}
+.pmeta{display:flex;gap:16px;color:var(--tx2);font-size:14px;margin-top:8px;flex-wrap:wrap}
+.pcnt{display:flex;gap:18px;font-size:14px;margin-top:10px}
+.pcl{cursor:pointer;color:var(--tx)}
+.pcl:hover{text-decoration:underline}
+.folp{border-top:1px solid var(--line);background:var(--bg2)}
+.magrow{padding:11px 16px;color:var(--tx2);font-size:14px;font-style:italic}
+.nrow{display:flex;gap:14px;padding:14px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.nrow:hover{background:var(--hov)}
+.nsym{width:28px;font-size:19px;text-align:center;flex:none;font-weight:800}
+.nlike{color:#e0245e}.nrt{color:#17a06b}.nmen{color:var(--ac)}.nfol{color:#7c5cd6}
+.pnote{margin:12px 16px;border:1px solid var(--line);border-radius:14px;padding:13px 15px;background:var(--bg2);display:flex;gap:12px}
+.plogo{width:34px;height:34px;border-radius:9px;background:var(--ac);color:#fff;display:flex;align-items:center;justify-content:center;flex:none}
+.dms{display:flex;height:calc(100vh - 44px)}
+.dlist{width:340px;flex:none;border-right:1px solid var(--line);overflow-y:auto}
+.drow{display:flex;gap:11px;padding:13px 16px;cursor:pointer;border-bottom:1px solid var(--line)}
+.drow:hover{background:var(--hov)}
+.drow.sel{background:var(--hov);border-right:2px solid var(--ac)}
+.dchat{flex:1;display:flex;flex-direction:column}
+.dmsgs{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:8px}
+.mb{max-width:72%;padding:10px 14px;border-radius:18px;background:var(--bg2);font-size:14.5px;line-height:1.4;width:fit-content}
+.mb.me{background:var(--ac);color:#fff;margin-left:auto}
+.dmin{display:flex;gap:10px;padding:12px 16px;border-top:1px solid var(--line)}
+.dmi{flex:1;background:var(--bg2);border:none;border-radius:999px;padding:11px 16px;font:400 14px Figtree;color:var(--tx);outline:none}
+.cols{flex:1;display:flex;overflow-x:auto;height:calc(100vh - 44px);border-left:1px solid var(--line)}
+.colm{width:352px;flex:none;border-right:1px solid var(--line);display:flex;flex-direction:column}
+.chd{padding:11px 14px;border-bottom:1px solid var(--line);background:var(--bg)}
+.chdt{font:800 15px Figtree}
+.chds{font-size:11.5px;color:var(--tx2);margin-top:1px}
+.cbody{overflow-y:auto;flex:1}
+.cposts .post{padding:10px 12px}
+.cposts .av{width:32px;height:32px;font-size:12px}
+.cposts .ptx{font-size:14px}
+.cposts .acts{display:none}
+.cposts .mph{height:90px}
+.cposts .lci{height:0;border:none}
+.obs .cmp,.obs .pbtn,.obs .fbtn,.obs .dmin,.obs .npill{display:none}
+.obs .act{pointer-events:none}
+.obs .acts{color:var(--tx2)}
+</style>
+</helmet>
+<div class="xb xbt">UNCLASSIFIED // EXERCISE · EXERCISE · EXERCISE — ALL CONTENT SIMULATED</div>
+<div class="xb xbb">PULSE TRAINING ENVIRONMENT — EXERCISE · NOT REAL-WORLD INFORMATION</div>
+<div class="{{appCls}}">
+<sc-if value="{{alertOn}}" hint-placeholder-val="{{false}}"><div class="abar" role="alert" data-screen-label="Alert bar"><span class="asev">⚠ ADVISORY</span><span class="fw7">Boil Water Advisory — City of Fairhaven, Zones 2–4 · Issued 10:42 AM</span><span class="f1"></span><span class="alnk">Guidance from @FulcoEM →</span></div></sc-if>
+<div class="frame">
+<nav class="nav" data-screen-label="Nav rail">
+<div class="logo"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12h4.2l2.1-5.2 4.4 10.4 2.1-5.2h6.2"></path></svg><span>Pulse</span></div>
+<div class="{{navHomeC}}" onClick="{{goHome}}"><svg class="nic" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v8.5h-5.4v-5h-5.2v5H4z"></path></svg><span>Home</span></div>
+<div class="{{navExpC}}" onClick="{{goExplore}}"><span class="hashg">#</span><span>Explore</span></div>
+<div class="{{navNotC}}" onClick="{{goNotifs}}"><svg class="nic" viewBox="0 0 24 24"><path d="M6 16v-5.5a6 6 0 0 1 12 0V16l2 3H4z"></path><path d="M10 21.5h4"></path></svg><span>Notifications</span><span class="nbdg">{{bellCnt}}</span></div>
+<div class="{{navMsgC}}" onClick="{{goMsgs}}"><svg class="nic" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"></rect><path d="m3.5 7.5 8.5 6 8.5-6"></path></svg><span>Messages</span></div>
+<div class="{{navProC}}" onClick="{{goProfile}}"><svg class="nic" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 20.5c1.4-3.8 4.7-4.8 7.5-4.8s6.1 1 7.5 4.8"></path></svg><span>Profile</span></div>
+<button class="pbtn" onClick="{{openCmp}}">Post</button>
+<div class="navft">
+<sc-if value="{{hasOrg}}" hint-placeholder-val="{{true}}"><div class="nsw" onClick="{{togglePio}}"><span class="fx ac gap8"><svg class="nic" style="width:18px;height:18px" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1"></rect><rect x="10" y="4" width="5" height="16" rx="1"></rect><rect x="17" y="4" width="4" height="16" rx="1"></rect></svg>Columns</span><span class="{{pioSwC}}"><span class="kn"></span></span></div></sc-if>
+<div class="posrel">
+<sc-if value="{{meMenu}}" hint-placeholder-val="{{false}}"><div class="menu" style="bottom:110%;top:auto"><div class="mi jb" onClick="{{toggleTheme}}"><span class="fs14 fw6">Dark mode</span><span class="{{dkSwC}}"><span class="kn"></span></span></div><div class="mi"><span class="fs14 fw6">Settings and privacy</span></div><div class="mi"><span class="fs14 fw6" style="color:var(--tx2)">Log out @dreyes_fh</span></div></div></sc-if>
+<div class="mecard" onClick="{{toggleMe}}"><div class="av" style="width:36px;height:36px;background:#7c5cd6;font-size:13px">DR</div><div class="f1"><div class="fw7 fs14">Dana Reyes</div><div class="fs12" style="color:var(--tx2)">@dreyes_fh</div></div><span style="color:var(--tx2)">…</span></div>
+</div>
+</div>
+</nav>
+<sc-if value="{{pio}}" hint-placeholder-val="{{false}}">
+<div class="cols cposts" data-screen-label="PIO columns">
+<sc-for list="{{cols}}" as="c" hint-placeholder-count="3">
+<div class="colm"><div class="chd"><div class="chdt">{{c.t}}</div><div class="chds">{{c.s}}</div></div><div class="cbody">
+<sc-for list="{{c.list}}" as="p" hint-placeholder-count="5">
+<div class="post" onClick="{{p.open}}"><div class="av" style="background:{{p.avc}}">{{p.av}}</div><div class="f1" style="min-width:0"><div class="fx ac" style="gap:4px"><span class="pnm fs14">{{p.name}}</span><sc-if value="{{p.v}}" hint-placeholder-val="{{false}}"><svg class="chk" width="15" height="15" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M22.25 12l-2.05-2.35.3-3.1-3.05-.7L15.9 3.1 13 4.3 10.1 3.1 8.55 5.85l-3.05.7.3 3.1L3.75 12l2.05 2.35-.3 3.1 3.05.7 1.55 2.75L13 19.7l2.9 1.2 1.55-2.75 3.05-.7-.3-3.1z"></path><path fill="#fff" d="M11.1 15.4l-3.2-3.2 1.25-1.25 1.95 1.95 4.75-4.75 1.25 1.25z"></path></svg></sc-if><span class="ph fs12">{{p.handle}} · {{p.t}}</span></div><div class="ptx">{{p.text}}</div><sc-if value="{{p.mph}}" hint-placeholder-val="{{false}}"><div class="mph"><span class="mpl">{{p.mph}}</span></div></sc-if></div></div>
+</sc-for>
+</div></div>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{isHome}}" hint-placeholder-val="{{true}}">
+<main class="main" data-screen-label="Feed">
+<div class="mhd"><div class="mtt">Home</div><div class="tabs"><div class="{{tabAllC}}" onClick="{{setTabAll}}">All Posts<span class="ul"></span></div><div class="{{tabFolC}}" onClick="{{setTabFol}}">Following<span class="ul"></span></div></div></div>
+<div class="cmp"><div class="av" style="background:{{cur.avc}}">{{cur.av}}</div><div class="f1"><sc-if value="{{hasOrg}}" hint-placeholder-val="{{true}}"><div class="posrel"><button class="{{chipC}}" onClick="{{toggleMenu}}">Posting as: {{cur.name}} ▾</button><sc-if value="{{menuOpen}}" hint-placeholder-val="{{false}}"><div class="menu"><sc-for list="{{accts}}" as="a" hint-placeholder-count="3"><div class="mi" onClick="{{a.pick}}"><div class="av" style="width:34px;height:34px;font-size:12px;background:{{a.avc}}">{{a.av}}</div><div class="f1"><div class="fw7 fs14">{{a.name}}</div><div class="fs12" style="color:var(--tx2)">{{a.handle}}</div></div><span class="fs14" style="color:var(--ac)">{{a.mark}}</span></div></sc-for><div class="mhint">Org accounts are granted for this exercise. Posts publish under the selected account.</div></div></sc-if></div></sc-if><textarea class="cta" placeholder="What's happening in Fairhaven?" value="{{draft}}" onChange="{{setDraft}}"></textarea><div class="cbar"><svg class="att" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"></rect><circle cx="9" cy="10" r="1.6"></circle><path d="m4 18 5-5 4 4 3-3 4 4"></path></svg><span class="cring fx ac gap8"><svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="none" stroke="var(--line)" stroke-width="2.2"></circle><circle cx="11" cy="11" r="9" fill="none" stroke="var(--ac)" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="56.5" stroke-dashoffset="{{ringOff}}" transform="rotate(-90 11 11)"></circle></svg><sc-if value="{{cntShow}}" hint-placeholder-val="{{false}}"><span class="{{cntC}}">{{cnt}}</span></sc-if></span><button class="pbtn2" onClick="{{send}}">Post</button></div></div></div>
+<sc-if value="{{burstOn}}" hint-placeholder-val="{{false}}"><div aria-live="polite"><div class="npill" onClick="{{noop}}">▲ 218 new posts</div></div></sc-if>
+<sc-for list="{{feed}}" as="p" hint-placeholder-count="6">
+<div class="post" onClick="{{p.open}}"><div class="av" style="background:{{p.avc}}">{{p.av}}</div><div class="f1" style="min-width:0"><div class="fx ac" style="gap:4px"><span class="pnm">{{p.name}}</span><sc-if value="{{p.v}}" hint-placeholder-val="{{false}}"><svg class="chk" width="17" height="17" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M22.25 12l-2.05-2.35.3-3.1-3.05-.7L15.9 3.1 13 4.3 10.1 3.1 8.55 5.85l-3.05.7.3 3.1L3.75 12l2.05 2.35-.3 3.1 3.05.7 1.55 2.75L13 19.7l2.9 1.2 1.55-2.75 3.05-.7-.3-3.1z"></path><path fill="#fff" d="M11.1 15.4l-3.2-3.2 1.25-1.25 1.95 1.95 4.75-4.75 1.25 1.25z"></path></svg></sc-if><span class="ph">{{p.handle}} · {{p.t}}</span></div><div class="ptx">{{p.text}}</div><sc-if value="{{p.mph}}" hint-placeholder-val="{{false}}"><div class="mph"><span class="mpl">{{p.mph}}</span><span class="fs12">Attachment placeholder</span></div></sc-if><sc-if value="{{p.lc}}" hint-placeholder-val="{{false}}"><div class="lc"><div class="lci">{{p.lcimg}}</div><div class="lct"><div class="lcd">{{p.lcd}}</div>{{p.lc}}</div></div></sc-if><div class="acts"><span class="act"><svg class="aic" viewBox="0 0 24 24"><path d="M12 4.5c-4.85 0-8.75 3.2-8.75 7.2 0 2.3 1.3 4.35 3.35 5.65L6 20.9l3.95-1.75c.65.1 1.35.15 2.05.15 4.85 0 8.75-3.2 8.75-7.6s-3.9-7.2-8.75-7.2z"></path></svg>{{p.r}}</span><span class="act"><svg class="aic" viewBox="0 0 24 24"><path d="M7 7h8.5L13 4.5M17.5 7v7M17 17H8.5l2.5 2.5M6.5 17v-7"></path></svg>{{p.rp}}</span><span class="act"><svg class="aic" viewBox="0 0 24 24"><path d="M12 20.5C7.2 16.2 3.5 13.1 3.5 9.4c0-2.7 2.1-4.6 4.5-4.6 1.6 0 3.1.85 4 2.25.9-1.4 2.4-2.25 4-2.25 2.4 0 4.5 1.9 4.5 4.6 0 3.7-3.7 6.8-8.5 11.1z"></path></svg>{{p.l}}</span><span class="act"><svg class="aic" viewBox="0 0 24 24"><path d="M12 3.5v12M7.5 8 12 3.5 16.5 8M5 14.5V20h14v-5.5"></path></svg></span></div></div></div>
+</sc-for>
+</main>
+</sc-if>
+<sc-if value="{{isThread}}" hint-placeholder-val="{{false}}">
+<main class="main" data-screen-label="Thread">
+<div class="mhd"><div class="mtt"><button class="bk" onClick="{{goHome}}">←</button>Post</div></div>
+<sc-for list="{{anc}}" as="p" hint-placeholder-count="1"><div class="post"><div class="av" style="background:{{p.avc}}">{{p.av}}</div><div class="f1"><div class="fx ac" style="gap:4px"><span class="pnm">{{p.name}}</span><span class="ph">{{p.handle}} · {{p.t}}</span></div><div class="ptx">{{p.text}}</div><div class="fs13 mt8" style="color:var(--tx2)">Replying thread ↓</div></div></div></sc-for>
+<div class="fpost"><div class="fx ac gap10"><div class="av" style="background:#19647e">FW</div><div><div class="fx ac" style="gap:4px"><span class="pnm">Fairhaven Water Utility</span><svg class="chk" width="17" height="17" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M22.25 12l-2.05-2.35.3-3.1-3.05-.7L15.9 3.1 13 4.3 10.1 3.1 8.55 5.85l-3.05.7.3 3.1L3.75 12l2.05 2.35-.3 3.1 3.05.7 1.55 2.75L13 19.7l2.9 1.2 1.55-2.75 3.05-.7-.3-3.1z"></path><path fill="#fff" d="M11.1 15.4l-3.2-3.2 1.25-1.25 1.95 1.95 4.75-4.75 1.25 1.25z"></path></svg></div><div class="ph">@FairhavenWater</div></div></div><div class="ftx">Sampling update: crews are collecting samples across Zones 2–4 after taste and odor reports. No contamination confirmed yet — the county's precautionary boil advisory stays in effect while lab results are pending (expected 6 PM). #WaterIssues</div><div class="fs14" style="color:var(--tx2)">10:51 AM · Scenario Day 2</div><div class="fstats mt12"><span><span class="fsn">298</span> reposts</span><span><span class="fsn">57</span> quotes</span><span><span class="fsn">441</span> likes</span></div></div>
+<sc-for list="{{reps}}" as="p" hint-placeholder-count="4"><sc-if value="{{p.tomb}}" hint-placeholder-val="{{false}}"><div class="tomb">This post is unavailable.</div></sc-if><sc-if value="{{p.show}}" hint-placeholder-val="{{true}}"><div class="post"><div class="av" style="background:{{p.avc}}">{{p.av}}</div><div class="f1"><div class="fx ac" style="gap:4px"><span class="pnm">{{p.name}}</span><sc-if value="{{p.v}}" hint-placeholder-val="{{false}}"><svg class="chk" width="16" height="16" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M22.25 12l-2.05-2.35.3-3.1-3.05-.7L15.9 3.1 13 4.3 10.1 3.1 8.55 5.85l-3.05.7.3 3.1L3.75 12l2.05 2.35-.3 3.1 3.05.7 1.55 2.75L13 19.7l2.9 1.2 1.55-2.75 3.05-.7-.3-3.1z"></path><path fill="#fff" d="M11.1 15.4l-3.2-3.2 1.25-1.25 1.95 1.95 4.75-4.75 1.25 1.25z"></path></svg></sc-if><span class="ph">{{p.handle}} · {{p.t}}</span></div><div class="fs13" style="color:var(--tx2)">Replying to <a href="#">@FairhavenWater</a></div><div class="ptx">{{p.text}}</div></div></div></sc-if></sc-for>
+</main>
+</sc-if>
+<sc-if value="{{isExplore}}" hint-placeholder-val="{{false}}">
+<main class="main" data-screen-label="Explore">
+<div class="mhd"><div style="padding:10px 16px"><div class="sbox" onClick="{{goSearch}}"><svg class="sic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20.5 20.5-4.2-4.2"></path></svg>Search Pulse</div></div></div>
+<div class="mtt" style="padding-top:16px">Trends for you</div>
+<sc-for list="{{trends}}" as="t" hint-placeholder-count="5"><div class="trow" onClick="{{goSearch}}"><div class="tk">{{t.k}}</div><div class="tn">{{t.n}}</div><div class="tc">{{t.c}}</div></div></sc-for>
+</main>
+</sc-if>
+<sc-if value="{{isSearch}}" hint-placeholder-val="{{false}}">
+<main class="main" data-screen-label="Search results">
+<div class="mhd"><div style="padding:10px 16px;display:flex;gap:12px;align-items:center"><button class="bk" onClick="{{goExplore}}">←</button><div class="sbox f1"><svg class="sic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20.5 20.5-4.2-4.2"></path></svg><span style="color:var(--tx)">#WaterIssues</span></div></div><div class="tabs"><div class="{{topC}}" onClick="{{setTop}}">Top<span class="ul"></span></div><div class="{{recC}}" onClick="{{setRecent}}">Recent<span class="ul"></span></div></div></div>
+<div class="cht" style="padding-top:14px">People</div>
+<sc-for list="{{people}}" as="u" hint-placeholder-count="2"><div class="orow"><div class="av" style="background:{{u.avc}}">{{u.av}}</div><div class="f1" style="min-width:0"><div class="fx ac" style="gap:4px"><span class="pnm fs15">{{u.name}}</span><sc-if value="{{u.v}}" hint-placeholder-val="{{false}}"><svg class="chk" width="16" height="16" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M22.25 12l-2.05-2.35.3-3.1-3.05-.7L15.9 3.1 13 4.3 10.1 3.1 8.55 5.85l-3.05.7.3 3.1L3.75 12l2.05 2.35-.3 3.1 3.05.7 1.55 2.75L13 19.7l2.9 1.2 1.55-2.75 3.05-.7-.3-3.1z"></path><path fill="#fff" d="M11.1 15.4l-3.2-3.2 1.25-1.25 1.95 1.95 4.75-4.75 1.25 1.25z"></path></svg></sc-if></div><div class="fs13" style="color:var(--tx2)">{{u.handle}} · {{u.bio}}</div></div><button class="fbtn">Follow</button></div></sc-for>
+<div class="cht" style="border-top:1px solid var(--line);margin-top:6px">Posts</div>
+<sc-for list="{{sposts}}" as="p" hint-placeholder-count="4">
+<div class="post" onClick="{{p.open}}"><div class="av" style="background:{{p.avc}}">{{p.av}}</div><div class="f1" style="min-width:0"><div class="fx ac" style="gap:4px"><span class="pnm">{{p.name}}</span><sc-if value="{{p.v}}" hint-placeholder-val="{{false}}"><svg class="chk" width="17" height="17" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M22.25 12l-2.05-2.35.3-3.1-3.05-.7L15.9 3.1 13 4.3 10.1 3.1 8.55 5.85l-3.05.7.3 3.1L3.75 12l2.05 2.35-.3 3.1 3.05.7 1.55 2.75L13 19.7l2.9 1.2 1.55-2.75 3.05-.7-.3-3.1z"></path><path fill="#fff" d="M11.1 15.4l-3.2-3.2 1.25-1.25 1.95 1.95 4.75-4.75 1.25 1.25z"></path></svg></sc-if><span class="ph">{{p.handle}} · {{p.t}}</span></div><div class="ptx">{{p.text}}</div><div class="acts"><span class="act"><svg class="aic" viewBox="0 0 24 24"><path d="M12 4.5c-4.85 0-8.75 3.2-8.75 7.2 0 2.3 1.3 4.35 3.35 5.65L6 20.9l3.95-1.75c.65.1 1.35.15 2.05.15 4.85 0 8.75-3.2 8.75-7.6s-3.9-7.2-8.75-7.2z"></path></svg>{{p.r}}</span><span class="act"><svg class="aic" viewBox="0 0 24 24"><path d="M7 7h8.5L13 4.5M17.5 7v7M17 17H8.5l2.5 2.5M6.5 17v-7"></path></svg>{{p.rp}}</span><span class="act"><svg class="aic" viewBox="0 0 24 24"><path d="M12 20.5C7.2 16.2 3.5 13.1 3.5 9.4c0-2.7 2.1-4.6 4.5-4.6 1.6 0 3.1.85 4 2.25.9-1.4 2.4-2.25 4-2.25 2.4 0 4.5 1.9 4.5 4.6 0 3.7-3.7 6.8-8.5 11.1z"></path></svg>{{p.l}}</span></div></div></div>
+</sc-for>
+</main>
+</sc-if>
+<sc-if value="{{isNotifs}}" hint-placeholder-val="{{false}}">
+<main class="main" data-screen-label="Notifications">
+<div class="mhd"><div class="mtt">Notifications</div></div>
+<sc-if value="{{burstOn}}" hint-placeholder-val="{{false}}"><div class="fs13" style="color:var(--tx2);padding:10px 16px;border-bottom:1px solid var(--line)" aria-live="polite">High activity — similar notifications are grouped.</div></sc-if>
+<div class="pnote"><div class="plogo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12h4.2l2.1-5.2 4.4 10.4 2.1-5.2h6.2"></path></svg></div><div><div class="fw8 fs14">Pulse Safety Notice</div><div class="fs14 mt8" style="margin-top:3px">An emergency alert is active in your area: Boil Water Advisory — Fairhaven Zones 2–4. Follow <a href="#">@FulcoEM</a> for official updates.</div></div></div>
+<sc-for list="{{notifs}}" as="n" hint-placeholder-count="5"><div class="nrow"><div class="{{n.symC}}">{{n.sym}}</div><div class="f1"><div class="fs15"><span class="fw7">{{n.who}}</span> {{n.txt}}</div><sc-if value="{{n.q}}" hint-placeholder-val="{{false}}"><div class="fs14 mt8" style="color:var(--tx2);margin-top:4px">"{{n.q}}"</div></sc-if></div><div class="fs13" style="color:var(--tx2)">{{n.t}}</div></div></sc-for>
+</main>
+</sc-if>
+<sc-if value="{{isMsgs}}" hint-placeholder-val="{{false}}">
+<main class="main wide" data-screen-label="Messages">
+<div class="dms">
+<div class="dlist"><div class="mtt">Messages</div>
+<sc-for list="{{convs}}" as="c" hint-placeholder-count="3"><div class="{{c.cls}}"><div class="av" style="width:38px;height:38px;font-size:13px;background:{{c.avc}}">{{c.av}}</div><div class="f1" style="min-width:0"><div class="fx ac jb"><span class="fw7 fs14">{{c.name}}</span><span class="fs12" style="color:var(--tx2)">{{c.t}}</span></div><div class="fs13 nowrap" style="color:var(--tx2);overflow:hidden;text-overflow:ellipsis">{{c.last}}</div></div></div></sc-for>
+</div>
+<div class="dchat">
+<div class="mtt" style="border-bottom:1px solid var(--line)"><div class="av" style="width:32px;height:32px;font-size:12px;background:#b3322e">N7</div>Newsline 7 Assignment Desk</div>
+<div class="dmsgs"><sc-for list="{{msgs}}" as="m" hint-placeholder-count="4"><div class="{{m.cls}}">{{m.txt}}</div></sc-for></div>
+<div class="dmin"><input class="dmi" placeholder="Start a new message"><button class="pbtn2">Send</button></div>
+</div>
+</div>
+</main>
+</sc-if>
+<sc-if value="{{isProfile}}" hint-placeholder-val="{{false}}">
+<main class="main" data-screen-label="Profile">
+<div class="mhd"><div class="mtt"><button class="bk" onClick="{{goHome}}">←</button><span>Fulton County EM<span class="fs13" style="color:var(--tx2);font-weight:500;display:block">1,204 posts</span></span></div></div>
+<div class="pban"></div>
+<div style="padding:0 16px"><div class="fx jb"><div class="av pav" style="background:#2f6f4f">EM</div><button class="fbtn" style="margin-top:14px">Following</button></div></div>
+<div class="pbio"><div class="fx ac" style="gap:5px;margin-top:6px"><span class="fw8" style="font-size:20px">Fulton County EM</span><svg class="chk" width="19" height="19" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M22.25 12l-2.05-2.35.3-3.1-3.05-.7L15.9 3.1 13 4.3 10.1 3.1 8.55 5.85l-3.05.7.3 3.1L3.75 12l2.05 2.35-.3 3.1 3.05.7 1.55 2.75L13 19.7l2.9 1.2 1.55-2.75 3.05-.7-.3-3.1z"></path><path fill="#fff" d="M11.1 15.4l-3.2-3.2 1.25-1.25 1.95 1.95 4.75-4.75 1.25 1.25z"></path></svg></div><div class="fs14" style="color:var(--tx2)">@FulcoEM</div><div class="fs15 mt8">Official emergency management for Fulton County. Preparedness · Response · Recovery. Monitored during activations — call 911 for emergencies.</div><div class="pmeta"><span>📍 Fairhaven, Fulton County</span><span>🔗 <a href="#">fulco.gov/em</a></span><span>Joined Scenario Day 1</span></div><div class="pcnt"><span class="pcl"><span class="fw8">312</span> <span style="color:var(--tx2)">Following</span></span><span class="pcl" onClick="{{toggleFol}}"><span class="fw8">48.2K</span> <span style="color:var(--tx2)">Followers</span></span></div></div>
+<sc-if value="{{folOpen}}" hint-placeholder-val="{{false}}"><div class="folp"><div class="cht">Followers</div><sc-for list="{{fols}}" as="u" hint-placeholder-count="4"><div class="orow"><div class="av" style="width:34px;height:34px;font-size:12px;background:{{u.avc}}">{{u.av}}</div><div class="f1"><div class="fx ac" style="gap:4px"><span class="pnm fs14">{{u.name}}</span><sc-if value="{{u.v}}" hint-placeholder-val="{{false}}"><svg class="chk" width="15" height="15" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M22.25 12l-2.05-2.35.3-3.1-3.05-.7L15.9 3.1 13 4.3 10.1 3.1 8.55 5.85l-3.05.7.3 3.1L3.75 12l2.05 2.35-.3 3.1 3.05.7 1.55 2.75L13 19.7l2.9 1.2 1.55-2.75 3.05-.7-.3-3.1z"></path><path fill="#fff" d="M11.1 15.4l-3.2-3.2 1.25-1.25 1.95 1.95 4.75-4.75 1.25 1.25z"></path></svg></sc-if></div><div class="fs12" style="color:var(--tx2)">{{u.handle}}</div></div></div></sc-for><div class="magrow">…and ~48.2K others</div></div></sc-if>
+<div class="tabs" style="border-bottom:1px solid var(--line)"><div class="tab on">Posts<span class="ul"></span></div><div class="tab">Replies</div><div class="tab">Media</div></div>
+<sc-for list="{{pposts}}" as="p" hint-placeholder-count="2">
+<div class="post" onClick="{{p.open}}"><div class="av" style="background:{{p.avc}}">{{p.av}}</div><div class="f1" style="min-width:0"><div class="fx ac" style="gap:4px"><span class="pnm">{{p.name}}</span><svg class="chk" width="17" height="17" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M22.25 12l-2.05-2.35.3-3.1-3.05-.7L15.9 3.1 13 4.3 10.1 3.1 8.55 5.85l-3.05.7.3 3.1L3.75 12l2.05 2.35-.3 3.1 3.05.7 1.55 2.75L13 19.7l2.9 1.2 1.55-2.75 3.05-.7-.3-3.1z"></path><path fill="#fff" d="M11.1 15.4l-3.2-3.2 1.25-1.25 1.95 1.95 4.75-4.75 1.25 1.25z"></path></svg><span class="ph">{{p.handle}} · {{p.t}}</span></div><div class="ptx">{{p.text}}</div><sc-if value="{{p.mph}}" hint-placeholder-val="{{false}}"><div class="mph"><span class="mpl">{{p.mph}}</span><span class="fs12">Attachment placeholder</span></div></sc-if><div class="acts"><span class="act"><svg class="aic" viewBox="0 0 24 24"><path d="M12 4.5c-4.85 0-8.75 3.2-8.75 7.2 0 2.3 1.3 4.35 3.35 5.65L6 20.9l3.95-1.75c.65.1 1.35.15 2.05.15 4.85 0 8.75-3.2 8.75-7.6s-3.9-7.2-8.75-7.2z"></path></svg>{{p.r}}</span><span class="act"><svg class="aic" viewBox="0 0 24 24"><path d="M7 7h8.5L13 4.5M17.5 7v7M17 17H8.5l2.5 2.5M6.5 17v-7"></path></svg>{{p.rp}}</span><span class="act"><svg class="aic" viewBox="0 0 24 24"><path d="M12 20.5C7.2 16.2 3.5 13.1 3.5 9.4c0-2.7 2.1-4.6 4.5-4.6 1.6 0 3.1.85 4 2.25.9-1.4 2.4-2.25 4-2.25 2.4 0 4.5 1.9 4.5 4.6 0 3.7-3.7 6.8-8.5 11.1z"></path></svg>{{p.l}}</span></div></div></div>
+</sc-for>
+</main>
+</sc-if>
+<sc-if value="{{sideOn}}" hint-placeholder-val="{{true}}">
+<aside class="side" data-screen-label="Sidebar">
+<div class="sbox" onClick="{{goSearch}}" style="margin-top:8px"><svg class="sic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20.5 20.5-4.2-4.2"></path></svg>Search Pulse</div>
+<div class="card"><div class="cht">Trending in Fairhaven</div><sc-for list="{{trends}}" as="t" hint-placeholder-count="4"><div class="trow" onClick="{{goSearch}}"><div class="tk">{{t.k}}</div><div class="tn">{{t.n}}</div><div class="tc">{{t.c}}</div></div></sc-for></div>
+<div class="card"><div class="cht">Who to follow</div><sc-for list="{{people}}" as="u" hint-placeholder-count="2"><div class="orow"><div class="av" style="width:36px;height:36px;font-size:13px;background:{{u.avc}}">{{u.av}}</div><div class="f1" style="min-width:0"><div class="fx ac" style="gap:4px"><span class="pnm fs14">{{u.name}}</span><sc-if value="{{u.v}}" hint-placeholder-val="{{false}}"><svg class="chk" width="15" height="15" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M22.25 12l-2.05-2.35.3-3.1-3.05-.7L15.9 3.1 13 4.3 10.1 3.1 8.55 5.85l-3.05.7.3 3.1L3.75 12l2.05 2.35-.3 3.1 3.05.7 1.55 2.75L13 19.7l2.9 1.2 1.55-2.75 3.05-.7-.3-3.1z"></path><path fill="#fff" d="M11.1 15.4l-3.2-3.2 1.25-1.25 1.95 1.95 4.75-4.75 1.25 1.25z"></path></svg></sc-if></div><div class="fs12" style="color:var(--tx2)">{{u.handle}}</div></div><button class="fbtn">Follow</button></div></sc-for></div>
+</aside>
+</sc-if>
+</div>
+</div>
+<sc-if value="{{cmpOpen}}" hint-placeholder-val="{{false}}">
+<div class="ovl" onClick="{{closeCmp}}"><div class="{{mdlC}}" onClick="{{stop}}" data-screen-label="Composer modal">
+<div class="fx ac jb"><button class="bk" onClick="{{closeCmp}}">✕</button><span class="fs13" style="color:var(--tx2)">Drafts</span></div>
+<div class="fx gap12 mt12"><div class="av" style="background:{{cur.avc}}">{{cur.av}}</div><div class="f1"><sc-if value="{{hasOrg}}" hint-placeholder-val="{{true}}"><div class="posrel"><button class="{{chipC}}" onClick="{{toggleMenu}}">Posting as: {{cur.name}} ▾</button><sc-if value="{{menuOpen}}" hint-placeholder-val="{{false}}"><div class="menu"><sc-for list="{{accts}}" as="a" hint-placeholder-count="3"><div class="mi" onClick="{{a.pick}}"><div class="av" style="width:34px;height:34px;font-size:12px;background:{{a.avc}}">{{a.av}}</div><div class="f1"><div class="fw7 fs14">{{a.name}}</div><div class="fs12" style="color:var(--tx2)">{{a.handle}}</div></div><span class="fs14" style="color:var(--ac)">{{a.mark}}</span></div></sc-for><div class="mhint">Org accounts are granted for this exercise. Posts publish under the selected account.</div></div></sc-if></div></sc-if><textarea class="cta" placeholder="What's happening in Fairhaven?" value="{{draft}}" onChange="{{setDraft}}"></textarea><div class="cbar" style="border-top:1px solid var(--line);padding-top:10px"><svg class="att" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"></rect><circle cx="9" cy="10" r="1.6"></circle><path d="m4 18 5-5 4 4 3-3 4 4"></path></svg><span class="cring fx ac gap8"><svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="none" stroke="var(--line)" stroke-width="2.2"></circle><circle cx="11" cy="11" r="9" fill="none" stroke="var(--ac)" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="56.5" stroke-dashoffset="{{ringOff}}" transform="rotate(-90 11 11)"></circle></svg><sc-if value="{{cntShow}}" hint-placeholder-val="{{false}}"><span class="{{cntC}}">{{cnt}}</span></sc-if></span><button class="pbtn2" onClick="{{send}}">Post</button></div></div></div>
+</div></div>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;worldState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;normal&quot;,&quot;burst&quot;,&quot;alert&quot;],&quot;default&quot;:&quot;normal&quot;,&quot;tsType&quot;:&quot;'normal'|'burst'|'alert'&quot;,&quot;section&quot;:&quot;Exercise demo state&quot;},&quot;observer&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Exercise demo state&quot;},&quot;orgGrants&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Exercise demo state&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#1e3a5f&quot;,&quot;options&quot;:[&quot;#1e3a5f&quot;,&quot;#DB3A54&quot;,&quot;#0F9182&quot;,&quot;#7C4DD8&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Per-exercise brand&quot;}}">
+class Component extends DCLogic {
+  state = { screen: 'home', tab: 'all', stab: 'top', theme: 'lt', pio: false, cmp: false, acct: 0, draft: '', menu: false, fol: false, meMenu: false };
+  componentDidMount() { this.applyAc(); }
+  componentDidUpdate() { this.applyAc(); }
+  applyAc() { document.documentElement.style.setProperty('--pulse-ac', this.props.accent ?? '#1e3a5f'); }
+  renderVals() {
+    const S = this.state, P = this.props;
+    const ws = P.worldState ?? 'normal';
+    const obs = !!P.observer;
+    const go = s => () => this.setState({ screen: s, menu: false, fol: false, meMenu: false });
+    const hasOrg = P.orgGrants ?? true;
+    const openT = () => this.setState({ screen: 'thread' });
+    const mk = (av, avc, name, handle, v, t, text, x = {}) => ({ av, avc, name, handle, v, t, text, open: openT, r: '0', rp: '0', l: '0', ...x });
+
+    const PALL = [
+      mk('MV', '#c2543a', 'Marisol Vega', '@mvega_fh', false, '2m', "Is anyone else's tap water coming out with a weird metallic smell near Maple St? Filled a glass and it's… not right. #WaterIssues", { r: '41', rp: '112', l: '203' }),
+      mk('FW', '#8a8f98', 'Fairhaven Water Updates', '@FairhavenWaterUpd', false, '8m', "ALERT: chemical spill at the Fairhaven treatment plant. DO NOT shower or run your taps. The city is covering it up — share before this gets deleted. #WaterIssues", { r: '88', rp: '640', l: '512' }),
+      mk('FW', '#19647e', 'Fairhaven Water Utility', '@FairhavenWater', true, '11m', "Sampling update: crews are collecting samples across Zones 2–4 after taste and odor reports. No contamination confirmed yet — the county's precautionary boil advisory stays in effect while lab results are pending (expected 6 PM). #WaterIssues", { r: '57', rp: '298', l: '441' }),
+      mk('N7', '#b3322e', 'Newsline 7', '@Newsline7', true, '19m', 'BREAKING: Fairhaven officials investigating water complaints across the east side. A boil-water advisory is "under consideration," a city spokesperson says.', { lcimg: 'NEWSLINE 7 · LIVE', lcd: 'newsline7.com', lc: 'Water complaints multiply across east Fairhaven as city weighs advisory', r: '34', rp: '186', l: '255' }),
+      mk('TB', '#3a6ea5', 'Tom Brandt', '@tbrandt41', false, '26m', 'Filled three pots and the bathtub just in case. Better safe than sorry. #WaterIssues', { r: '5', rp: '9', l: '64' }),
+      mk('EM', '#2f6f4f', 'Fulton County EM', '@FulcoEM', true, '31m', 'BOIL WATER ADVISORY — Fairhaven Zones 2–4, effective immediately. Boil tap water for 1 full minute before drinking or cooking. Bottled water distribution starts 4 PM at Eastside Rec Center. Guidance: fulco.gov/water', { mph: 'Map — Advisory area · Zones 2–4', r: '112', rp: '1.5K', l: '2.3K' }),
+      mk('TS', '#c07a17', 'The Scoop', '@TheScoopHQ', true, '48m', "EXCLUSIVE: What Fairhaven city hall ISN'T telling you about your tap water 👀", { lcimg: 'THE SCOOP', lcd: 'thescoop.co', lc: 'Sources say the water thing goes deeper than anyone admits', r: '71', rp: '389', l: '902' }),
+      mk('KW', '#8a4f7d', 'Keisha Ward', '@kwardFH', false, '1h', 'School just sent the kids home with bottled water. Anyone have confirmed info for the north side, or is that just Zones 2–4? #WaterIssues', { r: '12', rp: '6', l: '58' }),
+      mk('CL', '#4a4f57', 'The Courier-Ledger', '@CourierLedger', true, '2h', "City council's deferred-maintenance fight over the Maple St mains, from our March reporting. Context for today:", { lcimg: 'THE COURIER-LEDGER', lcd: 'courierledger.com', lc: "Fairhaven put off water main repairs for a decade. Here's what it costs now.", r: '19', rp: '84', l: '167' })
+    ];
+    const PFOL = [PALL[2], PALL[5], PALL[3], PALL[8]];
+    const feed = S.tab === 'all' ? PALL : PFOL;
+
+    const anc = [PALL[0]];
+    const reps = [
+      mk('TB', '#3a6ea5', 'Tom Brandt', '@tbrandt41', false, '14m', "How long until sample results? We're on Maple.", { show: true }),
+      mk('FW', '#19647e', 'Fairhaven Water Utility', '@FairhavenWater', true, '9m', "Lab results are expected by 6 PM. We'll post them here in full.", { show: true }),
+      { tomb: true },
+      mk('FW', '#8a8f98', 'Fairhaven Water Updates', '@FairhavenWaterUpd', false, '6m', "Don't believe them. Our sources at the plant say it's benzene. Repost before this gets deleted.", { show: true }),
+      mk('KW', '#8a4f7d', 'Keisha Ward', '@kwardFH', false, '4m', 'Heads up — this account is not the real utility. No verification mark, joined this week. The real one is @FairhavenWater.', { show: true })
+    ];
+    const trends = [
+      { k: 'Trending', n: '#WaterIssues', c: '12.4K posts' },
+      { k: 'Public safety · Trending', n: '#BoilWater', c: '4,208 posts' },
+      { k: 'Fairhaven · East side', n: 'Maple Street', c: '1,912 posts' },
+      { k: 'Community', n: 'Eastside Rec Center', c: '886 posts' },
+      { k: 'News · Newsline 7', n: 'City issues boil-water advisory for Zones 2–4', c: 'Live coverage' }
+    ];
+    const people = [
+      { av: 'FW', avc: '#19647e', name: 'Fairhaven Water Utility', handle: '@FairhavenWater', v: true, bio: 'Official utility account' },
+      { av: 'FW', avc: '#8a8f98', name: 'Fairhaven Water Updates', handle: '@FairhavenWaterUpd', v: false, bio: 'Joined this week' }
+    ];
+    const sTop = [PALL[5], PALL[2], PALL[1], PALL[0], PALL[7]];
+    const sRec = [PALL[0], PALL[1], PALL[2], PALL[4], PALL[7]];
+    const sposts = S.stab === 'top' ? sTop : sRec;
+
+    const burst = ws === 'burst';
+    const nrm = [
+      { sym: '♥', symC: 'nsym nlike', who: 'Newsline 7', txt: 'liked your post', t: '4m' },
+      { sym: '@', symC: 'nsym nmen', who: 'Marisol Vega', txt: 'mentioned you', q: '@dreyes_fh is the advisory real? Nothing on the city site yet.', t: '9m' },
+      { sym: '⇄', symC: 'nsym nrt', who: 'Fairhaven Water Utility', txt: 'reposted your post', t: '22m' },
+      { sym: '+', symC: 'nsym nfol', who: 'Keisha Ward', txt: 'followed you', t: '1h' }
+    ];
+    const agg = [
+      { sym: '♥', symC: 'nsym nlike', who: 'Newsline 7', txt: 'and 41 others liked your post', t: '2m' },
+      { sym: '⇄', symC: 'nsym nrt', who: '18 accounts', txt: 'reposted your advisory post', t: '5m' },
+      { sym: '@', symC: 'nsym nmen', who: 'You', txt: 'were mentioned in 26 posts in the last 10 minutes', t: '10m' },
+      { sym: '+', symC: 'nsym nfol', who: '9 accounts', txt: 'followed you', t: '15m' }
+    ];
+
+    const convs = [
+      { av: 'N7', avc: '#b3322e', name: 'Newsline 7 Assignment Desk', t: '3m', last: 'Great, quoting that. Thanks.', cls: 'drow sel' },
+      { av: 'MV', avc: '#c2543a', name: 'Marisol Vega', t: '40m', last: 'Thank you!! Sharing with the block group.', cls: 'drow' },
+      { av: 'EM', avc: '#2f6f4f', name: 'Fulton County EM', t: '2h', last: 'Advisory template is in the shared drive.', cls: 'drow' }
+    ];
+    const msgs = [
+      { txt: 'Hi Dana — Newsline 7 assignment desk. Can you confirm the advisory zones for our 6 PM broadcast?', cls: 'mb' },
+      { txt: 'Also — is the "chemical spill" post going around accurate?', cls: 'mb' },
+      { txt: "Advisory covers Zones 2–4 only. The spill post is false — it's not from the real utility account (no verification mark). Official guidance: fulco.gov/water.", cls: 'mb me' },
+      { txt: 'Great, quoting that. Thanks.', cls: 'mb' }
+    ];
+
+    const pposts = [
+      PALL[5],
+      mk('EM', '#2f6f4f', 'Fulton County EM', '@FulcoEM', true, '5h', 'Reminder: sign up for FulcoAlerts to get advisories by text. Today is a good day to check that your household is registered. fulco.gov/alerts', { r: '8', rp: '41', l: '96' })
+    ];
+    const fols = [
+      { av: 'N7', avc: '#b3322e', name: 'Newsline 7', handle: '@Newsline7', v: true },
+      { av: 'CL', avc: '#4a4f57', name: 'The Courier-Ledger', handle: '@CourierLedger', v: true },
+      { av: 'MV', avc: '#c2543a', name: 'Marisol Vega', handle: '@mvega_fh', v: false },
+      { av: 'KW', avc: '#8a4f7d', name: 'Keisha Ward', handle: '@kwardFH', v: false },
+      { av: 'DR', avc: '#7c5cd6', name: 'Dana Reyes', handle: '@dreyes_fh', v: false }
+    ];
+
+    const acN = [
+      { av: 'DR', avc: '#7c5cd6', name: 'Dana Reyes', handle: '@dreyes_fh', org: false },
+      { av: 'EM', avc: '#2f6f4f', name: 'Fulton County EM', handle: '@FulcoEM', org: true },
+      { av: 'FW', avc: '#19647e', name: 'Fairhaven Water Utility', handle: '@FairhavenWater', org: true }
+    ];
+    const accts = acN.map((a, i) => ({ ...a, mark: i === S.acct ? '✓' : '', pick: () => this.setState({ acct: i, menu: false }) }));
+    const cur = accts[S.acct];
+
+    const cols = [
+      { t: 'All Posts', s: 'Home · firehose', list: PALL },
+      { t: '#WaterIssues', s: 'Saved hashtag', list: [PALL[0], PALL[1], PALL[2], PALL[4], PALL[7]] },
+      { t: '"boil water"', s: 'Saved search', list: [PALL[5], PALL[4], PALL[3], PALL[8]] },
+      { t: 'Mentions', s: '@FulcoEM', list: [
+        mk('MV', '#c2543a', 'Marisol Vega', '@mvega_fh', false, '1m', '@FulcoEM is the advisory real? Nothing on the city site yet.'),
+        mk('TB', '#3a6ea5', 'Tom Brandt', '@tbrandt41', false, '7m', '@FulcoEM where exactly is the zone boundary? Map link is broken for me.'),
+        mk('N7', '#b3322e', 'Newsline 7', '@Newsline7', true, '16m', '.@FulcoEM press availability on the water advisory today? DM open.'),
+        mk('KW', '#8a4f7d', 'Keisha Ward', '@kwardFH', false, '29m', '@FulcoEM north side schools too, or just Zones 2–4?')
+      ] }
+    ];
+
+    const nc = s => 'ni' + (S.screen === s ? ' on' : '');
+    const left = 280 - S.draft.length;
+    const pio = hasOrg && S.pio;
+    return {
+      appCls: 'app' + (S.theme === 'dk' ? ' dk' : '') + (obs ? ' obs' : ''),
+      alertOn: ws === 'alert', burstOn: burst,
+      pio, notPio: !pio,
+      hasOrg,
+      meMenu: S.meMenu, toggleMe: () => this.setState({ meMenu: !S.meMenu }),
+      bellCnt: burst ? '99+' : ws === 'alert' ? '5' : '3',
+      ringOff: (56.5 * left / 280).toFixed(1),
+      cntShow: left <= 20,
+      isHome: !pio && S.screen === 'home', isThread: !pio && S.screen === 'thread',
+      isExplore: !pio && S.screen === 'explore', isSearch: !pio && S.screen === 'search',
+      isNotifs: !pio && S.screen === 'notifs', isMsgs: !pio && S.screen === 'msgs',
+      isProfile: !pio && S.screen === 'profile',
+      sideOn: !pio && S.screen !== 'msgs',
+      navHomeC: nc('home') + (S.screen === 'thread' ? ' on' : ''), navExpC: nc('explore') + (S.screen === 'search' ? ' on' : ''), navNotC: nc('notifs'), navMsgC: nc('msgs'), navProC: nc('profile'),
+      goHome: go('home'), goExplore: go('explore'), goNotifs: go('notifs'), goMsgs: go('msgs'), goProfile: go('profile'), goSearch: go('search'),
+      tabAllC: 'tab' + (S.tab === 'all' ? ' on' : ''), tabFolC: 'tab' + (S.tab === 'fol' ? ' on' : ''),
+      setTabAll: () => this.setState({ tab: 'all' }), setTabFol: () => this.setState({ tab: 'fol' }),
+      topC: 'tab' + (S.stab === 'top' ? ' on' : ''), recC: 'tab' + (S.stab === 'rec' ? ' on' : ''),
+      setTop: () => this.setState({ stab: 'top' }), setRecent: () => this.setState({ stab: 'rec' }),
+      toggleTheme: () => this.setState({ theme: S.theme === 'dk' ? 'lt' : 'dk' }),
+      dkSwC: 'swt' + (S.theme === 'dk' ? ' on' : ''),
+      togglePio: () => this.setState({ pio: !S.pio }),
+      pioSwC: 'swt' + (S.pio ? ' on' : ''),
+      cmpOpen: S.cmp && !obs, openCmp: () => this.setState({ cmp: true }), closeCmp: () => this.setState({ cmp: false, menu: false }),
+      mdlC: 'mdl' + (S.theme === 'dk' ? ' dk app' : ' app'),
+      stop: e => e.stopPropagation(),
+      menuOpen: S.menu, toggleMenu: () => this.setState({ menu: !S.menu }),
+      accts, cur, chipC: 'orgchip' + (cur.org ? ' org' : ''),
+      draft: S.draft, setDraft: e => this.setState({ draft: e.target.value }),
+      cnt: String(left), cntC: 'cnt' + (left < 20 ? ' low' : ''),
+      send: () => this.setState({ draft: '', cmp: false, menu: false }),
+      noop: () => {},
+      feed, anc, reps, trends, people, sposts,
+      notifs: burst ? agg : nrm,
+      convs, msgs, pposts, fols,
+      folOpen: S.fol, toggleFol: () => this.setState({ fol: !S.fol }),
+      cols
+    };
+  }
+}
+</script>
+</body>
+</html>
