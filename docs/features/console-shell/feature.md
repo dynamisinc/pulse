@@ -1,0 +1,44 @@
+# Feature: Console shell (toolstrip, flyouts, action bar)
+
+**Epic:** E7 — Controller Command Surface  ·  **Phase:** 1  ·  **Feature ref:** D5 additions
+**World:** staff  ·  **Issue:** #2  ·  **Status:** feature.md stub — decompose before build
+
+> **Architectural foundation of the console (Wave 1).** The D5 design review introduced the shell
+> pattern that hosts every other E7 surface, so this feature lands first. Stories below are planned,
+> not yet authored.
+
+## Summary
+The controller console's frame: a right-edge **toolstrip** with **flyouts**, a persistent
+**NEEDS-YOU action bar**, a **static identity badge**, and the interaction-safety rule that chips
+locate-and-highlight but **never act**. This is the extension point that keeps the console from
+re-bloating as surfaces are added.
+
+## Requirements covered
+D5-016, D5-017, D5-019 (toolstrip + flyouts); D5-010, D5-012(d) (NEEDS-YOU bar);
+D5-012(g) → **amends COR-005** (static identity during conduct); D5-014/3.4 (Flag → AAR, partial);
+D5-016 + D5-014/3.1 (trainee monitor flyout, partial).
+
+## Design references
+`docs/design/D5-controller-console/README.md`, `DECISIONS.md`, and **`STORY-UPDATES.md`** section B
+(ADDs) and the COR-005 amendment in section A. Apply the amendments; cite the decision IDs.
+
+## Stories (planned)
+| # | Story | Requirement(s) | Status | Issue |
+|---|-------|----------------|--------|-------|
+| 01 | Toolstrip + flyouts (continuous-watch vs consult-on-demand) | D5-016/17/19 | Not Started | #9 |
+| 02 | NEEDS-YOU action bar — locate & highlight, never act | D5-010, D5-012(d) | Not Started | #10 |
+| 03 | Static identity badge during conduct (switching is pre-conduct) | COR-005 / D5-012(g) | Not Started | #11 |
+| 04 | Flag on any post → after-action record (minimal) | D5-014/3.4 | Not Started | #12 |
+| 05 | Trainee monitor flyout (adaptive-loop metric) | D5-016, D5-014/3.1 | Not Started | #13 |
+
+## Dependencies
+E1 exercise-context + roles (Director vs Controller gating); the E10 after-action record sink for
+Flag (story 04, minimal write now, full annotation set deferred to D6/evaluator). Command palette
+here hosts `persona-operation`'s picker.
+
+## Design notes
+**Interaction safety (D5):** NEEDS-YOU chips highlight a target (amber ring) but **never execute** —
+nothing fires without an explicit Fire press (no action-at-a-distance). Continuous-watch surfaces
+(engine review queue, live world) keep permanent rail/column space; consult-on-demand surfaces
+(Stories, Personas, Trainees, Rumors, participant admin) are toolstrip flyouts with status badges.
+Keyboard-first, fully operable (NFR-001).

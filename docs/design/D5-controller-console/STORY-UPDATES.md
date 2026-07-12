@@ -14,7 +14,7 @@ Legend: **AMEND** = edit existing requirement · **ADD** = new requirement/capab
 
 ## A. Requirement amendments (safety-critical first)
 
-- [ ] **ADP-040 — engine-draft timeout defaults to auto-HOLD** · `D5-014/1.1`, `D5-005 (superseded)`
+- [x] **ADP-040 — engine-draft timeout defaults to auto-HOLD** · `D5-014/1.1`, `D5-005 (superseded)`
   - **Before:** expired timed drafts auto-**send** (inaction = approval).
   - **After:** expired drafts **auto-HOLD** for the controller ("timer expired — held for
     you"; surfaces in NEEDS YOU). *Silence is never approval.* Auto-send exists **only** as
@@ -23,7 +23,7 @@ Legend: **AMEND** = edit existing requirement · **ADD** = new requirement/capab
   - **Action:** rewrite the acceptance criteria for the timeout path; add the swamped-mode
     setting as a separate, lead-controller-gated story.
 
-- [ ] **CTL-024 — rename "Real-World Broadcast" → "Break Fiction"; constrain scope** · `D5-014/1.2`, `D5-007`
+- [x] **CTL-024 — rename "Real-World Broadcast" → "Break Fiction"; constrain scope** · `D5-014/1.2`, `D5-007`
   - **Before:** "Real-World Broadcast" control (scope ambiguous).
   - **After:** **"Break Fiction"** — replaces participant screens **inside the exercise only**
     (nothing leaves the platform). Director-gated (locked for Controller role), type-to-confirm
@@ -31,7 +31,7 @@ Legend: **AMEND** = edit existing requirement · **ADD** = new requirement/capab
     is logged to the exercise record**. Confirm dialog states destination + that use is logged.
   - **Action:** rename across stories; add scope, gating, type-to-confirm, and audit-log ACs.
 
-- [ ] **CTL-023 — pause becomes tiered (3 tiers)** · `D5-014/1.3`
+- [x] **CTL-023 — pause becomes tiered (3 tiers)** · `D5-014/1.3`
   - **Before:** single pause action.
   - **After:** three tiers — **Pause injects** (world keeps living) / **Pause engine** (no new
     AI content) / **Freeze world** (guarded; participants notice; safety-stop only). State pill
@@ -40,7 +40,7 @@ Legend: **AMEND** = edit existing requirement · **ADD** = new requirement/capab
   - **Action:** split the pause AC into three tiers; specify which tier stops the scenario clock;
     mark Freeze as guarded.
 
-- [ ] **CTL-034 — visible metric is "queue pressure," not performance** · `D5-014/2.7`, `D5-003`
+- [x] **CTL-034 — visible metric is "queue pressure," not performance** · `D5-014/2.7`, `D5-003`
   - **Before:** "decisions/min" acceptance criterion (unspecified surfacing).
   - **After:** a header/action-bar **queue-pressure meter** = decisions **demanded** per minute
     over a rolling 60s window, budget **≤6**, amber past 6. Tooltip states it is **demand, not a
@@ -48,19 +48,19 @@ Legend: **AMEND** = edit existing requirement · **ADD** = new requirement/capab
   - **Action:** reword CTL-034 to define the metric as demand + design budget; forbid its use as
     a performance/evaluation signal.
 
-- [ ] **CTL-022 — storyline intensity = actual + controller-set target** · `D5-014/2.2`
+- [x] **CTL-022 — storyline intensity = actual + controller-set target** · `D5-014/2.2`
   - **Before:** intensity shown as a single value.
   - **After:** one track showing **actual fill + a target tick**; click the track to set target
     ("78 →60"); the **engine drives actual toward the target**.
   - **Action:** update CTL-022 to include the target control and the engine-follows-target loop.
 
-- [ ] **CTL-015 — time-jump guarded while RUNNING** · `D5-014/P4`
+- [x] **CTL-015 — time-jump guarded while RUNNING** · `D5-014/P4`
   - **Before:** time-jump available during conduct.
   - **After:** **requires pause first**; the time-jump dialog does batch disposition of spanned
     injects (fire all / fire + hold rumor wave / skip all).
   - **Action:** add the pause precondition and the batch-disposition step to CTL-015.
 
-- [ ] **COR-005 — exercise identity is static during live conduct** · `D5-012(g)`
+- [x] **COR-005 — exercise identity is static during live conduct** · `D5-012(g)`
   - **Before:** exercise switcher present in the header.
   - **After:** header shows a **static identity badge** during conduct; switching is a
     **pre-conduct** concern (identity intent of COR-005 kept).
@@ -70,7 +70,7 @@ Legend: **AMEND** = edit existing requirement · **ADD** = new requirement/capab
 
 ## B. New requirements / capabilities to add
 
-- [ ] **ADD — Toolstrip + flyouts pattern (the console's extension point)** · `D5-016`, `D5-017`, `D5-019`
+- [x] **ADD — Toolstrip + flyouts pattern (the console's extension point)** · `D5-016`, `D5-017`, `D5-019`
   - 56px right-edge toolstrip; **continuous-watch** surfaces (engine review queue, live world)
     keep permanent rail/column space; **consult-on-demand** surfaces (Stories, Personas,
     Trainees, Rumors) are tools with status badges (red pulsing count when escalating).
@@ -83,16 +83,16 @@ Legend: **AMEND** = edit existing requirement · **ADD** = new requirement/capab
     reach bar + trend, mutation line, countered-by credit, action **"Draft counter as…"** → persona picker.
   - **Action:** create rumor-object stories (data model + tracker flyout); currently mock-only.
 
-- [ ] **ADD — "Flag" on any post writes to the after-action record** · `D5-014/3.4` *(partial)*
+- [x] **ADD — "Flag" on any post writes to the after-action record** · `D5-014/3.4` *(partial)*
   - Per-post hover **Flag** action → AAR. Full evaluator flags/annotations deferred to D6/evaluator.
   - **Action:** add a minimal AAR-write story for Flag; link full annotation set to D6.
 
-- [ ] **ADD — Trainee monitor (flyout), adaptive-loop metric** · `D5-016`, `D5-014/3.1` *(partial)*
+- [x] **ADD — Trainee monitor (flyout), adaptive-loop metric** · `D5-016`, `D5-014/3.1` *(partial)*
   - Card per trainee: role, live status (ACTIVE / IDLE / DRAFTING), last action, response-time-vs-target
     and expected-action progress. Storyline cards keep a one-line trainee signal.
   - **Action:** add trainee-monitor story; note full PIO monitoring is its own future surface.
 
-- [ ] **ADD — NEEDS YOU action bar: locate-and-highlight, never act** · `D5-010`, `D5-012(d)`
+- [x] **ADD — NEEDS YOU action bar: locate-and-highlight, never act** · `D5-010`, `D5-012(d)`
   - Persistent bar names current to-dos; chips highlight the target (amber ring) but **never
     execute** — nothing fires without an explicit Fire press.
   - **Action:** capture as an interaction-safety requirement (no action-at-a-distance).
@@ -101,16 +101,17 @@ Legend: **AMEND** = edit existing requirement · **ADD** = new requirement/capab
 
 ## C. Reconcile / supersede
 
-- [ ] **RECONCILE — D5-005 "auto-fire on expiry" is superseded by D5-014/1.1 (auto-HOLD).**
+- [x] **RECONCILE — D5-005 "auto-fire on expiry" is superseded by D5-014/1.1 (auto-HOLD).**
   Ensure no story still says drafts auto-send on timeout except behind swamped mode.
-- [ ] **RECONCILE — counts across surfaces** · `D5-014/2.1` — "N of M need review" / "N timers under
+- [x] **RECONCILE — counts across surfaces** · `D5-014/2.1` — "N of M need review" / "N timers under
   60s" must agree with the queue's pending count. Add a consistency note to the relevant ACs.
 
 ---
 
 ## D. Deferred → backlog (log as future stories, not this pass)
 
-- [ ] **CTL-033 — evaluator read-only console variant:** steering controls **absent, not disabled**.
+- [x] **CTL-033 — evaluator read-only console variant:** steering controls **absent, not disabled**.
+  *(Logged as a backlog story in `docs/features/live-monitoring/feature.md`.)*
 - [ ] **COR-017 — participant admin quick-panel:** StartEx login triage (candidate toolstrip tool).
 - [ ] **NFR-008 — "EXERCISE" watermark slot:** participant-content concern, not the console.
 - [ ] **Global sentiment / mood** (per-storyline sentiment already exists) · `D5-014/3.2`.
