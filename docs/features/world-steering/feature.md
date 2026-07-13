@@ -20,7 +20,8 @@ via SOC-072 notifications.
   guarded/latched group, **every use logged** to the exercise record.
 - **CTL-023 → tiered pause** (D5-014/1.3): Pause injects / Pause engine / Freeze world; state pill
   INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN; **scenario clock stops only on Freeze**; Break
-  Fiction implies world-freeze.
+  Fiction implies world-freeze. *(The state pill + pause button as header chrome are interim —
+  superseded by D7 shell, R-006/COMPONENTS.md; the tier behavior is unaffected.)*
 - **CTL-022 → intensity = actual + controller-set target** (D5-014/2.2): one track, actual fill +
   target tick; click to set target; the **engine drives actual toward the target**.
 

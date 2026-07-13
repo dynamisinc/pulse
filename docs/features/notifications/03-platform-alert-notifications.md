@@ -17,7 +17,9 @@ mockup previews the PRT-010 in-app advisory bar (an E3/Phase-3 surface).
 - [ ] Alert delivery is exercise-scoped (COR-001), logged (XC-004), and nothing marks it as
       controller-originated to participants (XC-002).
 - [ ] The D1 advisory-bar (PRT-010) preview is tracked under E3 — this story delivers the SOC-072
-      notification path only.
+      notification path only. (The advisory bar's **container pattern** is inventoried shell chrome —
+      R-006/COMPONENTS.md — so when E3 builds PRT-010 it inherits the D7 shell's container, not the
+      D1 mockup's improvised one.)
 
 ## Out of Scope
 The portal alert bar itself (E3 PRT-010, Phase 3); the E7 flag-as-alert control (world-steering CTL-021).

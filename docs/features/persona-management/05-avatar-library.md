@@ -1,12 +1,18 @@
 # Story: Bundled avatar library + upload
 
 **Feature:** Persona management & cast libraries  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-024  ·  **Design decisions:** none  ·  **Issue:** #57
+**Requirements:** COR-024  ·  **Design decisions:** R-004 (interim treatment)  ·  **Issue:** #57
 
 ## Context
 An avatar library: bundled, rights-cleared avatar/profile image sets organized by persona type, plus
 upload (COR-024). Beat integration for generated avatars lands in E9 (Phase 4) — this story is the
 bundled library + upload path.
+
+**Interim treatment until this lands (R-004, session 3; reaffirms the D1-R6 deferral):** surfaces
+render **duotone head-and-shoulders silhouettes** for human accounts and **monograms** for org/
+institutional accounts — raw initials are retired. The library must not break what the interim
+treatment protects: org accounts keep a monogram/logo-analog option so the intentional
+near-identical impersonation pair (SOC-052) stays possible.
 
 ## Acceptance Criteria
 - [ ] A bundled, rights-cleared avatar/profile-image library is available, organized by persona type,

@@ -16,6 +16,8 @@ Start with the foundations, then the brief for the surface you're building.
 | [D5-controller-console.md](D5-controller-console.md) | Controller console — design brief (epic E7) | Brief |
 | [D5-controller-console/](D5-controller-console/) | Controller console (SimCell operator surface) | Handoff v1 — ready to implement |
 | [D6-evaluator-dashboard.md](D6-evaluator-dashboard.md) | Evaluator dashboard — epic E10 | Brief |
+| [R-CROSS-SURFACE-RECONCILIATION.md](R-CROSS-SURFACE-RECONCILIATION.md) | D1 ↔ D5 reconciliation decisions R-001…R-006 (session 3, verbatim excerpt) | Handoff — applied to stories |
+| [COMPONENTS.md](COMPONENTS.md) | Cross-surface shell-chrome inventory — everything improvised is frozen pending **D7 (unified shell)** | Evidence for D7 |
 
 > The epic docs the briefs cite (`../00-MASTER-PRD.md`, `../01`…`../11`) live one level up in
 > [`docs/`](../). Start any design session with the foundations, then the surface's brief.

@@ -11,6 +11,7 @@
 | 02 Compliance chrome | App-shell banner outside the skin subtree + chrome/watermark guard. | `src/frontend/src/core/ComplianceChrome.tsx` | `<ComplianceChrome>` |
 | 03 Lifecycle | Lifecycle state machine + subsystem hooks. | (backend) lifecycle; `core/lifecycle.ts` | `useLifecycleState()` |
 | 04 Practice flag | Sandbox flag read by export filtering. | (backend) flag | practice flag |
+| 05 Participant exercise identity | **Requirements decision, no code** — resolves COMPONENTS.md divergence #5; outcome lands in story 02's chrome content and the D7 shell. Not in the wave plan. | — | the decision (D7 input) |
 
 ## Reuse map
 - Exercise entity (exercise-isolation) — settings hang off it

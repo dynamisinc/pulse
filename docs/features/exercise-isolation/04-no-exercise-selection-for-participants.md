@@ -25,6 +25,12 @@ theming (exercise-configuration COR-030).
 Participant world. Routing resolves the exercise from the session (per-exercise hostname, story 08) —
 not from a user choice. See implementation.md (story 04).
 
+Related requirements gap (session 3, COMPONENTS.md divergence #5): participants currently see no
+exercise-session identity at all, while the console shows it persistently (COR-005). Whether the
+participant frame should carry session identity — without violating this story's "no exercise
+concept" ACs — is tracked as `exercise-configuration/05-participant-exercise-identity.md`; the ACs
+above are unchanged until that decision lands.
+
 ## Dependencies
 Story 08 (hostname scoping); auth/session (identity-auth-roles COR-012). Shapes every participant
 entry point.
