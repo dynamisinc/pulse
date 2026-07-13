@@ -19,8 +19,9 @@ D5-012(g) → **amends COR-005** (static identity during conduct); D5-014/3.4 (F
 D5-016 + D5-014/3.1 (trainee monitor flyout, partial).
 
 ## Design references
-`docs/design/D5-controller-console/README.md`, `DECISIONS.md`, and **`STORY-UPDATES.md`** section B
-(ADDs) and the COR-005 amendment in section A. Apply the amendments; cite the decision IDs.
+`docs/design/D5-controller-console/README.md`, the canonical `docs/design/DECISIONS.md` (D5 + R
+sections), and **`STORY-UPDATES.md`** section B (ADDs) and the COR-005 amendment in section A.
+Apply the amendments; cite the decision IDs.
 
 **Session 3 — shell extraction (R-006, `docs/design/COMPONENTS.md`):** the console's improvised
 container chrome — exercise banner, header/brand lockup, exercise identity block, clock cluster,

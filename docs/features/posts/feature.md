@@ -18,7 +18,7 @@ Amendments applied: **SOC-002** verified mark fixed seal-blue `#2D9CDB` (D1-003)
 thread-only, feeds silently omit (D1-009); **SOC-006** "Posting as" chip grant-gated, one identity at a
 time (D1-007/R2); composer depleting ring counter (D1-R5).
 
-**Session-3 cross-surface reconciliation applied** (`docs/design/R-CROSS-SURFACE-RECONCILIATION.md`):
+**Session-3 cross-surface reconciliation applied** (`docs/design/DECISIONS.md` §"R — Cross-surface reconciliation"):
 the verified mark is the canonical **scallop-with-check** seal on both worlds (R-001); engagement row
 order is **reply · repost · like** everywhere (R-002); avatars use the interim duotone-silhouette
 (humans) / monogram (orgs) treatment until COR-024 (R-004); SOC-003 origin renders staff-side as the
