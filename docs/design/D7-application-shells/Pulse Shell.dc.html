@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Libre+Franklin:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#151a21;font-family:Figtree,system-ui,sans-serif}
+a{color:#1e3a5f}a:hover{text-decoration:underline}
+.wrap{display:flex;gap:52px;padding:46px 56px 60px;align-items:flex-start;width:max-content}
+.hdr{color:#8fa0b2;padding:0 0 14px 2px}
+.hdr .t1{font:800 15px Figtree;color:#dbe4ee;letter-spacing:.02em}
+.hdr .t2{font:500 11.5px Figtree;margin-top:3px}
+.flabel{font:700 10.5px Figtree;letter-spacing:.18em;color:#6f8093;margin:0 0 10px 2px}
+.frame{position:relative;background:#fff;overflow:hidden;box-shadow:0 26px 70px rgba(0,0,0,.55)}
+.dframe{width:1180px;height:760px;border-radius:10px}
+.pframe{width:390px;height:800px;border-radius:38px;border:9px solid #262e38}
+.xb{position:absolute;left:0;right:0;height:22px;background:#2e6b2e;color:#eaf5e6;font:700 10px/22px Figtree,sans-serif;text-align:center;letter-spacing:.14em;z-index:80;white-space:nowrap;overflow:hidden}
+.xbt{top:0}.xbb{bottom:0}
+.zone{position:absolute;top:22px;bottom:22px;left:0;right:0;display:flex;flex-direction:column;background:#fff}
+.nochrome .xb{display:none}
+.nochrome .zone{top:0;bottom:0}
+.kiosk .strip{display:none}.kiosk .tabbar{display:none}
+.ro .roh{display:none}
+.strip{display:flex;align-items:center;gap:2px;padding:0 14px;height:38px;background:#fbfcfd;border-bottom:1px solid #e3e7ea;flex:none}
+.sl{font:600 12.5px Figtree;color:#5a6a76;padding:5px 10px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.sl:hover{background:rgba(14,21,24,.05);color:#101b23}
+.sl.on{color:#101b23;font-weight:800;box-shadow:inset 0 -2px 0 #101b23;border-radius:6px 6px 0 0}
+.sdate{margin-left:auto;font:500 11.5px Figtree;color:#8a97a1;white-space:nowrap}
+.ab{flex:none;display:flex;align-items:center;gap:12px;padding:9px 16px;font-size:13.5px;border-bottom:1px solid;position:relative;z-index:5}
+.ab-info{background:#edf3f9;border-color:#c3d5e6;color:#243c52}
+.ab-adv{background:#fff3dd;border-color:#e3b25f;color:#6b4300}
+.ab-emg{background:#b3261e;border-color:#8f150c;color:#fff}
+.chip{font:800 10.5px Figtree;letter-spacing:.1em;padding:3px 8px;border-radius:5px;display:flex;align-items:center;gap:5px;flex:none}
+.ab-info .chip{background:#3d6a96;color:#fff}
+.ab-adv .chip{background:#b97a00;color:#fff}
+.ab-emg .chip{background:#fff;color:#8f150c}
+.amsg{flex:1;min-width:0;line-height:1.4}
+.atime{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;opacity:.78;flex:none}
+.alink{font-weight:700;cursor:pointer;flex:none;white-space:nowrap}
+.ab.cmp{padding:5px 16px;font-size:12px;gap:9px}
+.cmp .amsg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmp .chip{font-size:9.5px;padding:2px 7px}
+.amore{flex:none;font:700 11px Figtree;padding:3px 9px;border-radius:999px;border:1px solid currentColor;cursor:pointer;opacity:.85;white-space:nowrap}
+.ab-tk{flex:none;display:flex;align-items:stretch;background:#14181c;color:#eef2f5;border-bottom:1px solid #000;position:relative;z-index:5}
+.tk-tab{display:flex;align-items:center;gap:6px;padding:0 12px;font:800 10.5px Figtree;letter-spacing:.1em;flex:none}
+.tk-info{background:#3d6a96;color:#fff}.tk-adv{background:#b97a00;color:#fff}.tk-emg{background:#c0271a;color:#fff}
+.tk-msg{display:flex;align-items:center;padding:8px 12px;font:500 12.5px ui-monospace,Menlo,monospace;flex:1;min-width:0;line-height:1.4}
+.tk-time{display:flex;align-items:center;padding:0 12px;font:600 11px ui-monospace,Menlo,monospace;color:#9fb0bd;flex:none}
+.content{flex:1;overflow:auto;background:#fff;min-height:0;position:relative}
+.tabbar{flex:none;display:flex;border-top:1px solid #e3e7ea;background:#fff;height:56px}
+.tb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font:600 9.5px Figtree;color:#7a8791;cursor:pointer}
+.tb.on{color:#101b23;font-weight:800}
+.tbi{font-size:17px;line-height:1}
+.sp{display:flex;height:100%;font-family:Figtree,sans-serif;color:#0e1518}
+.sp-rail{width:206px;flex:none;padding:14px;display:flex;flex-direction:column;gap:2px}
+.sp-logo{display:flex;align-items:center;gap:8px;font:800 20px Figtree;padding:8px 10px 14px}
+.sp-ni{padding:9px 12px;border-radius:999px;font-size:15.5px;cursor:pointer;width:fit-content}
+.sp-ni:hover{background:rgba(14,21,24,.045)}
+.sp-ni.on{font-weight:800}
+.sp-btn{background:#DB3A54;color:#fff;border-radius:999px;font:800 14px Figtree;padding:10px 0;width:150px;text-align:center;margin:10px 0 0 6px;cursor:pointer}
+.sp-feed{width:480px;border-left:1px solid #e5e8ea;border-right:1px solid #e5e8ea;min-height:100%}
+.sp-hd{font:800 16px Figtree;padding:12px 16px;border-bottom:1px solid #e5e8ea}
+.scomp{display:flex;gap:10px;padding:12px 16px;border-bottom:1px solid #e5e8ea;align-items:center}
+.scin{flex:1;background:#f3f5f6;border-radius:999px;padding:10px 14px;color:#61707a;font-size:14px}
+.spost{display:flex;gap:10px;padding:12px 16px;border-bottom:1px solid #e5e8ea}
+.sav{width:38px;height:38px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font:700 13px Figtree;color:#fff}
+.hum{color:transparent;position:relative;overflow:hidden}
+.hum::after{content:"";position:absolute;inset:0;background:rgba(255,255,255,.85);-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='15' r='7'/%3E%3Cellipse cx='20' cy='34' rx='12' ry='9'/%3E%3C/svg%3E") center/cover no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='15' r='7'/%3E%3Cellipse cx='20' cy='34' rx='12' ry='9'/%3E%3C/svg%3E") center/cover no-repeat}
+.spn{font-weight:700;font-size:14px;display:flex;align-items:center;gap:4px}
+.sph{color:#61707a;font-size:12.5px;font-weight:400}
+.spt{font-size:14px;line-height:1.45;margin-top:2px}
+.sact{display:flex;gap:38px;color:#61707a;font-size:12px;margin-top:9px}
+.seal{width:15px;height:15px;flex:none}
+.ft{font-family:'Libre Franklin',sans-serif;color:#1c2833}
+.fthead{background:#123a63;color:#fff;padding:14px 22px}
+.ftm{font:800 23px 'Libre Franklin';letter-spacing:.04em}
+.ftm b{color:#e8b437}
+.ftnav{display:flex;gap:16px;font:600 10.5px 'Libre Franklin';letter-spacing:.12em;color:#b9cbdd;margin-top:8px}
+.ftbody{padding:18px 22px}
+.ftlead{display:flex;gap:16px}
+.ftimg{width:300px;height:168px;background:#dfe5ea;position:relative;border-radius:4px;flex:none;display:flex;align-items:center;justify-content:center;color:#98a5b0;font:600 10.5px 'Libre Franklin';letter-spacing:.1em}
+.wm{position:absolute;right:8px;bottom:8px;background:rgba(46,107,46,.92);color:#fff;font:800 9px 'Libre Franklin';letter-spacing:.12em;padding:2px 7px;border-radius:3px}
+.ftk{color:#c8102e;font:800 10.5px 'Libre Franklin';letter-spacing:.12em}
+.fth1{font:800 21px/1.25 'Libre Franklin';margin:6px 0 8px}
+.ftp{font-size:13.5px;line-height:1.55;color:#46545f}
+.ftsrc{display:inline-block;background:#eef1f4;border-radius:3px;font:700 9.5px 'Libre Franklin';letter-spacing:.08em;color:#5a6a76;padding:2px 6px;margin-top:8px}
+.ftrow{display:flex;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid #e6eaee;align-items:baseline}
+.fth2{font:700 15px 'Libre Franklin';flex:1}
+.nl{font-family:'Libre Franklin',sans-serif}
+.nlh{background:#111;color:#fff;padding:12px 22px;display:flex;align-items:center;gap:12px}
+.nl7{background:#c8102e;color:#fff;font:800 16px 'Libre Franklin';padding:4px 10px;border-radius:3px}
+.nlw{font:800 14px 'Libre Franklin';letter-spacing:.06em}
+.nlive{margin-left:auto;background:#c8102e;font:800 10px 'Libre Franklin';letter-spacing:.1em;padding:6px 10px;border-radius:3px;cursor:pointer}
+.nlrow{padding:14px 22px;border-bottom:1px solid #eceff2}
+.nlk{font:800 9.5px 'Libre Franklin';letter-spacing:.12em;color:#c8102e}
+.nlt{font:700 16px 'Libre Franklin';margin-top:3px;color:#16202a}
+.nls{font:400 12px 'Libre Franklin';color:#61707a;margin-top:3px}
+.wr{font-family:Georgia,serif;color:#22303c}
+.wrh{padding:16px 22px;border-bottom:2px solid #22303c}
+.wrt1{font:700 20px Georgia,serif}
+.wrt2{font:600 10px Figtree,sans-serif;letter-spacing:.12em;color:#7d8592;margin-top:4px}
+.wrrow{padding:13px 22px;border-bottom:1px solid #e8e6e0}
+.wrd{font:600 9.5px Figtree,sans-serif;letter-spacing:.12em;color:#8a8577}
+.wrtt{font:700 15px Georgia,serif;margin-top:4px}
+.wx{font-family:system-ui,sans-serif;color:#1b2733}
+.wxh{background:#1a4480;color:#fff;padding:12px 22px}
+.wxt1{font:800 15px system-ui;letter-spacing:.06em}
+.wxt2{font:400 11.5px system-ui;color:#b7c8de;margin-top:2px}
+.wxhaz{display:flex;gap:9px;align-items:center;background:#ffedd5;border-bottom:1px solid #f0b26b;color:#9a3412;padding:9px 22px;font:600 13px system-ui;cursor:pointer}
+.wxgrid{display:flex;padding:16px 22px;flex-wrap:wrap}
+.wxd{flex:1;min-width:70px;text-align:center;border-right:1px solid #e5e7eb;padding:8px 4px}
+.wxd:hover{background:#f5f8fb}
+.wxdn{font:700 11px system-ui;color:#5a6a76;letter-spacing:.08em}
+.wxglyph{font-size:21px;margin:7px 0 5px}
+.wxtmp{font:700 15px system-ui}
+.wxlo{font:400 12px system-ui;color:#8a97a1}
+.ovl{position:absolute;left:0;right:0;top:22px;bottom:22px;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:13px;text-align:center;padding:34px}
+.nochrome .ovl{top:0;bottom:0}
+.ovl-fic{background:#f4f5f6;color:#3c464e;font-family:system-ui,sans-serif}
+.ovl-ctl{background:#1b232c;color:#aebfd2;font-family:ui-monospace,Menlo,monospace}
+.ovg{font-size:38px;color:#a9b2ba}
+.ov1{font:600 25px system-ui;color:#242c33}
+.ov2{font:400 14px/1.6 system-ui;max-width:430px;color:#5d6870}
+.ov3{font:400 11px system-ui;color:#98a2ab;margin-top:12px}
+.ovk{font:800 13px ui-monospace,Menlo,monospace;letter-spacing:.34em;color:#e6edf5;border:1px solid #3a4a5c;padding:9px 18px 9px 22px}
+.ov1w{font:500 15px/1.6 ui-monospace,Menlo,monospace;max-width:430px;color:#c3d2e2}
+.ovm{font:600 11px ui-monospace,Menlo,monospace;letter-spacing:.12em;color:#75879b;margin-top:10px}
+.bfx{position:absolute;inset:0;z-index:200;background:#0d0d0d;color:#ffb300;font-family:ui-monospace,Menlo,monospace;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:15px;text-align:center;padding:44px}
+.hz{position:absolute;left:0;right:0;height:16px;background:repeating-linear-gradient(45deg,#ffb300 0 18px,#0d0d0d 18px 36px)}
+.hzt{top:0}.hzb{bottom:0}
+.bx1{font:800 12px ui-monospace,Menlo,monospace;letter-spacing:.3em}
+.bx2{font:700 30px ui-monospace,Menlo,monospace;color:#fff;max-width:640px;line-height:1.25}
+.bx3{font:500 13px/1.7 ui-monospace,Menlo,monospace;color:#ffd97a;max-width:540px}
+.bxclock{font:700 14px ui-monospace,Menlo,monospace;color:#fff;border:1px solid #ffb300;padding:7px 15px;letter-spacing:.08em;margin-top:6px}
+.bx4{font:500 10.5px ui-monospace,Menlo,monospace;color:#8f7a3c;letter-spacing:.08em}
+.pframe .bx2{font-size:19px}
+.pframe .bx3{font-size:11.5px}
+.pframe .sp-rail{display:none}
+.pframe .sp-feed{width:auto;border:0}
+.pframe .ftlead{flex-direction:column}
+.pframe .ftimg{width:100%;height:150px}
+.pframe .ftbody{padding:14px 16px}
+.pframe .fthead{padding:12px 16px}
+.pframe .nlh{padding:10px 14px}
+.pframe .nlrow{padding:12px 16px}
+.pframe .wrh{padding:14px 16px}
+.pframe .wrrow{padding:12px 16px}
+.pframe .wxh{padding:10px 16px}
+.pframe .wxhaz{padding:9px 16px;font-size:12px}
+.pframe .ov1{font-size:20px}
+</style>
+</helmet>
+<div class="wrap">
+<div>
+<div class="hdr"><div class="t1">Pulse — Participant Application Shell (D7)</div><div class="t2">Compliance chrome · alert bar host · channel strip · content region · overlay layer. Channels are clickable; states via Tweaks.</div></div>
+<div class="flabel">DESKTOP · 1180 × 760</div>
+<div class="frame dframe {{frameCls}}">
+<div class="xb xbt">UNCLASSIFIED // EXERCISE · EXERCISE · EXERCISE — ALL CONTENT SIMULATED</div>
+<div class="zone">
+<sc-if value="{{abBand}}" hint-placeholder-val="{{false}}"><div class="ab {{aCls}}"><span class="chip"><span>{{aIcon}}</span><span>{{aChip}}</span></span><span class="amsg">{{aMsg}}</span><span class="atime">{{aTime}}</span><sc-if value="{{morePill}}" hint-placeholder-val="{{false}}"><span class="amore" onClick="{{toggleStack}}">+2 more ▾</span></sc-if><span class="alink">Details →</span></div></sc-if>
+<sc-if value="{{abCmp}}" hint-placeholder-val="{{false}}"><div class="ab cmp {{aCls}}"><span class="chip"><span>{{aIcon}}</span><span>{{aChip}}</span></span><span class="amsg">{{aMsg}}</span><span class="atime">{{aTime}}</span><sc-if value="{{morePill}}" hint-placeholder-val="{{false}}"><span class="amore" onClick="{{toggleStack}}">+2 ▾</span></sc-if><span class="alink">Details →</span></div></sc-if>
+<sc-if value="{{abTk}}" hint-placeholder-val="{{false}}"><div class="ab-tk"><span class="tk-tab {{aTk}}"><span>{{aIcon}}</span><span>{{aChip}}</span></span><span class="tk-msg">{{aMsg}}</span><sc-if value="{{morePill}}" hint-placeholder-val="{{false}}"><span class="tk-time amore" onClick="{{toggleStack}}">+2 ▾</span></sc-if><span class="tk-time">{{aTime}}</span></div></sc-if>
+<sc-if value="{{stackOpen}}" hint-placeholder-val="{{false}}"><div class="ab cmp ab-info"><span class="chip"><span>ⓘ</span><span>INFO</span></span><span class="amsg">Cooling center open at Grace Community Center, 9 AM–8 PM.</span><span class="atime">1:15 PM</span></div><div class="ab cmp ab-info"><span class="chip"><span>ⓘ</span><span>INFO</span></span><span class="amsg">Mill Rd bridge closed for repairs through Friday — use the Route 9 detour.</span><span class="atime">8:05 AM</span></div></sc-if>
+<div class="strip"><sc-for list="{{nav}}" as="n" hint-placeholder-count="5"><span class="sl {{n.cls}}" onClick="{{n.go}}">{{n.label}}</span></sc-for><span class="sdate">Tue, Mar 14 · 4:12 PM</span></div>
+<div class="content">
+<sc-if value="{{isPortal}}" hint-placeholder-val="{{true}}"><div class="ft"><div class="fthead"><div class="ftm">FAIRHAVEN <b>TODAY</b></div><div class="ftnav"><span>LOCAL</span><span>WEATHER</span><span>TRAFFIC</span><span>ALERTS</span></div></div><div class="ftbody"><div class="ftlead"><div class="ftimg">PHOTO — DISTRIBUTION SITE<span class="wm">EXERCISE</span></div><div><div class="ftk">● ADVISORY · LIVE UPDATES</div><div class="fth1">City extends boil-water advisory for Zones 2–4 as lab results remain pending</div><div class="ftp">County EM says the precautionary advisory stays in effect while the Millbrook plant samples are analyzed. Results expected by 6 PM.</div><span class="ftsrc">NEWSLINE 7</span></div></div><div class="ftrow"><div class="fth2">Water distribution site opens at Fairview High School</div><span class="ftsrc">COURIER-LEDGER</span></div><div class="ftrow"><div class="fth2">What we know about the Millbrook treatment plant issue</div><span class="ftsrc">THE NATIONAL WIRE</span></div></div></div></sc-if>
+<sc-if value="{{isPulse}}" hint-placeholder-val="{{false}}"><div class="sp"><div class="sp-rail"><div class="sp-logo"><svg width="30" height="16" viewBox="0 0 40 20"><path d="M0 10h10l4-8 6 16 4-8h16" stroke="#DB3A54" stroke-width="2.5" fill="none"></path></svg>Pulse</div><div class="sp-ni on">Home</div><div class="sp-ni">Explore</div><div class="sp-ni">Notifications</div><div class="sp-ni">Messages</div><div class="sp-ni">Profile</div><div class="sp-btn roh">Post</div></div><div class="sp-feed"><div class="sp-hd">Home</div><div class="scomp roh"><div class="sav" style="background:#33a06f">DR</div><div class="scin">What’s happening?</div></div><div class="spost"><div class="sav" style="background:#1e3a5f">EM</div><div><div class="spn">Fulton County EM<svg class="seal" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M12 1l2.6 2 3.2-.5 1.2 3 3 1.2-.5 3.2 2 2.6-2 2.6.5 3.2-3 1.2-1.2 3-3.2-.5-2.6 2-2.6-2-3.2.5-1.2-3-3-1.2.5-3.2-2-2.6 2-2.6-.5-3.2 3-1.2 1.2-3 3.2.5z"></path><path fill="#fff" d="M10.5 15.5l-3-3 1.4-1.4 1.6 1.6 4.6-4.6 1.4 1.4z"></path></svg><span class="sph">@FulcoEM · 2h</span></div><div class="spt">Boil Water Advisory remains in effect for Zones 2–4. Boil tap water for 1 minute before drinking or cooking. Lab results expected by 6 PM.</div><div class="sact"><span>↩ 48</span><span>↺ 312</span><span>♡ 1.2K</span></div></div></div><div class="spost"><div class="sav hum" style="background:#7a5aa0">MV</div><div><div class="spn">Marisol Vega<span class="sph">@mvega_fh · 34m</span></div><div class="spt">Line at the Fairview HS water pickup is around the block, but they’re moving people through fast.</div><div class="sact"><span>↩ 6</span><span>↺ 21</span><span>♡ 148</span></div></div></div></div></div></sc-if>
+<sc-if value="{{isNews}}" hint-placeholder-val="{{false}}"><div class="nl"><div class="nlh"><span class="nl7">7</span><span class="nlw">NEWSLINE 7</span><span class="nlive">● WATCH LIVE</span></div><div class="nlrow"><div class="nlk">LIVE · 5 PM</div><div class="nlt">Newsline 7 at 5: County EM briefs on the boil-water advisory</div><div class="nls">Anchor desk coverage with live reports from the Fairview HS distribution site.</div></div><div class="nlrow"><div class="nlk">LOCAL</div><div class="nlt">Residents ask how long Zones 2–4 will be under the advisory</div><div class="nls">Officials say lab results are expected by 6 PM.</div></div></div></sc-if>
+<sc-if value="{{isWire}}" hint-placeholder-val="{{false}}"><div class="wr"><div class="wrh"><div class="wrt1">The Wire Room</div><div class="wrt2">CITY OF FAIRHAVEN · OFFICE OF COMMUNICATIONS</div></div><div class="wrrow"><div class="wrd">MEDIA ADVISORY · MAR 14 · 3:50 PM</div><div class="wrtt">Joint press briefing on the water advisory — 5:30 PM, City Hall Media Room</div></div><div class="wrrow"><div class="wrd">PRESS RELEASE · MAR 14 · 2:38 PM</div><div class="wrtt">Precautionary boil water advisory issued for Zones 2–4</div></div></div></sc-if>
+<sc-if value="{{isWx}}" hint-placeholder-val="{{false}}"><div class="wx"><div class="wxh"><div class="wxt1">THE WEATHER DESK</div><div class="wxt2">Fairhaven, Fulton County — updated 4:05 PM</div></div><div class="wxhaz"><span>⚠</span><span>Public Information Statement: Boil Water Advisory — Fulton County Zones 2–4 · Details →</span></div><div class="wxgrid"><div class="wxd"><div class="wxdn">TUE</div><div class="wxglyph">☀</div><div class="wxtmp">64°</div><div class="wxlo">48°</div></div><div class="wxd"><div class="wxdn">WED</div><div class="wxglyph">⛅</div><div class="wxtmp">61°</div><div class="wxlo">47°</div></div><div class="wxd"><div class="wxdn">THU</div><div class="wxglyph">☂</div><div class="wxtmp">55°</div><div class="wxlo">44°</div></div><div class="wxd"><div class="wxdn">FRI</div><div class="wxglyph">☂</div><div class="wxtmp">52°</div><div class="wxlo">41°</div></div><div class="wxd"><div class="wxdn">SAT</div><div class="wxglyph">⛅</div><div class="wxtmp">58°</div><div class="wxlo">43°</div></div></div></div></sc-if>
+</div>
+</div>
+<sc-if value="{{ovPF}}" hint-placeholder-val="{{false}}"><div class="ovl ovl-fic"><div class="ovg">⚙</div><div class="ov1">We’ll be right back</div><div class="ov2">Scheduled maintenance is under way across Fairhaven network services. Thanks for your patience.</div><div class="ov3">Fairhaven Today · Pulse · Newsline 7 · The Wire Room · The Weather Desk</div></div></sc-if>
+<sc-if value="{{ovPC}}" hint-placeholder-val="{{false}}"><div class="ovl ovl-ctl"><div class="ovk">EXERCISE PAUSED</div><div class="ov1w">The exercise is holding. Stand by for Exercise Control.</div><div class="ovm">SCENARIO CLOCK STOPPED · 4:12 PM</div></div></sc-if>
+<sc-if value="{{ovEF}}" hint-placeholder-val="{{false}}"><div class="ovl ovl-fic"><div class="ovg">◦</div><div class="ov1">This service is no longer available</div><div class="ov2">Fairhaven network services are offline. Thanks for visiting.</div></div></sc-if>
+<sc-if value="{{ovEC}}" hint-placeholder-val="{{false}}"><div class="ovl ovl-ctl"><div class="ovk">ENDEX</div><div class="ov1w">Exercise concluded at 4:30 PM scenario time. Thank you for participating.</div><div class="ovm">HOT WASH · BRIEFING ROOM B · 15:45 LOCAL</div></div></sc-if>
+<sc-if value="{{ovB}}" hint-placeholder-val="{{false}}"><div class="bfx"><div class="hz hzt"></div><div class="bx1">REAL-WORLD MESSAGE · EXERCISE CONTROL</div><div class="bx2">Stop exercise play now.</div><div class="bx3">Severe weather has been reported near the exercise venue. Follow instructions from facility staff and your facilitator. Do not act on any content shown in this environment.</div><div class="bxclock">10:47 AM — REAL TIME</div><div class="bx4">THIS SCREEN REMAINS UNTIL CLEARED BY EXERCISE CONTROL</div><div class="hz hzb"></div></div></sc-if>
+<div class="xb xbb">PULSE TRAINING ENVIRONMENT — SIMULATED INFORMATION SPACE — NOT REAL NEWS</div>
+</div>
+</div>
+<div>
+<div style="height:33px"></div>
+<div class="flabel">MOBILE · 390</div>
+<div class="frame pframe {{frameCls}}">
+<div class="xb xbt">UNCLASSIFIED // EXERCISE · EXERCISE</div>
+<div class="zone">
+<sc-if value="{{abBand}}" hint-placeholder-val="{{false}}"><div class="ab {{aCls}}"><span class="chip"><span>{{aIcon}}</span><span>{{aChip}}</span></span><span class="amsg">{{aMsg}}</span></div></sc-if>
+<sc-if value="{{abCmp}}" hint-placeholder-val="{{false}}"><div class="ab cmp {{aCls}}"><span class="chip"><span>{{aIcon}}</span><span>{{aChip}}</span></span><span class="amsg">{{aMsg}}</span><span class="alink">→</span></div></sc-if>
+<sc-if value="{{abTk}}" hint-placeholder-val="{{false}}"><div class="ab-tk"><span class="tk-tab {{aTk}}"><span>{{aIcon}}</span><span>{{aChip}}</span></span><span class="tk-msg">{{aMsg}}</span></div></sc-if>
+<div class="content">
+<sc-if value="{{isPortal}}" hint-placeholder-val="{{true}}"><div class="ft"><div class="fthead"><div class="ftm">FAIRHAVEN <b>TODAY</b></div></div><div class="ftbody"><div class="ftlead"><div class="ftimg">PHOTO<span class="wm">EXERCISE</span></div><div><div class="ftk">● ADVISORY · LIVE UPDATES</div><div class="fth1">City extends boil-water advisory for Zones 2–4</div><span class="ftsrc">NEWSLINE 7</span></div></div><div class="ftrow"><div class="fth2">Water distribution site opens at Fairview High School</div></div><div class="ftrow"><div class="fth2">What we know about the Millbrook plant issue</div></div></div></div></sc-if>
+<sc-if value="{{isPulse}}" hint-placeholder-val="{{false}}"><div class="sp"><div class="sp-feed"><div class="sp-hd">Home</div><div class="scomp roh"><div class="sav" style="background:#33a06f">DR</div><div class="scin">What’s happening?</div></div><div class="spost"><div class="sav" style="background:#1e3a5f">EM</div><div><div class="spn">Fulton County EM<svg class="seal" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M12 1l2.6 2 3.2-.5 1.2 3 3 1.2-.5 3.2 2 2.6-2 2.6.5 3.2-3 1.2-1.2 3-3.2-.5-2.6 2-2.6-2-3.2.5-1.2-3-3-1.2.5-3.2-2-2.6 2-2.6-.5-3.2 3-1.2 1.2-3 3.2.5z"></path><path fill="#fff" d="M10.5 15.5l-3-3 1.4-1.4 1.6 1.6 4.6-4.6 1.4 1.4z"></path></svg></div><div class="sph">@FulcoEM · 2h</div><div class="spt">Boil Water Advisory remains in effect for Zones 2–4. Boil tap water for 1 minute before drinking or cooking.</div><div class="sact"><span>↩ 48</span><span>↺ 312</span><span>♡ 1.2K</span></div></div></div><div class="spost"><div class="sav hum" style="background:#7a5aa0">MV</div><div><div class="spn">Marisol Vega</div><div class="sph">@mvega_fh · 34m</div><div class="spt">Line at the Fairview HS water pickup is around the block, but moving fast.</div><div class="sact"><span>↩ 6</span><span>↺ 21</span><span>♡ 148</span></div></div></div></div></div></sc-if>
+<sc-if value="{{isNews}}" hint-placeholder-val="{{false}}"><div class="nl"><div class="nlh"><span class="nl7">7</span><span class="nlw">NEWSLINE 7</span><span class="nlive">● LIVE</span></div><div class="nlrow"><div class="nlk">LIVE · 5 PM</div><div class="nlt">County EM briefs on the boil-water advisory</div></div><div class="nlrow"><div class="nlk">LOCAL</div><div class="nlt">How long will Zones 2–4 be under the advisory?</div></div></div></sc-if>
+<sc-if value="{{isWire}}" hint-placeholder-val="{{false}}"><div class="wr"><div class="wrh"><div class="wrt1">The Wire Room</div><div class="wrt2">CITY OF FAIRHAVEN</div></div><div class="wrrow"><div class="wrd">MEDIA ADVISORY · 3:50 PM</div><div class="wrtt">Joint press briefing — 5:30 PM, City Hall</div></div><div class="wrrow"><div class="wrd">PRESS RELEASE · 2:38 PM</div><div class="wrtt">Boil water advisory issued for Zones 2–4</div></div></div></sc-if>
+<sc-if value="{{isWx}}" hint-placeholder-val="{{false}}"><div class="wx"><div class="wxh"><div class="wxt1">THE WEATHER DESK</div><div class="wxt2">Fairhaven, Fulton County</div></div><div class="wxhaz"><span>⚠</span><span>Boil Water Advisory — Zones 2–4 · Details →</span></div><div class="wxgrid"><div class="wxd"><div class="wxdn">TUE</div><div class="wxglyph">☀</div><div class="wxtmp">64°</div><div class="wxlo">48°</div></div><div class="wxd"><div class="wxdn">WED</div><div class="wxglyph">⛅</div><div class="wxtmp">61°</div><div class="wxlo">47°</div></div><div class="wxd"><div class="wxdn">THU</div><div class="wxglyph">☂</div><div class="wxtmp">55°</div><div class="wxlo">44°</div></div></div></div></sc-if>
+</div>
+<div class="tabbar"><sc-for list="{{nav}}" as="n" hint-placeholder-count="5"><div class="tb {{n.cls}}" onClick="{{n.go}}"><span class="tbi">{{n.icon}}</span><span>{{n.tlabel}}</span></div></sc-for></div>
+</div>
+<sc-if value="{{ovPF}}" hint-placeholder-val="{{false}}"><div class="ovl ovl-fic"><div class="ovg">⚙</div><div class="ov1">We’ll be right back</div><div class="ov2">Scheduled maintenance is under way. Thanks for your patience.</div></div></sc-if>
+<sc-if value="{{ovPC}}" hint-placeholder-val="{{false}}"><div class="ovl ovl-ctl"><div class="ovk">EXERCISE PAUSED</div><div class="ov1w">The exercise is holding. Stand by for Exercise Control.</div><div class="ovm">SCENARIO CLOCK STOPPED · 4:12 PM</div></div></sc-if>
+<sc-if value="{{ovEF}}" hint-placeholder-val="{{false}}"><div class="ovl ovl-fic"><div class="ovg">◦</div><div class="ov1">This service is no longer available</div><div class="ov2">Fairhaven network services are offline. Thanks for visiting.</div></div></sc-if>
+<sc-if value="{{ovEC}}" hint-placeholder-val="{{false}}"><div class="ovl ovl-ctl"><div class="ovk">ENDEX</div><div class="ov1w">Exercise concluded. Thank you for participating.</div><div class="ovm">HOT WASH · BRIEFING ROOM B · 15:45 LOCAL</div></div></sc-if>
+<sc-if value="{{ovB}}" hint-placeholder-val="{{false}}"><div class="bfx"><div class="hz hzt"></div><div class="bx1">REAL-WORLD MESSAGE</div><div class="bx2">Stop exercise play now.</div><div class="bx3">Severe weather reported near the venue. Follow instructions from facility staff and your facilitator.</div><div class="bxclock">10:47 AM — REAL TIME</div><div class="bx4">REMAINS UNTIL CLEARED BY EXERCISE CONTROL</div><div class="hz hzb"></div></div></sc-if>
+<div class="xb xbb">PULSE TRAINING ENVIRONMENT — SIMULATED</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1780,&quot;height&quot;:950},&quot;chrome&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Shell&quot;},&quot;kiosk&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Shell&quot;},&quot;readOnly&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Shell&quot;},&quot;alert&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;none&quot;,&quot;info&quot;,&quot;advisory&quot;,&quot;emergency&quot;],&quot;default&quot;:&quot;advisory&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Alert bar&quot;},&quot;alertStyle&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;band&quot;,&quot;compact&quot;,&quot;ticker&quot;],&quot;default&quot;:&quot;ticker&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Alert bar&quot;},&quot;alertCollapsed&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Alert bar&quot;},&quot;multiAlert&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Alert bar&quot;},&quot;overlay&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;none&quot;,&quot;broadcast&quot;,&quot;pause-in-fiction&quot;,&quot;pause-control&quot;,&quot;endex-in-fiction&quot;,&quot;endex-control&quot;],&quot;default&quot;:&quot;none&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Overlay layer&quot;}}">
+class Component extends DCLogic {
+  state = { ch: 'portal', stackOpen: false, tick: 0 };
+  componentDidMount() { this._iv = setInterval(() => this.setState(t => ({ tick: t.tick + 1 })), 3500); }
+  componentWillUnmount() { clearInterval(this._iv); }
+  renderVals() {
+    const p = this.props, s = this.state;
+    const chrome = p.chrome ?? true, kiosk = p.kiosk ?? false, ro = p.readOnly ?? false;
+    const sev = p.alert ?? 'advisory';
+    let style = p.alertStyle ?? 'ticker';
+    if ((p.alertCollapsed ?? false) && sev !== 'emergency') style = 'compact';
+    if (style === 'ticker' && sev === 'emergency') style = 'band';
+    const on = sev !== 'none';
+    const A = {
+      info: { chip: 'INFO', icon: 'ⓘ', msg: 'Mill Rd bridge closed for repairs through Friday — use the Route 9 detour.', time: '8:05 AM', cls: 'ab-info', tk: 'tk-info' },
+      advisory: { chip: 'ADVISORY', icon: '⚠', msg: 'Boil Water Advisory — Zones 2–4. Boil tap water for 1 minute before drinking or cooking.', time: '2:40 PM', cls: 'ab-adv', tk: 'tk-adv' },
+      emergency: { chip: 'EMERGENCY', icon: '⚠', msg: 'Do not drink tap water in Zones 2–4. Water distribution now open at Fairview High School.', time: '4:02 PM', cls: 'ab-emg', tk: 'tk-emg' }
+    }[sev] || {};
+    const ov = p.overlay ?? 'none';
+    const multi = (p.multiAlert ?? false) && on;
+    const rot = multi && style === 'ticker';
+    let cur = A;
+    if (rot) {
+      const stack = [A,
+        { chip: 'INFO', icon: 'ⓘ', msg: 'Cooling center open at Grace Community Center, 9 AM–8 PM.', time: '1:15 PM', cls: 'ab-info', tk: 'tk-info' },
+        { chip: 'INFO', icon: 'ⓘ', msg: 'Mill Rd bridge closed for repairs through Friday — use the Route 9 detour.', time: '8:05 AM', cls: 'ab-info', tk: 'tk-info' }];
+      cur = stack[s.tick % stack.length];
+    }
+    const chans = [
+      ['portal', 'Fairhaven Today', '⌂', 'Home'],
+      ['news', 'Newsline 7', '▤', 'News'],
+      ['pulse', 'Pulse', '◉', 'Pulse'],
+      ['wire', 'The Wire Room', '✉', 'Wire'],
+      ['wx', 'Weather Desk', '☂', 'Weather']
+    ];
+    const nav = chans.map(([id, label, icon, tlabel]) => ({
+      label, icon, tlabel,
+      cls: s.ch === id ? 'on' : '',
+      go: () => this.setState({ ch: id })
+    }));
+    return {
+      frameCls: `${(!chrome || kiosk) ? 'nochrome' : ''} ${kiosk ? 'kiosk' : ''} ${ro ? 'ro' : ''}`,
+      nav,
+      abBand: on && style === 'band', abCmp: on && style === 'compact', abTk: on && style === 'ticker',
+      aCls: cur.cls || '', aTk: cur.tk || '', aChip: cur.chip || '', aIcon: cur.icon || '', aMsg: cur.msg || '', aTime: cur.time || '',
+      morePill: multi && !rot && !s.stackOpen,
+      stackOpen: multi && !rot && s.stackOpen,
+      toggleStack: () => this.setState(x => ({ stackOpen: !x.stackOpen })),
+      isPortal: s.ch === 'portal', isNews: s.ch === 'news', isPulse: s.ch === 'pulse', isWire: s.ch === 'wire', isWx: s.ch === 'wx',
+      ovB: ov === 'broadcast', ovPF: ov === 'pause-in-fiction', ovPC: ov === 'pause-control', ovEF: ov === 'endex-in-fiction', ovEC: ov === 'endex-control'
+    };
+  }
+}
+</script>
+</body>
+</html>

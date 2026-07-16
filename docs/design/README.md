@@ -16,6 +16,7 @@ Start with the foundations, then the brief for the surface you're building.
 | [D5-controller-console.md](D5-controller-console.md) | Controller console — design brief (epic E7) | Brief |
 | [D5-controller-console/](D5-controller-console/) | Controller console (SimCell operator surface) | Handoff v2 — session-3 reconciliation applied |
 | [D6-evaluator-dashboard.md](D6-evaluator-dashboard.md) | Evaluator dashboard — epic E10 | Brief |
+| [D7-application-shells/](D7-application-shells/) | Application shells — participant + staff frame (epics E1/E7) | Handoff v1 — SHELL-CONTRACT + retrofit |
 | [DECISIONS.md](DECISIONS.md) | **Canonical decision log, all sessions** — incl. "R — Cross-surface reconciliation" (R-001…R-006, applied to stories) and the D7 shells section (session 5) | Canonical |
 | [COMPONENTS.md](COMPONENTS.md) | Cross-surface shell-chrome inventory — everything improvised is frozen interim chrome, replaced by the **D7 shell**; do not build against it | Evidence consumed by D7 |
 
@@ -23,7 +24,7 @@ Start with the foundations, then the brief for the surface you're building.
 > [`docs/`](../). Start any design session with the foundations, then the surface's brief.
 
 Session order (from D0 §6): D5 Controller console · D1 Social app · D2 Portal ·
-D3 News outlets · D4 Press + Weather · D6 Evaluator dashboard.
+D3 News outlets · D4 Press + Weather · D6 Evaluator dashboard · **D7 Application shells (session 5)**.
 
 ## About the design-session handoffs
 
@@ -70,3 +71,24 @@ Folder contents: `Controller Console.dc.html` (prototype), `README.md` (handoff 
 `STORY-UPDATES.md` (requirement-change checklist), `cobra.jsx` (provider-wrap pattern reference),
 `support.js` (design-canvas runtime). The decision log (D5-001…D5-020 + R) lives in the canonical
 root [DECISIONS.md](DECISIONS.md) — in-folder references to a sibling `DECISIONS.md` point there.
+
+## D7 — Application shells (handoff v1)
+
+The two container shells every surface mounts into: the **participant shell** (compliance chrome,
+alert bar, channel nav, scenario-time source, overlay layer, variants) and the **staff shell frame**
+(Cadence header, one toolstrip dock, participant-admin flyout, preview-as-participant). It unifies the
+chrome D1 + D5 each improvised (COMPONENTS.md inventory, R-006). Decisions **D7-001…D7-011** are in the
+canonical [DECISIONS.md](DECISIONS.md); the normative interface is
+**[SHELL-CONTRACT.md](D7-application-shells/SHELL-CONTRACT.md)** (shell-owns vs channel-owns, alert-bar
+contract, overlay z-order, hard gates); container swaps for the finished D1/D5 mockups are in
+**[RETROFIT-NOTES.md](D7-application-shells/RETROFIT-NOTES.md)**.
+
+Backlog impact is an actionable checklist in
+**[STORY-UPDATES.md](D7-application-shells/STORY-UPDATES.md)**: adds two features (`participant-shell`,
+epic E1; `staff-shell`, epic E7), **unfreezes `console-shell`** (its frame chrome moves to
+`staff-shell`, D7-007/010/011), and moves the break-fiction / pause / EndEx **overlay rendering** to
+`participant-shell` (world-steering keeps only the triggers, D7-003/004).
+
+Folder contents: `Pulse Shell.dc.html` + `Pulse Staff Shell.dc.html` (prototypes), `README.md`
+(handoff spec), `SHELL-CONTRACT.md` (normative), `RETROFIT-NOTES.md`, `STORY-UPDATES.md`,
+`support.js` (design-canvas runtime).

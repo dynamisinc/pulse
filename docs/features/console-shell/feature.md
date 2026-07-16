@@ -19,23 +19,27 @@ D5-012(g) → **amends COR-005** (static identity during conduct); D5-014/3.4 (F
 D5-016 + D5-014/3.1 (trainee monitor flyout, partial).
 
 ## Design references
-`docs/design/D5-controller-console/README.md`, the canonical `docs/design/DECISIONS.md` (D5 + R
-sections), and **`STORY-UPDATES.md`** section B (ADDs) and the COR-005 amendment in section A.
-Apply the amendments; cite the decision IDs.
+`docs/design/D5-controller-console/README.md`, the canonical `docs/design/DECISIONS.md` (D5 + R + D7
+sections), and both amendment logs: **`D5-controller-console/STORY-UPDATES.md`** (§B ADDs, §A COR-005)
+and **`D7-application-shells/STORY-UPDATES.md`** (§B — the frame moves to `staff-shell`; this feature
+keeps its content). Apply the amendments; cite the decision IDs.
 
-**Session 3 — shell extraction (R-006, `docs/design/COMPONENTS.md`):** the console's improvised
-container chrome — exercise banner, header/brand lockup, exercise identity block, clock cluster,
-state pill, staff presence cluster, header action group — is inventoried and **frozen pending the
-D7 unified-shell session**. Story 03's presentation is tagged interim; none of the other inventoried
-elements should be specced in any story until D7 lands. (The toolstrip, flyouts, and NEEDS-YOU bar
-are working UI, explicitly *outside* the inventory — stories 01/02 are unaffected.)
+**Session 3 → D7 (shell extraction — RESOLVED).** The console's improvised container chrome —
+exercise banner, header/brand lockup, exercise identity block, clock cluster, state pill, staff
+presence, header action group — was inventoried (R-006, `docs/design/COMPONENTS.md`) and frozen
+pending the D7 unified-shell session. **D7 has landed** (`docs/design/D7-application-shells/`): those
+elements are now owned by the new **`staff-shell`** frame feature (header, toolstrip dock, identity
+badge, classification tag, clocks, state pill, presence). **This feature keeps only the console-
+specific content that mounts in that frame:** the toolbox tools (which *register into* `staff-shell`'s
+toolstrip dock, D7-011 — not a strip this feature draws), the NEEDS-YOU action bar, the console's
+flyouts, Flag, and the trainee monitor. See `docs/design/D7-application-shells/STORY-UPDATES.md` §B.
 
 ## Stories (planned)
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Toolstrip + flyouts (continuous-watch vs consult-on-demand) | D5-016/17/19 | Not Started | #9 |
+| 01 | Toolstrip + flyouts — **register tools into `staff-shell` dock (D7-011)** | D5-016/17/19 | Not Started | #9 |
 | 02 | NEEDS-YOU action bar — locate & highlight, never act | D5-010, D5-012(d) | Not Started | #10 |
-| 03 | Static identity badge during conduct (switching is pre-conduct) | COR-005 / D5-012(g) | Not Started | #11 |
+| 03 | Static identity badge during conduct — **presentation → `staff-shell` header (D7-007/010)** | COR-005 / D5-012(g) | Not Started | #11 |
 | 04 | Flag on any post → after-action record (minimal) | D5-014/3.4 | Not Started | #12 |
 | 05 | Trainee monitor flyout (adaptive-loop metric) | D5-016, D5-014/3.1 | Not Started | #13 |
 

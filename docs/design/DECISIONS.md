@@ -18,8 +18,11 @@ none = zero height · info `#3d6a96` · advisory (D1/D2 amber, exact) · emergen
 Icon + text chip + color, never color-only (NFR-001). Scenario timestamp + Details → history.
 Info/advisory scroll-collapse to a compact line; emergency never collapses; never dismissable.
 Multi-alert: highest severity + "+N more" expands stack. Per user "explore options": three
-treatments built as a tweak (band / compact / ticker); **band recommended**; ticker noted as a
-D3 outlet-skin option.
+treatments built as a tweak (band / compact / ticker); **user chose ticker as the default**
+(dark one-line ticker, severity tab + mono message). Band/compact kept in the tweak for
+comparison. **Emergency escapes the ticker and forces the full band** — alerts are simulated/
+in-fiction; real-world messages are ONLY the break-fiction overlay (user confirmed). Ticker
+multi-alert **auto-rotates** (~3.5s) instead of "+N" expand (user decision).
 
 ### D7-003 — Break-fiction overlay: hazard black/amber mono, canonized from D5-007 (CTL-024)
 Full-bleed above ALL chrome incl. compliance banners (COR-065 top z). Wall-clock time — the only
@@ -53,8 +56,25 @@ Read-only: affordances absent, not disabled (COR-015) — composer, Post button 
 (PRT-040): compliance chrome, channel strip, and tab bar all removed; alert bar persists
 (PRT-010). Chrome-off is a legal state and layout survives it.
 
+### D7-009 — Staff chrome restyled to Cadence Design System (user decision)
+Staff frame adopts the binding Cadence palette: navy `#1e3a5f` header + exercise bar, light
+`#f8f8f8` work area with white panels, Cadence red `#e42217` badges/lockout, gray `#848482`
+secondary text, pill-shaped buttons (Cobra idiom). Thumbnail gate preserved — navy chrome +
+light staff world vs green-banner fiction. Participant shell stays OUT of Cadence: it is
+in-fiction and must look like consumer media, not the exercise platform.
+
+### D7-010 — No separate staff exercise bar; classification folds into the header (user decision)
+Controllers know they're in an exercise — the 20px exbar earned nothing but the FOUO marking.
+Pushback kept: `UNCLASSIFIED // FOUO` must persist on every staff screen, so it becomes a
+compact mono tag in the header (with training-use tooltip). Everything else the bar carried
+already lives in the identity badge. Retrofit delta for D5: drop `.exbar`, add the tag.
+
+### D7-011 — Toolstrip and controller toolbox are ONE dock (resolves user-flagged conflict)
+The shell owns the strip container with two zones: shell-global tools (ADMIN) above a divider;
+below it, the surface registers its own tools (the D5 toolbox docks here). Surfaces never draw
+a second strip. Shown in the mockup as a dashed SURFACE slot.
+
 ### D7 open / deferred
-- Alert-bar treatment decision (band vs ticker) — user reviewing the exploration tweak.
 - Shell as a real shared component (both mockups currently keep their own chrome) — retrofit
   is documented, execution deferred to the frontend build.
 - Preview-as-participant channel coverage: portal stub only; other channels render in the
