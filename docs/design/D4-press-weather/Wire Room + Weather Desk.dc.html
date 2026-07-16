@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Public+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#20262e;font-family:Figtree,system-ui,sans-serif;color:#1b2733}
+a{color:#1a4480}a:hover{text-decoration:underline}
+input,select,textarea,button{font-family:inherit}
+</style>
+</helmet>
+<div style="position:fixed;inset:0;display:flex;flex-direction:column;background:#fff">
+<div style="flex:none;height:22px;background:#2e6b2e;color:#eaf5e6;font:700 10px/22px Figtree,sans-serif;text-align:center;letter-spacing:.14em;white-space:nowrap;overflow:hidden">UNCLASSIFIED // EXERCISE · EXERCISE · EXERCISE — ALL CONTENT SIMULATED</div>
+<sc-if value="{{abTicker}}" hint-placeholder-val="{{true}}">
+<div role="status" style="flex:none;display:flex;align-items:stretch;background:#14181c;color:#eef2f5;border-bottom:1px solid #000">
+<div style="display:flex;align-items:center;gap:6px;padding:0 12px;font-family:Figtree;font-weight:800;font-size:10.5px;letter-spacing:.1em;background:{{abTab}};color:#fff;flex:none">⚠ {{abChip}}</div>
+<div style="display:flex;align-items:center;padding:8px 12px;font:500 12.5px ui-monospace,Menlo,monospace;flex:1;min-width:0;line-height:1.4;cursor:pointer" onClick="{{abGo}}">{{abMsg}}</div>
+<div style="display:flex;align-items:center;padding:0 6px;font:600 11px ui-monospace,Menlo,monospace;color:#9fb0bd;flex:none">{{abTime}}</div>
+<div style="display:flex;align-items:center;padding:0 14px 0 6px;font:700 12px Figtree;color:#cfe0ee;cursor:pointer;white-space:nowrap" onClick="{{abGo}}">Details →</div>
+</div>
+</sc-if>
+<sc-if value="{{abBand}}" hint-placeholder-val="{{false}}">
+<div role="status" style="flex:none;display:flex;align-items:center;gap:12px;padding:9px 16px;font-size:13.5px;background:#b3261e;border-bottom:1px solid #8f150c;color:#fff">
+<div style="font:800 10.5px Figtree;letter-spacing:.1em;padding:3px 8px;border-radius:5px;background:#fff;color:#8f150c;display:flex;align-items:center;gap:5px;flex:none">⚠ EMERGENCY</div>
+<div style="flex:1;min-width:0;line-height:1.4;font-weight:600;cursor:pointer" onClick="{{abGo}}">{{abMsg}}</div>
+<div style="flex:none;font:700 11px Figtree;padding:3px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.7);white-space:nowrap">+ 2 MORE</div>
+<div style="font:600 11px ui-monospace,Menlo,monospace;opacity:.85;flex:none">{{abTime}}</div>
+<div style="font-weight:700;cursor:pointer;flex:none;white-space:nowrap" onClick="{{abGo}}">Details →</div>
+</div>
+</sc-if>
+<div style="flex:none;display:flex;align-items:center;gap:2px;padding:0 14px;height:38px;background:#fbfcfd;border-bottom:1px solid #e3e7ea">
+<sc-for list="{{chans}}" as="c" hint-placeholder-count="5">
+<div style="font-family:Figtree;font-size:12.5px;color:{{c.col}};font-weight:{{c.w}};padding:5px 10px;border-radius:6px;cursor:pointer;white-space:nowrap;box-shadow:{{c.sh}}" style-hover="background:rgba(14,21,24,.05)" onClick="{{c.go}}">{{c.label}}</div>
+</sc-for>
+<div style="margin-left:auto;font:500 11.5px Figtree;color:#8a97a1;white-space:nowrap">TUE JUL 14 · 2:47 PM</div>
+</div>
+<div style="flex:1;min-height:0;overflow:auto;position:relative;background:#fff">
+
+<sc-if value="{{sStory}}" hint-placeholder-val="{{false}}">
+<div style="min-height:100%;background:#1b222b;padding:36px 40px 70px;font-family:Figtree" data-screen-label="Propagation storyboard">
+<div style="display:inline-block;background:#2e6b2e;color:#eaf5e6;font:800 9.5px Figtree;letter-spacing:.16em;padding:3px 9px;border-radius:3px">DESIGN SCAFFOLD — WX-011 · NOT A PARTICIPANT SCREEN</div>
+<div style="font:800 24px Figtree;color:#e8eef5;margin-top:14px">The propagation moment</div>
+<div style="font:400 13.5px/1.6 Figtree;color:#93a3b4;max-width:640px;margin-top:8px">One warning product, published once from The Weather Desk, arrives everywhere at the same instant. Nothing announces the mechanism — the same headline string is simply present on every surface, the way real weather is.</div>
+<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:30px;align-items:flex-start">
+<div style="width:320px;background:#232c37;border:1px solid #33404e;border-radius:8px;padding:16px">
+<div style="font:700 10.5px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:#7fd1a8">2:02:00 PM — ISSUED</div>
+<div style="margin-top:12px;background:#fff;border-radius:4px;overflow:hidden">
+<div style="background:#112e51;color:#fff;padding:7px 10px;font:800 9px 'Public Sans';letter-spacing:.08em">THE WEATHER DESK</div>
+<div style="background:#8b0000;color:#fff;padding:9px 10px"><span style="background:#fff;color:#8b0000;font:800 8px 'Public Sans';letter-spacing:.08em;padding:2px 5px;border-radius:3px">⚠ WARNING</span><div style="font:800 12px 'Public Sans';margin-top:5px">FLASH FLOOD WARNING</div><div style="font:400 9px 'Public Sans';opacity:.85;margin-top:2px">Until 4:15 PM · Millbrook Valley &amp; coastal Fairhaven</div></div>
+<div style="padding:8px 10px;font:400 9px 'Public Sans';color:#5a6a76;line-height:1.5">The warning product page (WX-010) is the origin — issued from the controller console, rendered NWS-style.</div>
+</div>
+<div style="font:400 12px/1.55 Figtree;color:#93a3b4;margin-top:12px">The Weather Desk publishes the warning product. This page is the canonical source every other surface links back to.</div>
+</div>
+<div style="width:400px;background:#232c37;border:1px solid #33404e;border-radius:8px;padding:16px">
+<div style="font:700 10.5px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:#e8b437">+2s — EVERY SHELL LIGHTS AT ONCE</div>
+<div style="display:flex;gap:10px;margin-top:12px">
+<sc-for list="{{sbShells}}" as="f" hint-placeholder-count="3">
+<div style="flex:1;min-width:0">
+<div style="background:#fff;border-radius:4px;overflow:hidden">
+<div style="height:5px;background:#2e6b2e"></div>
+<div style="background:#b3261e;color:#fff;padding:4px 6px;display:flex;align-items:center;gap:4px"><span style="background:#fff;color:#8f150c;font:800 6px Figtree;letter-spacing:.06em;padding:1px 3px;border-radius:2px">⚠ EMG</span><span style="font:600 6.5px Figtree;white-space:nowrap;overflow:hidden">Flash Flood Warning until 4:15 PM</span></div>
+<div style="padding:7px 8px 9px"><div style="font-family:Figtree;font-weight:800;font-size:8px;color:{{f.col}}">{{f.name}}</div><div style="height:4px;background:#e8ebee;border-radius:2px;margin-top:6px;width:90%"></div><div style="height:4px;background:#e8ebee;border-radius:2px;margin-top:4px;width:70%"></div><div style="height:4px;background:#e8ebee;border-radius:2px;margin-top:4px;width:80%"></div></div>
+</div>
+<div style="font:600 9px Figtree;color:#7c8ea0;text-align:center;margin-top:6px">{{f.name}}</div>
+</div>
+</sc-for>
+</div>
+<div style="font:400 12px/1.55 Figtree;color:#93a3b4;margin-top:12px">The shell alert bar is fed by the warning (SHELL-CONTRACT §2): emergency escapes the ticker and forces the full band on every channel — portal, Pulse, Wire Room alike (PRT-010).</div>
+</div>
+<div style="width:340px;background:#232c37;border:1px solid #33404e;border-radius:8px;padding:16px">
+<div style="font:700 10.5px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:#7fb3d1">+4s — @WEATHERDESK POSTS</div>
+<div style="margin-top:12px;background:#fff;border-radius:10px;padding:12px;font-family:Figtree">
+<div style="display:flex;gap:8px;align-items:center"><div style="width:30px;height:30px;border-radius:50%;background:#112e51;color:#fff;display:flex;align-items:center;justify-content:center;font:700 10px Figtree;flex:none">WD</div><div><div style="font:700 12px Figtree;display:flex;align-items:center;gap:4px">The Weather Desk <svg width="13" height="13" viewBox="0 0 24 24"><path fill="#2D9CDB" d="M12 1l2.4 2 3.1-.4 1 3 2.9 1.2-.6 3.1 2 2.4-2 2.4.6 3.1-2.9 1.2-1 3-3.1-.4-2.4 2-2.4-2-3.1.4-1-3-2.9-1.2.6-3.1-2-2.4 2-2.4-.6-3.1 2.9-1.2 1-3 3.1.4z"></path><path fill="#fff" d="M10.5 15.6l-2.8-2.8 1.2-1.2 1.6 1.6 4.4-4.4 1.2 1.2z"></path></svg></div><div style="font:400 10.5px Figtree;color:#61707a">@WeatherDesk · 2:02 PM</div></div></div>
+<div style="font:400 12px/1.5 Figtree;color:#0e1518;margin-top:8px">A FLASH FLOOD WARNING is in effect for Millbrook Valley and coastal Fairhaven until 4:15 PM. Do not drive through flooded roads.</div>
+<div style="border:1px solid #e5e8ea;border-radius:10px;overflow:hidden;margin-top:9px"><div style="height:64px;background:#dfe5ea;display:flex;align-items:center;justify-content:center;color:#98a5b0;font:600 8.5px Figtree;letter-spacing:.1em;position:relative">RADAR · FAIRHAVEN REGIONAL<span style="position:absolute;right:5px;bottom:5px;background:rgba(46,107,46,.92);color:#fff;font:800 7px Figtree;letter-spacing:.1em;padding:1px 5px;border-radius:2px">EXERCISE</span></div><div style="padding:7px 9px"><div style="font:400 9px Figtree;color:#61707a">weatherdesk.fh.gov</div><div style="font:700 10.5px Figtree;margin-top:2px">Flash Flood Warning — Millbrook Valley, coastal Fairhaven</div></div></div>
+</div>
+<div style="font:400 12px/1.55 Figtree;color:#93a3b4;margin-top:12px">The auto-post carries the standard link card (COMPONENTS handoff) back to the product page. Same headline string, no paraphrase.</div>
+</div>
+<div style="width:300px;background:#232c37;border:1px solid #33404e;border-radius:8px;padding:16px">
+<div style="font:700 10.5px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:#d1a87f">+4s — PORTAL WIDGET FLIPS</div>
+<div style="margin-top:12px;background:#fff;border-radius:6px;padding:12px;font-family:'Libre Franklin',Figtree,sans-serif">
+<div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font:700 11px Figtree;color:#16202a">Fairhaven Weather</span><span style="font:700 7.5px Figtree;letter-spacing:.1em;color:#5a6a76">THE WEATHER DESK</span></div>
+<div style="background:#8b0000;color:#fff;border-radius:4px;padding:9px 10px;margin-top:8px"><span style="background:#fff;color:#8b0000;font:800 7.5px Figtree;letter-spacing:.08em;padding:1px 5px;border-radius:2px">⚠ WARNING</span><div style="font:800 12px Figtree;margin-top:5px">Flash Flood Warning</div><div style="font:400 9.5px Figtree;opacity:.85;margin-top:2px">Until 4:15 PM · Details →</div></div>
+<div style="display:flex;justify-content:space-between;color:#8a97a1;font:400 9px Figtree;margin-top:8px"><span>66° Heavy rain</span><span>Zones 2–4</span></div>
+</div>
+<div style="font:400 12px/1.55 Figtree;color:#93a3b4;margin-top:12px">The D2 portal module swaps its forecast tile for the warning tile — the fourth simultaneous appearance (WX-011).</div>
+</div>
+</div>
+<div style="font:500 12px/1.6 ui-monospace,Menlo,monospace;color:#6f8093;margin-top:26px;max-width:760px">ONE STRING, FOUR SURFACES — the bar (shell contract), the post (social handoff), the widget (portal module), the product page (origin). Arrival feels like real weather because nothing explains it: it is simply everywhere at once.</div>
+</div>
+</sc-if>
+
+<sc-if value="{{sStub}}" hint-placeholder-val="{{false}}">
+<div style="min-height:100%;display:flex;align-items:center;justify-content:center;background:#f4f5f6" data-screen-label="Channel stub">
+<div style="max-width:440px;text-align:center;padding:40px">
+<div style="display:inline-block;background:#2e6b2e;color:#eaf5e6;font:800 9.5px Figtree;letter-spacing:.16em;padding:3px 9px;border-radius:3px">DESIGN SCAFFOLD — NOT A D4 SCREEN</div>
+<div style="font:800 22px Figtree;color:#1b2733;margin-top:14px">{{stub.t}}</div>
+<div style="font:400 13.5px/1.6 Figtree;color:#5a6a76;margin-top:8px">{{stub.p}}</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{sWire}}" hint-placeholder-val="{{true}}">
+<div style="min-height:100%;background:#faf9f6" data-screen-label="The Wire">
+<div style="border-bottom:3px double #22303c">
+<div style="max-width:980px;margin:0 auto;padding:26px 24px 0;display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap">
+<div><div style="font:700 30px Georgia,'Times New Roman',serif;color:#22303c">The Wire Room</div><div style="font-family:Figtree;font-size:10px;font-weight:700;letter-spacing:.18em;color:#8a8577;margin-top:5px">OFFICIAL RELEASE WIRE · FAIRHAVEN REGION</div></div>
+<div style="display:flex;align-items:center;gap:18px;padding-bottom:4px;flex-wrap:wrap">
+<div style="font:700 12.5px Figtree;color:#22303c;box-shadow:inset 0 -2px 0 #22303c;padding:4px 1px;cursor:pointer;white-space:nowrap">The Wire</div>
+<div style="font:600 12.5px Figtree;color:#6d6a5e;cursor:pointer;white-space:nowrap" style-hover="color:#22303c" onClick="{{goNewsroom}}">Newsrooms</div>
+<div style="font:600 12.5px Figtree;color:#6d6a5e;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap" style-hover="color:#22303c" onClick="{{goApproval}}">Approvals <span style="font:800 8.5px Figtree;letter-spacing:.08em;background:#e9e6dc;color:#6d6a5e;padding:1px 5px;border-radius:3px">JIC</span></div>
+<div style="font:700 12.5px Figtree;background:#22303c;color:#f5f3ec;padding:8px 16px;border-radius:3px;cursor:pointer;white-space:nowrap" style-hover="background:#33465a" onClick="{{goComposer}}">Submit a release</div>
+</div>
+</div>
+<div style="max-width:980px;margin:0 auto;padding:14px 24px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+<div style="font:700 10px Figtree;letter-spacing:.12em;color:#8a8577;margin-right:4px">ORGANIZATION</div>
+<sc-for list="{{filters}}" as="f" hint-placeholder-count="5">
+<div style="font-family:Figtree;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:999px;cursor:pointer;border:1px solid {{f.bd}};background:{{f.bg}};color:{{f.col}}" onClick="{{f.go}}">{{f.label}}</div>
+</sc-for>
+</div>
+</div>
+<div style="max-width:980px;margin:0 auto;padding:6px 24px 70px">
+<sc-if value="{{staged}}" hint-placeholder-val="{{false}}">
+<div style="text-align:center;padding:90px 20px">
+<div style="font:700 22px Georgia,serif;color:#22303c">No releases have been issued.</div>
+<div style="font:400 13.5px/1.6 Figtree;color:#8a8577;margin-top:10px;max-width:420px;margin-left:auto;margin-right:auto">Releases published by participating organizations appear here immediately. Registered newsrooms: Fulton County Emergency Management · City of Fairhaven · Fairhaven Water Utility · Fairhaven Public Schools.</div>
+<div style="display:inline-block;font:700 12.5px Figtree;background:#22303c;color:#f5f3ec;padding:9px 18px;border-radius:3px;cursor:pointer;margin-top:22px" onClick="{{goComposer}}">Submit the first release</div>
+</div>
+</sc-if>
+<sc-if value="{{embargoed}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;gap:14px;padding:16px 14px;margin-top:8px;border:1px solid #e3b25f;background:#fff8e9;border-radius:4px;cursor:pointer;align-items:flex-start" onClick="{{goSchedRel}}">
+<div style="width:40px;height:40px;background:#2f5d50;color:#fff;display:flex;align-items:center;justify-content:center;font:700 13px Figtree;flex:none;border-radius:2px">CF</div>
+<div style="flex:1;min-width:0">
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font:700 10px Figtree;letter-spacing:.12em;color:#2f5d50">CITY OF FAIRHAVEN</span><span style="font:800 9.5px Figtree;letter-spacing:.1em;background:#b97a00;color:#fff;padding:2px 7px;border-radius:3px">⏱ SCHEDULED</span><span style="font:600 11px ui-monospace,Menlo,monospace;color:#8a6a1e">releases at 3:06 PM · in 19m</span></div>
+<div style="font:700 17px Georgia,serif;color:#22303c;margin-top:5px;opacity:.75">Boil water advisory lifted for Zones 2 and 3</div>
+<div style="font:400 11.5px Figtree;color:#8a8577;margin-top:4px">Visible to you and JIC approvers only until release. Not on the public wire.</div>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{showRows}}" hint-placeholder-val="{{true}}">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+<div style="display:flex;gap:14px;padding:17px 14px;border-bottom:1px solid #e8e5db;cursor:pointer" style-hover="background:#f4f2ea" onClick="{{r.go}}">
+<div style="width:40px;height:40px;background:{{r.color}};color:#fff;display:flex;align-items:center;justify-content:center;font-family:Figtree;font-weight:700;font-size:13px;flex:none;border-radius:2px">{{r.mono}}</div>
+<div style="flex:1;min-width:0">
+<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-family:Figtree;font-weight:700;font-size:10px;letter-spacing:.12em;color:{{r.color}}">{{r.orgCaps}}</span><span style="font:400 11px Figtree;color:#8a8577">{{r.time}}</span><sc-if value="{{r.rev}}" hint-placeholder-val="{{false}}"><span style="font:800 8.5px Figtree;letter-spacing:.08em;border:1px solid #b9b4a4;color:#6d6a5e;padding:1px 5px;border-radius:3px">UPDATED 11:20 AM</span></sc-if></div>
+<div style="font:700 18px Georgia,serif;color:#22303c;margin-top:4px">{{r.hl}}</div>
+<div style="font:400 13px/1.55 Figtree;color:#5f5c50;margin-top:4px">{{r.sub}}</div>
+</div>
+</div>
+</sc-for>
+</sc-if>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{sNewsroom}}" hint-placeholder-val="{{false}}">
+<div style="min-height:100%;background:#faf9f6" data-screen-label="Org newsroom">
+<div style="background:{{nr.color}};color:#fff">
+<div style="max-width:980px;margin:0 auto;padding:30px 24px 24px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+<div style="width:58px;height:58px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.35);display:flex;align-items:center;justify-content:center;font:700 19px Figtree;flex:none;border-radius:3px">{{nr.mono}}</div>
+<div style="flex:1;min-width:220px"><div style="font:700 24px Georgia,serif">{{nr.name}}</div><div style="font:400 12px Figtree;opacity:.8;margin-top:4px">{{nr.addr}}</div></div>
+<div style="font:800 10px Figtree;letter-spacing:.2em;border:1px solid rgba(255,255,255,.4);padding:5px 12px;border-radius:3px">NEWSROOM</div>
+</div>
+</div>
+<div style="max-width:980px;margin:0 auto;padding:18px 24px 70px;display:flex;gap:34px;align-items:flex-start;flex-wrap:wrap">
+<div style="flex:1;min-width:420px">
+<div style="display:flex;align-items:center;gap:10px;padding:6px 0 4px;flex-wrap:wrap"><span style="font:700 10px Figtree;letter-spacing:.12em;color:#8a8577">NEWSROOMS</span>
+<sc-for list="{{nrTabs}}" as="n" hint-placeholder-count="4"><div style="font-family:Figtree;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:999px;cursor:pointer;border:1px solid {{n.bd}};background:{{n.bg}};color:{{n.col}}" onClick="{{n.go}}">{{n.label}}</div></sc-for>
+</div>
+<sc-for list="{{nrRows}}" as="r" hint-placeholder-count="2">
+<div style="padding:17px 4px;border-bottom:1px solid #e8e5db;cursor:pointer" style-hover="background:#f4f2ea" onClick="{{r.go}}">
+<div style="display:flex;align-items:baseline;gap:10px"><span style="font:600 11px ui-monospace,Menlo,monospace;color:#8a8577">{{r.time}}</span><span style="font:400 10.5px Figtree;color:#b0ac9c">Release No. {{r.no}}</span></div>
+<div style="font:700 18px Georgia,serif;color:#22303c;margin-top:4px">{{r.hl}}</div>
+<div style="font:400 13px/1.55 Figtree;color:#5f5c50;margin-top:4px">{{r.sub}}</div>
+</div>
+</sc-for>
+<div style="font:400 12px Figtree;color:#8a8577;margin-top:16px">Releases from all organizations appear on <span style="font-weight:700;color:#22303c;cursor:pointer" onClick="{{goWire}}">The Wire →</span></div>
+</div>
+<div style="width:280px;flex:none;border:1px solid #ddd9cc;background:#fff;padding:18px 20px">
+<div style="font:700 10px Figtree;letter-spacing:.16em;color:#8a8577">MEDIA CONTACT</div>
+<div style="font:700 15px Georgia,serif;color:#22303c;margin-top:10px">{{nr.cn}}</div>
+<div style="font:400 12.5px Figtree;color:#5f5c50">{{nr.ct}}</div>
+<div style="font:500 12.5px Figtree;color:#22303c;margin-top:10px">{{nr.cp}}</div>
+<div style="font:500 12.5px Figtree;margin-top:2px"><a href="#">{{nr.ce}}</a></div>
+<div style="border-top:1px solid #eceadf;margin-top:14px;padding-top:12px;font:400 11.5px/1.55 Figtree;color:#8a8577">Media inquiries are answered during activation hours. For immediate needs call the duty officer line.</div>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{sRelease}}" hint-placeholder-val="{{false}}">
+<div style="min-height:100%;background:#eceae3;padding:26px 24px 80px" data-screen-label="Release permalink">
+<div style="max-width:760px;margin:0 auto">
+<div style="font:600 12px Figtree;color:#6d6a5e;cursor:pointer;margin-bottom:14px;width:fit-content" style-hover="color:#22303c" onClick="{{goWire}}">← The Wire</div>
+<sc-if value="{{relSched}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;align-items:center;gap:12px;background:#fff8e9;border:1px solid #e3b25f;padding:12px 16px;border-radius:4px;margin-bottom:14px"><span style="font:800 9.5px Figtree;letter-spacing:.1em;background:#b97a00;color:#fff;padding:3px 8px;border-radius:3px;flex:none">⏱ SCHEDULED</span><span style="font:600 13px Figtree;color:#6b4300;flex:1">Releases at 3:06 PM — in 19m. Visible to your organization and JIC approvers only.</span><span style="font:700 12px Figtree;color:#8a6a1e;cursor:pointer;white-space:nowrap" onClick="{{goComposer}}">Edit in composer →</span></div>
+</sc-if>
+<div style="background:#fff;box-shadow:0 18px 50px rgba(34,48,60,.14);padding:44px 54px 40px">
+<div style="display:flex;align-items:center;gap:14px;padding-bottom:16px;border-bottom:3px solid {{rOrg.color}}">
+<div style="width:46px;height:46px;background:{{rOrg.color}};color:#fff;display:flex;align-items:center;justify-content:center;font-family:Figtree;font-weight:700;font-size:15px;flex:none;border-radius:2px">{{rOrg.mono}}</div>
+<div><div style="font-family:Georgia,serif;font-weight:700;font-size:16px;letter-spacing:.04em;color:{{rOrg.color}}">{{rOrg.caps}}</div><div style="font:400 11px Figtree;color:#8a8577;margin-top:3px">{{rOrg.addr}}</div></div>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:18px;flex-wrap:wrap;gap:8px"><span style="font:700 11px Figtree;letter-spacing:.16em;color:#22303c">FOR IMMEDIATE RELEASE</span><span style="font:500 11px ui-monospace,Menlo,monospace;color:#8a8577">Release No. {{rel.no}} · Tuesday, July 14 · {{rel.time}}</span></div>
+<div style="font:700 28px/1.25 Georgia,serif;color:#22303c;margin-top:14px;text-wrap:pretty">{{rel.hl}}</div>
+<sc-if value="{{relRev}}" hint-placeholder-val="{{false}}">
+<div style="font:500 11px ui-monospace,Menlo,monospace;color:#8a6a1e;background:#faf6ea;border:1px solid #e8dcb8;padding:7px 10px;margin-top:14px;border-radius:3px">REV 2 · Updated 11:20 AM — zone boundary map corrected · Originally released 9:41 AM</div>
+</sc-if>
+<div style="display:flex;align-items:center;gap:10px;margin-top:22px;padding:8px 0;border-top:1px solid #eceadf;border-bottom:1px solid #eceadf"><span style="font:700 9.5px Figtree;letter-spacing:.14em;color:#8a8577">FILED DOCUMENT</span><span style="font:500 11.5px ui-monospace,Menlo,monospace;color:#5f5c50">{{rel.file}}</span><span style="font:400 11px Figtree;color:#b0ac9c">· rendered inline</span></div>
+<div style="border:1px solid #e3e0d4;margin-top:18px;padding:36px 42px;box-shadow:0 4px 14px rgba(34,48,60,.06)">
+<div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:2px solid {{rOrg.color}}"><span style="font-family:Georgia,serif;font-weight:700;font-size:11px;letter-spacing:.06em;color:{{rOrg.color}}">{{rOrg.caps}}</span><span style="font:400 9.5px Figtree;color:#b0ac9c">Page 1 of {{rel.pgs}}</span></div>
+<sc-for list="{{relParasA}}" as="p" hint-placeholder-count="2"><p style="font:400 14px/1.75 Georgia,serif;color:#33302a;margin:14px 0 0">{{p.t}}</p></sc-for>
+</div>
+<sc-if value="{{relHasP2}}" hint-placeholder-val="{{false}}">
+<div style="border:1px solid #e3e0d4;margin-top:14px;padding:36px 42px;box-shadow:0 4px 14px rgba(34,48,60,.06)">
+<div style="display:flex;justify-content:flex-end;padding-bottom:10px"><span style="font:400 9.5px Figtree;color:#b0ac9c">Page 2 of {{rel.pgs}}</span></div>
+<sc-for list="{{relParasB}}" as="p" hint-placeholder-count="1"><p style="font:400 14px/1.75 Georgia,serif;color:#33302a;margin:0 0 14px">{{p.t}}</p></sc-for>
+<div style="font:400 13px Georgia,serif;color:#8a8577;text-align:center;margin-top:22px">###</div>
+</div>
+</sc-if>
+<div style="border:1px solid #ddd9cc;background:#faf9f5;padding:16px 20px;margin-top:22px">
+<div style="font:700 10px Figtree;letter-spacing:.16em;color:#8a8577">MEDIA CONTACT</div>
+<div style="font:600 13.5px Figtree;color:#22303c;margin-top:7px">{{rOrg.cn}} · {{rOrg.ct}}</div>
+<div style="font:400 12.5px Figtree;color:#5f5c50;margin-top:2px">{{rOrg.cp}} · <a href="#">{{rOrg.ce}}</a></div>
+</div>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{sComposer}}" hint-placeholder-val="{{false}}">
+<div style="min-height:100%;background:#eceae3;padding:26px 24px 80px" data-screen-label="Composer">
+<div style="max-width:1120px;margin:0 auto;display:flex;gap:26px;align-items:flex-start;justify-content:center;flex-wrap:wrap">
+<div style="width:740px;max-width:100%">
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+<div style="font:600 12px Figtree;color:#6d6a5e;cursor:pointer" style-hover="color:#22303c" onClick="{{goWire}}">← The Wire</div>
+<div style="display:flex;align-items:center;gap:6px;font:600 11.5px Figtree;color:#5e7a5e"><span style="width:7px;height:7px;border-radius:50%;background:#5e9b5e;display:inline-block"></span>{{autosave}}</div>
+</div>
+<sc-if value="{{retBanner}}" hint-placeholder-val="{{false}}">
+<div style="background:#fbeeec;border:1px solid #d69a92;padding:14px 18px;border-radius:4px;margin-bottom:14px">
+<div style="display:flex;align-items:center;gap:10px"><span style="font:800 9.5px Figtree;letter-spacing:.1em;background:#8f2a20;color:#fff;padding:3px 8px;border-radius:3px">↩ RETURNED FOR REVISION</span><span style="font:600 12px Figtree;color:#7a352c">Alan Whitfield · JIC Lead · 2:12 PM</span></div>
+<div style="font:400 13.5px/1.55 Georgia,serif;color:#5c2c24;margin-top:8px">“Add the distribution point hours and the schools line before this goes out. Everything else reads fine.”</div>
+<div style="font:700 12px Figtree;color:#8f2a20;cursor:pointer;margin-top:8px;width:fit-content" onClick="{{goApproval}}">View in Approvals →</div>
+</div>
+</sc-if>
+<sc-if value="{{schedBanner}}" hint-placeholder-val="{{false}}">
+<div style="background:#fff8e9;border:1px solid #e3b25f;padding:14px 18px;border-radius:4px;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+<span style="font:800 9.5px Figtree;letter-spacing:.1em;background:#b97a00;color:#fff;padding:3px 8px;border-radius:3px;flex:none">⏱ SCHEDULED</span>
+<span style="font:700 14px Figtree;color:#6b4300;flex:1;min-width:200px">Scheduled — releases in 19m <span style="font:500 12px ui-monospace,Menlo,monospace;color:#8a6a1e">(today · 3:06 PM)</span></span>
+<span style="font:700 12px Figtree;color:#8a6a1e;cursor:pointer;white-space:nowrap" onClick="{{editSched}}">Edit schedule</span>
+<sc-if value="{{cancelAskOff}}" hint-placeholder-val="{{true}}"><span style="font:700 12px Figtree;color:#8f2a20;cursor:pointer;white-space:nowrap" onClick="{{askCancel}}">Cancel release</span></sc-if>
+<sc-if value="{{cancelAsk}}" hint-placeholder-val="{{false}}"><span style="display:flex;align-items:center;gap:8px;font:700 12px Figtree;color:#5c2c24;background:#fbeeec;border:1px solid #d69a92;padding:5px 10px;border-radius:999px">Cancel this scheduled release?<span style="cursor:pointer;color:#8f2a20" onClick="{{doCancel}}">Yes, cancel</span>·<span style="cursor:pointer;color:#6d6a5e" onClick="{{keepSched}}">Keep</span></span></sc-if>
+</div>
+</sc-if>
+<sc-if value="{{pubBanner}}" hint-placeholder-val="{{false}}">
+<div style="background:#eef4ec;border:1px solid #9dbb9a;padding:14px 18px;border-radius:4px;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+<span style="font:800 9.5px Figtree;letter-spacing:.1em;background:#3c6b3a;color:#fff;padding:3px 8px;border-radius:3px;flex:none">✓ RELEASED</span>
+<span style="font:700 14px Figtree;color:#2e4d2c;flex:1;min-width:180px">On the wire · 2:47 PM</span>
+<span style="font:700 12px Figtree;color:#3c6b3a;cursor:pointer;white-space:nowrap" onClick="{{goWire}}">View on the wire</span>
+<sc-if value="{{pubSocial}}" hint-placeholder-val="{{false}}"><span style="font:700 12px Figtree;color:#3c6b3a;cursor:pointer;white-space:nowrap">View Pulse post ↗</span></sc-if>
+<span style="font:700 12px Figtree;color:#6d6a5e;cursor:pointer;white-space:nowrap" onClick="{{resetComposer}}">Compose another</span>
+</div>
+</sc-if>
+<div style="background:#fff;box-shadow:0 18px 50px rgba(34,48,60,.14);padding:38px 48px 44px;position:relative">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;position:relative">
+<div style="display:flex;align-items:center;gap:8px;font:600 12px Figtree;color:#5f5c50;border:1px solid #ddd9cc;border-radius:999px;padding:5px 12px;cursor:pointer;background:#faf9f5" style-hover="border-color:#8a8577" onClick="{{toggleOrgMenu}}"><span style="white-space:nowrap">Releasing as</span> <span style="font-weight:800;color:{{curOrg.color}}">{{curOrg.name}}</span> ▾</div>
+<div style="font:400 10.5px Figtree;color:#b0ac9c">Letterhead and contacts follow the organization</div>
+<sc-if value="{{orgMenu}}" hint-placeholder-val="{{false}}">
+<div style="position:absolute;top:36px;left:0;background:#fff;border:1px solid #ddd9cc;box-shadow:0 14px 36px rgba(34,48,60,.18);border-radius:6px;padding:6px;z-index:30;width:330px">
+<sc-for list="{{grants}}" as="g" hint-placeholder-count="3">
+<div style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:4px;cursor:pointer;background:{{g.bg}}" style-hover="background:#f4f2ea" onClick="{{g.go}}">
+<div style="width:30px;height:30px;background:{{g.color}};color:#fff;display:flex;align-items:center;justify-content:center;font-family:Figtree;font-weight:700;font-size:11px;flex:none;border-radius:2px">{{g.mono}}</div>
+<div style="flex:1;min-width:0"><div style="font:700 12.5px Figtree;color:#22303c">{{g.name}}</div><div style="font:400 10.5px Figtree;color:#8a8577">{{g.handle}} · granted for this exercise</div></div>
+<sc-if value="{{g.cur}}" hint-placeholder-val="{{false}}"><span style="font:800 10px Figtree;color:#3c6b3a">✓</span></sc-if>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</div>
+<div style="display:flex;align-items:center;gap:14px;padding-bottom:16px;border-bottom:3px solid {{curOrg.color}}">
+<div style="width:46px;height:46px;background:{{curOrg.color}};color:#fff;display:flex;align-items:center;justify-content:center;font-family:Figtree;font-weight:700;font-size:15px;flex:none;border-radius:2px">{{curOrg.mono}}</div>
+<div><div style="font-family:Georgia,serif;font-weight:700;font-size:16px;letter-spacing:.04em;color:{{curOrg.color}}">{{curOrg.caps}}</div><div style="font:400 11px Figtree;color:#8a8577;margin-top:3px">{{curOrg.addr}}</div></div>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:18px;flex-wrap:wrap;gap:8px"><span style="font:700 11px Figtree;letter-spacing:.16em;color:#22303c">{{emLine}}</span><span style="font:500 11px ui-monospace,Menlo,monospace;color:#8a8577">Tuesday, July 14</span></div>
+<input style="width:100%;box-sizing:border-box;border:none;outline:none;border-bottom:1px solid #eceadf;font:700 26px/1.3 Georgia,serif;color:#22303c;margin-top:12px;padding:4px 0;background:transparent" placeholder="Release headline" value="{{hl}}" onChange="{{onHl}}">
+<sc-if value="{{sugShow}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;align-items:center;gap:8px;margin-top:8px;font:500 11.5px Figtree;color:#8a8577;flex-wrap:wrap">From the PDF: <span style="font-style:italic;color:#5f5c50">“{{sug}}”</span><span style="font:700 11.5px Figtree;color:#22303c;border:1px solid #b9b4a4;border-radius:999px;padding:2px 10px;cursor:pointer" style-hover="background:#f4f2ea" onClick="{{useSug}}">Use as headline</span></div>
+</sc-if>
+<sc-if value="{{showDrop}}" hint-placeholder-val="{{true}}">
+<div style="margin-top:22px;border:2px dashed #b9b4a4;border-radius:6px;min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;cursor:pointer;background:#fbfaf7" style-hover="border-color:#22303c;background:#f6f4ec" onClick="{{dropPdf}}" onDragOver="{{onDrag}}" onDrop="{{dropPdf}}">
+<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#8a8577" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M12 18v-6"></path><path d="M9 15l3 3 3-3"></path></svg>
+<div style="font:700 17px Georgia,serif;color:#22303c">Drop the approved release PDF</div>
+<div style="font:400 12.5px Figtree;color:#8a8577">Pages render on the wire exactly as filed · or <span style="font-weight:700;text-decoration:underline;color:#22303c">choose a file</span></div>
+<div style="font:600 11.5px Figtree;color:#8a8577;margin-top:10px;border-top:1px solid #eceadf;padding-top:12px;width:60%;text-align:center">No PDF? <span style="font-weight:700;color:#22303c;cursor:pointer" onClick="{{toRich}}">Paste from Word instead →</span></div>
+</div>
+</sc-if>
+<sc-if value="{{rich}}" hint-placeholder-val="{{false}}">
+<div style="margin-top:22px;border:1px solid #ddd9cc;border-radius:6px;overflow:hidden">
+<div style="display:flex;gap:2px;background:#faf9f5;border-bottom:1px solid #eceadf;padding:6px 8px"><span style="font:700 12px Georgia,serif;padding:3px 9px;border-radius:3px;cursor:pointer" style-hover="background:#eceadf">B</span><span style="font:400 12px Georgia,serif;font-style:italic;padding:3px 9px;border-radius:3px;cursor:pointer" style-hover="background:#eceadf">I</span><span style="font:400 12px Georgia,serif;text-decoration:underline;padding:3px 9px;border-radius:3px;cursor:pointer" style-hover="background:#eceadf">U</span><span style="font:400 12px Figtree;padding:3px 9px;border-radius:3px;cursor:pointer" style-hover="background:#eceadf">• List</span><span style="margin-left:auto;font:600 11px Figtree;color:#8a8577;padding:3px 6px">Formatting from Word is kept</span></div>
+<div style="min-height:220px;padding:18px 22px;font:400 14px/1.75 Georgia,serif;color:#8a8577">Paste the release text here…</div>
+<div style="border-top:1px solid #eceadf;padding:8px 12px;font:600 11px Figtree;color:#8a8577;background:#faf9f5">Prefer the PDF path when you have the signed document — <span style="font-weight:700;color:#22303c;cursor:pointer" onClick="{{toDrop}}">back to PDF drop</span></div>
+</div>
+</sc-if>
+<sc-if value="{{pdf}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;align-items:center;gap:10px;margin-top:22px;padding:8px 0;border-top:1px solid #eceadf;border-bottom:1px solid #eceadf"><span style="font:700 9.5px Figtree;letter-spacing:.14em;color:#8a8577">FILED DOCUMENT</span><span style="font:500 11.5px ui-monospace,Menlo,monospace;color:#5f5c50">advisory-update-0714.pdf · 2 pages</span><span style="font:700 11px Figtree;color:#8f2a20;cursor:pointer;margin-left:auto" onClick="{{replacePdf}}">Replace</span></div>
+<div style="border:1px solid #e3e0d4;margin-top:16px;padding:32px 38px;box-shadow:0 4px 14px rgba(34,48,60,.06)">
+<div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:2px solid {{curOrg.color}}"><span style="font-family:Georgia,serif;font-weight:700;font-size:11px;letter-spacing:.06em;color:{{curOrg.color}}">{{curOrg.caps}}</span><span style="font:400 9.5px Figtree;color:#b0ac9c">Page 1 of 2</span></div>
+<p style="font:400 13.5px/1.75 Georgia,serif;color:#33302a;margin:14px 0 0">FAIRHAVEN — The precautionary boil water advisory for Zones 2, 3 and 4 remains in effect. A second round of confirmation samples was collected at 2:15 PM from twelve monitoring points across the affected zones and delivered to the state laboratory.</p>
+<p style="font:400 13.5px/1.75 Georgia,serif;color:#33302a;margin:14px 0 0">Results are expected by 6:00 PM today. Until the advisory is lifted, residents in the affected zones should boil tap water for at least one minute before drinking, cooking, or preparing infant formula.</p>
+</div>
+<div style="border:1px solid #e3e0d4;margin-top:12px;padding:32px 38px;box-shadow:0 4px 14px rgba(34,48,60,.06)">
+<div style="display:flex;justify-content:flex-end;padding-bottom:8px"><span style="font:400 9.5px Figtree;color:#b0ac9c">Page 2 of 2</span></div>
+<p style="font:400 13.5px/1.75 Georgia,serif;color:#33302a;margin:0">Free water distribution continues at Harborview Rec Center and Eastgate Mall until 8:00 PM. Updates will be issued on this wire as results are received.</p>
+<div style="font:400 13px Georgia,serif;color:#8a8577;text-align:center;margin-top:20px">###</div>
+</div>
+</sc-if>
+<div style="border:1px solid #ddd9cc;background:#faf9f5;padding:14px 18px;margin-top:22px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+<div><div style="font:700 10px Figtree;letter-spacing:.16em;color:#8a8577">MEDIA CONTACT</div><div style="font:600 13px Figtree;color:#22303c;margin-top:6px">{{curOrg.cn}} · {{curOrg.ct}}</div><div style="font:400 12px Figtree;color:#5f5c50;margin-top:1px">{{curOrg.cp}} · {{curOrg.ce}}</div></div>
+<div style="font:600 11px Figtree;color:#8a8577;cursor:pointer;border:1px solid #ddd9cc;border-radius:999px;padding:3px 12px" style-hover="border-color:#8a8577;color:#5f5c50">Edit</div>
+</div>
+</div>
+</div>
+<div style="width:300px;flex:none;position:sticky;top:0">
+<div style="background:#fff;box-shadow:0 12px 34px rgba(34,48,60,.12);padding:20px 22px">
+<div style="font:700 10px Figtree;letter-spacing:.16em;color:#8a8577">RELEASE</div>
+<div style="display:flex;align-items:center;gap:10px;margin-top:12px;cursor:pointer" onClick="{{setNow}}"><span style="width:16px;height:16px;border-radius:50%;border:2px solid {{nowBd}};display:flex;align-items:center;justify-content:center;flex:none"><span style="width:8px;height:8px;border-radius:50%;background:{{nowDot}}"></span></span><span style="font:600 13.5px Figtree;color:#22303c">Publish now</span></div>
+<div style="display:flex;align-items:center;gap:10px;margin-top:10px;cursor:pointer" onClick="{{setSched}}"><span style="width:16px;height:16px;border-radius:50%;border:2px solid {{schBd}};display:flex;align-items:center;justify-content:center;flex:none"><span style="width:8px;height:8px;border-radius:50%;background:{{schDot}}"></span></span><span style="font:600 13.5px Figtree;color:#22303c">Schedule <span style="font-weight:400;color:#8a8577">(embargo)</span></span></div>
+<sc-if value="{{isSched}}" hint-placeholder-val="{{false}}">
+<div style="margin:10px 0 0 26px;border:1px solid #ddd9cc;border-radius:4px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;background:#faf9f5"><span style="font:600 12.5px Figtree;color:#22303c">Today · 3:06 PM</span><span style="font:400 11px Figtree;color:#8a8577">▾</span></div>
+<div style="margin:8px 0 0 26px;font:400 11px/1.5 Figtree;color:#8a8577">Held until then. JIC approvers can view it; the public wire cannot.</div>
+</sc-if>
+<div style="border-top:1px solid #eceadf;margin-top:16px;padding-top:14px">
+<div style="font:700 10px Figtree;letter-spacing:.16em;color:#8a8577">CROSS-POST</div>
+<div style="display:flex;align-items:flex-start;gap:10px;margin-top:11px;cursor:pointer" onClick="{{toggleSocial}}">
+<span style="width:17px;height:17px;border-radius:3px;border:2px solid {{soBd}};background:{{soBg}};color:#fff;display:flex;align-items:center;justify-content:center;font:800 11px Figtree;flex:none;margin-top:1px">{{soCk}}</span>
+<span style="font:600 13px/1.4 Figtree;color:#22303c">Also post to Pulse as <span style="font-weight:800;color:{{curOrg.color}}">{{curOrg.handle}}</span></span>
+</div>
+<sc-if value="{{social}}" hint-placeholder-val="{{false}}">
+<div style="border:1px solid #e5e8ea;border-radius:10px;overflow:hidden;margin:10px 0 0 27px"><div style="padding:8px 10px"><div style="font:400 9.5px Figtree;color:#61707a">wireroom.fh.gov</div><div style="font:700 11px/1.35 Figtree;color:#0e1518;margin-top:2px">{{cardHl}}</div><div style="font:400 9.5px Figtree;color:#61707a;margin-top:2px">Official release · The Wire Room</div></div></div>
+<div style="margin:7px 0 0 27px;font:400 10.5px/1.5 Figtree;color:#8a8577">Posts the link card when the release goes live.</div>
+</sc-if>
+</div>
+<sc-if value="{{cityGate}}" hint-placeholder-val="{{false}}">
+<div style="border-top:1px solid #eceadf;margin-top:16px;padding-top:12px;font:500 11.5px/1.5 Figtree;color:#8a6a1e;background:#fff;display:flex;gap:8px"><span>⚑</span><span>City releases require JIC approval — publishing sends this to Approvals first.</span></div>
+</sc-if>
+<div style="margin-top:18px">
+<sc-if value="{{canPublish}}" hint-placeholder-val="{{true}}">
+<div style="background:#22303c;color:#f5f3ec;font:700 14px Figtree;text-align:center;padding:12px 0;border-radius:3px;cursor:pointer" style-hover="background:#33465a" onClick="{{openConfirm}}">{{pubLabel}}</div>
+</sc-if>
+<sc-if value="{{pubDone}}" hint-placeholder-val="{{false}}">
+<div style="border:1px solid #ddd9cc;color:#8a8577;font:600 12px Figtree;text-align:center;padding:11px 0;border-radius:3px">Release No. 2026-0714-045 filed</div>
+</sc-if>
+<div style="font:400 10.5px/1.5 Figtree;color:#b0ac9c;text-align:center;margin-top:9px">You confirm before anything goes out. Nothing publishes on drop.</div>
+</div>
+</div>
+</div>
+</div>
+<sc-if value="{{confirm}}" hint-placeholder-val="{{false}}">
+<div style="position:absolute;inset:0;background:rgba(20,24,28,.45);display:flex;align-items:center;justify-content:center;z-index:60" onClick="{{closeConfirm}}">
+<div style="background:#fff;width:460px;max-width:90%;padding:30px 34px;box-shadow:0 30px 80px rgba(0,0,0,.35)" onClick="{{eat}}">
+<div style="font:700 20px Georgia,serif;color:#22303c">{{cfTitle}}</div>
+<div style="border-top:1px solid #eceadf;margin-top:16px;padding-top:14px;display:grid;grid-template-columns:110px 1fr;gap:9px 12px;font-family:Figtree">
+<span style="font:700 10px Figtree;letter-spacing:.12em;color:#8a8577;padding-top:2px">ORGANIZATION</span><span style="font:600 13px Figtree;color:#22303c">{{curOrg.name}}</span>
+<span style="font:700 10px Figtree;letter-spacing:.12em;color:#8a8577;padding-top:2px">HEADLINE</span><span style="font:600 13px/1.4 Figtree;color:#22303c">{{cardHl}}</span>
+<span style="font:700 10px Figtree;letter-spacing:.12em;color:#8a8577;padding-top:2px">TIMING</span><span style="font:600 13px Figtree;color:#22303c">{{cfTiming}}</span>
+<span style="font:700 10px Figtree;letter-spacing:.12em;color:#8a8577;padding-top:2px">PULSE</span><span style="font:600 13px Figtree;color:#22303c">{{cfSocial}}</span>
+</div>
+<div style="display:flex;justify-content:flex-end;gap:16px;align-items:center;margin-top:24px">
+<span style="font:700 13px Figtree;color:#6d6a5e;cursor:pointer" onClick="{{closeConfirm}}">Keep editing</span>
+<span style="background:#22303c;color:#f5f3ec;font:700 13.5px Figtree;padding:11px 22px;border-radius:3px;cursor:pointer" style-hover="background:#33465a" onClick="{{doPublish}}">{{cfBtn}}</span>
+</div>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{sApproval}}" hint-placeholder-val="{{false}}">
+<div style="min-height:100%;background:#faf9f6" data-screen-label="Approvals (JIC)">
+<div style="border-bottom:3px double #22303c">
+<div style="max-width:1060px;margin:0 auto;padding:24px 24px 16px;display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap">
+<div><div style="font:700 24px Georgia,serif;color:#22303c">Approvals</div><div style="font-family:Figtree;font-size:10px;font-weight:700;letter-spacing:.18em;color:#8a8577;margin-top:5px">JOINT INFORMATION CENTER · YOU ARE THE RELEASE AUTHORITY</div></div>
+<div style="font:600 12px Figtree;color:#6d6a5e;cursor:pointer;padding-bottom:4px" style-hover="color:#22303c" onClick="{{goWire}}">← The Wire</div>
+</div>
+</div>
+<div style="max-width:1060px;margin:0 auto;padding:20px 24px 70px;display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap">
+<div style="width:320px;flex:none">
+<div style="font:700 10px Figtree;letter-spacing:.16em;color:#8a8577;padding:2px 2px 10px">PENDING — 2</div>
+<sc-for list="{{appItems}}" as="a" hint-placeholder-count="2">
+<div style="border:1px solid {{a.bd}};background:{{a.bg}};padding:13px 15px;margin-bottom:10px;cursor:pointer;border-radius:4px" onClick="{{a.go}}">
+<div style="display:flex;align-items:center;gap:8px"><span style="width:26px;height:26px;background:{{a.color}};color:#fff;display:flex;align-items:center;justify-content:center;font-family:Figtree;font-weight:700;font-size:9.5px;flex:none;border-radius:2px">{{a.mono}}</span><span style="font-family:Figtree;font-weight:700;font-size:9.5px;letter-spacing:.1em;color:{{a.color}}">{{a.orgCaps}}</span></div>
+<div style="font:700 14.5px Georgia,serif;color:#22303c;margin-top:7px">{{a.hl}}</div>
+<div style="font:500 10.5px Figtree;color:#8a8577;margin-top:5px">{{a.draft}} · submitted {{a.at}} by {{a.by}}</div>
+</div>
+</sc-for>
+<div style="font:400 11px/1.55 Figtree;color:#b0ac9c;padding:4px 2px">Releases from organizations under JIC review hold here until approved. Authors see the hold state in their composer.</div>
+</div>
+<div style="flex:1;min-width:440px;background:#fff;box-shadow:0 14px 40px rgba(34,48,60,.12);padding:30px 38px">
+<sc-if value="{{retHist}}" hint-placeholder-val="{{false}}">
+<div style="background:#fbeeec;border:1px solid #d69a92;padding:10px 14px;border-radius:4px;margin-bottom:16px;font:500 12px/1.5 Figtree;color:#7a352c"><span style="font:800 9px Figtree;letter-spacing:.1em;background:#8f2a20;color:#fff;padding:2px 6px;border-radius:3px;margin-right:8px">↩ RETURNED 2:12 PM</span>“Add the distribution point hours and the schools line before this goes out.” — you</div>
+</sc-if>
+<div style="display:flex;align-items:center;gap:12px;padding-bottom:12px;border-bottom:2px solid {{appCur.color}}">
+<div style="width:36px;height:36px;background:{{appCur.color}};color:#fff;display:flex;align-items:center;justify-content:center;font-family:Figtree;font-weight:700;font-size:12px;flex:none;border-radius:2px">{{appCur.mono}}</div>
+<div><div style="font-family:Georgia,serif;font-weight:700;font-size:13px;letter-spacing:.04em;color:{{appCur.color}}">{{appCur.orgCaps}}</div><div style="font:400 10.5px Figtree;color:#8a8577;margin-top:2px">{{appCur.draft}} · submitted {{appCur.at}} by {{appCur.by}}</div></div>
+</div>
+<div style="font:700 22px/1.3 Georgia,serif;color:#22303c;margin-top:16px;text-wrap:pretty">{{appCur.hl}}</div>
+<div style="display:flex;align-items:center;gap:8px;margin-top:16px"><span style="font:700 9.5px Figtree;letter-spacing:.14em;color:#8a8577">CHANGES FROM {{appCur.prev}}</span><span style="flex:1;border-top:1px solid #eceadf"></span><span style="font:500 10px Figtree;color:#b0ac9c">removed struck · added shaded</span></div>
+<div style="margin-top:12px">
+<sc-for list="{{appDiff}}" as="d" hint-placeholder-count="4">
+<p style="font-family:Georgia,serif;font-size:14px;line-height:1.75;margin:10px 0 0;color:{{d.col}};background:{{d.bg}};text-decoration:{{d.deco}};padding:{{d.pad}}">{{d.t}}</p>
+</sc-for>
+</div>
+<div style="border-top:1px solid #eceadf;margin-top:24px;padding-top:18px">
+<sc-if value="{{appIdle}}" hint-placeholder-val="{{true}}">
+<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+<div style="background:#22303c;color:#f5f3ec;font:700 13.5px Figtree;padding:11px 22px;border-radius:3px;cursor:pointer" style-hover="background:#33465a" onClick="{{appAskGo}}">Approve &amp; release</div>
+<div style="font:700 13px Figtree;color:#8f2a20;cursor:pointer;border:1px solid #d69a92;padding:10px 18px;border-radius:3px" style-hover="background:#fbeeec" onClick="{{appRetGo}}">Return with note</div>
+<div style="font:400 11px Figtree;color:#b0ac9c">Approving releases it to the public wire immediately.</div>
+</div>
+</sc-if>
+<sc-if value="{{appAsk}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;align-items:center;gap:10px;font:700 13px Figtree;color:#22303c;background:#faf9f5;border:1px solid #ddd9cc;padding:10px 16px;border-radius:999px;width:fit-content">Release to the public wire now?<span style="cursor:pointer;color:#3c6b3a" onClick="{{appYes}}">Release</span>·<span style="cursor:pointer;color:#6d6a5e" onClick="{{appNo}}">Keep pending</span></div>
+</sc-if>
+<sc-if value="{{appRet}}" hint-placeholder-val="{{false}}">
+<div>
+<textarea style="width:100%;box-sizing:border-box;border:1px solid #d69a92;border-radius:4px;min-height:74px;padding:10px 12px;font:400 13px/1.5 Figtree;color:#22303c;outline:none;resize:vertical;background:#fffdfc" placeholder="Tell the author what needs to change — a note is required." value="{{appNote}}" onChange="{{onAppNote}}"></textarea>
+<div style="display:flex;gap:14px;align-items:center;margin-top:10px">
+<div style="background:#8f2a20;color:#fff;font:700 13px Figtree;padding:10px 18px;border-radius:3px;cursor:pointer" style-hover="background:#a53d32" onClick="{{appSubmitRet}}">Return to author</div>
+<div style="font:700 12.5px Figtree;color:#6d6a5e;cursor:pointer" onClick="{{appNo}}">Cancel</div>
+<sc-if value="{{appNoteErr}}" hint-placeholder-val="{{false}}"><div style="font:600 11.5px Figtree;color:#8f2a20">A note is required — authors need to know what to change.</div></sc-if>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{appApproved}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;align-items:center;gap:10px;background:#eef4ec;border:1px solid #9dbb9a;padding:12px 16px;border-radius:4px;font:700 13px Figtree;color:#2e4d2c">✓ Released to the wire at 2:47 PM <span style="font-weight:700;color:#3c6b3a;cursor:pointer" onClick="{{goWire}}">View on the wire →</span></div>
+</sc-if>
+<sc-if value="{{appReturned}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;align-items:center;gap:10px;background:#fbeeec;border:1px solid #d69a92;padding:12px 16px;border-radius:4px;font:700 13px Figtree;color:#7a352c">↩ Returned to the author with your note at 2:47 PM.</div>
+</sc-if>
+</div>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{sWx}}" hint-placeholder-val="{{false}}">
+<div style="min-height:100%;background:#fff;font-family:'Public Sans',system-ui,sans-serif" data-screen-label="Weather Desk">
+<div style="background:#112e51;color:#fff">
+<div style="max-width:1080px;margin:0 auto;padding:16px 24px 14px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+<div><div style="font:800 19px 'Public Sans';letter-spacing:.05em">THE WEATHER DESK</div><div style="font:400 11px 'Public Sans';color:#a9bdd6;margin-top:2px">Fairhaven Regional Forecast Office</div></div>
+<div style="margin-left:auto;display:flex;align-items:center;gap:8px"><span style="font:600 11px 'Public Sans';color:#a9bdd6">FORECAST ZONE</span>
+<select style="background:#0c2340;color:#fff;border:1px solid #3c5a80;border-radius:3px;font:600 12.5px 'Public Sans';padding:6px 8px;outline:none" value="{{zoneVal}}" onChange="{{onZone}}">
+<option value="0">FHZ-002 — Fairhaven Inland</option>
+<option value="1">FHZ-003 — Fairhaven Coastal</option>
+<option value="2">FHZ-004 — Millbrook Valley</option>
+</select></div>
+</div>
+<div style="background:#0c2340">
+<div style="max-width:1080px;margin:0 auto;padding:0 24px;display:flex;gap:22px;font:600 11.5px 'Public Sans'">
+<span style="color:#fff;padding:9px 0;box-shadow:inset 0 -3px 0 #e8b437">Forecast</span><span style="color:#a9bdd6;padding:9px 0">Radar</span><span style="color:#a9bdd6;padding:9px 0;cursor:pointer" onClick="{{goWarnMaybe}}">Alerts</span><span style="color:#a9bdd6;padding:9px 0">Rivers &amp; Lakes</span><span style="color:#a9bdd6;padding:9px 0">Climate</span>
+</div>
+</div>
+</div>
+<sc-if value="{{hazStrip}}" hint-placeholder-val="{{false}}">
+<div style="background:{{pr.col}};color:#fff;cursor:pointer" onClick="{{goWarn}}">
+<div style="max-width:1080px;margin:0 auto;padding:9px 24px;display:flex;align-items:center;gap:10px;font:600 13px 'Public Sans'"><span style="background:#fff;color:{{pr.col}};font:800 9.5px 'Public Sans';letter-spacing:.08em;padding:2px 7px;border-radius:3px;flex:none">⚠ {{pr.sev}}</span><span style="flex:1">1 active hazard — {{pr.type}} · until {{pr.expShort}}</span><span style="font-weight:800;white-space:nowrap">Details →</span></div>
+</div>
+</sc-if>
+<div style="max-width:1080px;margin:0 auto;padding:22px 24px 70px">
+<div style="display:flex;gap:22px;align-items:stretch;flex-wrap:wrap">
+<div style="width:330px;flex:none;border:1px solid #d6dbe0;border-radius:4px">
+<div style="background:#f0f3f6;border-bottom:1px solid #d6dbe0;padding:9px 16px;font:700 11px 'Public Sans';letter-spacing:.1em;color:#3d4f61">CURRENT CONDITIONS — {{zoneName}}</div>
+<div style="padding:16px 18px">
+<div style="display:flex;align-items:center;gap:16px"><div style="font:800 44px 'Public Sans';color:#112e51">{{w.temp}}°F</div><div><div style="font:700 15px 'Public Sans';color:#1b2733">{{w.cond}}</div><div style="font:400 11px 'Public Sans';color:#5a6a76;margin-top:2px">{{w.station}}</div></div></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px 16px;margin-top:16px;font:400 12.5px 'Public Sans';color:#3d4f61">
+<span style="display:flex;justify-content:space-between;gap:8px">Humidity <b style="white-space:nowrap">{{w.hum}}</b></span><span style="display:flex;justify-content:space-between;gap:8px">Wind <b style="white-space:nowrap">{{w.wind}}</b></span>
+<span style="display:flex;justify-content:space-between;gap:8px">Dewpoint <b style="white-space:nowrap">{{w.dew}}</b></span><span style="display:flex;justify-content:space-between;gap:8px">Pressure <b style="white-space:nowrap">{{w.pres}}</b></span>
+<span style="display:flex;justify-content:space-between;gap:8px">Visibility <b style="white-space:nowrap">{{w.vis}}</b></span><span style="display:flex;justify-content:space-between;gap:8px">Last 3 hr rain <b style="white-space:nowrap">{{w.rain}}</b></span>
+</div>
+</div>
+</div>
+<div style="flex:1;min-width:340px;border:1px solid #d6dbe0;border-radius:4px;display:flex;flex-direction:column">
+<div style="background:#f0f3f6;border-bottom:1px solid #d6dbe0;padding:9px 16px;font:700 11px 'Public Sans';letter-spacing:.1em;color:#3d4f61">ACTIVE ALERTS — FAIRHAVEN REGION</div>
+<div style="padding:14px 16px;flex:1">
+<sc-if value="{{alNone}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;align-items:center;gap:10px;font:600 13.5px 'Public Sans';color:#2e5d3a"><span style="width:10px;height:10px;border-radius:50%;background:#4b8a5e;flex:none"></span>No active watches, warnings or advisories.</div>
+<div style="font:400 12px/1.6 'Public Sans';color:#5a6a76;margin-top:10px">Hazardous Weather Outlook: no hazardous weather is expected through Friday.</div>
+</sc-if>
+<sc-for list="{{alCards}}" as="al" hint-placeholder-count="1">
+<div style="display:flex;align-items:center;gap:12px;border:1px solid {{al.col}};border-left:6px solid {{al.col}};border-radius:3px;padding:11px 14px;margin-bottom:9px;cursor:pointer" style-hover="background:#f6f8fa" onClick="{{al.go}}">
+<span style="background:{{al.col}};color:#fff;font:800 9.5px 'Public Sans';letter-spacing:.08em;padding:3px 7px;border-radius:3px;flex:none">⚠ {{al.sev}}</span>
+<div style="flex:1;min-width:0"><div style="font:700 14px 'Public Sans';color:#1b2733">{{al.type}}</div><div style="font:400 11.5px 'Public Sans';color:#5a6a76;margin-top:1px">{{al.line}}</div></div>
+<span style="font:700 12px 'Public Sans';color:#1a4480;white-space:nowrap">Details →</span>
+</div>
+</sc-for>
+<sc-if value="{{alOutlook}}" hint-placeholder-val="{{false}}"><div style="font:400 12px/1.6 'Public Sans';color:#5a6a76;margin-top:6px">Hazardous Weather Outlook: {{outlook}}</div></sc-if>
+</div>
+</div>
+</div>
+<div style="border:1px solid #d6dbe0;border-radius:4px;margin-top:22px">
+<div style="background:#f0f3f6;border-bottom:1px solid #d6dbe0;padding:9px 16px;font:700 11px 'Public Sans';letter-spacing:.1em;color:#3d4f61">FORECAST — {{zoneName}}</div>
+<div style="display:flex;flex-wrap:wrap">
+<sc-for list="{{fc}}" as="d" hint-placeholder-count="7">
+<div style="flex:1;min-width:96px;text-align:center;border-right:1px solid #e5e9ec;padding:14px 6px 16px">
+<div style="font:700 10.5px 'Public Sans';letter-spacing:.08em;color:#5a6a76">{{d.d}}</div>
+<div style="height:34px;display:flex;align-items:center;justify-content:center;margin-top:6px">
+<sc-if value="{{d.sun}}" hint-placeholder-val="{{false}}"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#d99a1f" stroke-width="2"><circle cx="12" cy="12" r="4.5" fill="#f2c14e" stroke="none"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M19.4 4.6l-2.1 2.1M6.7 17.3l-2.1 2.1"></path></svg></sc-if>
+<sc-if value="{{d.cloud}}" hint-placeholder-val="{{false}}"><svg width="30" height="30" viewBox="0 0 24 24" fill="#b9c4cd"><path d="M6.5 18a4.5 4.5 0 0 1-.4-9A6 6 0 0 1 17.7 9.8 4 4 0 0 1 17 18z"></path></svg></sc-if>
+<sc-if value="{{d.rain}}" hint-placeholder-val="{{false}}"><svg width="30" height="30" viewBox="0 0 24 24"><path fill="#8fa5b5" d="M6.5 14a4.5 4.5 0 0 1-.4-9A6 6 0 0 1 17.7 5.8 4 4 0 0 1 17 14z"></path><path stroke="#4a7fae" stroke-width="1.8" stroke-linecap="round" d="M8 17l-1 3M12 17l-1 3M16 17l-1 3"></path></svg></sc-if>
+</div>
+<div style="font:700 15px 'Public Sans';color:#112e51;margin-top:4px">{{d.hi}}</div>
+<div style="font:400 11px/1.4 'Public Sans';color:#5a6a76;margin-top:3px;padding:0 4px">{{d.txt}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="display:flex;gap:22px;margin-top:22px;align-items:flex-start;flex-wrap:wrap">
+<div style="flex:1;min-width:380px;border:1px solid #d6dbe0;border-radius:4px">
+<div style="background:#f0f3f6;border-bottom:1px solid #d6dbe0;padding:9px 16px;font:700 11px 'Public Sans';letter-spacing:.1em;color:#3d4f61">DETAILED FORECAST</div>
+<div style="padding:6px 16px 12px">
+<sc-for list="{{det}}" as="d" hint-placeholder-count="4">
+<div style="display:flex;gap:14px;padding:10px 0;border-bottom:1px solid #eef1f3"><span style="width:110px;flex:none;font:700 12.5px 'Public Sans';color:#1b2733">{{d.p}}</span><span style="font:400 12.5px/1.6 'Public Sans';color:#3d4f61">{{d.t}}</span></div>
+</sc-for>
+</div>
+</div>
+<div style="width:340px;flex:none;border:1px solid #d6dbe0;border-radius:4px">
+<div style="background:#f0f3f6;border-bottom:1px solid #d6dbe0;padding:9px 16px;font:700 11px 'Public Sans';letter-spacing:.1em;color:#3d4f61">FORECAST DISCUSSION — 2:30 PM</div>
+<div style="padding:14px 16px;font:400 12px/1.7 ui-monospace,Menlo,monospace;color:#3d4f61">{{disc}}</div>
+</div>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{sWarn}}" hint-placeholder-val="{{false}}">
+<div style="min-height:100%;background:#fff;font-family:'Public Sans',system-ui,sans-serif" data-screen-label="Warning product">
+<div style="background:#112e51;color:#fff">
+<div style="max-width:920px;margin:0 auto;padding:13px 24px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+<div style="font:800 15px 'Public Sans';letter-spacing:.05em;cursor:pointer" onClick="{{goWx}}">THE WEATHER DESK</div>
+<div style="font:400 11.5px 'Public Sans';color:#a9bdd6"><span style="cursor:pointer;text-decoration:underline" onClick="{{goWx}}">Forecast</span> › Alerts › {{pr.type}}</div>
+</div>
+</div>
+<div style="background:{{pr.col}};color:#fff">
+<div style="max-width:920px;margin:0 auto;padding:20px 24px 18px">
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="background:#fff;color:{{pr.col}};font:800 10.5px 'Public Sans';letter-spacing:.1em;padding:3px 9px;border-radius:3px">⚠ {{pr.sev}}</span><span style="font:600 11.5px 'Public Sans';opacity:.9">The Weather Desk · Fairhaven Regional Forecast Office</span></div>
+<div style="font:800 30px 'Public Sans';margin-top:10px;letter-spacing:.01em">{{pr.type}}</div>
+<div style="display:flex;gap:26px;margin-top:12px;font:400 12px 'Public Sans';flex-wrap:wrap">
+<span style="display:inline-flex;gap:8px;white-space:nowrap"><span style="opacity:.75;font-weight:600">ISSUED</span><b>{{pr.issued}}</b></span>
+<span style="display:inline-flex;gap:8px;white-space:nowrap"><span style="opacity:.75;font-weight:600">EFFECTIVE</span><b>{{pr.eff}}</b></span>
+<span style="display:inline-flex;gap:8px;white-space:nowrap"><span style="opacity:.75;font-weight:600">EXPIRES</span><b>{{pr.exp}}</b></span>
+</div>
+</div>
+</div>
+<div style="max-width:920px;margin:0 auto;padding:22px 24px 80px">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#d6dbe0;border:1px solid #d6dbe0;border-radius:4px;overflow:hidden">
+<div style="background:#fff;padding:14px 18px"><div style="font:800 10.5px 'Public Sans';letter-spacing:.12em;color:{{pr.col}}">WHAT</div><div style="font:400 13px/1.6 'Public Sans';color:#1b2733;margin-top:5px">{{pr.what}}</div></div>
+<div style="background:#fff;padding:14px 18px"><div style="font:800 10.5px 'Public Sans';letter-spacing:.12em;color:{{pr.col}}">WHERE</div><div style="font:400 13px/1.6 'Public Sans';color:#1b2733;margin-top:5px">{{pr.where}}</div></div>
+<div style="background:#fff;padding:14px 18px"><div style="font:800 10.5px 'Public Sans';letter-spacing:.12em;color:{{pr.col}}">WHEN</div><div style="font:400 13px/1.6 'Public Sans';color:#1b2733;margin-top:5px">{{pr.when}}</div></div>
+<div style="background:#fff;padding:14px 18px"><div style="font:800 10.5px 'Public Sans';letter-spacing:.12em;color:{{pr.col}}">IMPACTS</div><div style="font:400 13px/1.6 'Public Sans';color:#1b2733;margin-top:5px">{{pr.impacts}}</div></div>
+</div>
+<div style="display:flex;gap:22px;margin-top:22px;align-items:flex-start;flex-wrap:wrap">
+<div style="flex:1;min-width:400px">
+<div style="font:700 11px 'Public Sans';letter-spacing:.1em;color:#3d4f61">AFFECTED ZONES</div>
+<div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap">
+<span style="border:1px solid #d6dbe0;border-radius:3px;padding:4px 10px;font:600 11.5px 'Public Sans';color:#1b2733">FHZ-003 · Fairhaven Coastal</span>
+<span style="border:1px solid #d6dbe0;border-radius:3px;padding:4px 10px;font:600 11.5px 'Public Sans';color:#1b2733">FHZ-004 · Millbrook Valley</span>
+<span style="border:1px solid #d6dbe0;border-radius:3px;padding:4px 10px;font:600 11.5px 'Public Sans';color:#1b2733">City of Fairhaven Zones 2–4</span>
+</div>
+<div style="border:1px solid #d6dbe0;border-radius:4px;margin-top:18px;padding:0">
+<div style="background:#f0f3f6;border-bottom:1px solid #d6dbe0;padding:8px 14px;font:700 10.5px 'Public Sans';letter-spacing:.1em;color:#3d4f61">PRODUCT TEXT</div>
+<div style="padding:16px 18px;font:400 12.5px/1.8 ui-monospace,Menlo,monospace;color:#1b2733">
+<div style="font-weight:700">{{pr.hlLine}}</div>
+<sc-for list="{{prBody}}" as="p" hint-placeholder-count="2"><p style="margin:14px 0 0">{{p.t}}</p></sc-for>
+<div style="font-weight:700;margin-top:18px">PRECAUTIONARY/PREPAREDNESS ACTIONS...</div>
+<sc-for list="{{prActs}}" as="p" hint-placeholder-count="3"><p style="margin:12px 0 0">{{p.t}}</p></sc-for>
+<div style="margin-top:18px">&amp;&amp;</div>
+<div>$$</div>
+</div>
+</div>
+</div>
+<div style="width:330px;flex:none">
+<div style="border:1px solid #d6dbe0;border-radius:4px;overflow:hidden">
+<div style="background:#f0f3f6;border-bottom:1px solid #d6dbe0;padding:8px 14px;font:700 10.5px 'Public Sans';letter-spacing:.1em;color:#3d4f61">{{pr.radarCap}}</div>
+<div style="height:250px;background:repeating-linear-gradient(45deg,#e2e7ec 0 14px,#dde3e9 14px 28px);display:flex;align-items:center;justify-content:center;position:relative">
+<div style="text-align:center;color:#8595a3"><div style="font:700 11px 'Public Sans';letter-spacing:.1em">RADAR / CONE IMAGERY SLOT</div><div style="font:400 10.5px 'Public Sans';margin-top:4px">Beat imagery renders here (WX-013)</div></div>
+<span style="position:absolute;right:10px;bottom:10px;background:rgba(46,107,46,.92);color:#fff;font:800 9px 'Public Sans';letter-spacing:.12em;padding:2px 8px;border-radius:3px">EXERCISE</span>
+</div>
+</div>
+<div style="border:1px solid #d6dbe0;border-radius:4px;margin-top:14px;padding:13px 16px;font:400 12px/1.65 'Public Sans';color:#3d4f61">{{pr.next}}<br>Source: The Weather Desk · Fairhaven Regional Forecast Office.</div>
+</div>
+</div>
+</div>
+</div>
+</sc-if>
+
+</div>
+<div style="flex:none;height:22px;background:#2e6b2e;color:#eaf5e6;font:700 10px/22px Figtree,sans-serif;text-align:center;letter-spacing:.14em;white-space:nowrap;overflow:hidden">PULSE TRAINING ENVIRONMENT — EXERCISE · NOT REAL-WORLD INFORMATION</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;wireState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;normal&quot;,&quot;staged&quot;,&quot;embargoed&quot;,&quot;returned&quot;],&quot;default&quot;:&quot;normal&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wire Room&quot;},&quot;weatherState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;calm&quot;,&quot;watch&quot;,&quot;warning&quot;],&quot;default&quot;:&quot;watch&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Weather Desk&quot;},&quot;storyboard&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Weather Desk&quot;}}">
+class Component extends DCLogic {
+  state = { screen: 'wire', tick: 0, stubKey: 'today', zone: 1, orgFilter: -1, relSel: 4,
+    nrOrg: 0, org: 0, orgMenu: false, pdf: false, rich: false, hl: '', social: false,
+    timing: 'now', confirm: false, published: false, cancelAsk: false,
+    appSel: 0, appNote: '', appMode: 'idle', appNoteErr: false, appDone: '' };
+  componentDidMount() { this.iv = setInterval(() => this.setState(s => ({ tick: s.tick + 1 })), 3600); }
+  componentWillUnmount() { clearInterval(this.iv); }
+  go(patch) { return () => this.setState(patch); }
+  renderVals() {
+    const P = this.props, S = this.state;
+    const wState = P.wireState ?? 'normal', wxs = P.weatherState ?? 'watch', story = P.storyboard ?? false;
+    const ORGS = [
+      { key: 'fcem', mono: 'FC', color: '#1f3d5c', name: 'Fulton County Emergency Management', caps: 'FULTON COUNTY EMERGENCY MANAGEMENT', addr: 'Emergency Operations Center · 400 Civic Plaza · Fairhaven', handle: '@FulcoEM', cn: 'Dana Reyes', ct: 'Public Information Officer', cp: '(555) 014-2200', ce: 'press@fulcoem.gov' },
+      { key: 'city', mono: 'CF', color: '#2f5d50', name: 'City of Fairhaven', caps: 'CITY OF FAIRHAVEN · OFFICE OF COMMUNICATIONS', addr: 'City Hall · 1 Commons Square · Fairhaven', handle: '@CityFairhaven', cn: 'Alan Whitfield', ct: 'Communications Director', cp: '(555) 014-3310', ce: 'press@fairhaven.gov' },
+      { key: 'water', mono: 'FW', color: '#0e6a73', name: 'Fairhaven Water Utility', caps: 'FAIRHAVEN WATER UTILITY', addr: 'Operations Center · 88 Millbrook Rd · Fairhaven', handle: '@FairhavenWater', cn: 'Priya Raman', ct: 'Media Relations Manager', cp: '(555) 014-4587', ce: 'media@fairhavenwater.org' },
+      { key: 'schools', mono: 'PS', color: '#6b3a2e', name: 'Fairhaven Public Schools', caps: 'FAIRHAVEN PUBLIC SCHOOLS', addr: 'District Office · 210 Alder St · Fairhaven', handle: '@FairhavenPS', cn: 'Renee Calloway', ct: 'Community Relations', cp: '(555) 014-5102', ce: 'communications@fairhavenps.org' }];
+    const RELS = [
+      { no: '2026-0714-044', org: 0, time: '2:35 PM', pgs: 2, hl: 'Boil water advisory remains in effect; second round of samples collected', sub: 'Lab results from the second sample set are expected by 6:00 PM. Residents in Zones 2–4 should continue boiling water for drinking and cooking.',
+        pA: ['FAIRHAVEN — The precautionary boil water advisory for Zones 2, 3 and 4 remains in effect. A second round of confirmation samples was collected at 2:15 PM from twelve monitoring points across the affected zones and delivered to the state laboratory.', 'Results are expected by 6:00 PM today. Until the advisory is lifted, residents in the affected zones should boil tap water for at least one minute before drinking, cooking, or preparing infant formula.'],
+        pB: ['Free water distribution continues at Harborview Rec Center and Eastgate Mall until 8:00 PM today. Updates will be issued on this wire as laboratory results are received.'] },
+      { no: '2026-0714-043', org: 1, time: '1:20 PM', pgs: 2, hl: 'Free water distribution open at Harborview Rec Center and Eastgate Mall', sub: 'Both sites are open until 8:00 PM today. Bring your own containers; the limit is three gallons per household member per day.',
+        pA: ['FAIRHAVEN — The City of Fairhaven has opened free water distribution points at Harborview Recreation Center (120 Shoreline Dr) and Eastgate Mall (north lot, 2200 Eastgate Blvd) for residents in advisory Zones 2, 3 and 4.', 'Both sites operate until 8:00 PM today and will reopen at 8:00 AM tomorrow if the advisory remains in effect. Residents should bring their own containers; the limit is three gallons per household member per day.'],
+        pB: ['Residents who cannot travel to a distribution point may call the city assistance line at (555) 014-3400 to arrange delivery.'] },
+      { no: '2026-0714-042', org: 3, time: '12:10 PM', pgs: 1, hl: 'Schools move to bottled water service; kitchens on modified menus', sub: 'All district buildings remain open. Drinking fountains in Zones 2–4 buildings are closed until the advisory is lifted.',
+        pA: ['FAIRHAVEN — All Fairhaven Public Schools buildings remain open and on regular schedules. Buildings in advisory Zones 2, 3 and 4 have closed drinking fountains and switched to bottled water service effective this morning.', 'School kitchens in the affected zones are operating on modified menus that require no tap water. Families do not need to send water with students; bottled water is provided.'], pB: [] },
+      { no: '2026-0714-041', org: 2, time: '11:05 AM', pgs: 1, hl: 'Millbrook treatment plant update: laboratory results expected by 6:00 PM', sub: 'The precautionary advisory issued by Fulton County remains in effect while confirmation samples are processed.',
+        pA: ['FAIRHAVEN — Fairhaven Water Utility crews completed an inspection of the Millbrook treatment plant at 10:30 AM. Initial samples taken this morning are being processed by the state laboratory, with results expected by 6:00 PM.', 'The precautionary boil water advisory issued by Fulton County Emergency Management remains in effect for Zones 2, 3 and 4 while results are pending. The utility will flush affected mains as a precaution beginning this afternoon.'], pB: [] },
+      { no: '2026-0714-040', org: 0, time: '9:41 AM', pgs: 2, rev: true, hl: 'Precautionary boil water advisory issued for Zones 2, 3 and 4', sub: 'Residents should boil tap water for at least one minute before drinking or cooking until further notice.',
+        pA: ['FAIRHAVEN — The Fulton County Department of Emergency Management, in coordination with the Fairhaven Water Utility, has issued a precautionary boil water advisory for customers in Zones 2, 3 and 4, effective immediately.', 'Pressure irregularities were detected overnight at the Millbrook treatment plant. As a precaution, residents in the affected zones should boil tap water for at least one minute and let it cool before drinking, cooking, preparing infant formula, or making ice.'],
+        pB: ['Water remains safe for bathing, laundry, and other non-consumption uses. Updates will be issued on this wire and on official social channels as laboratory results become available.'] }];
+    const go = (s, x) => () => this.setState(Object.assign({ screen: s }, x || {}));
+    // ---- alert bar ----
+    const boil = { chip: 'ADVISORY', tab: '#b97a00', msg: 'Precautionary boil water advisory in effect for Zones 2, 3 and 4 — lab results expected 6:00 PM', time: '9:41 AM', to: go('stub', { stubKey: 'alerts' }) };
+    const watchAl = { chip: 'ADVISORY', tab: '#b97a00', msg: 'Flash Flood Watch in effect for the Fairhaven region until 8:00 PM', time: '11:32 AM', to: go('warn') };
+    const warnAl = { msg: 'Flash Flood Warning for Millbrook Valley and coastal Fairhaven until 4:15 PM — avoid flooded roads', time: '2:02 PM', to: go('warn') };
+    const abBand = !story && wxs === 'warning';
+    const abTicker = !story && !abBand;
+    const tickList = wxs === 'watch' ? [watchAl, boil] : [boil];
+    const cur = abBand ? warnAl : tickList[S.tick % tickList.length];
+    // ---- channel strip ----
+    const wireScreens = ['wire', 'newsroom', 'release', 'composer', 'approval'];
+    const chan = (label, on, to) => ({ label, go: to, col: on ? '#101b23' : '#5a6a76', w: on ? 800 : 600, sh: on ? 'inset 0 -2px 0 #101b23' : 'none' });
+    const onWire = wireScreens.indexOf(S.screen) >= 0, onWx = S.screen === 'wx' || S.screen === 'warn';
+    const chans = [
+      chan('Fairhaven Today', S.screen === 'stub' && S.stubKey === 'today', go('stub', { stubKey: 'today' })),
+      chan('News', S.screen === 'stub' && S.stubKey === 'news', go('stub', { stubKey: 'news' })),
+      chan('Pulse', S.screen === 'stub' && S.stubKey === 'pulse', go('stub', { stubKey: 'pulse' })),
+      chan('Wire Room', onWire, go('wire')),
+      chan('Weather', onWx, go('wx'))];
+    const STUBS = {
+      today: { t: 'Fairhaven Today', p: 'The portal was designed in session D2 — see “Fairhaven Today Portal.dc.html”. In the real shell this link opens it directly.' },
+      news: { t: 'News Outlets', p: 'Newsline 7, The Courier-Ledger, The National Wire and The Scoop were designed in session D3 — four skins, one system.' },
+      pulse: { t: 'Pulse', p: 'The social app was designed in session D1 — see “Pulse Social App.dc.html”.' },
+      alerts: { t: 'Alerts history', p: 'Reverse-chronological list of every alert issued this exercise (PRT-012) — scoped in D2, content pass later. The alert bar’s “Details” routes here for non-weather alerts.' } };
+    // ---- wire ----
+    const fnames = ['All', 'Fulton County EM', 'City of Fairhaven', 'Water Utility', 'Public Schools'];
+    const filters = fnames.map((label, i) => { const v = i - 1, on = S.orgFilter === v; return { label, go: () => this.setState({ orgFilter: v }), bg: on ? '#22303c' : 'transparent', col: on ? '#f5f3ec' : '#6d6a5e', bd: on ? '#22303c' : '#c9c4b4' }; });
+    const rows = RELS.filter(r => S.orgFilter < 0 || r.org === S.orgFilter).map((r, iAll) => {
+      const idx = RELS.indexOf(r); const o = ORGS[r.org];
+      return { mono: o.mono, color: o.color, orgCaps: o.caps, time: r.time, hl: r.hl, sub: r.sub, rev: !!r.rev, go: go('release', { relSel: idx }) };
+    });
+    const staged = wState === 'staged';
+    // ---- release ----
+    const schedRel = { no: '2026-0714-045', org: 1, time: '3:06 PM', pgs: 1, hl: 'Boil water advisory lifted for Zones 2 and 3', sub: '',
+      pA: ['FAIRHAVEN — Sampling completed at 2:15 PM confirms water quality in Zones 2 and 3 meets all state standards. The precautionary boil water advisory is lifted for those zones effective immediately.', 'Zone 4 remains under advisory until a second sample set clears. Results are expected by 6:00 PM.'], pB: [] };
+    const relIsSched = S.relSel === -1;
+    const rel = relIsSched ? schedRel : RELS[S.relSel];
+    const rOrg = ORGS[rel.org];
+    const relParasA = rel.pA.map(t => ({ t })), relParasB = rel.pB.map(t => ({ t }));
+    // ---- composer ----
+    const curOrg = ORGS[S.org];
+    const grants = [0, 1, 2].map(i => ({ ...ORGS[i], cur: i === S.org, bg: i === S.org ? '#f4f2ea' : 'transparent', go: () => this.setState({ org: i, orgMenu: false }) }));
+    const sug = 'Boil water advisory remains in effect; second round of samples collected';
+    const retBanner = wState === 'returned' && !S.published;
+    const schedBanner = S.published && S.timing === 'sched';
+    const pubBanner = S.published && S.timing === 'now';
+    const isSched = S.timing === 'sched';
+    const on = '#22303c', off = '#c9c4b4';
+    const composer = {
+      hl: S.hl, onHl: e => this.setState({ hl: e.target.value, hlTouched: true }),
+      sugShow: S.pdf && S.hl === '', sug, useSug: () => this.setState({ hl: sug }),
+      showDrop: !S.pdf && !S.rich, rich: S.rich && !S.pdf,
+      dropPdf: e => { if (e && e.preventDefault) e.preventDefault(); this.setState({ pdf: true, rich: false }); },
+      onDrag: e => e.preventDefault(),
+      replacePdf: () => this.setState({ pdf: false }),
+      toRich: e => { e.stopPropagation(); this.setState({ rich: true }); },
+      toDrop: () => this.setState({ rich: false }),
+      setNow: () => this.setState({ timing: 'now' }), setSched: () => this.setState({ timing: 'sched' }),
+      nowBd: !isSched ? on : off, nowDot: !isSched ? on : 'transparent',
+      schBd: isSched ? on : off, schDot: isSched ? on : 'transparent',
+      toggleSocial: () => this.setState({ social: !S.social }),
+      soBd: S.social ? on : off, soBg: S.social ? on : '#fff', soCk: S.social ? '✓' : '',
+      toggleOrgMenu: () => this.setState({ orgMenu: !S.orgMenu }),
+      openConfirm: () => this.setState({ confirm: true }), closeConfirm: () => this.setState({ confirm: false }),
+      eat: e => e.stopPropagation(),
+      doPublish: () => this.setState({ confirm: false, published: true }),
+      editSched: () => this.setState({ published: false }),
+      askCancel: () => this.setState({ cancelAsk: true }), keepSched: () => this.setState({ cancelAsk: false }),
+      doCancel: () => this.setState({ cancelAsk: false, published: false, timing: 'now' }),
+      resetComposer: () => this.setState({ published: false, pdf: false, hl: '', social: false, timing: 'now' }) };
+    const cardHl = S.hl || sug;
+    // ---- approvals ----
+    const APP = [
+      { org: 1, hl: 'Boil water advisory lifted for Zones 2 and 3', draft: 'DRAFT 3', prev: 'DRAFT 2', by: 'A. Whitfield', at: '2:28 PM',
+        diff: [
+          { k: 's', t: 'FAIRHAVEN — Sampling completed at 2:15 PM confirms water quality in Zones 2 and 3 meets all state standards. The precautionary boil water advisory is lifted for those zones effective immediately.' },
+          { k: 'd', t: 'Zone 4 results are still pending.' },
+          { k: 'i', t: 'Zone 4 remains under advisory until a second sample set clears. Results are expected by 6:00 PM.' },
+          { k: 'i', t: 'Free water distribution at Harborview Rec Center and Eastgate Mall remains open until 8:00 PM for Zone 4 residents.' }] },
+      { org: 2, hl: 'Flushing guidance for households in restored zones', draft: 'DRAFT 1', prev: 'DRAFT 1 (new)', by: 'P. Raman', at: '2:41 PM',
+        diff: [
+          { k: 's', t: 'FAIRHAVEN — Once the advisory is lifted for your zone, run all cold-water taps for five minutes before use and discard the first batch of ice from automatic ice makers.' },
+          { k: 'i', t: 'Households with point-of-entry filtration should replace filter cartridges before returning the system to service.' }] }];
+    const appItems = APP.map((a, i) => { const o = ORGS[a.org]; const sel = S.appSel === i; return { orgCaps: o.caps, color: o.color, mono: o.mono, hl: a.hl, draft: a.draft, by: a.by, at: a.at, bg: sel ? '#fff' : '#f4f2ea', bd: sel ? '#22303c' : '#ddd9cc', go: () => this.setState({ appSel: i, appMode: 'idle', appDone: '', appNote: '', appNoteErr: false }) }; });
+    const ac = APP[S.appSel]; const acOrg = ORGS[ac.org];
+    const appCur = { color: acOrg.color, mono: acOrg.mono, orgCaps: acOrg.caps, hl: ac.hl, draft: ac.draft, prev: ac.prev, by: ac.by, at: ac.at };
+    const appDiff = ac.diff.map(d => ({ t: d.t, col: d.k === 'd' ? '#8f2a20' : d.k === 'i' ? '#25551f' : '#33302a', bg: d.k === 'i' ? '#eaf3ea' : d.k === 'd' ? '#fbeeec' : 'transparent', deco: d.k === 'd' ? 'line-through' : 'none', pad: d.k === 's' ? '0' : '4px 8px' }));
+    const approvals = {
+      appIdle: S.appMode === 'idle' && !S.appDone, appAsk: S.appMode === 'ask', appRet: S.appMode === 'ret',
+      appAskGo: () => this.setState({ appMode: 'ask' }), appRetGo: () => this.setState({ appMode: 'ret', appNoteErr: false }),
+      appYes: () => this.setState({ appMode: 'idle', appDone: 'approved' }), appNo: () => this.setState({ appMode: 'idle', appNoteErr: false }),
+      onAppNote: e => this.setState({ appNote: e.target.value, appNoteErr: false }),
+      appSubmitRet: () => { if (!S.appNote.trim()) { this.setState({ appNoteErr: true }); return; } this.setState({ appMode: 'idle', appDone: 'returned' }); },
+      appNote: S.appNote, appNoteErr: S.appNoteErr,
+      appApproved: S.appDone === 'approved', appReturned: S.appDone === 'returned',
+      retHist: wState === 'returned' && S.appSel === 0 };
+    // ---- weather ----
+    const zones = ['FHZ-002 — Fairhaven Inland', 'FHZ-003 — Fairhaven Coastal', 'FHZ-004 — Millbrook Valley'];
+    const zi = S.zone;
+    const WX = {
+      calm: { temps: [78, 76, 74], cond: 'Sunny', wind: 'SW 8 mph', hum: '54%', dew: '61°F', vis: '10 mi', pres: '30.11 in (steady)', rain: '0.00 in',
+        fc: [['TODAY', '78°', 'sun', 'Sunny'], ['TONIGHT', '63°', 'cloud', 'Mostly clear'], ['WED', '80°', 'sun', 'Sunny'], ['WED NIGHT', '64°', 'cloud', 'Partly cloudy'], ['THU', '79°', 'sun', 'Mostly sunny'], ['FRI', '77°', 'cloud', 'Partly sunny'], ['SAT', '76°', 'sun', 'Sunny']],
+        det: [['Today', 'Sunny, with a high near 78. Southwest wind around 8 mph.'], ['Tonight', 'Mostly clear, with a low around 63. Light southwest wind.'], ['Wednesday', 'Sunny, with a high near 80.'], ['Wednesday Night', 'Partly cloudy, with a low around 64.']],
+        disc: 'A ridge of high pressure holds across the region through midweek. Expect a quiet, warm stretch with light onshore winds each afternoon. No hazardous weather is expected through Friday.' },
+      watch: { temps: [71, 70, 69], cond: 'Showers', wind: 'SE 14 mph', hum: '88%', dew: '66°F', vis: '7 mi', pres: '29.84 in (falling)', rain: '0.35 in',
+        fc: [['TODAY', '71°', 'rain', 'Showers, heavy at times'], ['TONIGHT', '64°', 'rain', 'Rain, locally heavy'], ['WED', '72°', 'rain', 'Showers likely'], ['WED NIGHT', '63°', 'cloud', 'Gradual clearing'], ['THU', '75°', 'cloud', 'Partly sunny'], ['FRI', '77°', 'sun', 'Sunny'], ['SAT', '78°', 'sun', 'Sunny']],
+        det: [['This Afternoon', 'Showers, with thunderstorms possible after 3 PM. Rainfall amounts of 1 to 2 inches, locally higher. High near 71.'], ['Tonight', 'Rain, heavy at times, mainly before midnight. Low around 64.'], ['Wednesday', 'Showers likely, mainly before noon. High near 72.'], ['Wednesday Night', 'Gradual clearing, with a low around 63.']],
+        disc: 'A slow-moving frontal boundary will focus repeated rounds of heavy rain over the Fairhaven region this afternoon and evening. Soils are near saturation from last week; a FLASH FLOOD WATCH is in effect from 2 PM to 8 PM. The threat diminishes overnight as the boundary shifts east.' },
+      warning: { temps: [66, 65, 64], cond: 'Heavy rain', wind: 'SE 21 mph G32', hum: '96%', dew: '64°F', vis: '2 mi', pres: '29.66 in (falling)', rain: '1.85 in',
+        fc: [['TODAY', '66°', 'rain', 'Heavy rain, flooding'], ['TONIGHT', '61°', 'rain', 'Rain tapering'], ['WED', '70°', 'cloud', 'Showers ending'], ['WED NIGHT', '62°', 'cloud', 'Partly cloudy'], ['THU', '74°', 'sun', 'Mostly sunny'], ['FRI', '77°', 'sun', 'Sunny'], ['SAT', '78°', 'sun', 'Sunny']],
+        det: [['This Afternoon', 'Heavy rain. Flash flooding is occurring in parts of the warned area. Additional rainfall of 1 to 2 inches. High near 66.'], ['Tonight', 'Rain tapering to showers after 10 PM. Low around 61.'], ['Wednesday', 'Showers ending by noon, then gradual clearing. High near 70.'], ['Wednesday Night', 'Partly cloudy, with a low around 62.']],
+        disc: 'Training echoes over Millbrook Valley have produced 1.5 to 2.5 inches of rain in under three hours. A FLASH FLOOD WARNING is in effect until 4:15 PM for Millbrook Valley and coastal Fairhaven. Rain rates decrease from the west after 4 PM as the axis shifts offshore.' } };
+    const w0 = WX[wxs];
+    const w = { temp: w0.temps[zi], cond: w0.cond, wind: w0.wind, hum: w0.hum, dew: w0.dew, vis: w0.vis, pres: w0.pres, rain: w0.rain, station: 'Fairhaven Harbor Station · updated 2:35 PM' };
+    const fc = w0.fc.map(f => ({ d: f[0], hi: f[1], sun: f[2] === 'sun', cloud: f[2] === 'cloud', rain: f[2] === 'rain', txt: f[3] }));
+    const det = w0.det.map(d => ({ p: d[0], t: d[1] }));
+    // ---- products ----
+    const watchP = { type: 'FLASH FLOOD WATCH', sev: 'WATCH', col: '#2e6b4f', issued: '11:32 AM · Tue, Jul 14', eff: '2:00 PM · Tue, Jul 14', exp: '8:00 PM · Tue, Jul 14', expShort: '8:00 PM',
+      what: 'Flash flooding caused by excessive rainfall is possible.', where: 'Millbrook Valley, coastal and inland Fairhaven — including City of Fairhaven Zones 2, 3 and 4.', when: 'From 2:00 PM this afternoon through 8:00 PM this evening.', impacts: 'Creeks and streams may rise out of their banks. Low-lying and poor-drainage areas may flood.',
+      hlLine: '...FLASH FLOOD WATCH IN EFFECT FROM 2 PM THIS AFTERNOON THROUGH 8 PM THIS EVENING...',
+      body: ['A slow-moving frontal boundary will focus repeated rounds of heavy rain over the region this afternoon and evening. Rainfall amounts of 1 to 2 inches are expected, with locally higher amounts possible over Millbrook Valley.', 'Soils across the region are near saturation. Runoff will be rapid where heavier rain persists over the same areas.'],
+      acts: ['You should monitor later forecasts and be alert for possible Flash Flood Warnings. Those living in areas prone to flooding should be prepared to take action should flooding develop.'],
+      radarCap: 'REGIONAL RADAR · FAIRHAVEN · 2:44 PM', next: 'The next statement will be issued by 8:00 PM, or sooner if conditions warrant.' };
+    const warnP = { type: 'FLASH FLOOD WARNING', sev: 'WARNING', col: '#7a1010', issued: '2:02 PM · Tue, Jul 14', eff: 'Immediately', exp: '4:15 PM · Tue, Jul 14', expShort: '4:15 PM',
+      what: 'Life-threatening flash flooding. Heavy rain is producing flash flooding across the warned area.', where: 'Millbrook Valley and coastal Fairhaven, including City of Fairhaven Zones 2, 3 and 4.', when: 'Until 4:15 PM this afternoon.', impacts: 'Flooding of creeks, streets and underpasses. The Millbrook treatment plant access road may become impassable.',
+      hlLine: '...A FLASH FLOOD WARNING REMAINS IN EFFECT UNTIL 415 PM FOR MILLBROOK VALLEY AND COASTAL FAIRHAVEN...',
+      body: ['At 200 PM, emergency management and utility crews reported water over the roadway at Millbrook Rd and Route 9. Between 1.5 and 2.5 inches of rain have fallen. Additional rainfall amounts of 1 to 2 inches are possible in the warned area.', 'Locations that will experience flash flooding include Fairhaven, Millbrook Valley, Eastgate and the Harborview district.'],
+      acts: ['Turn around, don\u2019t drown. Do not drive through flooded roadways — most flood deaths occur in vehicles.', 'Move to higher ground now if you are near a creek or drainage channel.', 'The boil water advisory for Zones 2–4 remains in effect; flooding does not change advisory status.'],
+      radarCap: 'REGIONAL RADAR · FAIRHAVEN · 2:44 PM', next: 'The next statement will be issued by 3:15 PM.' };
+    const pr = wxs === 'warning' ? warnP : watchP;
+    const alCards = [];
+    if (wxs === 'warning') alCards.push({ type: 'Flash Flood Warning', sev: 'WARNING', col: '#7a1010', line: 'Until 4:15 PM · Millbrook Valley, coastal Fairhaven, Zones 2–4', go: go('warn') });
+    if (wxs !== 'calm') alCards.push({ type: 'Flash Flood Watch', sev: 'WATCH', col: '#2e6b4f', line: 'Until 8:00 PM · entire Fairhaven region', go: go('warn') });
+    return {
+      // shell
+      abTicker, abBand, abTab: cur.tab || '#b97a00', abChip: cur.chip || 'ADVISORY', abMsg: cur.msg, abTime: cur.time, abGo: cur.to,
+      chans,
+      // screens
+      sStory: story, sStub: !story && S.screen === 'stub', sWire: !story && S.screen === 'wire', sNewsroom: !story && S.screen === 'newsroom',
+      sRelease: !story && S.screen === 'release', sComposer: !story && S.screen === 'composer', sApproval: !story && S.screen === 'approval',
+      sWx: !story && S.screen === 'wx', sWarn: !story && S.screen === 'warn',
+      stub: STUBS[S.stubKey],
+      sbShells: [{ name: 'Fairhaven Today', col: '#123a63' }, { name: 'Pulse', col: '#DB3A54' }, { name: 'Wire Room', col: '#22303c' }],
+      // nav
+      goWire: go('wire'), goNewsroom: go('newsroom'), goComposer: go('composer'), goApproval: go('approval'), goWx: go('wx'), goWarn: go('warn'),
+      goWarnMaybe: wxs === 'calm' ? () => {} : go('warn'),
+      goSchedRel: go('release', { relSel: -1 }),
+      // wire
+      filters, rows, staged, embargoed: wState === 'embargoed' && !staged, showRows: !staged,
+      // release
+      rel: { no: rel.no, time: rel.time, hl: rel.hl, pgs: rel.pgs, file: 'release-' + rel.no + '.pdf · ' + rel.pgs + (rel.pgs > 1 ? ' pages' : ' page') },
+      rOrg, relParasA, relParasB, relHasP2: relParasB.length > 0, relRev: !relIsSched && !!rel.rev, relSched: relIsSched,
+      // newsroom
+      nr: ORGS[S.nrOrg],
+      nrTabs: ORGS.map((o, i) => ({ label: o.name.replace('Fulton County Emergency Management', 'Fulton County EM'), go: () => this.setState({ nrOrg: i }), bg: i === S.nrOrg ? '#22303c' : 'transparent', col: i === S.nrOrg ? '#f5f3ec' : '#6d6a5e', bd: i === S.nrOrg ? '#22303c' : '#c9c4b4' })),
+      nrRows: RELS.filter(r => r.org === S.nrOrg).map(r => ({ time: r.time, no: r.no, hl: r.hl, sub: r.sub, go: go('release', { relSel: RELS.indexOf(r) }) })),
+      // composer
+      curOrg, grants, orgMenu: S.orgMenu, autosave: 'Autosaves · Saved 2:46 PM',
+      emLine: isSched ? 'EMBARGOED — HOLD UNTIL 3:06 PM' : 'FOR IMMEDIATE RELEASE',
+      pdf: S.pdf, retBanner, schedBanner, pubBanner, pubSocial: S.social, isSched,
+      cancelAsk: S.cancelAsk, cancelAskOff: !S.cancelAsk,
+      social: S.social, cardHl, cityGate: curOrg.key === 'city' && !S.published,
+      canPublish: !S.published, pubDone: S.published,
+      pubLabel: isSched ? 'Schedule release' : 'Publish to the wire',
+      confirm: S.confirm, cfTitle: isSched ? 'Schedule this release?' : 'Publish this release?',
+      cfTiming: isSched ? 'Scheduled — today at 3:06 PM (in 19m)' : 'Immediately',
+      cfSocial: S.social ? 'Post link card as ' + curOrg.handle : 'No cross-post',
+      cfBtn: isSched ? 'Schedule for 3:06 PM' : 'Publish now',
+      ...composer,
+      // approvals
+      appItems, appCur, appDiff, ...approvals,
+      // weather
+      zoneVal: String(zi), onZone: e => this.setState({ zone: Number(e.target.value) }), zoneName: zones[zi].toUpperCase(),
+      w, fc, det, disc: w0.disc,
+      hazStrip: wxs !== 'calm', alNone: wxs === 'calm', alCards, alOutlook: wxs !== 'calm',
+      outlook: wxs === 'warning' ? 'flash flooding ongoing; conditions improve from the west after 4 PM.' : 'heavy rainfall this afternoon and evening may produce flash flooding.',
+      pr, prBody: pr.body.map(t => ({ t })), prActs: pr.acts.map(t => ({ t }))
+    };
+  }
+}
+</script>
+</body>
+</html>

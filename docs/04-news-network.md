@@ -57,7 +57,7 @@ Looking Glass demonstrated the pattern: NewsNow published "Emergency Call Delays
 
 **Design notes.** One rendering system, multiple outlet skins (theme tokens per outlet). Article pages must look excellent on mobile — that's where shared links get opened.
 
-> **Approved design proposal (D3, 2026-07):** the one-system/four-token-skins contract, the invariant article slot anatomy, the skin token surface (CAN/CANNOT), and the four outlet registers are decided — see [`design/D3-news-outlets/`](design/D3-news-outlets/DECISIONS.md) (`D3-P1…P4`). [`STORY-UPDATES.md`](design/D3-news-outlets/STORY-UPDATES.md) carries the requirement amendments; the E4 story decomposition folds them in. Approved at proposal fidelity (exhibits 1a/1b); the full clickable mockup is the next design deliverable.
+> **Approved design proposal (D3, 2026-07):** the one-system/four-token-skins contract, the invariant article slot anatomy, the skin token surface (CAN/CANNOT), and the four outlet registers are decided — see the canonical [`DECISIONS.md`](design/DECISIONS.md) (`## D3`, `D3-P1…P4`); handoff package in [`design/D3-news-outlets/`](design/D3-news-outlets/). [`STORY-UPDATES.md`](design/D3-news-outlets/STORY-UPDATES.md) carries the requirement amendments; the E4 story decomposition folds them in. Approved at proposal fidelity (exhibits 1a/1b); the full clickable mockup is the next design deliverable.
 
 ## 4. Out of scope
 

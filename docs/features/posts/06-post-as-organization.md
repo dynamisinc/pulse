@@ -1,7 +1,7 @@
 # Story: Post as organization (grant-gated chip)
 
 **Feature:** Posts  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** SOC-006 (COR-018)  ·  **Design decisions:** D1-007, D1-R2, R-006 (chip chrome interim)  ·  **Issue:** #97
+**Requirements:** SOC-006 (COR-018)  ·  **Design decisions:** D1-007, D1-R2, R-006 (chip chrome interim), D4-005  ·  **Issue:** #97
 
 ## Context
 Participants granted org-persona operation (COR-018) get a **"Posting as: {account} ▾" chip** in the
@@ -27,7 +27,8 @@ time**. Multi-persona posting is a Controller Console capability, **never** a pa
 
 ## Out of Scope
 The org-grant model itself (E1 identity-auth-roles COR-018); controller post-as-any-persona (E7
-persona-operation); press-room account switcher (E5 PRS-001).
+persona-operation); press-room account switcher (E5 PRS-001 — per **D4-005** the Wire Room reuses
+**this** chip, labelled "Releasing as {org} ▾"; no second switcher is built).
 
 ## Technical Notes
 Participant world. Grant-gated conditional render; single active identity in the compose state. Reuses
