@@ -53,3 +53,7 @@ Effort`, sized by **file-footprint disjointness** so a wave can fan out with no 
 Branching/PR conventions, whether builds run as a Claude Code Workflow fan-out or hand-driven,
 CI wiring (none exists yet), and environment/deploy. Fill these in as Pulse's engineering process
 settles — this doc defines the *contracts* (Wave Plan, reuse map, review gates), not the mechanics.
+
+> **These mechanics are now defined** in [`ORCHESTRATION_MECHANICS.md`](ORCHESTRATION_MECHANICS.md)
+> (umbrella-branch model, worktree-per-builder, per-wave Workflow fan-out, and the session-kickoff
+> prompt). [`BUILD_PLAN.md`](BUILD_PLAN.md) is the live wave checklist.
