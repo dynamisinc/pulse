@@ -21,6 +21,10 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // The suite is populated per-story by testing-agent (see docs/ORCHESTRATION_MECHANICS.md);
+    // an empty/early tree must not fail CI. Real per-story test coverage is enforced at the
+    // code-review gate, not here.
+    passWithNoTests: true,
     testTimeout: 10000,
     coverage: {
       provider: 'v8',
