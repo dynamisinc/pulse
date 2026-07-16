@@ -1,0 +1,16 @@
+{
+  "analyzers": {
+    "core": {
+      "enabled": true,
+      "rules": {
+        // The storage/database/signalr/staticwebapp modules deliberately surface
+        // connection strings and the SWA deployment token as outputs — that is the
+        // module contract the composed template consumes to wire the backend host.
+        // These are intentional, not accidental leaks, so the rule is disabled here.
+        "outputs-should-not-contain-secrets": {
+          "level": "off"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,167 @@
+name: Deploy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - uat
+      create_resource_group:
+        description: "Create resource group if it doesn't exist"
+        required: false
+        type: boolean
+        default: false
+      deploy_defender:
+        description: "Deploy Defender for Cloud (subscription-scoped)"
+        required: false
+        type: boolean
+        default: false
+      what_if:
+        description: "Preview changes only (what-if mode, no actual deployment)"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-infra-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  # Resource group naming convention: rg-pulse-{env}-{region}
+  UAT_RESOURCE_GROUP: "rg-pulse-uat-centralus"
+  UAT_LOCATION: "centralus"
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set environment variables
+        id: env
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          if [ "$ENV" = "uat" ]; then
+            echo "resource_group=${{ env.UAT_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+            echo "location=${{ env.UAT_LOCATION }}" >> $GITHUB_OUTPUT
+            echo "param_file=infrastructure/parameters/uat.bicepparam" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Create resource group
+        if: github.event.inputs.create_resource_group == 'true'
+        run: |
+          az group create \
+            --name ${{ steps.env.outputs.resource_group }} \
+            --location ${{ steps.env.outputs.location }} \
+            --tags Environment=${{ github.event.inputs.environment }} Application=pulse ManagedBy=Bicep
+
+      - name: What-If Preview
+        if: github.event.inputs.what_if == 'true'
+        env:
+          SQL_ADMIN_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          EMAIL_CONNECTION_STRING: ${{ secrets.EMAIL_CONNECTION_STRING }}
+        run: |
+          echo "## Infrastructure What-If Preview" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Resource Group:** ${{ steps.env.outputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          az deployment group what-if \
+            --resource-group ${{ steps.env.outputs.resource_group }} \
+            --template-file infrastructure/main.bicep \
+            --parameters ${{ steps.env.outputs.param_file }} \
+            --no-pretty-print 2>&1 | tee /tmp/whatif.txt
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/whatif.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Deploy Infrastructure
+        if: github.event.inputs.what_if != 'true'
+        env:
+          SQL_ADMIN_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          EMAIL_CONNECTION_STRING: ${{ secrets.EMAIL_CONNECTION_STRING }}
+        run: |
+          az deployment group create \
+            --resource-group ${{ steps.env.outputs.resource_group }} \
+            --template-file infrastructure/main.bicep \
+            --parameters ${{ steps.env.outputs.param_file }} \
+            --name "pulse-${{ github.event.inputs.environment }}-$(date +%Y%m%d-%H%M%S)" \
+            --verbose
+
+      - name: Deployment Summary
+        if: github.event.inputs.what_if != 'true'
+        run: |
+          echo "## Infrastructure Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Resource Group:** ${{ steps.env.outputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Get deployment outputs
+          OUTPUTS=$(az deployment group show \
+            --resource-group ${{ steps.env.outputs.resource_group }} \
+            --name "$(az deployment group list --resource-group ${{ steps.env.outputs.resource_group }} --query '[0].name' -o tsv)" \
+            --query 'properties.outputs' -o json 2>/dev/null || echo '{}')
+
+          echo "### Deployed Resources" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo "$OUTPUTS" | jq '.' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  deploy-defender:
+    name: Deploy Defender for Cloud
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.event.inputs.deploy_defender == 'true' && github.event.inputs.what_if != 'true'
+    environment:
+      name: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get Log Analytics Workspace ID
+        id: workspace
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          RG="${{ env.UAT_RESOURCE_GROUP }}"
+
+          WORKSPACE_ID=$(az monitor log-analytics workspace show \
+            --workspace-name "log-pulse-${ENV}" \
+            --resource-group "$RG" \
+            --query 'id' -o tsv)
+          echo "id=$WORKSPACE_ID" >> $GITHUB_OUTPUT
+
+      - name: Deploy Defender for Cloud
+        run: |
+          LOCATION="${{ env.UAT_LOCATION }}"
+
+          az deployment sub create \
+            --location "$LOCATION" \
+            --template-file infrastructure/modules/defender.bicep \
+            --parameters logAnalyticsWorkspaceId='${{ steps.workspace.outputs.id }}' \
+            --parameters securityContactEmail='${{ secrets.SECURITY_CONTACT_EMAIL }}' \
+            --name "defender-$(date +%Y%m%d-%H%M%S)"
+
+          echo "## Defender for Cloud Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "Defender for Cloud free CSPM enabled at subscription level." >> $GITHUB_STEP_SUMMARY
