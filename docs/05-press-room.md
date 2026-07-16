@@ -4,7 +4,7 @@
 > **Depends on:** E1 · **Feeds:** E3 (portal module), E2 (link cards), E10 (telemetry)
 > **Roles served:** PIO participants (primary authors), Controllers, Evaluators
 > **Looking Glass parity target:** Press Room Wire (PR14)
-> **Design handoff:** D4 (Wire Room) — [`docs/design/D4-press-weather/`](design/D4-press-weather/) · decisions `D4-001…013` in [`DECISIONS.md`](design/D4-press-weather/DECISIONS.md); requirement amendments in [`STORY-UPDATES.md`](design/D4-press-weather/STORY-UPDATES.md).
+> **Design handoff:** D4 (Wire Room) — [`docs/design/D4-press-weather/`](design/D4-press-weather/) · decisions `D4-001…013` in the canonical [`DECISIONS.md`](design/DECISIONS.md) (`## D4` section); requirement amendments in [`STORY-UPDATES.md`](design/D4-press-weather/STORY-UPDATES.md).
 
 ## 1. Epic summary
 
@@ -45,7 +45,7 @@ Looking Glass parity: PR Wire lets Communications Players/PIOs post releases (pa
 
 > Source: design session **D4** — a full user-approved mockup with 12 sign-offs. Package:
 > [`docs/design/D4-press-weather/`](design/D4-press-weather/)
-> ([`DECISIONS.md`](design/D4-press-weather/DECISIONS.md),
+> ([`DECISIONS.md`](design/DECISIONS.md) `## D4` section,
 > [`STORY-UPDATES.md`](design/D4-press-weather/STORY-UPDATES.md)). Requirement IDs are **stable**;
 > the entries below **amend/confirm** the requirements above — original wording is preserved. They
 > attach to the E5 stories when E5 is decomposed into `docs/features/press-room/` (not yet done —

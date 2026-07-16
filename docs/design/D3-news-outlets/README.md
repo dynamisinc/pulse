@@ -18,7 +18,8 @@ do not treat anything beyond exhibits 1a/1b as design-final.
 - `D3 Proposal.dc.html` — the approved exhibit. **1a** = shared article grid + token
   surface (normative); **1b** = one headline block in all four outlet registers.
 - `support.js` — prototype runtime for the `.dc.html` file (reference only).
-- `DECISIONS.md` — the D3-P1…P4 decision log with requirement traceability.
+- `../DECISIONS.md` — the D3-P1…P4 decision log with requirement traceability, in the canonical root
+  log (`## D3` section); the per-folder copy was folded in and removed.
 - `STORY-UPDATES.md` — distilled AMEND/ADD/RECONCILE checklist for the story/epic
   agents; folds into the E4 story decomposition when it happens (Phase 3).
 

@@ -79,7 +79,7 @@ PIO-authored — the evaluation-critical composer lives here, E5/PRS) and **The 
 (weather.gov-anchored government weather service, staff-authored, E6/WX). Both render inside the D7
 participant shell; the Weather Desk feeds the shell alert bar. Full clickable mockup, user-approved,
 **12 sign-offs**. Key decisions that **amend requirements** and flow back to the stories (see
-[DECISIONS.md](D4-press-weather/DECISIONS.md)):
+the canonical [DECISIONS.md](DECISIONS.md), `## D4` section):
 
 - **D4-001/002** — the composer **is the letterhead sheet**, not a form/CMS: the PDF drop zone is the
   body, headline is the only required input (auto-suggested, one-click accept), and **nothing
@@ -104,9 +104,8 @@ decisions are pre-staged there and folded into the epics — the decomposition i
 
 Folder contents: `Wire Room + Weather Desk.dc.html` (prototype — needs `support.js`; does not render
 standalone), `wx011-propagation-storyboard.png` (the WX-011 four-surface propagation moment),
-`DECISIONS.md` (D4-001…013 + the 12 sign-offs — per-folder, matching the D3 handoff; folding into the
-canonical root [DECISIONS.md](DECISIONS.md) is a possible follow-up), `STORY-UPDATES.md`
-(requirement-change checklist), `README.md` (handoff spec), `SHELL-CONTRACT.md` (the D7 shell contract
-the mockup builds against), `support.js`, `CLAUDE-CODE-PROMPT.md` (the sync brief that produced this
-pass). The cross-surface component inventory is the canonical [COMPONENTS.md](COMPONENTS.md) at this
-directory's root.
+`STORY-UPDATES.md` (requirement-change checklist), `README.md` (handoff spec), `SHELL-CONTRACT.md`
+(the D7 shell contract the mockup builds against), `support.js`, `CLAUDE-CODE-PROMPT.md` (the sync
+brief that produced this pass). The D4 decision log (`D4-001…013` + the 12 sign-offs) lives in the
+canonical [DECISIONS.md](DECISIONS.md) (`## D4` section); the cross-surface component inventory is the
+canonical [COMPONENTS.md](COMPONENTS.md) — both at this directory's root.

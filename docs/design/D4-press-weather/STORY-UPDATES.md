@@ -1,7 +1,7 @@
 # Story Updates — The Wire Room & The Weather Desk (D4)
 
 > **Purpose.** The D4 design review (full mockup, user-approved, 12 sign-offs — see
-> [`DECISIONS.md`](DECISIONS.md)) produced decisions that **constrain and in places amend
+> the canonical [`DECISIONS.md`](../DECISIONS.md) `## D4` section) produced decisions that **constrain and in places amend
 > requirements as written**, not just UI choices. This checklist is the input for the story/epic
 > agents: each item names the requirement ID, the D4 decision that touches it, the before → after,
 > and the action. Verify each "before" against the current epic text (`../../05-press-room.md`,

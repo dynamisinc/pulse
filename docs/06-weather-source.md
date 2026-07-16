@@ -4,7 +4,7 @@
 > **Depends on:** E1 · **Feeds:** E3 (weather widget, alert bar), E2 (paired account posts), E10
 > **Roles served:** Participants (consumers), Controllers (weather authors), Evaluators
 > **Looking Glass parity target:** The Weather Source
-> **Design handoff:** D4 (Weather Desk) — [`docs/design/D4-press-weather/`](design/D4-press-weather/) · decisions `D4-009…013` in [`DECISIONS.md`](design/D4-press-weather/DECISIONS.md); requirement amendments in [`STORY-UPDATES.md`](design/D4-press-weather/STORY-UPDATES.md).
+> **Design handoff:** D4 (Weather Desk) — [`docs/design/D4-press-weather/`](design/D4-press-weather/) · decisions `D4-009…013` in the canonical [`DECISIONS.md`](design/DECISIONS.md) (`## D4` section); requirement amendments in [`STORY-UPDATES.md`](design/D4-press-weather/STORY-UPDATES.md).
 
 ## 1. Epic summary
 
@@ -44,7 +44,7 @@ Scope discipline: this is the smallest channel epic. It is a content presentatio
 
 > Source: design session **D4** — a full user-approved mockup with 12 sign-offs. Package:
 > [`docs/design/D4-press-weather/`](design/D4-press-weather/)
-> ([`DECISIONS.md`](design/D4-press-weather/DECISIONS.md),
+> ([`DECISIONS.md`](design/DECISIONS.md) `## D4` section,
 > [`STORY-UPDATES.md`](design/D4-press-weather/STORY-UPDATES.md)). Requirement IDs are **stable**;
 > the entries below **amend/confirm** the requirements above — original wording is preserved. They
 > attach to the E6 stories when E6 is decomposed into `docs/features/weather-source/` (not yet done —

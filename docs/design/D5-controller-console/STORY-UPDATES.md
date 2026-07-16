@@ -121,7 +121,7 @@ Legend: **AMEND** = edit existing requirement · **ADD** = new requirement/capab
 ## E. Inbound from D4 (Weather Desk → console retrofit notes)
 
 > Source: design session **D4** (The Weather Desk), decision **D4-011** (sign-offs #9, #10). See
-> [`../D4-press-weather/DECISIONS.md`](../D4-press-weather/DECISIONS.md) and its
+> the canonical [`../DECISIONS.md`](../DECISIONS.md) (`## D4` section) and its
 > [`STORY-UPDATES.md`](../D4-press-weather/STORY-UPDATES.md) §E. Weather is **staff-authored only**,
 > so these are **console** capabilities, not participant-surface stories.
 

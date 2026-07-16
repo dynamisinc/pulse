@@ -1,7 +1,7 @@
 # Story Updates — Pulse News Outlets (D3)
 
 > **Purpose.** The approved D3 proposal (exhibits 1a/1b + decisions `D3-P1…P4`, see
-> [`DECISIONS.md`](DECISIONS.md)) **changes or sharpens requirements as written**. This
+> the canonical [`DECISIONS.md`](../DECISIONS.md) `## D3` section) **changes or sharpens requirements as written**. This
 > checklist is the input for the story/epic agents. E4 is not yet decomposed into
 > `docs/features/` (Phase 3) — boxes stay unchecked until the decomposition folds each
 > item in; each item names the requirement ID, the decision, the before → after, and the
