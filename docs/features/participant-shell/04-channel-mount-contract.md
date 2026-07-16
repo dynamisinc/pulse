@@ -1,7 +1,7 @@
 # Story: Channel-mount contract (content region, scenario time, variant)
 
 **Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-060 (COR-053, COR-062)  ·  **Design decisions:** D7-005  ·  **Issue:** —
+**Requirements:** COR-060 (COR-053, COR-062)  ·  **Design decisions:** D7-005  ·  **Issue:** #188
 
 ## Context
 The seam between shell and channel. The shell hands each channel a rectangle (the content region

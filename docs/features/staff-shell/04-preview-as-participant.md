@@ -1,7 +1,7 @@
 # Story: Preview as participant (staged, read-only, scenario-moment picker)
 
 **Feature:** Staff shell frame  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-041  ·  **Design decisions:** D7-007  ·  **Issue:** —
+**Requirements:** COR-041  ·  **Design decisions:** D7-007  ·  **Issue:** #195
 
 ## Context
 Controllers and planners need to see what participants see without leaving the console. **Preview as

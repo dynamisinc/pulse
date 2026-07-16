@@ -1,7 +1,7 @@
 # Story: Compliance chrome (two banners, config-driven, chrome-off legal)
 
 **Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-031 (COR-066)  ·  **Design decisions:** D7-005, D7-006  ·  **Issue:** —
+**Requirements:** COR-031 (COR-066)  ·  **Design decisions:** D7-005, D7-006  ·  **Issue:** #185
 
 ## Context
 Compliance chrome is the participant world's frame and one of the only two exercise signals a

@@ -1,7 +1,7 @@
 # Story: Participant-admin flyout (login triage)
 
 **Feature:** Staff shell frame  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-017  ·  **Design decisions:** D7-007  ·  **Issue:** —
+**Requirements:** COR-017  ·  **Design decisions:** D7-007  ·  **Issue:** #194
 
 ## Context
 StartEx reality: 100+ variably tech-literate participants, and someone is locked out or on the wrong

@@ -1,7 +1,7 @@
 # Story: Cadence chrome tokens + thumbnail-distinguishability gate
 
 **Feature:** Staff shell frame  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** D7-009, COR-063  ·  **Design decisions:** D7-009, D7-005  ·  **Issue:** —
+**Requirements:** D7-009, COR-063  ·  **Design decisions:** D7-009, D7-005  ·  **Issue:** #196
 
 ## Context
 The staff frame adopts the binding **Cadence Design System** look (D7-009): navy `#1e3a5f` header,

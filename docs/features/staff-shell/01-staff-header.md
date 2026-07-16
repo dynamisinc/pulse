@@ -1,7 +1,7 @@
 # Story: Staff header — lockup, identity badge, clocks, state pill, classification tag
 
 **Feature:** Staff shell frame  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-063, COR-005  ·  **Design decisions:** D7-007, D7-010  ·  **Issue:** —
+**Requirements:** COR-063, COR-005  ·  **Design decisions:** D7-007, D7-010  ·  **Issue:** #192
 
 ## Context
 The 56px navy Cadence header every staff surface renders under. It carries, left→right: the brand

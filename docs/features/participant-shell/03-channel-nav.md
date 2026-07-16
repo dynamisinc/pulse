@@ -1,7 +1,7 @@
 # Story: Channel nav — global strip + mobile tabs (config-driven)
 
 **Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-061, COR-062  ·  **Design decisions:** D7-001  ·  **Issue:** —
+**Requirements:** COR-061, COR-062  ·  **Design decisions:** D7-001  ·  **Issue:** #187
 
 ## Context
 One shell-owned way to move between channels, so no channel re-implements a cross-channel switcher

@@ -1,7 +1,7 @@
 # Feature: Participant shell
 
 **Epic:** E1 — Platform Core & Exercise Isolation  ·  **Phase:** 1  ·  **Feature ref:** D7 (application shells)
-**World:** participant  ·  **Issue:** —  ·  **Status:** decomposed — ready to build
+**World:** participant  ·  **Issue:** #183  ·  **Status:** decomposed — ready to build
 
 ## Summary
 The one container every participant-facing channel (social app, portal, news, press, weather) mounts
@@ -29,13 +29,13 @@ Tweaks props). **STORY-UPDATES.md** §A (this ADD) + §B (participant-surface re
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Compliance chrome (two banners, config-driven, chrome-off legal) | COR-031 / COR-066 | Not Started | — |
-| 02 | Alert-bar host (4 states, ticker default, emergency escapes) | PRT-010/011/012 / D7-002 | Not Started | — |
-| 03 | Channel nav — global strip + mobile tabs (config-driven) | COR-061/062 / D7-001 | Not Started | — |
-| 04 | Channel-mount contract (content region, scenario time, variant) | COR-060 / COR-053/062 | Not Started | — |
-| 05 | Overlay layer — pause / EndEx / break-fiction rendering | COR-065 / CTL-023/024 / COR-054 | Not Started | — |
-| 06 | Variants — read-only, kiosk (Phase 3), preview | COR-064/015 / PRT-040 / COR-041 | Not Started | — |
-| 07 | Per-exercise brand theming hooks | COR-066 / COR-030 | Not Started | — |
+| 01 | Compliance chrome (two banners, config-driven, chrome-off legal) | COR-031 / COR-066 | Not Started | #185 |
+| 02 | Alert-bar host (4 states, ticker default, emergency escapes) | PRT-010/011/012 / D7-002 | Not Started | #186 |
+| 03 | Channel nav — global strip + mobile tabs (config-driven) | COR-061/062 / D7-001 | Not Started | #187 |
+| 04 | Channel-mount contract (content region, scenario time, variant) | COR-060 / COR-053/062 | Not Started | #188 |
+| 05 | Overlay layer — pause / EndEx / break-fiction rendering | COR-065 / CTL-023/024 / COR-054 | Not Started | #189 |
+| 06 | Variants — read-only, kiosk (Phase 3), preview | COR-064/015 / PRT-040 / COR-041 | Not Started | #190 |
+| 07 | Per-exercise brand theming hooks | COR-066 / COR-030 | Not Started | #191 |
 
 ## Dependencies
 E1 exercise-context + scenario clock (COR-050/053) — the shell reads server-driven exercise-scoped

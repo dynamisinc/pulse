@@ -1,7 +1,7 @@
 # Story: Overlay layer — pause / EndEx / break-fiction rendering
 
 **Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-065 (CTL-023, CTL-024, COR-054)  ·  **Design decisions:** D7-003, D7-004  ·  **Issue:** —
+**Requirements:** COR-065 (CTL-023, CTL-024, COR-054)  ·  **Design decisions:** D7-003, D7-004  ·  **Issue:** #189
 
 ## Context
 The shell owns the layer that covers the world when the exercise is held or stopped, so no channel

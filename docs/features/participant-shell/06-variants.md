@@ -1,7 +1,7 @@
 # Story: Variants — read-only, kiosk (Phase 3), preview
 
 **Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-064 (COR-015, PRT-040, COR-041)  ·  **Design decisions:** D7-008  ·  **Issue:** —
+**Requirements:** COR-064 (COR-015, PRT-040, COR-041)  ·  **Design decisions:** D7-008  ·  **Issue:** #190
 
 ## Context
 One shell renders in four modes. **full** is the default. **read-only** (COR-015) is the passive-

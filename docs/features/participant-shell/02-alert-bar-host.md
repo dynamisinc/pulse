@@ -1,7 +1,7 @@
 # Story: Alert-bar host (4 states, ticker default, emergency escapes)
 
 **Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** PRT-010, PRT-011, PRT-012  ·  **Design decisions:** D7-002  ·  **Issue:** —
+**Requirements:** PRT-010, PRT-011, PRT-012  ·  **Design decisions:** D7-002  ·  **Issue:** #186
 
 ## Context
 The EAS analog — one alert host directly below the top chrome that **persists across every channel**

@@ -1,7 +1,7 @@
 # Story: Toolstrip dock — one shell-owned strip, shell-global + surface zones
 
 **Feature:** Staff shell frame  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** D7-011, COR-063  ·  **Design decisions:** D7-011  ·  **Issue:** —
+**Requirements:** D7-011, COR-063  ·  **Design decisions:** D7-011  ·  **Issue:** #193
 
 ## Context
 D7-011 resolved a user-flagged conflict: there is **one** toolstrip, and the shell owns it. A 56px

@@ -1,7 +1,7 @@
 # Story: Per-exercise brand theming hooks
 
 **Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-066 (COR-030)  ·  **Design decisions:** D7 (theming hooks)  ·  **Issue:** —
+**Requirements:** COR-066 (COR-030)  ·  **Design decisions:** D7 (theming hooks)  ·  **Issue:** #191
 
 ## Context
 The shell must carry **zero hardcoded brands** — every "Fairhaven"/"BAY SHIELD" string in the mockup
