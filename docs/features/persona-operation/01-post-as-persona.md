@@ -1,7 +1,7 @@
 # Story: Post as any persona into an enabled channel
 
 **Feature:** Persona operation  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** CTL-001, COR-018  ·  **Design decisions:** none  ·  **Issue:** #14
+**Requirements:** CTL-001, COR-018  ·  **Design decisions:** R-001, R-003, R-004  ·  **Issue:** #14
 
 ## Context
 The controller must be able to speak as the world. From the console composer, a controller posts,
@@ -15,12 +15,16 @@ persona is an org account operated by a human, the individual human is recorded 
 ## Acceptance Criteria
 - [ ] Given an active persona and the social channel, when the controller submits a post, then it
       publishes through the E2 social pipeline authored by that persona (avatar/handle/verified per
-      the persona) with no controller identity visible to any participant.
+      the persona — the canonical scallop seal and R-004 avatar treatment, identical everywhere the
+      persona renders, incl. the console's composer identity header per R-001) with no controller
+      identity visible to any participant.
 - [ ] The composer supports post, reply, repost/quote, and DM as the active persona (the social
       actions available to a participant, per E2).
 - [ ] Given a published post, when telemetry is recorded (XC-004), then the event captures
       `origin=controller-as-persona`, the **acting human** controller id (COR-018), the persona id,
-      the channel, and both wall-clock and scenario timestamps (SOC-003).
+      the channel, and both wall-clock and scenario timestamps (SOC-003). On console post cards this
+      provenance surfaces as the always-visible **SIMCELL-n · MANUAL** origin line (R-003,
+      live-monitoring/01) — staff-only, never participant-visible.
 - [ ] The participant-visible post renders its time in **scenario time** in the exercise time zone
       (COR-053); wall-clock never appears in the participant view.
 - [ ] Post text/media is sanitized before publish (NFR-004) — a script in the composer never

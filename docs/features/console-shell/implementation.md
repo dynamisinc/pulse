@@ -9,7 +9,7 @@
 |-------|----------|------------------|------------------------------|
 | 01 Toolstrip + flyouts | Console layout shell + 56px toolstrip + flyout primitive + a tool registry (continuous-watch vs consult-on-demand). | `features/controller/components/shell/ConsoleShell.tsx`, `Toolstrip.tsx`, `Flyout.tsx`, `toolRegistry.ts` | `<ConsoleShell>`, `registerTool()`, `<Flyout>` |
 | 02 NEEDS-YOU bar | Persistent bar bound to a derived to-dos selector; chips call a shared reveal-target primitive, never a mutation. | `features/controller/components/shell/NeedsYouBar.tsx`, `hooks/useToDos.ts`, `components/shell/revealTarget.ts` | `useToDos()`, `revealTarget()` |
-| 03 Static identity badge | Header badge that reads lifecycle state to choose static vs switchable. | `features/controller/components/shell/IdentityBadge.tsx` | `<IdentityBadge>` |
+| 03 Static identity badge | Header badge that reads lifecycle state to choose static vs switchable. **Placement/presentation interim — superseded by D7 shell (R-006)**; build the behavior, expect the chrome to be re-homed. | `features/controller/components/shell/IdentityBadge.tsx` | `<IdentityBadge>` |
 | 04 Flag → AAR | Hover Flag affordance + an AAR-write mutation (append-only). | `features/controller/hooks/useFlagToAar.ts`, `components/FlagAction.tsx` | `useFlagToAar()`, `<FlagAction>` |
 | 05 Trainee monitor | Consult-on-demand flyout of trainee cards over the activity + expected-action stream. | `features/controller/components/TraineeMonitor.tsx`, `hooks/useTrainees.ts` | `<TraineeMonitor>` (registered tool) |
 

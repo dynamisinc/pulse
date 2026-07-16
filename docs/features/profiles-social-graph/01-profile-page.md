@@ -8,8 +8,9 @@ A profile page per persona/participant: banner, avatar, bio, join date, follower
 tabs for Posts / Posts & replies / Media / Likes (SOC-050).
 
 ## Acceptance Criteria
-- [ ] A profile renders banner, avatar, display name + verified mark when applicable (story 03), handle,
-      bio, meta row (location/link/joined), and follower/following counts (magnitude, story 05).
+- [ ] A profile renders banner, avatar (interim R-004 treatment: duotone silhouette for humans,
+      monogram for orgs, until COR-024), display name + verified mark when applicable (story 03),
+      handle, bio, meta row (location/link/joined), and follower/following counts (magnitude, story 05).
 - [ ] Tabs show Posts / Posts & replies / Media / Likes, each exercise-scoped (COR-001).
 - [ ] Join date and post timestamps render in scenario time (COR-053); backdated history (E1 COR-023)
       renders correctly.

@@ -1,0 +1,14 @@
+{
+  "name": "e8-generation-loop-spike",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Throwaway E8 spike: measure latency/cost/voice-quality of the generate->review loop (ADP epic open question 3). Not production code.",
+  "scripts": {
+    "spike": "node index.mjs",
+    "spike:offline": "node index.mjs --offline"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0"
+  }
+}

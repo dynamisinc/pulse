@@ -16,7 +16,12 @@ steering controls **absent, not disabled** — captured as a later story, not bu
 **queue-pressure meter** = decisions **demanded** per minute over a rolling 60s window, budget **≤6**,
 amber past 6, tooltip states it is **demand, not a controller-performance measure**. Staff-performance
 surveillance is explicitly rejected — author story 04 accordingly. Counts across surfaces must agree
-(D5-014/2.1, RECONCILE).
+(D5-014/2.1, RECONCILE). **Session-3 cross-surface reconciliation (R-001…R-004,
+`docs/design/DECISIONS.md` §"R — Cross-surface reconciliation"):** console post cards mirror the participant
+anatomy — canonical scallop seal `#2D9CDB`, engagement order reply · repost · like, duotone/monogram
+avatars — plus the always-visible staff origin line `{origin} · FIRED {scenario time}` (R-003).
+Demo/mock data stays **per-surface** (R-005): the D1 and D5 casts are intentionally separate; do not
+assume or build a shared cast module.
 
 ## Stories (planned)
 | # | Story | Requirement(s) | Status | Issue |

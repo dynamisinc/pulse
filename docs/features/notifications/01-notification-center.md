@@ -10,7 +10,8 @@ violet) and the nav bell shows a count badge (3 normal / 5 alert / 99+ burst) (D
 
 ## Acceptance Criteria
 - [ ] A notification center lists mentions, replies, reposts, likes, follows, and DMs with typed
-      symbols; the nav bell shows an unread count badge.
+      symbols; an unread count badge is surfaced on the app's notifications entry point *(the nav
+      bell/badge placement in the rail: interim — superseded by D7 shell, R-006/COMPONENTS.md)*.
 - [ ] Notifications render in scenario time (COR-053), exercise-scoped (COR-001); tapping navigates to
       the source (post/thread/profile/DM).
 - [ ] Type is conveyed by symbol + text, not color alone (NFR-001).

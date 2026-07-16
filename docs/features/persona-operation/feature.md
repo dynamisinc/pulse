@@ -14,7 +14,7 @@ COR-022 mid-exercise persona creation, SOC-054 audience magnitude).
 
 ## Design references
 Brief: `docs/design/D5-controller-console.md`. Handoff: `docs/design/D5-controller-console/`
-(`README.md`, `DECISIONS.md`). Persona operation sits behind the console's persona dock / command
+(`README.md`; decision log: canonical `docs/design/DECISIONS.md`). Persona operation sits behind the console's persona dock / command
 palette (Ctrl+K) — see the `console-shell` feature for the toolstrip/flyout host. No F7.1-specific
 requirement amendments in `STORY-UPDATES.md`; the identity-badge change (COR-005, D5-012(g)) is
 tracked in `console-shell`.

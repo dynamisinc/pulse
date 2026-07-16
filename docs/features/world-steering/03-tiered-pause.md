@@ -1,7 +1,7 @@
 # Story: Tiered pause (injects / engine / freeze)
 
 **Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** CTL-023  ·  **Design decisions:** D5-014/1.3  ·  **Issue:** #26
+**Requirements:** CTL-023  ·  **Design decisions:** D5-014/1.3, R-006 (state-pill chrome interim)  ·  **Issue:** #26
 
 ## Context
 "Pause" is not one thing. The D5 review **amended** CTL-023 into **three tiers** so a controller can
@@ -17,8 +17,10 @@ stops only on Freeze**. Break Fiction (story 04) implies world-freeze.
 - [ ] Given the console, when the controller selects a pause tier, then the correct scope pauses —
       **Pause injects** halts queued inject/burst firing (world/engine keep running); **Pause engine**
       halts new E8 content (injects/world continue); **Freeze world** halts everything.
-- [ ] A **state pill** shows the active tier: INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN (text +
-      icon, not color-only; NFR-001).
+- [ ] The active tier is always visible as INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN (text +
+      icon, not color-only; NFR-001) *(the state pill and its header placement are inventoried
+      improvised chrome: interim — superseded by D7 shell, R-006/COMPONENTS.md — the requirement is
+      a persistently visible tier state, however D7 houses it)*.
 - [ ] The **scenario clock stops only on Freeze** (COR-050); injects-paused and engine-paused leave
       the clock running.
 - [ ] **Freeze is guarded** (deliberate confirm) because participants notice it; the pause holding

@@ -10,11 +10,15 @@ rehearsals out of evaluation exports.
 
 ## Requirements covered
 COR-030, COR-031, COR-032, COR-033 (with NFR-008 leak protection for chrome/watermark, XC-003
-compliance chrome, XC-008 time zone).
+compliance chrome, XC-008 time zone). Plus the **COR-005 participant-identity gap** (story 05 —
+requirements decision, COMPONENTS.md divergence #5).
 
 ## Design references
 D0 foundations (compliance chrome as environment chrome outside the app frame). Master decisions 4
-(configurable chrome) and 9/13 (lifecycle, leak protection).
+(configurable chrome) and 9/13 (lifecycle, leak protection). **Session 3 (R-006):** the banner
+chrome both mockups improvised is inventoried in `docs/design/COMPONENTS.md` and frozen pending the
+**D7 unified shell** — story 02's banner presentation is interim, and story 05 files the
+participant exercise-identity requirements gap (divergence #5) as a D7 input.
 
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
@@ -23,6 +27,7 @@ D0 foundations (compliance chrome as environment chrome outside the app frame). 
 | 02 | Compliance chrome (configurable banners) | COR-031 | Not Started | #68 |
 | 03 | Exercise lifecycle state machine | COR-032 | Not Started | #69 |
 | 04 | Practice/sandbox flag | COR-033 | Not Started | #70 |
+| 05 | Participant-visible exercise identity *(requirements gap → D7 input)* | COR-005 gap / R-006, COMPONENTS.md #5 | Not Started | #180 |
 
 ## Dependencies
 Exercise entity (exercise-isolation); the exercise clock (exercise-clock) consumes the time zone;
