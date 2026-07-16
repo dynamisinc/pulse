@@ -10,6 +10,7 @@ import { cobraTheme } from './theme/cobraTheme'
 import { CobraPrimaryButton } from './theme/styledComponents'
 import CobraStyles from './theme/CobraStyles'
 import { HomePage } from './features/home'
+import { EvaluatorDashboardPage } from './features/evaluator'
 
 // Sensible React Query defaults. Real-time feeds will lean on a live transport
 // rather than refetch-on-focus (see D0 §4 - burst legibility, 120 posts/min).
@@ -39,6 +40,9 @@ const NotFoundPage = () => (
 
 const router = createBrowserRouter([
   { path: '/', element: <HomePage /> },
+  // Staff surface (COBRA) — standalone dev route; see StaffShellStub for the
+  // shared-shell (D7) caveat this surface will be re-hosted under.
+  { path: '/evaluator', element: <EvaluatorDashboardPage /> },
   { path: '*', element: <NotFoundPage /> },
 ])
 

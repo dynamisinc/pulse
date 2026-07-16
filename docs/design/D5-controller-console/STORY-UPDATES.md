@@ -118,6 +118,28 @@ Legend: **AMEND** = edit existing requirement · **ADD** = new requirement/capab
 
 ---
 
+## E. Inbound from D4 (Weather Desk → console retrofit notes)
+
+> Source: design session **D4** (The Weather Desk), decision **D4-011** (sign-offs #9, #10). See
+> the canonical [`../DECISIONS.md`](../DECISIONS.md) (`## D4` section) and its
+> [`STORY-UPDATES.md`](../D4-press-weather/STORY-UPDATES.md) §E. Weather is **staff-authored only**,
+> so these are **console** capabilities, not participant-surface stories.
+
+- [ ] **ADD — weather authoring is console-side; no participant Weather Desk composer** · `D4-011` (#9)
+  - The Weather Desk has **no participant composer**. Warning/watch/advisory products
+    (WX-002/010/012) are authored and issued **from the controller console** — fired as Cadence
+    injects (E9) or ad hoc (E7). The participant Weather Desk is read/consume only.
+  - **Action:** the weather-authoring console surface owns product composition + issuance; scope it
+    alongside `world-steering` / inject issuance when E6 lands on the console.
+- [ ] **ADD — @WeatherDesk auto-post is editable pre-publish, console-side** · `D4-011` (#10)
+  - On issuing a warning, the paired **@WeatherDesk** post (WX-011/WX-020) is **editable before
+    publish** in the console; default text = the **product headline verbatim** — the same string that
+    hits the alert bar, portal widget, and product page (no paraphrase, D4-010).
+  - **Action:** add the editable auto-post step to the weather-issuance console flow; default to the
+    headline; keep the published string identical across all surfaces.
+
+---
+
 ## Traceability at a glance
 
 | Requirement | Decision(s) | Type | One-line change |
@@ -134,3 +156,5 @@ Legend: **AMEND** = edit existing requirement · **ADD** = new requirement/capab
 | 3.4 | D5-014/3.4 | ADD | Flag → after-action record (partial) |
 | 3.1 | D5-016, D5-014/3.1 | ADD | Trainee monitor flyout (partial) |
 | CTL-033 / COR-017 / NFR-008 | Open | BACKLOG | Deferred, not in this pass |
+| WX-002 (console) | D4-011 #9 (inbound) | ADD | Weather authoring is console-side; no participant composer |
+| WX-011/020 (console) | D4-011 #10 (inbound) | ADD | @WeatherDesk auto-post editable pre-publish (default = headline) |

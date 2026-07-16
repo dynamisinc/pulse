@@ -1,5 +1,205 @@
 # DECISIONS.md — Pulse design sessions
 
+## D6 — Evaluator Dashboard & Replay (session 7)
+
+Session 7 · the last surface. Mockup: `Evaluator Dashboard.dc.html` — renders inside the D7
+staff shell (COR-063) at lower density than D5. States via Tweaks (`exState`: live-quiet /
+live-storm / hotwash / pre-e8; `projector` boolean scales the board numerals). Fairhaven
+68-minute water-contamination arc end-to-end. Layout + scrubber model user-confirmed.
+
+### D6-001 — Storyline board is the primary surface, full-width at eye-top (EVL-022)
+Inversion of D5-019: on the console storylines earned only a badged flyout because the queue is
+the decision surface; an evaluator has no queue — the board IS the job. Four large tiles in a
+top row; live stream (left) + read-only world view (right) below. **Tile hero = state ×
+time-in-state** ("AMBER · 40 MIN", ~30px, 46px in projector mode): duration of neglect, not
+instantaneous intensity, is the across-the-room signal (E10 §3). State is word + shape + color
+(● CALM / ▲ ELEVATED / ■ HOT — never color-only, NFR-001); below the hero: intensity bar,
+response-latency ticker ("No official post — 40m"), unaddressed-concern count, sentiment
+word + arrow. Tile click → Timeline pre-filtered to that storyline.
+
+### D6-002 — Read-only means absent (COR-013)
+No pause, no engine control, no dial, no fire, no compose — nothing rendered disabled. The tab
+row carries a one-line caption stating steering lives in the Controller Console. Shell-global
+items (Preview-as-participant, participant admin, presence, clocks) remain per D7-007.
+
+### D6-003 — Annotation capture: B key or ⚑, one popover, no modal (EVL-020/021)
+Any card/tile/row carries ⚑; B opens the same popover anywhere with a context-derived anchor.
+Anatomy: focused note field, category chips STRENGTH/IMPROVEMENT/OBSERVATION on keys 1–3,
+Enter saves, Esc cancels — measured path ≤10s. Annotations tool (badged with unpushed count)
+lists all; each row has "→ Cadence" and the flyout footer a COBRA "Push N to Cadence" —
+evidence goes to Cadence, scoring stays there (E10 §1 boundary).
+
+### D6-004 — Timeline explorer: chip filters + per-human attribution chips (EVL-001/002, COR-018)
+Filter chips (channel / origin / storyline / range) + actor search, working on the event list.
+Rows behind shared org accounts carry a "⌨ D. Reyes" attribution chip — visible, not hover.
+Off-platform responses appear as first-class rows with an ☎ OFF-PLATFORM · CTL-026 tag.
+"View in situ →" on every row deep-links into Replay at that scenario moment (EVL-002).
+
+### D6-005 — Replay is a video player; track = wall-elapsed time; jumps are hatched seams (EVL-003)
+Transport bar with play/pause (space), 1×/4×/16× speeds, click-to-scrub track. The track maps
+to wall-elapsed exercise time so scrubbing stays physically smooth; the +4h scenario-time jump
+renders as a narrow hazard-hatched seam with a "⟫ +4 HR" chip — honest both ways (no wall time
+passed; fiction time did). Crossing it while playing raises a "SCENARIO TIME ADVANCED" toast.
+Activity ridgeline drawn on the track (the storm is visible); staff lane above it holds inject
+▸ and controller-dial ◆ markers, own labeled lane, never mixed into activity data; bookmark ⚑
+lane below, click to jump. Stage renders participant surfaces (Portal / Pulse) with the D1/D7
+anatomy — green banners, alert bar, channel strip, scallop seal, reply·repost·like order.
+
+### D6-006 — Honest fidelity is chrome, not fine print (EVL-003)
+Persistent "ORDER EXACT · COUNTS ≈ SNAPSHOT" chip in the replay header; derived values inside
+the fiction (trending rank, like counts) carry an amber ≈ mark with a tooltip. No derived
+number pretends to be replayed.
+
+### D6-007 — Hotwash mode: one explicit segmented switch, overlays vanish (EVL-014, EVL-033)
+"EVALUATOR VIEW ⇄ HOTWASH · PARTICIPANT-VISIBLE" — a large two-state control; hotwash side
+renders amber when active and swaps the fidelity chip for a persistent "HOTWASH — STAFF
+OVERLAYS HIDDEN" tag, so the presenter always knows what the projector shows. In hotwash the
+staff lane and origin lines are absent, not grayed. Switching back is the same deliberate
+click; no keyboard/hover path. The `hotwash` exState opens directly here (post-EndEx,
+projector-in-30-min scenario).
+
+### D6-008 — Dial events are a separate visual layer everywhere (EVL-014 — the defensibility feature)
+One vocabulary across the surface: amber ◆ + "scenario design input — not participant
+behavior" copy. Appears as: distinct amber stream rows on Live, STAFF-channel rows on the
+Timeline, the staff lane on the replay track, and dashed-line ◆ markers on the sentiment
+chart with a legend banner stating mood shifts at these marks are dialed. An evaluator cannot
+read a dialed shift as participant performance without ignoring three labels.
+
+### D6-009 — Evidence level is a chip on every derived metric (EVL-012)
+PERSON-LEVEL (navy, tooltip names the human per COR-018) vs SESSION-LEVEL (gray, "no
+individual identified") on each latency row and chart header — the epistemic-honesty cue at
+chip weight, not footnote weight.
+
+### D6-010 — Coverage items are provisional until confirmed (EVL-011)
+Missed-opportunity rows start dashed-amber "PROVISIONAL — NOT IN AAR YET" at reduced opacity
+with Confirm-for-AAR / Dismiss actions (evaluator judgment, not world steering); confirmed
+rows go solid red with the confirming evaluator's id. The AAR export flyout restates that
+unconfirmed items export flagged provisional.
+
+### D6-011 — Pre-E8: engine metrics absent, honestly (EVL-015)
+`pre-e8` state: tile intensity/sentiment rows collapse to "engine off — event-log signals
+only"; the sentiment chart is replaced by a dashed card stating nothing was synthesized, while
+latency + coverage (event-log-derived) remain fully usable. No fake numbers, no empty-chart
+shame.
+
+### D6-012 — AAR export: one COBRA button + contents manifest (EVL-030/031)
+Toolstrip tool → flyout: five-line manifest (timeline log, replay bundle, annotations with
+unpushed count, metrics, scenario design record — the EVL-014 layer ships in the package),
+provisional-items warning, one "Export AAR package" button with progress and a named .zip
+result line.
+
+### D6 open / deferred
+- Misinformation spread tree (EVL-013) — rumor reach shows in coverage rows; the tree
+  visualization is a metrics-v2 pass.
+- Replay channel coverage: Portal + Pulse rendered; Wire/Weather tabs present but static.
+- Annotation attach-to-selection (drag a post into the popover) — popover anchors by context
+  now; direct-manipulation attach is a build refinement.
+- EVL-032 (retention/off-box export policy surface) — not a screen concern this pass.
+
+## D4 — The Wire Room & The Weather Desk (session 6)
+
+Session 6 · the two institutional participant channels. Anchors: municipal newsroom / PR
+Newswire (Wire Room), weather.gov (Weather Desk). Mockup: `Wire Room + Weather Desk.dc.html`
+— both channels inside the D7 participant shell (user-confirmed), states via Tweaks
+(wireState / weatherState / storyboard), desktop-first (user-confirmed, per D1/D2 precedent).
+
+### D4-001 — Composer is the letterhead sheet, not a form (PRS-002)
+The PIO edits the artifact itself: org letterhead + contact block prefilled and rendered as
+the release sheet; the PDF drop target IS the body area (unmissable under stress); headline is
+the only required input, auto-suggested from the PDF with one-click accept. Rich-text
+"paste from Word" is the quiet secondary path behind a link. Rejected: CMS-style field form —
+the brief's named anti-pattern. Stressed-PIO walkthrough verified <60s: land (prefilled) →
+drop (5–15s) → confirm headline (15–30s) → decide social checkbox → publish + 4-line confirm.
+
+### D4-002 — One confirmation gate; nothing publishes on drop (PRS-002/020)
+Publish opens a single confirm sheet restating org / headline / timing / cross-post — the only
+modal on the path, and the no-destructive-action-without-confirmation gate (cancel-scheduled
+and return-to-author also confirm). Copy under the button states "Nothing publishes on drop."
+
+### D4-003 — Embargo state is a full-width amber banner, everywhere the release appears (PRS-003)
+"⏱ SCHEDULED — releases in 19m" banner on the composer, an amber author-view row on the wire,
+and the same banner on the permalink; the sheet's own "FOR IMMEDIATE RELEASE" line flips to
+"EMBARGOED — HOLD UNTIL 3:06 PM" when scheduling is selected. Unmistakable by redundancy.
+
+### D4-004 — Social cross-post: explicit checkbox + live link-card preview (PRS-013)
+Unchecked by default, names the org handle ("Also post to Pulse as @FulcoEM"), and checking it
+renders the link card that will post — the decision shows its consequence. Card anatomy matches
+the D1/COMPONENTS handoff.
+
+### D4-005 — Org switcher reuses the D1 "Posting as" chip pattern (COR-018)
+"Releasing as {org} ▾" chip above the letterhead; switching swaps letterhead, contact block and
+cross-post handle live. Menu shows granted orgs only with the D1 "granted for this exercise"
+hint line (SOC-006 one-identity-at-a-time carried over).
+
+### D4-006 — Autosave is ambient, in the sheet header (PRS-004)
+Green-dot "Autosaves · Saved 2:46 PM" chip always visible at the top of the sheet — state, not
+a control.
+
+### D4-007 — Approval gate is participant paper, built as draft-diff review (PRS-021)
+Same Wire Room letterhead/serif world (no staff chrome): pending list left, selected draft
+right with changes-from-previous-draft rendered inline (struck removals, shaded additions).
+Approve = confirm chip then releases; Return requires a note (author needs to know what to
+change). Returned-for-revision loop closes in the composer: red banner quoting the approver's
+note with a "View in Approvals" link (wireState=returned shows both ends).
+
+### D4-008 — Weather Desk speaks NWS, verbatim conventions (WX-010, NFR-001)
+weather.gov anatomy: dark-navy office masthead, zone selector (WX-004), current conditions +
+active-alerts panels, 7-period forecast strip, detailed forecast, monospace forecast
+discussion. Warning product = severity-colored header band (icon + WATCH/WARNING text chip,
+never color-only) with Issued/Effective/Expires, the IBW What/Where/When/Impacts grid, zone
+chips, and the raw product text in monospace with NWS furniture (...HEADLINE..., PRECAUTIONARY/
+PREPAREDNESS ACTIONS, && and $$). Severity hues follow NWS family (watch green, flash-flood-
+warning dark red) darkened slightly to hold WCAG AA white-text contrast.
+
+### D4-009 — The warning feeds the shell alert bar per the D7 contract (WX-011, PRT-010/011)
+Watch = advisory ticker (auto-rotating with the boil-advisory alert — multi-alert per D7-002);
+warning = emergency band that escapes the ticker, with "+2 more". Same headline string in the
+bar, the @WeatherDesk post, the portal widget and the product page — no paraphrase between
+surfaces. Details → routes to the product page (weather) or alerts history (non-weather).
+
+### D4-010 — Radar slot reserves the EXERCISE watermark (NFR-008, WX-013)
+The Beat radar/cone imagery slot on the warning product carries the D2-008 bottom-right
+"EXERCISE" corner chip — designed now on the highest-risk leak template, per the brief.
+
+### D4-011 — Propagation storyboard is design scaffold, not fiction (WX-011)
+Four static frames (issue → all shells light at +2s → @WeatherDesk post → portal widget flip)
+behind a Tweaks toggle, scaffold-badged — demo machinery stays out of the fiction (D1-002 rule).
+
+### D4-012 — Fairhaven continuity
+Boil-advisory releases from the D1/D2 cast (@FulcoEM, @FairhavenWater, City, Schools), scenario
+now 2:47 PM with 6:00 PM lab results (D1 timeline); the flash-flood arc dovetails (Millbrook
+plant access road in the warning IMPACTS). Composer demo persona: Dana Reyes, FCEM PIO with JIC
+grants (D1-R2).
+
+### D4-013 — Review sign-offs (user, session close)
+1. **Approval routing (PRS-021):** per-exercise config with a default setup per org (mockup's
+   "City requires JIC approval" is one such config, not a product rule).
+2. **Embargo cancel (PRS-003):** cancelling a scheduled release notifies approvers and leaves a
+   wire audit trace.
+3. **Returns stay wire-internal** (no Pulse/portal notification) — flagged open to explore.
+4. **Headline auto-suggest from PDF is in scope** (PRS-002).
+5. **The public wire is readable by all participants**, citizens included.
+6. **Every warning type forces the emergency band** in the shell bar, for now (WX-011/D7-002);
+   watch = advisory ticker confirmed.
+7. **The alert bar carries all alerts together** — weather and non-weather rotate/stack in one
+   multi-alert bar (D7-002), weather never replaces others.
+8. **AA-adjusted NWS hues accepted** (watch green / warning red darkened for white-text
+   contrast, NFR-001).
+9. **Weather authoring is staff-side only** (D5 console); the Weather Desk has no participant
+   composer.
+10. **@WeatherDesk auto-post is editable pre-publish** (console-side); default text stays the
+    product headline verbatim.
+11. **Propagation storyboard exported as static frames** for the story agents
+    (`design_handoff_press_weather/`); the Tweaks toggle stays in the mockup.
+12. **Mobile pass deferred**, per D1/D2 precedent.
+
+### D4 open / deferred
+- Mobile pass — same follow-up as D1/D2 (sign-off #12).
+- Return-notification reach beyond the wire — explore later (sign-off #3).
+- Rich-text editor is a stub (toolbar + paste target); real paste-from-Word behavior is build.
+- PDF pages are simulated sheets; real inline PDF rendering is build.
+- Alerts history page (PRT-012) — still the D2 stub.
+
 ## D7 — Application Shells (session 5)
 
 Session 5 · unifies the improvised chrome of D1 + D5 (COMPONENTS.md inventory, R-006).
@@ -577,293 +777,3 @@ chrome, alert bar, clock cluster). Full inventory with markup anchors and 8 docu
 divergences now lives in COMPONENTS.md ("Shell extraction"). All inventoried elements are
 marked "replaced by shell — see D7". No shell design was done in this session; both mockups
 keep their improvised chrome untouched so D7 starts from evidence, not memory.
-
-
-## D3 — Pulse News Outlets (proposal stage)
-
-Per-surface decision log (convention per the D1/D5 handoff dirs). Proposal-stage session:
-the shared-grid + token-surface contract and the four outlet registers were reviewed and
-**approved**; the full clickable mockup follows as its own deliverable. Anchor per the D3
-brief: **real local news sites** — a TV station site, a newspaper site, a wire feed, a
-gossip site. Credibility is conveyed by design, and *reading* credibility is the skill
-being trained.
-
-
----
-
-### D3-P1 — ONE rendering system; four outlet skins as token files (NWS-002)
-
-**Decision.** One article/homepage rendering system; each outlet is a **skin token file**
-over it. A fifth outlet is a token file, not a new build. The article page's slot anatomy
-is **invariant** across all skins:
-
-1. Shell chrome — owned by the shell, never re-implemented (SHELL-CONTRACT §1: compliance
-   chrome, alert bar, channel strip; outlet pages render in the content region only)
-2. Outlet masthead + section nav *(skin)*
-3. Breaking slot — authorial, **empty by default** (NWS-012)
-4. Kicker → headline → dek *(skin type/case/scale; order fixed)*
-5. Byline · scenario dateline · share *(fixed: persona block + COR-053 time — skins format,
-   never source; share → Pulse link card)*
-6. Hero media — image or Beat video, broadcast-style player (NWS-014) — with reserved
-   **EXERCISE watermark chip, bottom-right** (NWS-032/NFR-008, matches portal D2-008)
-7. Body + pull quote *(skin)*, with **embedded Pulse post** rendered to D1 anatomy
-   verbatim (SOC-002/004)
-8. Correction slot (NWS-013)
-9. Footer: **"Join the discussion on Pulse"** → the outlet's paired post (NWS-031 — no
-   comments, ever)
-
-Grid (exhibit 1a): desktop 12-col well, max 1140px; body column 680px (~66ch); optional
-340px rail is a skin token. Mobile: one column; rail folds below the body.
-
-**Alternatives rejected.** Bespoke per-outlet layouts — kills the fifth-outlet promise and
-re-implements the shell boundary per outlet; the brief's anti-pattern list names
-one-skin-fits-all *and* per-outlet builds as the two failure modes.
-**Satisfies.** NWS-002/003/010/011/012/013/014/031/032, SHELL-CONTRACT §1, D2-008 parity.
-
-### D3-P2 — The token surface: what a skin CAN and CANNOT touch
-
-**Decision.** A skin **CAN** set: type stack (masthead/hed/dek/body/kicker — face, weight,
-case, condensation) · palette (accent, link, bg, rules, breaking color) · density (spacing
-scale, rule weights, corner radius) · media treatment (crop aggression, caption style,
-player chrome tint) · breaking treatment (banner style + vocabulary) · byline/dateline
-format · layout enums (rail on/off; homepage lead mode: `video-lead / text-lead /
-list-lead / clutter`) · clutter modules (sanctioned set, **The Scoop only** — busyness as
-untrustworthiness signal).
-
-A skin **CANNOT** touch: slot order/anatomy · the scenario-time source (COR-053 — formats
-vary, the clock doesn't) · Pulse embed + link-card rendering (D1 anatomy verbatim, seal
-`#2D9CDB` fixed — SOC-002/004) · the watermark slot (NFR-008) · share behavior (always
-posts an outlet link card to Pulse) · the no-comments rule (NWS-031) · the a11y floor
-(NFR-001: AA contrast, ≥16px mobile body, correction-slot semantics) · telemetry
-invisibility (NWS-030 — zero reader-visible UI).
-
-**Rationale.** The CAN list is exactly the credibility-register surface (what makes The
-Scoop read untrustworthy); the CANNOT list is every trainable signal and compliance
-guarantee — those must survive any rebrand, exactly as the verified seal survives exercise
-accent theming (D1-003/R-001 precedent).
-**Satisfies.** NWS-001/002/030/031, COR-053, SOC-002/004, NFR-001/008.
-
-### D3-P3 — The four approved registers (exhibit 1b)
-
-**Decision.** Approved type/palette per outlet token file:
-
-| Outlet | Register | Type | Palette / idiom |
-|---|---|---|---|
-| **Newsline 7** | Local TV | Oswald (condensed heds) + Source Sans 3 | Navy `#0f2749`, red `#c8102e`; ● LIVE chip; kicker "BREAKING · WATER CRISIS"; video-forward |
-| **The Courier-Ledger** | Newspaper | Newsreader serif (+ Source Sans 3 meta) | Centered nameplate with double rule; restrained grays; small-caps kicker; "By X, Staff Writer" byline; text-forward |
-| **The National Wire** | Wire service | IBM Plex Sans + IBM Plex Mono | Timestamp-first (mono, rust `#9a3412`); slug codes (`NW-FAIRHAVEN-WATER-0142`); wire dateline "**FAIRHAVEN, Fulton County (NW) —**"; "BY THE NATIONAL WIRE"; terse heds, minimal art |
-| **The Scoop** | Tabloid | Anton (ALL-CAPS heds) + Figtree | Yellow `#ffd400`, magenta `#e6007e`, black; rotated flags ("EXCLUSIVE!!"); yellow highlight marks in heds; chip clutter (TRENDING / SHOCKING / MUST SEE) |
-
-Reading the grid of four: trust decays through type discipline (condensed-urgent →
-serif-measured → mono-austere → display-screaming), palette restraint, and clutter count.
-The Scoop's chips/rotation/highlights come from its sanctioned clutter-module set — no
-other skin can enable them.
-
-**Satisfies.** NWS-002 (credibility diversity as a training feature), D3 brief §"The four
-skins", E4 §3 ("participants should be able to *feel* source quality").
-
-### D3-P4 — Breaking is authorial only; corrections have exactly two renderings
-
-**Decision.** **Breaking (NWS-012):** the outlet's own banner in the outlet's own
-vocabulary, in the breaking slot, which is empty by default and fills only by
-controller/authorial action. The platform never adds badges (SOC-002 parity — the *outlet*
-screams BREAKING, Pulse never does). Banner style + vocabulary are skin tokens
-("BREAKING NEWS" / "News Alert" / "EXCLUSIVE!!").
-
-**Corrections (NWS-013):** two renderings, both scenario levers, controller-selectable per
-correction: **visible editor's-note append** (skin-styled; slot position and semantics
-fixed) or **silent rewrite** (body text changes; only the "Updated" scenario-time stamp
-changes). An outlet that quietly rewrites vs. transparently corrects is itself a
-credibility signal participants can learn.
-
-**Satisfies.** NWS-012/013, SOC-002, COR-053 (the Updated stamp is scenario time).
-
----
-
-### Status caveat / open / deferred
-
-- **Approved = exhibits 1a/1b only** (grid contract + registers). Article page, homepage,
-  breaking state, both correction states, mobile view, and the skin switcher arrive in the
-  full-mockup package; do not mark implementation-ready ACs "design final" beyond 1a/1b.
-- **Authoring UI (NWS-020…022)** is controller-console territory (E7/D5 patterns); D3
-  designed the participant-facing rendering only.
-- **Homepage** (NWS-003): lead-mode enum decided (D3-P2); the module set and per-skin
-  homepage compositions are full-mockup work.
-- **D2 cross-surface note:** the portal's "print" direction (D2-002) risks reading as the
-  Courier-Ledger register; portal default remains broadcast (already noted in the D2 log).
-
-
-## D4 — The Wire Room & The Weather Desk
-
-Running log of design decisions for the Press wire (**The Wire Room**, E5/PRS) and Weather
-service (**The Weather Desk**, E6/WX) mockup. Each entry records the choice and the requirement
-IDs it satisfies or **amends**. This file goes back to the story/epic agents so design and
-requirements stay aligned — see [`STORY-UPDATES.md`](D4-press-weather/STORY-UPDATES.md) for the actionable
-amend/add/reconcile/backlog checklist.
-
-Session 5 (D0 §6 order) · Phase 3 surfaces, smaller & institutional · both channels render
-inside the D7 participant shell ([`SHELL-CONTRACT.md`](D4-press-weather/SHELL-CONTRACT.md)); the Weather Desk feeds
-the shell alert bar. Anchors: municipal newsroom / PR Newswire (Wire Room) and weather.gov / NWS
-(Weather Desk). **Status: full clickable mockup, user-approved, including 12 review sign-offs
-(D4-013).** Evidence anchors below are class/handler names in
-[`Wire Room + Weather Desk.dc.html`](D4-press-weather/Wire%20Room%20%2B%20Weather%20Desk.dc.html).
-
----
-
-### Part A — The Wire Room (PRS)
-
-### D4-001 — The composer is the letterhead sheet, not a form/CMS
-**Decision.** The release composer renders as the finished release artifact: org letterhead +
-contact block prefilled and shown as the sheet. The **PDF drop zone IS the body area** (PDF-first,
-PRS-002); **headline is the only required input**, auto-suggested from the dropped PDF with a
-one-click **"Use as headline"** accept. Rich-text **"Paste from Word"** (formatting kept, sanitized
-per NFR-004) is the quiet *secondary* path, not a co-equal tab.
-**Sign-off.** Headline **auto-suggest IS in scope** (not a later nicety). Verified against a
-stressed-PIO walkthrough: **drop → publish in under 60 seconds.**
-**Evidence.** `placeholder="Release headline"`, `From the PDF: "{{sug}}"` + `Use as headline`
-(`{{useSug}}`), `Paste from Word instead →` (`{{toRich}}`), `back to PDF drop` (`{{toDrop}}`).
-**Satisfies / amends.** PRS-002 (AMEND: adds headline-only-required + auto-suggest + one-click
-accept; confirms PDF-first primary, paste-from-Word secondary), PRS-004, NFR-004. Anti-pattern
-avoided: CMS admin panel (D4 brief §Anti-patterns).
-
-### D4-002 — Exactly one confirmation gate; nothing publishes on drop
-**Decision.** Dropping a PDF never publishes. **Publish** opens a single confirm sheet restating
-**org / headline / timing / cross-post** before anything goes out. **Cancel-scheduled** and
-**return-to-author** also confirm. No destructive action without confirmation.
-**Sign-off (#2).** Cancelling an embargo **notifies approvers and leaves a wire audit trace.**
-**Evidence.** `Confirm …` gates; `Publish now` / `Schedule (embargo)` (`{{setNow}}`/`{{setSched}}`).
-**Satisfies / amends.** PRS-002, PRS-020 (AMEND: one-gate model; cancel-embargo → approver
-notification + audit trace). Aligns with E5 §3 design note "no destructive actions without
-confirmation."
-
-### D4-003 — Embargo state is unmistakable by redundancy
-**Decision.** A scheduled (embargoed) release shows an amber **"⏱ SCHEDULED — releases in 19m"**
-treatment in **three** places: the composer, the author-view wire row, and the release permalink.
-On the sheet, the **"FOR IMMEDIATE RELEASE"** line flips to **"EMBARGOED — HOLD UNTIL {time}"**.
-Scheduled releases are visible to the author + staff/JIC approvers only, invisible to the public
-until release.
-**Evidence.** `⏱ SCHEDULED` + `releases at 3:06 PM · in 19m` (wire row), permalink banner
-"Releases at 3:06 PM — in 19m. Visible to your organization and JIC approvers only.",
-`FOR IMMEDIATE RELEASE` / `EMBARGOED`.
-**Satisfies / amends.** PRS-003 (AMEND: the redundant, three-surface scheduled-state treatment +
-the sheet headline flip).
-
-### D4-004 — Pulse cross-post is an explicit, unchecked-by-default checkbox with a live card
-**Decision.** The "post to our social account" decision (PRS-013) is an **explicit checkbox naming
-the org handle, unchecked by default**, and it renders the **exact link card** that will post
-(card anatomy per the canonical [`COMPONENTS.md`](COMPONENTS.md) / D1). Deciding *whether and how* to socialize a
-release is PIO craft being evaluated, so it is a visible decision, never an implicit side effect.
-**Evidence.** `cross-post` toggle + `link card` preview.
-**Satisfies / amends.** PRS-013 (AMEND: unchecked default; names the handle; live link-card
-preview).
-
-### D4-005 — Org switcher reuses the D1 "Posting as" chip, as "Releasing as {org} ▾"
-**Decision.** Multi-org / JIC authors switch org identity via the **same D1 chip pattern** (COR-018)
-— labelled **"Releasing as {org} ▾"** — granted orgs only; letterhead, contact block, and paired
-handle swap live. **One identity at a time** (SOC-006).
-**Evidence.** `Releasing as {{curOrg.name}} ▾` (`{{toggleOrgMenu}}`); letterhead/`MEDIA CONTACT`
-bound to `{{curOrg.*}}`.
-**Satisfies.** PRS-001, COR-018, SOC-006. Reuses E1 org-grant + attribution and the E2/D1 chip
-(see [`../features/posts/06-post-as-organization.md`](../features/posts/06-post-as-organization.md),
-[`../features/identity-auth-roles/09-org-account-operation.md`](../features/identity-auth-roles/09-org-account-operation.md)).
-
-### D4-006 — Autosave is ambient state in the sheet header, never a control
-**Decision.** Autosave shows as a passive status line (dot + "Saved …") in the sheet header; there
-is no Save button. The draft edit timeline is retained for evaluation (PRS-004, disclosed per
-NFR-007).
-**Evidence.** `{{autosave}}` with a green status dot in the composer header.
-**Satisfies / amends.** PRS-004 (AMEND: autosave is presented as ambient state, not an action).
-
-### D4-007 — The approval gate is participant paper, not staff chrome
-**Decision.** The JIC/legal approval gate (PRS-021) renders in the **wire's letterhead world**, not
-staff console chrome: a **pending list** + a **draft-diff** (struck removals, shaded additions).
-**Approve** = a confirm chip, then it releases. **Return REQUIRES a note**; the returned note
-surfaces in the author's composer as a **"↩ RETURNED FOR REVISION"** banner.
-**Sign-offs.** **(#1)** Approval routing is **per-exercise config with per-org defaults** (off by
-default stays true). **(#3)** Returns stay **wire-internal — no Pulse/portal notification** — this
-is flagged **open to explore** (see STORY-UPDATES open items), not a shipped guarantee.
-**Evidence.** `Approvals` (JIC) tab, `↩ RETURNED FOR REVISION` banner + returner/time, `diff`.
-**Satisfies / amends.** PRS-021 (AMEND: participant-surface gate; mandatory return note; returned
-note surfaces to author; per-exercise routing + per-org defaults), EVL-010 (approval latency still
-captured). **Reconcile:** E5/PRS-021 currently frames the approver as "a participant role or a
-controller playing that role" — the *gate UI* is participant paper regardless of who operates it
-(a controller uses preview-as-participant / the participant approval view).
-
-### D4-008 — The wire is public to ALL participants, citizens included
-**Decision.** The Wire Room is a public destination for every participant, not a
-PIO/media-only surface.
-**Sign-off (#5).** Confirmed: citizens can read the wire.
-**Satisfies.** PRS-010, PRS-011, PRS-012.
-
----
-
-### Part B — The Weather Desk (WX)
-
-### D4-009 — The Weather Desk speaks NWS verbatim
-**Decision.** weather.gov anatomy: zone selector (WX-004), the IBW **What / Where / When / Impacts**
-grid on the warning product (WX-010), monospace product text with NWS furniture (`...HEADLINE...`,
-`PRECAUTIONARY/PREPAREDNESS ACTIONS`, `&&` / `$$`), and **Issued / Effective / Expires** in scenario
-time (COR-053). Severity is **always icon + WATCH/WARNING text chip + color — never color-only**.
-**Sign-off (#8).** NWS hues **darkened slightly** so white text clears **WCAG AA** contrast
-(warning renders `#8b0000`; watch `#2e6b4f`), while staying recognizably NWS so participants'
-instincts transfer.
-**Evidence.** `⚠ WARNING`/`WATCH` chips, `Public Sans` product type, `What:`/`Where:`/`When:`/
-`Impacts:`, `PRECAUTIONARY`, `#8b0000` warning / `#2e6b4f` watch.
-**Satisfies / amends.** WX-001, WX-004, WX-010 (AMEND: IBW grid + NWS furniture specifics),
-NFR-001 (icon+text+color; AA-adjusted hues), COR-053.
-
-### D4-010 — A warning feeds the shell alert bar per SHELL-CONTRACT §2
-**Decision.** Watch = **advisory ticker**; warning = **emergency band that escapes the ticker** and
-forces the full band on **every** channel (portal, Pulse, Wire Room alike). The bar carries **all**
-alerts together — weather and non-weather **rotate/stack in one multi-alert bar**. The **same
-headline string** appears on the bar, the @WeatherDesk post, the portal widget, and the product
-page — **no paraphrase**.
-**Sign-offs.** **(#6)** For now, **every warning type forces the emergency band** (no per-type
-severity mapping yet — a deliberate, revisit-later simplification). **(#7)** One shared multi-alert
-bar for weather + non-weather.
-**Evidence.** `wx011-propagation-storyboard.png` (four surfaces, one string); alert-bar cards
-`abTicker`/`abBand`; "emergency escapes the ticker and forces the full band … (PRT-010)".
-**Satisfies / amends.** WX-011 (AMEND: warning⇒emergency-band "for now"; multi-alert shared bar;
-verbatim headline propagation), PRT-010, PRT-011, SHELL-CONTRACT §2.
-
-### D4-011 — @WeatherDesk auto-post is editable pre-publish and console-side; weather is staff-authored only
-**Decision.** The @WeatherDesk auto-post (WX-011/WX-020) is **editable before publish, on the
-console side**; default text is the **product headline verbatim**. Weather authoring is
-**staff-side only via the controller console** — the Weather Desk has **NO participant composer**.
-**Sign-offs.** **(#9)** No participant weather authoring. **(#10)** Auto-post text is editable
-pre-publish (console-side).
-**Satisfies.** WX-011, WX-020, WX-002/WX-012 (staff authoring). **Routing:** both are **D5
-controller-console retrofit notes**, not participant-surface stories — routed to
-[`D5-controller-console/STORY-UPDATES.md`](D5-controller-console/STORY-UPDATES.md) §E.
-
-### D4-012 — The radar/cone imagery slot reserves the EXERCISE watermark chip
-**Decision.** The WX-013 imagery slot reserves the bottom-right **EXERCISE** watermark chip
-(NFR-008), matching portal D2-008. Warning products are the highest-risk leak class in the product,
-so this is the template that is covered first.
-**Evidence.** RADAR tile with absolute bottom-right `EXERCISE` chip (`rgba(46,107,46,.92)`).
-**Satisfies / amends.** WX-013, WX-002 (watermark-on-warning), NFR-008 (AMEND: names the reserved
-slot + placement).
-
----
-
-### D4-013 — Package sign-off (12 review sign-offs)
-**Decision.** The mockup is user-approved with 12 explicit review sign-offs, folded into the
-decisions above. Roster (anchor → decision):
-
-| # | Sign-off | Home |
-|---|----------|------|
-| 1 | Approval routing = per-exercise config, per-org defaults | D4-007 |
-| 2 | Cancel-embargo notifies approvers + wire audit trace | D4-002 |
-| 3 | Returns stay wire-internal (no Pulse/portal notification) — **open to explore** | D4-007 |
-| 4 | Cross-post is opt-in (unchecked default), names handle, live card | D4-004 |
-| 5 | The wire is public to all participants, citizens included | D4-008 |
-| 6 | Every warning type forces the emergency band, **for now** | D4-010 |
-| 7 | One multi-alert bar carries weather + non-weather together | D4-010 |
-| 8 | NWS hues darkened for WCAG AA white-text contrast | D4-009 |
-| 9 | Weather authoring is staff-side only (no participant composer) | D4-011 |
-| 10 | @WeatherDesk auto-post is editable pre-publish (console-side) | D4-011 |
-| 11 | Headline auto-suggest from the PDF is in scope | D4-001 |
-| 12 | Autosave is ambient state, never a control | D4-006 |
-
-> Sign-offs #3 and #6 are explicitly provisional ("open to explore", "for now") and are logged as
-> open items in [`STORY-UPDATES.md`](D4-press-weather/STORY-UPDATES.md), not as settled guarantees.

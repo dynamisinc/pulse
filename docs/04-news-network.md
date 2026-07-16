@@ -57,12 +57,14 @@ Looking Glass demonstrated the pattern: NewsNow published "Emergency Call Delays
 
 **Design notes.** One rendering system, multiple outlet skins (theme tokens per outlet). Article pages must look excellent on mobile — that's where shared links get opened.
 
+> **Approved design proposal (D3, 2026-07):** the one-system/four-token-skins contract, the invariant article slot anatomy, the skin token surface (CAN/CANNOT), and the four outlet registers are decided — see the canonical [`DECISIONS.md`](design/DECISIONS.md) (`## D3`, `D3-P1…P4`); handoff package in [`design/D3-news-outlets/`](design/D3-news-outlets/). [`STORY-UPDATES.md`](design/D3-news-outlets/STORY-UPDATES.md) carries the requirement amendments; the E4 story decomposition folds them in. Approved at proposal fidelity (exhibits 1a/1b); the full clickable mockup is the next design deliverable.
+
 ## 4. Out of scope
 
 Standalone video platform, article comment threads, participant-authored articles (participants publish via Press Room E5; if an exercise casts a participant *as* media, they get controller-style outlet access — edge case, config-level).
 
 ## 5. Open questions
 
-1. Reporter personas as bylines: required or optional per article? (Recommended: optional; outlets can byline "Staff.")
+1. ~~Reporter personas as bylines: required or optional per article? (Recommended: optional; outlets can byline "Staff.")~~ **Resolved (D3-P2/P3):** optional — byline/dateline format is a per-outlet skin token; org/staff bylines are legal ("BY THE NATIONAL WIRE", "By Scoop Staff"). See `design/D3-news-outlets/`.
 2. Paywall/subscription theater for realism — almost certainly beyond the fidelity ceiling; recommend never.
 3. ~~How many outlet templates at launch?~~ **Resolved:** 4 — Newsline 7, The Courier-Ledger, The National Wire, The Scoop (NWS-002).

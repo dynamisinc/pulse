@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,700;0,6..72,800;1,6..72,400&family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&family=Anton&family=Figtree:wght@400;600;700;800&display=swap"><style>
+body{background:#e8e9ec;margin:0;font-family:Figtree,sans-serif;color:#1a1a1a}
+a{color:#1e3a5f}a:hover{color:#e42217}
+.turn{padding:36px 40px;display:flex;flex-direction:column;gap:24px}
+.badge{display:inline-flex;align-items:center;gap:8px;background:#1e3a5f;color:#fff;font:700 12px Figtree;letter-spacing:.08em;padding:4px 10px;border-radius:4px}
+.exh{background:#fff;border:1px solid #c9cbd2;border-radius:10px;padding:26px 28px;box-shadow:0 1px 3px rgba(10,20,40,.08)}
+.xtitle{font:800 17px Figtree;margin:0 0 2px}
+.xsub{font:400 13px Figtree;color:#5a5e6a;margin:0 0 18px;max-width:760px}
+.row{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}
+.slot{border:1px solid #d4d6dd;border-radius:6px;padding:9px 12px;display:flex;align-items:center;gap:10px;background:#fafafb}
+.slot .sn{font:700 12.5px Figtree}
+.slot .sd{font:400 11.5px Figtree;color:#6a6e7a}
+.tag{font:700 9.5px Figtree;letter-spacing:.1em;padding:2px 7px;border-radius:3px;flex-shrink:0}
+.tskin{background:#e7eef7;color:#1e3a5f}.tfix{background:#1e3a5f;color:#fff}.tauth{background:#fdeceb;color:#b3261e}.tshell{background:#e4e6ea;color:#6a6e7a}
+.anat{display:flex;flex-direction:column;gap:6px;width:430px;flex-shrink:0}
+.shellslot{border:1px dashed #b6bac4;background:repeating-linear-gradient(-45deg,#f2f3f5 0 8px,#e9eaee 8px 16px)}
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:0 26px;flex:1;min-width:460px}
+.tkh{font:800 12px Figtree;letter-spacing:.12em;text-transform:uppercase;padding-bottom:6px;border-bottom:2px solid #1a1a1a;margin-bottom:10px}
+.tkh.no{border-color:#b3261e;color:#b3261e}
+.tk{font:400 13px/1.45 Figtree;padding:6px 0;border-bottom:1px solid #ececf0}
+.tk b{font-weight:700}
+.regs{display:grid;grid-template-columns:repeat(2,minmax(330px,430px));gap:18px}
+.reg{border:1px solid #c9cbd2;border-radius:8px;overflow:hidden;background:#fff}
+.reglab{font:700 10.5px Figtree;letter-spacing:.12em;color:#6a6e7a;padding:7px 12px;background:#f4f4f6;border-bottom:1px solid #e2e3e8;display:flex;justify-content:space-between}
+.hb{padding:18px 20px 20px}
+.brow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.n7-mast{background:#0f2749;padding:10px 20px;display:flex;align-items:center;gap:10px}
+.n7-7{background:#c8102e;color:#fff;font:700 20px/1 Oswald;padding:4px 9px 5px}
+.n7-wm{color:#fff;font:600 17px Oswald;letter-spacing:.14em}
+.n7-k{color:#c8102e;font:700 12.5px 'Source Sans 3';letter-spacing:.1em;display:flex;align-items:center;gap:7px}
+.n7-live{background:#c8102e;color:#fff;font:700 10px 'Source Sans 3';letter-spacing:.1em;padding:2px 7px;border-radius:3px;display:inline-flex;align-items:center;gap:5px}
+.n7-h{font:600 30px/1.12 Oswald;margin:8px 0 8px;color:#10161f}
+.n7-d{font:400 15.5px/1.45 'Source Sans 3';color:#3a4048;margin:0 0 12px}
+.n7-b{font:600 12.5px 'Source Sans 3';color:#0f2749}
+.n7-t{font:400 12.5px 'Source Sans 3';color:#6a707a}
+.cl-mast{border-bottom:3px double #1a1a1a;padding:12px 20px 10px;text-align:center}
+.cl-wm{font:800 24px Newsreader;letter-spacing:.01em}
+.cl-k{font:600 11.5px 'Source Sans 3';letter-spacing:.18em;color:#5a5e66;text-transform:uppercase;border-top:1px solid #d8d9de;border-bottom:1px solid #d8d9de;padding:4px 0;display:inline-block}
+.cl-h{font:700 28px/1.18 Newsreader;margin:10px 0 8px;color:#141414}
+.cl-d{font:italic 400 16px/1.5 Newsreader;color:#44474e;margin:0 0 12px}
+.cl-b{font:600 12.5px 'Source Sans 3';color:#141414}
+.cl-t{font:400 12.5px 'Source Sans 3';color:#71757e}
+.nw-mast{border-bottom:2px solid #14161a;padding:11px 20px;display:flex;align-items:baseline;gap:12px}
+.nw-wm{font:700 15px 'IBM Plex Sans';letter-spacing:.2em}
+.nw-slug{font:400 10.5px 'IBM Plex Mono';color:#7a7e88}
+.nw-ts{font:500 11.5px 'IBM Plex Mono';color:#9a3412;letter-spacing:.04em}
+.nw-h{font:600 23px/1.22 'IBM Plex Sans';margin:8px 0;color:#14161a}
+.nw-dl{font:400 14.5px/1.5 'IBM Plex Sans';color:#3c3f46;margin:0 0 12px}
+.nw-dl b{font-weight:700;color:#14161a}
+.nw-b{font:400 11.5px 'IBM Plex Mono';color:#61656e}
+.sc-mast{background:#ffd400;padding:8px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:4px solid #14161a}
+.sc-wm{font:400 22px Anton;letter-spacing:.03em;color:#14161a;text-transform:uppercase}
+.sc-mn{font:800 9.5px Figtree;letter-spacing:.08em;background:#e6007e;color:#fff;padding:3px 8px;transform:rotate(-2deg)}
+.sc-fl{display:inline-block;background:#e6007e;color:#fff;font:400 13px Anton;letter-spacing:.06em;padding:3px 10px;transform:rotate(-1.5deg)}
+.sc-h{font:400 29px/1.13 Anton;margin:10px 0 8px;color:#14161a;text-transform:uppercase}
+.sc-h mark{background:#ffd400;padding:0 4px}
+.sc-d{font:700 14.5px/1.4 Figtree;color:#2a2d33;margin:0 0 12px}
+.sc-b{font:800 11.5px Figtree;color:#e6007e;text-transform:uppercase;letter-spacing:.04em}
+.sc-t{font:600 11.5px Figtree;color:#6a6e7a}
+.sc-chips{display:flex;gap:6px;margin-top:10px}
+.sc-chip{font:800 9.5px Figtree;letter-spacing:.08em;border:1.5px solid #14161a;padding:2px 8px;background:#fff}
+.note{font:400 12px/1.5 Figtree;color:#6a6e7a;max-width:860px}
+</style></helmet>
+<section class="turn">
+<div id="1a"><span class="badge">1a · SHARED ARTICLE GRID + TOKEN SURFACE</span>
+<div class="exh mt12"><h2 class="xtitle">One article system — slot anatomy is fixed, skins restyle within slots</h2><p class="xsub">Content region only (shell owns chrome, alert bar, channel strip — SHELL-CONTRACT §1). Desktop: 12-col well, max 1140px; body column 680px (~66ch); optional 340px rail is a skin token. Mobile: one column, rail folds below body. Slot order is invariant — NWS-002's "fifth outlet = a token file" depends on it.</p>
+<div class="row">
+<div class="anat">
+<div class="slot shellslot"><span class="tag tshell">SHELL</span><span class="sd">compliance chrome · alert bar · channel strip — never re-implemented</span></div>
+<div class="slot"><span class="tag tskin">SKIN</span><div><div class="sn">Outlet masthead + section nav</div><div class="sd">nameplate, palette, nav style — the brand carrier</div></div></div>
+<div class="slot"><span class="tag tauth">AUTHORIAL</span><div><div class="sn">Breaking slot</div><div class="sd">empty by default; outlet-voiced banner when controller sets it (NWS-012) — platform adds nothing</div></div></div>
+<div class="slot"><span class="tag tskin">SKIN</span><div><div class="sn">Kicker → Headline → Dek</div><div class="sd">type, case, scale per register; order fixed</div></div></div>
+<div class="slot"><span class="tag tfix">FIXED</span><div><div class="sn">Byline · scenario dateline · share</div><div class="sd">persona block + COR-053 time (skin formats, never sources); share → Pulse link card</div></div></div>
+<div class="slot"><span class="tag tskin">SKIN</span><div><div class="sn">Hero media / Beat video player</div><div class="sd">broadcast-style player (NWS-014); crop + caption per skin</div></div></div>
+<div class="slot"><span class="tag tfix">FIXED</span><div><div class="sn">↳ EXERCISE watermark slot</div><div class="sd">bottom-right corner chip on media, matches D2-008 (NWS-032 / NFR-008)</div></div></div>
+<div class="slot"><span class="tag tskin">SKIN</span><div><div class="sn">Body + pull quote</div><div class="sd">measure token, quote style per register</div></div></div>
+<div class="slot"><span class="tag tfix">FIXED</span><div><div class="sn">↳ Embedded Pulse post</div><div class="sd">D1 anatomy verbatim, seal #2D9CDB — the embed is the platform's, not the outlet's (SOC-002/004)</div></div></div>
+<div class="slot"><span class="tag tauth">AUTHORIAL</span><div><div class="sn">Correction slot</div><div class="sd">visible editor's note (skin-styled) OR silent rewrite = only the Updated stamp changes (NWS-013)</div></div></div>
+<div class="slot"><span class="tag tfix">FIXED</span><div><div class="sn">Footer: "Join the discussion" → outlet's Pulse post</div><div class="sd">no comments, ever (NWS-031)</div></div></div>
+</div>
+<div class="cols2">
+<div><div class="tkh">A skin CAN set (token file)</div>
+<div class="tk"><b>Type stack</b> — masthead, hed, dek, body, kicker faces; weight, case, condensation</div>
+<div class="tk"><b>Palette</b> — accent, link, bg, rules, breaking color</div>
+<div class="tk"><b>Density</b> — spacing scale, rule weights (hairline ↔ heavy bar), corner radius</div>
+<div class="tk"><b>Media treatment</b> — crop aggression, caption style, player chrome tint</div>
+<div class="tk"><b>Breaking treatment</b> — banner style + vocabulary ("BREAKING NEWS" / "News Alert" / "EXCLUSIVE!!")</div>
+<div class="tk"><b>Byline/dateline format</b> — "By X, Staff Writer" vs wire slug "FAIRHAVEN (NW) —"</div>
+<div class="tk"><b>Layout enums</b> — rail on/off; homepage lead mode (video-lead / text-lead / list-lead / clutter)</div>
+<div class="tk"><b>Clutter modules</b> — sanctioned set, The Scoop only (busyness = untrustworthiness)</div></div>
+<div><div class="tkh no">A skin CANNOT touch</div>
+<div class="tk"><b>Slot anatomy + order</b> — the system above</div>
+<div class="tk"><b>Scenario time source</b> — COR-053; formats vary, the clock doesn't</div>
+<div class="tk"><b>Pulse embed + link-card contract</b> — pixel-consistent both directions (SOC-004)</div>
+<div class="tk"><b>Watermark slot</b> — position + reservation (NFR-008)</div>
+<div class="tk"><b>Share behavior</b> — always posts an outlet link card to Pulse</div>
+<div class="tk"><b>No comments; no platform badges</b> — NWS-031, SOC-002</div>
+<div class="tk"><b>A11y floor</b> — AA contrast, ≥16px mobile body, correction slot semantics (NFR-001)</div>
+<div class="tk"><b>Telemetry</b> — invisible, zero UI (NWS-030)</div></div>
+</div></div></div></div>
+<div id="1b"><span class="badge">1b · ONE HEADLINE BLOCK, FOUR REGISTERS</span>
+<div class="exh mt12"><h2 class="xtitle">Same story, same slots — credibility read from design alone</h2><p class="xsub">Masthead → kicker → hed → dek → byline/dateline. Content is outlet-authored per register (controllers write each outlet's voice); the DOM is identical.</p>
+<div class="regs">
+<div class="reg"><div class="reglab"><span>NEWSLINE 7 — LOCAL TV</span><span>Oswald / Source Sans 3</span></div>
+<div class="n7-mast"><span class="n7-7">7</span><span class="n7-wm">NEWSLINE</span></div>
+<div class="hb"><div class="n7-k"><span class="n7-live">● LIVE</span>BREAKING · WATER CRISIS</div>
+<h3 class="n7-h">Boil-water advisory issued for Zones 2–4 after alarm at Millbrook plant</h3>
+<p class="n7-d">County EM urges residents to boil all tap water; lab results expected by 6 p.m.</p>
+<div class="brow"><span class="n7-b">Maria Solano</span><span class="n7-t">· Newsline 7 · Updated 10:14 AM</span></div></div></div>
+<div class="reg"><div class="reglab"><span>THE COURIER-LEDGER — NEWSPAPER</span><span>Newsreader / Source Sans 3</span></div>
+<div class="cl-mast"><span class="cl-wm">The Courier-Ledger</span></div>
+<div class="hb tc"><span class="cl-k">Public Health</span>
+<h3 class="cl-h">Boil-water advisory issued for Zones 2–4 after treatment plant alarm</h3>
+<p class="cl-d">Officials said the precaution will remain in place until laboratory results return Tuesday evening.</p>
+<div class="brow jc"><span class="cl-b">By Elena Marsh</span><span class="cl-t">· Staff Writer · July 13, 10:21 a.m.</span></div></div></div>
+<div class="reg"><div class="reglab"><span>THE NATIONAL WIRE — WIRE SERVICE</span><span>IBM Plex Sans / Mono</span></div>
+<div class="nw-mast"><span class="nw-wm">THE NATIONAL WIRE</span><span class="nw-slug">NW-FAIRHAVEN-WATER-0142</span></div>
+<div class="hb"><div class="nw-ts">UPDATED 10:14 AM · 2 MIN READ</div>
+<h3 class="nw-h">Fairhaven orders boil-water advisory for four zones</h3>
+<p class="nw-dl"><b>FAIRHAVEN, Fulton County (NW) —</b> Emergency officials issued a boil-water advisory Tuesday after a treatment alarm at the Millbrook plant.</p>
+<div class="nw-b">BY THE NATIONAL WIRE</div></div></div>
+<div class="reg"><div class="reglab"><span>THE SCOOP — TABLOID</span><span>Anton / Figtree</span></div>
+<div class="sc-mast"><span class="sc-wm">The Scoop</span><span class="sc-mn">FAIRHAVEN'S #1 SOURCE</span></div>
+<div class="hb"><span class="sc-fl">EXCLUSIVE!!</span>
+<h3 class="sc-h">Tap water <mark>TERROR</mark>: city admits "don't drink" as plant alarm sparks panic</h3>
+<p class="sc-d">Insiders say officials knew for HOURS before telling you. What they're not saying →</p>
+<div class="brow"><span class="sc-b">By Scoop Staff</span><span class="sc-t">| 10:33 AM</span></div>
+<div class="sc-chips"><span class="sc-chip">TRENDING</span><span class="sc-chip">SHOCKING</span><span class="sc-chip">MUST SEE</span></div></div></div>
+</div>
+<p class="note mt16">Reading the grid of four: trust decays left-to-right through type discipline (condensed-urgent → serif-measured → mono-austere → display-screaming), palette restraint, and clutter count. The Scoop's chips/rotation/highlights come from its sanctioned clutter-module set — no other skin can enable them.</p>
+</div></div>
+</section>
+</x-dc>
+</body>
+</html>
