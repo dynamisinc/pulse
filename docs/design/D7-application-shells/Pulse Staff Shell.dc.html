@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700;800&family=Libre+Franklin:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f8f8f8;--panel:#fff;--card:#fff;--line:#dcdcdc;--line2:#c4c4c4;--ink:#1a1a1a;--ink2:#4a4f55;--ink3:#848482;--navy:#1e3a5f;--red:#e42217;--amber:#b26a00;--green:#2e7d4f;--hink:#eef3f9;--hink2:#b9c7d8;--hink3:#7d93ad;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--navy);text-decoration:none}a:hover{color:#2f5580}
+.app{height:100vh;display:grid;grid-template-rows:56px minmax(0,1fr)}
+.cls-tag{font:700 9px var(--mono);letter-spacing:.12em;color:var(--hink3);border:1px solid rgba(255,255,255,.18);padding:3px 8px;border-radius:5px;white-space:nowrap}
+.shdr{display:flex;align-items:center;gap:14px;padding:0 14px;background:var(--navy);border-bottom:1px solid #16293f;color:var(--hink)}
+.brand{display:flex;flex-direction:column;line-height:1.05}
+.brand .b1{font-size:15px;font-weight:800;letter-spacing:.02em}
+.brand .b2{font-size:9.5px;font-weight:700;letter-spacing:.16em;color:var(--hink3)}
+.exsw-btn{display:flex;flex-direction:column;align-items:flex-start;gap:1px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.22);border-radius:8px;padding:5px 11px;color:var(--hink)}
+.exsw-btn .e1{font-size:12px;font-weight:700;white-space:nowrap}
+.exsw-btn .e2{font-size:9.5px;font-weight:700;letter-spacing:.08em;color:#9fc0e8}
+.clocks{display:flex;align-items:center;gap:14px;padding:0 4px}
+.clk{display:flex;flex-direction:column;align-items:flex-start;line-height:1;gap:3px}
+.clk .t{font-family:var(--mono);font-weight:700}
+.clk .l{font-size:8.5px;font-weight:700;letter-spacing:.12em;color:var(--hink3)}
+.clk.scn .t{font-size:20px}
+.clk.wall .t{font-size:13px;color:var(--hink2)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none;background:currentColor}
+.state-pill{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;letter-spacing:.08em;padding:4px 9px;border-radius:20px;background:rgba(51,160,111,.14);color:#5fce9a;border:1px solid rgba(51,160,111,.4)}
+.state-pill.paused{background:rgba(245,166,35,.14);color:#f5c56b;border-color:rgba(245,166,35,.5)}
+.presence{display:flex;gap:6px}
+.av{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff}
+.hbtn{display:flex;align-items:center;gap:7px;background:transparent;border:1px solid rgba(255,255,255,.35);border-radius:999px;color:var(--hink2);font:600 12px ui-sans-serif,system-ui,sans-serif;padding:7px 14px;cursor:pointer;white-space:nowrap}
+.hbtn:hover{background:rgba(255,255,255,.12);color:var(--hink)}
+.hbtn.on{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.55);color:var(--hink)}
+.ic{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.body{display:grid;grid-template-columns:minmax(0,1fr) 56px;min-height:0;position:relative}
+.work{min-height:0;overflow:auto;padding:22px;display:flex;flex-direction:column}
+.ph{flex:1;border:1.5px dashed var(--line2);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--ink3);text-align:center}
+.ph .p1{font:700 14px ui-sans-serif,system-ui,sans-serif,system-ui;color:var(--ink2)}
+.ph .p2{font:500 12px/1.6 ui-sans-serif,system-ui,sans-serif,system-ui;max-width:440px}
+.strip{display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;border-left:1px solid var(--line);background:var(--panel)}
+.tool{width:40px;height:40px;border-radius:10px;border:1px solid var(--line2);background:transparent;color:var(--ink2);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative}
+.tool:hover{background:#eef3f9;color:var(--ink)}
+.tool.on{background:#e7eef6;border-color:var(--navy);color:var(--navy)}
+.tbadge{position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;font:800 9px ui-sans-serif,system-ui,sans-serif;padding:1px 5px;border-radius:8px}
+.tlbl{font:700 8px ui-sans-serif,system-ui,sans-serif;letter-spacing:.08em;color:var(--ink3);text-align:center;margin-top:-6px}
+.tdiv{width:26px;height:1px;background:var(--line2);margin:3px 0}
+.tool.ghost{border-style:dashed;color:var(--ink3);cursor:default}
+.tool.ghost:hover{background:transparent;color:var(--ink3)}
+.fly{position:absolute;top:0;right:56px;bottom:0;width:330px;background:var(--panel);border-left:1px solid var(--line2);box-shadow:-16px 0 40px rgba(0,0,0,.14);z-index:30;display:flex;flex-direction:column}
+.flyh{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--line)}
+.flyt{font:800 11px ui-sans-serif,system-ui,sans-serif;letter-spacing:.14em;color:var(--ink2)}
+.flyx{cursor:pointer;color:var(--ink3);font-size:15px;background:none;border:none}
+.flyc{font:500 11px/1.5 ui-sans-serif,system-ui,sans-serif;color:var(--ink3);padding:10px 16px 0}
+.prow{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line)}
+.pinfo{flex:1;min-width:0}
+.pn{font:700 12.5px ui-sans-serif,system-ui,sans-serif}
+.pr{font:600 10px ui-sans-serif,system-ui,sans-serif;letter-spacing:.06em;color:var(--ink3);margin-top:2px}
+.pst{font:800 9px ui-sans-serif,system-ui,sans-serif;letter-spacing:.08em;padding:3px 7px;border-radius:5px;flex:none}
+.st-lock{background:rgba(228,34,23,.1);color:#c11b10}
+.st-off{background:rgba(178,106,0,.12);color:#8a5300}
+.st-ok{background:rgba(46,125,79,.12);color:#256b43}
+.pact{font:700 11px ui-sans-serif,system-ui,sans-serif;color:var(--navy);cursor:pointer;flex:none;background:none;border:none;padding:0}
+.pact:hover{color:#2f5580}
+.flyf{margin-top:auto;padding:14px 16px;border-top:1px solid var(--line)}
+.pvwrap{flex:1;display:flex;flex-direction:column;min-height:0}
+.pvbar{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:16px}
+.pvt{font:800 10px ui-sans-serif,system-ui,sans-serif;letter-spacing:.12em;color:var(--amber);white-space:nowrap}
+.mchip{font:700 11px var(--mono);padding:5px 12px;border-radius:999px;border:1px solid var(--line2);color:var(--ink2);cursor:pointer;white-space:nowrap;background:transparent}
+.mchip:hover{background:#eef3f9}
+.mchip.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.pvnote{font:500 10.5px ui-sans-serif,system-ui,sans-serif;color:var(--ink3);margin-left:auto;white-space:nowrap}
+.pvstage{flex:1;display:flex;align-items:flex-start;justify-content:center;overflow:auto;background:#e9edf1;border:1px solid var(--line);border-radius:12px;padding:26px}
+.pv{width:820px;background:#fff;border-radius:8px;overflow:hidden;position:relative;box-shadow:0 18px 50px rgba(0,0,0,.22);font-family:Figtree,sans-serif;color:#0e1518}
+.pxb{height:20px;background:#2e6b2e;color:#eaf5e6;font:700 9px/20px Figtree;text-align:center;letter-spacing:.14em}
+.pab{display:flex;align-items:center;gap:10px;padding:8px 14px;font-size:12.5px;border-bottom:1px solid}
+.pab-adv{background:#fff3dd;border-color:#e3b25f;color:#6b4300}
+.pab-emg{background:#b3261e;border-color:#8f150c;color:#fff}
+.pchip{font:800 9.5px Figtree;letter-spacing:.1em;padding:2px 7px;border-radius:5px;display:flex;gap:4px;flex:none}
+.pab-adv .pchip{background:#b97a00;color:#fff}
+.pab-emg .pchip{background:#fff;color:#8f150c}
+.pstrip{display:flex;align-items:center;gap:2px;padding:0 10px;height:32px;background:#fbfcfd;border-bottom:1px solid #e3e7ea;font:600 11px Figtree;color:#5a6a76}
+.psl{padding:4px 8px}
+.psl.on{color:#101b23;font-weight:800;box-shadow:inset 0 -2px 0 #101b23}
+.pdate{margin-left:auto;font:500 10px Figtree;color:#8a97a1}
+.pft{font-family:'Libre Franklin',sans-serif;color:#1c2833}
+.pfthead{background:#123a63;color:#fff;padding:10px 16px;font:800 17px 'Libre Franklin';letter-spacing:.04em}
+.pfthead b{color:#e8b437}
+.pftbody{padding:14px 16px}
+.pftk{color:#c8102e;font:800 9px 'Libre Franklin';letter-spacing:.12em}
+.pfth1{font:800 16px/1.3 'Libre Franklin';margin:4px 0 6px}
+.pftp{font:400 11.5px/1.5 'Libre Franklin';color:#46545f}
+.pftrow{font:700 12px 'Libre Franklin';margin-top:10px;padding-top:10px;border-top:1px solid #e6eaee}
+</style>
+</helmet>
+<div class="app">
+<div class="shdr">
+<div class="brand"><span class="b1">PULSE</span><span class="b2">{{surfaceSub}}</span></div>
+<div class="exsw-btn" title="Exercise identity — fixed while conduct is live (COR-005)"><span class="e1">{{exName}}</span><span class="e2">{{roleLine}}</span></div>
+<div class="clocks"><div class="clk scn"><span class="t">16:12:04</span><span class="l">SCENARIO TIME</span></div><div class="clk wall"><span class="t">10:47</span><span class="l">WALL · JUL 13</span></div></div>
+<div class="state-pill {{stateCls}}"><span class="dot"></span>{{stateLabel}}</div>
+<div class="f1"></div>
+<div class="cls-tag" title="Training use only — all content simulated">UNCLASSIFIED // FOUO</div>
+<div class="presence"><div class="av" style="background:#33a06f" title="SimCell-1 (you)">S1</div><div class="av" style="background:#f5a623" title="SimCell-2 · J. Okoro">S2</div><div class="av" style="background:#7a5aa0" title="Director · L. Park">DP</div></div>
+<button class="hbtn {{pvBtnCls}}" onClick="{{togglePreview}}" title="See exactly what participants see right now — opens the participant shell inside this staff frame (COR-041)"><svg class="ic" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"></path><circle cx="12" cy="12" r="2.6"></circle></svg>{{pvBtnLabel}}</button>
+</div>
+<div class="body">
+<div class="work">
+<sc-if value="{{previewOn}}" hint-placeholder-val="{{false}}">
+<div class="pvwrap">
+<div class="pvbar"><span class="pvt">PREVIEWING AS PARTICIPANT</span><sc-for list="{{moments}}" as="m" hint-placeholder-count="4"><button class="mchip {{m.cls}}" onClick="{{m.go}}">{{m.label}}</button></sc-for><span class="pvnote">Read-only — nothing you do here reaches the exercise</span></div>
+<div class="pvstage">
+<div class="pv">
+<div class="pxb">UNCLASSIFIED // EXERCISE · EXERCISE · EXERCISE — ALL CONTENT SIMULATED</div>
+<sc-if value="{{pvAdv}}" hint-placeholder-val="{{false}}"><div class="pab pab-adv"><span class="pchip"><span>⚠</span><span>ADVISORY</span></span><span>Boil Water Advisory — Zones 2–4. Boil tap water for 1 minute before use.</span></div></sc-if>
+<sc-if value="{{pvEmg}}" hint-placeholder-val="{{false}}"><div class="pab pab-emg"><span class="pchip"><span>⚠</span><span>EMERGENCY</span></span><span>Do not drink tap water in Zones 2–4. Distribution open at Fairview HS.</span></div></sc-if>
+<div class="pstrip"><span class="psl on">Fairhaven Today</span><span class="psl">Newsline 7</span><span class="psl">Pulse</span><span class="psl">The Wire Room</span><span class="psl">Weather Desk</span><span class="pdate">{{pvDate}}</span></div>
+<div class="pft"><div class="pfthead">FAIRHAVEN <b>TODAY</b></div><div class="pftbody"><div class="pftk">{{pvKicker}}</div><div class="pfth1">{{pvHeadline}}</div><div class="pftp">{{pvDek}}</div><div class="pftrow">Water distribution site opens at Fairview High School</div><div class="pftrow">What we know about the Millbrook treatment plant issue</div></div></div>
+<div class="pxb">PULSE TRAINING ENVIRONMENT — SIMULATED INFORMATION SPACE — NOT REAL NEWS</div>
+</div>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{previewOff}}" hint-placeholder-val="{{true}}">
+<div class="ph"><div class="p1">{{surfaceName}} work area</div><div class="p2">The surface renders here and owns everything inside this region. The frame above — brand lockup, exercise identity, clocks, state pill, classification tag, presence — and the toolstrip dock at right are shell-owned and identical on every staff surface.</div></div>
+</sc-if>
+</div>
+<div class="strip">
+<button class="tool {{adminCls}}" onClick="{{toggleAdmin}}" title="Participant admin — login triage without leaving conduct (COR-017)"><svg class="ic" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"></circle><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"></path><path d="M17 8h5M19.5 5.5v5"></path></svg><span class="tbadge">2</span></button>
+<span class="tlbl">ADMIN</span>
+<div class="tdiv"></div>
+<button class="tool ghost" title="Surface zone — the surface (e.g. the controller toolbox) registers its tools here, below the divider. The shell never knows what they are; it only owns the dock."><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" stroke-dasharray="3 3"></rect></svg></button>
+<span class="tlbl">SURFACE</span>
+<button class="tool" title="Extension point — future consult-on-demand tools dock here (D5-017): stories, rumors, trainees, settings"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.6"></circle><circle cx="12" cy="5" r="1.6"></circle><circle cx="12" cy="19" r="1.6"></circle></svg></button>
+</div>
+<sc-if value="{{adminOpen}}" hint-placeholder-val="{{false}}">
+<div class="fly">
+<div class="flyh"><span class="flyt">PARTICIPANT ADMIN</span><button class="flyx" onClick="{{toggleAdmin}}">✕</button></div>
+<div class="flyc">StartEx login triage — fix access without leaving conduct.</div>
+<div class="prow"><div class="pinfo"><div class="pn">D. Reyes</div><div class="pr">PIO · CITY OF FAIRHAVEN</div></div><span class="pst st-lock">LOCKED OUT</span><button class="pact">Reset link</button></div>
+<div class="prow"><div class="pinfo"><div class="pn">K. Ward</div><div class="pr">EOC LIAISON</div></div><span class="pst st-off">NO LOGIN YET</span><button class="pact">Resend invite</button></div>
+<div class="prow"><div class="pinfo"><div class="pn">T. Brandt</div><div class="pr">OBSERVER</div></div><span class="pst st-ok">ACTIVE · 14M</span><button class="pact">View</button></div>
+<div class="flyf"><a href="#">Open full participant admin →</a></div>
+</div>
+</sc-if>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;surface&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Controller Console&quot;,&quot;Evaluator Dashboard&quot;],&quot;default&quot;:&quot;Controller Console&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Frame&quot;},&quot;exName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;BAY SHIELD 2026&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Frame&quot;},&quot;exerciseState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;running&quot;,&quot;paused&quot;],&quot;default&quot;:&quot;running&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Frame&quot;}}">
+class Component extends DCLogic {
+  state = { preview: false, moment: 'now', adminOpen: false };
+  renderVals() {
+    const p = this.props, s = this.state;
+    const surface = p.surface ?? 'Controller Console';
+    const paused = (p.exerciseState ?? 'running') === 'paused';
+    const M = {
+      startex: { date: 'Tue, Mar 14 · 8:00 AM', sev: 'none', kicker: 'LOCAL', headline: 'Millbrook plant begins scheduled maintenance week', dek: 'City crews start planned work on the water treatment system this morning.' },
+      advisory: { date: 'Tue, Mar 14 · 2:40 PM', sev: 'advisory', kicker: '● ADVISORY · LIVE UPDATES', headline: 'Boil-water advisory issued for Zones 2–4', dek: 'County EM announces a precautionary advisory while Millbrook plant samples are analyzed.' },
+      burst: { date: 'Tue, Mar 14 · 4:02 PM', sev: 'emergency', kicker: '● EMERGENCY · LIVE UPDATES', headline: 'Do-not-drink order issued as lab results come back positive', dek: 'Officials open a water distribution site at Fairview High School.' },
+      now: { date: 'Tue, Mar 14 · 4:12 PM', sev: 'emergency', kicker: '● EMERGENCY · LIVE UPDATES', headline: 'Do-not-drink order in effect for Zones 2–4', dek: 'Distribution under way at Fairview HS; officials to brief media at 5:30 PM.' }
+    };
+    const cur = M[s.moment];
+    const moments = [['startex', 'STARTEX 08:00'], ['advisory', 'ADVISORY 14:40'], ['burst', 'BURST 16:02'], ['now', 'NOW 16:12']].map(([id, label]) => ({
+      label, cls: s.moment === id ? 'on' : '', go: () => this.setState({ moment: id })
+    }));
+    return {
+      exName: p.exName ?? 'BAY SHIELD 2026',
+      surfaceSub: surface.toUpperCase(),
+      surfaceName: surface,
+      roleLine: (surface === 'Evaluator Dashboard' ? 'EVALUATOR · Team B' : 'CONTROLLER · SimCell-1'),
+      stateCls: paused ? 'paused' : '', stateLabel: paused ? 'INJECTS PAUSED' : 'RUNNING',
+      previewOn: s.preview, previewOff: !s.preview,
+      pvBtnLabel: s.preview ? 'Exit preview' : 'Preview as participant',
+      pvBtnCls: s.preview ? 'on' : '',
+      togglePreview: () => this.setState(x => ({ preview: !x.preview })),
+      moments,
+      pvAdv: cur.sev === 'advisory', pvEmg: cur.sev === 'emergency',
+      pvDate: cur.date, pvKicker: cur.kicker, pvHeadline: cur.headline, pvDek: cur.dek,
+      adminOpen: s.adminOpen, adminCls: s.adminOpen ? 'on' : '',
+      toggleAdmin: () => this.setState(x => ({ adminOpen: !x.adminOpen }))
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 # Story: Static identity badge during conduct
 
 **Feature:** Console shell  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-005  ·  **Design decisions:** D5-012(g), R-006 (presentation interim)  ·  **Issue:** #11
+**Requirements:** COR-005  ·  **Design decisions:** D5-012(g), D7-007/010 (presentation → `staff-shell` header)  ·  **Issue:** #11
 
 ## Context
 COR-005 lets staff hold assignments across exercises with an explicit exercise switcher on staff
@@ -11,17 +11,18 @@ is a **pre-conduct** concern. This preserves COR-005's identity intent while rem
 foot-gun (accidentally operating the wrong world). The E1 COR-005 requirement/story should carry the
 same clarification.
 
-> **Interim — superseded by D7 shell (R-006).** The exercise identity block is inventoried improvised
-> chrome (`docs/design/COMPONENTS.md`, D5 `.exsw`) — its header placement/presentation here is
-> interim; the D7 unified-shell session defines the shell's identity chrome. The **behavior stands**:
-> static during conduct, switching pre-conduct. Related gap: participants have **no** exercise
-> identity at all (COMPONENTS.md divergence #5) — tracked as
-> `exercise-configuration/05-participant-exercise-identity.md`, a D7 input.
+> **Resolved by D7 (was R-006 interim).** The identity badge is now **rendered by the `staff-shell`
+> header** (`staff-shell/01-staff-header.md`, D7-007/010) — the D7 session defined the shell's identity
+> chrome. The **behavior specified here stands and is canonical** (static during conduct, switching
+> pre-conduct); this story is the *behavior contract* the shell header implements (and the E1 COR-005
+> amendment). Presentation is `staff-shell`'s, not this feature's. Related: participants have **no**
+> exercise identity by design (D7-005, XC-002) — see
+> `exercise-configuration/05-participant-exercise-identity.md`.
 
 ## Acceptance Criteria
 - [ ] Given an exercise in live conduct, when the console renders, then the shell shows a **static**
       identity badge (exercise name + controller identity) with **no** exercise switcher control
-      *(header placement/presentation: interim — superseded by D7 shell, R-006)*.
+      *(rendered by the `staff-shell` header, D7-007/010; behavior canonical here)*.
 - [ ] Given a pre-conduct state (Build/Staged), when a controller with multiple assignments opens the
       console, then exercise switching is available (COR-005) — switching is a pre-conduct action.
 - [ ] The badge unambiguously identifies which exercise the controller is operating, in the staff

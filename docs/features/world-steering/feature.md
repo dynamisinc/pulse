@@ -17,11 +17,13 @@ via SOC-072 notifications.
 `STORY-UPDATES.md` section A (safety-critical). Amendments to apply:
 - **CTL-024 → "Break Fiction"** (D5-014/1.2, D5-007): replaces participant screens **inside the
   exercise only**, Director-gated (locked for Controller role), type-to-confirm (**"BROADCAST"**),
-  guarded/latched group, **every use logged** to the exercise record.
+  guarded/latched group, **every use logged** to the exercise record. *(D7-003: the alien overlay is
+  **rendered by `participant-shell`**; this feature owns only the trigger + fan-out + audit.)*
 - **CTL-023 → tiered pause** (D5-014/1.3): Pause injects / Pause engine / Freeze world; state pill
   INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN; **scenario clock stops only on Freeze**; Break
-  Fiction implies world-freeze. *(The state pill + pause button as header chrome are interim —
-  superseded by D7 shell, R-006/COMPONENTS.md; the tier behavior is unaffected.)*
+  Fiction implies world-freeze. *(D7-004: the participant pause/EndEx pages are **rendered by
+  `participant-shell`** and the state pill lives in the **`staff-shell` header** (D7-010) — R-006
+  resolved; this feature owns the tier control + state machine.)*
 - **CTL-022 → intensity = actual + controller-set target** (D5-014/2.2): one track, actual fill +
   target tick; click to set target; the **engine drives actual toward the target**.
 
@@ -37,9 +39,11 @@ via SOC-072 notifications.
 | — | Portal curation — pin Top Stories, publish alert bar *(Phase 3 stub)* | CTL-020 (PRT-004/010) | Not Started | — |
 
 ## Dependencies
-E1 clock + lifecycle (pause tiers), roles (Director vs Controller for Break Fiction); E2 social
-levers (SOC-041/053/072) and soft-delete/tombstone (SOC-005, XC-010) for takedown; E8 escalation
-profiles (ADP-010) for the dial; E10 sink for the off-platform marker + takedown record.
+E1 clock + lifecycle (pause tiers), roles (Director vs Controller for Break Fiction); **`participant-shell`
+overlay layer renders the break-fiction / pause / EndEx states this feature triggers** (D7-003/004);
+**`staff-shell` header renders the tier state pill** (D7-010); E2 social levers (SOC-041/053/072) and
+soft-delete/tombstone (SOC-005, XC-010) for takedown; E8 escalation profiles (ADP-010) for the dial;
+E10 sink for the off-platform marker + takedown record.
 
 ## Design notes
 Staff world (COBRA). **Break Fiction is the house lights** — visually alien to both worlds, cannot be

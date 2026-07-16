@@ -1,7 +1,7 @@
 # Story: Break Fiction — Director-gated safety broadcast
 
 **Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** CTL-024  ·  **Design decisions:** D5-014/1.2, D5-007  ·  **Issue:** #27
+**Requirements:** CTL-024  ·  **Design decisions:** D5-014/1.2, D5-007, D7-003 (overlay → `participant-shell`)  ·  **Issue:** #27
 
 ## Context
 The house lights. A Director-level action publishes an unmissable, visually **alien** overlay to every
@@ -14,6 +14,12 @@ distinct **guarded/latched** group, and **every use is logged** to the exercise 
 > **Amendment (D5-014/1.2, D5-007).** Before: "Real-World Broadcast" (scope ambiguous). After:
 > "Break Fiction" — in-exercise only, Director-gated (locked for Controller role), type-to-confirm,
 > guarded/latched, logged; the confirm dialog states destination + that use is logged.
+>
+> **Amendment (D7-003).** The alien overlay is **rendered by `participant-shell`** (the overlay
+> layer, top of the z-order above compliance chrome — `participant-shell/05-overlay-layer.md`). **This
+> story owns only the trigger:** the guarded/latched control, the Director gate, type-to-confirm, the
+> per-session broadcast fan-out, and the audit log. The overlay's look (black/amber hazard, monospace,
+> wall-clock, no-dismiss) is specified in D7-003 / SHELL-CONTRACT §3 and built there.
 
 ## Acceptance Criteria
 - [ ] Given the **Director** role, when they invoke Break Fiction from its guarded/latched group and
@@ -36,9 +42,9 @@ these are the normal in-fiction markings, not the alien break); EndEx flow (E1 C
 
 ## Technical Notes
 Staff world (COBRA). Owns the guarded control + type-to-confirm + a broadcast channel that reaches all
-in-exercise sessions (SignalR fan-out when present; design the delivery-log-per-session path). The
-overlay component is intentionally outside both visual worlds. Reuses the Freeze state (story 03). See
-implementation.md (story 04).
+in-exercise sessions (SignalR fan-out when present; design the delivery-log-per-session path) — it
+pushes `overlayState: broadcast` which **`participant-shell` renders** (D7-003); the alien overlay
+component is **not** built here. Reuses the Freeze state (story 03). See implementation.md (story 04).
 
 ## Dependencies
 E1 roles (Director gate), exercise-context (in-exercise-only scope), lifecycle; story 03 (Freeze); the
