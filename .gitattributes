@@ -1,0 +1,26 @@
+# Line-ending policy for Pulse.
+#
+# Store all text as LF in the repository AND check it out as LF on every platform.
+# `eol=lf` overrides a developer's local core.autocrlf, so Windows checkouts stop
+# rewriting files to CRLF — that CRLF churn is what caused the merge/stash/rebase
+# friction during the D7/E8 backlog work. LF-everywhere is the standard, safe
+# default for this stack (Git Bash, VS Code, Node/Vite, .NET all handle LF).
+#
+# Note: this governs files as they are next committed or checked out; it does not
+# mass-rewrite existing files. To normalize the whole tree in one pass (do it when
+# the repo is quiet, on its own commit): `git add --renormalize . && git commit`.
+
+* text=auto eol=lf
+
+# Binary assets — never apply text/eol conversion.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
