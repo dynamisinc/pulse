@@ -40,11 +40,31 @@ git worktree add ../pulse-wt-<slug>-<NN> -b build/<slug>/<NN-slug> feature/<slug
 ```
 
 - Build, test, and run checks inside the worktree; commit to the builder branch there.
-- The `Workflow` tool's `isolation: 'worktree'` option does this automatically per builder agent —
-  prefer it for fan-out. For hand-driven single stories, create the worktree manually.
+- The `Workflow` tool's `isolation: 'worktree'` option creates a worktree per builder automatically —
+  convenient for fan-out, but each is auto-created off the **session HEAD** (ambiguous base) and starts
+  with no `node_modules`. To control the base (fork off the umbrella) *and* share `node_modules` (see
+  below), **pre-create** the worktrees off `feature/<slug>` and pass each path to the build+test agents
+  instead. For hand-driven single stories, create the worktree manually.
 - Remove a worktree once its branch is merged: `git worktree remove ../pulse-wt-<slug>-<NN>`.
 - **Never** leave uncommitted new files in the primary checkout — a parallel session may sweep them
   into the wrong commit.
+
+### Sharing `node_modules` (skip per-worktree installs)
+
+Fresh worktrees start with **no `node_modules`**, and `npm ci` in every builder is slow and adds a
+failure surface. Because each worktree is checked out at the same commit (same lockfile), share the
+primary checkout's installed modules read-only via a junction/symlink, then tell builders **not** to run
+`npm install`/`npm ci`:
+
+```powershell
+# Windows (PowerShell). POSIX: ln -s <primary>/src/frontend/node_modules <worktree>/src/frontend/node_modules
+New-Item -ItemType Junction -Path <worktree>\src\frontend\node_modules -Target C:\Code\pulse\src\frontend\node_modules
+```
+
+The store is read-only during type-check/lint/test, so parallel builders don't collide. This pairs with
+**pre-created** worktrees (above), not `isolation:'worktree'`. Cleanup: remove the junction before
+`git worktree remove` (or use `--force`) so it doesn't choke on the reparse point. From Git Bash use the
+PowerShell form — `cmd //c mklink /J` mangles the paths under MSYS.
 
 ---
 
