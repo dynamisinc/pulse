@@ -21,7 +21,8 @@ and the WX-011 propagation storyboard (exported as `wx011-propagation-storyboard
 - `wx011-propagation-storyboard.png` — the propagation moment, four static frames.
 - `D4-press-weather.md` — the surface brief (Part A Wire Room, Part B Weather Desk).
 - `SHELL-CONTRACT.md` — shell owns chrome/alert bar/nav; channels own the content region.
-- `COMPONENTS.md` — cross-surface component inventory.
+- `../COMPONENTS.md` — cross-surface component inventory (canonical, at the `docs/design/` root; the
+  copy bundled in this handoff was removed as a duplicate of it).
 - `D0-FOUNDATIONS.md` — binding design foundations.
 - `support.js` — runtime for the .dc.html file.
 

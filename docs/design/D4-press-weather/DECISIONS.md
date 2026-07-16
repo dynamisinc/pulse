@@ -56,7 +56,7 @@ the sheet headline flip).
 ## D4-004 — Pulse cross-post is an explicit, unchecked-by-default checkbox with a live card
 **Decision.** The "post to our social account" decision (PRS-013) is an **explicit checkbox naming
 the org handle, unchecked by default**, and it renders the **exact link card** that will post
-(card anatomy per [`COMPONENTS.md`](COMPONENTS.md) / D1). Deciding *whether and how* to socialize a
+(card anatomy per the canonical [`COMPONENTS.md`](../COMPONENTS.md) / D1). Deciding *whether and how* to socialize a
 release is PIO craft being evaluated, so it is a visible decision, never an implicit side effect.
 **Evidence.** `cross-post` toggle + `link card` preview.
 **Satisfies / amends.** PRS-013 (AMEND: unchecked default; names the handle; live link-card

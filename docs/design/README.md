@@ -9,14 +9,16 @@ Start with the foundations, then the brief for the surface you're building.
 |-----|---------|--------|
 | [D0-FOUNDATIONS.md](D0-FOUNDATIONS.md) | Shared house rules, the two worlds, brand set, non-negotiables | Foundations |
 | [D1-social-app.md](D1-social-app.md) | Social app (Pulse) — epic E2 | Brief |
-| [D1-social-app/](D1-social-app/) | Social app (Pulse) — participant surface | Handoff v1 — ready to implement |
+| [D1-social-app/](D1-social-app/) | Social app (Pulse) — participant surface | Handoff v2 — session-3 reconciliation applied |
 | [D2-portal.md](D2-portal.md) | Exercise portal ("[City] Today") — epic E3 | Brief |
 | [D3-news-outlets.md](D3-news-outlets.md) | News outlets (TV / paper / wire / tabloid) — epic E4 | Brief |
 | [D4-press-weather.md](D4-press-weather.md) | Press Room + Weather Desk — epics E5/E6 | Brief |
 | [D4-press-weather/](D4-press-weather/) | The Wire Room (press) + The Weather Desk (weather) — participant surfaces + PIO composer | Handoff v1 — decisions synced to epics; E5/E6 stories not yet decomposed |
 | [D5-controller-console.md](D5-controller-console.md) | Controller console — design brief (epic E7) | Brief |
-| [D5-controller-console/](D5-controller-console/) | Controller console (SimCell operator surface) | Handoff v1 — ready to implement |
+| [D5-controller-console/](D5-controller-console/) | Controller console (SimCell operator surface) | Handoff v2 — session-3 reconciliation applied |
 | [D6-evaluator-dashboard.md](D6-evaluator-dashboard.md) | Evaluator dashboard — epic E10 | Brief |
+| [DECISIONS.md](DECISIONS.md) | **Canonical decision log, all sessions** — incl. "R — Cross-surface reconciliation" (R-001…R-006, applied to stories) and the D7 shells section (session 5) | Canonical |
+| [COMPONENTS.md](COMPONENTS.md) | Cross-surface shell-chrome inventory — everything improvised is frozen interim chrome, replaced by the **D7 shell**; do not build against it | Evidence consumed by D7 |
 
 > The epic docs the briefs cite (`../00-MASTER-PRD.md`, `../01`…`../11`) live one level up in
 > [`docs/`](../). Start any design session with the foundations, then the surface's brief.
@@ -27,7 +29,9 @@ D3 News outlets · D4 Press + Weather · D6 Evaluator dashboard.
 ## About the design-session handoffs
 
 Each handoff folder is the output of a Claude design session: a **clickable HTML
-prototype** plus a **`DECISIONS.md`** decision log with requirement traceability.
+prototype**, with the decision log kept as **one canonical [DECISIONS.md](DECISIONS.md)** at this
+directory's root (all sessions in one file, incl. the cross-surface R section and D7 shells — the
+per-surface copies were retired with the session-3 handoff as redundant duplicates).
 
 **These are design references, not production code.** The prototypes were authored in
 a design-canvas environment and load the Cadence design-system bundle (`cadence-design-system`)
@@ -38,16 +42,17 @@ COBRA styled components + FontAwesome).
 
 When implementing a surface:
 1. Read [D0-FOUNDATIONS.md](D0-FOUNDATIONS.md), then the surface's `README.md`.
-2. Read its `DECISIONS.md` — each entry cites the requirement IDs it satisfies or
-   **amends**. Amendments (e.g. D5-014) are changes to the epic/stories, not just UI notes.
+2. Read the surface's sections of [DECISIONS.md](DECISIONS.md) plus the cross-surface "R" section —
+   each entry cites the requirement IDs it satisfies or **amends**. Amendments (e.g. D5-014,
+   R-001…R-006) are changes to the epic/stories, not just UI notes.
 3. Rebuild in `src/frontend` using COBRA components; don't port the prototype HTML.
 
-## D5 — Controller console (handoff v1)
+## D5 — Controller console (handoff v2)
 
 The SimCell operator surface: one controller running a simulated social-media world during
 an exercise (scenario: *Bay Shield 2026*). Dark operator chrome (staff world) with COBRA
 light "paper" for dialogs/composer. Key decisions that **amend requirements** and need to
-flow back to the stories (see [DECISIONS.md](D5-controller-console/DECISIONS.md)):
+flow back to the stories (see [DECISIONS.md](DECISIONS.md), sections D5 + R):
 
 - **ADP-040** — engine-draft timeout defaults to **auto-HOLD**, never auto-send ("silence
   is never approval"); auto-send is an explicit opt-in "swamped mode".
@@ -62,9 +67,10 @@ The requirement amendments above are tracked as an actionable checklist for the 
 agents in **[STORY-UPDATES.md](D5-controller-console/STORY-UPDATES.md)** (amend / add /
 reconcile / backlog, with a traceability table).
 
-Folder contents: `Controller Console.dc.html` (prototype), `DECISIONS.md` (D5-001…D5-020),
-`README.md` (handoff spec), `STORY-UPDATES.md` (requirement-change checklist), `cobra.jsx`
-(provider-wrap pattern reference), `support.js` (design-canvas runtime).
+Folder contents: `Controller Console.dc.html` (prototype), `README.md` (handoff spec),
+`STORY-UPDATES.md` (requirement-change checklist), `cobra.jsx` (provider-wrap pattern reference),
+`support.js` (design-canvas runtime). The decision log (D5-001…D5-020 + R) lives in the canonical
+root [DECISIONS.md](DECISIONS.md) — in-folder references to a sibling `DECISIONS.md` point there.
 
 ## D4 — The Wire Room (press) + The Weather Desk (weather) (handoff v1)
 
@@ -98,7 +104,9 @@ decisions are pre-staged there and folded into the epics — the decomposition i
 
 Folder contents: `Wire Room + Weather Desk.dc.html` (prototype — needs `support.js`; does not render
 standalone), `wx011-propagation-storyboard.png` (the WX-011 four-surface propagation moment),
-`DECISIONS.md` (D4-001…013 + the 12 sign-offs), `STORY-UPDATES.md` (requirement-change checklist),
-`README.md` (handoff spec), `COMPONENTS.md` + `SHELL-CONTRACT.md` (cross-surface/shell briefs bundled
-with this handoff — candidates to promote to `docs/design/` top-level later), `support.js`,
-`CLAUDE-CODE-PROMPT.md` (the sync brief that produced this pass).
+`DECISIONS.md` (D4-001…013 + the 12 sign-offs — per-folder, matching the D3 handoff; folding into the
+canonical root [DECISIONS.md](DECISIONS.md) is a possible follow-up), `STORY-UPDATES.md`
+(requirement-change checklist), `README.md` (handoff spec), `SHELL-CONTRACT.md` (the D7 shell contract
+the mockup builds against), `support.js`, `CLAUDE-CODE-PROMPT.md` (the sync brief that produced this
+pass). The cross-surface component inventory is the canonical [COMPONENTS.md](COMPONENTS.md) at this
+directory's root.

@@ -22,7 +22,9 @@ The base activity board (story 01); expected-action tracking (story 03); acting 
 
 ## Technical Notes
 Staff world (COBRA). Columns are saved queries over the same activity stream as story 01; reuse the
-virtualized list. Mounts in console-shell. See implementation.md (story 02).
+virtualized list **and story 01's reconciled post cards** (canonical seal, reply · repost · like
+order, R-004 avatars, always-visible R-003 origin line). Mounts in console-shell. See
+implementation.md (story 02).
 
 ## Dependencies
 Story 01 (activity stream + list); console-shell; E2 hashtags/threads/personas.
