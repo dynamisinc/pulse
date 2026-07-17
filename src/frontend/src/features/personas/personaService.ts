@@ -29,8 +29,17 @@ import type { Persona, PersonaTemplate } from './types'
 const MOCK_EXERCISE_ID = 'ex-mock-0001'
 
 /**
- * The seeded instances for the mock exercise. Computed once (seeding is pure +
- * deterministic) so `personaById` and the mock adapter share one stable set.
+ * MOCK SCAFFOLD — dev/test + mock-fixture use ONLY. The seeded instances for
+ * the mock exercise, computed once (seeding is pure + deterministic) so
+ * `personaById` and the mock adapter share one stable set.
+ *
+ * A shipped participant surface must NOT import this array (or `personaById`)
+ * directly: unlike `resolvePersonas()` these are NOT behind the
+ * `USE_MOCK_PERSONAS` flip point, so importing them into production code would
+ * ship canned mock authors instead of failing closed (the fail-open-to-mock
+ * shape WAVE0-REVIEW precedent 15 forbids). The real read path is
+ * `usePersonas()` / `resolvePersonas()`. These exist for the mock adapter, unit
+ * tests, and other mock fixtures (e.g. mock post authorship) only.
  */
 export const SEEDED_PERSONAS: readonly Persona[] = seedCast(
   FAIRHAVEN_BASELINE,
@@ -38,7 +47,11 @@ export const SEEDED_PERSONAS: readonly Persona[] = seedCast(
   PERSONA_TEMPLATES,
 )
 
-/** Look up a seeded persona instance by id (undefined if absent). */
+/**
+ * Look up a seeded persona instance by id (undefined if absent). MOCK SCAFFOLD
+ * — same caveat as {@link SEEDED_PERSONAS}: mock fixtures + tests only, never a
+ * shipped participant surface (use `usePersonas()` there).
+ */
 export function personaById(id: string): Persona | undefined {
   return SEEDED_PERSONAS.find(p => p.id === id)
 }
@@ -55,8 +68,23 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
 /** Single env-guarded mock/live flip point (mirrors exerciseContextResolver). */
 const USE_MOCK_PERSONAS = import.meta.env.DEV
 
+function isValidPersona(value: unknown): value is Persona {
+  if (!value || typeof value !== 'object') return false
+  const p = value as Persona
+  return (
+    typeof p.id === 'string' && p.id.length > 0 &&
+    typeof p.displayName === 'string' && p.displayName.length > 0 &&
+    typeof p.handle === 'string' && p.handle.length > 0 &&
+    (p.kind === 'human' || p.kind === 'org') &&
+    // `verified` drives the SOC-052 trust signal PostCard renders — an
+    // undefined/coerced value would silently misrender it, so validate it
+    // strictly rather than accept any element with a string id.
+    typeof p.verified === 'boolean'
+  )
+}
+
 function isPersonaArray(data: unknown): data is Persona[] {
-  return Array.isArray(data) && data.every(p => !!p && typeof (p as Persona).id === 'string')
+  return Array.isArray(data) && data.every(isValidPersona)
 }
 
 /**
@@ -119,6 +147,11 @@ export function usePersonas(): UsePersonasResult {
 /**
  * The org-library persona templates (story 01). Reusable across exercises, so
  * this is a static read of the library, not an exercise-scoped resolution.
+ *
+ * MOCK SCAFFOLD — returns the canned seed library directly (not behind the
+ * `USE_MOCK_PERSONAS` flip point). Fine for the current no-backend scaffold and
+ * for staff/authoring tooling that is itself mock; the real library read lands
+ * with the backend. Not a participant-surface read path.
  */
 export function usePersonaTemplates(): readonly PersonaTemplate[] {
   return PERSONA_TEMPLATES

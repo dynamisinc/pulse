@@ -62,7 +62,7 @@ describe('seedCast — one-action seeding with derived state (COR-021)', () => {
 })
 
 describe('SOC-052 impersonation pair', () => {
-  it('carries a verified utility and an UNVERIFIED lookalike differing only by the trust signal', () => {
+  it('carries a verified utility and an UNVERIFIED lookalike whose only trust signal is the mark', () => {
     const personas = seed()
     const real = personas.find(p => p.handle === 'FairhavenWater')
     const fake = personas.find(p => p.handle === 'FairhavenWaterUpd')
