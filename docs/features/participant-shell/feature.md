@@ -55,3 +55,10 @@ with a live-region announce (NFR-001). Scenario time is the only time shown in-f
 shell never annotates it as "scenario time." Compliance chrome + overlays are the **only** exercise
 signals a participant sees (XC-002/003); no instructional banners inside the fiction. State is
 exercise-scoped and server-driven (XC-001).
+
+**Forward-looking (WR-002, Gate-2 · issue #238 · not this pass).** The two-worlds rule extends to the
+*not-found* path. `App.tsx` mounts `/shell` COBRA-free but its router catch-all still renders the COBRA
+staff 404. `/shell` is exact-match today so no participant path reaches it — **not a current break**.
+When E2 social lands participant deep-links / nested channel routes, add a brand-skinned participant
+not-found inside the `/shell` subtree so a mistyped participant URL stays in the fiction; keep the COBRA
+404 for staff / unknown-staff paths only. Tracked in STORY-UPDATES §D.

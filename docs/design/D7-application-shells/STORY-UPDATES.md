@@ -115,6 +115,16 @@ D7 establishes the two container shells every surface mounts into. Both are **Ph
   node so each shell insets independently, and move `ShellLayout`'s `var(--pulse-chrome-*, 0px)`
   consumer with them. Land in `participant-shell/06-variants.md` (preview) / the App.tsx participant
   route-tree split, when the shell is actually wired up.
+- [ ] **Participant not-found leaks the COBRA staff 404 (WR-002)** — `App.tsx` scopes COBRA to a
+  `StaffThemeBoundary` and mounts `/shell` COBRA-free (`ExerciseContextProvider → BrandThemeProvider →
+  ShellLayout`), but the router catch-all
+  (`{ path: '*', element: <StaffThemeBoundary><NotFoundPage/></StaffThemeBoundary> }`) renders the
+  **staff 404** for every unmatched path. `/shell` is exact-match today, so no participant path falls
+  through — **not a current break**. Once E2 social lands participant deep-links / nested channel
+  routes, `/shell/foo` falls through to the COBRA 404, showing the staff look inside the fiction
+  (violates the D0 §2 two-worlds thumbnail gate on a participant path). **Fix when participant routing
+  lands:** a nested, brand-skinned not-found inside `ParticipantShellRoute`; keep the COBRA
+  `NotFoundPage` for staff / unknown-staff paths only. Wave-2 Gate-2 finding · issue #238.
 
 ---
 
@@ -133,3 +143,4 @@ D7 establishes the two container shells every surface mounts into. Both are **Ph
 | `COMPONENTS.md` inventory | R-006 → D7 | RECONCILE | "replaced by shell" discharged by the two features |
 | PRT-040 kiosk / multi-channel / D6 frame | D7-008/001 | BACKLOG | Phase-3 notes, not built this pass |
 | `participant-shell` 06 inset (WR-001) | Gate-1 review | BACKLOG | Scope chrome inset vars off `:root` (ref-count landed) |
+| `participant-shell` App.tsx 404 (WR-002) | Gate-2 review | BACKLOG | Participant catch-all must stay COBRA-free when sub-routes land (issue #238) |
