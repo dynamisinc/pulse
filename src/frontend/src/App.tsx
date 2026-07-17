@@ -42,6 +42,9 @@ import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
 import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
 import { ToolstripProvider } from '@/features/staffShell/toolRegistry'
+import { ParticipantAdminFlyout } from '@/features/staffShell/components/ParticipantAdminFlyout'
+import { PreviewProvider, usePreview } from '@/features/staffShell/previewContext'
+import { PreviewAsParticipant } from '@/features/staffShell/components/PreviewAsParticipant'
 
 // Sensible React Query defaults. Real-time feeds will lean on a live transport
 // rather than refetch-on-focus (see D0 §4 - burst legibility, 120 posts/min).
@@ -84,19 +87,49 @@ const NotFoundPage = () => (
 )
 
 /**
- * The staff shell composition for the Evaluator Dashboard: exercise scope >
- * toolstrip registry > the real `StaffShellFrame` (which mounts COBRA
- * itself). See module header.
+ * Inner staff-shell composition for the Evaluator Dashboard. Reads the preview
+ * toggle (`usePreview`) to drive the header's Preview-as button AND to swap the
+ * work area for the read-only participant-preview stage (story 04). Renders
+ * inside `PreviewProvider` + `ToolstripProvider` + `ExerciseContextProvider`
+ * (see `EvaluatorDashboardRoute`).
  */
-const EvaluatorDashboardRoute = () => (
+function EvaluatorStaffShell() {
+  const { active: previewActive, toggle: togglePreview } = usePreview()
+  return (
+    <StaffShellFrame
+      header={
+        <StaffHeader
+          surfaceName="Evaluator Dashboard"
+          previewActive={previewActive}
+          onTogglePreview={togglePreview}
+        />
+      }
+      toolstrip={<Toolstrip />}
+      // Shell-global participant-admin flyout (story 03). Suppressed while the
+      // participant preview is staged, so it can never render above the preview
+      // stage (SHELL-CONTRACT §4 / story-03 stacking note); it re-registers on
+      // preview exit.
+      globalOverlay={previewActive ? undefined : <ParticipantAdminFlyout />}
+    >
+      {previewActive ? <PreviewAsParticipant /> : <EvaluatorDashboardPage />}
+    </StaffShellFrame>
+  )
+}
+
+/**
+ * The staff shell composition for the Evaluator Dashboard: exercise scope >
+ * toolstrip registry > preview toggle > the real `StaffShellFrame` (which
+ * mounts COBRA itself). See module header.
+ */
+// Exported for the Integration-B wiring test (App.integration.test.tsx) — it
+// renders this composition directly to prove the preview button ↔ stage swap
+// and the shell-global admin flyout are wired, without standing up the router.
+export const EvaluatorDashboardRoute = () => (
   <ExerciseContextProvider>
     <ToolstripProvider>
-      <StaffShellFrame
-        header={<StaffHeader surfaceName="Evaluator Dashboard" />}
-        toolstrip={<Toolstrip />}
-      >
-        <EvaluatorDashboardPage />
-      </StaffShellFrame>
+      <PreviewProvider>
+        <EvaluatorStaffShell />
+      </PreviewProvider>
     </ToolstripProvider>
   </ExerciseContextProvider>
 )

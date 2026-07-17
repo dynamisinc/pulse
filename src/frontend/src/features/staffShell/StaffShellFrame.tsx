@@ -62,13 +62,28 @@ export interface StaffShellFrameProps {
    * dashboard) that owns everything inside it.
    */
   children: ReactNode
+  /**
+   * Shell-owned overlays that span the work-area + toolstrip row and pin
+   * themselves against the toolstrip's edge — e.g. the shell-global
+   * participant-admin flyout (story 03), which positions itself at
+   * `right: STAFF_TOOLSTRIP_WIDTH_PX`. Rendered inside the row's positioning
+   * context (below), NOT a `document.body` portal, so a shell-global flyout
+   * stays within the staff frame (SHELL-CONTRACT §1) and never escapes it.
+   * Optional so the frame is standalone-testable.
+   */
+  globalOverlay?: ReactNode
 }
 
 /**
  * The staff-world COBRA theme boundary + Cadence chrome frame. See the module
  * header for the theme-boundary/two-worlds contract this component enforces.
  */
-export function StaffShellFrame({ header, toolstrip, children }: StaffShellFrameProps) {
+export function StaffShellFrame({
+  header,
+  toolstrip,
+  children,
+  globalOverlay,
+}: StaffShellFrameProps) {
   return (
     <ThemeProvider theme={cobraTheme}>
       <CssBaseline />
@@ -96,6 +111,9 @@ export function StaffShellFrame({ header, toolstrip, children }: StaffShellFrame
 
         <Box
           sx={{
+            // Positioning context for `globalOverlay` (shell-global flyouts
+            // pin themselves against the toolstrip edge, e.g. right: 56px).
+            position: 'relative',
             display: 'grid',
             gridTemplateColumns: `minmax(0, 1fr) ${STAFF_TOOLSTRIP_WIDTH_PX}px`,
             minHeight: 0,
@@ -127,6 +145,8 @@ export function StaffShellFrame({ header, toolstrip, children }: StaffShellFrame
           >
             {toolstrip}
           </Box>
+
+          {globalOverlay}
         </Box>
       </Box>
     </ThemeProvider>
