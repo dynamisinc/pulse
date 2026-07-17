@@ -137,7 +137,7 @@ const isoDateTimeString = z.iso.datetime({ offset: true })
  * }
  * ```
  */
-export const telemetryEventV0Schema = z.object({
+export const telemetryEventV0Schema = z.strictObject({
   /** Literal — a future breaking change is a new literal, never a mutation of this one. */
   schemaVersion: z.literal('v0'),
   /** uuid; client-generated — see `buildTelemetryEvent`. */

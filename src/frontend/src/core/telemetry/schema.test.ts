@@ -116,6 +116,13 @@ describe('telemetryEventV0Schema', () => {
     expect(result.success).toBe(false)
   })
 
+  it('rejects an unknown top-level key (the envelope is closed — extend via payload)', () => {
+    // strictObject: unknown keys fail loudly rather than being silently
+    // stripped, so a typo'd field or top-level event data can't slip through.
+    const result = telemetryEventV0Schema.safeParse(validEvent({ notAField: 'nope' }))
+    expect(result.success).toBe(false)
+  })
+
   it.each(['wallClockTime', 'scenarioTime', 'emittedAt'])(
     'rejects a non-date-time string for %s',
     field => {
