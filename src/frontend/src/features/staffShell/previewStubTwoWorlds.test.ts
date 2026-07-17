@@ -27,7 +27,11 @@ const FORBIDDEN_SPECIFIER_PATTERNS: RegExp[] = [
   /cobraTheme/i,
   /styledComponents/,
   /CobraStyles/,
-  /staffShell\/staffShellTokens/,
+  // Bare name (not path-scoped): also catches the relative form a sibling in
+  // components/ would write — `../staffShellTokens` — which the path-scoped
+  // `staffShell/staffShellTokens` pattern missed. No participant module carries
+  // this name, so a bare match cannot over-match (Gate-1 W-001).
+  /staffShellTokens/,
   /^@mui\//,
 ]
 
