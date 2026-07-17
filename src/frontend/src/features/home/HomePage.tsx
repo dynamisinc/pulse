@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { Box, Card, CardContent, Chip, Container, Divider, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -40,6 +41,8 @@ const STAFF_SURFACES: Surface[] = [
  * come online. Rendered here with the COBRA staff theme.
  */
 export const HomePage = () => {
+  const navigate = useNavigate()
+
   return (
     <Container maxWidth="lg" sx={{ py: 6 }}>
       <Stack spacing={1} sx={{ mb: 4 }}>
@@ -116,10 +119,13 @@ export const HomePage = () => {
 
       <Divider sx={{ mb: 3 }} />
 
-      <Stack direction="row" spacing={2}>
-        <CobraPrimaryButton onClick={() => window.open('https://github.com/dynamisinc/pulse', '_blank')}>
-          View repository
+      <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', gap: 2 }}>
+        <CobraPrimaryButton onClick={() => navigate('/evaluator')}>
+          Evaluator dashboard
         </CobraPrimaryButton>
+        <CobraSecondaryButton onClick={() => window.open('https://github.com/dynamisinc/pulse', '_blank')}>
+          View repository
+        </CobraSecondaryButton>
         <CobraSecondaryButton onClick={() => { window.location.hash = '#surfaces' }}>
           Design foundations
         </CobraSecondaryButton>
