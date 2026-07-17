@@ -22,7 +22,7 @@
  * exercise clock so scenario-relative rendering is deterministic.
  */
 import type { ReactNode } from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock, type IExerciseClock } from '@/core/clock'
@@ -240,6 +240,24 @@ describe('PostCard — scenario time only (COR-053)', () => {
     expect(time).toHaveAttribute('title')
     expect(time.getAttribute('title')).not.toBe('')
   })
+
+  it('renders the machine-readable dateTime and an absolute title anchored to scenario time, never wall-clock', async () => {
+    // Same rationale as above: an instant far from any real test-run
+    // wall-clock time, so a leak of Date.now()/new Date() into EITHER the
+    // `dateTime` attribute or the absolute tooltip fails this assertion
+    // rather than coincidentally passing. The Wave-0 mock exercise scope's
+    // fixed zone (America/New_York) turns the UTC instant below into one
+    // known local string.
+    setExerciseClock(fixedClock(new Date('2031-03-01T14:00:00.000Z')))
+
+    await renderWithExerciseContext(
+      <PostCard post={buildPost({ scenarioTime: '2031-03-01T12:00:00.000Z' })} />,
+    )
+
+    const time = screen.getByText('2h ago')
+    expect(time).toHaveAttribute('dateTime', '2031-03-01T12:00:00.000Z')
+    expect(time).toHaveAttribute('title', 'Mar 1, 2031, 7:00 AM')
+  })
 })
 
 describe('PostCard — keyboard operability (NFR-001)', () => {
@@ -310,5 +328,104 @@ describe('PostCard — media and link preview', () => {
 
     expect(screen.getByText('Boil water advisory lifted')).toBeInTheDocument()
     expect(screen.getByText('fulco.gov')).toBeInTheDocument()
+  })
+})
+
+describe('PostCard — canonical anatomy renders together (R-002, AC1)', () => {
+  it('renders avatar, name, handle, separator, relative scenario-time, text, and the action row as one card', async () => {
+    setExerciseClock(fixedClock(new Date('2026-07-16T13:00:00.000Z')))
+    const author = buildPersona({ displayName: 'Keisha Ward', handle: 'kwardFH' })
+
+    await renderWithExerciseContext(
+      <PostCard
+        post={buildPost({
+          author,
+          scenarioTime: '2026-07-16T12:00:00.000Z',
+          text: 'Boil-water advisory lifted for zone 3.',
+        })}
+      />,
+    )
+
+    expect(screen.getByTestId('post-avatar')).toBeInTheDocument()
+    expect(screen.getByText('Keisha Ward')).toBeInTheDocument()
+    expect(screen.getByText('@kwardFH')).toBeInTheDocument()
+    expect(screen.getByText('·')).toBeInTheDocument()
+    expect(screen.getByText('1h ago')).toBeInTheDocument()
+    expect(screen.getByText('Boil-water advisory lifted for zone 3.')).toBeInTheDocument()
+    expect(screen.getByTestId('post-actions')).toBeInTheDocument()
+  })
+})
+
+describe('PostCard — action buttons carry an accessible name including their count (NFR-001)', () => {
+  it('exposes reply/repost/like as buttons named "<Label>, <count>", not a color/icon-only signal', async () => {
+    await renderWithExerciseContext(
+      <PostCard post={buildPost({ counts: { reply: 3, repost: 7, like: 42 } })} />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Reply, 3' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Repost, 7' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Like, 42' })).toBeInTheDocument()
+  })
+})
+
+describe('PostCard — action row is a sibling of the open target, never nested (NFR-001)', () => {
+  it('does not fire onOpen when an action button is clicked', async () => {
+    const onOpen = vi.fn()
+    await renderWithExerciseContext(<PostCard post={buildPost()} onOpen={onOpen} />)
+
+    screen.getByRole('button', { name: /^reply/i }).click()
+
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('does not fire onOpen when the avatar is clicked', async () => {
+    const onOpen = vi.fn()
+    await renderWithExerciseContext(<PostCard post={buildPost()} onOpen={onOpen} />)
+
+    screen.getByTestId('post-avatar').click()
+
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+})
+
+describe('PostCard — readOnly controls are absent, not merely disabled (COR-015, D1-011)', () => {
+  it('exposes no button role and no tab stop on the inert counts', async () => {
+    await renderWithExerciseContext(<PostCard post={buildPost()} variant="readOnly" />)
+
+    const actionsRegion = screen.getByTestId('post-actions')
+    expect(within(actionsRegion).queryAllByRole('button')).toHaveLength(0)
+    expect(actionsRegion.querySelectorAll('[tabindex]')).toHaveLength(0)
+  })
+})
+
+describe('PostCard — content security (NFR-004) — script payload', () => {
+  it('renders a <script> tag payload as inert text, never parsed as a real element', async () => {
+    const maliciousText = '<script>window.__pulsePostcardXssProbe = true</script>'
+    const { container } = await renderWithExerciseContext(
+      <PostCard post={buildPost({ text: maliciousText })} />,
+    )
+
+    // A dangerouslySetInnerHTML render would parse this into a literal
+    // (inert-in-jsdom, but still DOM-present) <script> element; a plain-text
+    // React child never does.
+    expect(container.querySelector('script')).not.toBeInTheDocument()
+    expect(screen.getByText(maliciousText)).toBeInTheDocument()
+  })
+})
+
+describe('PostCard — no origin/provenance leak even if present on the data (XC-002)', () => {
+  it('never renders an origin/source-exercise value that is not part of PostView', async () => {
+    const postWithForeignFields = {
+      ...buildPost(),
+      origin: 'staff-console-mirror',
+      sourceExerciseId: 'ex-other-9999',
+    } as PostView & Record<string, unknown>
+
+    const { container } = await renderWithExerciseContext(
+      <PostCard post={postWithForeignFields} />,
+    )
+
+    expect(container.textContent).not.toMatch(/staff-console-mirror/i)
+    expect(container.textContent).not.toMatch(/ex-other-9999/i)
   })
 })
