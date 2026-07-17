@@ -172,6 +172,35 @@ describe('useRegisterSurfaceTool — registers into the surface zone only', () =
     // Still exactly one entry for this id — an upsert, not a duplicate append.
     expect(within(screen.getByTestId('surface-tools')).getAllByTestId('sf-stories')).toHaveLength(1)
   })
+
+  it('keeps the tool active (flyout open) when its badge changes — a count bump must not close the flyout (D5-017)', async () => {
+    const user = userEvent.setup()
+
+    function RegistrantWithBadge() {
+      const [count, setCount] = useState(1)
+      useRegisterSurfaceTool({ ...STORIES_TOOL, badge: { count } })
+      return <button type="button" onClick={() => setCount(c => c + 1)}>bump</button>
+    }
+
+    render(
+      <ToolstripProvider>
+        <RegistrantWithBadge />
+        <ToolstripProbe />
+      </ToolstripProvider>,
+    )
+
+    // Open the tool's flyout (activate it), then a new pending item arrives and
+    // bumps the badge while the controller has the flyout open.
+    await user.click(screen.getByRole('button', { name: 'toggle stories' }))
+    expect(screen.getByTestId('active-tool-id')).toHaveTextContent('stories')
+
+    await user.click(screen.getByRole('button', { name: 'bump' }))
+
+    // The count updates AND the flyout stays open — the badge upsert must not
+    // unregister/re-register the tool and clear activeToolId (regression: it did).
+    expect(screen.getByTestId('sf-stories')).toHaveTextContent('STORIES:2')
+    expect(screen.getByTestId('active-tool-id')).toHaveTextContent('stories')
+  })
 })
 
 describe('useRegisterShellGlobalTool — registers into the shell-global zone only', () => {

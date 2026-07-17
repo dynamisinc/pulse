@@ -184,9 +184,25 @@ function useToolstripContextValue(): ToolstripContextValue {
  * registry array) on every unrelated re-render of the registrant — an
  * infinite update loop the moment ANY ancestor (starting with
  * `ToolstripProvider` itself, right after the first registration) causes the
- * registrant to re-render. Keying on the primitives means the effect — and
+ * registrant to re-render. Keying on the primitives means the upsert — and
  * the registry array — only changes when something the dock actually renders
  * differently (label/icon/tooltip/badge) has changed.
+ *
+ * ## Two effects, deliberately: upsert-in-place vs. unmount-cleanup
+ * The upsert and the unregister-on-unmount are split into SEPARATE effects on
+ * purpose. A single effect that both `registerTool`s and returns an
+ * `unregisterTool` cleanup would run that cleanup on EVERY dep change —
+ * including a live badge-count bump — and `unregisterTool` clears a matching
+ * `activeToolId` (an unregistered tool can't stay open). That would slam the
+ * flyout shut underneath a controller the instant a pending count changed —
+ * exactly the D5-017 consult-on-demand escalating case (flyout open, a new
+ * item arrives, count bumps). So:
+ *   - the UPSERT effect keys on the render-affecting primitives and never
+ *     unregisters (a count bump replaces the tool in place; `activeToolId` is
+ *     untouched);
+ *   - the CLEANUP effect keys only on `{zone, id}` and unregisters solely on
+ *     unmount (or a genuine identity change), where closing the flyout is
+ *     correct because the tool itself is going away.
  */
 function useRegisterTool(zone: ToolZone, tool: SurfaceTool): void {
   const { registerTool, unregisterTool } = useToolstripContextValue()
@@ -194,12 +210,20 @@ function useRegisterTool(zone: ToolZone, tool: SurfaceTool): void {
   const badgeCount = badge?.count
   const badgeEscalating = badge?.escalating
 
+  // Upsert in place on mount and whenever a render-affecting field changes.
+  // No cleanup here — a badge bump must NOT close the tool's flyout.
   useEffect(() => {
     registerTool(zone, tool)
-    return () => unregisterTool(zone, id)
     // Keyed on primitives, not `tool`'s object identity — see rationale above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zone, id, label, tooltip, icon, badgeCount, badgeEscalating, registerTool, unregisterTool])
+  }, [zone, id, label, tooltip, icon, badgeCount, badgeEscalating, registerTool])
+
+  // Unregister only when the tool truly goes away (unmount) or its identity
+  // ({zone, id}) changes — the sole case where clearing a matching
+  // `activeToolId` is the right behavior.
+  useEffect(() => {
+    return () => unregisterTool(zone, id)
+  }, [zone, id, unregisterTool])
 }
 
 /**
