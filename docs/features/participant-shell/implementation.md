@@ -7,13 +7,18 @@
 
 | Story | Approach | Key files it owns | Exports (that others import) |
 |-------|----------|-------------------|------------------------------|
-| 01 compliance-chrome | Fixed top/bottom banners outside the app frame; reads `chromeConfig` | `features/participantShell/components/ComplianceChrome.tsx` | `<ComplianceChrome>` |
+| 01 compliance-chrome | Fixed top/bottom banners outside the app frame; reads `chromeConfig` | `features/participant-shell/components/ComplianceChrome.tsx` | `<ComplianceChrome>` |
 | 02 alert-bar-host | Ticker default + band/emergency; `role="status"` live-region; consumes `alerts[]` | `.../components/AlertBar/*` | `<AlertBar>`, alert-state types |
 | 03 channel-nav | Desktop strip + mobile tab bar; config-driven visibility | `.../components/ChannelNav.tsx` | `<ChannelNav>` |
 | 04 channel-mount-contract | Content-region container + `{variant, scenarioNow}` props + CSS reset boundary; single scenario-time source | `.../ShellLayout.tsx`, `.../mountContract.ts` | **`ShellMountProps` / `useShellContext()`** — the seam every channel imports |
 | 05 overlay-layer | z-ordered overlay host; renders `overlayState` (pause/endex/broadcast + register); break-fiction alien treatment | `.../components/OverlayLayer/*` | `<OverlayLayer>`, `OverlayState` type |
 | 06 variants | `variant` flag plumbed through the mount contract; read-only removes affordances | (flag in `mountContract.ts`) | `variant` on `ShellMountProps` |
 | 07 brand-theming | Per-exercise brand-token provider in the participant route subtree | `.../BrandThemeProvider.tsx` | `<BrandThemeProvider>`, brand tokens |
+
+> Code dir is `src/frontend/src/features/participant-shell/` (hyphenated) — it matches the feature
+> slug and the Wave-0 wall-clock lint ban in `src/frontend/eslint.config.js`
+> (`src/features/participant-shell/**`), so the COR-053 guard covers the shell code with no eslint
+> change (WAVE0-REVIEW precedent 11). The `.../` in the table above is relative to this dir.
 
 Backend .NET not present yet — shell state (`{chromeConfig, alerts[], overlayState, variant,
 scenarioNow}`) is the **contract seam**: React Query + mock behind the axios client now; SignalR push
