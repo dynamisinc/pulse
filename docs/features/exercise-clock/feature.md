@@ -24,7 +24,7 @@ exercise time zone (exercise-configuration COR-030).
 | 01 | Native exercise clock (provider interface) | COR-050 | Not Started | #77 |
 | 02 | Discrete Director time-jumps | COR-051 | Not Started | #78 |
 | 03 | Suspension & module advancement (TTX) | COR-052 | Not Started | #79 |
-| 04 | Scenario time is the participant-visible time | COR-053 | Not Started | #80 |
+| 04 | Scenario time is the participant-visible time | COR-053 | Complete | #80 |
 | 05 | EndEx | COR-054 | Not Started | #81 |
 
 ## Dependencies
@@ -37,3 +37,9 @@ Foundation. **Providers are swappable** (native now; Cadence-linked in Phase 4) 
 (COR-050). **Continuous clock compression is explicitly out of scope** (Master decision 12) — only
 discrete jumps + suspension. Scenario time is the sole participant-visible time (COR-053); wall-clock
 is telemetry-only.
+
+Story 04 (the scenario-time utility) ships as a **Wave-0 foundation seam**: a minimal mock clock
+source stands it up standalone, ahead of story 01's real native-clock provider, which later replaces
+the mock behind the same `IExerciseClock` interface. It is deliberately code-decoupled from the other
+two Wave-0 seams (`exercise-isolation/10`, `telemetry/01`) — none imports another; wiring (the
+exercise's real time zone into this utility) happens later, in consumers.

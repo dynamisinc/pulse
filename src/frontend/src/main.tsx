@@ -7,7 +7,12 @@ import { checkEnvironment } from './core/utils/validateEnv'
 // Validate environment variables on startup
 checkEnvironment()
 
-createRoot(document.getElementById('root')!).render(
+const rootElement = document.getElementById('root')
+if (!rootElement) {
+  throw new Error('Root element #root not found — cannot mount the app.')
+}
+
+createRoot(rootElement).render(
   <StrictMode>
     <App />
   </StrictMode>,

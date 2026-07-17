@@ -30,6 +30,7 @@ conduct) — see `docs/features/console-shell/03-static-identity-badge.md`.
 | 07 | Standing cross-exercise isolation test suite | COR-007 | Not Started | #50 |
 | 08 | Per-exercise hostname (subdomain) | COR-008 | Not Started | #51 |
 | 09 | Network readiness (self-test, allowlist, GFE guidance) | COR-009 | Not Started | #52 |
+| 10 | Mock ExerciseContext provider (Wave-0 frontend seam) | COR-001, COR-004 | Complete | #211 |
 
 ## Dependencies
 The Exercise / Organization entities and the exercise-context resolution (which exercise a session
@@ -42,3 +43,10 @@ This is the hard dependency under the whole platform (XC-001). Isolation is enfo
 non-guessable and access-checked. Participant sessions never expose exercise selection, simulation
 status, or admin (XC-002). The standing test suite (COR-007) grows as endpoints are added and
 includes stored-XSS attempts (NFR-004).
+
+A Wave-0 mock `ExerciseContextProvider` (story 10) seeds the frontend contract ahead of the real
+host-resolution + query-filter wiring (stories 01/04/08), so the parallel Wave-0 foundation work
+(`exercise-clock/04` scenario-time, `telemetry/01`) has a stable, single-exercise scope shape to build
+against from day one. Story 10 is deliberately code-decoupled from those two seams — it does not
+import the clock or the telemetry emitter, and they do not import it; wiring happens later, in
+consumers.

@@ -28,7 +28,7 @@ gh pr create -R dynamisinc/pulse --base main --head d7-application-shells \
 
 ---
 
-## Wave 0 — Foundation seams ⬜  · umbrella `feature/foundation-seams`
+## Wave 0 — Foundation seams ✅  · umbrella `feature/foundation-seams`
 
 Load-bearing; build before any consumer. All mock-behind-the-axios-client (no backend). The playbook
 mandates these first — a schema mistake here becomes a cross-phase migration.
@@ -39,8 +39,11 @@ mandates these first — a schema mistake here becomes a cross-phase migration.
 | `exercise-clock` (E1, COR-053) | Scenario-time source: `scenarioNow` + `formatScenarioTime` | Consumed by the shell mount contract and every PostCard |
 | XC-004 telemetry (schema-first) | Telemetry emitter v0 + event schema | Posts write provenance through it from day one |
 
-> **First action:** have `story-agent` confirm these three have build-ready stories (`implementation.md`)
-> under their feature folders; author/split if thin, before fanning out.
+> **Delivered** (both code-review gates clean, 89 tests): `core/exerciseContext.tsx` (mock provider,
+> fail-closed) via story `exercise-isolation/10`; `core/clock/{scenarioTime,exerciseClock}.ts`
+> (`scenarioNow` + `formatScenarioTime`, COR-053) via `exercise-clock/04`; `core/telemetry/*` (locked
+> XC-004 v0 envelope + mock sink) via `telemetry/01`. The three seams are code-decoupled at v0 —
+> consumers wire the edges. Merged via the `feature/foundation-seams` PR.
 
 ---
 
