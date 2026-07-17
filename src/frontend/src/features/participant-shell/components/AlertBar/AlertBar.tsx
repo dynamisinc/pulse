@@ -212,6 +212,24 @@ const emergencyHostStyle: CSSProperties = {
   color: '#ffffff',
 }
 
+/**
+ * The `none` state (AC1): the live region stays MOUNTED (so the none→first-alert
+ * transition is announced — see the return block) but collapses to zero height
+ * with no padding/background, so it reserves NO space and is invisible.
+ * `position: fixed` also keeps it out of normal flow, exactly like the visible
+ * treatments — "no reserved space" holds.
+ */
+const noneHostStyle: CSSProperties = {
+  position: 'fixed',
+  left: 0,
+  right: 0,
+  top: `var(${SHELL_CHROME_TOP_VAR}, 0px)`,
+  height: 0,
+  padding: 0,
+  overflow: 'hidden',
+  zIndex: SHELL_Z.alertBar,
+}
+
 /** Unstyled-button reset so the collapsed tap target reads as ticker content, not a control. */
 const tapToExpandStyle: CSSProperties = {
   ...rowStyle,
@@ -306,106 +324,111 @@ export function AlertBar() {
   // "+N more" stack expansion (emergency band multi-alert AC only).
   const [stackExpanded, setStackExpanded] = useState(false)
 
-  if (treatment === 'none') return null
+  // A single, ALWAYS-MOUNTED live region. A `role="status"` inserted into the
+  // DOM already-populated is not reliably announced by assistive tech, so the
+  // most important transition — `none` → the first alert (which may itself be
+  // an emergency) — would be SILENT if the bar returned `null` while empty.
+  // Keeping ONE persistent host means the region exists (empty) before any
+  // content arrives, so every state change announces. In `none` it carries
+  // `noneHostStyle` (zero-height, no padding, out of flow), so AC1's "no
+  // reserved space" still holds — the region is present but invisible.
+  const activeAlert =
+    treatment === 'none' ? null : pickActiveAlert(alerts, hasEmergency, safeTickerIndex)
+  const liveAnnounceLevel = activeAlert?.severity === 'emergency' ? 'assertive' : 'polite'
+  const otherAlerts =
+    activeAlert && treatment === 'emergencyBand'
+      ? alerts.filter(alert => alert.id !== activeAlert.id)
+      : []
+  const hostStyle =
+    treatment === 'none'
+      ? noneHostStyle
+      : treatment === 'emergencyBand'
+        ? emergencyHostStyle
+        : tickerHostStyle
+  const dataTreatment =
+    treatment === 'none' ? 'none' : treatment === 'emergencyBand' ? 'band' : 'ticker'
 
-  const activeAlert = pickActiveAlert(alerts, hasEmergency, safeTickerIndex)
-  if (!activeAlert) return null // Unreachable given the `alerts.length === 0` guard above.
-
-  const liveAnnounceLevel = activeAlert.severity === 'emergency' ? 'assertive' : 'polite'
-
-  if (treatment === 'emergencyBand') {
-    const otherAlerts = alerts.filter(alert => alert.id !== activeAlert.id)
-
-    return (
-      <div
-        role="status"
-        aria-live={liveAnnounceLevel}
-        aria-atomic="true"
-        data-testid="pulse-alert-bar"
-        data-alert-severity={activeAlert.severity}
-        data-alert-treatment="band"
-        style={emergencyHostStyle}
-      >
-        <div style={rowStyle}>
-          <SeverityChip severity={activeAlert.severity} />
-          <span data-testid="pulse-alert-bar-message" style={messageStyle}>
-            {activeAlert.message}
-          </span>
-          <span data-testid="pulse-alert-bar-timestamp" style={timestampStyle}>
-            {format(activeAlert.scenarioTime)}
-          </span>
-          <a
-            href={ALERTS_HISTORY_HREF}
-            data-testid="pulse-alert-bar-details"
-            style={{ ...detailsLinkStyle, color: '#ffffff' }}
-          >
-            Details →
-          </a>
-          {otherAlerts.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setStackExpanded(current => !current)}
-              aria-expanded={stackExpanded}
-              aria-controls="pulse-alert-bar-stack"
-              data-testid="pulse-alert-bar-more-chip"
-              style={moreChipStyle}
-            >
-              +{otherAlerts.length} more
-            </button>
-          )}
-        </div>
-        {stackExpanded && (
-          <div id="pulse-alert-bar-stack" data-testid="pulse-alert-bar-stack" style={stackListStyle}>
-            {otherAlerts.map(alert => (
-              <div key={alert.id} data-testid="pulse-alert-bar-stack-item" style={rowStyle}>
-                <SeverityChip severity={alert.severity} />
-                <span style={messageStyle}>{alert.message}</span>
-                <span style={timestampStyle}>{format(alert.scenarioTime)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // Ticker (default treatment, D7-002).
   return (
     <div
       role="status"
       aria-live={liveAnnounceLevel}
       aria-atomic="true"
       data-testid="pulse-alert-bar"
-      data-alert-severity={activeAlert.severity}
-      data-alert-treatment="ticker"
-      style={tickerHostStyle}
+      data-alert-severity={activeAlert?.severity ?? 'none'}
+      data-alert-treatment={dataTreatment}
+      style={hostStyle}
     >
-      {collapsed ? (
-        <button
-          type="button"
-          onClick={() => setManuallyExpanded(true)}
-          aria-label={`${SEVERITY_META[activeAlert.severity].label} alert: ${activeAlert.message}. Tap for details.`}
-          data-testid="pulse-alert-bar-expand"
-          style={tapToExpandStyle}
-        >
-          <SeverityChip severity={activeAlert.severity} />
-          <span data-testid="pulse-alert-bar-message" style={messageStyle}>
-            {activeAlert.message}
-          </span>
-        </button>
-      ) : (
-        <div style={rowStyle}>
-          <SeverityChip severity={activeAlert.severity} />
-          <span data-testid="pulse-alert-bar-message" style={messageStyle}>
-            {activeAlert.message}
-          </span>
-          <span data-testid="pulse-alert-bar-timestamp" style={timestampStyle}>
-            {format(activeAlert.scenarioTime)}
-          </span>
-          <a href={ALERTS_HISTORY_HREF} data-testid="pulse-alert-bar-details" style={detailsLinkStyle}>
-            Details →
-          </a>
-        </div>
+      {treatment === 'emergencyBand' && activeAlert && (
+        <>
+          <div style={rowStyle}>
+            <SeverityChip severity={activeAlert.severity} />
+            <span data-testid="pulse-alert-bar-message" style={messageStyle}>
+              {activeAlert.message}
+            </span>
+            <span data-testid="pulse-alert-bar-timestamp" style={timestampStyle}>
+              {format(activeAlert.scenarioTime)}
+            </span>
+            <a
+              href={ALERTS_HISTORY_HREF}
+              data-testid="pulse-alert-bar-details"
+              style={{ ...detailsLinkStyle, color: '#ffffff' }}
+            >
+              Details →
+            </a>
+            {otherAlerts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setStackExpanded(current => !current)}
+                aria-expanded={stackExpanded}
+                aria-controls="pulse-alert-bar-stack"
+                data-testid="pulse-alert-bar-more-chip"
+                style={moreChipStyle}
+              >
+                +{otherAlerts.length} more
+              </button>
+            )}
+          </div>
+          {stackExpanded && (
+            <div id="pulse-alert-bar-stack" data-testid="pulse-alert-bar-stack" style={stackListStyle}>
+              {otherAlerts.map(alert => (
+                <div key={alert.id} data-testid="pulse-alert-bar-stack-item" style={rowStyle}>
+                  <SeverityChip severity={alert.severity} />
+                  <span style={messageStyle}>{alert.message}</span>
+                  <span style={timestampStyle}>{format(alert.scenarioTime)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      {treatment === 'ticker' && activeAlert && (
+        collapsed ? (
+          <button
+            type="button"
+            onClick={() => setManuallyExpanded(true)}
+            aria-label={`${SEVERITY_META[activeAlert.severity].label} alert: ${activeAlert.message}. Tap for details.`}
+            data-testid="pulse-alert-bar-expand"
+            style={tapToExpandStyle}
+          >
+            <SeverityChip severity={activeAlert.severity} />
+            <span data-testid="pulse-alert-bar-message" style={messageStyle}>
+              {activeAlert.message}
+            </span>
+          </button>
+        ) : (
+          <div style={rowStyle}>
+            <SeverityChip severity={activeAlert.severity} />
+            <span data-testid="pulse-alert-bar-message" style={messageStyle}>
+              {activeAlert.message}
+            </span>
+            <span data-testid="pulse-alert-bar-timestamp" style={timestampStyle}>
+              {format(activeAlert.scenarioTime)}
+            </span>
+            <a href={ALERTS_HISTORY_HREF} data-testid="pulse-alert-bar-details" style={detailsLinkStyle}>
+              Details →
+            </a>
+          </div>
+        )
       )}
     </div>
   )

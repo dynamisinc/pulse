@@ -76,14 +76,38 @@ afterEach(() => {
 })
 
 describe('AlertBar — none state (AC1)', () => {
-  it('renders nothing at all when there are no active alerts - zero height, no reserved space', () => {
+  it('keeps a persistent but EMPTY, zero-height live region when there are no active alerts', () => {
     mockUseAlerts.mockReturnValue([])
 
-    const { container } = render(<AlertBar />)
+    render(<AlertBar />)
 
-    expect(container.firstChild).toBeNull()
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('pulse-alert-bar')).not.toBeInTheDocument()
+    // The live region stays mounted (so the none→first-alert transition below
+    // announces) but is empty and reserves no space (AC1): no chip, message,
+    // timestamp, or Details anatomy.
+    const host = screen.getByTestId('pulse-alert-bar')
+    expect(host).toHaveAttribute('role', 'status')
+    expect(host).toHaveAttribute('data-alert-treatment', 'none')
+    expect(host).toBeEmptyDOMElement()
+    expect(screen.queryByTestId('pulse-alert-bar-message')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('pulse-alert-bar-details')).not.toBeInTheDocument()
+  })
+
+  it('announces the first alert by populating a live region that was already mounted (none → active)', () => {
+    // A role=status inserted already-populated is not reliably announced; the
+    // region must exist EMPTY first, then receive content. Pin that the same
+    // host element persists across the none→active transition and gains text.
+    mockUseAlerts.mockReturnValue([])
+    const { rerender } = render(<AlertBar />)
+    const hostBefore = screen.getByTestId('pulse-alert-bar')
+    expect(hostBefore).toBeEmptyDOMElement()
+
+    mockUseAlerts.mockReturnValue([makeAlert({ severity: 'info', message: 'First alert appears.' })])
+    rerender(<AlertBar />)
+
+    const hostAfter = screen.getByTestId('pulse-alert-bar')
+    expect(hostAfter).toBe(hostBefore) // same element — region existed before content
+    expect(hostAfter).toHaveAttribute('role', 'status')
+    expect(hostAfter).toHaveTextContent('First alert appears.')
   })
 })
 

@@ -272,7 +272,12 @@ describe('ChannelNav — current channel marked, never color-only (AC1/AC5, NFR-
     expect(tabCurrentRule).toMatch(/font-weight:\s*700/)
     // The tab's underline lives on the nested label rule (kept separate so
     // the icon itself isn't underlined) — still non-color, still present.
-    expect(styleText).toMatch(/\.pulse-channel-nav-tab--current \.pulse-channel-nav-tab-label\s*\{[^}]*text-decoration:\s*underline/)
+    expect(styleText).toMatch(
+      new RegExp(
+        '\\.pulse-channel-nav-tab--current \\.pulse-channel-nav-tab-label' +
+        '\\s*\\{[^}]*text-decoration:\\s*underline',
+      ),
+    )
   })
 })
 
@@ -445,8 +450,12 @@ describe('ChannelNav — mobile-first responsive mechanism', () => {
     expect(mediaIndex).toBeGreaterThan(-1)
     const baseText = styleText.slice(0, mediaIndex)
 
-    expect(baseText).toMatch(/\.pulse-channel-nav-strip\s*\{[^}]*display:\s*none;[^}]*height:\s*38px;/)
-    expect(baseText).toMatch(/\.pulse-channel-nav-tabs\s*\{[^}]*display:\s*flex;[^}]*height:\s*56px;/)
+    expect(baseText).toMatch(
+      new RegExp('\\.pulse-channel-nav-strip\\s*\\{[^}]*display:\\s*none;[^}]*height:\\s*38px;'),
+    )
+    expect(baseText).toMatch(
+      new RegExp('\\.pulse-channel-nav-tabs\\s*\\{[^}]*display:\\s*flex;[^}]*height:\\s*56px;'),
+    )
   })
 
   it('toggles to the desktop strip (and hides the tab bar) inside a min-width media query', () => {
@@ -508,7 +517,9 @@ describe('ChannelNav — participant world: quiet styling, FontAwesome-only, no 
     const buttons = screen.getAllByRole('button', { hidden: true })
     expect(buttons).toHaveLength(TWO_CHANNEL_CONFIG.channels.length * 2)
     for (const button of buttons) {
-      const label = TWO_CHANNEL_CONFIG.channels.find(channel => channel.label === button.textContent)
+      const label = TWO_CHANNEL_CONFIG.channels.find(
+        channel => channel.label === button.textContent,
+      )
       expect(label).toBeDefined()
     }
   })

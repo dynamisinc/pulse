@@ -145,7 +145,10 @@ const NAV_STYLES = `
   padding-left: 16px;
   font-size: 12px;
   letter-spacing: 0.02em;
-  color: #838c95;
+  /* Matches the link gray — >=4.5:1 on #fafafa (WCAG 2.1 AA 1.4.3). The
+     dateline is participant-visible content (COR-061/062, AC5→NFR-001), so it
+     must clear normal-text contrast, not just "never color-only". */
+  color: #5a6470;
   white-space: nowrap;
 }
 .pulse-channel-nav-tabs {
