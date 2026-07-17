@@ -62,18 +62,30 @@ Wave plan: `docs/features/participant-shell/implementation.md`.
 > watermark-fallback signal) via story `01-compliance-chrome`. Merged onto the `feature/participant-shell`
 > umbrella.
 
-### App route-tree split ⬜ (integration task, after Wave 1)
+### App route-tree split ✅ (integration task, after Wave 1)
 Refactor `src/frontend/src/App.tsx`: move the root `<ThemeProvider theme={cobraTheme}>` out of the app
 root; mount a **participant subtree** (`<BrandThemeProvider>` → `<ShellLayout>`) and a **staff subtree**
 (`<StaffShellFrame>` applies COBRA). `QueryClientProvider`/router stay at root. Makes COBRA physically
 unreachable from participant paths (the thumbnail-test guarantee).
 
-### Wave 2 ⬜ (all disjoint — fan out)
+> **Delivered:** `cobraTheme` moved off the app root into `StaffShellFrame`'s own `StaffThemeBoundary`,
+> and a COBRA-free `/shell` participant route was added mounting `<BrandThemeProvider>` →
+> `<ShellLayout>`. COBRA is now physically unreachable from participant paths.
+
+### Wave 2 ✅ (all disjoint — fan out)
 - `07-brand-theming` — `BrandThemeProvider` (creates the participant skin provider)
 - `02-alert-bar-host` — PRT-010 EAS analog, `role="status"`, severity never color-only
 - `03-channel-nav` — desktop strip + mobile tab bar
 - `05-overlay-layer` — pause/EndEx/break-fiction host (renders mock overlay state; triggers are world-steering, a later cross-feature edge)
 - `06-variants` — full / read-only / preview flag through the mount contract
+
+> **Delivered** (both code-review gates clean, 299 tests suite-wide): `07-brand-theming-hooks` —
+> `BrandThemeProvider.tsx` / `brandTokens.ts`; `02-alert-bar-host` — `components/AlertBar/{AlertBar.tsx,
+> alertTypes.ts,useAlerts.ts}`; `03-channel-nav` — `ChannelNav.tsx` / `channelNavConfig.ts`;
+> `05-overlay-layer` — `components/OverlayLayer/*`; `06-variants` — `mountContract.ts`
+> (`affordancesAvailable`) + `shellState.ts` (CR-W1 default flip to `readOnly`). All 5 stories merged
+> onto the `feature/participant-shell` umbrella; the participant-shell feature is now Complete (7/7
+> stories) and ready for the umbrella→`main` PR.
 
 ---
 

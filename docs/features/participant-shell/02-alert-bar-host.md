@@ -1,7 +1,8 @@
 # Story: Alert-bar host (4 states, ticker default, emergency escapes)
 
-**Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** PRT-010, PRT-011, PRT-012  ·  **Design decisions:** D7-002  ·  **Issue:** #186
+**Delivered:** `components/AlertBar/{AlertBar.tsx,alertTypes.ts,useAlerts.ts}`
 
 ## Context
 The EAS analog — one alert host directly below the top chrome that **persists across every channel**
@@ -13,25 +14,28 @@ Alerts are **in-fiction/simulated** — anything real-world is the break-fiction
 never the alert bar. In pilot mode the content arrives via platform notifications (SOC-072).
 
 ## Acceptance Criteria
-- [ ] Given an active alert, when the shell renders, then the alert-bar host shows the correct state —
+- [x] Given an active alert, when the shell renders, then the alert-bar host shows the correct state —
       `none` (zero height, no reserved space) / `info` / `advisory` / `emergency` — with a severity
       **chip (icon + LABEL text) + color, never color-only** (NFR-001), the message, a **scenario
-      timestamp**, and a **Details →** link to alerts history (PRT-012).
-- [ ] Ticker is the **default** treatment (dark `#14181c` one-line, severity tab + mono message);
+      timestamp**, and a **Details →** link to alerts history (PRT-012). — `AlertBar.test.tsx`
+- [x] Ticker is the **default** treatment (dark `#14181c` one-line, severity tab + mono message);
       **emergency escapes the ticker and forces the full band** (`#b3261e` solid, white text) and
       **never collapses**; info/advisory band treatments collapse-on-scroll to one line and re-expand
-      on tap (D7-002).
-- [ ] **Multi-alert:** the ticker auto-rotates active alerts (~3.5s, severity tab swaps per message);
-      band/compact show highest severity + a "+N more" chip that expands the stack.
-- [ ] The alert bar **persists across every channel** (PRT-010) and is **never user-dismissable**;
-      alerts are in-fiction only (real-world messages are the break-fiction overlay, story 05).
-- [ ] Accessibility: `role="status"`; severity carried by chip text; a live-region announce fires on
-      state change (NFR-001). Timestamp renders in **scenario time** (COR-053), never wall-clock.
+      on tap (D7-002). — `AlertBar.test.tsx`
+- [x] **Multi-alert:** the ticker auto-rotates active alerts (~3.5s, severity tab swaps per message);
+      band/compact show highest severity + a "+N more" chip that expands the stack. — `AlertBar.test.tsx`
+- [x] The alert bar **persists across every channel** (PRT-010) and is **never user-dismissable**;
+      alerts are in-fiction only (real-world messages are the break-fiction overlay, story 05). —
+      `AlertBar.test.tsx`
+- [x] Accessibility: `role="status"`; severity carried by chip text; a live-region announce fires on
+      state change (NFR-001). Timestamp renders in **scenario time** (COR-053), never wall-clock. —
+      `AlertBar.test.tsx`
 
 ## Out of Scope
-Alert **content** patterns and the alerts-history page (channel-side, PRT-012 stub, D2); publishing
-an alert (world-steering CTL-020/CTL-021 attention levers / SOC-072 notifications); the break-fiction
-overlay (story 05 — real-world, not an alert).
+Alert **content** patterns and the alerts-history page (channel-side, PRT-012 stub, D2) — the
+**Details →** link renders now but does not yet navigate anywhere or emit view telemetry; both land
+with the alerts-history page (later); publishing an alert (world-steering CTL-020/CTL-021 attention
+levers / SOC-072 notifications); the break-fiction overlay (story 05 — real-world, not an alert).
 
 ## Technical Notes
 Participant world. Consumes `alerts[]` (`{severity, message, scenarioTime, id}`, server-driven,

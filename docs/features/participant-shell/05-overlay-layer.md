@@ -1,7 +1,8 @@
 # Story: Overlay layer — pause / EndEx / break-fiction rendering
 
-**Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-065 (CTL-023, CTL-024, COR-054)  ·  **Design decisions:** D7-003, D7-004  ·  **Issue:** #189
+**Delivered:** `components/OverlayLayer/*`
 
 ## Context
 The shell owns the layer that covers the world when the exercise is held or stopped, so no channel
@@ -14,23 +15,26 @@ states, not user actions**: world-steering (staff) **triggers** them (break-fict
 **wall-clock** time.
 
 ## Acceptance Criteria
-- [ ] Given an overlay state, when the shell renders, then the z-order is honored bottom→top: content
+- [x] Given an overlay state, when the shell renders, then the z-order is honored bottom→top: content
       · channel nav · alert bar · **pause/EndEx pages** · compliance chrome · **break-fiction**
-      (COR-065); a channel can never draw above this layer.
-- [ ] **Break-fiction (CTL-024/D7-003):** a black `#0d0d0d` field with amber `#ffb300` hazard-stripe
+      (COR-065); a channel can never draw above this layer. — `OverlayLayer.test.tsx`
+- [x] **Break-fiction (CTL-024/D7-003):** a black `#0d0d0d` field with amber `#ffb300` hazard-stripe
       bars, monospace, "REAL-WORLD MESSAGE · EXERCISE CONTROL", the configured message, **wall-clock
       time**, a "remains until cleared" line, **no dismiss affordance**, and **no brand/type/color from
       either world** — it covers compliance chrome too. It clears only on the Director action (the
-      console triggers; this shell renders).
-- [ ] **Pause (CTL-023/D7-004):** in-fiction = a neutral "We'll be right back" maintenance page
+      console triggers; this shell renders). — `OverlayLayer.test.tsx`, `wallClock.test.ts`
+- [x] **Pause (CTL-023/D7-004):** in-fiction = a neutral "We'll be right back" maintenance page
       (system-ui, zero exercise language); out-of-fiction = a slate `#1b232c`/mono "EXERCISE PAUSED"
       control page with a "scenario clock stopped" line. **EndEx (COR-054):** in-fiction = "This
-      service is no longer available"; out-of-fiction = "ENDEX" + hot-wash logistics.
-- [ ] Only break-fiction gets the alarm treatment; pause/EndEx control pages share the calm slate/mono
+      service is no longer available"; out-of-fiction = "ENDEX" + hot-wash logistics. —
+      `OverlayLayer.test.tsx`
+- [x] Only break-fiction gets the alarm treatment; pause/EndEx control pages share the calm slate/mono
       family. Overlays are **not user-dismissable**; break-fiction has **no** client-side dismiss path.
-- [ ] Accessibility: overlays trap focus and are announced (NFR-001); the break-fiction message is a
+      — `OverlayLayer.test.tsx`
+- [x] Accessibility: overlays trap focus and are announced (NFR-001); the break-fiction message is a
       high-risk content class and reserves the EXERCISE watermark slot where a channel is still visible
-      beneath a non-covering register (NFR-008). Break-fiction's wall-clock is the sole COR-053 exception.
+      beneath a non-covering register (NFR-008). Break-fiction's wall-clock is the sole COR-053
+      exception. — `OverlayLayer.test.tsx`, `useOverlayFocusTrap.test.tsx`, `wallClock.test.ts`
 
 ## Out of Scope
 The **triggers**: Break Fiction's guarded control + type-to-confirm + fan-out + audit
