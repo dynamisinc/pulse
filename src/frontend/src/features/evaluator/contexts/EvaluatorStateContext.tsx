@@ -443,7 +443,8 @@ export function EvaluatorStateProvider({ children }: EvaluatorStateProviderProps
       }
       if (stateRef.current.annotationPopoverOpen && ['1', '2', '3'].includes(e.key)) {
         const categories: AnnotationCategory[] = ['STRENGTH', 'IMPROVEMENT', 'OBSERVATION']
-        dispatch({ type: 'SET_ANNOTATION_CATEGORY', category: categories[Number(e.key) - 1] })
+        const category = categories[Number(e.key) - 1]
+        if (category) dispatch({ type: 'SET_ANNOTATION_CATEGORY', category })
         return
       }
       const currentView: EvaluatorView = stateRef.current.view

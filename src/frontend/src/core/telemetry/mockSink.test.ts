@@ -168,8 +168,8 @@ describe('emitTelemetryEvent / mock sink', () => {
       expect(buffered).toHaveLength(500)
       // The two oldest (event-0, event-1) were evicted; the buffer now runs
       // from event-2 through the most recently emitted event-501.
-      expect(buffered[0].eventId).toBe('event-2')
-      expect(buffered[buffered.length - 1].eventId).toBe('event-501')
+      expect(buffered[0]?.eventId).toBe('event-2')
+      expect(buffered[buffered.length - 1]?.eventId).toBe('event-501')
     })
   })
 })
