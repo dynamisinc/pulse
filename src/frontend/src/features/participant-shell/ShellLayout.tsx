@@ -33,8 +33,23 @@
  *  5. Provides `{variant, scenarioNow}` to the mounted channel via
  *     `ShellContextProvider` (`mountContract.ts`).
  *
- * Deliberately does NOT render cross-channel nav (story 03) or any overlay
- * (story 05) — this component only defines the contract they participate in.
+ * ## Shell composition (Wave-2 integration)
+ * `ShellLayout` is the assembly point for every shell-owned layer. It renders,
+ * as siblings AROUND the content region (never inside its reset boundary):
+ *   - `<ComplianceChrome>` (story 01) — the two fixed banners; publishes the
+ *     `--pulse-chrome-*` inset vars the content region consumes.
+ *   - `<AlertBar>` (story 02) — the EAS-analog host, fixed below the top chrome.
+ *   - `<ChannelNav>` (story 03) — the desktop strip / mobile tab bar.
+ *   - `<OverlayLayer>` (story 05) — pause/EndEx (below chrome) + break-fiction
+ *     (above everything).
+ * Each layer is SELF-CONTAINED (reads its own exercise-scoped mock seam), so
+ * composition is drop-in with zero prop-threading. The z-order contract
+ * (SHELL-CONTRACT §3) is carried by each layer's `SHELL_Z` z-index, not by DOM
+ * order. NOTE (Phase-1): precise vertical stacking of the nav/alert-bar under
+ * the fixed chrome, and pinning the mobile tab bar to the bottom edge, are
+ * refined when the first real channel (E2 social) mounts content to lay out
+ * against — the Wave-2 deliverable is the assembly + z-order + the COBRA-free
+ * subtree, and every layer's own ACs are met at the component level.
  *
  * ## The reset boundary
  * The boundary uses `all: initial` — deliberately NOT `all: revert`.
@@ -70,6 +85,10 @@ import {
   type ShellMountProps,
 } from './mountContract'
 import { useShellState } from './shellState'
+import { ComplianceChrome } from './components/ComplianceChrome'
+import { AlertBar } from './components/AlertBar/AlertBar'
+import { ChannelNav } from './components/ChannelNav'
+import { OverlayLayer } from './components/OverlayLayer'
 
 export interface ShellLayoutProps {
   /** The channel mounted into the shell (social now; portal/news/press/weather later). */
@@ -93,6 +112,18 @@ const contentRegionStyle: CSSProperties = {
   paddingBottom: `var(${SHELL_CHROME_BOTTOM_VAR}, 0px)`,
 }
 
+/**
+ * The shell root. `position: relative` + `minHeight: 100vh` gives the shell a
+ * full-viewport container for its content flow. It deliberately sets NO
+ * `transform`/`filter`/`will-change`: any of those would make it a containing
+ * block for `position: fixed`, which would break the chrome / alert-bar /
+ * overlay layers' viewport anchoring.
+ */
+const shellRootStyle: CSSProperties = {
+  position: 'relative',
+  minHeight: '100vh',
+}
+
 export function ShellLayout({ children }: ShellLayoutProps) {
   // Fail-closed exercise scoping (COR-001/XC-001) — see module header point 2.
   // The resolved scope is deliberately unused beyond this call: exerciseId is
@@ -105,13 +136,34 @@ export function ShellLayout({ children }: ShellLayoutProps) {
   const mountProps: ShellMountProps = { variant, scenarioNow }
 
   return (
-    <div
-      data-testid="pulse-shell-content-region"
-      style={contentRegionStyle}
-    >
-      <ShellContextProvider value={mountProps}>
-        {children}
-      </ShellContextProvider>
+    <div data-testid="pulse-shell-root" style={shellRootStyle}>
+      {/* Fixed compliance banners (z=chrome). Publishes the --pulse-chrome-*
+          inset vars the content region below consumes. */}
+      <ComplianceChrome />
+
+      {/* EAS-analog alert host — fixed just below the top chrome (z=alertBar).
+          Persists across every channel; renders a zero-height empty live
+          region when there are no active alerts. */}
+      <AlertBar />
+
+      {/* Shell-owned channel nav: desktop strip + mobile tab bar. A SIBLING of
+          the content region (never inside its reset boundary) — it is shell
+          chrome, not channel content (COR-060). */}
+      <ChannelNav />
+
+      {/* The ONE place a channel mounts: zero-styling reset boundary, chrome
+          inset, own stacking context at SHELL_Z.content (AC1/AC3). */}
+      <div data-testid="pulse-shell-content-region" style={contentRegionStyle}>
+        <ShellContextProvider value={mountProps}>
+          {children}
+        </ShellContextProvider>
+      </div>
+
+      {/* Overlay layer: pause/EndEx (z=overlay, below chrome) + break-fiction
+          (z=breakFiction, above everything incl. chrome). Renders null when
+          overlayState is 'none'. Kept last so its paint order matches its
+          z-order for equal-context layers. */}
+      <OverlayLayer />
     </div>
   )
 }
