@@ -81,4 +81,17 @@ describe('resolveExerciseContext', () => {
 
     await expect(resolveExerciseContext()).rejects.toThrow('network down')
   })
+
+  it('fails closed when status is outside the known set', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        exerciseId: 'ex-0042',
+        exerciseName: 'River Flood Drill',
+        timeZone: 'America/Denver',
+        status: 'paused',
+      },
+    } as Awaited<ReturnType<typeof api.get>>)
+
+    await expect(resolveExerciseContext()).rejects.toThrow()
+  })
 })

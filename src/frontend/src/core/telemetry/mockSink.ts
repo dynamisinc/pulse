@@ -37,12 +37,22 @@ const buffer: TelemetryEventV0[] = []
 export function emitTelemetryEvent(event: TelemetryEventV0): void {
   buffer.push(event)
 
-  console.info(`[telemetry] ${event.eventType}`, event)
+  // Dev-console only: keep telemetry noise — and actor identities — out of
+  // production browser consoles.
+  if (import.meta.env.DEV) {
+    console.info(`[telemetry] ${event.eventType}`, event)
+  }
 
-  void api.post('/telemetry', event).catch(() => {
-    // Best-effort only: no real backend exists yet, and a telemetry send
-    // failure must never surface to (or block) the caller's action.
-  })
+  // Best-effort, fire-and-forget. Swallow BOTH an async rejection and any
+  // synchronous throw from the client, so a telemetry send can never surface
+  // to (or block) the caller's action. No real backend exists yet.
+  try {
+    void api.post('/telemetry', event).catch(() => {
+      /* swallowed — see above */
+    })
+  } catch {
+    /* swallowed — see above */
+  }
 }
 
 /**

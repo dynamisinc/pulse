@@ -100,19 +100,15 @@ export const telemetryTargetSchema = z.object({
 export type TelemetryTarget = z.infer<typeof telemetryTargetSchema>
 
 /**
- * A string that must parse as a valid date-time (ISO-8601 in practice — see
- * each field's doc comment below for the exact flavor expected). Deliberately
- * validated via `Date.parse` rather than zod's stricter `z.iso.datetime()`
- * regex so the v0 schema doesn't reject reasonable ISO-8601 variants (e.g. a
- * numeric offset instead of a trailing `Z`) before this seam has real
- * callers to observe.
+ * A strict ISO-8601 date-time string. Uses zod's `z.iso.datetime` rather than
+ * the lenient `Date.parse` (which accepts non-ISO inputs like a bare year
+ * `'2033'` or `'March 4 2033'`): these v0 timestamps feed E10 metrics, E9's
+ * event stream (`INT-031`), and E8 observation, so a malformed timestamp
+ * slipping through becomes a cross-phase data-quality problem. `offset: true`
+ * accepts both a trailing `Z` and a numeric UTC offset (e.g. `+00:00`) — the
+ * two ISO-8601 flavors real callers actually produce.
  */
-const isoDateTimeString = z
-  .string()
-  .min(1, 'must be a non-empty date-time string')
-  .refine(value => !Number.isNaN(Date.parse(value)), {
-    message: 'must be a valid ISO-8601 date-time string',
-  })
+const isoDateTimeString = z.iso.datetime({ offset: true })
 
 // ---------------------------------------------------------------------------
 // The v0 envelope (locked)

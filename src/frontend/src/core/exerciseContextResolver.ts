@@ -28,6 +28,23 @@ import { api } from './services/api'
 /** Exercise lifecycle status, as surfaced on a single bound scope (no list). */
 export type ExerciseStatus = 'scheduled' | 'active' | 'complete' | 'archived'
 
+/**
+ * All valid exercise statuses. The runtime guard checks membership here so it
+ * matches the wire contract — this seam swaps to a live endpoint with no
+ * consumer change, so an out-of-enum `status` must fail closed, not be cast
+ * blindly to `ExerciseStatus`.
+ */
+const EXERCISE_STATUSES: readonly ExerciseStatus[] = [
+  'scheduled',
+  'active',
+  'complete',
+  'archived',
+]
+
+function isExerciseStatus(value: unknown): value is ExerciseStatus {
+  return typeof value === 'string' && (EXERCISE_STATUSES as readonly string[]).includes(value)
+}
+
 /** The single-exercise scope every participant-facing module resolves against. */
 export interface ExerciseScope {
   readonly exerciseId: string
@@ -79,7 +96,7 @@ function isValidResponseBody(
     typeof body.exerciseId === 'string' && body.exerciseId.length > 0 &&
     typeof body.exerciseName === 'string' && body.exerciseName.length > 0 &&
     typeof body.timeZone === 'string' && body.timeZone.length > 0 &&
-    typeof body.status === 'string' && body.status.length > 0
+    isExerciseStatus(body.status)
   )
 }
 

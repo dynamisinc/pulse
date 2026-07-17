@@ -124,6 +124,16 @@ describe('telemetryEventV0Schema', () => {
     },
   )
 
+  it.each(['2033', 'March 4 2033'])(
+    'rejects a lenient, non-ISO-8601 date-time string %s (stricter than Date.parse)',
+    value => {
+      // Date.parse would accept these; the v0 schema must not, so a malformed
+      // timestamp cannot reach E10/E9/E8 downstream.
+      const result = telemetryEventV0Schema.safeParse(validEvent({ wallClockTime: value }))
+      expect(result.success).toBe(false)
+    },
+  )
+
   it('rejects an empty timeZone', () => {
     const result = telemetryEventV0Schema.safeParse(validEvent({ timeZone: '' }))
     expect(result.success).toBe(false)
