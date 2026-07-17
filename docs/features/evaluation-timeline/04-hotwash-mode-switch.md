@@ -1,7 +1,7 @@
 # Story: Hotwash mode switch (participant-visible replay)
 
 **Feature:** Evaluation timeline & replay foundation  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started
-**Requirements:** EVL-014 (hotwash-exclusion clause), EVL-033, COR-054  ·  **Design decisions:** D6-007  ·  **Issue:** —
+**Requirements:** EVL-014 (hotwash-exclusion clause), EVL-033, COR-054  ·  **Design decisions:** D6-007  ·  **Issue:** #233
 
 ## Context
 **Design-introduced story (D6-007).** The epic asks (EVL-014) that engine/controller-dial overlays

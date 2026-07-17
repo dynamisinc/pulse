@@ -1,7 +1,7 @@
 # Feature: Response, coverage, reach & sentiment metrics
 
 **Epic:** E10 — Evaluation & AAR  ·  **Phase:** 4  ·  **Feature ref:** F10.2 Response metrics
-**World:** staff  ·  **Issue:** —
+**World:** staff  ·  **Issue:** #220
 
 ## Summary
 The evaluator's quantified evidence layer over the timeline: response latency (including

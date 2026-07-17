@@ -1,7 +1,7 @@
 # Story: Annotation push to Cadence
 
 **Feature:** Live evaluator tools — storyline board & annotation capture  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started
-**Requirements:** EVL-021  ·  **Design decisions:** D6-003  ·  **Issue:** —
+**Requirements:** EVL-021  ·  **Design decisions:** D6-003  ·  **Issue:** #236
 
 ## Context
 EVL-021 requires annotations to be exportable and included in the AAR package; when Cadence is

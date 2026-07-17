@@ -1,7 +1,7 @@
 # Feature: Live evaluator tools — storyline board & annotation capture
 
 **Epic:** E10 — Evaluation & AAR  ·  **Phase:** 4  ·  **Feature ref:** F10.3 Evaluator tools
-**World:** staff  ·  **Issue:** —
+**World:** staff  ·  **Issue:** #221
 
 ## Summary
 The evaluator's real-time situational-awareness surface — a full-width storyline board mirroring the

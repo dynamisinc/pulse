@@ -1,7 +1,7 @@
 # Feature: Evaluation timeline & replay foundation
 
 **Epic:** E10 — Evaluation & AAR  ·  **Phase:** 4  ·  **Feature ref:** F10.1 The timeline (foundation)
-**World:** staff  ·  **Issue:** —
+**World:** staff  ·  **Issue:** #219
 
 ## Summary
 The evaluator's foundation surface: a staff-only, exercise-scoped, ordered record of everything

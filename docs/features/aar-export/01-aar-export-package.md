@@ -1,7 +1,7 @@
 # Story: AAR export package
 
 **Feature:** AAR export package  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started
-**Requirements:** EVL-030, EVL-031  ·  **Design decisions:** D6-012  ·  **Issue:** —
+**Requirements:** EVL-030, EVL-031  ·  **Design decisions:** D6-012  ·  **Issue:** #223
 
 ## Context
 EVL-030 wants a one-click AAR package export per exercise: timeline (data + readable document),

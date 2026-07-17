@@ -1,7 +1,7 @@
 # Story: Misinformation spread tree
 
 **Feature:** Response, coverage, reach & sentiment metrics  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started · deferred: design pass pending
-**Requirements:** EVL-013  ·  **Design decisions:** none — deferred, metrics-v2 design pass  ·  **Issue:** —
+**Requirements:** EVL-013  ·  **Design decisions:** none — deferred, metrics-v2 design pass  ·  **Issue:** #229
 
 ## Context
 EVL-013 calls for per-rumor (ADP-032) spread-tree size/velocity, time-to-counter, and

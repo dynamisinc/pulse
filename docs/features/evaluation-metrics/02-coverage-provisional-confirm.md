@@ -1,7 +1,7 @@
 # Story: Coverage — missed opportunities, provisional until confirmed
 
 **Feature:** Response, coverage, reach & sentiment metrics  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started
-**Requirements:** EVL-011  ·  **Design decisions:** D6-010  ·  **Issue:** —
+**Requirements:** EVL-011  ·  **Design decisions:** D6-010  ·  **Issue:** #226
 
 ## Context
 EVL-011's coverage metric auto-generates a missed-opportunities list (public concerns/storylines/

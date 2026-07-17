@@ -1,7 +1,7 @@
 # Story: Response latency with evidence-level chip
 
 **Feature:** Response, coverage, reach & sentiment metrics  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started
-**Requirements:** EVL-010, CTL-026  ·  **Design decisions:** D6-009  ·  **Issue:** —
+**Requirements:** EVL-010, CTL-026  ·  **Design decisions:** D6-009  ·  **Issue:** #225
 
 ## Context
 EVL-010 measures, for each storyline/inject with an expected response, emergence → first official

@@ -1,7 +1,7 @@
 # Feature: AAR export package
 
 **Epic:** E10 — Evaluation & AAR  ·  **Phase:** 4  ·  **Feature ref:** F10.4 AAR export
-**World:** staff  ·  **Issue:** —
+**World:** staff  ·  **Issue:** #222
 
 ## Summary
 The one-click, honest AAR evidence package: timeline, replay, annotations, metrics, and the
