@@ -29,10 +29,10 @@ Tweaks props). **STORY-UPDATES.md** §A (this ADD) + §B (participant-surface re
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Compliance chrome (two banners, config-driven, chrome-off legal) | COR-031 / COR-066 | Not Started | #185 |
+| 01 | Compliance chrome (two banners, config-driven, chrome-off legal) | COR-031 / COR-066 | Complete | #185 |
 | 02 | Alert-bar host (4 states, ticker default, emergency escapes) | PRT-010/011/012 / D7-002 | Not Started | #186 |
 | 03 | Channel nav — global strip + mobile tabs (config-driven) | COR-061/062 / D7-001 | Not Started | #187 |
-| 04 | Channel-mount contract (content region, scenario time, variant) | COR-060 / COR-053/062 | Not Started | #188 |
+| 04 | Channel-mount contract (content region, scenario time, variant) | COR-060 / COR-053/062 | Complete | #188 |
 | 05 | Overlay layer — pause / EndEx / break-fiction rendering | COR-065 / CTL-023/024 / COR-054 | Not Started | #189 |
 | 06 | Variants — read-only, kiosk (Phase 3), preview | COR-064/015 / PRT-040 / COR-041 | Not Started | #190 |
 | 07 | Per-exercise brand theming hooks | COR-066 / COR-030 | Not Started | #191 |

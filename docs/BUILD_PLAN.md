@@ -51,9 +51,16 @@ mandates these first — a schema mistake here becomes a cross-phase migration.
 
 Wave plan: `docs/features/participant-shell/implementation.md`.
 
-### Wave 1 ⬜
+### Wave 1 ✅
 - `04-channel-mount-contract` — `ShellLayout.tsx`, `mountContract.ts` → **`ShellMountProps` / `useShellContext()`**, the seam every channel imports. Depends on Wave 0 `scenarioNow`.
 - `01-compliance-chrome` — two fixed green banners (COR-031/066, NFR-008 guard).
+
+> **Delivered** (both code-review gates clean, 174 tests suite-wide): `mountContract.ts` /
+> `ShellLayout.tsx` (`ShellMountProps` / `useShellContext()` — the mount props, inset-var contract, and
+> `SHELL_Z` z-order/stacking-context boundary) via story `04-channel-mount-contract`; `chromeConfig.ts` /
+> `components/ComplianceChrome.tsx` (config-driven two fixed banners, chrome-off-is-legal, NFR-008
+> watermark-fallback signal) via story `01-compliance-chrome`. Merged onto the `feature/participant-shell`
+> umbrella.
 
 ### App route-tree split ⬜ (integration task, after Wave 1)
 Refactor `src/frontend/src/App.tsx`: move the root `<ThemeProvider theme={cobraTheme}>` out of the app
