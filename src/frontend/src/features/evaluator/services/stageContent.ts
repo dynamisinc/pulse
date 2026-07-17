@@ -68,7 +68,12 @@ export function segmentIndexForT(t: number): number {
 /** Builds the read-only participant-stage snapshot for scenario minute `t`. */
 export function getStageContent(t: number): StageContent {
   const seg = segmentIndexForT(t)
-  const portal = PORTAL_SEGMENTS[seg]
+  // seg is always 0–4 (segmentIndexForT is total over that range) and the three
+  // segment tables are 1:1, so these lookups are provably in-bounds; the ?? branches
+  // satisfy noUncheckedIndexedAccess and never execute.
+  const portal = PORTAL_SEGMENTS[seg] ?? { kicker: '', headline: '', dek: '', row1: '', row2: '' }
+  const posts = POSTS_BY_SEGMENT[seg] ?? []
+  const trend = TREND_BY_SEGMENT[seg] ?? ''
   const rounded = Math.round(t)
   const dateline = t >= 52
     ? `Saturday · 7:${String(rounded - 52).padStart(2, '0')} PM`
@@ -84,7 +89,7 @@ export function getStageContent(t: number): StageContent {
     dek: portal.dek,
     row1: portal.row1,
     row2: portal.row2,
-    posts: POSTS_BY_SEGMENT[seg],
-    trend: TREND_BY_SEGMENT[seg],
+    posts,
+    trend,
   }
 }

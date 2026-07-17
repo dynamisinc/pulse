@@ -27,7 +27,9 @@ export interface ReplayTrackData {
 
 /** Recovers elapsed scenario minutes `t` from an annotation's `HH:MM` time. */
 function elapsedMinutesFromScenarioClock(time: string): number {
-  const [hh, mm] = time.split(':').map(Number)
+  const parts = time.split(':')
+  const hh = Number(parts[0])
+  const mm = Number(parts[1])
   const raw = hh * 60 + mm - SCENARIO_START_MINUTES
   const unwrapped = raw > ARC_DURATION_MINUTES ? raw - TIME_JUMP_MINUTES : raw
   return Math.min(ARC_DURATION_MINUTES, Math.max(0, unwrapped))

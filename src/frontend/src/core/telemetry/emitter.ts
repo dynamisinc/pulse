@@ -70,8 +70,10 @@ export function generateEventId(): string {
   if (c?.randomUUID) return c.randomUUID()
   if (c?.getRandomValues) {
     const b = c.getRandomValues(new Uint8Array(16))
-    b[6] = (b[6] & 0x0f) | 0x40 // version 4
-    b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+    // Indices 6/8 are always in-bounds on this fixed length-16 array; the `?? 0`
+    // is dead and exists only to satisfy noUncheckedIndexedAccess.
+    b[6] = ((b[6] ?? 0) & 0x0f) | 0x40 // version 4
+    b[8] = ((b[8] ?? 0) & 0x3f) | 0x80 // variant 10
     const hex = Array.from(b, byte => byte.toString(16).padStart(2, '0'))
     return (
       hex.slice(0, 4).join('') + '-' +
