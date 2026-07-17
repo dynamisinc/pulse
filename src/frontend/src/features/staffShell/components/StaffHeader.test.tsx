@@ -71,7 +71,9 @@ describe('StaffHeader — renders every required region (AC1)', () => {
 
     const badge = screen.getByTestId('staff-header-identity-badge')
     expect(within(badge).getByText('Bay Shield 2026')).toBeInTheDocument()
-    expect(within(badge).getByText(/CONTROLLER/)).toBeInTheDocument()
+    // Exact role/cell string (not a loose substring match) — pins the
+    // `${role} · ${cell}` join format the mock seam (staffHeaderMocks.ts) feeds it.
+    expect(within(badge).getByText('CONTROLLER · SimCell-1')).toBeInTheDocument()
 
     expect(screen.getByTestId('staff-header-scenario-clock')).toBeInTheDocument()
     expect(screen.getByTestId('staff-header-wall-clock')).toBeInTheDocument()
@@ -90,6 +92,27 @@ describe('StaffHeader — renders every required region (AC1)', () => {
   })
 })
 
+describe('StaffHeader — surfaceName reflects the prop, not a hardcoded lockup value', () => {
+  it('renders a different surface name for a different surfaceName prop', () => {
+    render(<StaffHeader surfaceName="Evaluator Dashboard" />)
+
+    const lockup = screen.getByTestId('staff-header-lockup')
+    expect(within(lockup).getByText('Evaluator Dashboard')).toBeInTheDocument()
+    expect(within(lockup).queryByText('Controller Console')).not.toBeInTheDocument()
+  })
+})
+
+describe('StaffHeader — staff presence roster (contract seam: staffHeaderMocks.ts)', () => {
+  it('exposes each presence member by its real accessible label, not just its initials', () => {
+    render(<StaffHeader surfaceName="Controller Console" />)
+
+    const presence = screen.getByRole('group', { name: 'Staff presence' })
+    expect(within(presence).getByLabelText('SimCell-1 (you)')).toBeInTheDocument()
+    expect(within(presence).getByLabelText('SimCell-2 · J. Okoro')).toBeInTheDocument()
+    expect(within(presence).getByLabelText('Director · L. Park')).toBeInTheDocument()
+  })
+})
+
 describe('StaffHeader — identity badge is STATIC during conduct (COR-005)', () => {
   it('a Live (active) exercise renders no switcher control — the badge is plain, non-interactive text', () => {
     mockScope({ status: 'active' })
@@ -101,19 +124,19 @@ describe('StaffHeader — identity badge is STATIC during conduct (COR-005)', ()
     expect(badge.tagName).not.toBe('BUTTON')
   })
 
-  it('no switcher control renders regardless of status (switching UX is out of scope for this story)', () => {
-    const statuses: ExerciseStatus[] = ['scheduled', 'active', 'complete', 'archived']
+  const ALL_STATUSES: ExerciseStatus[] = ['scheduled', 'active', 'complete', 'archived']
 
-    for (const status of statuses) {
+  it.each(ALL_STATUSES)(
+    'status "%s" renders no switcher control either (switching UX is out of scope for this story)',
+    status => {
       mockScope({ status })
-      const { unmount } = render(<StaffHeader surfaceName="Controller Console" />)
+      render(<StaffHeader surfaceName="Controller Console" />)
 
       const badge = screen.getByTestId('staff-header-identity-badge')
       expect(within(badge).queryByRole('button')).not.toBeInTheDocument()
-
-      unmount()
-    }
-  })
+      expect(within(badge).queryByRole('combobox')).not.toBeInTheDocument()
+    },
+  )
 })
 
 describe('StaffHeader — exercise state pill (NFR-001: never color-only)', () => {
@@ -140,6 +163,10 @@ describe('StaffHeader — exercise state pill (NFR-001: never color-only)', () =
       // The pill's accessible name carries the text label too — a screen
       // reader is never left with color as the only signal.
       expect(pill).toHaveAccessibleName(`Exercise state: ${expectedLabel}`)
+      // The pill is a live-region landmark a screen reader can actually find
+      // by role (not merely a data-testid hook) — locks in the `role="status"`
+      // attribute genuinely registering in the accessibility tree.
+      expect(screen.getByRole('status', { name: `Exercise state: ${expectedLabel}` })).toBe(pill)
     },
   )
 })
@@ -173,6 +200,15 @@ describe('StaffHeader — Preview-as button is driven entirely by props (story 0
     await user.click(screen.getByRole('button', { name: /preview as participant/i }))
 
     expect(onTogglePreview).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not throw when clicked with no onTogglePreview handler supplied (the prop is optional)', async () => {
+    const user = userEvent.setup()
+    render(<StaffHeader surfaceName="Controller Console" previewActive={false} />)
+
+    await expect(
+      user.click(screen.getByRole('button', { name: /preview as participant/i })),
+    ).resolves.not.toThrow()
   })
 
   it('is keyboard-operable: reachable by Tab and activatable with Enter', async () => {
@@ -225,6 +261,23 @@ describe('StaffHeader — dual clock pair is Cadence-convention (scenario + wall
     expect(wallText).not.toContain('21:42:37')
   })
 
+  it('the scenario clock renders in the exercise\'s configured IANA time zone, never raw UTC (COR-053)', () => {
+    // 20:15:30 UTC is 13:15:30 in America/Los_Angeles (PDT, UTC-7 in July) —
+    // proves the clock actually converts through the exercise's configured
+    // zone rather than always rendering the underlying UTC instant.
+    const scenarioInstant = new Date('2026-07-16T20:15:30Z')
+    vi.setSystemTime(scenarioInstant)
+    setExerciseClock({ scenarioNow: () => scenarioInstant })
+    mockScope({ timeZone: 'America/Los_Angeles' })
+
+    render(<StaffHeader surfaceName="Controller Console" />)
+
+    const scenarioText = screen.getByTestId('staff-header-scenario-clock').textContent ?? ''
+
+    expect(scenarioText).toContain('13:15:30')
+    expect(scenarioText).not.toContain('20:15:30')
+  })
+
   it('the wall clock ticks forward on its own (~1s) without the scenario clock needing to change', () => {
     // The wall clock's displayed precision is hour:minute (no seconds), so
     // the system time starts one second before a minute boundary — any test
@@ -256,5 +309,35 @@ describe('StaffHeader — staff world (thumbnail-distinguishability, XC-002)', (
     // guards that StaffHeader renders standalone without needing the frame.
     render(<StaffHeader surfaceName="Controller Console" />)
     expect(screen.getByTestId('staff-header')).toBeInTheDocument()
+  })
+})
+
+describe('StaffHeader — primary-emphasis text INHERITS its color rather than hardcoding one (module-header decision 2)', () => {
+  it('the PULSE lockup, identity-badge exercise name, and scenario-clock digits pick up an ancestor text color instead of a fixed one', () => {
+    // StaffShellFrame (story 05) is the one that actually paints the navy
+    // background + light `textPrimary` on the real header element — this
+    // test proves StaffHeader never shortcuts that by hardcoding its own
+    // light color on its primary-emphasis text, which would silently stop
+    // tracking the frame's color if the frame (or a future consumer) ever
+    // painted the header a different color. (The preview-toggle label and
+    // secondary/muted text are explicitly `textMuted`-colored in the
+    // component, not inherited — this test only covers the elements that
+    // actually set no explicit `color`.)
+    render(
+      <div style={{ color: 'rgb(10, 20, 30)' }}>
+        <StaffHeader surfaceName="Controller Console" />
+      </div>,
+    )
+
+    const pulseLabel = screen.getByText('PULSE')
+    const exerciseNameLabel = screen.getByText('Bay Shield 2026')
+    const scenarioClockDigits = screen
+      .getByTestId('staff-header-scenario-clock')
+      .querySelector('[aria-labelledby="staff-header-scenario-clock-label"]')
+
+    expect(scenarioClockDigits).not.toBeNull()
+    expect(getComputedStyle(pulseLabel).color).toBe('rgb(10, 20, 30)')
+    expect(getComputedStyle(exerciseNameLabel).color).toBe('rgb(10, 20, 30)')
+    expect(getComputedStyle(scenarioClockDigits as Element).color).toBe('rgb(10, 20, 30)')
   })
 })
