@@ -1,7 +1,7 @@
 # Story: Mock ExerciseContext provider (Wave-0 frontend seam)
 
 **Feature:** Exercise isolation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
-**Requirements:** COR-001, COR-004 (XC-001, XC-002)  ·  **Design decisions:** none  ·  **Issue:** —
+**Requirements:** COR-001, COR-004 (XC-001, XC-002)  ·  **Design decisions:** none  ·  **Issue:** #211
 
 ## Context
 Every participant-facing frontend module needs a single, trustworthy answer to "which exercise is this

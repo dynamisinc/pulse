@@ -1,7 +1,7 @@
 # Story: Telemetry emitter v0 (schema + mock sink)
 
 **Feature:** Telemetry capture (XC-004 v0)  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
-**Requirements:** XC-004 (COR-018, COR-053, XC-001/COR-001)  ·  **Design decisions:** none  ·  **Issue:** —
+**Requirements:** XC-004 (COR-018, COR-053, XC-001/COR-001)  ·  **Design decisions:** none  ·  **Issue:** #210
 
 ## Context
 Every participant- or persona-generated event must be captured from day one of Phase 1, and the

@@ -3,7 +3,7 @@
 **Epic:** E1 — Platform Core & Exercise Isolation  ·  **Phase:** 1  ·  **Feature ref:** XC-004
 (cross-cutting; named Phase-1-early design deliverable — Master §5, `11-ADVERSARIAL-REVIEW.md` finding
 D2 "SPIKE")
-**World:** platform/foundation  ·  **Issue:** —
+**World:** platform/foundation  ·  **Issue:** #209
 
 ## Summary
 Every participant- or persona-generated event (post, reply, reaction, view, DM, login, engine action)
@@ -29,7 +29,7 @@ consuming surfaces). No design brief exists for this surface — it has no UI.
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Telemetry emitter v0 (schema + mock sink) | XC-004 | Complete | — |
+| 01 | Telemetry emitter v0 (schema + mock sink) | XC-004 | Complete | #210 |
 
 ## Dependencies
 None (Wave 0 — the first of Pulse's three foundation seams to have zero upstream dependency). Consumed
