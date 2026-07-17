@@ -41,17 +41,23 @@ export interface StaffPresenceMember {
   readonly initials: string
   /** Accessible name / tooltip text, e.g. "SimCell-2 · J. Okoro". */
   readonly label: string
-  /** Avatar background color (presentational only — never the sole signal). */
+  /**
+   * Avatar background color (presentational only — never the sole signal; the
+   * label carries identity). Chosen dark enough that the white initials meet
+   * WCAG 2.1 AA (>=4.5:1 for small text) on this staff surface (NFR-001).
+   */
   readonly color: string
 }
 
 // TODO(E1 roles/presence API): replace with the real SignalR presence channel
 // (CLAUDE.md "G. Real-time" — a handler on the one shared connection, not a
-// new socket) once it exists. Wave-0/story-01 mock: a fixed roster.
+// new socket) once it exists. Wave-0/story-01 mock: a fixed roster. Colors are
+// AA-safe against white initials (contrast >=4.5:1): #276749 6.7:1, #8a5300
+// 6.3:1, #5b3f86 8.4:1.
 const MOCK_STAFF_PRESENCE: readonly StaffPresenceMember[] = [
-  { id: 'simcell-1', initials: 'S1', label: 'SimCell-1 (you)', color: '#33a06f' },
-  { id: 'simcell-2', initials: 'S2', label: 'SimCell-2 · J. Okoro', color: '#f5a623' },
-  { id: 'director', initials: 'DP', label: 'Director · L. Park', color: '#7a5aa0' },
+  { id: 'simcell-1', initials: 'S1', label: 'SimCell-1 (you)', color: '#276749' },
+  { id: 'simcell-2', initials: 'S2', label: 'SimCell-2 · J. Okoro', color: '#8a5300' },
+  { id: 'director', initials: 'DP', label: 'Director · L. Park', color: '#5b3f86' },
 ]
 
 export function useStaffPresence(): readonly StaffPresenceMember[] {

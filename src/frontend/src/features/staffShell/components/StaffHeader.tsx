@@ -15,10 +15,11 @@
  * legibly specifically on navy — see the comment at their declaration — a
  * small local constant, exactly as `staffShellTokens.ts`'s own module header
  * justifies its navy-only tokens). Primary-emphasis text (the "PULSE"
- * lockup, exercise name, clock digits, preview label) is left uncolored and
+ * lockup, exercise name, and the SCENARIO clock digits) is left uncolored and
  * simply INHERITS the light `textPrimary` color the frame already set on the
- * header element — the same pattern already proven in
- * `features/evaluator/components/shell/StaffShellStub.tsx`.
+ * header element; secondary text (the LOCAL wall-clock digits, the preview
+ * label) is explicitly set to `textMuted`. This is the same pattern already
+ * proven in `features/evaluator/components/shell/StaffShellStub.tsx`.
  *
  * Left-to-right, per SHELL-CONTRACT §1 "Header":
  *   1. Brand lockup — PULSE (bold) over the surface name (small caps, muted).
