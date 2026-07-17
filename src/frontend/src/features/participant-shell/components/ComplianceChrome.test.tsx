@@ -22,6 +22,7 @@
  * that would regress if that publishing logic ever broke — rather than on
  * `ShellLayout`'s (unobservable-in-jsdom) computed padding.
  */
+import { StrictMode } from 'react'
 import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ComplianceChrome } from './ComplianceChrome'
@@ -128,6 +129,51 @@ describe('ComplianceChrome — ShellLayout inset contract (AC1)', () => {
 
     unmount()
 
+    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('')
+    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('')
+  })
+})
+
+describe('ComplianceChrome — concurrent-mount inset safety (WR-001, preview COR-041)', () => {
+  it('keeps the :root inset reserved when one of two live instances unmounts, clearing only when the last leaves', () => {
+    mockUseChromeConfig.mockReturnValue(NON_DEFAULT_CONFIG)
+
+    // Two shells publish the shared :root pair at once — the mount contract's
+    // `preview` shell (COR-041, story 06) rendered inside the staff frame
+    // while an outer participant shell is also live.
+    const outer = render(<ComplianceChrome />)
+    const preview = render(<ComplianceChrome />)
+
+    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('22px')
+    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('22px')
+
+    // First unmount must NOT removeProperty the reserved inset out from under
+    // the still-visible sibling shell — the exact WR-001 regression.
+    preview.unmount()
+    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('22px')
+    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('22px')
+
+    // Last instance out clears it — a lone shell still leaves no stale gap.
+    outer.unmount()
+    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('')
+    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('')
+  })
+
+  it('is StrictMode-safe: a mount→cleanup→mount cycle nets to published, then clears on unmount', () => {
+    mockUseChromeConfig.mockReturnValue(NON_DEFAULT_CONFIG)
+
+    // StrictMode double-invokes the layout effect on mount in dev
+    // (acquire→release→acquire). A naive ref-count would strand the vars
+    // cleared or the counter unbalanced; the count must net to exactly one.
+    const { unmount } = render(
+      <StrictMode>
+        <ComplianceChrome />
+      </StrictMode>,
+    )
+    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('22px')
+    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('22px')
+
+    unmount()
     expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('')
     expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('')
   })

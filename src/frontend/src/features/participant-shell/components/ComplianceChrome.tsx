@@ -30,6 +30,23 @@
  * rendering the watermark itself is a participant-channel concern (out of
  * scope here).
  *
+ * Double-mount safety (Wave-1 Gate-1 finding WR-001): the inset vars live on
+ * the single shared `document.documentElement`, which is correct for the
+ * documented "mount once near the root" case. But the mount contract allows a
+ * `preview` shell (COR-041, story 06) rendered INSIDE the staff frame while an
+ * outer participant shell is also live — two `ComplianceChrome` instances, one
+ * shared `:root` pair. So the `:root` writes are REF-COUNTED
+ * (`acquireChromeInset` / `releaseChromeInset` below): an unmount clears the
+ * vars only when the LAST instance leaves, so the first to unmount can no
+ * longer `removeProperty` the reserved inset out from under a still-visible
+ * sibling shell. This guards the unmount RACE; it does NOT give two
+ * concurrently-mounted shells INDEPENDENT insets (one `:root` pair holds one
+ * value; last writer wins). Fully per-pane-independent insets are the scoping
+ * follow-up — set/read the vars on a shared shell-root node instead of `:root`,
+ * moving `ShellLayout`'s `var(--pulse-chrome-*, 0px)` consumer with them —
+ * deferred to story 06 / the staff-shell preview composition, when that
+ * container actually exists.
+ *
  * A11y (AC5): each banner is exercise/classification CONTEXT, not
  * interactive content — plain `<div>`s, no button/link/onClick/tabIndex, not
  * focusable. `role="note"` + a descriptive `aria-label` announce them to
@@ -80,9 +97,48 @@ const bannerBaseStyle: CSSProperties = {
 }
 
 /**
+ * Number of live `ComplianceChrome` instances currently publishing the shared
+ * `:root` inset vars. Module-scoped on purpose: it coordinates the ONE global
+ * `:root` pair across every instance on the page (see the module header's
+ * "Double-mount safety" note — WR-001). Effects run synchronously on the main
+ * thread, so a plain counter needs no locking.
+ */
+let activeChromeInstances = 0
+
+/**
+ * Publish the inset vars for a mounting instance and count it in. Always
+ * writes (last writer wins on the shared pair); the increment is what lets
+ * {@link releaseChromeInset} defer the clear until the last instance leaves.
+ */
+function acquireChromeInset(height: string): void {
+  const root = document.documentElement
+  activeChromeInstances += 1
+  root.style.setProperty(SHELL_CHROME_TOP_VAR, height)
+  root.style.setProperty(SHELL_CHROME_BOTTOM_VAR, height)
+}
+
+/**
+ * Count a leaving instance out; only the LAST one out clears the shared vars,
+ * so an unmounting instance never collapses a still-visible sibling shell's
+ * reserved inset (WR-001). `Math.max(0, …)` keeps a stray extra release from
+ * driving the count negative and stranding the vars set forever.
+ */
+function releaseChromeInset(): void {
+  activeChromeInstances = Math.max(0, activeChromeInstances - 1)
+  if (activeChromeInstances === 0) {
+    const root = document.documentElement
+    root.style.removeProperty(SHELL_CHROME_TOP_VAR)
+    root.style.removeProperty(SHELL_CHROME_BOTTOM_VAR)
+  }
+}
+
+/**
  * Renders the compliance-chrome banners and publishes the `ShellLayout` inset
  * contract. Mount once, near the root of the participant shell (alongside
- * `ShellLayout`, outside its content region) — see the module header.
+ * `ShellLayout`, outside its content region) — see the module header. Safe to
+ * mount more than once concurrently (e.g. an outer shell + a `preview` shell,
+ * COR-041): the `:root` writes are ref-counted so a partial unmount keeps the
+ * inset reserved for the survivor (WR-001).
  */
 export function ComplianceChrome() {
   const config = useChromeConfig()
@@ -90,19 +146,16 @@ export function ComplianceChrome() {
   // Publish the inset contract on :root so ShellLayout's content region
   // (a sibling subtree, not a descendant of this component) insets
   // correctly. Runs in a layout effect so the reserved space is applied
-  // before the browser paints the content region beneath it, and cleans up
-  // by restoring (removing) the properties on unmount — matching the "0px
-  // fallback IS the contract" note on SHELL_CHROME_TOP_VAR/BOTTOM_VAR.
+  // before the browser paints the content region beneath it. Acquire/release
+  // are ref-counted (see the helpers above): the cleanup removes the vars
+  // only when the LAST instance unmounts, so a partial unmount can't collapse
+  // a still-visible sibling shell's inset (WR-001) — while a lone instance
+  // still clears them on unmount, matching the "0px fallback IS the contract"
+  // note on SHELL_CHROME_TOP_VAR/BOTTOM_VAR.
   useLayoutEffect(() => {
-    const root = document.documentElement
     const height = config.enabled ? BANNER_HEIGHT : NO_CHROME_HEIGHT
-    root.style.setProperty(SHELL_CHROME_TOP_VAR, height)
-    root.style.setProperty(SHELL_CHROME_BOTTOM_VAR, height)
-
-    return () => {
-      root.style.removeProperty(SHELL_CHROME_TOP_VAR)
-      root.style.removeProperty(SHELL_CHROME_BOTTOM_VAR)
-    }
+    acquireChromeInset(height)
+    return releaseChromeInset
   }, [config.enabled])
 
   // Chrome-off is a legal state (AC3): render nothing. The effect above has

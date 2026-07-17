@@ -108,6 +108,13 @@ D7 establishes the two container shells every surface mounts into. Both are **Ph
   `participant-shell/03-channel-nav.md` as Phase-1 container + Phase-3 multi-channel behavior.
 - [ ] **Evaluator dashboard frame (D6)** inherits the `staff-shell` frame with fewer header controls —
   fold in when D6/evaluator decomposes.
+- [ ] **Per-shell-scoped compliance-chrome inset (WR-001)** — `ComplianceChrome` publishes its inset
+  vars (`--pulse-chrome-top`/`-bottom`) on the shared `:root`. A ref-count guards the unmount race
+  (landed, story 01), but a `preview` shell (COR-041) mounted alongside an outer shell still shares one
+  value pair — a differently-configured pair clobbers each other. Scope the vars to a per-shell root
+  node so each shell insets independently, and move `ShellLayout`'s `var(--pulse-chrome-*, 0px)`
+  consumer with them. Land in `participant-shell/06-variants.md` (preview) / the App.tsx participant
+  route-tree split, when the shell is actually wired up.
 
 ---
 
@@ -125,3 +132,4 @@ D7 establishes the two container shells every surface mounts into. Both are **Ph
 | E2 posts / E3 portal | RETROFIT-NOTES | AMEND | Chrome/alert-bar/nav are shell-owned (retrofit) |
 | `COMPONENTS.md` inventory | R-006 → D7 | RECONCILE | "replaced by shell" discharged by the two features |
 | PRT-040 kiosk / multi-channel / D6 frame | D7-008/001 | BACKLOG | Phase-3 notes, not built this pass |
+| `participant-shell` 06 inset (WR-001) | Gate-1 review | BACKLOG | Scope chrome inset vars off `:root` (ref-count landed) |
