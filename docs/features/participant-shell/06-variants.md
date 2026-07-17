@@ -24,6 +24,12 @@ flag it passes to channels (story 04); channels honor it by not rendering the re
       is removed everywhere it would appear (no partial exposure).
 - [ ] Read-only removal is accessible — the affordance is genuinely gone from the a11y tree, not a
       disabled control a screen reader still announces (NFR-001, COR-015).
+- [ ] Given **preview** (COR-041) mounted while an outer participant shell is also live, when either
+      shell unmounts, then the survivor's compliance-chrome inset is **preserved** and each shell's
+      content region insets against **its own** chrome — the two shells do not fight over one shared
+      `:root` inset (Wave-1 Gate-1 finding WR-001). Scope the chrome inset vars
+      (`--pulse-chrome-top`/`-bottom`) to a per-shell root node; keep `ShellLayout`'s
+      `var(--pulse-chrome-*, 0px)` consumer in sync with wherever the vars live.
 
 ## Out of Scope
 The **shared-credential lifecycle** (E1 identity-auth-roles COR-015/NFR-009); the staff-side
@@ -35,10 +41,20 @@ Participant world. `variant ∈ {full, readOnly, kiosk, preview}` is a shell fla
 channel-mount contract (story 04). read-only + preview are Phase 1; kiosk is Phase-3-exercised. See
 implementation.md (story 06). Mockup Tweaks props: `readOnly`, `kiosk`.
 
+**WR-001 (preview double-mount inset).** `ComplianceChrome` (story 01) publishes the inset vars on the
+shared `document.documentElement`, so an outer shell + a `preview` shell share one `:root` pair. A
+ref-count already guards the unmount RACE (an unmount clears the vars only when the last instance
+leaves — landed with story 01). What remains for **this** story: give each shell an INDEPENDENT inset
+by scoping the vars to a shell-root node instead of `:root`, so a differently-configured pair (e.g.
+chrome-on outer + chrome-off preview) can't clobber the single shared value. Move `ShellLayout`'s
+`var(--pulse-chrome-*, 0px)` consumer to read from wherever the vars land. Note that a `position: fixed`
+banner positions against the viewport (or nearest transformed/contained ancestor), so the preview
+pane's containing block must be settled alongside the var scoping.
+
 ## Dependencies
 The channel-mount contract (story 04, which carries `variant`); `staff-shell` preview-as (story 04)
 for the preview target; identity-auth-roles (COR-015 read-only sessions). Ticks STORY-UPDATES §A;
-kiosk is a §D backlog note.
+kiosk **and** the WR-001 inset-scoping item are §D backlog notes.
 
 ## Tests
 - Component (RTL): read-only mounts a channel with no composer/Post in the a11y tree.
