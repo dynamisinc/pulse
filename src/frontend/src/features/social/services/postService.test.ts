@@ -158,6 +158,55 @@ describe('createPost', () => {
     expect(post.exerciseId).toBe('')
     expect(getEmittedTelemetryEvents()).toHaveLength(0)
   })
+
+  // ---------------------------------------------------------------------
+  // XC-004: actor.kind stays 'persona' regardless of origin — the envelope's
+  // `origin` (not the actor) carries the provenance distinction. A future
+  // regression that swaps in `origin` as `actor.kind` for engine/inject
+  // posts would break downstream E10 aggregation by actor kind.
+  // ---------------------------------------------------------------------
+
+  it.each<CreatePostInput['origin']>(['participant', 'controller-as-persona', 'engine', 'inject'])(
+    'always emits actor.kind "persona" for a "%s"-origin post',
+    origin => {
+      createPost(validInput({ origin, injectId: origin === 'inject' ? '042' : undefined }))
+      const events = getEmittedTelemetryEvents()
+      const event = events[0]
+      expect(event).toBeDefined()
+      if (!event) return
+
+      expect(event.actor.kind).toBe('persona')
+      expect(event.actor.personaId).toBe('persona-fairhavenwater')
+      expect(event.actor.actingHumanId).toBe('human-simcell-utility')
+      expect(event.origin).toBe(origin)
+    },
+  )
+
+  // ---------------------------------------------------------------------
+  // COR-018: the individual human behind a shared org/persona account.
+  // ---------------------------------------------------------------------
+
+  it('attributes each post to its own acting human even when the same persona posts via a shift handoff', () => {
+    // Same shared org account (`authorPersonaId`), two different controllers
+    // operating it across a shift handoff - each post must carry ITS OWN
+    // acting-human attribution, never the other shift's.
+    const firstShift = createPost(
+      validInput({ origin: 'controller-as-persona', actingHumanId: 'human-controller-am-shift' }),
+    )
+    const secondShift = createPost(
+      validInput({ origin: 'controller-as-persona', actingHumanId: 'human-controller-pm-shift' }),
+    )
+
+    expect(firstShift.authorPersonaId).toBe(secondShift.authorPersonaId)
+    expect(firstShift.actingHumanId).toBe('human-controller-am-shift')
+    expect(secondShift.actingHumanId).toBe('human-controller-pm-shift')
+    expect(firstShift.actingHumanId).not.toBe(secondShift.actingHumanId)
+
+    const events = getEmittedTelemetryEvents()
+    expect(events).toHaveLength(2)
+    expect(events[0]?.actor.actingHumanId).toBe('human-controller-am-shift')
+    expect(events[1]?.actor.actingHumanId).toBe('human-controller-pm-shift')
+  })
 })
 
 describe('toParticipantView (XC-002)', () => {
@@ -194,6 +243,26 @@ describe('toParticipantView (XC-002)', () => {
     const view = toParticipantView(post)
     expect(JSON.stringify(view)).not.toContain(post.createdWallClock)
   })
+
+  it('strips provenance from REAL seeded fixture posts too, not just freshly-created ones', () => {
+    // listPosts() posts are plain Post literals (never routed through
+    // createPost) - toParticipantView must narrow them exactly the same way,
+    // since these are the posts a participant feed will actually render.
+    const injectPost = listPosts().find(p => p.origin === 'inject')
+    expect(injectPost).toBeDefined()
+    if (!injectPost) return
+
+    const view = toParticipantView(injectPost)
+    expect('origin' in view).toBe(false)
+    expect('injectId' in view).toBe(false)
+    expect('actingHumanId' in view).toBe(false)
+    expect('createdWallClock' in view).toBe(false)
+    // Exact key set, not just "missing the obviously bad ones" - a stray
+    // extra field of any kind would fail this.
+    expect(Object.keys(view).sort()).toEqual(
+      ['authorPersonaId', 'counts', 'id', 'scenarioTime', 'text'].sort(),
+    )
+  })
 })
 
 describe('originConsoleLabel (R-003, staff-only)', () => {
@@ -217,6 +286,24 @@ describe('originConsoleLabel (R-003, staff-only)', () => {
 
   it('maps an "inject" origin to INJ-<injectId>', () => {
     expect(originConsoleLabel(postWithOrigin('inject', '042'))).toBe('INJ-042')
+  })
+
+  it('falls back to INJ-unknown for an "inject" origin post missing its injectId', () => {
+    // Should never happen via createPost's normal contract, but the console
+    // label must degrade safely (never throw/undefined) rather than silently
+    // mis-rendering, if it ever does.
+    expect(originConsoleLabel(postWithOrigin('inject'))).toBe('INJ-unknown')
+  })
+
+  it('maps every REAL seeded fixture post to a non-empty console label, incl. the fired inject', () => {
+    for (const post of listPosts()) {
+      const label = originConsoleLabel(post)
+      expect(label).toBeTruthy()
+    }
+    const injectPost = listPosts().find(p => p.origin === 'inject')
+    expect(injectPost).toBeDefined()
+    if (!injectPost) return
+    expect(originConsoleLabel(injectPost)).toBe('INJ-042')
   })
 })
 
