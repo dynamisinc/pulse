@@ -24,6 +24,10 @@ flag it passes to channels (story 04); channels honor it by not rendering the re
       is removed everywhere it would appear (no partial exposure).
 - [ ] Read-only removal is accessible — the affordance is genuinely gone from the a11y tree, not a
       disabled control a screen reader still announces (NFR-001, COR-015).
+- [ ] Given the shell-state query is **loading or errored** (review CR-W1), when a channel mounts,
+      then `variant` resolves to the **least-affordance** default (`readOnly`, not `full`) — a loading
+      frame or a prod fetch failure never grants interaction the exercise didn't intend. UX/affordance
+      only; read-only integrity is still enforced server-side (a client can forge `full`).
 - [ ] Given **preview** (COR-041) mounted while an outer participant shell is also live, when either
       shell unmounts, then the survivor's compliance-chrome inset is **preserved** and each shell's
       content region insets against **its own** chrome — the two shells do not fight over one shared
@@ -40,6 +44,13 @@ render target); full **TTX** kiosk display beyond the flag (Phase 3, COR-052/PRT
 Participant world. `variant ∈ {full, readOnly, kiosk, preview}` is a shell flag passed via the
 channel-mount contract (story 04). read-only + preview are Phase 1; kiosk is Phase-3-exercised. See
 implementation.md (story 06). Mockup Tweaks props: `readOnly`, `kiosk`.
+
+**Review CR-W1 (Wave-1 Gate-1, deferred to this story).** `useShellState()` currently returns
+`data?.variant ?? 'full'` (`shellState.ts`) — fail-OPEN while the query is loading / on error, inert
+only because no channel gates affordances on `variant` yet. This story is where that gate lands, so
+flip the default to `readOnly` (least-affordance) here and add the loading/error test below. Note the
+**intentional contrast**: `chromeConfig.ts` fails SAFE the other way (`enabled: true` keeps banners
+visible, PRT-010/NFR-008) — the two defaults differ on purpose; do NOT align chromeConfig to match.
 
 **WR-001 (preview double-mount inset).** `ComplianceChrome` (story 01) publishes the inset vars on the
 shared `document.documentElement`, so an outer shell + a `preview` shell share one `:root` pair. A
@@ -60,3 +71,5 @@ kiosk **and** the WR-001 inset-scoping item are §D backlog notes.
 - Component (RTL): read-only mounts a channel with no composer/Post in the a11y tree.
 - Component (RTL): kiosk strips chrome + nav, keeps the alert bar.
 - Unit: `variant` flows through the mount contract to the channel.
+- Unit: `useShellState` resolves `readOnly` (not `full`) while the query is loading and on error —
+  pins the CR-W1 fail-closed default so a later refactor can't silently regress it.
