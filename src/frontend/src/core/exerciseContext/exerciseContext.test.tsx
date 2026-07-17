@@ -118,30 +118,62 @@ describe('ExerciseContextProvider', () => {
     consoleSpy.mockRestore()
   })
 
-  it('never falls back to a default/aggregate scope when resolution yields no scope', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    // Simulates the resolver's own "empty scope" failure mode reaching the
-    // provider as a rejection - the provider has no fallback path of its own.
-    mockResolve.mockRejectedValue(new Error('empty or malformed scope'))
+  // WARN-002 remediation: the previous version of this test ("never falls
+  // back to a default/aggregate scope when resolution yields no scope")
+  // rejected the mock resolution and re-asserted the same fail-closed render
+  // outcome already pinned by the preceding "fails closed" test - it added no
+  // distinct coverage. This repoints it to a genuinely different case: the
+  // provider's cleanup guard (`cancelled`) must suppress a resolution that
+  // settles AFTER the component has already unmounted.
+  it('never sets state after the provider unmounts before resolution settles (cleanup guard)', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let resolveLate: ((scope: ExerciseScope) => void) | undefined
+    mockResolve.mockReturnValue(
+      new Promise<ExerciseScope>(resolve => {
+        resolveLate = resolve
+      }),
+    )
 
-    render(
+    const { unmount } = render(
       <ExerciseContextProvider>
         <Probe />
       </ExerciseContextProvider>,
     )
 
-    await waitFor(() => expect(consoleSpy).toHaveBeenCalled())
-    expect(screen.queryByTestId('probe')).not.toBeInTheDocument()
+    unmount()
+    resolveLate?.(FIXTURE)
+    await Promise.resolve()
+    await Promise.resolve()
 
-    consoleSpy.mockRestore()
+    // No "state update on an unmounted component" warning - the late
+    // resolution must be silently dropped, not surfaced or acted on.
+    expect(consoleErrorSpy).not.toHaveBeenCalled()
+
+    consoleErrorSpy.mockRestore()
   })
 })
 
 describe('module surface', () => {
-  it('exposes only the single-scope provider + hook - no list, picker, or admin export', () => {
-    expect(Object.keys(ExerciseContextModule).sort()).toEqual(
-      ['ExerciseContextProvider', 'useExerciseContext'].sort(),
-    )
+  // PREC-005 remediation: exact `Object.keys` equality would fail for the
+  // wrong reason - it churns on any benign new export (e.g. a future helper
+  // type or utility) with no bearing on isolation. Assert instead the
+  // ABSENCE of forbidden surface names, so this test only fails for the
+  // reason that actually matters: a leaked exercise-list/picker/admin/
+  // selection surface reaching this participant-facing module (COR-004).
+  it('never exports a list/picker/admin/selection/switcher surface (COR-004)', () => {
+    const exportNames = Object.keys(ExerciseContextModule).map(name => name.toLowerCase())
+    const forbiddenSubstrings = ['picker', 'list', 'admin', 'select', 'switch']
+
+    for (const forbidden of forbiddenSubstrings) {
+      expect(exportNames.some(name => name.includes(forbidden))).toBe(false)
+    }
+  })
+
+  it('exposes the provider and hook needed to bind + read the single scope', () => {
+    const exportNames = Object.keys(ExerciseContextModule)
+
+    expect(exportNames).toContain('ExerciseContextProvider')
+    expect(exportNames).toContain('useExerciseContext')
   })
 
   it('returns a single bound scope object, never a collection', async () => {

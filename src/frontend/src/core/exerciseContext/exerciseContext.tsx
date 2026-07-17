@@ -26,6 +26,15 @@
  * with host/auth-resolved scope and a participant route guard; it does not
  * replace it.
  *
+ * PRECEDENT - this session-scope gate is DELIBERATELY hand-rolled
+ * (useState/useEffect), not React Query, even though React Query is the default
+ * server-state pattern elsewhere. React Query's cache / staleTime / background
+ * refetch / retry fight fail-closed semantics (a failed refetch would keep
+ * serving the last scope instead of failing closed). React Query stays the
+ * default for ordinary cacheable data; the isolation gate is the exception.
+ * `status` is not a render-safety signal (see ExerciseScope) - lifecycle gating
+ * is story 04/06.
+ *
  * Deliberately decoupled at v0: this module does not import the
  * scenario-time clock (`core/clock/`) or the telemetry emitter
  * (`core/telemetry/`). `exerciseId` / `timeZone` are exposed on the resolved

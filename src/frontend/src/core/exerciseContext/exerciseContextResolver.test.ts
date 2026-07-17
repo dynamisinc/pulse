@@ -12,9 +12,9 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { resolveExerciseContext } from './exerciseContextResolver'
-import { api } from './services/api'
+import { api } from '../services/api'
 
-vi.mock('./services/api', () => ({
+vi.mock('../services/api', () => ({
   api: { get: vi.fn() },
 }))
 

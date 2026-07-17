@@ -23,7 +23,7 @@
  */
 
 import type { AxiosAdapter } from 'axios'
-import { api } from './services/api'
+import { api } from '../services/api'
 
 /** Exercise lifecycle status, as surfaced on a single bound scope (no list). */
 export type ExerciseStatus = 'scheduled' | 'active' | 'complete' | 'archived'
@@ -45,7 +45,22 @@ function isExerciseStatus(value: unknown): value is ExerciseStatus {
   return typeof value === 'string' && (EXERCISE_STATUSES as readonly string[]).includes(value)
 }
 
-/** The single-exercise scope every participant-facing module resolves against. */
+/**
+ * The single-exercise scope every participant-facing module resolves against.
+ *
+ * PRECEDENT — `exerciseId` here is a DISPLAY / TELEMETRY-STAMPING field, NOT a
+ * query-scoping mechanism. Query isolation is enforced SERVER-SIDE (COR-001,
+ * story 01's central query filter; story 04's host/session resolution). A
+ * participant request must never carry a client-supplied `exerciseId` param —
+ * that is exactly the cross-exercise-leak vector COR-001 forbids. Read
+ * `exerciseId` to stamp a telemetry envelope or label a surface; never to scope
+ * a fetch.
+ *
+ * `status` is lifecycle metadata, NOT a render-safety signal: a resolved scope
+ * does not by itself mean "safe to show live participant content". Gating an
+ * archived/scheduled/complete exercise out of a live render is story 04 (route
+ * guard) + story 06 (archived separation), not this seam.
+ */
 export interface ExerciseScope {
   readonly exerciseId: string
   readonly exerciseName: string
@@ -62,10 +77,10 @@ interface ExerciseContextResponseBody {
 }
 
 /**
- * The one fixed exercise this Wave-0 mock resolves to. When the real
- * `/exercise-context` endpoint lands, delete `mockAdapter` below (and this
- * constant) and let the `api.get` call hit the network - the response shape
- * is exactly what that endpoint should return.
+ * The one fixed exercise this Wave-0 mock resolves to (dev/test only — see
+ * `USE_MOCK_EXERCISE_CONTEXT`). When the real `/exercise-context` endpoint
+ * lands, this constant + `mockAdapter` are deleted and the flip point flips;
+ * the response shape is exactly what that endpoint should return.
  */
 const MOCK_EXERCISE_CONTEXT: ExerciseContextResponseBody = {
   exerciseId: 'ex-mock-0001',
@@ -88,6 +103,16 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
   config,
 })
 
+/**
+ * The SINGLE mock/live flip point. Mock in dev/test; a production build hits the
+ * real `/exercise-context` endpoint (and, until the backend lands, fails closed
+ * — the provider renders nothing rather than serving a stale canned exercise).
+ * PRECEDENT: mock data is switched in exactly ONE env-guarded place, never
+ * per-call, so a forgotten `adapter:` can't silently fail *open* to mock data
+ * in production.
+ */
+const USE_MOCK_EXERCISE_CONTEXT = import.meta.env.DEV
+
 function isValidResponseBody(
   body: ExerciseContextResponseBody | null | undefined,
 ): body is ExerciseContextResponseBody {
@@ -109,9 +134,10 @@ function isValidResponseBody(
  * (COR-001, XC-001).
  */
 export async function resolveExerciseContext(): Promise<ExerciseScope> {
-  const response = await api.get<ExerciseContextResponseBody>('/exercise-context', {
-    adapter: mockAdapter,
-  })
+  const response = await api.get<ExerciseContextResponseBody>(
+    '/exercise-context',
+    USE_MOCK_EXERCISE_CONTEXT ? { adapter: mockAdapter } : undefined,
+  )
 
   if (!isValidResponseBody(response.data)) {
     throw new Error(
