@@ -60,6 +60,34 @@ import { createContext, createElement, useContext, type ReactNode } from 'react'
 export type ShellVariant = 'full' | 'readOnly' | 'kiosk' | 'preview'
 
 /**
+ * Whether a channel mounted under `variant` may render its interactive
+ * affordances (composer, Post, reply, follow, and anything of that kind —
+ * COR-015/COR-064). `true` only for `'full'`; every other variant means the
+ * affordance is genuinely ABSENT from the render, never present-but-disabled
+ * (a screen reader must not still announce it, NFR-001/AC5).
+ *
+ * - `readOnly` — the passive-participant / shared-credential mode; this is
+ *   the whole point of the variant (COR-015).
+ * - `preview` (COR-041) — the staff-side "preview as participant" render
+ *   target is specified as a **read-only stage** (story 06 AC), so it shares
+ *   `readOnly`'s answer here even though it is a distinct `ShellVariant`.
+ * - `kiosk` (PRT-040, Phase 3) — a public/TTX display is not a credentialed
+ *   participant session either; this predicate takes the same
+ *   least-affordance stance as `useShellState`'s CR-W1 default rather than
+ *   leaving it unspecified. Kiosk's chrome/nav stripping is NOT built by this
+ *   story (Phase 3) — only this affordance answer is reserved now, alongside
+ *   the flag itself.
+ *
+ * A channel calls this instead of re-deriving its own `variant === 'full'`
+ * check, so the "which variants get affordances" answer lives in exactly one
+ * place and a later variant addition can't silently ship interactive by
+ * default (mirrors the CR-W1 least-affordance stance in `shellState.ts`).
+ */
+export function affordancesAvailable(variant: ShellVariant): boolean {
+  return variant === 'full'
+}
+
+/**
  * What a mounted channel receives from the shell — the WHOLE contract; a
  * channel needs nothing else from its container.
  */

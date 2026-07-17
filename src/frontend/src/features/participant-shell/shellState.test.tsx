@@ -13,6 +13,12 @@
  * `@/core/exerciseContext` is mocked too - exercise-context resolution itself
  * is a different seam's concern (exercise-isolation/10's own suite); only the
  * exerciseId VALUE matters here, for the query key.
+ *
+ * The pending/error-fallback cases below pin CR-W1 (Wave-1 Gate-1, story 06):
+ * the least-affordance default is `'readOnly'`, never `'full'` - a loading
+ * frame or a fetch failure must never grant interaction the exercise didn't
+ * intend. A later refactor that reintroduces the old `'full'` fallback should
+ * fail these tests.
  */
 import type { ReactNode } from 'react'
 import { renderHook, waitFor } from '@testing-library/react'
@@ -56,16 +62,16 @@ describe('useShellState (boundary-mocked branch)', () => {
     await waitFor(() => expect(result.current.variant).toBe('kiosk'))
   })
 
-  it('falls back to "full" - never an unresolved/undefined variant - while the query is pending', () => {
+  it('falls back to "readOnly" (CR-W1) - never an unresolved/undefined variant, never "full" - while the query is pending', () => {
     mockGet.mockReturnValue(new Promise(() => {}) as ReturnType<typeof api.get>)
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
     const { result } = renderHook(() => useShellState(), { wrapper: makeWrapper(queryClient) })
 
-    expect(result.current.variant).toBe('full')
+    expect(result.current.variant).toBe('readOnly')
   })
 
-  it('falls back to "full" - never the bogus value - once a response with an out-of-enum variant settles', async () => {
+  it('falls back to "readOnly" (CR-W1) - never the bogus value, never "full" - once a response with an out-of-enum variant settles', async () => {
     mockGet.mockResolvedValue(
       { data: { variant: 'god-mode' } } as unknown as Awaited<ReturnType<typeof api.get>>,
     )
@@ -74,14 +80,14 @@ describe('useShellState (boundary-mocked branch)', () => {
     const { result } = renderHook(() => useShellState(), { wrapper: makeWrapper(queryClient) })
 
     // Confirm the query actually SETTLES to an error (the runtime guard
-    // rejecting the malformed body), not merely that "full" shows because
+    // rejecting the malformed body), not merely that "readOnly" shows because
     // the query is still loading - a removed guard would instead settle to
     // a SUCCESS state carrying the bogus 'god-mode' value.
     await waitFor(() => {
       const cachedState = queryClient.getQueryCache().findAll()[0]?.state
       expect(cachedState?.status).toBe('error')
     })
-    expect(result.current.variant).toBe('full')
+    expect(result.current.variant).toBe('readOnly')
   })
 
   it('never sends the exerciseId as a request/query param to the server (COR-001, XC-002)', async () => {
