@@ -1,6 +1,6 @@
 # Story: Role set
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** COR-010  ·  **Design decisions:** none  ·  **Issue:** #58
 
 ## Context
@@ -8,6 +8,15 @@ The role set that mirrors the exercise ecosystem and gates every surface: **Part
 (participant flavor with monitoring defaults + Press Room authoring), **Controller**, **Evaluator**
 (read-everything, write-nothing in the sim), **Planner/ExerciseAdmin**, **OrgAdmin** — aligned with
 Cadence's ExerciseRole vocabulary where sensible (COR-010).
+
+**Seed delivered (Social E2 prerequisite):** `core/auth/roles.ts` landed as a minimal mock seed so the
+Social (E2) build (`posts/02`, `posts/03`) has an `ExerciseRole` vocabulary and write-gating to build
+against — it is **not** a build of this story's full ACs. Delivered: the `ExerciseRole` type (the six
+roles), `PARTICIPANT`/`STAFF` role-group guards, `canWriteInSim()` (COR-013 write-nothing groundwork),
+and `isExerciseRole()` + a `useRole()` hook. Tests: `core/auth/roles.test.ts`. Remaining before this
+story can flip to Complete: actual route/API surface gating per role (participant cannot reach a staff
+surface, XC-002), the PIO Press Room authoring activation (waits on E5), and the org-admin surface
+itself — none of that exists yet.
 
 ## Acceptance Criteria
 - [ ] The six roles exist and gate access: participant/PIO surfaces vs staff (controller/evaluator/

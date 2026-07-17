@@ -20,8 +20,8 @@ believable as these notes (COR-020).
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Persona templates (create/edit/clone/archive, voice notes) | COR-020 | Not Started | #53 |
-| 02 | Casts & one-action seeding with derived state | COR-021 | Not Started | #54 |
+| 01 | Persona templates (create/edit/clone/archive, voice notes) | COR-020 | In Progress | #53 |
+| 02 | Casts & one-action seeding with derived state | COR-021 | In Progress | #54 |
 | 03 | Mid-exercise persona creation (≤60s) | COR-022 | Not Started | #55 |
 | 04 | Pre-exercise backdated post history | COR-023 | Not Started | #56 |
 | 05 | Bundled avatar library + upload | COR-024 | Not Started | #57 |

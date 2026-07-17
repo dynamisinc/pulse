@@ -1,6 +1,6 @@
 # Story: Persona templates (create / edit / clone / archive)
 
-**Feature:** Persona management & cast libraries  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Persona management & cast libraries  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** COR-020 (SOC-054)  ·  **Design decisions:** none  ·  **Issue:** #53
 
 ## Context
@@ -8,6 +8,15 @@ Planners create, edit, clone, and archive **persona templates** with: name, hand
 persona type, verification flag, audience magnitude band (SOC-054), voice/personality notes (drives E8
 and controller ghost-writing), and optional backstory. Voice-profile quality is Phase-1-critical — the
 Phase-2 engine is only as believable as these notes (COR-020).
+
+**Seed delivered (Social E2 prerequisite):** `features/personas/{types.ts,personaTemplates.ts}` landed
+as a minimal mock seed so the Social (E2) build (`posts/02`, `posts/03`) has believable authors to
+render/attribute — it is **not** a build of this story's full ACs. Delivered: the `PersonaTemplate`
+model, type-driven verification defaults, and the Fairhaven organization's template library, including
+the SOC-052 verified/lookalike-impersonator pair used by the PostCard tests. Tests:
+`features/personas/types.test.ts`. Remaining before this story can flip to Complete: the
+`PersonaTemplateEditor` staff CRUD UI (create/edit/clone/archive), and the .NET backend — neither
+exists yet; there is no way for a planner to actually author a template today.
 
 ## Acceptance Criteria
 - [ ] Planners can create/edit/clone/archive a `PersonaTemplate` in the org library with all fields:
