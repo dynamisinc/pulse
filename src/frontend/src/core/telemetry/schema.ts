@@ -236,6 +236,9 @@ export const telemetryEventV0Schema = z.strictObject({
       message: "injectId is required when origin is 'inject'",
     })
   }
+  // View reach is participant/session-scoped by design (COR-015): persona/engine
+  // actors don't emit views, so requiring participantId|sessionId regardless of
+  // actor.kind is deliberate.
   if (
     (event.eventType === 'view' || event.eventType === 'article_view') &&
     !actor.participantId &&

@@ -95,8 +95,10 @@ export function generateEventId(): string {
  */
 export function buildTelemetryEvent(partial: BuildTelemetryEventInput): TelemetryEventV0 {
   const candidate = {
-    schemaVersion: 'v0' as const,
     ...partial,
+    // Stamped AFTER the spread so an explicit `schemaVersion: undefined` in the
+    // input can't overwrite the locked literal (as with eventId / emittedAt).
+    schemaVersion: 'v0' as const,
     eventId: generateEventId(),
     emittedAt: new Date().toISOString(),
   }

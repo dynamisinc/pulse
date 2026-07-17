@@ -13,8 +13,10 @@ mock sink — so every later feature that emits an event has a stable contract t
 backend required yet.
 
 ## The v0 envelope (locked — encode verbatim)
-This is the **stable** schema. New event kinds/fields extend it via the open `eventType` string and the
-`payload` object; the envelope itself does not change without a version bump.
+This is the **stable** schema. Event-type-specific data extends it via the `payload` object and new
+`eventType` values; **cross-cutting** metadata uses the named (optional, reserved) envelope fields below
+(`correlationId`/`causationId`/`sequence`/`source`) — never `payload`. The envelope's *shape* does not
+change without a version bump.
 
 ```ts
 interface TelemetryEventV0 {
@@ -35,6 +37,10 @@ interface TelemetryEventV0 {
                                                                             // participant-visible
                                                                             // (posts/03-post-provenance.md)
   injectId?: string                   // provenance — set when origin === 'inject'
+  correlationId?: string              // reserved: groups one logical operation (engine loop, INT-031 saga)
+  causationId?: string                // reserved: eventId of the direct parent (amplification/rumor lineage)
+  sequence?: number                   // reserved: per-source ordering tiebreaker (server ingest = authority)
+  source?: string                     // reserved: producing emitter/feature (forensics, INT-031)
   wallClockTime: string                // ISO-8601 UTC, real time — telemetry-only, never in fiction
   scenarioTime: string                 // ISO-8601, scenario time (COR-053)
   timeZone: string                     // IANA zone (XC-008)
@@ -56,8 +62,9 @@ envelope, no migration.
 
 ## Acceptance Criteria
 - [x] `src/frontend/src/core/telemetry/` exports the v0 TypeScript types and a `zod` schema for
-      `TelemetryEventV0` matching the envelope above exactly, including the literal
-      `schemaVersion: 'v0'`.
+      `TelemetryEventV0` matching the envelope above (including the literal `schemaVersion: 'v0'`, the
+      required non-empty `exerciseId`, and the optional reserved fields). The TS type is derived from
+      the `zod` schema via `z.infer` so the validator and the type cannot drift.
 - [x] Given a partial event, when `buildTelemetryEvent(partial)` is called, then it stamps `eventId`
       (generated) and `emittedAt` (now), validates the result against the v0 `zod` schema, and throws
       (or returns a typed error) on an invalid/incomplete event rather than emitting a malformed one.
@@ -76,6 +83,17 @@ envelope, no migration.
       `press_release`, `dm`, `login`, `logout`, `follow`, `view`, `search`, `steering_action`) is
       documented in the module as the Phase-1 vocabulary, with the schema left open (plain `string`)
       so engine event types extend it later without a migration.
+- [x] The envelope is a `strictObject` (and so are nested `actor`/`target`): an unknown key fails
+      validation rather than being silently stripped, so a typo'd attribution field can't slip through.
+- [x] Conditional attribution is enforced by the schema (`superRefine`): a `participant`/`persona`
+      actor requires its id; `origin: 'controller-as-persona'` requires `actingHumanId` (COR-018);
+      `inject` requires `injectId`; a `view`/`article_view` requires `participantId` or `sessionId`
+      (COR-015 reach counting).
+- [x] `buildAndEmit(partial)` is the caller-safe path — it never throws into the caller's action (a
+      build/validation failure is swallowed and counted); `getTelemetryHealth()` exposes
+      emitted/dropped counts so a dead pipeline is observable (not silently empty).
+- [x] `generateEventId()` degrades `crypto.randomUUID()` → `getRandomValues` UUID → non-crypto id, so
+      id generation never throws on a non-secure-context (plain-HTTP) deploy (COR-008/009).
 
 ## Out of Scope
 Any real backend `/telemetry` endpoint (mocked only — a swallowed-failure POST); wiring `scenarioTime`/

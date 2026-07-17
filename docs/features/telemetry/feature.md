@@ -47,8 +47,9 @@ surface, no COBRA, no participant skin. No backend exists yet, so v0 writes to a
 in-memory buffer (test-inspectable) plus a dev-console log plus a best-effort mocked POST via the
 shared axios client — failures swallowed, never blocking the caller's action. The schema is
 **stable by design**: `schemaVersion: 'v0'` is a literal so a future breaking change is detectable, and
-new event kinds/fields extend via the open `eventType` string and the `payload` extension point,
-needing no envelope migration. This is one of Pulse's three Wave-0 foundation seams (with
+new event kinds extend via the open `eventType` string, event-type-specific data via the `payload`
+extension point, and cross-cutting metadata via named reserved envelope fields
+(`correlationId`/`causationId`/`sequence`/`source`) — all additive, needing no envelope migration. This is one of Pulse's three Wave-0 foundation seams (with
 `exercise-isolation/10` and `exercise-clock/04`) and is deliberately **code-decoupled** from the other
 two at v0: the emitter does not import scenario-time or exercise-context — callers assemble the event
 and pass `scenarioTime` + `exerciseId` in themselves. Wiring (assembling a telemetry event from
