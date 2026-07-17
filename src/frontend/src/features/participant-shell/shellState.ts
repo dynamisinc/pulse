@@ -32,6 +32,18 @@
  * scoping parameter (the mock ignores it entirely; a real endpoint scopes by
  * the authenticated session, server-side).
  *
+ * **CR-W1 (Wave-1 Gate-1, fixed here — story 06).** `variant` resolves to
+ * `'readOnly'` — never `'full'` — whenever the query has no resolved data
+ * yet: loading, errored, or absent. This is the least-affordance default
+ * (COR-015/COR-064): a loading frame or a prod fetch failure must never grant
+ * interactive affordances (composer/Post/reply/follow) the exercise didn't
+ * intend. It's UX/affordance only — read-only integrity is still enforced
+ * server-side; a client can forge `full` regardless of what this hook
+ * returns. Deliberately do NOT mirror this in `chromeConfig.ts` — that seam's
+ * `enabled: true` fallback fails SAFE the opposite way on purpose (keeps
+ * classification banners visible, PRT-010/NFR-008); the two seams' fallback
+ * directions differ intentionally and should not be reconciled.
+ *
  * World: participant. No COBRA, no UI — a pure data hook.
  */
 
@@ -71,8 +83,10 @@ function isValidResponseBody(
 
 /**
  * The one fixed mock shell state this Wave-1 mock resolves to (dev/test
- * only — see `USE_MOCK_SHELL_STATE`). `variant` defaults to `'full'` per the
- * story's AC; swap this constant + `mockAdapter` for a live `/shell-state`
+ * only — see `USE_MOCK_SHELL_STATE`). `variant: 'full'` here is the resolved
+ * MOCK DATA (ordinary participant conduct once the query settles) — distinct
+ * from the `'readOnly'` LOADING/ERROR fallback `useShellState()` returns
+ * below (CR-W1); swap this constant + `mockAdapter` for a live `/shell-state`
  * call when the backend lands.
  */
 const MOCK_SHELL_STATE: ShellStateResponseBody = {
@@ -97,8 +111,9 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
  * The SINGLE mock/live flip point (WAVE0-REVIEW precedent 15) — mirrors
  * `exerciseContextResolver.ts`'s `USE_MOCK_EXERCISE_CONTEXT`. Mock in
  * dev/test; a production build without a backend fails closed (the query's
- * `data` stays undefined and `useShellState` falls back to `'full'`, it
- * never silently serves mock content).
+ * `data` stays undefined and `useShellState` falls back to `'readOnly'`
+ * (CR-W1) — it never silently serves mock content, and a fetch failure never
+ * grants `full` interaction).
  */
 const USE_MOCK_SHELL_STATE = import.meta.env.DEV
 
@@ -118,13 +133,25 @@ async function fetchShellState(): Promise<ShellStateResult> {
 }
 
 /**
+ * The least-affordance fallback (CR-W1, Wave-1 Gate-1 — fixed in story 06).
+ * `useShellState()` resolves to THIS, never `'full'`, whenever the query has
+ * no resolved data yet (loading, errored, or absent), so a loading frame or a
+ * prod fetch failure never grants interaction the exercise didn't intend.
+ * See the module header for the full rationale and the deliberate contrast
+ * with `chromeConfig.ts`'s opposite-direction (fail-SAFE, `enabled: true`)
+ * fallback — do NOT align that seam to this one.
+ */
+const LEAST_AFFORDANCE_VARIANT: ShellVariant = 'readOnly'
+
+/**
  * Resolves the current exercise's shell-mount state (today: `variant` only).
  *
  * Exercise-scoped via the React Query key (see module header). `variant`
- * defaults to `'full'` whenever the query has no resolved data yet — while
- * loading, on error, or absent — so `ShellLayout` always has a usable
- * variant to hand a channel; it never renders a channel against an
- * "unknown" variant.
+ * falls back to {@link LEAST_AFFORDANCE_VARIANT} (`'readOnly'`, CR-W1)
+ * whenever the query has no resolved data yet — while loading, on error, or
+ * absent — so `ShellLayout` always has a usable variant to hand a channel;
+ * it never renders a channel against an "unknown" variant, and it never
+ * defaults to `'full'` before the exercise's real variant is confirmed.
  */
 export function useShellState(): ShellStateResult {
   const { exerciseId } = useExerciseContext()
@@ -134,5 +161,5 @@ export function useShellState(): ShellStateResult {
     queryFn: fetchShellState,
   })
 
-  return { variant: data?.variant ?? 'full' }
+  return { variant: data?.variant ?? LEAST_AFFORDANCE_VARIANT }
 }
