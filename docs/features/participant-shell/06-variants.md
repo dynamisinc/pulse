@@ -1,7 +1,8 @@
 # Story: Variants — read-only, kiosk (Phase 3), preview
 
-**Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-064 (COR-015, PRT-040, COR-041)  ·  **Design decisions:** D7-008  ·  **Issue:** #190
+**Delivered:** `mountContract.ts` (`affordancesAvailable`) + `shellState.ts` (CR-W1 default flip to `readOnly`)
 
 ## Context
 One shell renders in four modes. **full** is the default. **read-only** (COR-015) is the passive-
@@ -11,29 +12,38 @@ inside the staff frame (COR-041, driven by `staff-shell` story 04). The shell ex
 flag it passes to channels (story 04); channels honor it by not rendering the removed affordances.
 
 ## Acceptance Criteria
-- [ ] Given **read-only** (COR-015), when a channel mounts, then interactive affordances (composer,
+- [x] Given **read-only** (COR-015), when a channel mounts, then interactive affordances (composer,
       Post, reply, follow) are **absent** (not present-but-disabled); the shell passes `variant:
-      readOnly` and channels honor it.
+      readOnly` and channels honor it. — `mountContract.test.tsx`
 - [ ] Given **kiosk** (PRT-040), when the shell renders, then compliance chrome **and** channel nav /
       tab bar are removed but the **alert bar persists** (PRT-010) — *(Phase 3, with TTX COR-052; the
-      flag + behavior are specified now, exercised when TTX lands)*.
-- [ ] Given **preview** (COR-041), when the staff frame requests it, then the participant shell renders
+      flag + behavior are specified now, exercised when TTX lands)*. **Deferred to Phase 3** — the
+      `kiosk` variant flag exists and is threaded through the contract (`affordancesAvailable('kiosk')
+      === false`), but chrome/nav-stripping rendering is not built this pass.
+- [x] Given **preview** (COR-041), when the staff frame requests it, then the participant shell renders
       in a read-only stage (driven by `staff-shell` preview-as, story 04) with the scenario-moment the
-      staff picker selected.
-- [ ] Variants are **exercise-scoped** shell flags (server-driven); an affordance removed in read-only
-      is removed everywhere it would appear (no partial exposure).
-- [ ] Read-only removal is accessible — the affordance is genuinely gone from the a11y tree, not a
-      disabled control a screen reader still announces (NFR-001, COR-015).
-- [ ] Given the shell-state query is **loading or errored** (review CR-W1), when a channel mounts,
+      staff picker selected. — `mountContract.test.tsx` (participant-side render target: `preview`
+      resolves the same least-affordance stage as `readOnly`; the staff-side trigger is `staff-shell`
+      story 04, out of scope here and not yet built).
+- [x] Variants are **exercise-scoped** shell flags (server-driven); an affordance removed in read-only
+      is removed everywhere it would appear (no partial exposure). — `shellState.test.tsx`,
+      `mountContract.test.tsx`
+- [x] Read-only removal is accessible — the affordance is genuinely gone from the a11y tree, not a
+      disabled control a screen reader still announces (NFR-001, COR-015). — `mountContract.test.tsx`
+- [x] Given the shell-state query is **loading or errored** (review CR-W1), when a channel mounts,
       then `variant` resolves to the **least-affordance** default (`readOnly`, not `full`) — a loading
       frame or a prod fetch failure never grants interaction the exercise didn't intend. UX/affordance
-      only; read-only integrity is still enforced server-side (a client can forge `full`).
+      only; read-only integrity is still enforced server-side (a client can forge `full`). —
+      `shellState.test.tsx` (CR-W1 fixed this pass)
 - [ ] Given **preview** (COR-041) mounted while an outer participant shell is also live, when either
       shell unmounts, then the survivor's compliance-chrome inset is **preserved** and each shell's
       content region insets against **its own** chrome — the two shells do not fight over one shared
       `:root` inset (Wave-1 Gate-1 finding WR-001). Scope the chrome inset vars
       (`--pulse-chrome-top`/`-bottom`) to a per-shell root node; keep `ShellLayout`'s
-      `var(--pulse-chrome-*, 0px)` consumer in sync with wherever the vars live.
+      `var(--pulse-chrome-*, 0px)` consumer in sync with wherever the vars live. **Deferred** — D7
+      STORY-UPDATES §D backlog. The unmount-**race** is fixed (a ref-count on `ComplianceChrome`'s
+      shared `:root` inset writes clears the vars only when the last instance leaves, landed with story
+      01); **independent per-shell** inset scoping (this AC's actual ask) is not yet built.
 
 ## Out of Scope
 The **shared-credential lifecycle** (E1 identity-auth-roles COR-015/NFR-009); the staff-side
