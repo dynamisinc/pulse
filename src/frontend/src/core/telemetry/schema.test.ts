@@ -177,4 +177,185 @@ describe('telemetryEventV0Schema', () => {
     // Guards against someone silently trimming the documented vocabulary.
     expect(KNOWN_TELEMETRY_EVENT_TYPES).toHaveLength(14)
   })
+
+  // ---------------------------------------------------------------------
+  // Conditional attribution (superRefine) - XC-004 / COR-018 / COR-015.
+  // A plain object schema can't express "required when a sibling field has
+  // a particular value"; these rules close that silent-attribution-drop
+  // hole via the envelope's superRefine.
+  // ---------------------------------------------------------------------
+
+  describe('conditional attribution (superRefine)', () => {
+    it('rejects actor.kind "participant" without participantId', () => {
+      const result = telemetryEventV0Schema.safeParse(
+        validEvent({ actor: { kind: 'participant' } }),
+      )
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(
+          result.error.issues.some(issue => issue.path.join('.') === 'actor.participantId'),
+        ).toBe(true)
+      }
+    })
+
+    it('rejects actor.kind "persona" without personaId', () => {
+      const result = telemetryEventV0Schema.safeParse(
+        validEvent({ actor: { kind: 'persona' } }),
+      )
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(
+          result.error.issues.some(issue => issue.path.join('.') === 'actor.personaId'),
+        ).toBe(true)
+      }
+    })
+
+    it('rejects origin "controller-as-persona" without actor.actingHumanId (COR-018)', () => {
+      const result = telemetryEventV0Schema.safeParse(
+        validEvent({
+          actor: { kind: 'persona', personaId: 'persona-1' },
+          origin: 'controller-as-persona',
+        }),
+      )
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(
+          result.error.issues.some(issue => issue.path.join('.') === 'actor.actingHumanId'),
+        ).toBe(true)
+      }
+    })
+
+    it('accepts origin "controller-as-persona" when actor.actingHumanId is present (COR-018)', () => {
+      const result = telemetryEventV0Schema.safeParse(
+        validEvent({
+          actor: { kind: 'persona', personaId: 'persona-1', actingHumanId: 'human-1' },
+          origin: 'controller-as-persona',
+        }),
+      )
+      expect(result.success).toBe(true)
+    })
+
+    it('rejects origin "inject" without injectId', () => {
+      const result = telemetryEventV0Schema.safeParse(validEvent({ origin: 'inject' }))
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error.issues.some(issue => issue.path.join('.') === 'injectId')).toBe(true)
+      }
+    })
+
+    it('accepts origin "inject" when injectId is present', () => {
+      const result = telemetryEventV0Schema.safeParse(
+        validEvent({ origin: 'inject', injectId: 'inject-1' }),
+      )
+      expect(result.success).toBe(true)
+    })
+
+    it.each(['view', 'article_view'])(
+      'rejects a "%s" event whose actor has neither participantId nor sessionId (COR-015)',
+      eventType => {
+        const result = telemetryEventV0Schema.safeParse(
+          validEvent({ eventType, actor: { kind: 'system' } }),
+        )
+        expect(result.success).toBe(false)
+      },
+    )
+
+    it('accepts a "view" event whose actor has only sessionId (anonymous reach counting, COR-015)', () => {
+      const result = telemetryEventV0Schema.safeParse(
+        validEvent({
+          eventType: 'view',
+          actor: { kind: 'system', sessionId: 'session-1' },
+        }),
+      )
+      expect(result.success).toBe(true)
+    })
+
+    it.each(['system', 'engine'] as const)(
+      'accepts a "%s" actor with no participant/session ids for a non-view event type',
+      kind => {
+        const result = telemetryEventV0Schema.safeParse(
+          validEvent({ eventType: 'post', actor: { kind } }),
+        )
+        expect(result.success).toBe(true)
+      },
+    )
+  })
+
+  // ---------------------------------------------------------------------
+  // Nested strict (silent-attribution-drop hole): unknown keys inside
+  // nested blocks must reject too, mirroring the top-level unknown-key test.
+  // ---------------------------------------------------------------------
+
+  describe('nested strict objects', () => {
+    it('rejects an unknown key inside actor', () => {
+      const result = telemetryEventV0Schema.safeParse(
+        validEvent({
+          actor: { kind: 'participant', participantId: 'participant-1', extraField: 'nope' },
+        }),
+      )
+      expect(result.success).toBe(false)
+    })
+
+    it('rejects an unknown key inside target', () => {
+      const result = telemetryEventV0Schema.safeParse(
+        validEvent({
+          target: { entityType: 'post', entityId: 'post-1', extraField: 'nope' },
+        }),
+      )
+      expect(result.success).toBe(false)
+    })
+  })
+
+  // ---------------------------------------------------------------------
+  // Reserved envelope fields: correlationId / causationId / sequence / source.
+  // ---------------------------------------------------------------------
+
+  describe('reserved envelope fields', () => {
+    it.each(['correlationId', 'causationId', 'source'])(
+      'accepts a non-empty %s',
+      field => {
+        const result = telemetryEventV0Schema.safeParse(validEvent({ [field]: 'reserved-value-1' }))
+        expect(result.success).toBe(true)
+      },
+    )
+
+    it.each(['correlationId', 'causationId', 'source'])(
+      'rejects an empty-string %s',
+      field => {
+        const result = telemetryEventV0Schema.safeParse(validEvent({ [field]: '' }))
+        expect(result.success).toBe(false)
+      },
+    )
+
+    it('accepts a non-negative integer sequence, including zero', () => {
+      expect(telemetryEventV0Schema.safeParse(validEvent({ sequence: 0 })).success).toBe(true)
+      expect(telemetryEventV0Schema.safeParse(validEvent({ sequence: 42 })).success).toBe(true)
+    })
+
+    it('rejects a negative sequence', () => {
+      const result = telemetryEventV0Schema.safeParse(validEvent({ sequence: -1 }))
+      expect(result.success).toBe(false)
+    })
+
+    it('rejects a non-integer sequence', () => {
+      const result = telemetryEventV0Schema.safeParse(validEvent({ sequence: 1.5 }))
+      expect(result.success).toBe(false)
+    })
+
+    it('validates a fully-populated event with every reserved envelope field set', () => {
+      const result = telemetryEventV0Schema.safeParse(
+        validEvent({
+          correlationId: 'corr-1',
+          causationId: 'evt-parent-1',
+          sequence: 3,
+          source: 'social-compose',
+        }),
+      )
+      expect(result.success).toBe(true)
+    })
+  })
 })

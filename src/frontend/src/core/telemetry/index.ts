@@ -8,12 +8,13 @@
  * participant-facing read path. See `docs/features/telemetry/` for the
  * feature/story docs this implements.
  *
- * Typical usage (from a future caller, e.g. a compose action):
+ * Typical usage (from a future caller, e.g. a compose action) — use the
+ * caller-safe `buildAndEmit`, which never throws into the caller's action:
  *
  * ```ts
- * import { buildTelemetryEvent, emitTelemetryEvent } from '@/core/telemetry'
+ * import { buildAndEmit } from '@/core/telemetry'
  *
- * const event = buildTelemetryEvent({
+ * buildAndEmit({
  *   exerciseId,               // from useExerciseContext() — not this module's concern
  *   eventType: 'post',
  *   channel: 'social',
@@ -23,8 +24,12 @@
  *   timeZone,                  // from useExerciseContext() — not this module's concern
  *   target: { entityType: 'post', entityId: postId },
  * })
- * emitTelemetryEvent(event)
  * ```
+ *
+ * `buildTelemetryEvent` + `emitTelemetryEvent` remain exported for callers that
+ * want the throwing build (e.g. tests). Do NOT use the unguarded
+ * `emitTelemetryEvent(buildTelemetryEvent(...))` form in feature code — a build
+ * error would surface into the caller's action; use `buildAndEmit` instead.
  */
 
 export {
@@ -46,11 +51,19 @@ export type {
   KnownTelemetryEventType,
 } from './schema'
 
-export { buildTelemetryEvent, TelemetryValidationError } from './emitter'
+export {
+  buildTelemetryEvent,
+  buildAndEmit,
+  generateEventId,
+  TelemetryValidationError,
+} from './emitter'
 export type { BuildTelemetryEventInput, TelemetryValidationIssue } from './emitter'
 
 export {
   emitTelemetryEvent,
   getEmittedTelemetryEvents,
   resetTelemetryBuffer,
+  getTelemetryHealth,
+  noteTelemetryDrop,
 } from './mockSink'
+export type { TelemetryHealth } from './mockSink'

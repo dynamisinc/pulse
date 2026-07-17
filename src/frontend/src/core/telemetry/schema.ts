@@ -82,7 +82,7 @@ export type TelemetryOrigin = z.infer<typeof telemetryOriginSchema>
  * every actor kind populates every field (e.g. `system`/`engine` actors
  * have no `participantId`).
  */
-export const telemetryActorSchema = z.object({
+export const telemetryActorSchema = z.strictObject({
   kind: telemetryActorKindSchema,
   participantId: z.string().min(1).optional(),
   personaId: z.string().min(1).optional(),
@@ -93,7 +93,7 @@ export const telemetryActorSchema = z.object({
 export type TelemetryActor = z.infer<typeof telemetryActorSchema>
 
 /** Optional pointer to the entity an event acted on (a post, an article, ...). */
-export const telemetryTargetSchema = z.object({
+export const telemetryTargetSchema = z.strictObject({
   entityType: z.string().min(1).optional(),
   entityId: z.string().min(1).optional(),
 })
@@ -128,6 +128,10 @@ const isoDateTimeString = z.iso.datetime({ offset: true })
  *   actor: { kind, participantId?, personaId?, actingHumanId?, sessionId?, role? }
  *   origin?: 'participant' | 'controller-as-persona' | 'engine' | 'inject'
  *   injectId?: string
+ *   correlationId?: string   // reserved: groups one logical operation
+ *   causationId?: string     // reserved: eventId of the direct parent event
+ *   sequence?: number        // reserved: per-source ordering tiebreaker
+ *   source?: string          // reserved: producing emitter/feature
  *   wallClockTime: string
  *   scenarioTime: string
  *   timeZone: string
@@ -140,9 +144,17 @@ const isoDateTimeString = z.iso.datetime({ offset: true })
 export const telemetryEventV0Schema = z.strictObject({
   /** Literal — a future breaking change is a new literal, never a mutation of this one. */
   schemaVersion: z.literal('v0'),
-  /** uuid; client-generated — see `buildTelemetryEvent`. */
+  /**
+   * uuid; client-generated (see `buildTelemetryEvent`). Also the idempotency /
+   * dedup key: a retrying real backend (NFR-003) dedupes on this, so it must be
+   * unique per logical event.
+   */
   eventId: z.string().min(1),
-  /** REQUIRED, non-empty — isolation scope (COR-001/XC-001). Never omit. */
+  /**
+   * REQUIRED, non-empty — the isolation scope (COR-001/XC-001) and primary
+   * analytics key. This is the exercise RUN/instance id, never a reusable
+   * template id (persona templates are shared across runs, XC-005). Never omit.
+   */
   exerciseId: z.string().min(1, 'exerciseId is required'),
   /**
    * Open string — see `KNOWN_TELEMETRY_EVENT_TYPES` below for the
@@ -157,6 +169,33 @@ export const telemetryEventV0Schema = z.strictObject({
   origin: telemetryOriginSchema.optional(),
   /** Set when `origin === 'inject'`. Provenance — never participant-visible. */
   injectId: z.string().min(1).optional(),
+  /**
+   * Correlation id — groups every event of one logical operation (an engine
+   * observe→…→measure decision, an INT-031 saga, a multi-step user action).
+   * Cross-cutting (NOT event-type-specific), so it lives on the envelope, never
+   * in `payload`. Optional/reserved in v0 so E8/E9/E10 populate it with no
+   * envelope migration.
+   */
+  correlationId: z.string().min(1).optional(),
+  /**
+   * Causation id — the `eventId` of the DIRECT parent event. Reconstructs
+   * amplification chains/trees (SOC-022: post←repost←quote edges) and rumor
+   * lineage (engine-telemetry-tuning `mutationOf`). Optional/reserved in v0.
+   */
+  causationId: z.string().min(1).optional(),
+  /**
+   * Per-source monotonic sequence — a client tiebreaker for exact ordering
+   * (EVL-003) when wall-clock timestamps tie/skew across clients and when
+   * scenarioTime is non-monotonic (COR-051 jumps). Server ingest order is the
+   * authority; this is best-effort. Optional/reserved in v0.
+   */
+  sequence: z.number().int().nonnegative().optional(),
+  /**
+   * Producer id — which emitter/feature (later, + code version) wrote the
+   * event; for data forensics, scoping a backfill, and INT-031 consumers.
+   * Optional/reserved in v0.
+   */
+  source: z.string().min(1).optional(),
   /** ISO-8601 UTC — real (wall-clock) time. Telemetry-only; never shown in-fiction. */
   wallClockTime: isoDateTimeString,
   /** ISO-8601 scenario time (COR-053) — what participants would see, if this were ever shown. */
@@ -168,6 +207,45 @@ export const telemetryEventV0Schema = z.strictObject({
   payload: z.record(z.string(), z.unknown()).optional(),
   /** ISO-8601 UTC — when the emitter stamped/sent the event (see `buildTelemetryEvent`). */
   emittedAt: isoDateTimeString,
+}).superRefine((event, ctx) => {
+  // Attribution is enforced by the schema, not left to convention (XC-004 /
+  // COR-018 / COR-015). Tighten now, while there are zero live emitters to
+  // migrate. Conditional requiredness a plain object can't express.
+  const { actor } = event
+  if (actor.kind === 'participant' && !actor.participantId) {
+    ctx.addIssue({
+      code: 'custom', path: ['actor', 'participantId'],
+      message: "actor.participantId is required when actor.kind is 'participant'",
+    })
+  }
+  if (actor.kind === 'persona' && !actor.personaId) {
+    ctx.addIssue({
+      code: 'custom', path: ['actor', 'personaId'],
+      message: "actor.personaId is required when actor.kind is 'persona'",
+    })
+  }
+  if (event.origin === 'controller-as-persona' && !actor.actingHumanId) {
+    ctx.addIssue({
+      code: 'custom', path: ['actor', 'actingHumanId'],
+      message: "actor.actingHumanId is required when origin is 'controller-as-persona' (COR-018)",
+    })
+  }
+  if (event.origin === 'inject' && !event.injectId) {
+    ctx.addIssue({
+      code: 'custom', path: ['injectId'],
+      message: "injectId is required when origin is 'inject'",
+    })
+  }
+  if (
+    (event.eventType === 'view' || event.eventType === 'article_view') &&
+    !actor.participantId &&
+    !actor.sessionId
+  ) {
+    ctx.addIssue({
+      code: 'custom', path: ['actor'],
+      message: 'a view event requires actor.participantId or actor.sessionId for reach counting (COR-015)',
+    })
+  }
 })
 
 /**

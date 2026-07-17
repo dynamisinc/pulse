@@ -1,6 +1,20 @@
-import { describe, expect, it } from 'vitest'
-import { buildTelemetryEvent, TelemetryValidationError, type BuildTelemetryEventInput } from './emitter'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  buildAndEmit,
+  buildTelemetryEvent,
+  generateEventId,
+  TelemetryValidationError,
+  type BuildTelemetryEventInput,
+} from './emitter'
 import { telemetryEventV0Schema } from './schema'
+import { getEmittedTelemetryEvents, getTelemetryHealth, resetTelemetryBuffer } from './mockSink'
+
+// `buildAndEmit` routes through the mock sink, which best-effort POSTs via the
+// shared axios client - mock it so these tests never touch the network (mirrors
+// mockSink.test.ts).
+vi.mock('@/core/services/api', () => ({
+  api: { post: vi.fn().mockResolvedValue(undefined) },
+}))
 
 /** A minimal, fully-valid `buildTelemetryEvent` input. */
 function validInput(overrides: Partial<BuildTelemetryEventInput> = {}): BuildTelemetryEventInput {
@@ -119,5 +133,83 @@ describe('buildTelemetryEvent', () => {
     expect(() => buildTelemetryEvent(validInput({ scenarioTime: 'not-a-date' }))).toThrow(
       TelemetryValidationError,
     )
+  })
+})
+
+describe('generateEventId', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('returns a UUID-shaped string', () => {
+    const id = generateEventId()
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+  })
+
+  it('is unique across calls', () => {
+    const ids = new Set(Array.from({ length: 25 }, () => generateEventId()))
+    expect(ids.size).toBe(25)
+  })
+
+  it('produces a UUIDv4-shaped id via the getRandomValues fallback when randomUUID is absent', () => {
+    const realCrypto = globalThis.crypto
+    // Expose ONLY getRandomValues - no randomUUID - the plain-HTTP-deploy case
+    // (COR-008/COR-009) generateEventId is designed to survive.
+    vi.stubGlobal('crypto', { getRandomValues: realCrypto.getRandomValues.bind(realCrypto) })
+
+    const id = generateEventId()
+
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+  })
+
+  it('still returns a unique, non-throwing id when crypto is entirely unavailable', () => {
+    vi.stubGlobal('crypto', undefined)
+
+    let first = ''
+    let second = ''
+
+    expect(() => {
+      first = generateEventId()
+      second = generateEventId()
+    }).not.toThrow()
+
+    expect(first).toBeTruthy()
+    expect(second).toBeTruthy()
+    expect(first).not.toBe(second)
+  })
+})
+
+describe('buildAndEmit', () => {
+  beforeEach(() => {
+    resetTelemetryBuffer()
+  })
+
+  afterEach(() => {
+    resetTelemetryBuffer()
+  })
+
+  it('returns the built event and emits it to the sink on valid input', () => {
+    const event = buildAndEmit(validInput())
+
+    expect(event).not.toBeNull()
+    expect(getEmittedTelemetryEvents()).toHaveLength(1)
+    expect(getEmittedTelemetryEvents()[0]).toEqual(event)
+  })
+
+  it('returns null, never throws, on invalid input', () => {
+    expect(() => buildAndEmit(validInput({ exerciseId: '' }))).not.toThrow()
+
+    const result = buildAndEmit(validInput({ exerciseId: '' }))
+    expect(result).toBeNull()
+    expect(getEmittedTelemetryEvents()).toHaveLength(0)
+  })
+
+  it('counts a build failure in getTelemetryHealth().dropped without emitting anything', () => {
+    const before = getTelemetryHealth().dropped
+
+    buildAndEmit(validInput({ exerciseId: '' }))
+
+    expect(getTelemetryHealth().dropped).toBe(before + 1)
+    expect(getEmittedTelemetryEvents()).toHaveLength(0)
   })
 })

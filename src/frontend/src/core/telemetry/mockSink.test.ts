@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { emitTelemetryEvent, getEmittedTelemetryEvents, resetTelemetryBuffer } from './mockSink'
+import {
+  emitTelemetryEvent,
+  getEmittedTelemetryEvents,
+  getTelemetryHealth,
+  resetTelemetryBuffer,
+} from './mockSink'
 import type { TelemetryEventV0 } from './schema'
 
 const postMock = vi.fn()
@@ -105,5 +110,66 @@ describe('emitTelemetryEvent / mock sink', () => {
     snapshot.push(makeEvent({ eventId: 'not-really-emitted' }))
 
     expect(getEmittedTelemetryEvents()).toHaveLength(1)
+  })
+
+  // ---------------------------------------------------------------------
+  // getTelemetryHealth() (NFR-003 degraded-mode signal).
+  // ---------------------------------------------------------------------
+
+  describe('getTelemetryHealth()', () => {
+    it('reports {emitted, dropped, buffered} correctly as events are emitted', () => {
+      expect(getTelemetryHealth()).toEqual({ emitted: 0, dropped: 0, buffered: 0 })
+
+      emitTelemetryEvent(makeEvent({ eventId: 'event-1' }))
+      emitTelemetryEvent(makeEvent({ eventId: 'event-2' }))
+
+      expect(getTelemetryHealth()).toEqual({ emitted: 2, dropped: 0, buffered: 2 })
+    })
+
+    it('increments dropped (without throwing) on a send failure - the emit still counts', async () => {
+      postMock.mockRejectedValue(new Error('network down'))
+      const event = makeEvent()
+
+      expect(() => emitTelemetryEvent(event)).not.toThrow()
+
+      // Flush the microtask queue so the swallowed rejection's .catch() runs.
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(getTelemetryHealth()).toEqual({ emitted: 1, dropped: 1, buffered: 1 })
+    })
+
+    it('resetTelemetryBuffer() resets the emitted/dropped counters too, not just the buffer', async () => {
+      postMock.mockRejectedValue(new Error('network down'))
+      emitTelemetryEvent(makeEvent())
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(getTelemetryHealth().dropped).toBeGreaterThan(0)
+
+      resetTelemetryBuffer()
+
+      expect(getTelemetryHealth()).toEqual({ emitted: 0, dropped: 0, buffered: 0 })
+    })
+  })
+
+  // ---------------------------------------------------------------------
+  // Bounded buffer (NFR-007: no unbounded client-side retention of telemetry
+  // about named government personnel).
+  // ---------------------------------------------------------------------
+
+  describe('bounded buffer', () => {
+    it('caps the buffer at 500 events, dropping the oldest when the cap is exceeded', () => {
+      for (let i = 0; i < 502; i++) {
+        emitTelemetryEvent(makeEvent({ eventId: `event-${i}` }))
+      }
+
+      const buffered = getEmittedTelemetryEvents()
+      expect(buffered).toHaveLength(500)
+      // The two oldest (event-0, event-1) were evicted; the buffer now runs
+      // from event-2 through the most recently emitted event-501.
+      expect(buffered[0].eventId).toBe('event-2')
+      expect(buffered[buffered.length - 1].eventId).toBe('event-501')
+    })
   })
 })
