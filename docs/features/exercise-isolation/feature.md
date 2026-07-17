@@ -30,7 +30,7 @@ conduct) — see `docs/features/console-shell/03-static-identity-badge.md`.
 | 07 | Standing cross-exercise isolation test suite | COR-007 | Not Started | #50 |
 | 08 | Per-exercise hostname (subdomain) | COR-008 | Not Started | #51 |
 | 09 | Network readiness (self-test, allowlist, GFE guidance) | COR-009 | Not Started | #52 |
-| 10 | Mock ExerciseContext provider (Wave-0 frontend seam) | COR-001, COR-004 | Not Started | — |
+| 10 | Mock ExerciseContext provider (Wave-0 frontend seam) | COR-001, COR-004 | Complete | — |
 
 ## Dependencies
 The Exercise / Organization entities and the exercise-context resolution (which exercise a session

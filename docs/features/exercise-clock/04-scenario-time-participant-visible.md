@@ -1,6 +1,6 @@
 # Story: Scenario time is the participant-visible time
 
-**Feature:** Exercise clock & scenario-time model  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Exercise clock & scenario-time model  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-053  ·  **Design decisions:** none  ·  **Issue:** #80
 
 ## Context
@@ -16,23 +16,24 @@ behind a **minimal mock clock source**, not the full native-clock provider — s
 interface, with no change to this utility's callers.
 
 ## Acceptance Criteria
-- [ ] `src/frontend/src/core/clock/scenarioTime.ts` exports `scenarioNow(): Date` and
+- [x] `src/frontend/src/core/clock/scenarioTime.ts` exports `scenarioNow(): Date` and
       `formatScenarioTime(instant, timeZone, opts?)`, backed by a minimal mock clock source at
       `src/frontend/src/core/clock/exerciseClock.ts` — a mock `IExerciseClock` exposing `scenarioNow`
       only (the real native/Cadence-linked provider swaps in later behind the same interface per story
       01 / COR-050, with no change to callers).
-- [ ] `formatScenarioTime` renders absolute times, datelines, and relative times ("2h ago") in scenario
+- [x] `formatScenarioTime` renders absolute times, datelines, and relative times ("2h ago") in scenario
       time, using `Intl.DateTimeFormat` with the **passed-in `timeZone`** argument for TZ-correct
       absolute/dateline rendering (date-fns v4 is available for duration math); relative strings are
       computed against `scenarioNow()` — **never** wall-clock (`Date.now()` / unadorned `new Date()`).
-- [ ] `formatScenarioTime` takes `timeZone` as an **explicit argument** (defaulting to a mock IANA zone
+- [x] `formatScenarioTime` takes `timeZone` as an **explicit argument** (defaulting to a mock IANA zone
       for standalone use and tests) — it does not import or reach into the exercise-context module to
       resolve it. A `useScenarioTime()` hook wraps the utility for component consumption.
 - [ ] Every participant-visible time uses this utility; a review/lint guard flags any wall-clock time
-      rendered on a participant surface (enforced by `code-review`).
-- [ ] Backdated content (persona-management COR-023) and post-jump backfills (story 02) render
+      rendered on a participant surface (enforced by `code-review`). (No participant surface exists yet
+      to hold to this rule — enforced by the `code-review` gate going forward; carried forward.)
+- [x] Backdated content (persona-management COR-023) and post-jump backfills (story 02) render
       consistently under this rule.
-- [ ] Wall-clock is available to staff (dual time) and telemetry, never in the participant fiction.
+- [x] Wall-clock is available to staff (dual time) and telemetry, never in the participant fiction.
 
 ## Out of Scope
 The individual surfaces' rendering (each channel uses the utility); staff dual-time display (E7); the
@@ -67,6 +68,27 @@ replaces the mock provider behind the same `IExerciseClock` interface; exercise-
 time zone) feeds real `timeZone` values through consumers, not through this module directly.
 
 ## Tests
-- Unit: absolute/relative/dateline formatting in scenario time + a passed exercise TZ; no wall-clock
-  leak; a backdated + a backfilled item render in correct scenario order; `scenarioNow()` reads from
-  the mock clock source (`exerciseClock.ts`), never `Date.now()` directly.
+AC-to-test mapping (all committed under `src/frontend/src/core/clock/`):
+- **AC1** (`scenarioNow()`/`formatScenarioTime` backed by a mock `IExerciseClock`):
+  `exerciseClock.test.ts` (default mock tracks wall-clock; `setExerciseClock`/`resetExerciseClock`
+  swap seam); `scenarioTime.test.ts` ("scenarioNow()" describe block — reflects a swapped clock
+  instant exactly, never resolves to the real wall clock).
+- **AC2** (absolute/dateline/relative via `Intl.DateTimeFormat` + the passed-in `timeZone`; relative
+  against `scenarioNow()`, never wall-clock): `scenarioTime.test.ts` ("formatScenarioTime - absolute",
+  "- dateline", "- relative" describe blocks, including the TZ-boundary dateline case, the
+  divergent-real-clock relative case, and "never touches Date.now() while formatting").
+- **AC3** (`timeZone` as an explicit argument, default mock zone; no exercise-context import;
+  `useScenarioTime()` hook): `scenarioTime.test.ts` ("defaults to the mock scenario time zone when none
+  is passed"); `useScenarioTime.test.tsx` (bound `format` callback, default zone, refresh-interval
+  re-read). The no-import claim is held to structurally — the module imports only `date-fns`/React and
+  `./exerciseClock` (per the module header comments; enforced by `code-review`).
+- **AC4** (every participant-visible time uses this utility / review-lint guard) — left unchecked: no
+  participant surface exists yet to enforce this rule against; it is enforced by the `code-review` gate
+  going forward.
+- **AC5** (backdated content + post-jump backfill scenario ordering, COR-023/story 02):
+  `scenarioTime.test.ts` ("backdated + backfilled content ordering (COR-023, story 02)").
+- **AC6** (wall-clock available to staff/telemetry, never in participant fiction): the never-in-fiction
+  half is exhaustively covered by `scenarioTime.test.ts` (the `Date.now()`-spy test and both
+  divergent-real-clock tests) and `useScenarioTime.test.tsx` (fake-timer re-read test); wall-clock
+  availability elsewhere is unrestricted by this module (no staff dual-time consumer exists yet — E7,
+  out of scope for this story).

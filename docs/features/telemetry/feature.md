@@ -29,7 +29,7 @@ consuming surfaces). No design brief exists for this surface — it has no UI.
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Telemetry emitter v0 (schema + mock sink) | XC-004 | Not Started | — |
+| 01 | Telemetry emitter v0 (schema + mock sink) | XC-004 | Complete | — |
 
 ## Dependencies
 None (Wave 0 — the first of Pulse's three foundation seams to have zero upstream dependency). Consumed

@@ -24,7 +24,7 @@ exercise time zone (exercise-configuration COR-030).
 | 01 | Native exercise clock (provider interface) | COR-050 | Not Started | #77 |
 | 02 | Discrete Director time-jumps | COR-051 | Not Started | #78 |
 | 03 | Suspension & module advancement (TTX) | COR-052 | Not Started | #79 |
-| 04 | Scenario time is the participant-visible time | COR-053 | Not Started | #80 |
+| 04 | Scenario time is the participant-visible time | COR-053 | Complete | #80 |
 | 05 | EndEx | COR-054 | Not Started | #81 |
 
 ## Dependencies

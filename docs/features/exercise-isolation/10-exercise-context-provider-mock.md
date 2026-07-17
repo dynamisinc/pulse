@@ -1,6 +1,6 @@
 # Story: Mock ExerciseContext provider (Wave-0 frontend seam)
 
-**Feature:** Exercise isolation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Exercise isolation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-001, COR-004 (XC-001, XC-002)  ·  **Design decisions:** none  ·  **Issue:** —
 
 ## Context
@@ -16,20 +16,21 @@ it resolves and exposes exactly one exercise's scope; it does not decide *which*
 or session (that is story 04's later extension of this same module).
 
 ## Acceptance Criteria
-- [ ] Given the app is wrapped in `ExerciseContextProvider`, when any descendant calls
+- [x] Given the app is wrapped in `ExerciseContextProvider`, when any descendant calls
       `useExerciseContext()`, then it receives `{ exerciseId, exerciseName, timeZone, status }` for
       exactly one exercise, resolved via a mock `resolveExerciseContext()` routed through the shared
       axios client (`core/services/api.ts`).
-- [ ] Given no provider is mounted, when a component calls `useExerciseContext()`, then it **throws**
+- [x] Given no provider is mounted, when a component calls `useExerciseContext()`, then it **throws**
       (fail-closed) rather than returning `undefined`, a default scope, or an aggregate scope.
-- [ ] The provider exposes no exercise list, no picker, and no simulation-status/admin surface —
+- [x] The provider exposes no exercise list, no picker, and no simulation-status/admin surface —
       `useExerciseContext()` returns a single bound scope only, never a collection (COR-004, XC-002).
-- [ ] Given the mock resolver fails or returns no scope, when the provider initializes, then it fails
+- [x] Given the mock resolver fails or returns no scope, when the provider initializes, then it fails
       closed (an error/guard state) — never falling back to an unscoped or cross-exercise render
       (COR-001, XC-001).
-- [ ] `exerciseId` and `timeZone` are plain, stable fields on the returned scope, shaped so the
+- [x] `exerciseId` and `timeZone` are plain, stable fields on the returned scope, shaped so the
       scenario-time and telemetry seams can consume them later from their own call sites — without this
-      module reaching into either.
+      module reaching into either (structural — see Tests note; held to by code review, no dedicated
+      runtime test).
 
 ## Out of Scope
 Host/subdomain resolution (story 08); the real auth-derived session scope (story 04, which **extends**
@@ -62,6 +63,25 @@ None (Wave 0). Story 04 later extends this module with host-resolution + a parti
 story 08 (hostname) and auth feed story 04, not this story.
 
 ## Tests
-- Unit: `useExerciseContext()` outside a provider throws; inside a provider it returns a single scope
-  object with `exerciseId`/`exerciseName`/`timeZone`/`status`; a failed/empty mock resolution fails
-  closed (no default/aggregate scope is ever rendered).
+AC-to-test mapping (all committed under `src/frontend/src/core/`):
+- **AC1** (resolves + exposes one scope via the mock resolver, routed through the shared axios client):
+  `exerciseContext.test.tsx` ("resolves and exposes exactly one scope with
+  exerciseId/exerciseName/timeZone/status"); `exerciseContextResolver.default.test.ts` (exercises the
+  actual shipped path — the real axios client short-circuited by the canned adapter);
+  `exerciseContextResolver.test.ts` (resolver validation logic, `api.get` mocked at the boundary).
+- **AC2** (throws outside a provider): `exerciseContext.test.tsx` ("throws rather than returning
+  undefined, a default, or an aggregate scope").
+- **AC3** (no list/picker/admin surface; single scope only, never a collection):
+  `exerciseContext.test.tsx` ("module surface" describe block — exact export surface is
+  `ExerciseContextProvider`/`useExerciseContext` only; "returns a single bound scope object, never a
+  collection").
+- **AC4** (fails closed on resolver rejection / empty / malformed scope — never a default or
+  cross-exercise render): `exerciseContext.test.tsx` ("renders nothing while resolution is pending",
+  "fails closed - renders nothing - when the mock resolution rejects", "never falls back to a
+  default/aggregate scope..."); `exerciseContextResolver.test.ts` (empty body, missing field, empty
+  string field, out-of-enum `status`, and request failure all reject rather than resolving).
+- **AC5** (`exerciseId`/`timeZone` are plain stable fields; module doesn't reach into the clock/telemetry
+  seams): verified structurally, not by a dedicated runtime test — `ExerciseScope` in
+  `exerciseContextResolver.ts` types both as plain `string`, and `exerciseContext.tsx` /
+  `exerciseContextResolver.ts` import only React and the shared axios client, never `core/clock` or
+  `core/telemetry` (per the module header comments; held to by the `code-review` gate).
