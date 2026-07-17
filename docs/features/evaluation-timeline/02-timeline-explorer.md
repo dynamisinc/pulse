@@ -1,7 +1,7 @@
 # Story: Timeline explorer (filters, per-human attribution, deep-link)
 
 **Feature:** Evaluation timeline & replay foundation  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started
-**Requirements:** EVL-001, EVL-002, COR-018, CTL-026  ·  **Design decisions:** D6-004  ·  **Issue:** —
+**Requirements:** EVL-001, EVL-002, COR-018, CTL-026  ·  **Design decisions:** D6-004  ·  **Issue:** #231
 
 ## Context
 EVL-001 wants a complete, ordered exercise timeline of every information-environment event — content

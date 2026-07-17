@@ -1,7 +1,7 @@
 # Story: Read-only staff access to the evaluator dashboard
 
 **Feature:** Evaluation timeline & replay foundation  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started
-**Requirements:** EVL-004, COR-013  ·  **Design decisions:** D6-002  ·  **Issue:** —
+**Requirements:** EVL-004, COR-013  ·  **Design decisions:** D6-002  ·  **Issue:** #230
 
 ## Context
 EVL-004 requires the timeline (and by extension the whole evaluator dashboard) to be staff-only —
