@@ -13,7 +13,7 @@ in this pass; the D7 unified-shell session starts from this evidence.
 | Element | Anchor | What it improvised | Status |
 |---|---|---|---|
 | Exercise banner ×2 (top + bottom) | `.xb .xbt` / `.xb .xbb` | Fixed 22px strips, green `#2e6b2e`, Figtree 10.5px caps, `.14em` tracking. Top: "UNCLASSIFIED // EXERCISE · EXERCISE · EXERCISE — ALL CONTENT SIMULATED". Bottom: "PULSE TRAINING ENVIRONMENT — …". App frame is inset 22px top+bottom to clear them. | replaced by shell — see D7 |
-| Advisory alert bar | `.abar` (+ `.asev`, `.alnk`) | Sticky in-app emergency banner, amber `#fff3dd`/`#b97a00` (own dark variant), toggled by `alertOn`. In-fiction content, but the container pattern is chrome. | replaced by shell — see D7 |
+| Advisory alert bar | `.abar` (+ `.asev`, `.alnk`) | Sticky in-app emergency banner, band `#fff3dd` / chip `#8a5a00` + white LABEL (chip darkened from `#b97a00` for WCAG AA — D7-012; own dark variant), toggled by `alertOn`. In-fiction content, but the container pattern is chrome. | replaced by shell — see D7 |
 | Nav rail + logo | `.nav`, `.logo` | Left rail with hand-drawn Pulse waveform SVG logo + 5 nav rows (Home/Explore/Notifications/Messages/Profile) with badge. Product nav, but the rail container/logo lockup were improvised. | replaced by shell — see D7 |
 | Identity switcher | `Posting as: {{cur.name}} ▾` chip + `.menu`/`.mi` | Account-switch chip + dropdown in composer (PIO multi-account). Staff-adjacent identity chrome. | replaced by shell — see D7 |
 | Me card / account menu | `.mecard` + `Log out @dreyes_fh` flyout | Bottom-of-rail current-user card with logout flyout. | replaced by shell — see D7 |

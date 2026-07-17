@@ -143,7 +143,8 @@ exercise engine (advisory bar + safety notice); observer flag from exercise role
   repost `#17a06b`, follow `#7c5cd6`.
 - Light: bg `#fff`, panel `#f3f5f6`, line `#e5e8ea`, ink `#0e1518` / `#61707a`.
 - Dark: bg `#0c1116`, panel `#161e25`, line `#233039`, ink `#e9eef1` / `#8aa0ac`.
-- Alert bar: light `#fff3dd`/`#e3b25f`/`#6b4300`, dark `#33270e`/`#f2cf8a`; chip `#b97a00`.
+- Alert bar: light `#fff3dd`/`#e3b25f`/`#6b4300`, dark `#33270e`/`#f2cf8a`; chip `#8a5a00` + white
+  (darkened from `#b97a00` for WCAG AA — D7-012).
 - Exercise banners: `#2e6b2e` bg, `#eaf5e6` text, 22px, letterspaced 700 caps.
 - Radii: pills 999px, cards/media 14–16px, menus 14px. Hover: 4.5% ink wash.
 
