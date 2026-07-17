@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest'
 import { faFlag } from '@fortawesome/free-solid-svg-icons'
 import { Toolstrip } from './Toolstrip'
 import { ToolstripProvider, useRegisterSurfaceTool, type SurfaceTool } from '../toolRegistry'
+import { staffShellTokens } from '../staffShellTokens'
 
 const STORIES_TOOL: SurfaceTool = {
   id: 'stories',
@@ -47,6 +48,18 @@ describe('Toolstrip — shell-owned dock structure (AC1)', () => {
     expect(screen.getByTestId('toolstrip-divider')).toBeInTheDocument()
     expect(screen.getByTestId('toolstrip-zone-surface')).toBeInTheDocument()
   })
+
+  it('renders its own dock at the shared 56px toolstrip width (D7-011)', () => {
+    render(
+      <ToolstripProvider>
+        <Toolstrip />
+      </ToolstripProvider>,
+    )
+
+    expect(screen.getByTestId('staff-toolstrip')).toHaveStyle({
+      width: `${staffShellTokens.toolstrip.widthPx}px`,
+    })
+  })
 })
 
 describe('Toolstrip — a registered surface tool renders in the dock (AC2)', () => {
@@ -63,6 +76,20 @@ describe('Toolstrip — a registered surface tool renders in the dock (AC2)', ()
     expect(
       within(screen.getByTestId('toolstrip-zone-shell-global')).queryByTestId('toolstrip-tool-stories'),
     ).not.toBeInTheDocument()
+  })
+})
+
+describe('Toolstrip — a tool with no badge (AC3 negative case)', () => {
+  it('uses the plain tool label as the accessible name and renders no badge element', () => {
+    render(
+      <ToolstripProvider>
+        <SurfaceRegistrant tool={STORIES_TOOL} />
+        <Toolstrip />
+      </ToolstripProvider>,
+    )
+
+    expect(screen.getByRole('button', { name: 'STORIES' })).toBeInTheDocument()
+    expect(screen.queryByTestId('toolstrip-badge-stories')).not.toBeInTheDocument()
   })
 })
 

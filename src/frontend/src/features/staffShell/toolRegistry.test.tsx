@@ -193,6 +193,44 @@ describe('useRegisterShellGlobalTool — registers into the shell-global zone on
   })
 })
 
+describe('ToolstripProvider — exercise-scoped state (XC-001): a remount starts clean', () => {
+  it('does not carry over a previous mount\'s registered tools or active tool id (simulating a new exercise)', async () => {
+    const user = userEvent.setup()
+
+    function Scenario() {
+      useRegisterSurfaceTool(STORIES_TOOL)
+      useRegisterShellGlobalTool(ADMIN_TOOL)
+      return <ToolstripProbe />
+    }
+
+    const { unmount } = render(
+      <ToolstripProvider>
+        <Scenario />
+      </ToolstripProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'toggle stories' }))
+    expect(screen.getByTestId('active-tool-id')).toHaveTextContent('stories')
+    expect(screen.getByTestId('sf-stories')).toBeInTheDocument()
+    expect(screen.getByTestId('sg-admin')).toBeInTheDocument()
+
+    // Unmount entirely (e.g. leaving the exercise) — a module-global registry
+    // would still hold `stories`/`admin` and the active id at this point.
+    unmount()
+
+    // A brand-new provider instance (a new exercise), with no registrants yet.
+    render(
+      <ToolstripProvider>
+        <ToolstripProbe />
+      </ToolstripProvider>,
+    )
+
+    expect(screen.getByTestId('active-tool-id')).toHaveTextContent('none')
+    expect(screen.queryByTestId('sf-stories')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('sg-admin')).not.toBeInTheDocument()
+  })
+})
+
 describe('toggleTool — one active tool at a time, across both zones', () => {
   function BothRegistrants() {
     useRegisterShellGlobalTool(ADMIN_TOOL)
