@@ -36,6 +36,10 @@ export default defineConfig([
         argsIgnorePattern: '^_',
         varsIgnorePattern: '^_',
       }],
+
+      // Enforce "guard, don't `!`" (CLAUDE.md): a non-null assertion hides the
+      // exact null/undefined bug strict null-checks exist to catch. Narrow instead.
+      '@typescript-eslint/no-non-null-assertion': 'error',
       // =======================================================================
       // Stylistic Rules - Code Formatting
       // =======================================================================
@@ -86,6 +90,34 @@ export default defineConfig([
     files: ['**/test/**', '**/*.test.{ts,tsx}', '**/contexts/**'],
     rules: {
       'react-refresh/only-export-components': 'off',
+    },
+  },
+  // Participant surfaces render SCENARIO time only (COR-053). Ban wall-clock so
+  // the invariant is enforced mechanically the moment a participant surface
+  // lands — a unit test can't cover a surface that doesn't exist yet. Staff
+  // surfaces (evaluator/console, COBRA world) legitimately use wall-clock and
+  // are deliberately NOT covered here. Use scenarioNow()/formatScenarioTime()
+  // from @/core/clock instead.
+  {
+    files: [
+      'src/features/social/**/*.{ts,tsx}',
+      'src/features/portal/**/*.{ts,tsx}',
+      'src/features/news/**/*.{ts,tsx}',
+      'src/features/press/**/*.{ts,tsx}',
+      'src/features/weather/**/*.{ts,tsx}',
+      'src/features/participant-shell/**/*.{ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: "NewExpression[callee.name='Date'][arguments.length=0]",
+          message: 'Participant surfaces render scenario time only (COR-053). Use scenarioNow()/formatScenarioTime() from @/core/clock — never `new Date()` (wall-clock).',
+        },
+        {
+          selector: "CallExpression[callee.object.name='Date'][callee.property.name='now']",
+          message: 'Participant surfaces render scenario time only (COR-053). Use scenarioNow() from @/core/clock — never Date.now() (wall-clock).',
+        },
+      ],
     },
   },
 ])
