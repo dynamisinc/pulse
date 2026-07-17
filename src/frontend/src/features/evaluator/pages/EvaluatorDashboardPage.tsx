@@ -1,8 +1,13 @@
 /**
  * features/evaluator/pages/EvaluatorDashboardPage.tsx
  * ---------------------------------------------------------------------------
- * Work-area content for the Evaluator Dashboard (D6). This is what the real
- * shared staff shell (D7) will host — see `StaffShellStub` for the caveat.
+ * Work-area content for the Evaluator Dashboard (D6), hosted inside the real
+ * shared staff shell (D7) — `App.tsx` mounts this page as `StaffShellFrame`'s
+ * `children`, with `StaffHeader` / `Toolstrip` filling the frame's header /
+ * toolstrip slots. This component registers its own tools into the ONE
+ * shell-owned toolstrip dock (`EvaluatorToolstripRegistration`, D7-011)
+ * rather than drawing a strip of its own.
+ *
  * Four views: Live (storyline board + live stream + read-only world view),
  * Timeline (filterable event explorer), Replay (video-scrubber over the
  * exercise), Metrics (latency / coverage / sentiment). Read-only throughout
@@ -11,8 +16,7 @@
 
 import { Box, Stack, Typography } from '@mui/material'
 import { EvaluatorStateProvider, useEvaluatorState } from '../contexts/EvaluatorStateContext'
-import { StaffShellStub } from '../components/shell/StaffShellStub'
-import { EvaluatorToolstripButtons } from '../components/shell/EvaluatorToolstripButtons'
+import { EvaluatorToolstripRegistration } from '../components/shell/EvaluatorToolstripRegistration'
 import { EvaluatorFlyoutLayer } from '../components/shell/EvaluatorFlyoutLayer'
 import { DevExerciseStateToggle } from '../components/DevExerciseStateToggle'
 import { StorylineBoard } from '../components/StorylineBoard'
@@ -81,12 +85,15 @@ function EvaluatorDashboardContent() {
 export function EvaluatorDashboardPage() {
   return (
     <EvaluatorStateProvider>
-      <StaffShellStub
-        toolstripTools={<EvaluatorToolstripButtons />}
-        flyouts={<EvaluatorFlyoutLayer />}
-      >
-        <EvaluatorDashboardContent />
-      </StaffShellStub>
+      {/* The frame's work-area column is the positioning context; the surface
+          owns its own scroll + its absolutely-positioned flyout overlays. */}
+      <Box sx={{ position: 'relative', height: '100%', overflow: 'hidden' }}>
+        <Box sx={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
+          <EvaluatorToolstripRegistration />
+          <EvaluatorDashboardContent />
+        </Box>
+        <EvaluatorFlyoutLayer />
+      </Box>
     </EvaluatorStateProvider>
   )
 }

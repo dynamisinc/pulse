@@ -2,14 +2,11 @@
  * features/evaluator/evaluatorTools.ts
  * ---------------------------------------------------------------------------
  * Toolstrip tool registry for the Evaluator Dashboard: Annotations (badged
- * with the unpushed-to-Cadence count) and AAR export. Mounted into
- * `StaffShellStub`'s toolstrip slot for now.
- *
- * TODO(D7-011): once the real shared staff shell exists, its toolstrip owns
- * a single `registerTool()` registry shared by every staff surface (see
- * `docs/features/console-shell/implementation.md`, story 01). Move these
- * two entries there instead of rendering them locally via
- * `EvaluatorToolstripButtons`.
+ * with the unpushed-to-Cadence count) and AAR export. Registered into the
+ * real shared staff shell's ONE toolstrip dock via `useRegisterSurfaceTool()`
+ * (`@/features/staffShell/toolRegistry`, D7-011) by
+ * `components/shell/EvaluatorToolstripRegistration.tsx` — this feature draws
+ * no toolstrip of its own.
  */
 
 import type { ComponentType } from 'react'

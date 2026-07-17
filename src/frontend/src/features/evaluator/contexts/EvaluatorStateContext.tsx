@@ -73,12 +73,10 @@ interface State {
   annotationNote: string;
   annotationCategory: AnnotationCategory;
   annotationAnchor: string;
-  annotationsFlyoutOpen: boolean;
   annotations: Annotation[];
 
   coverageItems: CoverageItem[];
 
-  exportFlyoutOpen: boolean;
   exporting: boolean;
   exportPct: number;
   exportDone: boolean;
@@ -113,12 +111,10 @@ const initialState: State = {
   annotationNote: '',
   annotationCategory: 'OBSERVATION',
   annotationAnchor: '',
-  annotationsFlyoutOpen: false,
   annotations: INITIAL_ANNOTATIONS,
 
   coverageItems: INITIAL_COVERAGE_ITEMS,
 
-  exportFlyoutOpen: false,
   exporting: false,
   exportPct: 0,
   exportDone: false,
@@ -147,8 +143,6 @@ type Action =
   | { type: 'SAVE_ANNOTATION'; time: string }
   | { type: 'PUSH_ANNOTATION'; id: string }
   | { type: 'PUSH_ALL_ANNOTATIONS' }
-  | { type: 'TOGGLE_ANNOTATIONS_FLYOUT' }
-  | { type: 'TOGGLE_EXPORT_FLYOUT' }
   | { type: 'CONFIRM_COVERAGE'; id: string; evaluatorId: string }
   | { type: 'DISMISS_COVERAGE'; id: string }
   | { type: 'START_EXPORT' }
@@ -249,14 +243,6 @@ function reducer(state: State, action: Action): State {
       }
     case 'PUSH_ALL_ANNOTATIONS':
       return { ...state, annotations: state.annotations.map(a => ({ ...a, pushed: true })) }
-    case 'TOGGLE_ANNOTATIONS_FLYOUT':
-      return {
-        ...state,
-        annotationsFlyoutOpen: !state.annotationsFlyoutOpen,
-        exportFlyoutOpen: false,
-      }
-    case 'TOGGLE_EXPORT_FLYOUT':
-      return { ...state, exportFlyoutOpen: !state.exportFlyoutOpen, annotationsFlyoutOpen: false }
     case 'CONFIRM_COVERAGE':
       return {
         ...state,
@@ -335,8 +321,6 @@ export interface EvaluatorStateValue {
   saveAnnotation: () => void;
   pushAnnotation: (id: string) => void;
   pushAllAnnotations: () => void;
-  annotationsFlyoutOpen: boolean;
-  toggleAnnotationsFlyout: () => void;
 
   // Coverage (D6-010)
   coverageItems: CoverageItem[];
@@ -344,8 +328,6 @@ export interface EvaluatorStateValue {
   dismissCoverage: (id: string) => void;
 
   // AAR export (D6-012)
-  exportFlyoutOpen: boolean;
-  toggleExportFlyout: () => void;
   exporting: boolean;
   exportPct: number;
   exportDone: boolean;
@@ -505,15 +487,11 @@ export function EvaluatorStateProvider({ children }: EvaluatorStateProviderProps
     saveAnnotation,
     pushAnnotation: id => dispatch({ type: 'PUSH_ANNOTATION', id }),
     pushAllAnnotations: () => dispatch({ type: 'PUSH_ALL_ANNOTATIONS' }),
-    annotationsFlyoutOpen: state.annotationsFlyoutOpen,
-    toggleAnnotationsFlyout: () => dispatch({ type: 'TOGGLE_ANNOTATIONS_FLYOUT' }),
 
     coverageItems: state.coverageItems,
     confirmCoverage: id => dispatch({ type: 'CONFIRM_COVERAGE', id, evaluatorId: CURRENT_EVALUATOR_ID }),
     dismissCoverage: id => dispatch({ type: 'DISMISS_COVERAGE', id }),
 
-    exportFlyoutOpen: state.exportFlyoutOpen,
-    toggleExportFlyout: () => dispatch({ type: 'TOGGLE_EXPORT_FLYOUT' }),
     exporting: state.exporting,
     exportPct: state.exportPct,
     exportDone: state.exportDone,

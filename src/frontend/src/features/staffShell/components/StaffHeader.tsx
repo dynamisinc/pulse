@@ -18,8 +18,8 @@
  * lockup, exercise name, and the SCENARIO clock digits) is left uncolored and
  * simply INHERITS the light `textPrimary` color the frame already set on the
  * header element; secondary text (the LOCAL wall-clock digits, the preview
- * label) is explicitly set to `textMuted`. This is the same pattern already
- * proven in `features/evaluator/components/shell/StaffShellStub.tsx`.
+ * label) is explicitly set to `textMuted`. This is the same inherit-vs-
+ * explicit-mute pattern the Evaluator Dashboard's own shell content follows.
  *
  * Left-to-right, per SHELL-CONTRACT §1 "Header":
  *   1. Brand lockup — PULSE (bold) over the surface name (small caps, muted).
