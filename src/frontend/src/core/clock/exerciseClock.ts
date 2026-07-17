@@ -29,10 +29,30 @@
  * `setExerciseClock()` / `resetExerciseClock()`.
  */
 
-/** The exercise-clock contract every scenario-time consumer relies on. */
+/**
+ * The exercise-clock contract every scenario-time consumer relies on.
+ *
+ * Story 01 (native clock) replaces the Wave-0 mock behind this interface. Two
+ * requirements it MUST satisfy that the mock only stubs:
+ *  - **Change-notification** (`subscribe`): a Director time-jump (COR-051) or a
+ *    pause/Freeze (COR-052) must propagate to participant surfaces promptly, not
+ *    after the next poll. Consumers (`useScenarioTime`) subscribe when it's
+ *    present and fall back to polling when it isn't (the mock).
+ *  - **Exercise scoping:** the real provider resolves the CURRENT exercise's
+ *    clock (per-exercise StartEx anchor + logged jumps, COR-030/050). The Wave-0
+ *    mock is a single ambient clock; a staff surface observing multiple
+ *    exercises will need a keyed/scoped accessor — design story 01 for that
+ *    rather than assuming one ambient clock per runtime.
+ */
 export interface IExerciseClock {
   /** The current scenario-time instant. */
   scenarioNow(): Date
+  /**
+   * Optional: subscribe to scenario-time changes (jump/pause/resume/tick).
+   * Returns an unsubscribe function. Absent on the Wave-0 mock (consumers then
+   * poll); story 01's real provider should implement it.
+   */
+  subscribe?(listener: () => void): () => void
 }
 
 /**
