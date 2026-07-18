@@ -214,7 +214,7 @@ Anchor: the network strip on real media properties. Deliberately quiet so it nev
 with channel mastheads; no instructional text. Mobile: shell bottom tab bar (COR-061 mobile).
 
 ### D7-002 — Alert bar: 4 states, chip anatomy, emergency never collapses (PRT-010/011/012)
-none = zero height · info `#3d6a96` · advisory (D1/D2 amber, exact) · emergency solid `#b3261e`.
+none = zero height · info `#3d6a96` · advisory (D1/D2 amber, darkened to `#8a5a00` for AA — D7-012) · emergency solid `#b3261e`.
 Icon + text chip + color, never color-only (NFR-001). Scenario timestamp + Details → history.
 Info/advisory scroll-collapse to a compact line; emergency never collapses; never dismissable.
 Multi-alert: highest severity + "+N more" expands stack. Per user "explore options": three
