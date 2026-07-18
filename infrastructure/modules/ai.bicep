@@ -25,14 +25,14 @@ param publicNetworkAccess string = 'Enabled'
 param modelSkuName string = 'DataZoneStandard'
 
 @description('Standard tier — storyline-critical reactions (top voice quality).')
-param standardModel string = 'gpt-4.1'
-param standardModelVersion string = '2025-04-14'
+param standardModel string = 'gpt-5.4'
+param standardModelVersion string = '2026-03-05'
 @description('Standard-tier capacity (thousands of tokens/min).')
 param standardCapacity int = 50
 
 @description('Ambient tier — bulk background chatter (cheaper/faster, the volume driver).')
-param ambientModel string = 'gpt-4.1-mini'
-param ambientModelVersion string = '2025-04-14'
+param ambientModel string = 'gpt-5.4-mini'
+param ambientModelVersion string = '2026-03-17'
 @description('Ambient-tier capacity (thousands of tokens/min).')
 param ambientCapacity int = 100
 
