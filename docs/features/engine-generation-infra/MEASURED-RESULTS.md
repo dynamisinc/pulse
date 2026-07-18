@@ -13,8 +13,10 @@
 | Ambient | gpt-5.4-mini | 1682 ms | 1983 ms | 992 | 196 | 0 | 5/5 | 5/5 | $0.0020 | ~$0.74 |
 
 \* At a nominal active-storyline hour (~25 generated posts/min ≈ 375 four-post bursts), using **analog
-Sonnet/Haiku per-MTok pricing** ($3/$15 Standard, $1/$5 Ambient) — the **actual gpt-5.4 Azure rates are
-still to confirm**; the *token profile* is measured.
+Sonnet/Haiku per-MTok pricing** ($3/$15 Standard, $1/$5 Ambient); the *token profile* is measured.
+**Update:** the gpt-5.4 Azure list rates are now confirmed ($2.50/$15 Standard, $0.75/$4.50 Ambient),
+which lowers the firmed-up baseline to ~$2.09 / ~$0.61 per exercise-hour — see
+[`PROVIDER-COMPARISON.md`](PROVIDER-COMPARISON.md) §2.
 
 ## Findings
 
@@ -37,5 +39,8 @@ still to confirm**; the *token profile* is measured.
 
 ## Still open (→ engine-eval-harness story 03)
 
-Ongoing SLO monitoring, and re-running §2's cost line once (a) gpt-5.4 Azure list prices are confirmed and
-(b) production-size dossiers push the prefix past the cache threshold.
+Ongoing SLO monitoring, and re-running §2's cost line once production-size dossiers push the prefix past
+the cache threshold. **Provider comparison:** the Claude-on-Foundry adapter + harness now exist; the
+side-by-side (latency/cost/guard/voice, Azure OpenAI vs Claude) and the data-driven default-provider
+recommendation live in [`PROVIDER-COMPARISON.md`](PROVIDER-COMPARISON.md) — its measured Claude column
+fills once the Claude tiers are provisioned and the comparison pass runs.
