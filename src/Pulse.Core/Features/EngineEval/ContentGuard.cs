@@ -96,7 +96,10 @@ public static partial class ContentGuard
     [GeneratedRegex(@"\bas an ai\b", RegexOptions.IgnoreCase)]
     private static partial Regex AsAnAi();
 
-    [GeneratedRegex(@"\bi (?:cannot|can't|am unable to)\b", RegexOptions.IgnoreCase)]
+    // Scoped to assistant-style refusals ("I cannot help you", "I'm unable to comply") — NOT everyday
+    // in-world speech like "I can't believe this" / "I can't help but wonder". The maintained red-team
+    // suite (engine-eval-harness story 02) tunes this set as new phrasings appear.
+    [GeneratedRegex(@"\bi (?:cannot|can't|am unable to) (?:help you|assist you|assist with|comply with|fulfil|fulfill)\b", RegexOptions.IgnoreCase)]
     private static partial Regex Refusal();
 
     [GeneratedRegex(@"\bdebug mode\b", RegexOptions.IgnoreCase)]

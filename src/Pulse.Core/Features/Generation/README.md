@@ -36,14 +36,16 @@ story 03. The provider transports both; it never re-interprets the boundary.
 
 ## Status
 
+All six generation-infra stories have landed on this slice (PR #248), live-validated + measured:
+
 | Story | State |
 |---|---|
-| 01 Provider abstraction + governance | **In progress** (this slice: seam, options, governance gate, Fake provider, DI). |
-| 02 Prompt assembly & context | Not started. |
-| 03 Untrusted-data isolation boundary | Not started (shares the fiction/injection guard with `engine-eval-harness`). |
-| 04 Model tiering & caching | Not started. |
-| 05 Degraded-mode fallback (circuit breaker) | Not started (greenfield — attach `Microsoft.Extensions.Http.Resilience` to the adapter's `HttpClient`). |
-| 06 Cost/latency spike (measured) | **Blocked** on a live tenant-bounded Foundry endpoint + credentials. |
+| 01 Provider abstraction + governance | Done — seam, options, governance gate, Fake provider, DI. |
+| 02 Prompt assembly & context | Done — `PromptAssembler` (3-strata, cache-prefix-ordered). |
+| 03 Untrusted-data isolation boundary | Done — `WorldFeedFence` + `ContentGuard`/`VoiceMetrics` (shared with `engine-eval-harness`). |
+| 04 Model tiering & caching | Done — `TierPolicy`; cache-prefix stability (engages once the prefix exceeds Azure's ~1024-token threshold). |
+| 05 Degraded-mode fallback (circuit breaker) | Done — resilience pipeline + `IProviderHealthListener` degraded-mode seam. |
+| 06 Cost/latency spike (measured) | Done — live measured pass; see `docs/features/engine-generation-infra/MEASURED-RESULTS.md`. |
 
-The `AzureOpenAI` / `ClaudeFoundry` adapters pass the governance gate but intentionally throw
-"adapter not wired yet" until stories 02/04 + the story-06 measured pass land.
+The `AzureOpenAI` adapter is wired and live-validated. `ClaudeFoundry` passes the governance gate but
+intentionally throws "adapter not wired yet" — the serverless Claude-on-Foundry adapter is a fast-follow.

@@ -81,6 +81,20 @@ public class GenerationGovernanceTests
     }
 
     [Fact]
+    public void Validate_WhenRetentionUnspecified_Throws()
+    {
+        // Arrange — the gate must require an explicit retention stance (NFR-005), not silently pass.
+        var options = CompliantAzureOptions();
+        options.Governance.Retention = RetentionPosture.Unspecified;
+
+        // Act
+        var act = () => GenerationGovernance.Validate(options);
+
+        // Assert
+        act.Should().Throw<GenerationConfigurationException>().WithMessage("*retention posture*");
+    }
+
+    [Fact]
     public void Validate_WhenZdrTargetedButModelNotZdrCapable_RejectsTheModel()
     {
         // Arrange

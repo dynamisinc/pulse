@@ -54,6 +54,13 @@ public sealed record GenerationGovernance(
             errors.Add($"provider '{provider}' has no documented data residency (NFR-005).");
         }
 
+        if (g.Retention == RetentionPosture.Unspecified)
+        {
+            errors.Add(
+                $"provider '{provider}' has no declared retention posture — set ZeroDataRetention or Retained " +
+                "so the config explicitly records a retention stance (NFR-005 deployment gate).");
+        }
+
         if (g.Retention == RetentionPosture.ZeroDataRetention)
         {
             foreach (var (tier, model) in options.Tiers)

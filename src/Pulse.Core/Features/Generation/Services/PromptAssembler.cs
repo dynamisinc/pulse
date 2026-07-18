@@ -28,7 +28,10 @@ public sealed class PromptAssembler : IPromptAssembler
             throw new ArgumentException("At least one persona is required to assemble a burst.", nameof(input));
         }
 
-        var postCount = input.PostCount > 0 ? input.PostCount : input.Personas.Count;
+        // One post per persona — the burst-in-one-call diversity model (§5.2). The selected persona set
+        // IS the burst size, so there is no separate post-count knob that could diverge from it and make
+        // the "exactly one per persona" instruction unsatisfiable.
+        var postCount = input.Personas.Count;
 
         return new GenerationRequest
         {

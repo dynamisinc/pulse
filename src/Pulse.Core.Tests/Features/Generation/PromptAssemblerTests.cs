@@ -8,7 +8,7 @@ public class PromptAssemblerTests
 {
     private readonly PromptAssembler _assembler = new();
 
-    private static PromptAssemblyInput Input(int postCount = 0, IReadOnlyList<WorldPost>? world = null) => new()
+    private static PromptAssemblyInput Input(IReadOnlyList<WorldPost>? world = null) => new()
     {
         ExerciseId = Guid.NewGuid(),
         ExerciseBrief = "Fictional town of Rivermead. Scenario time: Day 1, 09:00.",
@@ -28,7 +28,6 @@ public class PromptAssemblerTests
         ],
         WorldPosts = world ?? [],
         Tier = GenerationTier.Standard,
-        PostCount = postCount,
     };
 
     [Fact]
@@ -59,10 +58,10 @@ public class PromptAssemblerTests
     }
 
     [Fact]
-    public void Assemble_DefaultsPostCountToPersonaCount()
+    public void Assemble_PostCountAlwaysEqualsPersonaCount()
     {
+        // One post per persona — no separate knob that could make "exactly one per persona" unsatisfiable.
         _assembler.Assemble(Input()).PostCount.Should().Be(2);
-        _assembler.Assemble(Input(postCount: 5)).PostCount.Should().Be(5);
     }
 
     [Fact]

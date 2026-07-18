@@ -5,7 +5,7 @@
 > (`PULSE_LIVE_FOUNDRY=1 dotnet test --filter MeasuredCostLatencyTests`).
 
 **Run:** 2026-07-18 · endpoint `aif-pulse-uat` (Foundry, keyless) · api-version `2025-04-01-preview` ·
-5 iterations/tier · 4-persona bursts · `AzureCliCredential` (tbull@dynamiscobra.com).
+5 iterations/tier · 4-persona bursts · `AzureCliCredential` (an az login holding the Cognitive Services OpenAI User role).
 
 | Tier | Model | p50 | p95 | in tok | out tok | cached | guard | diversity | ~$/burst | ~$/exercise-hr* |
 |---|---|---|---|---|---|---|---|---|---|---|

@@ -105,7 +105,4 @@ public sealed record PromptAssemblyInput
     public IReadOnlyList<WorldPost> WorldPosts { get; init; } = [];
 
     public required GenerationTier Tier { get; init; }
-
-    /// <summary>How many posts to generate. Defaults to one per persona when unset (0).</summary>
-    public int PostCount { get; init; }
 }
