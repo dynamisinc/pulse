@@ -7,8 +7,8 @@
  * COBRA, no themed MUI, FontAwesome icons only.
  *
  * The X-familiarity target (D1): a text area, a photo-attach affordance, an
- * optional location tag, an X-style DEPLETING RING character counter, and a
- * Post button. All state + the publish machine live in `useComposePost()`
+ * X-style DEPLETING RING character counter, and a Post button. All state + the
+ * publish machine live in `useComposePost()`
  * (`../hooks/useComposePost`) — this component is the view.
  *
  * D1-R5 counter: the ring depletes as characters are used; the numeric count
@@ -31,9 +31,9 @@
  * "Posting as" org chip, quote-post, and rich-media states are out of scope.
  */
 
-import { useId, useRef, type ChangeEvent, type FormEvent } from 'react'
+import { useRef, type ChangeEvent, type FormEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faImage, faLocationDot, faXmark } from '@fortawesome/free-solid-svg-icons'
+import { faImage, faXmark } from '@fortawesome/free-solid-svg-icons'
 import { useComposePost, type UseComposePostOptions } from '../hooks/useComposePost'
 import styles from './Composer.module.css'
 
@@ -57,7 +57,6 @@ export function Composer({ charLimit, onPosted }: ComposerProps) {
     ...(onPosted !== undefined ? { onPosted } : {}),
   })
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const locationId = useId()
 
   // COR-015 / D1-011: the composer is absent in a read-only session, never a
   // disabled form — a screen reader must not announce controls that can't be used.
@@ -109,19 +108,6 @@ export function Composer({ charLimit, onPosted }: ComposerProps) {
       {compose.mediaError !== undefined && (
         <p className={styles.error} role="alert">{compose.mediaError}</p>
       )}
-
-      <div className={styles.locationRow}>
-        <FontAwesomeIcon icon={faLocationDot} aria-hidden="true" className={styles.locationIcon} />
-        <input
-          id={locationId}
-          className={styles.locationInput}
-          type="text"
-          value={compose.location}
-          onChange={e => compose.setLocation(e.target.value)}
-          placeholder="Add location"
-          aria-label="Location"
-        />
-      </div>
 
       <div className={styles.toolbar}>
         <div className={styles.tools}>

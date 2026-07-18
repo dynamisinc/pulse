@@ -19,9 +19,11 @@
  * VARIANT (COR-015 / D1-011): the shell mount variant is read via
  * `useShellContext()`; each card gets `variant = affordancesAvailable(variant)
  * ? 'full' : 'readOnly'`, so an observer session's cards render the counts as
- * inert text with the interactive controls ABSENT (not disabled). The composer
- * and thread-open wiring are NOT built here (out of scope) — `onOpen` is left
- * unset; the integration step wires it.
+ * inert text with the interactive controls ABSENT (not disabled). Thread
+ * navigation is threaded in by the shell channel (`SocialChannel`) via the
+ * optional `onOpenThread` prop — passed to each card's body-open AND reply
+ * affordance (SOC-011); an observer can still open a thread (a read action),
+ * only the write affordances are absent.
  *
  * SCENARIO TIME (COR-053): this page renders no timestamp itself — each
  * `<PostCard>` self-renders its own relative "2h ago" via `useScenarioTime()`,
@@ -68,6 +70,10 @@ type CardVariant = 'full' | 'readOnly'
 interface FeedRowProps {
   post: PostView
   variant: CardVariant
+  /** Opens this post's flattened thread; supplied by the shell channel. Stable
+   * identity (a `useCallback`), so the memoized row still skips re-render under
+   * burst (NFR-002/SOC-071) even though a function prop is threaded through. */
+  onOpenThread?: (id: string) => void
 }
 
 /**
@@ -76,16 +82,24 @@ interface FeedRowProps {
  * Props are primitives + a referentially-stable `PostView` (see `useFeed`), so
  * the default shallow comparison is correct here.
  */
-const FeedRow = memo(function FeedRow({ post, variant }: FeedRowProps) {
+const FeedRow = memo(function FeedRow({ post, variant, onOpenThread }: FeedRowProps) {
   return (
     <li className={styles.row}>
-      {/* onOpen deliberately unset — thread navigation is out of scope (integration wires it). */}
-      <PostCard post={post} variant={variant} />
+      {/* Tapping the post body OR its reply affordance opens the flattened
+          thread (SOC-011); the shell channel supplies onOpenThread. */}
+      <PostCard post={post} variant={variant} onOpen={onOpenThread} onReply={onOpenThread} />
     </li>
   )
 })
 
-export function Feed() {
+export interface FeedProps {
+  /** Opens a post's flattened thread; the shell channel (`SocialChannel`)
+   * supplies it. Omitted in isolation — the feed still renders, just without
+   * thread navigation. */
+  readonly onOpenThread?: (id: string) => void
+}
+
+export function Feed({ onOpenThread }: FeedProps = {}) {
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
   const { variant } = useShellContext()
@@ -121,7 +135,12 @@ export function Feed() {
           announce subsequent changes). */}
       <ul className={styles.list} aria-live="polite">
         {posts.map(post => (
-          <FeedRow key={post.id} post={post} variant={cardVariant} />
+          <FeedRow
+            key={post.id}
+            post={post}
+            variant={cardVariant}
+            onOpenThread={onOpenThread}
+          />
         ))}
       </ul>
 

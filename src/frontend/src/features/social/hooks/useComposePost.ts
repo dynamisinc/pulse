@@ -6,7 +6,7 @@
  * (Pulse Social skin) — pure hook + pure helpers, no UI, no COBRA.
  *
  * WHAT THIS OWNS
- *  - Draft state: `text`, `location`, and validated `media` (0–4 images).
+ *  - Draft state: `text` and validated `media` (0–4 images).
  *  - Derived counter state for the D1-R5 depleting ring: `length`,
  *    `remaining`, `showCount` (count text appears at ≤20 remaining),
  *    `isLow` (amber near the limit), `isOverLimit` (publish blocked).
@@ -48,6 +48,7 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { scenarioNow } from '@/core/clock'
 import { createPost, type Post, type PostMedia } from '@/features/social'
+import { sanitizeText } from '../services/sanitize'
 
 /** Default per-exercise character limit (SOC-001); overridable via a prop. */
 export const DEFAULT_CHAR_LIMIT = 280
@@ -129,8 +130,10 @@ export function validateImageFiles(files: File[], existingCount: number): ImageV
     if (file.size > MAX_IMAGE_BYTES) {
       return { media: [], error: `${file.name} is too large (max 5 MB).` }
     }
-    // Interim alt = filename until a real alt-authoring affordance lands.
-    accepted.push({ kind: 'image', alt: file.name })
+    // Interim alt = filename, sanitized — NFR-004 keeps ALL free text on the
+    // publish path cleaned (defense-in-depth; alt already renders inert) until
+    // a real alt-authoring affordance lands.
+    accepted.push({ kind: 'image', alt: sanitizeText(file.name) })
   }
   if (existingCount + accepted.length > MAX_IMAGES) {
     return { media: [], error: `You can attach up to ${MAX_IMAGES} images.` }
@@ -151,8 +154,6 @@ export interface UseComposePostOptions {
 export interface UseComposePostResult {
   readonly text: string
   readonly setText: (value: string) => void
-  readonly location: string
-  readonly setLocation: (value: string) => void
   readonly media: readonly PostMedia[]
   /** Validates + appends picked image files; sets `mediaError` on rejection. */
   readonly attachImages: (files: File[]) => void
@@ -192,7 +193,6 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
   const session = useSession()
 
   const [text, setText] = useState('')
-  const [location, setLocation] = useState('')
   const [media, setMedia] = useState<PostMedia[]>([])
   const [mediaError, setMediaError] = useState<string | undefined>(undefined)
 
@@ -246,7 +246,6 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     })
 
     setText('')
-    setLocation('')
     setMedia([])
     setMediaError(undefined)
     onPosted?.(post)
@@ -265,8 +264,6 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
   return {
     text,
     setText,
-    location,
-    setLocation,
     media,
     attachImages,
     removeMedia,

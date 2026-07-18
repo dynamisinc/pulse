@@ -1,0 +1,76 @@
+/*
+ * features/social/SocialChannel.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the Social channel shell (the composer + feed + thread
+ * composition, `SocialChannel.tsx`). CSS Module — locally scoped, no global
+ * leak, NO COBRA/MUI dependency (participant world).
+ *
+ * Theming mirrors `social.module.css` / `Composer.module.css`: a token root on
+ * `.channel` reading the shared per-exercise accent `var(--pulse-ac)` (COR-030)
+ * with the Cadence-navy fallback, plus the two dark-mode triggers
+ * (`prefers-color-scheme` OR a host `[data-theme="dark"]`). Left-anchored
+ * single column (D1-013), width-matched to `<PostCard>`/`<Composer>` (600px).
+ */
+
+.channel {
+  /* Light-mode palette (default) — mirrors the sibling social modules. */
+  --sc-line: #e5e8ea;
+  --sc-ink: #0e1518;
+  --sc-ink-muted: #61707a;
+  --sc-hover: rgba(14, 21, 24, .045);
+  --sc-accent: var(--pulse-ac, #1e3a5f);
+
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 600px;
+  margin: 0; /* left-anchored (D1-013) */
+  color: var(--sc-ink);
+  font-family: 'Figtree', system-ui, sans-serif;
+  text-align: left;
+}
+
+/* OS-level dark mode (no host override). */
+@media (prefers-color-scheme: dark) {
+  .channel {
+    --sc-line: #233039;
+    --sc-ink: #e9eef1;
+    --sc-ink-muted: #8aa0ac;
+    --sc-hover: rgba(255, 255, 255, .05);
+  }
+}
+
+/* Host-forced dark mode — `data-theme="dark"` on the root OR an ancestor. */
+:global([data-theme='dark']) .channel,
+.channel:global([data-theme='dark']) {
+  --sc-line: #233039;
+  --sc-ink: #e9eef1;
+  --sc-ink-muted: #8aa0ac;
+  --sc-hover: rgba(255, 255, 255, .05);
+}
+
+/* "Back to feed" — a plain in-fiction text button (never a COBRA control). */
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--sc-accent);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.back:hover,
+.back:focus-visible {
+  background: var(--sc-hover);
+}
+
+.backIcon {
+  width: 14px;
+  height: 14px;
+}
