@@ -28,6 +28,33 @@ public sealed record StorylineStateChanged(
     StorylineCause Cause,
     int ScenarioMinute) : IStorylineEvent;
 
+/// <summary>What moved a storyline's intensity/sentiment on a measured tick (§6.2), for the telemetry cause.</summary>
+public enum MeasureCause
+{
+    /// <summary>Natural rise/decay along the escalation curve + scenario time.</summary>
+    Curve,
+
+    /// <summary>Amplification velocity + audience magnitude bent intensity up (ADP-004 / SOC-054).</summary>
+    Amplification,
+
+    /// <summary>A matched official response bent intensity/sentiment down (ADP-002).</summary>
+    MatchedResponse,
+}
+
+/// <summary>
+/// An intensity/sentiment measurement on a storyline (maps to <c>engine.measured</c>, §11). Carries the
+/// delta, the resulting values, and the cause so E10 can render the arc with dial-input overlays
+/// (EVL-014) and separate designed pressure from participant-driven pressure. Staff/evaluator-facing
+/// (XC-002).
+/// </summary>
+public sealed record StorylineMeasured(
+    Guid StorylineId,
+    int IntensityDelta,
+    int Intensity,
+    double Sentiment,
+    MeasureCause Cause,
+    int ScenarioMinute) : IStorylineEvent;
+
 /// <summary>The kind of controller steering action recorded on a storyline (XC-004 steering-action log).</summary>
 public enum SteeringActionKind
 {

@@ -22,6 +22,9 @@ public sealed class Storyline
     internal const double MinSentiment = -1.0;
     internal const double MaxSentiment = 1.0;
 
+    // Fraction of intensity a matched official response sheds immediately (§6.2), before ongoing decay.
+    private const double ResponseBendDownFactor = 0.25;
+
     private Storyline()
     {
     }
@@ -183,8 +186,25 @@ public sealed class Storyline
         return new StorylineStateChanged(Id, from, to, cause ?? StorylineStateMachine.DefaultCause(trigger), scenarioMinute);
     }
 
-    /// <summary>Arms the storyline: <see cref="StorylinePhase.Dormant"/> → <see cref="StorylinePhase.Seeded"/>.</summary>
-    public StorylineStateChanged Seed(int scenarioMinute) => Transition(StorylineTrigger.Seed, scenarioMinute);
+    /// <summary>
+    /// Arms the storyline (<see cref="StorylinePhase.Dormant"/> → <see cref="StorylinePhase.Seeded"/>) and
+    /// anchors its tick baseline at <paramref name="scenarioMinute"/> so silence accrues from the seed
+    /// moment, not from minute 0 (a storyline seeded mid-exercise doesn't inherit a huge false silence).
+    /// </summary>
+    public StorylineStateChanged Seed(int scenarioMinute)
+    {
+        var evt = Transition(StorylineTrigger.Seed, scenarioMinute);
+        LastTickScenarioMinute = scenarioMinute;
+        return evt;
+    }
+
+    /// <summary>
+    /// Opens the storyline early on observed participant/world activity
+    /// (<see cref="StorylinePhase.Seeded"/> → <see cref="StorylinePhase.Escalating"/>, §6.1) — the
+    /// observe stage fires this when activity beats the silence window.
+    /// </summary>
+    public StorylineStateChanged DetectActivity(int scenarioMinute) =>
+        Transition(StorylineTrigger.ActivityDetected, scenarioMinute);
 
     /// <summary>
     /// Reassigns the escalation curve live (ADP-010, story 03) and returns the steering action to log
@@ -205,6 +225,118 @@ public sealed class Storyline
         return new SteeringActionLogged(Id, SteeringActionKind.CurveChanged, $"{from} → {CurveName}", scenarioMinute);
     }
 
+    /// <summary>
+    /// Advances the storyline one tick in scenario time (COR-050/051): accrues silence, opens the window /
+    /// tops out / begins decay / resolves as the phase warrants, moves intensity along the curve (bent up
+    /// by amplification), recomputes sentiment, and returns the events raised (mapped to
+    /// <c>storyline.state_changed</c> + <c>engine.measured</c>). Elapsed time is measured from the scenario
+    /// clock, so a freeze (elapsed 0) holds everything and a time-jump advances proportionally, possibly
+    /// blowing several transitions in one tick.
+    /// </summary>
+    public StorylineTickResult Tick(IScenarioClock clock, StorylineTickSignals? signals = null)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        signals ??= StorylineTickSignals.None;
+
+        var minute = clock.CurrentScenarioMinute;
+        var elapsed = Math.Max(0, minute - LastTickScenarioMinute);
+        var intensityBefore = Intensity;
+        var events = new List<IStorylineEvent>();
+
+        // Silence accrues in scenario time (drives the brief's minutes-since-response + window opening).
+        MinutesSinceLastOfficialResponse += elapsed;
+
+        // Time-driven phase moves that precede the intensity update.
+        if (Phase == StorylinePhase.Seeded && MinutesSinceLastOfficialResponse >= ResponseWindowMin)
+        {
+            events.Add(Transition(StorylineTrigger.WindowOpened, minute));
+        }
+        else if (Phase == StorylinePhase.Addressed && elapsed > 0)
+        {
+            events.Add(Transition(StorylineTrigger.DecayBegan, minute));
+        }
+
+        var curve = EscalationCurves.CurveFor(CurveName);
+        SetIntensity(IntensityModel.Tick(Intensity, elapsed, Phase, curve, signals.Amplification));
+
+        // Intensity-driven phase moves that follow the update.
+        if (Phase == StorylinePhase.Escalating && Intensity >= curve.Ceiling)
+        {
+            events.Add(Transition(StorylineTrigger.LeftUnaddressed, minute));
+        }
+        else if (Phase == StorylinePhase.Decaying && Intensity <= curve.Floor)
+        {
+            events.Add(Transition(StorylineTrigger.ReachedFloor, minute));
+        }
+
+        SetSentiment(SentimentModel.Compute(Phase, Intensity, signals.Reactions, signals.ContentSentiment));
+
+        var cause = MeasureCauseFor(elapsed, signals.Amplification);
+        events.Add(new StorylineMeasured(Id, Intensity - intensityBefore, Intensity, Sentiment, cause, minute));
+
+        LastTickScenarioMinute = minute;
+
+        return new StorylineTickResult
+        {
+            ScenarioMinute = minute,
+            ElapsedScenarioMinutes = elapsed,
+            IntensityBefore = intensityBefore,
+            IntensityAfter = Intensity,
+            Sentiment = Sentiment,
+            Events = events,
+        };
+    }
+
+    /// <summary>
+    /// Records a qualifying official response (ADP-002): resets the silence clock, moves the storyline to
+    /// <see cref="StorylinePhase.Addressed"/> if its phase allows, and bends intensity down immediately
+    /// (§6.2). An off-platform marker (CTL-026) satisfies the expectation identically but records the
+    /// distinct <see cref="StorylineCause.OffPlatformMarker"/> cause. Returns the events raised. (The
+    /// miss-safe handling of an <i>unmatched</i> official post — ADP-002a — belongs to response-reaction,
+    /// not here.)
+    /// </summary>
+    public IReadOnlyList<IStorylineEvent> RecordMatchedResponse(int scenarioMinute, bool offPlatform = false)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(scenarioMinute);
+
+        var events = new List<IStorylineEvent>();
+        var intensityBefore = Intensity;
+
+        MinutesSinceLastOfficialResponse = 0;
+
+        var cause = offPlatform ? StorylineCause.OffPlatformMarker : StorylineCause.MatchedResponse;
+        if (StorylineStateMachine.CanTransition(Phase, StorylineTrigger.OfficialResponseMatched))
+        {
+            events.Add(Transition(StorylineTrigger.OfficialResponseMatched, scenarioMinute, cause));
+        }
+
+        // Immediate bend-down toward — never below — the curve floor, and never upward.
+        var curve = EscalationCurves.CurveFor(CurveName);
+        var bentDown = (int)Math.Round(Intensity * (1.0 - ResponseBendDownFactor));
+        SetIntensity(Math.Min(Intensity, Math.Max(curve.Floor, bentDown)));
+
+        SetSentiment(SentimentModel.Compute(Phase, Intensity));
+        events.Add(new StorylineMeasured(
+            Id, Intensity - intensityBefore, Intensity, Sentiment, MeasureCause.MatchedResponse, scenarioMinute));
+
+        return events;
+    }
+
     /// <summary>Scenario minutes the storyline has spent in its current phase, given the current scenario minute.</summary>
     public int MinutesInPhase(int currentScenarioMinute) => Math.Max(0, currentScenarioMinute - PhaseEnteredScenarioMinute);
+
+    private MeasureCause MeasureCauseFor(int elapsed, IAmplificationSignal? amplification)
+    {
+        if (elapsed == 0)
+        {
+            return MeasureCause.Curve;
+        }
+
+        var unaddressed = Phase is StorylinePhase.Escalating or StorylinePhase.Peak;
+        return unaddressed && amplification is { Velocity: > 0 } ? MeasureCause.Amplification : MeasureCause.Curve;
+    }
+
+    private void SetIntensity(int value) => Intensity = Math.Clamp(value, MinIntensity, MaxIntensity);
+
+    private void SetSentiment(double value) => Sentiment = Math.Clamp(value, MinSentiment, MaxSentiment);
 }
