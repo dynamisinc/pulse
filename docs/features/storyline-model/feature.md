@@ -22,11 +22,11 @@ escalation, intensity/sentiment, rate governance). D5-014/2.2 (CTL-022 actual+ta
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Storyline object + state machine | ADP-010 (state) | Not Started | #152 |
-| 02 | Intensity + sentiment tracking | ADP-012 | Not Started | #153 |
-| 03 | Escalation curves (Slow burn / Standard / Flash panic) | ADP-010 | Not Started | #154 |
-| 04 | Rate caps + quiet floors | ADP-011 | Not Started | #155 |
-| 05 | Dial-target follow loop | CTL-022 | Not Started | #156 |
+| 01 | Storyline object + state machine | ADP-010 (state) | Done | #152 |
+| 02 | Intensity + sentiment tracking | ADP-012 | Done | #153 |
+| 03 | Escalation curves (Slow burn / Standard / Flash panic) | ADP-010 | Done | #154 |
+| 04 | Rate caps + quiet floors | ADP-011 | Done | #155 |
+| 05 | Dial-target follow loop | CTL-022 | Done | #156 |
 
 ## Dependencies
 E1 exercise clock (COR-050/051, scenario time); persona-management (participatingPersonas, SOC-054);
