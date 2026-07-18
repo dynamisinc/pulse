@@ -41,6 +41,12 @@ param deployCommunication bool = false
 @description('Deploy the Azure AI Foundry (Cognitive Services) account + E8 model deployments. Off until the engine needs a live endpoint.')
 param deployAi bool = false
 
+@description('Also deploy the Claude-on-Foundry (serverless MaaS) model tiers alongside the Azure OpenAI ones (for the E8 provider comparison). Requires deployAi and a Claude-eligible subscription.')
+param deployClaude bool = false
+
+@description('Legal organization name for the Anthropic Marketplace attestation (modelProviderData), used only when deployClaude = true.')
+param claudeOrganizationName string = 'Dynamis'
+
 // ============================================================================
 // SQL Parameters (only consumed when deployDatabase = true)
 // ============================================================================
@@ -292,6 +298,8 @@ module ai 'modules/ai.bicep' = if (deployAi) {
     location: location
     aiFoundryName: aiFoundryName
     backendPrincipalId: ''
+    deployClaude: deployClaude
+    claudeOrganizationName: claudeOrganizationName
     tags: tags
   }
 }
@@ -332,3 +340,6 @@ output emailSenderAddress string = deployCommunication ? communication.outputs.m
 output aiFoundryEndpoint string = deployAi ? ai.outputs.endpoint! : ''
 #disable-next-line BCP318
 output aiFoundryAccountName string = deployAi ? ai.outputs.name! : ''
+// Base host for the Claude/Anthropic passthrough (Generation:Endpoint for the ClaudeFoundry provider).
+#disable-next-line BCP318
+output aiClaudeEndpoint string = (deployAi && deployClaude) ? ai.outputs.claudeEndpoint! : ''

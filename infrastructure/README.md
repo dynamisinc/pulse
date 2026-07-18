@@ -126,12 +126,50 @@ does (e.g. for the story-06 measured cost/latency pass).
     --scope $(az cognitiveservices account show -n aif-pulse-uat -g rg-pulse-uat-centralus --query id -o tsv)
   ```
 
+### Claude on Foundry (serverless MaaS) — the E8 provider comparison
+
+`deployClaude = true` (with `deployAi = true`) also deploys the **Claude tiers** onto the *same*
+`aif-pulse-uat` account — `claude-sonnet-5` (Standard) and `claude-haiku-4-5` (Ambient) — as
+`Microsoft.CognitiveServices/accounts/deployments` with `model.format: 'Anthropic'`. They're served on
+the **native Anthropic Messages API passthrough** (`https://aif-pulse-uat.services.ai.azure.com/anthropic/v1/messages`),
+not the `/openai` surface. Keyless Entra, token scope **`https://ai.azure.com/.default`** (distinct from
+the OpenAI surface's `cognitiveservices.azure.com`), data-plane role **`Cognitive Services User`**.
+
+- **Marketplace.** Claude requires a Claude-eligible subscription and an accepted Azure Marketplace
+  offer for Anthropic; the RP auto-accepts it from the `modelProviderData` attestation
+  (`claudeOrganizationName` / `claudeCountryCode` / `claudeIndustry`) — no manual click-through. Set the
+  org name to the real entity using the model.
+- **Deploy (direct module, same pattern as the OpenAI pass — avoids churning the live SWA):**
+  ```bash
+  az deployment group create \
+    --resource-group rg-pulse-uat-centralus \
+    --template-file infrastructure/modules/ai.bicep \
+    --parameters location=centralus aiFoundryName=aif-pulse-uat \
+                 deployClaude=true claudeOrganizationName=Dynamis \
+                 claudeCountryCode=US claudeIndustry=government \
+    --name "pulse-uat-claude-foundry"
+  ```
+  (Idempotent: the account + OpenAI deployments already exist; this only adds the two Claude deployments.
+  Model deployments can keep provisioning after the ARM operation returns — re-check state before rerun.)
+- **Access for the measured comparison:** grant your az-login identity the Claude data-plane role once
+  (you already hold `Cognitive Services OpenAI User` for the OpenAI surface):
+  ```bash
+  az role assignment create --role "Cognitive Services User" \
+    --assignee <your-object-id> \
+    --scope $(az cognitiveservices account show -n aif-pulse-uat -g rg-pulse-uat-centralus --query id -o tsv)
+  ```
+- **Then run the side-by-side pass** (opt-in, both providers, same bursts):
+  ```bash
+  PULSE_LIVE_FOUNDRY=1 dotnet test --filter ProviderComparisonTests
+  ```
+  See [`docs/features/engine-generation-infra/PROVIDER-COMPARISON.md`](../docs/features/engine-generation-infra/PROVIDER-COMPARISON.md).
+
 ## Follow-ups
 
 - Wire the backend host's managed identity into `ai.bicep` (`backendPrincipalId`) once `deployBackend`
-  is on, so the app gets `Cognitive Services OpenAI User` automatically (needs `webapp.bicep` /
-  `functionapp.bicep` to output `principalId`). Add Claude-on-Foundry (serverless MaaS) deployments
-  when that access is approved.
+  is on, so the app gets `Cognitive Services OpenAI User` (and, when `deployClaude` is set,
+  `Cognitive Services User`) automatically (needs `webapp.bicep` / `functionapp.bicep` to output
+  `principalId`).
 - Set the `AZURE_STATIC_WEB_APPS_API_TOKEN` repo secret so `deploy-frontend.yml` can publish.
 - Decide the wildcard DNS + TLS strategy for per-exercise subdomains (COR-008) before
   backend hosting is finalized, then set `frontendUrl` in `uat.bicepparam`.
