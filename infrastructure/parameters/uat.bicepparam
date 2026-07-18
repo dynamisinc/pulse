@@ -27,6 +27,12 @@ param deployCommunication = false
 // backend). Needed for the story-06 measured cost/latency pass. See infrastructure/README.md.
 param deployAi = false
 
+// Flip to true (with deployAi) to also deploy the Claude-on-Foundry tiers for the E8 provider
+// comparison. Requires a Claude-eligible subscription; the Anthropic Marketplace offer is auto-accepted
+// from the attestation below. Set the org name to the real entity using the model.
+param deployClaude = false
+param claudeOrganizationName = 'Dynamis'
+
 // --- Static Web App (the one resource deployed today) -------------------------
 param repositoryUrl = 'https://github.com/dynamisinc/pulse'
 // Custom domain bound to stapp-pulse-uat. Requires the GoDaddy CNAME
