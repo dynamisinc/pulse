@@ -26,11 +26,11 @@ envelope), §3.4 (four-layer isolation boundary), §3.5 (degraded mode). Prototy
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
 | 01 | Provider abstraction + tenant-bounded governance | NFR-005 / ADP-025 | In Progress | #142 |
-| 02 | Prompt assembly & context assembly | ADP-020 (context) | Not Started | #143 |
-| 03 | Untrusted-data isolation boundary | ADP-024 | Not Started | #144 |
+| 02 | Prompt assembly & context assembly | ADP-020 (context) | In Progress | #143 |
+| 03 | Untrusted-data isolation boundary | ADP-024 | In Progress | #144 |
 | 04 | Model tiering & prompt caching | ADP-011 (cost) | Not Started | #145 |
 | 05 | Degraded-mode fallback (circuit breaker) | NFR-003 / ADP-042 | Not Started | #146 |
-| 06 | Cost/latency spike (measured) | open Q3 / NFR-002 | Not Started | #147 |
+| 06 | Cost/latency spike (measured) | open Q3 / NFR-002 | In Progress | #147 |
 
 ## Dependencies
 E1 exercise-context/query-scoping layer; persona dossiers (persona-management COR-020); the E2

@@ -1,6 +1,6 @@
 # Story: Prompt assembly & context assembly
 
-**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress
 **Requirements:** ADP-020 (context)  ·  **Design decisions:** none  ·  **Issue:** #143
 
 ## Context

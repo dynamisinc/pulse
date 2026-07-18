@@ -20,6 +20,9 @@ public sealed class GenerationOptions
     /// <summary>Tenant-bounded endpoint URI. Unused by the Fake provider.</summary>
     public string? Endpoint { get; set; }
 
+    /// <summary>Provider API version (Azure OpenAI data plane). gpt-5-tier models require a recent version.</summary>
+    public string ApiVersion { get; set; } = "2025-04-01-preview";
+
     /// <summary>The governance posture the deployment attests to (NFR-005 / ADP-025). Gated at startup.</summary>
     public GovernanceOptions Governance { get; set; } = new();
 
@@ -53,8 +56,11 @@ public sealed class GovernanceOptions
 /// <summary>A concrete model/deployment bound to a <see cref="GenerationTier"/>.</summary>
 public sealed class TierModelOptions
 {
-    /// <summary>Provider model id or Azure deployment name (e.g. "gpt-4.1", "claude-sonnet-5").</summary>
+    /// <summary>Underlying model id, for telemetry/cost (e.g. "gpt-5.4", "claude-sonnet-5").</summary>
     public string Model { get; set; } = string.Empty;
+
+    /// <summary>Azure deployment name used in the endpoint path (e.g. "standard", "ambient").</summary>
+    public string Deployment { get; set; } = string.Empty;
 
     /// <summary>Whether this model can run under zero-data-retention. Checked when the deployment targets ZDR.</summary>
     public bool ZdrCapable { get; set; } = true;

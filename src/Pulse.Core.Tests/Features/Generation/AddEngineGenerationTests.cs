@@ -61,18 +61,43 @@ public class AddEngineGenerationTests
     }
 
     [Fact]
-    public void RealProviderPassingGovernance_ThrowsNotYetWired()
+    public void AzureOpenAI_WithGoodGovernanceAndEndpoint_ResolvesAdapter()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddEngineGeneration(Config(
+            ("Generation:Provider", "AzureOpenAI"),
+            ("Generation:Endpoint", "https://aif-pulse-uat.cognitiveservices.azure.com/"),
+            ("Generation:Governance:TenantBounded", "true"),
+            ("Generation:Governance:NoTrainingAttested", "true"),
+            ("Generation:Governance:Residency", "centralus"),
+            ("Generation:Governance:Retention", "Retained"),
+            ("Generation:Tiers:Standard:Deployment", "standard"),
+            ("Generation:Tiers:Standard:Model", "gpt-5.4")));
+
+        // Act
+        using var provider = services.BuildServiceProvider();
+        var resolved = provider.GetRequiredService<IGenerationProvider>();
+
+        // Assert
+        resolved.Should().BeOfType<AzureOpenAIGenerationProvider>();
+        resolved.Name.Should().Be("AzureOpenAI");
+        resolved.Governance.TenantBounded.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ClaudeFoundry_WithGoodGovernance_ThrowsNotYetWired()
     {
         // Arrange
         var services = new ServiceCollection();
 
         // Act — governance is satisfied, so the failure is the documented "adapter not wired yet" seam state
         var act = () => services.AddEngineGeneration(Config(
-            ("Generation:Provider", "AzureOpenAI"),
-            ("Generation:Endpoint", "https://aif-pulse-uat.openai.azure.com/"),
+            ("Generation:Provider", "ClaudeFoundry"),
+            ("Generation:Endpoint", "https://example-foundry/"),
             ("Generation:Governance:TenantBounded", "true"),
             ("Generation:Governance:NoTrainingAttested", "true"),
-            ("Generation:Governance:Residency", "centralus"),
+            ("Generation:Governance:Residency", "eastus"),
             ("Generation:Governance:Retention", "Retained")));
 
         // Assert
