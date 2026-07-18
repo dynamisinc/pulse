@@ -184,6 +184,11 @@ function buildMockThreadResponse(focusedPostId: string): ThreadWireResponse {
 // Resolution (mirrors `personaService.resolvePersonas()`'s mock/live seam)
 // -----------------------------------------------------------------------------
 
+// Mirrors `feedService.isPost`: `useThread` narrows every post through
+// `toParticipantView` and then renders it in `<PostCard>`, which reads
+// `counts.{reply,repost,like}`. A malformed `/threads/:id` response missing
+// `counts` must fail closed HERE, not crash later at render — so validate the
+// engagement counts, not just the id/text/time fields.
 function isValidPost(value: unknown): value is Post {
   if (!value || typeof value !== 'object') return false
   const p = value as Post
@@ -191,7 +196,11 @@ function isValidPost(value: unknown): value is Post {
     typeof p.id === 'string' && p.id.length > 0 &&
     typeof p.authorPersonaId === 'string' && p.authorPersonaId.length > 0 &&
     typeof p.text === 'string' &&
-    typeof p.scenarioTime === 'string' && p.scenarioTime.length > 0
+    typeof p.scenarioTime === 'string' && p.scenarioTime.length > 0 &&
+    !!p.counts && typeof p.counts === 'object' &&
+    typeof p.counts.reply === 'number' &&
+    typeof p.counts.repost === 'number' &&
+    typeof p.counts.like === 'number'
   )
 }
 

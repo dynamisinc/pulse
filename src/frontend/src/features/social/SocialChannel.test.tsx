@@ -26,6 +26,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
 import { resetExerciseClock, setExerciseClock, type IExerciseClock } from '@/core/clock'
+import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import {
   ShellContextProvider,
   type ShellMountProps,
@@ -69,6 +70,7 @@ function renderChannel(variant: ShellVariant = 'full') {
 
 afterEach(() => {
   resetExerciseClock()
+  resetTelemetryBuffer()
 })
 
 describe('SocialChannel — Wave S2 integration wiring', () => {
@@ -106,15 +108,47 @@ describe('SocialChannel — Wave S2 integration wiring', () => {
     // Tap the first post's open target (wired to onOpenThread by the channel).
     await user.click(first(screen.getAllByTestId('post-open-target')))
 
-    // The thread view replaces the feed + composer; a Back control appears.
+    // The thread view appears; the feed + composer stay MOUNTED but HIDDEN
+    // (not removed) so their state survives the round-trip.
     expect(await screen.findByTestId('thread-view')).toBeInTheDocument()
-    expect(screen.queryByTestId('composer')).not.toBeInTheDocument()
+    expect(screen.getByTestId('composer')).not.toBeVisible()
+    expect(screen.getByTestId('social-feed-region')).not.toBeVisible()
+    // Focus moved INTO the thread (the feed below is display:none — NFR-001).
+    expect(screen.getByTestId('social-thread-region')).toHaveFocus()
 
     await user.click(screen.getByRole('button', { name: /back to feed/i }))
 
-    // Back to the feed — composer + cards restored, thread gone.
-    await waitFor(() => expect(screen.getByTestId('composer')).toBeInTheDocument())
+    // Back to the feed — composer + cards visible again, thread gone, focus
+    // returned to the feed region.
+    await waitFor(() => expect(screen.getByTestId('composer')).toBeVisible())
     expect(screen.queryByTestId('thread-view')).not.toBeInTheDocument()
+    expect(screen.getByTestId('social-feed-region')).toHaveFocus()
     expect(screen.getAllByTestId('post-card').length).toBeGreaterThan(0)
+  })
+
+  it('keeps the feed mounted across a thread visit — no duplicate feed-view telemetry on return', async () => {
+    const user = userEvent.setup()
+    resetTelemetryBuffer()
+    renderChannel('full')
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('post-card').length).toBeGreaterThan(0),
+    )
+
+    const feedViews = () =>
+      getEmittedTelemetryEvents().filter(
+        e => e.eventType === 'view' && e.target?.entityType === 'feed',
+      ).length
+    expect(feedViews()).toBe(1)
+
+    // Open a thread and come back.
+    await user.click(first(screen.getAllByTestId('post-open-target')))
+    await screen.findByTestId('thread-view')
+    await user.click(screen.getByRole('button', { name: /back to feed/i }))
+    await waitFor(() => expect(screen.getByTestId('composer')).toBeVisible())
+
+    // The feed was hidden, not remounted — so still exactly one feed-view event
+    // (the emit-once ref survived because <Feed> never unmounted).
+    expect(feedViews()).toBe(1)
   })
 })

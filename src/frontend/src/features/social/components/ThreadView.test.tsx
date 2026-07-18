@@ -17,6 +17,7 @@
  * (mirrors `PostCard.test.tsx`'s pattern) with a fixed exercise clock for
  * deterministic scenario-relative rendering.
  */
+import { StrictMode } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
@@ -138,6 +139,36 @@ describe('ThreadView — thread-open telemetry (XC-004)', () => {
     expect(event.timeZone).toBe('America/New_York')
     expect(event.scenarioTime).toBe('2033-09-04T14:15:00.000Z')
     expect(Number.isNaN(Date.parse(event.wallClockTime))).toBe(false)
+  })
+
+  it('emits a SINGLE "view" event under React StrictMode, and re-emits only when the focused post changes', async () => {
+    setExerciseClock(fixedClock(new Date('2033-09-04T14:15:00.000Z')))
+
+    const renderStrict = (focusedPostId: string) => (
+      <StrictMode>
+        <ExerciseContextProvider>
+          <SessionProvider>
+            <ThreadView focusedPostId={focusedPostId} />
+          </SessionProvider>
+        </ExerciseContextProvider>
+      </StrictMode>
+    )
+    const viewEvents = () => getEmittedTelemetryEvents().filter(e => e.eventType === 'view')
+
+    const { rerender } = render(renderStrict('post-seed-mvega-question'))
+    await waitFor(() => expect(screen.getByTestId('thread-view')).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('Loading thread…')).not.toBeInTheDocument())
+
+    // StrictMode double-invokes the effect; the emit-once ref guard keeps it to one.
+    expect(viewEvents()).toHaveLength(1)
+
+    // Re-centering on a different post emits exactly one more (keyed on focusedPostId).
+    rerender(renderStrict('post-seed-fw-advisory'))
+    await waitFor(() => expect(viewEvents()).toHaveLength(2))
+    expect(viewEvents().map(e => e.target?.entityId)).toEqual([
+      'post-seed-mvega-question',
+      'post-seed-fw-advisory',
+    ])
   })
 })
 

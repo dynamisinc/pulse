@@ -70,6 +70,31 @@ describe('resolveThread (validation boundary)', () => {
     vi.spyOn(api, 'get').mockRejectedValue(new Error('network down'))
     await expect(resolveThread('post-seed-mvega-question')).rejects.toThrow('network down')
   })
+
+  it('fails closed when a post is missing its engagement counts (would crash <PostCard> at render)', async () => {
+    // A body that passes the id/text/time checks but omits `counts` — which
+    // `toParticipantView` copies through and `<PostCard>` reads (counts.reply
+    // etc.). The tightened validator must reject it here rather than let it
+    // through to throw a TypeError deep in the render tree.
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        ancestors: [],
+        focused: {
+          id: 'post-no-counts',
+          exerciseId: 'ex-mock-0001',
+          authorPersonaId: 'persona-mvega_fh',
+          actingHumanId: 'human-participant-mvega',
+          text: 'no counts here',
+          // counts deliberately omitted
+          createdWallClock: '2026-07-01T00:00:00.000Z',
+          scenarioTime: '2033-09-04T14:05:00Z',
+          origin: 'participant',
+        },
+        replies: [],
+      },
+    } as Awaited<ReturnType<typeof api.get>>)
+    await expect(resolveThread('post-no-counts')).rejects.toThrow()
+  })
 })
 
 describe('useThread — narrows to participant-safe view models (XC-002)', () => {

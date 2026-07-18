@@ -45,7 +45,7 @@
  * thread's actual scope is server-side (`useThread`'s resolution seam).
  */
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import { scenarioNow } from '@/core/clock'
@@ -93,7 +93,15 @@ export function ThreadView({ focusedPostId }: ThreadViewProps) {
     [personas],
   )
 
+  // Emit-once-per-focused-post guard (mirrors Feed.tsx): the effect double-
+  // invokes under React StrictMode (dev) and re-runs whenever any dep changes,
+  // but a thread-open 'view' should fire ONCE per focused post — and again only
+  // when the caller re-centers this component on a DIFFERENT post without a
+  // remount. Keying the ref on focusedPostId gives exactly that.
+  const emittedForRef = useRef<string | undefined>(undefined)
   useEffect(() => {
+    if (emittedForRef.current === focusedPostId) return
+    emittedForRef.current = focusedPostId
     buildAndEmit({
       exerciseId,
       eventType: 'view',
@@ -104,8 +112,6 @@ export function ThreadView({ focusedPostId }: ThreadViewProps) {
       timeZone,
       target: { entityType: 'thread', entityId: focusedPostId },
     })
-    // Fires once per mounted thread, and again if the caller re-centers this
-    // same component on a different post without remounting it.
   }, [focusedPostId, exerciseId, timeZone, session.accountId])
 
   if (loading) {

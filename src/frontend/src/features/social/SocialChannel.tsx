@@ -37,7 +37,7 @@
  * plain semantic elements + a scoped CSS Module.
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons'
 import {
@@ -61,22 +61,52 @@ export function SocialChannel() {
   const openThread = useCallback((id: string) => setOpenThreadId(id), [])
   const closeThread = useCallback(() => setOpenThreadId(null), [])
 
-  if (openThreadId !== null) {
-    return (
-      <div className={styles.channel} data-testid="social-channel">
-        <button type="button" className={styles.back} onClick={closeThread}>
-          <FontAwesomeIcon icon={faArrowLeft} aria-hidden="true" className={styles.backIcon} />
-          Back to feed
-        </button>
-        <ThreadView focusedPostId={openThreadId} />
-      </div>
-    )
-  }
+  // Focus management for the in-channel view swap (NFR-001). The feed below is
+  // HIDDEN (not unmounted) while a thread is open, so leaving focus on the
+  // just-activated post would strand it on a `display:none` element — move
+  // focus INTO the thread on open, and back to the feed region on close. Each
+  // region is `tabIndex={-1}` so it is a programmatic-focus target without
+  // adding a keyboard tab stop.
+  const feedRegionRef = useRef<HTMLDivElement>(null)
+  const threadRegionRef = useRef<HTMLDivElement>(null)
+  const prevOpenRef = useRef<string | null>(null)
+  useEffect(() => {
+    const was = prevOpenRef.current
+    prevOpenRef.current = openThreadId
+    if (was === null && openThreadId !== null) {
+      threadRegionRef.current?.focus()
+    } else if (was !== null && openThreadId === null) {
+      feedRegionRef.current?.focus()
+    }
+  }, [openThreadId])
 
   return (
     <div className={styles.channel} data-testid="social-channel">
-      {canCompose && <Composer />}
-      <Feed onOpenThread={openThread} />
+      {/* The feed stays MOUNTED across a thread open/close — only hidden — so the
+          compose draft, scroll position, resolved feed data, and the feed's
+          emit-once view-telemetry guard all survive returning from a thread (no
+          refetch, no duplicate feed-view). `.region` sets no `display`, so the
+          `hidden` attribute's `display:none` is authoritative. */}
+      <div
+        ref={feedRegionRef}
+        tabIndex={-1}
+        hidden={openThreadId !== null}
+        className={styles.region}
+        data-testid="social-feed-region"
+      >
+        {canCompose && <Composer />}
+        <Feed onOpenThread={openThread} />
+      </div>
+
+      {openThreadId !== null && (
+        <div ref={threadRegionRef} tabIndex={-1} className={styles.region} data-testid="social-thread-region">
+          <button type="button" className={styles.back} onClick={closeThread}>
+            <FontAwesomeIcon icon={faArrowLeft} aria-hidden="true" className={styles.backIcon} />
+            Back to feed
+          </button>
+          <ThreadView focusedPostId={openThreadId} />
+        </div>
+      )}
     </div>
   )
 }

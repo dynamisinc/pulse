@@ -48,6 +48,17 @@
   --sc-hover: rgba(255, 255, 255, .05);
 }
 
+/*
+ * Feed / thread region wrapper. Sets NO `display` so the `hidden` attribute
+ * (the feed region carries it while a thread is open) keeps its `display:none`.
+ * `tabIndex={-1}` makes each region a programmatic focus target for the view
+ * swap; `outline:none` because that focus is programmatic, not a keyboard tab
+ * stop (the region is never in the tab order).
+ */
+.region {
+  outline: none;
+}
+
 /* "Back to feed" — a plain in-fiction text button (never a COBRA control). */
 .back {
   display: inline-flex;
