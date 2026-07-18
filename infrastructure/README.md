@@ -24,6 +24,7 @@ cost toggles (all `false` today in [`parameters/uat.bicepparam`](parameters/uat.
 | `deployDatabase` | Azure SQL server + database | `false` |
 | `deployBackend` | App Service / Function App (per `hostingModel`) | `false` |
 | `deployCommunication` | ACS + Email Service | `false` |
+| `deployAi` | Azure AI Foundry account + E8 model deployments (Standard/Ambient) | `false` |
 
 The Static Web App **always** deploys. To scale up when the backend lands: flip the
 relevant toggles to `true`, set the SQL secrets, and re-deploy — no template rewrite.
@@ -44,6 +45,7 @@ relevant toggles to `true`, set the SQL secrets, and re-deploy — no template r
 | Function App | `func-pulse-uat` |
 | Communication Svc | `acs-pulse-uat` |
 | Email Service | `email-pulse-uat` |
+| AI Foundry | `aif-pulse-uat` |
 
 ## Deploy (manual, from repo root)
 
@@ -105,8 +107,31 @@ az staticwebapp secrets list -n stapp-pulse-uat -g rg-pulse-uat-centralus \
   --query "properties.apiKey" -o tsv
 ```
 
+## Azure AI Foundry (E8 engine)
+
+`deployAi = true` stands up `aif-pulse-uat` (Cognitive Services, kind `AIServices`) with two Azure
+OpenAI model deployments — `standard` (storyline-critical) and `ambient` (bulk chatter). It is
+**independent of `deployBackend`**, so the engine's generation endpoint can exist before the app host
+does (e.g. for the story-06 measured cost/latency pass).
+
+- **No keys.** `disableLocalAuth: true` — the data plane accepts only Entra ID / managed-identity
+  tokens (`DefaultAzureCredential`). Nothing to leak; matches NFR-005.
+- **Residency.** Model deployments default to the `DataZoneStandard` SKU (US data zone). Override
+  `modelSkuName` per the customer's approved list.
+- **Access for the measured spike (story 06):** the module's role assignment is skipped until a backend
+  managed identity is supplied, so grant your own identity the data-plane role once after deploy:
+  ```bash
+  az role assignment create --role "Cognitive Services OpenAI User" \
+    --assignee <your-object-id> \
+    --scope $(az cognitiveservices account show -n aif-pulse-uat -g rg-pulse-uat-centralus --query id -o tsv)
+  ```
+
 ## Follow-ups
 
+- Wire the backend host's managed identity into `ai.bicep` (`backendPrincipalId`) once `deployBackend`
+  is on, so the app gets `Cognitive Services OpenAI User` automatically (needs `webapp.bicep` /
+  `functionapp.bicep` to output `principalId`). Add Claude-on-Foundry (serverless MaaS) deployments
+  when that access is approved.
 - Set the `AZURE_STATIC_WEB_APPS_API_TOKEN` repo secret so `deploy-frontend.yml` can publish.
 - Decide the wildcard DNS + TLS strategy for per-exercise subdomains (COR-008) before
   backend hosting is finalized, then set `frontendUrl` in `uat.bicepparam`.
