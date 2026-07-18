@@ -27,3 +27,24 @@ public sealed record StorylineStateChanged(
     StorylinePhase To,
     StorylineCause Cause,
     int ScenarioMinute) : IStorylineEvent;
+
+/// <summary>The kind of controller steering action recorded on a storyline (XC-004 steering-action log).</summary>
+public enum SteeringActionKind
+{
+    /// <summary>The escalation curve was reassigned live (ADP-010, story 03).</summary>
+    CurveChanged,
+
+    /// <summary>The dial target intensity was set, changed, or cleared (CTL-022, story 05).</summary>
+    TargetChanged,
+}
+
+/// <summary>
+/// A controller steering action against a storyline (curve reassignment, dial-target change) — logged as
+/// an XC-004 steering action so E10 can attribute a shift in the world to a controller decision rather
+/// than to participant-driven pressure (EVL-014, no sentiment circularity). Staff-only (XC-002).
+/// </summary>
+public sealed record SteeringActionLogged(
+    Guid StorylineId,
+    SteeringActionKind Kind,
+    string Detail,
+    int ScenarioMinute) : IStorylineEvent;

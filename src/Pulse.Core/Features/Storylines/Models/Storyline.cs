@@ -186,6 +186,25 @@ public sealed class Storyline
     /// <summary>Arms the storyline: <see cref="StorylinePhase.Dormant"/> → <see cref="StorylinePhase.Seeded"/>.</summary>
     public StorylineStateChanged Seed(int scenarioMinute) => Transition(StorylineTrigger.Seed, scenarioMinute);
 
+    /// <summary>
+    /// Reassigns the escalation curve live (ADP-010, story 03) and returns the steering action to log
+    /// (XC-004). Takes effect on the next tick — the curve is the natural trajectory the intensity update
+    /// (story 02) reads. No-ops silently only if the name is unchanged.
+    /// </summary>
+    public SteeringActionLogged AssignCurve(string curveName, int scenarioMinute)
+    {
+        if (string.IsNullOrWhiteSpace(curveName))
+        {
+            throw new ArgumentException("A storyline needs an escalation curve name (ADP-010).", nameof(curveName));
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegative(scenarioMinute);
+
+        var from = CurveName;
+        CurveName = curveName.Trim();
+        return new SteeringActionLogged(Id, SteeringActionKind.CurveChanged, $"{from} → {CurveName}", scenarioMinute);
+    }
+
     /// <summary>Scenario minutes the storyline has spent in its current phase, given the current scenario minute.</summary>
     public int MinutesInPhase(int currentScenarioMinute) => Math.Max(0, currentScenarioMinute - PhaseEnteredScenarioMinute);
 }
