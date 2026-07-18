@@ -104,16 +104,25 @@ delivered" notes for exactly what landed vs. what remains).
 > the `feature/social` umbrella — see `docs/features/posts/{02-post-rendering-identity,03-post-provenance}.md`
 > for the Tests sections and file lists.
 
-### Wave S2 — first surface ⬜ (the slice that proves social works)
-- `feeds-discovery/01-all-posts-feed` — global chronological feed; the **pilot login landing surface**, mounts in the participant shell.
-- `posts/01-post-composition` — the composer.
-- `threads-replies/01-flattened-thread-view` + `02-reply-counts-and-open`.
+### Wave S2 — first surface ✅ (the slice that proves social works)
+- ✅ `feeds-discovery/01-all-posts-feed` (#120) — global chronological feed; the **pilot landing surface**, mounted as the shell's default `social` channel at `/shell`.
+- ✅ `posts/01-post-composition` (#92) — the inline composer: text + image-attach + depleting ring counter + sanitized/instrumented publish (inline video, location, and #/@ persistence deferred to the posts/03 model — see the story's Deferred note).
+- ✅ `threads-replies/01-flattened-thread-view` (#98) + `02-reply-counts-and-open` (#99) — open a post into its flattened thread in-channel; reply-count + open affordance on `<PostCard>`.
 
-> **Pending Gate-2 findings for the feed builder (forward-looking, not yet actioned):**
-> (L-1) hoist a single `useScenarioTime` "now" snapshot at the feed level rather than re-deriving it
-> per-`PostCard`, for NFR-002 burst-scale legibility at 120 posts/min; (L-2) enforce `injectId` when
-> `origin === 'inject'` in `createPost` (narrow `CreatePostInput` so the two are coupled) so an
-> inject-originated post can't silently drop its XC-004 event.
+> **Delivered** — all four stories Gate-1 clean → merged into `feature/social`; the integrated umbrella is
+> Gate-2 clean (opus/xhigh), green (build:check + lint + **585 tests**), and browser-smoked at `/shell`.
+> `SocialChannel` composes composer + feed + in-channel thread nav; `App.tsx`'s participant route now wraps
+> `<SessionProvider>` and mounts it in place of `ParticipantChannelPlaceholder`. Umbrella→`main` PR open
+> (awaiting review/merge — Copilot review runs on the PR).
+>
+> **Tracked forward-looking findings (deferred, non-blocking):**
+> (S2-1) returning from a thread remounts `<Feed>` → a duplicate feed-view telemetry event + refetch + lost
+> scroll; fix with feed persistence (keep `<Feed>` mounted / overlay the thread) in `feeds-discovery/04`.
+> (S2-2) `resolveFeed`/`resolveThread` return the full `Post` over the (mock) transport, narrowed to the
+> participant view **client-side** — project provenance out server-side when the real `/feed` + `/threads`
+> endpoints land. (S2-3) read-only view events attribute `participantId`; prefer `sessionId` once `Session`
+> carries one (COR-015). (L-1) hoist one `useScenarioTime` "now" at the feed vs per-`PostCard` for burst
+> scale. (L-2) couple `injectId` to `origin === 'inject'` in `createPost` (posts/03).
 
 ### Wave S3+ ⬜ (fan out; all reuse PostCard)
 - `profiles-social-graph/01-profile-page` → `02-follow-unfollow` → `feeds-discovery/02-following-feed`

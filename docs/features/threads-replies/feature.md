@@ -19,8 +19,8 @@ the impersonation call-out beat (D1-008).
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Flattened thread view | SOC-010 / D1-006 | Not Started | #98 |
-| 02 | Reply counts & thread open | SOC-011 | Not Started | #99 |
+| 01 | Flattened thread view | SOC-010 / D1-006 | Complete | #98 |
+| 02 | Reply counts & thread open | SOC-011 | Complete | #99 |
 | 03 | Persona/participant replies (both directions) | SOC-012 | Not Started | #100 |
 
 ## Dependencies
