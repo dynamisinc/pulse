@@ -67,21 +67,18 @@ COBRA cobalt-blue button palette — because the mockup's layout was user-confir
 and swapping in the four fixed-color Cobra button variants would drift from that sign-off. If a
 future COBRA toggle/segmented-button primitive lands, these are the candidates to migrate.
 
-## Shell stub caveat
+## Shell hosting
 
-`components/shell/StaffShellStub.tsx` is **not** the real shared staff shell. The real D7 shell
-(header: brand lockup, exercise identity badge, scenario+wall clocks, state pill, classification
-tag, presence, Preview-as-participant; toolstrip: shell-global tools + surface tools) is owned by
-the `console-shell` feature and hasn't landed in `src/frontend` yet. `StaffShellStub` exists only
-so `/evaluator` has somewhere to render for standalone dev routing — it draws a minimal navy
-header and the 56px toolstrip dock geometry (which IS real: two-zone toolstrip, D7-011) so
-`evaluatorTools.ts` has somewhere to mount. Swap `StaffShellStub` for the real shell once it
-exists; `EvaluatorDashboardPage`'s own content shouldn't need to change.
+This surface is hosted inside the real shared staff shell (`@/features/staffShell`, D7):
+`App.tsx` mounts `StaffShellFrame` (the COBRA theme boundary) at `/evaluator`, with `StaffHeader`
+filling its header slot and `Toolstrip` filling its toolstrip slot; `EvaluatorDashboardPage` is
+the frame's `children` — see `App.tsx`'s `EvaluatorDashboardRoute`.
 
 `evaluatorTools.ts` registers Annotations (badged with the unpushed-to-Cadence count) and AAR
-export as toolstrip tools. **TODO(D7-011):** move these into the real shell's shared
-`registerTool()` registry (see `docs/features/console-shell/implementation.md`, story 01)
-instead of `EvaluatorToolstripButtons` wiring them locally.
+export into the shell's ONE shared toolstrip dock via `useRegisterSurfaceTool()`
+(`components/shell/EvaluatorToolstripRegistration.tsx`, D7-011) — this surface draws no toolstrip
+of its own. `components/shell/EvaluatorFlyoutLayer.tsx` renders whichever tool's flyout is active,
+keyed off the shell's shared `useToolstrip().activeToolId`.
 
 ## Data seam (mock today, real APIs later)
 
@@ -105,8 +102,9 @@ wall-clock).
 
 ## Routing
 
-Mounted at `/evaluator` in `src/frontend/src/App.tsx` (`StaffShellStub` → `EvaluatorDashboardPage`,
-which owns mounting its own `EvaluatorStateProvider`). Existing routes (home, 404) are untouched.
+Mounted at `/evaluator` in `src/frontend/src/App.tsx` (`ExerciseContextProvider` →
+`ToolstripProvider` → `StaffShellFrame` → `EvaluatorDashboardPage`, which owns mounting its own
+`EvaluatorStateProvider`). Existing routes (home, 404) are untouched.
 
 ## Known scaffold gaps
 

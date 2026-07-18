@@ -22,6 +22,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { CobraPrimaryButton } from '@/theme/styledComponents'
+import { useToolstrip } from '@/features/staffShell/toolRegistry'
 import { useEvaluatorState } from '../contexts/EvaluatorStateContext'
 import { useAarManifest } from '../hooks/useAarExport'
 import { useMetrics } from '../hooks/useMetrics'
@@ -35,7 +36,8 @@ const MANIFEST_ICONS: Record<string, IconDefinition> = {
 }
 
 export function AarExportPanel() {
-  const { toggleExportFlyout, exporting, exportPct, exportDone, startExport } = useEvaluatorState()
+  const { exporting, exportPct, exportDone, startExport } = useEvaluatorState()
+  const { toggleTool } = useToolstrip()
   const manifest = useAarManifest()
   const { provisionalCount } = useMetrics()
 
@@ -50,7 +52,7 @@ export function AarExportPanel() {
       sx={{
         position: 'absolute',
         top: 0,
-        right: 56,
+        right: 0,
         bottom: 0,
         width: 352,
         bgcolor: '#fff',
@@ -65,7 +67,7 @@ export function AarExportPanel() {
         <Typography sx={{ font: '800 11px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.14em', color: '#4a4f55' }}>
           AAR EXPORT
         </Typography>
-        <IconButton size="small" onClick={toggleExportFlyout} sx={{ color: '#848482' }}>
+        <IconButton size="small" onClick={() => toggleTool('aar-export')} sx={{ color: '#848482' }}>
           <FontAwesomeIcon icon={faXmark} size="sm" />
         </IconButton>
       </Stack>

@@ -11,6 +11,7 @@ import { Box, Stack, Typography, Chip, IconButton, Button } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faXmark, faCheck } from '@fortawesome/free-solid-svg-icons'
 import { CobraPrimaryButton } from '@/theme/styledComponents'
+import { useToolstrip } from '@/features/staffShell/toolRegistry'
 import { useEvaluatorState } from '../contexts/EvaluatorStateContext'
 import type { AnnotationCategory } from '../types'
 
@@ -21,9 +22,8 @@ const CATEGORY_COLORS: Record<AnnotationCategory, { bg: string; fg: string }> = 
 }
 
 export function AnnotationsFlyout() {
-  const {
-    annotations, toggleAnnotationsFlyout, pushAnnotation, pushAllAnnotations,
-  } = useEvaluatorState()
+  const { annotations, pushAnnotation, pushAllAnnotations } = useEvaluatorState()
+  const { toggleTool } = useToolstrip()
   const unpushed = annotations.filter(a => !a.pushed).length
 
   return (
@@ -31,7 +31,7 @@ export function AnnotationsFlyout() {
       sx={{
         position: 'absolute',
         top: 0,
-        right: 56,
+        right: 0,
         bottom: 0,
         width: 352,
         bgcolor: '#fff',
@@ -46,7 +46,7 @@ export function AnnotationsFlyout() {
         <Typography sx={{ font: '800 11px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.14em', color: '#4a4f55' }}>
           ANNOTATIONS
         </Typography>
-        <IconButton size="small" onClick={toggleAnnotationsFlyout} sx={{ color: '#848482' }}>
+        <IconButton size="small" onClick={() => toggleTool('annotations')} sx={{ color: '#848482' }}>
           <FontAwesomeIcon icon={faXmark} size="sm" />
         </IconButton>
       </Stack>

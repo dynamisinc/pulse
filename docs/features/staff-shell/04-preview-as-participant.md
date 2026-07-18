@@ -1,6 +1,6 @@
 # Story: Preview as participant (staged, read-only, scenario-moment picker)
 
-**Feature:** Staff shell frame  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Staff shell frame  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-041  ·  **Design decisions:** D7-007  ·  **Issue:** #195
 
 ## Context
@@ -11,16 +11,16 @@ drives the preview's alert state and content. It is the build/readiness check fo
 from inside the staff frame. The header button (story 01) toggles it on.
 
 ## Acceptance Criteria
-- [ ] Given a staff surface, when the controller presses **Preview as participant**, then the work
+- [x] Given a staff surface, when the controller presses **Preview as participant**, then the work
       area is replaced by the participant shell (`participant-shell`, `variant: preview`) in a stage,
       **read-only**, and the header button shows its on-state.
-- [ ] A **scenario-moment picker** offers mutually-exclusive chips **STARTEX / ADVISORY / BURST / NOW**;
+- [x] A **scenario-moment picker** offers mutually-exclusive chips **STARTEX / ADVISORY / BURST / NOW**;
       selecting one drives the preview's **alert state + content** to that moment.
-- [ ] The preview is unmistakably a preview **within the staff frame** (it does not navigate away, does
+- [x] The preview is unmistakably a preview **within the staff frame** (it does not navigate away, does
       not open a participant session); exiting returns the prior work area.
-- [ ] The preview is **read-only** — no affordance in it can post/act (it renders `participant-shell`'s
+- [x] The preview is **read-only** — no affordance in it can post/act (it renders `participant-shell`'s
       read-only/preview variant, story 06); it is exercise-scoped (XC-001) and staff-only (XC-002).
-- [ ] The control + picker are keyboard-operable and labelled; the moment chips announce selection
+- [x] The control + picker are keyboard-operable and labelled; the moment chips announce selection
       state (NFR-001).
 
 ## Out of Scope

@@ -1,6 +1,6 @@
 # Story: Staff header — lockup, identity badge, clocks, state pill, classification tag
 
-**Feature:** Staff shell frame  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Staff shell frame  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-063, COR-005  ·  **Design decisions:** D7-007, D7-010  ·  **Issue:** #192
 
 ## Context
@@ -12,17 +12,17 @@ conduct**, COR-005), the scenario+wall **clock pair**, the exercise **state pill
 header — there is **no** standalone `.exbar`; the FOUO marking survives as a compact mono tag.
 
 ## Acceptance Criteria
-- [ ] Given a staff surface, when it renders, then the shell header shows the brand lockup (PULSE /
+- [x] Given a staff surface, when it renders, then the shell header shows the brand lockup (PULSE /
       {surface name}), the identity badge, the scenario+wall clock pair, the state pill, the
       classification tag, presence, and the Preview-as button — in the navy Cadence chrome.
-- [ ] The **identity badge is static during conduct** (COR-005 / D5-012(g)): exercise name + role/cell,
+- [x] The **identity badge is static during conduct** (COR-005 / D5-012(g)): exercise name + role/cell,
       **no switcher** in a Live exercise; switching is pre-conduct (Build/Staged). *(This is the
       canonical home of the behavior `console-shell` story 03 specified as interim — R-006 resolved.)*
-- [ ] The **classification tag** `UNCLASSIFIED // FOUO` is a persistent compact mono tag in the header
+- [x] The **classification tag** `UNCLASSIFIED // FOUO` is a persistent compact mono tag in the header
       (D7-010), config-driven per deployment; there is **no** separate staff exercise bar.
-- [ ] The **state pill** shows conduct state with **text + dot, never color-only** (NFR-001); the
+- [x] The **state pill** shows conduct state with **text + dot, never color-only** (NFR-001); the
       **scenario clock** and **wall clock** are both shown (dual-time, Cadence convention).
-- [ ] The header is **staff-world** (navy `#1e3a5f` Cadence) — thumbnail-distinguishable from any
+- [x] The header is **staff-world** (navy `#1e3a5f` Cadence) — thumbnail-distinguishable from any
       participant view (XC-002, hard gate); fully keyboard-operable and screen-reader labelled (NFR-001).
 
 ## Out of Scope
