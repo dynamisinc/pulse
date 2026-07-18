@@ -111,14 +111,15 @@ interface SeverityMeta {
 
 /**
  * Exact palettes per story AC / SHELL-CONTRACT.md §2: info `#edf3f9/#3d6a96`,
- * advisory `#fff3dd/#b97a00` (D1/D2 exact). Emergency's chip is a translucent
+ * advisory `#fff3dd/#8a5a00` (D1/D2's `#b97a00` fg darkened to `#8a5a00` for WCAG
+ * AA — DECISIONS.md D7-012). Emergency's chip is a translucent
  * white pill (not its own hue) because the surrounding band is ALREADY solid
  * `#b3261e` — a same-color chip would be invisible against it; the band
  * background itself carries the "solid #b3261e, white text" requirement.
  */
 const SEVERITY_META: Record<AlertSeverity, SeverityMeta> = {
   info: { label: 'INFO', icon: faCircleInfo, chipBg: '#edf3f9', chipFg: '#3d6a96' },
-  advisory: { label: 'ADVISORY', icon: faTriangleExclamation, chipBg: '#fff3dd', chipFg: '#b97a00' },
+  advisory: { label: 'ADVISORY', icon: faTriangleExclamation, chipBg: '#fff3dd', chipFg: '#8a5a00' },
   emergency: { label: 'EMERGENCY', icon: faBullhorn, chipBg: 'rgba(255, 255, 255, 0.18)', chipFg: '#ffffff' },
 }
 
