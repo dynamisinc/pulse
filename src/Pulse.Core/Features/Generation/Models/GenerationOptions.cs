@@ -31,6 +31,9 @@ public sealed class GenerationOptions
     /// ("Standard", "Ambient"). Model tiering + selection is finalized in story 04.
     /// </summary>
     public Dictionary<string, TierModelOptions> Tiers { get; } = new();
+
+    /// <summary>Circuit-breaker / retry tuning for the provider (NFR-003 / ADP-042, story 05).</summary>
+    public ResilienceOptions Resilience { get; } = new();
 }
 
 /// <summary>
@@ -77,4 +80,29 @@ public enum RetentionPosture
 
     /// <summary>Data is retained per the documented retention window (still tenant-bounded, no-training).</summary>
     Retained,
+}
+
+/// <summary>
+/// Circuit-breaker / retry tuning for the generation provider (NFR-003 / ADP-042). Defaults are
+/// conservative placeholders; the story-06 measured p95 sets the real degraded-mode trip thresholds.
+/// </summary>
+public sealed class ResilienceOptions
+{
+    /// <summary>Retry attempts for transient failures (5xx / 408 / network), on top of the first try.</summary>
+    public int MaxRetries { get; set; } = 2;
+
+    /// <summary>Failure ratio within the sampling window that opens the circuit (0.0–1.0).</summary>
+    public double CircuitBreakerFailureRatio { get; set; } = 0.5;
+
+    /// <summary>Minimum calls in the sampling window before the breaker can open.</summary>
+    public int CircuitBreakerMinimumThroughput { get; set; } = 10;
+
+    /// <summary>Rolling window over which the failure ratio is evaluated.</summary>
+    public double CircuitBreakerSamplingSeconds { get; set; } = 30;
+
+    /// <summary>How long the circuit stays open (degraded) before probing recovery.</summary>
+    public double CircuitBreakerBreakSeconds { get; set; } = 15;
+
+    /// <summary>Per-attempt timeout. The load-bearing SLO (§4.3): a breach trips degraded mode.</summary>
+    public double AttemptTimeoutSeconds { get; set; } = 30;
 }

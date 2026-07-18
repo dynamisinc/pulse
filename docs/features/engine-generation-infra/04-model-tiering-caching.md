@@ -1,6 +1,6 @@
 # Story: Model tiering & prompt caching
 
-**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress
 **Requirements:** ADP-011 (cost side)  ·  **Design decisions:** none  ·  **Issue:** #145
 
 ## Context

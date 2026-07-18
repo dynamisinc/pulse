@@ -83,4 +83,15 @@ public class PromptAssemblerTests
 
         act.Should().Throw<ArgumentException>();
     }
+
+    [Fact]
+    public void Assemble_PutsStableCastBeforeVariableStoryline_ForCachePrefix()
+    {
+        var prompt = _assembler.Assemble(Input()).SystemPrompt;
+
+        // The bulky, stable cast block must precede the per-burst-variable storyline state so the
+        // cacheable prompt prefix stays byte-stable across a burst sequence (§4.2).
+        prompt.IndexOf("## Cast", StringComparison.Ordinal)
+            .Should().BeLessThan(prompt.IndexOf("## Storyline", StringComparison.Ordinal));
+    }
 }

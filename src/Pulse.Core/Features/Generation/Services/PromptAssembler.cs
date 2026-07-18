@@ -63,7 +63,20 @@ public sealed class PromptAssembler : IPromptAssembler
         sb.AppendLine("3. Stay in each persona's distinct voice. Different people write differently. Do not converge.");
         sb.AppendLine("4. Emit posts ONLY via the emit_posts tool. No preamble, no commentary.");
         sb.AppendLine();
-        sb.AppendLine("## Storyline you are advancing");
+        // Cache-prefix stability (§4.2): the bulky, stable context — the absolute rules (above) and the
+        // cast dossiers — comes FIRST so it forms the cacheable prompt prefix across a burst sequence.
+        // The small, per-burst-variable storyline state is injected AFTER it, right before the task, so a
+        // changing "minutes since response" never invalidates the cached prefix.
+        sb.Append("## Cast — write ONE post for each of these ")
+          .Append(postCount.ToString(CultureInfo.InvariantCulture))
+          .AppendLine(" personas, each in their own voice");
+        foreach (var persona in input.Personas)
+        {
+            AppendPersona(sb, persona);
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Storyline you are advancing (current state)");
         sb.Append("Title: ").AppendLine(s.Title);
         sb.Append("Public expectation (what officials have NOT yet addressed): ").AppendLine(s.Expectation);
         sb.Append("Minutes since any official response: ")
@@ -85,15 +98,6 @@ public sealed class PromptAssembler : IPromptAssembler
         sb.AppendLine(EscalationGuidance(s));
         sb.AppendLine();
 
-        sb.Append("## Cast — write ONE post for each of these ")
-          .Append(postCount.ToString(CultureInfo.InvariantCulture))
-          .AppendLine(" personas, each in their own voice");
-        foreach (var persona in input.Personas)
-        {
-            AppendPersona(sb, persona);
-        }
-
-        sb.AppendLine();
         sb.AppendLine("## Task");
         sb.Append("Generate exactly ").Append(postCount.ToString(CultureInfo.InvariantCulture))
           .AppendLine(" posts — one from each listed persona, in their distinct voices —");
