@@ -1,0 +1,91 @@
+/*
+ * features/social/pages/Feed.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the All Posts feed page (feature: feeds-discovery, story
+ * 01). CSS Module — every class is locally scoped; nothing leaks a global name
+ * and this file carries NO COBRA/MUI dependency (participant world, Pulse
+ * skin).
+ *
+ * Layout (D1-013): the feed is a LEFT-ANCHORED single column (~600px, matching
+ * the PostCard max-width) — anchored to the left edge of the content region,
+ * never centered. Mobile-first: below the column width it is simply full-bleed.
+ *
+ * Theming model mirrors `../theme/social.module.css` exactly, so the page frame
+ * and its loading/empty states track the post cards: `.feed` declares the
+ * light-mode palette as CSS custom properties, then rules read `var(--fd-*)`.
+ * Dark mode has the same TWO independent triggers as social.module.css — the OS
+ * `prefers-color-scheme: dark` media query AND a host-set `[data-theme="dark"]`
+ * on the root or any ancestor — neither dependent on a React theme provider.
+ * Values mirror `tokens.ts`'s LIGHT/DARK_PALETTE; keep both in sync by hand.
+ */
+
+.feed {
+  /* Light-mode palette (default) */
+  --fd-bg: #fff;
+  --fd-ink: #0e1518;
+  --fd-ink-muted: #61707a;
+  --fd-line: #e5e8ea;
+
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 600px;
+  /* Left-anchored (D1-013) — no auto side margins, sits at the content edge. */
+  margin: 0;
+  background: var(--fd-bg);
+  color: var(--fd-ink);
+  font-family: 'Figtree', system-ui, sans-serif;
+  text-align: left;
+}
+
+/* OS-level dark mode (no host override). */
+@media (prefers-color-scheme: dark) {
+  .feed {
+    --fd-bg: #0c1116;
+    --fd-ink: #e9eef1;
+    --fd-ink-muted: #8aa0ac;
+    --fd-line: #233039;
+  }
+}
+
+/* Host-forced dark mode — `data-theme="dark"` on the root OR an ancestor. */
+:global([data-theme='dark']) .feed,
+.feed:global([data-theme='dark']) {
+  --fd-bg: #0c1116;
+  --fd-ink: #e9eef1;
+  --fd-ink-muted: #8aa0ac;
+  --fd-line: #233039;
+}
+
+/* The post list. `aria-live="polite"` (set in the TSX) is the seam story 04's
+ * "new posts" pill announces into — no auto-scroll, no live-insert. */
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: block;
+}
+
+/* Calm, in-fiction loading/empty state — no exercise/admin language. */
+.state {
+  padding: 32px 16px;
+  color: var(--fd-ink-muted);
+  font-size: 15px;
+  text-align: center;
+}
+
+.srOnly {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}
