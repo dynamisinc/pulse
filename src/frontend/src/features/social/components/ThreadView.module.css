@@ -1,0 +1,109 @@
+/*
+ * features/social/components/ThreadView.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for `<ThreadView>` (feature: threads-replies, story 01;
+ * SOC-010, D1-006). A CSS Module — every class below is locally scoped by the
+ * build; nothing leaks a global class name, and this file carries NO COBRA/
+ * MUI dependency (participant world).
+ *
+ * D1-006 is explicit that the thread is a FLAT VERTICAL LIST — ancestors,
+ * then the focused post, then replies, one after another with no
+ * left-indentation at any point, no matter how deep the ancestor chain gets.
+ * `.thread` below is a single-column flex stack; nothing here ever indents a
+ * child by depth.
+ *
+ * The focused post is "enlarged" via `.focusedWrap`'s `transform: scale(...)`
+ * — a wrapper-only technique so `<PostCard>` (which sets fixed px font sizes
+ * internally) never needs to be forked to know about a "large" variant.
+ *
+ * Tokens mirror `theme/social.module.css`'s palette variables so this file's
+ * few own rules (status text, "Replying to" label, the interim tombstone)
+ * stay visually consistent with the rest of the Social skin, light + dark.
+ */
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+  max-width: 600px;
+  font-family: 'Figtree', system-ui, sans-serif;
+}
+
+.status {
+  margin: 16px;
+  color: #61707a;
+  font-size: 14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .status {
+    color: #8aa0ac;
+  }
+}
+
+:global([data-theme='dark']) .status {
+  color: #8aa0ac;
+}
+
+/* The focused post renders enlarged (D1-006) via a wrapper-only transform -
+ * `<PostCard>` itself is never forked/aware of a "large" variant. */
+.focusedWrap {
+  transform: scale(1.06);
+  transform-origin: top left;
+  margin: 4px 0 16px;
+}
+
+.replyGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.replyingTo {
+  margin: 8px 0 0 16px;
+  color: #61707a;
+  font-size: 13px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .replyingTo {
+    color: #8aa0ac;
+  }
+}
+
+:global([data-theme='dark']) .replyingTo {
+  color: #8aa0ac;
+}
+
+/* INTERIM in-thread tombstone (SOC-005/D1-009). The canonical `<Tombstone>`
+ * component (posts/05) does not exist yet - this is a minimal, plainly-styled
+ * stand-in, not a reusable component. Delete this rule + its usage in
+ * `ThreadView.tsx` once posts/05 lands and swap in the real component. */
+.tombstone {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 600px;
+  padding: 12px 16px;
+  border: 1px solid #e5e8ea;
+  border-bottom: 1px solid #e5e8ea;
+  border-radius: 12px;
+  background: #f3f5f6;
+  color: #61707a;
+  font-size: 14px;
+  font-style: italic;
+}
+
+@media (prefers-color-scheme: dark) {
+  .tombstone {
+    border-color: #233039;
+    background: #161e25;
+    color: #8aa0ac;
+  }
+}
+
+:global([data-theme='dark']) .tombstone {
+  border-color: #233039;
+  background: #161e25;
+  color: #8aa0ac;
+}
