@@ -20,6 +20,7 @@
 import { useEffect, useState } from 'react'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { PERSONA_TEMPLATES } from './personaTemplates'
 import { FAIRHAVEN_BASELINE } from './casts'
 import { seedCast } from './seedCast'
@@ -66,7 +67,7 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
 })
 
 /** Single env-guarded mock/live flip point (mirrors exerciseContextResolver). */
-const USE_MOCK_PERSONAS = import.meta.env.DEV
+const USE_MOCK_PERSONAS = USE_MOCK_DATA
 
 function isValidPersona(value: unknown): value is Persona {
   if (!value || typeof value !== 'object') return false

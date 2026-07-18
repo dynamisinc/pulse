@@ -64,6 +64,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { useExerciseContext } from '@/core/exerciseContext'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 
 /**
  * The minimal, channel-useful color set a brand skin themes against. Kept
@@ -162,7 +163,7 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
  * production build without a backend fails closed (the query errors rather
  * than serving a canned brand).
  */
-const USE_MOCK_BRAND_TOKENS = import.meta.env.DEV
+const USE_MOCK_BRAND_TOKENS = USE_MOCK_DATA
 
 async function fetchBrandTokens(): Promise<BrandTokens> {
   const response = await api.get<BrandTokensResponseBody>(

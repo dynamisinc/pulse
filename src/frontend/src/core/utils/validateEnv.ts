@@ -17,9 +17,10 @@ const ENV_VARS: EnvVar[] = [
     key: 'VITE_API_URL',
     required: false,
     description:
-      'Base URL of the Pulse backend API. Blank targets same-origin /api; ' +
-      'mock data is dev-server-only (run `npm run dev`), NOT enabled by a blank ' +
-      'value — a production build fails closed and renders blank without a backend.',
+      'Base URL of the Pulse backend API. Blank targets same-origin /api. Mock ' +
+      'data requires the dev server (`npm run dev`) or an explicit ' +
+      'VITE_USE_MOCK_DATA=true; a plain production build fails closed and renders ' +
+      'blank without a backend.',
   },
 ]
 

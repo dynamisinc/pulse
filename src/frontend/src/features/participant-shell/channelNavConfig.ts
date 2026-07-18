@@ -42,6 +42,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { useExerciseContext } from '@/core/exerciseContext'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 
 /**
  * The closed set of channel icon identifiers `ChannelNav.tsx` knows how to
@@ -174,7 +175,7 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
  * production build without a backend fails closed (the query errors rather
  * than serving a canned config).
  */
-const USE_MOCK_CHANNEL_NAV_CONFIG = import.meta.env.DEV
+const USE_MOCK_CHANNEL_NAV_CONFIG = USE_MOCK_DATA
 
 /**
  * The AC-canonical safe-default fallback `useChannelNav()` returns while the

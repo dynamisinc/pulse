@@ -65,8 +65,14 @@ jobs:
         run: npm run build
         working-directory: src/frontend
         env:
-          # Optional. Blank runs the SPA against mock data only (see validateEnv.ts).
+          # Optional. Blank → same-origin /api (see validateEnv.ts).
           VITE_API_URL: ${{ vars.VITE_API_URL || '' }}
+          # Opt-in mock data for a backend-less environment. Set the
+          # VITE_USE_MOCK_DATA variable to 'true' on the target GitHub
+          # Environment (uat) to render every surface from canned data. Unset →
+          # fail closed (never mock). NEVER set 'true' on a participant-facing
+          # production environment (COR-001). See core/config/mockData.ts.
+          VITE_USE_MOCK_DATA: ${{ vars.VITE_USE_MOCK_DATA || '' }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

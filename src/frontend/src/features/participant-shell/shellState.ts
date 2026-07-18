@@ -51,6 +51,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { useExerciseContext } from '@/core/exerciseContext'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import type { ShellVariant } from './mountContract'
 
 /** The mount-relevant slice of shell state this story resolves. */
@@ -115,7 +116,7 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
  * (CR-W1) — it never silently serves mock content, and a fetch failure never
  * grants `full` interaction).
  */
-const USE_MOCK_SHELL_STATE = import.meta.env.DEV
+const USE_MOCK_SHELL_STATE = USE_MOCK_DATA
 
 async function fetchShellState(): Promise<ShellStateResult> {
   const response = await api.get<ShellStateResponseBody>(

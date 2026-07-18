@@ -43,6 +43,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { useExerciseContext } from '@/core/exerciseContext'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import type { ChromeBannerConfig, ChromeConfig } from './mountContract'
 
 /** Wire shape of the (future) `/chrome-config` response body. */
@@ -129,7 +130,7 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
  * build without a backend fails closed (the query errors rather than
  * serving a canned config).
  */
-const USE_MOCK_CHROME_CONFIG = import.meta.env.DEV
+const USE_MOCK_CHROME_CONFIG = USE_MOCK_DATA
 
 async function fetchChromeConfig(): Promise<ChromeConfig> {
   const response = await api.get<ChromeConfigResponseBody>(
