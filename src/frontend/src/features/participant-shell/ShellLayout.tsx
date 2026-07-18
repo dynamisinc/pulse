@@ -24,9 +24,12 @@
  *  4. Renders `children` (the channel) inside a content-region boundary that:
  *     - imposes ZERO inherited styling (AC1, COR-060) — see "The reset
  *       boundary" below.
- *     - insets by the chrome CSS vars (`SHELL_CHROME_TOP_VAR` /
- *       `SHELL_CHROME_BOTTOM_VAR`), defaulting to `0px` so an unmounted /
- *       chrome-off shell (a legal state, D7-008) leaves NO gap.
+ *     - carries NO chrome inset of its own: the shell ROOT insets the whole
+ *       in-flow stack (alert bar + nav + content) below/above the two fixed
+ *       compliance banners by the chrome CSS vars (`SHELL_CHROME_TOP_VAR` /
+ *       `SHELL_CHROME_BOTTOM_VAR`, default `0px` so a chrome-off shell, a legal
+ *       state D7-008, leaves NO gap), so the nav and alert bar clear the
+ *       banners too — not just the content region.
  *     - sits at `SHELL_Z.content` and is its own CSS stacking context, so a
  *       channel's internal `z-index` values are scoped inside it and cannot
  *       escape above the nav / alert-bar / overlay / chrome layers (AC3).
@@ -45,11 +48,13 @@
  * Each layer is SELF-CONTAINED (reads its own exercise-scoped mock seam), so
  * composition is drop-in with zero prop-threading. The z-order contract
  * (SHELL-CONTRACT §3) is carried by each layer's `SHELL_Z` z-index, not by DOM
- * order. NOTE (Phase-1): precise vertical stacking of the nav/alert-bar under
- * the fixed chrome, and pinning the mobile tab bar to the bottom edge, are
- * refined when the first real channel (E2 social) mounts content to lay out
- * against — the Wave-2 deliverable is the assembly + z-order + the COBRA-free
- * subtree, and every layer's own ACs are met at the component level.
+ * order. NOTE (Phase-1): the shell root insets the whole in-flow stack
+ * below/above the fixed chrome (see `shellRootStyle`), so the nav and alert bar
+ * clear the banners. Pinning the mobile tab bar to the viewport bottom edge
+ * (vs. its current in-flow position after the content) is still refined when
+ * the first real channel (E2 social) mounts content to lay out against — the
+ * Wave-2 deliverable is the assembly + z-order + the COBRA-free subtree, and
+ * every layer's own ACs are met at the component level.
  *
  * ## The reset boundary
  * The boundary uses `all: initial` — deliberately NOT `all: revert`.
@@ -65,11 +70,12 @@
  * Because `initial` also resets `display` to its spec value (`inline`, not
  * the `<div>` UA default of `block`) and `position` to `static`, this
  * component re-asserts the handful of STRUCTURAL properties it intentionally
- * owns (`display`, `position`, `isolation`, `zIndex`, `boxSizing`, the
- * chrome-inset padding) immediately after the reset. Those are shell
- * layout/contract concerns (insets, stacking, z-order), not "styling" in the
- * COR-060 sense (typography/color/decoration) — which is left at the reset,
- * spec-initial state for the channel to define entirely on its own.
+ * owns (`display`, `position`, `isolation`, `zIndex`, `boxSizing`) immediately
+ * after the reset. Those are shell layout/contract concerns (stacking,
+ * z-order), not "styling" in the COR-060 sense (typography/color/decoration) —
+ * which is left at the reset, spec-initial state for the channel to define
+ * entirely on its own. (The compliance-chrome inset lives on the shell root,
+ * not here — see `shellRootStyle`.)
  *
  * World: participant. No COBRA, no MUI theme, no default MUI look (D0 §2).
  */
@@ -96,10 +102,12 @@ export interface ShellLayoutProps {
 }
 
 /**
- * The content-region reset + inset + stacking-context boundary. See the
- * module header ("The reset boundary") for why `all: initial` (not
- * `revert`) is the reset mechanism, and why the properties below are
- * re-asserted immediately after it.
+ * The content-region reset + stacking-context boundary. See the module header
+ * ("The reset boundary") for why `all: initial` (not `revert`) is the reset
+ * mechanism, and why the properties below are re-asserted immediately after it.
+ * The compliance-chrome inset lives on the shell ROOT (see `shellRootStyle`),
+ * not here — so the nav / alert bar clear the fixed banners too, and this
+ * boundary carries no chrome padding of its own.
  */
 const contentRegionStyle: CSSProperties = {
   all: 'initial',
@@ -108,8 +116,6 @@ const contentRegionStyle: CSSProperties = {
   isolation: 'isolate',
   zIndex: SHELL_Z.content,
   boxSizing: 'border-box',
-  paddingTop: `var(${SHELL_CHROME_TOP_VAR}, 0px)`,
-  paddingBottom: `var(${SHELL_CHROME_BOTTOM_VAR}, 0px)`,
 }
 
 /**
@@ -118,10 +124,20 @@ const contentRegionStyle: CSSProperties = {
  * `transform`/`filter`/`will-change`: any of those would make it a containing
  * block for `position: fixed`, which would break the chrome / alert-bar /
  * overlay layers' viewport anchoring.
+ *
+ * It owns the compliance-chrome inset for the whole in-flow stack: top/bottom
+ * padding = the `--pulse-chrome-*` vars `ComplianceChrome` publishes (default
+ * `0px` when chrome is off, so no reserved-gap artifact), so the alert bar,
+ * nav, and content region all clear the two fixed banners — not just the
+ * content region. `border-box` keeps that padding inside the `100vh`
+ * min-height, so it reserves banner clearance without adding scroll overflow.
  */
 const shellRootStyle: CSSProperties = {
   position: 'relative',
   minHeight: '100vh',
+  boxSizing: 'border-box',
+  paddingTop: `var(${SHELL_CHROME_TOP_VAR}, 0px)`,
+  paddingBottom: `var(${SHELL_CHROME_BOTTOM_VAR}, 0px)`,
 }
 
 export function ShellLayout({ children }: ShellLayoutProps) {
