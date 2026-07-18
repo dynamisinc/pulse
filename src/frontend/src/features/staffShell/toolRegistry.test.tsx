@@ -292,3 +292,47 @@ describe('toggleTool — one active tool at a time, across both zones', () => {
     expect(screen.getByTestId('active-tool-id')).toHaveTextContent('none')
   })
 })
+
+describe('cross-zone id uniqueness — dev invariant', () => {
+  const DUP_ID = 'dup-tool'
+
+  function CrossZoneCollision() {
+    // Same id in BOTH zones — a contract violation, since activeToolId is
+    // zone-agnostic (one flyout at a time across both zones).
+    useRegisterShellGlobalTool({ ...ADMIN_TOOL, id: DUP_ID })
+    useRegisterSurfaceTool({ ...STORIES_TOOL, id: DUP_ID })
+    return null
+  }
+
+  it('fails loud (console.error) when the same id is registered in both zones', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    render(
+      <ToolstripProvider>
+        <CrossZoneCollision />
+      </ToolstripProvider>,
+    )
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(DUP_ID))
+    errorSpy.mockRestore()
+  })
+
+  it('does not warn when ids are unique across zones', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    function DistinctIds() {
+      useRegisterShellGlobalTool(ADMIN_TOOL)
+      useRegisterSurfaceTool(STORIES_TOOL)
+      return null
+    }
+
+    render(
+      <ToolstripProvider>
+        <DistinctIds />
+      </ToolstripProvider>,
+    )
+
+    expect(errorSpy).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+})

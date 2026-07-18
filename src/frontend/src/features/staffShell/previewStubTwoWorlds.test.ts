@@ -39,6 +39,10 @@ function extractImportSpecifiers(source: string): string[] {
   const specifiers: string[] = []
   const patterns = [
     /import\s+(?:type\s+)?[^'"]*?from\s+['"]([^'"]+)['"]/g,
+    // Side-effect-only import (no `from`), e.g. `import '@mui/material'` or
+    // `import '../staffShellTokens'` — still a real import that would otherwise
+    // bypass this gate.
+    /import\s+['"]([^'"]+)['"]/g,
     /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
     /require\(\s*['"]([^'"]+)['"]\s*\)/g,
   ]

@@ -78,7 +78,14 @@ export type ToolZone = 'shellGlobal' | 'surface'
 
 /** A single toolstrip-dock tool, as registered by a shell-global capability or a surface. */
 export interface SurfaceTool {
-  /** Stable id, unique within its zone — registering the same id again upserts it. */
+  /**
+   * Stable id, unique across the WHOLE toolstrip — BOTH zones, not just this
+   * tool's own zone. `activeToolId` / `toggleTool(id)` / `isActive(id)` are
+   * zone-agnostic (one flyout open at a time across both zones), so two tools
+   * sharing an id across zones would collide — activating one would open/close
+   * the other. Registering the same id again upserts it in place. A dev-mode
+   * invariant in `ToolstripProvider` fails loud on a cross-zone id collision.
+   */
   id: string
   /** Short caption rendered under the icon (e.g. "STORIES"). */
   label: string
@@ -147,6 +154,26 @@ export function ToolstripProvider({ children }: ToolstripProviderProps) {
   const toggleTool = useCallback((id: string) => {
     setActiveToolId(current => (current === id ? null : id))
   }, [])
+
+  // Dev-mode invariant (fail-fast): tool ids must be unique across the WHOLE
+  // toolstrip, not per-zone — `activeToolId` is zone-agnostic (one flyout at a
+  // time across both zones), so the same id in both zones would make toggling
+  // one open/close the other. A loud console error surfaces the collision in
+  // dev without crashing prod (mirrors the codebase's swallow-don't-throw ethos).
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    const shellGlobalIds = new Set(toolsByZone.shellGlobal.map(tool => tool.id))
+    const collisions = toolsByZone.surface
+      .map(tool => tool.id)
+      .filter(id => shellGlobalIds.has(id))
+    if (collisions.length > 0) {
+      console.error(
+        `[toolstrip] tool id(s) [${collisions.join(', ')}] are registered in BOTH the ` +
+        'shell-global and surface zones. Tool ids must be unique across the whole toolstrip ' +
+        '(activeToolId/toggleTool/isActive are zone-agnostic) — the wrong flyout will open/close.',
+      )
+    }
+  }, [toolsByZone])
 
   const value = useMemo<ToolstripContextValue>(() => ({
     toolsByZone,

@@ -32,20 +32,29 @@ const FORBIDDEN_SPECIFIER_PATTERNS: RegExp[] = [
   /cobraTheme/i,
   /styledComponents/,
   /CobraStyles/,
-  /staffShell\/staffShellTokens/,
+  // Bare name (not path-scoped): also catches both the aliased
+  // (`@/features/staffShell/staffShellTokens`) and relative (`../staffShellTokens`)
+  // import forms — the path-scoped `staffShell/staffShellTokens` pattern missed
+  // the relative form. No participant module carries this name, so it can't
+  // over-match.
+  /staffShellTokens/,
 ]
 
 /**
- * Extract every static `import ... from '<specifier>'`, dynamic
- * `import('<specifier>')`, and `require('<specifier>')` module specifier from
- * a source file's text. Deliberately specifier-only (not a full parse) so it
- * never matches prose in comments that merely *mentions* "COBRA"/"theme"
- * (see e.g. `ShellLayout.tsx`'s own header comment) without an actual import.
+ * Extract every static `import ... from '<specifier>'`, SIDE-EFFECT-only
+ * `import '<specifier>'`, dynamic `import('<specifier>')`, and
+ * `require('<specifier>')` module specifier from a source file's text.
+ * Deliberately specifier-only (not a full parse) so it never matches prose in
+ * comments that merely *mentions* "COBRA"/"theme" (see e.g. `ShellLayout.tsx`'s
+ * own header comment) without an actual import.
  */
 function extractImportSpecifiers(source: string): string[] {
   const specifiers: string[] = []
   const patterns = [
     /import\s+(?:type\s+)?[^'"]*?from\s+['"]([^'"]+)['"]/g,
+    // Side-effect-only import (no `from`), e.g. `import '@/theme/cobraTheme'` —
+    // still a real module import that would otherwise bypass this gate.
+    /import\s+['"]([^'"]+)['"]/g,
     /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
     /require\(\s*['"]([^'"]+)['"]\s*\)/g,
   ]
