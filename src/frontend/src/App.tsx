@@ -15,17 +15,18 @@
  *   `<ThemeProvider theme={cobraTheme}>` (see that component's own header).
  *   `StaffHeader`/`Toolstrip` fill its slots; the shell-global participant-admin
  *   flyout and the read-only preview stage are wired via `EvaluatorStaffShell`.
- * - Participant surface (`/shell`) — the fiction: exercise scope > per-exercise
- *   `BrandThemeProvider` > `ShellLayout` (compliance chrome, alert bar, channel
- *   nav, overlay + the channel mount point). COBRA-free BY CONSTRUCTION — there
- *   is no `cobraTheme` above it, so the staff look cannot leak in by inheritance.
+ * - Participant surface (`/shell`) — the fiction: exercise scope > bound session
+ *   > per-exercise `BrandThemeProvider` > `ShellLayout` (compliance chrome, alert
+ *   bar, channel nav, overlay) > the `SocialChannel` (E2, the default channel).
+ *   COBRA-free BY CONSTRUCTION — there is no `cobraTheme` above it, so the staff
+ *   look cannot leak in by inheritance.
  * - Scaffold/utility pages (`/` home, `*` 404) — not participant fiction, but
  *   they use COBRA components, so each wraps itself in a local `CobraThemed`
  *   boundary. COBRA still only ever mounts where a route explicitly asks for it.
  *
- * The first real participant channel (E2 social) replaces
- * `ParticipantChannelPlaceholder`; additional participant brands mount their own
- * per-brand theme within their own route subtree — NEVER `cobraTheme`.
+ * The E2 social channel (`SocialChannel`) is mounted as the shell's default
+ * channel; additional participant brands mount their own per-brand theme within
+ * their own route subtree — NEVER `cobraTheme`.
  */
 import type { ReactNode } from 'react'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
@@ -42,6 +43,7 @@ import CobraStyles from './theme/CobraStyles'
 import { HomePage } from './features/home'
 import { EvaluatorDashboardPage } from './features/evaluator'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
+import { SessionProvider } from '@/core/auth'
 import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
 import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
@@ -51,7 +53,7 @@ import { PreviewProvider, usePreview } from '@/features/staffShell/previewContex
 import { PreviewAsParticipant } from '@/features/staffShell/components/PreviewAsParticipant'
 import { BrandThemeProvider } from './features/participant-shell/BrandThemeProvider'
 import { ShellLayout } from './features/participant-shell/ShellLayout'
-import { useShellContext } from './features/participant-shell/mountContract'
+import { SocialChannel } from './features/social'
 
 // Sensible React Query defaults. Real-time feeds will lean on a live transport
 // rather than refetch-on-focus (see D0 §4 - burst legibility, 120 posts/min).
@@ -95,44 +97,25 @@ const NotFoundPage = () => (
 )
 
 /**
- * Phase-1 placeholder channel. It exists only to prove the mount contract: it
- * reads `{variant, scenarioNow}` from `useShellContext()` — the whole of what a
- * channel receives from its container. The first real channel (E2 social)
- * replaces it. Participant-world styling only: plain React + system-ui, NO
- * COBRA / `@/theme/styledComponents` / default MUI look (D0 §2). Scenario time
- * is shown for the mount-contract demo; it is never labelled "scenario time"
- * inside real fiction (XC-002).
- */
-function ParticipantChannelPlaceholder() {
-  const { variant, scenarioNow } = useShellContext()
-  return (
-    <div style={{ padding: '24px', fontFamily: 'system-ui, -apple-system, sans-serif', color: '#1a1a1a' }}>
-      <h1 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 8px' }}>
-        Participant shell
-      </h1>
-      <p style={{ fontSize: '14px', color: '#4a4f55', margin: 0 }}>
-        A channel mounts here (E2 social is the first). Mount variant:{' '}
-        <code>{variant}</code>; scenario now: <code>{scenarioNow.toISOString()}</code>.
-      </p>
-    </div>
-  )
-}
-
-/**
  * The participant route subtree — COBRA-free BY CONSTRUCTION. There is no
  * `ThemeProvider(cobraTheme)` above it (the root is theme-free); the stack is
- * exercise scope (fail-closed) → per-exercise brand skin → the shell
- * (compliance chrome, alert bar, channel nav, overlay layer + the channel
- * mount point). This is the participant half of the D0 §2 two-worlds rule.
+ * exercise scope (fail-closed) → bound session (COR-012 — the identity the
+ * social channel composes/attributes posts and stamps view telemetry with) →
+ * per-exercise brand skin → the shell (compliance chrome, alert bar, channel
+ * nav, overlay layer) → the mounted channel. The E2 `SocialChannel` is the
+ * shell's default channel (Wave S2). This is the participant half of the
+ * D0 §2 two-worlds rule.
  */
 function ParticipantShellRoute() {
   return (
     <ExerciseContextProvider>
-      <BrandThemeProvider>
-        <ShellLayout>
-          <ParticipantChannelPlaceholder />
-        </ShellLayout>
-      </BrandThemeProvider>
+      <SessionProvider>
+        <BrandThemeProvider>
+          <ShellLayout>
+            <SocialChannel />
+          </ShellLayout>
+        </BrandThemeProvider>
+      </SessionProvider>
     </ExerciseContextProvider>
   )
 }

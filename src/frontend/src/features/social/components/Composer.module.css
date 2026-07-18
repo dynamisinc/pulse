@@ -1,0 +1,285 @@
+/*
+ * features/social/components/Composer.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the inline Pulse "Social" (D1) post composer (story 01).
+ * CSS Module — every class is locally scoped by the build; nothing leaks a
+ * global class, and this file carries NO COBRA/MUI dependency (participant
+ * world, never staff chrome).
+ *
+ * Theming model mirrors `../theme/social.module.css` exactly so the composer
+ * and the PostCard share one look:
+ *  - `.composer` is the token ROOT: it declares the light-mode palette as CSS
+ *    custom properties, and every rule reads `var(--pc-*)` rather than
+ *    hardcoding a color.
+ *  - Dark mode has the same TWO independent triggers as the card: the OS
+ *    `prefers-color-scheme: dark` media query AND a `[data-theme="dark"]`
+ *    attribute on the composer root OR any ancestor. Neither needs a React
+ *    provider — a plain CSS cascade.
+ *  - The accent reads the shared `--pulse-ac` per-exercise rebrand hook
+ *    (COR-030) with the Cadence-navy default fallback — never a bare accent.
+ *
+ * Keep the palette values in sync by hand with `tokens.ts` /
+ * `social.module.css` (a CSS Module cannot import a `.ts` file's values).
+ * The ring's amber/red state colors are LOCAL to the composer (the D1-R5
+ * counter states) and deliberately not part of the shared palette; the count
+ * NUMBER text carries the state too, so color is never the only cue (NFR-001).
+ */
+
+.composer {
+  /* Light-mode palette (default) */
+  --pc-bg: #fff;
+  --pc-panel: #f3f5f6;
+  --pc-line: #e5e8ea;
+  --pc-ink: #0e1518;
+  --pc-ink-muted: #61707a;
+  --pc-hover: rgba(14, 21, 24, .045);
+  --pc-accent: var(--pulse-ac, #1e3a5f);
+  /* Counter state colors (D1-R5). Chosen to read on both light and dark bg;
+   * always paired with the visible count number, never the sole signal. */
+  --pc-low: #b26a00;
+  --pc-over: #c02a2a;
+
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 600px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--pc-line);
+  background: var(--pc-bg);
+  color: var(--pc-ink);
+  font-family: 'Figtree', system-ui, sans-serif;
+  text-align: left;
+}
+
+/* OS-level dark mode (no host override). */
+@media (prefers-color-scheme: dark) {
+  .composer {
+    --pc-bg: #0c1116;
+    --pc-panel: #161e25;
+    --pc-line: #233039;
+    --pc-ink: #e9eef1;
+    --pc-ink-muted: #8aa0ac;
+    --pc-hover: rgba(255, 255, 255, .05);
+    --pc-low: #e0952b;
+    --pc-over: #f0666b;
+  }
+}
+
+/* Host-forced dark mode — `data-theme="dark"` on the root OR an ancestor. */
+:global([data-theme='dark']) .composer,
+.composer:global([data-theme='dark']) {
+  --pc-bg: #0c1116;
+  --pc-panel: #161e25;
+  --pc-line: #233039;
+  --pc-ink: #e9eef1;
+  --pc-ink-muted: #8aa0ac;
+  --pc-hover: rgba(255, 255, 255, .05);
+  --pc-low: #e0952b;
+  --pc-over: #f0666b;
+}
+
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 80px;
+  padding: 8px 0;
+  border: none;
+  background: none;
+  color: var(--pc-ink);
+  font-family: inherit;
+  font-size: 18px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.input::placeholder {
+  color: var(--pc-ink-muted);
+}
+
+.input:focus-visible {
+  outline: none;
+}
+
+.mediaList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mediaChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--pc-line);
+  border-radius: 999px;
+  background: var(--pc-panel);
+  color: var(--pc-ink);
+  font-size: 13px;
+}
+
+.mediaLabel {
+  overflow: hidden;
+  max-width: 220px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mediaRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--pc-ink-muted);
+  cursor: pointer;
+}
+
+.mediaRemove:hover,
+.mediaRemove:focus-visible {
+  background: var(--pc-hover);
+  color: var(--pc-ink);
+}
+
+.error {
+  margin: 0;
+  color: var(--pc-over);
+  font-size: 13px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pc-line);
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--pc-accent);
+  cursor: pointer;
+}
+
+.toolButton:hover,
+.toolButton:focus-visible {
+  background: var(--pc-hover);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+}
+
+.ringTrack {
+  stroke: var(--pc-line);
+}
+
+.ringProgress {
+  stroke: var(--pc-accent);
+  transition: stroke-dashoffset .12s linear;
+}
+
+.ringProgressLow {
+  stroke: var(--pc-low);
+}
+
+.ringProgressOver {
+  stroke: var(--pc-over);
+}
+
+.count {
+  position: absolute;
+  color: var(--pc-ink-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.countLow {
+  color: var(--pc-low);
+}
+
+.countOver {
+  color: var(--pc-over);
+  font-weight: 700;
+}
+
+.postButton {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 999px;
+  background: var(--pc-accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.postButton:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.notice {
+  margin: 0;
+  color: var(--pc-ink-muted);
+  font-size: 13px;
+}
+
+.srOnly {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 420px) {
+  .composer {
+    padding: 10px 12px;
+  }
+
+  .input {
+    font-size: 16px;
+  }
+}

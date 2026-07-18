@@ -28,7 +28,7 @@ presentation is **interim — superseded by the D7 shell** (R-006; story 06).
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Post composition (text/media/hashtags/mentions) | SOC-001 | Not Started | #92 |
+| 01 | Post composition (text/media/hashtags/mentions) | SOC-001 | Complete | #92 |
 | 02 | Post rendering & author identity (verified mark) | SOC-002 / D1-003 | Complete | #93 |
 | 03 | Post provenance & telemetry | SOC-003 (XC-004) | Complete | #94 |
 | 04 | Link previews for in-sim URLs | SOC-004 | Not Started | #95 |

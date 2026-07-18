@@ -306,6 +306,106 @@ describe('PostCard — keyboard operability (NFR-001)', () => {
   })
 })
 
+describe('PostCard — reply count & thread-open affordance (SOC-011, threads-replies story 02)', () => {
+  it('shows the reply count in the action row', async () => {
+    await renderWithExerciseContext(
+      <PostCard post={buildPost({ counts: { reply: 9, repost: 1, like: 2 } })} />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Reply, 9' })).toBeInTheDocument()
+  })
+
+  it('fires onReply with the post id when the reply button is clicked', async () => {
+    const onReply = vi.fn()
+    await renderWithExerciseContext(
+      <PostCard post={buildPost({ id: 'post-reply-1' })} onReply={onReply} />,
+    )
+
+    screen.getByRole('button', { name: /^reply/i }).click()
+
+    expect(onReply).toHaveBeenCalledWith('post-reply-1')
+  })
+
+  it('fires onReply on keyboard activation (Enter) of the reply button', async () => {
+    const onReply = vi.fn()
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const user = userEvent.setup()
+
+    await renderWithExerciseContext(
+      <PostCard post={buildPost({ id: 'post-reply-2' })} onReply={onReply} />,
+    )
+
+    const replyButton = screen.getByRole('button', { name: /^reply/i })
+    replyButton.focus()
+    await user.keyboard('{Enter}')
+
+    expect(onReply).toHaveBeenCalledWith('post-reply-2')
+  })
+
+  it('leaves the reply button a no-op when onReply is not supplied (unchanged default behavior)', async () => {
+    await renderWithExerciseContext(<PostCard post={buildPost()} />)
+
+    // Should not throw, and no onOpen leak either.
+    expect(() => screen.getByRole('button', { name: /^reply/i }).click()).not.toThrow()
+  })
+
+  it('does not wire onReply onto the inert readOnly counts', async () => {
+    const onReply = vi.fn()
+    await renderWithExerciseContext(
+      <PostCard post={buildPost()} variant="readOnly" onReply={onReply} />,
+    )
+
+    const actionsRegion = screen.getByTestId('post-actions')
+    expect(within(actionsRegion).queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it('fires onReply on keyboard activation (Space) of the reply button', async () => {
+    const onReply = vi.fn()
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const user = userEvent.setup()
+
+    await renderWithExerciseContext(
+      <PostCard post={buildPost({ id: 'post-reply-3' })} onReply={onReply} />,
+    )
+
+    const replyButton = screen.getByRole('button', { name: /^reply/i })
+    replyButton.focus()
+    await user.keyboard(' ')
+
+    expect(onReply).toHaveBeenCalledWith('post-reply-3')
+  })
+
+  it('fires onReply, not onOpen, when the reply button is clicked and both handlers are supplied', async () => {
+    const onOpen = vi.fn()
+    const onReply = vi.fn()
+    await renderWithExerciseContext(
+      <PostCard post={buildPost({ id: 'post-reply-4' })} onOpen={onOpen} onReply={onReply} />,
+    )
+
+    screen.getByRole('button', { name: /^reply/i }).click()
+
+    expect(onReply).toHaveBeenCalledWith('post-reply-4')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('reflects an updated reply count on rerender (real-time feed consistency)', async () => {
+    const { rerender } = await renderWithExerciseContext(
+      <PostCard post={buildPost({ id: 'post-live', counts: { reply: 2, repost: 0, like: 0 } })} />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Reply, 2' })).toBeInTheDocument()
+
+    rerender(
+      <ExerciseContextProvider>
+        <PostCard post={buildPost({ id: 'post-live', counts: { reply: 3, repost: 0, like: 0 } })} />
+      </ExerciseContextProvider>,
+    )
+
+    expect(screen.getByRole('button', { name: 'Reply, 3' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reply, 2' })).not.toBeInTheDocument()
+  })
+})
+
 describe('PostCard — media and link preview', () => {
   it('renders an accessible media placeholder for each attachment', async () => {
     await renderWithExerciseContext(

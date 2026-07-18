@@ -46,3 +46,23 @@ export {
   listPosts,
 } from './services/postService'
 export type { CreatePostInput } from './services/postService'
+
+// --- Wave S2: the first participant surface (feed + composer + threads) ---
+// feeds-discovery/01 — the All Posts feed (the default landing surface).
+export { Feed } from './pages/Feed'
+export type { FeedProps } from './pages/Feed'
+export { useFeed } from './hooks/useFeed'
+export type { UseFeedResult } from './hooks/useFeed'
+
+// posts/01 — the inline composer.
+export { Composer } from './components/Composer'
+export type { ComposerProps } from './components/Composer'
+export { useComposePost } from './hooks/useComposePost'
+
+// threads-replies/01 — the flattened thread view.
+export { ThreadView } from './components/ThreadView'
+export type { ThreadViewProps } from './components/ThreadView'
+export { useThread } from './hooks/useThread'
+
+// The channel composition mounted as the shell's default participant channel.
+export { SocialChannel } from './SocialChannel'
