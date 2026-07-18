@@ -45,6 +45,10 @@ public sealed class ProviderComparisonTests
         string Endpoint,
         TierSpec Standard,
         TierSpec Ambient,
+        // Token accounting differs by provider: Azure OpenAI's InputTokens INCLUDES cached tokens (cache
+        // read is a subset), while Anthropic's InputTokens EXCLUDES both cache-read and cache-creation
+        // tokens (reported separately). The cost math + the displayed total-input normalise for this.
+        bool InputExcludesCache,
         Func<HttpClient, GenerationOptions, IGenerationProvider> Factory);
 
     private static ProviderSpec[] Providers() =>
@@ -54,6 +58,7 @@ public sealed class ProviderComparisonTests
             OpenAIEndpoint,
             new TierSpec("standard", "gpt-5.4", new TierPricing(2.50, 15.00)),
             new TierSpec("ambient", "gpt-5.4-mini", new TierPricing(0.75, 4.50)),
+            InputExcludesCache: false,
             (http, opts) => new AzureOpenAIGenerationProvider(http, new AzureCliCredential(), Options.Create(opts), GenerationGovernance.InProcess)),
 
         new ProviderSpec(
@@ -61,8 +66,25 @@ public sealed class ProviderComparisonTests
             ClaudeEndpoint,
             new TierSpec("claude-sonnet-5", "claude-sonnet-5", new TierPricing(3.00, 15.00)),
             new TierSpec("claude-haiku-4-5", "claude-haiku-4-5", new TierPricing(1.00, 5.00)),
+            InputExcludesCache: true,
             (http, opts) => new ClaudeFoundryGenerationProvider(http, new AzureCliCredential(), Options.Create(opts), GenerationGovernance.InProcess)),
     ];
+
+    // Provider-aware cost model. Cache-read bills at 0.1x input; cache-creation (Anthropic only) at 1.25x.
+    // For OpenAI, InputTokens already includes cache reads, so fresh = In - CacheRead; for Anthropic,
+    // InputTokens is already fresh and the cache tokens are additive.
+    private static double CostPerBurst(TierRun run, TierPricing price, bool inputExcludesCache)
+    {
+        var freshInput = inputExcludesCache ? run.AvgIn : run.AvgIn - run.AvgCacheRead;
+        return ((freshInput * price.InPerMTok)
+            + (run.AvgCacheRead * price.InPerMTok * 0.1)
+            + (run.AvgCacheCreate * price.InPerMTok * 1.25)
+            + (run.AvgOut * price.OutPerMTok)) / 1_000_000.0;
+    }
+
+    // Total input tokens processed, normalised so the column is apples-to-apples across providers.
+    private static int TotalInput(TierRun run, bool inputExcludesCache) =>
+        inputExcludesCache ? run.AvgIn + run.AvgCacheRead + run.AvgCacheCreate : run.AvgIn;
 
     [Fact]
     public async Task Live_ComparesProvidersOnIdenticalBursts()
@@ -109,12 +131,12 @@ public sealed class ProviderComparisonTests
                 }
 
                 anyCompleted = true;
-                var p = tierSpec.Pricing;
-                var costPerBurst = (((run.AvgIn - run.AvgCached) * p.InPerMTok) + (run.AvgCached * p.InPerMTok * 0.1) + (run.AvgOut * p.OutPerMTok)) / 1_000_000.0;
+                var costPerBurst = CostPerBurst(run, tierSpec.Pricing, spec.InputExcludesCache);
                 var costPerHour = costPerBurst * (25.0 * 60.0 / 4.0); // ~375 four-post bursts / active-storyline hour
+                var totalIn = TotalInput(run, spec.InputExcludesCache);
 
                 _output.WriteLine(string.Create(CultureInfo.InvariantCulture,
-                    $"{spec.Name,-13} | {tier,-8} | {tierSpec.Model,-17} | {run.P50,6:0} | {run.P95,6:0} | {run.AvgIn,6} | {run.AvgOut,7} | {run.AvgCached,6} | {run.GuardOk}/{Iterations,-5} | {run.DivOk}/{Iterations,-3} | {run.AvgOverlap,4:0.00} | {costPerBurst,8:0.0000} | {costPerHour,0:0.00}"));
+                    $"{spec.Name,-13} | {tier,-8} | {tierSpec.Model,-17} | {run.P50,6:0} | {run.P95,6:0} | {totalIn,6} | {run.AvgOut,7} | {run.AvgCacheRead,6} | {run.GuardOk}/{Iterations,-5} | {run.DivOk}/{Iterations,-3} | {run.AvgOverlap,4:0.00} | {costPerBurst,8:0.0000} | {costPerHour,0:0.00}"));
 
                 if (tier == GenerationTier.Standard && run.FirstBurst.Count > 0)
                 {
@@ -140,7 +162,8 @@ public sealed class ProviderComparisonTests
         double P95,
         int AvgIn,
         int AvgOut,
-        int AvgCached,
+        int AvgCacheRead,
+        int AvgCacheCreate,
         int GuardOk,
         int DivOk,
         double AvgOverlap,
@@ -151,7 +174,8 @@ public sealed class ProviderComparisonTests
         var latencies = new List<double>();
         var inTokens = new List<int>();
         var outTokens = new List<int>();
-        var cached = new List<int>();
+        var cacheRead = new List<int>();
+        var cacheCreate = new List<int>();
         var overlaps = new List<double>();
         var guardOk = 0;
         var divOk = 0;
@@ -168,7 +192,8 @@ public sealed class ProviderComparisonTests
             latencies.Add(result.Latency.TotalMilliseconds);
             inTokens.Add(result.Usage.InputTokens);
             outTokens.Add(result.Usage.OutputTokens);
-            cached.Add(result.Usage.CacheReadInputTokens);
+            cacheRead.Add(result.Usage.CacheReadInputTokens);
+            cacheCreate.Add(result.Usage.CacheCreationInputTokens);
             overlaps.Add(VoiceMetrics.MaxPairwiseOverlap(result.Posts).MaxOverlap);
             if (ContentGuard.InspectBurst(result.Posts).Clean) { guardOk++; }
             if (VoiceMetrics.Evaluate(result.Posts).Passed) { divOk++; }
@@ -180,7 +205,8 @@ public sealed class ProviderComparisonTests
             Percentile(latencies, 0.95),
             (int)inTokens.Average(),
             (int)outTokens.Average(),
-            (int)cached.Average(),
+            (int)cacheRead.Average(),
+            (int)cacheCreate.Average(),
             guardOk,
             divOk,
             overlaps.Average(),

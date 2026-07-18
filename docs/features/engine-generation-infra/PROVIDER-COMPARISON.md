@@ -76,6 +76,9 @@ token profile (a proxy — the harness measures Claude's real profile; tokenizer
 \* Nominal active-storyline hour ≈ 25 generated posts/min ≈ 375 four-post bursts. Un-cached ceiling
 (neither provider's prompt cache engages at ~992 tokens — Azure's threshold is ~1024, Claude Sonnet 5's
 is ~2048 — both activate in production once real COR-020 dossiers push the stable prefix past threshold).
+The harness applies **provider-aware cost math** so the cache re-measurement stays apples-to-apples: Azure
+OpenAI counts cache reads *inside* `input_tokens` (cache read billed 0.1×), whereas Anthropic reports
+`cache_read` (0.1×) and `cache_creation` (1.25×) *separately from* `input_tokens`.
 
 **Read:** at Global list rates, **Standard is a near-tie** (gpt-5.4 ~$2.09 vs Sonnet 5 ~$2.27/hr post-intro;
 Sonnet 5 is actually *cheaper* during the intro window). **Ambient favors Azure** (gpt-5.4-mini ~$0.61 vs
