@@ -103,6 +103,10 @@ public sealed class ResilienceOptions
     /// <summary>How long the circuit stays open (degraded) before probing recovery.</summary>
     public double CircuitBreakerBreakSeconds { get; set; } = 15;
 
-    /// <summary>Per-attempt timeout. The load-bearing SLO (§4.3): a breach trips degraded mode.</summary>
-    public double AttemptTimeoutSeconds { get; set; } = 30;
+    /// <summary>
+    /// Per-attempt timeout — the load-bearing SLO (§4.3 / §3.5): a call slower than this is cancelled and
+    /// counts as a breaker failure, so sustained slowness trips degraded mode. Set to the design's ~10s
+    /// breach point, comfortably above the measured p95 (~2.7s Standard, story 06).
+    /// </summary>
+    public double AttemptTimeoutSeconds { get; set; } = 10;
 }

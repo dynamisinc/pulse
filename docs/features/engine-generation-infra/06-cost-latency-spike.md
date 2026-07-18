@@ -1,7 +1,8 @@
 # Story: Cost/latency spike (measured)
 
-**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress
 **Requirements:** epic open question 3, NFR-002  ·  **Design decisions:** none  ·  **Issue:** #147
+**Measured results:** [`MEASURED-RESULTS.md`](MEASURED-RESULTS.md) (live pass 2026-07-18)
 
 ## Context
 A first-class story (the epic flags the cost/latency envelope as needing a spike before story-level
