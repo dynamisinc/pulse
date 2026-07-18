@@ -107,6 +107,9 @@ describe('Composer — telemetry + scenario time (XC-004, COR-053)', () => {
     const event = posts[0]
     expect(event?.channel).toBe('social')
     expect(event?.origin).toBe('participant')
+    // XC-004: a post's actor.kind is always 'persona' — the human who typed it
+    // is carried separately (actingHumanId), never as the actor kind itself.
+    expect(event?.actor.kind).toBe('persona')
     // The Wave-1 mock session posts as Dana Reyes.
     expect(event?.actor.personaId).toBe('persona-dreyes_fh')
     // Scenario time only — the injected clock instant, never wall-clock.
@@ -160,7 +163,7 @@ describe('Composer — depleting ring counter (D1-R5)', () => {
 })
 
 describe('Composer — content security (NFR-004)', () => {
-  it('sanitizes a stored-XSS payload on the publish path — the new post carries no <script>', async () => {
+  it('sanitizes a stored-XSS <script> payload on the publish path — the new post carries no <script>', async () => {
     const onPosted = vi.fn<(post: Post) => void>()
     const user = userEvent.setup()
     await renderComposer(<Composer onPosted={onPosted} />)
@@ -174,6 +177,31 @@ describe('Composer — content security (NFR-004)', () => {
     const post = onPosted.mock.calls[0]?.[0]
     expect(post?.text).not.toMatch(/<script/i)
     expect(post?.text).toContain('safe text')
+    // The payload was never executed: pasting/publishing it never runs script,
+    // it only ever flows as inert draft text through the sanitizer.
+    expect((window as unknown as { __composerXss?: boolean }).__composerXss).toBeUndefined()
+  })
+
+  it('sanitizes a stored-XSS <img onerror> payload on the publish path — no script/img element is ever produced', async () => {
+    const onPosted = vi.fn<(post: Post) => void>()
+    const user = userEvent.setup()
+    await renderComposer(<Composer onPosted={onPosted} />)
+
+    const scriptCountBefore = document.querySelectorAll('script').length
+
+    const input = screen.getByLabelText('Post text')
+    input.focus()
+    await user.paste('<img src=x onerror="window.__composerImgXss = true">also unsafe')
+    await user.click(screen.getByRole('button', { name: 'Post' }))
+
+    const post = onPosted.mock.calls[0]?.[0]
+    expect(post?.text).not.toMatch(/onerror/i)
+    expect(post?.text).not.toMatch(/<img/i)
+    expect(post?.text).toContain('also unsafe')
+    // The onerror handler never ran, and the composer created no new <script>
+    // element from the payload either.
+    expect((window as unknown as { __composerImgXss?: boolean }).__composerImgXss).toBeUndefined()
+    expect(document.querySelectorAll('script')).toHaveLength(scriptCountBefore)
   })
 })
 
