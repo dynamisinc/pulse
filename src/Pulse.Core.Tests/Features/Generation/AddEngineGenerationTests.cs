@@ -86,22 +86,48 @@ public class AddEngineGenerationTests
     }
 
     [Fact]
-    public void ClaudeFoundry_WithGoodGovernance_ThrowsNotYetWired()
+    public void ClaudeFoundry_WithGoodGovernanceAndEndpoint_ResolvesAdapter()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddEngineGeneration(Config(
+            ("Generation:Provider", "ClaudeFoundry"),
+            ("Generation:Endpoint", "https://aif-pulse-uat.services.ai.azure.com/"),
+            ("Generation:Governance:TenantBounded", "true"),
+            ("Generation:Governance:NoTrainingAttested", "true"),
+            ("Generation:Governance:Residency", "eastus"),
+            ("Generation:Governance:Retention", "Retained"),
+            ("Generation:Tiers:Standard:Deployment", "claude-sonnet-4-5"),
+            ("Generation:Tiers:Standard:Model", "claude-sonnet-4-5")));
+
+        // Act
+        using var provider = services.BuildServiceProvider();
+        var resolved = provider.GetRequiredService<IGenerationProvider>();
+
+        // Assert
+        resolved.Should().BeOfType<ClaudeFoundryGenerationProvider>();
+        resolved.Name.Should().Be("ClaudeFoundry");
+        resolved.Governance.TenantBounded.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ClaudeFoundry_WithoutRetentionPosture_ThrowsGovernanceError()
     {
         // Arrange
         var services = new ServiceCollection();
 
-        // Act — governance is satisfied, so the failure is the documented "adapter not wired yet" seam state
+        // Act — every field satisfied EXCEPT the retention posture (left Unspecified). The gate now
+        // requires an explicit ZeroDataRetention or Retained stance before an egressing provider is wired.
         var act = () => services.AddEngineGeneration(Config(
             ("Generation:Provider", "ClaudeFoundry"),
-            ("Generation:Endpoint", "https://example-foundry/"),
+            ("Generation:Endpoint", "https://aif-pulse-uat.services.ai.azure.com/"),
             ("Generation:Governance:TenantBounded", "true"),
             ("Generation:Governance:NoTrainingAttested", "true"),
-            ("Generation:Governance:Residency", "eastus"),
-            ("Generation:Governance:Retention", "Retained")));
+            ("Generation:Governance:Residency", "eastus")));
 
         // Assert
-        act.Should().Throw<GenerationConfigurationException>().WithMessage("*not wired yet*");
+        act.Should().Throw<GenerationConfigurationException>()
+            .WithMessage("*governance gate*").WithMessage("*retention posture*");
     }
 
     [Fact]

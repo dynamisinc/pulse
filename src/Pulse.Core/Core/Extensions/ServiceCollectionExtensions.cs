@@ -39,15 +39,15 @@ public static class ServiceCollectionExtensions
                 break;
 
             case "AzureOpenAI":
-                AddAzureOpenAI(services, options);
+                AddHttpProvider<AzureOpenAIGenerationProvider>(services, options);
                 break;
 
             case "ClaudeFoundry":
-                // Governance gate runs first (NFR-005); the Claude-on-Foundry serverless adapter is a fast-follow.
-                _ = GenerationGovernance.Validate(options);
-                throw new GenerationConfigurationException(
-                    "Generation provider 'ClaudeFoundry' passed the governance gate but its adapter is not wired yet " +
-                    "(the Claude-on-Foundry serverless adapter is a fast-follow). Use Provider=\"AzureOpenAI\" or \"Fake\".");
+                // Claude on Azure AI Foundry (serverless MaaS) — the quality-preferred alternative
+                // (architecture §3.1), same governance gate + keyless Entra + resilience as Azure OpenAI;
+                // only the wire format (native Anthropic Messages API) differs, inside the adapter.
+                AddHttpProvider<ClaudeFoundryGenerationProvider>(services, options);
+                break;
 
             default:
                 throw new GenerationConfigurationException(
@@ -57,26 +57,34 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    private static void AddAzureOpenAI(IServiceCollection services, GenerationOptions options)
+    /// <summary>
+    /// Registers an egressing (real) generation provider behind <see cref="IGenerationProvider"/> — the
+    /// shared setup for every provider that reaches a tenant-bounded endpoint (Azure OpenAI today,
+    /// Claude-on-Foundry too). The NFR-005 governance gate runs <b>first</b>, before any adapter or
+    /// HttpClient is constructed, so a misconfigured or ungoverned deployment fails fast at startup rather
+    /// than reaching a live endpoint. Auth is keyless (managed identity in prod, az-cli login in dev); the
+    /// retry + circuit-breaker + per-attempt-timeout pipeline (story 05) is identical across providers so
+    /// degraded-mode behaviour (NFR-003 / ADP-042) does not change when the provider is swapped.
+    /// </summary>
+    private static void AddHttpProvider<TProvider>(IServiceCollection services, GenerationOptions options)
+        where TProvider : class, IGenerationProvider
     {
-        // The NFR-005 governance gate runs BEFORE any adapter/HttpClient is constructed: a misconfigured
-        // deployment fails fast at startup rather than reaching an endpoint.
         var governance = GenerationGovernance.Validate(options);
 
         if (string.IsNullOrWhiteSpace(options.Endpoint))
         {
-            throw new GenerationConfigurationException("Generation:Endpoint is required for provider 'AzureOpenAI'.");
+            throw new GenerationConfigurationException($"Generation:Endpoint is required for provider '{options.Provider}'.");
         }
 
         var endpoint = new Uri(options.Endpoint, UriKind.Absolute);
         var resilience = options.Resilience;
 
         services.AddSingleton(governance);
-        services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
+        services.TryAddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
         services.TryAddSingleton<IProviderHealthListener, NoOpProviderHealthListener>();
 
         services
-            .AddHttpClient<IGenerationProvider, AzureOpenAIGenerationProvider>(client =>
+            .AddHttpClient<IGenerationProvider, TProvider>(client =>
             {
                 client.BaseAddress = endpoint;
 
