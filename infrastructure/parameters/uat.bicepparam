@@ -25,10 +25,14 @@ param deployCommunication = false
 
 // --- Static Web App (the one resource deployed today) -------------------------
 param repositoryUrl = 'https://github.com/dynamisinc/pulse'
+// Custom domain bound to stapp-pulse-uat. Requires the GoDaddy CNAME
+// pulse-uat -> lively-river-0ce317010.7.azurestaticapps.net (registrar-side).
+// The clean pulse.cobrasoftware.com is reserved for a future prod environment.
+param staticWebAppCustomDomain = 'pulse-uat.cobrasoftware.com'
 
 // --- Hosting (only used once deployBackend = true) ----------------------------
 param hostingModel = 'webapi'
-param frontendUrl = '' // TODO: set to the Pulse UAT domain once DNS is decided (COR-008)
+param frontendUrl = 'https://pulse-uat.cobrasoftware.com'
 
 // --- SQL (only used once deployDatabase = true) -------------------------------
 param sqlAdminLogin = 'sqladmin'

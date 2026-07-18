@@ -93,6 +93,9 @@ param staticWebAppName string = 'stapp-${appName}-${environment}'
 @description('GitHub repository URL for Static Web App')
 param repositoryUrl string = 'https://github.com/dynamisinc/pulse'
 
+@description('Custom domain bound to the Static Web App (e.g. pulse-uat.cobrasoftware.com). Empty = none. Requires a registrar CNAME to the SWA default hostname (managed at the registrar, not here).')
+param staticWebAppCustomDomain string = ''
+
 // ============================================================================
 // Secrets (set via parameter file or --parameters on CLI)
 // ============================================================================
@@ -259,6 +262,7 @@ module staticWebApp 'modules/staticwebapp.bicep' = {
     location: location
     staticWebAppName: staticWebAppName
     repositoryUrl: repositoryUrl
+    customDomainName: staticWebAppCustomDomain
     tags: tags
   }
 }
@@ -295,6 +299,7 @@ output webAppHostname string = deployWebApp ? webApp.outputs.defaultHostname! : 
 output functionAppName string = deployFunctions ? functionApp.outputs.name! : ''
 output staticWebAppName string = staticWebApp.outputs.name
 output staticWebAppHostname string = staticWebApp.outputs.defaultHostname
+output staticWebAppCustomDomain string = staticWebApp.outputs.customDomain
 output staticWebAppDeploymentToken string = staticWebApp.outputs.deploymentToken
 #disable-next-line BCP318
 output sqlServerFqdn string = deployDatabase ? database.outputs.serverFqdn! : ''
