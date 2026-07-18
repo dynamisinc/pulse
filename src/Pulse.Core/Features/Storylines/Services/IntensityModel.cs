@@ -72,6 +72,43 @@ public static class IntensityModel
     }
 
     /// <summary>
+    /// Drives intensity toward a controller-set dial target (CTL-022, story 05) instead of following the
+    /// raw curve. It uses the curve's rates for how fast to move — rising (bent up by amplification) when
+    /// below the target, decaying when above — but the <b>target</b> is the goal and the hard bound: it
+    /// never overshoots the target, and when the target is below the current value (a controller lowered
+    /// it) it only ever moves <i>down</i> — amplification cannot push intensity past a lowered target
+    /// (controller authority is absolute). The target overrides the curve's own floor/ceiling.
+    /// </summary>
+    public static int TickTowardTarget(
+        int currentIntensity,
+        int target,
+        int elapsedScenarioMinutes,
+        EscalationCurve curve,
+        IAmplificationSignal? amplification = null)
+    {
+        ArgumentNullException.ThrowIfNull(curve);
+        ArgumentOutOfRangeException.ThrowIfNegative(elapsedScenarioMinutes);
+
+        var goal = Math.Clamp(target, Storyline.MinIntensity, Storyline.MaxIntensity);
+
+        if (elapsedScenarioMinutes == 0 || currentIntensity == goal)
+        {
+            return ClampHard(currentIntensity == goal ? goal : currentIntensity);
+        }
+
+        if (currentIntensity < goal)
+        {
+            // Raise toward the target; amplification helps, but never overshoot the target.
+            var rise = (curve.RiseRateUnaddressed * elapsedScenarioMinutes) + AmplificationBend(amplification, elapsedScenarioMinutes);
+            return ClampHard((int)Math.Round(Math.Min(currentIntensity + rise, goal)));
+        }
+
+        // Above the target: taper down toward it — no upward bend past a controller-lowered target.
+        var fall = curve.DecayRateAddressed * elapsedScenarioMinutes;
+        return ClampHard((int)Math.Round(Math.Max(currentIntensity - fall, goal)));
+    }
+
+    /// <summary>
     /// The upward bend from amplification this tick (ADP-004 velocity scaled by SOC-054 audience). Zero
     /// when there is no amplification signal.
     /// </summary>

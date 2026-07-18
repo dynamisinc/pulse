@@ -257,7 +257,14 @@ public sealed class Storyline
         }
 
         var curve = EscalationCurves.CurveFor(CurveName);
-        SetIntensity(IntensityModel.Tick(Intensity, elapsed, Phase, curve, signals.Amplification));
+
+        // When a controller target is set, the engine drives actual → target (CTL-022) rather than
+        // following the raw curve — but only in the live escalation phases; a lingering target does not
+        // re-heat an addressed/decaying concern (that would need an explicit re-open).
+        var next = TargetIntensity is int target && Phase is StorylinePhase.Escalating or StorylinePhase.Peak
+            ? IntensityModel.TickTowardTarget(Intensity, target, elapsed, curve, signals.Amplification)
+            : IntensityModel.Tick(Intensity, elapsed, Phase, curve, signals.Amplification);
+        SetIntensity(next);
 
         // Intensity-driven phase moves that follow the update.
         if (Phase == StorylinePhase.Escalating && Intensity >= curve.Ceiling)
@@ -322,8 +329,33 @@ public sealed class Storyline
         return events;
     }
 
+    /// <summary>
+    /// Sets, changes, or clears (pass <c>null</c>) the controller's dial target (CTL-022, story 05) and
+    /// returns the steering action to log (XC-004). Setting the target does not move intensity itself — the
+    /// engine drives actual toward it over subsequent ticks (<see cref="Tick"/>), never overshooting and
+    /// never pushing intensity past a lowered target. Controller authority over the target is absolute.
+    /// </summary>
+    public SteeringActionLogged SetTargetIntensity(int? target, int scenarioMinute)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(scenarioMinute);
+
+        if (target is int value)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, MinIntensity);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value, MaxIntensity);
+        }
+
+        var from = TargetIntensity;
+        TargetIntensity = target;
+
+        var detail = $"{FormatTarget(from)} → {FormatTarget(target)}";
+        return new SteeringActionLogged(Id, SteeringActionKind.TargetChanged, detail, scenarioMinute);
+    }
+
     /// <summary>Scenario minutes the storyline has spent in its current phase, given the current scenario minute.</summary>
     public int MinutesInPhase(int currentScenarioMinute) => Math.Max(0, currentScenarioMinute - PhaseEnteredScenarioMinute);
+
+    private static string FormatTarget(int? target) => target?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none";
 
     private MeasureCause MeasureCauseFor(int elapsed, IAmplificationSignal? amplification)
     {
