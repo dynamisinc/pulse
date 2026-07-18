@@ -9,7 +9,7 @@
 **Status (2026-07-18):** The Azure OpenAI column is **measured** (story 06). The Claude-on-Foundry
 column is **built and ready but not yet measured** — it is gated on provisioning the Claude tiers
 (`deployClaude=true`, see [`infrastructure/README.md`](../../../infrastructure/README.md)) and running the
-comparison harness. This doc firms up the **cost baseline with confirmed list pricing** (which needs no
+comparison harness. This doc firms up the **cost baseline with the best-available list pricing** (which needs no
 live run) and lays out the **quality-comparison method + decision rule**; the harness fills the measured
 Claude latency/quality cells.
 
@@ -40,10 +40,10 @@ passthrough `https://aif-pulse-uat.services.ai.azure.com/anthropic/v1/messages` 
 
 ---
 
-## 2. Cost — confirmed list pricing + the firmed-up Azure baseline
+## 2. Cost — list pricing + the firmed-up Azure baseline
 
-**gpt-5.4 Azure list pricing confirmed** (the story-06 open item). Per-MTok list rates used below, all
-**Standard Global**, confirmed 2026-07-18:
+**gpt-5.4 Azure list pricing resolved** (the story-06 open item) — best available, **medium-confidence**;
+see the caveat below. Per-MTok list rates used, all **Standard Global**, as of 2026-07-18:
 
 | Model | Input $/MTok | Cached input $/MTok | Output $/MTok |
 |---|---|---|---|
@@ -62,7 +62,7 @@ passthrough `https://aif-pulse-uat.services.ai.azure.com/anthropic/v1/messages` 
 
 ### Firmed-up cost, from the story-06 **measured** token profile (992 in / ~200 out, un-cached)
 
-Recomputing MEASURED-RESULTS with the confirmed gpt-5.4 rates, and **projecting** Claude at the same
+Recomputing MEASURED-RESULTS with the resolved gpt-5.4 rates, and **projecting** Claude at the same
 token profile (a proxy — the harness measures Claude's real profile; tokenizers differ modestly):
 
 | Tier · model | ~$/burst | ~$/exercise-hr* | vs. the old analog estimate |

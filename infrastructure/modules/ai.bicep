@@ -76,7 +76,7 @@ param claudeModelVersion string = '1'
 param claudeOrganizationName string = 'Dynamis'
 @description('Two-letter ISO country code for the Marketplace acceptance (modelProviderData).')
 param claudeCountryCode string = 'US'
-@description('Industry for the Marketplace acceptance (modelProviderData) — MUST be lowercase (e.g. government, technology).')
+@description('Industry for the Marketplace acceptance (modelProviderData), e.g. government, technology. Lowercased automatically (Foundry requires lowercase).')
 param claudeIndustry string = 'government'
 
 @description('Object (principal) id of the backend managed identity to grant the data-plane role(s): "Cognitive Services OpenAI User" (OpenAI surface) and, when deployClaude is set, "Cognitive Services User" (Claude/Anthropic surface). Empty = skip the role assignment (grant your az-login identity manually for the local measured spike).')
@@ -172,7 +172,9 @@ resource claudeStandardDeployment 'Microsoft.CognitiveServices/accounts/deployme
     modelProviderData: {
       organizationName: claudeOrganizationName
       countryCode: claudeCountryCode
-      industry: claudeIndustry
+      // Foundry requires a lowercase industry; enforce it here so a capitalised param value (e.g.
+      // 'Government') can't fail the deployment.
+      industry: toLower(claudeIndustry)
     }
     versionUpgradeOption: 'OnceNewDefaultVersionAvailable'
     raiPolicyName: 'Microsoft.DefaultV2'
@@ -203,7 +205,9 @@ resource claudeAmbientDeployment 'Microsoft.CognitiveServices/accounts/deploymen
     modelProviderData: {
       organizationName: claudeOrganizationName
       countryCode: claudeCountryCode
-      industry: claudeIndustry
+      // Foundry requires a lowercase industry; enforce it here so a capitalised param value (e.g.
+      // 'Government') can't fail the deployment.
+      industry: toLower(claudeIndustry)
     }
     versionUpgradeOption: 'OnceNewDefaultVersionAvailable'
     raiPolicyName: 'Microsoft.DefaultV2'

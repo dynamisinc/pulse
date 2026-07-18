@@ -112,6 +112,8 @@ public sealed class ProviderComparisonTests
             using var http = new HttpClient { BaseAddress = new Uri(spec.Endpoint), Timeout = TimeSpan.FromSeconds(60) };
             var provider = spec.Factory(http, options);
 
+            try
+            {
             foreach (var (tier, tierSpec) in new[]
                      {
                          (GenerationTier.Standard, spec.Standard),
@@ -145,6 +147,13 @@ public sealed class ProviderComparisonTests
                 }
 
                 run.P95.Should().BeLessThan(10_000, $"{spec.Name}/{tier} generation p95 must sit inside the human-review loop (§4.3)");
+            }
+            }
+            finally
+            {
+                // ClaudeFoundryGenerationProvider is IDisposable (owns the SDK client); dispose it so
+                // repeated live runs of the harness don't leak SDK resources.
+                (provider as IDisposable)?.Dispose();
             }
         }
 

@@ -14,9 +14,9 @@
 
 \* At a nominal active-storyline hour (~25 generated posts/min ≈ 375 four-post bursts), using **analog
 Sonnet/Haiku per-MTok pricing** ($3/$15 Standard, $1/$5 Ambient); the *token profile* is measured.
-**Update:** the gpt-5.4 Azure list rates are now confirmed ($2.50/$15 Standard, $0.75/$4.50 Ambient),
-which lowers the firmed-up baseline to ~$2.09 / ~$0.61 per exercise-hour — see
-[`PROVIDER-COMPARISON.md`](PROVIDER-COMPARISON.md) §2.
+**Update:** the gpt-5.4 Azure list rates are now resolved (best available, medium-confidence — pending
+official-page verification): $2.50/$15 Standard, $0.75/$4.50 Ambient, which lowers the firmed-up baseline
+to ~$2.09 / ~$0.61 per exercise-hour — see [`PROVIDER-COMPARISON.md`](PROVIDER-COMPARISON.md) §2.
 
 ## Findings
 

@@ -47,9 +47,11 @@ public sealed class AzureOpenAIGenerationProvider : IGenerationProvider
         }
 
         // gpt-5.x needs a recent preview data-plane version (max_completion_tokens + reasoning + tools);
-        // that ServiceVersion only exists on the Azure.AI.OpenAI beta line. Route through our HttpClient so
-        // the Polly pipeline governs resilience, and disable the SDK's own retry to avoid double-retry.
-        var clientOptions = new AzureOpenAIClientOptions(AzureOpenAIClientOptions.ServiceVersion.V2025_04_01_Preview)
+        // that ServiceVersion only exists on the Azure.AI.OpenAI beta line. Generation:ApiVersion is
+        // honored when it maps to a supported version (so an operator can bump it via config), defaulting
+        // to the latest the SDK exposes. Route through our HttpClient so the Polly pipeline governs
+        // resilience, and disable the SDK's own retry to avoid double-retry.
+        var clientOptions = new AzureOpenAIClientOptions(ResolveServiceVersion(_options.ApiVersion))
         {
             Transport = new HttpClientPipelineTransport(http),
             RetryPolicy = new ClientRetryPolicy(maxRetries: 0),
@@ -179,6 +181,18 @@ public sealed class AzureOpenAIGenerationProvider : IGenerationProvider
 
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : string.Concat(value.AsSpan(0, max), "…");
+
+    // Map the configured Generation:ApiVersion to a supported SDK ServiceVersion. Unset/unknown values
+    // fall back to the latest the SDK exposes (required for gpt-5.x). The enum only exists on the beta line.
+    private static AzureOpenAIClientOptions.ServiceVersion ResolveServiceVersion(string? apiVersion) => apiVersion switch
+    {
+        "2024-10-21" => AzureOpenAIClientOptions.ServiceVersion.V2024_10_21,
+        "2024-12-01-preview" => AzureOpenAIClientOptions.ServiceVersion.V2024_12_01_Preview,
+        "2025-01-01-preview" => AzureOpenAIClientOptions.ServiceVersion.V2025_01_01_Preview,
+        "2025-03-01-preview" => AzureOpenAIClientOptions.ServiceVersion.V2025_03_01_Preview,
+        "2025-04-01-preview" => AzureOpenAIClientOptions.ServiceVersion.V2025_04_01_Preview,
+        _ => AzureOpenAIClientOptions.ServiceVersion.V2025_04_01_Preview,
+    };
 
     // Same emit_posts contract (one post per persona) as the Claude adapter, so the content guard + voice
     // metrics inspect identical shapes across providers. For this SDK the tool schema is the bare
