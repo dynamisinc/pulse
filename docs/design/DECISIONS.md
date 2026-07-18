@@ -14,7 +14,7 @@ Anchor: the network strip on real media properties. Deliberately quiet so it nev
 with channel mastheads; no instructional text. Mobile: shell bottom tab bar (COR-061 mobile).
 
 ### D7-002 — Alert bar: 4 states, chip anatomy, emergency never collapses (PRT-010/011/012)
-none = zero height · info `#3d6a96` · advisory (D1/D2 amber, exact) · emergency solid `#b3261e`.
+none = zero height · info `#3d6a96` · advisory (D1/D2 amber, darkened to `#8a5a00` for AA — D7-012) · emergency solid `#b3261e`.
 Icon + text chip + color, never color-only (NFR-001). Scenario timestamp + Details → history.
 Info/advisory scroll-collapse to a compact line; emergency never collapses; never dismissable.
 Multi-alert: highest severity + "+N more" expands stack. Per user "explore options": three
@@ -73,6 +73,25 @@ already lives in the identity badge. Retrofit delta for D5: drop `.exbar`, add t
 The shell owns the strip container with two zones: shell-global tools (ADMIN) above a divider;
 below it, the surface registers its own tools (the D5 toolbox docks here). Surfaces never draw
 a second strip. Shown in the mockup as a dashed SURFACE slot.
+
+### D7-012 — Advisory alert chip darkened to `#8a5a00` for WCAG AA (participant-shell story 02, Gate-1)
+The advisory severity chip / ticker tab renders **white LABEL text on the saturated advisory amber**
+(SHELL-CONTRACT §2 convention: chip/ticker-tab = saturated color + white text; the pale `#fff3dd`
+tint is the alternate BAND *container* bg, not the chip). The D1/D2 amber `#b97a00` failed WCAG 2.1
+AA on the 11px bold LABEL in **every** arrangement — white-on-`#b97a00` ≈ 3.6:1, `#b97a00`-on-pale-
+`#fff3dd` ≈ 3.3:1, both < 4.5:1 — so NFR-001 (a D0 non-negotiable / §4 hard gate) was unmet by the
+chip, even though "never color-only" was (icon + word + color). The chip amber is darkened to
+**`#8a5a00`** (white-on-`#8a5a00` ≈ 5.9:1), staying recognizably amber — the same move as the NWS
+hue darkening in D4-009/#8. The pale `#fff3dd` band background and its `#6b4300` body text (≈ 7.9:1)
+are unchanged. Info (`#3d6a96`) and emergency already cleared AA; info was realigned from the
+builder's pale-pill/colored-text reading to the same saturated-chip/white-text convention (the
+README/mockup ticker spec) for consistency (white-on-`#3d6a96` ≈ 5.7:1), not for contrast.
+**Synced together:** SHELL-CONTRACT §2 (+ the D4 copy), README, both D7 mockups (`.tk-adv`,
+`.ab-adv .chip`, `.pab-adv .pchip`), the D1 mockup (`.asev`) + D1 README, the D4 advisory alert
+tabs, COMPONENTS.md, story `02-alert-bar-host.md`, and the code (`AlertBar.tsx` `SEVERITY_META`).
+**Open:** the D4 Wire Room "⏱ SCHEDULED" embargo chip reuses `#b97a00` + white (≈ 3.6:1) for a
+*different* semantic (release status, not an alert severity) and the evaluator staff-origin chips
+reuse the amber too — separate AA follow-ups, deliberately not changed here.
 
 ### D7 open / deferred
 - Shell as a real shared component (both mockups currently keep their own chrome) — retrofit

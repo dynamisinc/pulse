@@ -40,7 +40,8 @@ Desktop (1180-wide frame) and mobile (390) side by side. Shell-owned layers, top
   survive it).
 - **Alert bar (PRT-010/011/012):** states none/info/advisory/emergency. **Default treatment:
   ticker** — dark `#14181c` one-line bar: severity tab (icon + LABEL, info `#3d6a96`,
-  advisory `#b97a00`, emergency `#c0271a`, white text) + monospace message + timestamp.
+  advisory `#8a5a00` (darkened from `#b97a00` for WCAG AA — D7-012), emergency `#c0271a`,
+  white text) + monospace message + timestamp.
   **Emergency always escapes the ticker to the full band**: solid `#b3261e`, white text,
   chip = white bg / red text. Band treatment (info `#edf3f9`, advisory `#fff3dd`) retained
   as an alternate. Multi-alert in ticker: auto-rotate ~3.5s. Never color-only (NFR-001);

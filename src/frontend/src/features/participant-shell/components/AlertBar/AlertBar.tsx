@@ -110,15 +110,22 @@ interface SeverityMeta {
 }
 
 /**
- * Exact palettes per story AC / SHELL-CONTRACT.md §2: info `#edf3f9/#3d6a96`,
- * advisory `#fff3dd/#b97a00` (D1/D2 exact). Emergency's chip is a translucent
+ * Severity chip palette (SHELL-CONTRACT.md §2 convention): the CHIP — and the
+ * ticker's severity tab — is the SATURATED severity color with a WHITE LABEL
+ * (info `#3d6a96`, advisory `#8a5a00`), matching the D7 mockups' `.tk-*` ticker
+ * tabs / `.ab-* .chip` band chips and the README ticker spec. The pale
+ * `#edf3f9` / `#fff3dd` tints are the alternate BAND *container* background,
+ * NOT the chip. Advisory was darkened from the D1/D2 `#b97a00` to `#8a5a00` so
+ * white-on-amber clears WCAG AA (4.5:1) on the 11px bold LABEL — `#b97a00`
+ * rendered ~3.3–3.6:1 in every arrangement, failing NFR-001 (DECISIONS.md
+ * D7-012, participant-shell story 02 Gate-1). Emergency's chip is a translucent
  * white pill (not its own hue) because the surrounding band is ALREADY solid
  * `#b3261e` — a same-color chip would be invisible against it; the band
  * background itself carries the "solid #b3261e, white text" requirement.
  */
 const SEVERITY_META: Record<AlertSeverity, SeverityMeta> = {
-  info: { label: 'INFO', icon: faCircleInfo, chipBg: '#edf3f9', chipFg: '#3d6a96' },
-  advisory: { label: 'ADVISORY', icon: faTriangleExclamation, chipBg: '#fff3dd', chipFg: '#b97a00' },
+  info: { label: 'INFO', icon: faCircleInfo, chipBg: '#3d6a96', chipFg: '#ffffff' },
+  advisory: { label: 'ADVISORY', icon: faTriangleExclamation, chipBg: '#8a5a00', chipFg: '#ffffff' },
   emergency: { label: 'EMERGENCY', icon: faBullhorn, chipBg: 'rgba(255, 255, 255, 0.18)', chipFg: '#ffffff' },
 }
 

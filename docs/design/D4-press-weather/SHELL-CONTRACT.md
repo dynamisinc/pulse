@@ -43,7 +43,7 @@ SIMULATED"). Staff: `UNCLASSIFIED // FOUO`. One config token per deployment, per
 
 - **States:** `none` (zero height — no reserved space) · `info` · `advisory` · `emergency`.
 - **Anatomy:** severity chip (icon + LABEL text) · message · scenario timestamp · "Details →" (routes to alerts history).
-- **Palettes:** info `#edf3f9/#3d6a96` · advisory `#fff3dd/#b97a00` (D1/D2 exact) · emergency `#b3261e` solid, white text.
+- **Palettes** (chip / ticker-tab = saturated color + white LABEL; the pale tint is the alternate BAND *container* bg): info chip `#3d6a96` / band `#edf3f9` · advisory chip `#8a5a00` / band `#fff3dd` — chip darkened from the D1/D2 `#b97a00` so white-on-amber clears WCAG AA on the 11px LABEL (D7-012; `#b97a00` was ~3.3–3.6:1) · emergency `#b3261e` solid, white text.
 - **Collapse:** band info/advisory collapse on scroll to a one-line compact strip; tap re-expands. **Emergency never collapses and always escapes the ticker to the full band.** Alerts are in-fiction (simulated) — anything real-world is ONLY the break-fiction overlay, never the alert bar. Never user-dismissable.
 - **Multi-alert:** ticker auto-rotates through active alerts (~3.5s, severity tab swaps per message); band/compact show highest severity + "+N more" chip that expands the stack in place.
 - **A11y:** `role="status"`; severity carried by chip text; live-region announce on state change.

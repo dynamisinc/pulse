@@ -635,8 +635,8 @@ class Component extends DCLogic {
         pB: ['Water remains safe for bathing, laundry, and other non-consumption uses. Updates will be issued on this wire and on official social channels as laboratory results become available.'] }];
     const go = (s, x) => () => this.setState(Object.assign({ screen: s }, x || {}));
     // ---- alert bar ----
-    const boil = { chip: 'ADVISORY', tab: '#b97a00', msg: 'Precautionary boil water advisory in effect for Zones 2, 3 and 4 — lab results expected 6:00 PM', time: '9:41 AM', to: go('stub', { stubKey: 'alerts' }) };
-    const watchAl = { chip: 'ADVISORY', tab: '#b97a00', msg: 'Flash Flood Watch in effect for the Fairhaven region until 8:00 PM', time: '11:32 AM', to: go('warn') };
+    const boil = { chip: 'ADVISORY', tab: '#8a5a00', msg: 'Precautionary boil water advisory in effect for Zones 2, 3 and 4 — lab results expected 6:00 PM', time: '9:41 AM', to: go('stub', { stubKey: 'alerts' }) };
+    const watchAl = { chip: 'ADVISORY', tab: '#8a5a00', msg: 'Flash Flood Watch in effect for the Fairhaven region until 8:00 PM', time: '11:32 AM', to: go('warn') };
     const warnAl = { msg: 'Flash Flood Warning for Millbrook Valley and coastal Fairhaven until 4:15 PM — avoid flooded roads', time: '2:02 PM', to: go('warn') };
     const abBand = !story && wxs === 'warning';
     const abTicker = !story && !abBand;
@@ -768,7 +768,7 @@ class Component extends DCLogic {
     if (wxs !== 'calm') alCards.push({ type: 'Flash Flood Watch', sev: 'WATCH', col: '#2e6b4f', line: 'Until 8:00 PM · entire Fairhaven region', go: go('warn') });
     return {
       // shell
-      abTicker, abBand, abTab: cur.tab || '#b97a00', abChip: cur.chip || 'ADVISORY', abMsg: cur.msg, abTime: cur.time, abGo: cur.to,
+      abTicker, abBand, abTab: cur.tab || '#8a5a00', abChip: cur.chip || 'ADVISORY', abMsg: cur.msg, abTime: cur.time, abGo: cur.to,
       chans,
       // screens
       sStory: story, sStub: !story && S.screen === 'stub', sWire: !story && S.screen === 'wire', sNewsroom: !story && S.screen === 'newsroom',

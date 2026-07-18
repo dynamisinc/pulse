@@ -40,8 +40,9 @@ levers / SOC-072 notifications); the break-fiction overlay (story 05 — real-wo
 ## Technical Notes
 Participant world. Consumes `alerts[]` (`{severity, message, scenarioTime, id}`, server-driven,
 exercise-scoped). Ticker is the shipped default; band/compact retained as an alternate treatment per
-D7-002. See implementation.md (story 02). Palettes: info `#edf3f9/#3d6a96`, advisory `#fff3dd/#b97a00`
-(D1/D2 exact), emergency `#b3261e`.
+D7-002. See implementation.md (story 02). Palettes (chip = saturated color + white LABEL; pale tint
+= alternate band bg): info chip `#3d6a96`, advisory chip `#8a5a00` (darkened from the D1/D2 `#b97a00`
+for WCAG AA on the 11px LABEL — D7-012), emergency `#b3261e`.
 
 ## Dependencies
 Compliance chrome (story 01, sits above it); notifications SOC-072 (pilot-mode alert delivery) / E3
