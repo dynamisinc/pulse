@@ -31,6 +31,7 @@
 import type { AxiosAdapter } from 'axios'
 import { api } from '../services/api'
 import { isExerciseRole, type ExerciseRole } from './roles'
+import { USE_MOCK_DATA } from '../config/mockData'
 
 /**
  * The bound session for the current participant. Bound to exactly ONE exercise
@@ -99,7 +100,7 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
  * until the backend lands). One env-guarded place, never per-call, so a
  * forgotten `adapter:` can't fail *open* to a mock session in production.
  */
-const USE_MOCK_SESSION = import.meta.env.DEV
+const USE_MOCK_SESSION = USE_MOCK_DATA
 
 function isValidBody(body: SessionResponseBody | null | undefined): body is SessionResponseBody {
   return (

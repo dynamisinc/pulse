@@ -50,6 +50,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { useExerciseContext } from '@/core/exerciseContext'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import type { Alert, AlertSeverity } from './alertTypes'
 
 /**
@@ -123,7 +124,7 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
  * `USE_MOCK_CHROME_CONFIG`. Mock in dev/test; a production build without a
  * backend fails closed (the query errors rather than serving canned alerts).
  */
-const USE_MOCK_ALERTS = import.meta.env.DEV
+const USE_MOCK_ALERTS = USE_MOCK_DATA
 
 async function fetchAlerts(): Promise<readonly Alert[]> {
   const response = await api.get<AlertsResponseBody>(

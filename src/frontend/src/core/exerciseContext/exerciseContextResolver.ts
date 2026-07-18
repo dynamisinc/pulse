@@ -24,6 +24,7 @@
 
 import type { AxiosAdapter } from 'axios'
 import { api } from '../services/api'
+import { USE_MOCK_DATA } from '../config/mockData'
 
 /** Exercise lifecycle status, as surfaced on a single bound scope (no list). */
 export type ExerciseStatus = 'scheduled' | 'active' | 'complete' | 'archived'
@@ -111,7 +112,7 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
  * per-call, so a forgotten `adapter:` can't silently fail *open* to mock data
  * in production.
  */
-const USE_MOCK_EXERCISE_CONTEXT = import.meta.env.DEV
+const USE_MOCK_EXERCISE_CONTEXT = USE_MOCK_DATA
 
 function isValidResponseBody(
   body: ExerciseContextResponseBody | null | undefined,
