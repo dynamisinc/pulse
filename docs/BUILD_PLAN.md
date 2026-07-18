@@ -92,16 +92,28 @@ unreachable from participant paths (the thumbnail-test guarantee).
 ## Social (E2) ⬜  · umbrella `feature/social`  · after the participant shell hosts a surface
 
 Seed E1 data first (mock): `identity-auth-roles` 01/03 (roles + sessions), `persona-management` 01/02
-(persona templates + casts) — so PostCard has authors and the feed has content.
+(persona templates + casts) — so PostCard has authors and the feed has content. — ✅ mock seed
+delivered on `feature/social` (data/model only; staff UIs deferred — see the four stories' "Seed
+delivered" notes for exactly what landed vs. what remains).
 
-### Wave S1 — keystone ⬜
-- `posts/02-post-rendering-identity` — **`<PostCard>` + `<VerifiedMark>`** (`features/social/components/PostCard.tsx`). *Build first* — reused by every surface.
-- `posts/03-post-provenance` — provenance/telemetry on the post model (XC-004).
+### Wave S1 — keystone ✅
+- `posts/02-post-rendering-identity` — **`<PostCard>` + `<VerifiedMark>`** (`features/social/components/PostCard.tsx`). *Build first* — reused by every surface. **Done.**
+- `posts/03-post-provenance` — provenance/telemetry on the post model (XC-004). **Done.**
+
+> **Delivered** (both code-review gates clean, 291 tests suite-wide): full ACs met for both stories on
+> the `feature/social` umbrella — see `docs/features/posts/{02-post-rendering-identity,03-post-provenance}.md`
+> for the Tests sections and file lists.
 
 ### Wave S2 — first surface ⬜ (the slice that proves social works)
 - `feeds-discovery/01-all-posts-feed` — global chronological feed; the **pilot login landing surface**, mounts in the participant shell.
 - `posts/01-post-composition` — the composer.
 - `threads-replies/01-flattened-thread-view` + `02-reply-counts-and-open`.
+
+> **Pending Gate-2 findings for the feed builder (forward-looking, not yet actioned):**
+> (L-1) hoist a single `useScenarioTime` "now" snapshot at the feed level rather than re-deriving it
+> per-`PostCard`, for NFR-002 burst-scale legibility at 120 posts/min; (L-2) enforce `injectId` when
+> `origin === 'inject'` in `createPost` (narrow `CreatePostInput` so the two are coupled) so an
+> inject-originated post can't silently drop its XC-004 event.
 
 ### Wave S3+ ⬜ (fan out; all reuse PostCard)
 - `profiles-social-graph/01-profile-page` → `02-follow-unfollow` → `feeds-discovery/02-following-feed`

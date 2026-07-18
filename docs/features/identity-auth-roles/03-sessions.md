@@ -1,12 +1,21 @@
 # Story: Short-lived exercise-bound sessions
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** COR-012  ·  **Design decisions:** none  ·  **Issue:** #60
 
 ## Context
 Sessions are short-lived with refresh; a participant session is bound to **one exercise and one
 account** (or one read-only session per COR-015) (COR-012). This keeps the session's exercise scope
 unambiguous — the anchor the isolation guarantee (COR-001) relies on.
+
+**Seed delivered (Social E2 prerequisite):** `core/auth/{session.tsx,sessionResolver.ts}` landed as a
+minimal mock seed so the Social (E2) build has a session/identity to attribute posts to — it is **not**
+a build of this story's full ACs. Delivered: a fail-closed, mock-behind-the-axios-client
+`SessionProvider`/`useSession()` that resolves a short-lived session carrying exercise + account scope,
+with expiry. Tests: `core/auth/session.test.tsx`, `core/auth/sessionResolver.test.ts`,
+`core/auth/sessionResolver.default.test.ts`. Remaining before this story can flip to Complete: a real
+session provider backed by an actual refresh mechanism/token lifecycle (today's "refresh" is mock
+behavior only) and the .NET backend session endpoint — neither exists yet.
 
 ## Acceptance Criteria
 - [ ] Authenticated sessions are short-lived with a refresh mechanism; expiry forces re-auth.
