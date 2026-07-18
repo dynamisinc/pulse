@@ -22,11 +22,19 @@ public class ClaudeFoundryGenerationProviderTests
 {
     private sealed class FakeCredential : TokenCredential
     {
-        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
-            new("fake-token", DateTimeOffset.MaxValue);
+        public string[]? RequestedScopes { get; private set; }
 
-        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
-            ValueTask.FromResult(new AccessToken("fake-token", DateTimeOffset.MaxValue));
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+        {
+            RequestedScopes = requestContext.Scopes;
+            return new AccessToken("fake-token", DateTimeOffset.MaxValue);
+        }
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+        {
+            RequestedScopes = requestContext.Scopes;
+            return ValueTask.FromResult(new AccessToken("fake-token", DateTimeOffset.MaxValue));
+        }
     }
 
     private static GenerationOptions OptionsWithStandard()
@@ -36,7 +44,7 @@ public class ClaudeFoundryGenerationProviderTests
             Provider = "ClaudeFoundry",
             Endpoint = "https://test.example/",
         };
-        options.Tiers["Standard"] = new TierModelOptions { Deployment = "claude-sonnet-4-5", Model = "claude-sonnet-4-5" };
+        options.Tiers["Standard"] = new TierModelOptions { Deployment = "claude-sonnet-5", Model = "claude-sonnet-5" };
         return options;
     }
 
@@ -63,7 +71,8 @@ public class ClaudeFoundryGenerationProviderTests
         return JsonSerializer.Serialize(new
         {
             id = "msg_1",
-            model = "claude-sonnet-4-5",
+            type = "message",
+            model = "claude-sonnet-5",
             role = "assistant",
             stop_reason = "tool_use",
             content = new object[]
@@ -76,7 +85,7 @@ public class ClaudeFoundryGenerationProviderTests
 
     private sealed record Captured(string? Body, Uri? Uri, bool HasAnthropicVersion);
 
-    private static (ClaudeFoundryGenerationProvider Provider, Func<Captured> Captured) BuildProvider(
+    private static (ClaudeFoundryGenerationProvider Provider, Func<Captured> Captured, FakeCredential Credential) BuildProvider(
         HttpStatusCode status, string responseBody, GenerationOptions? options = null)
     {
         var handler = new Mock<HttpMessageHandler>();
@@ -94,16 +103,17 @@ public class ClaudeFoundryGenerationProviderTests
             });
 
         var http = new HttpClient(handler.Object) { BaseAddress = new Uri("https://test.example/") };
+        var credential = new FakeCredential();
         var provider = new ClaudeFoundryGenerationProvider(
-            http, new FakeCredential(), Options.Create(options ?? OptionsWithStandard()), GenerationGovernance.InProcess);
+            http, credential, Options.Create(options ?? OptionsWithStandard()), GenerationGovernance.InProcess);
 
-        return (provider, () => captured);
+        return (provider, () => captured, credential);
     }
 
     [Fact]
     public async Task GenerateAsync_ParsesToolUseIntoPostsAndUsage()
     {
-        var (provider, _) = BuildProvider(HttpStatusCode.OK, ToolUseResponse());
+        var (provider, _, _) = BuildProvider(HttpStatusCode.OK, ToolUseResponse());
 
         var result = await provider.GenerateAsync(Request());
 
@@ -111,7 +121,7 @@ public class ClaudeFoundryGenerationProviderTests
         result.Posts[0].PersonaHandle.Should().Be("@ana");
         result.Posts[0].Hashtags.Should().Contain("#WaterIssues");
         result.Posts[1].Sentiment.Should().BeApproximately(-0.6, 0.001);
-        result.Model.Should().Be("claude-sonnet-4-5");
+        result.Model.Should().Be("claude-sonnet-5");
         result.Usage.InputTokens.Should().Be(700);
         result.Usage.OutputTokens.Should().Be(60);
         result.Usage.CacheReadInputTokens.Should().Be(500);
@@ -122,7 +132,7 @@ public class ClaudeFoundryGenerationProviderTests
     [Fact]
     public async Task GenerateAsync_UsesAnthropicShape_SystemTopLevel_WorldFeedInUserTurnOnly()
     {
-        var (provider, captured) = BuildProvider(HttpStatusCode.OK, ToolUseResponse());
+        var (provider, captured, _) = BuildProvider(HttpStatusCode.OK, ToolUseResponse());
 
         await provider.GenerateAsync(Request());
 
@@ -157,13 +167,28 @@ public class ClaudeFoundryGenerationProviderTests
     }
 
     [Fact]
+    public async Task GenerateAsync_RequestsTheFoundryAiAzureScope()
+    {
+        var (provider, _, credential) = BuildProvider(HttpStatusCode.OK, ToolUseResponse());
+
+        await provider.GenerateAsync(Request());
+
+        // Keyless Entra must target the Foundry data-plane scope, NOT the OpenAI cognitiveservices scope
+        // — a wrong scope is a live 401 that no other hermetic test would catch.
+        credential.RequestedScopes.Should().ContainSingle().Which.Should().Be("https://ai.azure.com/.default");
+    }
+
+    [Fact]
     public async Task GenerateAsync_NonSuccessStatus_ThrowsProviderException()
     {
-        var (provider, _) = BuildProvider(HttpStatusCode.TooManyRequests, "{\"error\":\"rate limited\"}");
+        // A well-formed Anthropic error envelope (the SDK's error factory parses error.type/message).
+        var (provider, _, _) = BuildProvider(
+            HttpStatusCode.TooManyRequests,
+            "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"rate limited\"}}");
 
         var act = () => provider.GenerateAsync(Request());
 
-        await act.Should().ThrowAsync<GenerationProviderException>().WithMessage("*429*");
+        await act.Should().ThrowAsync<GenerationProviderException>().WithMessage("*Claude on Foundry*");
     }
 
     [Fact]
@@ -171,12 +196,15 @@ public class ClaudeFoundryGenerationProviderTests
     {
         var noTool = JsonSerializer.Serialize(new
         {
-            model = "claude-sonnet-4-5",
+            id = "msg_2",
+            type = "message",
+            model = "claude-sonnet-5",
+            role = "assistant",
             stop_reason = "end_turn",
             content = new object[] { new { type = "text", text = "I refuse." } },
             usage = new { input_tokens = 10, output_tokens = 3 },
         });
-        var (provider, _) = BuildProvider(HttpStatusCode.OK, noTool);
+        var (provider, _, _) = BuildProvider(HttpStatusCode.OK, noTool);
 
         var act = () => provider.GenerateAsync(Request());
 
@@ -187,7 +215,7 @@ public class ClaudeFoundryGenerationProviderTests
     public async Task GenerateAsync_MissingDeploymentForTier_ThrowsConfigException()
     {
         var options = new GenerationOptions { Provider = "ClaudeFoundry", Endpoint = "https://test.example/" };
-        var (provider, _) = BuildProvider(HttpStatusCode.OK, ToolUseResponse(), options);
+        var (provider, _, _) = BuildProvider(HttpStatusCode.OK, ToolUseResponse(), options);
 
         var act = () => provider.GenerateAsync(Request());
 

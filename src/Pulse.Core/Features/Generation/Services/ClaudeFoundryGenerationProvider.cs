@@ -1,55 +1,43 @@
 namespace Pulse.Core.Features.Generation.Services;
 
 using System.Diagnostics;
-using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
+using Anthropic.Exceptions;
+using Anthropic.Foundry;
+using Anthropic.Models.Messages;
 using Azure.Core;
 using Microsoft.Extensions.Options;
 using Pulse.Core.Features.Generation.Models;
 
 /// <summary>
-/// Tenant-bounded Claude-on-Azure-AI-Foundry adapter behind <see cref="IGenerationProvider"/> — the
-/// quality-preferred alternative to <see cref="AzureOpenAIGenerationProvider"/> (architecture §3.1),
-/// selected per deployment by the eval harness on measured voice fidelity, never from preference.
+/// Tenant-bounded Claude-on-Azure-AI-Foundry adapter behind <see cref="IGenerationProvider"/>, on the
+/// official Anthropic .NET SDK (<c>Anthropic.Foundry</c>) — the quality-preferred alternative to
+/// <see cref="AzureOpenAIGenerationProvider"/> (architecture §3.1), selected per deployment by the eval
+/// harness on measured voice fidelity, never from preference.
 ///
-/// It speaks the **native Anthropic Messages API** (Foundry's <c>/anthropic/v1/messages</c> passthrough),
-/// which differs from Azure OpenAI's chat-completions shape in every way that matters here:
-/// <list type="bullet">
-///   <item>the trusted engine context is the top-level <c>system</c> field, not a <c>system</c> message;</item>
-///   <item>the untrusted world feed still rides only in the user turn (ADP-024), unchanged;</item>
-///   <item>structured output is forced via Messages-API <c>tools</c> + <c>tool_use</c>
-///   (<c>tool_choice: {type:"tool", name:"emit_posts"}</c>, tool schema under <c>input_schema</c>) —
-///   Claude returns the burst as a <c>tool_use</c> content block, not OpenAI's <c>tool_calls</c>;</item>
-///   <item><c>max_tokens</c> is <b>required</b> by the Messages API (Azure OpenAI's cap is optional).</item>
-/// </list>
+/// It speaks the Anthropic Messages API (Foundry's <c>/anthropic/v1/messages</c> passthrough, which the
+/// SDK targets automatically from the resource name): the trusted engine context is the top-level
+/// <c>system</c> field, the untrusted world feed rides only in the user turn (ADP-024), and structured
+/// output is forced via a Messages-API <c>tool_use</c> (<c>tool_choice</c> = the <c>emit_posts</c> tool)
+/// so Claude returns the burst as a tool_use block — the same <c>emit_posts</c> contract the OpenAI
+/// adapter uses, so the content guard + voice metrics inspect identical shapes.
 ///
-/// Auth is keyless — an Entra token from the injected <see cref="TokenCredential"/> (managed identity in
-/// prod, az-cli login in dev), matching the account's <c>disableLocalAuth</c> posture (NFR-005, no keys
-/// to leak). NOTE the Foundry Anthropic surface takes a <b>different token scope</b> than the Azure OpenAI
-/// surface — <c>https://ai.azure.com/.default</c>, not <c>cognitiveservices.azure.com</c> (a wrong scope
-/// is a 401). The data-plane RBAC role is <c>Cognitive Services User</c>. On failure it surfaces a clear
-/// <see cref="GenerationProviderException"/> so the shared circuit breaker (story 05) trips identically.
+/// Auth is keyless — an Entra token from the injected <see cref="TokenCredential"/> via
+/// <see cref="AnthropicFoundryIdentityTokenCredentials"/> (scope <c>https://ai.azure.com/.default</c>,
+/// data-plane role <c>Cognitive Services User</c>), matching the account's <c>disableLocalAuth</c> posture
+/// (NFR-005). The SDK's transport is our resilient <see cref="HttpClient"/> (the shared Polly pipeline),
+/// so degraded-mode (NFR-003 / ADP-042) trips identically to the OpenAI adapter; the SDK's own retry is
+/// disabled so Polly owns resilience. The <c>anthropic-version</c> header is set by the SDK.
 /// </summary>
-public sealed class ClaudeFoundryGenerationProvider : IGenerationProvider
+public sealed class ClaudeFoundryGenerationProvider : IGenerationProvider, IDisposable
 {
-    // The Foundry AI-services data-plane scope for the /anthropic passthrough — distinct from the Azure
-    // OpenAI adapter's cognitiveservices scope. Confirmed against the MS "use Claude in Foundry" docs.
-    private static readonly string[] Scopes = ["https://ai.azure.com/.default"];
-
-    // Stable Anthropic Messages API version (a request header, distinct from Azure's api-version query
-    // param). Pinned here rather than in config: it is the wire contract this adapter is written against.
-    private const string AnthropicVersion = "2023-06-01";
-
     // Floor for the required max_tokens when the request leaves it unset. A burst is small (measured
     // ~200 output tokens for 4 posts), but the ceiling is scaled by post count so a large cast never
     // truncates the tool_use block mid-JSON (a truncated burst fails the emit_posts parse below).
     private const int MinOutputTokens = 1024;
     private const int OutputTokensPerPost = 200;
 
-    private readonly HttpClient _http;
-    private readonly TokenCredential _credential;
+    private readonly AnthropicFoundryClient _client;
     private readonly GenerationOptions _options;
 
     public ClaudeFoundryGenerationProvider(
@@ -59,15 +47,35 @@ public sealed class ClaudeFoundryGenerationProvider : IGenerationProvider
         GenerationGovernance governance)
     {
         ArgumentNullException.ThrowIfNull(options);
-        _http = http ?? throw new ArgumentNullException(nameof(http));
-        _credential = credential ?? throw new ArgumentNullException(nameof(credential));
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(credential);
         _options = options.Value;
         Governance = governance ?? throw new ArgumentNullException(nameof(governance));
+
+        if (string.IsNullOrWhiteSpace(_options.Endpoint))
+        {
+            throw new GenerationConfigurationException("Generation:Endpoint is required for provider 'ClaudeFoundry'.");
+        }
+
+        // The Foundry client takes a RESOURCE NAME (it builds https://{name}.services.ai.azure.com/anthropic
+        // itself), not a URL — derive it from the configured endpoint host's first label. Our resilient
+        // HttpClient is the transport (Polly owns retries + the breaker); disable the SDK's own retry.
+        var resourceName = ResourceNameFrom(_options.Endpoint);
+        var credentials = new AnthropicFoundryIdentityTokenCredentials(credential, resourceName);
+        _client = new AnthropicFoundryClient(credentials)
+        {
+            HttpClient = http,
+            MaxRetries = 0,
+        };
     }
 
     public string Name => "ClaudeFoundry";
 
     public GenerationGovernance Governance { get; }
+
+    /// <summary>Disposes the SDK client. The injected HttpClient is owned by IHttpClientFactory, not this
+    /// client, so it is not disposed here.</summary>
+    public void Dispose() => _client.Dispose();
 
     public async Task<GenerationResult> GenerateAsync(GenerationRequest request, CancellationToken cancellationToken = default)
     {
@@ -80,110 +88,74 @@ public sealed class ClaudeFoundryGenerationProvider : IGenerationProvider
                 $"No deployment configured for tier '{tierKey}' (set Generation:Tiers:{tierKey}:Deployment).");
         }
 
-        var body = BuildRequestBody(request, tier);
-        var accessToken = await _credential
-            .GetTokenAsync(new TokenRequestContext(Scopes), cancellationToken)
-            .ConfigureAwait(false);
-
-        // The Foundry Anthropic passthrough is versioned by the anthropic-version HEADER (set below), not
-        // by an Azure api-version query param — unlike the /openai/... surface. So no api-version here.
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, new Uri("anthropic/v1/messages", UriKind.Relative))
-        {
-            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"),
-        };
-        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
-        httpRequest.Headers.TryAddWithoutValidation("anthropic-version", AnthropicVersion);
-
-        var stopwatch = Stopwatch.StartNew();
-        using var response = await _http.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        stopwatch.Stop();
-
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new GenerationProviderException(
-                $"Claude on Foundry returned {(int)response.StatusCode} for model '{tier.Deployment}': {Truncate(payload, 600)}");
-        }
-
-        return Parse(payload, stopwatch.Elapsed, tier);
-    }
-
-    private static JsonObject BuildRequestBody(GenerationRequest request, TierModelOptions tier)
-    {
         var userContent = string.IsNullOrWhiteSpace(request.WorldFeed) ? WorldFeedFence.Empty : request.WorldFeed;
         var maxTokens = request.MaxOutputTokens ?? Math.Max(MinOutputTokens, request.PostCount * OutputTokensPerPost);
 
-        return new JsonObject
+        var parameters = new MessageCreateParams
         {
-            ["model"] = tier.Deployment,
-            ["max_tokens"] = maxTokens,
+            Model = tier.Deployment,
+            MaxTokens = maxTokens,
 
-            // Trusted engine context is the top-level system field (Messages API) — NOT a system message.
-            ["system"] = request.SystemPrompt,
+            // Trusted engine context is the top-level system field; the untrusted world feed rides in the
+            // user turn only (ADP-024), identical to the OpenAI adapter.
+            System = request.SystemPrompt,
+            Messages = [new() { Role = Role.User, Content = userContent }],
 
-            // Untrusted world feed stays in the user turn only (ADP-024), identical to the OpenAI adapter.
-            ["messages"] = new JsonArray(
-                new JsonObject { ["role"] = "user", ["content"] = userContent }),
-
-            ["tools"] = new JsonArray(JsonNode.Parse(EmitPostsTool)!),
-            ["tool_choice"] = new JsonObject
-            {
-                ["type"] = "tool",
-                ["name"] = "emit_posts",
-            },
+            Tools = [EmitPostsTool],
+            ToolChoice = new ToolChoiceTool { Name = "emit_posts" },
         };
-    }
 
-    private static GenerationResult Parse(string payload, TimeSpan latency, TierModelOptions tier)
-    {
-        using var doc = JsonDocument.Parse(payload);
-        var root = doc.RootElement;
-
-        var model = root.TryGetProperty("model", out var modelEl)
-            ? modelEl.GetString() ?? tier.Model
-            : tier.Model;
-
-        if (!TryFindEmitPostsTool(root, out var toolUse))
+        var stopwatch = Stopwatch.StartNew();
+        Message response;
+        try
         {
-            var stop = root.TryGetProperty("stop_reason", out var sr) ? sr.GetString() : "unknown";
+            response = await _client.Messages.Create(parameters, cancellationToken).ConfigureAwait(false);
+        }
+        catch (AnthropicApiException ex)
+        {
             throw new GenerationProviderException(
-                $"Model did not call emit_posts (stop_reason={stop}). Content guard cannot run on a non-burst response.");
+                $"Claude on Foundry failed for model '{tier.Deployment}': {Truncate(ex.Message, 600)}", ex);
         }
 
-        var posts = toolUse.TryGetProperty("input", out var input)
-            ? ParsePosts(input)
-            : [];
-        var usage = ParseUsage(root);
+        stopwatch.Stop();
+        return Parse(response, stopwatch.Elapsed, tier);
+    }
+
+    private static GenerationResult Parse(Message response, TimeSpan latency, TierModelOptions tier)
+    {
+        ToolUseBlock? emit = null;
+        foreach (var block in response.Content)
+        {
+            if (block.TryPickToolUse(out var toolUse) && toolUse.Name == "emit_posts")
+            {
+                emit = toolUse;
+                break;
+            }
+        }
+
+        if (emit is null)
+        {
+            throw new GenerationProviderException(
+                $"Model did not call emit_posts (stop_reason={response.StopReason}). Content guard cannot run on a non-burst response.");
+        }
+
+        var posts = emit.Input.TryGetValue("posts", out var postsEl) ? ParsePosts(postsEl) : [];
+        var usage = ParseUsage(response.Usage);
+
+        // response.Model is an ApiEnum<string, Model>; take its string value, falling back to the config.
+        string model = response.Model;
+        if (string.IsNullOrEmpty(model))
+        {
+            model = tier.Model;
+        }
 
         return new GenerationResult(posts, usage, latency, "ClaudeFoundry", model);
     }
 
-    private static bool TryFindEmitPostsTool(JsonElement root, out JsonElement toolUse)
-    {
-        toolUse = default;
-        if (!root.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
-        {
-            return false;
-        }
-
-        foreach (var block in content.EnumerateArray())
-        {
-            if (block.TryGetProperty("type", out var type) && type.GetString() == "tool_use"
-                && block.TryGetProperty("name", out var name) && name.GetString() == "emit_posts")
-            {
-                toolUse = block;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static List<GeneratedPost> ParsePosts(JsonElement input)
+    private static List<GeneratedPost> ParsePosts(JsonElement postsEl)
     {
         var posts = new List<GeneratedPost>();
-
-        if (!input.TryGetProperty("posts", out var postsEl) || postsEl.ValueKind != JsonValueKind.Array)
+        if (postsEl.ValueKind != JsonValueKind.Array)
         {
             return posts;
         }
@@ -213,55 +185,64 @@ public sealed class ClaudeFoundryGenerationProvider : IGenerationProvider
         return posts;
     }
 
-    private static GenerationUsage ParseUsage(JsonElement root)
+    private static GenerationUsage ParseUsage(Usage usage)
     {
-        if (!root.TryGetProperty("usage", out var usage))
-        {
-            return new GenerationUsage(0, 0);
-        }
-
+        // Anthropic's InputTokens EXCLUDES cache tokens (cache read + creation are reported separately);
+        // the cost model accounts for these semantics per provider.
         return new GenerationUsage(
-            InputTokens: ReadInt(usage, "input_tokens"),
-            OutputTokens: ReadInt(usage, "output_tokens"),
-            CacheReadInputTokens: ReadInt(usage, "cache_read_input_tokens"),
-            CacheCreationInputTokens: ReadInt(usage, "cache_creation_input_tokens"));
+            InputTokens: (int)usage.InputTokens,
+            OutputTokens: (int)usage.OutputTokens,
+            CacheReadInputTokens: (int)(usage.CacheReadInputTokens ?? 0),
+            CacheCreationInputTokens: (int)(usage.CacheCreationInputTokens ?? 0));
     }
 
-    private static int ReadInt(JsonElement element, string property) =>
-        element.TryGetProperty(property, out var value) && value.TryGetInt32(out var result) ? result : 0;
+    private static string ResourceNameFrom(string endpoint)
+    {
+        var host = new Uri(endpoint, UriKind.Absolute).Host;
+        var label = host.Split('.', 2)[0];
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            throw new GenerationConfigurationException(
+                $"Could not derive a Foundry resource name from Generation:Endpoint '{endpoint}'.");
+        }
+
+        return label;
+    }
 
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : string.Concat(value.AsSpan(0, max), "…");
 
-    // Anthropic tool definition is flat: {name, description, input_schema} — NOT wrapped in a "function"
-    // object like OpenAI. Same emit_posts contract (one post per persona) as the OpenAI adapter so the
-    // content guard + voice metrics inspect identical shapes across providers.
-    private const string EmitPostsTool = """
+    // Anthropic tool definition: flat {name, description, input_schema}. Same emit_posts contract (one
+    // post per persona) as the OpenAI adapter so the guard + voice metrics inspect identical shapes.
+    // Built once (static) — it is an immutable request parameter reused across bursts.
+    private static readonly Tool EmitPostsTool = new()
     {
-      "name": "emit_posts",
-      "description": "Emit the generated social-media posts — exactly one per requested persona.",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "posts": {
-            "type": "array",
-            "description": "One post per persona, each written in that persona's own voice.",
-            "items": {
-              "type": "object",
-              "properties": {
-                "personaHandle": { "type": "string", "description": "The @handle of the persona authoring this post." },
-                "text": { "type": "string", "description": "The post body — in-world, in the persona's voice." },
-                "sentiment": { "type": "number", "description": "Sentiment from -1.0 (very negative) to 1.0 (very positive)." },
-                "hashtags": { "type": "array", "items": { "type": "string" }, "description": "Hashtags used, including the leading #." }
-              },
-              "required": ["personaHandle", "text", "sentiment", "hashtags"],
-              "additionalProperties": false
-            }
-          }
+        Name = "emit_posts",
+        Description = "Emit the generated social-media posts — exactly one per requested persona.",
+        InputSchema = new()
+        {
+            Properties = new Dictionary<string, JsonElement>
+            {
+                ["posts"] = JsonSerializer.SerializeToElement(new
+                {
+                    type = "array",
+                    description = "One post per persona, each written in that persona's own voice.",
+                    items = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            personaHandle = new { type = "string", description = "The @handle of the persona authoring this post." },
+                            text = new { type = "string", description = "The post body — in-world, in the persona's voice." },
+                            sentiment = new { type = "number", description = "Sentiment from -1.0 (very negative) to 1.0 (very positive)." },
+                            hashtags = new { type = "array", items = new { type = "string" }, description = "Hashtags used, including the leading #." },
+                        },
+                        required = new[] { "personaHandle", "text", "sentiment", "hashtags" },
+                        additionalProperties = false,
+                    },
+                }),
+            },
+            Required = ["posts"],
         },
-        "required": ["posts"],
-        "additionalProperties": false
-      }
-    }
-    """;
+    };
 }

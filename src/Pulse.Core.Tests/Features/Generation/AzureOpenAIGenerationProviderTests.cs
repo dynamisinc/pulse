@@ -15,11 +15,19 @@ public class AzureOpenAIGenerationProviderTests
 {
     private sealed class FakeCredential : TokenCredential
     {
-        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
-            new("fake-token", DateTimeOffset.MaxValue);
+        public string[]? RequestedScopes { get; private set; }
 
-        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
-            ValueTask.FromResult(new AccessToken("fake-token", DateTimeOffset.MaxValue));
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+        {
+            RequestedScopes = requestContext.Scopes;
+            return new AccessToken("fake-token", DateTimeOffset.MaxValue);
+        }
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+        {
+            RequestedScopes = requestContext.Scopes;
+            return ValueTask.FromResult(new AccessToken("fake-token", DateTimeOffset.MaxValue));
+        }
     }
 
     private static GenerationOptions OptionsWithStandard()
@@ -76,7 +84,7 @@ public class AzureOpenAIGenerationProviderTests
         });
     }
 
-    private static (AzureOpenAIGenerationProvider Provider, Func<string?> CapturedBody) BuildProvider(
+    private static (AzureOpenAIGenerationProvider Provider, Func<string?> CapturedBody, FakeCredential Credential) BuildProvider(
         HttpStatusCode status, string responseBody, GenerationOptions? options = null)
     {
         var handler = new Mock<HttpMessageHandler>();
@@ -91,16 +99,17 @@ public class AzureOpenAIGenerationProviderTests
             });
 
         var http = new HttpClient(handler.Object) { BaseAddress = new Uri("https://test.example/") };
+        var credential = new FakeCredential();
         var provider = new AzureOpenAIGenerationProvider(
-            http, new FakeCredential(), Options.Create(options ?? OptionsWithStandard()), GenerationGovernance.InProcess);
+            http, credential, Options.Create(options ?? OptionsWithStandard()), GenerationGovernance.InProcess);
 
-        return (provider, () => capturedBody);
+        return (provider, () => capturedBody, credential);
     }
 
     [Fact]
     public async Task GenerateAsync_ParsesToolCallIntoPostsAndUsage()
     {
-        var (provider, _) = BuildProvider(HttpStatusCode.OK, ToolCallResponse());
+        var (provider, _, _) = BuildProvider(HttpStatusCode.OK, ToolCallResponse());
 
         var result = await provider.GenerateAsync(Request());
 
@@ -118,7 +127,7 @@ public class AzureOpenAIGenerationProviderTests
     [Fact]
     public async Task GenerateAsync_ForcesEmitPostsTool_AndKeepsWorldFeedInUserTurnOnly()
     {
-        var (provider, capturedBody) = BuildProvider(HttpStatusCode.OK, ToolCallResponse());
+        var (provider, capturedBody, _) = BuildProvider(HttpStatusCode.OK, ToolCallResponse());
 
         await provider.GenerateAsync(Request());
 
@@ -143,9 +152,21 @@ public class AzureOpenAIGenerationProviderTests
     }
 
     [Fact]
+    public async Task GenerateAsync_RequestsTheCognitiveServicesScope()
+    {
+        var (provider, _, credential) = BuildProvider(HttpStatusCode.OK, ToolCallResponse());
+
+        await provider.GenerateAsync(Request());
+
+        // The Azure OpenAI surface uses the cognitiveservices scope — distinct from the Claude/Foundry
+        // adapter's ai.azure.com scope. A wrong scope is a live 401 no other hermetic test would catch.
+        credential.RequestedScopes.Should().ContainSingle().Which.Should().Be("https://cognitiveservices.azure.com/.default");
+    }
+
+    [Fact]
     public async Task GenerateAsync_NonSuccessStatus_ThrowsProviderException()
     {
-        var (provider, _) = BuildProvider(HttpStatusCode.TooManyRequests, "{\"error\":\"rate limited\"}");
+        var (provider, _, _) = BuildProvider(HttpStatusCode.TooManyRequests, "{\"error\":\"rate limited\"}");
 
         var act = () => provider.GenerateAsync(Request());
 
@@ -161,7 +182,7 @@ public class AzureOpenAIGenerationProviderTests
             choices = new[] { new { finish_reason = "stop", message = new { role = "assistant", content = "I refuse." } } },
             usage = new { prompt_tokens = 10, completion_tokens = 3 },
         });
-        var (provider, _) = BuildProvider(HttpStatusCode.OK, noTool);
+        var (provider, _, _) = BuildProvider(HttpStatusCode.OK, noTool);
 
         var act = () => provider.GenerateAsync(Request());
 
@@ -172,7 +193,7 @@ public class AzureOpenAIGenerationProviderTests
     public async Task GenerateAsync_MissingDeploymentForTier_ThrowsConfigException()
     {
         var options = new GenerationOptions { Provider = "AzureOpenAI", Endpoint = "https://test.example/" };
-        var (provider, _) = BuildProvider(HttpStatusCode.OK, ToolCallResponse(), options);
+        var (provider, _, _) = BuildProvider(HttpStatusCode.OK, ToolCallResponse(), options);
 
         var act = () => provider.GenerateAsync(Request());
 
