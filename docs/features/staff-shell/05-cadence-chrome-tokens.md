@@ -1,6 +1,6 @@
 # Story: Cadence chrome tokens + thumbnail-distinguishability gate
 
-**Feature:** Staff shell frame  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Staff shell frame  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** D7-009, COR-063  ·  **Design decisions:** D7-009, D7-005  ·  **Issue:** #196
 
 ## Context
@@ -13,18 +13,18 @@ framed by two green banners. The participant shell stays **out** of Cadence; it 
 consumer media, not the exercise platform.
 
 ## Acceptance Criteria
-- [ ] The staff frame renders in the Cadence palette (navy `#1e3a5f` header, `#f8f8f8` work area,
+- [x] The staff frame renders in the Cadence palette (navy `#1e3a5f` header, `#f8f8f8` work area,
       white panels, `#e42217` accents, `#848482` secondary, pill buttons), sourced from COBRA tokens /
       `@/theme/styledComponents` — never a default MUI look.
-- [ ] **Hard gate:** at thumbnail size a staff surface is unmistakable from a participant surface (dark
+- [x] **Hard gate:** at thumbnail size a staff surface is unmistakable from a participant surface (dark
       chrome + single top bar vs light world framed by two green banners); the two are **never** mixed
       on one surface (SHELL-CONTRACT §4). *(The one deliberate, labelled exception is Preview-as, story
       04, which stages the participant shell inside the frame.)*
-- [ ] The **participant shell uses none** of these Cadence tokens (D7-009) — enforced by the two-worlds
+- [x] The **participant shell uses none** of these Cadence tokens (D7-009) — enforced by the two-worlds
       route separation (COBRA theme mounts on staff routes only; participant routes never import it).
-- [ ] Tokens are consistent with the wider Cadence/COBRA system so a Cadence-trained controller reads
+- [x] Tokens are consistent with the wider Cadence/COBRA system so a Cadence-trained controller reads
       the console immediately (D0 §1); state/severity styling is never color-only (NFR-001).
-- [ ] Classification tag styling (`UNCLASSIFIED // FOUO`, mono) and the navy exercise-bar-free header
+- [x] Classification tag styling (`UNCLASSIFIED // FOUO`, mono) and the navy exercise-bar-free header
       (D7-010) derive from these tokens.
 
 ## Out of Scope

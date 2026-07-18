@@ -100,21 +100,23 @@ Seed E1 data first (mock): `identity-auth-roles` 01/03 (roles + sessions), `pers
 
 ---
 
-## Staff shell ⬜  · umbrella `feature/staff-shell`  · parallel, after participant mount contract
+## Staff shell 🔧  · umbrella `feature/staff-shell`  · parallel, after participant mount contract — built, Gate-2 clean; umbrella→main PR open (awaiting merge)
 
 Wave plan: `docs/features/staff-shell/implementation.md`.
 
-### Wave 1 ⬜
-- `05-cadence-chrome-tokens` — `StaffShellFrame.tsx` (COBRA theme boundary; enforces the hard gate)
-- `01-staff-header` — navy Cadence header, clocks, state pill, FOUO tag, preview button
-- `02-toolstrip-dock` — `Toolstrip.tsx`, `toolRegistry.ts` → **`registerSurfaceTool()`** (the console/evaluator seam)
+### Wave 1 ✅
+- ✅ built — `05-cadence-chrome-tokens` — `StaffShellFrame.tsx` (COBRA theme boundary; enforces the hard gate)
+- ✅ built — `01-staff-header` — navy Cadence header, clocks, state pill, FOUO tag, preview button
+- ✅ built — `02-toolstrip-dock` — `Toolstrip.tsx`, `toolRegistry.ts` → **`registerSurfaceTool()`** (the console/evaluator seam)
 
-### Wave 2 ⬜
-- `03-participant-admin-flyout` — login-triage flyout (shell-global tool)
-- `04-preview-as-participant` — **depends on `participant-shell` mount contract** (the one cross-feature serial edge)
+### Wave 2 ✅
+- ✅ built — `03-participant-admin-flyout` — login-triage flyout (shell-global tool)
+- ✅ built — `04-preview-as-participant` — **depends on `participant-shell` mount contract** (the one cross-feature serial edge)
 
 **On landing:** delete `src/frontend/src/features/evaluator/components/shell/StaffShellStub.tsx` (its own
-comment says so) — coordinate with the evaluator session, which currently imports it.
+comment says so) — coordinate with the evaluator session, which currently imports it. **Done:**
+`StaffShellStub.tsx` has been deleted and the evaluator dashboard is re-hosted under the real
+`StaffShellFrame`.
 
 ---
 

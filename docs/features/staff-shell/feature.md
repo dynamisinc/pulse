@@ -1,7 +1,7 @@
 # Feature: Staff shell frame
 
 **Epic:** E7 — Controller Command Surface  ·  **Phase:** 1  ·  **Feature ref:** D7 (application shells)
-**World:** staff  ·  **Issue:** #184  ·  **Status:** decomposed — ready to build
+**World:** staff  ·  **Issue:** #184  ·  **Status:** built — Gate-2 clean; umbrella→main PR open
 
 ## Summary
 The frame every staff surface (controller console, evaluator dashboard) renders inside: the Cadence
@@ -28,11 +28,11 @@ Uses the COBRA/Cadence components (`@/theme/styledComponents`) where they map. *
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Staff header — lockup, identity badge, clocks, state pill, classification tag | COR-063 / COR-005 / D7-010 | Not Started | #192 |
-| 02 | Toolstrip dock — one shell-owned strip, shell-global + surface zones | D7-011 / COR-063 | Not Started | #193 |
-| 03 | Participant-admin flyout (login triage) | COR-017 | Not Started | #194 |
-| 04 | Preview as participant (staged, read-only, scenario-moment picker) | COR-041 | Not Started | #195 |
-| 05 | Cadence chrome tokens + thumbnail-distinguishability gate | D7-009 | Not Started | #196 |
+| 01 | Staff header — lockup, identity badge, clocks, state pill, classification tag | COR-063 / COR-005 / D7-010 | Complete | #192 |
+| 02 | Toolstrip dock — one shell-owned strip, shell-global + surface zones | D7-011 / COR-063 | Complete | #193 |
+| 03 | Participant-admin flyout (login triage) | COR-017 | Complete | #194 |
+| 04 | Preview as participant (staged, read-only, scenario-moment picker) | COR-041 | Complete | #195 |
+| 05 | Cadence chrome tokens + thumbnail-distinguishability gate | D7-009 | Complete | #196 |
 
 ## Dependencies
 E1 exercise-context + roles (Director/Controller; lead-controller for some admin actions),
