@@ -41,6 +41,15 @@
  * interactive element inside another (the action row's real `<button>`s are
  * SIBLINGS of this region, not descendants of it).
  *
+ * Reply-to-thread (SOC-011/threads-replies story 02): the reply action in
+ * the action row accepts an OPTIONAL `onReply` prop; when a caller supplies
+ * it, clicking (or keyboard-activating) the reply button also opens the
+ * thread focused on this post — same affordance as tapping the card body,
+ * just reachable from the reply count too. With no `onReply` supplied the
+ * reply button renders exactly as before (an inert-until-wired `<button>`),
+ * so no existing consumer's behavior changes. `readOnly` counts stay fully
+ * inert — `onReply` is never wired to them.
+ *
  * World: participant (Pulse skin). No COBRA, no themed MUI — plain semantic
  * elements + the scoped `social.module.css` CSS Module (tokens read from CSS
  * custom properties; see that file's header for the theming model).
@@ -107,6 +116,13 @@ export interface PostCardProps {
   variant?: 'full' | 'readOnly'
   /** Fires when the card body (header/text/media — not the action row) is activated. */
   onOpen?: (id: string) => void
+  /**
+   * Fires with the post id when the reply action is activated (click or
+   * keyboard). Optional — omit it and the reply button behaves exactly as
+   * before (no-op). Never wired when `variant === 'readOnly'` (counts stay
+   * inert there).
+   */
+  onReply?: (id: string) => void
 }
 
 interface ActionSpec {
@@ -131,7 +147,7 @@ function buildActions(counts: PostCounts): ActionSpec[] {
 
 const OPEN_KEYS = new Set(['Enter', ' ', 'Spacebar'])
 
-export function PostCard({ post, variant = 'full', onOpen }: PostCardProps) {
+export function PostCard({ post, variant = 'full', onOpen, onReply }: PostCardProps) {
   const { timeZone } = useExerciseContext()
   const { format } = useScenarioTime(timeZone)
 
@@ -237,6 +253,7 @@ export function PostCard({ post, variant = 'full', onOpen }: PostCardProps) {
                 className={styles.actionButton}
                 data-action={action.key}
                 aria-label={`${action.label}, ${action.count}`}
+                onClick={action.key === 'reply' && onReply ? () => onReply(post.id) : undefined}
               >
                 <FontAwesomeIcon icon={action.icon} aria-hidden="true" className={styles.actionIcon} />
                 <span className={styles.actionCount}>{action.count}</span>
