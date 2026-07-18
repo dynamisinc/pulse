@@ -89,9 +89,14 @@ README/mockup ticker spec) for consistency (white-on-`#3d6a96` ≈ 5.7:1), not f
 **Synced together:** SHELL-CONTRACT §2 (+ the D4 copy), README, both D7 mockups (`.tk-adv`,
 `.ab-adv .chip`, `.pab-adv .pchip`), the D1 mockup (`.asev`) + D1 README, the D4 advisory alert
 tabs, COMPONENTS.md, story `02-alert-bar-host.md`, and the code (`AlertBar.tsx` `SEVERITY_META`).
-**Open:** the D4 Wire Room "⏱ SCHEDULED" embargo chip reuses `#b97a00` + white (≈ 3.6:1) for a
-*different* semantic (release status, not an alert severity) and the evaluator staff-origin chips
-reuse the amber too — separate AA follow-ups, deliberately not changed here.
+**Resolved (PR #242):** the remaining `#b97a00`+white reuses moved to `#8a5a00` — the D4 Wire Room
+"⏱ SCHEDULED" embargo chip (a *different* semantic: release status, not an alert severity), the
+evaluator participant-preview advisory-chip replica (`ParticipantStageFrame.tsx`, which had
+re-hardcoded the shell chip instead of tracking it), and the evaluator-dashboard handoff bundle
+(its two advisory-chip replicas + the SHELL-CONTRACT / DECISIONS copies). The `#8a5300`-on-pale
+evaluator chips (TimelineExplorer STAFF/PORTAL, the derived-trend chip) already cleared AA
+(≈ 5.8:1) and were left unchanged — the earlier note's "staff-origin chips" was actually that
+advisory replica, not those chips.
 
 ### D7 open / deferred
 - Shell as a real shared component (both mockups currently keep their own chrome) — retrofit
