@@ -358,6 +358,52 @@ describe('PostCard — reply count & thread-open affordance (SOC-011, threads-re
     const actionsRegion = screen.getByTestId('post-actions')
     expect(within(actionsRegion).queryAllByRole('button')).toHaveLength(0)
   })
+
+  it('fires onReply on keyboard activation (Space) of the reply button', async () => {
+    const onReply = vi.fn()
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const user = userEvent.setup()
+
+    await renderWithExerciseContext(
+      <PostCard post={buildPost({ id: 'post-reply-3' })} onReply={onReply} />,
+    )
+
+    const replyButton = screen.getByRole('button', { name: /^reply/i })
+    replyButton.focus()
+    await user.keyboard(' ')
+
+    expect(onReply).toHaveBeenCalledWith('post-reply-3')
+  })
+
+  it('fires onReply, not onOpen, when the reply button is clicked and both handlers are supplied', async () => {
+    const onOpen = vi.fn()
+    const onReply = vi.fn()
+    await renderWithExerciseContext(
+      <PostCard post={buildPost({ id: 'post-reply-4' })} onOpen={onOpen} onReply={onReply} />,
+    )
+
+    screen.getByRole('button', { name: /^reply/i }).click()
+
+    expect(onReply).toHaveBeenCalledWith('post-reply-4')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('reflects an updated reply count on rerender (real-time feed consistency)', async () => {
+    const { rerender } = await renderWithExerciseContext(
+      <PostCard post={buildPost({ id: 'post-live', counts: { reply: 2, repost: 0, like: 0 } })} />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Reply, 2' })).toBeInTheDocument()
+
+    rerender(
+      <ExerciseContextProvider>
+        <PostCard post={buildPost({ id: 'post-live', counts: { reply: 3, repost: 0, like: 0 } })} />
+      </ExerciseContextProvider>,
+    )
+
+    expect(screen.getByRole('button', { name: 'Reply, 3' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reply, 2' })).not.toBeInTheDocument()
+  })
 })
 
 describe('PostCard — media and link preview', () => {
