@@ -38,6 +38,9 @@ param deployBackend bool = false
 @description('Deploy ACS + Email Service resources. Off until email is needed.')
 param deployCommunication bool = false
 
+@description('Deploy the Azure AI Foundry (Cognitive Services) account + E8 model deployments. Off until the engine needs a live endpoint.')
+param deployAi bool = false
+
 // ============================================================================
 // SQL Parameters (only consumed when deployDatabase = true)
 // ============================================================================
@@ -122,6 +125,7 @@ param emailConnectionString string = ''
 //   func-pulse-{env}       (function app)
 //   acs-pulse-{env}        (communication services)
 //   email-pulse-{env}      (email service)
+//   aif-pulse-{env}        (ai foundry / cognitive services)
 // ============================================================================
 
 var resourceSuffix = '${appName}-${environment}'
@@ -135,6 +139,7 @@ var signalRName = 'sigr-${resourceSuffix}'
 var functionAppName = 'func-${resourceSuffix}'
 var acsName = 'acs-${resourceSuffix}'
 var emailServiceName = 'email-${resourceSuffix}'
+var aiFoundryName = 'aif-${resourceSuffix}'
 
 var tags = {
   Environment: environment
@@ -277,6 +282,20 @@ module communication 'modules/communication.bicep' = if (deployCommunication) {
   }
 }
 
+// Azure AI Foundry for the E8 Adaptive Content Engine. Independent of deployBackend — the engine's
+// generation endpoint can stand up before the app host exists (e.g. for the story-06 measured spike).
+// The role assignment is skipped until a backend managed identity is passed; grant your az-login
+// identity "Cognitive Services OpenAI User" manually to run the spike against it.
+module ai 'modules/ai.bicep' = if (deployAi) {
+  name: 'aiDeploy'
+  params: {
+    location: location
+    aiFoundryName: aiFoundryName
+    backendPrincipalId: ''
+    tags: tags
+  }
+}
+
 // ============================================================================
 // Defender for Cloud (subscription-scoped) — deploy separately:
 //   az deployment sub create --location <location> \
@@ -309,3 +328,7 @@ output logAnalyticsWorkspaceId string = deployMonitoring ? logAnalytics.outputs.
 output acsHostName string = deployCommunication ? communication.outputs.acsHostName! : ''
 #disable-next-line BCP318
 output emailSenderAddress string = deployCommunication ? communication.outputs.managedDomainSenderAddress! : emailSenderAddress
+#disable-next-line BCP318
+output aiFoundryEndpoint string = deployAi ? ai.outputs.endpoint! : ''
+#disable-next-line BCP318
+output aiFoundryAccountName string = deployAi ? ai.outputs.name! : ''

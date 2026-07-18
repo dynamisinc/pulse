@@ -23,6 +23,10 @@ param deployDatabase = false
 param deployBackend = false
 param deployCommunication = false
 
+// Flip to true to stand up the E8 Azure AI Foundry endpoint + model deployments (independent of the
+// backend). Needed for the story-06 measured cost/latency pass. See infrastructure/README.md.
+param deployAi = false
+
 // --- Static Web App (the one resource deployed today) -------------------------
 param repositoryUrl = 'https://github.com/dynamisinc/pulse'
 // Custom domain bound to stapp-pulse-uat. Requires the GoDaddy CNAME

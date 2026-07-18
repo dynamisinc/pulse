@@ -1,6 +1,6 @@
 # Story: Degraded-mode fallback (circuit breaker)
 
-**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress
 **Requirements:** NFR-003, ADP-042  ·  **Design decisions:** none  ·  **Issue:** #146
 
 ## Context

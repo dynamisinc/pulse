@@ -25,18 +25,19 @@ envelope), §3.4 (four-layer isolation boundary), §3.5 (degraded mode). Prototy
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Provider abstraction + tenant-bounded governance | NFR-005 / ADP-025 | Not Started | #142 |
-| 02 | Prompt assembly & context assembly | ADP-020 (context) | Not Started | #143 |
-| 03 | Untrusted-data isolation boundary | ADP-024 | Not Started | #144 |
-| 04 | Model tiering & prompt caching | ADP-011 (cost) | Not Started | #145 |
-| 05 | Degraded-mode fallback (circuit breaker) | NFR-003 / ADP-042 | Not Started | #146 |
-| 06 | Cost/latency spike (measured) | open Q3 / NFR-002 | Not Started | #147 |
+| 01 | Provider abstraction + tenant-bounded governance | NFR-005 / ADP-025 | In Progress | #142 |
+| 02 | Prompt assembly & context assembly | ADP-020 (context) | In Progress | #143 |
+| 03 | Untrusted-data isolation boundary | ADP-024 | In Progress | #144 |
+| 04 | Model tiering & prompt caching | ADP-011 (cost) | In Progress | #145 |
+| 05 | Degraded-mode fallback (circuit breaker) | NFR-003 / ADP-042 | In Progress | #146 |
+| 06 | Cost/latency spike (measured) | open Q3 / NFR-002 | In Progress | #147 |
 
 ## Dependencies
 E1 exercise-context/query-scoping layer; persona dossiers (persona-management COR-020); the E2
 publish pipeline (output path); the XC-004 telemetry emitter. Sibling E8 features `persona-voice-engine`,
-`reaction-loop`, `storyline-model` build on this. Backend .NET does not exist yet — the provider
-interface is the contract seam; the frontend cockpit already exists (engine-review-cockpit #34–36).
+`reaction-loop`, `storyline-model` build on this. The .NET backend is now bootstrapped (`src/Pulse.Core`,
+this feature) — the provider interface is the contract seam. The frontend engine-review-cockpit
+(#34–36) is storied but not yet built (it lands with the E7 controller console).
 
 ## Design notes
 Staff/backend. **NFR-005 is a Phase-2 gate, not future:** every provider must satisfy the same

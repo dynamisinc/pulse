@@ -1,6 +1,6 @@
 # Story: Untrusted-data isolation boundary (prompt-injection hardening)
 
-**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress
 **Requirements:** ADP-024, NFR-005  ·  **Design decisions:** none  ·  **Issue:** #144
 
 ## Context

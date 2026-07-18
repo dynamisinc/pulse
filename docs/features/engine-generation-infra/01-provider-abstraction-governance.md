@@ -1,6 +1,6 @@
 # Story: Provider abstraction + tenant-bounded governance
 
-**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress
 **Requirements:** NFR-005, ADP-025  ·  **Design decisions:** none  ·  **Issue:** #142
 
 ## Context
