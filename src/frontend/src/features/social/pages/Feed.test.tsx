@@ -105,6 +105,58 @@ describe('Feed — shell variant drives card affordances (COR-015, D1-011)', () 
   })
 })
 
+describe('Feed — no provenance leak into the DOM (XC-002)', () => {
+  it('never renders origin/actingHumanId/injectId values, though the seeded posts carry them', async () => {
+    const { container } = renderFeed()
+    await screen.findAllByTestId('post-card')
+
+    // Values genuinely present on the seeded `Post` set (services/postService.ts)
+    // that must never reach a participant-visible string.
+    const provenanceValues = [
+      'human-simcell-utility',
+      'human-simcell-rumor',
+      'system-engine',
+      'human-participant-mvega',
+      'human-participant-kward',
+      'controller-as-persona',
+    ]
+    for (const value of provenanceValues) {
+      expect(container.textContent).not.toContain(value)
+    }
+    // The inject-origin post's injectId ('042') rendered via the staff-only
+    // console label would read "INJ-042" — assert that never appears either.
+    expect(container.textContent).not.toMatch(/INJ-042/)
+  })
+})
+
+describe('Feed — row DOM identity is stable across a re-render (NFR-002/SOC-071)', () => {
+  it('does not remount a row when the feed re-renders with unchanged data', async () => {
+    const utils = renderFeed()
+    const cardsBefore = await screen.findAllByTestId('post-card')
+    const firstCardBefore = cardsBefore[0]
+    expect(firstCardBefore).toBeDefined()
+
+    // Re-render the whole tree with a freshly-constructed (but equivalent)
+    // shell context value — if a row's key were unstable, or `FeedRow` were
+    // redefined per render instead of a stable memoized component, React
+    // would tear down and recreate the DOM node here.
+    utils.rerender(
+      <ExerciseContextProvider>
+        <SessionProvider>
+          <ShellContextProvider
+            value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+          >
+            <Feed />
+          </ShellContextProvider>
+        </SessionProvider>
+      </ExerciseContextProvider>,
+    )
+
+    const cardsAfter = await screen.findAllByTestId('post-card')
+    expect(cardsAfter[0]).toBe(firstCardBefore)
+  })
+})
+
 describe('Feed — feed-view telemetry (XC-004)', () => {
   it('emits exactly one "view" event on mount, with feed target + scenario time', async () => {
     setExerciseClock(fixedClock(new Date('2033-09-04T15:00:00.000Z')))
