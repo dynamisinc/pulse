@@ -18,11 +18,13 @@
  * deterministic scenario-relative rendering.
  */
 import { render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
 import { resetExerciseClock, setExerciseClock, type IExerciseClock } from '@/core/clock'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
+import { api } from '@/core/services/api'
+import { personaIdForHandle } from '@/features/personas'
 import { ThreadView } from './ThreadView'
 
 function fixedClock(instant: Date): IExerciseClock {
@@ -136,5 +138,77 @@ describe('ThreadView — thread-open telemetry (XC-004)', () => {
     expect(event.timeZone).toBe('America/New_York')
     expect(event.scenarioTime).toBe('2033-09-04T14:15:00.000Z')
     expect(Number.isNaN(Date.parse(event.wallClockTime))).toBe(false)
+  })
+})
+
+describe('ThreadView — no provenance/origin leak into the rendered DOM (XC-002)', () => {
+  it('never renders origin/actingHumanId/injectId values from the underlying posts, even though the mock data carries them', async () => {
+    const { container } = await renderThread('post-seed-mvega-question')
+
+    // actingHumanId behind the ancestors, the focused post, and the visible
+    // reply (the taken-down reply's actingHumanId, 'human-simcell-rumor', is
+    // covered too — its content never renders at all, tombstone or not).
+    expect(container.textContent).not.toMatch(/human-participant-kward/)
+    expect(container.textContent).not.toMatch(/human-participant-mvega/)
+    expect(container.textContent).not.toMatch(/human-simcell-rumor/)
+    expect(container.textContent).not.toMatch(/system-engine/)
+    // PostOrigin enum values (never a participant-visible string).
+    expect(container.textContent).not.toMatch(/controller-as-persona/)
+    expect(container.textContent).not.toMatch(/\binject\b/i)
+    expect(container.textContent).not.toMatch(/\bengine\b/i)
+    // injectId of the ancestor rumor post ('042').
+    expect(container.textContent).not.toMatch(/\b042\b/)
+  })
+})
+
+describe('ThreadView — content sanitization (NFR-004)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("renders the focused post's malicious text as inert text, never parsed HTML", async () => {
+    const maliciousText = '<img src=x onerror=alert(1)>'
+    const realGet = api.get.bind(api)
+    // Only the thread lookup is faked here — `ExerciseContextProvider` (a
+    // sibling in the same render tree) resolves through this same shared
+    // `api.get`, so anything else must fall through to the real mock adapter
+    // rather than being swallowed by a blanket mock.
+    vi.spyOn(api, 'get').mockImplementation((url: string, config?: Parameters<typeof api.get>[1]) => {
+      if (url.startsWith('/threads/')) {
+        return Promise.resolve({
+          data: {
+            ancestors: [],
+            focused: {
+              id: 'post-xss-focused',
+              exerciseId: 'ex-mock-0001',
+              authorPersonaId: personaIdForHandle('mvega_fh'),
+              actingHumanId: 'human-participant-mvega',
+              text: maliciousText,
+              counts: { reply: 0, repost: 0, like: 0 },
+              createdWallClock: '2026-07-01T00:00:00.000Z',
+              scenarioTime: '2033-09-04T14:05:00Z',
+              origin: 'participant',
+            },
+            replies: [],
+          },
+        } as Awaited<ReturnType<typeof api.get>>)
+      }
+      return realGet(url, config)
+    })
+
+    const { container } = await renderThread('post-xss-focused')
+
+    // A `dangerouslySetInnerHTML` render would parse this into a real (if
+    // inert-in-jsdom) <img> element; a plain-text React child never does.
+    expect(container.querySelector('img')).not.toBeInTheDocument()
+    expect(screen.getByText(maliciousText)).toBeInTheDocument()
+  })
+})
+
+describe('ThreadView — accessible thread landmark (NFR-001)', () => {
+  it('exposes the thread as a labelled region', async () => {
+    await renderThread('post-seed-mvega-question')
+
+    expect(screen.getByRole('region', { name: 'Thread' })).toBeInTheDocument()
   })
 })
