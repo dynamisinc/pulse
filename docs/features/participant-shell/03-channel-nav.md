@@ -1,7 +1,8 @@
 # Story: Channel nav — global strip + mobile tabs (config-driven)
 
-**Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-061, COR-062  ·  **Design decisions:** D7-001  ·  **Issue:** #187
+**Delivered:** `ChannelNav.tsx` + `channelNavConfig.ts`
 
 ## Context
 One shell-owned way to move between channels, so no channel re-implements a cross-channel switcher
@@ -13,23 +14,28 @@ with a channel's own masthead. **Config-driven:** a disabled channel appears **n
 its keep as E4/E5/E6 land (Phase 3).
 
 ## Acceptance Criteria
-- [ ] Given the enabled channel set, when the shell renders on desktop, then a 38px strip shows each
+- [x] Given the enabled channel set, when the shell renders on desktop, then a 38px strip shows each
       enabled channel as a plain link with the current channel marked (weight + underline) and the
-      **scenario dateline** right-aligned; on mobile, a bottom tab bar with the same channel set.
-- [ ] **Config-driven visibility:** a disabled channel appears in **neither** the strip **nor** the
+      **scenario dateline** right-aligned; on mobile, a bottom tab bar with the same channel set. —
+      `ChannelNav.test.tsx`
+- [x] **Config-driven visibility:** a disabled channel appears in **neither** the strip **nor** the
       mobile tabs — no dangling doors (matches D2-005); a single-channel deployment may hide the strip
-      entirely (config).
-- [ ] Channels **never** render their own cross-channel nav; switching a channel updates the mounted
-      channel and **persists per shell instance**.
-- [ ] The strip is **participant-world** styled (plain links, quiet grays) — never COBRA / default MUI
-      (D0 §2) — and never carries instructional text (XC-002).
-- [ ] Nav is keyboard-operable and screen-reader labelled; the current channel is programmatically
-      marked (NFR-001); the dateline renders in scenario time (COR-053).
+      entirely (config). — `ChannelNav.test.tsx`, `channelNavConfig.test.tsx`
+- [x] Channels **never** render their own cross-channel nav; switching a channel updates the mounted
+      channel and **persists per shell instance**. — `ChannelNav.test.tsx`
+- [x] The strip is **participant-world** styled (plain links, quiet grays) — never COBRA / default MUI
+      (D0 §2) — and never carries instructional text (XC-002). — `ChannelNav.test.tsx`
+- [x] Nav is keyboard-operable and screen-reader labelled; the current channel is programmatically
+      marked (NFR-001); the dateline renders in scenario time (COR-053). — `ChannelNav.test.tsx`
 
 ## Out of Scope
 A channel's own masthead / section nav (channel-owned); which channels exist (exercise-configuration);
 multi-channel behavior **at scale** across E4/E5/E6 (**Phase 3** — this story delivers the Phase-1
-container + single/degenerate-channel behavior); kiosk (nav stripped — story 06).
+container + single/degenerate-channel behavior, incl. the mobile tab bar's 5-slot cap; true
+**>5-channel overflow** treatment is Phase 3, when E4/E5/E6 land); the **actual cross-channel
+mount-switch** (Phase 3 — this story delivers the switch **mechanism** + per-shell-instance persisted
+state; there is only one real channel, Social, to switch to in pilot mode); kiosk (nav stripped —
+story 06).
 
 ## Technical Notes
 Participant world. Reads the enabled-channel config + current channel (exercise-scoped). Anchor: the

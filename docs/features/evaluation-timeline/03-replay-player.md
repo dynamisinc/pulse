@@ -1,7 +1,7 @@
 # Story: Replay player (honest fidelity)
 
 **Feature:** Evaluation timeline & replay foundation  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started
-**Requirements:** EVL-003, COR-053  ·  **Design decisions:** D6-005, D6-006  ·  **Issue:** —
+**Requirements:** EVL-003, COR-053  ·  **Design decisions:** D6-005, D6-006  ·  **Issue:** #232
 
 ## Context
 EVL-003 is the fidelity contract: event ordering and content are **guaranteed exact**; derived state

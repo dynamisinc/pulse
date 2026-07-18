@@ -1,7 +1,7 @@
 # Story: Pre-E8 graceful degradation
 
 **Feature:** Response, coverage, reach & sentiment metrics  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started
-**Requirements:** EVL-015  ·  **Design decisions:** D6-011  ·  **Issue:** —
+**Requirements:** EVL-015  ·  **Design decisions:** D6-011  ·  **Issue:** #228
 
 ## Context
 EVL-015 requires pre-E8 exercises to degrade gracefully: metrics that depend on engine constructs

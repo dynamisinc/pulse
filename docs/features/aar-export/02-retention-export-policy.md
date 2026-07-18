@@ -1,7 +1,7 @@
 # Story: Retention & export policy
 
 **Feature:** AAR export package  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started · deferred: design pass pending
-**Requirements:** EVL-032  ·  **Design decisions:** none — deferred, not a screen concern this pass  ·  **Issue:** —
+**Requirements:** EVL-032  ·  **Design decisions:** none — deferred, not a screen concern this pass  ·  **Issue:** #224
 
 ## Context
 EVL-032 requires archived exercises to retain full timeline/replay integrity per COR-006, with

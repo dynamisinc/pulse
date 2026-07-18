@@ -1,7 +1,7 @@
 # Story: Live annotation capture (≤10 seconds)
 
 **Feature:** Live evaluator tools — storyline board & annotation capture  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started
-**Requirements:** EVL-020  ·  **Design decisions:** D6-003  ·  **Issue:** —
+**Requirements:** EVL-020  ·  **Design decisions:** D6-003  ·  **Issue:** #235
 
 ## Context
 EVL-020 wants evaluators to bookmark/tag any timeline moment or content item with a note and

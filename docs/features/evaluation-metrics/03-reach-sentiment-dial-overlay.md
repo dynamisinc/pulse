@@ -1,7 +1,7 @@
 # Story: Reach & sentiment trajectory with controller-dial overlay
 
 **Feature:** Response, coverage, reach & sentiment metrics  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started
-**Requirements:** EVL-012, EVL-014  ·  **Design decisions:** D6-008, D6-009  ·  **Issue:** —
+**Requirements:** EVL-012, EVL-014  ·  **Design decisions:** D6-008, D6-009  ·  **Issue:** #227
 
 ## Context
 EVL-012 (reach & traction) computes impressions/engagement/amplification for official content over

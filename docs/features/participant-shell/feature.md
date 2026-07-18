@@ -1,7 +1,8 @@
 # Feature: Participant shell
 
 **Epic:** E1 — Platform Core & Exercise Isolation  ·  **Phase:** 1  ·  **Feature ref:** D7 (application shells)
-**World:** participant  ·  **Issue:** #183  ·  **Status:** decomposed — ready to build
+**World:** participant  ·  **Issue:** #183  ·  **Status:** Complete — all 7 stories built, tested, Gate-1 + Gate-2
+clean on the `feature/participant-shell` umbrella (30 files / 299 tests); ready for the umbrella→`main` PR.
 
 ## Summary
 The one container every participant-facing channel (social app, portal, news, press, weather) mounts
@@ -30,12 +31,12 @@ Tweaks props). **STORY-UPDATES.md** §A (this ADD) + §B (participant-surface re
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
 | 01 | Compliance chrome (two banners, config-driven, chrome-off legal) | COR-031 / COR-066 | Complete | #185 |
-| 02 | Alert-bar host (4 states, ticker default, emergency escapes) | PRT-010/011/012 / D7-002 | Not Started | #186 |
-| 03 | Channel nav — global strip + mobile tabs (config-driven) | COR-061/062 / D7-001 | Not Started | #187 |
+| 02 | Alert-bar host (4 states, ticker default, emergency escapes) | PRT-010/011/012 / D7-002 | Complete | #186 |
+| 03 | Channel nav — global strip + mobile tabs (config-driven) | COR-061/062 / D7-001 | Complete | #187 |
 | 04 | Channel-mount contract (content region, scenario time, variant) | COR-060 / COR-053/062 | Complete | #188 |
-| 05 | Overlay layer — pause / EndEx / break-fiction rendering | COR-065 / CTL-023/024 / COR-054 | Not Started | #189 |
-| 06 | Variants — read-only, kiosk (Phase 3), preview | COR-064/015 / PRT-040 / COR-041 | Not Started | #190 |
-| 07 | Per-exercise brand theming hooks | COR-066 / COR-030 | Not Started | #191 |
+| 05 | Overlay layer — pause / EndEx / break-fiction rendering | COR-065 / CTL-023/024 / COR-054 | Complete | #189 |
+| 06 | Variants — read-only, kiosk (Phase 3), preview | COR-064/015 / PRT-040 / COR-041 | Complete | #190 |
+| 07 | Per-exercise brand theming hooks | COR-066 / COR-030 | Complete | #191 |
 
 ## Dependencies
 E1 exercise-context + scenario clock (COR-050/053) — the shell reads server-driven exercise-scoped
@@ -54,3 +55,10 @@ with a live-region announce (NFR-001). Scenario time is the only time shown in-f
 shell never annotates it as "scenario time." Compliance chrome + overlays are the **only** exercise
 signals a participant sees (XC-002/003); no instructional banners inside the fiction. State is
 exercise-scoped and server-driven (XC-001).
+
+**Forward-looking (WR-002, Gate-2 · issue #238 · not this pass).** The two-worlds rule extends to the
+*not-found* path. `App.tsx` mounts `/shell` COBRA-free but its router catch-all still renders the COBRA
+staff 404. `/shell` is exact-match today so no participant path reaches it — **not a current break**.
+When E2 social lands participant deep-links / nested channel routes, add a brand-skinned participant
+not-found inside the `/shell` subtree so a mistyped participant URL stays in the fiction; keep the COBRA
+404 for staff / unknown-staff paths only. Tracked in STORY-UPDATES §D.

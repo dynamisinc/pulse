@@ -1,6 +1,6 @@
 # Story: Casts & one-action seeding with derived state
 
-**Feature:** Persona management & cast libraries  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Persona management & cast libraries  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** COR-021  ·  **Design decisions:** none  ·  **Issue:** #54
 
 ## Context
@@ -8,6 +8,17 @@ Planners assemble templates into named **Casts** (e.g. "Mid-size US city baselin
 agencies, 40 citizens") and seed an exercise with a cast in one action; seeding instantiates personas
 with believable **derived state** — varied follower counts, join dates predating the exercise
 (COR-021).
+
+**Seed delivered (Social E2 prerequisite):** `features/personas/{casts.ts,seedCast.ts,personaService.ts}`
+landed as a minimal mock seed so the Social (E2) feed/post surfaces have exercise-instanced personas to
+render — it is **not** a build of this story's full ACs. Delivered: a named `Cast` model, a one-action
+`seedCast()` that instantiates a cast's templates into exercise-scoped personas with derived follower
+counts (from audience-magnitude bands, SOC-054) and pre-exercise join dates (rendered in scenario time,
+COR-053), and a `usePersonas()` hook for consumers. Tests: `features/personas/seedCast.test.ts`,
+`features/personas/personaService.test.ts`. Remaining before this story can flip to Complete: the
+`CastBuilder` staff UI (assemble/edit a cast's membership) and the actual staff-triggered backend
+seeding action — neither exists yet; `seedCast()` today is a data function, not a reachable staff
+action.
 
 ## Acceptance Criteria
 - [ ] Planners can assemble persona templates into a named Cast and edit its membership.

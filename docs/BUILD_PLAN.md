@@ -62,34 +62,58 @@ Wave plan: `docs/features/participant-shell/implementation.md`.
 > watermark-fallback signal) via story `01-compliance-chrome`. Merged onto the `feature/participant-shell`
 > umbrella.
 
-### App route-tree split ⬜ (integration task, after Wave 1)
+### App route-tree split ✅ (integration task, after Wave 1)
 Refactor `src/frontend/src/App.tsx`: move the root `<ThemeProvider theme={cobraTheme}>` out of the app
 root; mount a **participant subtree** (`<BrandThemeProvider>` → `<ShellLayout>`) and a **staff subtree**
 (`<StaffShellFrame>` applies COBRA). `QueryClientProvider`/router stay at root. Makes COBRA physically
 unreachable from participant paths (the thumbnail-test guarantee).
 
-### Wave 2 ⬜ (all disjoint — fan out)
+> **Delivered:** `cobraTheme` moved off the app root into `StaffShellFrame`'s own `StaffThemeBoundary`,
+> and a COBRA-free `/shell` participant route was added mounting `<BrandThemeProvider>` →
+> `<ShellLayout>`. COBRA is now physically unreachable from participant paths.
+
+### Wave 2 ✅ (all disjoint — fan out)
 - `07-brand-theming` — `BrandThemeProvider` (creates the participant skin provider)
 - `02-alert-bar-host` — PRT-010 EAS analog, `role="status"`, severity never color-only
 - `03-channel-nav` — desktop strip + mobile tab bar
 - `05-overlay-layer` — pause/EndEx/break-fiction host (renders mock overlay state; triggers are world-steering, a later cross-feature edge)
 - `06-variants` — full / read-only / preview flag through the mount contract
 
+> **Delivered** (both code-review gates clean, 299 tests suite-wide): `07-brand-theming-hooks` —
+> `BrandThemeProvider.tsx` / `brandTokens.ts`; `02-alert-bar-host` — `components/AlertBar/{AlertBar.tsx,
+> alertTypes.ts,useAlerts.ts}`; `03-channel-nav` — `ChannelNav.tsx` / `channelNavConfig.ts`;
+> `05-overlay-layer` — `components/OverlayLayer/*`; `06-variants` — `mountContract.ts`
+> (`affordancesAvailable`) + `shellState.ts` (CR-W1 default flip to `readOnly`). All 5 stories merged
+> onto the `feature/participant-shell` umbrella; the participant-shell feature is now Complete (7/7
+> stories) and ready for the umbrella→`main` PR.
+
 ---
 
 ## Social (E2) ⬜  · umbrella `feature/social`  · after the participant shell hosts a surface
 
 Seed E1 data first (mock): `identity-auth-roles` 01/03 (roles + sessions), `persona-management` 01/02
-(persona templates + casts) — so PostCard has authors and the feed has content.
+(persona templates + casts) — so PostCard has authors and the feed has content. — ✅ mock seed
+delivered on `feature/social` (data/model only; staff UIs deferred — see the four stories' "Seed
+delivered" notes for exactly what landed vs. what remains).
 
-### Wave S1 — keystone ⬜
-- `posts/02-post-rendering-identity` — **`<PostCard>` + `<VerifiedMark>`** (`features/social/components/PostCard.tsx`). *Build first* — reused by every surface.
-- `posts/03-post-provenance` — provenance/telemetry on the post model (XC-004).
+### Wave S1 — keystone ✅
+- `posts/02-post-rendering-identity` — **`<PostCard>` + `<VerifiedMark>`** (`features/social/components/PostCard.tsx`). *Build first* — reused by every surface. **Done.**
+- `posts/03-post-provenance` — provenance/telemetry on the post model (XC-004). **Done.**
+
+> **Delivered** (both code-review gates clean, 291 tests suite-wide): full ACs met for both stories on
+> the `feature/social` umbrella — see `docs/features/posts/{02-post-rendering-identity,03-post-provenance}.md`
+> for the Tests sections and file lists.
 
 ### Wave S2 — first surface ⬜ (the slice that proves social works)
 - `feeds-discovery/01-all-posts-feed` — global chronological feed; the **pilot login landing surface**, mounts in the participant shell.
 - `posts/01-post-composition` — the composer.
 - `threads-replies/01-flattened-thread-view` + `02-reply-counts-and-open`.
+
+> **Pending Gate-2 findings for the feed builder (forward-looking, not yet actioned):**
+> (L-1) hoist a single `useScenarioTime` "now" snapshot at the feed level rather than re-deriving it
+> per-`PostCard`, for NFR-002 burst-scale legibility at 120 posts/min; (L-2) enforce `injectId` when
+> `origin === 'inject'` in `createPost` (narrow `CreatePostInput` so the two are coupled) so an
+> inject-originated post can't silently drop its XC-004 event.
 
 ### Wave S3+ ⬜ (fan out; all reuse PostCard)
 - `profiles-social-graph/01-profile-page` → `02-follow-unfollow` → `feeds-discovery/02-following-feed`

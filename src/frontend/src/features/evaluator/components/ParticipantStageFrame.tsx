@@ -83,7 +83,9 @@ export function ParticipantStageFrame({ stage, activeChannel, showOrigins, size 
               px: 0.875,
               py: 0.25,
               borderRadius: '5px',
-              bgcolor: '#b97a00',
+              // Advisory alert chip — mirrors the participant shell's SEVERITY_META.advisory;
+              // #8a5a00 (not #b97a00) so white-on-amber clears WCAG AA (DECISIONS.md D7-012).
+              bgcolor: '#8a5a00',
               color: '#fff',
               flex: 'none',
             }}

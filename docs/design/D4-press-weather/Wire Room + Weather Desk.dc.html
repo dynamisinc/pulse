@@ -137,7 +137,7 @@ input,select,textarea,button{font-family:inherit}
 <div style="display:flex;gap:14px;padding:16px 14px;margin-top:8px;border:1px solid #e3b25f;background:#fff8e9;border-radius:4px;cursor:pointer;align-items:flex-start" onClick="{{goSchedRel}}">
 <div style="width:40px;height:40px;background:#2f5d50;color:#fff;display:flex;align-items:center;justify-content:center;font:700 13px Figtree;flex:none;border-radius:2px">CF</div>
 <div style="flex:1;min-width:0">
-<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font:700 10px Figtree;letter-spacing:.12em;color:#2f5d50">CITY OF FAIRHAVEN</span><span style="font:800 9.5px Figtree;letter-spacing:.1em;background:#b97a00;color:#fff;padding:2px 7px;border-radius:3px">⏱ SCHEDULED</span><span style="font:600 11px ui-monospace,Menlo,monospace;color:#8a6a1e">releases at 3:06 PM · in 19m</span></div>
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font:700 10px Figtree;letter-spacing:.12em;color:#2f5d50">CITY OF FAIRHAVEN</span><span style="font:800 9.5px Figtree;letter-spacing:.1em;background:#8a5a00;color:#fff;padding:2px 7px;border-radius:3px">⏱ SCHEDULED</span><span style="font:600 11px ui-monospace,Menlo,monospace;color:#8a6a1e">releases at 3:06 PM · in 19m</span></div>
 <div style="font:700 17px Georgia,serif;color:#22303c;margin-top:5px;opacity:.75">Boil water advisory lifted for Zones 2 and 3</div>
 <div style="font:400 11.5px Figtree;color:#8a8577;margin-top:4px">Visible to you and JIC approvers only until release. Not on the public wire.</div>
 </div>
@@ -199,7 +199,7 @@ input,select,textarea,button{font-family:inherit}
 <div style="max-width:760px;margin:0 auto">
 <div style="font:600 12px Figtree;color:#6d6a5e;cursor:pointer;margin-bottom:14px;width:fit-content" style-hover="color:#22303c" onClick="{{goWire}}">← The Wire</div>
 <sc-if value="{{relSched}}" hint-placeholder-val="{{false}}">
-<div style="display:flex;align-items:center;gap:12px;background:#fff8e9;border:1px solid #e3b25f;padding:12px 16px;border-radius:4px;margin-bottom:14px"><span style="font:800 9.5px Figtree;letter-spacing:.1em;background:#b97a00;color:#fff;padding:3px 8px;border-radius:3px;flex:none">⏱ SCHEDULED</span><span style="font:600 13px Figtree;color:#6b4300;flex:1">Releases at 3:06 PM — in 19m. Visible to your organization and JIC approvers only.</span><span style="font:700 12px Figtree;color:#8a6a1e;cursor:pointer;white-space:nowrap" onClick="{{goComposer}}">Edit in composer →</span></div>
+<div style="display:flex;align-items:center;gap:12px;background:#fff8e9;border:1px solid #e3b25f;padding:12px 16px;border-radius:4px;margin-bottom:14px"><span style="font:800 9.5px Figtree;letter-spacing:.1em;background:#8a5a00;color:#fff;padding:3px 8px;border-radius:3px;flex:none">⏱ SCHEDULED</span><span style="font:600 13px Figtree;color:#6b4300;flex:1">Releases at 3:06 PM — in 19m. Visible to your organization and JIC approvers only.</span><span style="font:700 12px Figtree;color:#8a6a1e;cursor:pointer;white-space:nowrap" onClick="{{goComposer}}">Edit in composer →</span></div>
 </sc-if>
 <div style="background:#fff;box-shadow:0 18px 50px rgba(34,48,60,.14);padding:44px 54px 40px">
 <div style="display:flex;align-items:center;gap:14px;padding-bottom:16px;border-bottom:3px solid {{rOrg.color}}">
@@ -250,7 +250,7 @@ input,select,textarea,button{font-family:inherit}
 </sc-if>
 <sc-if value="{{schedBanner}}" hint-placeholder-val="{{false}}">
 <div style="background:#fff8e9;border:1px solid #e3b25f;padding:14px 18px;border-radius:4px;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-<span style="font:800 9.5px Figtree;letter-spacing:.1em;background:#b97a00;color:#fff;padding:3px 8px;border-radius:3px;flex:none">⏱ SCHEDULED</span>
+<span style="font:800 9.5px Figtree;letter-spacing:.1em;background:#8a5a00;color:#fff;padding:3px 8px;border-radius:3px;flex:none">⏱ SCHEDULED</span>
 <span style="font:700 14px Figtree;color:#6b4300;flex:1;min-width:200px">Scheduled — releases in 19m <span style="font:500 12px ui-monospace,Menlo,monospace;color:#8a6a1e">(today · 3:06 PM)</span></span>
 <span style="font:700 12px Figtree;color:#8a6a1e;cursor:pointer;white-space:nowrap" onClick="{{editSched}}">Edit schedule</span>
 <sc-if value="{{cancelAskOff}}" hint-placeholder-val="{{true}}"><span style="font:700 12px Figtree;color:#8f2a20;cursor:pointer;white-space:nowrap" onClick="{{askCancel}}">Cancel release</span></sc-if>

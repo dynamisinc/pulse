@@ -2,34 +2,38 @@
  * App.tsx
  * ---------------------------------------------------------------------------
  * Root application component (integration glue — see D7-009 / D0 §2 "two
- * worlds"). This is the ONE place the router, React Query, and the toast
- * layer are assembled, and it is deliberately THEME-FREE at the root: there
- * is no ancestor `<ThemeProvider theme={cobraTheme}>` here any more, so COBRA
- * is physically unreachable unless a route subtree mounts it itself.
+ * worlds"). This is the ONE place the router, React Query, and the toast layer
+ * are assembled, and it is deliberately THEME-FREE at the root: there is no
+ * ancestor `<ThemeProvider theme={cobraTheme}>`, so the COBRA staff look is
+ * PHYSICALLY UNREACHABLE unless a route subtree mounts it itself. That split is
+ * the structural half of the D0 §2 two-worlds thumbnail gate.
  *
- * - The staff route (`/evaluator`) mounts the real staff shell —
- *   `ExerciseContextProvider` (exercise scope) > `ToolstripProvider` (the
- *   toolstrip registry) > `StaffShellFrame` (the ONE place that mounts
- *   `<ThemeProvider theme={cobraTheme}>`, see that component's own header).
- *   `StaffHeader` fills the frame's `header` slot and `Toolstrip` fills its
- *   `toolstrip` slot; the "Preview as participant" button is rendered
- *   inert (no `onTogglePreview`) — story 04 wires the real behavior later.
- * - `/` and `*` are scaffold/utility pages, not participant fiction, but
- *   they DO use COBRA components (`CobraPrimaryButton`, `CobraStyles`) for
- *   convenience — each wraps itself in its own local `CobraThemed` helper so
- *   COBRA still only ever mounts where a route explicitly asks for it.
- * - PARTICIPANT ROUTES (social, portal, news, press, weather) are NOT built
- *   yet. When they land, they mount their OWN per-brand theme within their
- *   own route subtree — NEVER `cobraTheme` — so COBRA stays physically
- *   unreachable from any participant path (two-worlds hard gate, D7-009).
+ * Route worlds:
+ * - Staff surface (`/evaluator`) — the real staff shell: `ExerciseContextProvider`
+ *   (exercise scope) > `ToolstripProvider` (toolstrip registry) > `PreviewProvider`
+ *   (preview toggle) > `StaffShellFrame`, which is the ONE place that mounts
+ *   `<ThemeProvider theme={cobraTheme}>` (see that component's own header).
+ *   `StaffHeader`/`Toolstrip` fill its slots; the shell-global participant-admin
+ *   flyout and the read-only preview stage are wired via `EvaluatorStaffShell`.
+ * - Participant surface (`/shell`) — the fiction: exercise scope > per-exercise
+ *   `BrandThemeProvider` > `ShellLayout` (compliance chrome, alert bar, channel
+ *   nav, overlay + the channel mount point). COBRA-free BY CONSTRUCTION — there
+ *   is no `cobraTheme` above it, so the staff look cannot leak in by inheritance.
+ * - Scaffold/utility pages (`/` home, `*` 404) — not participant fiction, but
+ *   they use COBRA components, so each wraps itself in a local `CobraThemed`
+ *   boundary. COBRA still only ever mounts where a route explicitly asks for it.
+ *
+ * The first real participant channel (E2 social) replaces
+ * `ParticipantChannelPlaceholder`; additional participant brands mount their own
+ * per-brand theme within their own route subtree — NEVER `cobraTheme`.
  */
+import type { ReactNode } from 'react'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import { Box, Typography } from '@mui/material'
 import { ToastContainer } from 'react-toastify'
-import type { ReactNode } from 'react'
 import 'react-toastify/dist/ReactToastify.css'
 
 import { cobraTheme } from './theme/cobraTheme'
@@ -45,6 +49,9 @@ import { ToolstripProvider } from '@/features/staffShell/toolRegistry'
 import { ParticipantAdminFlyout } from '@/features/staffShell/components/ParticipantAdminFlyout'
 import { PreviewProvider, usePreview } from '@/features/staffShell/previewContext'
 import { PreviewAsParticipant } from '@/features/staffShell/components/PreviewAsParticipant'
+import { BrandThemeProvider } from './features/participant-shell/BrandThemeProvider'
+import { ShellLayout } from './features/participant-shell/ShellLayout'
+import { useShellContext } from './features/participant-shell/mountContract'
 
 // Sensible React Query defaults. Real-time feeds will lean on a live transport
 // rather than refetch-on-focus (see D0 §4 - burst legibility, 120 posts/min).
@@ -60,8 +67,9 @@ const queryClient = new QueryClient({
 
 /**
  * Wraps a scaffold/utility page (never participant fiction) in its own COBRA
- * theme boundary, so the root stays theme-free and COBRA only ever mounts
- * where a route explicitly asks for it.
+ * theme boundary, so the root stays theme-free and COBRA only ever mounts where
+ * a route explicitly asks for it. Real staff SURFACES do NOT use this — they
+ * render `<StaffShellFrame>`, which owns its own COBRA boundary.
  */
 function CobraThemed({ children }: { children: ReactNode }) {
   return (
@@ -85,6 +93,49 @@ const NotFoundPage = () => (
     </CobraPrimaryButton>
   </Box>
 )
+
+/**
+ * Phase-1 placeholder channel. It exists only to prove the mount contract: it
+ * reads `{variant, scenarioNow}` from `useShellContext()` — the whole of what a
+ * channel receives from its container. The first real channel (E2 social)
+ * replaces it. Participant-world styling only: plain React + system-ui, NO
+ * COBRA / `@/theme/styledComponents` / default MUI look (D0 §2). Scenario time
+ * is shown for the mount-contract demo; it is never labelled "scenario time"
+ * inside real fiction (XC-002).
+ */
+function ParticipantChannelPlaceholder() {
+  const { variant, scenarioNow } = useShellContext()
+  return (
+    <div style={{ padding: '24px', fontFamily: 'system-ui, -apple-system, sans-serif', color: '#1a1a1a' }}>
+      <h1 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 8px' }}>
+        Participant shell
+      </h1>
+      <p style={{ fontSize: '14px', color: '#4a4f55', margin: 0 }}>
+        A channel mounts here (E2 social is the first). Mount variant:{' '}
+        <code>{variant}</code>; scenario now: <code>{scenarioNow.toISOString()}</code>.
+      </p>
+    </div>
+  )
+}
+
+/**
+ * The participant route subtree — COBRA-free BY CONSTRUCTION. There is no
+ * `ThemeProvider(cobraTheme)` above it (the root is theme-free); the stack is
+ * exercise scope (fail-closed) → per-exercise brand skin → the shell
+ * (compliance chrome, alert bar, channel nav, overlay layer + the channel
+ * mount point). This is the participant half of the D0 §2 two-worlds rule.
+ */
+function ParticipantShellRoute() {
+  return (
+    <ExerciseContextProvider>
+      <BrandThemeProvider>
+        <ShellLayout>
+          <ParticipantChannelPlaceholder />
+        </ShellLayout>
+      </BrandThemeProvider>
+    </ExerciseContextProvider>
+  )
+}
 
 /**
  * Inner staff-shell composition for the Evaluator Dashboard. Reads the preview
@@ -116,11 +167,6 @@ function EvaluatorStaffShell() {
   )
 }
 
-/**
- * The staff shell composition for the Evaluator Dashboard: exercise scope >
- * toolstrip registry > preview toggle > the real `StaffShellFrame` (which
- * mounts COBRA itself). See module header.
- */
 // Exported for the Integration-B wiring test (App.integration.test.tsx) — it
 // renders this composition directly to prove the preview button ↔ stage swap
 // and the shell-global admin flyout are wired, without standing up the router.
@@ -135,21 +181,24 @@ export const EvaluatorDashboardRoute = () => (
 )
 
 const router = createBrowserRouter([
+  // Scaffold/utility pages — COBRA-using, wrapped in their own theme boundary.
   { path: '/', element: <CobraThemed><HomePage /></CobraThemed> },
-  // Staff surface (COBRA, mounted inside StaffShellFrame — see module header).
+  // Staff surface (COBRA) — the real staff shell owns its own COBRA boundary.
   { path: '/evaluator', element: <EvaluatorDashboardRoute /> },
-  // PARTICIPANT ROUTE SUBTREE MOUNTS HERE (future) — its own per-brand theme,
-  // never `cobraTheme` (D7-009 two-worlds hard gate).
+  // Participant surface (the fiction) — per-brand skin, no COBRA anywhere above it.
+  { path: '/shell', element: <ParticipantShellRoute /> },
   { path: '*', element: <CobraThemed><NotFoundPage /></CobraThemed> },
 ])
 
 /**
  * Root application component.
  *
- * Theme-free at the root: provides React Query, the router, and toasts only.
- * Each route subtree is responsible for mounting its own theme (COBRA for
- * staff surfaces via `StaffShellFrame`; a per-brand theme for participant
- * surfaces once they land) — see module header.
+ * Holds ONLY the app-wide, world-neutral providers: React Query, the router,
+ * and toasts. The COBRA staff theme is deliberately NOT here — it is scoped to
+ * staff surfaces via `<StaffShellFrame>` (and the `CobraThemed` scaffold
+ * wrapper), and participant routes mount their own per-brand theme
+ * (`ParticipantShellRoute`). This split makes the staff look unreachable from
+ * participant paths (D0 §2 two-worlds gate).
  */
 function App() {
   return (

@@ -109,10 +109,14 @@ describe('ShellLayout — single scenario-time source (AC2)', () => {
 
     await waitFor(() => expect(screen.getByTestId('probe')).toBeInTheDocument())
 
-    // The Wave-1 shell-state mock always resolves 'full' (see shellState.ts);
-    // the point under test is that variant and scenarioNow arrive together
-    // off one useShellContext() call, not that 'full' specifically is chosen.
-    expect(screen.getByTestId('variant')).toHaveTextContent('full')
+    // The probe renders immediately with useShellState's CR-W1 least-affordance
+    // fallback ('readOnly', shellState.ts) before the shell-state query settles,
+    // then the Wave-1 mock resolves 'full' (see shellState.ts's MOCK_SHELL_STATE)
+    // once it does. Wait for that settled value specifically - the point under
+    // test is that variant and scenarioNow arrive together off one
+    // useShellContext() call, not that 'readOnly' (the transient fallback)
+    // specifically is chosen.
+    await waitFor(() => expect(screen.getByTestId('variant')).toHaveTextContent('full'))
   })
 })
 

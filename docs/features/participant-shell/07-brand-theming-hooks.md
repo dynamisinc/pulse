@@ -1,7 +1,8 @@
 # Story: Per-exercise brand theming hooks
 
-**Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Participant shell  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-066 (COR-030)  ·  **Design decisions:** D7 (theming hooks)  ·  **Issue:** #191
+**Delivered:** `BrandThemeProvider.tsx` + `brandTokens.ts`
 
 ## Context
 The shell must carry **zero hardcoded brands** — every "Fairhaven"/"BAY SHIELD" string in the mockup
@@ -12,17 +13,18 @@ outlet's skin (NWS-002) without a code change — brand independence is the whol
 participant channel stubs in the mockup.
 
 ## Acceptance Criteria
-- [ ] Given a per-exercise brand config, when a channel mounts, then it receives brand tokens
-      (COR-066/030) it can theme against; the shell hardcodes **no** brand name, color, or logo.
-- [ ] Changing the exercise brand config changes channel skins with **no shell code change** (the
-      "Fairhaven" demo strings prove brand independence, not product copy).
-- [ ] The shell's own chrome (compliance banners Figtree/green, alert-bar palettes, overlay treatments)
+- [x] Given a per-exercise brand config, when a channel mounts, then it receives brand tokens
+      (COR-066/030) it can theme against; the shell hardcodes **no** brand name, color, or logo. —
+      `BrandThemeProvider.test.tsx`, `brandTokens.test.tsx`
+- [x] Changing the exercise brand config changes channel skins with **no shell code change** (the
+      "Fairhaven" demo strings prove brand independence, not product copy). — `BrandThemeProvider.test.tsx`
+- [x] The shell's own chrome (compliance banners Figtree/green, alert-bar palettes, overlay treatments)
       is **independent** of the per-exercise brand — the exercise signal never re-skins to match the
-      fiction (XC-002/003).
-- [ ] Brand tokens are exercise-scoped (XC-001) and never leak one exercise's brand into another
-      session.
-- [ ] Participant surfaces theme from these tokens and **never** read as an enterprise app / COBRA /
-      default MUI (D0 §2).
+      fiction (XC-002/003). — `BrandThemeProvider.test.tsx`
+- [x] Brand tokens are exercise-scoped (XC-001) and never leak one exercise's brand into another
+      session. — `brandTokens.test.tsx`
+- [x] Participant surfaces theme from these tokens and **never** read as an enterprise app / COBRA /
+      default MUI (D0 §2). — `BrandThemeProvider.test.tsx`
 
 ## Out of Scope
 The **brand authoring** UI + token schema authority (exercise-configuration COR-030); per-outlet news

@@ -1,7 +1,7 @@
 # Story: Live storyline board
 
 **Feature:** Live evaluator tools — storyline board & annotation capture  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started
-**Requirements:** EVL-022, NFR-001  ·  **Design decisions:** D6-001  ·  **Issue:** —
+**Requirements:** EVL-022, NFR-001  ·  **Design decisions:** D6-001  ·  **Issue:** #234
 
 ## Context
 EVL-022 wants a live evaluator dashboard mirroring the controller's CTL-030 situational-awareness
