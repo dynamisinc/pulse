@@ -1,0 +1,117 @@
+name: CI
+
+# The enforcement floor (Gate 0). Runs each stack's real build + lint + type-check + test on every PR
+# BEFORE merge, and on main as a trunk backstop. This is what makes the Definition of Done
+# machine-enforced instead of honor-system. Deploy workflows assume-green off already-gated trunk and no
+# longer run these checks. See docs/ORCHESTRATION_MECHANICS.md §3 and docs/PROCESS_REVIEW-PULSE.md (R1).
+#
+# Branch protection requires the aggregate `gate` job (not the individual stack jobs), so adding a stack
+# later cannot silently un-gate the branch.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (React / Vite / TS)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: src/frontend/.nvmrc
+          cache: "npm"
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run type-check
+
+      - name: Test
+        run: npm run test:run
+
+      - name: Build
+        run: npm run build
+        env:
+          # Same-origin /api when blank (validateEnv.ts). Build must not depend on deploy-time secrets.
+          VITE_API_URL: ""
+
+  backend:
+    name: Backend (.NET / Pulse.Core)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore pulse.slnx
+
+      # .NET has no separate lint/type-check step: the compiler is the type-checker and
+      # AnalysisMode=Recommended runs the analyzers during build. Build == lint + type-check here.
+      - name: Build
+        run: dotnet build pulse.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test pulse.slnx --configuration Release --no-build
+
+  infra:
+    name: Infra (Bicep)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Bicep CLI
+        run: az bicep install
+
+      # `az bicep build` compiles main.bicep + every referenced module to ARM and runs the linter from
+      # infrastructure/bicepconfig.json. Compile errors fail the job; lint findings are advisory (default
+      # warning level) until a rule is deliberately raised to "error" in bicepconfig.json. No infra tests exist.
+      - name: Build (compile + lint) main template
+        run: az bicep build --file infrastructure/main.bicep --stdout > /dev/null
+
+      - name: Validate UAT parameters
+        run: az bicep build-params --file infrastructure/parameters/uat.bicepparam --stdout > /dev/null
+
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    needs: [frontend, backend, infra]
+    if: ${{ always() }}
+    steps:
+      # The single required status check. `if: always()` + explicit result checks mean a failed or
+      # cancelled stack makes THIS job fail (not merely skip) — a skipped required check would otherwise
+      # be treated as passing and silently un-gate the branch.
+      - name: Verify every stack gate passed
+        run: |
+          echo "frontend=${{ needs.frontend.result }} backend=${{ needs.backend.result }} infra=${{ needs.infra.result }}"
+          if [ "${{ needs.frontend.result }}" != "success" ] \
+          || [ "${{ needs.backend.result }}"  != "success" ] \
+          || [ "${{ needs.infra.result }}"    != "success" ]; then
+            echo "::error::One or more stack gates did not pass."
+            exit 1
+          fi
+          echo "All stack gates passed."

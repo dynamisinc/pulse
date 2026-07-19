@@ -1,6 +1,8 @@
 # Feature Orchestration Playbook — Pulse
 
-> **Status: v0 — adapted from a proven solo-project pattern; refine for the Dynamis team workflow.**
+> **Status: v1 — adapted from a proven solo-project pattern; hardened by the pulse process review
+> (see [`PROCESS_REVIEW-PULSE.md`](PROCESS_REVIEW-PULSE.md)): CI enforcement floor, two-tier review,
+> orchestrator-owned composition root, stack-agnostic DoD.**
 > This is the bridge between planning (`docs/features/` stories + `implementation.md`) and building
 > a feature with one or more coding agents. The `story-agent` writes `implementation.md` to be
 > orchestration-ready; `code-review` is the review gate; `frontend-agent` / `testing-agent` build
@@ -22,7 +24,11 @@ Effort`, sized by **file-footprint disjointness** so a wave can fan out with no 
   query-scoping layer** (nothing participant-facing is safe to build until data is exercise-scoped)
   and the **`XC-004` telemetry event schema v0** (E10 metrics, E9's event stream, and E8 all consume
   it — a schema mistake becomes a cross-phase migration). These precede the surfaces that consume
-  them and are serial dependencies for most Phase-1 work.
+  them and are serial dependencies for most Phase-1 work. **Seed the seam at v0 and reserve extension
+  fields — do not assume "freeze once."** The highest-fan-in seam keeps revealing requirements as
+  consumers wire up (telemetry, the most-imported core module, churned most *after* its v0 lock), so
+  budget **one explicit seam-hardening pass after the first consumer wave** rather than treating v0 as
+  final (see `docs/features/WAVE0-REVIEW.md` for the pass that hardened XC-004).
 - **Parallelize disjoint stories** within a wave (different file footprints → no conflicts). Use a
   git worktree per parallel builder if they touch the tree simultaneously.
 - **Serialize the contract seams.** The **frontend → backend** edge is serial: the .NET backend does
@@ -30,8 +36,14 @@ Effort`, sized by **file-footprint disjointness** so a wave can fan out with no 
   and any story needing a real endpoint depends on the backend contract (the hook/service signature
   is the seam — there is no codegen step).
 
-## The two review gates (`code-review`)
+## The gates
 
+- **Gate 0 — machine (CI):** `.github/workflows/ci.yml` runs the affected stack's `build + lint +
+  type-check + test` on every PR, **before** merge — the enforcement floor that makes the DoD
+  machine-enforced, not honor-system (frontend and backend both gated). Deploy assumes-green. Review
+  independence is **two-tier**: Tier 1 = `code-review` agent + Copilot on the PR (always, cheap); Tier 2
+  = a human sign-off, reserved for Critical classes (isolation / security / contract). See
+  [`ORCHESTRATION_MECHANICS.md §3`](ORCHESTRATION_MECHANICS.md).
 - **Gate 1 — per-story:** before a builder's branch integrates, `code-review` checks the diff against
   the story's ACs, the cross-cutting ACs, and the reuse map, and emits a `clean` verdict. No Critical
   findings → eligible to integrate. Isolation breaks, unsanitized free-text surfaces, and COBRA on a
@@ -50,9 +62,10 @@ Effort`, sized by **file-footprint disjointness** so a wave can fan out with no 
 
 ## What this playbook deliberately leaves to the team
 
-Branching/PR conventions, whether builds run as a Claude Code Workflow fan-out or hand-driven,
-CI wiring (none exists yet), and environment/deploy. Fill these in as Pulse's engineering process
-settles — this doc defines the *contracts* (Wave Plan, reuse map, review gates), not the mechanics.
+Branching/PR conventions and whether builds run as a Claude Code Workflow fan-out or hand-driven. CI is
+now wired (Gate 0 — `.github/workflows/ci.yml`) and deploy/rollback is described in
+[`OPERATE.md`](OPERATE.md); refine both as Pulse's engineering process settles. This doc defines the
+*contracts* (Wave Plan, reuse map, review gates), not the mechanics.
 
 > **These mechanics are now defined** in [`ORCHESTRATION_MECHANICS.md`](ORCHESTRATION_MECHANICS.md)
 > (umbrella-branch model, worktree-per-builder, per-wave Workflow fan-out, and the session-kickoff

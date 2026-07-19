@@ -32,7 +32,18 @@ consistent and faithful to the two worlds + isolation. Fill in the ones this fea
 Foundation first: the exercise-context layer and the telemetry schema precede the surfaces that
 consume them. A frontend→backend contract edge is serial (the contract is the seam; no codegen).>
 
-| Story | Files it owns | Depends-on | Can-run-with | Wave | Effort |
-|-------|---------------|------------|--------------|------|--------|
-| 01 | | | | 1 | |
-| 02 | | | | 2 | |
+| Story | Stack | Files it owns | Depends-on | Can-run-with | Wave | Effort |
+|-------|-------|---------------|------------|--------------|------|--------|
+| 01 | frontend | | | | 1 | |
+| 02 | backend | | | | 2 | |
+
+`Stack` (`frontend | backend | fullstack`) tells the orchestrator which builder to spawn and which
+Gate-0 command to run (see `ORCHESTRATION_MECHANICS.md §5`).
+
+### Integration seam (orchestrator-owned — never a wave story)
+<The composition root is disjoint from nothing: every surface-adding story would touch it, so no
+builder may own it. The orchestrator edits it serially, between waves, in its own commit.>
+
+| Seam | File(s) | Rule |
+|------|---------|------|
+| Composition root | `src/frontend/src/App.tsx` | Routes / providers / subtree mounts. Orchestrator-only, serial, between waves. No builder branch touches it. |
