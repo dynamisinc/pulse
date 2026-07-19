@@ -1,7 +1,12 @@
 # Story: Auto-HOLD-on-timeout wiring (never auto-send)
 
-**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-040  ·  **Design decisions:** D5-014/1.1 (supersedes D5-005)  ·  **Issue:** #170
+
+> **Status: Complete.** Delivered as the pure `AutoHoldPolicy` over `(DelayedAutoCountdown, EffectiveAutonomy,
+> current scenario minute, swamped) → {Hold | Publish | AwaitDecision}`. Silence resolves to HOLD; swamped
+> mode is the only auto-send path and is suspended by any safety clamp. Covered by `AutoHoldPolicyTests`
+> (incl. freeze / time-jump).
 
 ## Context
 Safety-critical, and the exact behavior E8 must produce for the Phase-1 cockpit (engine-review-cockpit
@@ -12,18 +17,22 @@ lead-controller-gated **swamped mode** (engine-review-cockpit #36). E8 produces 
 the cockpit consumes them — the terminal action must be HOLD in the default configuration.
 
 ## Acceptance Criteria
-- [ ] Given a Delayed-auto draft, when its scenario-time countdown reaches zero **without** a
+- [x] Given a Delayed-auto draft, when its scenario-time countdown reaches zero **without** a
       controller decision, then the draft moves to **HELD** (not published) with a "timer expired —
-      held for you" state and surfaces in the NEEDS-YOU bar.
-- [ ] Given the default configuration, when any timed draft expires, then **no draft is ever
+      held for you" state and surfaces in the NEEDS-YOU bar. *(`Decide` → `Hold`; `DraftDisposition.Held`,
+      `EngineReviewItem.NeedsController`.)*
+- [x] Given the default configuration, when any timed draft expires, then **no draft is ever
       auto-published on timeout** — verified; the only timeout-auto-send path is swamped mode (#36).
-- [ ] Given swamped mode is enabled (lead-controller-gated, #36), when a timed draft expires, then it
-      auto-sends within existing rate caps instead of holding — and only then.
-- [ ] Given the engine, when it operates, then it **never turns swamped mode on by itself** — the
-      autonomy level does not self-escalate.
-- [ ] **Telemetry (XC-004):** the expiry→HOLD (or, under swamped mode, expiry→auto-send) transition is
+      *(`AutoHoldPolicyTests.OnExpiry_WithNoDecision_AutoHolds` + time-jump variant.)*
+- [x] Given swamped mode is enabled (lead-controller-gated, #36), when a timed draft expires, then it
+      auto-sends within existing rate caps instead of holding — and only then. *(swamped && effective ==
+      DelayedAuto is the sole `Publish`-on-expiry branch.)*
+- [x] Given the engine, when it operates, then it **never turns swamped mode on by itself** — the
+      autonomy level does not self-escalate. *(`SetSwampedMode` is the only flip; no automation path sets it.)*
+- [x] **Telemetry (XC-004):** the expiry→HOLD (or, under swamped mode, expiry→auto-send) transition is
       logged with trigger + storyline + scenario time; the held item feeds the NEEDS-YOU to-dos.
-      Countdown/expiry state is conveyed by text/number, not color alone (NFR-001).
+      Countdown/expiry state is conveyed by text/number, not color alone (NFR-001). *(`AutoHoldPolicy.Evaluate`
+      returns `DraftTimeoutResolved`; `DelayedAutoCountdown.MinutesRemaining` is numeric.)*
 
 ## Out of Scope
 The swamped-mode toggle itself (engine-review-cockpit #36 owns it — this story honors it); the review

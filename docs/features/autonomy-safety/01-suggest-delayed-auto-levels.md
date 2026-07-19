@@ -1,7 +1,11 @@
 # Story: Suggest + Delayed-auto autonomy levels
 
-**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP §2.3 (v1 subset)  ·  **Design decisions:** none  ·  **Issue:** #169
+
+> **Status: Complete.** Delivered in `Pulse.Core/Features/Autonomy` — `AutonomyLevel` (Suggest/DelayedAuto;
+> Auto reserved+rejected for v1.1) and `EngineAutonomyState` (per-exercise default + per-storyline override,
+> resolution rule, human-only raise). Covered by `AutonomyLevelTests` + `EngineAutonomyStateTests`.
 
 ## Context
 The engine runs at a controller-chosen autonomy level, per exercise and per-storyline overridable
@@ -11,17 +15,21 @@ vetoes — keeps pace without constant attention). **Auto** is v1.1 (out of scop
 what the reaction-loop's generate→review stage routes on.
 
 ## Acceptance Criteria
-- [ ] Given an exercise, when the lead controller sets the engine autonomy level, then it is one of
+- [x] Given an exercise, when the lead controller sets the engine autonomy level, then it is one of
       **Suggest** or **Delayed-auto** (v1), stored per exercise and overridable per storyline.
-- [ ] Given **Suggest**, when a burst is ready, then it lands in the review queue (engine-review-cockpit
-      #34) and nothing publishes without an explicit approve.
-- [ ] Given **Delayed-auto**, when a burst is ready, then it publishes after a **scenario-time**
+      *(`AutonomyLevel` + `EngineAutonomyState.SetExerciseDefault`/`SetStorylineOverride`; `Auto` rejected.)*
+- [x] Given **Suggest**, when a burst is ready, then it lands in the review queue (engine-review-cockpit
+      #34) and nothing publishes without an explicit approve. *(`EffectiveAutonomy`/`DraftDisposition.Queued`
+      contract; dispatch is reaction-loop.)*
+- [x] Given **Delayed-auto**, when a burst is ready, then it publishes after a **scenario-time**
       countdown unless a controller vetoes within the window; on timeout it auto-HOLDs (story 02).
-- [ ] Given a per-storyline override, when set, then that storyline uses its level regardless of the
-      exercise default.
-- [ ] Given autonomy changes, when a controller makes one, then it is **only** ever a human toggle —
+      *(`DelayedAutoCountdown` + `AutoHoldPolicy`.)*
+- [x] Given a per-storyline override, when set, then that storyline uses its level regardless of the
+      exercise default. *(`ResolveBase`: override wins, else default — `EngineAutonomyStateTests`.)*
+- [x] Given autonomy changes, when a controller makes one, then it is **only** ever a human toggle —
       the engine never sets or raises its own level (the self-escalation invariant); changes are
-      logged (XC-004, staff-only XC-002).
+      logged (XC-004, staff-only XC-002). *(Only `Human`-cause paths raise; `IEngineSafetySwitch` exposes
+      lowering only; every mutator returns an `AutonomyLevelChanged`.)*
 
 ## Out of Scope
 Auto mode (auto-mode feature, v1.1); the auto-HOLD timeout behavior (story 02); the kill switch
