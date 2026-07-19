@@ -115,8 +115,9 @@ delivered" notes for exactly what landed vs. what remains).
 > thread nav; `App.tsx`'s participant route wraps `<SessionProvider>` and mounts it in place of
 > `ParticipantChannelPlaceholder`.
 >
-> **Fixed in the PR #252 review round (Copilot + self — were listed here as deferred, now DONE):** the
-> thread-Back feed remount — `<Feed>` + `<Composer>` now stay MOUNTED (hidden) while a thread is open, so
+> **Fixed in the PR #252 review round (Copilot + a self-review)** — findings that were listed here as
+> deferred, now DONE: the thread-back feed remount — `<Feed>` + `<Composer>` now stay MOUNTED (hidden)
+> while a thread is open, so
 > the compose draft, scroll, resolved data, and the feed's emit-once view-telemetry guard all survive the
 > round-trip (no refetch, no duplicate feed-view) — plus focus management on the view swap (NFR-001); and
 > the thread-open `'view'` telemetry gained an emit-once ref guard (no StrictMode double-emit); and the
