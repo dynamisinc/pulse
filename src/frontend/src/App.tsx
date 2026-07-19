@@ -15,6 +15,12 @@
  *   `<ThemeProvider theme={cobraTheme}>` (see that component's own header).
  *   `StaffHeader`/`Toolstrip` fill its slots; the shell-global participant-admin
  *   flyout and the read-only preview stage are wired via `EvaluatorStaffShell`.
+ * - Staff surface (`/console`) — the E7 Simcell Operator controller console:
+ *   `ExerciseContextProvider > ToolstripProvider > ActivePersonaProvider >
+ *   StaffShellFrame` with `ControllerConsole` as the work-area child. The console
+ *   posts as a persona through the shipped `createPost` pipeline; the published
+ *   post lands in the participant feed (`/shell`) via the shared `postStore`, with
+ *   the controller origin never participant-visible (see `ControllerConsoleRoute`).
  * - Participant surface (`/shell`) — the fiction: exercise scope > bound session
  *   > per-exercise `BrandThemeProvider` > `ShellLayout` (compliance chrome, alert
  *   bar, channel nav, overlay) > the `SocialChannel` (E2, the default channel).
@@ -54,6 +60,7 @@ import { PreviewAsParticipant } from '@/features/staffShell/components/PreviewAs
 import { BrandThemeProvider } from './features/participant-shell/BrandThemeProvider'
 import { ShellLayout } from './features/participant-shell/ShellLayout'
 import { SocialChannel } from './features/social'
+import { ControllerConsoleRoute } from './features/controller'
 
 // Sensible React Query defaults. Real-time feeds will lean on a live transport
 // rather than refetch-on-focus (see D0 §4 - burst legibility, 120 posts/min).
@@ -168,6 +175,8 @@ const router = createBrowserRouter([
   { path: '/', element: <CobraThemed><HomePage /></CobraThemed> },
   // Staff surface (COBRA) — the real staff shell owns its own COBRA boundary.
   { path: '/evaluator', element: <EvaluatorDashboardRoute /> },
+  // Staff surface (COBRA) — the E7 Simcell Operator controller console.
+  { path: '/console', element: <ControllerConsoleRoute /> },
   // Participant surface (the fiction) — per-brand skin, no COBRA anywhere above it.
   { path: '/shell', element: <ParticipantShellRoute /> },
   { path: '*', element: <CobraThemed><NotFoundPage /></CobraThemed> },

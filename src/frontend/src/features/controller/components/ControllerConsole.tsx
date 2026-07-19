@@ -44,7 +44,7 @@
  * `createPost` and is never drawn here. Never a participant surface (XC-002).
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faMasksTheater, faTowerBroadcast } from '@fortawesome/free-solid-svg-icons'
@@ -52,16 +52,34 @@ import { usePersonas } from '@/features/personas'
 import { useRegisterSurfaceTool, useToolstrip } from '@/features/staffShell/toolRegistry'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import { useControllerIdentity } from '../identity/controllerIdentity'
-import { CommandPalette } from '../console/CommandPalette'
+import { CommandPalette, type CommandPalettePersonaSlot } from '../console/CommandPalette'
 // The component lives in `personaDockHost.tsx`; the shared ids/types in the
 // sibling `personaDockHost.ts`. A bare `./personaDockHost` specifier resolves
 // to the `.ts`, so the component is imported with its explicit `.tsx`
 // extension (allowed by `allowImportingTsExtensions`), while `PERSONAS_TOOL_ID`
 // comes from the `.ts`.
 import { PersonaDockHost } from '../console/personaDockHost.tsx'
-import { PERSONAS_TOOL_ID } from '../console/personaDockHost'
+import { PERSONAS_TOOL_ID, type PersonaDockSlots } from '../console/personaDockHost'
 
-export function ControllerConsole() {
+export interface ControllerConsoleProps {
+  /**
+   * Renders the searchable persona LIST into the ⌘K palette's PERSONAS section
+   * (`persona-operation/02`'s `PersonaPicker`) — supplied by the `/console`
+   * route at integration. Absent in isolation (cs01 standalone tests), where the
+   * palette shows its neutral placeholder.
+   */
+  renderPersonaResults?: (slot: CommandPalettePersonaSlot) => ReactNode
+  /**
+   * The persona-dock host content slots (`persona-operation`'s context panel +
+   * composer for the active persona) — supplied by the `/console` route. Absent
+   * in isolation, where the dock shows its neutral placeholder.
+   */
+  dockSlots?: PersonaDockSlots
+}
+
+export function ControllerConsole(
+  { renderPersonaResults, dockSlots }: ControllerConsoleProps = {},
+) {
   const identity = useControllerIdentity()
   const { isActive, toggleTool } = useToolstrip()
 
@@ -162,9 +180,10 @@ export function ControllerConsole() {
         open={paletteOpen}
         onClose={closePalette}
         onSelectPersona={handleSelectPersona}
+        renderPersonaResults={renderPersonaResults}
       />
 
-      <PersonaDockHost open={dockPersonaId !== null} onClose={closeDock} />
+      <PersonaDockHost open={dockPersonaId !== null} onClose={closeDock} slots={dockSlots} />
     </Box>
   )
 }
