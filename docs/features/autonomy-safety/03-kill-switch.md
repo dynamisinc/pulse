@@ -1,7 +1,12 @@
 # Story: Kill switch (drop to Suggest / stop)
 
-**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-042  ·  **Design decisions:** none  ·  **Issue:** #171
+
+> **Status: Complete.** `EngineAutonomyState.EngageKillSwitch(DropToSuggest | FullStop)` clamps the whole
+> engine instantly and one-way; `AutonomyProviderHealthListener` wires generation-infra's
+> `IProviderHealthListener` into the same clamp (degrade → Suggest; recover never raises). A controller
+> lifts it via `RestoreFromSafety`. Covered by `EngineAutonomyStateTests` + `AutonomyProviderHealthListenerTests`.
 
 ## Context
 One control **drops the entire engine to Suggest (or full stop) instantly** (ADP-042). It is the
@@ -10,18 +15,21 @@ move autonomy only *down*, never up. The kill switch is the controller's emergen
 engine is misbehaving, the scenario changes abruptly, or the world needs to go quiet now.
 
 ## Acceptance Criteria
-- [ ] Given any engine autonomy level, when a controller hits the kill switch, then the engine drops
+- [x] Given any engine autonomy level, when a controller hits the kill switch, then the engine drops
       to **Suggest** (nothing auto-publishes) **or** full stop (no generation), per the control's
-      setting, **instantly**.
-- [ ] Given the kill switch has fired, when the situation resolves, then the engine does **not** raise
+      setting, **instantly**. *(`EngageKillSwitch(KillSwitchMode)`; `ResolveEffective` reflects it at once.)*
+- [x] Given the kill switch has fired, when the situation resolves, then the engine does **not** raise
       its own autonomy back up — a controller restores it explicitly (self-escalation invariant).
-- [ ] Given in-flight Delayed-auto countdowns, when the kill switch fires, then they are suspended (no
-      auto-send) — consistent with dropping to Suggest.
-- [ ] Given the kill switch fires, when it does, then it is logged (XC-004) with actor + scenario time,
+      *(`RestoreFromSafety` is the only lift; no automation path raises — `KillSwitch_DoesNotAutoRecover`.)*
+- [x] Given in-flight Delayed-auto countdowns, when the kill switch fires, then they are suspended (no
+      auto-send) — consistent with dropping to Suggest. *(effective drops below Delayed-auto → `AutoHoldPolicy`
+      holds even under swamped mode.)*
+- [x] Given the kill switch fires, when it does, then it is logged (XC-004) with actor + scenario time,
       and the state is clearly indicated in the console (text + icon, not color alone; NFR-001),
-      staff-only (XC-002).
-- [ ] The kill switch coexists with the automatic degraded-mode fallback (they share the "autonomy
-      only moves down" invariant) — either can trip; neither auto-recovers autonomy.
+      staff-only (XC-002). *(`EngineKillSwitchFired` carries mode+actor+scenario minute; console surface is E7.)*
+- [x] The kill switch coexists with the automatic degraded-mode fallback (they share the "autonomy
+      only moves down" invariant) — either can trip; neither auto-recovers autonomy. *(both drive the same
+      clamp in `EngineAutonomyState`; `MarkProviderRecovered` never raises.)*
 
 ## Out of Scope
 The automatic degraded-mode circuit breaker (engine-generation-infra story 05 — the automatic sibling);

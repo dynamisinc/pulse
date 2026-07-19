@@ -23,10 +23,17 @@ engine-review-cockpit (#34–36) and world-steering; produces exactly what they 
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Suggest + Delayed-auto autonomy levels | ADP §2.3 (v1 subset) | Not Started | #169 |
-| 02 | Auto-HOLD-on-timeout wiring (never auto-send) | ADP-040 / D5-014/1.1 | Not Started | #170 |
-| 03 | Kill switch (drop to Suggest / stop) | ADP-042 | Not Started | #171 |
-| 04 | Controller-workload contract (≤6/min demand) | CTL-034 / D5-014/2.7 | Not Started | #172 |
+| 01 | Suggest + Delayed-auto autonomy levels | ADP §2.3 (v1 subset) | Complete | #169 |
+| 02 | Auto-HOLD-on-timeout wiring (never auto-send) | ADP-040 / D5-014/1.1 | Complete | #170 |
+| 03 | Kill switch (drop to Suggest / stop) | ADP-042 | Complete | #171 |
+| 04 | Controller-workload contract (≤6/min demand) | CTL-034 / D5-014/2.7 | Complete | #172 |
+
+**Delivered** as the pure-backend `Pulse.Core/Features/Autonomy/*` slice (see its `README.md`): the
+`EngineAutonomyState` aggregate (level resolution + kill switch + degraded-mode clamp), the pure
+`AutoHoldPolicy`, the `AutonomyProviderHealthListener` bridge onto generation-infra's
+`IProviderHealthListener`, and the CTL-034 `WorkloadDemandMeter` + `DemandAccounting`. No E2/E7 dependency;
+no participant surface. The API/DTO seam to the E7 cockpit (`EngineReviewItem` / `DraftDisposition`) is
+defined here and converges when a WebApi exists (none yet).
 
 ## Dependencies
 engine-review-cockpit (#34 queue, #35 auto-HOLD, #36 swamped-mode) — E8 produces what these consume;
