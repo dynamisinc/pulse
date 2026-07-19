@@ -1,11 +1,13 @@
 # Feature: Console shell (toolstrip, flyouts, action bar)
 
 **Epic:** E7 — Controller Command Surface  ·  **Phase:** 1  ·  **Feature ref:** D5 additions
-**World:** staff  ·  **Issue:** #2  ·  **Status:** feature.md stub — decompose before build
+**World:** staff  ·  **Issue:** #2  ·  **Status:** stories authored — Wave 1 (story 01) building
 
 > **Architectural foundation of the console (Wave 1).** The D5 design review introduced the shell
-> pattern that hosts every other E7 surface, so this feature lands first. Stories below are planned,
-> not yet authored.
+> pattern that hosts every other E7 surface, so this feature lands first. Stories are authored (see
+> the table below); story 01 is the KEYSTONE of a 5-story cross-feature Wave-1 integration composition
+> alongside `persona-operation` and `feeds-discovery` — see its "Wave-1 integration seam" and
+> `implementation.md`'s callout.
 
 ## Summary
 The controller console's frame: a right-edge **toolstrip** with **flyouts**, a persistent
@@ -34,7 +36,7 @@ specific content that mounts in that frame:** the toolbox tools (which *register
 toolstrip dock, D7-011 — not a strip this feature draws), the NEEDS-YOU action bar, the console's
 flyouts, Flag, and the trainee monitor. See `docs/design/D7-application-shells/STORY-UPDATES.md` §B.
 
-## Stories (planned)
+## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
 | 01 | Toolstrip + flyouts — **register tools into `staff-shell` dock (D7-011)** | D5-016/17/19 | Not Started | #9 |
@@ -44,9 +46,13 @@ flyouts, Flag, and the trainee monitor. See `docs/design/D7-application-shells/S
 | 05 | Trainee monitor flyout (adaptive-loop metric) | D5-016, D5-014/3.1 | Not Started | #13 |
 
 ## Dependencies
-E1 exercise-context + roles (Director vs Controller gating); the E10 after-action record sink for
-Flag (story 04, minimal write now, full annotation set deferred to D6/evaluator). Command palette
-here hosts `persona-operation`'s picker.
+`staff-shell` (shipped, Complete — the toolstrip dock story 01 registers into, and the
+`StaffShellFrame`/`ExerciseContextProvider`/`ToolstripProvider` stack the `/console` route composes
+at integration); E1 exercise-context + roles (Director vs Controller gating); the E10 after-action
+record sink for Flag (story 04, minimal write now, full annotation set deferred to D6/evaluator).
+The ⌘K command palette + persona-dock host here (story 01) host `persona-operation`'s picker,
+composer, and context panel — built to an input/callback contract, wired at a serial integration
+step (see `01-toolstrip-flyouts.md`).
 
 ## Design notes
 **Interaction safety (D5):** NEEDS-YOU chips highlight a target (amber ring) but **never execute** —

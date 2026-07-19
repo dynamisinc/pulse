@@ -4,6 +4,15 @@
 > (D1-005). Backend not present — feed/search queries + the SignalR host are the contract seam; mock
 > now with polling fallback designed in (NFR-003).
 
+> **Wave-1 cross-feature integration slice (story 07).** A minimal slice of story 04's real-time
+> update lands early, as one of a 5-story cross-feature Wave-1 wave alongside `console-shell/01`
+> (KEYSTONE) and `persona-operation` 01–03, so a controller-published post
+> (`persona-operation/01`'s `onPublished`) can appear in the feed. Story 07 is the **only** story in
+> this Wave-1 composition touching `features/social/*`; it does not import any `controller`/
+> `persona-operation` file, and those stories do not import `postStore` — the integration step wires
+> `onPublished → postStore.appendPost`. Story 04 remains the full follow-up and this doc's own Wave
+> Plan (below) is unaffected for stories 01–06.
+
 ## Per-story tech notes
 
 | Story | Approach | Key files (owns) | Exports |
@@ -14,6 +23,7 @@
 | 04 New-posts pill | Buffer + sticky pill; SignalR + polling fallback. | `features/social/components/NewPostsPill.tsx`, `hooks/useFeedStream.ts` | `useFeedStream()` |
 | 05 For You (stretch) | Engagement ranking, config-gated. | `features/social/services/forYouRank.ts` | — |
 | 06 PIO columns | Grant-gated column layout over feed/search streams. | `features/social/components/ColumnsMode.tsx` | `<ColumnsMode>` |
+| 07 Live post store (Wave-1 slice) | Module-singleton post store the mock feed adapter + `useFeed()` read/subscribe to, so an appended post surfaces live (newest-first) through the existing `aria-live="polite"` region — no pill, no SignalR. | `features/social/services/postStore.ts` (new); edits to `feedService.ts`, `useFeed.ts` | `postStore` (`getPosts()`, `appendPost()`, `subscribe()`, `resetForTests()`) |
 
 ## Reuse map
 - `<PostCard>` (posts); profiles follow edges; hashtags-trending + search; `<VerifiedMark>` (People)
@@ -21,6 +31,8 @@
 - **SignalR real-time host (Phase 1)** — `useFeedStream` (04) + notifications share it; polling fallback (NFR-003)
 - Burst strategy shared with notification aggregation (notifications/02) — bounded buffer, aria-live=polite
 - E1 org grants (COR-018) — PIO columns gating (06)
+- **Shipped `postService.ts`** (`listPosts`, `toParticipantView`) — story 07's `postStore` seeds from
+  `listPosts()` and never bypasses `toParticipantView`'s narrowing (XC-002)
 
 ## Wave Plan (DAG-ready)
 
@@ -32,3 +44,9 @@
 | 04 New-posts pill | NewPostsPill, useFeedStream | 01; SignalR host | 02 | 2 | M |
 | 06 PIO columns | ColumnsMode | 01, 03, 04; E1 COR-018 | 05 | 3 | M |
 | 05 For You (stretch) | forYouRank | 01, 04; exercise-config | 06 | 3 | S |
+| 07 Live post store (Wave-1 slice) | postStore, feedService/useFeed edits | 01 (shipped) | — (this pass — cross-feature Wave-1 composition with `console-shell/01` + `persona-operation` 01–03) | 1* | S |
+
+\* Story 07 lands in the SAME calendar wave as 01's dependents for this pass's cross-feature
+composition, but is not itself a dependency of 02/03/05/06 — it is additive to story 01's shipped
+seam. Treat its "Wave 1" as "this pass's Wave 1," not a reordering of the feature's own internal
+sequencing.
