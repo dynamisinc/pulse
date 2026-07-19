@@ -24,7 +24,15 @@ public sealed class WorkloadDemandMeter
     /// <summary>The default rolling window (D5-014/2.7 "rolling 60s" = one scenario minute).</summary>
     public const int DefaultWindowMinutes = 1;
 
+    /// <summary>
+    /// The default retention window in scenario minutes. Chosen far above any realistic analysis window so
+    /// auto-prune never disturbs a rate query, while still bounding memory over a multi-hour exercise.
+    /// </summary>
+    public const int DefaultRetentionMinutes = 120;
+
     private readonly List<DemandEvent> _events = [];
+    private readonly int _retentionMinutes;
+    private int _maxScenarioMinute;
 
     /// <summary>The controller this meter tracks demand for.</summary>
     public Guid ControllerId { get; }
@@ -32,8 +40,14 @@ public sealed class WorkloadDemandMeter
     /// <summary>The exercise the demand is scoped to (COR-001).</summary>
     public Guid ExerciseId { get; }
 
-    /// <summary>Creates a demand meter for one controller in one exercise.</summary>
-    public WorkloadDemandMeter(Guid exerciseId, Guid controllerId)
+    /// <summary>
+    /// Creates a demand meter for one controller in one exercise. <paramref name="retentionMinutes"/> bounds
+    /// how far back events are kept: on every <see cref="Record"/> the meter auto-prunes anything older than
+    /// the latest scenario minute minus this window, so memory (and the <see cref="DemandInWindow"/> scan)
+    /// stay O(retention), not O(total). Keep it comfortably larger than any window passed to
+    /// <see cref="DemandInWindow"/> / <see cref="IsOverBudget"/>, or an over-long query would under-count.
+    /// </summary>
+    public WorkloadDemandMeter(Guid exerciseId, Guid controllerId, int retentionMinutes = DefaultRetentionMinutes)
     {
         if (exerciseId == Guid.Empty)
         {
@@ -45,15 +59,29 @@ public sealed class WorkloadDemandMeter
             throw new ArgumentException("The demand meter tracks one controller.", nameof(controllerId));
         }
 
+        ArgumentOutOfRangeException.ThrowIfLessThan(retentionMinutes, 1);
+
         ExerciseId = exerciseId;
         ControllerId = controllerId;
+        _retentionMinutes = retentionMinutes;
     }
 
-    /// <summary>Records one demanded decision at <paramref name="scenarioMinute"/>.</summary>
+    /// <summary>
+    /// Records one demanded decision at <paramref name="scenarioMinute"/>, then auto-prunes events older than
+    /// the retention window so the retained set (and every rate scan) stays bounded even if the caller never
+    /// calls <see cref="Prune"/>.
+    /// </summary>
     public void Record(DemandEventKind kind, int scenarioMinute)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(scenarioMinute);
         _events.Add(new DemandEvent(kind, scenarioMinute));
+
+        _maxScenarioMinute = Math.Max(_maxScenarioMinute, scenarioMinute);
+        var oldest = _maxScenarioMinute - _retentionMinutes;
+        if (oldest > 0)
+        {
+            _events.RemoveAll(e => e.ScenarioMinute < oldest);
+        }
     }
 
     /// <summary>

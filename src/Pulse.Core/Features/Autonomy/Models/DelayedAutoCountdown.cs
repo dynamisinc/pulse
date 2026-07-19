@@ -21,20 +21,65 @@ public enum ControllerDecision
 /// time-jump can carry it past expiry (<see cref="AutoHoldPolicy"/> resolves that to a HOLD, never a
 /// silent auto-send).
 /// </summary>
-/// <param name="ExerciseId">The exercise the draft belongs to (COR-001).</param>
-/// <param name="StorylineId">The storyline the draft voices.</param>
-/// <param name="DraftId">Stable identity of the draft/burst under countdown.</param>
-/// <param name="StartedScenarioMinute">The scenario minute the countdown began.</param>
-/// <param name="CountdownMinutes">The countdown length in scenario minutes (non-negative).</param>
-/// <param name="Decision">The controller's decision so far (default <see cref="ControllerDecision.None"/>).</param>
-public sealed record DelayedAutoCountdown(
-    Guid ExerciseId,
-    Guid StorylineId,
-    Guid DraftId,
-    int StartedScenarioMinute,
-    int CountdownMinutes,
-    ControllerDecision Decision = ControllerDecision.None)
+public sealed record DelayedAutoCountdown
 {
+    /// <summary>
+    /// Creates a countdown snapshot, validating its fields up front so an invalid countdown can never
+    /// exist: the ids are non-empty (COR-001 exercise scope), and the start/length are non-negative — a
+    /// negative length would otherwise "expire" immediately and mis-drive <see cref="AutoHoldPolicy"/>.
+    /// </summary>
+    public DelayedAutoCountdown(
+        Guid exerciseId,
+        Guid storylineId,
+        Guid draftId,
+        int startedScenarioMinute,
+        int countdownMinutes,
+        ControllerDecision decision = ControllerDecision.None)
+    {
+        if (exerciseId == Guid.Empty)
+        {
+            throw new ArgumentException("A countdown must belong to an exercise (COR-001).", nameof(exerciseId));
+        }
+
+        if (storylineId == Guid.Empty)
+        {
+            throw new ArgumentException("A countdown must name its storyline.", nameof(storylineId));
+        }
+
+        if (draftId == Guid.Empty)
+        {
+            throw new ArgumentException("A countdown must name its draft.", nameof(draftId));
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegative(startedScenarioMinute);
+        ArgumentOutOfRangeException.ThrowIfNegative(countdownMinutes);
+
+        ExerciseId = exerciseId;
+        StorylineId = storylineId;
+        DraftId = draftId;
+        StartedScenarioMinute = startedScenarioMinute;
+        CountdownMinutes = countdownMinutes;
+        Decision = decision;
+    }
+
+    /// <summary>The exercise the draft belongs to (COR-001).</summary>
+    public Guid ExerciseId { get; init; }
+
+    /// <summary>The storyline the draft voices.</summary>
+    public Guid StorylineId { get; init; }
+
+    /// <summary>Stable identity of the draft/burst under countdown.</summary>
+    public Guid DraftId { get; init; }
+
+    /// <summary>The scenario minute the countdown began.</summary>
+    public int StartedScenarioMinute { get; init; }
+
+    /// <summary>The countdown length in scenario minutes (non-negative).</summary>
+    public int CountdownMinutes { get; init; }
+
+    /// <summary>The controller's decision so far (default <see cref="ControllerDecision.None"/>).</summary>
+    public ControllerDecision Decision { get; init; }
+
     /// <summary>The scenario minute at which the countdown expires (start + length).</summary>
     public int DeadlineScenarioMinute => StartedScenarioMinute + CountdownMinutes;
 

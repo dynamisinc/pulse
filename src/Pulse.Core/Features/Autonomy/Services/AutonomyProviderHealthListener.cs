@@ -20,12 +20,13 @@ using Pulse.Core.Features.Storylines.Services;
 /// the whole host, so a real deployment fans one circuit trip out to every active exercise's switch; that
 /// registry is a WebApi/host concern (none yet). This adapter wires one exercise's switch — the shape the
 /// reaction loop consumes. Because <see cref="IProviderHealthListener"/> is fire-and-forget (returns
-/// <see cref="ValueTask"/>), the automatic degrade/recover transition can't be <i>returned</i> the way the
-/// manual kill switch's event is; instead the adapter forwards it to an optional
-/// <see cref="IAutonomyEvent"/> sink the host supplies (which engine-telemetry-tuning drains onto XC-004),
-/// so the automatic drop of engine autonomy is never a silent, untraced safety action. With no sink the
-/// event is dropped — appropriate for a simple host or a test — and this feature keeps no telemetry-sink
-/// dependency of its own.</para>
+/// <see cref="ValueTask"/>), an autonomy change can't be <i>returned</i> the way the manual kill switch's
+/// event is; instead the adapter forwards each <b>non-null</b> autonomy-change the switch reports to an
+/// optional <see cref="IAutonomyEvent"/> sink the host supplies (which engine-telemetry-tuning drains onto
+/// XC-004), so the automatic drop of engine autonomy is never a silent, untraced safety action. Today that
+/// is the degrade→Suggest change; recovery (<see cref="IEngineSafetySwitch.MarkProviderRecovered"/>) makes
+/// no autonomy change (it never raises, §8.2), so it forwards nothing. With no sink the event is dropped —
+/// appropriate for a simple host or a test — and this feature keeps no telemetry-sink dependency.</para>
 /// </summary>
 public sealed class AutonomyProviderHealthListener : IProviderHealthListener
 {

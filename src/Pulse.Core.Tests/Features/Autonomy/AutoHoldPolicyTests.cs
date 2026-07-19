@@ -11,7 +11,7 @@ public class AutoHoldPolicyTests
 
     // Countdown started at scenario-minute 100, 5-minute window → deadline at 105.
     private static DelayedAutoCountdown Countdown(ControllerDecision decision = ControllerDecision.None) =>
-        new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), StartedScenarioMinute: 100, CountdownMinutes: 5, decision);
+        new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), startedScenarioMinute: 100, countdownMinutes: 5, decision);
 
     [Fact]
     public void BeforeExpiry_WithNoDecision_AwaitsDecision()

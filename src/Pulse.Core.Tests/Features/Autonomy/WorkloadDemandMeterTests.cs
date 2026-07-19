@@ -90,6 +90,27 @@ public class WorkloadDemandMeterTests
     }
 
     [Fact]
+    public void Record_AutoPrunes_BeyondTheRetentionWindow_WithoutAnExplicitPrune()
+    {
+        var meter = new WorkloadDemandMeter(Guid.NewGuid(), Guid.NewGuid(), retentionMinutes: 10);
+        RecordDemand(meter, 5, scenarioMinute: 1);
+
+        // Scenario time advances well past retention; recording there evicts the minute-1 events, so memory
+        // stays bounded even though Prune was never called — and the current window is unaffected.
+        RecordDemand(meter, 2, scenarioMinute: 100);
+
+        meter.RetainedCount.Should().Be(2);
+        meter.DemandInWindow(100, 1).Should().Be(2);
+    }
+
+    [Fact]
+    public void Constructor_RejectsANonPositiveRetention()
+    {
+        var act = () => new WorkloadDemandMeter(Guid.NewGuid(), Guid.NewGuid(), retentionMinutes: 0);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
     public void Meter_IsExerciseAndControllerScoped()
     {
         var exercise = Guid.NewGuid();
