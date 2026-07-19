@@ -1,0 +1,119 @@
+/*
+ * features/controller/components/PersonaComposer.module.css
+ * ---------------------------------------------------------------------------
+ * Layout-only scoped styles for the Controller Console's post-as-persona
+ * composer (persona-operation/01). STAFF world (COBRA) — this file carries NO
+ * brand/skin color; all interactive chrome (input, button) is a COBRA styled
+ * component. These rules are pure structure (flex/spacing/typographic scale)
+ * for a dense, desktop-first operator surface — never a participant skin.
+ */
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+/* Persona identity header (R-001 seal / R-004 avatar), rendered from the
+   supplied activePersona — this is who the world sees the post come from. */
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.identityText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.displayName {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handle {
+  font-size: 12px;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The FIRE control row: dual-time readout on the left, counter + Post button
+   on the right. Dense, single row (staff-side, desktop-first). */
+.fireControl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dualTime {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.timeRow {
+  display: flex;
+  gap: 6px;
+}
+
+.timeLabel {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  min-width: 68px;
+}
+
+.timeValue {
+  font-variant-numeric: tabular-nums;
+}
+
+.fireActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.counter {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+/* Non-color state cue (NFR-001): over-limit is carried by weight + text, not
+   color alone. */
+.counterOver {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+/* Staff-only provenance line (R-003, originConsoleLabel) — SIMCELL · MANUAL.
+   NEVER participant-visible. Monospace to read as a machine/console field. */
+.originLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.originLabel {
+  font-weight: 700;
+}
