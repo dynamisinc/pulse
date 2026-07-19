@@ -96,4 +96,63 @@ describe('ControllerConsole', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(screen.getByTestId('controller-console')).toBeInTheDocument()
   })
+
+  it('does not unmount/remount the console body while the flyout opens and closes', async () => {
+    // A stronger check than "still in the document": the SAME heading node
+    // must persist across the flyout's open/close cycle. If the console's
+    // body were ever conditionally rendered on `paletteOpen` (e.g. hidden
+    // behind the flyout instead of composed alongside it), a fresh node would
+    // be mounted in its place and this reference-identity check would fail
+    // even though a `toBeInTheDocument()`-only assertion would still pass.
+    const user = userEvent.setup()
+    renderConsole()
+    await findConsole()
+
+    const headingBeforeOpen = screen.getByRole('heading', { name: 'CONTROLLER CONSOLE' })
+
+    await user.click(await screen.findByTestId('toolstrip-tool-personas'))
+    expect(await screen.findByRole('dialog', { name: /command palette/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'CONTROLLER CONSOLE' })).toBe(headingBeforeOpen)
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'CONTROLLER CONSOLE' })).toBe(headingBeforeOpen)
+  })
+
+  it('activating the Personas tool a second time closes the palette and returns focus to it', async () => {
+    // Distinct code path from the Ctrl+K/Esc test above: closing via
+    // TOGGLING THE SAME TOOL OFF (click again) rather than Esc. This exercises
+    // `closePalette`'s `toggleTool` branch, not just `setKeyboardPaletteOpen`.
+    const user = userEvent.setup()
+    renderConsole()
+    await findConsole()
+
+    const personasButton = await screen.findByTestId('toolstrip-tool-personas')
+    await user.click(personasButton)
+    expect(await screen.findByRole('dialog', { name: /command palette/i })).toBeInTheDocument()
+
+    await user.click(personasButton)
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(personasButton).toHaveFocus()
+  })
+
+  it('returns focus to the Personas toolstrip button (not just "a" trigger) on Esc close', async () => {
+    // The Ctrl+K test above closes a palette opened by keyboard shortcut, so
+    // the captured "trigger" is whatever had focus at that moment (often
+    // `document.body` in a fresh render). This test opens via the toolstrip
+    // BUTTON itself, so a regression that returns focus to the wrong element
+    // (e.g. always `document.body`, or the palette's own search field) fails
+    // this specific, stronger assertion.
+    const user = userEvent.setup()
+    renderConsole()
+    await findConsole()
+
+    const personasButton = await screen.findByTestId('toolstrip-tool-personas')
+    await user.click(personasButton)
+    expect(await screen.findByRole('dialog', { name: /command palette/i })).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(personasButton).toHaveFocus()
+  })
 })

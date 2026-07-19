@@ -122,6 +122,29 @@ describe('CommandPalette', () => {
     expect(option).toHaveFocus()
   })
 
+  it('traps focus on the search field alone when no persona list is wired (current shipped state)', async () => {
+    // TESTER-added: the wrap-around trap test above only exercises the
+    // MULTI-focusable case (search + a persona option), which only exists
+    // once `persona-operation/02` wires `renderPersonaResults` at
+    // integration. Until then — the state this story actually ships — the
+    // PERSONAS section is a placeholder with no focusable content, so the
+    // search field is BOTH first and last. A regression that mishandles the
+    // single-focusable-element case (e.g. lets Tab escape the dialog to the
+    // document body) would pass the multi-element trap test but fail here.
+    const user = userEvent.setup()
+    renderWithTheme(<PaletteHarness />)
+
+    await user.click(screen.getByTestId('trigger'))
+    const search = screen.getByLabelText('Search personas and commands')
+    expect(search).toHaveFocus()
+
+    await user.tab()
+    expect(search).toHaveFocus()
+
+    await user.tab({ shift: true })
+    expect(search).toHaveFocus()
+  })
+
   it('hands the chosen persona back and closes when a persona is selected', async () => {
     const user = userEvent.setup()
     const onSelectPersona = vi.fn()

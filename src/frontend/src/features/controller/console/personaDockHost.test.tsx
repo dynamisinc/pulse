@@ -75,4 +75,19 @@ describe('PersonaDockHost', () => {
     expect(screen.queryByTestId('persona-dock-host')).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
   })
+
+  it('moves focus to the close button on open (keyboard users land inside, no pointer required)', async () => {
+    // TESTER-added: the module header promises "On open, focus moves to the
+    // close button" as part of the NFR-001 keyboard-operability contract, but
+    // no existing test observes it — only the round-trip back to the opener
+    // on close. A regression that drops the open-time `.focus()` call (while
+    // leaving the close-time restore intact) would pass every other test here
+    // but fail this one.
+    const user = userEvent.setup()
+    renderWithTheme(<DockHarness />)
+
+    await user.click(screen.getByTestId('trigger'))
+
+    expect(screen.getByRole('button', { name: 'Close post-as-persona panel' })).toHaveFocus()
+  })
 })
