@@ -96,4 +96,54 @@ describe('composeAsPersona — content security (NFR-004)', () => {
     expect(post.text).not.toMatch(/<script/i)
     expect(post.text).toContain('Advisory update')
   })
+
+  // A different vector than the <script> case above: an attribute-based
+  // payload on an ordinary-looking tag. Exercises the sanitizer's "strip
+  // every tag" path, not just the special-cased <script>/<style> block — a
+  // regression that only special-cased <script> would still fail this.
+  it('strips a stored-XSS <img onerror> payload from the composed text before publish', () => {
+    const post = composeAsPersona({
+      ...BASE_INPUT,
+      text: '<img src="x" onerror="window.__xss = true">Advisory update',
+    })
+    expect(post.text).not.toMatch(/onerror/i)
+    expect(post.text).not.toContain('<img')
+    expect(post.text).toContain('Advisory update')
+  })
+
+  it('never lets a stored-XSS payload survive as far as the participant view either', () => {
+    const post = composeAsPersona({
+      ...BASE_INPUT,
+      text: '<script>alert(document.cookie)</script>Zone 3 is clear.',
+    })
+    const view = toParticipantView(post)
+    expect(view.text).not.toMatch(/<script/i)
+    expect(view.text).toContain('Zone 3 is clear.')
+  })
+})
+
+describe('composeAsPersona — origin cannot be overridden by the caller (defense in depth)', () => {
+  it('fixes origin to controller-as-persona even if an untyped caller smuggles a different one', () => {
+    // ComposeAsPersonaInput has no `origin` field, so this can only happen via
+    // an untyped/JS caller bypassing the type system — simulate that with a
+    // deliberate unsafe cast rather than assuming TS alone protects this.
+    const maliciousInput = {
+      ...BASE_INPUT,
+      origin: 'participant',
+    } as unknown as ComposeAsPersonaInput
+
+    const post = composeAsPersona(maliciousInput)
+    expect(post.origin).toBe('controller-as-persona')
+  })
+})
+
+describe('composeAsPersona — exercise stamping (COR-001)', () => {
+  it('stamps the post and its telemetry event with the caller-supplied exerciseId', () => {
+    const post = composeAsPersona({ ...BASE_INPUT, exerciseId: 'ex-other-9999' })
+    expect(post.exerciseId).toBe('ex-other-9999')
+
+    const events = getEmittedTelemetryEvents().filter(e => e.eventType === 'post')
+    expect(events).toHaveLength(1)
+    expect(events[0]?.exerciseId).toBe('ex-other-9999')
+  })
 })

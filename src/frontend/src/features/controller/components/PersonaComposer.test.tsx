@@ -164,4 +164,105 @@ describe('PersonaComposer — identity + scenario time (R-001/R-004, COR-053)', 
     const post = onPublished.mock.calls[0]?.[0]
     expect(post?.scenarioTime).toBe('2031-03-01T14:00:00.000Z')
   })
+
+  it('does not render the verified seal for an unverified persona (SOC-052)', async () => {
+    const unverifiedPersona: Persona = { ...ACTIVE_PERSONA, verified: false }
+    await renderComposer(
+      <PersonaComposer
+        activePersona={unverifiedPersona}
+        actingHumanId="human-ctl-7"
+        callSign="SIMCELL-3"
+      />,
+    )
+
+    expect(screen.getByTestId('persona-identity')).toHaveTextContent('Fairhaven Water')
+    expect(screen.queryByTestId('verified-mark')).not.toBeInTheDocument()
+  })
+
+  it('never shows the operating controller identity inside the persona identity header', async () => {
+    await renderComposer(
+      <PersonaComposer
+        activePersona={ACTIVE_PERSONA}
+        actingHumanId="human-ctl-7"
+        callSign="SIMCELL-3"
+      />,
+    )
+
+    // R-001/R-004: the identity header is who the WORLD sees. The operator's
+    // call sign / acting-human id belong only in the fire control / origin
+    // line (asserted elsewhere), never here alongside the persona's own name.
+    const identity = screen.getByTestId('persona-identity')
+    expect(identity).not.toHaveTextContent('SIMCELL-3')
+    expect(identity).not.toHaveTextContent('human-ctl-7')
+  })
+})
+
+describe('PersonaComposer — dual-time fire control never conflates the two clocks (COR-053)', () => {
+  it('renders the scenario reading from the injected exercise clock and a differently-sourced wall reading', async () => {
+    // Fixed scenario instant far from "now" (the real wall-clock, ~2026) so a
+    // regression that wired the WALL·UTC readout to scenarioNow() instead of
+    // wallClockNowIso() would leak "2031" into the wall reading too.
+    setExerciseClock(fixedClock(new Date('2031-03-01T14:00:00.000Z')))
+    await renderComposer(
+      <PersonaComposer
+        activePersona={ACTIVE_PERSONA}
+        actingHumanId="human-ctl-7"
+        callSign="SIMCELL-3"
+      />,
+    )
+
+    const scenarioReading = screen.getByTestId('dual-time-scenario')
+    const wallReading = screen.getByTestId('dual-time-wall')
+
+    expect(scenarioReading).toHaveTextContent('2031')
+    expect(wallReading).not.toHaveTextContent('2031')
+    // The wall-clock reading is a bare UTC HH:MM:SSZ clock face.
+    expect(wallReading.textContent).toMatch(/^\d{2}:\d{2}:\d{2}Z$/)
+  })
+})
+
+describe('PersonaComposer — over-length draft blocks publish (SOC-001 char limit)', () => {
+  it('disables Post and flags the counter as over-limit once the draft exceeds charLimit', async () => {
+    const onPublished = vi.fn<(post: Post) => void>()
+    const user = userEvent.setup()
+    await renderComposer(
+      <PersonaComposer
+        activePersona={ACTIVE_PERSONA}
+        actingHumanId="human-ctl-7"
+        callSign="SIMCELL-3"
+        charLimit={10}
+        onPublished={onPublished}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('Post text'), 'This is way over the ten-char limit')
+
+    const counter = screen.getByTestId('char-counter')
+    expect(counter).toHaveAttribute('data-state', 'over')
+    expect(counter).toHaveAccessibleName(/characters over the limit/i)
+    expect(screen.getByRole('button', { name: 'Post' })).toBeDisabled()
+    expect(onPublished).not.toHaveBeenCalled()
+  })
+})
+
+describe('PersonaComposer — keyboard-first fire (NFR-001, CTL-001 quick-fire)', () => {
+  it('publishes on Ctrl+Enter without clicking the Post button', async () => {
+    const onPublished = vi.fn<(post: Post) => void>()
+    const user = userEvent.setup()
+    await renderComposer(
+      <PersonaComposer
+        activePersona={ACTIVE_PERSONA}
+        actingHumanId="human-ctl-7"
+        callSign="SIMCELL-3"
+        onPublished={onPublished}
+      />,
+    )
+
+    const input = screen.getByLabelText('Post text')
+    await user.type(input, 'Fire via keyboard.')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+
+    expect(onPublished).toHaveBeenCalledTimes(1)
+    expect(onPublished.mock.calls[0]?.[0]?.text).toBe('Fire via keyboard.')
+  })
 })
