@@ -69,7 +69,6 @@ import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import {
   faBriefcase,
   faBuilding,
-  faCircleCheck,
   faCloudSun,
   faMagnifyingGlass,
   faNewspaper,
@@ -79,6 +78,11 @@ import {
   faUserTie,
 } from '@fortawesome/free-solid-svg-icons'
 import { usePersonas, type Persona, type PersonaType } from '@/features/personas'
+// Direct leaf import (not the '@/features/social' barrel) so the staff picker
+// doesn't transitively load the whole participant social feature (postService,
+// Feed, Composer…) just for the seal SVG — and so a test that partially mocks
+// `@/features/personas` isn't broken by the barrel eager-loading postService.
+import { VerifiedMark } from '@/features/social/components/VerifiedMark'
 import { CobraTextField } from '@/theme/styledComponents'
 import { useActivePersona } from '../hooks/useActivePersona'
 
@@ -493,14 +497,9 @@ function PersonaPickerRow({
           >
             {persona.displayName}
           </Typography>
-          {persona.verified && (
-            <FontAwesomeIcon
-              icon={faCircleCheck}
-              size="xs"
-              color="#2D9CDB"
-              aria-label="Verified"
-            />
-          )}
+          {/* The canonical cross-surface seal (R-001) — never a theme-colored,
+              hand-rolled mark; the fixed seal-blue lives in <VerifiedMark>. */}
+          {persona.verified && <VerifiedMark size={13} />}
           {isActive && (
             <Typography
               data-testid={`persona-picker-active-badge-${persona.id}`}
