@@ -23,10 +23,16 @@ metric). Prototype metrics: `spikes/e8-generation-loop/metrics.mjs` (`maxPairwis
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Voice consistency — dossier + prior-post conditioning | ADP-020 | Not Started | #148 |
-| 02 | Cross-persona diversity — burst generation + thresholds | ADP-021 | Not Started | #149 |
-| 03 | Persona-type behavior + bad-actor gating | ADP-022 | Not Started | #150 |
-| 04 | The believable + diverse acceptance metric | ADP-021 | Not Started | #151 |
+| 01 | Voice consistency — dossier + prior-post conditioning | ADP-020 | Complete | #148 |
+| 02 | Cross-persona diversity — burst generation + thresholds | ADP-021 | Complete | #149 |
+| 03 | Persona-type behavior + bad-actor gating | ADP-022 | Complete | #150 |
+| 04 | The believable + diverse acceptance metric | ADP-021 | Complete | #151 |
+
+**Delivered** as the pure-backend `Pulse.Core/Features/PersonaVoice/*` slice (see its `README.md`):
+`VoiceProfileBuilder` (consistency + `ToDossier` projection), `PersonaCasting` (type behavior + bad-actor
+gate), `StyleConformance` + `BurstAcceptancePolicy` (the believable+diverse gate over the merged
+`VoiceMetrics`, with bounded re-roll → drop). Builds on `Generation.Models` + `EngineEval.VoiceMetrics`
+read-only; no E2/E7 dependency. The believable+diverse metric is shared with `engine-eval-harness` (#175).
 
 ## Dependencies
 `engine-generation-infra` (prompt assembly + provider); persona-management (COR-020 dossiers, persona

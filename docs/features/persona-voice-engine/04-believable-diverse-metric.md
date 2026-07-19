@@ -1,7 +1,12 @@
 # Story: The believable + diverse acceptance metric
 
-**Feature:** Persona voice engine  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Persona voice engine  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-021  ·  **Design decisions:** none  ·  **Issue:** #151
+
+> **Delivered:** the diversity trio is the merged `EngineEval.VoiceMetrics` (overlap / distinct-2 /
+> distinctiveness); this story adds the consistency half `PersonaVoice/Services/StyleConformance` and folds
+> both into `BurstAcceptancePolicy.Evaluate` → one pass/fail with named failing checks. Pure functions,
+> shared with engine-eval-harness (#175). Tests: `StyleConformanceTests` + `BurstAcceptancePolicyTests`.
 
 ## Context
 ADP-021 requires diversity checks **in acceptance criteria** (e.g. n-gram overlap thresholds across a
@@ -10,18 +15,18 @@ functions, used both as the pre-review re-roll gate (story 02) and as a maintain
 (engine-eval-harness story 01). The functions are prototyped and self-validated in the spike.
 
 ## Acceptance Criteria
-- [ ] Given a burst, when it is scored, then the metric computes: max pairwise **trigram overlap**,
+- [x] Given a burst, when it is scored, then the metric computes: max pairwise **trigram overlap**,
       **distinct-2** (unique bigrams / total), and per-persona **lexical distinctiveness** (own
       content words vs the rest of the burst).
-- [ ] Given a persona post, when it is scored against its dossier, then **style-param conformance**
+- [x] Given a persona post, when it is scored against its dossier, then **style-param conformance**
       (emoji/length/caps/hashtag within tolerance) is computed (the consistency half, from story 01).
-- [ ] Given the v1 thresholds (overlap < 0.2, distinct-2 > 0.7, per-persona distinctiveness > 0.4,
+- [x] Given the v1 thresholds (overlap < 0.2, distinct-2 > 0.7, per-persona distinctiveness > 0.4,
       style conformance pass), when a burst is evaluated, then a single pass/fail is produced with the
       failing check(s) named.
-- [ ] Given a deliberately-blended burst, when scored, then it **fails** the diversity checks; given a
+- [x] Given a deliberately-blended burst, when scored, then it **fails** the diversity checks; given a
       clean burst, it **passes** — i.e. the metric catches real failures (the spike's harness
       self-check).
-- [ ] The metric is exposed as **pure functions** (no I/O) so it runs identically in the pre-review
+- [x] The metric is exposed as **pure functions** (no I/O) so it runs identically in the pre-review
       gate and in CI-style regression as prompts/models change.
 
 ## Out of Scope

@@ -1,7 +1,12 @@
 # Story: Cross-persona diversity — burst generation + thresholds
 
-**Feature:** Persona voice engine  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Persona voice engine  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-021  ·  **Design decisions:** none  ·  **Issue:** #149
+
+> **Delivered:** `PersonaVoice/Services/BurstAcceptancePolicy` — scores a burst with the merged
+> `VoiceMetrics` thresholds and re-rolls a failing burst up to a bound (`Decide` → accept / re-roll / drop);
+> relies on the assembler's burst-in-one-call (`PostCount = personas.Count`). Tests:
+> `BurstAcceptancePolicyTests` (clean passes, blended fails, bound → drop).
 
 ## Context
 Output across personas must be **diverse** — tone, literacy, emoji habits, perspective — and must not
@@ -12,17 +17,17 @@ burst that fails the diversity thresholds is **re-rolled or its outliers resampl
 sees it.
 
 ## Acceptance Criteria
-- [ ] Given a burst request for N personas, when the engine generates, then it produces all N in a
+- [x] Given a burst request for N personas, when the engine generates, then it produces all N in a
       single call so the model sees the personas together and differentiates them.
-- [ ] Given a generated burst, when it is scored, then it must pass the diversity thresholds (max
+- [x] Given a generated burst, when it is scored, then it must pass the diversity thresholds (max
       pairwise trigram overlap < 0.2, distinct-2 > 0.7, per-persona distinctiveness > 0.4) before it
       is eligible to reach the review queue.
-- [ ] Given a burst that fails a diversity threshold, when it is detected, then the engine re-rolls
+- [x] Given a burst that fails a diversity threshold, when it is detected, then the engine re-rolls
       the burst (or resamples the offending persona) up to a bounded number of attempts, and never
       surfaces a converged burst.
-- [ ] Given repeated re-roll failures, when the bound is hit, then the burst is dropped and the event
+- [x] Given repeated re-roll failures, when the bound is hit, then the burst is dropped and the event
       is logged (telemetry XC-004) rather than surfacing low-quality content.
-- [ ] **LLM governance (NFR-005):** diversity is enforced by the acceptance gate, not assumed from
+- [x] **LLM governance (NFR-005):** diversity is enforced by the acceptance gate, not assumed from
       the model.
 
 ## Out of Scope
