@@ -109,20 +109,27 @@ delivered" notes for exactly what landed vs. what remains).
 - ✅ `posts/01-post-composition` (#92) — the inline composer: text + image-attach + depleting ring counter + sanitized/instrumented publish (inline video, location, and #/@ persistence deferred to the posts/03 model — see the story's Deferred note).
 - ✅ `threads-replies/01-flattened-thread-view` (#98) + `02-reply-counts-and-open` (#99) — open a post into its flattened thread in-channel; reply-count + open affordance on `<PostCard>`.
 
-> **Delivered** — all four stories Gate-1 clean → merged into `feature/social`; the integrated umbrella is
-> Gate-2 clean (opus/xhigh), green (build:check + lint + **585 tests**), and browser-smoked at `/shell`.
-> `SocialChannel` composes composer + feed + in-channel thread nav; `App.tsx`'s participant route now wraps
-> `<SessionProvider>` and mounts it in place of `ParticipantChannelPlaceholder`. Umbrella→`main` PR open
-> (awaiting review/merge — Copilot review runs on the PR).
+> **Delivered & merged to `main`** (PR #252, merge `2e714aa`) — all four stories Gate-1 clean → merged
+> into `feature/social`; the integrated umbrella was Gate-2 clean (opus/xhigh), green (build:check + lint
+> + **588 tests**), and browser-smoked at `/shell`. `SocialChannel` composes composer + feed + in-channel
+> thread nav; `App.tsx`'s participant route wraps `<SessionProvider>` and mounts it in place of
+> `ParticipantChannelPlaceholder`.
+>
+> **Fixed in the PR #252 review round (Copilot + a self-review)** — findings that were listed here as
+> deferred, now DONE: the thread-back feed remount — `<Feed>` + `<Composer>` now stay MOUNTED (hidden)
+> while a thread is open, so
+> the compose draft, scroll, resolved data, and the feed's emit-once view-telemetry guard all survive the
+> round-trip (no refetch, no duplicate feed-view) — plus focus management on the view swap (NFR-001); and
+> the thread-open `'view'` telemetry gained an emit-once ref guard (no StrictMode double-emit); and the
+> `useThread` post validator now checks engagement counts (fail-closed vs. a malformed thread body).
 >
 > **Tracked forward-looking findings (deferred, non-blocking):**
-> (S2-1) returning from a thread remounts `<Feed>` → a duplicate feed-view telemetry event + refetch + lost
-> scroll; fix with feed persistence (keep `<Feed>` mounted / overlay the thread) in `feeds-discovery/04`.
 > (S2-2) `resolveFeed`/`resolveThread` return the full `Post` over the (mock) transport, narrowed to the
 > participant view **client-side** — project provenance out server-side when the real `/feed` + `/threads`
 > endpoints land. (S2-3) read-only view events attribute `participantId`; prefer `sessionId` once `Session`
 > carries one (COR-015). (L-1) hoist one `useScenarioTime` "now" at the feed vs per-`PostCard` for burst
-> scale. (L-2) couple `injectId` to `origin === 'inject'` in `createPost` (posts/03).
+> scale. (L-2) couple `injectId` to `origin === 'inject'` in `createPost` (posts/03). Feed virtualization +
+> the real-time "new posts" pill remain `feeds-discovery/04`.
 
 ### Wave S3+ ⬜ (fan out; all reuse PostCard)
 - `profiles-social-graph/01-profile-page` → `02-follow-unfollow` → `feeds-discovery/02-following-feed`
