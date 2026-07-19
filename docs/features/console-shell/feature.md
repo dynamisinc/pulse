@@ -1,11 +1,15 @@
 # Feature: Console shell (toolstrip, flyouts, action bar)
 
 **Epic:** E7 — Controller Command Surface  ·  **Phase:** 1  ·  **Feature ref:** D5 additions
-**World:** staff  ·  **Issue:** #2  ·  **Status:** feature.md stub — decompose before build
+**World:** staff  ·  **Issue:** #2  ·  **Status:** Wave 1 delivered (story 01 Complete) — stories 02–05 Not Started
 
-> **Architectural foundation of the console (Wave 1).** The D5 design review introduced the shell
-> pattern that hosts every other E7 surface, so this feature lands first. Stories below are planned,
-> not yet authored.
+> **Architectural foundation of the console (Wave 1 — delivered).** The D5 design review introduced
+> the shell pattern that hosts every other E7 surface, so this feature landed first. Story 01 was the
+> KEYSTONE of a 5-story cross-feature Wave-1 integration composition alongside `persona-operation` and
+> `feeds-discovery` — built Gate-1 clean, wired at a serial integration step, and Gate-2 clean on the
+> integrated umbrella (684/684 tests, browser-verified end-to-end). See its "Wave-1 integration seam"
+> and `implementation.md`'s callout. Stories 02–05 (NEEDS-YOU bar, static identity badge, Flag → AAR,
+> trainee monitor) remain out of this wave.
 
 ## Summary
 The controller console's frame: a right-edge **toolstrip** with **flyouts**, a persistent
@@ -34,19 +38,23 @@ specific content that mounts in that frame:** the toolbox tools (which *register
 toolstrip dock, D7-011 — not a strip this feature draws), the NEEDS-YOU action bar, the console's
 flyouts, Flag, and the trainee monitor. See `docs/design/D7-application-shells/STORY-UPDATES.md` §B.
 
-## Stories (planned)
+## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Toolstrip + flyouts — **register tools into `staff-shell` dock (D7-011)** | D5-016/17/19 | Not Started | #9 |
+| 01 | Toolstrip + flyouts — **register tools into `staff-shell` dock (D7-011)** | D5-016/17/19 | Complete | #9 |
 | 02 | NEEDS-YOU action bar — locate & highlight, never act | D5-010, D5-012(d) | Not Started | #10 |
 | 03 | Static identity badge during conduct — **presentation → `staff-shell` header (D7-007/010)** | COR-005 / D5-012(g) | Not Started | #11 |
 | 04 | Flag on any post → after-action record (minimal) | D5-014/3.4 | Not Started | #12 |
 | 05 | Trainee monitor flyout (adaptive-loop metric) | D5-016, D5-014/3.1 | Not Started | #13 |
 
 ## Dependencies
-E1 exercise-context + roles (Director vs Controller gating); the E10 after-action record sink for
-Flag (story 04, minimal write now, full annotation set deferred to D6/evaluator). Command palette
-here hosts `persona-operation`'s picker.
+`staff-shell` (shipped, Complete — the toolstrip dock story 01 registers into, and the
+`StaffShellFrame`/`ExerciseContextProvider`/`ToolstripProvider` stack the `/console` route composes
+at integration); E1 exercise-context + roles (Director vs Controller gating); the E10 after-action
+record sink for Flag (story 04, minimal write now, full annotation set deferred to D6/evaluator).
+The ⌘K command palette + persona-dock host here (story 01) host `persona-operation`'s picker,
+composer, and context panel — built to an input/callback contract, wired at a serial integration
+step (see `01-toolstrip-flyouts.md`).
 
 ## Design notes
 **Interaction safety (D5):** NEEDS-YOU chips highlight a target (amber ring) but **never execute** —

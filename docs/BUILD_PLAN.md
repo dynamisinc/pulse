@@ -160,6 +160,48 @@ comment says so) — coordinate with the evaluator session, which currently impo
 
 ---
 
+## E7 Simcell Operator — Wave 1 ✅  · umbrella `feature/simcell-operator`
+
+Cross-feature integration wave: the controller console's first end-to-end loop — pick a persona,
+compose in-voice, publish, see it land in the participant feed. Five stories built in parallel
+(`console-shell/01` as keystone, `persona-operation/01–03`, `feeds-discovery/07`) against an
+input/callback contract, then wired at a serial integration step.
+
+- ✅ `console-shell/01-toolstrip-flyouts` — console frame registers into the `staff-shell` toolstrip
+  dock (D7-011); the ⌘K command palette shell + PERSONAS section; the persona-dock host flyout mount
+  slot; the Phase-1 mock `useControllerIdentity()` (COR-018 attribution seam).
+- ✅ `persona-operation/01-post-as-persona` — post-as-persona composer through the shipped
+  `createPost` pipeline (POST-ONLY this wave — reply/repost/DM deferred pending a `Post`-model
+  parent/thread extension).
+- ✅ `persona-operation/02-fast-persona-switching` — searchable/pinnable persona picker,
+  keyboard-first, ≤3s switch.
+- ✅ `persona-operation/03-composer-persona-context` — persona voice notes, recents, audience band,
+  "POSTING AS {category}" chip.
+- ✅ `feeds-discovery/07-live-feed-store` — minimal live `postStore` read seam so a published post
+  appears in the participant feed without a reload (partial SOC-083/D1-005 slice; the FULL buffered
+  pill + SignalR transport stays `04-realtime-new-posts-pill.md`, #123).
+
+**Serial integration step** (after the fan-out): `features/controller` barrel, the App.tsx `/console`
+route (`ExerciseContextProvider > ToolstripProvider > StaffShellFrame`, mirroring `/evaluator`), the
+persona-dock host wired to the picker → composer → context panel, and the composer's
+`onPublished` wired to `postStore.appendPost`.
+
+> **Delivered** — all five stories Gate-1 clean (0 Critical/0 Major), merged serially onto
+> `feature/simcell-operator`; the integrated umbrella is Gate-2 clean (opus/xhigh — 0 Critical/0
+> Major/3 Minor token-consistency notes/2 informational). `build:check` + `lint` clean, **684/684
+> tests pass** (up from a 588 baseline). Browser-verified end-to-end from `/console`: ⌘K →
+> PersonaPicker → select verified agency persona @FairhavenWater → dock (context panel + composer,
+> dual-time, OPERATOR SIMCELL-1) → Post → the post appears in the participant `/shell` feed authored
+> as @FairhavenWater with zero controller-origin leak in the participant DOM (the staff-only
+> `SIMCELL · MANUAL` origin line shows console-side only). Umbrella→`main` PR pending.
+>
+> **Follow-ups (not this wave):** `console-shell/02–05` (NEEDS-YOU bar, static identity badge, Flag →
+> AAR, trainee monitor), `persona-operation/04–05` (multi-controller presence, mid-exercise persona
+> creation), and the FULL `feeds-discovery/04` (#123) buffered "▲ N new posts" pill + SignalR/polling
+> transport.
+
+---
+
 ## Cross-feature serial edges (don't parallelize across these)
 - `participant-shell/04` (mount contract) **before** `staff-shell/04` (preview-as).
 - `staff-shell/02` (`registerSurfaceTool()`) **before** `console-shell` docks its toolbox.

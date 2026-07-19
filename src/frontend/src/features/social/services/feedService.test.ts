@@ -9,10 +9,11 @@
  *  - `resolveFeed` (the shipped mock-adapter path, USE_MOCK_DATA on in test)
  *    resolves the seeded posts through the real axios pipeline.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { Persona } from '@/features/personas'
 import type { Post } from '@/features/social'
 import { assembleFeedView, resolveFeed } from './feedService'
+import { postStore } from './postStore'
 
 function buildPersona(overrides: Partial<Persona> = {}): Persona {
   return {
@@ -99,12 +100,27 @@ describe('assembleFeedView — provenance stays absent (XC-002)', () => {
 })
 
 describe('resolveFeed — shipped mock-adapter path (NFR-003 seam)', () => {
+  afterEach(() => {
+    postStore.resetForTests()
+  })
+
   it('resolves the seeded posts through the real axios pipeline', async () => {
     const posts = await resolveFeed()
 
     expect(Array.isArray(posts)).toBe(true)
     expect(posts.length).toBeGreaterThan(0)
     // A known seeded post from the Fairhaven arc came back through the adapter.
+    expect(posts.some(p => p.id === 'post-seed-fw-advisory')).toBe(true)
+  })
+
+  it('resolves through postStore.getPosts() — a just-appended post is included (feeds-discovery/07)', async () => {
+    postStore.appendPost(buildPost({ id: 'post-live-appended' }))
+
+    const posts = await resolveFeed()
+
+    // Proof the mock adapter reads the live store, not listPosts() directly:
+    // the appended post rides through the same axios pipeline as the baseline.
+    expect(posts.some(p => p.id === 'post-live-appended')).toBe(true)
     expect(posts.some(p => p.id === 'post-seed-fw-advisory')).toBe(true)
   })
 })

@@ -27,6 +27,15 @@ composer/pill (D1-011). Read-only sessions default to All Posts (COR-015).
 | 04 | Real-time updates — "new posts" pill (no auto-scroll) | SOC-083 / D1-005 | Not Started | #123 |
 | 05 | Engagement-weighted "For You" mode (stretch) | SOC-084 | Not Started | #124 |
 | 06 | PIO multi-column mode (grant-gated) | D1-010 | Not Started | #125 |
+| 07 | Live post store — Wave-1 minimal slice (shared store + live read, no pill) | SOC-083 (partial) / D1-005 (partial) | Complete | — |
+
+**Story 07** is a Wave-1 cross-feature integration slice (see `console-shell/01` +
+`persona-operation` 01–03), authored to unblock a controller-published post appearing in the feed.
+**Delivered** — built Gate-1 clean on `feature/simcell-operator`, wired at the Wave-1 integration step,
+Gate-2 clean on the integrated umbrella (684/684 tests, browser-verified: a console-published post
+appears at the top of the participant feed with no reload). It is a **partial** of SOC-083/D1-005 —
+story 04 remains the FULL follow-up (buffered pill, SignalR + polling fallback) and is not superseded
+or completed by 07; story 04 stays Not Started.
 
 ## Dependencies
 posts (PostCard), profiles (follow edges), hashtags-trending; E1 isolation, scenario-time, telemetry,

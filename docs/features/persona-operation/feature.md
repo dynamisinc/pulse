@@ -1,7 +1,16 @@
 # Feature: Persona operation
 
 **Epic:** E7 — Controller Command Surface  ·  **Phase:** 1  ·  **Feature ref:** F7.1
-**World:** staff  ·  **Issue:** #3
+**World:** staff  ·  **Issue:** #3  ·  **Status:** Wave 1 delivered (stories 01–03 Complete, POST-ONLY) — stories 04–05 Not Started
+
+> **Wave 1 delivered.** Stories 01–03 (post as persona, fast switching, composer persona context)
+> built in the 5-story cross-feature Wave-1 fan-out on `feature/simcell-operator` alongside
+> `console-shell/01` and `feeds-discovery/07` — Gate-1 clean, wired at a serial integration step,
+> Gate-2 clean on the integrated umbrella (684/684 tests, browser-verified end-to-end: ⌘K → picker →
+> compose → publish → appears in the participant feed with no controller-origin leak). Story 01 is
+> **POST-ONLY** this wave — reply/repost/DM-as-persona are deferred pending a `Post`-model
+> parent/thread extension. Stories 04 (multi-controller presence) and 05 (mid-exercise persona
+> creation) remain out of this wave.
 
 ## Summary
 The controller's core loop: post, reply, repost, and DM as **any persona** in the exercise from
@@ -22,9 +31,9 @@ tracked in `console-shell`.
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Post as any persona into an enabled channel | CTL-001, COR-018 | Not Started | #14 |
-| 02 | Fast persona switching (searchable picker, ≤3s) | CTL-002 | Not Started | #15 |
-| 03 | Composer shows persona context while writing | CTL-003, COR-020, SOC-054 | Not Started | #16 |
+| 01 | Post as any persona into an enabled channel | CTL-001, COR-018 | Complete | #14 |
+| 02 | Fast persona switching (searchable picker, ≤3s) | CTL-002 | Complete | #15 |
+| 03 | Composer shows persona context while writing | CTL-003, COR-020, SOC-054 | Complete | #16 |
 | 04 | Multi-controller presence & safe co-operation | CTL-004 | Not Started | #17 |
 | 05 | Mid-exercise persona creation from the picker | CTL-005, COR-022 | Not Started | #18 |
 
