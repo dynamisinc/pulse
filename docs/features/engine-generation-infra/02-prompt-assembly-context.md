@@ -1,6 +1,6 @@
 # Story: Prompt assembly & context assembly
 
-**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress
+**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-020 (context)  ·  **Design decisions:** none  ·  **Issue:** #143
 
 ## Context
@@ -13,18 +13,18 @@ constrains output to structured per-post objects. Context assembly selects the s
 relevant persona dossiers + the last K world posts relevant to the storyline (by hashtag/mention/recency).
 
 ## Acceptance Criteria
-- [ ] Given a storyline and a set of participating personas, when the engine assembles a generation
+- [x] Given a storyline and a set of participating personas, when the engine assembles a generation
       request, then the system prompt contains the exercise brief, the absolute rules, the storyline
       state, and per-persona voice notes (COR-020) + style params + prior-post exemplars.
-- [ ] Given a burst request, when output is produced, then it comes **only** via a forced
+- [x] Given a burst request, when output is produced, then it comes **only** via a forced
       `emit_posts` tool call returning `[{personaHandle, text, sentiment, hashtags}]` — no free-form
       prose, no preamble.
-- [ ] Given the last K world posts, when context is assembled, then only posts relevant to the
+- [x] Given the last K world posts, when context is assembled, then only posts relevant to the
       storyline (hashtag/mention/recency) are included, bounded to a token budget.
-- [ ] Given scenario time, when it appears in the prompt, then it is carried as **storyline state**
+- [x] Given scenario time, when it appears in the prompt, then it is carried as **storyline state**
       (after the cache breakpoint), never interpolated into the stable system prefix (so caching in
       story 04 is not invalidated).
-- [ ] **LLM governance (NFR-005):** the assembled request goes only to the tenant-bounded provider
+- [x] **LLM governance (NFR-005):** the assembled request goes only to the tenant-bounded provider
       (story 01); untrusted world content is placed only where story 03 fences it, never in the
       system role.
 

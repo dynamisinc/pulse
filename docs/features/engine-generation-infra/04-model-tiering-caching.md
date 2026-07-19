@@ -1,6 +1,6 @@
 # Story: Model tiering & prompt caching
 
-**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress
+**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-011 (cost side)  ·  **Design decisions:** none  ·  **Issue:** #145
 
 ## Context
@@ -13,18 +13,18 @@ provider-agnostic (auto-cache on 1P/Foundry, manual `cache_control` on Bedrock/V
 on Azure OpenAI).
 
 ## Acceptance Criteria
-- [ ] Given a generation request, when the engine selects a model tier, then storyline-critical
+- [x] Given a generation request, when the engine selects a model tier, then storyline-critical
       generation uses the Sonnet-tier and ambient/bulk uses the Haiku-tier, per the reaction-loop's
       intent.
-- [ ] Given a sequence of bursts sharing the stable prefix, when they run, then the dossier+brief+rules
+- [x] Given a sequence of bursts sharing the stable prefix, when they run, then the dossier+brief+rules
       prefix is prompt-cached and subsequent calls report cache reads (not full-price re-processing).
-- [ ] Given the stable prefix, when it is built, then it is byte-stable across calls (no timestamps /
+- [x] Given the stable prefix, when it is built, then it is byte-stable across calls (no timestamps /
       per-request IDs in it — scenario time is injected as storyline state per story 02), so the cache
       is not silently invalidated.
-- [ ] Given the flagship tiers, when model selection runs, then Opus/Fable are **not** used for
+- [x] Given the flagship tiers, when model selection runs, then Opus/Fable are **not** used for
       per-post generation (documented rationale: no reviewer-visible believability gain at 3–10× cost;
       Fable ZDR restriction).
-- [ ] Per-burst token usage + cache-hit metrics are emitted (telemetry XC-004) so cost can be tracked
+- [x] Per-burst token usage + cache-hit metrics are emitted (telemetry XC-004) so cost can be tracked
       and tuned (feeds engine-eval-harness story 03).
 
 ## Out of Scope

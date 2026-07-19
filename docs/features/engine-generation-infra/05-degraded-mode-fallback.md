@@ -1,6 +1,6 @@
 # Story: Degraded-mode fallback (circuit breaker)
 
-**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress
+**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** NFR-003, ADP-042  ·  **Design decisions:** none  ·  **Issue:** #146
 
 ## Context
@@ -11,15 +11,15 @@ the manual kill switch (autonomy-safety story 03). The invariant: degradation on
 autonomy **down** — automation never raises its own autonomy (architecture §3.5).
 
 ## Acceptance Criteria
-- [ ] Given a provider outage or error-rate spike, when the breaker trips, then the engine drops to
+- [x] Given a provider outage or error-rate spike, when the breaker trips, then the engine drops to
       **Suggest** (no auto-publish) and the controller is alerted with the reason.
-- [ ] Given generation latency, when p95 breaches the configured trip threshold (~10s), then the
+- [x] Given generation latency, when p95 breaches the configured trip threshold (~10s), then the
       breaker trips to Suggest/manual and alerts — the same path as an outage.
-- [ ] Given the breaker has tripped, when the provider recovers, then the engine does **not** raise
+- [x] Given the breaker has tripped, when the provider recovers, then the engine does **not** raise
       its own autonomy back up — a controller restores it explicitly (automation never self-escalates).
-- [ ] Given the breaker trips, when it does, then the event is logged (telemetry XC-004) with the
+- [x] Given the breaker trips, when it does, then the event is logged (telemetry XC-004) with the
       trigger (outage / error rate / latency) and scenario time.
-- [ ] The degraded-state indicator is **staff-only** (XC-002); no participant surface reveals engine
+- [x] The degraded-state indicator is **staff-only** (XC-002); no participant surface reveals engine
       state.
 
 ## Out of Scope

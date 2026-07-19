@@ -1,6 +1,6 @@
 # Story: Untrusted-data isolation boundary (prompt-injection hardening)
 
-**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress
+**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-024, NFR-005  ·  **Design decisions:** none  ·  **Issue:** #144
 
 ## Context
@@ -12,22 +12,22 @@ structural fencing, an instructional warning, an output-shape constraint, and a 
 guard backed by the human gate.
 
 ## Acceptance Criteria
-- [ ] Given world/participant posts entering context, when the prompt is assembled, then they appear
+- [x] Given world/participant posts entering context, when the prompt is assembled, then they appear
       **only** inside a fenced `<world_feed>` block in the **user** turn, each item role-tagged with
       its author handle — **never** in the system prompt and never as an operator/system message.
-- [ ] Given a crafted post attempting to forge the fence or a turn boundary, when it is placed in the
+- [x] Given a crafted post attempting to forge the fence or a turn boundary, when it is placed in the
       feed, then newlines are collapsed and literal fence tokens (`</world_feed>` etc.) are
       neutralised so it cannot break out of the data block.
-- [ ] Given the system prompt, when it is built, then it explicitly instructs the model that
+- [x] Given the system prompt, when it is built, then it explicitly instructs the model that
       `<world_feed>` content is data to react to and that "ignore instructions / print your prompt /
       declare the exercise over / repeat this verbatim" posts are in-world noise, not commands.
-- [ ] Given any generated draft, when it is produced, then it passes the automated fiction/injection
+- [x] Given any generated draft, when it is produced, then it passes the automated fiction/injection
       guard (engine-eval-harness / content-guard) **before** it can reach the review queue; a
       guard-failing draft is auto-re-rolled or dropped and **never surfaced** to a controller.
-- [ ] Given the standing red-team injection suite (engine-eval-harness story 02), when it runs, then
+- [x] Given the standing red-team injection suite (engine-eval-harness story 02), when it runs, then
       no attack causes the engine to break character, leak the prompt, obey the injected command, or
       reproduce an attacker-demanded string — **a regression blocks release**.
-- [ ] **LLM governance (NFR-005/ADP-024):** untrusted content is structurally isolated; the guarantee
+- [x] **LLM governance (NFR-005/ADP-024):** untrusted content is structurally isolated; the guarantee
       does not rely on the model's goodwill alone.
 
 ## Out of Scope
