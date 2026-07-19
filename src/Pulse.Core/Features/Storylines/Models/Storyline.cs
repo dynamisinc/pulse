@@ -45,7 +45,7 @@ public sealed class Storyline
     public string Expectation { get; init; } = string.Empty;
 
     /// <summary>
-    /// Phase-4 Cadence binding hook (ADP-006): the inject <c>ExpectedAction</c> this expectation binds to.
+    /// Phase-4 Cadence binding hook (ADP-006): the Cadence inject's <c>ExpectedAction</c> this expectation binds to.
     /// <b>Reserved / null in v1 and v1.1</b> — present so the binding needs no schema migration later.
     /// </summary>
     public Guid? ExpectedActionRef { get; init; }
@@ -194,7 +194,12 @@ public sealed class Storyline
     public StorylineStateChanged Seed(int scenarioMinute)
     {
         var evt = Transition(StorylineTrigger.Seed, scenarioMinute);
+
+        // Anchor the tick baseline and clear any silence accrued before seeding, so the window measures
+        // from the seed moment — a storyline that idled (or was ticked) while Dormant can't open the
+        // instant it's seeded on stale minutes-since-response.
         LastTickScenarioMinute = scenarioMinute;
+        MinutesSinceLastOfficialResponse = 0;
         return evt;
     }
 
@@ -209,7 +214,8 @@ public sealed class Storyline
     /// <summary>
     /// Reassigns the escalation curve live (ADP-010, story 03) and returns the steering action to log
     /// (XC-004). Takes effect on the next tick — the curve is the natural trajectory the intensity update
-    /// (story 02) reads. No-ops silently only if the name is unchanged.
+    /// (story 02) reads. Always logs the steering action (a controller re-selecting the same curve is
+    /// still an auditable action), so the returned event is never null.
     /// </summary>
     public SteeringActionLogged AssignCurve(string curveName, int scenarioMinute)
     {
@@ -309,7 +315,12 @@ public sealed class Storyline
         var events = new List<IStorylineEvent>();
         var intensityBefore = Intensity;
 
+        // Reset the silence clock and re-anchor the tick baseline to the response moment, so the next tick
+        // accrues silence from the response — not from the previous tick — without ever moving time
+        // backwards (a response between ticks must not overstate minutes-since-response, which feeds the
+        // generation prompt).
         MinutesSinceLastOfficialResponse = 0;
+        LastTickScenarioMinute = Math.Max(LastTickScenarioMinute, scenarioMinute);
 
         var cause = offPlatform ? StorylineCause.OffPlatformMarker : StorylineCause.MatchedResponse;
         if (StorylineStateMachine.CanTransition(Phase, StorylineTrigger.OfficialResponseMatched))

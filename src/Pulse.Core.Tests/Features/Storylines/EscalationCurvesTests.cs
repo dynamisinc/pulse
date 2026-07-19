@@ -100,6 +100,18 @@ public class EscalationCurvesTests
     }
 
     [Fact]
+    public void AssignCurve_SameName_StillLogsTheSteeringAction()
+    {
+        var storyline = Storyline.Create(Guid.NewGuid(), "t", "e", curveName: "Standard");
+
+        // Re-selecting the same curve is still an auditable controller action — it logs, never null.
+        var action = storyline.AssignCurve("Standard", scenarioMinute: 3);
+
+        action.Should().NotBeNull();
+        action.Detail.Should().Be("Standard → Standard");
+    }
+
+    [Fact]
     public void AssignCurve_BlankName_Throws()
     {
         var storyline = Storyline.Create(Guid.NewGuid(), "t", "e");

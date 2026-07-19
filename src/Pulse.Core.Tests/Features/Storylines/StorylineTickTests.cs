@@ -176,6 +176,38 @@ public class StorylineTickTests
     private const int EscalationCurvesFloor = 5; // Standard curve floor
 
     [Fact]
+    public void Seed_ClearsSilenceAccruedWhileDormant_SoTheWindowDoesNotOpenInstantly()
+    {
+        var storyline = Storyline.Create(Guid.NewGuid(), "t", "e", responseWindowMin: 20, initialIntensity: 40);
+
+        // Idle while Dormant accrues silence...
+        storyline.Tick(new FakeScenarioClock(50));
+        storyline.MinutesSinceLastOfficialResponse.Should().Be(50);
+
+        // ...but seeding clears it, so the window measures from the seed moment.
+        storyline.Seed(50);
+        storyline.MinutesSinceLastOfficialResponse.Should().Be(0);
+
+        // A tick 5 minutes later is well under the window — the storyline is still armed, not escalating.
+        storyline.Tick(new FakeScenarioClock(55));
+        storyline.Phase.Should().Be(StorylinePhase.Seeded);
+    }
+
+    [Fact]
+    public void RecordMatchedResponse_ReAnchorsTheTickBaseline_SoSilenceIsMeasuredFromTheResponse()
+    {
+        var storyline = SeededStoryline(initialIntensity: 40);
+        storyline.Tick(new FakeScenarioClock(20)); // last tick at t=20
+
+        storyline.RecordMatchedResponse(scenarioMinute: 21); // response between ticks
+
+        storyline.Tick(new FakeScenarioClock(25)); // t=25
+
+        // Silence is 4 (25 - 21), not 5 (25 - 20): measured from the response, not the previous tick.
+        storyline.MinutesSinceLastOfficialResponse.Should().Be(4);
+    }
+
+    [Fact]
     public void Tick_ClockBehindLastTick_TreatsElapsedAsZero_NeverNegative()
     {
         var storyline = SeededStoryline();
