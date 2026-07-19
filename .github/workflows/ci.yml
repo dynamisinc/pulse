@@ -32,8 +32,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          # TODO: pin via .nvmrc so repo + CI + deploy share one source of truth (see report). 22 mirrors deploy-frontend.yml.
-          node-version: "22"
+          node-version-file: src/frontend/.nvmrc
           cache: "npm"
           cache-dependency-path: src/frontend/package-lock.json
 
@@ -65,8 +64,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          # TODO: add a global.json to pin the SDK; without it CI floats to the runner's latest 10.0.x.
-          dotnet-version: "10.0.x"
+          global-json-file: global.json
 
       - name: Restore
         run: dotnet restore pulse.slnx
@@ -89,8 +87,9 @@ jobs:
       - name: Install Bicep CLI
         run: az bicep install
 
-      # `az bicep build` compiles main.bicep + every referenced module to ARM and runs the linter
-      # configured in infrastructure/bicepconfig.json. Compile/lint errors fail the job. No infra tests exist.
+      # `az bicep build` compiles main.bicep + every referenced module to ARM and runs the linter from
+      # infrastructure/bicepconfig.json. Compile errors fail the job; lint findings are advisory (default
+      # warning level) until a rule is deliberately raised to "error" in bicepconfig.json. No infra tests exist.
       - name: Build (compile + lint) main template
         run: az bicep build --file infrastructure/main.bicep --stdout > /dev/null
 

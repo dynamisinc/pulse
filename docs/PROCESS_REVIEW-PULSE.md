@@ -22,7 +22,7 @@
 
 | # | Finding | Severity | Revision landed |
 |---|---------|----------|-----------------|
-| R1 | Gates were honor-system; backend ungated; quality gates ran post-merge | **Blocker** | Added `ci.yml` (Gate 0): affected-stack `build + lint + type-check + test` on every PR, frontend **and** backend. Stripped duplicated gates from `deploy-frontend.yml` (assumes-green). |
+| R1 | Gates were honor-system; backend + infra ungated; quality gates ran post-merge | **Blocker** | Added `ci.yml` (Gate 0): one job per stack (frontend, **backend**, **infra/Bicep**) + an aggregate `gate` required check; toolchains pinned (`.nvmrc`, `global.json`). Stripped duplicated gates from `deploy-frontend.yml` (assumes-green). |
 | R2 | Independence conflated "different context" with "different human" | Major | `ORCHESTRATION_MECHANICS.md §3`: two review tiers — Tier 1 structural (`code-review` agent + Copilot, always, cheap), Tier 2 human sign-off (Critical classes only). Copilot named in the §7 role table. |
 | R3 | File-disjointness has no word for the composition root | Major | Mechanics §4 + template: `App.tsx` is **orchestrator-owned**, edited serially between waves; new "Integration seam" row in `implementation.md`. |
 | R4 | DoD + builders were frontend-only; half the repo (`Pulse.Core`) orphaned | Major | Stack-agnostic DoD ("the affected stack's gate passes") with `[machine-enforced]`/`[reviewer-checked]` labels; `stack:` field on the wave-plan row; `backend-agent` role. |
