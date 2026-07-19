@@ -24,10 +24,17 @@ target is engine-review-cockpit (#34–36); the publish target is the E2 posts p
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Observe stage — triggers + inaction timers (scenario time) | F8.1 / COR-050 | Not Started | #157 |
-| 02 | Decide stage — generation intent | F8.1 / ADP-010/011 | Not Started | #158 |
-| 03 | Generate → review → publish wiring | F8.1 / ADP-040 | Not Started | #159 |
-| 04 | Measure stage — telemetry + storyline update | ADP-041 / XC-004 | Not Started | #160 |
+| 01 | Observe stage — triggers + inaction timers (scenario time) | F8.1 / COR-050 | Complete | #157 |
+| 02 | Decide stage — generation intent | F8.1 / ADP-010/011 | Complete | #158 |
+| 03 | Generate → review → publish wiring | F8.1 / ADP-040 | Blocked (E2 publish + E7 cockpit) | #159 |
+| 04 | Measure stage — telemetry + storyline update | ADP-041 / XC-004 | Blocked (E2 signals + E1 XC-004) | #160 |
+
+**Partially delivered:** the pure front stages **observe (#157)** and **decide (#158)** plus the
+decide-stage behavior registry ship as `Pulse.Core/Features/ReactionLoop/*` (see its `README.md`) — pure
+backend, no E2/E7 dependency. `ObserveStage` raises scenario-time inaction triggers + addressing
+candidates; `IntentComposer` + `DecideStage` compose the `GenerationIntent` from curve/caps/target +
+autonomy + eligible cast, and expose the `IReactionBehavior` registry the reactive behaviors plug into.
+Stories **03/04 remain blocked** until the E2 publish pipeline and the E7 review cockpit (#34–36) exist.
 
 ## Dependencies
 `storyline-model` (state + curves + caps + target), `persona-voice-engine` (burst generation +
