@@ -58,6 +58,50 @@ public class AutonomyProviderHealthListenerTests
     }
 
     [Fact]
+    public async Task OnDegraded_ForwardsTheTransition_ToTheSink_ForTelemetry()
+    {
+        var state = EngineAutonomyState.Create(Guid.NewGuid(), AutonomyLevel.DelayedAuto);
+        var logged = new List<IAutonomyEvent>();
+        var listener = new AutonomyProviderHealthListener(state, new FakeScenarioClock(50), logged.Add);
+
+        await listener.OnDegradedAsync("circuit opened");
+
+        logged.Should().ContainSingle();
+        logged[0].Should().BeOfType<AutonomyLevelChanged>()
+            .Which.Should().BeEquivalentTo(new
+            {
+                From = AutonomyLevel.DelayedAuto,
+                To = AutonomyLevel.Suggest,
+                Cause = AutonomyChangeCause.DegradedMode,
+                ScenarioMinute = 50,
+            });
+    }
+
+    [Fact]
+    public async Task OnDegraded_WhenAlreadyAtFloor_ForwardsNothing()
+    {
+        var state = EngineAutonomyState.Create(Guid.NewGuid(), AutonomyLevel.Suggest);
+        var logged = new List<IAutonomyEvent>();
+        var listener = new AutonomyProviderHealthListener(state, new FakeScenarioClock(50), logged.Add);
+
+        await listener.OnDegradedAsync("circuit opened");
+
+        logged.Should().BeEmpty("no autonomy change to log when already at the floor");
+    }
+
+    [Fact]
+    public void RestoreFromSafety_ClearsTheDegradedAlert_SoItNeverOutlivesTheClamp()
+    {
+        var state = EngineAutonomyState.Create(Guid.NewGuid(), AutonomyLevel.DelayedAuto);
+        state.DegradeToSuggest("circuit opened", 10);
+        state.DegradedReason.Should().NotBeNull();
+
+        state.RestoreFromSafety("controller:alex", 40);
+
+        state.DegradedReason.Should().BeNull("a manual restore clears the stale degraded banner");
+    }
+
+    [Fact]
     public void DegradeToSuggest_WhenAlreadyAtFloor_IsANoChange()
     {
         var state = EngineAutonomyState.Create(Guid.NewGuid(), AutonomyLevel.Suggest);

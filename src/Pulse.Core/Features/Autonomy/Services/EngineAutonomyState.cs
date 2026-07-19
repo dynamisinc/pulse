@@ -197,8 +197,8 @@ public sealed class EngineAutonomyState : IEngineSafetySwitch
     /// <summary>
     /// Lifts an active safety clamp (kill switch / degraded mode) — an explicit controller action (§8.2:
     /// automation never raises; a human restores). Base levels resume underneath, so per-storyline
-    /// configuration is not lost. No-op (returns null) when nothing is clamped. Returns the resulting
-    /// exercise-default change to log.
+    /// configuration is not lost, and the degraded alert (<see cref="DegradedReason"/>) is cleared. No-op
+    /// (returns null) when nothing is clamped. Returns the resulting exercise-default change to log.
     /// </summary>
     public AutonomyLevelChanged? RestoreFromSafety(string actor, int scenarioMinute)
     {
@@ -212,6 +212,11 @@ public sealed class EngineAutonomyState : IEngineSafetySwitch
         var fromDefault = ClampedDefault();
         _safetyClamp = null;
         _stopped = false;
+
+        // An explicit restore is the controller taking over: clear the degraded alert too, so a restored
+        // (possibly raised) autonomy is never shown alongside a stale "provider degraded" banner. If the
+        // provider is in fact still unhealthy, the circuit breaker re-trips and re-degrades on the next call.
+        _degradedReason = null;
 
         return new AutonomyLevelChanged(
             ExerciseId, AutonomyScope.Exercise, null, fromDefault, _default, AutonomyChangeCause.Human, validatedActor, minute);

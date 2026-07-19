@@ -1,5 +1,6 @@
 namespace Pulse.Core.Features.Autonomy.Services;
 
+using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Generation.Services;
 using Pulse.Core.Features.Storylines.Services;
 
@@ -18,26 +19,45 @@ using Pulse.Core.Features.Storylines.Services;
 /// <para>The <see cref="IEngineSafetySwitch"/> target is per-exercise. A single generation provider serves
 /// the whole host, so a real deployment fans one circuit trip out to every active exercise's switch; that
 /// registry is a WebApi/host concern (none yet). This adapter wires one exercise's switch — the shape the
-/// reaction loop consumes — and returns the domain events for the caller to forward to telemetry
-/// (engine-telemetry-tuning), keeping this feature free of a telemetry-sink dependency.</para>
+/// reaction loop consumes. Because <see cref="IProviderHealthListener"/> is fire-and-forget (returns
+/// <see cref="ValueTask"/>), the automatic degrade/recover transition can't be <i>returned</i> the way the
+/// manual kill switch's event is; instead the adapter forwards it to an optional
+/// <see cref="IAutonomyEvent"/> sink the host supplies (which engine-telemetry-tuning drains onto XC-004),
+/// so the automatic drop of engine autonomy is never a silent, untraced safety action. With no sink the
+/// event is dropped — appropriate for a simple host or a test — and this feature keeps no telemetry-sink
+/// dependency of its own.</para>
 /// </summary>
 public sealed class AutonomyProviderHealthListener : IProviderHealthListener
 {
     private readonly IEngineSafetySwitch _safetySwitch;
     private readonly IScenarioClock _clock;
+    private readonly Action<IAutonomyEvent>? _onTransition;
 
-    /// <summary>Bridges provider health for one exercise's <paramref name="safetySwitch"/>, stamped by <paramref name="clock"/>.</summary>
-    public AutonomyProviderHealthListener(IEngineSafetySwitch safetySwitch, IScenarioClock clock)
+    /// <summary>
+    /// Bridges provider health for one exercise's <paramref name="safetySwitch"/>, stamped by
+    /// <paramref name="clock"/>. <paramref name="onTransition"/> (optional) receives each non-null
+    /// degrade/recover autonomy transition so the host can log it (XC-004); pass null to drop it.
+    /// </summary>
+    public AutonomyProviderHealthListener(
+        IEngineSafetySwitch safetySwitch,
+        IScenarioClock clock,
+        Action<IAutonomyEvent>? onTransition = null)
     {
         _safetySwitch = safetySwitch ?? throw new ArgumentNullException(nameof(safetySwitch));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _onTransition = onTransition;
     }
 
     /// <inheritdoc />
     public ValueTask OnDegradedAsync(string reason, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        _safetySwitch.DegradeToSuggest(reason, _clock.CurrentScenarioMinute);
+        var evt = _safetySwitch.DegradeToSuggest(reason, _clock.CurrentScenarioMinute);
+        if (evt is not null)
+        {
+            _onTransition?.Invoke(evt);
+        }
+
         return ValueTask.CompletedTask;
     }
 
@@ -45,7 +65,12 @@ public sealed class AutonomyProviderHealthListener : IProviderHealthListener
     public ValueTask OnRecoveredAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        _safetySwitch.MarkProviderRecovered(_clock.CurrentScenarioMinute);
+        var evt = _safetySwitch.MarkProviderRecovered(_clock.CurrentScenarioMinute);
+        if (evt is not null)
+        {
+            _onTransition?.Invoke(evt);
+        }
+
         return ValueTask.CompletedTask;
     }
 }
