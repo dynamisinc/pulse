@@ -1,13 +1,15 @@
 # Feature: Console shell (toolstrip, flyouts, action bar)
 
 **Epic:** E7 — Controller Command Surface  ·  **Phase:** 1  ·  **Feature ref:** D5 additions
-**World:** staff  ·  **Issue:** #2  ·  **Status:** stories authored — Wave 1 (story 01) building
+**World:** staff  ·  **Issue:** #2  ·  **Status:** Wave 1 delivered (story 01 Complete) — stories 02–05 Not Started
 
-> **Architectural foundation of the console (Wave 1).** The D5 design review introduced the shell
-> pattern that hosts every other E7 surface, so this feature lands first. Stories are authored (see
-> the table below); story 01 is the KEYSTONE of a 5-story cross-feature Wave-1 integration composition
-> alongside `persona-operation` and `feeds-discovery` — see its "Wave-1 integration seam" and
-> `implementation.md`'s callout.
+> **Architectural foundation of the console (Wave 1 — delivered).** The D5 design review introduced
+> the shell pattern that hosts every other E7 surface, so this feature landed first. Story 01 was the
+> KEYSTONE of a 5-story cross-feature Wave-1 integration composition alongside `persona-operation` and
+> `feeds-discovery` — built Gate-1 clean, wired at a serial integration step, and Gate-2 clean on the
+> integrated umbrella (684/684 tests, browser-verified end-to-end). See its "Wave-1 integration seam"
+> and `implementation.md`'s callout. Stories 02–05 (NEEDS-YOU bar, static identity badge, Flag → AAR,
+> trainee monitor) remain out of this wave.
 
 ## Summary
 The controller console's frame: a right-edge **toolstrip** with **flyouts**, a persistent
@@ -39,7 +41,7 @@ flyouts, Flag, and the trainee monitor. See `docs/design/D7-application-shells/S
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Toolstrip + flyouts — **register tools into `staff-shell` dock (D7-011)** | D5-016/17/19 | Not Started | #9 |
+| 01 | Toolstrip + flyouts — **register tools into `staff-shell` dock (D7-011)** | D5-016/17/19 | Complete | #9 |
 | 02 | NEEDS-YOU action bar — locate & highlight, never act | D5-010, D5-012(d) | Not Started | #10 |
 | 03 | Static identity badge during conduct — **presentation → `staff-shell` header (D7-007/010)** | COR-005 / D5-012(g) | Not Started | #11 |
 | 04 | Flag on any post → after-action record (minimal) | D5-014/3.4 | Not Started | #12 |

@@ -1,6 +1,6 @@
 # Story: Fast persona switching (searchable picker, ≤3s)
 
-**Feature:** Persona operation  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Persona operation  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** CTL-002  ·  **Design decisions:** D5-004, D5-015, D5-017, D5-018  ·  **Issue:** #15
 
 ## Context
@@ -11,19 +11,27 @@ picker with type filters, recents, and pinned favorites, reachable from the **�
 toolstrip tool that opens the ⌘K picker directly — there is no separate roster/"Cast" surface.
 
 ## Acceptance Criteria
-- [ ] Given the console, when the controller opens the persona picker (the "Personas" toolstrip tool,
+- [x] Given the console, when the controller opens the persona picker (the "Personas" toolstrip tool,
       or ⌘K), then they can search personas by name/handle and filter by persona type, and selecting
       one sets it as the active persona (`useActivePersona()`) for the composer.
-- [ ] The picker surfaces **recents** and **pinned favorites**; a controller can pin/unpin a persona.
-- [ ] Given a keyboard-only controller, when they invoke the palette and type a name, then they can
+- [x] The picker surfaces **recents** and **pinned favorites**; a controller can pin/unpin a persona.
+- [x] Given a keyboard-only controller, when they invoke the palette and type a name, then they can
       select and activate a persona without a pointer (NFR-001 keyboard-operable) — the full
       `<10s reply flow` per D5 (⌘K → type name → Enter → composer).
-- [ ] The picker lists only personas in the controller's **active exercise** (COR-001) — read via
+- [x] The picker lists only personas in the controller's **active exercise** (COR-001) — read via
       `usePersonas()` (`@/features/personas`), **never** `SEEDED_PERSONAS`/`personaById` (those are
       mock-fixture-only exports, fail-open on a shipped path); switching the active exercise re-scopes
       the list.
-- [ ] Selecting a persona updates the composer (`persona-operation/01`) and the persona-context panel
+- [x] Selecting a persona updates the composer (`persona-operation/01`) and the persona-context panel
       (`persona-operation/03`) to that persona.
+
+## Delivered (Wave 1)
+Built in the 5-story Wave-1 parallel fan-out on `feature/simcell-operator`, Gate-1 clean (0
+Critical/0 Major); the integrated umbrella is Gate-2 clean (opus/xhigh — 0 Critical/0 Major/3 Minor
+token-consistency notes/2 informational); `build:check` + `lint` clean; 684/684 tests pass (up from a
+588 baseline). Browser-verified: ⌘K → PersonaPicker → searched/selected @FairhavenWater → set as the
+active persona feeding the composer and context panel, keyboard-only. Files:
+`features/controller/{components/PersonaPicker.tsx, hooks/useActivePersona.ts}`.
 
 ## Out of Scope
 The compose/publish action (`persona-operation/01`); the context panel contents

@@ -1,6 +1,6 @@
 # Story: Composer shows persona context while writing
 
-**Feature:** Persona operation  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Persona operation  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** CTL-003, COR-020, SOC-054  ·  **Design decisions:** D5-014/2.4  ·  **Issue:** #16
 
 ## Context
@@ -17,24 +17,33 @@ within seconds without having authored the persona themselves.
 > `audienceBand` (SOC-054), by contrast, **is** on the instance — read it straight off `persona`.
 
 ## Acceptance Criteria
-- [ ] Given an active persona, when the composer is open, then the panel displays the persona's
+- [x] Given an active persona, when the composer is open, then the panel displays the persona's
       voice/personality notes — resolved via
       `personaTemplateById(persona.templateId)?.voiceNotes` (COR-020) — its recent posts, and its
       audience magnitude band read from `persona.audienceBand` (SOC-054).
-- [ ] Given an active persona, when the composer is open, then the panel also shows a
+- [x] Given an active persona, when the composer is open, then the panel also shows a
       **"POSTING AS {category}"** chip (D5-014/2.4, wrong-persona defense) derived from
       `persona.personaType` (e.g. `citizen` → "CITIZEN VOICE"; `agency`/`weather-scientific` →
       "OFFICIAL ACCOUNT"; `news-outlet` → "NEWS / MEDIA") — unmissable at compose time, distinct per
       category, never color-only (the label text itself carries the signal, NFR-001).
-- [ ] Changing the active persona (`persona-operation/02`) updates the context panel — voice notes,
+- [x] Changing the active persona (`persona-operation/02`) updates the context panel — voice notes,
       recents, audience band, and the category chip — to the new persona without a full reload.
-- [ ] The panel is read-only reference (it does not let the controller edit the persona template
+- [x] The panel is read-only reference (it does not let the controller edit the persona template
       here) and does not obstruct the fire path.
-- [ ] The context data is scoped to the active exercise's persona instance (COR-001) — recents reflect
+- [x] The context data is scoped to the active exercise's persona instance (COR-001) — recents reflect
       this exercise's history, not another exercise's; template data (voice notes, category) is
       org-library-scoped (not exercise-scoped) by design, matching `PersonaTemplate`'s own scope.
-- [ ] Accessible: the panel is reachable and legible via keyboard/screen reader alongside the composer
+- [x] Accessible: the panel is reachable and legible via keyboard/screen reader alongside the composer
       (NFR-001).
+
+## Delivered (Wave 1)
+Built in the 5-story Wave-1 parallel fan-out on `feature/simcell-operator`, Gate-1 clean (0
+Critical/0 Major); the integrated umbrella is Gate-2 clean (opus/xhigh — 0 Critical/0 Major/3 Minor
+token-consistency notes/2 informational); `build:check` + `lint` clean; 684/684 tests pass (up from a
+588 baseline). Browser-verified: selecting @FairhavenWater in the persona-dock host populated the
+context panel with its voice notes, recents, audience band, and "OFFICIAL ACCOUNT" chip alongside the
+composer. Files: `features/controller/{components/PersonaContextPanel.tsx,
+services/personaVoice.ts}`.
 
 ## Out of Scope
 Editing the persona template (E1 persona management); audience-magnitude math itself (defined with

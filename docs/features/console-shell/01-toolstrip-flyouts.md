@@ -1,6 +1,6 @@
 # Story: Toolstrip + flyouts (the console's extension point)
 
-**Feature:** Console shell  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Console shell  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** console UI architecture (D5), COR-018  ·  **Design decisions:** D5-004, D5-015, D5-016, D5-017, D5-018, D5-019, **D7-011**  ·  **Issue:** #9
 
 ## Context
@@ -31,38 +31,50 @@ import theirs. A serial integration step (not a builder wave) wires the two toge
 route. See "Wave-1 integration seam" under Technical Notes.
 
 ## Acceptance Criteria
-- [ ] Given the console mounted in the staff shell, when it renders, then it **registers** its
+- [x] Given the console mounted in the staff shell, when it renders, then it **registers** its
       consult-on-demand tools into the shell's toolstrip surface-zone via `useRegisterSurfaceTool()`
       (`@/features/staffShell/toolRegistry`, D7-011) with FontAwesome icons + accessible labels, and
       continuous-watch surfaces occupy permanent rail/column space rather than the toolstrip. The
       console does **not** draw its own strip or its own tool registry.
-- [ ] When the controller activates a toolstrip tool (click or keyboard) via `useToolstrip()`'s
+- [x] When the controller activates a toolstrip tool (click or keyboard) via `useToolstrip()`'s
       `toggleTool`/`isActive`, then its flyout opens over the console without displacing the live
       world/queue columns, and closes without losing their state.
-- [ ] A tool's toolstrip icon carries a **status badge** (e.g. a count) that pulses red when that
+- [x] A tool's toolstrip icon carries a **status badge** (e.g. a count) that pulses red when that
       surface is escalating — conveyed by icon/label/number, **never color alone** (NFR-001).
-- [ ] The toolstrip and every flyout are fully keyboard-operable and screen-reader labelled
+- [x] The toolstrip and every flyout are fully keyboard-operable and screen-reader labelled
       (NFR-001); focus returns to the toolstrip on flyout close.
-- [ ] New tools register through one extension point (adding a tool does not require re-laying-out
+- [x] New tools register through one extension point (adding a tool does not require re-laying-out
       the console), and this surface is staff-only — never reachable from a participant session (XC-002).
-- [ ] **⌘K command palette (D5-004/015/017/018).** Given the console, when the controller presses
+- [x] **⌘K command palette (D5-004/015/017/018).** Given the console, when the controller presses
       ⌘K/Ctrl+K, or activates the registered **"Personas"** surface tool, then a keyboard-first,
       searchable command palette opens with a PERSONAS section that is the entry point to the
       "post as persona" flow. The palette is focus-trapped, closes on Esc, is screen-reader labelled,
       and every step (open → search/type → select) is reachable with no pointer required (NFR-001).
       This story ships the palette shell + the PERSONAS section as a search/select surface; the
       searchable persona list itself is `persona-operation/02`'s (wired at integration).
-- [ ] **Persona-dock host.** Given a persona is selected from the palette (or the "Personas" tool is
+- [x] **Persona-dock host.** Given a persona is selected from the palette (or the "Personas" tool is
       otherwise activated), when the flyout opens, then it renders into a console-owned
       **persona-dock host** — a named flyout mount slot that subsequent persona-operation content
       (picker → composer → context panel) renders into. This story ships the host slot itself, empty
       of persona content until the integration step wires it (see Technical Notes) — building persona
       content here would duplicate `persona-operation`'s ownership.
-- [ ] **Mock controller identity (COR-018).** Given the console is mounted, when any component needs
+- [x] **Mock controller identity (COR-018).** Given the console is mounted, when any component needs
       to attribute an action to the operating controller, then `useControllerIdentity()`
       (`features/controller/identity/controllerIdentity.ts`) returns an exercise-scoped
       `{ actingHumanId, callSign, role: 'controller' }` — a Phase-1 mock (rationale below) that other
       Wave-1 stories consume as an **input**, never an import of this module from `persona-operation`.
+
+## Delivered (Wave 1)
+Built in the 5-story Wave-1 parallel fan-out on `feature/simcell-operator`, Gate-1 clean (0
+Critical/0 Major), then wired at the serial integration step (App.tsx `/console` route,
+`features/controller` barrel, persona-dock host wiring). The integrated umbrella is Gate-2 clean
+(opus/xhigh — 0 Critical/0 Major/3 Minor token-consistency notes/2 informational); `build:check` and
+`lint` clean; 684/684 tests pass (up from a 588 baseline). Browser-verified end-to-end: ⌘K →
+PersonaPicker → select @FairhavenWater → persona-dock host (context panel + composer, dual-time,
+OPERATOR SIMCELL-1) → Post → the post appears in the participant `/shell` feed authored as
+@FairhavenWater with zero controller-origin leak in the participant DOM. Files: `features/controller/
+{components/ControllerConsole.tsx, console/CommandPalette.tsx, console/personaDockHost.{ts,tsx},
+identity/controllerIdentity.ts, ControllerConsoleRoute.tsx, index.ts}` + the App.tsx `/console` route.
 
 ## Out of Scope
 **SCOPE GUARD — this wave builds ONLY the frame extension point + palette + persona-dock host.** It

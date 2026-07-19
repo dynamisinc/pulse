@@ -1,6 +1,6 @@
 # Story: Post as any persona into an enabled channel
 
-**Feature:** Persona operation  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Persona operation  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** CTL-001, COR-018  ·  **Design decisions:** R-001, R-003, R-004  ·  **Issue:** #14
 
 ## Context
@@ -22,16 +22,16 @@ is recorded (COR-018).
 > `persona-operation` backlog note, not built this pass.
 
 ## Acceptance Criteria
-- [ ] Given an active persona and the social channel, when the controller submits a post, then it
+- [x] Given an active persona and the social channel, when the controller submits a post, then it
       publishes through `createPost` (`@/features/social`) authored by that persona
       (`authorPersonaId`) with `origin: 'controller-as-persona'` — avatar/handle/verified render per
       the persona (the canonical scallop seal and R-004 avatar treatment, identical everywhere the
       persona renders, incl. the console's composer identity header per R-001) with no controller
       identity visible to any participant. `createPost` is reused as-is, never forked.
-- [ ] **POST-ONLY for Wave 1** (see the grounding correction above): the composer supports composing
+- [x] **POST-ONLY for Wave 1** (see the grounding correction above): the composer supports composing
       and publishing a new post as the active persona. Reply, repost/quote, and DM as a persona are
       explicitly OUT of scope this pass — the `Post` model cannot represent them yet.
-- [ ] Given a published post, when telemetry is recorded (XC-004, via `createPost`'s
+- [x] Given a published post, when telemetry is recorded (XC-004, via `createPost`'s
       `buildAndEmit` — never a raw build+emit call), then the event captures
       `origin: 'controller-as-persona'`, the **acting human** controller id (`actingHumanId`,
       COR-018 — the operating controller, supplied as an input, see Technical Notes), the persona id,
@@ -39,18 +39,29 @@ is recorded (COR-018).
       cards this provenance surfaces as the always-visible **SIMCELL-n · MANUAL** origin line
       (`originConsoleLabel(post)`, R-003, live-monitoring) — staff-only, never participant-visible
       (SOC-003/XC-002; `toParticipantView` is the structural guarantee elsewhere in the pipeline).
-- [ ] The participant-visible post renders its time in **scenario time** in the exercise time zone
+- [x] The participant-visible post renders its time in **scenario time** in the exercise time zone
       (COR-053) — `scenarioTime: scenarioNow().toISOString()` from `@/core/clock`; wall-clock never
       appears in the participant view (`ParticipantPostView` has no `createdWallClock` field at all).
       The console's own composer shows **both** wall-clock and scenario time at the fire control
       (dual-time, staff-side only — the Cadence precedent for a controller-facing FIRE action).
-- [ ] Post text/media is sanitized before publish (NFR-004, via `createPost`'s internal
+- [x] Post text/media is sanitized before publish (NFR-004, via `createPost`'s internal
       `sanitizeText` — this story does not re-implement sanitization) — a script in the composer never
       executes in a participant session.
-- [ ] The action only targets personas and channels within the controller's **active exercise**
+- [x] The action only targets personas and channels within the controller's **active exercise**
       (COR-001) — `exerciseId`/`timeZone` come from `useExerciseContext()` and stamp the post/telemetry
       only (never a client query-scoping param); a persona from another exercise is not selectable or
       postable here.
+
+## Delivered (Wave 1)
+Built in the 5-story Wave-1 parallel fan-out on `feature/simcell-operator`, Gate-1 clean (0
+Critical/0 Major); the integrated umbrella is Gate-2 clean (opus/xhigh — 0 Critical/0 Major/3 Minor
+token-consistency notes/2 informational); `build:check` + `lint` clean; 684/684 tests pass (up from a
+588 baseline). **POST-ONLY scope holds** — reply-as-persona, repost/quote-as-persona, and
+DM-as-persona remain deferred to a future `Post`-model parent/thread extension (see the grounding
+correction above), not built this pass. Browser-verified: composing and publishing as
+@FairhavenWater from the console produced a participant-visible post in the `/shell` feed with no
+controller identity/origin leak. Files: `features/controller/{services/composeService.ts,
+hooks/useComposeAsPersona.ts, components/PersonaComposer.tsx}`.
 
 ## Out of Scope
 News/press/weather composing (Phase 3, as those channels land); the persona picker UX
