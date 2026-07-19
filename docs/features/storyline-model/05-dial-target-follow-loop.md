@@ -1,6 +1,6 @@
 # Story: Dial-target follow loop
 
-**Feature:** Storyline model  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Storyline model  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Done
 **Requirements:** CTL-022  ·  **Design decisions:** D5-014/2.2  ·  **Issue:** #156
 
 ## Context
@@ -12,16 +12,16 @@ toward target (raise = generate more/hotter content, lower = taper) rather than 
 blindly. The engine follows the controller; it never overrides the target.
 
 ## Acceptance Criteria
-- [ ] Given a storyline with `targetIntensity` set (via the #25 dial), when the engine ticks, then it
+- [x] Given a storyline with `targetIntensity` set (via the #25 dial), when the engine ticks, then it
       drives `actual` toward `target` — increasing generation intensity/volume to raise, tapering to
       lower — within rate caps (story 04).
-- [ ] Given no target set, when the engine ticks, then intensity follows the escalation curve
+- [x] Given no target set, when the engine ticks, then intensity follows the escalation curve
       (story 03) as the natural trajectory (target is an optional override, not required).
-- [ ] Given actual has reached target, when the engine ticks, then it holds near target rather than
+- [x] Given actual has reached target, when the engine ticks, then it holds near target rather than
       overshooting per the raw curve.
-- [ ] Given a target change mid-exercise, when the controller sets it, then the follow loop retargets
+- [x] Given a target change mid-exercise, when the controller sets it, then the follow loop retargets
       live and the target change is logged as a steering action (XC-004) — staff-only (XC-002).
-- [ ] The engine **never raises intensity past a controller-lowered target on its own** — controller
+- [x] The engine **never raises intensity past a controller-lowered target on its own** — controller
       authority over the target is absolute (consistent with the autonomy-safety invariant).
 
 ## Out of Scope

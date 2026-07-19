@@ -1,6 +1,6 @@
 # Story: Intensity + sentiment tracking
 
-**Feature:** Storyline model  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Storyline model  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Done
 **Requirements:** ADP-012  ·  **Design decisions:** none  ·  **Issue:** #153
 
 ## Context
@@ -12,19 +12,19 @@ per-storyline and exercise-wide, and exposed to controllers (E7), evaluators (E1
 dial-input overlays), and back to the engine as its own feedback input.
 
 ## Acceptance Criteria
-- [ ] Given a storyline tick, when intensity is updated, then it moves per the curve + time-since-
+- [x] Given a storyline tick, when intensity is updated, then it moves per the curve + time-since-
       response, is bent down by a matched response and up by amplification/audience (SOC-054), and
       stays within [floor, ceiling].
-- [ ] Given reaction signals (SOC-031) and generated content, when sentiment is computed, then a
+- [x] Given reaction signals (SOC-031) and generated content, when sentiment is computed, then a
       continuous −1…+1 value is maintained per-storyline and aggregated exercise-wide.
-- [ ] Given the controller/evaluator surfaces, when intensity/sentiment are exposed, then E10 renders
+- [x] Given the controller/evaluator surfaces, when intensity/sentiment are exposed, then E10 renders
       them with **dial-input overlays** (EVL-014) so designed pressure is distinguishable from
       participant-driven pressure (no sentiment circularity in the AAR).
-- [ ] Given the engine's next decision, when it runs, then current sentiment/intensity feed back into
+- [x] Given the engine's next decision, when it runs, then current sentiment/intensity feed back into
       it (the engine's own feedback input).
-- [ ] **Telemetry (XC-004):** intensity/sentiment deltas emit `engine.measured` events with the cause
+- [x] **Telemetry (XC-004):** intensity/sentiment deltas emit `engine.measured` events with the cause
       (curve / matched response / amplification), wall + scenario time.
-- [ ] Intensity/sentiment are **staff/evaluator-facing** (XC-002); the sentiment reaction set stays,
+- [x] Intensity/sentiment are **staff/evaluator-facing** (XC-002); the sentiment reaction set stays,
       to participants, an ordinary reaction picker (SOC-031).
 
 ## Out of Scope

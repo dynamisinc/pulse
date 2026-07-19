@@ -1,6 +1,6 @@
 # Story: Storyline object + state machine
 
-**Feature:** Storyline model  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Storyline model  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Done
 **Requirements:** ADP-010 (state)  ·  **Design decisions:** none  ·  **Issue:** #152
 
 ## Context
@@ -14,18 +14,18 @@ unaddressed trigger. Storylines are **planner-created (pre-seeded) or controller
 automatic detection from participant activity is **deferred post-v1** (open question 1).
 
 ## Acceptance Criteria
-- [ ] Given a planner or controller, when they create a storyline, then it persists with all fields
+- [x] Given a planner or controller, when they create a storyline, then it persists with all fields
       (architecture §1.1), scoped to one exercise (COR-001), and starts in `DORMANT`/`SEEDED`.
-- [ ] Given a storyline, when the engine advances it, then phase transitions follow the defined
+- [x] Given a storyline, when the engine advances it, then phase transitions follow the defined
       machine (SEEDED→ESCALATING on window/activity; →ADDRESSED on a matched response; →DECAYING→
       RESOLVED on decay; re-open to ESCALATING on a new unaddressed trigger).
-- [ ] Given intensity, when it is stored, then it is on the **0–100** canonical scale (the dial reads
+- [x] Given intensity, when it is stored, then it is on the **0–100** canonical scale (the dial reads
       it as actual-fill; the planner's coarse "0–10" maps ×10).
-- [ ] Given the v1 object, when it is defined, then `expectedActionRef` and `rumorRefs` exist as
+- [x] Given the v1 object, when it is defined, then `expectedActionRef` and `rumorRefs` exist as
       **reserved/null** slots so Phase-4 Cadence binding and v1.1 rumor lineage need no migration.
-- [ ] **Telemetry (XC-004):** each state transition emits a `storyline.state_changed` event
+- [x] **Telemetry (XC-004):** each state transition emits a `storyline.state_changed` event
       (from→to, cause, scenario time) — logged by engine-telemetry-tuning.
-- [ ] The storyline and all its state are **staff-only** (XC-002) and exercise-scoped (COR-001) — no
+- [x] The storyline and all its state are **staff-only** (XC-002) and exercise-scoped (COR-001) — no
       participant surface exposes storylines.
 
 ## Out of Scope
