@@ -121,8 +121,8 @@ describe('ControllerConsole', () => {
 
   it('activating the Personas tool a second time closes the palette and returns focus to it', async () => {
     // Distinct code path from the Ctrl+K/Esc test above: closing via
-    // TOGGLING THE SAME TOOL OFF (click again) rather than Esc. This exercises
-    // `closePalette`'s `toggleTool` branch, not just `setKeyboardPaletteOpen`.
+    // TOGGLING THE SAME TOOL OFF (click again) rather than Esc — the toolstrip
+    // tool's active state is the palette's single source of truth.
     const user = userEvent.setup()
     renderConsole()
     await findConsole()
@@ -154,5 +154,22 @@ describe('ControllerConsole', () => {
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(personasButton).toHaveFocus()
+  })
+
+  it('closes a TOOL-opened palette with ⌘K (cross-entry-point single source of truth)', async () => {
+    // Regression for the pre-fix asymmetry: opening via the toolstrip tool and
+    // then pressing ⌘K used to be a no-op (⌘K toggled a separate state), leaving
+    // the palette stuck open. With the tool's active state as the single source
+    // of truth, ⌘K toggles the same state and closes it.
+    const user = userEvent.setup()
+    renderConsole()
+    await findConsole()
+
+    await user.click(await screen.findByTestId('toolstrip-tool-personas'))
+    expect(await screen.findByRole('dialog', { name: /command palette/i })).toBeInTheDocument()
+
+    await user.keyboard('{Control>}k{/Control}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByTestId('controller-console')).toBeInTheDocument()
   })
 })

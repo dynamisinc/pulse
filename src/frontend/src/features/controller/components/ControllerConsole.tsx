@@ -100,15 +100,14 @@ export function ControllerConsole(
     badge: personaCount > 0 ? { count: personaCount, escalating: false } : undefined,
   })
 
-  // ⌘K binding lives here (the composition owner); the palette itself is a
-  // controlled overlay. The "Personas" tool's active state ALSO opens the
-  // palette, so the two share one open state.
-  const [keyboardPaletteOpen, setKeyboardPaletteOpen] = useState(false)
-  const personasToolActive = isActive(PERSONAS_TOOL_ID)
-  const paletteOpen = keyboardPaletteOpen || personasToolActive
+  // The "Personas" toolstrip tool's active state is the SINGLE source of truth
+  // for whether the ⌘K palette is open, so the toolstrip button always reflects
+  // the palette and ⌘K + the button toggle the exact same state — opening via
+  // one and closing via the other both work. ⌘K therefore toggles the tool
+  // (functional toggle in the registry, so no stale-closure race).
+  const paletteOpen = isActive(PERSONAS_TOOL_ID)
 
   const closePalette = useCallback(() => {
-    setKeyboardPaletteOpen(false)
     if (isActive(PERSONAS_TOOL_ID)) toggleTool(PERSONAS_TOOL_ID)
   }, [isActive, toggleTool])
 
@@ -116,12 +115,12 @@ export function ControllerConsole(
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && (event.key === 'k' || event.key === 'K')) {
         event.preventDefault()
-        setKeyboardPaletteOpen(prev => !prev)
+        toggleTool(PERSONAS_TOOL_ID)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [toggleTool])
 
   // The persona-dock host opens once a persona is selected (from the palette,
   // or — at integration — from the picker). Persona content mounts into its

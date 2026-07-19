@@ -71,9 +71,17 @@ export function useFeed(): UseFeedResult {
     let cancelled = false
     setPostsLoading(true)
     resolveFeed()
-      .then(resolved => {
+      .then(() => {
         if (cancelled) return
-        setRawPosts(resolved)
+        // Set from the store's CURRENT snapshot, NOT the value captured when the
+        // request started: an append that lands while this baseline resolve is
+        // in flight has already updated the store (and fired the subscription
+        // below), so reading the stale `resolved` here would clobber the
+        // just-appended post until the next append. `resolveFeed()` is still
+        // awaited for its validation + fail-closed/loading semantics; the store
+        // (which its mock adapter reads) is the single source of truth for the
+        // rows, read the same way as the subscription.
+        setRawPosts(postStore.getPosts())
         setPostsError(undefined)
       })
       .catch((err: unknown) => {
@@ -84,10 +92,9 @@ export function useFeed(): UseFeedResult {
         if (!cancelled) setPostsLoading(false)
       })
 
-    // Live seam (feeds-discovery/07): after the baseline resolve, re-read the
-    // store on every append so a new post surfaces without a re-fetch. Reading
-    // the current snapshot directly (not the resolved value) keeps this correct
-    // even if an append lands before/around the initial resolve.
+    // Live seam (feeds-discovery/07): re-read the store on every append so a new
+    // post surfaces without a re-fetch — the same current-snapshot read as the
+    // resolve path above, so neither can clobber the other regardless of order.
     const unsubscribe = postStore.subscribe(() => {
       if (cancelled) return
       setRawPosts(postStore.getPosts())

@@ -69,7 +69,9 @@ const SECTION_LABEL_SX = {
 function recentPostsFor(persona: Persona, maxRecents: number): Post[] {
   return listPosts()
     .filter(post => post.exerciseId === persona.exerciseId && post.authorPersonaId === persona.id)
-    .sort((a, b) => new Date(b.scenarioTime).getTime() - new Date(a.scenarioTime).getTime())
+    // `Date.parse` on an ISO instant (not a wall-clock read) — matches
+    // `feedService`'s newest-first comparator and avoids per-item Date objects.
+    .sort((a, b) => Date.parse(b.scenarioTime) - Date.parse(a.scenarioTime))
     .slice(0, maxRecents)
 }
 
