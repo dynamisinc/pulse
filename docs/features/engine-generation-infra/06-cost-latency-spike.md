@@ -1,6 +1,6 @@
 # Story: Cost/latency spike (measured)
 
-**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress
+**Feature:** Engine generation infrastructure  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** epic open question 3, NFR-002  ·  **Design decisions:** none  ·  **Issue:** #147
 **Measured results:** [`MEASURED-RESULTS.md`](MEASURED-RESULTS.md) (live pass 2026-07-18)
 
@@ -14,18 +14,18 @@ the live-key measurement pass** that replaces the *modeled* latency and voice-qu
 *measured* ones before story estimates and SLOs lock.
 
 ## Acceptance Criteria
-- [ ] Given a tenant-bounded provider with credentials, when the spike harness runs live, then it
+- [x] Given a tenant-bounded provider with credentials, when the spike harness runs live, then it
       records **measured** p50/p95 generation latency and per-burst cost for the Sonnet-tier and
       Haiku-tier at representative burst sizes.
-- [ ] Given the measured numbers, when they are compared to the analytic model in `FINDINGS.md`, then
+- [x] Given the measured numbers, when they are compared to the analytic model in `FINDINGS.md`, then
       any material divergence is documented and the exercise-hour envelope (architecture §4.1) is
       updated.
-- [ ] Given measured latency, when p95 is known, then the **degraded-mode trip threshold** (story 05)
+- [x] Given measured latency, when p95 is known, then the **degraded-mode trip threshold** (story 05)
       is set from data rather than the placeholder ~10s.
-- [ ] Given the live output, when voice bursts are scored by the metric harness (`metrics.mjs`), then
+- [x] Given the live output, when voice bursts are scored by the metric harness (`metrics.mjs`), then
       the believable+diverse gates are checked against real (not fixture) generations and the
       thresholds are confirmed or tuned.
-- [ ] **LLM governance (NFR-005):** the live run uses only a tenant-bounded, no-training endpoint —
+- [x] **LLM governance (NFR-005):** the live run uses only a tenant-bounded, no-training endpoint —
       the spike does not send exercise-adjacent content to an ungoverned provider.
 
 ## Out of Scope
