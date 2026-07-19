@@ -70,12 +70,16 @@ PowerShell form — `cmd //c mklink /J` mangles the paths under MSYS.
 
 ## 3. The gates (from the playbook)
 
-**Gate 0 — machine (CI), the enforcement floor.** Every builder branch and every PR is gated by
-`.github/workflows/ci.yml`: the **affected stack's** `build + lint + type-check + test` must pass
-(frontend → `lint + type-check + test:run`; backend → `dotnet build + dotnet test`; a full-stack story
-→ both). This runs on `pull_request` **before** merge — it is what makes the Definition of Done
-machine-enforced instead of honor-system. Deploy workflows assume-green and no longer re-run it.
-**No second contributor (human or unattended agent) lands work without Gate 0.**
+**Gate 0 — machine (CI), the enforcement floor.** The umbrella→`main` PR (and every push to `main`) is
+gated by `.github/workflows/ci.yml`: the **affected stack's** `build + lint + type-check + test` must
+pass (frontend → `lint + type-check + test:run`; backend → `dotnet build + dotnet test`; a full-stack
+story → both). It triggers on `pull_request`/`push` to `main`, so it runs **before** anything reaches
+`main` — the machine backstop that makes the Definition of Done enforced rather than honor-system.
+Builder branches are not CI-gated on their own: they run the same stack checks **locally in the
+worktree** at Gate 1 (below) and are enforced by Gate 0 at the feature PR. (To gate builder branches in
+CI as well, open their PRs against the umbrella or add the umbrella branches to the `pull_request`
+targets.) Deploy workflows assume-green and no longer re-run these checks.
+**No second contributor (human or unattended agent) lands work on `main` without Gate 0.**
 
 The review gates are **structurally independent** of the builder — a different context reviews the diff,
 so independence is cheap (no human queue). Two review tiers:
