@@ -1,0 +1,68 @@
+name: CI
+
+# The enforcement floor. Runs the affected stack's gate (build + lint + type-check +
+# test) BEFORE merge on every PR, and again on main as a backstop. This is what makes
+# the Definition of Done machine-enforced rather than honor-system: no builder branch
+# reaches an umbrella (or main) without a green gate. Deploy workflows assume-green and
+# no longer re-run these checks. See docs/ORCHESTRATION_MECHANICS.md §3 (the two gates).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend gate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run type-check
+
+      - name: Test
+        run: npm run test:run
+
+  backend:
+    name: Backend gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore pulse.slnx
+
+      - name: Build
+        run: dotnet build pulse.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test pulse.slnx --configuration Release --no-build

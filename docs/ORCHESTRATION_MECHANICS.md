@@ -68,7 +68,23 @@ PowerShell form — `cmd //c mklink /J` mangles the paths under MSYS.
 
 ---
 
-## 3. The two gates (from the playbook)
+## 3. The gates (from the playbook)
+
+**Gate 0 — machine (CI), the enforcement floor.** Every builder branch and every PR is gated by
+`.github/workflows/ci.yml`: the **affected stack's** `build + lint + type-check + test` must pass
+(frontend → `lint + type-check + test:run`; backend → `dotnet build + dotnet test`; a full-stack story
+→ both). This runs on `pull_request` **before** merge — it is what makes the Definition of Done
+machine-enforced instead of honor-system. Deploy workflows assume-green and no longer re-run it.
+**No second contributor (human or unattended agent) lands work without Gate 0.**
+
+The review gates are **structurally independent** of the builder — a different context reviews the diff,
+so independence is cheap (no human queue). Two review tiers:
+
+- **Tier 1 — structural independence (always).** The `code-review` agent (Gates 1 & 2 below) plus
+  **GitHub Copilot on the umbrella→`main` PR**. Both are independent of the builder agent; fold their
+  findings before merge.
+- **Tier 2 — human sign-off (Critical classes only).** A second person, reserved for isolation-scope
+  breaks, security, and schema/contract changes. Everything else ships on Tier 1.
 
 - **Gate 1 — per story.** Before a builder branch merges into the umbrella, `code-review` checks the
   diff (`git diff feature/<slug>...build/<slug>/<NN-slug>`) against the story's ACs, the attached
@@ -85,6 +101,13 @@ PowerShell form — `cmd //c mklink /J` mangles the paths under MSYS.
 
 A wave is a set of stories whose `Files it owns` (from the feature's `implementation.md` Wave Plan) are
 disjoint, so they build in parallel with no conflicts. One `Workflow` run per wave.
+
+> **The composition root is disjoint from nothing.** The app's route/provider tree (`src/frontend/src/App.tsx`)
+> is edited by *every* surface-adding story, so it can never be a wave story's owned file — file-disjointness
+> has no word for it and it is the repo's single most-churned file. It is **orchestrator-owned**: after a
+> wave's builder branches merge clean, the **orchestrator** makes the one composition-root edit that wires
+> the new surfaces (routes/providers/subtree mounts), serially, in its own commit. No builder branch touches
+> it. Declare it in the feature's `implementation.md` "Integration seam" row.
 
 **Flow per story (pipeline stages):**
 1. **Build** — `frontend-agent` (or the right builder) in an isolated worktree on `build/<slug>/<NN>`:
@@ -147,12 +170,17 @@ After the run, the main loop merges the `clean` branches into `feature/<slug>` s
 
 ## 5. Definition of done (per story — from the playbook)
 
-- All ACs met and checked; the attached cross-cutting ACs are actually satisfied by the diff.
-- Tests (or a documented manual check while the harness is thin) cover the ACs, cited in the story's **Tests** section.
-- `npm run type-check` + `npm run lint` + `npm run test:run` pass.
-- `code-review` verdict is `clean`.
+- All ACs met and checked; the attached cross-cutting ACs are actually satisfied by the diff. **[reviewer-checked]**
+- Tests (or a documented manual check while the harness is thin) cover the ACs, cited in the story's **Tests** section. **[reviewer-checked]**
+- **The affected stack's gate passes** — frontend story → `type-check + lint + test:run`; backend story →
+  `dotnet build + dotnet test`; full-stack story → both. Same commands CI runs (Gate 0). **[machine-enforced]**
+- `code-review` verdict is `clean` (Tier 1 structural independence). **[reviewer-checked]**
 - `story-agent` flips the story's `**Status:**` to Complete and mirrors the GitHub issue
   (see [`GITHUB_TRACKER.md`](GITHUB_TRACKER.md) — markdown is canonical; issues mirror it).
+
+> The story row's `stack:` field (`frontend | backend | fullstack`) tells the orchestrator which builder
+> to spawn (`frontend-agent` / `backend-agent`) and which gate to run. Every stack in the repo gets a
+> builder and a gate; none is left ungated.
 
 A **feature** is done when all its waves are green (Gate 2 clean) and the umbrella → `main` PR merges.
 
@@ -189,6 +217,8 @@ the relevant `design/D1..D7` brief for a participant surface.
 | Agent | Role in the loop |
 |---|---|
 | `story-agent` | Phase 0 (decompose epic → stories + `implementation.md`), fold design amendments, and close-out (flip Status + mirror issue). Does **not** write code/tests. |
-| `frontend-agent` | The builder inside a wave — builds a story's diff strictly to its ACs. |
-| `testing-agent` | Covers the ACs (Vitest); isolation / scenario-time / telemetry / sanitization first. |
-| `code-review` | The gate — read-only, adversarial; emits the `{clean, findings}` verdict for Gates 1 & 2. |
+| `frontend-agent` | The builder inside a wave for a `frontend`/`fullstack` story — builds a story's diff strictly to its ACs. |
+| `backend-agent` | The builder for a `backend`/`fullstack` story (`Pulse.Core`); same "strictly to ACs" contract, `dotnet build + dotnet test` gate. |
+| `testing-agent` | Covers the ACs (Vitest / xUnit); isolation / scenario-time / telemetry / sanitization first. |
+| `code-review` | The Tier-1 gate — read-only, adversarial; emits the `{clean, findings}` verdict for Gates 1 & 2. |
+| GitHub Copilot | Tier-1 independent reviewer on the umbrella→`main` PR; fold its findings before merge (`fix(...): address Copilot PR review`). |
