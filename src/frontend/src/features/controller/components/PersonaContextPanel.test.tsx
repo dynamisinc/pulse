@@ -105,6 +105,35 @@ describe('PersonaContextPanel (persona-operation/03)', () => {
     expect(screen.queryByText(/boil water advisory remains in effect/i)).not.toBeInTheDocument()
   })
 
+  it('scopes recent posts to THIS persona, not merely the exercise (a same-exercise, different persona sees only its own posts)', async () => {
+    // Fulton County EM shares ex-mock-0001 with Fairhaven Water, so a filter
+    // that only matched `exerciseId` (dropping the `authorPersonaId` match)
+    // would incorrectly surface the utility's advisory here too.
+    const fulcoEm = buildPersona({
+      id: 'persona-fulcoem',
+      templateId: 'tmpl-fulcoem',
+      displayName: 'Fulton County EM',
+      handle: 'FulcoEM',
+      initials: 'FC',
+      audienceBand: 'mid',
+    })
+    await renderPanel(<PersonaContextPanel persona={fulcoEm} />)
+
+    expect(screen.getByText(/coordinating with fairhaven water/i)).toBeInTheDocument()
+    expect(
+      screen.queryByText(/boil water advisory remains in effect for zones 2-4/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('renders a graceful fallback (not a crash) when the persona\'s template cannot be resolved', async () => {
+    const orphanPersona = buildPersona({ templateId: 'tmpl-does-not-exist' })
+    await renderPanel(<PersonaContextPanel persona={orphanPersona} />)
+
+    expect(screen.getByTestId('persona-context-voice-notes')).toHaveTextContent(
+      /voice notes unavailable/i,
+    )
+  })
+
   it('is a labelled, keyboard/screen-reader reachable section with no interactive controls', async () => {
     await renderPanel(<PersonaContextPanel persona={buildPersona()} />)
     const panel = screen.getByRole('region', { name: /persona context for fairhaven water utility/i })
