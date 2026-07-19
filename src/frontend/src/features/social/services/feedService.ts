@@ -50,18 +50,22 @@
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
-import { listPosts, toParticipantView, type Post } from '@/features/social'
+import { toParticipantView, type Post } from '@/features/social'
 import type { PostView } from '@/features/social'
 import type { Persona } from '@/features/personas'
+import { postStore } from './postStore'
 
 /**
- * Short-circuits the network with the seeded posts, while still exercising the
- * shared axios client's request pipeline exactly as a live `/feed` call would
- * (mirrors `personaService`/`sessionResolver`'s mock adapters). Returns a fresh
- * copy each call (`listPosts()` already copies).
+ * Short-circuits the network with the current post set, while still exercising
+ * the shared axios client's request pipeline exactly as a live `/feed` call
+ * would (mirrors `personaService`/`sessionResolver`'s mock adapters). Reads from
+ * the module-singleton `postStore` (feeds-discovery/07) — seeded once from
+ * `listPosts()` — rather than calling `listPosts()` directly, so a post appended
+ * after mount is included on the next resolve and, via `useFeed`'s store
+ * subscription, surfaces live without a re-fetch of the seeded baseline.
  */
 const mockAdapter: AxiosAdapter = config => Promise.resolve({
-  data: listPosts(),
+  data: postStore.getPosts(),
   status: 200,
   statusText: 'OK',
   headers: {},
