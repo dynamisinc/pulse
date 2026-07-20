@@ -180,6 +180,126 @@ public class QueryFilterIsolationTests
     }
 
     [RequiresDockerFact]
+    public async Task IdorAttempt_FindByKnownCrossExerciseId_ReturnsNull()
+    {
+        // The realistic attack shape: a participant in exercise A learns (or guesses) another exercise's
+        // real row id — e.g. from a shared link, a leaked screenshot, or brute-forcing a sequential-looking
+        // guid — and asks the API to fetch it directly by id, NOT via a filtered list. `FindAsync`/
+        // `SingleOrDefaultAsync` are exactly the shape a "get by id" endpoint would use, and must be just as
+        // fail-closed as the list-query path above.
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+        var postA = Guid.NewGuid();
+        var postB = Guid.NewGuid();
+        var personaA = Guid.NewGuid();
+        var personaB = Guid.NewGuid();
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Posts.Add(NewPost(postA, exerciseA));
+            seed.Posts.Add(NewPost(postB, exerciseB));
+            seed.Personas.Add(NewPersona(personaA, exerciseA));
+            seed.Personas.Add(NewPersona(personaB, exerciseB));
+            await seed.SaveChangesAsync();
+        }
+
+        await using var readA = _fixture.CreateContext(ScopeFor(exerciseA));
+
+        (await readA.Posts.FindAsync(postB)).Should().BeNull(
+            "FindAsync by exercise B's real post id, from an exercise-A scope, must not resolve the row — " +
+            "an IDOR attempt against a known/guessed foreign id must fail closed like a list query does");
+        (await readA.Posts.SingleOrDefaultAsync(p => p.Id == postB)).Should().BeNull(
+            "SingleOrDefaultAsync by exercise B's post id must also be filtered out under exercise A's scope");
+        (await readA.Personas.FindAsync(personaB)).Should().BeNull(
+            "FindAsync by exercise B's real persona id must not resolve under exercise A's scope");
+
+        // Sanity: the same lookups DO resolve the caller's own exercise's rows, proving the null above is
+        // isolation, not a broken/no-op Find.
+        (await readA.Posts.FindAsync(postA)).Should().NotBeNull("the caller's own exercise A post must still resolve");
+        (await readA.Personas.FindAsync(personaA)).Should().NotBeNull("the caller's own exercise A persona must still resolve");
+    }
+
+    [RequiresDockerFact]
+    public async Task AggregateCount_InExerciseA_ExcludesExerciseBRows_NoTotalLeak()
+    {
+        // A different leak shape than a targeted id lookup: an unfiltered COUNT (e.g. a "N posts in this
+        // exercise" dashboard stat) must reflect only the scoped exercise's rows, never the combined total
+        // across exercises — an aggregate is just as capable of leaking the SIZE of another exercise as a
+        // list query is of leaking its CONTENT.
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                seed.Posts.Add(NewPost(Guid.NewGuid(), exerciseA));
+            }
+
+            for (var i = 0; i < 5; i++)
+            {
+                seed.Posts.Add(NewPost(Guid.NewGuid(), exerciseB));
+            }
+
+            await seed.SaveChangesAsync();
+        }
+
+        await using var readA = _fixture.CreateContext(ScopeFor(exerciseA));
+
+        // No predicate at all: a naive `_context.Posts.CountAsync()` dashboard-style call.
+        (await readA.Posts.CountAsync()).Should().Be(
+            3, "an unfiltered count under exercise A's scope must equal exactly A's row count (3), never A+B " +
+               "(8) or B's alone (5) — the filter must confine aggregates, not only itemised reads");
+    }
+
+    [RequiresDockerFact]
+    public async Task UnrelatedThirdExerciseScope_SeesNeitherSeededExercise()
+    {
+        // A third, wholly unrelated exercise C's scope (not seeded with any rows of its own) must see ZERO
+        // rows of either A or B — proving the filter is a positive match on the caller's own scope, not
+        // merely "not exercise A" or "not exercise B" exclusion logic that could accidentally admit a third
+        // party.
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+        var exerciseC = Guid.NewGuid();
+        var postA = Guid.NewGuid();
+        var postB = Guid.NewGuid();
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Posts.Add(NewPost(postA, exerciseA));
+            seed.Posts.Add(NewPost(postB, exerciseB));
+            await seed.SaveChangesAsync();
+        }
+
+        await using var readC = _fixture.CreateContext(ScopeFor(exerciseC));
+
+        (await readC.Posts.CountAsync(p => p.Id == postA || p.Id == postB)).Should().Be(
+            0, "an unrelated exercise C, seeded with nothing of its own, must see none of exercise A's or " +
+               "B's rows — the filter must be a positive match on C, not a mere exclusion of A or B");
+    }
+
+    [RequiresDockerFact]
+    public async Task ExplicitGuidEmptyScope_ReturnsZeroScopedRows_FailClosed()
+    {
+        // A third fail-closed input shape, distinct from "null accessor" and "null CurrentExerciseId": an
+        // accessor whose CurrentExerciseId is EXPLICITLY Guid.Empty (not defaulted there via `??`). Exercises
+        // the ctor's capture directly rather than the `?? Guid.Empty` fallback branch, guarding against a
+        // future refactor of that fallback silently changing this path's behaviour.
+        var (personaId, postId, eventId) = await SeedOneOfEachAsync();
+
+        await using var read = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = Guid.Empty });
+
+        (await read.Personas.CountAsync(p => p.Id == personaId)).Should().Be(
+            0, "an explicit Guid.Empty scope must match zero rows — no scoped row is ever persisted with an " +
+               "empty ExerciseId, so this predicate can never open the door");
+        (await read.Posts.CountAsync(p => p.Id == postId)).Should().Be(0, "fail closed");
+        (await read.TelemetryEvents.CountAsync(e => e.EventId == eventId)).Should().Be(0, "fail closed");
+
+        await AssertRowsPhysicallyExistAsync(personaId, postId, eventId);
+    }
+
+    [RequiresDockerFact]
     public async Task IgnoreQueryFilters_RevealsAllExercises_ProvingScopingIsTheFilter()
     {
         var exerciseA = Guid.NewGuid();
