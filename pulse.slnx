@@ -3,5 +3,7 @@
     <Project Path="src/Pulse.Core.Tests/Pulse.Core.Tests.csproj" />
     <Project Path="src/Pulse.Core/Pulse.Core.csproj" />
     <Project Path="src/Pulse.Playground/Pulse.Playground.csproj" />
+    <Project Path="src/Pulse.WebApi.Tests/Pulse.WebApi.Tests.csproj" />
+    <Project Path="src/Pulse.WebApi/Pulse.WebApi.csproj" />
   </Folder>
 </Solution>

@@ -1,6 +1,6 @@
 # Story: Every entity is exercise-scoped (central query filter)
 
-**Feature:** Exercise isolation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Exercise isolation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-001  ·  **Design decisions:** none  ·  **Issue:** #44
 
 ## Context
@@ -9,13 +9,13 @@ on participant-facing paths filter by the session's exercise — enforced **cent
 filter/interceptor), not per-endpoint, so a new endpoint cannot accidentally omit the scope (COR-001).
 
 ## Acceptance Criteria
-- [ ] Every content/social-graph entity carries an `ExerciseId`; the schema makes it non-nullable on
+- [x] Every content/social-graph entity carries an `ExerciseId`; the schema makes it non-nullable on
       those entities.
-- [ ] Given a participant session in exercise A, when any participant-facing query runs, then it is
+- [x] Given a participant session in exercise A, when any participant-facing query runs, then it is
       automatically filtered to exercise A by a central filter/interceptor — no per-endpoint opt-in.
-- [ ] A query that attempts to omit the exercise scope on a participant-facing path fails closed (no
+- [x] A query that attempts to omit the exercise scope on a participant-facing path fails closed (no
       results / error), not open (leaking all exercises).
-- [ ] The scoping is covered by the standing isolation suite (COR-007, story 07).
+- [x] The scoping is covered by the standing isolation suite (COR-007, story 07).
 
 ## Out of Scope
 Media-URL access-checks (story 02); staff cross-exercise queries (story 05); the per-exercise hostname

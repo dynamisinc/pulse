@@ -1,6 +1,6 @@
 # Story: Telemetry sink (backend `POST /telemetry` ingest + durable store)
 
-**Feature:** Telemetry capture (XC-004 v0)  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Telemetry capture (XC-004 v0)  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** XC-004  ·  **Design decisions:** none  ·  **Issue:** #274
 
 ## Context
@@ -18,28 +18,28 @@ pointing `VITE_API_URL` at the deployed host (the mock→live flip, orchestrator
 World: backend infrastructure — no UI (this feature has none; see `feature.md`).
 
 ## Acceptance Criteria
-- [ ] Given a client POSTs a well-formed `TelemetryEventV0` JSON body to `POST /api/telemetry` (the same
+- [x] Given a client POSTs a well-formed `TelemetryEventV0` JSON body to `POST /api/telemetry` (the same
       path shape `core/telemetry/mockSink.ts` already calls), when the request arrives, then the server
       validates it against the same v0 shape the client's `zod` schema enforces and persists it as one
       row via `backend-host/02`'s `DbSet<TelemetryEvent>`.
-- [ ] Given a malformed or schema-invalid body (missing/empty `exerciseId`, a `schemaVersion` other than
+- [x] Given a malformed or schema-invalid body (missing/empty `exerciseId`, a `schemaVersion` other than
       `'v0'`, an unrecognized top-level key), when it is POSTed, then the endpoint responds `400` and the
       event is **not** persisted — the server does not trust the client-side `zod` validation alone
       (defense in depth).
-- [ ] Given the same `eventId` is POSTed twice (the documented client retry-after-swallowed-failure case
+- [x] Given the same `eventId` is POSTed twice (the documented client retry-after-swallowed-failure case
       in `mockSink.ts`'s header comment), when the second POST arrives, then it is deduplicated — no
       duplicate row, no error surfaced to the caller.
-- [ ] Given `dotnet test` runs, then `Pulse.WebApi.Tests` includes an integration test
+- [x] Given `dotnet test` runs, then `Pulse.WebApi.Tests` includes an integration test
       (`WebApplicationFactory`, reusing `backend-host/01`'s test-host pattern) that POSTs a
       fully-populated v0 envelope and asserts it round-trips out of `PulseDbContext` unchanged
       (field-for-field).
-- [ ] **Telemetry schema fidelity (XC-004 v0):** the accepted/stored shape matches the identical v0
+- [x] **Telemetry schema fidelity (XC-004 v0):** the accepted/stored shape matches the identical v0
       envelope locked in `docs/features/telemetry/01-telemetry-emitter-v0.md` — same field names, types,
       and optionality; the literal `schemaVersion: 'v0'`; the open `eventType` string; the reserved
       `correlationId`/`causationId`/`sequence`/`source` fields carried through unchanged. A drift between
       the client-locked schema and what the server accepts/stores is a contract break, not "the server
       just interprets it differently."
-- [ ] **Content security (NFR-004):** the endpoint enforces a request-body size cap and rejects (`400`) a
+- [x] **Content security (NFR-004):** the endpoint enforces a request-body size cap and rejects (`400`) a
       request exceeding it; free-text-bearing fields (`payload`, `target`) are stored as opaque, untrusted
       data — never HTML-rendered by this story (no read/render path exists yet) — and are written via
       parameterized EF Core operations only (no raw SQL string interpolation).

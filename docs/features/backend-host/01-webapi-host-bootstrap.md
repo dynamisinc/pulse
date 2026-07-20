@@ -1,6 +1,6 @@
 # Story: WebApi host bootstrap (composition root, health, CORS, App Insights)
 
-**Feature:** Backend host & persistence foundation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Backend host & persistence foundation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** none (foundation substrate — Master PRD §6; unblocks COR-001/002/007, COR-050, XC-004, NFR-006)  ·  **Design decisions:** none  ·  **Issue:** #268
 
 ## Context
@@ -21,28 +21,28 @@ World: backend infrastructure — a headless host, not a UI in either world (see
 notes).
 
 ## Acceptance Criteria
-- [ ] Given `pulse.slnx`, when `dotnet restore && dotnet build pulse.slnx --configuration Release` runs
+- [x] Given `pulse.slnx`, when `dotnet restore && dotnet build pulse.slnx --configuration Release` runs
       (the CI `backend` job's exact command), then a new `Pulse.WebApi` ASP.NET Core Web API project
       (targeting `net10.0`, matching `Pulse.Core`'s `Nullable`/`ImplicitUsings`/`AnalysisMode=Recommended`
       settings) is part of the build graph and compiles clean; a sibling `Pulse.WebApi.Tests` xUnit
       project (mirroring `Pulse.Core.Tests`'s package set) is added alongside it.
-- [ ] Given the host starts, when `Program.cs` calls `builder.Services.AddEngineGeneration(builder.
+- [x] Given the host starts, when `Program.cs` calls `builder.Services.AddEngineGeneration(builder.
       Configuration)` (the existing, unmodified `Pulse.Core` extension method), then the generation
       provider, prompt assembler, and tier policy resolve from DI with zero changes to
       `ServiceCollectionExtensions.cs` or any file under `Pulse.Core` — this story is a pure consumer of
       the existing engine seam.
-- [ ] Given the host is running, when a client sends `GET /health`, then it returns `200 OK` with a body
+- [x] Given the host is running, when a client sends `GET /health`, then it returns `200 OK` with a body
       indicating liveness, with no dependency on a database connection (persistence lands in story 02).
-- [ ] Given a request whose `Origin` header matches the configured frontend origin (the same
+- [x] Given a request whose `Origin` header matches the configured frontend origin (the same
       `Authentication__FrontendBaseUrl`-equivalent config key `infrastructure/modules/webapp.bicep`
       already provisions for the Static Web App's URL), when a CORS preflight or simple request arrives,
       then it is allowed; given an unlisted origin, then it is rejected.
-- [ ] Given `APPLICATIONINSIGHTS_CONNECTION_STRING` is present in configuration (as
+- [x] Given `APPLICATIONINSIGHTS_CONNECTION_STRING` is present in configuration (as
       `infrastructure/modules/webapp.bicep` already provisions it as an app setting), when the host
       starts, then Application Insights telemetry (requests, dependencies, traces) is wired; given it is
       absent (local development), the host still starts cleanly — a missing connection string is never a
       startup failure.
-- [ ] Given `dotnet test pulse.slnx --configuration Release --no-build` runs, then `Pulse.WebApi.Tests`
+- [x] Given `dotnet test pulse.slnx --configuration Release --no-build` runs, then `Pulse.WebApi.Tests`
       includes at least one `WebApplicationFactory<Program>`-based integration test asserting the host
       boots and `GET /health` returns 200 — closing the CI backend gate on a real assertion about this
       story, not only "it compiles."

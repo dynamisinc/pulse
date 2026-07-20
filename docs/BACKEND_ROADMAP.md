@@ -169,6 +169,15 @@ The load-bearing tier. Nothing consumer-facing is safe until these land. Analogo
 > **Composition-root note:** `Program.cs`/DI is orchestrator-owned from the first commit — builders register
 > their services through extension methods; the orchestrator wires them serially, exactly as `App.tsx` was handled.
 
+> **Delivered** (all four stories Gate-1 + Gate-2 clean, full suite green: 375 Pulse.Core + 75 Pulse.WebApi
+> tests, 0 warnings): `backend-host/01-webapi-host-bootstrap` — `Pulse.WebApi` + health + CORS + App
+> Insights via #268; `backend-host/02-persistence-efcore` — `PulseDbContext` + EF Core entities
+> (Exercise, Persona[Template], Post [reserved rumorRef/mutationOf + soft-delete], TelemetryEvent) +
+> non-nullable `ExerciseId` write-guard via #269 (Tier-2 human sign-off before merge); `exercise-isolation/01-exercise-scoped-queries`
+> — read-side EF global query filter + standing cross-exercise suite via #44 (Tier-2 human sign-off); `telemetry/02-telemetry-sink-backend`
+> — `POST /api/telemetry` ingest + durable store via #274. Merged onto `feature/backend-host` umbrella; umbrella→main PR open awaiting
+> TIER-2 sign-off + merge.
+
 ### Phase B1 — The walking skeleton: the controller-message loop, for real · umbrella `feature/social-api`
 
 **The money slice.** Makes the exact loop the SimCell wave demoed *in one tab* work **across machines, across a
