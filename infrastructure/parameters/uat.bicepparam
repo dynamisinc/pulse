@@ -6,21 +6,23 @@ using '../main.bicep'
 // Resource Group: rg-pulse-uat-centralus
 // ============================================================================
 //
-// Cost posture: Pulse has no .NET backend yet, so today this deploys ONLY the
-// Free-tier Static Web App (stapp-pulse-uat). Everything else is authored in
-// main.bicep but gated off. When the backend lands, flip the toggles below to
-// true, set the SQL secrets, and re-deploy — no template rewrite required.
+// Cost posture: Phase B0's backend (Pulse.WebApi + PulseDbContext) has landed, so this now deploys the
+// App Service host (app-pulse-api-uat), Azure SQL (sqldb-pulse-uat), and App Insights alongside the
+// Free-tier Static Web App. Storage (blob media) and Communication (email) stay gated off until a
+// feature needs them. Before running the Deploy Infrastructure workflow, ensure the SQL_ADMIN_PASSWORD
+// (and JWT_SECRET_KEY) GitHub secrets are set on the uat environment.
 // ============================================================================
 
 param environment = 'uat'
 param location = 'centralus'
 
 // --- Cost / feature toggles ---------------------------------------------------
-// Flip to true when the .NET backend lands (and set the SQL secrets below).
-param deployMonitoring = false
+// Backend on (Phase B0 landed): App Insights + Azure SQL + App Service host now deploy.
+// Storage/Communication stay off until a feature needs blob media or email.
+param deployMonitoring = true
 param deployStorage = false
-param deployDatabase = false
-param deployBackend = false
+param deployDatabase = true
+param deployBackend = true
 param deployCommunication = false
 
 // Flip to true to stand up the E8 Azure AI Foundry endpoint + model deployments (independent of the
@@ -44,11 +46,16 @@ param staticWebAppCustomDomain = 'pulse-uat.cobrasoftware.com'
 param hostingModel = 'webapi'
 param frontendUrl = 'https://pulse-uat.cobrasoftware.com'
 
-// --- SQL (only used once deployDatabase = true) -------------------------------
+// --- SQL (deployDatabase = true) ----------------------------------------------
+// The App Service connects via SQL auth (sqlAdminLogin/password → ConnectionStrings__DefaultConnection),
+// so this deploys without the Entra admin. Optionally set sqlEntraAdminObjectId to also configure an
+// Entra (AAD) admin on the SQL server — recommended for keyless/least-privilege access in a later
+// hardening pass, but NOT required for B1 go-live.
 param sqlAdminLogin = 'sqladmin'
 param sqlAdminPassword = readEnvironmentVariable('SQL_ADMIN_PASSWORD', '')
 param sqlEntraAdminLogin = 'tbull@dynamis.com'
-// TODO: set sqlEntraAdminObjectId (Entra object id for tbull@dynamis.com) before enabling SQL.
+// TODO (optional, hardening): set the Entra object id for tbull@dynamis.com to enable the AAD admin:
+//   param sqlEntraAdminObjectId = '<az ad user show --id tbull@dynamis.com --query id -o tsv>'
 
 // --- Secrets — sourced from environment variables (set in CI from GitHub secrets)
 param jwtSecretKey = readEnvironmentVariable('JWT_SECRET_KEY', '')
