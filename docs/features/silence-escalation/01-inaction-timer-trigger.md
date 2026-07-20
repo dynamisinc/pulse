@@ -1,6 +1,6 @@
 # Story: Inaction timer → escalation trigger (scenario time)
 
-**Feature:** Silence escalation  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Silence escalation  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-001, COR-050/051  ·  **Design decisions:** none  ·  **Issue:** #161
 
 ## Context
@@ -11,17 +11,17 @@ unmatched official content is **not** silence (response-reaction handles that). 
 timer that makes inaction visible.
 
 ## Acceptance Criteria
-- [ ] Given a storyline with a `responseWindowMin`, when that many **scenario minutes** pass with no
+- [x] Given a storyline with a `responseWindowMin`, when that many **scenario minutes** pass with no
       qualifying official response, then an escalation trigger is raised for the storyline.
-- [ ] Given an official social post matched to the storyline, or an off-platform marker (CTL-026),
+- [x] Given an official social post matched to the storyline, or an off-platform marker (CTL-026),
       when it lands before the window elapses, then the timer is satisfied and no escalation trigger
       fires (it counts as a response).
-- [ ] Given **unmatched** official content, when it lands, then it does **not** satisfy the timer
+- [x] Given **unmatched** official content, when it lands, then it does **not** satisfy the timer
       (it is never treated as silence — response-reaction slows escalation and prompts the controller
       instead).
-- [ ] Given a scenario-time freeze (CTL-023) or time-jump (CTL-015), when it occurs, then the window
+- [x] Given a scenario-time freeze (CTL-023) or time-jump (CTL-015), when it occurs, then the window
       timer stops/advances with scenario time — it never elapses while the world is frozen.
-- [ ] **Scenario time (COR-050/051):** the window is measured in scenario minutes via the E1 clock;
+- [x] *(Scenario-time window + staff-only met via `ObserveStage`; the `engine.observed` telemetry is deferred with #173.)* **Scenario time (COR-050/051):** the window is measured in scenario minutes via the E1 clock;
       **Telemetry (XC-004):** the trigger emits an `engine.observed` event (trigger: inaction-timer,
       storyline, scenario time). Staff-only (XC-002).
 

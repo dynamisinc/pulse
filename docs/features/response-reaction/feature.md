@@ -22,9 +22,17 @@ Adversarial review D4/A6 (the anti-berate-the-PIO requirement). `docs/features/w
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Matched-response reaction | ADP-002 | Not Started | #163 |
-| 02 | Miss-safe unmatched default (safety-critical) | ADP-002a | Not Started | #164 |
-| 03 | Match suggestion + trust curve | ADP-002a (open Q2) | Not Started | #165 |
+| 01 | Matched-response reaction | ADP-002 | Done (decide policy + bend; generate blocked) | #163 |
+| 02 | Miss-safe unmatched default (safety-critical) | ADP-002a | Complete | #164 |
+| 03 | Match suggestion + trust curve | ADP-002a (open Q2) | Complete | #165 |
+
+**Delivered** as the pure-backend `Pulse.Core/Features/ResponseReaction/*` slice (see its `README.md`):
+`ResponseMatcher` + `ResponseMatchTrustCurve` (suggestion + rolling precision + offer-only opt-in, engine
+never self-escalates match-autonomy), `MissSafeResolver` (the safety-critical slow-not-pause / never-silence
+/ anti-gaming logic + the off-platform-marker identical satisfier + the storyline bend via
+`RecordMatchedResponse`), and `ResponseReactionBehavior` (the tunable gratitude/follow-up/skeptic reaction
+intent). The generate→publish of the reaction, the controller-prompt/opt-in UI (E7 cockpit), and the XC-004
+logging (#173) are the remaining blocked/deferred pieces.
 
 ## Dependencies
 `reaction-loop` (decide/generate), `storyline-model` (intensity/sentiment bend, expectation),

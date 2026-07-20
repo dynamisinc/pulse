@@ -21,8 +21,15 @@ qualifying response). Epic §4 UX ("the vacuum fills").
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Inaction timer → escalation trigger (scenario time) | ADP-001 / COR-050 | Not Started | #161 |
-| 02 | Escalating anxiety/speculation content | ADP-001 / ADP-010 | Not Started | #162 |
+| 01 | Inaction timer → escalation trigger (scenario time) | ADP-001 / COR-050 | Complete | #161 |
+| 02 | Escalating anxiety/speculation content | ADP-001 / ADP-010 | Done (decide policy; generate blocked) | #162 |
+
+**Delivered** as the pure-backend `Pulse.Core/Features/SilenceEscalation/*` slice (see its `README.md`):
+`SilenceRules` (qualifying-response semantics — off-platform marker or matched official post satisfies the
+timer, unmatched never does; the escalation tone that climbs with silence) + `SilenceEscalationBehavior`
+(the `Inaction` decide-stage policy). The scenario-time trigger substrate is the merged
+`ReactionLoop.ObserveStage`. The generate→guard→publish of the escalation intent, and the `engine.observed`
+telemetry, are blocked on reaction-loop story 03 (E2/E7) and #173 (E1 XC-004 base) respectively.
 
 ## Dependencies
 `reaction-loop` (observe raises the inaction trigger; decide/generate carry it out), `storyline-model`

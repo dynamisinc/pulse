@@ -21,7 +21,7 @@ scenario test).
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Voice-diversity & fidelity checks | ADP-021 | Pending (reuses persona-voice metric) | #175 |
+| 01 | Voice-diversity & fidelity checks | ADP-021 | Complete | #175 |
 | 02 | Prompt-injection red-team suite (release-gating) | ADP-024 | Complete | #176 |
 | 03 | Latency/cost SLO measurement | NFR-002/003 | Pending (needs live-provider pass) | #177 |
 | 04 | Scenario reaction-correctness tests | §12.4 / ADP-001/002a / CTL-034 | Blocked (needs the full loop) | #178 |
