@@ -10,10 +10,11 @@ drafts auto-send instead of auto-holding (story 02). It is deliberately a separa
 **automation never escalates its own autonomy**; a controller chooses it explicitly.
 
 ## Acceptance Criteria
-- [ ] Given the **lead controller** role, when they enable swamped mode for the exercise, then expired
-      timed drafts **auto-send** (within existing engine rate caps) instead of auto-holding (story 02).
-- [ ] Swamped mode is **not** available to a non-lead controller, and it is **off by default**;
-      enabling/disabling it is logged (XC-004) with actor + scenario time.
+- [ ] Given a controller whose Phase-1 mock identity has **`isLead: true`**, when they enable swamped
+      mode for the exercise, then expired timed drafts **auto-send** (within existing engine rate caps)
+      instead of auto-holding (story 02).
+- [ ] Swamped mode is **not** available to a controller whose mock identity has `isLead: false`, and it
+      is **off by default**; enabling/disabling it is logged (XC-004) with actor + scenario time.
 - [ ] While swamped mode is on, the console shows a clear, persistent indicator (text + icon, not
       color-only; NFR-001) that timeout auto-send is active.
 - [ ] The engine never turns swamped mode on by itself — it is only ever a human toggle (the autonomy
@@ -25,14 +26,20 @@ The default auto-HOLD behavior (story 02); autonomy levels themselves (E8 Sugges
 ADP-030s); the kill switch (ADP-042).
 
 ## Technical Notes
-Staff world (COBRA). A per-exercise flag gated by the lead-controller role; read by the timer's
-terminal action (story 02). Persistent on-state banner. See implementation.md (story 03).
+Staff world (COBRA). A per-exercise flag gated by `useControllerIdentity()`'s **`isLead`** field — a
+small, additive extension of the SHIPPED Phase-1 mock (`identity/controllerIdentity.ts`,
+console-shell/01), not an E1 role (`roles.ts` has no `lead-controller` role yet; the real
+lead-controller gate is the deferred backend swap, same pattern as the rest of that mock). `/console`
+does not mount `SessionProvider`, so this does not require it either. `useSwampedMode()` provides the
+resulting `swampedMode` boolean as an **input** to story 02's `useDraftTimer`, not an import of it.
+Persistent on-state banner. See implementation.md (story 03).
 
 ## Dependencies
-E1 roles (lead-controller gate); story 02 (the timer path it switches); telemetry. Part of
-STORY-UPDATES.md §A **ADP-040** (the swamped-mode add).
+The Phase-1 mock controller identity's `isLead` flag (extends `controllerIdentity.ts`, console-
+shell/01, shipped); story 02 (the timer path it switches, via the `swampedMode` input/output
+contract); telemetry. Part of STORY-UPDATES.md §A **ADP-040** (the swamped-mode add).
 
 ## Tests
 - Unit: with swamped mode on, an expired timer auto-sends; with it off (default), it holds.
-- Unit: a non-lead controller cannot enable it; toggling is logged.
+- Unit: a controller whose mock identity has `isLead: false` cannot enable it; toggling is logged.
 - Component (RTL): the on-state indicator renders (text+icon, not color-only).
