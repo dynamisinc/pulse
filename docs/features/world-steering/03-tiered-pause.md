@@ -1,7 +1,16 @@
 # Story: Tiered pause (injects / engine / freeze)
 
-**Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** CTL-023  ·  **Design decisions:** D5-014/1.3, D7-004 (pause/EndEx pages → `participant-shell`), D7-010 (state pill → `staff-shell` header)  ·  **Issue:** #26
+
+> **Wave 1 delivered.** Gate-1 clean (0 Critical/0 Major) on the story branch; Gate-2 clean
+> (opus/xhigh — 0 Critical/0 Warnings; 2 non-blocking suggestions) on the integrated
+> `feature/world-steering` umbrella. `build:check` + `lint` clean; full suite 880/882 passing (2
+> pre-existing failures are an untouched `ReviewQueue.test.tsx` parallel-load flake, 10/10 in
+> isolation). Freeze-stops-clock also verified live in the browser at `/console` (scenario clock
+> held while wall-clock advanced; Pause-injects left it running; the guarded confirm was required
+> before Freeze took effect). See `docs/BUILD_PLAN.md`'s "E7 World Steering — Wave 1" section for
+> the full close-out and deferred follow-ups.
 
 ## Context
 "Pause" is not one thing. The D5 review **amended** CTL-023 into **three tiers** so a controller can
@@ -20,36 +29,93 @@ stops only on Freeze**. Break Fiction (story 04) implies world-freeze.
 > the tier state machine (Pause injects / Pause engine / Freeze), the guard on Freeze, the clock-stop-
 > on-Freeze, and pushing `overlayState` for the shell to render.
 
+> **Phase 0 reconciliation (done) — the clock-freeze mechanism.** `@/core/clock`'s `IExerciseClock`
+> contract (SHIPPED, Wave-0 foundation seam) has **no pause primitive** — only `scenarioNow()` and an
+> optional `subscribe()`. This story owns a small, feature-local **pausable exercise clock**
+> (`features/controller/services/pausableExerciseClock.ts`), a second `IExerciseClock`
+> implementation: it tracks accumulated-frozen wall-time via an offset — `scenarioNow()` returns
+> `wallNow − accumulatedFrozenMs` while running, or the held freeze-instant while frozen — and
+> implements `subscribe()` so `useScenarioTime` (which already polls + subscribes generically) re-
+> reads promptly on a tier change. On **Freeze**, `usePauseState` installs it via the SHIPPED
+> `setExerciseClock()` and notifies subscribers, so the `staff-shell` header's SCENARIO clock stops
+> immediately; on **Resume**, it keeps advancing with no scenario time lost (the accumulated-frozen
+> offset preserves the frozen span exactly). **Injects-paused and engine-paused never touch the
+> clock** — `scenarioNow()` keeps advancing under both. This is the mock stand-in for story 01's
+> native pause-aware clock provider / the backend reaction-loop pause (`BACKEND_ROADMAP` B3); the
+> later flip swaps which `IExerciseClock` is installed — a contract-only change, no consumer edits
+> (`getExerciseClock()`/`setExerciseClock()`/`resetExerciseClock()` is documented "not for
+> production" precisely because this is its sanctioned mock use until then). The dependency
+> direction stays one-way and legal: `features/controller` imports `@/core/clock`; `@/core/clock`
+> must never import back into a feature.
+
 ## Acceptance Criteria
-- [ ] Given the console, when the controller selects a pause tier, then the correct scope pauses —
-      **Pause injects** halts queued inject/burst firing (world/engine keep running); **Pause engine**
-      halts new E8 content (injects/world continue); **Freeze world** halts everything.
-- [ ] The active tier is always visible as INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN (text +
-      icon, not color-only; NFR-001) *(rendered by the `staff-shell` header state pill, D7-010 —
-      R-006 resolved; this story provides the tier state it displays)*.
-- [ ] The **scenario clock stops only on Freeze** (COR-050); injects-paused and engine-paused leave
-      the clock running.
-- [ ] **Freeze is guarded** (deliberate confirm) because participants notice it; the pause holding
-      page supports **in-fiction and out-of-fiction** registers (CTL-023) — **rendered by
-      `participant-shell`** (D7-004); this story selects the register and pushes the state.
-- [ ] In-flight bursts (inject-queue CTL-014) suspend under Pause injects/Freeze; each tier change is
-      logged (XC-004) and is staff-only (XC-002).
+- [x] Given the console, when no pause tier is active, then the pause state is **`running`** (the
+      unpaused baseline) and the `staff-shell` header's existing RUNNING/LIVE state-pill behavior is
+      untouched.
+- [x] Given the console, when the controller selects a pause tier, then the correct scope pauses —
+      **Pause injects** halts queued inject/burst firing (world/engine keep running); **Pause
+      engine** halts new E8 content (injects/world continue); **Freeze world** halts everything.
+      Only one tier is active at a time; selecting a new tier (or Resume) replaces the prior one.
+      *(The tier state machine correctly represents scope; wiring the deferred consumers —
+      `DraftTimerDriver`, inject-queue burst-suspend — to actually react to it is a follow-up, per
+      Out of Scope/Tests below.)*
+- [x] `usePauseState()` exposes the active tier as INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN /
+      RUNNING; `<PausePill>` renders it as **dot + text**, never color-only (NFR-001) — this is the
+      tier state the `staff-shell` header state pill overrides its label with while paused
+      (integration seam, orchestrator-owned; this story does not edit `StaffHeader.tsx`).
+- [x] The **scenario clock stops only on Freeze** (per the DECISION above, COR-050): `scenarioNow()`
+      holds at the freeze instant while frozen and resumes with no time lost on Resume; under
+      Pause-injects and Pause-engine, `scenarioNow()` keeps advancing exactly as when `running`.
+- [x] **Freeze is guarded** — selecting it requires a deliberate confirm step (per D5's "Pause
+      popover": 3 radio tiers, Freeze styled amber, Cancel/Pause; the button reads "Resume" while
+      paused) — because participants notice it. This is a confirm-step guard, **not** a Director
+      role-gate (that pattern belongs to Break Fiction, story 04, deferred).
+- [x] `usePauseState()` exposes an **overlay-register selection** (`'in-fiction'` |
+      `'out-of-fiction'`) alongside the tier, as the seam `participant-shell`'s (deferred) trigger
+      wiring will read — this story does not call `OverlayLayer/overlayState.ts` itself; it only
+      exposes the value.
+- [x] Each tier change (including the transition back to `running`) emits a `steering_action`
+      telemetry event (XC-004) — `channel: 'system'`, `actor: { kind: 'system', actingHumanId, role
+      }`, `target: { entityType: 'exercise', entityId }`, `payload` naming the tier transition — and
+      is scoped to the active exercise (COR-001) and staff-only (XC-002).
+- [x] The tier control is **fully keyboard-operable** (NFR-001) — tab to each tier option, activate
+      with Enter/Space, and the Freeze confirm step is reachable and dismissable by keyboard alone.
 
 ## Out of Scope
-Break Fiction (story 04, which implies freeze); the exercise-clock mechanics themselves (E1 COR-050);
-the holding-page content authoring (E1 lifecycle COR-032).
+Break Fiction (story 04, which implies Freeze); the exercise-clock's native/production mechanics
+(E1 COR-050 — this story's `pausableExerciseClock` is an explicitly-mock stand-in); the holding-page
+content authoring (E1 lifecycle COR-032); **wiring the seam's consumers** — `DraftTimerDriver`/
+inject-queue reading `usePauseState()` to actually suspend bursts/timers, and
+`participant-shell`'s `OverlayLayer` reading the overlay-register selection to render the pause/EndEx
+page, are both **deferred**; this story exposes the primitives only. Mounting `<PausePill>` into
+`StaffHeader.tsx` (orchestrator-owned integration seam).
 
 ## Technical Notes
-Staff world (COBRA). Owns a pause-state machine (injects/engine/freeze) that other surfaces read
-(inject-queue burst suspend, time-jump gating; engine review). Freeze integrates with the clock stop.
-See implementation.md (story 03).
+Staff world (COBRA). Owns `features/controller/hooks/usePauseState.ts`,
+`features/controller/components/steering/PausePill.tsx`, and
+`features/controller/services/pausableExerciseClock.ts` (kept disjoint from story 02's
+`storylineMock.ts`/`useStorylineTarget.ts`/`EscalationDial.tsx`). `usePauseState()` is the primitive
+other surfaces will read once built — `DraftTimerDriver` (engine-review-cockpit) and inject-queue's
+burst-suspend/jump-gating are documented follow-ups, not built here. See `implementation.md`
+(story 03) for the pausable-clock mechanics, the reuse map, and the Wave Plan.
 
 ## Dependencies
-E1 clock + lifecycle/holding-page (COR-050/032); inject-queue (bursts/jump read pause); engine-review
--cockpit (engine pause). Ticks STORY-UPDATES.md §A **CTL-023**.
+`@/core/clock` (shipped `IExerciseClock`/`setExerciseClock`/`resetExerciseClock` seam),
+`useControllerIdentity()` and `@/core/telemetry` (both shipped) for attribution/logging. Deferred
+follow-ups (not blocking this story): inject-queue (bursts/jump reading pause), engine-review-cockpit
+(`DraftTimerDriver` suspending on Pause engine/Freeze), `participant-shell`'s `OverlayLayer` (reading
+the register to render the pause/EndEx page). The orchestrator-owned mount into `StaffHeader.tsx`
+lands after this story and story 02 both merge. Ticks STORY-UPDATES.md §A **CTL-023**.
 
 ## Tests
-- Unit: each tier pauses the correct scope; only Freeze stops the scenario clock.
-- Unit: an in-flight burst suspends under Pause injects and Freeze.
-- Component (RTL): the state pill shows the active tier with text+icon (not color-only); Freeze
-  requires a confirm.
+- Unit: each tier pauses the correct scope (tier value only — suspension of injects/engine content is
+  a deferred consumer concern, not exercised here); only Freeze changes `scenarioNow()`'s behavior.
+- Unit: Freeze installs the pausable clock (via `setExerciseClock`) such that `scenarioNow()` holds
+  at a fixed instant across repeated calls; Resume restores advancement with the frozen span
+  preserved (no scenario time lost) — assert via the accumulated-offset math, not wall-clock timing.
+- Unit: Pause injects and Pause engine leave `scenarioNow()` advancing identically to `running`.
+- Unit: each tier transition (including back to `running`) emits exactly one `steering_action`
+  telemetry event with the correct actor/target/payload.
+- Component (RTL): `<PausePill>` shows the active tier with text+icon (not color-only); selecting
+  Freeze requires an explicit confirm step before the tier takes effect; the control is operable via
+  keyboard alone (tab/Enter/Space).

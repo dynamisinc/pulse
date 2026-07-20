@@ -53,7 +53,9 @@ import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { ToolstripProvider } from '@/features/staffShell/toolRegistry'
 import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
+import { pauseStatePillConfig } from '@/features/staffShell/components/statePillConfig'
 import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
+import { usePauseState } from './hooks/usePauseState'
 import { postStore } from '@/features/social/services/postStore'
 import { EngineDraftEditComposer, type ReviewQueueEditSlotProps } from './engine'
 import { ControllerConsole } from './components/ControllerConsole'
@@ -121,6 +123,24 @@ function ControllerConsoleContent() {
 }
 
 /**
+ * The staff header for the console: the shared `StaffHeader` with its exercise-
+ * state pill driven by the world-steering tiered-pause tier (D7-010) — while a
+ * tier is active the pill shows INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN
+ * (amber), otherwise the lifecycle status (LIVE / STAGED / …). Reads
+ * `usePauseState()` here (inside the provider stack) rather than in the shared
+ * header, so the header stays free of the controller-only pause/identity seam.
+ */
+function ConsoleStaffHeader() {
+  const { isPaused, label } = usePauseState()
+  return (
+    <StaffHeader
+      surfaceName="Controller Console"
+      stateOverride={isPaused ? pauseStatePillConfig(label) : undefined}
+    />
+  )
+}
+
+/**
  * The `/console` route element. See the module header for the provider stack and
  * the wired loop.
  */
@@ -130,7 +150,7 @@ export function ControllerConsoleRoute() {
       <ToolstripProvider>
         <ActivePersonaProvider>
           <StaffShellFrame
-            header={<StaffHeader surfaceName="Controller Console" />}
+            header={<ConsoleStaffHeader />}
             toolstrip={<Toolstrip />}
           >
             <ControllerConsoleContent />

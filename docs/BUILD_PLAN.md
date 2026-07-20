@@ -252,6 +252,62 @@ slot, sanitizes before publish, NFR-004).
 
 ---
 
+## E7 World Steering — Wave 1 ✅  · umbrella `feature/world-steering`
+
+The controller's world-bending primitives: the storyline escalation dial (a ready control for the
+Phase 2 E8 engine to drive) and the tiered pause (the keystone safety-stop for the whole console),
+both built mock-first against the FROZEN backend Storyline contract
+(`Pulse.Core/Features/Storylines/Models/Storyline.cs`, `StorylinePhase.cs`,
+`StorylineBriefProjection.cs`) and the shipped `@/core/clock` `IExerciseClock` seam, so the backend
+flip is contract-only. Two stories built in parallel, each Gate-1 clean, then integrated at a
+serial step.
+
+- ✅ `world-steering/03-tiered-pause` — the **keystone primitive**: `usePauseState()` (tiers
+  running/injects/engine/freeze) + `<PausePill>` (3-tier popover, guarded Freeze confirm,
+  keyboard-operable, dot+text never color-only) + `pausableExerciseClock` (a feature-local
+  `IExerciseClock` — Freeze installs it via the shipped `setExerciseClock()` and holds
+  `scenarioNow()`; injects/engine never touch the clock; Resume loses no scenario time via an
+  accumulated-frozen offset) (#26).
+- ✅ `world-steering/02-escalation-dial` — `<EscalationDial>` (one track: actual FILL + target TICK,
+  distinguishable without color; click/drag + arrow/Home/End keyboard to set target; "78 → 60"
+  relationship text; uppercase phase label) + `useStorylineTarget()` (exposes the target for the
+  deferred engine-follow loop) + `storylineMock.ts` (a TS mirror of the frozen `Storyline.cs`
+  field-for-field) (#25).
+
+**Serial integration step** (after the fan-out): the `/console` route's staff-shell header state
+pill driven from `usePauseState()` (INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN, D7-010) via a
+decoupled optional `stateOverride` prop on the shared `StaffHeader` (state-pill config extracted to
+`statePillConfig.ts`); `<PausePill>` + `<EscalationDial>` docked into the `ControllerConsole` work
+area; barrel exports added.
+
+> **Delivered** — both stories Gate-1 clean (0 Critical/0 Major); the integrated umbrella is Gate-2
+> clean (opus/xhigh — 0 Critical/0 Warnings; 2 non-blocking suggestions). `build:check` + `lint`
+> clean, **880/882 tests pass** (the 2 failures are a pre-existing `ReviewQueue.test.tsx`
+> parallel-load flake on an untouched file, 10/10 passing in isolation). The load-bearing safety
+> property, proven live in the browser at `/console`: **the scenario clock stops only on Freeze** —
+> held while wall-clock advanced, Pause-injects left it running, and the guarded confirm step was
+> required before Freeze took effect. Cross-cutting: every steering action logs one
+> `steering_action` telemetry event (XC-004, actor kind `'system'` + `actingHumanId` + role,
+> channel `'system'`); exercise-scoped (COR-001); staff-only (XC-002); fully keyboard-operable, no
+> color-only state (NFR-001); never skins the participant pause/freeze overlay — that stays
+> `participant-shell`'s `OverlayLayer`, which this feature only triggers/exposes (two-worlds).
+> Umbrella→`main` PR pending.
+>
+> **Follow-ups (not this wave):** `world-steering/01` (attention levers, dep: E2 SOC-041/053/072),
+> `04` (Break Fiction, dep: SignalR broadcast host B1 + Director role B2 + Freeze from this wave),
+> `05` (content takedown, dep: E2 soft-delete/tombstone), `06` (off-platform response marker, dep:
+> E8 expectations + E10 sink); wiring `usePauseState()`'s consumers — `DraftTimerDriver`
+> (engine-review-cockpit) and inject-queue's burst-suspend/jump-gating reading the tier to actually
+> suspend, and `participant-shell`'s `OverlayLayer` reading the overlay-register selection to render
+> the pause/EndEx page, and the SignalR broadcast host relaying tier changes — are all exposed as
+> seams but not wired; and the real engine-follows-target reaction loop (`Storyline.Tick`'s
+> `TickTowardTarget` path, `BACKEND_ROADMAP` B3) consumes `useStorylineTarget()`'s exposed value once
+> the E8 engine lands in Phase 2. Two non-blocking Gate-2 suggestions: a keyboard nudge from an
+> unset target currently snaps to actual±1 (`EscalationDial`); `resetPauseStateForTest` is a
+> production-module export (nil blast radius, test-only usage).
+
+---
+
 ## Cross-feature serial edges (don't parallelize across these)
 - `participant-shell/04` (mount contract) **before** `staff-shell/04` (preview-as).
 - `staff-shell/02` (`registerSurfaceTool()`) **before** `console-shell` docks its toolbox.

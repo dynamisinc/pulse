@@ -78,6 +78,8 @@ import { CommandPalette, type CommandPalettePersonaSlot } from '../console/Comma
 // comes from the `.ts`.
 import { PersonaDockHost } from '../console/personaDockHost.tsx'
 import { PERSONAS_TOOL_ID, type PersonaDockSlots } from '../console/personaDockHost'
+import { EscalationDial } from './steering/EscalationDial'
+import { PausePill } from './steering/PausePill'
 import {
   DraftDisposition,
   DraftTimerDriver,
@@ -249,6 +251,19 @@ export function ControllerConsole(
                 Personas tool, to post as a persona. The engine review queue is docked to the
                 right; the live world and other surfaces dock here as they land.
               </Typography>
+
+              {/* World-steering (E7 Wave 1): the tiered-pause control + the
+                  storyline escalation dial. PausePill drives usePauseState (the
+                  header state pill reflects the tier); EscalationDial sets the
+                  storyline target the engine will follow (loop deferred). Both
+                  are self-contained COBRA staff controls. */}
+              <Stack
+                data-testid="world-steering-panel"
+                sx={{ gap: 1.5, mt: 0.5, maxWidth: 520 }}
+              >
+                <PausePill />
+                <EscalationDial />
+              </Stack>
             </Stack>
           </Box>
 
