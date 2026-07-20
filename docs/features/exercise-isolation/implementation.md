@@ -1,8 +1,11 @@
 # Implementation: Exercise isolation
 
-> The platform foundation. Mostly backend/infra (the .NET backend does not exist yet — this feature
-> largely *defines* it). The frontend consumes a scoped API and must never construct cross-exercise
-> requests. Mirrors Cadence's multi-tenant filtering.
+> The platform foundation. Mostly backend/infra. The `Pulse.WebApi` host and `PulseDbContext` now exist
+> as of `backend-host` (Phase B0 — `docs/BACKEND_ROADMAP.md` §4): story 01's global query filter is the
+> next link in that same serial chain, **extending** `PulseDbContext.OnModelCreating`
+> (`backend-host/02-persistence-efcore`) rather than standing up its own `DbContext`. The frontend
+> consumes a scoped API and must never construct cross-exercise requests. Mirrors Cadence's multi-tenant
+> filtering.
 
 ## Per-story tech notes
 
@@ -23,6 +26,12 @@
 - Shared axios client — `core/services/api.ts` (all scoped calls go through it)
 - Exercise-context resolver — `src/frontend/src/core/exerciseContext` (mock provider: story 10, Wave 0;
   host/auth-resolved extension: story 04) — **consumed by every participant-facing feature**
+- Backend host + persistence (`backend-host`, Phase B0) — `PulseDbContext` and the `IExerciseScoped`
+  marker (`backend-host/02-persistence-efcore`, `src/Pulse.WebApi/Data/PulseDbContext.cs`): story 01's
+  EF Core global query filter **extends** `OnModelCreating` on this same `DbContext` (the
+  `exerciseContext.tsx` "create then extend" pattern above, applied backend-side) — it does not create a
+  new `DbContext`. The write-time `SaveChangesAsync` guard `backend-host/02` already adds is a
+  complementary, independent layer, not something story 01 re-implements.
 - COBRA theme (staff switcher, story 05) — `@/theme/styledComponents`
 - `testing-agent` isolation suite conventions (story 07) — the cross-exercise guardrail
 - Cadence multi-tenant query-filter pattern — reuse the proven approach
@@ -32,7 +41,7 @@
 | Story | Files it owns | Depends-on | Can-run-with | Wave | Effort |
 |-------|---------------|------------|--------------|------|--------|
 | 10 Mock context provider | exerciseContext.tsx | none | — (Wave-0 seam, parallel with `exercise-clock/04` and `telemetry/01` in other features — code-decoupled, no shared files) | 0 | S |
-| 01 Central scoping | query-filter, exercise-context | Exercise entity | 03 | 1 | L |
+| 01 Central scoping | query-filter (extends `PulseDbContext.OnModelCreating`), exercise-context | `backend-host/02-persistence-efcore` (PulseDbContext + Exercise entity, Phase B0 — cross-feature, serial) | 03 | 1 | L |
 | 03 Multi-instance personas | Persona model | Exercise entity | 01 | 1 | M |
 | 02 Scoped surfaces + media | media serving/URL | 01 | 08 | 2 | M |
 | 08 Hostname | host resolver, infra | 01 | 02 | 2 | L |
@@ -47,3 +56,13 @@ ships even earlier (Wave 0): a mock, standalone `ExerciseContextProvider` so fro
 contract on day one, before the real query-filter (01) and host-resolution (08) land. It is
 code-decoupled from the other two Wave-0 seams (`exercise-clock/04`, `telemetry/01`) — none of the
 three imports another; wiring happens later, in consumers.
+
+**Cross-feature edge (Phase B0).** Story 01's Wave numbering above is this feature's own internal
+sequence and is unchanged by this note — but story 01 cannot start until `backend-host`'s serial chain
+(`01-webapi-host-bootstrap` → `02-persistence-efcore`) lands, per `docs/BACKEND_ROADMAP.md` §4 Phase B0.
+That is a serial edge into this feature's Wave 1, not modeled as an extra wave here (mirrors how
+`telemetry/02-telemetry-sink-backend` depends on the same `backend-host/02` seam — see
+`docs/features/telemetry/implementation.md`). `backend-host/02` is Tier-2-reviewed for the schema/write
+half of the isolation guarantee (non-nullable `ExerciseId`, the `SaveChangesAsync` guard); story 01 adds
+the read-side global query filter on top of it and remains this product's own always-Critical review
+item (`docs/ORCHESTRATION_MECHANICS.md` §3).

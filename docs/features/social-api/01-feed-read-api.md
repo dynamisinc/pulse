@@ -23,7 +23,7 @@ wire, not because a component chooses not to render them.
 
 ## Acceptance Criteria
 - [ ] **Feed scoping + shape (SOC-080).** Given a request whose resolved exercise scope
-      (`IExerciseContext`, `backend-host/03`) is exercise A, when the client calls `GET /feed`,
+      (`IExerciseContext` from `exercise-isolation/01`) is exercise A, when the client calls `GET /feed`,
       then the response is exercise A's public post set only, and every item satisfies
       `feedService.ts`'s `isPost` runtime guard (`id`, `authorPersonaId`, `text`, `scenarioTime`,
       `counts.{reply,repost,like}` present) — `resolveFeed()` and `assembleFeedView()`
@@ -49,7 +49,7 @@ wire, not because a component chooses not to render them.
       localizes, or derives it from its own wall clock. `formatScenarioTime()` (frontend,
       unchanged) remains the only rendering step.
 - [ ] **Fails closed on an unresolvable scope.** Given a request whose exercise scope cannot be
-      resolved (no valid host/session token per `backend-host/03`), when either endpoint is called,
+      resolved (no valid host/session scope; full host/session-token auth is Phase B2 `identity-backend`), when either endpoint is called,
       then it returns 401/403 — never a default, empty-but-200, or unscoped result.
 
 ## Out of Scope
@@ -75,9 +75,9 @@ Integration seam table; this story's builder touches only `Pulse.WebApi/**` (+ i
 tests).
 
 ## Dependencies
-Phase B0: `backend-host/01-webapi-bootstrap`, `backend-host/02-persistence-efcore`, and the
-exercise-scoping filter (`exercise-isolation/01`, realized by `backend-host/03-exercise-isolation-
-filter` **[Tier-2]**). Soft, non-blocking relationship with `04-persona-read-api`: author
+Phase B0: `backend-host/01-webapi-host-bootstrap`, `backend-host/02-persistence-efcore`, and the
+read-side exercise-scoping filter (`exercise-isolation/01`, extending `backend-host/02`'s
+`PulseDbContext` on its **[Tier-2]** write-time guard). Soft, non-blocking relationship with `04-persona-read-api`: author
 resolution (`authorPersonaId` → `Persona`) happens client-side via `assembleFeedView`'s `Map`
 lookup, so this story does not need 04 to be live to ship.
 

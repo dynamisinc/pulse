@@ -46,7 +46,7 @@ caller's response never does, matching `01-feed-read-api`'s unconditional guaran
       the locked v0 envelope (`core/telemetry/schema.ts`'s `telemetryEventV0Schema`:
       `exerciseId`, `actor: {kind:'persona', personaId: authorPersonaId, actingHumanId}`, `origin`,
       `channel:'social'`, `wallClockTime` = server UTC now, `scenarioTime` as supplied,
-      `target: {entityType:'post', entityId}`) via `backend-host/04`'s sink. Once the frontend
+      `target: {entityType:'post', entityId}`) via `telemetry/02`'s sink. Once the frontend
       write path is flipped live (an orchestrator integration edit, see implementation.md), the
       client-side `buildAndEmit` call currently inside `createPost` is retired so the event is
       never double-counted.
@@ -96,8 +96,8 @@ seam table, which calls it out as its own reviewed commit. Cross-reference imple
 Reuse map + Wave Plan, and the `IFeedBroadcaster` contract-first note shared with `03`.
 
 ## Dependencies
-Phase B0 (`backend-host/01,02`; filter via `backend-host/03` **[Tier-2]**) plus
-`backend-host/04-telemetry-sink` (needed for the XC-004 AC). Contract-first seam with
+Phase B0 (`backend-host/01,02`; read filter `exercise-isolation/01` on `backend-host/02`'s **[Tier-2]** write guard) plus
+`telemetry/02-telemetry-sink-backend` (needed for the XC-004 AC). Contract-first seam with
 `03-signalr-feed-host` (`IFeedBroadcaster.BroadcastPostAsync`) — see implementation.md; both build
 in the same wave against the agreed interface shape.
 

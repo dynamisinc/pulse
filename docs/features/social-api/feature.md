@@ -48,11 +48,11 @@ server-side provenance projection — rather than a chrome one; see Design notes
 | 04 | Persona read API — `GET /personas` | XC-005, COR-003 (COR-018, XC-002) | Not Started | — |
 
 ## Dependencies
-**Phase B0, hard prerequisite for all four stories:** `backend-host/01-webapi-bootstrap` (the
-`Pulse.WebApi` host), `backend-host/02-persistence-efcore` (`PulseDbContext`), and
-`exercise-isolation/01-exercise-scoped-queries`' central query filter as realized in real SQL by
-`backend-host/03-exercise-isolation-filter` **[Tier-2]**. Story 02 additionally depends on
-`backend-host/04-telemetry-sink` (it emits the XC-004 event server-side). All of `backend-host/**`
+**Phase B0, hard prerequisite for all four stories:** `backend-host/01-webapi-host-bootstrap` (the
+`Pulse.WebApi` host), `backend-host/02-persistence-efcore` (`PulseDbContext` + the **[Tier-2]**
+write-time scope guard), and `exercise-isolation/01-exercise-scoped-queries`' central query filter,
+realized in real SQL as the read-side filter extending that `PulseDbContext`. Story 02 additionally depends on
+`telemetry/02-telemetry-sink-backend` (it emits the XC-004 event server-side). All of `backend-host/**`
 is authored in parallel by a sibling effort — referenced here by name, not owned by this feature.
 
 Sibling **frontend** feature docs this reconciles with but does not edit: `posts` (the `Post`

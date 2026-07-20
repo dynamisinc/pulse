@@ -65,7 +65,7 @@ participant feed's author resolution (`usePersonas()`) and the controller consol
 shape. Cross-reference implementation.md's Reuse map + Wave Plan.
 
 ## Dependencies
-Phase B0 (`backend-host/01,02`; filter via `backend-host/03` **[Tier-2]**). No dependency on
+Phase B0 (`backend-host/01,02`; read filter `exercise-isolation/01` on `backend-host/02`'s **[Tier-2]** write guard). No dependency on
 `01`/`02`/`03` — file-disjoint and independently shippable within Wave 1.
 
 ## Tests

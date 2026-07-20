@@ -81,7 +81,7 @@ this story exposes an extension method, per implementation.md's Integration seam
 reference the `IFeedBroadcaster` contract-first note shared with `02-post-write-api`.
 
 ## Dependencies
-Phase B0 (`backend-host/01,02`; filter via `backend-host/03` **[Tier-2]**). Contract-first seam
+Phase B0 (`backend-host/01,02`; read filter `exercise-isolation/01` on `backend-host/02`'s **[Tier-2]** write guard). Contract-first seam
 with `02-post-write-api` (`IFeedBroadcaster.BroadcastPostAsync`) — both build in the same wave
 against the agreed interface. Soft reuse of `01-feed-read-api`'s `GET /feed` as the polling-
 fallback data source (not a hard dependency — 01 already exists as a read endpoint regardless of

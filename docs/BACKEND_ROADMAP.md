@@ -151,27 +151,41 @@ and fan out.
 
 The load-bearing tier. Nothing consumer-facing is safe until these land. Analogous to frontend **Wave 0**.
 
-| Story (proposed) | Builds | Retires / enables | Req |
+> **Backlog authored** (`story-agent`, this branch): `docs/features/backend-host/` (`01-webapi-host-bootstrap`,
+> `02-persistence-efcore`) plus the reconciled cross-feature seams `docs/features/telemetry/02-telemetry-sink-backend`
+> and `docs/features/exercise-isolation/01-exercise-scoped-queries` (the existing #44). The isolation guarantee is
+> **split** — the write/schema half (Tier-2) lives in `backend-host/02`; the read-side global query filter (Tier-2,
+> always-Critical) is `exercise-isolation/01`, which *extends* `backend-host/02`'s `PulseDbContext` via the repo's
+> "create then extend" pattern rather than standing up a second context. The table below reflects those files, not
+> the indicative `backend-host/03`/`04` slugs an earlier draft used.
+
+| Story | Builds | Retires / enables | Req |
 |---|---|---|---|
-| `backend-host/01-webapi-bootstrap` | `Pulse.WebApi` ASP.NET Core project added to `pulse.slnx`; DI root wiring `AddEngineGeneration(...)`; health, CORS for the SWA, config/secrets, App Insights | Gate-0 backend job now covers a real host; the frontend's `/api` base URL resolves | §6 tech context |
-| `backend-host/02-persistence-efcore` | `PulseDbContext` + EF Core on Azure SQL; the E1 entities (`Exercise`, `PersonaTemplate`/`Persona`, `Post`, `ParticipantAccount`, `StaffAssignment`, `Cast`, telemetry event store); initial migration | `database.bicep` gets its first consumer; durable state exists | COR domain model |
-| `backend-host/03-exercise-isolation-filter` **[Tier-2]** | `IExerciseContext` resolved per request (hostname COR-008 / session token); **EF global query filter on `ExerciseId`**, fail-closed; the standing cross-exercise + stored-XSS access test suite. **Extends the existing `docs/features/exercise-isolation/01-exercise-scoped-queries` story** (already decomposed, currently *Not Started* — *"the .NET backend does not exist yet"*), rather than starting fresh | The server-side realization of the client's already-delegated scoping; the always-Critical guarantee, in real SQL | COR-001/002/007 |
-| `backend-host/04-telemetry-sink` | Real `POST /telemetry` ingest + storage behind the **locked XC-004 v0 envelope**; the highest-fan-in seam | Turns the swallowed fire-and-forget into a real sink; feeds E10 from day one | XC-004 |
+| `backend-host/01-webapi-host-bootstrap` | `Pulse.WebApi` ASP.NET Core project added to `pulse.slnx`; DI root wiring `AddEngineGeneration(...)`; `AddControllers()`/health/CORS-for-the-SWA/App Insights; a sibling `Pulse.WebApi.Tests` | Gate-0 backend job now covers a real host; the frontend's `/api` base URL resolves | §6 tech context |
+| `backend-host/02-persistence-efcore` **[Tier-2]** | `PulseDbContext` + EF Core on Azure SQL; the **walking-skeleton entity set** (`Exercise`, `PersonaTemplate`/`Persona`, `Post` reserving `rumorRef`/`mutationOf` + soft-delete, `TelemetryEvent`); non-nullable `ExerciseId` + a `SaveChangesAsync` **write-time scope guard** (the isolation write/schema half); initial migration. Accounts/casts/staff-assignments deferred to B2 | `database.bicep` gets its first consumer; durable, write-scoped state exists | COR domain model, COR-001 |
+| `exercise-isolation/01-exercise-scoped-queries` **[Tier-2]** *(existing #44)* | The **read-side** EF global query filter on `ExerciseId`, fail-closed, extending `backend-host/02`'s `PulseDbContext.OnModelCreating`; the standing cross-exercise + stored-XSS suite (`exercise-isolation/07`) | The server-side realization of the client's already-delegated scoping; the always-Critical guarantee, in real SQL | COR-001/002/007 |
+| `telemetry/02-telemetry-sink-backend` | Real `POST /telemetry` ingest + `DbSet<TelemetryEvent>` store behind the **locked XC-004 v0 envelope**; the highest-fan-in seam | Turns the swallowed fire-and-forget into a real sink; feeds E10 from day one | XC-004 |
 
 > **Composition-root note:** `Program.cs`/DI is orchestrator-owned from the first commit — builders register
 > their services through extension methods; the orchestrator wires them serially, exactly as `App.tsx` was handled.
 
-### Phase B1 — The walking skeleton: the controller-message loop, for real · umbrella `feature/social-backend`
+### Phase B1 — The walking skeleton: the controller-message loop, for real · umbrella `feature/social-api`
 
 **The money slice.** Makes the exact loop the SimCell wave demoed *in one tab* work **across machines, across a
 reload, persisted, and evaluated.** This is "pilot mode" per PRD §4 (login → social feed) on a real spine.
 
-| Story (proposed) | Builds | Retires / enables | Stack |
+> **Backlog authored** (`story-agent`, this branch): `docs/features/social-api/` — a backend/service feature
+> (sibling to the `engine-*` backend features), each story `fullstack` where it also flips a frozen frontend seam
+> live. All four hard-depend on Phase B0. Story `02`'s live flip is a bigger, separately-reviewed integration commit
+> (`createPost` is synchronous/never-axios-routed today), and `02`↔`03` share a contract-first `IFeedBroadcaster`
+> seam so they still fan out in one wave.
+
+| Story | Builds | Retires / enables | Stack |
 |---|---|---|---|
-| `social-backend/01-feed-read-api` | `GET /feed` (exercise-scoped; **provenance projected out server-side** — retires deferred finding S2-2) + `GET /threads/:id` | Flip `resolveFeed`/`useThread` mock adapter to live | fullstack |
-| `social-backend/02-post-write-api` | `POST /posts` — server-side `createPost` (sanitize NFR-004, stamp `exerciseId`/`origin`, persist, emit telemetry) | Participant composer **and** controller `composeAsPersona` POST here instead of `postStore.appendPost` | fullstack |
-| `social-backend/03-realtime-fanout` | **SignalR hub** (`signalr.bicep`): a published post pushes to every session in the exercise; polling fallback (NFR-003) | Replace the in-memory `postStore`; deliver the deferred `feeds-discovery/04` buffered "▲ N new posts" pill. **This is what makes a controller's post appear in a _different participant's_ browser.** | fullstack |
-| `social-backend/04-persona-attribution` | Personas served from the DB; COR-018 per-human attribution persisted | Replace the seeded `personaService` mock; real authorship | fullstack |
+| `social-api/01-feed-read-api` | `GET /feed` (exercise-scoped; **provenance projected out server-side** — retires deferred finding S2-2) + `GET /threads/:id` | Flip `resolveFeed`/`useThread` mock adapter to live | fullstack |
+| `social-api/02-post-write-api` | `POST /posts` — server-side `createPost` (sanitize NFR-004, stamp `exerciseId`/`origin`, persist, emit telemetry) | Participant composer **and** controller `composeAsPersona` POST here instead of `postStore.appendPost` | fullstack |
+| `social-api/03-signalr-feed-host` | **SignalR hub** (`signalr.bicep`): a published post pushes to every session in the exercise; polling fallback (NFR-003) | Replace the in-memory `postStore`; unblock the deferred `feeds-discovery/04` buffered "▲ N new posts" pill. **This is what makes a controller's post appear in a _different participant's_ browser.** | fullstack |
+| `social-api/04-persona-read-api` | Personas served from the DB; COR-018 per-human attribution persisted | Replace the seeded `personaService` mock; real authorship | fullstack |
 
 > **Outcome:** the headline concern is fully retired — controller messages are viewable everywhere, by everyone in
 > the exercise, durably. The frozen frontend contracts get their first real server, proving the seam design.
@@ -253,27 +267,28 @@ Same loop as [`ORCHESTRATION_MECHANICS.md`](ORCHESTRATION_MECHANICS.md), with th
 
 ## 7. Immediate next actions
 
-1. **Decompose B0 + B1 with `story-agent`** into `docs/features/` — write `feature.md` + `implementation.md`
-   (reuse map naming the engine's existing services and the frontend's frozen DTOs; a DAG-ready Wave Plan with
-   `stack:` fields) + the `NN-<slug>.md` stories, mirrored to GitHub per [`GITHUB_TRACKER.md`](GITHUB_TRACKER.md).
-   Start with `backend-host` (Phase B0) — it is the serial prerequisite for everything else. **Reconcile, don't
-   duplicate:** the net-new foundation is `backend-host`, but several consumer stories *attach to existing feature
-   folders that today carry only frontend/mock work* — `exercise-isolation`, `posts`, `feeds-discovery`,
-   `identity-auth-roles`, `persona-management`, `telemetry`. Add the `stack: backend|fullstack` stories to those
-   features rather than inventing parallel ones; the frontend halves are already their reuse map.
-2. **Run Phase B0 as a hand-driven serial chain** (not a fan-out): its four stories are a dependency line
-   (host → persistence → isolation filter → telemetry sink), so build them in order with the standard
-   build→test→Gate-1 loop, then Gate-2 the umbrella.
-3. **Then fan out Phase B1** as a per-wave Workflow run (the four stories are file-disjoint once the seams exist),
-   swapping the frontend adapters live as each endpoint lands. Update this doc's phase boxes as waves merge.
+1. ✅ **B0 + B1 decomposed** (`story-agent`, this branch) — `docs/features/backend-host/` +
+   `telemetry/02-telemetry-sink-backend` + the reconciled `exercise-isolation/01` (Phase B0), and
+   `docs/features/social-api/` (Phase B1), each with an orchestration-ready `implementation.md` (reuse map over
+   the frozen frontend DTOs + the engine DI, a DAG Wave Plan with `stack:` fields, the two composition roots).
+   `Issue:` fields left blank pending GitHub-mirror approval (`GITHUB_TRACKER.md`). Phase **B2** (identity/nav) is
+   *already* decomposed in the existing `identity-auth-roles/` + `exercise-isolation/` folders — it needs `stack:`
+   backend stories added, not a fresh feature, when its turn comes.
+2. **Run Phase B0 as a hand-driven serial chain** (not a fan-out): a dependency line — `backend-host/01`
+   (host) → `backend-host/02` (persistence + Tier-2 write guard) → then, on that `PulseDbContext`,
+   `exercise-isolation/01` (read-side query filter) and `telemetry/02` (sink) — built in order with the
+   standard build→test→Gate-1 loop, then Gate-2 the umbrella.
+3. **Then fan out Phase B1** (`social-api`) as a per-wave Workflow run (the four stories are file-disjoint once the
+   seams exist), swapping the frontend adapters live as each endpoint lands. Update this doc's phase boxes as waves merge.
 
 **Session-kickoff (paste to start the first build session):**
 
 ```
 Build backend-host Phase B0 per docs/BACKEND_ROADMAP.md and docs/ORCHESTRATION_MECHANICS.md.
 Umbrella: feature/backend-host (off latest origin/main).
-Serial chain (each its own build/<slug>/<NN> branch): 01-webapi-bootstrap → 02-persistence-efcore →
-  03-exercise-isolation-filter [Tier-2] → 04-telemetry-sink.
+Serial chain (each its own build/<slug>/<NN> branch): backend-host/01-webapi-host-bootstrap →
+  backend-host/02-persistence-efcore [Tier-2 write guard], then the cross-feature seams
+  exercise-isolation/01-exercise-scoped-queries [Tier-2 read filter] + telemetry/02-telemetry-sink-backend.
 Stack: backend. Gate each with dotnet build + dotnet test; Gate-1 code-review per story (isolation filter is
 always-Critical); Gate-2 the umbrella. Do NOT exceed the ACs. The exercise-scoping query filter must be a
 central EF global filter, fail-closed, with a cross-exercise test that FAILS access.
