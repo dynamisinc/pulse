@@ -1,8 +1,15 @@
 # Feature: World steering
 
 **Epic:** E7 — Controller Command Surface  ·  **Phase:** 1  ·  **Feature ref:** F7.3
-**World:** staff  ·  **Issue:** #5  ·  **Status:** Wave 1 ready to build — escalation dial (#25) +
-tiered pause (#26); stories 01/04/05/06 deferred
+**World:** staff  ·  **Issue:** #5  ·  **Status:** Wave 1 delivered — escalation dial (#25) +
+tiered pause (#26) Complete; stories 01/04/05/06 deferred
+
+> **Wave 1 delivered.** Stories 02 (escalation dial) and 03 (tiered pause) are Complete — Gate-1
+> clean per story, integrated umbrella Gate-2 clean, `build:check`/`lint` clean, 880/882 tests
+> passing (2 pre-existing unrelated flakes). Freeze-stops-clock verified live in the browser at
+> `/console`. See `docs/BUILD_PLAN.md`'s "E7 World Steering — Wave 1" section for the full
+> close-out, Gate evidence, and deferred follow-ups (stories 01/04/05/06 and the seam-consumer
+> wiring).
 
 > **Phase 0 reconciliation (done).** Stories 02/03 and `implementation.md` are checked against the
 > FROZEN backend contracts (`Pulse.Core/Features/Storylines/Models/Storyline.cs`,
@@ -42,8 +49,8 @@ via SOC-072 notifications.
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
 | 01 | Attention levers (suggested-follows, flag-as-alert, trend boost) | CTL-021 (SOC-041/053/072) | Not Started — deferred (dep: E2 SOC-041/053/072) | #24 |
-| 02 | Storyline escalation dial — actual + target, engine follows | CTL-022 / D5-014/2.2 | Not Started — Wave 1 | #25 |
-| 03 | Tiered pause (injects / engine / freeze); clock stops only on freeze | CTL-023 / D5-014/1.3 | Not Started — Wave 1 | #26 |
+| 02 | Storyline escalation dial — actual + target, engine follows | CTL-022 / D5-014/2.2 | **Complete** — Wave 1 delivered | #25 |
+| 03 | Tiered pause (injects / engine / freeze); clock stops only on freeze | CTL-023 / D5-014/1.3 | **Complete** — Wave 1 delivered | #26 |
 | 04 | Break Fiction — Director-gated, type-to-confirm, in-exercise, logged | CTL-024 / D5-014/1.2, D5-007 | Not Started — deferred (dep: SignalR broadcast host B1 + Director role B2 + Freeze from #26) | #27 |
 | 05 | Content takedown ≤2 clicks (tombstone, incident category, notify) | CTL-025 | Not Started — deferred (dep: E2 soft-delete/tombstone) | #28 |
 | 06 | Off-platform response marker | CTL-026 (ADP-002a) | Not Started — deferred (dep: E8 expectations + E10 sink) | #29 |

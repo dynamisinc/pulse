@@ -1,7 +1,16 @@
 # Story: Tiered pause (injects / engine / freeze)
 
-**Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** CTL-023  ·  **Design decisions:** D5-014/1.3, D7-004 (pause/EndEx pages → `participant-shell`), D7-010 (state pill → `staff-shell` header)  ·  **Issue:** #26
+
+> **Wave 1 delivered.** Gate-1 clean (0 Critical/0 Major) on the story branch; Gate-2 clean
+> (opus/xhigh — 0 Critical/0 Warnings; 2 non-blocking suggestions) on the integrated
+> `feature/world-steering` umbrella. `build:check` + `lint` clean; full suite 880/882 passing (2
+> pre-existing failures are an untouched `ReviewQueue.test.tsx` parallel-load flake, 10/10 in
+> isolation). Freeze-stops-clock also verified live in the browser at `/console` (scenario clock
+> held while wall-clock advanced; Pause-injects left it running; the guarded confirm was required
+> before Freeze took effect). See `docs/BUILD_PLAN.md`'s "E7 World Steering — Wave 1" section for
+> the full close-out and deferred follow-ups.
 
 ## Context
 "Pause" is not one thing. The D5 review **amended** CTL-023 into **three tiers** so a controller can
@@ -40,33 +49,36 @@ stops only on Freeze**. Break Fiction (story 04) implies world-freeze.
 > must never import back into a feature.
 
 ## Acceptance Criteria
-- [ ] Given the console, when no pause tier is active, then the pause state is **`running`** (the
+- [x] Given the console, when no pause tier is active, then the pause state is **`running`** (the
       unpaused baseline) and the `staff-shell` header's existing RUNNING/LIVE state-pill behavior is
       untouched.
-- [ ] Given the console, when the controller selects a pause tier, then the correct scope pauses —
+- [x] Given the console, when the controller selects a pause tier, then the correct scope pauses —
       **Pause injects** halts queued inject/burst firing (world/engine keep running); **Pause
       engine** halts new E8 content (injects/world continue); **Freeze world** halts everything.
       Only one tier is active at a time; selecting a new tier (or Resume) replaces the prior one.
-- [ ] `usePauseState()` exposes the active tier as INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN /
+      *(The tier state machine correctly represents scope; wiring the deferred consumers —
+      `DraftTimerDriver`, inject-queue burst-suspend — to actually react to it is a follow-up, per
+      Out of Scope/Tests below.)*
+- [x] `usePauseState()` exposes the active tier as INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN /
       RUNNING; `<PausePill>` renders it as **dot + text**, never color-only (NFR-001) — this is the
       tier state the `staff-shell` header state pill overrides its label with while paused
       (integration seam, orchestrator-owned; this story does not edit `StaffHeader.tsx`).
-- [ ] The **scenario clock stops only on Freeze** (per the DECISION above, COR-050): `scenarioNow()`
+- [x] The **scenario clock stops only on Freeze** (per the DECISION above, COR-050): `scenarioNow()`
       holds at the freeze instant while frozen and resumes with no time lost on Resume; under
       Pause-injects and Pause-engine, `scenarioNow()` keeps advancing exactly as when `running`.
-- [ ] **Freeze is guarded** — selecting it requires a deliberate confirm step (per D5's "Pause
+- [x] **Freeze is guarded** — selecting it requires a deliberate confirm step (per D5's "Pause
       popover": 3 radio tiers, Freeze styled amber, Cancel/Pause; the button reads "Resume" while
       paused) — because participants notice it. This is a confirm-step guard, **not** a Director
       role-gate (that pattern belongs to Break Fiction, story 04, deferred).
-- [ ] `usePauseState()` exposes an **overlay-register selection** (`'in-fiction'` |
+- [x] `usePauseState()` exposes an **overlay-register selection** (`'in-fiction'` |
       `'out-of-fiction'`) alongside the tier, as the seam `participant-shell`'s (deferred) trigger
       wiring will read — this story does not call `OverlayLayer/overlayState.ts` itself; it only
       exposes the value.
-- [ ] Each tier change (including the transition back to `running`) emits a `steering_action`
+- [x] Each tier change (including the transition back to `running`) emits a `steering_action`
       telemetry event (XC-004) — `channel: 'system'`, `actor: { kind: 'system', actingHumanId, role
       }`, `target: { entityType: 'exercise', entityId }`, `payload` naming the tier transition — and
       is scoped to the active exercise (COR-001) and staff-only (XC-002).
-- [ ] The tier control is **fully keyboard-operable** (NFR-001) — tab to each tier option, activate
+- [x] The tier control is **fully keyboard-operable** (NFR-001) — tab to each tier option, activate
       with Enter/Space, and the Freeze confirm step is reachable and dismissable by keyboard alone.
 
 ## Out of Scope
