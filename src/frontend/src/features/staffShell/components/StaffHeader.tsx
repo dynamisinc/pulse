@@ -50,10 +50,10 @@ import { Box, Stack, Tooltip, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
-import type { ExerciseStatus } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
 import { staffShellTokens } from '../staffShellTokens'
 import { useStaffPresence, useStaffRoleCell } from '../staffHeaderMocks'
+import { STATE_PILL_CONFIG, type StatePillConfig } from './statePillConfig'
 
 /**
  * Classification marking shown in every staff header (SHELL-CONTRACT §1
@@ -71,55 +71,17 @@ export interface StaffHeaderProps {
   previewActive?: boolean
   /** Invoked when the Preview-as button is activated. Story 04 supplies the real handler. */
   onTogglePreview?: () => void
-}
-
-interface StatePillConfig {
-  /** The conduct-state label — the pill's REQUIRED text half (NFR-001: never color-only). */
-  label: string
-  /** The dot + text color for this state. */
-  accentColor: string
-  background: string
-  borderColor: string
-}
-
-// On-navy severity accents for the exercise-state pill. Base COBRA palette
-// hues (`cobraTheme.palette.success`/`error`/etc., via `staffShellTokens.
-// accent`) are calibrated for the LIGHT work-area background, not this navy
-// header — reusing them verbatim here would render low-contrast/muddy
-// against `#1e3a5f`. These two navy-safe accents are this component's own
-// constants, following the same "define next to what renders it" rationale
-// `staffShellTokens.ts`'s module header gives for the header background
-// itself. The complete/archived states intentionally reuse
-// `staffShellTokens.header.textMuted` instead of adding two more one-off
-// colors — those states are deliberately unemphasized (conduct has ended).
-const STATE_PILL_LIVE_ACCENT = '#5fce9a'
-const STATE_PILL_STAGED_ACCENT = '#f5c56b'
-
-const STATE_PILL_CONFIG: Record<ExerciseStatus, StatePillConfig> = {
-  active: {
-    label: 'LIVE',
-    accentColor: STATE_PILL_LIVE_ACCENT,
-    background: 'rgba(51, 160, 111, 0.16)',
-    borderColor: 'rgba(51, 160, 111, 0.45)',
-  },
-  scheduled: {
-    label: 'STAGED',
-    accentColor: STATE_PILL_STAGED_ACCENT,
-    background: 'rgba(245, 166, 35, 0.16)',
-    borderColor: 'rgba(245, 166, 35, 0.5)',
-  },
-  complete: {
-    label: 'ENDEX',
-    accentColor: staffShellTokens.header.textMuted,
-    background: 'rgba(255, 255, 255, 0.08)',
-    borderColor: 'rgba(255, 255, 255, 0.22)',
-  },
-  archived: {
-    label: 'ARCHIVED',
-    accentColor: staffShellTokens.header.textMuted,
-    background: 'rgba(255, 255, 255, 0.05)',
-    borderColor: 'rgba(255, 255, 255, 0.16)',
-  },
+  /**
+   * Overrides the exercise-state pill's config (label + navy-safe accent), e.g.
+   * the world-steering tiered-pause state (INJECTS PAUSED / ENGINE PAUSED /
+   * WORLD FROZEN, D5-014/1.3 / D7-010). Left undefined, the pill shows the
+   * lifecycle status (LIVE / STAGED / ENDEX / ARCHIVED). Passed in — this shared
+   * header stays free of any surface-specific hook (a participant-role surface
+   * mounting it must never pull in the controller identity/pause seam). The
+   * `/console` route computes it from `usePauseState()` via
+   * {@link pauseStatePillConfig}.
+   */
+  stateOverride?: StatePillConfig
 }
 
 const TIME_WITH_SECONDS: Intl.DateTimeFormatOptions = {
@@ -175,6 +137,7 @@ export function StaffHeader({
   surfaceName,
   previewActive = false,
   onTogglePreview,
+  stateOverride,
 }: StaffHeaderProps) {
   const { exerciseName, timeZone, status } = useExerciseContext()
   const { role, cell } = useStaffRoleCell()
@@ -183,7 +146,9 @@ export function StaffHeader({
   const { now: scenarioInstant } = useScenarioTime(timeZone, CLOCK_TICK_MS)
   const wallInstant = useWallClockNow()
 
-  const statePill = STATE_PILL_CONFIG[status]
+  // The steering pause tier (when active) overrides the lifecycle status pill
+  // (D7-010); otherwise the lifecycle status drives it (LIVE / STAGED / ...).
+  const statePill = stateOverride ?? STATE_PILL_CONFIG[status]
   const scenarioTimeText = formatClock(scenarioInstant, timeZone, TIME_WITH_SECONDS)
   const wallTimeText = formatClock(wallInstant, undefined, TIME_ONLY)
   const wallDateText = formatClock(wallInstant, undefined, DAY_MONTH).toUpperCase()

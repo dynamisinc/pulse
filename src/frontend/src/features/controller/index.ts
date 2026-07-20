@@ -31,9 +31,14 @@ export { composeAsPersona } from './services/composeService'
 // persona-operation/03 — in-composer persona context.
 export { PersonaContextPanel } from './components/PersonaContextPanel'
 
-// world-steering/03 — tiered pause (the keystone primitive) + its pill.
-// The orchestrator wires the pill into StaffHeader.tsx and reads usePauseState()
-// for the header state-pill label override (integration seam, not built here).
+// world-steering/03 — tiered pause (the keystone primitive) + its control pill.
+// The /console route reads usePauseState() to drive the staff-header state-pill
+// label override; PausePill (the tier control) is docked in the console work area.
 export { usePauseState, PAUSE_TIER_LABELS } from './hooks/usePauseState'
 export type { PauseTier, PauseLabel, PauseState, OverlayRegister } from './hooks/usePauseState'
 export { PausePill } from './components/steering/PausePill'
+
+// world-steering/02 — storyline escalation dial (actual + target) + its hook.
+export { EscalationDial } from './components/steering/EscalationDial'
+export type { EscalationDialProps } from './components/steering/EscalationDial'
+export { useStorylineTarget } from './hooks/useStorylineTarget'
