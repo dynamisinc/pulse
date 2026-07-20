@@ -34,8 +34,10 @@ conduct) — see `docs/features/console-shell/03-static-identity-badge.md`.
 
 ## Dependencies
 The Exercise / Organization entities and the exercise-context resolution (which exercise a session
-belongs to). Blocks every channel epic (E2–E6), E7, E8. Backend not present yet — the query-filter
-layer is the first backend contract; the frontend consumes a scoped API.
+belongs to). Blocks every channel epic (E2–E6), E7, E8. **`backend-host`** (Phase B0,
+`docs/BACKEND_ROADMAP.md` §4): story 01's EF Core global query filter **extends** the `PulseDbContext`
+that `backend-host/02-persistence-efcore` stands up — that story is a serial prerequisite for story 01 to
+become buildable. The frontend consumes a scoped API.
 
 ## Design notes
 This is the hard dependency under the whole platform (XC-001). Isolation is enforced **centrally**

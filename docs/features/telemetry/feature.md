@@ -30,16 +30,21 @@ consuming surfaces). No design brief exists for this surface — it has no UI.
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
 | 01 | Telemetry emitter v0 (schema + mock sink) | XC-004 | Complete | #210 |
+| 02 | Telemetry sink (backend `POST /telemetry` ingest + durable store) | XC-004 | Not Started | #274 |
 
 ## Dependencies
-None (Wave 0 — the first of Pulse's three foundation seams to have zero upstream dependency). Consumed
-by nearly every later feature: `posts` (SOC-003/provenance), `persona-operation`, `identity-auth-roles`,
-`inject-queue`, all of E8 (`reaction-loop`, `storyline-model`, `response-reaction`, `silence-escalation`,
-`amplification-engine`, `autonomy-safety`, `persona-voice-engine`, `engine-generation-infra`,
-`engine-telemetry-tuning` — which **extends** this v0 schema, not forks it), `world-steering`,
-`evaluation-timeline`, `evaluation-metrics`, `evaluator-tools`, `aar-export`, `console-shell`,
-`staff-shell`. None of those are built yet; this feature exists so they have a stable contract to emit
-into from the moment each one lands.
+Story 01: none (Wave 0 — the first of Pulse's three foundation seams to have zero upstream dependency).
+Story 02 (backend sink): **`backend-host`** (Phase B0, `docs/BACKEND_ROADMAP.md` §4) —
+`backend-host/01-webapi-host-bootstrap` (the host it mounts in) and `backend-host/02-persistence-efcore`
+(the `PulseDbContext`/`DbSet<TelemetryEvent>` it writes through). Consumed by nearly every later feature:
+`posts` (SOC-003/provenance), `persona-operation`, `identity-auth-roles`, `inject-queue`, all of E8
+(`reaction-loop`, `storyline-model`, `response-reaction`, `silence-escalation`, `amplification-engine`,
+`autonomy-safety`, `persona-voice-engine`, `engine-generation-infra`, `engine-telemetry-tuning` — which
+**extends** this v0 schema, not forks it), `world-steering`, `evaluation-timeline`, `evaluation-metrics`,
+`evaluator-tools`, `aar-export`, `console-shell`, `staff-shell`. None of those are built yet; this feature
+exists so they have a stable contract to emit into from the moment each one lands. All of them depend on
+story 01 existing (the client-side emitter); none of them need to wait on story 02 (the frontend keeps
+emitting through the same mock-sink call regardless of whether the backend sink exists yet).
 
 ## Design notes
 World: **platform/foundation** — a pure `core/` module (`src/frontend/src/core/telemetry/`); no UI
