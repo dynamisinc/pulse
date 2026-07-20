@@ -53,3 +53,8 @@ export type { DraftTimeoutResolved, TimeoutEvaluation } from './services/autoHol
 export { approve, edit, veto, reroll, batchApprove } from './services/reviewActions'
 export type { ReviewActionContext, ReviewedAction, BatchApproveOutcome } from './services/reviewActions'
 export { reviewStore } from './services/reviewStore'
+
+// --- Swamped mode (story 03) — the lead-gated auto-send opt-in ---
+export { useSwampedMode } from './hooks/useSwampedMode'
+export type { UseSwampedModeResult } from './hooks/useSwampedMode'
+export { SwampedModeToggle } from './components/SwampedModeToggle'
