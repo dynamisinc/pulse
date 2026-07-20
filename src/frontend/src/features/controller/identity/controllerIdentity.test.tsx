@@ -46,6 +46,7 @@ describe('resolveMockControllerIdentity', () => {
       actingHumanId: 'human-controller-01',
       callSign: 'SIMCELL-1',
       role: 'controller',
+      isLead: true,
     })
   })
 
@@ -55,6 +56,12 @@ describe('resolveMockControllerIdentity', () => {
     expect(a.actingHumanId).not.toBe(b.actingHumanId)
     expect(a.role).toBe('controller')
     expect(b.role).toBe('controller')
+  })
+
+  it('isLead: true for the mock exercise, false for any other (derived) exercise (ADP-040)', () => {
+    expect(resolveMockControllerIdentity('ex-mock-0001').isLead).toBe(true)
+    expect(resolveMockControllerIdentity('ex-alpha').isLead).toBe(false)
+    expect(resolveMockControllerIdentity('ex-bravo').isLead).toBe(false)
   })
 })
 
@@ -66,6 +73,7 @@ describe('useControllerIdentity', () => {
       actingHumanId: 'human-controller-01',
       callSign: 'SIMCELL-1',
       role: 'controller',
+      isLead: true,
     })
   })
 

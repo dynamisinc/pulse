@@ -202,6 +202,56 @@ persona-dock host wired to the picker → composer → context panel, and the co
 
 ---
 
+## Engine Review Cockpit — Wave 1 ✅  · umbrella `feature/engine-review-cockpit`
+
+The controller HITL review queue landing surface for E8 (ADP-040): the cockpit the adaptive engine
+(Phase 2) will land drafted content into, built mock-first against the FROZEN backend Autonomy/Models
+contracts (`Pulse.Core/Features/Autonomy/Models/*`, `AutoHoldPolicy`, `WorkloadDemandMeter`) so the
+engine arrives to a ready surface. Three stories built serially onto the umbrella branch, each
+Gate-1 clean, then integrated into `/console` at a serial step.
+
+- ✅ `engine-review-cockpit/01-review-queue` — the keystone: a review-queue rail with per-item
+  persona + storyline context, approve / edit / veto / re-roll, batch approve, and its own inline
+  "N need review / N timers <60s" indicator as the single D5-014/2.1 source of truth (#34).
+- ✅ `engine-review-cockpit/02-timed-draft-auto-hold` — an expired timed draft **auto-HOLDs**, never
+  auto-sends, in the default configuration ("timer expired — held for you"); silence is never
+  approval (D5-014/1.1, supersedes D5-005) (#35).
+- ✅ `engine-review-cockpit/03-swamped-mode-toggle` — the **only** sanctioned path to timeout
+  auto-send: a lead-controller-gated, per-exercise, off-by-default toggle with a persistent
+  text+icon on-state banner; the engine never self-enables it (#36).
+
+**Serial integration step** (after the fan-out): `ReviewQueue` docked as a permanent 336px column in
+`ControllerConsole`'s work area, alongside the existing console chrome; the `EngineControlBar` control
+strip — the ADP-042 kill switch (Live → Suggest-only → STOP, cycling) + a degrade indicator + the
+CTL-034 demand meter ("N / 6") + the same inline "N need review / N timers <60s" indicator the docked
+queue reports (D5-014/2.1 consistency); `DraftTimerDriver` wiring each seeded counting-down item to
+`useDraftTimer`/`autoHoldPolicy` so expiry resolves Hold by default and `autoPublish` only under the
+swamped + still-Delayed-auto path, with the clamp-suspends-swamped composition (STOP / Suggest-only /
+degraded clamp all still hold) driven by the REAL `useEngineControl`; approve/edit routes through
+`reviewActions` → `createPost(origin: 'engine')` → `postStore` → the live participant feed with
+provenance stripped from the participant view; and the `EngineDraftEditComposer` (engine-origin edit
+slot, sanitizes before publish, NFR-004).
+
+> **Delivered** — all three stories Gate-1 clean (0 Critical), merged serially onto
+> `feature/engine-review-cockpit`; the integrated umbrella is Gate-2 clean (opus/xhigh — 0 Critical).
+> `build:check` + `lint` clean, **791/791 tests pass** (up from a 761 pre-integration baseline).
+> The load-bearing safety property, proven at both the unit and the docked-integration layer:
+> **auto-HOLD on timeout — inaction is never approval.** Timeout auto-send exists on exactly one
+> path — lead-gated swamped mode — and even that path HOLDs the moment the kill-switch or a degrade
+> clamp drops the effective autonomy below Delayed-auto; automation never escalates its own autonomy.
+>
+> **Follow-ups (not this wave):** the real backend engine API + reaction loop (a separate backend
+> wave — no `Pulse.WebApi` yet; this wave is frontend-only against the frozen contracts + mock
+> drafts); `AutonomyLevel.Auto` (reserved, not exposed this wave); the NEEDS-YOU bar
+> (`console-shell/02` — this feature's inline indicator is the interim single source of truth it will
+> read from once it lands); `world-steering`'s pause-suspends-timers wiring (no live storyline-target
+> or tiered-pause integration yet); and two field-for-field completeness nits flagged at Gate-2 — port
+> `AutonomyLevels.EnsureSelectable` from the backend model, and add a `currentScenarioMinute >= 0`
+> guard — both deferred until a real level selector lands (mock timers don't yet exercise either
+> edge).
+
+---
+
 ## Cross-feature serial edges (don't parallelize across these)
 - `participant-shell/04` (mount contract) **before** `staff-shell/04` (preview-as).
 - `staff-shell/02` (`registerSurfaceTool()`) **before** `console-shell` docks its toolbox.

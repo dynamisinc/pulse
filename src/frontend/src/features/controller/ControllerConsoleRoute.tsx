@@ -31,6 +31,16 @@
  *   in the participant view — `toParticipantView` strips it). COR-018/SOC-003/
  *   COR-053/NFR-004/XC-004/COR-001 all hold by construction of the reused seams.
  *
+ * SERIAL INTEGRATION — the engine review cockpit's edit composer (feature:
+ * engine-review-cockpit). `ControllerConsole` docks `<ReviewQueue>` itself; this
+ * composition root supplies ONLY its `editSlot` render prop
+ * (`EngineDraftEditComposer`), mirroring how `dockSlots`/`renderPersonaResults`
+ * are supplied here rather than imported by the consult-on-demand components
+ * themselves. The composer's `onSubmit` is `ReviewQueue`'s OWN `submitEdit`,
+ * which routes through `useReviewQueue().edit()` → `reviewActions.edit()` →
+ * the shipped `createPost` with `origin: 'engine'` (sanitized, NFR-004) — there
+ * is no second publish path here and no `'engine-edited'` origin.
+ *
  * Note: `SessionProvider` is deliberately NOT in this stack — the console's
  * operating identity is `useControllerIdentity()` (a Phase-1 mock; the one mock
  * session is a participant), exactly as the shipped `/evaluator` route mounts no
@@ -45,6 +55,7 @@ import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
 import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
 import { postStore } from '@/features/social/services/postStore'
+import { EngineDraftEditComposer, type ReviewQueueEditSlotProps } from './engine'
 import { ControllerConsole } from './components/ControllerConsole'
 import type { CommandPalettePersonaSlot } from './console/CommandPalette'
 import type { PersonaDockSlots } from './console/personaDockHost'
@@ -93,7 +104,20 @@ function ControllerConsoleContent() {
     [activePersona, identity.actingHumanId, identity.callSign],
   )
 
-  return <ControllerConsole renderPersonaResults={renderPersonaResults} dockSlots={dockSlots} />
+  // The docked review queue's edit composer — a stable render-prop identity so
+  // `<ReviewQueue>` doesn't remount its edit-slot host on every console render.
+  const reviewEditSlot = useCallback(
+    (props: ReviewQueueEditSlotProps) => <EngineDraftEditComposer {...props} />,
+    [],
+  )
+
+  return (
+    <ControllerConsole
+      renderPersonaResults={renderPersonaResults}
+      dockSlots={dockSlots}
+      reviewEditSlot={reviewEditSlot}
+    />
+  )
 }
 
 /**
