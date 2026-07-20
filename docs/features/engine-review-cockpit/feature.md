@@ -2,7 +2,7 @@
 
 **Epic:** E7 — Controller Command Surface (hosts E8's human-in-the-loop control)  ·  **Phase:** 1
 **Feature ref:** ADP-040 / F8.5 (engine-first: ships with the Phase-1 controller surface)
-**World:** staff  ·  **Issue:** #7  ·  **Status:** Stories decomposed — ready to build
+**World:** staff  ·  **Issue:** #7  ·  **Status:** Wave 1 delivered (stories 01–03 Complete) — kill switch (ADP-042) deferred to Phase 2 with E8
 
 > **Phase 0 reconciliation (done).** Stories/implementation.md checked against the FROZEN backend
 > contracts (`Pulse.Core/Features/Autonomy/Models/*`, `AutoHoldPolicy`, `WorkloadDemandMeter`) and the
@@ -33,9 +33,9 @@ auto-send on timeout except behind swamped mode).
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Review queue — approve / edit / veto / re-roll, batch, per-item context | ADP-040 | Not Started | #34 |
-| 02 | Timed-draft expiry **auto-HOLD** (never auto-send); surfaces in NEEDS YOU | ADP-040 / D5-014/1.1 | Not Started | #35 |
-| 03 | Swamped-mode toggle — lead-controller-gated auto-send opt-in | new / D5-014/1.1 | Not Started | #36 |
+| 01 | Review queue — approve / edit / veto / re-roll, batch, per-item context | ADP-040 | Complete | #34 |
+| 02 | Timed-draft expiry **auto-HOLD** (never auto-send); surfaces in NEEDS YOU | ADP-040 / D5-014/1.1 | Complete | #35 |
+| 03 | Swamped-mode toggle — lead-controller-gated auto-send opt-in | new / D5-014/1.1 | Complete | #36 |
 | — | Kill switch (drop engine to Suggest / stop) *(Phase 2 with E8)* | ADP-042 | Not Started | — |
 
 ## Dependencies
