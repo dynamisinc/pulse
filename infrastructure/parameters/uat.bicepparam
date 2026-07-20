@@ -24,6 +24,9 @@ param deployStorage = false
 param deployDatabase = true
 param deployBackend = true
 param deployCommunication = false
+// Flip to true when social-api/03-signalr-feed-host (B1 real-time) lands; bump signalRSkuName to
+// Standard_S1 for real exercise load (Free_F1 caps at 20 connections / 20k msgs/day).
+param deploySignalR = false
 
 // Flip to true to stand up the E8 Azure AI Foundry endpoint + model deployments (independent of the
 // backend). Needed for the story-06 measured cost/latency pass. See infrastructure/README.md.
