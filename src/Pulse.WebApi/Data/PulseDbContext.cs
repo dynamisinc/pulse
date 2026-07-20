@@ -1,5 +1,6 @@
 namespace Pulse.WebApi.Data;
 
+using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data.Entities;
 
@@ -24,10 +25,39 @@ using Pulse.WebApi.Data.Entities;
 /// </remarks>
 public class PulseDbContext : DbContext
 {
+    /// <summary>
+    /// Open generic handle to <see cref="ApplyExerciseScopeFilter{TEntity}"/>, resolved once and closed
+    /// per <see cref="IExerciseScoped"/> CLR type in <see cref="OnModelCreating"/>.
+    /// </summary>
+    private static readonly MethodInfo ApplyExerciseScopeFilterMethod =
+        typeof(PulseDbContext).GetMethod(
+            nameof(ApplyExerciseScopeFilter),
+            BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException(
+            $"Could not reflect {nameof(ApplyExerciseScopeFilter)} — the read-side exercise scope filter is unwired.");
+
+    /// <summary>
+    /// The exercise scope for the read-side global query filter, captured ONCE at construction. Fails
+    /// closed to <see cref="Guid.Empty"/> when no scope is resolved (see the constructor).
+    /// </summary>
+    private readonly Guid _currentExerciseId;
+
     /// <summary>Creates the context with externally-supplied options (DI / design-time / tests).</summary>
-    public PulseDbContext(DbContextOptions<PulseDbContext> options)
+    /// <param name="options">The EF Core options (provider, connection string).</param>
+    /// <param name="exerciseContext">
+    /// The current exercise scope for the read-side global query filter. OPTIONAL/nullable so the
+    /// design-time <see cref="PulseDbContextFactory"/> (which calls <c>new PulseDbContext(options)</c>) and
+    /// tests that don't care about scoping still compile and work; at runtime <c>AddDbContext</c> injects
+    /// the registered <see cref="IExerciseContext"/>. A <c>null</c> accessor — or a null
+    /// <see cref="IExerciseContext.CurrentExerciseId"/> — means "no scope resolved" and fails closed.
+    /// </param>
+    public PulseDbContext(DbContextOptions<PulseDbContext> options, IExerciseContext? exerciseContext = null)
         : base(options)
     {
+        // Fail-closed capture (the always-Critical property): an unset scope collapses to Guid.Empty,
+        // which the write-guard guarantees no scoped row ever carries — so the query filter matches zero
+        // rows, never all exercises. Read the reasoning in full in OnModelCreating.
+        _currentExerciseId = exerciseContext?.CurrentExerciseId ?? Guid.Empty;
     }
 
     /// <summary>The exercise runs — the aggregate root / isolation scope.</summary>
@@ -104,12 +134,44 @@ public class PulseDbContext : DbContext
         });
 
         // ------------------------------------------------------------------------------------------
-        // EXTENSION POINT — exercise-isolation/01 (#44) ADDS the read-side global query filter HERE:
-        //   modelBuilder.Entity<Persona>().HasQueryFilter(...); (and Post, TelemetryEvent)
-        // Do NOT add HasQueryFilter in THIS story — it is exercise-isolation/01's diff. Adding it here
-        // is scope creep and would collide with that story. This story delivers only the schema +
-        // write-time halves of isolation (see the class remarks); the read-side filter completes it.
+        // READ-SIDE GLOBAL QUERY FILTER — exercise-isolation/01 (#44): the always-Critical read half of
+        // the isolation guarantee (COR-001). Applied CENTRALLY to EVERY IExerciseScoped entity by
+        // reflecting over the model — not entity-by-entity — so a newly-added scoped entity is covered
+        // automatically and a new endpoint cannot accidentally omit the scope (the whole reason this lives
+        // here, once, and not on each query).
+        //
+        // FAIL CLOSED (captured in the ctor): _currentExerciseId is
+        //     accessor?.CurrentExerciseId ?? Guid.Empty
+        // so an UNSET scope (no IExerciseContext, or CurrentExerciseId == null) is Guid.Empty. The
+        // write-time guard below (GuardExerciseScope — deliberately untouched by this story) forbids
+        // persisting any scoped row with ExerciseId == Guid.Empty, so the predicate
+        // `e.ExerciseId == Guid.Empty` can match NOTHING. An unresolved scope therefore yields ZERO rows,
+        // never all exercises — a closed door, not an open one. Do NOT invert this to a "null scope sees
+        // everything" default: that would fail OPEN and leak across exercises.
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (typeof(IExerciseScoped).IsAssignableFrom(entityType.ClrType))
+            {
+                ApplyExerciseScopeFilterMethod
+                    .MakeGenericMethod(entityType.ClrType)
+                    .Invoke(this, [modelBuilder]);
+            }
+        }
         // ------------------------------------------------------------------------------------------
+    }
+
+    /// <summary>
+    /// Adds the read-side global query filter to one <see cref="IExerciseScoped"/> entity. Kept as a
+    /// strongly-typed generic (rather than a hand-built <see cref="System.Linq.Expressions.Expression"/>)
+    /// so the predicate closes over THIS context instance's <see cref="_currentExerciseId"/> field the way
+    /// EF Core recognises: it is re-read as a query parameter on every query, so the single cached model
+    /// serves every context instance / scope correctly. Invoked via reflection from
+    /// <see cref="OnModelCreating"/> for each scoped entity type.
+    /// </summary>
+    private void ApplyExerciseScopeFilter<TEntity>(ModelBuilder modelBuilder)
+        where TEntity : class, IExerciseScoped
+    {
+        modelBuilder.Entity<TEntity>().HasQueryFilter(e => e.ExerciseId == _currentExerciseId);
     }
 
     /// <inheritdoc />

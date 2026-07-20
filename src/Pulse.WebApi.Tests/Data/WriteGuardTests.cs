@@ -52,7 +52,9 @@ public class WriteGuardTests
         // Zero-rows-written half of the fail-closed guarantee: query with a SEPARATE context so the
         // (correctly non-persisted) locally-tracked entity can't make the assertion pass for the wrong reason.
         await using var verifyContext = _fixture.CreateContext();
-        var count = await verifyContext.Posts.CountAsync(p => p.Id == postId);
+        // IgnoreQueryFilters: assert PHYSICAL persistence, so the read-side exercise filter can never mask
+        // a leaked/absent row and make this write-guard assertion pass for the wrong reason.
+        var count = await verifyContext.Posts.IgnoreQueryFilters().CountAsync(p => p.Id == postId);
         count.Should().Be(0, "the rejected Post must never have been written to the database");
     }
 
@@ -82,7 +84,8 @@ public class WriteGuardTests
             "the write-time guard must reject a scoped TelemetryEvent with a default ExerciseId before it reaches the database");
 
         await using var verifyContext = _fixture.CreateContext();
-        var count = await verifyContext.TelemetryEvents.CountAsync(e => e.EventId == eventId);
+        // IgnoreQueryFilters: assert PHYSICAL persistence, independent of the read-side exercise filter.
+        var count = await verifyContext.TelemetryEvents.IgnoreQueryFilters().CountAsync(e => e.EventId == eventId);
         count.Should().Be(0, "the rejected TelemetryEvent must never have been written to the database");
     }
 
@@ -117,10 +120,12 @@ public class WriteGuardTests
         await act.Should().ThrowAsync<ExerciseScopeViolationException>(
             "one invalid scoped entity in a batch must fail the whole SaveChangesAsync call, not just itself");
 
+        // IgnoreQueryFilters on the scoped Post reads: assert PHYSICAL absence, independent of the
+        // read-side exercise filter. (Exercise is not IExerciseScoped, so it carries no filter.)
         await using var verifyContext = _fixture.CreateContext();
-        (await verifyContext.Posts.CountAsync(p => p.Id == validPostId)).Should().Be(
+        (await verifyContext.Posts.IgnoreQueryFilters().CountAsync(p => p.Id == validPostId)).Should().Be(
             0, "the guard runs before base.SaveChangesAsync, so even the otherwise-valid Post in the same batch must not be written");
-        (await verifyContext.Posts.CountAsync(p => p.Id == invalidPostId)).Should().Be(0);
+        (await verifyContext.Posts.IgnoreQueryFilters().CountAsync(p => p.Id == invalidPostId)).Should().Be(0);
         (await verifyContext.Exercises.CountAsync(e => e.Id == exerciseId)).Should().Be(
             0, "the anchor Exercise queued in the same failed SaveChangesAsync call must not be written either");
     }
@@ -149,7 +154,9 @@ public class WriteGuardTests
         }
 
         await using var verifyContext = _fixture.CreateContext();
-        var count = await verifyContext.Posts.CountAsync(p => p.Id == postId);
+        // IgnoreQueryFilters: assert PHYSICAL persistence, so the read-side exercise filter can never mask
+        // a leaked/absent row and make this write-guard assertion pass for the wrong reason.
+        var count = await verifyContext.Posts.IgnoreQueryFilters().CountAsync(p => p.Id == postId);
         count.Should().Be(1, "the validly-scoped Post must have actually reached the database");
     }
 }

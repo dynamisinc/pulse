@@ -99,8 +99,10 @@ public class MigrationRoundTripTests
             await writeContext.SaveChangesAsync();
         }
 
+        // IgnoreQueryFilters: this is a persistence round-trip, not an isolation test — read back the row
+        // regardless of the (unscoped) read context's now-active exercise query filter.
         await using var readContext = _fixture.CreateContext();
-        var reloaded = await readContext.Personas.SingleAsync(p => p.Id == personaId);
+        var reloaded = await readContext.Personas.IgnoreQueryFilters().SingleAsync(p => p.Id == personaId);
 
         reloaded.ExerciseId.Should().Be(exerciseId);
         reloaded.ExerciseId.Should().NotBe(Guid.Empty, "scoped rows must carry a real ExerciseId");
@@ -134,8 +136,9 @@ public class MigrationRoundTripTests
             await writeContext.SaveChangesAsync();
         }
 
+        // IgnoreQueryFilters: persistence round-trip, not an isolation test (see Persona_RoundTrips).
         await using var readContext = _fixture.CreateContext();
-        var reloaded = await readContext.Posts.SingleAsync(p => p.Id == postId);
+        var reloaded = await readContext.Posts.IgnoreQueryFilters().SingleAsync(p => p.Id == postId);
 
         reloaded.ExerciseId.Should().Be(exerciseId);
         reloaded.ExerciseId.Should().NotBe(Guid.Empty, "scoped rows must carry a real ExerciseId");
@@ -195,8 +198,9 @@ public class MigrationRoundTripTests
             await writeContext.SaveChangesAsync();
         }
 
+        // IgnoreQueryFilters: persistence round-trip, not an isolation test (see Persona_RoundTrips).
         await using var readContext = _fixture.CreateContext();
-        var reloaded = await readContext.TelemetryEvents.SingleAsync(e => e.EventId == eventId);
+        var reloaded = await readContext.TelemetryEvents.IgnoreQueryFilters().SingleAsync(e => e.EventId == eventId);
 
         reloaded.EventId.Should().Be(eventId);
         reloaded.SchemaVersion.Should().Be("v0");
@@ -261,8 +265,9 @@ public class MigrationRoundTripTests
             await writeContext.SaveChangesAsync();
         }
 
+        // IgnoreQueryFilters: persistence round-trip, not an isolation test (see Persona_RoundTrips).
         await using var readContext = _fixture.CreateContext();
-        var reloaded = await readContext.TelemetryEvents.SingleAsync(e => e.EventId == eventId);
+        var reloaded = await readContext.TelemetryEvents.IgnoreQueryFilters().SingleAsync(e => e.EventId == eventId);
 
         reloaded.Target.Should().BeNull(
             "an event with no target must round-trip as a real null, not an owned instance with all-null sub-fields");

@@ -49,7 +49,8 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
 
     private MsSqlContainer? _container;
 
-    private string? ConnectionString { get; set; }
+    /// <summary>The live container's connection string, available once <see cref="InitializeAsync"/> has run.</summary>
+    public string? ConnectionString { get; private set; }
 
     /// <inheritdoc />
     public async Task InitializeAsync()
@@ -72,8 +73,20 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
         }
     }
 
-    /// <summary>Builds a fresh, independently-tracked <see cref="PulseDbContext"/> against the shared container.</summary>
-    public PulseDbContext CreateContext()
+    /// <summary>
+    /// Builds a fresh, independently-tracked <see cref="PulseDbContext"/> against the shared container with
+    /// NO exercise scope resolved — the fail-closed default. Used by the persistence/write-guard tests,
+    /// which read back through <c>IgnoreQueryFilters()</c> to assert physical persistence independently of
+    /// the read-side filter.
+    /// </summary>
+    public PulseDbContext CreateContext() => CreateContext(exerciseContext: null);
+
+    /// <summary>
+    /// Builds a fresh, independently-tracked <see cref="PulseDbContext"/> against the shared container whose
+    /// read-side global query filter is bound to <paramref name="exerciseContext"/>. Pass <c>null</c> for
+    /// the fail-closed "no scope resolved" case.
+    /// </summary>
+    public PulseDbContext CreateContext(IExerciseContext? exerciseContext)
     {
         if (ConnectionString is null)
         {
@@ -85,7 +98,7 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
             .UseSqlServer(ConnectionString)
             .Options;
 
-        return new PulseDbContext(options);
+        return new PulseDbContext(options, exerciseContext);
     }
 }
 
