@@ -30,12 +30,15 @@ name: Deploy Backend
 on:
   push:
     branches: [main]
+    # Fires on real backend CODE changes only. Deliberately NOT triggered by edits to this workflow
+    # file itself — a deploy pipeline should not redeploy just because its own YAML changed (and the
+    # very first merge of this file would otherwise attempt a deploy before the infra exists). Use the
+    # workflow_dispatch below to run it on demand.
     paths:
       - "src/Pulse.WebApi/**"
       - "src/Pulse.Core/**"
       - "global.json"
       - "pulse.slnx"
-      - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
     inputs:
       environment:
