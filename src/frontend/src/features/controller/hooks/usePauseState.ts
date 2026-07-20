@@ -45,8 +45,12 @@
  * the action): `channel: 'system'`, `actor: { kind: 'system', actingHumanId,
  * role }`, `target: { entityType: 'exercise', entityId }`, `payload` naming the
  * transition. `exerciseId`/`timeZone` are STAMPING-ONLY (COR-001), sourced from
- * `useExerciseContext()`; the acting human from `useControllerIdentity()`
- * (COR-018), the role from `useRole()`. Staff-only (XC-002).
+ * `useExerciseContext()`; the acting human AND role from `useControllerIdentity()`
+ * (COR-018; the console's operating identity is the controller-identity seam, not
+ * a `SessionProvider`/`useRole()` read — staff routes mount no session, and the
+ * mock session is a participant, so `useControllerIdentity().role` (`'controller'`)
+ * is the correct, SessionProvider-free actor role, matching `reviewActions.ts`).
+ * Staff-only (XC-002).
  *
  * ## Overlay register (seam only)
  * `overlayRegister` (`'in-fiction' | 'out-of-fiction'`) is exposed alongside the
@@ -61,7 +65,6 @@ import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import { scenarioNow } from '@/core/clock'
 import { useExerciseContext } from '@/core/exerciseContext'
-import { useRole } from '@/core/auth'
 import { useControllerIdentity } from '../identity/controllerIdentity'
 import { pausableExerciseClock } from '../services/pausableExerciseClock'
 
@@ -193,13 +196,12 @@ export function resetPauseStateForTest(): void {
  * The tiered-pause primitive. Reads the shared ambient pause fact and exposes
  * the tier, its label, the overlay-register seam, and the setters — every tier
  * change (incl. back to `running`) emits ONE `steering_action` telemetry event.
- * Must be called under an `<ExerciseContextProvider>` + `SessionProvider`
- * (fail-closed via `useExerciseContext()`/`useRole()`).
+ * Must be called under an `<ExerciseContextProvider>` (fail-closed via
+ * `useExerciseContext()`/`useControllerIdentity()`).
  */
 export function usePauseState(): PauseState {
   const { exerciseId, timeZone } = useExerciseContext()
-  const { actingHumanId } = useControllerIdentity()
-  const role = useRole()
+  const { actingHumanId, role } = useControllerIdentity()
 
   const state = useSyncExternalStore(subscribeStore, getStoreSnapshot, getStoreSnapshot)
 

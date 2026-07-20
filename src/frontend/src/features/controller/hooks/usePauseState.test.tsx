@@ -16,10 +16,10 @@
  *    `steering_action` telemetry event with the correct actor/target/payload,
  *    scoped to the active exercise (COR-001).
  *
- * `@/core/exerciseContext`, `@/core/auth`, and the sibling `controllerIdentity`
- * module are mocked at the module boundary (mirrors `useSwampedMode.test.tsx`
- * / `useEngineControl.test.ts`'s hook-mock precedent) so each test controls
- * the exercise scope, role, and identity directly and deterministically.
+ * `@/core/exerciseContext` and the sibling `controllerIdentity` module are
+ * mocked at the module boundary (mirrors `useSwampedMode.test.tsx` /
+ * `useEngineControl.test.ts`'s hook-mock precedent) so each test controls the
+ * exercise scope + identity (which carries the actor role) deterministically.
  * `@/core/clock`'s real `setExerciseClock`/`resetExerciseClock`/`scenarioNow`
  * are used (not mocked) so the pausable-clock installation is exercised
  * end-to-end, with a controllable wall-clock source substituted underneath.
@@ -28,7 +28,6 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getExerciseClock, resetExerciseClock, scenarioNow } from '@/core/clock'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
-import { useRole, type ExerciseRole } from '@/core/auth'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { useControllerIdentity, type ControllerIdentity } from '../identity/controllerIdentity'
 import { pausableExerciseClock } from '../services/pausableExerciseClock'
@@ -37,15 +36,11 @@ import { resetPauseStateForTest, usePauseState } from './usePauseState'
 vi.mock('@/core/exerciseContext', () => ({
   useExerciseContext: vi.fn(),
 }))
-vi.mock('@/core/auth', () => ({
-  useRole: vi.fn(),
-}))
 vi.mock('../identity/controllerIdentity', () => ({
   useControllerIdentity: vi.fn(),
 }))
 
 const mockedUseExerciseContext = vi.mocked(useExerciseContext)
-const mockedUseRole = vi.mocked(useRole)
 const mockedUseControllerIdentity = vi.mocked(useControllerIdentity)
 
 function scopeFor(exerciseId: string): ExerciseScope {
@@ -62,17 +57,12 @@ function identity(overrides: Partial<ControllerIdentity> = {}): ControllerIdenti
   }
 }
 
-function role(value: ExerciseRole = 'controller'): ExerciseRole {
-  return value
-}
-
 function steeringEvents() {
   return getEmittedTelemetryEvents().filter(e => e.eventType === 'steering_action')
 }
 
 beforeEach(() => {
   mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
-  mockedUseRole.mockReturnValue(role('controller'))
   mockedUseControllerIdentity.mockReturnValue(identity())
   resetTelemetryBuffer()
   resetPauseStateForTest()
@@ -248,7 +238,6 @@ describe('usePauseState — telemetry (XC-004)', () => {
   it('emits exactly one steering_action event per tier change, with actor/target/payload', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
     mockedUseControllerIdentity.mockReturnValue(identity({ actingHumanId: 'human-lead-1' }))
-    mockedUseRole.mockReturnValue(role('controller'))
 
     const { result } = renderHook(() => usePauseState())
     act(() => result.current.setTier('injects'))
