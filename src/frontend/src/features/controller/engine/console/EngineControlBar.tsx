@@ -159,7 +159,9 @@ export function EngineControlBar() {
             Restore
           </Box>
         </Stack>
-      ) : (
+      ) : import.meta.env.DEV ? (
+        // Dev-only affordance: `degrade()` trips a safety clamp, so it must not
+        // be reachable by an operator in a real (production) exercise build.
         <Box
           component="button"
           type="button"
@@ -180,7 +182,7 @@ export function EngineControlBar() {
         >
           Simulate degraded (dev)
         </Box>
-      )}
+      ) : null}
 
       <Box sx={{ width: '1px', alignSelf: 'stretch', bgcolor: chrome.line }} />
 

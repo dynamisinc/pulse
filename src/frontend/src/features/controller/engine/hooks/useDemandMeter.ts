@@ -115,10 +115,14 @@ export function useDemandMeter(): UseDemandMeterResult {
 
       const nowMinute = scenarioMinuteOf(scenarioNow().getTime())
       const lowerExclusive = nowMinute - WINDOW_MINUTES
-      setDemand(
-        demandMinutesRef.current.filter(minute => minute > lowerExclusive && minute <= nowMinute)
-          .length,
+      // Prune the buffer to the active rolling window each scan so it stays
+      // O(window) rather than growing unbounded over a long console session
+      // (mirrors the C# WorkloadDemandMeter's auto-prune). Only this window is
+      // ever queried, so trimming to it is lossless for the meter.
+      demandMinutesRef.current = demandMinutesRef.current.filter(
+        minute => minute > lowerExclusive && minute <= nowMinute,
       )
+      setDemand(demandMinutesRef.current.length)
     }
 
     scan()
