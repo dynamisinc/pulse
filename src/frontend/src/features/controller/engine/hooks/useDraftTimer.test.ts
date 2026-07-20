@@ -21,6 +21,8 @@ import {
   AutonomyLevel,
   ControllerDecision,
   DelayedAutoCountdown,
+  DraftDisposition,
+  EngineReviewItem,
   STOPPED_AUTONOMY,
   TimeoutDisposition,
   runningAutonomy,
@@ -96,6 +98,47 @@ describe('useDraftTimer — counting down (not yet expired)', () => {
     expect(result.current.label).toBe('holds in 1:30')
     expect(onResolve).not.toHaveBeenCalled()
     expect(reviewedEvents()).toHaveLength(0)
+  })
+})
+
+describe('useDraftTimer — scenario-time countdown decreases as scenario minute advances', () => {
+  it('minutesRemaining counts down 5..0 purely from the injected scenario clock, never wall-clock', () => {
+    // Same countdown (deadline 105); only the injected scenario minute moves. Wall-
+    // clock is never touched — the hook reads exclusively from `now`.
+    const observed = [100, 101, 102, 103, 104, 105, 999].map(minute => {
+      const { result } = renderHook(() =>
+        useDraftTimer(makeCountdown(), delayedAuto, false, { now: clockAt(minute) }),
+      )
+      return result.current.minutesRemaining
+    })
+
+    expect(observed).toEqual([5, 4, 3, 2, 1, 0, 0])
+    // Strictly non-increasing as scenario time advances (never resets/increases).
+    for (let i = 1; i < observed.length; i += 1) {
+      const current = observed[i] ?? 0
+      const previous = observed[i - 1] ?? 0
+      expect(current).toBeLessThanOrEqual(previous)
+    }
+  })
+
+  it('advances live as the injected clock ticks forward (no rerender/remount needed)', () => {
+    vi.useFakeTimers()
+    let minute = 100
+    const now = () => new Date(minute * 60_000)
+
+    const { result } = renderHook(() =>
+      useDraftTimer(makeCountdown(), delayedAuto, false, { now, tickMs: 1000 }),
+    )
+    expect(result.current.minutesRemaining).toBe(5)
+
+    minute = 103
+    act(() => vi.advanceTimersByTime(1000))
+    expect(result.current.minutesRemaining).toBe(2)
+
+    minute = 105
+    act(() => vi.advanceTimersByTime(1000))
+    expect(result.current.minutesRemaining).toBe(0)
+    expect(result.current.hasExpired).toBe(true)
   })
 })
 
@@ -204,6 +247,70 @@ describe('useDraftTimer — an explicit human decision is not a timeout transiti
     expect(result.current.disposition).toBe(TimeoutDisposition.Hold)
     expect(onResolve).not.toHaveBeenCalled()
     expect(reviewedEvents()).toHaveLength(0)
+  })
+
+  it('resolves an approved draft to Publish regardless of the timer (even before expiry), and does not log a timeout transition', () => {
+    const onResolve = vi.fn()
+    // Minute 101 — well before the minute-105 deadline. An explicit approval wins
+    // over the still-running countdown (autoHoldPolicy precedence #2).
+    const { result } = renderHook(() =>
+      useDraftTimer(makeCountdown(ControllerDecision.Approved), delayedAuto, false, {
+        onResolve,
+        now: clockAt(101),
+      }),
+    )
+
+    expect(result.current.disposition).toBe(TimeoutDisposition.Publish)
+    // A human decision is logged on the review-action path (`reviewActions`), not
+    // here — this hook only resolves/logs an on-expiry, NO-decision transition.
+    expect(onResolve).not.toHaveBeenCalled()
+    expect(reviewedEvents()).toHaveLength(0)
+  })
+
+  it('resolves an approved draft to Publish even past the deadline (approval, not expiry, drives it)', () => {
+    const { result } = renderHook(() =>
+      useDraftTimer(makeCountdown(ControllerDecision.Approved), delayedAuto, false, {
+        now: clockAt(200),
+      }),
+    )
+
+    expect(result.current.disposition).toBe(TimeoutDisposition.Publish)
+    expect(reviewedEvents()).toHaveLength(0)
+  })
+})
+
+describe('useDraftTimer — held-on-expiry marks the item as needing the controller', () => {
+  it('feeds story 01\'s EngineReviewItem.needsController via the same frozen contract (not a re-derived copy)', () => {
+    // Wire the hook's terminal Hold the way integration will: onResolve flips the
+    // item's disposition to Held through the SAME EngineReviewItem the queue uses.
+    const item = new EngineReviewItem({
+      exerciseId: EX,
+      storylineId: STORY,
+      draftId: DRAFT,
+      routedAtLevel: AutonomyLevel.DelayedAuto,
+      disposition: DraftDisposition.CountingDown,
+      countdown: makeCountdown(),
+      posts: [],
+      storylineTag: '#Test',
+      storylineBrief: 'brief',
+      actionLabel: 'reply',
+    })
+    expect(item.needsController).toBe(false) // still counting down — no decision needed yet
+
+    let held: EngineReviewItem | undefined
+    renderHook(() =>
+      useDraftTimer(makeCountdown(), delayedAuto, false, {
+        now: clockAt(105),
+        onResolve: disposition => {
+          if (disposition === TimeoutDisposition.Hold) {
+            held = item.withDisposition(DraftDisposition.Held)
+          }
+        },
+      }),
+    )
+
+    expect(held?.disposition).toBe(DraftDisposition.Held)
+    expect(held?.needsController).toBe(true)
   })
 })
 
