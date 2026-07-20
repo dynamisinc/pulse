@@ -14,6 +14,10 @@
  *  - the phase label renders as uppercase TEXT alongside the track;
  *  - actual vs. target is distinguishable WITHOUT color alone — separate
  *    icon+text labels ("ACTUAL n" / "TARGET n"), not merely two hues.
+ *  - a drag gesture (pointerdown -> pointermoves -> pointerup) emits exactly
+ *    ONE `steering_action` telemetry event (XC-004 hygiene, Gate-1 Minor) —
+ *    NOT one per `pointermove`; a discrete click and each keyboard set
+ *    likewise emit exactly one event.
  *
  * Rendered through the REAL `ExerciseContextProvider` (mirrors
  * `EngineControlBar.test.tsx`). jsdom does not implement the Pointer Capture
@@ -27,7 +31,7 @@ import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
-import { resetTelemetryBuffer } from '@/core/telemetry'
+import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { storylineMock } from '../../services/storylineMock'
 import { EscalationDial } from './EscalationDial'
 
@@ -74,6 +78,10 @@ function stubPointerCapture(track: HTMLElement): void {
   track.setPointerCapture = vi.fn()
   track.releasePointerCapture = vi.fn()
   track.hasPointerCapture = vi.fn().mockReturnValue(true)
+}
+
+function steeringEvents() {
+  return getEmittedTelemetryEvents().filter(e => e.eventType === 'steering_action')
 }
 
 describe('EscalationDial — one track, actual fill + target tick (D5-014/2.2)', () => {
@@ -246,5 +254,64 @@ describe('EscalationDial — actual vs. target distinguishable without color alo
     // grayscale render) still distinguishes "ACTUAL n" from "TARGET n".
     expect(screen.getByTestId('escalation-dial-actual-label').textContent).toMatch(/^ACTUAL \d+$/)
     expect(screen.getByTestId('escalation-dial-target-label').textContent).toMatch(/^TARGET \d+$/)
+  })
+})
+
+describe('EscalationDial — telemetry hygiene: one event per gesture (XC-004, Gate-1 Minor)', () => {
+  it('a drag (pointerdown -> several pointermoves -> pointerup) emits exactly ONE steering_action event', async () => {
+    await renderDial()
+    const track = screen.getByTestId('escalation-dial-track')
+    stubTrackGeometry(track)
+    stubPointerCapture(track)
+
+    fireEvent.pointerDown(track, { clientX: 20, pointerId: 1 }) // 10%
+    fireEvent.pointerMove(track, { clientX: 60, pointerId: 1 }) // 30%
+    fireEvent.pointerMove(track, { clientX: 100, pointerId: 1 }) // 50%
+    fireEvent.pointerMove(track, { clientX: 160, pointerId: 1 }) // 80%
+    fireEvent.pointerUp(track, { pointerId: 1 })
+
+    expect(screen.getByTestId('escalation-dial-target-label')).toHaveTextContent('TARGET 80')
+    expect(steeringEvents()).toHaveLength(1)
+    expect(steeringEvents()[0]?.payload).toMatchObject({ from: null, to: 80 })
+  })
+
+  it('a discrete click (pointerdown -> pointerup, no move) emits exactly ONE steering_action event', async () => {
+    await renderDial()
+    const track = screen.getByTestId('escalation-dial-track')
+    stubTrackGeometry(track)
+    stubPointerCapture(track)
+
+    fireEvent.pointerDown(track, { clientX: 120, pointerId: 1 }) // 60%
+    fireEvent.pointerUp(track, { pointerId: 1 })
+
+    expect(steeringEvents()).toHaveLength(1)
+  })
+
+  it('each keyboard set (Arrow/Home/End) emits exactly ONE steering_action event', async () => {
+    await renderDial()
+    const track = screen.getByTestId('escalation-dial-track')
+
+    track.focus()
+    fireEvent.keyDown(track, { key: 'ArrowRight' })
+    expect(steeringEvents()).toHaveLength(1)
+
+    fireEvent.keyDown(track, { key: 'End' })
+    expect(steeringEvents()).toHaveLength(2)
+
+    fireEvent.keyDown(track, { key: 'Home' })
+    expect(steeringEvents()).toHaveLength(3)
+  })
+
+  it('a set that resolves to the SAME value as the current target emits ZERO events (no-op guard)', async () => {
+    await renderDial()
+    const track = screen.getByTestId('escalation-dial-track')
+
+    track.focus()
+    fireEvent.keyDown(track, { key: 'End' }) // 62 -> 100
+    expect(steeringEvents()).toHaveLength(1)
+
+    fireEvent.keyDown(track, { key: 'End' }) // already 100 -> no-op
+    expect(steeringEvents()).toHaveLength(1)
+    expect(screen.getByTestId('escalation-dial-target-label')).toHaveTextContent('TARGET 100')
   })
 })

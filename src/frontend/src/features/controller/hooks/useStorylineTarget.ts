@@ -14,7 +14,10 @@
  *     engine-follow tick (`Storyline.Tick`'s `TickTowardTarget` branch, which
  *     runs server-side) to consume later — that loop itself is a no-op stub
  *     this pass; this hook only captures + exposes the target.
- *   - Each call emits exactly ONE `steering_action` telemetry event (XC-004)
+ *   - A call that resolves to the SAME value as the current target (a no-op,
+ *     e.g. `End` while already at 100) records + emits NOTHING — guards
+ *     against redundant `"100 -> 100"`-style events (XC-004 hygiene).
+ *   - Otherwise, each call emits exactly ONE `steering_action` telemetry event (XC-004)
  *     via the caller-safe `buildAndEmit`, mirroring `reviewActions.ts`'s
  *     `emitReviewed()` shape: `channel: 'system'`, `actor: { kind: 'system',
  *     actingHumanId, role }` (a controller/system action on world state, not
@@ -96,6 +99,11 @@ export function useStorylineTarget(
 
   const applyTarget = useCallback(
     (value: number | null) => {
+      // No-op guard (Gate-1 Minor): a resolved target equal to the current
+      // one (e.g. End while already at 100, or a drag rounding back to the
+      // same value) records/emits NOTHING — no redundant "100 -> 100" event.
+      if (storylineMock.getStoryline().targetIntensity === value) return
+
       const change = storylineMock.setTargetIntensity(value)
       setLastChangeDetail(change.detail)
 

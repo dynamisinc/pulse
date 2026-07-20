@@ -12,7 +12,9 @@
  *    exposes the exact transition detail (`lastChangeDetail`) — the value
  *    `<EscalationDial>` renders verbatim;
  *  - `clearTarget` unsets the target (`targetIntensity` -> `null`);
- *  - each call emits exactly ONE `steering_action` telemetry event (XC-004)
+ *  - a call that resolves to the SAME value as the current target is a no-op
+ *    — records/emits NOTHING (Gate-1 Minor: no redundant "100 -> 100" events);
+ *  - each (non-no-op) call emits exactly ONE `steering_action` telemetry event (XC-004)
  *    with `channel: 'system'`, `actor: { kind: 'system', actingHumanId, role }`,
  *    `target: { entityType: 'storyline', entityId }`, and a payload carrying
  *    the before/after detail — scoped to the active exercise (`exerciseId`
@@ -162,6 +164,30 @@ describe('useStorylineTarget — setTarget', () => {
     })
     expect(evt?.scenarioTime).toBe(SCENARIO_TIME)
     expect(evt?.timeZone).toBe('America/New_York')
+  })
+
+  it('a setTarget that resolves to the SAME value as the current target is a no-op: no record, no emit', () => {
+    const { result } = renderHook(() => useStorylineTarget())
+
+    act(() => result.current.setTarget(100)) // none -> 100
+    expect(steeringEvents()).toHaveLength(1)
+
+    act(() => result.current.setTarget(100)) // already 100 -> no-op
+
+    expect(steeringEvents()).toHaveLength(1) // still just the one from the real change
+    expect(result.current.targetIntensity).toBe(100)
+    expect(result.current.lastChangeDetail).toBe('none → 100') // unchanged by the no-op
+  })
+
+  it('a value that clamps down to the current target (e.g. 150 then a further 150) is also a no-op', () => {
+    const { result } = renderHook(() => useStorylineTarget())
+
+    act(() => result.current.setTarget(150)) // clamps to 100
+    expect(steeringEvents()).toHaveLength(1)
+
+    act(() => result.current.setTarget(999)) // clamps to 100 again -> no-op
+
+    expect(steeringEvents()).toHaveLength(1)
   })
 
   it('honors an explicit storylineId (a future per-card dial reuse, D5-016/017)', () => {
