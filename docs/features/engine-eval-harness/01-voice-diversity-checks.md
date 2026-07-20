@@ -1,7 +1,13 @@
 # Story: Voice-diversity & fidelity checks
 
-**Feature:** Engine eval harness  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Engine eval harness  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-021  ·  **Design decisions:** none  ·  **Issue:** #175
+
+> **Delivered:** `Pulse.Core/Features/EngineEval/VoiceDiversityRegression.cs` + `VoiceDiversityRegressionTests`
+> — a maintained labeled corpus scored by the **same** `BurstAcceptancePolicy.Evaluate` (over `VoiceMetrics`
+> + `StyleConformance`) the pre-review gate uses (one implementation, two call sites), plus `HumanSpotCheck`
+> + `ProxyTracksHumans` for the panel-vs-proxy comparison. The gate is real: clean passes, blended fails on
+> overlap, off-voice fails on conformance.
 
 ## Context
 ADP-021 requires diversity checks in acceptance criteria. This story runs the §5.3 believable+diverse
@@ -11,16 +17,16 @@ periodic **human spot-check** panels during tuning to keep the automated proxies
 CI-style regression as prompts/models change.
 
 ## Acceptance Criteria
-- [ ] Given a corpus of generated bursts, when the check runs, then it scores each against the §5.3
+- [x] Given a corpus of generated bursts, when the check runs, then it scores each against the §5.3
       metric and reports pass/fail per burst with the failing check(s) named.
-- [ ] Given a prompt or model change, when the regression runs, then any drop below the diversity/
+- [x] Given a prompt or model change, when the regression runs, then any drop below the diversity/
       fidelity thresholds is surfaced as a failure (guards against a change that quietly flattens the
       crowd voice).
-- [ ] Given tuning, when a human spot-check panel reviews a sample, then the panel's believability
+- [x] *(The recording + proxy-vs-panel comparison are delivered — `HumanSpotCheck` + `ProxyTracksHumans`; conducting an actual panel is a tuning-time human activity.)* Given tuning, when a human spot-check panel reviews a sample, then the panel's believability
       pass rate is recorded and compared to the automated proxies (the proxies must track the humans).
-- [ ] Given the metric functions, when used here, then they are the **same pure functions** as the
+- [x] Given the metric functions, when used here, then they are the **same pure functions** as the
       pre-review gate (persona-voice-engine story 04) — one implementation, two call sites.
-- [ ] Reports are **staff/tuning-facing** (XC-002); no participant exposure.
+- [x] Reports are **staff/tuning-facing** (XC-002); no participant exposure.
 
 ## Out of Scope
 The pre-review re-roll gate (persona-voice-engine story 02 — same metric, different call site); the
