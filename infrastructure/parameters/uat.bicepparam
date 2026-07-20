@@ -35,7 +35,7 @@ param deployAi = false
 param deployClaude = false
 param claudeOrganizationName = 'Dynamis'
 
-// --- Static Web App (the one resource deployed today) -------------------------
+// --- Static Web App (participant/staff SPA host) ------------------------------
 param repositoryUrl = 'https://github.com/dynamisinc/pulse'
 // Custom domain bound to stapp-pulse-uat. Requires the GoDaddy CNAME
 // pulse-uat -> lively-river-0ce317010.7.azurestaticapps.net (registrar-side).
