@@ -95,6 +95,7 @@ public class MigrationRoundTripTests
                 DisplayName = "Jordan Ferry",
                 Handle = $"@jferry_{personaId:N}",
                 PersonaTemplateId = templateId,
+                Kind = "human",
             });
             await writeContext.SaveChangesAsync();
         }

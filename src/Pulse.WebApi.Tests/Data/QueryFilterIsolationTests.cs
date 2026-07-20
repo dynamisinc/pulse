@@ -45,6 +45,7 @@ public class QueryFilterIsolationTests
         ExerciseId = exerciseId,
         DisplayName = $"Persona {id:N}",
         Handle = $"@p_{id:N}",
+        Kind = "human",
     };
 
     private static Post NewPost(Guid id, Guid exerciseId) => new()
