@@ -1,6 +1,6 @@
 # Story: Miss-safe unmatched default (safety-critical)
 
-**Feature:** Response reaction  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Response reaction  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-002a  ·  **Design decisions:** none  ·  **Issue:** #164
 
 ## Context
@@ -12,17 +12,17 @@ controller "does this address #WaterIssues? Y/N." Unmatched official content is 
 silence.**
 
 ## Acceptance Criteria
-- [ ] Given **unmatched** official content, when it is posted, then all active storyline escalation
+- [x] Given **unmatched** official content, when it is posted, then all active storyline escalation
       **slows** (not pauses — escalation continues at a reduced rate) and the controller is prompted
       to confirm which storyline(s) it addresses.
-- [ ] Given unmatched official content, when it lands, then it is **never** counted as silence — the
+- [x] Given unmatched official content, when it lands, then it is **never** counted as silence — the
       silence-escalation timer (silence-escalation story 01) is not satisfied by it, so the world
       never treats an answered concern as ignored.
-- [ ] Given the controller confirms a match (Y), when they do, then the storyline is treated as
+- [x] Given the controller confirms a match (Y), when they do, then the storyline is treated as
       addressed (hands to story 01); given they decline (N), then escalation resumes its normal rate.
-- [ ] Given an irrelevant official post (spam/off-topic), when it lands, then it cannot pause or
+- [x] Given an irrelevant official post (spam/off-topic), when it lands, then it cannot pause or
       falsely satisfy any storyline — the slow-not-pause rule holds so the engine can't be gamed.
-- [ ] **Telemetry (XC-004):** the unmatched event + the slow + the controller prompt/decision are
+- [ ] *(Deferred with #173 — blocked on the E1 XC-004 base; the resolver produces the unmatched/slow/prompt signals ready to log.)* **Telemetry (XC-004):** the unmatched event + the slow + the controller prompt/decision are
       logged (feeds the trust curve, story 03, and E10 latency/coverage). Staff-only (XC-002).
 
 ## Out of Scope
