@@ -146,7 +146,11 @@ var logAnalyticsName = 'log-${resourceSuffix}'
 var appInsightsName = 'appi-${resourceSuffix}'
 var sqlServerName = 'sql-${resourceSuffix}'
 var appServicePlanName = 'asp-${resourceSuffix}'
-var webAppName = 'app-${appName}-api-${environment}'
+// App Service names are GLOBALLY unique (they become <name>.azurewebsites.net). The plain
+// 'app-pulse-api-uat' is already registered in another Azure tenant, so a create in this RG 409s
+// ("Website with given name app-pulse-api-uat already exists"). A tenant-specific suffix restores a
+// free, predictable name (keeps deploy-backend.yml's WEBAPP_NAME + the frontend's VITE_API_URL static).
+var webAppName = 'app-${appName}-api-${environment}-dynamis'
 var signalRName = 'sigr-${resourceSuffix}'
 var functionAppName = 'func-${resourceSuffix}'
 var acsName = 'acs-${resourceSuffix}'

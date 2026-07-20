@@ -1,6 +1,6 @@
 name: Deploy Backend
 
-# Publishes Pulse.WebApi to the App Service (app-pulse-api-uat) and applies the EF Core
+# Publishes Pulse.WebApi to the App Service (app-pulse-api-uat-dynamis) and applies the EF Core
 # migration to Azure SQL (sqldb-pulse-uat) as an idempotent script. Quality gates
 # (dotnet build + test) run pre-merge in ci.yml; this workflow assumes-green and only
 # builds the migration script + publish output and deploys them — mirroring deploy-frontend.yml.
@@ -9,7 +9,7 @@ name: Deploy Backend
 #   1. Infra deployed with the backend toggles ON: in infrastructure/parameters/uat.bicepparam set
 #      deployDatabase = true, deployBackend = true, deployMonitoring = true (+ sqlEntraAdminObjectId),
 #      then run the "Deploy Infrastructure" workflow (what-if first). This creates
-#      app-pulse-api-uat + sql-pulse-uat/sqldb-pulse-uat + App Insights.
+#      app-pulse-api-uat-dynamis + sql-pulse-uat/sqldb-pulse-uat + App Insights.
 #   2. GitHub "uat" environment secrets:
 #        AZURE_CREDENTIALS            – service principal JSON (Contributor on rg-pulse-uat-centralus).
 #                                       Already used by Deploy Infrastructure. Must also let the SP
@@ -57,7 +57,7 @@ concurrency:
 env:
   RESOURCE_GROUP: "rg-pulse-uat-centralus"
   SQL_SERVER_NAME: "sql-pulse-uat"
-  WEBAPP_NAME: "app-pulse-api-uat"
+  WEBAPP_NAME: "app-pulse-api-uat-dynamis"
 
 jobs:
   build:

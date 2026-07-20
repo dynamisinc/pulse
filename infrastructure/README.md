@@ -36,7 +36,7 @@ relevant toggles to `true`, set the SQL secrets, and re-deploy — no template r
 | Resource group | `rg-pulse-uat-centralus` |
 | Static Web App | `stapp-pulse-uat` |
 | App Service Plan | `asp-pulse-uat` |
-| Web App (API) | `app-pulse-api-uat` |
+| Web App (API) | `app-pulse-api-uat-dynamis` |
 | SQL Server | `sql-pulse-uat` |
 | Storage | `stpulseuat` (no hyphens) |
 | App Insights | `appi-pulse-uat` |
