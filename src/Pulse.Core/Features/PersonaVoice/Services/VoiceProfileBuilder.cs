@@ -57,7 +57,9 @@ public static class VoiceProfileBuilder
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var voiceNotes = profile.VoiceNotes.Trim();
+        // Null-coalesce before trimming: VoiceNotes has a non-null default, but the init setter means a
+        // materialized profile (JSON/db) could carry null — ToDossier must stay pure and non-throwing.
+        var voiceNotes = (profile.VoiceNotes ?? string.Empty).Trim();
         if (includeTypeGuidance)
         {
             var guidance = PersonaCasting.Guidance(profile.Type);

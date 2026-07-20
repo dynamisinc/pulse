@@ -78,6 +78,24 @@ public class VoiceProfileBuilderTests
     }
 
     [Fact]
+    public void ToDossier_WithNullVoiceNotes_DoesNotThrow_AndStillCarriesTypeGuidance()
+    {
+        // A materialized profile (JSON/db) could carry null VoiceNotes despite the non-null default.
+        var profile = new PersonaVoiceProfile
+        {
+            ExerciseId = Guid.NewGuid(),
+            Handle = "@a",
+            DisplayName = "A",
+            Type = PersonaType.Agency,
+            VoiceNotes = null!,
+        };
+
+        var dossier = VoiceProfileBuilder.ToDossier(profile);
+
+        dossier.VoiceNotes.Should().Contain("procedural", "type guidance still applies with no authored notes");
+    }
+
+    [Fact]
     public void ToDossier_FeedsThePromptAssembler_OneCallForNPersonas()
     {
         // The burst-in-one-call diversity model (ADP-021/§5.2): N eligible personas → PostCount N.
