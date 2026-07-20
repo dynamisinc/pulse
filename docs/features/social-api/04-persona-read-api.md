@@ -1,7 +1,7 @@
 # Story: Persona read API — GET /personas
 
 **Feature:** Social API (backend)  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** XC-005, COR-003 (COR-018, XC-002)  ·  **Design decisions:** none  ·  **Issue:** —
+**Requirements:** XC-005, COR-003 (COR-018, XC-002)  ·  **Design decisions:** none  ·  **Issue:** #273
 
 ## Context
 `personaService.ts`'s `SEEDED_PERSONAS` is explicitly flagged as "MOCK SCAFFOLD — dev/test +

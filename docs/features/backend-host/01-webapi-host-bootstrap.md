@@ -1,7 +1,7 @@
 # Story: WebApi host bootstrap (composition root, health, CORS, App Insights)
 
 **Feature:** Backend host & persistence foundation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** none (foundation substrate — Master PRD §6; unblocks COR-001/002/007, COR-050, XC-004, NFR-006)  ·  **Design decisions:** none  ·  **Issue:** —
+**Requirements:** none (foundation substrate — Master PRD §6; unblocks COR-001/002/007, COR-050, XC-004, NFR-006)  ·  **Design decisions:** none  ·  **Issue:** #268
 
 ## Context
 Pulse today is "two well-built halves with no middle" (`docs/BACKEND_ROADMAP.md` §1): a feature-rich

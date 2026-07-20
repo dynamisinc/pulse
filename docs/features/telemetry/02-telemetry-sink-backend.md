@@ -1,7 +1,7 @@
 # Story: Telemetry sink (backend `POST /telemetry` ingest + durable store)
 
 **Feature:** Telemetry capture (XC-004 v0)  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** XC-004  ·  **Design decisions:** none  ·  **Issue:** —
+**Requirements:** XC-004  ·  **Design decisions:** none  ·  **Issue:** #274
 
 ## Context
 `telemetry/01-telemetry-emitter-v0` (Complete) already ships the locked v0 envelope and a client-side mock

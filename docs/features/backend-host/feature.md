@@ -1,7 +1,7 @@
 # Feature: Backend host & persistence foundation
 
 **Epic:** E1 — Platform Core & Exercise Isolation  ·  **Phase:** 1  ·  **Feature ref:** `docs/BACKEND_ROADMAP.md` §4 Phase B0 (COR domain model §3.1; infrastructure substrate — no single epic `F#.#` section owns it)
-**World:** platform/foundation (backend/infra — no UI, no participant skin, no COBRA)  ·  **Issue:** —
+**World:** platform/foundation (backend/infra — no UI, no participant skin, no COBRA)  ·  **Issue:** #266
 
 ## Summary
 The genuinely net-new middle tier. Today Pulse is "two well-built halves with no middle"
@@ -32,8 +32,8 @@ Plan / composition-root / gate contracts this feature's `implementation.md` foll
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | WebApi host bootstrap (composition root, health, CORS, App Insights) | none directly — unblocks COR-001/050, XC-004, NFR-006 | Not Started | — |
-| 02 | Persistence: `PulseDbContext` + EF Core walking-skeleton entities | COR-001 (schema precondition), XC-004 (durable event store), COR domain model §3.1 (partial) | Not Started | — |
+| 01 | WebApi host bootstrap (composition root, health, CORS, App Insights) | none directly — unblocks COR-001/050, XC-004, NFR-006 | Not Started | #268 |
+| 02 | Persistence: `PulseDbContext` + EF Core walking-skeleton entities | COR-001 (schema precondition), XC-004 (durable event store), COR domain model §3.1 (partial) | Not Started | #269 |
 
 ## Dependencies
 None upstream — this is Phase B0, the serial prerequisite for the rest of the Backend Roadmap. Reuses the

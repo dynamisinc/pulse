@@ -30,7 +30,7 @@ consuming surfaces). No design brief exists for this surface — it has no UI.
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
 | 01 | Telemetry emitter v0 (schema + mock sink) | XC-004 | Complete | #210 |
-| 02 | Telemetry sink (backend `POST /telemetry` ingest + durable store) | XC-004 | Not Started | — |
+| 02 | Telemetry sink (backend `POST /telemetry` ingest + durable store) | XC-004 | Not Started | #274 |
 
 ## Dependencies
 Story 01: none (Wave 0 — the first of Pulse's three foundation seams to have zero upstream dependency).

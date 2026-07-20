@@ -1,7 +1,7 @@
 # Story: SignalR feed host — real-time fan-out + polling fallback
 
 **Feature:** Social API (backend)  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** SOC-083, NFR-003 (COR-001/002, XC-002)  ·  **Design decisions:** none  ·  **Issue:** —
+**Requirements:** SOC-083, NFR-003 (COR-001/002, XC-002)  ·  **Design decisions:** none  ·  **Issue:** #272
 
 ## Context
 This is the story that makes a controller's post appear in a **different participant's browser**.

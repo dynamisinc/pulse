@@ -1,7 +1,7 @@
 # Story: Feed & thread read API — GET /feed, GET /threads/:id
 
 **Feature:** Social API (backend)  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** SOC-080, SOC-010 (XC-002, COR-001/002, COR-053)  ·  **Design decisions:** none  ·  **Issue:** —
+**Requirements:** SOC-080, SOC-010 (XC-002, COR-001/002, COR-053)  ·  **Design decisions:** none  ·  **Issue:** #270
 
 ## Context
 The All Posts feed (SOC-080, E2 §3) and the flattened thread view (SOC-010, E2 §F2.2) are both

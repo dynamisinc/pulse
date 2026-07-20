@@ -1,7 +1,7 @@
 # Story: Persistence — `PulseDbContext` + EF Core walking-skeleton entities
 
 **Feature:** Backend host & persistence foundation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-001 (schema precondition), XC-004 (durable event store), COR domain model §3.1 (partial)  ·  **Design decisions:** none  ·  **Issue:** —
+**Requirements:** COR-001 (schema precondition), XC-004 (durable event store), COR domain model §3.1 (partial)  ·  **Design decisions:** none  ·  **Issue:** #269
 
 ## Context
 The first durable state in Pulse. Today "zero `DbContext`/EF/repository/migration code anywhere"

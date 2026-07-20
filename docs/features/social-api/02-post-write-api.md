@@ -1,7 +1,7 @@
 # Story: Post write API — POST /posts (the server-side blessed ingest)
 
 **Feature:** Social API (backend)  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** SOC-003, COR-018 (NFR-004, XC-004, XC-002)  ·  **Design decisions:** none  ·  **Issue:** —
+**Requirements:** SOC-003, COR-018 (NFR-004, XC-004, XC-002)  ·  **Design decisions:** none  ·  **Issue:** #271
 
 ## Context
 `postService.createPost()` is documented as "the blessed ingest path — every new post (a
