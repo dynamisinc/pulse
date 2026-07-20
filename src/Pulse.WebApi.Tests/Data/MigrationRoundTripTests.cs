@@ -13,6 +13,11 @@ using Pulse.WebApi.Data.Entities;
 /// Runs against a REAL SQL Server (Testcontainers), not an in-memory provider stand-in, so it actually
 /// proves the migration + column types/collation apply, not just that the C# model compiles.
 /// </summary>
+/// <remarks>
+/// Every test is <see cref="RequiresDockerFactAttribute"/>, not a plain <c>[Fact]</c> — Gate-1 W-001: on a
+/// Docker-less machine these report a real <c>Skipped</c> outcome (decided at discovery time), never a
+/// silent <c>Passed</c>. Where Docker is present (here, CI), they run for real.
+/// </remarks>
 [Collection(MsSqlCollection.Name)]
 public class MigrationRoundTripTests
 {
@@ -23,14 +28,9 @@ public class MigrationRoundTripTests
         _fixture = fixture;
     }
 
-    [Fact]
+    [RequiresDockerFact]
     public async Task Exercise_RoundTrips()
     {
-        if (!_fixture.DockerAvailable)
-        {
-            return; // Docker unreachable — see MsSqlContainerFixture remarks.
-        }
-
         var id = Guid.NewGuid();
         var exercise = new Exercise { Id = id, Name = $"Round Trip Exercise {id}" };
 
@@ -47,14 +47,9 @@ public class MigrationRoundTripTests
         reloaded.Name.Should().Be(exercise.Name);
     }
 
-    [Fact]
+    [RequiresDockerFact]
     public async Task PersonaTemplate_RoundTrips()
     {
-        if (!_fixture.DockerAvailable)
-        {
-            return;
-        }
-
         var id = Guid.NewGuid();
         var template = new PersonaTemplate
         {
@@ -77,14 +72,9 @@ public class MigrationRoundTripTests
         reloaded.Handle.Should().Be(template.Handle);
     }
 
-    [Fact]
+    [RequiresDockerFact]
     public async Task Persona_RoundTrips_WithRealExerciseId()
     {
-        if (!_fixture.DockerAvailable)
-        {
-            return;
-        }
-
         var exerciseId = Guid.NewGuid();
         var personaId = Guid.NewGuid();
         var templateId = Guid.NewGuid();
@@ -119,14 +109,9 @@ public class MigrationRoundTripTests
         reloaded.PersonaTemplateId.Should().Be(templateId);
     }
 
-    [Fact]
+    [RequiresDockerFact]
     public async Task Post_RoundTrips_WithRealExerciseId()
     {
-        if (!_fixture.DockerAvailable)
-        {
-            return;
-        }
-
         var exerciseId = Guid.NewGuid();
         var authorPersonaId = Guid.NewGuid();
         var postId = Guid.NewGuid();
@@ -162,14 +147,9 @@ public class MigrationRoundTripTests
         reloaded.DeletedAt.Should().BeNull();
     }
 
-    [Fact]
+    [RequiresDockerFact]
     public async Task TelemetryEvent_RoundTrips_WithRealExerciseId()
     {
-        if (!_fixture.DockerAvailable)
-        {
-            return;
-        }
-
         var exerciseId = Guid.NewGuid();
         var eventId = Guid.NewGuid().ToString();
         var wallClockTime = new DateTimeOffset(2033, 6, 14, 15, 0, 0, TimeSpan.Zero);
@@ -244,5 +224,47 @@ public class MigrationRoundTripTests
         reloaded.Target!.EntityId.Should().Be("post-99");
         reloaded.Payload.Should().Be("{\"text\":\"hello\"}");
         reloaded.EmittedAt.Should().Be(emittedAt);
+    }
+
+    /// <summary>
+    /// Gate-1 review S-001: proves the OPTIONAL owned <c>Target</c> round-trips as a real <c>null</c> —
+    /// not an empty/all-null-fields owned instance — when the event has no target. Read back through a
+    /// separate context from the one that wrote it, same as every other round-trip test here, so this
+    /// proves the actual mapping (EF's owned-type-is-null-when-every-column-is-null convention), not just
+    /// an in-memory default.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task TelemetryEvent_RoundTrips_WithNullTarget()
+    {
+        var exerciseId = Guid.NewGuid();
+        var eventId = Guid.NewGuid().ToString();
+        var wallClockTime = new DateTimeOffset(2033, 6, 14, 15, 0, 0, TimeSpan.Zero);
+        var scenarioTime = new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5));
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Null Target Round Trip Exercise" });
+            writeContext.TelemetryEvents.Add(new TelemetryEvent
+            {
+                EventId = eventId,
+                SchemaVersion = "v0",
+                ExerciseId = exerciseId,
+                EventType = "login",
+                Channel = "system",
+                Actor = new TelemetryActor { Kind = "system" },
+                WallClockTime = wallClockTime,
+                ScenarioTime = scenarioTime,
+                TimeZone = "America/Chicago",
+                Target = null,
+                EmittedAt = wallClockTime,
+            });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = _fixture.CreateContext();
+        var reloaded = await readContext.TelemetryEvents.SingleAsync(e => e.EventId == eventId);
+
+        reloaded.Target.Should().BeNull(
+            "an event with no target must round-trip as a real null, not an owned instance with all-null sub-fields");
     }
 }

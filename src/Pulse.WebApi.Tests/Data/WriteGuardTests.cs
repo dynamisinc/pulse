@@ -15,6 +15,9 @@ using Pulse.WebApi.Data.Entities;
 /// container — against a fresh, separately-opened context so an in-memory change tracker cache can't
 /// mask a write that never actually reached the database. A positive control (valid <c>ExerciseId</c>)
 /// proves the guard isn't rejecting everything.
+///
+/// Every test is <see cref="RequiresDockerFactAttribute"/> (Gate-1 W-001): a real <c>Skipped</c> outcome on
+/// a Docker-less machine, never a silent <c>Passed</c>.
 /// </summary>
 [Collection(MsSqlCollection.Name)]
 public class WriteGuardTests
@@ -26,14 +29,9 @@ public class WriteGuardTests
         _fixture = fixture;
     }
 
-    [Fact]
+    [RequiresDockerFact]
     public async Task SaveChangesAsync_RejectsPostWithEmptyExerciseId_AndWritesNoRow()
     {
-        if (!_fixture.DockerAvailable)
-        {
-            return;
-        }
-
         var postId = Guid.NewGuid();
 
         await using var writeContext = _fixture.CreateContext();
@@ -58,14 +56,9 @@ public class WriteGuardTests
         count.Should().Be(0, "the rejected Post must never have been written to the database");
     }
 
-    [Fact]
+    [RequiresDockerFact]
     public async Task SaveChangesAsync_RejectsTelemetryEventWithEmptyExerciseId_AndWritesNoRow()
     {
-        if (!_fixture.DockerAvailable)
-        {
-            return;
-        }
-
         var eventId = Guid.NewGuid().ToString();
 
         await using var writeContext = _fixture.CreateContext();
@@ -93,14 +86,9 @@ public class WriteGuardTests
         count.Should().Be(0, "the rejected TelemetryEvent must never have been written to the database");
     }
 
-    [Fact]
+    [RequiresDockerFact]
     public async Task SaveChangesAsync_RejectsMixedBatch_WhenAnyScopedEntityHasEmptyExerciseId()
     {
-        if (!_fixture.DockerAvailable)
-        {
-            return;
-        }
-
         var exerciseId = Guid.NewGuid();
         var validPostId = Guid.NewGuid();
         var invalidPostId = Guid.NewGuid();
@@ -137,14 +125,9 @@ public class WriteGuardTests
             0, "the anchor Exercise queued in the same failed SaveChangesAsync call must not be written either");
     }
 
-    [Fact]
+    [RequiresDockerFact]
     public async Task SaveChangesAsync_Succeeds_WhenScopedEntityHasValidExerciseId()
     {
-        if (!_fixture.DockerAvailable)
-        {
-            return;
-        }
-
         var exerciseId = Guid.NewGuid();
         var postId = Guid.NewGuid();
 
