@@ -13,6 +13,15 @@
  * and wires the real edit composer into its `editSlot` — a composition-root edit,
  * not this story's (implementation.md "Integration seam").
  *
+ * SERIAL INTEGRATION (Wave-1, `ControllerConsoleRoute`). This barrel also
+ * exports the integration seam's own additions: `useDraftTimer` (story 02, now
+ * public so `DraftTimerDriver` can be composed from outside this folder),
+ * `useEngineControl` (the ADP-042 kill switch + degraded-mode mock),
+ * `useDemandMeter` (the CTL-034 "queue pressure = demand, never performance"
+ * meter), `EngineControlBar` (the docked chrome strip), and `autoPublish` (the
+ * ONE swamped-mode timeout auto-send path, which does not re-emit
+ * `engine.reviewed` — see `reviewActions.ts`).
+ *
  * World: staff (COBRA). The published OUTPUT is a participant post via `createPost`
  * (`origin: 'engine'`, scenario-time, sanitized) — never drawn here (XC-002).
  */
@@ -50,7 +59,7 @@ export { decide, evaluate } from './services/autoHoldPolicy'
 export type { DraftTimeoutResolved, TimeoutEvaluation } from './services/autoHoldPolicy'
 
 // --- Review actions + the mock store ---
-export { approve, edit, veto, reroll, batchApprove } from './services/reviewActions'
+export { approve, edit, veto, reroll, batchApprove, autoPublish } from './services/reviewActions'
 export type { ReviewActionContext, ReviewedAction, BatchApproveOutcome } from './services/reviewActions'
 export { reviewStore } from './services/reviewStore'
 
@@ -58,3 +67,23 @@ export { reviewStore } from './services/reviewStore'
 export { useSwampedMode } from './hooks/useSwampedMode'
 export type { UseSwampedModeResult } from './hooks/useSwampedMode'
 export { SwampedModeToggle } from './components/SwampedModeToggle'
+
+// --- The timed-draft countdown hook (story 02) — public for the integration
+// seam's `DraftTimerDriver` ---
+export { useDraftTimer } from './hooks/useDraftTimer'
+export type {
+  UseDraftTimerOptions,
+  UseDraftTimerResult,
+  DraftTimerReviewedAction,
+} from './hooks/useDraftTimer'
+
+// --- Serial integration seam: engine control, demand meter, the chrome strip,
+// the timer driver, and the edit composer ---
+export { useEngineControl } from './hooks/useEngineControl'
+export type { EngineMode, UseEngineControlResult } from './hooks/useEngineControl'
+export { useDemandMeter, DEMAND_BUDGET_PER_MINUTE } from './hooks/useDemandMeter'
+export type { UseDemandMeterResult } from './hooks/useDemandMeter'
+export { EngineControlBar } from './console/EngineControlBar'
+export { DraftTimerDriver } from './console/DraftTimerDriver'
+export type { DraftTimerDriverProps, DraftTimerDriverContext } from './console/DraftTimerDriver'
+export { EngineDraftEditComposer } from './components/EngineDraftEditComposer'

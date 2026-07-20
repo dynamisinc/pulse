@@ -29,6 +29,15 @@
  * SEPARATE from — and additional to — the `'post'` event `createPost` emits per
  * published post; it is emitted once per review DECISION, not per post.
  *
+ * `autoPublish` (integration seam, story 02/03). The ONE exception to "every
+ * action emits `engine.reviewed`": the swamped-mode timeout auto-send. It
+ * publishes the burst exactly like `approve` (same `origin: 'engine'` pipeline,
+ * same Published disposition) but emits NO `engine.reviewed` event itself —
+ * `useDraftTimer` already logged the single `action: 'auto-send'` transition on
+ * the terminal tick (see that module's header). Re-emitting here would double-log
+ * the same decision. `createPost` still emits its own `'post'` event per post, as
+ * always.
+ *
  * PURE-ISH / TESTABLE (mirrors the `composeService` / `useComposeAsPersona`
  * split). These functions take the clock/identity/exercise as an INPUT
  * ({@link ReviewActionContext}) — they read no React context and no clock
@@ -164,6 +173,18 @@ export function edit(item: EngineReviewItem, newText: string, ctx: ReviewActionC
   const published = publishBurst(item, ctx, newText)
   emitReviewed(item, ctx, 'edit')
   return published
+}
+
+/**
+ * Publishes the burst exactly like {@link approve} (`origin: 'engine'`, marks the
+ * item Published) but emits NO `engine.reviewed` event — the swamped-mode timeout
+ * auto-send's ONE transition log is `useDraftTimer`'s `action: 'auto-send'`, on
+ * the terminal tick; this function must not double-log it. The integration seam
+ * wires a `CountingDown` item's `useDraftTimer` `onResolve(Publish, ...)` here.
+ * `createPost` still emits its own `'post'` event per published post.
+ */
+export function autoPublish(item: EngineReviewItem, ctx: ReviewActionContext): Post[] {
+  return publishBurst(item, ctx)
 }
 
 /**

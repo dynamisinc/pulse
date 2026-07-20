@@ -14,7 +14,7 @@
  * `useRegisterSurfaceTool()` (`@/features/staffShell/toolRegistry`, D7-011) and
  * renders its own flyout(s) keyed on `useToolstrip().isActive(id)`.
  *
- * ## What this KEYSTONE story owns (and only this)
+ * ## What this KEYSTONE story owns
  *  - registers the "Personas" consult-on-demand surface tool (icon + label +
  *    tooltip + a never-color-only count badge);
  *  - the ⌘K / Ctrl+K command palette (open/close + key binding here; shell in
@@ -24,12 +24,28 @@
  *  - the mock controller identity seam (`../identity/controllerIdentity`),
  *    surfaced on the console chrome + consumed by persona-operation as an INPUT.
  *
- * SCOPE GUARD: this does NOT build the MSEL rail, live-world columns, review
- * queue, storylines, rumor tracker, trainee monitor, NEEDS-YOU bar,
- * break-fiction, pause tiers, or the engine cockpit — those are separate
- * features/stories. Continuous-watch surfaces (live world, review queue) will
- * later occupy PERMANENT rail/column space here, NOT the toolstrip (D5-017);
- * this story only stands up the consult-on-demand extension point.
+ * ## SERIAL INTEGRATION — the engine-review-cockpit is docked HERE
+ * (feature: engine-review-cockpit, integration seam; D5-017 "continuous-watch
+ * surfaces get permanent space, not a toolstrip flyout"). The work area is a
+ * horizontal split:
+ *   - the `<EngineControlBar>` chrome strip spans the FULL width at the top
+ *     (the kill switch, the degrade indicator, the CTL-034 demand meter, the
+ *     inline "N need review / N timers <60s" indicator, and `<SwampedModeToggle>`);
+ *   - below it, the main content region (flex 1 — the existing header/⌘K hint/
+ *     persona-dock host mount) sits LEFT of a PERMANENT 336px right column
+ *     hosting `<ReviewQueue>` — a docked column, NOT a toolstrip flyout, so it
+ *     never competes with the consult-on-demand "Personas" tool for the same
+ *     extension point.
+ * This component also mounts one invisible `<DraftTimerDriver>` per
+ * `CountingDown` review item so every outstanding engine draft's countdown
+ * actually ticks toward its terminal outcome (auto-HOLD by default; auto-send
+ * only under swamped(lead) mode on a still-effectively-Delayed-auto draft — see
+ * `DraftTimerDriver`'s module header for the full composition). The persona
+ * "post as persona" flow above is UNCHANGED by this integration.
+ *
+ * SCOPE GUARD: this still does NOT build the MSEL rail, live-world columns,
+ * storylines, rumor tracker, trainee monitor, break-fiction, or pause tiers —
+ * those remain separate features/stories.
  *
  * ## Entry points to "post as persona" (both funnel to the persona-dock host)
  *  1. ⌘K / Ctrl+K, or activating the "Personas" toolstrip tool → the command
@@ -40,15 +56,17 @@
  * the toolstrip button reflects the palette being open (one extension point).
  *
  * World: staff (COBRA/Cadence) — everything here is COBRA chrome; the
- * participant OUTPUT (a published post) is `persona-operation`'s via
- * `createPost` and is never drawn here. Never a participant surface (XC-002).
+ * participant OUTPUT (a published post) is `persona-operation`'s / the engine
+ * review queue's via `createPost` and is never drawn here. Never a participant
+ * surface (XC-002).
  */
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faMasksTheater, faTowerBroadcast } from '@fortawesome/free-solid-svg-icons'
 import { usePersonas } from '@/features/personas'
+import { useExerciseContext } from '@/core/exerciseContext'
 import { useRegisterSurfaceTool, useToolstrip } from '@/features/staffShell/toolRegistry'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import { useControllerIdentity } from '../identity/controllerIdentity'
@@ -60,6 +78,28 @@ import { CommandPalette, type CommandPalettePersonaSlot } from '../console/Comma
 // comes from the `.ts`.
 import { PersonaDockHost } from '../console/personaDockHost.tsx'
 import { PERSONAS_TOOL_ID, type PersonaDockSlots } from '../console/personaDockHost'
+import {
+  DraftDisposition,
+  DraftTimerDriver,
+  EngineControlBar,
+  ReviewQueue,
+  useEngineControl,
+  useReviewQueue,
+  useSwampedMode,
+  type DelayedAutoCountdown,
+  type EngineReviewItem,
+  type ReviewQueueEditSlotProps,
+} from '../engine'
+
+/** The docked review-queue column's fixed width (D5 §6 "336px, sole tenant"). */
+const REVIEW_QUEUE_WIDTH_PX = 336
+
+/** Narrows a `CountingDown` item down to one guaranteed to carry a countdown. */
+function hasCountdown(
+  item: EngineReviewItem,
+): item is EngineReviewItem & { countdown: DelayedAutoCountdown } {
+  return item.disposition === DraftDisposition.CountingDown && item.countdown !== null
+}
 
 export interface ControllerConsoleProps {
   /**
@@ -75,13 +115,35 @@ export interface ControllerConsoleProps {
    * in isolation, where the dock shows its neutral placeholder.
    */
   dockSlots?: PersonaDockSlots
+  /**
+   * The docked `<ReviewQueue>`'s edit composer slot (`engine-review-cockpit`'s
+   * `EngineDraftEditComposer`) — supplied by the `/console` route at
+   * integration. Absent in isolation, where the queue's E (edit) action is
+   * inert (mirrors `ReviewQueue`'s own standalone behavior).
+   */
+  reviewEditSlot?: (props: ReviewQueueEditSlotProps) => ReactNode
 }
 
 export function ControllerConsole(
-  { renderPersonaResults, dockSlots }: ControllerConsoleProps = {},
+  { renderPersonaResults, dockSlots, reviewEditSlot }: ControllerConsoleProps = {},
 ) {
   const identity = useControllerIdentity()
+  const { exerciseId, timeZone } = useExerciseContext()
   const { isActive, toggleTool } = useToolstrip()
+
+  // The engine-review-cockpit's own continuous-watch inputs (D5-017 permanent
+  // column, not a toolstrip flyout). `useReviewQueue()`/`useEngineControl()`/
+  // `useSwampedMode()` are singleton-store-backed, so this read and the
+  // `<EngineControlBar>`/`<ReviewQueue>` children's own reads of the same hooks
+  // all agree by construction (D5-014/2.1 counts-consistency).
+  const { items } = useReviewQueue()
+  const { swampedMode } = useSwampedMode()
+  const engineControl = useEngineControl()
+  const draftTimerCtx = useMemo(
+    () => ({ exerciseId, timeZone, actingHumanId: identity.actingHumanId }),
+    [exerciseId, timeZone, identity.actingHumanId],
+  )
+  const countingDownItems = useMemo(() => items.filter(hasCountdown), [items])
 
   // Phase-1 badge: the count of personas available to post as, exercise-scoped
   // via `usePersonas()` (COR-001). The badge's COUNT is what the shell's
@@ -138,42 +200,90 @@ export function ControllerConsole(
       // anchored to the work area's edges — mirrors the evaluator dashboard page.
       sx={{ position: 'relative', height: '100%', overflow: 'hidden' }}
     >
-      <Box sx={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
-        <Stack sx={{ gap: 1.5, p: '18px 22px', minHeight: '100%' }}>
-          <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
-            <FontAwesomeIcon icon={faTowerBroadcast} color={staffShellTokens.header.background} />
-            <Typography
-              component="h1"
-              sx={{
-                fontSize: 14,
-                fontWeight: 800,
-                letterSpacing: '0.1em',
-                color: staffShellTokens.header.background,
-              }}
-            >
-              CONTROLLER CONSOLE
-            </Typography>
-            <Box sx={{ flex: 1 }} />
-            <Typography
-              data-testid="controller-callsign"
-              sx={{
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: '0.08em',
-                color: staffShellTokens.accent.secondaryText,
-              }}
-            >
-              {identity.callSign}
-            </Typography>
-          </Stack>
+      <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* The engine-control chrome strip — full width, top of the work area
+            (D5 §2). Reads the SAME useReviewQueue()/useEngineControl()/
+            useSwampedMode() singleton-store hooks as the driver map + the
+            docked queue below (D5-014/2.1 counts-consistency). */}
+        <Box sx={{ flex: 'none' }}>
+          <EngineControlBar />
+        </Box>
 
-          <Typography sx={{ fontSize: 12, color: staffShellTokens.accent.secondaryText }}>
-            Press <Box component="kbd" sx={{ fontWeight: 700 }}>⌘K</Box> (or Ctrl+K), or open the
-            Personas tool, to post as a persona. Live world, the review queue, and other surfaces
-            dock here as they land.
-          </Typography>
+        <Stack direction="row" sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          {/* Main content region — the existing header/⌘K hint/persona-dock
+              host mount, unchanged by this integration. */}
+          <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
+            <Stack sx={{ gap: 1.5, p: '18px 22px', minHeight: '100%' }}>
+              <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
+                <FontAwesomeIcon
+                  icon={faTowerBroadcast}
+                  color={staffShellTokens.header.background}
+                />
+                <Typography
+                  component="h1"
+                  sx={{
+                    fontSize: 14,
+                    fontWeight: 800,
+                    letterSpacing: '0.1em',
+                    color: staffShellTokens.header.background,
+                  }}
+                >
+                  CONTROLLER CONSOLE
+                </Typography>
+                <Box sx={{ flex: 1 }} />
+                <Typography
+                  data-testid="controller-callsign"
+                  sx={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                    color: staffShellTokens.accent.secondaryText,
+                  }}
+                >
+                  {identity.callSign}
+                </Typography>
+              </Stack>
+
+              <Typography sx={{ fontSize: 12, color: staffShellTokens.accent.secondaryText }}>
+                Press <Box component="kbd" sx={{ fontWeight: 700 }}>⌘K</Box> (or Ctrl+K), or open the
+                Personas tool, to post as a persona. The engine review queue is docked to the
+                right; the live world and other surfaces dock here as they land.
+              </Typography>
+            </Stack>
+          </Box>
+
+          {/* The engine review queue — a PERMANENT docked column (D5-017), NOT
+              a toolstrip flyout. Self-contained; reads useReviewQueue()
+              internally. The edit slot is supplied by the /console route. */}
+          <Box
+            data-testid="review-queue-column"
+            sx={{
+              flex: 'none',
+              width: REVIEW_QUEUE_WIDTH_PX,
+              minWidth: REVIEW_QUEUE_WIDTH_PX,
+              height: '100%',
+              overflow: 'hidden',
+            }}
+          >
+            <ReviewQueue editSlot={reviewEditSlot} />
+          </Box>
         </Stack>
       </Box>
+
+      {/* One invisible driver per CountingDown item — the safety demo (see
+          `DraftTimerDriver`'s module header). Auto-HOLDs by default; the ONLY
+          timeout auto-send is swamped(lead) on a still-effectively-Delayed-auto
+          draft, and a STOP/Suggest-only/degraded engine holds even then. */}
+      {countingDownItems.map(item => (
+        <DraftTimerDriver
+          key={item.draftId}
+          item={item}
+          countdown={item.countdown}
+          swampedMode={swampedMode}
+          effective={engineControl.effective}
+          ctx={draftTimerCtx}
+        />
+      ))}
 
       <CommandPalette
         open={paletteOpen}
