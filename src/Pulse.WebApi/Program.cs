@@ -24,6 +24,11 @@ builder.Services.AddHealthChecks();
 // file owns the registration; this single line is the only Program.cs edit story 02 requires.
 builder.Services.AddPulsePersistence(builder.Configuration);
 
+// Read-side exercise scoping (exercise-isolation/01, #44) — orchestrator-wired. Registers the scoped
+// IExerciseContext that PulseDbContext's global query filter reads; it starts UNSET (fail-closed: an
+// unresolved scope matches zero rows). Later stories (host/auth/staff-switch) populate it per request.
+builder.Services.AddExerciseScoping();
+
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
 // (no cross-origin access at all) when the key is unset/empty rather than falling open.
