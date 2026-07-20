@@ -40,5 +40,4 @@ export { PausePill } from './components/steering/PausePill'
 
 // world-steering/02 — storyline escalation dial (actual + target) + its hook.
 export { EscalationDial } from './components/steering/EscalationDial'
-export type { EscalationDialProps } from './components/steering/EscalationDial'
 export { useStorylineTarget } from './hooks/useStorylineTarget'

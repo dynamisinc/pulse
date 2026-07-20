@@ -56,16 +56,6 @@ const chrome = {
   amber: '#f5a623',
 } as const
 
-/** Props for {@link EscalationDial}. */
-export interface EscalationDialProps {
-  /**
-   * Which storyline to target — defaults to `useStorylineTarget`'s default
-   * (the mock's single seeded storyline). Accepted so a future storyline
-   * board (D5-016/017, deferred) can mount one dial per card.
-   */
-  readonly storylineId?: string
-}
-
 function clamp0to100(value: number): number {
   return Math.min(100, Math.max(0, Math.round(value)))
 }
@@ -79,11 +69,12 @@ function valueFromClientX(track: HTMLElement, clientX: number): number {
 
 /**
  * The one-track actual+target escalation dial. See the module header for the
- * full contract. Self-contained — reads/writes via `useStorylineTarget()`;
- * callers pass nothing but an optional `storylineId`.
+ * full contract. Self-contained and prop-less — reads/writes the single mock
+ * storyline via `useStorylineTarget()` (Wave-1 is single-storyline; a future
+ * per-card board reuse arrives with the multi-storyline store, D5-016/017).
  */
-export function EscalationDial({ storylineId }: EscalationDialProps) {
-  const dial = useStorylineTarget(storylineId)
+export function EscalationDial() {
+  const dial = useStorylineTarget()
   const trackRef = useRef<HTMLDivElement | null>(null)
   const isDraggingRef = useRef(false)
   // The in-progress drag position — LIVE visual feedback only. The telemetry-

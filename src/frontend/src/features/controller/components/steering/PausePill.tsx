@@ -14,11 +14,13 @@
  * reinforcement, never the sole signal.
  *
  * THE PAUSE POPOVER (D5-014/1.3). Opening the pill reveals three radio tiers —
- * Pause injects / Pause engine / Freeze world — with Cancel + a primary action.
- * The primary reads "Resume" while paused. FREEZE IS GUARDED: choosing Freeze
- * routes through a deliberate confirm step before it takes effect, because
- * participants notice a world freeze. This is a confirm-step guard, NOT a
- * Director role-gate (that pattern belongs to Break Fiction, story 04).
+ * Pause injects / Pause engine / Freeze world. The footer has a **Cancel** link
+ * (dismiss, no change), a **Resume** button that appears while any tier is
+ * active (returns to `running`), and the primary **Pause** action that applies
+ * the selected tier. FREEZE IS GUARDED: choosing Freeze routes through a
+ * deliberate confirm step (Back / Confirm freeze) before it takes effect,
+ * because participants notice a world freeze. This is a confirm-step guard, NOT
+ * a Director role-gate (that pattern belongs to Break Fiction, story 04).
  *
  * FULLY KEYBOARD-OPERABLE (NFR-001). The pill is a button (Enter/Space); the
  * popover traps focus; the radios are arrow/Tab navigable; every action is a
@@ -43,7 +45,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
-import { CobraPrimaryButton, CobraSecondaryButton } from '@/theme/styledComponents'
+import { CobraLinkButton, CobraPrimaryButton, CobraSecondaryButton } from '@/theme/styledComponents'
 import { usePauseState, type PauseTier } from '../../hooks/usePauseState'
 
 /** D5 dark operator-chrome tokens (matches `SwampedModeToggle`). Staff-only. */
@@ -288,6 +290,9 @@ export function PausePill() {
               </RadioGroup>
 
               <Stack direction="row" sx={{ gap: 1, justifyContent: 'flex-end', alignItems: 'center' }}>
+                <CobraLinkButton data-testid="pause-cancel" onClick={closePopover}>
+                  Cancel
+                </CobraLinkButton>
                 {isPaused && (
                   <CobraSecondaryButton
                     data-testid="pause-resume"

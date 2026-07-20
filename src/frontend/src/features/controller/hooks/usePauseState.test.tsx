@@ -39,6 +39,13 @@ vi.mock('@/core/exerciseContext', () => ({
 vi.mock('../identity/controllerIdentity', () => ({
   useControllerIdentity: vi.fn(),
 }))
+// The real telemetry sink fire-and-forgets a POST through the shared axios
+// client; with no backend that rejects ASYNCHRONOUSLY and logs during teardown
+// (a vitest "onUserConsoleLog while closing rpc" worker race). Resolve the POST
+// so emission stays synchronous — mirrors `core/telemetry/mockSink.test.ts`.
+vi.mock('@/core/services/api', () => ({
+  api: { post: vi.fn().mockResolvedValue(undefined) },
+}))
 
 const mockedUseExerciseContext = vi.mocked(useExerciseContext)
 const mockedUseControllerIdentity = vi.mocked(useControllerIdentity)

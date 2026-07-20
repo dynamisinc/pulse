@@ -33,7 +33,7 @@ import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { useControllerIdentity, type ControllerIdentity } from '../identity/controllerIdentity'
-import { storylineMock } from '../services/storylineMock'
+import { MOCK_STORYLINE_ID, storylineMock } from '../services/storylineMock'
 import { useStorylineTarget } from './useStorylineTarget'
 
 vi.mock('@/core/exerciseContext', () => ({
@@ -41,6 +41,13 @@ vi.mock('@/core/exerciseContext', () => ({
 }))
 vi.mock('../identity/controllerIdentity', () => ({
   useControllerIdentity: vi.fn(),
+}))
+// The real telemetry sink fire-and-forgets a POST through the shared axios
+// client; with no backend that rejects ASYNCHRONOUSLY and logs during teardown
+// (a vitest "onUserConsoleLog while closing rpc" worker race). Resolve the POST
+// so emission stays synchronous — mirrors `core/telemetry/mockSink.test.ts`.
+vi.mock('@/core/services/api', () => ({
+  api: { post: vi.fn().mockResolvedValue(undefined) },
 }))
 
 const mockedUseExerciseContext = vi.mocked(useExerciseContext)
@@ -190,14 +197,17 @@ describe('useStorylineTarget — setTarget', () => {
     expect(steeringEvents()).toHaveLength(1)
   })
 
-  it('honors an explicit storylineId (a future per-card dial reuse, D5-016/017)', () => {
-    const { result } = renderHook(() => useStorylineTarget('storyline-alt'))
+  it('targets the single mock storyline (MOCK_STORYLINE_ID) — telemetry entityId matches what is mutated', () => {
+    const { result } = renderHook(() => useStorylineTarget())
 
     act(() => result.current.setTarget(20))
 
     const evt = steeringEvents()[0]
-    expect(evt?.target).toEqual({ entityType: 'storyline', entityId: 'storyline-alt' })
-    expect(result.current.storylineId).toBe('storyline-alt')
+    // Wave-1 is single-storyline: the returned id and the telemetry entityId
+    // are both MOCK_STORYLINE_ID — never an arbitrary caller-supplied id that
+    // would disagree with the (single, un-keyed) store actually mutated.
+    expect(evt?.target).toEqual({ entityType: 'storyline', entityId: MOCK_STORYLINE_ID })
+    expect(result.current.storylineId).toBe(MOCK_STORYLINE_ID)
   })
 })
 

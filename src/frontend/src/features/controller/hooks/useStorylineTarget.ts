@@ -52,7 +52,11 @@ import {
 
 /** The escalation dial's read/write surface for one storyline's target. */
 export interface UseStorylineTargetResult {
-  /** The storyline this target applies to (mock: the single seeded storyline). */
+  /**
+   * The storyline this target applies to. Wave-1 is single-storyline: this is
+   * always `MOCK_STORYLINE_ID` (the one seeded mock). A multi-storyline board
+   * (D5-016/017, deferred) will key `storylineMock` by id and select here.
+   */
   readonly storylineId: string
   /** Actual intensity, 0-100 (`Storyline.Intensity`) — the track's fill. */
   readonly intensity: number
@@ -78,14 +82,15 @@ export interface UseStorylineTargetResult {
  * The escalation dial's target-management hook. See the module header for the
  * full contract; `<EscalationDial>` is its intended consumer.
  *
- * @param storylineId Which storyline to target — defaults to the mock's single
- *   seeded storyline (`MOCK_STORYLINE_ID`). Accepted as a param (rather than
- *   hard-coded) so the hook does not foreclose a future multi-storyline board
- *   (D5-016/017, deferred) reusing it per-card with no signature change.
+ * Wave-1 is single-storyline: the hook always targets `MOCK_STORYLINE_ID` (the
+ * one seeded mock `storylineMock` snapshot), and stamps telemetry with that id.
+ * A `storylineId` selector param is deliberately NOT accepted yet — it would be
+ * a false affordance while `storylineMock` is a single un-keyed store (a passed
+ * id would mutate the one storyline while stamping telemetry for another). It
+ * arrives with the multi-storyline board (D5-016/017, deferred), which keys the
+ * store by id.
  */
-export function useStorylineTarget(
-  storylineId: string = MOCK_STORYLINE_ID,
-): UseStorylineTargetResult {
+export function useStorylineTarget(): UseStorylineTargetResult {
   const { exerciseId, timeZone } = useExerciseContext()
   const { actingHumanId, role } = useControllerIdentity()
 
@@ -115,7 +120,7 @@ export function useStorylineTarget(
         wallClockTime: wallClockNowIso(),
         scenarioTime: scenarioNow().toISOString(),
         timeZone,
-        target: { entityType: 'storyline', entityId: storylineId },
+        target: { entityType: 'storyline', entityId: MOCK_STORYLINE_ID },
         payload: {
           action: 'target-changed',
           from: change.from,
@@ -124,7 +129,7 @@ export function useStorylineTarget(
         },
       })
     },
-    [exerciseId, timeZone, actingHumanId, role, storylineId],
+    [exerciseId, timeZone, actingHumanId, role],
   )
 
   const setTarget = useCallback(
@@ -140,7 +145,7 @@ export function useStorylineTarget(
   }, [applyTarget])
 
   return {
-    storylineId,
+    storylineId: MOCK_STORYLINE_ID,
     intensity: storyline.intensity,
     targetIntensity: storyline.targetIntensity,
     phase: storyline.phase,
