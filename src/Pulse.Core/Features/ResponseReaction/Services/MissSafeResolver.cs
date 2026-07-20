@@ -45,7 +45,13 @@ public static class MissSafeResolver
         {
             var target = candidate.StorylineHintId
                 ?? ResponseMatcher.SuggestBest(candidate.Text, storylines)?.StorylineId;
-            return new MatchResolution(MatchKind.Matched, target, 1.0, ViaOffPlatformMarker: true);
+
+            // A marker with no resolvable storyline can't address anything — fall through to the miss-safe
+            // default rather than return a Matched with a null storyline (which would violate the contract
+            // and let a caller treat a non-match as a match).
+            return target is { } id
+                ? new MatchResolution(MatchKind.Matched, id, 1.0, ViaOffPlatformMarker: true)
+                : new MatchResolution(MatchKind.Unmatched, null, 0.0, ViaOffPlatformMarker: false);
         }
 
         var best = ResponseMatcher.SuggestBest(candidate.Text, storylines);

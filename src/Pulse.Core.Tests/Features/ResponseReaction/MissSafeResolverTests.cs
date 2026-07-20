@@ -44,6 +44,19 @@ public class MissSafeResolverTests
     }
 
     [Fact]
+    public void OffPlatformMarker_WithNoResolvableStoryline_IsUnmatched_NotAMatchWithNullStoryline()
+    {
+        // Hint absent and no storyline scores → cannot attribute; must fall through to miss-safe, never
+        // return Matched with a null storyline id (which would let a caller treat a non-match as a match).
+        var marker = new AddressingCandidate(AddressingSource.OffPlatformMarker, "marker-x", "", null, 31);
+
+        var resolution = MissSafeResolver.Resolve(marker, [], autoConfirmEnabled: false);
+
+        resolution.Kind.Should().Be(MatchKind.Unmatched);
+        resolution.StorylineId.Should().BeNull();
+    }
+
+    [Fact]
     public void OnTopicOfficialPost_NeedsConfirmation_UnlessAutoConfirmOptedIn()
     {
         var s = SilentStoryline();

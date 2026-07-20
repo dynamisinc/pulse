@@ -38,12 +38,21 @@ public static class SilenceRules
         // 0 at the window, ramping to 1 by ~2x the window (or immediately if the window is 0).
         var t = windowMin > 0 ? Math.Min(1.0, overshoot / (double)windowMin) : 1.0;
 
+        // Raw weights: worry cools as speculation + anger climb with the silence.
+        var worry = 0.5 - (0.2 * t);
+        var speculation = 0.2 + (0.2 * t);
+        var anger = 0.1 + (0.3 * t);
+        const double skepticism = 0.1;
+
+        // Normalise to sum to 1 (consistent with StorylineBriefProjection.ToneMixFor), so prompt-tone
+        // emphasis reads the same regardless of silence duration — only the proportions shift.
+        var total = worry + speculation + anger + skepticism;
         return new ToneMix
         {
-            Worry = 0.5 - (0.2 * t),        // 0.5 → 0.3
-            Speculation = 0.2 + (0.2 * t),  // 0.2 → 0.4
-            Anger = 0.1 + (0.3 * t),        // 0.1 → 0.4
-            Skepticism = 0.1,
+            Worry = worry / total,
+            Speculation = speculation / total,
+            Anger = anger / total,
+            Skepticism = skepticism / total,
             Gratitude = 0.0,
             Calm = 0.0,
         };

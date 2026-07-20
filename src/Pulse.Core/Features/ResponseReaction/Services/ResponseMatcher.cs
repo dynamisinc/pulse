@@ -40,11 +40,17 @@ public static class ResponseMatcher
             }
         }
 
-        // Otherwise: coverage of the expectation's content words (+ hashtag words) by the post.
+        // Otherwise: coverage of the expectation's content words (+ hashtag words) by the post. Filter
+        // hashtag words the same way as any token (drop empty / too-short / stop-words) so a low-signal tag
+        // can't inflate target.Count and deflate confidence for reasons unrelated to the official text.
         var target = Tokenize(storyline.Expectation);
         foreach (var tag in storyline.Hashtags)
         {
-            target.Add(tag.TrimStart('#').ToLowerInvariant());
+            var word = tag.TrimStart('#').ToLowerInvariant();
+            if (word.Length > 2 && !StopWords.Contains(word))
+            {
+                target.Add(word);
+            }
         }
 
         if (target.Count == 0)
