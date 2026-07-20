@@ -26,4 +26,19 @@ public sealed class Persona : IExerciseScoped
     /// templates are shared across runs.
     /// </summary>
     public Guid? PersonaTemplateId { get; set; }
+
+    /// <summary>
+    /// The frontend <c>PersonaKind</c> union value — <c>human</c> (individual) or <c>org</c>
+    /// (institutional) — as a string. Governs the R-004 avatar treatment (duotone silhouette vs.
+    /// monogram); never inferred from a persona type, since a bad-actor persona impersonating an org
+    /// is still <c>org</c>.
+    /// </summary>
+    public required string Kind { get; set; }
+
+    /// <summary>
+    /// The SOC-052 trust signal — whether this persona instance carries the platform's verified seal.
+    /// A plain per-instance flag, never inferred from <see cref="Kind"/> alone, so an unverified
+    /// lookalike account remains visually possible (impersonation training).
+    /// </summary>
+    public bool Verified { get; set; }
 }
