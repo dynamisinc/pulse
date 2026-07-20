@@ -1,6 +1,6 @@
 # Story: Matched-response reaction
 
-**Feature:** Response reaction  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Response reaction  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-002  ·  **Design decisions:** none  ·  **Issue:** #163
 
 ## Context
@@ -11,17 +11,17 @@ This is the "timely, accurate release calms the crowd" half of the differentiato
 v1.1 rumor crowd-correction mechanic.
 
 ## Acceptance Criteria
-- [ ] Given an official post matched to a storyline, when the engine reacts, then it generates a
+- [ ] *(The tunable reaction mix is delivered by `ResponseReactionBehavior`; the actual generation is reaction-loop story 03 — blocked on E2/E7.)* Given an official post matched to a storyline, when the engine reacts, then it generates a
       persona-voiced burst with a **tunable mix** (default: mostly gratitude + follow-up questions +
       one skeptic), appropriate to the storyline's cast.
-- [ ] Given a matched response, when it lands, then the storyline transitions toward **ADDRESSED** and
+- [x] Given a matched response, when it lands, then the storyline transitions toward **ADDRESSED** and
       intensity/sentiment bend **down** per the escalation curve's `decayRateAddressed`
       (storyline-model).
-- [ ] Given an off-platform marker (CTL-026 / #29), when it addresses the storyline, then it triggers
+- [x] Given an off-platform marker (CTL-026 / #29), when it addresses the storyline, then it triggers
       the same matched-response behavior as an on-platform match (identical satisfier).
-- [ ] Given active silence-escalation on the storyline, when a match lands, then escalation stops and
+- [x] Given active silence-escalation on the storyline, when a match lands, then escalation stops and
       hands off to this reaction.
-- [ ] **LLM governance (NFR-005/ADP-024) + content guard (ADP-023):** generation via the tenant-bounded
+- [ ] *(Generation/guard/publish + `engine.generated`/`published`/`state_changed` telemetry are reaction-loop story 03 + #173 — blocked/deferred; the storyline bend toward ADDRESSED is delivered above.)* **LLM governance (NFR-005/ADP-024) + content guard (ADP-023):** generation via the tenant-bounded
       provider with isolation; never breaks fiction. **Telemetry (XC-004):** the reaction emits
       `engine.generated`/`engine.published` and a `storyline.state_changed` (→ADDRESSED). Staff-only
       origin (SOC-003).

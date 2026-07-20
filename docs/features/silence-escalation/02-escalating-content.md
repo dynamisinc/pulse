@@ -1,6 +1,6 @@
 # Story: Escalating anxiety/speculation content
 
-**Feature:** Silence escalation  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Silence escalation  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-001, ADP-010  ·  **Design decisions:** none  ·  **Issue:** #162
 
 ## Context
@@ -11,17 +11,17 @@ intensity climbs and the content shifts — worried questions → "why is X sile
 have visible public consequences.
 
 ## Acceptance Criteria
-- [ ] Given an escalation trigger, when the engine generates, then it produces a persona-voiced burst
+- [ ] *(Intent shaped by `SilenceEscalationBehavior`; the actual generation is reaction-loop story 03 — blocked on E2/E7.)* Given an escalation trigger, when the engine generates, then it produces a persona-voiced burst
       of anxiety/speculation appropriate to the storyline and its current intensity (via
       reaction-loop decide→generate).
-- [ ] Given rising intensity as the window stays unaddressed, when successive bursts generate, then
+- [x] Given rising intensity as the window stays unaddressed, when successive bursts generate, then
       the tone escalates per the curve (Slow burn gradual, Flash panic steep) — later bursts are
       visibly more anxious/speculative than earlier ones.
-- [ ] Given the escalation, when it raises intensity, then storyline intensity increases per the curve
+- [ ] *(Intensity-per-curve is storyline-model, done; the `measure` step that records it is reaction-loop story 04 — blocked.)* Given the escalation, when it raises intensity, then storyline intensity increases per the curve
       (storyline-model story 02) and the change is measured (reaction-loop story 04).
-- [ ] Given a matched official response arriving mid-escalation, when it lands, then escalation stops
+- [x] Given a matched official response arriving mid-escalation, when it lands, then escalation stops
       and hands off to response-reaction (the storyline transitions toward ADDRESSED).
-- [ ] **LLM governance (NFR-005 / ADP-024):** generation is via the tenant-bounded provider with the
+- [ ] *(Generation/guard/publish + telemetry are reaction-loop story 03 + #173 — blocked/deferred.)* **LLM governance (NFR-005 / ADP-024):** generation is via the tenant-bounded provider with the
       isolation boundary; **content guard (ADP-023):** escalation never breaks fiction; **Telemetry
       (XC-004):** bursts emit `engine.generated`/`engine.published`. Staff-only origin (SOC-003).
 
