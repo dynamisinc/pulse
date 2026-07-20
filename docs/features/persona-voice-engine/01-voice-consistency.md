@@ -1,7 +1,11 @@
 # Story: Voice consistency — dossier + prior-post conditioning
 
-**Feature:** Persona voice engine  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Persona voice engine  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-020  ·  **Design decisions:** none  ·  **Issue:** #148
+
+> **Delivered:** `PersonaVoice/Services/VoiceProfileBuilder` — `RefreshStyle` (from post history, cold-start
+> → seed), `SelectExemplars` (2–3 recent), `ToDossier` (projection carrying voice notes + style + exemplars
+> + type guidance). Exercise-scoped (XC-001). Tests: `VoiceProfileBuilderTests`.
 
 ## Context
 A persona must sound like the same person all exercise (ADP-020). Its generation context always
@@ -11,17 +15,17 @@ time and refreshed from real post history, and **2–3 of its own recent posts**
 (prior-post conditioning). Same persona → same dossier + its own history → stable voice.
 
 ## Acceptance Criteria
-- [ ] Given a persona, when the engine generates for it, then the prompt includes its voice notes,
+- [x] Given a persona, when the engine generates for it, then the prompt includes its voice notes,
       style params, and 2–3 of its own most recent posts as exemplars.
-- [ ] Given a persona with accumulating post history, when style params are computed, then they are
+- [x] Given a persona with accumulating post history, when style params are computed, then they are
       refreshed from the persona's actual posts (not only the seed dossier), so the voice tracks how
       the persona has actually been writing this exercise.
-- [ ] Given repeated generations for one persona, when their output is compared, then it conforms to
+- [x] Given repeated generations for one persona, when their output is compared, then it conforms to
       that persona's style params (emoji/length/caps/hashtag) within tolerance — a consistency check
       the acceptance metric (story 04) enforces.
-- [ ] Given a persona with sparse or no history, when it is generated for, then the dossier exemplars
+- [x] Given a persona with sparse or no history, when it is generated for, then the dossier exemplars
       alone drive the voice (graceful cold start).
-- [ ] **LLM governance (NFR-005):** conditioning uses only the persona's own exercise-scoped content
+- [x] **LLM governance (NFR-005):** conditioning uses only the persona's own exercise-scoped content
       via the tenant-bounded provider; no cross-exercise history leaks (XC-001).
 
 ## Out of Scope

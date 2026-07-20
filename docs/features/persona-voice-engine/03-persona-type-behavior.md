@@ -1,7 +1,11 @@
 # Story: Persona-type behavior + bad-actor gating
 
-**Feature:** Persona voice engine  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Persona voice engine  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Complete
 **Requirements:** ADP-022  ·  **Design decisions:** none  ·  **Issue:** #150
+
+> **Delivered:** `PersonaVoice/Services/PersonaCasting` — `Guidance(type)` (trusted behavior per type;
+> adversarial types reassert the fiction guard), `IsBadActor`, `EligibleCast(cast, badActorsEnabled)` (gate).
+> Type guidance is folded into the trusted dossier by `VoiceProfileBuilder.ToDossier`. Tests: `PersonaCastingTests`.
 
 ## Context
 Persona **type** governs behavior (ADP-022): outlets sensationalize within bounds, agencies stay
@@ -10,18 +14,18 @@ procedural, trolls antagonize, helpers correct rumors, businesses give practical
 default — so a scenario without an antagonist doesn't spontaneously grow one.
 
 ## Acceptance Criteria
-- [ ] Given a persona's type, when the engine generates for it, then the type shapes its behavior
+- [x] Given a persona's type, when the engine generates for it, then the type shapes its behavior
       (outlet sensationalizes within bounds / agency procedural / troll antagonizes / helper corrects
       / business practical), consistent with the persona-management type taxonomy.
-- [ ] Given a bad-actor (troll / antagonist) persona, when a burst is composed, then it participates
+- [x] Given a bad-actor (troll / antagonist) persona, when a burst is composed, then it participates
       **only** if the storyline or scenario has enabled bad-actor participation; otherwise it is
       excluded.
-- [ ] Given a helper persona and an active rumor (v1.1) or misinformation, when it participates, then
+- [x] Given a helper persona and an active rumor (v1.1) or misinformation, when it participates, then
       its behavior tends toward correction/clarification (the v1 behavior sets up the v1.1
       crowd-correction mechanic in rumor-model).
-- [ ] Given any persona type, when it generates, then it still respects the fiction guard (ADP-023) —
+- [x] Given any persona type, when it generates, then it still respects the fiction guard (ADP-023) —
       a troll antagonizes in-world but never breaks fiction, uses slurs, or threatens violence.
-- [ ] **LLM governance (NFR-005):** type-driven behavior is expressed via the dossier/type in the
+- [x] **LLM governance (NFR-005):** type-driven behavior is expressed via the dossier/type in the
       trusted prompt context, never via untrusted world content.
 
 ## Out of Scope
