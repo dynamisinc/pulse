@@ -1,0 +1,203 @@
+name: Deploy Backend
+
+# Publishes Pulse.WebApi to the App Service (app-pulse-api-uat) and applies the EF Core
+# migration to Azure SQL (sqldb-pulse-uat) as an idempotent script. Quality gates
+# (dotnet build + test) run pre-merge in ci.yml; this workflow assumes-green and only
+# builds the migration script + publish output and deploys them — mirroring deploy-frontend.yml.
+#
+# ── Prerequisites (one-time, before this can succeed) ────────────────────────────────
+#   1. Infra deployed with the backend toggles ON: in infrastructure/parameters/uat.bicepparam set
+#      deployDatabase = true, deployBackend = true, deployMonitoring = true (+ sqlEntraAdminObjectId),
+#      then run the "Deploy Infrastructure" workflow (what-if first). This creates
+#      app-pulse-api-uat + sql-pulse-uat/sqldb-pulse-uat + App Insights.
+#   2. GitHub "uat" environment secrets:
+#        AZURE_CREDENTIALS            – service principal JSON (Contributor on rg-pulse-uat-centralus).
+#                                       Already used by Deploy Infrastructure. Must also let the SP
+#                                       manage the SQL firewall + deploy the web app.
+#        AZURE_SQL_CONNECTION_STRING  – connection string to sqldb-pulse-uat used ONLY to apply the
+#                                       migration script (the same admin creds database.bicep provisions;
+#                                       or a Key Vault reference). Not stored on the App Service.
+#      (The App Service's own runtime ConnectionStrings__DefaultConnection is injected by webapp.bicep —
+#       this workflow does not set app settings.)
+#
+# ── Migration strategy ───────────────────────────────────────────────────────────────
+#   The host does NOT call Database.Migrate() at startup (deliberate: concurrent instances must not race
+#   schema changes, and the app identity should not hold ALTER rights at runtime). Instead we generate an
+#   *idempotent* script at build time (safe to re-run — each migration is guarded by an
+#   __EFMigrationsHistory check) and apply it here before the new code is deployed. A transient SQL
+#   firewall rule for the runner's public IP is opened around the apply and removed in an always() step.
+
+on:
+  push:
+    branches: [main]
+    # Fires on real backend CODE changes only. Deliberately NOT triggered by edits to this workflow
+    # file itself — a deploy pipeline should not redeploy just because its own YAML changed (and the
+    # very first merge of this file would otherwise attempt a deploy before the infra exists). Use the
+    # workflow_dispatch below to run it on demand.
+    paths:
+      - "src/Pulse.WebApi/**"
+      - "src/Pulse.Core/**"
+      - "global.json"
+      - "pulse.slnx"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        default: "uat"
+        type: choice
+        options:
+          - uat
+
+concurrency:
+  # Never let two backend deploys race the same App Service / database.
+  group: deploy-backend-${{ github.event.inputs.environment || 'uat' }}
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: "rg-pulse-uat-centralus"
+  SQL_SERVER_NAME: "sql-pulse-uat"
+  WEBAPP_NAME: "app-pulse-api-uat"
+
+jobs:
+  build:
+    name: Build + migration script
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore pulse.slnx
+
+      - name: Publish Pulse.WebApi
+        run: >-
+          dotnet publish src/Pulse.WebApi/Pulse.WebApi.csproj
+          --configuration Release --no-restore --output ./publish
+
+      - name: Generate idempotent EF migration script
+        run: |
+          # Pin dotnet-ef to the EF Core version Pulse.WebApi references
+          # (Microsoft.EntityFrameworkCore.* in src/Pulse.WebApi/Pulse.WebApi.csproj). Installing the
+          # floating "latest" tool can drift a major version ahead of the app's runtime/design packages,
+          # which breaks `dotnet ef migrations script`. Bump this in lockstep with the csproj packages.
+          dotnet tool install --global dotnet-ef --version 10.0.10
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          mkdir -p ./migrations
+          # --idempotent: re-runnable; each migration is applied only if absent from __EFMigrationsHistory.
+          dotnet ef migrations script \
+            --idempotent \
+            --project src/Pulse.WebApi/Pulse.WebApi.csproj \
+            --output ./migrations/pulse.sql
+
+      - name: Upload publish output
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-publish
+          path: ./publish
+          retention-days: 1
+
+      - name: Upload migration script
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-migration
+          path: ./migrations/pulse.sql
+          retention-days: 1
+
+  deploy:
+    name: Migrate + deploy
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: ${{ github.event.inputs.environment || 'uat' }}
+    steps:
+      - name: Download publish output
+        uses: actions/download-artifact@v8
+        with:
+          name: backend-publish
+          path: ./publish
+
+      - name: Download migration script
+        uses: actions/download-artifact@v8
+        with:
+          name: backend-migration
+          path: ./migrations
+
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Azure SQL has no public firewall path for the GitHub runner (database.bicep's AllowAzureServices
+      # rule covers Azure-hosted callers, not a GitHub-hosted runner). Open a transient rule for this
+      # run's public IP, apply the migration, then always remove it.
+      - name: Open transient SQL firewall rule for runner
+        id: fw
+        run: |
+          # -4 forces IPv4: az sql server firewall-rule only accepts IPv4, but a runner with IPv6
+          # connectivity would otherwise resolve an AAAA address here and fail the rule create.
+          RUNNER_IP=$(curl -4 -s https://api.ipify.org)
+          if [ -z "$RUNNER_IP" ]; then
+            echo "::error::could not resolve the runner's IPv4 address for the transient SQL firewall rule"
+            exit 1
+          fi
+          RULE_NAME="gha-migrate-${GITHUB_RUN_ID}"
+          echo "rule_name=$RULE_NAME" >> "$GITHUB_OUTPUT"
+          az sql server firewall-rule create \
+            --resource-group "$RESOURCE_GROUP" \
+            --server "$SQL_SERVER_NAME" \
+            --name "$RULE_NAME" \
+            --start-ip-address "$RUNNER_IP" \
+            --end-ip-address "$RUNNER_IP"
+
+      - name: Apply EF migration (idempotent)
+        uses: azure/sql-action@v2.3
+        with:
+          connection-string: ${{ secrets.AZURE_SQL_CONNECTION_STRING }}
+          path: ./migrations/pulse.sql
+
+      - name: Remove transient SQL firewall rule
+        if: always() && steps.fw.outputs.rule_name != ''
+        run: |
+          az sql server firewall-rule delete \
+            --resource-group "$RESOURCE_GROUP" \
+            --server "$SQL_SERVER_NAME" \
+            --name "${{ steps.fw.outputs.rule_name }}" || true
+
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.WEBAPP_NAME }}
+          package: ./publish
+
+      - name: Smoke test — liveness must be up (DB-independent)
+        run: |
+          for i in 1 2 3 4 5 6; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://${WEBAPP_NAME}.azurewebsites.net/health" || echo 000)
+            echo "attempt $i: /health -> $CODE"
+            [ "$CODE" = "200" ] && break
+            sleep 10
+          done
+          [ "$CODE" = "200" ] || { echo "::error::/health did not return 200 after deploy"; exit 1; }
+
+      - name: Smoke test — readiness reflects DB reachability
+        run: |
+          # /health/ready aggregates the DbContext check; a non-200 here means the migration ran but the
+          # app can't reach the DB (connection string / firewall) — surface it as a warning, not a hard
+          # fail, so a transient serverless-SQL cold start doesn't red an otherwise-good deploy.
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://${WEBAPP_NAME}.azurewebsites.net/health/ready" || echo 000)
+          echo "/health/ready -> $CODE"
+          [ "$CODE" = "200" ] || echo "::warning::/health/ready returned $CODE — check ConnectionStrings__DefaultConnection and SQL reachability."
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Backend deploy — ${{ github.event.inputs.environment || 'uat' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- App Service: \`${WEBAPP_NAME}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Migration: idempotent script applied to \`${SQL_SERVER_NAME}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Liveness: https://${WEBAPP_NAME}.azurewebsites.net/health" >> "$GITHUB_STEP_SUMMARY"
