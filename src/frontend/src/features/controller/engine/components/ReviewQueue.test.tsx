@@ -89,6 +89,19 @@ describe('ReviewQueue — card context + actions', () => {
     expect(held).toHaveAttribute('data-priority', 'true')
     expect(within(held).getByTestId('countdown-state')).toHaveTextContent('timer expired — held for you')
   })
+
+  it('the header pendingCount/heldCount equal the number of rendered queued/held cards (D5-014/2.1)', async () => {
+    await renderQueue(<ReviewQueue />)
+    const cards = screen.getAllByTestId('review-card')
+    const pendingCards = cards.filter(card =>
+      ['queued', 'held'].includes(card.getAttribute('data-disposition') ?? ''),
+    )
+    const heldCards = cards.filter(card => card.getAttribute('data-disposition') === 'held')
+
+    expect(pendingCards.length).toBeGreaterThan(0)
+    expect(screen.getByTestId('pending-count')).toHaveTextContent(`${pendingCards.length} need review`)
+    expect(screen.getByTestId('held-count')).toHaveTextContent(`${heldCards.length} held`)
+  })
 })
 
 describe('ReviewQueue — keyboard actions', () => {
@@ -118,6 +131,43 @@ describe('ReviewQueue — keyboard actions', () => {
       expect(cardById('draft-fulco-reassure')).toHaveAttribute('data-disposition', 'vetoed')
     })
     expect(postStore.getPosts().length).toBe(baseline)
+  })
+
+  it('re-rolls the focused burst with R: a fresh draft, still unpublished', async () => {
+    await renderQueue(<ReviewQueue />)
+    const queue = screen.getByTestId('review-queue')
+    const baseline = listPosts().length
+    const before = within(cardById('draft-fulco-reassure')).getByTestId('preview-text').textContent
+
+    fireEvent.keyDown(queue, { key: 'r' })
+
+    await waitFor(() => {
+      const after = within(cardById('draft-fulco-reassure')).getByTestId('preview-text').textContent
+      expect(after).not.toBe(before)
+    })
+    expect(cardById('draft-fulco-reassure')).toHaveAttribute('data-disposition', 'counting-down')
+    expect(postStore.getPosts().length).toBe(baseline)
+    expect(screen.getByTestId('review-queue-status')).toHaveTextContent('Re-rolled')
+  })
+
+  it('↑ / ↓ move focus between cards (roving tabindex, NFR-001)', async () => {
+    await renderQueue(<ReviewQueue />)
+    const queue = screen.getByTestId('review-queue')
+
+    // ArrowDown from the default (first-card) focus moves DOM focus onto the
+    // next card — the roving-tabindex grid, not just a visual highlight.
+    fireEvent.keyDown(queue, { key: 'ArrowDown' })
+    await waitFor(() => {
+      expect(document.activeElement).toBe(cardById('draft-newsline7-followup'))
+    })
+    expect(cardById('draft-newsline7-followup')).toHaveAttribute('tabindex', '0')
+    expect(cardById('draft-fulco-reassure')).toHaveAttribute('tabindex', '-1')
+
+    fireEvent.keyDown(queue, { key: 'ArrowUp' })
+    await waitFor(() => {
+      expect(document.activeElement).toBe(cardById('draft-fulco-reassure'))
+    })
+    expect(cardById('draft-fulco-reassure')).toHaveAttribute('tabindex', '0')
   })
 })
 

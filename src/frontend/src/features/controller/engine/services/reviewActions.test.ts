@@ -16,7 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
-import { listPosts, type Post } from '@/features/social'
+import { listPosts, toParticipantView, type Post } from '@/features/social'
 import { postStore } from '@/features/social/services/postStore'
 import { personaIdForHandle } from '@/features/personas'
 import { DraftDisposition, type EngineReviewItem } from '../models/reviewContracts'
@@ -114,6 +114,52 @@ describe('edit', () => {
     const reviewed = reviewedEvents()
     expect(reviewed).toHaveLength(1)
     expect(firstOrThrow(reviewed).payload?.action).toBe('edit')
+  })
+
+  it('NEVER publishes an unsanitized edited draft: a stored-XSS payload is neutralized (NFR-004)', () => {
+    const item = itemById('draft-fulco-reassure')
+    const published = edit(
+      item,
+      '<script>alert(document.cookie)</script>Boil water now<img src=x onerror="alert(1)">',
+      CTX,
+    )
+
+    const post = firstOrThrow(published)
+    expect(post.text).toBe('Boil water now')
+    expect(post.text).not.toContain('<script')
+    expect(post.text).not.toContain('onerror')
+    expect(post.text).not.toMatch(/<[a-z]/i)
+  })
+})
+
+describe('published provenance never reaches a participant view (XC-002/SOC-003)', () => {
+  it('toParticipantView strips origin, actingHumanId, createdWallClock, and injectId from an approved engine post', () => {
+    const item = itemById('draft-fulco-reassure')
+    const post = firstOrThrow(approve(item, CTX))
+
+    // The full Post DOES carry engine provenance...
+    expect(post.origin).toBe('engine')
+    expect(post.actingHumanId).toBe('human-controller-01')
+
+    // ...but the ONLY shape a participant surface may receive does not.
+    const view = toParticipantView(post)
+    expect(view).not.toHaveProperty('origin')
+    expect(view).not.toHaveProperty('actingHumanId')
+    expect(view).not.toHaveProperty('createdWallClock')
+    expect(view).not.toHaveProperty('injectId')
+    const serialized = JSON.stringify(view)
+    expect(serialized).not.toContain('engine')
+    expect(serialized).not.toContain('human-controller-01')
+  })
+
+  it('holds for the edited-then-published post too', () => {
+    const item = itemById('draft-newsline7-followup')
+    const post = firstOrThrow(edit(item, 'Edited advisory text.', CTX))
+
+    const view = toParticipantView(post)
+    expect(view).not.toHaveProperty('origin')
+    expect(view).not.toHaveProperty('actingHumanId')
+    expect(view.text).toBe('Edited advisory text.')
   })
 })
 
