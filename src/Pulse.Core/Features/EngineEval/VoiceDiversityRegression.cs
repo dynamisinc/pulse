@@ -64,7 +64,22 @@ public static class VoiceDiversityRegression
     public static bool ProxyTracksHumans(double proxyPassRate, HumanSpotCheck panel, double tolerance = 0.2)
     {
         ArgumentNullException.ThrowIfNull(panel);
+        ThrowIfNotRate(proxyPassRate, nameof(proxyPassRate));
+        ThrowIfNotRate(panel.BelievabilityPassRate, $"{nameof(panel)}.{nameof(HumanSpotCheck.BelievabilityPassRate)}");
+        if (double.IsNaN(tolerance) || tolerance < 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(tolerance), tolerance, "Tolerance must be a non-negative number.");
+        }
+
         return Math.Abs(proxyPassRate - panel.BelievabilityPassRate) <= tolerance;
+    }
+
+    private static void ThrowIfNotRate(double value, string name)
+    {
+        if (double.IsNaN(value) || value < 0.0 || value > 1.0)
+        {
+            throw new ArgumentOutOfRangeException(name, value, "A pass rate must be within [0, 1].");
+        }
     }
 
     private static IReadOnlyList<VoiceDiversityCase> BuildCorpus()

@@ -71,4 +71,16 @@ public class VoiceDiversityRegressionTests
         VoiceDiversityRegression.ProxyTracksHumans(proxyPassRate: 0.80, panel).Should().BeTrue();
         VoiceDiversityRegression.ProxyTracksHumans(proxyPassRate: 0.40, panel).Should().BeFalse("a large divergence means the thresholds have drifted");
     }
+
+    [Theory]
+    [InlineData(1.5, 0.8, 0.2)]    // proxy rate > 1
+    [InlineData(0.8, 1.5, 0.2)]    // panel rate > 1
+    [InlineData(0.8, 0.8, -0.1)]   // negative tolerance
+    [InlineData(double.NaN, 0.8, 0.2)]
+    public void ProxyTracksHumans_RejectsOutOfRangeInputs(double proxyRate, double panelRate, double tolerance)
+    {
+        var panel = new HumanSpotCheck(20, panelRate);
+        var act = () => VoiceDiversityRegression.ProxyTracksHumans(proxyRate, panel, tolerance);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
 }
