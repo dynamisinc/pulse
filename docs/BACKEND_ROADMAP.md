@@ -274,24 +274,63 @@ Same loop as [`ORCHESTRATION_MECHANICS.md`](ORCHESTRATION_MECHANICS.md), with th
    `Issue:` fields left blank pending GitHub-mirror approval (`GITHUB_TRACKER.md`). Phase **B2** (identity/nav) is
    *already* decomposed in the existing `identity-auth-roles/` + `exercise-isolation/` folders — it needs `stack:`
    backend stories added, not a fresh feature, when its turn comes.
-2. **Run Phase B0 as a hand-driven serial chain** (not a fan-out): a dependency line — `backend-host/01`
-   (host) → `backend-host/02` (persistence + Tier-2 write guard) → then, on that `PulseDbContext`,
-   `exercise-isolation/01` (read-side query filter) and `telemetry/02` (sink) — built in order with the
-   standard build→test→Gate-1 loop, then Gate-2 the umbrella.
+2. **Run Phase B0 as the orchestrator** ([`ORCHESTRATION_MECHANICS.md`](ORCHESTRATION_MECHANICS.md) — spawn/gate
+   subagents, don't hand-code): a serial dependency line — `backend-host/01` (host) → `backend-host/02`
+   (persistence + Tier-2 write guard) → then, on that `PulseDbContext`, `exercise-isolation/01` (read-side query
+   filter) + `telemetry/02` (sink), which **fan out in one Workflow run once `02` lands** — each through the
+   build→test→Gate-1 loop, then Gate-2 the umbrella. Suggested subagent **model/effort** is in the kickoff prompt below.
 3. **Then fan out Phase B1** (`social-api`) as a per-wave Workflow run (the four stories are file-disjoint once the
    seams exist), swapping the frontend adapters live as each endpoint lands. Update this doc's phase boxes as waves merge.
 
 **Session-kickoff (paste to start the first build session):**
 
 ```
-Build backend-host Phase B0 per docs/BACKEND_ROADMAP.md and docs/ORCHESTRATION_MECHANICS.md.
-Umbrella: feature/backend-host (off latest origin/main).
-Serial chain (each its own build/<slug>/<NN> branch): backend-host/01-webapi-host-bootstrap →
-  backend-host/02-persistence-efcore [Tier-2 write guard], then the cross-feature seams
-  exercise-isolation/01-exercise-scoped-queries [Tier-2 read filter] + telemetry/02-telemetry-sink-backend.
-Stack: backend. Gate each with dotnet build + dotnet test; Gate-1 code-review per story (isolation filter is
-always-Critical); Gate-2 the umbrella. Do NOT exceed the ACs. The exercise-scoping query filter must be a
-central EF global filter, fail-closed, with a cross-exercise test that FAILS access.
+Build Phase B0 (backend foundation) as the ORCHESTRATOR — you spawn and gate subagents; you do NOT write
+code yourself. Follow docs/ORCHESTRATION_MECHANICS.md. Umbrella: feature/backend-host (off latest
+origin/main); one builder branch + git worktree per story (Build+Test share one worktree; code-review
+reads the branch diff).
+
+Subagent roles — model + effort (Agent tool: agentType / model / effort):
+  backend-agent (build)     opus   / high    (xhigh for #269 & #44; sonnet/medium ok for the boilerplate host #268)
+  testing-agent (xUnit)     sonnet / medium  (high for the isolation suite — Testcontainers.MsSql setup)
+  code-review (Gate 1 & 2)  opus   / xhigh   (the gate must be the strongest reviewer)
+  story-agent (close-out)   haiku  / low     (Status flip + issue mirror)
+  (run yourself, the orchestrator, on opus/high — you own the Program.cs edits + merge/gate calls.)
+
+Per-story loop (ORCHESTRATION_MECHANICS.md §4): backend-agent builds STRICTLY to the story's ACs (do not
+exceed them; reuse the reuse-map modules) -> testing-agent adds xUnit (isolation/schema/telemetry first) and
+runs `dotnet build pulse.slnx -c Release && dotnet test pulse.slnx -c Release` (green) -> Gate-1 code-review
+(read-only, adversarial; returns {clean,findings}; no Critical -> eligible) -> YOU merge the clean branch into
+the umbrella serially -> Gate-2 code-review on the integrated umbrella.
+
+Build order — SERIAL (each depends on the prior seam):
+  1. backend-host/01 (#268): add Pulse.WebApi + Pulse.WebApi.Tests to pulse.slnx; Program.cs calls
+     AddEngineGeneration(config) unmodified + AddControllers()/AddHealthChecks(); CORS for the SWA origin;
+     App Insights. GET /health -> 200.
+  2. backend-host/02 (#269) [TIER-2]: PulseDbContext + EF Core (Exercise, PersonaTemplate, Persona, Post
+     [reserve rumorRef/mutationOf + soft-delete], TelemetryEvent); non-nullable ExerciseId + a SaveChangesAsync
+     write-time scope guard (fail-closed); AddPulsePersistence(config); initial migration.
+  3. THEN fan out the tail in ONE Workflow run (both depend only on #02, disjoint files):
+     - exercise-isolation/01 (#44) [TIER-2]: read-side EF global query filter extending
+       PulseDbContext.OnModelCreating — exercise A never returns exercise B rows; omit-scope fails closed.
+     - telemetry/02 (#274): POST /api/telemetry validating the locked XC-004 v0 envelope -> DbSet<TelemetryEvent>.
+
+Composition root (orchestrator-owned, serial — never a builder's file): src/Pulse.WebApi/Program.cs. Story 01
+authors the skeleton; from 02 on, each story exports its own Add{X}()/Map{X}() extension and YOU wire the
+one-line call in between merges. Controllers self-register (AddControllers registered once in 01).
+
+TIER-2 (always-Critical, human sign-off): #269 and #44 are the isolation guarantee (write-guard + read-filter).
+Each MUST ship a cross-exercise access test that FAILS closed; build+review them at xhigh; flag for sign-off.
+
+Known flags (honor, don't rediscover): CI runs on ubuntu-latest with NO LocalDB -> use Testcontainers.MsSql for
+migration/constraint tests. Config keys must match infrastructure/modules/{webapp,database,appinsights}.bicep
+verbatim. Route base is /api; telemetry is POST /api/telemetry. Do NOT flip any frontend mock->live adapter in
+B0 (that's Phase B1, orchestrator-owned).
+
+Done (per story): ACs + cross-cutting ACs met; xUnit covers them; Gate-0 green; code-review clean; story-agent
+flips **Status:** Complete + mirrors the GitHub issue (close completed + drop status:*); tick the Phase B0 box
+here. When all four are Gate-2 clean: open feature/backend-host -> main (Gate-0 CI + Copilot), fold findings,
+merge. B0 done unblocks Phase B1 (social-api, #267).
 ```
 
 ---
