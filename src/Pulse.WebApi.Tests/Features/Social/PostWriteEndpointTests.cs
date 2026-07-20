@@ -169,6 +169,46 @@ public class PostWriteEndpointTests
     }
 
     [RequiresDockerFact]
+    public async Task TelemetryActor_ActingHumanId_IsNullForParticipant_AndNonNullForControllerAsPersona()
+    {
+        // The locked v0 envelope types actor.actingHumanId as z.string().min(1).optional(): an empty
+        // string is OFF-ENVELOPE. A participant post that omits actingHumanId must null-omit it on the
+        // telemetry actor (never persist ""); a controller-as-persona post must keep it non-null (COR-018).
+        var exerciseA = Guid.NewGuid();
+        var participantPersonaId = Guid.NewGuid();
+        var controllerPersonaId = Guid.NewGuid();
+        const string actingHumanId = "controller-77";
+
+        await using var factory = CreateFactory(exerciseA);
+        using var client = factory.CreateClient();
+
+        // Participant post: actingHumanId omitted from the request body entirely.
+        var participantBody = ValidRequestBody(participantPersonaId, "participant", actingHumanId: null);
+        var participantResponse = await client.PostAsync(PostsUri, JsonContent(participantBody));
+        participantResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        var participantPostId = await ReadPostIdAsync(participantResponse);
+
+        // Controller-as-persona post: actingHumanId supplied (required by COR-018).
+        var controllerBody = ValidRequestBody(controllerPersonaId, "controller-as-persona", actingHumanId: actingHumanId);
+        var controllerResponse = await client.PostAsync(PostsUri, JsonContent(controllerBody));
+        controllerResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        var controllerPostId = await ReadPostIdAsync(controllerResponse);
+
+        await using var readContext = _fixture.CreateContext();
+
+        var participantEvent = await readContext.TelemetryEvents.IgnoreQueryFilters()
+            .SingleAsync(e => e.Target != null && e.Target.EntityId == participantPostId.ToString());
+        participantEvent.Actor.ActingHumanId.Should().BeNull(
+            "a participant post that omits actingHumanId must null-omit it on the telemetry actor — "
+            + "an empty string is off the locked v0 envelope (z.string().min(1).optional())");
+
+        var controllerEvent = await readContext.TelemetryEvents.IgnoreQueryFilters()
+            .SingleAsync(e => e.Target != null && e.Target.EntityId == controllerPostId.ToString());
+        controllerEvent.Actor.ActingHumanId.Should().Be(actingHumanId,
+            "a controller-as-persona post must keep actingHumanId non-null on the telemetry actor (COR-018)");
+    }
+
+    [RequiresDockerFact]
     public async Task ControllerAsPersona_ActingHumanIdIsStored_AndStaffResponseIncludesOriginAndActingHumanId()
     {
         var exerciseA = Guid.NewGuid();

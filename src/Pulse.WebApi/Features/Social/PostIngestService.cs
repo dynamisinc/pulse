@@ -137,6 +137,10 @@ public sealed class PostIngestService
 
         // actingHumanId is stored for every origin (the Post column is NOT NULL — COR-018 telemetry/staff-only).
         var actingHumanId = request.ActingHumanId ?? string.Empty;
+        // The telemetry actor's actingHumanId is null-omitted when absent: the locked v0 envelope types
+        // actor.actingHumanId as z.string().min(1).optional() — an empty string is OFF-ENVELOPE (rejected by
+        // the telemetry/02 sink and the E10 v0 validators). Null-omit exactly the way injectId is below.
+        var telemetryActingHumanId = string.IsNullOrEmpty(request.ActingHumanId) ? null : request.ActingHumanId;
         var injectId = string.IsNullOrEmpty(request.InjectId) ? null : request.InjectId;
 
         // One server clock read shared by the persisted ingest instant and the telemetry timestamps.
@@ -172,7 +176,7 @@ public sealed class PostIngestService
             {
                 Kind = "persona",
                 PersonaId = authorPersonaId.ToString(),
-                ActingHumanId = actingHumanId,
+                ActingHumanId = telemetryActingHumanId,
             },
             Origin = origin,
             InjectId = injectId,
