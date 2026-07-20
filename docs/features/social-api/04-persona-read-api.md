@@ -1,6 +1,6 @@
 # Story: Persona read API — GET /personas
 
-**Feature:** Social API (backend)  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Social API (backend)  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** XC-005, COR-003 (COR-018, XC-002)  ·  **Design decisions:** none  ·  **Issue:** #273
 
 ## Context
@@ -20,27 +20,27 @@ however that seeding happened. It does **not** build persona template/cast autho
 read side only.
 
 ## Acceptance Criteria
-- [ ] **Exercise-scoped instance read (XC-005, COR-003).** Given a request whose resolved scope is
+- [x] **Exercise-scoped instance read (XC-005, COR-003).** Given a request whose resolved scope is
       exercise A, when the client calls `GET /personas`, then the response is exactly exercise A's
       seeded persona instances — never another concurrent exercise's instances of the same
       template (COR-003's "no collision" guarantee) — and every item satisfies `personaService.ts`'s
       `isValidPersona` guard (`id`, `displayName`, `handle`, `kind ∈ {human,org}`,
       `verified: boolean` present).
-- [ ] **Contract fidelity.** Given the mock→live flip (orchestrator-owned, not this story), when
+- [x] **Contract fidelity.** Given the mock→live flip (orchestrator-owned, not this story), when
       `USE_MOCK_DATA` is off, then `resolvePersonas()`/`usePersonas()` resolve against this
       endpoint with no change to either function's signature or the shipped `Persona` type
       (`personas/types.ts:84-101`).
-- [ ] **Real authorship end-to-end.** Given `01-feed-read-api`'s feed/thread responses reference
+- [x] **Real authorship end-to-end.** Given `01-feed-read-api`'s feed/thread responses reference
       `authorPersonaId`, when the client resolves an author via `assembleFeedView`'s persona `Map`
       lookup, then every persona referenced by a real, persisted post resolves to a row this
       endpoint serves — `SEEDED_PERSONAS` (`personaService.ts:45-49`) is no longer the production
       author source.
-- [ ] **Isolation.** Given exercise A and exercise B each have a persona instantiated from the same
+- [x] **Isolation.** Given exercise A and exercise B each have a persona instantiated from the same
       `PersonaTemplate`, when a request scoped to A calls `GET /personas`, then B's instance never
       appears in the response. Extend the standing isolation suite (`exercise-isolation/07`,
       COR-007); not separately Tier-2-tagged this pass — `01` and `03` carry this feature's Tier-2
       isolation sign-off.
-- [ ] **XC-002 — no new leak.** Given the backend schema may eventually carry staff-only operator/
+- [x] **XC-002 — no new leak.** Given the backend schema may eventually carry staff-only operator/
       presence metadata on a persona row (CTL-004 multi-controller presence, `persona-operation/04`,
       Not Started), when `GET /personas` serves this exercise's cast, then the response contains
       only the fields already in the shipped `Persona` type — no operator/session/attribution field

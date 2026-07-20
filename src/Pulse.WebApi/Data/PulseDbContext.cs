@@ -110,6 +110,9 @@ public class PulseDbContext : DbContext
             entity.HasIndex(e => e.ExerciseId);
             // RumorRef / MutationOf / DeletedAt are reserved nullable columns (E8 rumor model + XC-010
             // soft-delete); left nullable by their C# type — no extra config needed.
+            // Provenance columns (Origin / ActingHumanId / CreatedWallClock — NOT NULL; InjectId — NULL)
+            // likewise derive their nullability from their C# types (required / value type vs. string?), so
+            // they need no explicit config either.
         });
 
         modelBuilder.Entity<TelemetryEvent>(entity =>

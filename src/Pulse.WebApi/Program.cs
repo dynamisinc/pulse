@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.Realtime;
+using Pulse.WebApi.Features.Social;
 
 // Pulse.WebApi — the first runtime for the Pulse.Core engine (docs/BACKEND_ROADMAP.md §4, Phase B0).
 // This composition root is orchestrator-owned from here on: only a story that adds a *new* DI
@@ -28,6 +30,16 @@ builder.Services.AddPulsePersistence(builder.Configuration);
 // IExerciseContext that PulseDbContext's global query filter reads; it starts UNSET (fail-closed: an
 // unresolved scope matches zero rows). Later stories (host/auth/staff-switch) populate it per request.
 builder.Services.AddExerciseScoping();
+
+// Social API (Phase B1, feature/social-api) — orchestrator-wired composition root. Each story exposes its
+// own Add*/Map* extension (never edits this file itself); these five DI calls register the read/write
+// services, the persona read, and the SignalR realtime host. AddSocialRealtimeHub also registers
+// IFeedBroadcaster -> SignalRFeedBroadcaster (which PostIngestService calls after a successful persist) and
+// AddSignalR(); it must be present alongside AddSocialPostWrite so the write path's broadcast resolves.
+builder.Services.AddSocialFeedRead();      // #270 GET /api/feed, /api/threads/{id}
+builder.Services.AddSocialPostWrite();     // #271 POST /api/posts (sanitize + stamp + telemetry + broadcast)
+builder.Services.AddSocialPersonaRead();   // #273 GET /api/personas
+builder.Services.AddSocialRealtimeHub();   // #272 exercise-grouped hub + IFeedBroadcaster impl
 
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
@@ -63,6 +75,15 @@ app.UseCors(FrontendCorsPolicy);
 app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false });
 app.MapHealthChecks("/health/ready");
 app.MapControllers();
+
+// Social API endpoints + realtime hub (Phase B1) — the orchestrator-owned endpoint mappings paired with the
+// DI registrations above. Provenance is projected out server-side (XC-002) inside each endpoint; scope comes
+// only from the resolved IExerciseContext (COR-001), never a client-supplied exerciseId.
+app.MapSocialFeedEndpoints();     // #270 GET /api/feed
+app.MapSocialThreadEndpoints();   // #270 GET /api/threads/{postId}
+app.MapSocialPostEndpoints();     // #271 POST /api/posts
+app.MapSocialPersonaEndpoints();  // #273 GET /api/personas
+app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
 
 app.Run();
 

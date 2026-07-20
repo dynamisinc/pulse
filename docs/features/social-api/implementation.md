@@ -85,3 +85,47 @@ This feature adds no new route or component tree, so — unlike most frontend fe
 | Frontend mock→live flip — **write path (bigger edit, flag explicitly)** | `features/social/services/postService.ts` (`createPost`), `features/controller/services/composeService.ts` (`composeAsPersona`), `features/controller/hooks/useComposeAsPersona.ts` (`publish`), and the participant composer's equivalent hook (`useComposePost`, per `postService.ts`'s own module doc — not read/named in this pass) | Unlike the read seams, `createPost` is **synchronous today and never axios-routed at all** (no `api.*` call anywhere in `postService.ts`) — this is not a mock-adapter swap, it is introducing `api.post('/posts', …)` for the first time and changing `createPost`'s signature from `(input) => Post` to `(input) => Promise<Post>`, which ripples to every caller. Land it as its **own** reviewed integration commit once 02 is Gate-2 clean, separate from 01/03/04's flips. The client-side `sanitizeText`/`buildAndEmit` calls currently inside `createPost` are replaced (not layered) by the network call — they stop executing on the live path once this edit lands, so telemetry is never double-counted. |
 | Backend composition root | `Pulse.WebApi/Program.cs` (+ DI) | Each story exposes `IServiceCollection`/`IEndpointRouteBuilder` extension methods (e.g. `AddSocialFeedRead()`, `MapSocialFeedEndpoints()`, `AddSocialRealtimeHub()`, `MapSocialRealtimeHub()`); the orchestrator calls them from `Program.cs` serially as each story lands — mirroring the `App.tsx` convention (`BACKEND_ROADMAP.md` §3.4). No builder edits `Program.cs` directly. |
 
+### Wave-0 seam freeze (orchestrator-owned, landed before the fan-out)
+
+B0 shipped a deliberately thin `Post` entity (`Body`, `CreatedScenarioTime`, reserved `RumorRef`/`MutationOf`/`DeletedAt`) — it does **not** carry the provenance the write path (02) must persist, and the two shared C# contract types the parallel builders import must exist on the umbrella *before* the fan-out (C# is nominally typed — a "structural, per-side" contract like the frontend's Wave-1 precedent can't compile). So a single serial **seam-freeze** commit (`4981b6b`, `freeze(social-api): …`) landed these, reviewed as its own Tier-2-schema Gate-1:
+
+- **`Post` provenance columns** (+ EF migration `PostProvenanceColumns`): `Origin` (string, NOT NULL), `ActingHumanId` (string, NOT NULL — COR-018), `CreatedWallClock` (`DateTimeOffset`, NOT NULL — real ingest instant, staff/telemetry-only), `InjectId` (string, NULL). Staff/telemetry-only; **never** projected onto a participant response.
+- **`Features/Social/ParticipantPostDto.cs`** — the frozen participant-safe shape (`id`, `authorPersonaId`, `text`, `counts.{reply,repost,like}`, `scenarioTime`; `media`/`linkPreview` omitted this phase) with `static FromPost(Post)`, **the single server-side XC-002 narrowing** (retires S2-2). Story 01 *produces* it; stories 02 (participant branch) and 03 (broadcast payload) *consume* it.
+- **`Features/Realtime/IFeedBroadcaster.cs`** — `Task BroadcastPostAsync(Guid exerciseId, ParticipantPostDto post, CancellationToken)`. The contract-first seam 02 calls and 03 implements; payload is unconditionally participant-safe.
+
+Ownership delta from the Wave Plan: 01 no longer *creates* `ParticipantPostDto.cs` (it consumes the frozen one); 03 no longer *creates* `IFeedBroadcaster.cs` (it ships `SignalRFeedBroadcaster` implementing the frozen interface). All backend files remain disjoint across the four builders.
+
+## Post-B1 follow-ups
+
+**#271 write-path frontend flip (deferred).** Making `createPost` async (`Promise<Post>`) per the
+flip design in the Integration seam table above ripples beyond the two composer paths (the
+participant composer, `useComposeAsPersona`) into the **engine review-publish pipeline**
+(`features/controller/engine/services/reviewActions.ts` burst-publish, part of
+`engine-review-cockpit`) — a subsystem out of B1 scope — and the live path cannot be
+browser-smoked without a deployed backend + Phase-B2 per-request scope resolution. Recommended
+contained approach for the follow-up: route the live `api.post('/posts', …)` call in at the
+**composer-hook boundary** (`useComposePost` / `useComposeAsPersona`) behind `USE_MOCK_DATA`,
+leaving `createPost` itself as the mock/engine synchronous path, so the flip doesn't destabilize
+the engine subsystem; land it as its own reviewed, backend-verified commit once a deployed
+environment exists to smoke it against. The read-seam live branches (feed/thread/persona,
+stories 01/04) already exist and need no client change to go live — go-live for all four B1
+stories is the deploy-time `USE_MOCK_DATA` flag, not further frontend work.
+
+**Budgeted post-B1 hardening pass (Gate-2 suggestions).** Tracked for the explicit
+"hardening pass after B1" (`BACKEND_ROADMAP.md` §3.6/§8), not blocking this feature's Complete
+status:
+- **SG-1 — telemetry emission wording.** The implemented server-side XC-004 emission is a direct
+  `DbContext` insert in the same unit of work as the post persist (atomic, dedup-safe by
+  construction), not an HTTP call through `telemetry/02-telemetry-sink-backend`'s sink as this
+  doc's per-story tech notes phrase it above. Reconcile the wording, or extract a shared emit
+  helper if the sink's responsibilities grow side effects that the direct-insert path would miss.
+- **SG-2 — best-effort broadcast fan-out.** Make `IFeedBroadcaster`'s SignalR implementation
+  log-and-continue on a transient fault rather than propagate, so a broadcast failure never turns
+  an already-committed write into a 500 for the caller.
+- **SG-3 — read-path query parity.** Add `AsNoTracking()` to the post read path
+  (`PostReadService`) for parity with `04-persona-read-api`'s read service.
+- **SG-4 — acting-human placeholder.** Participant-authored posts store `ActingHumanId = ""`
+  (no real acting human to attribute) until Phase B2 `identity-backend` resolves a session to an
+  actual human; `controller-as-persona` posts already store the real operating controller per
+  COR-018.
+

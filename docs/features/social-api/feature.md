@@ -42,10 +42,10 @@ server-side provenance projection — rather than a chrome one; see Design notes
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Feed & thread read API — `GET /feed`, `GET /threads/:id` | SOC-080, SOC-010 (XC-002, COR-001/002, COR-053) | Not Started | #270 |
-| 02 | Post write API — `POST /posts` | SOC-003, COR-018 (NFR-004, XC-004, XC-002) | Not Started | #271 |
-| 03 | SignalR feed host — real-time fan-out + polling fallback | SOC-083 (NFR-003, COR-001/002, XC-002) | Not Started | #272 |
-| 04 | Persona read API — `GET /personas` | XC-005, COR-003 (COR-018, XC-002) | Not Started | #273 |
+| 01 | Feed & thread read API — `GET /feed`, `GET /threads/:id` | SOC-080, SOC-010 (XC-002, COR-001/002, COR-053) | Complete | #270 |
+| 02 | Post write API — `POST /posts` | SOC-003, COR-018 (NFR-004, XC-004, XC-002) | Complete | #271 |
+| 03 | SignalR feed host — real-time fan-out + polling fallback | SOC-083 (NFR-003, COR-001/002, XC-002) | Complete | #272 |
+| 04 | Persona read API — `GET /personas` | XC-005, COR-003 (COR-018, XC-002) | Complete | #273 |
 
 ## Dependencies
 **Phase B0, hard prerequisite for all four stories:** `backend-host/01-webapi-host-bootstrap` (the

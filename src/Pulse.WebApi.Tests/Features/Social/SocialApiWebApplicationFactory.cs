@@ -1,0 +1,63 @@
+namespace Pulse.WebApi.Tests.Features.Social;
+
+using System;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Data;
+
+/// <summary>
+/// The shared test host for story <c>social-api/01-feed-read-api</c> (#270): <c>GET /api/feed</c> and
+/// <c>GET /api/threads/{postId}</c>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Program.cs now owns the wiring.</b> The orchestrator's composition-root edit has landed:
+/// <c>Program.cs</c> calls <c>AddSocialFeedRead()</c> and maps <c>MapSocialFeedEndpoints()</c> /
+/// <c>MapSocialThreadEndpoints()</c> itself, so a plain <c>WebApplicationFactory&lt;Program&gt;</c> already
+/// serves both routes. This factory therefore no longer self-maps the endpoints (doing so would DOUBLE-MAP
+/// each route and raise an <c>AmbiguousMatchException</c> at request time); it only overrides the request's
+/// exercise scope for a test.
+/// </para>
+/// <para>
+/// Otherwise mirrors <c>Telemetry/TelemetryIngestTests.cs</c>'s <c>TelemetryWebApplicationFactory</c>: feeds
+/// the Testcontainers connection string via the <c>ConnectionStrings__DefaultConnection</c> process env var
+/// (set before <c>builder.Build()</c> captures config, cleared on dispose), and overrides the scoped
+/// <see cref="IExerciseContext"/> so a test can drive the endpoints as a specific exercise (or as an
+/// unresolved scope, by passing <c>exerciseId: null</c>).
+/// </para>
+/// </remarks>
+public sealed class SocialApiWebApplicationFactory : WebApplicationFactory<Program>
+{
+    private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
+
+    private readonly Guid? _exerciseId;
+
+    public SocialApiWebApplicationFactory(string connectionString, Guid? exerciseId)
+    {
+        Environment.SetEnvironmentVariable(ConnectionStringEnvVar, connectionString);
+        _exerciseId = exerciseId;
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ConfigureTestServices(services =>
+        {
+            // Per the harness rules: set the request's exercise scope by replacing the registered
+            // IExerciseContext, mirroring exercise-isolation/01's own DI-injection proof
+            // (QueryFilterIsolationTests.AddDbContext_InjectsRegisteredExerciseContext_DrivingTheFilter).
+            services.RemoveAll<IExerciseContext>();
+            services.AddScoped<IExerciseContext>(_ => new ExerciseContext { CurrentExerciseId = _exerciseId });
+        });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        Environment.SetEnvironmentVariable(ConnectionStringEnvVar, null);
+    }
+}

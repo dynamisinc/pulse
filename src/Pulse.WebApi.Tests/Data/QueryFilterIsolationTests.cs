@@ -45,6 +45,7 @@ public class QueryFilterIsolationTests
         ExerciseId = exerciseId,
         DisplayName = $"Persona {id:N}",
         Handle = $"@p_{id:N}",
+        Kind = "human",
     };
 
     private static Post NewPost(Guid id, Guid exerciseId) => new()
@@ -54,6 +55,9 @@ public class QueryFilterIsolationTests
         AuthorPersonaId = Guid.NewGuid(),
         Body = $"Post {id:N}",
         CreatedScenarioTime = DateTimeOffset.UtcNow,
+        Origin = "participant",
+        ActingHumanId = "human-test",
+        CreatedWallClock = new DateTimeOffset(2033, 9, 4, 13, 15, 0, TimeSpan.Zero),
     };
 
     private static TelemetryEvent NewTelemetry(string eventId, Guid exerciseId) => new()
