@@ -4,6 +4,7 @@ param appServicePlanId string
 param appInsightsConnectionString string
 param sqlConnectionString string
 param storageConnectionString string
+@secure()
 @description('Azure SignalR connection string for the Web-API-hosted real-time hub (social-api/03). Empty when SignalR is not deployed.')
 param signalRConnectionString string = ''
 param frontendUrl string = ''

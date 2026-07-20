@@ -227,6 +227,9 @@ module signalR 'modules/signalr.bicep' = if (deploySignalR) {
     location: location
     signalRName: signalRName
     skuName: signalRSkuName
+    // Web-API-hosted hub (webapi) needs Default; the Azure Functions SignalR bindings (functions/both)
+    // need Serverless. Derive from the hosting model so enabling Functions + SignalR stays coherent.
+    serviceMode: deployFunctions ? 'Serverless' : 'Default'
     allowedOrigins: frontendUrl != '' ? [frontendUrl] : []
     tags: tags
   }
