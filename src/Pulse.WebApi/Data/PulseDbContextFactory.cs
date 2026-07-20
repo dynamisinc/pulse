@@ -5,9 +5,10 @@ using Microsoft.EntityFrameworkCore.Design;
 
 /// <summary>
 /// Design-time factory so <c>dotnet ef migrations add</c> / <c>dotnet ef database update</c> can build a
-/// <see cref="PulseDbContext"/> even though <c>Program.cs</c> does not yet call <c>AddPulsePersistence</c>
-/// (the orchestrator wires that in between waves). The placeholder connection string is used ONLY to fix
-/// the SQL Server provider for scaffolding — it is never opened during migration generation.
+/// <see cref="PulseDbContext"/> independently of the runtime host's <c>AddPulsePersistence</c> registration
+/// (the EF CLI resolves this factory directly rather than booting <c>Program.cs</c>). The placeholder
+/// connection string is used ONLY to fix the SQL Server provider for scaffolding — it is never opened
+/// during migration generation.
 /// </summary>
 public sealed class PulseDbContextFactory : IDesignTimeDbContextFactory<PulseDbContext>
 {

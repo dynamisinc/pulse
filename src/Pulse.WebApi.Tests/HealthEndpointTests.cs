@@ -44,4 +44,23 @@ public class HealthEndpointTests : IClassFixture<WebApplicationFactory<Program>>
         body.Should().NotBeNullOrWhiteSpace();
         body.Should().Be("Healthy");
     }
+
+    /// <summary>
+    /// Locks the liveness/readiness split introduced when story 02's persistence was wired in:
+    /// readiness (/health/ready) DOES aggregate the DbContext check, so with no connection string
+    /// configured (the default test host) it reports Unhealthy (503) — never crashing the host, and
+    /// never leaking into the DB-free liveness probe above. This is the guard that keeps a DB outage
+    /// from ever flipping liveness Unhealthy.
+    /// </summary>
+    [Fact]
+    public async Task HealthReady_WithNoDatabaseConfigured_ReportsUnhealthy()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync(new Uri("/health/ready", UriKind.Relative));
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        body.Should().Be("Unhealthy");
+    }
 }
