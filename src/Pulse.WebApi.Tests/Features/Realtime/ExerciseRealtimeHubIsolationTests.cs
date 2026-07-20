@@ -6,13 +6,13 @@ using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.Realtime;
@@ -29,15 +29,17 @@ using Pulse.WebApi.Features.Social;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Docker-free by design.</b> <see cref="ExerciseRealtimeHub"/> depends on nothing but
-/// <see cref="IExerciseContext"/> — no <c>PulseDbContext</c>, no SQL Server — so these tests build a
-/// small, self-contained <see cref="TestServer"/> wiring only the production
-/// <see cref="RealtimeExtensions.AddSocialRealtimeHub"/> / <see cref="RealtimeExtensions.MapSocialRealtimeHub"/>
-/// seam (the exact extension methods <c>Program.cs</c> will call once the orchestrator wires them in —
-/// that wiring is this story's explicitly out-of-scope, orchestrator-owned line, per
-/// <c>03-signalr-feed-host.md</c>'s Technical Notes) rather than <c>WebApplicationFactory&lt;Program&gt;</c>,
-/// because the shipped <c>Program.cs</c> does not map <c>/hubs/exercise</c> yet. Every test here is a
-/// plain <see cref="FactAttribute"/> and runs locally without a container.
+/// <b>Docker-free by design, booting the real <c>Program.cs</c>.</b> The orchestrator's composition-root
+/// edit has landed: <c>Program.cs</c> now calls <see cref="RealtimeExtensions.AddSocialRealtimeHub"/> and
+/// maps <see cref="RealtimeExtensions.MapSocialRealtimeHub"/> at <c>/hubs/exercise</c> itself. These tests
+/// therefore boot the real host via <see cref="WebApplicationFactory{TEntryPoint}"/> over the in-memory
+/// <see cref="TestServer"/> transport and connect to Program.cs's OWN hub mapping — a live proof the hub is
+/// reachable through the composition root, not a test-only stand-in. They stay Docker-free: the host is fed
+/// a dummy, never-connecting connection string so it merely BUILDS (<see cref="ExerciseRealtimeHub"/>
+/// depends only on <see cref="IExerciseContext"/> — no <c>PulseDbContext</c> access on the hub path, so the
+/// database is never opened), and each test overrides the scoped <see cref="IExerciseContext"/> via
+/// <c>ConfigureTestServices</c>. Every test here is a plain <see cref="FactAttribute"/> and runs locally
+/// without a container.
 /// </para>
 /// <para>
 /// <b>Why a single connection per host, not two simultaneous connections in different exercises.</b>
@@ -220,47 +222,74 @@ public class ExerciseRealtimeHubIsolationTests
     };
 
     /// <summary>
-    /// Builds a minimal, self-contained host wiring only the production
-    /// <see cref="RealtimeExtensions.AddSocialRealtimeHub"/> / <see cref="RealtimeExtensions.MapSocialRealtimeHub"/>
-    /// seam plus whatever <see cref="IExerciseContext"/> registration <paramref name="configureExerciseContext"/>
-    /// supplies. No controllers, no persistence, no Docker — this is the story's own hub/broadcaster code
-    /// and nothing else.
+    /// Boots the real <c>Program</c> host (which now owns <see cref="RealtimeExtensions.AddSocialRealtimeHub"/>
+    /// / <see cref="RealtimeExtensions.MapSocialRealtimeHub"/>) over the in-memory <see cref="TestServer"/>
+    /// transport, replacing the registered <see cref="IExerciseContext"/> with whatever
+    /// <paramref name="configureExerciseContext"/> supplies. No Docker: a dummy, never-connecting connection
+    /// string lets the host build, and the hub path touches no database.
     /// </summary>
-    private static TestServer CreateTestServer(Action<IServiceCollection> configureExerciseContext)
-    {
-        var hostBuilder = new HostBuilder()
-            .ConfigureWebHost(webHost =>
-            {
-                webHost.UseTestServer();
-                webHost.ConfigureServices(services =>
-                {
-                    services.AddRouting();
-                    services.AddSocialRealtimeHub();
-                    configureExerciseContext(services);
-                });
-                webHost.Configure(app =>
-                {
-                    app.UseRouting();
-                    app.UseEndpoints(endpoints => endpoints.MapSocialRealtimeHub());
-                });
-            });
-
-        var host = hostBuilder.Start();
-        return host.GetTestServer();
-    }
+    private static RealtimeHostFactory CreateTestServer(Action<IServiceCollection> configureExerciseContext)
+        => new(configureExerciseContext);
 
     /// <summary>
-    /// Builds a client <see cref="HubConnection"/> against <paramref name="server"/>'s in-memory
-    /// transport, over long polling (the only transport <see cref="TestServer"/> supports end to end).
+    /// Builds a client <see cref="HubConnection"/> against <paramref name="factory"/>'s in-memory
+    /// <see cref="TestServer"/> transport, over long polling (the only transport <see cref="TestServer"/>
+    /// supports end to end).
     /// </summary>
-    private static HubConnection BuildConnection(TestServer server)
+    private static HubConnection BuildConnection(RealtimeHostFactory factory)
     {
         return new HubConnectionBuilder()
             .WithUrl(new Uri("http://localhost/hubs/exercise"), options =>
             {
-                options.HttpMessageHandlerFactory = _ => server.CreateHandler();
+                options.HttpMessageHandlerFactory = _ => factory.Server.CreateHandler();
                 options.Transports = Microsoft.AspNetCore.Http.Connections.HttpTransportType.LongPolling;
             })
             .Build();
+    }
+
+    /// <summary>
+    /// Boots the real <c>Program</c> host to exercise Program.cs's OWN SignalR hub mapping over the
+    /// in-memory <see cref="TestServer"/> transport — no Docker, no live database. Program.cs now owns the
+    /// hub wiring (<c>AddSocialRealtimeHub()</c> + <c>MapSocialRealtimeHub()</c>); this factory only feeds a
+    /// dummy (never-connecting) connection string so the host BUILDS — the hub path reads only
+    /// <see cref="IExerciseContext"/> and never opens the database — and overrides that scoped
+    /// <see cref="IExerciseContext"/> per test via <c>ConfigureTestServices</c> (which runs last and
+    /// reliably wins over Program.cs's default registration).
+    /// </summary>
+    private sealed class RealtimeHostFactory : WebApplicationFactory<Program>
+    {
+        private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
+
+        // Syntactically valid but non-connecting: enough for the host to BUILD and register PulseDbContext;
+        // the hub connection path never opens it.
+        private const string DummyConnectionString =
+            "Server=nonexistent;Database=pulse;Trusted_Connection=False;";
+
+        private readonly Action<IServiceCollection> _configureExerciseContext;
+
+        public RealtimeHostFactory(Action<IServiceCollection> configureExerciseContext)
+        {
+            _configureExerciseContext = configureExerciseContext;
+            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, DummyConnectionString);
+        }
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+
+            builder.ConfigureTestServices(services =>
+            {
+                // Drop Program.cs's default IExerciseContext registration, then let the test's own
+                // configurator install the scope it wants (a fixed exercise, or the fail-closed default).
+                services.RemoveAll<IExerciseContext>();
+                _configureExerciseContext(services);
+            });
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, null);
+        }
     }
 }

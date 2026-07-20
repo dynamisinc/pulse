@@ -8,17 +8,14 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
-using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Tests.Data;
 
 /// <summary>
@@ -251,10 +248,14 @@ public class PersonaEndpointsTests
 /// <summary>
 /// Boots the real <c>Program</c> host with <c>ConnectionStrings__DefaultConnection</c> set (in the
 /// constructor, before the host's config is captured) to the shared Testcontainers database — same pattern
-/// as <c>Telemetry/TelemetryIngestTests</c>' <c>TelemetryWebApplicationFactory</c>. Optionally swaps the
-/// registered <see cref="IExerciseContext"/> for a fixed scope so a request-scoped read/write test doesn't
-/// depend on per-request scope resolution landing (Phase B2) — a <c>null</c> <paramref name="exerciseId"/>
-/// leaves the default (UNSET) registration in place, for the fail-closed 401 case.
+/// as <c>Telemetry/TelemetryIngestTests</c>' <c>TelemetryWebApplicationFactory</c>. <c>Program.cs</c> now
+/// owns the composition root: it calls <c>AddSocialPersonaRead()</c> and maps
+/// <c>MapSocialPersonaEndpoints()</c> itself, so the booted host already serves <c>GET /api/personas</c> and
+/// this factory no longer self-maps it (a second mapping would DOUBLE-MAP the route and raise an
+/// <c>AmbiguousMatchException</c> at request time). It optionally swaps the registered
+/// <see cref="IExerciseContext"/> for a fixed scope so a request-scoped read test doesn't depend on
+/// per-request scope resolution landing (Phase B2) — a <c>null</c> <paramref name="exerciseId"/> leaves the
+/// default (UNSET) registration in place, for the fail-closed 401 case.
 /// </summary>
 public sealed class PersonaWebApplicationFactory : WebApplicationFactory<Program>
 {
@@ -272,21 +273,6 @@ public sealed class PersonaWebApplicationFactory : WebApplicationFactory<Program
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        // TEST-ONLY host wiring. GET /api/personas is a minimal-API endpoint: unlike telemetry's
-        // [ApiController], which the existing MapControllers() picks up automatically, a minimal-API route
-        // must be explicitly registered AND mapped. The orchestrator will do this from Program.cs (the
-        // composition root) when the mock->live flip lands; until then Program.cs does not wire it, so the
-        // booted WebApplicationFactory<Program> host would 404 on /api/personas and the AC tests below would
-        // never exercise the real route. We self-wire it here (register the service; add the endpoint via an
-        // IStartupFilter — the supported ASP.NET Core seam for mapping minimal-API endpoints onto a
-        // WebApplication from a test host without touching the composition root), mirroring story 01's
-        // factory. Production Program.cs and PersonaEndpoints.cs are deliberately left untouched.
-        builder.ConfigureServices(services =>
-        {
-            services.AddSocialPersonaRead();
-            services.AddSingleton<IStartupFilter>(new MapPersonaEndpointsStartupFilter());
-        });
-
         if (_exerciseId is { } exerciseId)
         {
             builder.ConfigureTestServices(services =>
@@ -301,25 +287,5 @@ public sealed class PersonaWebApplicationFactory : WebApplicationFactory<Program
     {
         base.Dispose(disposing);
         Environment.SetEnvironmentVariable(ConnectionStringEnvVar, null);
-    }
-}
-
-/// <summary>
-/// TEST-ONLY stand-in for the orchestrator's future <c>Program.cs</c> wiring: maps the minimal-API
-/// <c>GET /api/personas</c> endpoint onto the booted test host. An <see cref="IStartupFilter"/> is the
-/// documented, supported ASP.NET Core seam for adding minimal-API endpoints to a <c>WebApplication</c> from
-/// a test host without editing the composition root. Mirrors story 01's factory. Production
-/// <c>Program.cs</c>/<c>PersonaEndpoints.cs</c> are unchanged.
-/// </summary>
-internal sealed class MapPersonaEndpointsStartupFilter : IStartupFilter
-{
-    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
-    {
-        ArgumentNullException.ThrowIfNull(next);
-        return app =>
-        {
-            next(app);
-            app.UseEndpoints(endpoints => endpoints.MapSocialPersonaEndpoints());
-        };
     }
 }

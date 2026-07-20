@@ -10,10 +10,9 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -32,20 +31,14 @@ using Pulse.WebApi.Tests.Data;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why this class wires its own pipeline instead of relying on <c>Program.cs</c>.</b> Per
-/// <c>docs/features/social-api/implementation.md</c>'s Integration seam table, "each story exposes
-/// <c>IServiceCollection</c>/<c>IEndpointRouteBuilder</c> extension methods... the orchestrator calls
-/// them from <c>Program.cs</c> serially as each story lands — no builder edits <c>Program.cs</c>
-/// directly." That orchestrator wiring commit has not landed in this worktree, so
-/// <c>PostWriteEndpoints.AddSocialPostWrite()</c>/<c>MapSocialPostEndpoints()</c> are not yet called
-/// from the real <c>Program.cs</c> — <c>POST /api/posts</c> genuinely 404s on the unmodified host today
-/// (confirmed while authoring this suite). Rather than edit the orchestrator-owned <c>Program.cs</c>
-/// (out of scope for this story, and for this test pass), <see cref="PostWriteWebApplicationFactory"/>
-/// calls the SAME extension methods the orchestrator will eventually call, from
-/// <see cref="WebApplicationFactory{TEntryPoint}.ConfigureWebHost"/> — i.e. it exercises the exact
-/// production endpoint/service/sanitizer code, over real HTTP, against a real database; it just performs
-/// the composition-root call itself instead of relying on (not-yet-landed) <c>Program.cs</c> wiring.
-/// This is a real, load-bearing finding for the summary, not a defect in the builder's code.
+/// <b>Program.cs owns the endpoint wiring.</b> The orchestrator's composition-root edit has landed:
+/// <c>Program.cs</c> calls <c>AddSocialPostWrite()</c> and maps <c>MapSocialPostEndpoints()</c> itself, so
+/// the booted <c>WebApplicationFactory&lt;Program&gt;</c> host already serves <c>POST /api/posts</c> over
+/// real HTTP against the real database, exercising the exact production endpoint/service/sanitizer code.
+/// <see cref="PostWriteWebApplicationFactory"/> therefore no longer self-maps the endpoint (doing so would
+/// DOUBLE-MAP the route and raise an <c>AmbiguousMatchException</c> at request time); it only overrides the
+/// request's exercise scope and swaps in a <see cref="FakeFeedBroadcaster"/> so tests can assert the 03
+/// real-time seam without a live hub.
 /// </para>
 /// <para>
 /// Every test is <see cref="RequiresDockerFactAttribute"/> (Gate-1 W-001): a real <c>Skipped</c> on a
@@ -387,13 +380,13 @@ public sealed class FakeFeedBroadcaster : IFeedBroadcaster
 
 /// <summary>
 /// Boots the real <c>Program</c> host against the shared Testcontainers database (env-var-fed
-/// connection string, exactly as <c>TelemetryWebApplicationFactory</c> does) and additionally performs
-/// the composition-root wiring for the social post-write feature
-/// (<see cref="PostWriteEndpoints.AddSocialPostWrite"/> / <see cref="PostWriteEndpoints.MapSocialPostEndpoints"/>)
-/// that <c>Program.cs</c> does not yet call — see the class-level remarks on
-/// <see cref="PostWriteEndpointTests"/> for why. Overrides <see cref="IExerciseContext"/> to a fixed
-/// exercise scope (or an unset one, for the fail-closed test) and swaps in a
-/// <see cref="FakeFeedBroadcaster"/> so tests can assert the 03 seam without a real hub.
+/// connection string, exactly as <c>TelemetryWebApplicationFactory</c> does). <c>Program.cs</c> now owns
+/// the post-write composition root (it calls <c>AddSocialPostWrite()</c> and maps
+/// <c>MapSocialPostEndpoints()</c> itself), so this factory no longer wires the endpoint. It only
+/// overrides <see cref="IExerciseContext"/> to a fixed exercise scope (or an unset one, for the
+/// fail-closed test) and swaps in a <see cref="FakeFeedBroadcaster"/> so tests can assert the 03
+/// real-time seam without a real hub. Both overrides run in <c>ConfigureTestServices</c>, which executes
+/// last and reliably wins over <c>Program.cs</c>'s real <c>SignalRFeedBroadcaster</c> registration.
 /// </summary>
 public sealed class PostWriteWebApplicationFactory : WebApplicationFactory<Program>
 {
@@ -411,25 +404,16 @@ public sealed class PostWriteWebApplicationFactory : WebApplicationFactory<Progr
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.ConfigureServices(services =>
+        // ConfigureTestServices runs after Program.cs's own registrations, so these RemoveAll+Add
+        // overrides reliably win — in particular the FakeFeedBroadcaster replaces Program's real
+        // SignalRFeedBroadcaster so tests can assert the broadcast fan-out without a live SignalR hub.
+        builder.ConfigureTestServices(services =>
         {
-            services.AddSocialPostWrite();
-
             services.RemoveAll<IExerciseContext>();
             services.AddScoped<IExerciseContext>(_ => new ExerciseContext { CurrentExerciseId = _currentExerciseId });
 
             services.RemoveAll<IFeedBroadcaster>();
             services.AddSingleton<IFeedBroadcaster>(Broadcaster);
-        });
-
-        // Program.cs does not yet call MapSocialPostEndpoints() (orchestrator-owned wiring, not yet
-        // landed in this worktree — see PostWriteEndpointTests' class remarks). Build the minimal
-        // pipeline this story's endpoint needs directly, using its own exported extension method, so
-        // the test still exercises the real production endpoint/service code over real HTTP.
-        builder.Configure(app =>
-        {
-            app.UseRouting();
-            app.UseEndpoints(endpoints => endpoints.MapSocialPostEndpoints());
         });
     }
 

@@ -1,15 +1,12 @@
 namespace Pulse.WebApi.Tests.Features.Social;
 
 using System;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
-using Pulse.WebApi.Features.Social;
 
 /// <summary>
 /// The shared test host for story <c>social-api/01-feed-read-api</c> (#270): <c>GET /api/feed</c> and
@@ -17,21 +14,18 @@ using Pulse.WebApi.Features.Social;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why this factory maps the endpoints itself.</b> Per <c>docs/features/social-api/implementation.md</c>
-/// ("Integration seam (orchestrator-owned — never a wave story)"), wiring <c>AddSocialFeedRead()</c> /
-/// <c>MapSocialFeedEndpoints()</c> / <c>MapSocialThreadEndpoints()</c> into <c>Program.cs</c> is explicitly
-/// NOT this story's builder's job — it lands as a later, serial, orchestrator-owned composition-root edit.
-/// So as of this commit <c>Program.cs</c> does not yet call any of the three, and a plain
-/// <c>WebApplicationFactory&lt;Program&gt;</c> (the <c>TelemetryIngestTests</c> pattern) would 404 both
-/// routes. This factory registers the service (<see cref="MapSocialEndpointsStartupFilter"/>) the same way
-/// the eventual <c>Program.cs</c> edit will, purely at the test boundary — it does NOT touch
-/// <c>Pulse.WebApi/Program.cs</c> or any production file.
+/// <b>Program.cs now owns the wiring.</b> The orchestrator's composition-root edit has landed:
+/// <c>Program.cs</c> calls <c>AddSocialFeedRead()</c> and maps <c>MapSocialFeedEndpoints()</c> /
+/// <c>MapSocialThreadEndpoints()</c> itself, so a plain <c>WebApplicationFactory&lt;Program&gt;</c> already
+/// serves both routes. This factory therefore no longer self-maps the endpoints (doing so would DOUBLE-MAP
+/// each route and raise an <c>AmbiguousMatchException</c> at request time); it only overrides the request's
+/// exercise scope for a test.
 /// </para>
 /// <para>
 /// Otherwise mirrors <c>Telemetry/TelemetryIngestTests.cs</c>'s <c>TelemetryWebApplicationFactory</c>: feeds
 /// the Testcontainers connection string via the <c>ConnectionStrings__DefaultConnection</c> process env var
-/// (set before <c>builder.Build()</c> captures config, cleared on dispose), and optionally overrides the
-/// scoped <see cref="IExerciseContext"/> so a test can drive the endpoints as a specific exercise (or as an
+/// (set before <c>builder.Build()</c> captures config, cleared on dispose), and overrides the scoped
+/// <see cref="IExerciseContext"/> so a test can drive the endpoints as a specific exercise (or as an
 /// unresolved scope, by passing <c>exerciseId: null</c>).
 /// </para>
 /// </remarks>
@@ -51,12 +45,6 @@ public sealed class SocialApiWebApplicationFactory : WebApplicationFactory<Progr
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.ConfigureServices(services =>
-        {
-            services.AddSocialFeedRead();
-            services.AddSingleton<IStartupFilter>(new MapSocialEndpointsStartupFilter());
-        });
-
         builder.ConfigureTestServices(services =>
         {
             // Per the harness rules: set the request's exercise scope by replacing the registered
@@ -71,31 +59,5 @@ public sealed class SocialApiWebApplicationFactory : WebApplicationFactory<Progr
     {
         base.Dispose(disposing);
         Environment.SetEnvironmentVariable(ConnectionStringEnvVar, null);
-    }
-}
-
-/// <summary>
-/// Maps the story's two read endpoints onto the test host's pipeline — the test-only stand-in for the
-/// orchestrator's future <c>Program.cs</c> edit (see <see cref="SocialApiWebApplicationFactory"/> remarks).
-/// <see cref="IStartupFilter"/> is the documented, supported ASP.NET Core seam for adding endpoints to a
-/// minimal-hosting-model app (<c>WebApplication</c>) from a test host without touching the app's own
-/// composition root.
-/// </summary>
-internal sealed class MapSocialEndpointsStartupFilter : IStartupFilter
-{
-    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
-    {
-        ArgumentNullException.ThrowIfNull(next);
-
-        return app =>
-        {
-            next(app);
-
-            app.UseEndpoints(endpoints =>
-            {
-                endpoints.MapSocialFeedEndpoints();
-                endpoints.MapSocialThreadEndpoints();
-            });
-        };
     }
 }
