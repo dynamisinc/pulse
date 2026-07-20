@@ -119,6 +119,7 @@ class RealtimeFeedController implements RealtimeFeed {
   private currentMode: FeedTransportMode = 'connecting'
   private baselined = false
   private started = false
+  private pollInFlight = false
   private pollTimer: ReturnType<typeof setInterval> | null = null
   private reconnectWindowTimer: ReturnType<typeof setTimeout> | null = null
   private unsubscribePush: (() => void) | null = null
@@ -241,19 +242,29 @@ class RealtimeFeedController implements RealtimeFeed {
   }
 
   private async pollTick(): Promise<void> {
-    // Recovery driver: while degraded, keep trying to re-establish real-time. A
-    // successful start() emits Connected via onStateChange → we return to push transport.
-    if (this.connection.state === HubConnectionState.Disconnected) {
-      void this.connection.start().catch(() => {
-        // Still unreachable — remain in polling; the next tick retries.
-      })
-    }
-
+    // In-flight guard: setInterval fires on a fixed cadence and does not await the
+    // async tick, so a fetchFeed() slower than pollIntervalMs would otherwise let ticks
+    // overlap — two concurrent polls could both observe baselined === false and race the
+    // dedup/baseline state. Skip a tick while one is still running; the next cadence retries.
+    if (this.pollInFlight) return
+    this.pollInFlight = true
     try {
-      const posts = await this.fetchFeed()
-      this.handlePoll(posts)
-    } catch {
-      // Feed fetch failed while degraded — remain in polling; the next tick retries.
+      // Recovery driver: while degraded, keep trying to re-establish real-time. A
+      // successful start() emits Connected via onStateChange → we return to push transport.
+      if (this.connection.state === HubConnectionState.Disconnected) {
+        void this.connection.start().catch(() => {
+          // Still unreachable — remain in polling; the next tick retries.
+        })
+      }
+
+      try {
+        const posts = await this.fetchFeed()
+        this.handlePoll(posts)
+      } catch {
+        // Feed fetch failed while degraded — remain in polling; the next tick retries.
+      }
+    } finally {
+      this.pollInFlight = false
     }
   }
 

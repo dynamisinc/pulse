@@ -56,6 +56,7 @@ public sealed class PostReadService
         }
 
         var posts = await _dbContext.Posts
+            .AsNoTracking()
             .Where(post => post.DeletedAt == null)
             .OrderByDescending(post => post.CreatedScenarioTime)
             .ToListAsync(cancellationToken);
@@ -82,6 +83,7 @@ public sealed class PostReadService
         }
 
         var post = await _dbContext.Posts
+            .AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.Id == postId && candidate.DeletedAt == null, cancellationToken);
 
         return post is null ? null : ParticipantPostDto.FromPost(post);
