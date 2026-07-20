@@ -49,7 +49,13 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
 
     private MsSqlContainer? _container;
 
-    private string? ConnectionString { get; set; }
+    /// <summary>
+    /// The migrated container's connection string. Exposed (widened from private) so a
+    /// <c>WebApplicationFactory</c>-based integration test can point the booted host's
+    /// <see cref="PulseDbContext"/> at the same database this fixture migrated — see
+    /// <c>Telemetry/TelemetryIngestTests</c>. Null until <see cref="InitializeAsync"/> has run.
+    /// </summary>
+    public string? ConnectionString { get; private set; }
 
     /// <inheritdoc />
     public async Task InitializeAsync()
