@@ -95,3 +95,37 @@ B0 shipped a deliberately thin `Post` entity (`Body`, `CreatedScenarioTime`, res
 
 Ownership delta from the Wave Plan: 01 no longer *creates* `ParticipantPostDto.cs` (it consumes the frozen one); 03 no longer *creates* `IFeedBroadcaster.cs` (it ships `SignalRFeedBroadcaster` implementing the frozen interface). All backend files remain disjoint across the four builders.
 
+## Post-B1 follow-ups
+
+**#271 write-path frontend flip (deferred).** Making `createPost` async (`Promise<Post>`) per the
+flip design in the Integration seam table above ripples beyond the two composer paths (the
+participant composer, `useComposeAsPersona`) into the **engine review-publish pipeline**
+(`features/controller/engine/services/reviewActions.ts` burst-publish, part of
+`engine-review-cockpit`) — a subsystem out of B1 scope — and the live path cannot be
+browser-smoked without a deployed backend + Phase-B2 per-request scope resolution. Recommended
+contained approach for the follow-up: route the live `api.post('/posts', …)` call in at the
+**composer-hook boundary** (`useComposePost` / `useComposeAsPersona`) behind `USE_MOCK_DATA`,
+leaving `createPost` itself as the mock/engine synchronous path, so the flip doesn't destabilize
+the engine subsystem; land it as its own reviewed, backend-verified commit once a deployed
+environment exists to smoke it against. The read-seam live branches (feed/thread/persona,
+stories 01/04) already exist and need no client change to go live — go-live for all four B1
+stories is the deploy-time `USE_MOCK_DATA` flag, not further frontend work.
+
+**Budgeted post-B1 hardening pass (Gate-2 suggestions).** Tracked for the explicit
+"hardening pass after B1" (`BACKEND_ROADMAP.md` §3.6/§8), not blocking this feature's Complete
+status:
+- **SG-1 — telemetry emission wording.** The implemented server-side XC-004 emission is a direct
+  `DbContext` insert in the same unit of work as the post persist (atomic, dedup-safe by
+  construction), not an HTTP call through `telemetry/02-telemetry-sink-backend`'s sink as this
+  doc's per-story tech notes phrase it above. Reconcile the wording, or extract a shared emit
+  helper if the sink's responsibilities grow side effects that the direct-insert path would miss.
+- **SG-2 — best-effort broadcast fan-out.** Make `IFeedBroadcaster`'s SignalR implementation
+  log-and-continue on a transient fault rather than propagate, so a broadcast failure never turns
+  an already-committed write into a 500 for the caller.
+- **SG-3 — read-path query parity.** Add `AsNoTracking()` to the post read path
+  (`PostReadService`) for parity with `04-persona-read-api`'s read service.
+- **SG-4 — acting-human placeholder.** Participant-authored posts store `ActingHumanId = ""`
+  (no real acting human to attribute) until Phase B2 `identity-backend` resolves a session to an
+  actual human; `controller-as-persona` posts already store the real operating controller per
+  COR-018.
+

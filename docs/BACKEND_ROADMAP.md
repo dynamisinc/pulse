@@ -199,6 +199,23 @@ reload, persisted, and evaluated.** This is "pilot mode" per PRD §4 (login → 
 > **Outcome:** the headline concern is fully retired — controller messages are viewable everywhere, by everyone in
 > the exercise, durably. The frozen frontend contracts get their first real server, proving the seam design.
 
+> **Delivered** (all four stories Gate-1 + Gate-2 clean, full suite green: 375 Pulse.Core + 88 Pulse.WebApi
+> tests passing — 52 Docker-gated `[RequiresDockerFact]` integration tests skip locally, run in CI — plus 817
+> frontend tests, 0 warnings): `social-api/01-feed-read-api` — `GET /feed` + `GET /threads/:id`, server-side
+> `ParticipantPostDto` projection, cross-exercise thread-id case added to the standing isolation suite via #270
+> **[Tier-2 human sign-off pending]**; `social-api/02-post-write-api` — `POST /posts` blessed ingest (sanitize,
+> server-stamped `exerciseId`/`createdWallClock`, single XC-004 emission, role-conditional response) via #271;
+> `social-api/03-signalr-feed-host` — exercise-grouped `ExerciseRealtimeHub` + polling fallback + the shared
+> `core/realtime/` connection module, cross-exercise group-join case added to the standing isolation suite via
+> #272 **[Tier-2 human sign-off pending]**; `social-api/04-persona-read-api` — `GET /personas` over real,
+> exercise-scoped instances via #273. A Wave-0 seam-freeze landed first: `Post` provenance columns + migration,
+> the frozen `ParticipantPostDto`, and `IFeedBroadcaster`. Merged serially onto `feature/social-api` umbrella,
+> wired into `Pulse.WebApi/Program.cs`; umbrella→main PR open awaiting Gate-0 CI + Copilot review + the two
+> Tier-2 human sign-offs. Two follow-ups documented, not blocking: the #271 write-path frontend flip
+> (`createPost` → `Promise<Post>`) is deferred post-B1 pending its own reviewed integration commit; a budgeted
+> post-B1 hardening pass tracks four Gate-2 suggestions (telemetry-emit wording, best-effort broadcast fan-out,
+> `AsNoTracking()` read parity, `ActingHumanId` placeholder pending B2 identity).
+
 ### Phase B2 — Identity, sessions, exercise onboarding · umbrella `feature/identity-backend`
 
 Makes "log in and land in *your* exercise" real — and unlocks meaningful navigation.

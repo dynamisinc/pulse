@@ -1,6 +1,6 @@
 # Story: Feed & thread read API — GET /feed, GET /threads/:id
 
-**Feature:** Social API (backend)  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Social API (backend)  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** SOC-080, SOC-010 (XC-002, COR-001/002, COR-053)  ·  **Design decisions:** none  ·  **Issue:** #270
 
 ## Context
@@ -22,33 +22,33 @@ never recover `origin`/`actingHumanId`/`createdWallClock`/`injectId` because the
 wire, not because a component chooses not to render them.
 
 ## Acceptance Criteria
-- [ ] **Feed scoping + shape (SOC-080).** Given a request whose resolved exercise scope
+- [x] **Feed scoping + shape (SOC-080).** Given a request whose resolved exercise scope
       (`IExerciseContext` from `exercise-isolation/01`) is exercise A, when the client calls `GET /feed`,
       then the response is exercise A's public post set only, and every item satisfies
       `feedService.ts`'s `isPost` runtime guard (`id`, `authorPersonaId`, `text`, `scenarioTime`,
       `counts.{reply,repost,like}` present) — `resolveFeed()` and `assembleFeedView()`
       (`feedService.ts:140-165`) require no code change to consume it.
-- [ ] **Thread shape (SOC-010).** Given the same scope, when the client calls
+- [x] **Thread shape (SOC-010).** Given the same scope, when the client calls
       `GET /threads/{postId}` for a post in exercise A, then the response matches `useThread.ts`'s
       `ThreadWireResponse` shape (`ancestors: Post[]` oldest-first with unbounded depth per D1-006,
       `focused: Post | null`, `replies: (Post & {replyToPersonaId, status})[]`) and passes
       `isValidThreadResponse`; an unknown or cross-exercise `postId` resolves `focused: null` and
       empty `ancestors`/`replies` — never a 500 and never another exercise's content.
-- [ ] **XC-002 guarantee, server-side, unconditional (testable at the wire, not just client-side).**
+- [x] **XC-002 guarantee, server-side, unconditional (testable at the wire, not just client-side).**
       Given either endpoint returns a post or reply, when the raw HTTP response body is inspected,
       then it contains no `origin`, `actingHumanId`, `createdWallClock`, or `injectId` key on any
       item — structurally absent, not merely unread by `toParticipantView`. This is the retirement
       of finding S2-2 above.
-- [ ] **[Tier-2 — human sign-off, always-Critical isolation class]** Given a request scoped to
+- [x] **[Tier-2 — human sign-off, always-Critical isolation class]** Given a request scoped to
       exercise A, when it targets `GET /threads/{postId}` for a `postId` known to belong to
       exercise B, then the response is 403/404 — never exercise B's content. Add this case to the
       standing cross-exercise isolation suite (`exercise-isolation/07-isolation-test-suite`,
-      COR-007).
-- [ ] **Scenario time preserved (COR-053).** Given any returned post/reply, `scenarioTime` is the
+      COR-007). (implemented; Tier-2 human sign-off pending)
+- [x] **Scenario time preserved (COR-053).** Given any returned post/reply, `scenarioTime` is the
       stored scenario-time ISO instant exactly as persisted — the server never substitutes,
       localizes, or derives it from its own wall clock. `formatScenarioTime()` (frontend,
       unchanged) remains the only rendering step.
-- [ ] **Fails closed on an unresolvable scope.** Given a request whose exercise scope cannot be
+- [x] **Fails closed on an unresolvable scope.** Given a request whose exercise scope cannot be
       resolved (no valid host/session scope; full host/session-token auth is Phase B2 `identity-backend`), when either endpoint is called,
       then it returns 401/403 — never a default, empty-but-200, or unscoped result.
 

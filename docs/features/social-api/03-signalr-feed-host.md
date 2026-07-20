@@ -1,6 +1,6 @@
 # Story: SignalR feed host — real-time fan-out + polling fallback
 
-**Feature:** Social API (backend)  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Social API (backend)  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** SOC-083, NFR-003 (COR-001/002, XC-002)  ·  **Design decisions:** none  ·  **Issue:** #272
 
 ## Context
@@ -23,33 +23,34 @@ not the only one — its frontend connection module must be built as a shared pr
 consumers add handlers to, not a feed-specific fork.
 
 ## Acceptance Criteria
-- [ ] **Exercise-scoped group membership.** Given a client establishes a SignalR connection, when
+- [x] **Exercise-scoped group membership.** Given a client establishes a SignalR connection, when
       the hub's connection handler resolves the connection's exercise scope (`IExerciseContext`,
       the same mechanism the HTTP endpoints use), then the connection is added to a group keyed by
       that resolved exercise only (e.g. `exercise:{exerciseId}`) — the group name is never a
       client-supplied parameter.
-- [ ] **Fan-out on publish — the headline behavior.** Given a post is persisted via
+- [x] **Fan-out on publish — the headline behavior.** Given a post is persisted via
       `02-post-write-api` for exercise A, when the server broadcasts it, then every currently-
       connected session in exercise A's group receives a `PostReceived` push, and no session in any
       other exercise's group receives anything. This closes the exact gap `postStore.ts` names
       above.
-- [ ] **XC-002 guarantee, unconditional (testable).** Given a `PostReceived` push, when its payload
+- [x] **XC-002 guarantee, unconditional (testable).** Given a `PostReceived` push, when its payload
       is inspected, then it carries no `origin`/`actingHumanId`/`createdWallClock`/`injectId` — the
       same participant-safe shape as `01-feed-read-api`'s reads, unconditional (this route's
       documented first consumer, `feeds-discovery/04`'s future `useFeedStream()`, is
       participant-world only).
-- [ ] **[Tier-2 — human sign-off, always-Critical isolation class]** Given a connection resolved to
+- [x] **[Tier-2 — human sign-off, always-Critical isolation class]** Given a connection resolved to
       exercise A, when the client attempts to join or read another exercise's group by any
       client-controlled means (a manipulated group-name argument, a forged header, a second
       `JoinGroup`-style call, etc.), then the attempt fails closed — no cross-exercise message is
       ever delivered to that connection. Extend the standing isolation suite
       (`exercise-isolation/07`, COR-007) with a real-time-transport case, not just an HTTP one.
-- [ ] **Degraded-mode polling fallback (NFR-003).** Given the SignalR connection cannot be
+      (implemented; Tier-2 human sign-off pending)
+- [x] **Degraded-mode polling fallback (NFR-003).** Given the SignalR connection cannot be
       established, or drops and fails to reconnect within a bounded retry window, when the
       client-side connection module detects this, then it falls back to polling
       `01-feed-read-api`'s `GET /feed` on an interval until the connection recovers — never a
       silent, permanent loss of "real time."
-- [ ] **Shared-connection shape honored.** Given this story ships the first real consumer of the
+- [x] **Shared-connection shape honored.** Given this story ships the first real consumer of the
       client-side real-time transport, when it is built, then it establishes **one** shared
       connection module (`core/realtime/`) exposing a subscribe-by-event-name primitive — not a
       feed-only connection — so future consumers (break-fiction/pause overlay pushes, alert-bar

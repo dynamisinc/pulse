@@ -1,6 +1,6 @@
 # Story: Post write API — POST /posts (the server-side blessed ingest)
 
-**Feature:** Social API (backend)  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Social API (backend)  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** SOC-003, COR-018 (NFR-004, XC-004, XC-002)  ·  **Design decisions:** none  ·  **Issue:** #271
 
 ## Context
@@ -28,7 +28,7 @@ carry `origin`/`actingHumanId`, or the console's origin line breaks. A participa
 caller's response never does, matching `01-feed-read-api`'s unconditional guarantee.
 
 ## Acceptance Criteria
-- [ ] **Happy-path ingest (SOC-003).** Given a `POST /posts` body
+- [x] **Happy-path ingest (SOC-003).** Given a `POST /posts` body
       (`authorPersonaId`, `actingHumanId`, `text`, `scenarioTime`, `origin`, `media?`, `injectId?`)
       with `origin` ∈ `{'participant','controller-as-persona'}`, when the request's resolved
       exercise scope is A, then the server sanitizes `text` server-side (NFR-004, mirroring
@@ -36,12 +36,12 @@ caller's response never does, matching `01-feed-read-api`'s unconditional guaran
       `exerciseId = A` from the resolved scope (never a client-supplied value, even if present in
       the body), derives `createdWallClock` from the server's own UTC clock (never client-
       supplied), persists the post, and returns 201.
-- [ ] **NFR-004 content security.** Given `text` contains `<script>…</script>` or an
+- [x] **NFR-004 content security.** Given `text` contains `<script>…</script>` or an
       `<img onerror=…>` payload, when the post is created and later read back via
       `01-feed-read-api`, then the stored/served text contains no executable markup — a stored
       script cannot execute in another session. Add this case to the standing stored-XSS suite
       (`exercise-isolation/07`, COR-007/NFR-004).
-- [ ] **XC-004 telemetry, server-side, single emission.** Given a successful `POST /posts`, when
+- [x] **XC-004 telemetry, server-side, single emission.** Given a successful `POST /posts`, when
       the server persists the post, then it emits exactly one `'post'` event server-side against
       the locked v0 envelope (`core/telemetry/schema.ts`'s `telemetryEventV0Schema`:
       `exerciseId`, `actor: {kind:'persona', personaId: authorPersonaId, actingHumanId}`, `origin`,
@@ -50,19 +50,19 @@ caller's response never does, matching `01-feed-read-api`'s unconditional guaran
       write path is flipped live (an orchestrator integration edit, see implementation.md), the
       client-side `buildAndEmit` call currently inside `createPost` is retired so the event is
       never double-counted.
-- [ ] **COR-018 attribution preserved.** Given `origin: 'controller-as-persona'`, when the post is
+- [x] **COR-018 attribution preserved.** Given `origin: 'controller-as-persona'`, when the post is
       persisted, then `actingHumanId` (the operating controller) is stored — satisfying the
       envelope schema's own conditional requirement (`schema.ts`'s `superRefine`: `actingHumanId`
       required when `origin === 'controller-as-persona'`). The full `PostOrigin` union is accepted
       and stored even though only two values have a real caller this phase (see Context).
-- [ ] **XC-002 guarantee, role-conditional (testable — this feature's one deliberate exception).**
+- [x] **XC-002 guarantee, role-conditional (testable — this feature's one deliberate exception).**
       Given the request is authenticated as a participant caller (their own compose action), when
       `POST /posts` succeeds, then the JSON response contains no `origin`/`actingHumanId`/
       `createdWallClock`/`injectId` key — identical to `01`'s read-path guarantee. Given the
       request is instead authenticated as a staff/controller caller, when it succeeds, then the
       response **does** include `origin`/`actingHumanId`, because `originConsoleLabel
       (lastPublished)` (`PersonaComposer.tsx:150-157`) depends on it.
-- [ ] **Server-stamped scope, never client-trusted.** Given a request body that includes (or a
+- [x] **Server-stamped scope, never client-trusted.** Given a request body that includes (or a
       manipulated client attempts to inject) an `exerciseId` different from the request's own
       resolved scope, when the post is persisted, then the server's resolved scope wins
       unconditionally — a cross-exercise-stamped post is never created. (Baseline COR-001 hygiene
