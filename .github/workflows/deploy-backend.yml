@@ -79,7 +79,11 @@ jobs:
 
       - name: Generate idempotent EF migration script
         run: |
-          dotnet tool install --global dotnet-ef
+          # Pin dotnet-ef to the EF Core version Pulse.WebApi references
+          # (Microsoft.EntityFrameworkCore.* in src/Pulse.WebApi/Pulse.WebApi.csproj). Installing the
+          # floating "latest" tool can drift a major version ahead of the app's runtime/design packages,
+          # which breaks `dotnet ef migrations script`. Bump this in lockstep with the csproj packages.
+          dotnet tool install --global dotnet-ef --version 10.0.10
           export PATH="$PATH:$HOME/.dotnet/tools"
           mkdir -p ./migrations
           # --idempotent: re-runnable; each migration is applied only if absent from __EFMigrationsHistory.
@@ -132,7 +136,13 @@ jobs:
       - name: Open transient SQL firewall rule for runner
         id: fw
         run: |
-          RUNNER_IP=$(curl -s https://api.ipify.org)
+          # -4 forces IPv4: az sql server firewall-rule only accepts IPv4, but a runner with IPv6
+          # connectivity would otherwise resolve an AAAA address here and fail the rule create.
+          RUNNER_IP=$(curl -4 -s https://api.ipify.org)
+          if [ -z "$RUNNER_IP" ]; then
+            echo "::error::could not resolve the runner's IPv4 address for the transient SQL firewall rule"
+            exit 1
+          fi
           RULE_NAME="gha-migrate-${GITHUB_RUN_ID}"
           echo "rule_name=$RULE_NAME" >> "$GITHUB_OUTPUT"
           az sql server firewall-rule create \
