@@ -35,6 +35,12 @@ param deployDatabase bool = false
 @description('Deploy the backend host (App Service / Function App per hostingModel). Off until backend code exists.')
 param deployBackend bool = false
 
+@description('Deploy Azure SignalR Service for real-time feed fan-out (social-api/03). Web-API-hosted hub (ServiceMode Default), independent of the Functions host. Off until the real-time story lands.')
+param deploySignalR bool = false
+
+@description('Azure SignalR SKU name. Free_F1 caps at 20 concurrent connections / 20k messages/day — fine for a smoke test; use Standard_S1 for real exercise load (burst legibility, SOC-071).')
+param signalRSkuName string = 'Free_F1'
+
 @description('Deploy ACS + Email Service resources. Off until email is needed.')
 param deployCommunication bool = false
 
@@ -215,11 +221,12 @@ module appServicePlan 'modules/appserviceplan.bicep' = if (deployWebApp) {
   }
 }
 
-module signalR 'modules/signalr.bicep' = if (deployFunctions) {
+module signalR 'modules/signalr.bicep' = if (deploySignalR) {
   name: 'signalRDeploy'
   params: {
     location: location
     signalRName: signalRName
+    skuName: signalRSkuName
     allowedOrigins: frontendUrl != '' ? [frontendUrl] : []
     tags: tags
   }
@@ -241,6 +248,10 @@ module webApp 'modules/webapp.bicep' = if (deployWebApp) {
     sqlConnectionString: deployDatabase ? database.outputs.connectionString! : ''
     #disable-next-line BCP318
     storageConnectionString: deployStorage ? storage.outputs.connectionString! : ''
+    // The SignalR hub is hosted IN this Web API (ServiceMode Default), so the host — not the Function
+    // App — reads this connection string. Empty when SignalR isn't deployed.
+    #disable-next-line BCP318
+    signalRConnectionString: deploySignalR ? signalR.outputs.connectionString! : ''
     frontendUrl: frontendUrl
     emailConnectionString: emailConnectionString
     #disable-next-line BCP318
@@ -260,7 +271,7 @@ module functionApp 'modules/functionapp.bicep' = if (deployFunctions) {
     #disable-next-line BCP318
     appInsightsConnectionString: deployMonitoring ? appInsights.outputs.connectionString! : ''
     #disable-next-line BCP318
-    signalRConnectionString: deployFunctions ? signalR.outputs.connectionString! : ''
+    signalRConnectionString: deploySignalR ? signalR.outputs.connectionString! : ''
     #disable-next-line BCP318
     sqlConnectionString: deployDatabase ? database.outputs.connectionString! : ''
     tags: tags

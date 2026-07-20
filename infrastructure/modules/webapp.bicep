@@ -4,6 +4,8 @@ param appServicePlanId string
 param appInsightsConnectionString string
 param sqlConnectionString string
 param storageConnectionString string
+@description('Azure SignalR connection string for the Web-API-hosted real-time hub (social-api/03). Empty when SignalR is not deployed.')
+param signalRConnectionString string = ''
 param frontendUrl string = ''
 param aspnetcoreEnvironment string = 'Production'
 param blobStorageProvider string = 'Azure'
@@ -69,6 +71,12 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'Azure__BlobStorage__Provider'
           value: blobStorageProvider
+        }
+        // Azure SignalR (real-time feed fan-out; social-api/03). Read by AddSignalR().AddAzureSignalR()
+        // via config key Azure:SignalR:ConnectionString. Empty until deploySignalR = true.
+        {
+          name: 'Azure__SignalR__ConnectionString'
+          value: signalRConnectionString
         }
         // Email
         {
