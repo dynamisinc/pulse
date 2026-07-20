@@ -21,7 +21,7 @@ public sealed class TelemetryEvent : IExerciseScoped
 {
     /// <summary>
     /// <c>eventId</c> — client-generated uuid and the documented idempotency/dedup key (schema.ts). Used as
-    /// the primary key so it carries a unique index; <c>telemetry/04</c>'s dedup relies on this uniqueness.
+    /// the primary key so it carries a unique index; <c>telemetry/02</c>'s dedup relies on this uniqueness.
     /// </summary>
     public required string EventId { get; set; }
 

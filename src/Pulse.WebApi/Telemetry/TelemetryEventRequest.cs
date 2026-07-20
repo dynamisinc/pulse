@@ -294,10 +294,29 @@ public sealed class TelemetryEventRequest
     }
 
     /// <summary>
+    /// The exact ISO-8601 date-time layouts the client's <c>z.iso.datetime({ offset: true })</c> emits —
+    /// a mandatory <c>T</c> separator, seconds, optional fractional seconds, and an explicit offset that is
+    /// EITHER a literal <c>Z</c> OR a numeric <c>±hh:mm</c> (<c>zzz</c>). There is deliberately no
+    /// offset-optional layout (no bare <c>K</c>): an offset-less string must fail. <c>new Date().toISOString()</c>
+    /// (the real emitter) produces the fractional-<c>Z</c> form, so both fractional and non-fractional are listed.
+    /// </summary>
+    private static readonly string[] IsoOffsetFormats =
+    {
+        "yyyy-MM-dd'T'HH:mm:sszzz",
+        "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'",
+    };
+
+    /// <summary>
     /// Parses an ISO-8601 date-time that carries an explicit offset (a trailing <c>Z</c> or a numeric
-    /// <c>±hh:mm</c>), mirroring the client's <c>z.iso.datetime({ offset: true })</c>. A bare date, a
-    /// date-time with no offset, or a non-ISO string (e.g. a bare year) is rejected — the same values the
-    /// client schema rejects to keep these timestamps clean for E10/E9/E8 downstream.
+    /// <c>±hh:mm</c>), mirroring the client's <c>z.iso.datetime({ offset: true })</c>. Uses
+    /// <see cref="DateTimeOffset.TryParseExact(string, string[], IFormatProvider, DateTimeStyles, out DateTimeOffset)"/>
+    /// against a closed set of ISO layouts rather than the lenient <c>TryParse</c> (which accepts non-ISO
+    /// forms like <c>03/04/2033</c> or a space-separated date-time the client schema would reject). A bare
+    /// date, a date-time with no offset, or a non-ISO string is rejected — keeping these timestamps clean
+    /// for E10/E9/E8 downstream. <see cref="DateTimeStyles.AssumeUniversal"/> makes a literal-<c>Z</c> value
+    /// resolve to a <c>+00:00</c> offset; a <c>zzz</c> value already carries its own offset.
     /// </summary>
     private static bool TryParseIsoDateTimeWithOffset(string? value, out DateTimeOffset result)
     {
@@ -307,20 +326,8 @@ public sealed class TelemetryEventRequest
             return false;
         }
 
-        if (!DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
-        {
-            return false;
-        }
-
-        // RoundtripKind leaves an offset-less value as Unspecified — reject those to enforce offset:true.
-        if (!DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var asDateTime)
-            || asDateTime.Kind == DateTimeKind.Unspecified)
-        {
-            return false;
-        }
-
-        result = parsed;
-        return true;
+        return DateTimeOffset.TryParseExact(
+            value, IsoOffsetFormats, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out result);
     }
 }
 

@@ -213,12 +213,29 @@ public class TelemetryEventRequestTests
     [InlineData("March 4 2033")]
     [InlineData("2033-06-14")]
     [InlineData("2033-06-14T15:00:00")]
+    [InlineData("2033-06-14 15:00:00Z")] // space instead of the ISO 'T' — lenient TryParse would accept it
+    [InlineData("06/14/2033 15:00:00 +00:00")] // non-ISO layout the client zod schema rejects
     public void TimestampWithoutIsoOffset_IsInvalid(string badTimestamp)
     {
         var request = Parse(ValidEnvelopeJson);
         request.WallClockTime = badTimestamp;
 
         request.Validate().Should().Contain(e => e.Contains("wallClockTime", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("2033-06-14T15:00:00Z")]
+    [InlineData("2033-06-14T15:00:00.000Z")] // the real emitter's form: new Date().toISOString()
+    [InlineData("2033-06-14T15:00:00.1234567Z")]
+    [InlineData("2033-06-14T09:00:00-05:00")]
+    [InlineData("2033-06-14T15:00:00+00:00")]
+    [InlineData("2033-06-14T09:00:00.500-05:00")]
+    public void TimestampWithIsoOffset_IsValid(string goodTimestamp)
+    {
+        var request = Parse(ValidEnvelopeJson);
+        request.WallClockTime = goodTimestamp;
+
+        request.Validate().Should().NotContain(e => e.Contains("wallClockTime", StringComparison.Ordinal));
     }
 
     // --- Conditional requiredness (superRefine parity) --------------------------------------------------
