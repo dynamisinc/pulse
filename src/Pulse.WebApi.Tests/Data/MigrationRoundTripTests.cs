@@ -118,6 +118,7 @@ public class MigrationRoundTripTests
         var authorPersonaId = Guid.NewGuid();
         var postId = Guid.NewGuid();
         var createdScenarioTime = new DateTimeOffset(2033, 6, 14, 9, 30, 0, TimeSpan.FromHours(-5));
+        var createdWallClock = new DateTimeOffset(2033, 9, 4, 13, 15, 0, TimeSpan.Zero);
 
         await using (var writeContext = _fixture.CreateContext())
         {
@@ -129,6 +130,9 @@ public class MigrationRoundTripTests
                 AuthorPersonaId = authorPersonaId,
                 Body = "Reports of flooding downtown; avoid Elm Street.",
                 CreatedScenarioTime = createdScenarioTime,
+                Origin = "participant",
+                ActingHumanId = "human-test",
+                CreatedWallClock = createdWallClock,
                 RumorRef = null,
                 MutationOf = null,
                 DeletedAt = null,
@@ -145,6 +149,11 @@ public class MigrationRoundTripTests
         reloaded.AuthorPersonaId.Should().Be(authorPersonaId);
         reloaded.Body.Should().Be("Reports of flooding downtown; avoid Elm Street.");
         reloaded.CreatedScenarioTime.Should().Be(createdScenarioTime);
+        // Provenance columns round-trip too (staff/telemetry-only; NOT NULL Origin/ActingHumanId/CreatedWallClock, NULL InjectId).
+        reloaded.Origin.Should().Be("participant");
+        reloaded.ActingHumanId.Should().Be("human-test");
+        reloaded.CreatedWallClock.Should().Be(createdWallClock);
+        reloaded.InjectId.Should().BeNull();
         reloaded.RumorRef.Should().BeNull();
         reloaded.MutationOf.Should().BeNull();
         reloaded.DeletedAt.Should().BeNull();

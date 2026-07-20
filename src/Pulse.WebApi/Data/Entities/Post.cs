@@ -32,6 +32,29 @@ public sealed class Post : IExerciseScoped
     /// <summary>When the post was created, in scenario time (COR-053) — never wall-clock.</summary>
     public DateTimeOffset CreatedScenarioTime { get; set; }
 
+    /// <summary>
+    /// Provenance of the post — the <c>PostOrigin</c> union value as a string (<c>participant</c> /
+    /// <c>controller-as-persona</c> / <c>engine</c> / <c>inject</c>). Stamped server-side by the write path;
+    /// staff/telemetry-only (XC-002) — NEVER projected onto a participant response.
+    /// </summary>
+    public required string Origin { get; set; }
+
+    /// <summary>
+    /// The individual human behind the (possibly shared) account (COR-018) — e.g. which controller was
+    /// operating a shared org persona, or which participant authored their own post. Staff/telemetry-only
+    /// (XC-002) — never participant-visible.
+    /// </summary>
+    public required string ActingHumanId { get; set; }
+
+    /// <summary>
+    /// REAL wall-clock ingest instant (server UTC now) — telemetry/staff-only. Contrast
+    /// <see cref="CreatedScenarioTime"/>, the only participant-visible time (COR-053).
+    /// </summary>
+    public DateTimeOffset CreatedWallClock { get; set; }
+
+    /// <summary>The MSEL inject id — set only when <see cref="Origin"/> is <c>inject</c>; null otherwise. Staff/telemetry-only.</summary>
+    public string? InjectId { get; set; }
+
     /// <summary>Reserved for the E8 rumor model (v1.1) — the rumor this post belongs to. Unused at v0.</summary>
     public Guid? RumorRef { get; set; }
 

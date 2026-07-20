@@ -42,6 +42,9 @@ public class WriteGuardTests
             AuthorPersonaId = Guid.NewGuid(),
             Body = "This should never reach the database.",
             CreatedScenarioTime = DateTimeOffset.UtcNow,
+            Origin = "participant",
+            ActingHumanId = "human-test",
+            CreatedWallClock = new DateTimeOffset(2033, 9, 4, 13, 15, 0, TimeSpan.Zero),
         });
 
         var act = async () => await writeContext.SaveChangesAsync();
@@ -105,6 +108,9 @@ public class WriteGuardTests
             AuthorPersonaId = Guid.NewGuid(),
             Body = "Valid — carries a real ExerciseId.",
             CreatedScenarioTime = DateTimeOffset.UtcNow,
+            Origin = "participant",
+            ActingHumanId = "human-test",
+            CreatedWallClock = new DateTimeOffset(2033, 9, 4, 13, 15, 0, TimeSpan.Zero),
         });
         writeContext.Posts.Add(new Post
         {
@@ -113,6 +119,9 @@ public class WriteGuardTests
             AuthorPersonaId = Guid.NewGuid(),
             Body = "Invalid — should sink the whole batch.",
             CreatedScenarioTime = DateTimeOffset.UtcNow,
+            Origin = "participant",
+            ActingHumanId = "human-test",
+            CreatedWallClock = new DateTimeOffset(2033, 9, 4, 13, 15, 0, TimeSpan.Zero),
         });
 
         var act = async () => await writeContext.SaveChangesAsync();
@@ -146,6 +155,9 @@ public class WriteGuardTests
                 AuthorPersonaId = Guid.NewGuid(),
                 Body = "A validly-scoped post saves fine.",
                 CreatedScenarioTime = DateTimeOffset.UtcNow,
+                Origin = "participant",
+                ActingHumanId = "human-test",
+                CreatedWallClock = new DateTimeOffset(2033, 9, 4, 13, 15, 0, TimeSpan.Zero),
             });
 
             var act = async () => await writeContext.SaveChangesAsync();
