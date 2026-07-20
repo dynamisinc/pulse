@@ -21,10 +21,19 @@ scenario test).
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Voice-diversity & fidelity checks | ADP-021 | Not Started | #175 |
-| 02 | Prompt-injection red-team suite (release-gating) | ADP-024 | Not Started | #176 |
-| 03 | Latency/cost SLO measurement | NFR-002/003 | Not Started | #177 |
-| 04 | Scenario reaction-correctness tests | §12.4 / ADP-001/002a / CTL-034 | Not Started | #178 |
+| 01 | Voice-diversity & fidelity checks | ADP-021 | Pending (reuses persona-voice metric) | #175 |
+| 02 | Prompt-injection red-team suite (release-gating) | ADP-024 | Complete | #176 |
+| 03 | Latency/cost SLO measurement | NFR-002/003 | Pending (needs live-provider pass) | #177 |
+| 04 | Scenario reaction-correctness tests | §12.4 / ADP-001/002a / CTL-034 | Blocked (needs the full loop) | #178 |
+
+**Story 02 delivered:** the maintained injection red-team suite ships as `Pulse.Core/Features/EngineEval/
+InjectionRedTeam.cs` (+ `InjectionRedTeamTests`) — a standing attack catalog across every category with two
+defense-layer checks that hold without a live model: **structural containment** (the `WorldFeedFence`
+neutralises fence/turn/attribute forgery) and **obedience detection** (`ContentGuard` catches an obeyed
+tell / fiction break). Additive to the merged EngineEval slice; no edits to `ContentGuard`/`WorldFeedFence`.
+The opt-in live-provider end-to-end pass layers on when a key is wired. Story 01 (voice-diversity checks)
+reuses the persona-voice believable+diverse metric and lands with that slice; 03/04 need a live provider /
+the full reaction loop.
 
 ## Dependencies
 `persona-voice-engine` (the metric functions it shares), `engine-generation-infra` (provider + prompt
