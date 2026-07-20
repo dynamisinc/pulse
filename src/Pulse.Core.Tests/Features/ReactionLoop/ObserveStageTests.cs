@@ -64,7 +64,7 @@ public class ObserveStageTests
     }
 
     [Fact]
-    public void AnOfficialResponse_IsSurfacedAsAnAddressingCandidate_NotMatchedHere()
+    public void AnOffPlatformMarker_IsSurfacedAsAnAddressingCandidate_NotMatchedHere()
     {
         var s = SeededStoryline();
         var clock = new FakeScenarioClock(12);

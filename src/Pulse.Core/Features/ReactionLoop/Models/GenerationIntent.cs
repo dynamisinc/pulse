@@ -43,7 +43,11 @@ public sealed record GenerationIntent
     /// <summary>The desired emotional mix, phase/sentiment-derived from the storyline (StorylineBrief.ToneMix).</summary>
     public required ToneMix ToneMix { get; init; }
 
-    /// <summary>How many posts to request — one per persona, cap-bounded (ADP-011). Zero means "throttled, generate nothing".</summary>
+    /// <summary>
+    /// How many posts to request — one per persona, cap-bounded (ADP-011). Always ≥ 1 in a produced intent:
+    /// when the cap leaves no room (throttled), the engine stops (stopped), or no cast is eligible, no intent
+    /// is produced at all (a <c>null</c> from <c>IntentComposer</c>/<c>DecideStage</c>), never a 0-count one.
+    /// </summary>
     public required int Count { get; init; }
 
     /// <summary>The model tier (Standard for storyline-critical reactions; Ambient for lulls/bulk).</summary>
@@ -52,11 +56,3 @@ public sealed record GenerationIntent
     /// <summary>The effective autonomy level the burst routes at (Suggest / Delayed-auto) — from autonomy-safety.</summary>
     public required AutonomyLevel AutonomyLevel { get; init; }
 }
-
-/// <summary>
-/// The per-exercise rate-governance state at decide time (ADP-011): the config plus how many engine posts
-/// have already landed this scenario minute. The decide stage reads this to bound the burst (never breach
-/// <c>MaxEnginePostsPerMinute</c>) and to detect the quiet floor (drive ambient when below
-/// <c>MinBelievableActivity</c>). The loop owns the per-minute counting window; this is a snapshot.
-/// </summary>
-public sealed record RateCapState(int PostsThisMinute);
