@@ -84,3 +84,44 @@ exercise the login matches against). Feeds the participant landing (`exercise-is
 - Security: a stored `<script>` in an imported display name is sanitized and never executes in another
   session (extends the stored-XSS suite).
 - Integration: login success/failure emit the expected XC-004 events.
+
+### Backend test linkage (Wave 3 build)
+Under `src/Pulse.WebApi.Tests/Features/Identity/Accounts/`. DB-touching tests are `[RequiresDockerFact]`
+(real SQL via Testcontainers; skip cleanly locally, run in CI); the rest are `[Fact]`.
+- **Provision by import or individually (AC "bulk import or individually"):**
+  `AccountProvisioningServiceTests.Import_ValidCsv_CreatesAllRows_InActiveExercise`,
+  `AccountProvisioningServiceTests.Create_Success_StampsScope_HashesCredential_NormalizesRole`;
+  parser shape `AccountCsvParserTests.*`.
+- **No self-registration / provisioning is staff-only (AC XC-002):** only `/api/auth/login` is
+  participant-facing and it is login-only (no create). Staff-only gate:
+  `AccountProvisioningServiceTests.Create_NoStaffSession_FailsClosed_Unauthenticated_NoWrite`,
+  `AccountProvisioningServiceTests.Import_NoStaffSession_FailsClosed_Unauthenticated_NoWrite`,
+  `AccountEndpointsHttpTests.StaffCreateAccount_NoStaffSession_Returns401`,
+  `AccountEndpointsHttpTests.StaffImport_NoStaffSession_Returns401`.
+- **Belongs to one exercise + stamped from scope (AC COR-004, backend "stamp ExerciseId from the resolved
+  scope"):** `AccountProvisioningServiceTests.Create_Success_StampsScope_HashesCredential_NormalizesRole`,
+  `AccountLoginIsolationTests.StaffCreate_LandsOnlyInTheActiveExercise`,
+  `AccountLoginIsolationTests.StaffImport_LandsOnlyInTheActiveExercise`.
+- **Participant login issues a session (AC `POST /api/auth/login`):**
+  `ParticipantLoginServiceTests.Login_Success_IssuesParticipantSession_EmitsSuccessTelemetry_RecordsLastLogin`;
+  fail-closed credential/scope paths `ParticipantLoginServiceTests.Login_WrongPassword_*`,
+  `Login_UnknownHandle_*`, `Login_CredentialLessAccount_Rejected`, `Login_UnresolvedScope_*`.
+- **Cross-exercise login fails closed (AC "fails closed" / XC-001, extends `exercise-isolation/07`):**
+  `AccountLoginIsolationTests.Login_HandleProvisionedInExerciseB_IsNotValidOnExerciseAHost_ButIsValidOnB`.
+- **Telemetry XC-004 (login success + failure):**
+  `ParticipantLoginServiceTests.Login_Success_IssuesParticipantSession_EmitsSuccessTelemetry_RecordsLastLogin`,
+  `ParticipantLoginServiceTests.Login_WrongPassword_Rejected_NoSession_EmitsIdentitylessFailure`,
+  `ParticipantLoginServiceTests.Login_Success_AccountMutationAndTelemetry_ShareOneSaveChangesCall`.
+- **Content security NFR-004 (sanitize, size/MIME, malformed, rate limit, hashing):**
+  `AccountProvisioningServiceTests.Create_SanitizesDisplayNameOnIngest`,
+  `AccountProvisioningServiceTests.Import_SanitizesDisplayName_StoredScriptNeverPersistsAsMarkup`,
+  `AccountFieldRulesTests.TryNormalizeDisplayName_StripsScriptMarkup`,
+  `AccountProvisioningServiceTests.Import_MalformedCsv_FailsClosed`, `AccountCsvParserTests.Parse_*Malformed*`,
+  `AccountEndpointsHttpTests.StaffImport_OversizedFile_Returns400`,
+  `AccountEndpointsHttpTests.StaffImport_EmptyFile_Returns400`,
+  `AccountEndpointsHttpTests.ParticipantLogin_ExceedsPerIpRateLimit_Returns429`,
+  `ParticipantPasswordHasherTests.*`.
+- **Role guard (participant Account may not carry a staff role, XC-002):**
+  `AccountProvisioningServiceTests.Create_StaffRole_IsRejectedAsInvalid`,
+  `AccountFieldRulesTests.TryNormalizeRole_NonParticipantRoles_AreRejected`.
+- **Composition root:** `AccountRegistrationTests.*`.
