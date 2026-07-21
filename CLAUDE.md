@@ -165,6 +165,7 @@ backlog decomposed from the epics:
 |-------|---------|
 | `story-agent` | Decompose epics into buildable stories under `docs/features/`; write `implementation.md`; fold in design-review amendments (`STORY-UPDATES.md`); mirror to GitHub issues. |
 | `frontend-agent` | Build web surfaces (both worlds) on the React 19 / MUI 9 / COBRA stack. |
+| `backend-agent` | Build `Pulse.WebApi` on .NET 10 / EF Core 10 / ASP.NET Core: minimal-API feature slices, EF entities + migrations, exercise-scoped data access (`IExerciseScoped` + `PulseDbContext` central filter), XC-004 telemetry, SignalR — behind the orchestrator-owned `Program.cs`. |
 | `testing-agent` | Vitest coverage — isolation, scenario-time, and telemetry first; backend/e2e later. |
 | `code-review` | Review a diff against the two-worlds rule, exercise isolation, and the story's ACs; the orchestration review gate. |
 
