@@ -95,3 +95,49 @@ Future E9 federation slots behind the same `IIdentityProvider`.
 - Integration: `POST /api/staff/active-exercise` rejects an exercise the caller is not assigned to;
   selecting an assigned exercise re-scopes subsequent content queries.
 - Integration: staff login success/failure and exercise-switch emit the expected XC-004 events.
+
+### Test linkage (backend, Wave 1 — `src/Pulse.WebApi.Tests/Features/Identity/Staff/`)
+Provider + DI are plain `[Fact]`; DB-touching tests are `[RequiresDockerFact]` (skip locally, run in CI).
+
+- **AC: provider interface + Dynamis impl + swap needs no call-site change**
+  - `DynamisIdentityProviderTests.Authenticate_WithMatchingCredentials_ResolvesTheExternalIdentity`
+  - `DynamisIdentityProviderTests.Authenticate_WithWrongSecret_ReturnsRejected_AndNoIdentity`
+  - `DynamisIdentityProviderTests.Authenticate_WithUnknownUsername_ReturnsRejected`
+  - `DynamisIdentityProviderTests.Authenticate_UsernameMatch_IsCaseInsensitive`
+  - `DynamisIdentityProviderTests.Authenticate_SecretComparisonIsCaseSensitive`
+  - `DynamisIdentityProviderTests.Authenticate_WithEmptyAllowlist_ReturnsRejected_FailClosed`
+  - `DynamisIdentityProviderTests.Authenticate_EntryWithEmptyConfiguredSecret_CannotAuthenticate`
+  - `DynamisIdentityProviderTests.Authenticate_EntryWithEmptyExternalSubject_CannotAuthenticate`
+  - `StaffLoginServiceTests.Login_WorksThroughAnyIIdentityProvider_ProvingTheSwapSeam` (swap seam)
+- **AC: `AddStaffIdentity()` DI extension**
+  - `StaffIdentityRegistrationTests.AddStaffIdentity_RegistersProviderBehindTheInterface`
+  - `StaffIdentityRegistrationTests.AddStaffIdentity_BindsTheAllowlistOptions`
+  - `StaffIdentityRegistrationTests.AddStaffIdentity_RegistersAFailClosedCurrentStaffSessionAccessorByDefault`
+  - `StaffIdentityRegistrationTests.AddStaffIdentity_RegistersTheLoginAndAssignmentServices`
+- **AC: `POST /api/auth/staff/login` authenticates + issues a story-03 session (fail closed on failure)**
+  - `StaffLoginServiceTests.Login_Success_ProvisionsStaffUser_IssuesStaffSession_EmitsSuccessTelemetry`
+  - `StaffLoginServiceTests.Login_WrongSecret_Rejected_NoSession_EmitsFailureTelemetryWithNoIdentity`
+  - `StaffLoginServiceTests.Login_UnknownExercise_Invalid_NoSession_NoTelemetry`
+  - `StaffLoginServiceTests.Login_AuthenticatedButNotAssigned_Forbidden_ProvisionsUser_NoSession_EmitsFailure`
+  - `StaffAuthEndpointsHttpTests.StaffLogin_NullBody_Returns400` / `_MissingUsername_Returns400` / `_InvalidExerciseId_Returns400`
+- **AC: `GET /api/staff/assignments` — own-only, cross-exercise, staff-only**
+  - `StaffAssignmentServiceTests.GetAssignments_ReturnsOwnAssignmentsAcrossExercises_WithNamesAndRoles`
+  - `StaffAssignmentServiceTests.GetAssignments_NoCurrentStaffSession_ReturnsNull_FailClosed`
+  - `StaffAuthEndpointsHttpTests.StaffAssignments_NoAuthenticatedStaffSession_Returns401`
+- **AC: `POST /api/staff/active-exercise` — validate assignment set + persist selection (staff arm of scope seam)**
+  - `StaffAssignmentServiceTests.SetActiveExercise_AssignedExercise_UpdatesSessionExerciseAndRole_EmitsSwitchedEvent`
+  - `StaffAssignmentServiceTests.SetActiveExercise_UnassignedExercise_Forbidden_NoChange_NoTelemetry`
+  - `StaffAssignmentServiceTests.SetActiveExercise_AssignmentPointingAtMissingExercise_Invalid` (R6 service-layer FK check)
+  - `StaffAssignmentServiceTests.SetActiveExercise_NoCurrentStaffSession_Unauthenticated_FailClosed`
+  - `StaffAuthEndpointsHttpTests.StaffActiveExercise_NonGuidBody_Returns400` / `_ValidGuidButNoStaffSession_Returns401`
+- **Cross-cutting XC-004 telemetry (login success + failure + exercise-switch, v0 envelope)**
+  - `StaffLoginServiceTests.Login_Success_…_EmitsSuccessTelemetry` (actor.kind=system, role, actingHumanId, scenarioTime from stored)
+  - `StaffLoginServiceTests.Login_WrongSecret_…_EmitsFailureTelemetryWithNoIdentity` (payload.outcome=failure, no identity)
+  - `StaffLoginServiceTests.Login_ScenarioTime_FallsBackToWallClock_WhenExerciseHasNoStoredScenarioTime`
+  - `StaffAssignmentServiceTests.SetActiveExercise_AssignedExercise_…_EmitsSwitchedEvent` (`exercise.switched`)
+
+> **Cross-wave test-double note.** The story-03 seams (`ISessionIssuer`, `ICurrentStaffSessionAccessor`) are
+> exercised via `RecordingSessionIssuer` / `StubCurrentStaffSessionAccessor` doubles (in
+> `StaffIdentityTestDoubles.cs`) so the login/assignment paths are testable now. HTTP happy-path +
+> serialization coverage over `WebApplicationFactory<Program>` follows once the orchestrator wires
+> `Program.cs` (Wave 2 / testing-agent) — see the report.
