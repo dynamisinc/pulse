@@ -29,7 +29,13 @@ using Pulse.WebApi.Tests.Data;
 ///   <item><description>an anonymous write is NOT a read-only 403 — it fails closed on the unresolved scope
 ///   instead (proving the guard is not a blanket verb block);</description></item>
 ///   <item><description>a read-only session for exercise A sees ONLY A's rows (zero B) on a scoped read; and</description></item>
-///   <item><description>exercise A's shared password never authenticates on exercise B's host.</description></item>
+///   <item><description>exercise A's shared password never authenticates on exercise B's host;</description></item>
+///   <item><description>a read-only session IS allowed on a write path never wrapped in the guard (the
+///   opt-in deny-list does not over-block);</description></item>
+///   <item><description>the minted SessionDto uses the SAME ephemeral id for <c>accountId</c> /
+///   <c>actingHumanId</c> and omits <c>personaId</c>; and</description></item>
+///   <item><description>an unprovisioned host — through the REAL host-resolution middleware — mints no
+///   session and stamps no telemetry.</description></item>
 /// </list>
 /// </summary>
 [Collection(MsSqlCollection.Name)]
@@ -70,6 +76,91 @@ public sealed class SharedReadOnlyWriteDenialIsolationTests
         var ids = await GetPostIdsAsync(readOnlyClient);
         ids.Should().Contain(seed.PostA.ToString(), "a read-only session for A can read A's own content");
         ids.Should().NotContain(seed.PostB.ToString(), "a read-only session for A must never see exercise B's content (XC-001)");
+    }
+
+    [RequiresDockerFact]
+    public async Task ReadOnlySession_IsAllowedOnAnUnguardedWritePath_ProvingTheGuardIsOptIn()
+    {
+        // The opt-in deny-list design (COR-015): the guard is applied per-endpoint via
+        // DenyReadOnlySessions(), not as a blanket POST filter. A read-only session must be able to reach a
+        // write path that was never wrapped in the guard (standing in for e.g. POST /api/telemetry,
+        // /api/auth/refresh, /api/auth/logout, or SignalR negotiate) — 200, never 403 — so the deliberate
+        // trade-off (scoped, not global) does not accidentally over-block legitimate read-only writes.
+        var seed = await SeedTwoExercisesAsync();
+        await SeedSessionAsync("shared-readonly-unguarded-token", seed.ExerciseA, isReadOnly: true, kind: "readonly");
+
+        await using var host = await SharedReadOnlyTestHost.StartAsync(_fixture.ConnectionString!);
+        using var readOnlyClient = host.CreateClient(seed.HostA, "shared-readonly-unguarded-token");
+
+        var response = await readOnlyClient.PostAsJsonAsync("/test/unguarded-write", new { });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "a read-only session must NOT be denied on a write path that was never wrapped in " +
+            "DenyReadOnlySessions() — the guard is a deliberate opt-in deny-list, not a blanket verb block, so a " +
+            "read-only-allowed path (telemetry / refresh / logout / SignalR negotiate) must keep working");
+    }
+
+    [RequiresDockerFact]
+    public async Task SharedLogin_Success_SessionDto_UsesTheSameEphemeralIdentityForAccountAndActingHuman_AndOmitsPersonaId()
+    {
+        // The wire-level ephemeral session shape (COR-015): accountId and actingHumanId are the SAME freshly
+        // generated ephemeral id (there is no named account or acting human behind a shared login), and
+        // personaId is OMITTED from the JSON entirely (not merely null) — the frozen client SessionDto
+        // validator accepts an absent personaId but rejects a null one.
+        var seed = await SeedTwoExercisesAsync();
+
+        await using var host = await SharedReadOnlyTestHost.StartAsync(_fixture.ConnectionString!);
+        using var anon = host.CreateClient(seed.HostA);
+
+        var response = await anon.PostAsJsonAsync("/api/auth/shared", new { password = SeedData.PasswordA });
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var session = body.RootElement.GetProperty("session");
+
+        var accountId = session.GetProperty("accountId").GetString();
+        var actingHumanId = session.GetProperty("actingHumanId").GetString();
+        accountId.Should().NotBeNullOrEmpty();
+        actingHumanId.Should().Be(accountId,
+            "a read-only session has no named account or acting human — the SAME ephemeral identity is used " +
+            "for both accountId and actingHumanId");
+        Guid.TryParse(accountId, out _).Should().BeTrue("the ephemeral identity is a generated GUID");
+
+        session.TryGetProperty("personaId", out _).Should().BeFalse(
+            "personaId must be OMITTED (not merely serialized as null) from the wire session for a read-only " +
+            "login");
+    }
+
+    [RequiresDockerFact]
+    public async Task SharedLogin_OnUnprovisionedHost_FailsClosed_ThroughRealHostResolution_NoSessionMinted_NoTelemetry()
+    {
+        // The end-to-end proof through the REAL UseExerciseResolution() middleware (not a hand-constructed
+        // scope, as in SharedReadOnlyLoginServiceTests.Login_UnresolvedScope_...): a host that resolves to NO
+        // exercise at all must reject the shared login (401), minting no session and stamping no telemetry —
+        // asserted as a before/after delta so it holds regardless of other tests' data in the shared container.
+        var seed = await SeedTwoExercisesAsync();
+
+        await using var before = _fixture.CreateContext();
+        var sessionCountBefore = await before.Sessions.IgnoreQueryFilters().CountAsync();
+        var loginTelemetryCountBefore = await before.TelemetryEvents.IgnoreQueryFilters()
+            .Where(e => e.EventType == "login")
+            .CountAsync();
+
+        await using var host = await SharedReadOnlyTestHost.StartAsync(_fixture.ConnectionString!);
+        using var onUnknownHost = host.CreateClient($"unprovisioned-{Guid.NewGuid():N}.example.com");
+
+        var response = await onUnknownHost.PostAsJsonAsync("/api/auth/shared", new { password = SeedData.PasswordA });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "an unprovisioned host resolves to no exercise, so there is no credential to check — fail closed " +
+            "(401), never a default session, even through the REAL host-resolution middleware");
+
+        await using var after = _fixture.CreateContext();
+        (await after.Sessions.IgnoreQueryFilters().CountAsync()).Should().Be(sessionCountBefore,
+            "no session may be minted for an unresolved host, even through the real pipeline");
+        (await after.TelemetryEvents.IgnoreQueryFilters().Where(e => e.EventType == "login").CountAsync())
+            .Should().Be(loginTelemetryCountBefore,
+                "no scoped telemetry can be stamped without a resolved exercise, even through the real pipeline");
     }
 
     [RequiresDockerFact]

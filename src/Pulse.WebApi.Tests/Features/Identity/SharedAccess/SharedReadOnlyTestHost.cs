@@ -24,7 +24,9 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// shared-read-only slice in the same relative order <c>Program.cs</c> uses (<c>UseExerciseResolution()</c> →
 /// <c>UseSessionAuthentication()</c> → endpoints). It maps the live <c>POST /api/auth/shared</c> login, a
 /// <c>POST /test/sim-write</c> guarded by <see cref="ReadOnlyWriteDenialExtensions.DenyReadOnlySessions{TBuilder}"/>
-/// (standing in for the orchestrator-guarded sim-write surface, e.g. <c>POST /api/posts</c>), and a
+/// (standing in for the orchestrator-guarded sim-write surface, e.g. <c>POST /api/posts</c>), a deliberately
+/// UNGUARDED <c>POST /test/unguarded-write</c> (standing in for a read-only-ALLOWED write path, e.g.
+/// <c>POST /api/telemetry</c> / <c>/api/auth/refresh</c> / <c>/api/auth/logout</c> / SignalR negotiate), and a
 /// <c>GET /test/posts</c> scoped read — so a single end-to-end test can: log in with a shared credential, then
 /// prove that session is denied a write (403) but sees only its own exercise's rows. This is the documented
 /// "test middleware without a WebApplicationFactory" pattern (mirroring <c>SessionAuthenticationTestHost</c>);
@@ -97,6 +99,13 @@ public sealed class SharedReadOnlyTestHost : IAsyncDisposable
                                     ? Results.Unauthorized()
                                     : Results.Ok(scope.Value.ToString());
                             });
+
+                            // Deliberately NOT wrapped in DenyReadOnlySessions() — stands in for a legitimate
+                            // read-only-ALLOWED write path (e.g. POST /api/telemetry, POST /api/auth/refresh,
+                            // POST /api/auth/logout, or the SignalR negotiate endpoint). Proves the guard is an
+                            // opt-in deny-list applied per-endpoint, not a blanket POST filter: a read-only
+                            // session must reach this handler (200), never 403.
+                            endpoints.MapPost("/test/unguarded-write", () => Results.Ok("unguarded-write-ok"));
 
                             // Scoped read: a read-only session for exercise A must see only A's posts (zero B).
                             endpoints.MapGet("/test/posts", async (PulseDbContext dbContext) =>

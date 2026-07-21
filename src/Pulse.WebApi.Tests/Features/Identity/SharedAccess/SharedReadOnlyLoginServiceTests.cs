@@ -285,4 +285,31 @@ public sealed class SharedReadOnlyLoginServiceTests
             "the XC-004 login-success telemetry event persists in exactly one SaveChangesAsync call on the login " +
             "service's context (the session row is persisted separately by the issuer)");
     }
+
+    [RequiresDockerFact]
+    public async Task Login_Failure_TelemetryEvent_PersistsInOneSaveChangesCall()
+    {
+        // Mirrors the success-path proof above: a REJECTED login has no session to issue, so its single
+        // XC-004 failure event is the funnel's ONLY write — it must still land in exactly one
+        // SaveChangesAsync call, never split across multiple round trips.
+        var exercise = await SeedExerciseAsync(scenarioTime: null);
+        await SeedCredentialAsync(exercise.Id, Password);
+
+        var interceptor = new CountingSaveChangesInterceptor();
+        var scope = ScopeFor(exercise.Id);
+        var options = new DbContextOptionsBuilder<PulseDbContext>()
+            .UseSqlServer(_fixture.ConnectionString)
+            .AddInterceptors(interceptor)
+            .Options;
+
+        await using var context = new PulseDbContext(options, scope);
+        var service = new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer());
+
+        var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = "WRONG-password" });
+
+        result.Outcome.Should().Be(SharedReadOnlyLoginOutcome.Rejected);
+        interceptor.SaveChangesCallCount.Should().Be(1,
+            "the XC-004 login-failure telemetry event persists in exactly one SaveChangesAsync call — there is " +
+            "no session to issue on a rejected login, so this is the funnel's ONLY write");
+    }
 }
