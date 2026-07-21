@@ -70,10 +70,19 @@ public interface IReadOnlySessionProbe
 {
     /// <summary>
     /// Returns <c>true</c> only when the request carries a bearer token that resolves to a LIVE (non-revoked,
-    /// unexpired) session whose <c>IsReadOnly</c> flag is set. Fails closed to <c>false</c> for an
-    /// absent/unknown/expired/revoked token or any lookup error (an unauthenticated request is not this guard's
-    /// concern — the write endpoint's own scope check denies it).
+    /// unexpired) session whose <c>IsReadOnly</c> flag is set. Returns <c>false</c> for an
+    /// absent/unknown/expired/revoked token (an unauthenticated request is not this guard's concern — the write
+    /// endpoint's own scope check denies it).
     /// </summary>
+    /// <remarks>
+    /// A lookup ERROR (a DB failure, or a theoretical multi-match on the unique-by-<c>TokenHash</c> session) is
+    /// deliberately NOT swallowed: it PROPAGATES (surfacing as a 500), so the guarded write handler never runs
+    /// and the write is DENIED. That is the fail-SAFE outcome for a write guard whose whole job is
+    /// "a read-only session must NEVER write" (COR-015). This MUST NOT be "hardened" into a catch-that-returns-
+    /// <c>false</c>: returning <c>false</c> on an error would let the request fall THROUGH to the handler —
+    /// fail-OPEN — and could let a write slip past when the read-only status could not be established. When the
+    /// answer cannot be determined, denying (by throwing) is correct; allowing is not.
+    /// </remarks>
     /// <param name="httpContext">The current request.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns><c>true</c> when the request presents a live read-only session; otherwise <c>false</c>.</returns>
