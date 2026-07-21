@@ -101,3 +101,19 @@ checked against the §3.5 trip threshold. xUnit: `AddEngineGeneration` fails fas
 `GenerationConfigurationException` / governance error) when a real provider is configured without the
 governance keys — the fail-closed gate; `Fake` stays selected with no `Generation:Provider` set.
 Governance posture documented for the Tier-2 sign-off.
+
+### Test linkage (built this story)
+CI (no key, stays on `Fake`) — `Pulse.WebApi.Tests/ProviderLiveConfigTests.cs`:
+- `CommittedAppsettings_KeepsFakeProvider_SoCiNeverEgresses` (AC: Live provider selection — `Fake` is the CI default)
+- `GovernedExample_SelectsTheLiveAzureOpenAIProvider_WithoutEgress` (AC: Live provider selection)
+- `GovernedExample_MapsEveryGenerationKeyToItsBicepOutput` (AC: `ai.bicep` activation — keys match outputs verbatim)
+- `GovernedExample_WithGovernanceKeyUnset_FailsClosedAtStartup` (AC: Fail closed on ungoverned config — Tier-2)
+- `GovernedExample_TripThreshold_IsTunedToMeasuredP95_AndFlagsIfApproaching` (AC: Degraded-mode threshold validated — NFR-003)
+
+Out-of-CI live pass (`eval/live-provider.runsettings`, `PULSE_LIVE_FOUNDRY=1`) against the built harness:
+- `Pulse.Core.Tests/.../LiveInjectionRedTeamTests.Live_ResistsEveryCatalogAttack` (AC: Injection red-team green against the live provider — ADP-024)
+- `Pulse.Core.Tests/.../LiveFoundryTests` + `MeasuredCostLatencyTests` (AC: Measured cost/latency replaces modeled — recorded in `engine-generation-infra/MEASURED-RESULTS.md`)
+
+Governance (AC: LLM governance NFR-005 / ADP-025 — Tier-2): `docs/features/engine-runtime/PROVIDER-GOVERNANCE.md`
+(the human sign-off) + the fail-closed gate above as the mechanical guarantee. Reused (built, not re-authored):
+`Pulse.Core.Tests/.../AddEngineGenerationTests.cs`, `InjectionRedTeamTests.cs`, `ProviderComparisonTests.cs`.
