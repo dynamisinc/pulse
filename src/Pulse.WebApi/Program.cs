@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.ExerciseResolution;
+using Pulse.WebApi.Features.Identity.Sessions;
+using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 
@@ -37,14 +39,16 @@ builder.Services.AddExerciseScoping();
 // participant scope from the request Host header. Fail-closed on an unknown host (scope stays unset).
 builder.Services.AddExerciseResolution();
 
-// Staff identity (identity-auth-roles/05, #62) is BUILT + merged, but its composition-root wiring
-// (builder.Services.AddStaffIdentity(builder.Configuration) + app.UseRateLimiter() + app.MapStaffAuthEndpoints())
-// is DEFERRED to Phase B2 Wave 2 (story 03): StaffLoginService depends on ISessionIssuer, whose
-// implementation + DI registration land with story 03. Wiring it now would fail DI validation at startup
-// (unresolvable ISessionIssuer) and expose only non-functional endpoints (no auth scheme, no session
-// issuer, the ICurrentStaffSessionAccessor Null default fails closed). It is wired alongside AddSessions()
-// in Wave 2, once every runtime dependency exists — the "wire the composition root as dependencies become
-// ready" model.
+// Staff identity (identity-auth-roles/05, #62) + Sessions (identity-auth-roles/03, #60) — Phase B2 Wave 2.
+// AddStaffIdentity registers DynamisIdentityProvider (behind IIdentityProvider) + the staff
+// login/assignments/active-exercise services + the staff-login rate-limiter policy, and TryAdds the
+// fail-closed NullCurrentStaffSessionAccessor. AddSessions registers ISessionIssuer→SessionIssuer,
+// SessionService, the opaque-bearer auth scheme + the session-endpoints rate-limiter policy, and Replace()s
+// the staff-session accessor with the real CurrentStaffSessionAccessor (order-independent via Replace, but
+// AddStaffIdentity is listed first as the intended order). Both AddRateLimiter calls accumulate distinct
+// named policies under the single app.UseRateLimiter() below.
+builder.Services.AddStaffIdentity(builder.Configuration);
+builder.Services.AddSessions(builder.Configuration);
 
 // Social API (Phase B1, feature/social-api) — orchestrator-wired composition root. Each story exposes its
 // own Add*/Map* extension (never edits this file itself); these five DI calls register the read/write
@@ -97,6 +101,26 @@ app.UseWhen(
     context => !context.Request.Path.StartsWithSegments("/health"),
     branch => branch.UseExerciseResolution());
 
+// Session authentication (identity-auth-roles/03) — MUST run AFTER UseExerciseResolution so an
+// authenticated session's scope write OVERRIDES the host's provisional one (precedence: session > host >
+// unset). For a token-bearing request it resolves the live session via a throwaway scope (so the
+// request-scoped PulseDbContext is constructed only AFTER the higher-precedence scope is written), and for
+// a participant session fails closed (403) when the session's exercise != the host-resolved exercise. It
+// does no DB work for a request without a bearer token (health probes carry none), so it needs no /health
+// exclusion. Getting this order wrong is a correctness break: session-before-host 403s all participants;
+// host-after-session inverts precedence (shows the wrong exercise) — keep it exactly here.
+app.UseSessionAuthentication();
+
+// Rate limiting (identity-auth-roles/05 staff-login + /03 session-endpoints policies). NOTE (Gate-1,
+// tracked for /security-review before the umbrella→main PR): the staff-login limiter partitions on
+// Connection.RemoteIpAddress, which behind the Azure App Service reverse proxy is the platform proxy's
+// address — so the "per-IP" partition collapses to one global bucket unless forwarded-headers handling that
+// trusts ONLY the platform proxy (NEVER client-supplied X-Forwarded-For, which would let an attacker evade
+// the limit) is wired ahead of this. That config is a deployment/security decision finalized under
+// /security-review. Separately, the always-on session middleware's per-request token lookup is not covered
+// by these per-endpoint policies — a global per-IP limiter / edge-WAF is a /security-review item too.
+app.UseRateLimiter();
+
 // Liveness — no checks run (Predicate false), so it stays free of any DB/dependency coupling: the host
 // is "up" regardless of database reachability (story 01 AC). Readiness (/health/ready) runs every
 // registered check, including story 02's DbContext check, for deploy/orchestration probes.
@@ -113,10 +137,12 @@ app.MapSocialPostEndpoints();     // #271 POST /api/posts
 app.MapSocialPersonaEndpoints();  // #273 GET /api/personas
 app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
 
-// Exercise-resolution endpoint (Phase B2 Wave 1, exercise-isolation/08). Scope comes only from the
-// resolved IExerciseContext (COR-001); /exercise-context reads the host-resolved scope, never a client
-// exerciseId. (Story 05's MapStaffAuthEndpoints() is deferred to Wave 2 — see the DI note above.)
+// Identity + exercise-resolution endpoints (Phase B2 Waves 1–2). Scope comes only from the resolved
+// IExerciseContext (COR-001); /exercise-context and /session read the resolved scope, never a client
+// exerciseId. Staff auth endpoints require the live-session accessor (story 03) now that it is wired.
 app.MapExerciseContextEndpoints();  // #51 GET /api/exercise-context (frozen ExerciseScope; 404 on unknown host)
+app.MapSessionEndpoints();          // #60 GET /api/session, POST /api/auth/refresh, POST /api/auth/logout
+app.MapStaffAuthEndpoints();        // #62 POST /api/auth/staff/login, GET /api/staff/assignments, POST /api/staff/active-exercise
 
 app.Run();
 
