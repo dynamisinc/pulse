@@ -41,12 +41,11 @@ public sealed class ParticipantPasswordHasherTests
     }
 
     [Fact]
-    public void Hash_ProducesSelfDescribingPbkdf2Envelope()
+    public void Hash_IsNotThePlaintext()
     {
         var hash = _hasher.Hash("whatever");
 
-        hash.Should().StartWith("PBKDF2$SHA256$",
-            "the stored hash is a self-describing slow-KDF envelope, never the plaintext");
+        hash.Should().NotBeNullOrEmpty("the stored value is a slow-KDF hash");
         hash.Should().NotContain("whatever", "the plaintext must never appear in the stored hash");
     }
 
@@ -61,11 +60,26 @@ public sealed class ParticipantPasswordHasherTests
     }
 
     [Theory]
-    [InlineData("not-a-valid-hash")]
-    [InlineData("PBKDF2$SHA256$notanumber$c2FsdA==$c3Via2V5")]
-    [InlineData("PBKDF2$SHA256$100000$!!!notbase64!!!$c3Via2V5")]
+    [InlineData("not-a-valid-hash")]         // not valid base64 → decode failure
+    [InlineData("YWJjZGVmZ2hpamts")]         // valid base64 but not a framework hash blob
     public void Verify_WithMalformedHash_ReturnsFalse(string storedHash)
     {
         _hasher.Verify(storedHash, "any-password").Should().BeFalse("a malformed stored hash must fail closed, never throw");
+    }
+
+    [Fact]
+    public void Hash_ProducesFrameworkVerifiableValue_UsableByAPlainPasswordHasher()
+    {
+        // Gate-1: the stored value is a framework PasswordHasher<Account> hash, so story 07 / an AAR audit can
+        // verify a story-02 credential with a plain PasswordHasher<Account> (one identity tier, one format).
+        var hash = _hasher.Hash("shared-format-password");
+
+        var framework = new Microsoft.AspNetCore.Identity.PasswordHasher<Pulse.WebApi.Data.Entities.Account>();
+        var subject = new Pulse.WebApi.Data.Entities.Account { Username = "", DisplayName = "", Role = "" };
+
+        framework.VerifyHashedPassword(subject, hash, "shared-format-password")
+            .Should().BeOneOf(
+                Microsoft.AspNetCore.Identity.PasswordVerificationResult.Success,
+                Microsoft.AspNetCore.Identity.PasswordVerificationResult.SuccessRehashNeeded);
     }
 }
