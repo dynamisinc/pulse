@@ -37,6 +37,7 @@ public sealed class StaffAssignmentService
 {
     private const string SystemActorKind = "system";
     private const string SystemChannel = "system";
+    private const string StaffSessionKind = "staff";
     private const string ExerciseSwitchedEventType = "exercise.switched";
 
     private readonly PulseDbContext _dbContext;
@@ -139,6 +140,17 @@ public sealed class StaffAssignmentService
         if (session is null)
         {
             // The accessor reported a session that no longer exists — treat as unauthenticated (fail closed).
+            return SetActiveExerciseResult.Unauthenticated();
+        }
+
+        // Defense-in-depth (identity-auth-roles/03 hardening, Gate-1 Info): now that the real
+        // ICurrentStaffSessionAccessor backs this seam, re-assert at the point of mutation that the loaded
+        // session actually belongs to the caller the accessor reported AND is a staff-kind session. This costs
+        // nothing on the happy path and fails closed against any future accessor regression that could hand back
+        // a session id that is not the caller's own staff session — never mutate someone else's / a non-staff row.
+        if (session.StaffUserId != current.StaffUserId ||
+            !string.Equals(session.Kind, StaffSessionKind, StringComparison.Ordinal))
+        {
             return SetActiveExerciseResult.Unauthenticated();
         }
 
