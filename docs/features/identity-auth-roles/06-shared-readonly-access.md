@@ -83,3 +83,42 @@ exercise the credential is checked against). Lifecycle in story 07. Landing cons
 - Integration: the shared password of exercise A never authenticates on exercise B's host.
 - Integration: shared-cred login success/failure emit the expected XC-004 events with the ephemeral
   `actor.sessionId`.
+
+### Test coverage (linked; `[RequiresDockerFact]` unless noted — real SQL Server via Testcontainers, skip cleanly on a Docker-less box and run in CI)
+Backend slice under `src/Pulse.WebApi/Features/Identity/SharedAccess/`; tests under
+`src/Pulse.WebApi.Tests/Features/Identity/SharedAccess/`.
+
+- **View-only session + ephemeral identity + read access (AC1/AC3):**
+  `SharedReadOnlyLoginServiceTests.Login_CorrectPassword_MintsReadOnlySessionWithEphemeralIdentity_EmitsSuccessTelemetry`;
+  `SharedReadOnlyWriteDenialIsolationTests.SharedLogin_MintsViewOnlySession_ThenThatSessionIsDeniedASimWrite_ButCanRead`.
+- **Server-side write-path denial — read-only cannot post/react/follow/DM (AC2, backend 403):**
+  `SharedReadOnlyWriteDenialIsolationTests.SharedLogin_MintsViewOnlySession_ThenThatSessionIsDeniedASimWrite_ButCanRead`,
+  `SharedReadOnlyWriteDenialIsolationTests.NonReadOnlySession_PassesTheWriteGuard`,
+  `SharedReadOnlyWriteDenialIsolationTests.AnonymousWrite_IsNotAReadOnly403_ButFailsClosedOnUnresolvedScope`.
+- **Default landing is `isReadOnly`-driven, not the Following feed (AC4):** the backend sets
+  `isReadOnly: true` + `role: participant` on the minted session (asserted in
+  `SharedReadOnlyWriteDenialIsolationTests.SharedLogin_...ButCanRead` and
+  `SharedReadOnlyLoginServiceTests.Login_CorrectPassword_...`); the All-Posts route itself is `app-shell/01`.
+- **`SharedCredential` IS `IExerciseScoped` (backend AC):** covered by the Wave-0 standing suite
+  `Data.AccountAndSharedCredentialIsolationTests` (filter / fail-closed / IDOR for `SharedCredential`).
+- **`POST /api/auth/shared` checks the HOST-resolved credential (backend AC + isolation):**
+  `SharedReadOnlyWriteDenialIsolationTests.ExerciseAPassword_OnExerciseBHost_FailsClosed`,
+  `SharedReadOnlyWriteDenialIsolationTests.WrongPassword_OnCorrectHost_FailsClosed`,
+  `SharedReadOnlyLoginServiceTests.Login_ExerciseAPassword_DoesNotAuthenticateAgainstExerciseBCredential`,
+  `SharedReadOnlyLoginServiceTests.Login_UnresolvedScope_FailsClosed_NoSession_NoTelemetry`.
+- **Password stored hashed (slow KDF), never plaintext/logged (backend AC, NFR-009):** `[Fact]`
+  `SharedCredentialHasherTests.*` (no-plaintext, salted, verify, fail-closed).
+- **Per-IP rate limit (NFR-009):** `[Fact]`
+  `SharedReadOnlyEndpointsHttpTests.SharedLogin_ExceedsPerIpRateLimit_Returns429`.
+- **Disabled / revoked / absent credential fails closed (story-06 read of `IsEnabled`/`RevokedAt`/`CurrentHash`):**
+  `SharedReadOnlyLoginServiceTests.Login_DisabledCredential_Rejected_NoSession`,
+  `Login_RevokedCredential_Rejected_NoSession`, `Login_NoCredentialForExercise_Rejected_NoSession`,
+  `Login_WrongPassword_Rejected_NoSession_EmitsFailureTelemetryWithNoIdentity`.
+- **Isolation — read-only session for A sees zero B rows (XC-001, standing-suite extension):**
+  `SharedReadOnlyWriteDenialIsolationTests.SharedLogin_...ButCanRead` (asserts A's post present, B's absent).
+- **Telemetry (XC-004) success + failure, one `SaveChanges`, ephemeral `actor.sessionId`:**
+  `SharedReadOnlyLoginServiceTests.Login_CorrectPassword_...EmitsSuccessTelemetry`,
+  `Login_WrongPassword_...EmitsFailureTelemetryWithNoIdentity`,
+  `Login_Success_TelemetryEvent_PersistsInOneSaveChangesCall`.
+- **Fast fail-closed HTTP paths (no DB):** `[Fact]`
+  `SharedReadOnlyEndpointsHttpTests.SharedLogin_NullBody_Returns400`, `SharedLogin_MissingPassword_Returns400`.
