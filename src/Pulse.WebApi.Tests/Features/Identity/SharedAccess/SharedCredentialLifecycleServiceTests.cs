@@ -120,6 +120,35 @@ public sealed class SharedCredentialLifecycleServiceTests
         return await read.SharedCredentials.IgnoreQueryFilters().SingleAsync(c => c.ExerciseId == exerciseId);
     }
 
+    /// <summary>
+    /// Seeds a raw <see cref="Session"/> row with an arbitrary <c>Kind</c>/bound-exercise combination — used to
+    /// drive the <see cref="SharedCredentialLifecycleService"/> defense-in-depth checks directly (an accessor
+    /// CLAIMING a staff session over a row that is not actually a live, correctly-bound staff session).
+    /// </summary>
+    private async Task<Guid> SeedSessionAsync(Guid exerciseId, string kind, Guid? staffUserId = null)
+    {
+        var id = Guid.NewGuid();
+        var principal = staffUserId?.ToString() ?? Guid.NewGuid().ToString();
+
+        await using var seed = _fixture.CreateContext();
+        seed.Sessions.Add(new Session
+        {
+            Id = id,
+            TokenHash = Guid.NewGuid().ToString("N"),
+            Kind = kind,
+            ExerciseId = exerciseId,
+            PrincipalId = principal,
+            StaffUserId = staffUserId,
+            Role = kind == "staff" ? "controller" : "participant",
+            ActingHumanId = principal,
+            IsReadOnly = kind == "readonly",
+            IssuedAt = DateTimeOffset.UtcNow,
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+        });
+        await seed.SaveChangesAsync();
+        return id;
+    }
+
     private async Task<IReadOnlyList<TelemetryEvent>> ReadEventsAsync(Guid exerciseId, string eventType)
     {
         await using var read = _fixture.CreateContext();
@@ -342,5 +371,142 @@ public sealed class SharedCredentialLifecycleServiceTests
         result.Outcome.Should().Be(SharedCredentialRevokeOutcome.Revoked);
         interceptor.SaveChangesCallCount.Should().Be(1,
             "the credential revoke, the read-only session terminations, and the revoked telemetry all share one unit of work (XC-004)");
+    }
+
+    // --- Staff-authz defense-in-depth (ResolveStaffContextAsync re-asserts kind + exercise binding, not just
+    //     "the accessor said so") -----------------------------------------------------------------------------
+
+    [RequiresDockerFact]
+    public async Task Rotate_CallerSessionKindIsParticipant_FailsClosed_Unauthenticated_CredentialUntouched()
+    {
+        var exerciseId = await SeedExerciseAsync();
+        await SeedCredentialAsync(exerciseId, password: "seed-password");
+        var staffUserId = Guid.NewGuid();
+        // The accessor CLAIMS a staff session for staffUserId, but the persisted row it points at is actually a
+        // PARTICIPANT session (kept the SAME StaffUserId so only the Kind mismatch can fail this).
+        var sessionId = await SeedSessionAsync(exerciseId, kind: "participant", staffUserId: staffUserId);
+
+        var scope = ScopeFor(exerciseId);
+        await using (var context = _fixture.CreateContext(scope))
+        {
+            var result = await NewService(context, scope, sessionId, staffUserId).RotateAsync();
+            result.Outcome.Should().Be(SharedCredentialRotateOutcome.Unauthenticated,
+                "the service re-asserts the persisted session's Kind is 'staff' — a participant-kind session " +
+                "backing the accessor's claim must still fail closed (defense-in-depth)");
+        }
+
+        var credential = await ReadCredentialAsync(exerciseId);
+        _hasher.Verify(credential.CurrentHash, "seed-password").Should().BeTrue("a rejected caller changes nothing");
+    }
+
+    [RequiresDockerFact]
+    public async Task Rotate_CallerSessionKindIsReadOnly_FailsClosed_Unauthenticated_CredentialUntouched()
+    {
+        var exerciseId = await SeedExerciseAsync();
+        await SeedCredentialAsync(exerciseId, password: "seed-password");
+        var staffUserId = Guid.NewGuid();
+        var sessionId = await SeedSessionAsync(exerciseId, kind: "readonly", staffUserId: staffUserId);
+
+        var scope = ScopeFor(exerciseId);
+        await using (var context = _fixture.CreateContext(scope))
+        {
+            var result = await NewService(context, scope, sessionId, staffUserId).RotateAsync();
+            result.Outcome.Should().Be(SharedCredentialRotateOutcome.Unauthenticated,
+                "a read-only-kind session backing the accessor's staff claim must fail closed — a shared " +
+                "view-only login can never rotate the very credential it authenticated with");
+        }
+
+        var credential = await ReadCredentialAsync(exerciseId);
+        _hasher.Verify(credential.CurrentHash, "seed-password").Should().BeTrue("a rejected caller changes nothing");
+    }
+
+    [RequiresDockerFact]
+    public async Task Revoke_CallerSessionKindIsParticipant_FailsClosed_Unauthenticated_NoSessionsTerminated()
+    {
+        var exerciseId = await SeedExerciseAsync();
+        await SeedCredentialAsync(exerciseId, password: "seed-password");
+        var readOnly = await SeedReadOnlySessionAsync(exerciseId);
+        var staffUserId = Guid.NewGuid();
+        var sessionId = await SeedSessionAsync(exerciseId, kind: "participant", staffUserId: staffUserId);
+
+        var scope = ScopeFor(exerciseId);
+        await using (var context = _fixture.CreateContext(scope))
+        {
+            var result = await NewService(context, scope, sessionId, staffUserId).RevokeAsync();
+            result.Outcome.Should().Be(SharedCredentialRevokeOutcome.Unauthenticated,
+                "a participant-kind session backing the accessor's staff claim must fail closed (defense-in-depth)");
+        }
+
+        await using var read = _fixture.CreateContext();
+        (await read.Sessions.SingleAsync(s => s.Id == readOnly)).RevokedAt.Should()
+            .BeNull("a rejected caller terminates no sessions");
+    }
+
+    [RequiresDockerFact]
+    public async Task Revoke_CallerSessionKindIsReadOnly_FailsClosed_Unauthenticated_NoSessionsTerminated()
+    {
+        var exerciseId = await SeedExerciseAsync();
+        await SeedCredentialAsync(exerciseId, password: "seed-password");
+        var readOnly = await SeedReadOnlySessionAsync(exerciseId);
+        var staffUserId = Guid.NewGuid();
+        var sessionId = await SeedSessionAsync(exerciseId, kind: "readonly", staffUserId: staffUserId);
+
+        var scope = ScopeFor(exerciseId);
+        await using (var context = _fixture.CreateContext(scope))
+        {
+            var result = await NewService(context, scope, sessionId, staffUserId).RevokeAsync();
+            result.Outcome.Should().Be(SharedCredentialRevokeOutcome.Unauthenticated,
+                "a read-only-kind session backing the accessor's staff claim must fail closed — it must not be " +
+                "able to revoke (and thereby terminate) the very credential/session family it belongs to");
+        }
+
+        await using var read = _fixture.CreateContext();
+        (await read.Sessions.SingleAsync(s => s.Id == readOnly)).RevokedAt.Should()
+            .BeNull("a rejected caller terminates no sessions");
+    }
+
+    [RequiresDockerFact]
+    public async Task Rotate_StaffSessionBoundToDifferentExercise_FailsClosed_Unauthenticated_CredentialUntouched()
+    {
+        var exerciseA = await SeedExerciseAsync();
+        var exerciseB = await SeedExerciseAsync();
+        await SeedCredentialAsync(exerciseA, password: "password-A");
+        var staffUserId = Guid.NewGuid();
+        // A LEGIT staff session — but bound to exercise B — while the resolved scope is A.
+        var sessionId = await SeedSessionAsync(exerciseB, kind: "staff", staffUserId: staffUserId);
+
+        var scope = ScopeFor(exerciseA);
+        await using var context = _fixture.CreateContext(scope);
+        var result = await NewService(context, scope, sessionId, staffUserId).RotateAsync();
+
+        result.Outcome.Should().Be(SharedCredentialRotateOutcome.Unauthenticated,
+            "the persisted staff session's bound exercise must equal the resolved scope — a session bound to B " +
+            "must never be able to rotate A's credential merely because the resolved scope is A (COR-001 defense-in-depth)");
+
+        var credential = await ReadCredentialAsync(exerciseA);
+        _hasher.Verify(credential.CurrentHash, "password-A").Should().BeTrue("a rejected caller changes nothing");
+    }
+
+    [RequiresDockerFact]
+    public async Task Revoke_StaffSessionBoundToDifferentExercise_FailsClosed_Unauthenticated_NoSessionsTerminated()
+    {
+        var exerciseA = await SeedExerciseAsync();
+        var exerciseB = await SeedExerciseAsync();
+        await SeedCredentialAsync(exerciseA, password: "password-A");
+        var readOnlyA = await SeedReadOnlySessionAsync(exerciseA);
+        var staffUserId = Guid.NewGuid();
+        var sessionId = await SeedSessionAsync(exerciseB, kind: "staff", staffUserId: staffUserId);
+
+        var scope = ScopeFor(exerciseA);
+        await using var context = _fixture.CreateContext(scope);
+        var result = await NewService(context, scope, sessionId, staffUserId).RevokeAsync();
+
+        result.Outcome.Should().Be(SharedCredentialRevokeOutcome.Unauthenticated,
+            "a staff session bound to exercise B must never be able to revoke exercise A's credential merely " +
+            "because the resolved scope is A (COR-001 defense-in-depth)");
+
+        await using var read = _fixture.CreateContext();
+        (await read.Sessions.SingleAsync(s => s.Id == readOnlyA)).RevokedAt.Should()
+            .BeNull("a rejected caller terminates no sessions");
     }
 }

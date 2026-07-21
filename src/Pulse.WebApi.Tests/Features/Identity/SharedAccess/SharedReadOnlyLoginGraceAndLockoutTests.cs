@@ -159,6 +159,7 @@ public sealed class SharedReadOnlyLoginGraceAndLockoutTests
         evt.Channel.Should().Be("system");
         evt.Actor.Kind.Should().Be("system", "the lockout is a system defence, not a named actor");
         evt.Actor.ActingHumanId.Should().BeNull("a lockout during an anonymous shared login carries no acting human");
+        evt.Actor.Role.Should().BeNull("a lockout during an anonymous shared login carries no staff role either");
         evt.Target!.EntityType.Should().Be("sharedCredential");
         evt.ScenarioTime.Should().Be(new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5)),
             "scenario time is stamped from the exercise's stored CurrentScenarioTime (B2 placeholder)");
@@ -215,5 +216,62 @@ public sealed class SharedReadOnlyLoginGraceAndLockoutTests
         var credential = await ReadCredentialAsync(exerciseId);
         credential.FailedAttemptCount.Should().Be(0,
             "a disabled credential takes the negative (decoy) path and never accrues brute-force lockout state");
+    }
+
+    [RequiresDockerFact]
+    public async Task Login_AfterLockoutWindowExpires_CorrectPassword_ResetsResidualFailedAttemptCount()
+    {
+        // Distinct from Login_WhileLockoutExpired_CorrectPasswordAuthenticates (which starts from a ZERO
+        // counter): here the credential carries a RESIDUAL nonzero FailedAttemptCount alongside a stale
+        // LockedOutUntil, as it would immediately after a real lockout trip once the window has since elapsed
+        // with no intervening success. The success path must reset BOTH, not merely leave an already-zero count.
+        var exerciseId = await SeedExerciseAsync();
+        await SeedCredentialAsync(
+            exerciseId,
+            currentPassword: "correct-password",
+            failedAttemptCount: 7,
+            lockedOutUntil: DateTimeOffset.UtcNow.AddMinutes(-1));
+
+        (await LoginOnceAsync(exerciseId, "correct-password")).Should().Be(
+            SharedReadOnlyLoginOutcome.Authenticated, "an expired lockout no longer blocks a correct password");
+
+        var credential = await ReadCredentialAsync(exerciseId);
+        credential.FailedAttemptCount.Should().Be(0,
+            "a successful login after the lockout window elapses resets a RESIDUAL nonzero failed-attempt counter");
+        credential.LockedOutUntil.Should().BeNull("a successful login clears any residual lockout stamp");
+    }
+
+    [RequiresDockerFact]
+    public async Task Login_LockoutTrip_PersistsInOneSaveChangesCall()
+    {
+        // XC-004: the failed-attempt increment, the lockout trip itself (LockedOutUntil set + counter reset),
+        // the auth.lockout event, AND the login-failure event must all share exactly one SaveChangesAsync call —
+        // the same one-unit-of-work guarantee already pinned for plain rotate/revoke, extended to the lockout
+        // trip specifically (the busiest single write this funnel performs).
+        var exerciseId = await SeedExerciseAsync();
+        await SeedCredentialAsync(
+            exerciseId,
+            currentPassword: "correct-password",
+            failedAttemptCount: SharedCredentialLifecyclePolicy.MaxFailedAttempts - 1);
+
+        var interceptor = new CountingSaveChangesInterceptor();
+        var scope = ScopeFor(exerciseId);
+        var options = new DbContextOptionsBuilder<PulseDbContext>()
+            .UseSqlServer(_fixture.ConnectionString!)
+            .AddInterceptors(interceptor)
+            .Options;
+
+        await using var context = new PulseDbContext(options, scope);
+        var service = new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer());
+
+        var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = "wrong-password" });
+
+        result.Outcome.Should().Be(SharedReadOnlyLoginOutcome.Rejected);
+        interceptor.SaveChangesCallCount.Should().Be(1,
+            "the failed-attempt increment, the lockout trip, the auth.lockout event, and the login-failure event " +
+            "all share exactly one SaveChangesAsync call (XC-004)");
+
+        var credential = await ReadCredentialAsync(exerciseId);
+        credential.LockedOutUntil.Should().NotBeNull("the threshold-crossing attempt did trip the lockout");
     }
 }

@@ -114,6 +114,31 @@ public sealed class SharedCredentialLifecycleIsolationTests
         return id;
     }
 
+    /// <summary>A NAMED participant session (story 02) — distinct from the shared read-only kind — used to prove a revoke never touches it.</summary>
+    private async Task<Guid> SeedParticipantSessionAsync(Guid exerciseId)
+    {
+        var id = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
+
+        await using var seed = _fixture.CreateContext();
+        seed.Sessions.Add(new Session
+        {
+            Id = id,
+            TokenHash = Guid.NewGuid().ToString("N"),
+            Kind = "participant",
+            ExerciseId = exerciseId,
+            PrincipalId = accountId.ToString(),
+            AccountId = accountId,
+            Role = "participant",
+            ActingHumanId = accountId.ToString(),
+            IsReadOnly = false,
+            IssuedAt = DateTimeOffset.UtcNow,
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+        });
+        await seed.SaveChangesAsync();
+        return id;
+    }
+
     private async Task<SharedReadOnlyLoginOutcome> LoginOnceAsync(Guid exerciseId, string password)
     {
         var scope = ScopeFor(exerciseId);
@@ -208,6 +233,44 @@ public sealed class SharedCredentialLifecycleIsolationTests
         credentialB.FailedAttemptCount.Should().Be(0, "exercise B accrues no failed attempts from A's brute force");
         (await LoginOnceAsync(exerciseB, "shared-pw")).Should().Be(
             SharedReadOnlyLoginOutcome.Authenticated, "exercise B's shared login is unaffected by A's lockout");
+    }
+
+    [RequiresDockerFact]
+    public async Task Revoke_OnExerciseA_TerminatesOnlyAsLiveReadOnlySessions_LeavesStaffParticipantAndExerciseBReadOnlyUntouched()
+    {
+        // The full session-kind matrix in one scenario (gap in the builder's coverage, which proved staff-only
+        // and cross-exercise separately): exercise A carries TWO live read-only sessions, its own staff caller
+        // session, AND a named participant session; exercise B carries its own live read-only session. A revoke
+        // on A must terminate ONLY A's two read-only sessions — never A's staff/participant sessions, and never
+        // B's read-only session (COR-001).
+        var exerciseA = await SeedExerciseAsync();
+        var exerciseB = await SeedExerciseAsync();
+        await SeedCredentialAsync(exerciseA, "password-A");
+        await SeedCredentialAsync(exerciseB, "password-B");
+
+        var (sessionA, staffA) = await SeedStaffSessionAsync(exerciseA);
+        var readOnlyA1 = await SeedReadOnlySessionAsync(exerciseA);
+        var readOnlyA2 = await SeedReadOnlySessionAsync(exerciseA);
+        var participantA = await SeedParticipantSessionAsync(exerciseA);
+        var readOnlyB = await SeedReadOnlySessionAsync(exerciseB);
+
+        var scope = ScopeFor(exerciseA);
+        await using (var context = _fixture.CreateContext(scope))
+        {
+            var result = await NewLifecycleService(context, scope, sessionA, staffA).RevokeAsync();
+            result.Outcome.Should().Be(SharedCredentialRevokeOutcome.Revoked);
+            result.TerminatedSessionCount.Should().Be(2, "only A's two LIVE read-only sessions are terminated");
+        }
+
+        await using var read = _fixture.CreateContext();
+        (await read.Sessions.SingleAsync(s => s.Id == readOnlyA1)).RevokedAt.Should().NotBeNull("A's first read-only session is terminated");
+        (await read.Sessions.SingleAsync(s => s.Id == readOnlyA2)).RevokedAt.Should().NotBeNull("A's second read-only session is terminated");
+        (await read.Sessions.SingleAsync(s => s.Id == sessionA)).RevokedAt.Should()
+            .BeNull("the staff caller's own (non-read-only) session on A is never terminated by a shared-credential revoke");
+        (await read.Sessions.SingleAsync(s => s.Id == participantA)).RevokedAt.Should()
+            .BeNull("a NAMED participant session on A is untouched — the revoke targets only Kind == \"readonly\"");
+        (await read.Sessions.SingleAsync(s => s.Id == readOnlyB)).RevokedAt.Should()
+            .BeNull("exercise B's read-only session must never be terminated by a revoke on exercise A (COR-001)");
     }
 
     [RequiresDockerFact]
