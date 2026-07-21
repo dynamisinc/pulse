@@ -32,6 +32,14 @@ envelope), §3.4 (four-layer isolation boundary), §3.5 (degraded mode). Prototy
 | 05 | Degraded-mode fallback (circuit breaker) | NFR-003 / ADP-042 | Complete | #146 |
 | 06 | Cost/latency spike (measured) | open Q3 / NFR-002 | Complete | #147 |
 
+**#147 was completed *modeled*, not measured (§4.1 caveat) — forward-pointer.** No API key was
+available when #147 shipped, so its cost/latency envelope is analytic (published price table + a
+realistic token profile), not a live-endpoint measurement; #147 did its modeled job and stays
+**Complete**. `docs/features/engine-runtime/04-provider-live-config.md` (Phase B3, authored/Not
+Started) lands the live Azure OpenAI in-tenant endpoint and re-runs the built `EngineEval` latency/cost
+SLO suite against it, **replacing #147's modeled numbers with measured** and validating the §3.5
+degraded-mode trip threshold against measured p95 — see that story before treating #147's numbers as final.
+
 ## Dependencies
 E1 exercise-context/query-scoping layer; persona dossiers (persona-management COR-020); the E2
 publish pipeline (output path); the XC-004 telemetry emitter. Sibling E8 features `persona-voice-engine`,
@@ -44,6 +52,10 @@ Staff/backend. **NFR-005 is a Phase-2 gate, not future:** every provider must sa
 contract — tenant-bounded, contractual no-training, documented residency, ZDR as a config target.
 The provider is a **swappable interface** (Azure OpenAI in-tenant is the v1 default; Claude via a
 tenant-bounded endpoint — Foundry/Bedrock/Vertex — is the quality-preferred alternative), chosen by
-the voice-fidelity eval (engine-eval-harness), never from preference. The injection boundary is
-**defense in depth** — no single layer is trusted alone; red-team is acceptance testing
-(engine-eval-harness story 02), not a backlog "harden later" item.
+the voice-fidelity eval (engine-eval-harness), never from preference. **Its live-config realization —
+landing the governed Azure OpenAI in-tenant endpoint via `ai.bicep`, making `AddEngineGeneration` fail
+closed on ungoverned config, and re-running the eval against the live provider — is
+`engine-runtime/04`** (Tier-2, NFR-005 human sign-off); this feature ships the provider abstraction and
+adapters, not the live endpoint activation. The injection boundary is **defense in depth** — no single
+layer is trusted alone; red-team is acceptance testing (engine-eval-harness story 02), not a backlog
+"harden later" item — and `engine-runtime/04` keeps it green against the live provider, not only `Fake`.
