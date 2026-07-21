@@ -32,7 +32,28 @@ non-negotiables (staff vs participant worlds).
 
 ## Dependencies
 Exercise-isolation (session→exercise scoping, COR-001/008); telemetry (XC-004) for attribution. The
-identity provider stays behind an interface (COR-014). Backend not present yet.
+identity provider stays behind an interface (COR-014).
+
+**Open decision — the Organization tenant tier (`exercise-isolation/11`).** The customer `Organization` that
+*owns* named accounts (story 02) and staff/`StaffAssignment` (story 05) is designed-but-unbuilt and
+unscheduled (`exercise-isolation/11-organization-tenant-boundary.md`). B2 scopes accounts to an **exercise**
+and staff to **exercises** (via `StaffAssignment`), not to a customer org — sufficient for participant
+isolation, but staff/planner access is not customer-scoped until story 11 lands. This is the platform tenant,
+**distinct** from story 09's in-fiction org-account (COR-018).
+
+**Phase B2 backend build (`docs/BACKEND_ROADMAP.md` §4) — builds on B0.** The `Pulse.WebApi` host,
+`PulseDbContext`, the `IExerciseContext`/`ExerciseContext` scope seam, `AddExerciseScoping`, and the
+`Features/*` minimal-API endpoint pattern all landed in **Phase B0** (`backend-host`, merged). B2 adds the
+real identity tier on top: stories **03** (session hinge — `/session`, refresh, binding, scope
+population; `fullstack`, flips `sessionResolver`), **02** (named accounts + import + participant login;
+`fullstack`), **05** (`IIdentityProvider` + `StaffUser`/`StaffAssignment` + staff login + active-exercise;
+`backend`, **Tier-2**), **06** (shared read-only credential + view-only session; `backend`, **Tier-2**), and **07**
+(shared-credential lifecycle; `backend`, **Tier-2**). New B2 scoped entities (`Account`,
+`SharedCredential`) **extend** `PulseDbContext` via the create-then-extend pattern — they do not stand up
+a second context. **`StaffUser`/`StaffAssignment` are deliberately NOT `IExerciseScoped`** (cross-exercise
+by design, COR-005 — see implementation.md). Stories **01** (roles) and **04** (evaluator read-only) keep
+their prior scope; stories **08** (participant admin, COR-017) and **09** (org-account, COR-018) are
+**deferred out of the B2 slice**.
 
 ## Design notes
 Foundation, spanning staff and participant worlds. Read-only sessions still get an ephemeral identity
