@@ -1,4 +1,4 @@
-namespace Pulse.WebApi.Tests.Features.EngineRuntime;
+namespace Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// A hand-advanced <see cref="TimeProvider"/> for clock tests — the CI box has no <c>FakeTimeProvider</c>

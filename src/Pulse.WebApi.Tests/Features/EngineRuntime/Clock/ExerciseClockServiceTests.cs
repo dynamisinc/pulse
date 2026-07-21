@@ -1,4 +1,4 @@
-namespace Pulse.WebApi.Tests.Features.EngineRuntime;
+namespace Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 using FluentAssertions;
 using Pulse.Core.Features.Autonomy.Models;
