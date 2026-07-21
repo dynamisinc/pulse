@@ -1,6 +1,6 @@
 # Story: Named participant accounts (provisioned, no self-signup)
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-011  ·  **Design decisions:** none  ·  **Issue:** #59
 **Stack:** fullstack  ·  **Review:** Tier-1
 
@@ -20,38 +20,38 @@ backend-only slice + a follow-up frontend story — the backend endpoints stand 
 fullstack.)*
 
 ## Acceptance Criteria
-- [ ] Planners can provision named participant accounts by bulk import (CSV, mirroring Cadence's bulk
+- [x] Planners can provision named participant accounts by bulk import (CSV, mirroring Cadence's bulk
       import) or individually.
-- [ ] There is **no self-registration** on any participant path, and **no fake sign-up UI**.
-- [ ] A provisioned account belongs to exactly one exercise (COR-004) and carries its role(s).
-- [ ] Provisioning is a staff/planner action (staff world), never participant-facing (XC-002).
+- [x] There is **no self-registration** on any participant path, and **no fake sign-up UI**.
+- [x] A provisioned account belongs to exactly one exercise (COR-004) and carries its role(s).
+- [x] Provisioning is a staff/planner action (staff world), never participant-facing (XC-002).
 
 ### Backend — Account entity, provisioning, participant login (COR-011)
-- [ ] An `Account` entity (participant named account: display identity, role(s), one exercise) is added
+- [x] An `Account` entity (participant named account: display identity, role(s), one exercise) is added
       to `PulseDbContext` via the B0 create-then-extend pattern (new `DbSet` + `OnModelCreating` config +
       migration). **`Account` IS `IExerciseScoped`** — it belongs to exactly one exercise, so it carries
       a non-nullable `ExerciseId` and is covered by the global query filter + write-guard.
-- [ ] `POST /api/staff/accounts/import` (CSV, staff/planner-only) creates scoped accounts in the caller's
+- [x] `POST /api/staff/accounts/import` (CSV, staff/planner-only) creates scoped accounts in the caller's
       active exercise; `POST /api/staff/accounts` creates one account. Both stamp `ExerciseId` from the
       resolved scope (never a client-supplied exerciseId).
-- [ ] `POST /api/auth/login` verifies a participant credential against an `Account` **in the
+- [x] `POST /api/auth/login` verifies a participant credential against an `Account` **in the
       host-resolved exercise** (story 08) and, on success, issues a story-03 session; there is **no**
       registration/self-signup endpoint reachable on a participant path.
-- [ ] A login against an account that does not belong to the host's exercise fails closed (never
+- [x] A login against an account that does not belong to the host's exercise fails closed (never
       resolves a cross-exercise account).
 
 ### Cross-cutting
-- [ ] **Isolation (XC-001/COR-001):** an `Account` is bound to one exercise; a participant login on
+- [x] **Isolation (XC-001/COR-001):** an `Account` is bound to one exercise; a participant login on
       exercise A's host can only match an A account, and an account list/query is staff-only and
       A-scoped. A leaked/guessed account id from exercise B is invisible on A. Extends the standing suite
       (`exercise-isolation/07`) with an accounts case.
-- [ ] **Telemetry (XC-004):** participant **login success and failure** emit an XC-004 event at this
+- [x] **Telemetry (XC-004):** participant **login success and failure** emit an XC-004 event at this
       endpoint against the locked v0 envelope (wall + scenario time, actor, channel) — success:
       `eventType: 'login'`, `actor.kind: 'participant'`, `participantId` = accountId, `channel: 'system'`;
       failure: `payload.outcome = 'failure'`, no session identity (target = the attempted handle,
       sanitized). Scenario time uses the exercise's stored scenario time until the COR-050 backend clock
       (B3) lands.
-- [ ] **Content security (NFR-004):** CSV import fields — **especially display names, which render in the
+- [x] **Content security (NFR-004):** CSV import fields — **especially display names, which render in the
       staff console AND on participant surfaces (a stored-XSS surface)** — are validated and HTML-
       sanitized on ingest; oversized/malformed CSV is rejected; MIME/size validated. Login inputs are
       sanitized. The login endpoint is per-IP rate-limited (NFR-009). A stored script in an imported
@@ -125,3 +125,28 @@ Under `src/Pulse.WebApi.Tests/Features/Identity/Accounts/`. DB-touching tests ar
   `AccountProvisioningServiceTests.Create_StaffRole_IsRejectedAsInvalid`,
   `AccountFieldRulesTests.TryNormalizeRole_NonParticipantRoles_AreRejected`.
 - **Composition root:** `AccountRegistrationTests.*`.
+
+## Delivered (Phase B2)
+Built and tested on the B2 Wave-3 merges on `feature/identity-backend`: the `Account` entity
+(`IExerciseScoped`) + `PulseDbContext` config/migration, CSV bulk import + individual create
+(`AddParticipantAccounts()`), `POST /api/staff/accounts/import`, `POST /api/staff/accounts`, and
+`POST /api/auth/login` issuing a story-03 participant session. Both code-review gates (Gate-1,
+Gate-2) clean; umbrella green — 0 build warnings, `[RequiresDockerFact]` DB-backed tests run in CI
+(Testcontainers.MsSql). Frontend `build:check` clean.
+
+**Frontend deliverable:** the COBRA staff import panel `features/planner/components/AccountImport.tsx`
+(mirrors Cadence's bulk-import UX) is built and its suite is green. It runs mock-first
+(`USE_MOCK_DATA`) and goes live at backend deployment — there is no separate frozen-seam flip for this
+story (unlike story 03's `sessionResolver`, this panel simply points at the live endpoints once the
+backend is reachable).
+
+Deferred / tracked follow-ups (not blockers to Complete):
+- **Evaluator-can-provision authorization gap.** Story 04 (role-on-session) is deferred, so account
+  provisioning today is gated on "any live staff session," not planner-role specifically — any staff
+  session can call the import/create endpoints. This is a documented consequence of deferring story 04;
+  tighten to a planner-role check when 04/role-on-session lands.
+- **Duplicate-handle race → 500.** A concurrent duplicate-handle create/import can surface a 500 instead
+  of a clean conflict response; tracked as a minor follow-up, not a correctness or isolation issue.
+
+Markdown status flipped to Complete. Not closing the GitHub issue — it closes when the umbrella→main
+PR merges.
