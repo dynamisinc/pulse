@@ -2,11 +2,20 @@
 
 **Feature:** Exercise isolation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
 **Requirements:** COR-004  ·  **Design decisions:** none  ·  **Issue:** #47
+**Stack:** frontend  ·  **Review:** Tier-1
 
 ## Context
 Participants never choose or perceive an exercise. Login lands directly in their exercise's landing
 surface (the Social feed in pilot mode, the Portal in Phase 3), and an account belongs to exactly one
 exercise (COR-004, XC-002).
+
+**Phase B2 make-real (`docs/BACKEND_ROADMAP.md` §4).** This story now builds on **real** session +
+exercise resolution: the frozen `useSession()` (identity-auth-roles/03) and `useExerciseContext()`
+(exercise-isolation/08) are live behind their flipped mock seams. This story owns the **participant
+landing route guard** — the participant arm of role-aware nav (`app-shell/01`): a resolved participant
+(or read-only) session lands on its exercise's landing surface with no picker; a staff role, an
+unresolved scope, or an expired session is denied the participant fiction (fail-closed). The read-only
+All-Posts default (identity-auth-roles/06) is realized here off the session's `isReadOnly` flag.
 
 ## Acceptance Criteria
 - [ ] Given a participant credential, when they log in, then they land directly in their exercise's
@@ -16,6 +25,12 @@ exercise (COR-004, XC-002).
       hard-code the Portal.
 - [ ] No participant-facing surface exposes the concept of exercise selection, simulation status, or
       platform administration (XC-002).
+- [ ] **Make-real route guard:** given a live `useSession()`/`useExerciseContext()`, when the
+      participant route mounts, a **participant/PIO** role with a resolved scope renders the landing
+      surface; a **staff** role, an **unresolved** scope, or an **expired** session is redirected/denied
+      (never rendered into the participant fiction) — fail-closed.
+- [ ] **Read-only landing:** a session with `isReadOnly: true` (identity-auth-roles/06) lands on **All
+      Posts**, never the Following feed (COR-015).
 
 ## Out of Scope
 The staff switcher (story 05); the actual landing surfaces (E2 feed / E3 portal); the login page
@@ -32,8 +47,10 @@ concept" ACs — is tracked as `exercise-configuration/05-participant-exercise-i
 above are unchanged until that decision lands.
 
 ## Dependencies
-Story 08 (hostname scoping); auth/session (identity-auth-roles COR-012). Shapes every participant
-entry point.
+Story 08 (host resolution + `/exercise-context`, live) and identity-auth-roles/03 (session, live) — both
+flipped to their real backends in B2. identity-auth-roles/06 (the `isReadOnly` flag for the All-Posts
+default). Consumed by / composed with `app-shell/01` (the participant arm of role-aware nav). Shapes
+every participant entry point.
 
 ## Tests
 - Component/integration: participant login routes straight to the landing surface with no exercise
