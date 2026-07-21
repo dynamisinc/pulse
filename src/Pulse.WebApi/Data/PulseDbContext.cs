@@ -75,6 +75,9 @@ public class PulseDbContext : DbContext
     /// <summary>The durable telemetry event store (XC-004).</summary>
     public DbSet<TelemetryEvent> TelemetryEvents => Set<TelemetryEvent>();
 
+    /// <summary>The engine review-queue store — one row per generated burst awaiting/resolved review (E8 §8).</summary>
+    public DbSet<EngineReviewItemEntity> EngineReviewItems => Set<EngineReviewItemEntity>();
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -134,6 +137,17 @@ public class PulseDbContext : DbContext
 
             // target is optional; every sub-field becomes a (nullable) column.
             entity.OwnsOne(e => e.Target);
+        });
+
+        modelBuilder.Entity<EngineReviewItemEntity>(entity =>
+        {
+            // DraftId is the stable burst identity → primary key (one burst = one review item, ADP-040).
+            entity.HasKey(e => e.DraftId);
+            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.HasIndex(e => e.ExerciseId);
+
+            // The draft posts persist as an owned JSON collection — one nvarchar(max) column, no child table.
+            entity.OwnsMany(e => e.Posts, posts => posts.ToJson());
         });
 
         // ------------------------------------------------------------------------------------------
