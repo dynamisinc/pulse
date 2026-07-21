@@ -5,9 +5,12 @@ using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data.Entities;
 
 /// <summary>
-/// The first durable state in Pulse (COR-001, XC-004) — EF Core on Azure SQL. Exposes exactly the
-/// walking-skeleton entity set; the rest of E1's domain (<c>Organization</c>, <c>ParticipantAccount</c>,
-/// <c>StaffAssignment</c>, <c>Cast</c>) is deferred to the identity phase and is intentionally NOT here.
+/// The first durable state in Pulse (COR-001, XC-004) — EF Core on Azure SQL. Beyond the original
+/// walking-skeleton entities, the Phase-B2 identity tier now lives here too: <c>Account</c> and
+/// <c>SharedCredential</c> (exercise-scoped) alongside the cross-exercise <c>StaffUser</c>,
+/// <c>StaffAssignment</c>, and <c>Session</c> records (deliberately NOT <see cref="IExerciseScoped"/> —
+/// each carries a plain <c>ExerciseId</c> and documents its exemption in its own remarks).
+/// <c>Organization</c> / <c>Cast</c> remain deferred (exercise-isolation/11, gated on multi-customer go-live).
 /// </summary>
 /// <remarks>
 /// <para>
