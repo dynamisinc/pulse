@@ -55,21 +55,11 @@ public sealed class CurrentStaffSessionAccessor : ICurrentStaffSessionAccessor
 
         var session = await _dbContext.Sessions
             .AsNoTracking()
-            .Where(s => s.TokenHash == tokenHash)
-            .Select(s => new
-            {
-                s.Id,
-                s.Kind,
-                s.StaffUserId,
-                s.RevokedAt,
-                s.ExpiresAt,
-            })
-            .SingleOrDefaultAsync(cancellationToken);
+            .SingleOrDefaultAsync(s => s.TokenHash == tokenHash, cancellationToken);
 
         // Fail closed on anything that is not a live staff session bound to a StaffUser.
         if (session is null ||
-            session.RevokedAt is not null ||
-            session.ExpiresAt <= now ||
+            !session.IsLive(now) ||
             !string.Equals(session.Kind, StaffKind, StringComparison.Ordinal) ||
             session.StaffUserId is not { } staffUserId)
         {

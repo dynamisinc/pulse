@@ -80,22 +80,27 @@ public sealed class SessionService
         var session = await _dbContext.Sessions
             .SingleOrDefaultAsync(s => s.TokenHash == tokenHash, cancellationToken);
 
-        if (session is null || session.RevokedAt is not null)
+        if (session is null)
         {
-            // Unknown or already-invalidated (logged out / revoked) → 401, no telemetry (no re-auth-forcing
-            // expiry to record).
             return SessionQueryResult.Absent();
         }
 
         var now = DateTimeOffset.UtcNow;
-        if (session.ExpiresAt <= now)
+        if (session.IsLive(now))
         {
-            // Expiry forces re-auth: record it ONCE here (the moment the client learns it must re-auth), 401.
+            return SessionQueryResult.Live(session);
+        }
+
+        // Not live. Distinguish the two fail-closed cases for telemetry: an EXPIRED (not revoked) session is
+        // the re-auth-forcing event we record ONCE here (the moment the client learns it must re-auth), 401;
+        // an already-invalidated (logged out / revoked) session is a silent 401 (no session.expired).
+        if (session.RevokedAt is null)
+        {
             await EmitLifecycleEventAsync(session, SessionExpiredEventType, now, cancellationToken);
             return SessionQueryResult.Expired();
         }
 
-        return SessionQueryResult.Live(session);
+        return SessionQueryResult.Absent();
     }
 
     /// <summary>

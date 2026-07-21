@@ -65,19 +65,9 @@ public sealed partial class SessionAuthenticator : ISessionAuthenticator
 
             var session = await dbContext.Sessions
                 .AsNoTracking()
-                .Where(s => s.TokenHash == tokenHash)
-                .Select(s => new
-                {
-                    s.Id,
-                    s.ExerciseId,
-                    s.Kind,
-                    s.StaffUserId,
-                    s.RevokedAt,
-                    s.ExpiresAt,
-                })
-                .SingleOrDefaultAsync(cancellationToken);
+                .SingleOrDefaultAsync(s => s.TokenHash == tokenHash, cancellationToken);
 
-            if (session is null || session.RevokedAt is not null || session.ExpiresAt <= now)
+            if (session is null || !session.IsLive(now))
             {
                 // Unknown / revoked / expired → no live session (fail closed).
                 return null;

@@ -4,8 +4,12 @@ using Pulse.WebApi.Data.Entities;
 
 /// <summary>
 /// The single fail-closed definition of "a session is live" — shared by every consumer that authenticates a
-/// presented token (the request-scope middleware's authenticator and the staff-session accessor) so the
-/// live/expired/revoked decision can never drift between them.
+/// presented token (the request-scope middleware's <see cref="SessionAuthenticator"/>, the
+/// <see cref="CurrentStaffSessionAccessor"/>, and <see cref="SessionService"/>'s <c>GET /api/session</c> path)
+/// so the live/expired/revoked decision can never drift between them. <see cref="SessionService"/> additionally
+/// inspects <see cref="Pulse.WebApi.Data.Entities.Session.RevokedAt"/> to tell the expired-not-revoked case
+/// (which emits <c>session.expired</c>) apart from the revoked case — but the "is it live?" boolean itself is
+/// this one definition.
 /// </summary>
 internal static class SessionValidityExtensions
 {
