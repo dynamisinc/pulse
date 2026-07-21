@@ -22,9 +22,9 @@ non-negotiables (staff vs participant worlds).
 |---|-------|----------------|--------|-------|
 | 01 | Role set (Participant/PIO/Controller/Evaluator/Planner/OrgAdmin) | COR-010 | In Progress | #58 |
 | 02 | Named participant accounts (provisioned, no self-signup) | COR-011 | Not Started | #59 |
-| 03 | Short-lived exercise-bound sessions | COR-012 | In Progress | #60 |
+| 03 | Short-lived exercise-bound sessions | COR-012 | Complete | #60 |
 | 04 | Evaluator read-everything, write-nothing | COR-013 | Not Started | #61 |
-| 05 | Hybrid identity model behind a provider interface | COR-014 | Not Started | #62 |
+| 05 | Hybrid identity model behind a provider interface | COR-014 | Complete | #62 |
 | 06 | Shared read-only access (view-only session) | COR-015 | Not Started | #63 |
 | 07 | Shared-credential lifecycle (rotate/revoke/lockout) | COR-016 | Not Started | #64 |
 | 08 | Participant admin panel (login triage) | COR-017 | Not Started | #65 |
