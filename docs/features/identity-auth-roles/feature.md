@@ -34,9 +34,10 @@ non-negotiables (staff vs participant worlds).
 Exercise-isolation (session→exercise scoping, COR-001/008); telemetry (XC-004) for attribution. The
 identity provider stays behind an interface (COR-014).
 
-**Open decision — the Organization tenant tier (`exercise-isolation/11`).** The customer `Organization` that
-*owns* named accounts (story 02) and staff/`StaffAssignment` (story 05) is designed-but-unbuilt and
-unscheduled (`exercise-isolation/11-organization-tenant-boundary.md`). B2 scopes accounts to an **exercise**
+**The Organization tenant tier (`exercise-isolation/11`) — deferred to multi-customer go-live.** The customer
+`Organization` that *owns* named accounts (story 02) and staff/`StaffAssignment` (story 05) is
+designed-but-deferred — built in a dedicated wave gated on multi-customer go-live (Option B,
+`exercise-isolation/11-organization-tenant-boundary.md`). B2 scopes accounts to an **exercise**
 and staff to **exercises** (via `StaffAssignment`), not to a customer org — sufficient for participant
 isolation, but staff/planner access is not customer-scoped until story 11 lands. This is the platform tenant,
 **distinct** from story 09's in-fiction org-account (COR-018).

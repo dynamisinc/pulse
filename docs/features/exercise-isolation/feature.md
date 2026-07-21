@@ -31,7 +31,7 @@ conduct) — see `docs/features/console-shell/03-static-identity-badge.md`.
 | 08 | Per-exercise hostname (subdomain) | COR-008 | Not Started | #51 |
 | 09 | Network readiness (self-test, allowlist, GFE guidance) | COR-009 | Not Started | #52 |
 | 10 | Mock ExerciseContext provider (Wave-0 frontend seam) | COR-001, COR-004 | Complete | #211 |
-| 11 | Organization tenant boundary (customer scoping above the exercise) | COR-001, COR-010 | Not Started (open decision) | — |
+| 11 | Organization tenant boundary (customer scoping above the exercise) | COR-001, COR-010 | Deferred (multi-customer go-live gate) | — |
 
 ## Dependencies
 The Exercise / Organization entities and the exercise-context resolution (which exercise a session
@@ -65,11 +65,13 @@ against from day one. Story 10 is deliberately code-decoupled from those two sea
 import the clock or the telemetry emitter, and they do not import it; wiring happens later, in
 consumers.
 
-**Two-tier tenancy — an open decision (story 11).** The design nests isolation as **Organization** (customer
+**Two-tier tenancy — a resolved decision, deferred to a pre-multi-customer wave (story 11).** The design nests isolation as **Organization** (customer
 tenant — "mirrors Cadence's org concept", `docs/01-platform-core-isolation.md`) → owns many **Exercises** (the
 built, participant-facing scope, COR-001). Only the exercise tier is built; the `Organization` entity is
-designed-but-deferred and unscheduled, so Pulse is multi-tenant on the exercise axis only today. Story **11**
+designed-but-deferred (Option B — built in a wave gated on multi-customer go-live), so Pulse is multi-tenant on the exercise axis only today. Story **11**
 records that gap and its two consequences (staff/planner access not customer-scoped; `PersonaTemplate`/cast
-globally shared vs. the design's org-owned → a latent cross-customer leak) and the decision needed before
-multi-customer go-live. This is distinct from the *in-fiction* org-account (COR-018,
+globally shared vs. the design's org-owned → a latent cross-customer leak). **Decision: deferred (Option B)**
+— the `Organization` tier is built in a dedicated wave gated on multi-customer go-live (a hard blocker), with
+single-customer the explicit operating assumption until then. This is distinct from the *in-fiction*
+org-account (COR-018,
 `identity-auth-roles/09`).
