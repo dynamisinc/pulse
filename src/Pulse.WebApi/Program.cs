@@ -2,7 +2,9 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.ExerciseResolution;
+using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Sessions;
+using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
@@ -49,6 +51,15 @@ builder.Services.AddExerciseResolution();
 // named policies under the single app.UseRateLimiter() below.
 builder.Services.AddStaffIdentity(builder.Configuration);
 builder.Services.AddSessions(builder.Configuration);
+
+// Participant login methods (Phase B2 Wave 3). AddParticipantAccounts (identity-auth-roles/02) registers the
+// participant credential-login + staff account-provisioning services + the "participant-login" rate-limiter
+// policy. AddSharedReadOnly (identity-auth-roles/06) registers the shared view-only login + the read-only
+// write-denial probe/filter + the "shared-login" rate-limiter policy. All policies accumulate under the single
+// app.UseRateLimiter() above; each policy name is distinct (participant-login / shared-login / staff-login /
+// session-endpoints). Both depend on the ISessionIssuer (03) already registered above.
+builder.Services.AddParticipantAccounts();
+builder.Services.AddSharedReadOnly();
 
 // Social API (Phase B1, feature/social-api) — orchestrator-wired composition root. Each story exposes its
 // own Add*/Map* extension (never edits this file itself); these five DI calls register the read/write
@@ -133,16 +144,25 @@ app.MapControllers();
 // only from the resolved IExerciseContext (COR-001), never a client-supplied exerciseId.
 app.MapSocialFeedEndpoints();     // #270 GET /api/feed
 app.MapSocialThreadEndpoints();   // #270 GET /api/threads/{postId}
-app.MapSocialPostEndpoints();     // #271 POST /api/posts
+// #271 POST /api/posts — the one existing sim WRITE. Wrapped in a DenyReadOnlySessions() group
+// (identity-auth-roles/06) so a shared read-only session is refused (403) before the handler runs — the
+// server-side realization of the read-only-never-writes guarantee (COR-015). Opt-in per sim-write by design
+// (a verb-blanket would wrongly block read-only's legitimate writes to /api/telemetry, /auth/refresh,
+// /auth/logout, SignalR negotiate); each FUTURE sim-write (E2 reply/react/follow/DM) must apply the same
+// guard — tracked for a defense-in-depth backstop before E2 participant writes land.
+app.MapGroup(string.Empty).DenyReadOnlySessions().MapSocialPostEndpoints();
+
 app.MapSocialPersonaEndpoints();  // #273 GET /api/personas
 app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
 
-// Identity + exercise-resolution endpoints (Phase B2 Waves 1–2). Scope comes only from the resolved
+// Identity + exercise-resolution endpoints (Phase B2 Waves 1–3). Scope comes only from the resolved
 // IExerciseContext (COR-001); /exercise-context and /session read the resolved scope, never a client
 // exerciseId. Staff auth endpoints require the live-session accessor (story 03) now that it is wired.
 app.MapExerciseContextEndpoints();  // #51 GET /api/exercise-context (frozen ExerciseScope; 404 on unknown host)
 app.MapSessionEndpoints();          // #60 GET /api/session, POST /api/auth/refresh, POST /api/auth/logout
 app.MapStaffAuthEndpoints();        // #62 POST /api/auth/staff/login, GET /api/staff/assignments, POST /api/staff/active-exercise
+app.MapSharedReadOnlyEndpoints();   // #64 POST /api/auth/shared (view-only session + ephemeral identity)
+app.MapAccountEndpoints();          // #59 POST /api/auth/login, POST /api/staff/accounts[/import]
 
 app.Run();
 
