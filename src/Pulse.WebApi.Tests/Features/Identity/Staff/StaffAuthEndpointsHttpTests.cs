@@ -127,4 +127,33 @@ public sealed class StaffAuthEndpointsHttpTests
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
             "with no authenticated staff session the switch fails closed before touching the DB");
     }
+
+    [Fact]
+    public async Task StaffLogin_ExceedsPerIpRateLimit_Returns429()
+    {
+        // NFR-004/NFR-009: the staff login endpoint is per-IP rate-limited (a fixed 10/minute window,
+        // AddStaffIdentity()). Every request here fails validation fast (a bad body, never touching the DB),
+        // so this isolates the RATE LIMITER's own behavior: the 11th request within the window must be
+        // rejected by the limiter itself (429), never reaching the handler at all.
+        using var host = await StartHostAsync();
+        using var client = host.GetTestClient();
+
+        for (var attempt = 1; attempt <= 10; attempt++)
+        {
+            var response = await client.PostAsync(
+                "/api/auth/staff/login",
+                new StringContent("null", System.Text.Encoding.UTF8, "application/json"));
+
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                $"attempt {attempt} is within the configured 10/minute window and reaches the handler");
+        }
+
+        var eleventh = await client.PostAsync(
+            "/api/auth/staff/login",
+            new StringContent("null", System.Text.Encoding.UTF8, "application/json"));
+
+        eleventh.StatusCode.Should().Be(HttpStatusCode.TooManyRequests,
+            "the 11th staff-login attempt within the same window from the same caller must be rejected by the " +
+            "per-IP rate limiter (NFR-009), before it ever reaches the handler");
+    }
 }

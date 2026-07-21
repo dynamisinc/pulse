@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Tests.Features.Identity.Staff;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -97,5 +98,37 @@ public sealed class StubIdentityProvider : IIdentityProvider
     {
         ArgumentNullException.ThrowIfNull(credentials);
         return Task.FromResult(_result);
+    }
+}
+
+/// <summary>
+/// Counts <c>SaveChanges</c>/<c>SaveChangesAsync</c> invocations on the <see cref="Pulse.WebApi.Data.PulseDbContext"/>
+/// it is attached to — used to pin XC-004's "the telemetry event shares the mutation's unit of work" invariant
+/// for <see cref="Pulse.WebApi.Features.Identity.Staff.StaffLoginService"/> and
+/// <see cref="Pulse.WebApi.Features.Identity.Staff.StaffAssignmentService"/>: the entity mutation (the
+/// <c>StaffUser</c>/<c>Session</c> row) and its paired <c>TelemetryEvent</c> must reach the database in
+/// exactly ONE <c>SaveChangesAsync</c> call (one transaction), never two separate round trips where one could
+/// persist without the other.
+/// </summary>
+public sealed class CountingSaveChangesInterceptor : SaveChangesInterceptor
+{
+    /// <summary>How many times <c>SaveChanges</c> or <c>SaveChangesAsync</c> was invoked on the attached context.</summary>
+    public int SaveChangesCallCount { get; private set; }
+
+    /// <inheritdoc />
+    public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
+    {
+        SaveChangesCallCount++;
+        return base.SavingChanges(eventData, result);
+    }
+
+    /// <inheritdoc />
+    public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        SaveChangesCallCount++;
+        return base.SavingChangesAsync(eventData, result, cancellationToken);
     }
 }

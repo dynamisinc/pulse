@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -267,6 +268,69 @@ public sealed class StaffLoginServiceTests
         result.Outcome.Should().Be(StaffLoginOutcome.Authenticated,
             "a swapped IIdentityProvider drives the same login path with no call-site change");
         issuer.LastRequest!.Role.Should().Be("evaluator");
+    }
+
+    [RequiresDockerFact]
+    public async Task Login_Success_StaffUserMutationAndTelemetryEvent_ShareOneSaveChangesCall()
+    {
+        // XC-004: the StaffUser mutation (provisioning + LastLoginAt) and the paired login-success telemetry
+        // event must commit together as ONE unit of work — never two separate SaveChangesAsync round trips
+        // where one could persist without the other (e.g. a crash between them would otherwise leave a
+        // successful login with no audit event, or an audit event for a login that never completed).
+        var subject = $"idp|{Guid.NewGuid():N}";
+        var staffUserId = Guid.NewGuid();
+        var exercise = await SeedExerciseAsync(scenarioTime: null);
+        await SeedStaffUserWithAssignmentAsync(staffUserId, subject, exercise.Id, "controller");
+
+        var interceptor = new CountingSaveChangesInterceptor();
+        var options = new DbContextOptionsBuilder<PulseDbContext>()
+            .UseSqlServer(_fixture.ConnectionString)
+            .AddInterceptors(interceptor)
+            .Options;
+
+        await using var context = new PulseDbContext(options);
+        var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), new RecordingSessionIssuer());
+
+        var result = await service.LoginAsync(new StaffLoginRequest
+        {
+            Username = "ctrl",
+            Secret = "pw-123456",
+            ExerciseId = exercise.Id.ToString(),
+        });
+
+        result.Outcome.Should().Be(StaffLoginOutcome.Authenticated);
+        interceptor.SaveChangesCallCount.Should().Be(1,
+            "the StaffUser mutation and its XC-004 login-success telemetry event must commit together in " +
+            "exactly one SaveChangesAsync call — the same unit of work");
+    }
+
+    [RequiresDockerFact]
+    public async Task Login_WrongSecret_FailureTelemetryEvent_PersistsInOneSaveChangesCall()
+    {
+        // The failure path is just as much a unit-of-work concern: the rejected-login telemetry event must
+        // not depend on a second round trip either.
+        var subject = $"idp|{Guid.NewGuid():N}";
+        var exercise = await SeedExerciseAsync(scenarioTime: null);
+
+        var interceptor = new CountingSaveChangesInterceptor();
+        var options = new DbContextOptionsBuilder<PulseDbContext>()
+            .UseSqlServer(_fixture.ConnectionString)
+            .AddInterceptors(interceptor)
+            .Options;
+
+        await using var context = new PulseDbContext(options);
+        var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), new RecordingSessionIssuer());
+
+        var result = await service.LoginAsync(new StaffLoginRequest
+        {
+            Username = "ctrl",
+            Secret = "WRONG-secret",
+            ExerciseId = exercise.Id.ToString(),
+        });
+
+        result.Outcome.Should().Be(StaffLoginOutcome.Rejected);
+        interceptor.SaveChangesCallCount.Should().Be(1,
+            "a rejected login's failure telemetry event must persist in exactly one SaveChangesAsync call");
     }
 
     [RequiresDockerFact]
