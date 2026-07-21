@@ -27,10 +27,19 @@ exercise time zone (exercise-configuration COR-030).
 | 04 | Scenario time is the participant-visible time | COR-053 | Complete | #80 |
 | 05 | EndEx | COR-054 | Not Started | #81 |
 
+**Partially, honestly, realized by `engine-runtime/03`.** `docs/features/engine-runtime/03-scenario-clock-service.md`
+(Phase B3, authored/Not Started) builds a **scoped subset** of story 01 (#77) — the native clock, its
+StartEx tick, and the freeze/jump behavior the E8 reaction loop actually consumes (silence windows hold
+under freeze, advance on a jump) — plus the loop-facing slice of story 02's Director time-jump (#78).
+It does **not** close story 03's full overnight/TTX-advancement breadth (#79) or story 05's EndEx
+(#81), which remain this feature's own stories. Stories 01/02/03/05 stay **Not Started** here; do not
+read `engine-runtime/03` as retiring them — it is a narrower, engine-consumption-scoped build against
+the same `IExerciseClock` interface this feature owns.
+
 ## Dependencies
 exercise-configuration (time zone COR-030, lifecycle COR-032); consumed by exercise-build-golive
-(StartEx), E7 (CTL-015 jump, CTL-023 freeze), E8 (scenario-time timers), and every channel
-(scenario-time rendering). Backend not present yet.
+(StartEx), E7 (CTL-015 jump, CTL-023 freeze), E8 (scenario-time timers — the engine-consumption subset
+built as `engine-runtime/03`), and every channel (scenario-time rendering). Backend not present yet.
 
 ## Design notes
 Foundation. **Providers are swappable** (native now; Cadence-linked in Phase 4) behind one interface

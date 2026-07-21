@@ -32,14 +32,20 @@ engine-review-cockpit (#34–36) and world-steering; produces exactly what they 
 `EngineAutonomyState` aggregate (level resolution + kill switch + degraded-mode clamp), the pure
 `AutoHoldPolicy`, the `AutonomyProviderHealthListener` bridge onto generation-infra's
 `IProviderHealthListener`, and the CTL-034 `WorkloadDemandMeter` + `DemandAccounting`. No E2/E7 dependency;
-no participant surface. The API/DTO seam to the E7 cockpit (`EngineReviewItem` / `DraftDisposition`) is
-defined here and converges when a WebApi exists (none yet).
+no participant surface. **The API/DTO seam to the E7 cockpit (`EngineReviewItem` / `DraftDisposition`)
+defined here now converges: the WebApi exists (Phase B0), and the endpoints/DI + SignalR push wiring
+these services to the shipped cockpit is built as `docs/features/engine-runtime/02-review-cockpit-api.md`**
+(Phase B3) — that story consumes `EngineAutonomyState`, `AutoHoldPolicy`, `WorkloadDemandMeter`, and the
+frozen models exactly as written here; it does not re-derive the safety logic.
 
 ## Dependencies
 engine-review-cockpit (#34 queue, #35 auto-HOLD, #36 swamped-mode) — E8 produces what these consume;
-world-steering (queue-pressure meter, tiered pause); reaction-loop (routes drafts per level);
-engine-generation-infra story 05 (degraded-mode is the automatic sibling of the kill switch); E1
-roles (lead-controller gate for swamped mode). E1 clock (Delayed-auto countdown in scenario time).
+world-steering (queue-pressure meter, tiered pause); reaction-loop (routes drafts per level;
+generate/publish/measure back-half now built as `engine-runtime/01`); engine-generation-infra story 05
+(degraded-mode is the automatic sibling of the kill switch); E1 roles (lead-controller gate for swamped
+mode). E1 clock (Delayed-auto countdown in scenario time — the loop-facing subset delivered by
+`engine-runtime/03`). **`engine-runtime/02`** — the consumer that wires these built services to real
+endpoints + SignalR push and flips the cockpit's `useReviewQueue` off its mock store.
 
 ## Design notes
 Staff (COBRA). The safety invariants (architecture §8.2): **auto-HOLD on timeout, never auto-send**

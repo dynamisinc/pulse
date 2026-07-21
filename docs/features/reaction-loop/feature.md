@@ -26,22 +26,31 @@ target is engine-review-cockpit (#34–36); the publish target is the E2 posts p
 |---|-------|----------------|--------|-------|
 | 01 | Observe stage — triggers + inaction timers (scenario time) | F8.1 / COR-050 | Complete | #157 |
 | 02 | Decide stage — generation intent | F8.1 / ADP-010/011 | Complete | #158 |
-| 03 | Generate → review → publish wiring | F8.1 / ADP-040 | Blocked (E2 publish + E7 cockpit) | #159 |
-| 04 | Measure stage — telemetry + storyline update | ADP-041 / XC-004 | Blocked (E2 signals + E1 XC-004) | #160 |
+| 03 | Generate → review → publish wiring | F8.1 / ADP-040 | Unblocked → built as `engine-runtime/01` | #159 |
+| 04 | Measure stage — telemetry + storyline update | ADP-041 / XC-004 | Unblocked → built as `engine-runtime/01` | #160 |
 
-**Partially delivered:** the pure front stages **observe (#157)** and **decide (#158)** plus the
-decide-stage behavior registry ship as `Pulse.Core/Features/ReactionLoop/*` (see its `README.md`) — pure
-backend, no E2/E7 dependency. `ObserveStage` raises scenario-time inaction triggers + addressing
-candidates; `IntentComposer` + `DecideStage` compose the `GenerationIntent` from curve/caps/target +
-autonomy + eligible cast, and expose the `IReactionBehavior` registry the reactive behaviors plug into.
-Stories **03/04 remain blocked** until the E2 publish pipeline and the E7 review cockpit (#34–36) exist.
+**Partially delivered; back-half now rehomed.** The pure front stages **observe (#157)** and **decide
+(#158)** plus the decide-stage behavior registry ship as `Pulse.Core/Features/ReactionLoop/*` (see its
+`README.md`) — pure backend, no E2/E7 dependency. `ObserveStage` raises scenario-time inaction triggers
++ addressing candidates; `IntentComposer` + `DecideStage` compose the `GenerationIntent` from
+curve/caps/target + autonomy + eligible cast, and expose the `IReactionBehavior` registry the reactive
+behaviors plug into. Stories **03/04's blockers are retired at the docs level**: B1 (`social-api`)
+shipped the E2 publish pipeline (`PostIngestService.IngestAsync` + `IFeedBroadcaster`) and
+`engine-review-cockpit` (#34–36) shipped the E7 review queue — both now exist. The **generate → publish
+→ measure back-half these two stories describe is built as `docs/features/engine-runtime/01-reaction-loop-host.md`**
+(Phase B3 of `BACKEND_ROADMAP.md`), which wires this feature's `ObserveStage`/`DecideStage` output into
+the guard-filtered generate stage, B1's publish pipeline, and the measure stage — not a rewrite of this
+feature's built front stages.
 
 ## Dependencies
 `storyline-model` (state + curves + caps + target), `persona-voice-engine` (burst generation +
-diversity gate), `engine-generation-infra` (provider + prompt + guard), E1 exercise clock (COR-050),
-engine-review-cockpit (#34–36, the review target), E2 publish pipeline, engine-telemetry-tuning
-(events). The reactive behaviors (silence-escalation, response-reaction, amplification-engine,
-ambient-chatter) are the *decide-stage triggers* that drive this loop.
+diversity gate), `engine-generation-infra` (provider + prompt + guard), E1 exercise clock (COR-050;
+the loop-facing subset now delivered by `engine-runtime/03`), engine-review-cockpit (#34–36, the review
+target — now served live by `engine-runtime/02`), **the E2 publish pipeline (delivered — B1's
+`PostIngestService`/`IFeedBroadcaster`, `social-api`)**, engine-telemetry-tuning (events). The reactive
+behaviors (silence-escalation, response-reaction, amplification-engine, ambient-chatter) are the
+*decide-stage triggers* that drive this loop. **The back-half wiring (stories 03/04) is now built in
+`engine-runtime/01`** — this feature's Dependencies on the E2 pipeline and the E7 cockpit are satisfied.
 
 ## Design notes
 Staff/backend. The loop is **scenario-time-driven** (COR-050/051) — inaction timers and windows are

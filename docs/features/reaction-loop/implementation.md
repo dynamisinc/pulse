@@ -4,6 +4,13 @@
 > into the E7 cockpit (#34–36) and E2 publish. Backend .NET absent; this is a scheduler, not a
 > request/response service. The reactive-behavior features register the decide-stage trigger→intent
 > policies.
+>
+> **Back-half now built in `engine-runtime/01` (Phase B3).** Backend .NET now exists (Phase B0/B1),
+> so the plan below's stories 03/04 are no longer speculative `services/loop/*` sketches — the real
+> generate/publish/measure stages are built as `docs/features/engine-runtime/01-reaction-loop-host.md`'s
+> `GenerateStage`/`MeasureStage`/`EnginePublishService`, wired to this feature's built `ObserveStage`/
+> `DecideStage` output and publishing through B1's `PostIngestService`. The rows below are kept for
+> historical/planning context; they are not the as-built file layout for 03/04.
 
 ## Per-story tech notes
 
@@ -11,8 +18,8 @@
 |-------|----------|-----------------------|----------------------------------|
 | 01 Observe stage | Subscribe to clock + pause state + E2 activity; raise inaction triggers in scenario time. | `services/loop/observe` | `observe(exercise) → Signals` (triggers, timers, addressing candidates) |
 | 02 Decide stage | Compose intent from storyline rules + curve + caps + target + autonomy; behaviors register policies. | `services/loop/decide`, policy registry | `decide(signals) → Intent[]`; `registerBehavior(policy)` |
-| 03 Generate→review→publish | Generate burst → guard → route by autonomy → E2 publish. | `services/loop/dispatch` | `dispatch(intent) → queued \| published` |
-| 04 Measure stage | Observe downstream signals; update storyline; emit `engine.measured`. | `services/loop/measure` | `measure(published) → storyline update + telemetry` |
+| 03 Generate→review→publish | Generate burst → guard → route by autonomy → E2 publish. **Realized by `engine-runtime/01`** (`GenerateStage.cs`, `EnginePublishService.cs`) against the real `IGenerationProvider`/`ContentGuard`/`PostIngestService` — see that feature's `implementation.md` for the as-built files. | `services/loop/dispatch` *(superseded — see `engine-runtime/01`)* | `dispatch(intent) → queued \| published` *(realized as `IEnginePublishService.PublishBurstAsync`)* |
+| 04 Measure stage | Observe downstream signals; update storyline; emit `engine.measured`. **Realized by `engine-runtime/01`** (`MeasureStage.cs`) against `Storyline.Tick`/`IntensityModel`/`SentimentModel`. | `services/loop/measure` *(superseded — see `engine-runtime/01`)* | `measure(published) → storyline update + telemetry` |
 
 ## Reuse map
 - **`storyline-model`** — state, curves (03), caps (04), target-follow (05); `tickIntensity`/`computeSentiment`.
@@ -37,3 +44,9 @@
 Strictly sequential — it's a pipeline (observe→decide→generate→measure). The reactive-behavior
 features depend on the decide-stage policy registry (wave 2 export). Frontend→backend edge serial;
 the `dispatch` seam integrates with the already-built cockpit (#34–36).
+
+> **Pointer (Phase B3).** Waves 3 and 4 above are superseded by `engine-runtime`'s Wave Plan: the
+> generate/publish/measure work is built as `engine-runtime/01` (Wave 2 there), depending on this
+> feature's built observe/decide output plus `engine-runtime/03` (scenario clock) and `engine-runtime/04`
+> (live generation provider) from `engine-runtime`'s Wave 1. See
+> `docs/features/engine-runtime/implementation.md` for the as-built Wave Plan and reuse map.

@@ -25,8 +25,19 @@ table). EVL-014 (dial-input overlays). Master PRD XC-004 (the v0 schema this ext
 
 ## Dependencies
 The XC-004 v0 telemetry emitter (E1); every E8 feature emits through it (reaction-loop, storyline-model,
-response-reaction, autonomy-safety, amplification-engine); E10 consumes it (with EVL-014 overlays);
-E9's INT-031 stream shares the taxonomy.
+response-reaction, autonomy-safety, amplification-engine, **and now `engine-runtime`** — stories 01
+(`engine.observed/decided/generated/published/measured` + `storyline.state_changed`) and 02
+(`engine.reviewed`, incl. hold-on-expiry / auto-send) both emit against the extension this feature's
+story 01 (#173) defines); E10 consumes it (with EVL-014 overlays); E9's INT-031 stream shares the
+taxonomy.
+
+**Foundation dependency — sequencing decided (2026-07-21): schema-first.** `engine-runtime` is authored
+(Phase B3, Not Started) with its emissions specified against the engine event-type table (E8 arch §11);
+this feature's story 01 (#173) is the schema extension those emissions target and is **also Not
+Started**. Decision: story 01 (#173) lands **first**, as `engine-runtime`'s Wave-0 seam-freeze (the way
+B1 froze `ParticipantPostDto`/`IFeedBroadcaster` ahead of its fan-out), so `engine-runtime` 01/02 emit
+against a settled v0 envelope rather than co-evolving it — a hard prerequisite for the `engine-runtime`
+fan-out (`engine-runtime/implementation.md` open question (d), decided).
 
 ## Design notes
 Staff/backend. A **schema mistake is a cross-phase migration** (adversarial review D2) — the engine
