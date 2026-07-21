@@ -111,3 +111,19 @@ authenticated request; `app-shell/01` consumes the live `useSession()`.
 - Contract: `GET /api/session` returns the frozen `Session` shape for participant, staff, and read-only
   kinds.
 - Integration: session issue/refresh/expiry/logout emit the expected XC-004 events.
+
+### Implemented tests (Wave 2, story 03)
+Token/scheme primitives (no DB):
+- `SessionTokensTests` — opaque token entropy/uniqueness; only a non-reversible hash is stored, never the raw token (NFR-009 / AC "tokens do not leak secrets").
+- `SessionTokenExtractorTests` — `Authorization: Bearer` extraction, fail-closed on absent/malformed.
+- `SessionAuthenticationMiddlewareTests` — scope population + precedence (session > host), the participant host↔session fail-closed 403 check, no-token/invalid-token pass-through, staff/read-only not host-bound (AC "scope population + precedence", "host equality").
+- `SessionRegistrationTests` — `AddSessions()` graph resolves; session lifetimes bind; the real `ICurrentStaffSessionAccessor` wins over story 05's Null default (both registration orders).
+- `SessionEndpointsHttpTests` — `GET /api/session` 401 with no token; refresh 401 without a refresh token; logout 204 idempotent; per-IP 429 (AC "expiry forces re-auth", "rate-limited").
+
+DB-backed (`[RequiresDockerFact]`, run in CI):
+- `SessionIssuerTests` — persists only hashes; short-lived expiry + refresh window; binds one exercise/account; satisfies the staff `IssueAsync` request shape (AC "session model + issuance", "bound to one exercise/account").
+- `SessionServiceTests` — `GET /api/session` live/absent/expired(+`session.expired`)/revoked; refresh rotates both tokens + preserves binding (+`session.refreshed`); logout revokes server-side (+`logout`) + idempotent (AC "refresh preserves binding", "logout invalidates", "XC-004 lifecycle events").
+- `CurrentStaffSessionAccessorTests` — staff-only, live-only fail-closed accessor (participant/read-only/expired/revoked/no-token → null).
+- `SessionScopeIsolationTests` — standing-suite extension (exercise-isolation/07): participant session-scope; staff session>host precedence; participant wrong-host 403; session-provides-scope-with-no-host; expired → zero rows fail closed (AC "isolation XC-001").
+- `SessionEndpointContractTests` — end-to-end `GET /api/session` frozen `Session` shape (participant with persona / staff without) + expired → 401 (AC "frozen Session shape", "frozen-seam flip").
+- `StaffAssignmentServiceHardeningTests` — the defense-in-depth staff-session ownership + kind assertion added to `SetActiveExerciseAsync`.
