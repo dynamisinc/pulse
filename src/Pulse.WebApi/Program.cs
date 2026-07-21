@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 
@@ -30,6 +31,20 @@ builder.Services.AddPulsePersistence(builder.Configuration);
 // IExerciseContext that PulseDbContext's global query filter reads; it starts UNSET (fail-closed: an
 // unresolved scope matches zero rows). Later stories (host/auth/staff-switch) populate it per request.
 builder.Services.AddExerciseScoping();
+
+// Host → exercise resolution (exercise-isolation/08, #51, Phase B2 Wave 1) — orchestrator-wired.
+// Registers the host→exercise resolver that UseExerciseResolution() (below) uses to set the pre-auth
+// participant scope from the request Host header. Fail-closed on an unknown host (scope stays unset).
+builder.Services.AddExerciseResolution();
+
+// Staff identity (identity-auth-roles/05, #62) is BUILT + merged, but its composition-root wiring
+// (builder.Services.AddStaffIdentity(builder.Configuration) + app.UseRateLimiter() + app.MapStaffAuthEndpoints())
+// is DEFERRED to Phase B2 Wave 2 (story 03): StaffLoginService depends on ISessionIssuer, whose
+// implementation + DI registration land with story 03. Wiring it now would fail DI validation at startup
+// (unresolvable ISessionIssuer) and expose only non-functional endpoints (no auth scheme, no session
+// issuer, the ICurrentStaffSessionAccessor Null default fails closed). It is wired alongside AddSessions()
+// in Wave 2, once every runtime dependency exists — the "wire the composition root as dependencies become
+// ready" model.
 
 // Social API (Phase B1, feature/social-api) — orchestrator-wired composition root. Each story exposes its
 // own Add*/Map* extension (never edits this file itself); these five DI calls register the read/write
@@ -69,6 +84,13 @@ var app = builder.Build();
 
 app.UseCors(FrontendCorsPolicy);
 
+// Exercise scope resolution (exercise-isolation/08) — MUST run BEFORE any auth/session middleware
+// (Phase B2 Wave 2, story 03) so an authenticated session's scope write takes precedence over the host's
+// provisional one (the precedence model: session > host > unset → fail-closed zero rows). Maps the
+// request Host to an Exercise and sets ExerciseContext.CurrentExerciseId for anonymous/pre-auth
+// participant requests; an unknown/spoofed/omitted host leaves the scope unset (fail-closed).
+app.UseExerciseResolution();
+
 // Liveness — no checks run (Predicate false), so it stays free of any DB/dependency coupling: the host
 // is "up" regardless of database reachability (story 01 AC). Readiness (/health/ready) runs every
 // registered check, including story 02's DbContext check, for deploy/orchestration probes.
@@ -84,6 +106,11 @@ app.MapSocialThreadEndpoints();   // #270 GET /api/threads/{postId}
 app.MapSocialPostEndpoints();     // #271 POST /api/posts
 app.MapSocialPersonaEndpoints();  // #273 GET /api/personas
 app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
+
+// Exercise-resolution endpoint (Phase B2 Wave 1, exercise-isolation/08). Scope comes only from the
+// resolved IExerciseContext (COR-001); /exercise-context reads the host-resolved scope, never a client
+// exerciseId. (Story 05's MapStaffAuthEndpoints() is deferred to Wave 2 — see the DI note above.)
+app.MapExerciseContextEndpoints();  // #51 GET /api/exercise-context (frozen ExerciseScope; 404 on unknown host)
 
 app.Run();
 
