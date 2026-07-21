@@ -1,17 +1,19 @@
 # Story: Organization tenant boundary (customer scoping above the exercise)
 
-**Feature:** Exercise isolation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Exercise isolation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Deferred — gated on multi-customer go-live
 **Requirements:** COR-001 (the scoping tier above the exercise), COR-010 (OrgAdmin) + the epic entity model
 (`docs/01-platform-core-isolation.md` — `Organization` = "Tenant boundary (customer)")  ·  **Design decisions:** none  ·  **Issue:** —
 **Stack:** backend  ·  **Review:** Tier-2 (schema + isolation — the customer tenant boundary)
 
-> **⚠ OPEN ARCHITECTURAL DECISION — surfaced during the Phase B2 review, not yet scheduled.** This story
-> exists to make the decision explicit rather than leave it implicit. The design names `Organization` as the
-> customer **tenant boundary** ("Owns exercises, persona templates, cast libraries. Mirrors Cadence's org
-> concept" — `docs/01-platform-core-isolation.md` entity table), but the entity is **not built**: B0 deferred
-> it ("`Organization` … deferred to the identity phase" — `PulseDbContext.cs`), the B2 slice did **not** add
-> it, and no roadmap phase currently owns it. Today Pulse is multi-tenant on the **exercise** axis only.
-> **Decide where this lands before onboarding a second customer** (see "The decision" below).
+> **✅ DECISION (resolved) — Option B: deferred, and a hard prerequisite for multi-customer go-live.** The
+> design names `Organization` as the customer **tenant boundary** ("Owns exercises, persona templates, cast
+> libraries. Mirrors Cadence's org concept" — `docs/01-platform-core-isolation.md` entity table). It is **not
+> built** (B0 deferred it; the B2 slice did not add it), and that is the accepted state **while Pulse runs a
+> single customer** — today it is multi-tenant on the **exercise** axis only. This story stays a tracked
+> backlog item and is **pulled into a dedicated wave before a second customer is onboarded**: multi-customer
+> go-live is BLOCKED until it lands. The gate *is* the guardrail — it prevents the cross-customer
+> `PersonaTemplate`/cast leak (gap 2 below) from ever shipping to customer #2, with no interim throwaway
+> scaffolding. Single-customer is the explicit operating assumption until then.
 
 ## Context
 Pulse's isolation design has **two nested tiers**:
@@ -43,16 +45,26 @@ and is **not** this story. This story is the platform **customer tenant**.
    customer. This is a latent **cross-customer leak** — a quieter failure than the cross-exercise one, but a
    real one.
 
-## The decision (pick one; this story is the record of it)
-- **(A) Land in B2** — add `Organization` as a B2 identity-phase story: the natural home, since the org is the
-  tenant that owns accounts (identity/02), staff (identity/05), and templates. Widens the B2 slice by one
-  Tier-2 backend story + a schema migration.
-- **(B) Later identity wave** — build the exercise tier + auth now (B2 as scoped), add the org tier in a
-  follow-up wave before multi-customer go-live. Requires a migration adding `OrganizationId` to owned entities
-  then.
-- **(C) Accept single-tenant-for-now, explicitly** — declare one-customer an accepted constraint, add a
-  guardrail (e.g. a single seeded `Organization`, a config assertion, or a documented go-live gate) so the
-  `PersonaTemplate` cross-customer leak cannot ship silently, and revisit before customer #2.
+## The decision (RESOLVED → B)
+**Chosen: (B) — defer, gated on multi-customer go-live.** Build the exercise tier + auth now (B2 as scoped);
+add the `Organization` tenant tier in a dedicated wave triggered when a second customer is on the horizon,
+before multi-customer go-live. That wave adds the `Organization` entity + a migration putting `OrganizationId`
+on the owned entities (`Exercise`, `PersonaTemplate`/cast, accounts, staff) and the org scoping tier. This
+story is the tracked backlog placeholder for that wave; the ACs below apply when it is pulled in.
+
+**Why not the others:** (A) land-in-B2 would widen the identity slice with a tenant tier that has no near-term
+consumer (Pulse is single-customer today) — premature. (C) accept-single-tenant-with-a-code-guardrail adds
+interim scaffolding we'd then unwind; the go-live gate below achieves the same safety with no throwaway code.
+
+**The gate (what makes B safe):** multi-customer go-live is a **hard blocker** on this story — the
+cross-customer `PersonaTemplate`/cast leak (gap 2 above) must be closed before a second customer's data shares
+the platform. Track it on the go-live readiness path (COR-042), alongside network readiness (COR-009).
+
+Options considered (for the record):
+- **(A) Land in B2** — add `Organization` as a B2 identity-phase story (natural home; owns accounts/staff/
+  templates). Rejected: premature, no near-term multi-customer consumer.
+- **(B) Later dedicated wave** *(chosen)* — build the org tier in a wave gated on multi-customer go-live.
+- **(C) Accept single-tenant + interim code guardrail** — rejected in favor of the go-live gate (no throwaway).
 
 ## Acceptance Criteria (draft — apply once the decision selects A or B)
 - [ ] Given the two-tier design, when the model is built, then an `Organization` entity exists as the customer
