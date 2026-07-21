@@ -40,9 +40,12 @@ public static class ExerciseResolutionExtensions
     /// middleware (identity-auth-roles/03, Wave 2). The single scoped <c>CurrentExerciseId</c> has the
     /// precedence <c>session &gt; host &gt; unset</c>, realized purely by order: host resolution writes the
     /// provisional scope first, then the session middleware's later write (when a valid session exists) wins.
-    /// It should also run after the DB-independent liveness probe mapping so a resolution lookup can never
-    /// affect liveness; the resolver additionally fails closed on any lookup error as a second line of defense.
-    /// In Wave 1 there is no session layer yet, so host resolution is the only populator — expected.
+    /// This is a GLOBAL middleware, so it runs before every endpoint — including the DB-independent liveness
+    /// probe. To keep liveness free of any DB coupling (a resolver lookup could hang on a DB outage), the
+    /// orchestrator scopes this middleware OFF the <c>/health</c> path (via <c>UseWhen</c>) rather than relying
+    /// on mapping order, which does NOT govern middleware-vs-endpoint execution. The resolver additionally
+    /// fails closed on any lookup error as a second line of defense. In Wave 1 there is no session layer yet,
+    /// so host resolution is the only populator — expected.
     /// </para>
     /// <para>
     /// Pair this with <see cref="AddExerciseResolution"/> (DI) and

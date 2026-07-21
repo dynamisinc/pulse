@@ -89,7 +89,13 @@ app.UseCors(FrontendCorsPolicy);
 // provisional one (the precedence model: session > host > unset → fail-closed zero rows). Maps the
 // request Host to an Exercise and sets ExerciseContext.CurrentExerciseId for anonymous/pre-auth
 // participant requests; an unknown/spoofed/omitted host leaves the scope unset (fail-closed).
-app.UseExerciseResolution();
+// Scoped OFF the /health path (UseWhen): resolution runs a DB lookup, and the liveness probe
+// (/health) is deliberately DB-independent — a DB hang must never delay the liveness 200 into an
+// instance recycle. (Middleware-vs-endpoint order is not governed by map order, so excluding the
+// path here is what actually keeps liveness DB-free.)
+app.UseWhen(
+    context => !context.Request.Path.StartsWithSegments("/health"),
+    branch => branch.UseExerciseResolution());
 
 // Liveness — no checks run (Predicate false), so it stays free of any DB/dependency coupling: the host
 // is "up" regardless of database reachability (story 01 AC). Readiness (/health/ready) runs every
