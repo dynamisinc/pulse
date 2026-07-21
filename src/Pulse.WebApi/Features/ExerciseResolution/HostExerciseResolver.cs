@@ -66,13 +66,24 @@ public sealed partial class HostExerciseResolver : IHostExerciseResolver
 
             // Exact match, case-insensitive at the database (SQL_Latin1_General_CP1_CI_AS) against the
             // normalized (lower-cased) host, on either the default subdomain or the optional branded domain.
-            var exerciseId = await dbContext.Exercises
+            // Fetch up to TWO matches so an ambiguous host (one exercise's Hostname equalling a DIFFERENT
+            // exercise's BrandedDomain — there is no cross-column uniqueness guard) is detected rather than
+            // silently resolved to an arbitrary row (a nondeterministic cross-exercise misroute).
+            var matchingExerciseIds = await dbContext.Exercises
                 .AsNoTracking()
                 .Where(exercise => exercise.Hostname == host || exercise.BrandedDomain == host)
-                .Select(exercise => (Guid?)exercise.Id)
-                .FirstOrDefaultAsync(cancellationToken);
+                .Select(exercise => exercise.Id)
+                .Take(2)
+                .ToListAsync(cancellationToken);
 
-            return exerciseId;
+            if (matchingExerciseIds.Count > 1)
+            {
+                // Fail closed on ambiguity (the always-Critical seam): never pick one of several matches.
+                LogAmbiguousHostMatch(host);
+                return null;
+            }
+
+            return matchingExerciseIds.Count == 1 ? matchingExerciseIds[0] : null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -87,4 +98,11 @@ public sealed partial class HostExerciseResolver : IHostExerciseResolver
         Level = LogLevel.Warning,
         Message = "Host → exercise resolution failed for host '{Host}'; leaving scope unresolved.")]
     private partial void LogResolutionFailed(string host, Exception exception);
+
+    [LoggerMessage(
+        EventId = 2,
+        Level = LogLevel.Warning,
+        Message = "Host '{Host}' matched more than one exercise (Hostname/BrandedDomain collision); " +
+                  "failing closed and leaving scope unresolved rather than resolving to an arbitrary exercise.")]
+    private partial void LogAmbiguousHostMatch(string host);
 }

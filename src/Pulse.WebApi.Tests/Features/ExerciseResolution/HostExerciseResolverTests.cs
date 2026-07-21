@@ -104,6 +104,25 @@ public class HostExerciseResolverTests
     }
 
     [RequiresDockerFact]
+    public async Task AmbiguousHost_CrossColumnCollision_ResolvesToNull_FailClosed()
+    {
+        // No cross-column uniqueness guard exists: one exercise's Hostname can equal a DIFFERENT exercise's
+        // BrandedDomain (the per-column filtered unique indexes do not prevent this). Such a host must fail
+        // closed, never resolve to an arbitrary one of the two exercises (a silent cross-exercise misroute).
+        var collidingHost = $"collide-{Guid.NewGuid():N}.example.com";
+        var idA = Guid.NewGuid();
+        var idB = Guid.NewGuid();
+        await SeedExerciseAsync(idA, hostname: collidingHost, brandedDomain: null);
+        await SeedExerciseAsync(idB, hostname: $"h-{idB:N}.example.com", brandedDomain: collidingHost);
+
+        var resolved = await CreateResolver().ResolveExerciseIdAsync(collidingHost, CancellationToken.None);
+
+        resolved.Should().BeNull(
+            "a host matching two exercises (one's Hostname == another's BrandedDomain) fails closed — " +
+            "never resolves to an arbitrary exercise (cross-exercise misroute on the scope-resolution seam)");
+    }
+
+    [RequiresDockerFact]
     public async Task MalformedHost_ResolvesToNull_WithoutQuerying()
     {
         await SeedExerciseAsync(Guid.NewGuid(), hostname: $"h-{Guid.NewGuid():N}.example.com", brandedDomain: null);

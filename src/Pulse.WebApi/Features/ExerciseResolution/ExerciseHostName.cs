@@ -13,16 +13,22 @@ using System.Text.RegularExpressions;
 /// <para>
 /// The accepted grammar is a conservative RFC-1123 hostname: dot-separated labels of <c>[a-z0-9-]</c>
 /// (1–63 chars, no leading/trailing hyphen), total length 1–253. Ports are NOT accepted here — callers pass
-/// <see cref="Microsoft.AspNetCore.Http.HostString.Host"/>, which already excludes the port. Anything else
-/// (empty, whitespace, IPv6 literals, embedded <c>:</c>/<c>/</c>/<c>@</c>, control characters, a smuggled
-/// trailing newline) is rejected.
+/// <see cref="Microsoft.AspNetCore.Http.HostString.Host"/>, which already excludes the port. LEADING/TRAILING
+/// whitespace — including a stray trailing newline (<c>"evil.example.com\n"</c>) — is <c>Trim()</c>med first,
+/// so such an input is ACCEPTED and normalized to the clean host (<c>"evil.example.com"</c>); this is safe
+/// because the emitted value is regex-validated to contain only <c>[a-z0-9.-]</c> and can never carry a
+/// control character. Anything that survives the trim and is not a valid hostname — IPv6 literals, embedded
+/// <c>:</c>/<c>/</c>/<c>@</c>, and an EMBEDDED / mid-string control char or newline
+/// (<c>"evil.example.com\nhost: other"</c>, the header-smuggling shape) — is rejected by the regex.
 /// </para>
 /// <para>
 /// The regex is anchored with <c>\A</c>/<c>\z</c> (absolute string start/end) rather than <c>^</c>/<c>$</c>
-/// precisely so a trailing-newline payload (<c>"evil.example.com\n"</c>) — which <c>$</c> would match before
-/// — is rejected. Matching against a provisioned host relies on the database's case-insensitive collation
-/// (<c>SQL_Latin1_General_CP1_CI_AS</c>); the incoming host is additionally lower-cased here so the value we
-/// stash / log / compare is deterministic regardless of how the client cased it.
+/// as defense-in-depth: <c>$</c> can match just before a trailing newline, whereas <c>\z</c> only matches the
+/// absolute end. This is largely redundant given the preceding <c>Trim()</c> already removes a trailing
+/// newline, but it keeps the anchoring correct on its own terms. Matching against a provisioned host relies
+/// on the database's case-insensitive collation (<c>SQL_Latin1_General_CP1_CI_AS</c>); the incoming host is
+/// additionally lower-cased here so the value we stash / log / compare is deterministic regardless of how the
+/// client cased it.
 /// </para>
 /// </remarks>
 public static partial class ExerciseHostName
