@@ -99,3 +99,24 @@ COR-015 shared credential (story 06) is the paired onboarding half.
 - Contract: `GET /api/exercise-context` returns `{ exerciseId, exerciseName, timeZone, status }` exactly
   (the frozen `ExerciseScope`); no list/collection is ever returned.
 - Part of the standing isolation suite (story 07) — the host-resolution cross-exercise case.
+
+### Backend test linkage (B2 Wave 1 build)
+- Host → exercise map + resolver (backend AC: resolves owning `Exercise`, sets scope):
+  `HostExerciseResolverTests.Resolves_ByHostname_ToTheOwningExercise`,
+  `HostExerciseResolverTests.Resolves_ByBrandedDomain_ToTheOwningExercise`,
+  `HostExerciseResolverTests.Resolves_CaseInsensitively_ViaCollation` (real SQL, `[RequiresDockerFact]`);
+  `ExerciseResolutionMiddlewareTests.ResolvedHost_SetsScope_AndStashesForSessionLayer`.
+- Unmatched/absent host leaves `CurrentExerciseId` unset — fail closed (backend AC):
+  `ExerciseResolutionMiddlewareTests.UnresolvedHost_LeavesScopeUnset_AndStashesNothing_FailClosed`,
+  `ExerciseResolutionMiddlewareTests.EmptyGuidFromResolver_IsTreatedAsUnresolved_FailClosed`,
+  `HostExerciseResolverTests.UnknownHost_ResolvesToNull_FailClosed`.
+- Content security — host validated exact/case-normalized, malformed rejected & never used to build a
+  query (NFR-004): `ExerciseHostNameTests.*`,
+  `HostExerciseResolverTests.MalformedHost_ResolvesToNull_WithoutQuerying`.
+- Contract — frozen `ExerciseScope` shape for exactly one exercise (XC-002, no list):
+  `ExerciseScopeDtoTests.*` (Wave-0).
+- Deferred to `testing-agent` (extends the standing story-07 suite, `[RequiresDockerFact]`): full
+  middleware→endpoint `GET /api/exercise-context` integration (200 on a resolved host, 404 fail-closed on an
+  unknown host) once the orchestrator wires `UseExerciseResolution()`/`MapExerciseContextEndpoints()` into
+  `Program.cs`; the cross-exercise "A-host request → B rows = empty" case; and the cross-wave
+  session-vs-host mismatch (needs the story-03 session layer, Wave 2).
