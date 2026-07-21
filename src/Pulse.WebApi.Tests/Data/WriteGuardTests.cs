@@ -171,4 +171,98 @@ public class WriteGuardTests
         var count = await verifyContext.Posts.IgnoreQueryFilters().CountAsync(p => p.Id == postId);
         count.Should().Be(1, "the validly-scoped Post must have actually reached the database");
     }
+
+    // --- B2 Wave-0 additions: Account / SharedCredential (both IExerciseScoped) ---------------------------
+
+    [RequiresDockerFact]
+    public async Task SaveChangesAsync_RejectsAccountWithEmptyExerciseId_AndWritesNoRow()
+    {
+        var accountId = Guid.NewGuid();
+
+        await using var writeContext = _fixture.CreateContext();
+        writeContext.Accounts.Add(new Account
+        {
+            Id = accountId,
+            ExerciseId = Guid.Empty,
+            Username = $"user_{accountId:N}",
+            DisplayName = "This should never reach the database.",
+            Role = "participant",
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+
+        var act = async () => await writeContext.SaveChangesAsync();
+
+        await act.Should().ThrowAsync<ExerciseScopeViolationException>(
+            "the write-time guard must reject a scoped Account with a default ExerciseId before it reaches the database");
+
+        // Zero-rows-written half of the fail-closed guarantee, read from a SEPARATE context, IgnoreQueryFilters
+        // so the read-side exercise filter can never mask a leaked/absent row (see Post's equivalent test above).
+        await using var verifyContext = _fixture.CreateContext();
+        var count = await verifyContext.Accounts.IgnoreQueryFilters().CountAsync(a => a.Id == accountId);
+        count.Should().Be(0, "the rejected Account must never have been written to the database");
+    }
+
+    [RequiresDockerFact]
+    public async Task SaveChangesAsync_RejectsSharedCredentialWithEmptyExerciseId_AndWritesNoRow()
+    {
+        var credentialId = Guid.NewGuid();
+
+        await using var writeContext = _fixture.CreateContext();
+        writeContext.SharedCredentials.Add(new SharedCredential
+        {
+            Id = credentialId,
+            ExerciseId = Guid.Empty,
+            IsEnabled = false,
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+
+        var act = async () => await writeContext.SaveChangesAsync();
+
+        await act.Should().ThrowAsync<ExerciseScopeViolationException>(
+            "the write-time guard must reject a scoped SharedCredential with a default ExerciseId before it reaches the database");
+
+        await using var verifyContext = _fixture.CreateContext();
+        var count = await verifyContext.SharedCredentials.IgnoreQueryFilters().CountAsync(c => c.Id == credentialId);
+        count.Should().Be(0, "the rejected SharedCredential must never have been written to the database");
+    }
+
+    [RequiresDockerFact]
+    public async Task SaveChangesAsync_Succeeds_WhenAccountAndSharedCredentialHaveValidExerciseId()
+    {
+        var exerciseId = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
+        var credentialId = Guid.NewGuid();
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Identity Positive Control Exercise" });
+            writeContext.Accounts.Add(new Account
+            {
+                Id = accountId,
+                ExerciseId = exerciseId,
+                Username = $"user_{accountId:N}",
+                DisplayName = "A validly-scoped account saves fine.",
+                Role = "participant",
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+            writeContext.SharedCredentials.Add(new SharedCredential
+            {
+                Id = credentialId,
+                ExerciseId = exerciseId,
+                IsEnabled = true,
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+
+            var act = async () => await writeContext.SaveChangesAsync();
+
+            await act.Should().NotThrowAsync(
+                "a scoped Account/SharedCredential with a real, non-empty ExerciseId is the positive control");
+        }
+
+        await using var verifyContext = _fixture.CreateContext();
+        (await verifyContext.Accounts.IgnoreQueryFilters().CountAsync(a => a.Id == accountId)).Should().Be(
+            1, "the validly-scoped Account must have actually reached the database");
+        (await verifyContext.SharedCredentials.IgnoreQueryFilters().CountAsync(c => c.Id == credentialId)).Should().Be(
+            1, "the validly-scoped SharedCredential must have actually reached the database");
+    }
 }
