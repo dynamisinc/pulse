@@ -74,6 +74,32 @@ public sealed class SessionEndpointContractTests
     }
 
     [RequiresDockerFact]
+    public async Task GetSession_ReadOnlySession_ReturnsFrozenSixKeyShape_OmitsPersonaId()
+    {
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId, $"host-{exerciseId:N}.example.com");
+        var ephemeralId = Guid.NewGuid().ToString();
+        // Read-only sessions are not host-bound (story-03 per-kind rule) — any host works.
+        await SeedSessionAsync("readonly", "ro-live", exerciseId, principalId: ephemeralId, role: "participant");
+
+        await using var testHost = await SessionAuthenticationTestHost.StartAsync(_fixture.ConnectionString!);
+        using var client = testHost.CreateClient("shared-view.example.com", "ro-live");
+
+        var response = await client.GetAsync(new Uri("/api/session", UriKind.Relative));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var keys = document.RootElement.EnumerateObject().Select(p => p.Name).ToList();
+        keys.Should().NotContain("personaId", "a read-only session has no persona — the optional key is OMITTED, never null");
+        keys.Should().BeEquivalentTo(
+            ["exerciseId", "accountId", "role", "actingHumanId", "isReadOnly", "expiresAt"],
+            "a read-only session with no persona serializes exactly the frozen six keys");
+        document.RootElement.GetProperty("accountId").GetString().Should().Be(
+            ephemeralId, "a read-only session's wire accountId is the ephemeral identity (COR-015 — no named account)");
+        document.RootElement.GetProperty("isReadOnly").GetBoolean().Should().BeTrue();
+    }
+
+    [RequiresDockerFact]
     public async Task GetSession_ExpiredParticipantSession_Returns401()
     {
         var exerciseId = Guid.NewGuid();

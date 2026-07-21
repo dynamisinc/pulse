@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Tests.Data;
@@ -116,6 +117,50 @@ public sealed class SessionScopeIsolationTests
         var ids = await ParseIdsAsync(response);
         ids.Should().BeEmpty(
             "an expired session resolves NO scope and there is no host to fall back to — fail closed to zero rows, never all exercises");
+    }
+
+    [RequiresDockerFact]
+    public async Task AbsentSession_OnUnknownHost_SeesZeroRows_FailClosed()
+    {
+        // No token presented at all (not merely expired) and a host that resolves to nothing — the other half
+        // of "expired/absent session -> zero rows, never all exercises".
+        await SeedTwoExercisesAsync();
+
+        await using var testHost = await SessionAuthenticationTestHost.StartAsync(_fixture.ConnectionString!);
+        using var client = testHost.CreateClient($"unprovisioned-{Guid.NewGuid():N}.example.com", bearerToken: null);
+
+        var response = await client.GetAsync(new Uri("/test/posts", UriKind.Relative));
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "the read endpoint answers 200 — isolation happens inside the scoped read");
+
+        var ids = await ParseIdsAsync(response);
+        ids.Should().BeEmpty(
+            "with no session and no host resolution there is nothing to anchor the scope to — fail closed to zero rows, never all exercises");
+    }
+
+    [RequiresDockerFact]
+    public async Task ExpiredSession_UsedOnANonSessionEndpoint_EmitsNoSessionExpiredTelemetry()
+    {
+        // The story-03 AC is explicit: `session.expired` is emitted ONLY from GET /api/session (the bounded
+        // moment the client learns it must re-auth) — never per-request from the middleware's own token lookup
+        // (SessionAuthenticator emits no telemetry at all). Prove that hitting an ordinary scoped-read endpoint
+        // with an expired token authenticates nothing (zero rows) AND writes zero session.expired events —
+        // the middleware silently leaves the request unauthenticated rather than recording anything.
+        var (exerciseA, _, _, _, _, _) = await SeedTwoExercisesAsync();
+        await SeedSessionAsync("staff", "expired-no-telemetry", exerciseA, staffUserId: Guid.NewGuid(),
+            expiresAt: DateTimeOffset.UtcNow.AddMinutes(-1));
+
+        await using var testHost = await SessionAuthenticationTestHost.StartAsync(_fixture.ConnectionString!);
+        using var client = testHost.CreateClient($"unprovisioned-{Guid.NewGuid():N}.example.com", "expired-no-telemetry");
+
+        (await client.GetAsync(new Uri("/test/posts", UriKind.Relative))).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await using var verify = _fixture.CreateContext();
+        var expiredEventCount = await verify.TelemetryEvents.IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == exerciseA && e.EventType == "session.expired");
+
+        expiredEventCount.Should().Be(0,
+            "session.expired is emitted only from GET /api/session, never per-request from the middleware's " +
+            "own token lookup — otherwise every authenticated request with a stale token would spam telemetry");
     }
 
     private static async Task<List<string>> GetPostIdsAsync(HttpClient client)

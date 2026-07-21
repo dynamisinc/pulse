@@ -135,4 +135,23 @@ public sealed class SessionIssuerTests
         issued.Session.PersonaId.Should().BeNull();
         issued.Session.Role.Should().Be("controller");
     }
+
+    [RequiresDockerFact]
+    public async Task Issue_NeverEmitsAnyTelemetryEvent()
+    {
+        // Story 03's class remarks are explicit: the issuer emits NO telemetry (in particular, no `login` event
+        // — that is the calling login method's own concern; see StaffLoginService etc.). Prove the issuer's unit
+        // of work writes only the Session row, never a TelemetryEvent, for any of the three session kinds.
+        var exerciseId = Guid.NewGuid();
+
+        await using var context = _fixture.CreateContext();
+        await IssuerFor(context).IssueAsync(ParticipantRequest(exerciseId, Guid.NewGuid(), Guid.NewGuid()));
+
+        await using var verify = _fixture.CreateContext();
+        var eventCount = await verify.TelemetryEvents.IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == exerciseId);
+
+        eventCount.Should().Be(0,
+            "issuance is not a telemetry-emitting operation — the login METHOD emits the login event, not this seam");
+    }
 }

@@ -51,7 +51,11 @@ public sealed class SessionServiceTests
         DateTimeOffset? refreshExpiresAt = null,
         DateTimeOffset? revokedAt = null,
         string principalId = "acct-1",
-        string role = "participant")
+        string role = "participant",
+        Guid? accountId = null,
+        Guid? personaId = null,
+        Guid? staffUserId = null,
+        string actingHumanId = "human-1")
     {
         var session = new Session
         {
@@ -61,8 +65,11 @@ public sealed class SessionServiceTests
             Kind = kind,
             ExerciseId = exerciseId,
             PrincipalId = principalId,
+            AccountId = accountId,
+            StaffUserId = staffUserId,
+            PersonaId = personaId,
             Role = role,
-            ActingHumanId = "human-1",
+            ActingHumanId = actingHumanId,
             IsReadOnly = kind == "readonly",
             IssuedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
             ExpiresAt = expiresAt ?? DateTimeOffset.UtcNow.AddHours(1),
@@ -81,6 +88,13 @@ public sealed class SessionServiceTests
         await using var read = _fixture.CreateContext();
         return await read.TelemetryEvents.IgnoreQueryFilters()
             .CountAsync(e => e.ExerciseId == exerciseId && e.EventType == eventType);
+    }
+
+    private async Task<TelemetryEvent> GetSingleEventAsync(Guid exerciseId, string eventType)
+    {
+        await using var read = _fixture.CreateContext();
+        return await read.TelemetryEvents.IgnoreQueryFilters()
+            .SingleAsync(e => e.ExerciseId == exerciseId && e.EventType == eventType);
     }
 
     // ---- GET /api/session -----------------------------------------------------------------------------
@@ -214,6 +228,195 @@ public sealed class SessionServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task Refresh_OldRefreshToken_CannotBeReplayed_AfterRotation()
+    {
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId);
+        await SeedSessionAsync(exerciseId, rawToken: "access-replay", rawRefreshToken: "refresh-replay");
+
+        await using (var first = _fixture.CreateContext())
+        {
+            (await ServiceFor(first).RefreshAsync("refresh-replay")).Outcome.Should().Be(RefreshOutcome.Refreshed);
+        }
+
+        await using var replay = _fixture.CreateContext();
+        var replayResult = await ServiceFor(replay).RefreshAsync("refresh-replay");
+
+        replayResult.Outcome.Should().Be(RefreshOutcome.Invalid,
+            "the OLD refresh token was rotated away by the first refresh — replaying it must fail closed (re-auth), never renew a second time");
+    }
+
+    [RequiresDockerFact]
+    public async Task Refresh_NewlyRotatedTokens_BothWork_AccessAuthenticatesAndRefreshRenewsAgain()
+    {
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId);
+        await SeedSessionAsync(exerciseId, rawToken: "access-before", rawRefreshToken: "refresh-before");
+
+        RefreshResult firstRefresh;
+        await using (var context = _fixture.CreateContext())
+        {
+            firstRefresh = await ServiceFor(context).RefreshAsync("refresh-before");
+        }
+
+        await using (var getContext = _fixture.CreateContext())
+        {
+            var getResult = await ServiceFor(getContext).GetCurrentAsync(firstRefresh.SessionToken);
+            getResult.Outcome.Should().Be(SessionQueryOutcome.Live,
+                "the freshly rotated access token must authenticate — the new tokens work, not just the old ones failing");
+        }
+
+        await using var secondRefreshContext = _fixture.CreateContext();
+        var secondRefresh = await ServiceFor(secondRefreshContext).RefreshAsync(firstRefresh.RefreshToken);
+
+        secondRefresh.Outcome.Should().Be(RefreshOutcome.Refreshed,
+            "the freshly rotated refresh token must itself be usable for a subsequent refresh");
+    }
+
+    [RequiresDockerFact]
+    public async Task Refresh_PreservesAccountIdAndPersonaId_ForParticipantSession()
+    {
+        var exerciseId = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId);
+        var original = await SeedSessionAsync(
+            exerciseId,
+            kind: "participant",
+            rawToken: "persona-access",
+            rawRefreshToken: "persona-refresh",
+            principalId: accountId.ToString(),
+            accountId: accountId,
+            personaId: personaId,
+            role: "pio");
+
+        await using (var context = _fixture.CreateContext())
+        {
+            (await ServiceFor(context).RefreshAsync("persona-refresh")).Outcome.Should().Be(RefreshOutcome.Refreshed);
+        }
+
+        await using var verify = _fixture.CreateContext();
+        var renewed = await verify.Sessions.SingleAsync(s => s.Id == original.Id);
+
+        renewed.AccountId.Should().Be(accountId, "refresh must never re-scope the bound account");
+        renewed.PersonaId.Should().Be(personaId, "refresh must preserve the bound persona verbatim — never re-scope it");
+        renewed.Role.Should().Be("pio", "refresh must preserve the bound role verbatim");
+    }
+
+    [RequiresDockerFact]
+    public Task Refresh_EmitsSessionRefreshedWithTheParticipantActorShape() =>
+        AssertRefreshActorShapeAsync("participant");
+
+    [RequiresDockerFact]
+    public Task Refresh_EmitsSessionRefreshedWithTheStaffActorShape() =>
+        AssertRefreshActorShapeAsync("staff");
+
+    [RequiresDockerFact]
+    public Task Refresh_EmitsSessionRefreshedWithTheReadOnlyActorShape() =>
+        AssertRefreshActorShapeAsync("readonly");
+
+    [RequiresDockerFact]
+    public Task Logout_EmitsLogoutWithTheParticipantActorShape() =>
+        AssertLogoutActorShapeAsync("participant");
+
+    [RequiresDockerFact]
+    public Task Logout_EmitsLogoutWithTheStaffActorShape() =>
+        AssertLogoutActorShapeAsync("staff");
+
+    [RequiresDockerFact]
+    public Task Logout_EmitsLogoutWithTheReadOnlyActorShape() =>
+        AssertLogoutActorShapeAsync("readonly");
+
+    /// <summary>
+    /// Shared body for the three per-kind <c>session.refreshed</c> actor-shape facts above. Not itself a test
+    /// method (xUnit only auto-discovers <c>[RequiresDockerFact]</c>/<c>[Fact]</c>-attributed methods), which is
+    /// exactly the point: <c>[Theory]</c>/<c>[InlineData]</c> would NOT get the Docker-availability skip
+    /// treatment (only the <see cref="RequiresDockerFactAttribute"/> constructor sets <c>Skip</c>), so each kind
+    /// is its own explicit fact.
+    /// </summary>
+    private async Task AssertRefreshActorShapeAsync(string kind)
+    {
+        var exerciseId = Guid.NewGuid();
+        var principalId = Guid.NewGuid().ToString();
+        await SeedExerciseAsync(exerciseId);
+        await SeedSessionAsync(
+            exerciseId,
+            kind: kind,
+            rawToken: $"actor-access-{kind}",
+            rawRefreshToken: $"actor-refresh-{kind}",
+            principalId: principalId,
+            staffUserId: kind == "staff" ? Guid.NewGuid() : null,
+            role: kind == "staff" ? "controller" : "participant",
+            actingHumanId: "human-77");
+
+        await using (var context = _fixture.CreateContext())
+        {
+            (await ServiceFor(context).RefreshAsync($"actor-refresh-{kind}")).Outcome.Should().Be(RefreshOutcome.Refreshed);
+        }
+
+        var evt = await GetSingleEventAsync(exerciseId, "session.refreshed");
+        evt.Channel.Should().Be("system");
+        AssertActorShapeForKind(evt.Actor, kind, principalId);
+    }
+
+    /// <summary>Shared body for the three per-kind <c>logout</c> actor-shape facts above (see the remarks on <see cref="AssertRefreshActorShapeAsync"/>).</summary>
+    private async Task AssertLogoutActorShapeAsync(string kind)
+    {
+        var exerciseId = Guid.NewGuid();
+        var principalId = Guid.NewGuid().ToString();
+        await SeedExerciseAsync(exerciseId);
+        await SeedSessionAsync(
+            exerciseId,
+            kind: kind,
+            rawToken: $"logout-actor-{kind}",
+            principalId: principalId,
+            staffUserId: kind == "staff" ? Guid.NewGuid() : null,
+            role: kind == "staff" ? "controller" : "participant",
+            actingHumanId: "human-88");
+
+        await using (var context = _fixture.CreateContext())
+        {
+            await ServiceFor(context).LogoutAsync($"logout-actor-{kind}");
+        }
+
+        var evt = await GetSingleEventAsync(exerciseId, "logout");
+        evt.Channel.Should().Be("system");
+        AssertActorShapeForKind(evt.Actor, kind, principalId);
+    }
+
+    /// <summary>
+    /// Asserts the story-03 per-kind actor shape shared by <c>session.refreshed</c> / <c>session.expired</c> /
+    /// <c>logout</c>: participant → <c>kind:'participant'</c> + <c>participantId</c>; read-only →
+    /// <c>kind:'system'</c> + <c>sessionId</c> (the ephemeral identity, COR-015 — no named account); staff →
+    /// <c>kind:'system'</c> + <c>role</c> + <c>actingHumanId</c>.
+    /// </summary>
+    private static void AssertActorShapeForKind(TelemetryActor actor, string kind, string principalId)
+    {
+        switch (kind)
+        {
+            case "participant":
+                actor.Kind.Should().Be("participant");
+                actor.ParticipantId.Should().Be(principalId);
+                actor.Role.Should().BeNull("a participant actor carries no role field");
+                actor.SessionId.Should().BeNull("a participant actor carries no sessionId field");
+                break;
+            case "readonly":
+                actor.Kind.Should().Be("system", "a read-only session's actor is system-kind (COR-015 — no named account)");
+                actor.SessionId.Should().Be(principalId, "the read-only actor's sessionId is the ephemeral identity");
+                actor.ParticipantId.Should().BeNull();
+                actor.Role.Should().BeNull();
+                break;
+            default: // staff (and any other non-participant/read-only kind)
+                actor.Kind.Should().Be("system");
+                actor.Role.Should().Be("controller");
+                actor.ActingHumanId.Should().NotBeNullOrEmpty("staff attribution is per-human (COR-018)");
+                actor.ParticipantId.Should().BeNull();
+                actor.SessionId.Should().BeNull();
+                break;
+        }
+    }
+
+    [RequiresDockerFact]
     public async Task Refresh_ExpiredRefreshWindow_ReturnsInvalid()
     {
         var exerciseId = Guid.NewGuid();
@@ -312,5 +515,31 @@ public sealed class SessionServiceTests
         }
 
         (await CountEventsAsync(exerciseId, "logout")).Should().Be(0, "an unknown token has nothing to invalidate");
+    }
+
+    // ---- No `login` event anywhere on the session-lifecycle path (that is the login METHOD's concern) --------
+
+    [RequiresDockerFact]
+    public async Task SessionLifecycle_RefreshLogoutAndExpiry_NeverEmitALoginEvent()
+    {
+        // Story 03 deliberately owns only session.refreshed / session.expired / logout — never `login` (see the
+        // SessionService / SessionIssuer class remarks). Drive all three lifecycle paths for the SAME exercise
+        // and assert the login event type never appears among them.
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId);
+        await SeedSessionAsync(exerciseId, rawToken: "life-access", rawRefreshToken: "life-refresh");
+        await SeedSessionAsync(exerciseId, rawToken: "life-expired", expiresAt: DateTimeOffset.UtcNow.AddMinutes(-1));
+        await SeedSessionAsync(exerciseId, rawToken: "life-logout");
+
+        await using (var context = _fixture.CreateContext())
+        {
+            var service = ServiceFor(context);
+            (await service.RefreshAsync("life-refresh")).Outcome.Should().Be(RefreshOutcome.Refreshed);
+            (await service.GetCurrentAsync("life-expired")).Outcome.Should().Be(SessionQueryOutcome.Expired);
+            await service.LogoutAsync("life-logout");
+        }
+
+        (await CountEventsAsync(exerciseId, "login")).Should().Be(0,
+            "the session-lifecycle service never emits a `login` event — that is the login method's (02/05/06) own concern");
     }
 }
