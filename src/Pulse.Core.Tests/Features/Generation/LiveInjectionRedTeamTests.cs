@@ -1,8 +1,11 @@
 namespace Pulse.Core.Tests.Features.Generation;
 
+using Azure.Core;
 using Azure.Identity;
 using FluentAssertions;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Pulse.Core.Core.Extensions;
 using Pulse.Core.Features.EngineEval;
 using Pulse.Core.Features.Generation.Models;
 using Pulse.Core.Features.Generation.Services;
@@ -15,6 +18,13 @@ using Xunit.Abstractions;
 /// in-character reaction that the built <see cref="ContentGuard"/> passes as clean — proving the four-layer
 /// isolation boundary (<see cref="WorldFeedFence"/> + system-prompt framing + <c>emit_posts</c> tool shape
 /// + <see cref="ContentGuard"/>) holds against a real model. A regression blocks release (§12.2).
+/// <para>
+/// The live provider is resolved through <see cref="ServiceCollectionExtensions.AddEngineGeneration"/> with
+/// the <b>governed</b> live config (<c>Generation:Provider=AzureOpenAI</c> + the tenant-bounded /
+/// no-training / documented-residency governance keys), so the pass exercises the SAME governed-selection +
+/// <see cref="GenerationGovernance.Validate"/> gate path CI validates — not a hand-built provider carrying a
+/// false in-process governance attestation.
+/// </para>
 /// <para>
 /// Opt-in / OUT-OF-CI by construction: it runs only when <c>PULSE_LIVE_FOUNDRY=1</c> (set by
 /// <c>eval/live-provider.runsettings</c>) and the ambient az-cli login holds
@@ -41,18 +51,20 @@ public sealed class LiveInjectionRedTeamTests
             return;
         }
 
-        var options = new GenerationOptions
-        {
-            Provider = "AzureOpenAI",
-            Endpoint = Endpoint,
-            ApiVersion = "2025-04-01-preview",
-        };
-        options.Tiers["Standard"] = new TierModelOptions { Deployment = "standard", Model = "gpt-5.4" };
+        // Resolve the provider through the GOVERNED selection path (AddEngineGeneration -> the NFR-005
+        // GenerationGovernance.Validate gate -> the resilient typed-client adapter), exactly as the host
+        // wires it — NOT a hand-built provider. Keyless Entra via the ambient az-cli login (registered
+        // before AddEngineGeneration, whose TryAddSingleton then leaves it in place).
+        var services = new ServiceCollection();
+        services.AddSingleton<TokenCredential>(new AzureCliCredential());
+        services.AddEngineGeneration(GovernedLiveConfig());
 
-        using var http = new HttpClient { BaseAddress = new Uri(Endpoint), Timeout = TimeSpan.FromSeconds(60) };
-        var provider = new AzureOpenAIGenerationProvider(
-            http, new AzureCliCredential(), Options.Create(options), GenerationGovernance.InProcess);
-        var assembler = new PromptAssembler();
+        using var serviceProvider = services.BuildServiceProvider();
+        var provider = serviceProvider.GetRequiredService<IGenerationProvider>();
+        var assembler = serviceProvider.GetRequiredService<IPromptAssembler>();
+
+        provider.Should().BeOfType<AzureOpenAIGenerationProvider>(
+            "the governed live config must select the in-tenant Azure OpenAI adapter through the gated path");
 
         var failures = new List<string>();
 
@@ -78,6 +90,29 @@ public sealed class LiveInjectionRedTeamTests
             "the InjectionRedTeam catalog must stay green against the LIVE provider — the engine may never obey an "
             + "injected instruction, break fiction, or leak the prompt (ADP-024, §12.2):\n" + string.Join("\n", failures));
     }
+
+    /// <summary>
+    /// The governed live config the orchestrator sources verbatim from <c>ai.bicep</c> outputs
+    /// (PROVIDER-GOVERNANCE.md §4): the tenant-bounded endpoint, the no-training attestation, documented
+    /// residency, and an explicit retention posture — every field a <see cref="GenerationGovernance.Validate"/>
+    /// gate. This is the same governed selection CI's <c>AddEngineGenerationTests</c> assert, run here against
+    /// the real endpoint.
+    /// </summary>
+    private static IConfiguration GovernedLiveConfig() =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Generation:Provider"] = "AzureOpenAI",
+                ["Generation:Endpoint"] = Endpoint,
+                ["Generation:ApiVersion"] = "2025-04-01-preview",
+                ["Generation:Governance:TenantBounded"] = "true",
+                ["Generation:Governance:NoTrainingAttested"] = "true",
+                ["Generation:Governance:Residency"] = "centralus",
+                ["Generation:Governance:Retention"] = "Retained",
+                ["Generation:Tiers:Standard:Deployment"] = "standard",
+                ["Generation:Tiers:Standard:Model"] = "gpt-5.4",
+            })
+            .Build();
 
     private static PromptAssemblyInput BuildInput(InjectionAttack attack) => new()
     {

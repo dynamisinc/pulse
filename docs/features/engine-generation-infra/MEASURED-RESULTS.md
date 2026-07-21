@@ -9,14 +9,14 @@
 
 | Tier | Model | p50 | p95 | in tok | out tok | cached | guard | diversity | ~$/burst | ~$/exercise-hr* |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Standard | gpt-5.4 | 2433 ms | 2655 ms | 992 | 206 | 0 | 5/5 | 5/5 | $0.0061 | ~$2.27 |
-| Ambient | gpt-5.4-mini | 1682 ms | 1983 ms | 992 | 196 | 0 | 5/5 | 5/5 | $0.0020 | ~$0.74 |
+| Standard | gpt-5.4 | 2433 ms | 2655 ms | 992 | 206 | 0 | 5/5 | 5/5 | $0.0056 | ~$2.09 |
+| Ambient | gpt-5.4-mini | 1682 ms | 1983 ms | 992 | 196 | 0 | 5/5 | 5/5 | $0.0016 | ~$0.61 |
 
-\* At a nominal active-storyline hour (~25 generated posts/min ≈ 375 four-post bursts), using **analog
-Sonnet/Haiku per-MTok pricing** ($3/$15 Standard, $1/$5 Ambient); the *token profile* is measured.
-**Update:** the gpt-5.4 Azure list rates are now resolved (best available, medium-confidence — pending
-official-page verification): $2.50/$15 Standard, $0.75/$4.50 Ambient, which lowers the firmed-up baseline
-to ~$2.09 / ~$0.61 per exercise-hour — see [`PROVIDER-COMPARISON.md`](PROVIDER-COMPARISON.md) §2.
+\* At a nominal active-storyline hour (~25 generated posts/min ≈ 375 four-post bursts), using the
+**firmed-up gpt-5.4 Azure list rates** ($2.50/$15 Standard, $0.75/$4.50 Ambient — best available,
+medium-confidence, pending official-page verification); the *token profile* is measured. These rates
+supersede the earlier analog Sonnet/Haiku estimate ($3/$15, $1/$5 → ~$2.27 / ~$0.74), which ran ~10% high.
+The firmed-up figures match [`PROVIDER-COMPARISON.md`](PROVIDER-COMPARISON.md) §2 and PROVIDER-GOVERNANCE §5.
 
 ## Findings
 
@@ -24,7 +24,7 @@ to ~$2.09 / ~$0.61 per exercise-hour — see [`PROVIDER-COMPARISON.md`](PROVIDER
    degraded-mode breach point. Generation is off the participant hot path (§4.3), so 2–3 s is invisible
    in the review loop. **Degraded-mode trip set from data:** per-attempt timeout default lowered 30 s →
    **10 s** (≈3.7× the measured p95) — a call slower than that is treated as a failure and feeds the breaker.
-2. **Cost confirms the analytic model.** ~$0.74–2.27/exercise-hour tiered, against the modeled
+2. **Cost confirms the analytic model.** ~$0.61–2.09/exercise-hour tiered, against the modeled
    ~$1.50–3.60/hr — immaterial next to the SimCell staffing it offsets. Ambient is ~3× cheaper than
    Standard, so model tiering (story 04) pays off.
 3. **Prompt caching didn't engage yet — expected.** `cached = 0` because the burst prompt (~992 tokens)
