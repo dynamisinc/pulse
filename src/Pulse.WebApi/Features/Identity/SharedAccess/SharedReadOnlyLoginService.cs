@@ -1,5 +1,6 @@
 namespace Pulse.WebApi.Features.Identity.SharedAccess;
 
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
@@ -34,13 +35,20 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// (<see cref="ReadOnlySessionWriteFilter"/>), keyed off <c>Session.IsReadOnly</c>, not off the role.
 /// </para>
 /// <para>
-/// <b>Out of scope (story 07).</b> Rotation-with-grace (<c>PreviousHash</c>), immediate revoke, and brute-force
-/// lockout are NOT implemented here: this login only READS <see cref="SharedCredential.CurrentHash"/>,
-/// <see cref="SharedCredential.IsEnabled"/>, and <see cref="SharedCredential.RevokedAt"/> to decide the attempt,
-/// and never mutates the credential row (no failed-attempt counting). Server-authoritative: one wall-clock read
-/// is shared by the telemetry timestamps; scenario time is the exercise's stored
+/// <b>Grace + lockout + decoy (story 07 integration — the correct home for grace/lockout-aware verification).</b>
+/// This login is now the credential-verification arm of the story-07 lifecycle: it accepts the CURRENT password,
+/// OR the PREVIOUS password while its rotation grace window (<see cref="SharedCredential.PreviousHashGraceExpiresAt"/>)
+/// is still open; it enforces a brute-force LOCKOUT (incrementing <see cref="SharedCredential.FailedAttemptCount"/>
+/// on a failed attempt against an otherwise-usable credential, tripping <see cref="SharedCredential.LockedOutUntil"/>
+/// at <see cref="SharedCredentialLifecyclePolicy.MaxFailedAttempts"/> and rejecting EVERY attempt — even a correct
+/// password — while locked, resetting the counter on success); and, on any NEGATIVE path (absent / disabled /
+/// revoked / locked / passwordless credential), it runs a fixed-cost DECOY verify so the PBKDF2 cost is paid
+/// regardless of credential state — closing the enabled-state timing oracle. It therefore now MUTATES the tracked
+/// credential row within the same unit of work as its telemetry. Server-authoritative: one wall-clock read is
+/// shared by the telemetry timestamps; scenario time is the exercise's stored
 /// <see cref="Exercise.CurrentScenarioTime"/> (a documented B2 placeholder until the COR-050 backend clock lands
-/// in B3). The password is never logged (NFR-009).
+/// in B3). The password is never logged (NFR-009). Rotation and immediate revoke themselves live in
+/// <see cref="SharedCredentialLifecycleService"/>.
 /// </para>
 /// </remarks>
 public sealed class SharedReadOnlyLoginService
@@ -50,6 +58,8 @@ public sealed class SharedReadOnlyLoginService
     private const string SystemActorKind = "system";
     private const string SystemChannel = "system";
     private const string LoginEventType = "login";
+    private const string LockoutEventType = "auth.lockout";
+    private const string SharedCredentialEntityType = "sharedCredential";
     private const string SchemaVersion = "v0";
     private const string SuccessOutcomePayload = "{\"outcome\":\"success\"}";
     private const string FailureOutcomePayload = "{\"outcome\":\"failure\"}";
@@ -127,23 +137,65 @@ public sealed class SharedReadOnlyLoginService
         var now = DateTimeOffset.UtcNow;
         var scenarioTime = exercise.CurrentScenarioTime ?? now;
 
-        // 4. Load THIS exercise's shared credential. The B0 global query filter confines SharedCredential to the
-        //    resolved scope, so this returns the one credential for the host's exercise (or null) — never
-        //    another exercise's. AsNoTracking: story 06 never mutates the credential (lockout is story 07).
+        // 4. Load THIS exercise's shared credential (TRACKED — story 07 mutates it: failed-attempt counting on a
+        //    failure, and the counter reset on success). The B0 global query filter confines SharedCredential to
+        //    the resolved scope, so this returns the one credential for the host's exercise (or null) — never
+        //    another exercise's.
         var credential = await _dbContext.SharedCredentials
-            .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
 
-        // 5. Decide the attempt against CurrentHash + IsEnabled + RevokedAt only (story-06 surface). A bad /
-        //    absent / disabled / revoked credential, or a wrong password, all fail closed identically (401) so
-        //    the response never distinguishes "no credential" from "wrong password".
-        var authenticated =
+        // 5. Brute-force lockout gate (story 07): while locked, EVERY attempt is rejected — even a correct
+        //    password — until the window elapses.
+        var locked = credential?.LockedOutUntil is { } lockedUntil && lockedUntil > now;
+
+        // A credential can authenticate only when it is enabled, not revoked, not locked, and actually holds a
+        // current password. Anything else takes the NEGATIVE path (which still fails closed identically to a
+        // wrong password — the response never distinguishes "no credential" from "wrong password").
+        var canAuthenticate =
             credential is { IsEnabled: true, RevokedAt: null } &&
-            _hasher.Verify(credential.CurrentHash, request.Password);
+            !locked &&
+            !string.IsNullOrEmpty(credential.CurrentHash);
+
+        bool authenticated;
+        if (canAuthenticate)
+        {
+            // The CURRENT password, OR the PREVIOUS password while its rotation grace window is still open
+            // (story 07 rotation-with-grace: valid until PreviousHashGraceExpiresAt, then rejected).
+            authenticated =
+                _hasher.Verify(credential!.CurrentHash, request.Password) ||
+                (!string.IsNullOrEmpty(credential.PreviousHash) &&
+                 credential.PreviousHashGraceExpiresAt is { } graceExpiry &&
+                 graceExpiry > now &&
+                 _hasher.Verify(credential.PreviousHash, request.Password));
+        }
+        else
+        {
+            // NEGATIVE path (absent / disabled / revoked / locked / passwordless credential): run a DECOY verify
+            // against a fixed dummy hash so the PBKDF2 cost is paid regardless of credential state — no
+            // enabled-state timing oracle (story-07 fold of the story-06 Gate-1 Minor). Always returns false.
+            authenticated = _hasher.VerifyDecoy(request.Password);
+        }
 
         if (!authenticated)
         {
-            // Failure: one XC-004 login event with NO session identity (no session was minted), same unit of work.
+            // Brute-force accounting: only a wrong password against an OTHERWISE-USABLE credential counts toward
+            // lockout (an absent/disabled/revoked/already-locked credential accrues nothing — the per-IP rate
+            // limit and, once locked, the existing lockout already throttle those). Crossing the threshold trips
+            // a fixed lockout window, resets the counter, and emits an additive-vocab auth.lockout event.
+            if (canAuthenticate && credential is not null)
+            {
+                credential.FailedAttemptCount++;
+                if (credential.FailedAttemptCount >= SharedCredentialLifecyclePolicy.MaxFailedAttempts)
+                {
+                    credential.LockedOutUntil = now + SharedCredentialLifecyclePolicy.LockoutDuration;
+                    credential.FailedAttemptCount = 0;
+                    _dbContext.TelemetryEvents.Add(BuildLockoutTelemetry(
+                        exerciseId, credential.Id, now, scenarioTime, exercise.TimeZone));
+                }
+            }
+
+            // Failure: one XC-004 login event with NO session identity (no session was minted). The failed-attempt
+            // mutation (and any lockout-trip event) share this SINGLE unit of work.
             _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
                 exerciseId, sessionId: null, outcome: FailureOutcomePayload,
                 now: now, scenarioTime: scenarioTime, timeZone: exercise.TimeZone));
@@ -158,6 +210,12 @@ public sealed class SharedReadOnlyLoginService
         //    persistence + the raw token in a separate SaveChanges — mirroring StaffLoginService, so a single
         //    login is never double-counted).
         var ephemeralIdentity = Guid.NewGuid().ToString();
+
+        // Success resets the brute-force counter and clears any residual lockout (story 07: "reset the counter on
+        // success"). The credential is tracked and non-null on this path (canAuthenticate required it), so this
+        // persists in the SAME single unit of work as the success telemetry below.
+        credential!.FailedAttemptCount = 0;
+        credential.LockedOutUntil = null;
 
         _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
             exerciseId, sessionId: ephemeralIdentity, outcome: SuccessOutcomePayload,
@@ -212,6 +270,35 @@ public sealed class SharedReadOnlyLoginService
         ScenarioTime = scenarioTime,
         TimeZone = timeZone,
         Payload = outcome,
+        EmittedAt = now,
+    };
+
+    /// <summary>
+    /// Builds the XC-004 <c>auth.lockout</c> event emitted when a failed attempt trips the brute-force lockout
+    /// (additive vocab). <c>actor.kind: 'system'</c> with NO acting human or role — the lockout is a SYSTEM
+    /// defence reacting to anonymous shared-login brute force, not a staff action — <c>channel: 'system'</c>,
+    /// target = the shared credential.
+    /// </summary>
+    private static TelemetryEvent BuildLockoutTelemetry(
+        Guid exerciseId,
+        Guid credentialId,
+        DateTimeOffset now,
+        DateTimeOffset scenarioTime,
+        string timeZone) => new()
+    {
+        EventId = Guid.NewGuid().ToString(),
+        SchemaVersion = SchemaVersion,
+        ExerciseId = exerciseId,
+        EventType = LockoutEventType,
+        Channel = SystemChannel,
+        Actor = new TelemetryActor { Kind = SystemActorKind },
+        WallClockTime = now,
+        ScenarioTime = scenarioTime,
+        TimeZone = timeZone,
+        Target = new TelemetryTarget { EntityType = SharedCredentialEntityType, EntityId = credentialId.ToString() },
+        Payload = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{{\"lockoutMinutes\":{(int)SharedCredentialLifecyclePolicy.LockoutDuration.TotalMinutes}}}"),
         EmittedAt = now,
     };
 }

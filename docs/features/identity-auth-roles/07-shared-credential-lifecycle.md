@@ -68,3 +68,40 @@ Story 06 (the `SharedCredential` + view-only session it governs). `backend-host/
   read-only sessions immediately; lockout + per-IP rate limit trigger under brute force.
 - Integration: lifecycle actions are staff-only, exercise-scoped, and emit the expected XC-004 events;
   a revoke on exercise A never affects exercise B.
+
+### Test linkage (backend build)
+Rotate (grace window, hashed-only, once, telemetry):
+- `SharedCredentialLifecycleServiceTests.Rotate_LiveCredential_SetsFreshPassword_RetiresOldIntoGrace_EmitsRotatedTelemetry`
+- `SharedCredentialLifecycleServiceTests.Rotate_RevokedCredential_ReenablesWithNewPassword_ButNeverResurrectsKilledSecretIntoGrace`
+- `SharedReadOnlyLoginGraceAndLockoutTests.Login_DuringGraceWindow_PreviousPasswordAuthenticates_AsDoesCurrent`
+- `SharedReadOnlyLoginGraceAndLockoutTests.Login_AfterGraceWindowExpires_PreviousPasswordRejected_ButCurrentStillWorks`
+
+Revoke (immediate; terminates all read-only sessions):
+- `SharedCredentialLifecycleServiceTests.Revoke_TerminatesAllActiveReadOnlySessions_MarksRevoked_EmitsRevokedTelemetry`
+
+Brute-force lockout (+ per-IP rate limit is story 06's `SharedReadOnlyEndpointsHttpTests.SharedLogin_ExceedsPerIpRateLimit_Returns429`):
+- `SharedReadOnlyLoginGraceAndLockoutTests.Login_RepeatedFailures_TripLockout_ThenCorrectPasswordRejected_EmitsAuthLockout`
+- `SharedReadOnlyLoginGraceAndLockoutTests.Login_WhileLockoutExpired_CorrectPasswordAuthenticates`
+- `SharedReadOnlyLoginGraceAndLockoutTests.Login_Success_ResetsFailedAttemptCounter`
+- `SharedReadOnlyLoginGraceAndLockoutTests.Login_FailedAttempt_IncrementsFailedAttemptCounter_BelowThreshold`
+- `SharedReadOnlyLoginGraceAndLockoutTests.Login_DisabledCredential_WrongPassword_DoesNotAccrueLockout`
+
+Staff-only + logged (XC-002/XC-004):
+- `SharedCredentialLifecycleEndpointsHttpTests.Rotate_NoAuthenticatedStaffSession_Returns401`
+- `SharedCredentialLifecycleEndpointsHttpTests.Revoke_NoAuthenticatedStaffSession_Returns401`
+- `SharedCredentialLifecycleServiceTests.Rotate_NoStaffSession_FailsClosed_Unauthenticated_CredentialUntouched`
+- `SharedCredentialLifecycleServiceTests.Revoke_NoStaffSession_FailsClosed_Unauthenticated_NoSessionsTerminated`
+
+Isolation (XC-001/COR-001 — extends exercise-isolation/07):
+- `SharedCredentialLifecycleIsolationTests.Revoke_OnExerciseA_LeavesExerciseBCredentialAndReadOnlySessionsUntouched`
+- `SharedCredentialLifecycleIsolationTests.Rotate_OnExerciseA_DoesNotMutateExerciseBCredential`
+- `SharedCredentialLifecycleIsolationTests.Lockout_IsPerExercise_LockingExerciseADoesNotLockExerciseB`
+- `SharedCredentialLifecycleIsolationTests.Grace_IsPerExercise_ExerciseAPreviousPasswordNeverAuthenticatesOnExerciseB`
+
+XC-004 unit-of-work (one SaveChanges) + not-provisioned (404) + DI coexistence:
+- `SharedCredentialLifecycleServiceTests.Rotate_PersistsInOneSaveChangesCall`
+- `SharedCredentialLifecycleServiceTests.Revoke_PersistsInOneSaveChangesCall`
+- `SharedCredentialLifecycleServiceTests.Rotate_NoCredentialProvisioned_NotProvisioned`
+- `SharedCredentialLifecycleServiceTests.Revoke_NoCredentialProvisioned_NotProvisioned`
+- `SharedCredentialLifecycleEndpointsHttpTests.AddSharedCredentialLifecycle_ComposesWithAddSharedReadOnly_WithoutDuplicatingTheHasher`
+- `SharedCredentialLifecycleEndpointsHttpTests.AddSharedCredentialLifecycle_DoesNotRegisterRateLimiterPolicyOptions`
