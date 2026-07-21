@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 
@@ -15,8 +17,21 @@ const string FrontendCorsPolicy = "FrontendCors";
 var builder = WebApplication.CreateBuilder(args);
 
 // The engine's existing composition root (Pulse.Core, unmodified) — prompt assembler, tier policy,
-// and the config-selected generation provider (Fake by default; see appsettings.json).
+// and the config-selected generation provider. The committed default is Fake (see appsettings.json),
+// so CI/tests never reach a live endpoint. Story 04 (#288, Tier-2): the Fake->AzureOpenAI "flip" is a
+// GOVERNED-CONFIG action in the deployed environment (Generation:Provider=AzureOpenAI + the governance
+// keys, sourced from ai.bicep outputs — see appsettings.Generation.Example.json / PROVIDER-GOVERNANCE.md),
+// NOT a committed code change: AddEngineGeneration fails closed at startup on ungoverned config, so
+// committing AzureOpenAI here would (correctly) break the keyless CI build. Provider is config, not code.
 builder.Services.AddEngineGeneration(builder.Configuration);
+
+// Engine-runtime foundations (feature/engine-runtime) — orchestrator-wired between waves, each behind its
+// own extension (this file never gains engine logic). Wave 1: AddExerciseClock (#287) registers the native
+// per-exercise IExerciseClock (StartEx + freeze + discrete jump) and adapts the engine's IScenarioClock onto
+// it (one clock); AddEngineRuntimeSeams (Wave-0 seam-freeze) registers the shared IEngineTelemetryEmitter +
+// IEngineReviewStore that stories 01 (produces review items + telemetry) and 02 (serves the queue) consume.
+builder.Services.AddExerciseClock();
+builder.Services.AddEngineRuntimeSeams();
 
 builder.Services.AddControllers();
 builder.Services.AddHealthChecks();
