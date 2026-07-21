@@ -282,4 +282,278 @@ public class MigrationRoundTripTests
         reloaded.Target.Should().BeNull(
             "an event with no target must round-trip as a real null, not an owned instance with all-null sub-fields");
     }
+
+    // --- B2 Wave-0 additions: IdentitySchemaSeamFreeze (new columns + new tables) --------------------------
+    //
+    // NOTE: MsSqlContainerFixture.InitializeAsync already runs Database.MigrateAsync() ONCE per collection,
+    // applying EVERY migration (including IdentitySchemaSeamFreeze) before any test in this collection runs,
+    // and it does NOT swallow a failure (Gate-1 W-001) — so every [RequiresDockerFact] test that ran at all is
+    // already implicit proof "the full migration chain applies cleanly against a real SQL Server". These
+    // tests add the value the generic proof does NOT cover: that each NEW table's columns actually round-trip
+    // with the right types/nullability (mirroring the per-entity round-trip tests above), not just that the
+    // migration executed without throwing.
+
+    [RequiresDockerFact]
+    public async Task Exercise_RoundTrips_WithB2IdentitySeamFreezeColumns()
+    {
+        var id = Guid.NewGuid();
+        var currentScenarioTime = new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5));
+        var exercise = new Exercise
+        {
+            Id = id,
+            Name = $"Identity Seam Freeze Exercise {id}",
+            Hostname = $"atl-cie-{id:N}.example.com",
+            BrandedDomain = $"branded-{id:N}.example.org",
+            TimeZone = "America/New_York",
+            Status = "active",
+            CurrentScenarioTime = currentScenarioTime,
+        };
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.Exercises.Add(exercise);
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = _fixture.CreateContext();
+        var reloaded = await readContext.Exercises.SingleAsync(e => e.Id == id);
+
+        reloaded.Hostname.Should().Be(exercise.Hostname);
+        reloaded.BrandedDomain.Should().Be(exercise.BrandedDomain);
+        reloaded.TimeZone.Should().Be("America/New_York");
+        reloaded.Status.Should().Be("active");
+        reloaded.CurrentScenarioTime.Should().Be(currentScenarioTime);
+    }
+
+    [RequiresDockerFact]
+    public async Task Exercise_RoundTrips_WithDefaultTimeZoneAndStatus_WhenNotSet()
+    {
+        var id = Guid.NewGuid();
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.Exercises.Add(new Exercise { Id = id, Name = "Defaulted Exercise" });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = _fixture.CreateContext();
+        var reloaded = await readContext.Exercises.SingleAsync(e => e.Id == id);
+
+        reloaded.TimeZone.Should().Be("UTC", "the C# default applies when TimeZone is left unset on the entity");
+        reloaded.Status.Should().Be("scheduled", "the C# default applies when Status is left unset on the entity");
+        reloaded.Hostname.Should().BeNull();
+        reloaded.BrandedDomain.Should().BeNull();
+        reloaded.CurrentScenarioTime.Should().BeNull();
+    }
+
+    [RequiresDockerFact]
+    public async Task Account_RoundTrips_WithRealExerciseId()
+    {
+        var exerciseId = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        var createdAt = new DateTimeOffset(2033, 6, 14, 15, 0, 0, TimeSpan.Zero);
+        var lastLoginAt = createdAt.AddDays(1);
+        var lockedOutUntil = createdAt.AddMinutes(15);
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Account Round Trip Exercise" });
+            writeContext.Accounts.Add(new Account
+            {
+                Id = accountId,
+                ExerciseId = exerciseId,
+                Username = "jferry",
+                DisplayName = "Jordan Ferry",
+                Role = "pio",
+                PersonaId = personaId,
+                ActingHumanId = "human-42",
+                CredentialHash = "hashed-credential",
+                CreatedAt = createdAt,
+                LastLoginAt = lastLoginAt,
+                FailedLoginCount = 2,
+                LockedOutUntil = lockedOutUntil,
+            });
+            await writeContext.SaveChangesAsync();
+        }
+
+        // IgnoreQueryFilters: persistence round-trip, not an isolation test (see Persona_RoundTrips).
+        await using var readContext = _fixture.CreateContext();
+        var reloaded = await readContext.Accounts.IgnoreQueryFilters().SingleAsync(a => a.Id == accountId);
+
+        reloaded.ExerciseId.Should().Be(exerciseId);
+        reloaded.ExerciseId.Should().NotBe(Guid.Empty, "scoped rows must carry a real ExerciseId");
+        reloaded.Username.Should().Be("jferry");
+        reloaded.DisplayName.Should().Be("Jordan Ferry");
+        reloaded.Role.Should().Be("pio");
+        reloaded.PersonaId.Should().Be(personaId);
+        reloaded.ActingHumanId.Should().Be("human-42");
+        reloaded.CredentialHash.Should().Be("hashed-credential");
+        reloaded.CreatedAt.Should().Be(createdAt);
+        reloaded.LastLoginAt.Should().Be(lastLoginAt);
+        reloaded.FailedLoginCount.Should().Be(2);
+        reloaded.LockedOutUntil.Should().Be(lockedOutUntil);
+    }
+
+    [RequiresDockerFact]
+    public async Task SharedCredential_RoundTrips_WithRealExerciseId()
+    {
+        var exerciseId = Guid.NewGuid();
+        var credentialId = Guid.NewGuid();
+        var createdAt = new DateTimeOffset(2033, 6, 14, 15, 0, 0, TimeSpan.Zero);
+        var graceExpiresAt = createdAt.AddDays(7);
+        var updatedAt = createdAt.AddHours(2);
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Shared Credential Round Trip Exercise" });
+            writeContext.SharedCredentials.Add(new SharedCredential
+            {
+                Id = credentialId,
+                ExerciseId = exerciseId,
+                CurrentHash = "current-hash",
+                PreviousHash = "previous-hash",
+                PreviousHashGraceExpiresAt = graceExpiresAt,
+                IsEnabled = true,
+                RevokedAt = null,
+                FailedAttemptCount = 3,
+                LockedOutUntil = null,
+                CreatedAt = createdAt,
+                UpdatedAt = updatedAt,
+            });
+            await writeContext.SaveChangesAsync();
+        }
+
+        // IgnoreQueryFilters: persistence round-trip, not an isolation test (see Persona_RoundTrips).
+        await using var readContext = _fixture.CreateContext();
+        var reloaded = await readContext.SharedCredentials.IgnoreQueryFilters().SingleAsync(c => c.Id == credentialId);
+
+        reloaded.ExerciseId.Should().Be(exerciseId);
+        reloaded.ExerciseId.Should().NotBe(Guid.Empty, "scoped rows must carry a real ExerciseId");
+        reloaded.CurrentHash.Should().Be("current-hash");
+        reloaded.PreviousHash.Should().Be("previous-hash");
+        reloaded.PreviousHashGraceExpiresAt.Should().Be(graceExpiresAt);
+        reloaded.IsEnabled.Should().BeTrue();
+        reloaded.RevokedAt.Should().BeNull();
+        reloaded.FailedAttemptCount.Should().Be(3);
+        reloaded.LockedOutUntil.Should().BeNull();
+        reloaded.CreatedAt.Should().Be(createdAt);
+        reloaded.UpdatedAt.Should().Be(updatedAt);
+    }
+
+    [RequiresDockerFact]
+    public async Task StaffUser_RoundTrips()
+    {
+        var staffUserId = Guid.NewGuid();
+        var createdAt = new DateTimeOffset(2033, 6, 14, 15, 0, 0, TimeSpan.Zero);
+        var lastLoginAt = createdAt.AddDays(3);
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.StaffUsers.Add(new StaffUser
+            {
+                Id = staffUserId,
+                ExternalSubject = $"idp-sub-{staffUserId:N}",
+                Username = "controller.jane",
+                DisplayName = "Jane Controller",
+                CreatedAt = createdAt,
+                LastLoginAt = lastLoginAt,
+            });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = _fixture.CreateContext();
+        var reloaded = await readContext.StaffUsers.SingleAsync(u => u.Id == staffUserId);
+
+        reloaded.ExternalSubject.Should().Be($"idp-sub-{staffUserId:N}");
+        reloaded.Username.Should().Be("controller.jane");
+        reloaded.DisplayName.Should().Be("Jane Controller");
+        reloaded.CreatedAt.Should().Be(createdAt);
+        reloaded.LastLoginAt.Should().Be(lastLoginAt);
+    }
+
+    [RequiresDockerFact]
+    public async Task StaffAssignment_RoundTrips()
+    {
+        var staffUserId = Guid.NewGuid();
+        var exerciseId = Guid.NewGuid();
+        var assignmentId = Guid.NewGuid();
+        var createdAt = new DateTimeOffset(2033, 6, 14, 15, 0, 0, TimeSpan.Zero);
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.StaffAssignments.Add(new StaffAssignment
+            {
+                Id = assignmentId,
+                StaffUserId = staffUserId,
+                ExerciseId = exerciseId,
+                Role = "evaluator",
+                CreatedAt = createdAt,
+            });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = _fixture.CreateContext();
+        var reloaded = await readContext.StaffAssignments.SingleAsync(a => a.Id == assignmentId);
+
+        reloaded.StaffUserId.Should().Be(staffUserId);
+        reloaded.ExerciseId.Should().Be(exerciseId);
+        reloaded.Role.Should().Be("evaluator");
+        reloaded.CreatedAt.Should().Be(createdAt);
+    }
+
+    [RequiresDockerFact]
+    public async Task Session_RoundTrips()
+    {
+        var sessionId = Guid.NewGuid();
+        var exerciseId = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        var issuedAt = new DateTimeOffset(2033, 6, 14, 15, 0, 0, TimeSpan.Zero);
+        var expiresAt = issuedAt.AddHours(8);
+        var refreshExpiresAt = issuedAt.AddDays(1);
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.Sessions.Add(new Session
+            {
+                Id = sessionId,
+                TokenHash = $"token-hash-{sessionId:N}",
+                RefreshTokenHash = $"refresh-hash-{sessionId:N}",
+                Kind = "participant",
+                ExerciseId = exerciseId,
+                PrincipalId = accountId.ToString(),
+                AccountId = accountId,
+                StaffUserId = null,
+                Role = "participant",
+                PersonaId = personaId,
+                ActingHumanId = "human-77",
+                IsReadOnly = false,
+                IssuedAt = issuedAt,
+                ExpiresAt = expiresAt,
+                RefreshExpiresAt = refreshExpiresAt,
+                RevokedAt = null,
+            });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = _fixture.CreateContext();
+        var reloaded = await readContext.Sessions.SingleAsync(s => s.Id == sessionId);
+
+        reloaded.TokenHash.Should().Be($"token-hash-{sessionId:N}");
+        reloaded.RefreshTokenHash.Should().Be($"refresh-hash-{sessionId:N}");
+        reloaded.Kind.Should().Be("participant");
+        reloaded.ExerciseId.Should().Be(exerciseId);
+        reloaded.PrincipalId.Should().Be(accountId.ToString());
+        reloaded.AccountId.Should().Be(accountId);
+        reloaded.StaffUserId.Should().BeNull();
+        reloaded.Role.Should().Be("participant");
+        reloaded.PersonaId.Should().Be(personaId);
+        reloaded.ActingHumanId.Should().Be("human-77");
+        reloaded.IsReadOnly.Should().BeFalse();
+        reloaded.IssuedAt.Should().Be(issuedAt);
+        reloaded.ExpiresAt.Should().Be(expiresAt);
+        reloaded.RefreshExpiresAt.Should().Be(refreshExpiresAt);
+        reloaded.RevokedAt.Should().BeNull();
+    }
 }
