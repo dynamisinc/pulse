@@ -70,6 +70,28 @@ public class HostExerciseResolverTests
     }
 
     [RequiresDockerFact]
+    public async Task KnownHost_MatchingExerciseB_ResolvesToExerciseB_NeverExerciseA_NoCrossMatch()
+    {
+        // The uniqueness counterpart to the "resolves to the owning exercise" cases above: with TWO
+        // provisioned exercises in the table, a request for B's host must resolve to B's id specifically —
+        // never fall through to A's (e.g. a broken predicate that matched "any provisioned host" instead of
+        // "THIS host", or an unordered/first-row query bug) — the always-Critical case once more than one
+        // exercise is live at a time.
+        var idA = Guid.NewGuid();
+        var idB = Guid.NewGuid();
+        var hostA = $"host-a-{idA:N}.example.com";
+        var hostB = $"host-b-{idB:N}.example.com";
+
+        await SeedExerciseAsync(idA, hostname: hostA, brandedDomain: null);
+        await SeedExerciseAsync(idB, hostname: hostB, brandedDomain: null);
+
+        var resolved = await CreateResolver().ResolveExerciseIdAsync(hostB, CancellationToken.None);
+
+        resolved.Should().Be(idB, "a request for exercise B's host must resolve to B's id");
+        resolved.Should().NotBe(idA, "a request for exercise B's host must never cross-match to exercise A's id");
+    }
+
+    [RequiresDockerFact]
     public async Task UnknownHost_ResolvesToNull_FailClosed()
     {
         // Seed one exercise so the table is non-empty; then query a host that matches nothing.
