@@ -55,6 +55,33 @@ afterEach(() => {
   resetTelemetryBuffer()
 })
 
+describe('exercise isolation (COR-001)', () => {
+  it('stamps the record with the caller-supplied exerciseId only — never a different one', () => {
+    const record = repost(repostInput({ exerciseId: 'ex-alpha' }))
+    expect(record.exerciseId).toBe('ex-alpha')
+
+    const otherExerciseRecord = repost(repostInput({ exerciseId: 'ex-bravo' }))
+    expect(otherExerciseRecord.exerciseId).toBe('ex-bravo')
+    expect(otherExerciseRecord.exerciseId).not.toBe(record.exerciseId)
+  })
+
+  it('stamps the telemetry envelope with the same exerciseId as the record (no cross-exercise drift)', () => {
+    const record = repost(repostInput({ exerciseId: 'ex-alpha' }))
+
+    const event = getEmittedTelemetryEvents().find(e => e.eventType === 'repost')
+    expect(event?.exerciseId).toBe('ex-alpha')
+    expect(event?.exerciseId).toBe(record.exerciseId)
+  })
+
+  it('quotePost stamps exerciseId on both the record and its telemetry envelope', () => {
+    const record = quotePost(quoteInput({ exerciseId: 'ex-charlie' }))
+
+    expect(record.exerciseId).toBe('ex-charlie')
+    const event = getEmittedTelemetryEvents().find(e => e.eventType === 'quote')
+    expect(event?.exerciseId).toBe('ex-charlie')
+  })
+})
+
 describe('repost (SOC-020)', () => {
   it('returns a participant-safe repost record pointing at the original', () => {
     const record = repost(repostInput())
