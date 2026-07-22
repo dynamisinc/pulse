@@ -96,6 +96,8 @@ any B3 spike must use a server-authoritative stopgap scope, never a client-suppl
 
 ## Post-B3 follow-ups (tracked, non-blocking)
 
+> Mirrored to GitHub: **#296** (WR-001 idempotency), **#297** (cockpit role restriction — under security-review umbrella **#41**), **#298** (test hardening: the two flakes + Wave-0 LO-002 + read-only test fidelity).
+
 - **WR-001 / partial-publish idempotency** (stories 01+02): the engine publish path (`PostIngestService`)
   does not dedupe on `draftId`, so a review-approve that succeeds-then-fails-to-commit, OR a
   partial-publish 502 retry, can double-publish the already-live subset. Root fix: ingest-side `draftId`
