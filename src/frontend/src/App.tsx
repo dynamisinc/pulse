@@ -52,8 +52,16 @@ import { ControllerConsoleRoute } from './features/controller'
 import { ExerciseSwitcher } from '@/features/staff'
 import { createRoleAwareRoutes } from './features/app-shell'
 
-// Sensible React Query defaults. Real-time feeds will lean on a live transport
-// rather than refetch-on-focus (see D0 §4 - burst legibility, 120 posts/min).
+// Sensible React Query defaults. The participant social feed's real-time updates
+// do NOT refetch-on-focus — they ride the shared SignalR transport
+// (`@/core/realtime` → `features/social/services/realtimeFeed`), surfaced through
+// the buffered "▲ N new posts" pill (feeds-discovery/04), with a polling fallback
+// on degrade (NFR-003). That live subscription is turned on by the
+// `USE_MOCK_DATA`-gated source flip in
+// `features/social/services/feedStreamSource.ts` (mock data → the in-tab
+// `postStore`; a real backend → the SignalR transport) — the one composition
+// flip point for the pill, mirroring `feedService`'s `USE_MOCK_FEED`. See D0 §4
+// burst legibility (120 posts/min).
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
