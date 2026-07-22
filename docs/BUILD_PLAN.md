@@ -135,7 +135,7 @@ delivered" notes for exactly what landed vs. what remains).
 - ✅ `profiles-social-graph/01-profile-page` (#109) + `03-verification-and-impersonation` (#111) →
   `02-follow-unfollow` → `feeds-discovery/02-following-feed`
 - ✅ `reactions/01-like` (#104), ✅ `hashtags-trending/01-hashtags` (#106), 🔧 `amplification/01-repost-quote` (#101, AC1 partial)
-- `feeds-discovery/03-search`, `04-realtime-new-posts-pill` (SignalR host + polling fallback), `notifications/01-notification-center`
+- `feeds-discovery/03-search`, ✅ `04-realtime-new-posts-pill` (SignalR host + polling fallback), `notifications/01-notification-center`
 - `persona-operation/*` (E7 staff inject surface — after the participant read/compose slice exists)
 - Deferred/stretch: `feeds-discovery/05-for-you-feed`, `reactions/02-sentiment`, `direct-messages/*`
 
