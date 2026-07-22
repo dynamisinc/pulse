@@ -104,8 +104,13 @@ public sealed class StaffIdentityIsolationTests
         assignments.Should().NotBeNull();
         assignments!.Should().HaveCount(2,
             "the owner's read must return exactly their own two assignments (A and B), never the other staff user's row");
-        assignments.Should().Contain(a => a.ExerciseId == exerciseA.Id.ToString() && a.Role == "controller");
-        assignments.Should().Contain(a => a.ExerciseId == exerciseB.Id.ToString() && a.Role == "evaluator");
+        // Guid.Parse(...) rather than a bare string == exerciseX.Id.ToString(): GetAssignmentsAsync's
+        // ExerciseId = a.ExerciseId.ToString() runs INSIDE the LINQ-to-Entities query, so SQL Server (not
+        // .NET) performs the Guid-to-string conversion server-side — which yields UPPERCASE hex, unlike
+        // .NET's lowercase Guid.ToString(). An ordinal string compare would spuriously fail on case alone;
+        // parsing back to a Guid compares the actual identity, which is what these assertions mean.
+        assignments.Should().Contain(a => Guid.Parse(a.ExerciseId) == exerciseA.Id && a.Role == "controller");
+        assignments.Should().Contain(a => Guid.Parse(a.ExerciseId) == exerciseB.Id && a.Role == "evaluator");
         assignments.Should().NotContain(a => a.Role == "planner",
             "the other staff user's assignment on the SAME exercise B must never appear in the owner's own-only read — " +
             "proving the filter keys on StaffUserId, not merely on which exercises the caller happens to share");

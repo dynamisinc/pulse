@@ -112,8 +112,13 @@ public sealed class StaffAssignmentServiceTests
 
         assignments.Should().NotBeNull();
         assignments!.Should().HaveCount(2, "a staff user's assignment read spans every exercise they're assigned to (COR-005)");
-        assignments.Should().Contain(a => a.ExerciseId == exerciseA.Id.ToString() && a.ExerciseName == "Atlanta CIE" && a.Role == "controller");
-        assignments.Should().Contain(a => a.ExerciseId == exerciseB.Id.ToString() && a.ExerciseName == "Boston Full-Scale" && a.Role == "evaluator");
+        // Guid.Parse(...) rather than a bare string == exerciseX.Id.ToString(): GetAssignmentsAsync's
+        // ExerciseId = a.ExerciseId.ToString() runs INSIDE the LINQ-to-Entities query, so SQL Server (not
+        // .NET) performs the Guid-to-string conversion server-side — which yields UPPERCASE hex, unlike
+        // .NET's lowercase Guid.ToString(). An ordinal string compare would spuriously fail on case alone;
+        // parsing back to a Guid compares the actual identity, which is what these assertions mean.
+        assignments.Should().Contain(a => Guid.Parse(a.ExerciseId) == exerciseA.Id && a.ExerciseName == "Atlanta CIE" && a.Role == "controller");
+        assignments.Should().Contain(a => Guid.Parse(a.ExerciseId) == exerciseB.Id && a.ExerciseName == "Boston Full-Scale" && a.Role == "evaluator");
         assignments.Should().NotContain(a => a.Role == "planner",
             "a staff user's assignment read is own-only — it must never surface another staff user's assignment");
     }
@@ -177,8 +182,10 @@ public sealed class StaffAssignmentServiceTests
         assignments!.Should().HaveCount(2,
             "the switch moved the session's bound exercise to B, but the own-assignment read must still list " +
             "both A and B — it is not itself scoped to the currently active exercise");
-        assignments.Should().Contain(a => a.ExerciseId == exerciseA.Id.ToString());
-        assignments.Should().Contain(a => a.ExerciseId == exerciseB.Id.ToString());
+        // Guid.Parse(...): see the remark above — GetAssignmentsAsync's ExerciseId string conversion is
+        // translated to SQL Server, which formats it UPPERCASE (unlike .NET's lowercase Guid.ToString()).
+        assignments.Should().Contain(a => Guid.Parse(a.ExerciseId) == exerciseA.Id);
+        assignments.Should().Contain(a => Guid.Parse(a.ExerciseId) == exerciseB.Id);
     }
 
     [RequiresDockerFact]
