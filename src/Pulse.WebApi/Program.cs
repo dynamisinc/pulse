@@ -197,11 +197,11 @@ app.MapSharedCredentialLifecycleEndpoints(); // #64 POST /api/staff/shared-crede
 
 // Engine-runtime endpoints (Wave 2) — REST only; the review push reuses the B1 ExerciseRealtimeHub mapped
 // above (no second hub). Scope comes only from the resolved IExerciseContext (COR-001), never a client
-// exerciseId — now populated per-request by B2's UseExerciseResolution + UseSessionAuthentication above.
-// NOTE (tracked for /security-review before umbrella→main): the review cockpit is STAFF-ONLY, but these
-// endpoints currently gate only on scope, not role — a staff-session requirement (in-handler, like the
-// #62 staff endpoints) + DenyReadOnlySessions must be applied so a participant/read-only session cannot
-// drive the safety-critical cockpit. B2 landed the session/role machinery to enable this; see PR notes.
+// exerciseId — populated per-request by B2's UseExerciseResolution + UseSessionAuthentication above. The
+// STAFF-ONLY review cockpit (#286) is additionally role-gated by EngineCockpitStaffAuthorizationFilter
+// (wired inside MapEngineReview): a live STAFF session is required (401 otherwise) AND it must be assigned
+// to the resolved exercise (403 NotAssigned, COR-005) — so a participant/read-only session cannot drive
+// the safety-critical cockpit. Requires AddStaffIdentity (above) to precede AddEngineReview — it does.
 app.MapEngineRuntime();   // #285 reaction-loop host runtime surface
 app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + swamped-mode + kill-switch
 
