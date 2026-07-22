@@ -35,11 +35,14 @@
  * tab filters that already-scoped set; nothing here can reach another exercise's
  * content.
  *
- * TELEMETRY (XC-004): emits exactly ONE `'view'` event when the profile resolves
- * (ref-guarded so a re-render / StrictMode double-invoke can't re-emit), with a
- * `profile` target and participant attribution (`actor.participantId` = the
- * session `accountId`, present for read-only sessions too — satisfies the view
- * superRefine). `wallClockTime` is telemetry-only and never rendered.
+ * TELEMETRY (XC-004): emits exactly ONE `'view'` event per `persona.id` (a ref
+ * storing the last-emitted persona id, mirroring `HashtagFeed`'s tag-keyed ref)
+ * — a re-render or StrictMode double-invoke on the SAME id can't re-emit, but if
+ * a future profile-to-profile navigation reuses this already-mounted page with a
+ * DIFFERENT `personaId` (no unmount), the id change re-emits exactly once. Events
+ * carry a `profile` target and participant attribution (`actor.participantId` =
+ * the session `accountId`, present for read-only sessions too — satisfies the
+ * view superRefine). `wallClockTime` is telemetry-only and never rendered.
  *
  * MODEL NOTE — location/link + following count: the Phase-1 `Persona` model
  * (persona-management) carries neither a location/website nor an outbound-follow
@@ -145,14 +148,16 @@ export function Profile({ personaId }: ProfileProps) {
     [authoredPosts],
   )
 
-  // XC-004: one 'view' event once the profile resolves. Ref-guarded so a
-  // re-render / StrictMode double-effect can't re-emit; keyed off persona.id so
-  // a not-yet-resolved (or missing) persona emits nothing.
-  const viewEmittedRef = useRef(false)
+  // XC-004: one 'view' event per persona.id. The ref stores the LAST-EMITTED
+  // persona id (mirroring HashtagFeed's tag-keyed ref) so a re-render /
+  // StrictMode double-effect on the SAME id can't re-emit, but re-pointing this
+  // already-mounted page at a DIFFERENT personaId (profile->profile navigation,
+  // no unmount) re-emits exactly once for the new id.
+  const emittedForRef = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (viewEmittedRef.current) return
     if (!persona) return
-    viewEmittedRef.current = true
+    if (emittedForRef.current === persona.id) return
+    emittedForRef.current = persona.id
     buildAndEmit({
       exerciseId,
       eventType: 'view',

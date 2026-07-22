@@ -10,7 +10,7 @@
  * `extractHashtags` returns the distinct normalized tags. The two consumers
  * each render/use that data their own way — `PostCard` maps the token stream to
  * text + linkified `<a>` nodes (the linkify edit), and `HashtagFeed` uses the
- * extracted tags to filter the feed to one hashtag. Keeping the regex + tokenof
+ * extracted tags to filter the feed to one hashtag. Keeping the regex + tokenization
  * logic here (rather than inline in a component) is also what the later
  * search surface (feeds-discovery SOC-082 — OUT OF SCOPE for this story) will
  * reuse to index hashtags, so there is exactly one definition of "what a

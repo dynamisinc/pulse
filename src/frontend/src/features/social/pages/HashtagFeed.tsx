@@ -18,7 +18,13 @@
  *  - Two tabs (SOC-040): "Latest" = chronological (newest-first, the order
  *    `useFeed` already returns), "Top" = ranked by engagement (like + repost +
  *    reply + share), newest-first as the tiebreak. Tab state is local `useState`
- *    (no route — Phase 1 has no cross-channel router; see `SocialChannel`).
+ *    (no route — Phase 1 has no cross-channel router; see `SocialChannel`). The
+ *    tablist follows the WAI-ARIA tabs pattern (NFR-001): each tab carries a
+ *    unique `id` + `aria-controls` pointing at the panel, the panel carries an
+ *    `id` + `aria-labelledby` pointing back at the active tab, and a roving
+ *    tabindex (active tab `tabIndex=0`, inactive `tabIndex=-1`, Arrow/Home/End
+ *    to move) keeps only the active tab in the natural Tab order — mirroring
+ *    `Profile.tsx`'s tablist.
  *
  * ISOLATION (COR-001). The post set comes from `useFeed()`, which takes NO
  * client `exerciseId` — the session binds the exercise and query scoping is
@@ -49,7 +55,7 @@
  * what that pass reads.
  */
 
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { scenarioNow } from '@/core/clock'
@@ -142,6 +148,15 @@ export function HashtagFeed({ tag, onOpenThread }: HashtagFeedProps) {
 
   const isEmpty = !loading && error === undefined && matched.length === 0
 
+  // Roving tabindex (NFR-001): Arrow/Home/End moves selection between the two
+  // tabs — mirroring Profile.tsx's tablist — so only the active tab sits in the
+  // natural Tab order (inactive tabs carry tabIndex={-1}).
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    setTab(current => (current === 'latest' ? 'top' : 'latest'))
+  }
+
   return (
     <section className={styles.page} aria-labelledby="hashtag-feed-heading">
       <header className={styles.header}>
@@ -150,14 +165,28 @@ export function HashtagFeed({ tag, onOpenThread }: HashtagFeedProps) {
       </header>
 
       <div className={styles.tabs} role="tablist" aria-label={`#${tag} feed order`}>
-        <TabButton id="latest" label="Latest" active={tab === 'latest'} onSelect={setTab} />
-        <TabButton id="top" label="Top" active={tab === 'top'} onSelect={setTab} />
+        <TabButton
+          id="latest"
+          label="Latest"
+          active={tab === 'latest'}
+          onSelect={setTab}
+          onKeyDown={handleTabKeyDown}
+        />
+        <TabButton
+          id="top"
+          label="Top"
+          active={tab === 'top'}
+          onSelect={setTab}
+          onKeyDown={handleTabKeyDown}
+        />
       </div>
 
       <ul
         className={styles.list}
         aria-live="polite"
         role="tabpanel"
+        id={`hashtag-tabpanel-${tab}`}
+        aria-labelledby={`hashtag-tab-${tab}`}
         aria-label={`#${tag}, ${tab === 'top' ? 'Top' : 'Latest'}`}
       >
         {shown.map(post => (
@@ -183,16 +212,25 @@ interface TabButtonProps {
   label: string
   active: boolean
   onSelect: (tab: HashtagTab) => void
+  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void
 }
 
-function TabButton({ id, label, active, onSelect }: TabButtonProps) {
+/** A tab, programmatically associated with its panel per the WAI-ARIA tabs
+ * pattern (NFR-001): a unique `id` + `aria-controls` pointing at the panel
+ * `TabButton`'s active sibling renders (`hashtag-tabpanel-${id}`), and a roving
+ * `tabIndex` (0 when active, -1 otherwise) so only the active tab is Tab-reachable. */
+function TabButton({ id, label, active, onSelect, onKeyDown }: TabButtonProps) {
   return (
     <button
       type="button"
       role="tab"
+      id={`hashtag-tab-${id}`}
       aria-selected={active}
+      aria-controls={`hashtag-tabpanel-${id}`}
+      tabIndex={active ? 0 : -1}
       className={active ? `${styles.tab} ${styles.tabActive}` : styles.tab}
       onClick={() => onSelect(id)}
+      onKeyDown={onKeyDown}
     >
       {label}
     </button>

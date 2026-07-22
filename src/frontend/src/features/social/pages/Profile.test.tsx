@@ -14,7 +14,11 @@
  *  - the joined date renders in scenario time in the exercise zone (COR-053),
  *    including a backdated pre-exercise join instant;
  *  - exactly ONE 'view' telemetry event fires on resolve, with a profile
- *    target + participant attribution, in scenario time (XC-004);
+ *    target + participant attribution, in scenario time (XC-004); the emit
+ *    guard is keyed on `persona.id` (a last-emitted ref, mirroring
+ *    `HashtagFeed`), so re-pointing this already-mounted page at a DIFFERENT
+ *    personaId (no unmount) re-emits exactly once, while a re-render on the
+ *    SAME id does not;
  *  - an unknown persona fails gracefully in-fiction (no crash, no COBRA).
  *
  * `api.post` (the telemetry sink's fire-and-forget send) is spied to resolve so
@@ -204,6 +208,53 @@ describe('Profile — telemetry (XC-004)', () => {
     expect(view?.target).toEqual({ entityType: 'profile', entityId: FW_ID })
     expect(view?.scenarioTime).toBe('2033-09-04T15:00:00.000Z')
     expect(typeof view?.wallClockTime).toBe('string')
+  })
+
+  it('re-emits a view event when re-pointed at a DIFFERENT personaId without unmounting', async () => {
+    const utils = renderProfile(FW_ID)
+    await screen.findByRole('heading', { name: 'Fairhaven Water Utility' })
+    await waitFor(() => {
+      expect(getEmittedTelemetryEvents().filter(e => e.eventType === 'view')).toHaveLength(1)
+    })
+
+    // Simulates a future profile->profile navigation that reuses this already
+    // -mounted <Profile> with a different personaId (SocialChannel re-pointing
+    // view.kind='profile', no unmount) — the persona.id-keyed ref must re-emit.
+    utils.rerender(
+      <ExerciseContextProvider>
+        <SessionProvider>
+          <Profile personaId={TBRANDT_ID} />
+        </SessionProvider>
+      </ExerciseContextProvider>,
+    )
+
+    await screen.findByRole('heading', { name: 'Tom Brandt' })
+    await waitFor(() => {
+      const views = getEmittedTelemetryEvents().filter(e => e.eventType === 'view')
+      expect(views).toHaveLength(2)
+      expect(views.map(e => e.target)).toEqual([
+        { entityType: 'profile', entityId: FW_ID },
+        { entityType: 'profile', entityId: TBRANDT_ID },
+      ])
+    })
+  })
+
+  it('does NOT re-emit a view event on a re-render with the SAME personaId', async () => {
+    const utils = renderProfile(FW_ID)
+    await screen.findByRole('heading', { name: 'Fairhaven Water Utility' })
+    await waitFor(() => {
+      expect(getEmittedTelemetryEvents().filter(e => e.eventType === 'view')).toHaveLength(1)
+    })
+
+    utils.rerender(
+      <ExerciseContextProvider>
+        <SessionProvider>
+          <Profile personaId={FW_ID} />
+        </SessionProvider>
+      </ExerciseContextProvider>,
+    )
+
+    expect(getEmittedTelemetryEvents().filter(e => e.eventType === 'view')).toHaveLength(1)
   })
 })
 
