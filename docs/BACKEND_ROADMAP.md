@@ -256,6 +256,22 @@ for real"* (`Program.cs`).
 | `engine-runtime/03-scenario-clock-service` | The native exercise clock (COR-050) as a backend service driving the engine's scenario-time timers (today a hand-cranked `IScenarioClock`) | COR-050/051 |
 | `engine-runtime/04-provider-live-config` **[Tier-2]** | Azure OpenAI in-tenant default under NFR-005 governance; run the existing eval harness against the live provider (replace *modeled* cost/latency with *measured*) | NFR-005 |
 
+> **Delivered** (all four stories Gate-1 + Gate-2 clean): `engine-runtime/01-reaction-loop-host` — the
+> `ReactionLoopHost` BackgroundService driving `observe→decide→generate→review→publish→measure` (stories
+> #285); `engine-runtime/02-review-cockpit-api` — the `EngineReviewEndpoints` + `EngineReviewService` serving
+> live `EngineReviewItem`s with safety-critical autonomy/kill-switch/degraded-mode invariants + SignalR push, the
+> mock→live flip of `useReviewQueue`, and the frontend flipped live (#286, safety-critical); `engine-runtime/03-scenario-clock-service`
+> — the native `ExerciseClockService` implementing `IExerciseClock` with StartEx + pause/freeze + time-jump, replacing
+> the hand-cranked `IScenarioClock` stub (#287); `engine-runtime/04-provider-live-config` — Azure OpenAI in-tenant
+> selection via `ai.bicep` activation + the fail-closed `GenerationGovernance.Validate` gate + measured cost/latency
+> ELO suite replacing the modeled §4 numbers (#288, Tier-2). Wave-0 seam-freeze: `engine-telemetry-tuning/01` (#173)
+> XC-004 v0 extension (schema role frozen, event types added by stories 01/02). `useReviewQueue` flipped live behind
+> `USE_MOCK_DATA`. Merged onto `feature/engine-runtime` umbrella; umbrella→main PR open awaiting Gate-0 CI + Copilot
+> review + three Tier-2 human sign-offs (#288 governance fail-closed, #286 §8.2 safety invariants, #285 BackgroundService
+> isolation scope). B3 built after B2 was decomposed but before B2 merged, so story 02's endpoints fail closed on scope
+> until B2's per-request session→exercise binding lands (documented stopgap in story 02 `implementation.md` open question (b)).
+> Tracked non-blocking follow-ups documented in `feature.md`.
+
 ### Phase B4 — Evaluation backend + hardening · umbrella `feature/evaluation-backend`
 
 | Story (proposed) | Builds | Req |

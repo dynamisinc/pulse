@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -20,8 +22,21 @@ const string FrontendCorsPolicy = "FrontendCors";
 var builder = WebApplication.CreateBuilder(args);
 
 // The engine's existing composition root (Pulse.Core, unmodified) — prompt assembler, tier policy,
-// and the config-selected generation provider (Fake by default; see appsettings.json).
+// and the config-selected generation provider. The committed default is Fake (see appsettings.json),
+// so CI/tests never reach a live endpoint. Story 04 (#288, Tier-2): the Fake->AzureOpenAI "flip" is a
+// GOVERNED-CONFIG action in the deployed environment (Generation:Provider=AzureOpenAI + the governance
+// keys, sourced from ai.bicep outputs — see appsettings.Generation.Example.json / PROVIDER-GOVERNANCE.md),
+// NOT a committed code change: AddEngineGeneration fails closed at startup on ungoverned config, so
+// committing AzureOpenAI here would (correctly) break the keyless CI build. Provider is config, not code.
 builder.Services.AddEngineGeneration(builder.Configuration);
+
+// Engine-runtime foundations (feature/engine-runtime) — orchestrator-wired between waves, each behind its
+// own extension (this file never gains engine logic). Wave 1: AddExerciseClock (#287) registers the native
+// per-exercise IExerciseClock (StartEx + freeze + discrete jump) and adapts the engine's IScenarioClock onto
+// it (one clock); AddEngineRuntimeSeams (Wave-0 seam-freeze) registers the shared IEngineTelemetryEmitter +
+// IEngineReviewStore that stories 01 (produces review items + telemetry) and 02 (serves the queue) consume.
+builder.Services.AddExerciseClock();
+builder.Services.AddEngineRuntimeSeams();
 
 builder.Services.AddControllers();
 builder.Services.AddHealthChecks();
@@ -75,6 +90,16 @@ builder.Services.AddSocialFeedRead();      // #270 GET /api/feed, /api/threads/{
 builder.Services.AddSocialPostWrite();     // #271 POST /api/posts (sanitize + stamp + telemetry + broadcast)
 builder.Services.AddSocialPersonaRead();   // #273 GET /api/personas
 builder.Services.AddSocialRealtimeHub();   // #272 exercise-grouped hub + IFeedBroadcaster impl
+
+// Engine runtime — Wave 2 (feature/engine-runtime), orchestrator-wired. AddReactionLoopHost (#285)
+// registers the in-process reaction-loop BackgroundService + the IEnginePublishService publish funnel
+// (publishes through B1's PostIngestService as origin:'engine', reusing IFeedBroadcaster). AddEngineReview
+// (#286) registers the review-cockpit service + endpoints + the SignalR broadcaster (reusing the B1
+// ExerciseRealtimeHub — no second hub) + the auto-HOLD scenario tick, and REPLACES the generation NoOp
+// IProviderHealthListener with the degrade-only autonomy fan-out listener — so it MUST run after
+// AddEngineGeneration (above). Both consume AddExerciseClock + AddEngineRuntimeSeams.
+builder.Services.AddReactionLoopHost();    // #285 reaction-loop host + IEnginePublishService
+builder.Services.AddEngineReview();        // #286 review queue API + autonomy/safety wiring + SignalR push
 
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
@@ -169,6 +194,16 @@ app.MapStaffAuthEndpoints();        // #62 POST /api/auth/staff/login, GET /api/
 app.MapSharedReadOnlyEndpoints();          // #63 POST /api/auth/shared (view-only session + ephemeral identity)
 app.MapAccountEndpoints();                 // #59 POST /api/auth/login, POST /api/staff/accounts[/import]
 app.MapSharedCredentialLifecycleEndpoints(); // #64 POST /api/staff/shared-credential/{rotate,revoke}
+
+// Engine-runtime endpoints (Wave 2) — REST only; the review push reuses the B1 ExerciseRealtimeHub mapped
+// above (no second hub). Scope comes only from the resolved IExerciseContext (COR-001), never a client
+// exerciseId — populated per-request by B2's UseExerciseResolution + UseSessionAuthentication above. The
+// STAFF-ONLY review cockpit (#286) is additionally role-gated by EngineCockpitStaffAuthorizationFilter
+// (wired inside MapEngineReview): a live STAFF session is required (401 otherwise) AND it must be assigned
+// to the resolved exercise (403 NotAssigned, COR-005) — so a participant/read-only session cannot drive
+// the safety-critical cockpit. Requires AddStaffIdentity (above) to precede AddEngineReview — it does.
+app.MapEngineRuntime();   // #285 reaction-loop host runtime surface
+app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + swamped-mode + kill-switch
 
 app.Run();
 

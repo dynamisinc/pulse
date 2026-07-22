@@ -5,13 +5,24 @@
  * ADP-040, D5-014/2.1, COR-001/018, COR-053, XC-004, NFR-001). STAFF world — pure
  * hook, no UI, no COBRA.
  *
- * Subscribes `<ReviewQueue>` to the mock `reviewStore` (a `useSyncExternalStore`
+ * Subscribes `<ReviewQueue>` to a review-item store (a `useSyncExternalStore`
  * read of its stable snapshot), keeps a once-per-second SCENARIO-time tick so the
  * "holds in M:SS" countdown + the sub-60s count stay live, and exposes the four
  * per-item actions + batch approve — each wrapped with the clock/identity/exercise
  * INPUTS (`useControllerIdentity()` + `useExerciseContext()` + `scenarioNow()`)
- * that `reviewActions` needs, mirroring how `useComposeAsPersona` assembles them
+ * that the action layer needs, mirroring how `useComposeAsPersona` assembles them
  * for `composeAsPersona`.
+ *
+ * MOCK ↔ LIVE (story 02 flip; WAVE0-REVIEW precedent 15). Behind the ONE
+ * `USE_MOCK_DATA` flag (`@/core/config/mockData`):
+ *   - mock (dev/UAT, and every existing test): the module-singleton
+ *     `reviewStore` + the synchronous `reviewActions` — UNCHANGED behavior;
+ *   - live (`USE_MOCK_DATA === false`): the live `liveReviewStore` (an initial
+ *     `GET /api/engine/review-queue` + the shared `core/realtime` connection's
+ *     `ReviewItemChanged` push, reconciled by draftId/disposition) and
+ *     `liveReviewActions` (fire-and-forget POSTs, optimistic locally). Either
+ *     way `UseReviewQueueResult` is byte-for-byte the same shape — `<ReviewQueue>`
+ *     needs no awareness of which is active.
  *
  * THE SINGLE COUNT SOURCE (D5-014/2.1). `pendingCount` / `heldCount` /
  * `timersUnder60sCount` derived here are the ONE source of truth for the inline
@@ -26,6 +37,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { scenarioNow } from '@/core/clock'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useControllerIdentity } from '../../identity/controllerIdentity'
 import { DraftDisposition, type EngineReviewItem } from '../models/reviewContracts'
@@ -39,6 +51,14 @@ import {
   type ReviewActionContext,
 } from '../services/reviewActions'
 import { reviewStore } from '../services/reviewStore'
+import {
+  approve as liveApprove,
+  batchApprove as liveBatchApprove,
+  edit as liveEdit,
+  reroll as liveReroll,
+  veto as liveVeto,
+} from '../services/liveReviewActions'
+import { liveReviewStore } from '../services/liveReviewStore'
 
 /** A countdown at/under this many ms remaining is a "timer under 60s" (D5-014/2.1). */
 const UNDER_60S_MS = 60_000
@@ -73,7 +93,16 @@ export function useReviewQueue(): UseReviewQueueResult {
   const identity = useControllerIdentity()
   const { exerciseId, timeZone } = useExerciseContext()
 
-  const items = useSyncExternalStore(reviewStore.subscribe, reviewStore.getItems)
+  // Live path only: kick off the initial GET + realtime subscription once
+  // (idempotent — see liveReviewStore.ensureStarted). No-op under mock data.
+  useEffect(() => {
+    if (!USE_MOCK_DATA) liveReviewStore.ensureStarted()
+  }, [])
+
+  const items = useSyncExternalStore(
+    USE_MOCK_DATA ? reviewStore.subscribe : liveReviewStore.subscribe,
+    USE_MOCK_DATA ? reviewStore.getItems : liveReviewStore.getItems,
+  )
 
   const [nowMs, setNowMs] = useState<number>(() => scenarioNow().getTime())
   useEffect(() => {
@@ -114,30 +143,37 @@ export function useReviewQueue(): UseReviewQueueResult {
 
   const approve = useCallback(
     (item: EngineReviewItem) => {
-      approveAction(item, buildContext())
+      if (USE_MOCK_DATA) approveAction(item, buildContext())
+      else liveApprove(item, buildContext())
     },
     [buildContext],
   )
   const veto = useCallback(
     (item: EngineReviewItem) => {
-      vetoAction(item, buildContext())
+      if (USE_MOCK_DATA) vetoAction(item, buildContext())
+      else liveVeto(item, buildContext())
     },
     [buildContext],
   )
   const edit = useCallback(
     (item: EngineReviewItem, newText: string) => {
-      editAction(item, newText, buildContext())
+      if (USE_MOCK_DATA) editAction(item, newText, buildContext())
+      else liveEdit(item, newText, buildContext())
     },
     [buildContext],
   )
   const reroll = useCallback(
     (item: EngineReviewItem) => {
-      rerollAction(item, buildContext())
+      if (USE_MOCK_DATA) rerollAction(item, buildContext())
+      else liveReroll(item, buildContext())
     },
     [buildContext],
   )
   const batchApprove = useCallback(
-    (toApprove: readonly EngineReviewItem[]) => batchApproveAction(toApprove, buildContext()),
+    (toApprove: readonly EngineReviewItem[]) =>
+      USE_MOCK_DATA
+        ? batchApproveAction(toApprove, buildContext())
+        : liveBatchApprove(toApprove, buildContext()),
     [buildContext],
   )
 

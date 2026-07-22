@@ -22,6 +22,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.10" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.10" />
     <PackageReference Include="Testcontainers.MsSql" Version="4.13.0" />
   </ItemGroup>
 
@@ -31,6 +32,17 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Pulse.WebApi\Pulse.WebApi.csproj" />
+  </ItemGroup>
+
+  <!-- engine-runtime/04: copy the COMMITTED live-config artifacts to the test output so
+       ProviderLiveConfigTests validates the real files (Fake default + governed example), not a copy. -->
+  <ItemGroup>
+    <None Include="..\Pulse.WebApi\appsettings.json" Link="ConfigFixtures\appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\Pulse.WebApi\appsettings.Generation.Example.json" Link="ConfigFixtures\appsettings.Generation.Example.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

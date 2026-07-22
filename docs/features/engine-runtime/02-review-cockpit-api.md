@@ -1,6 +1,6 @@
 # Story: Review-cockpit API — serve `EngineReviewItem`s + wire autonomy/safety  `[fullstack]`
 
-**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** fullstack  ·  **Status:** Not Started
+**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** fullstack  ·  **Status:** Complete
 **Requirements:** ADP-040, ADP-042, CTL-034 (D5-014/1.1, D5-014/2.1, D5-014/2.7, COR-001, XC-004, XC-002, NFR-004, SOC-003, COR-018)  ·  **Design decisions:** D5-014/1.1, D5-014/2.1, D5-014/2.7  ·  **Issue:** #286
 
 > **⚠ SAFETY-CRITICAL.** This story carries the load-bearing E8 §8.2 safety invariants into the live
@@ -28,47 +28,47 @@ same `reviewContracts.ts` shapes). Staff world (COBRA), staff-only (XC-002). See
 `implementation.md`.
 
 ## Acceptance Criteria
-- [ ] **Queue GET (scoped).** Given a controller in exercise A, When it GETs the review queue, Then it
+- [x] **Queue GET (scoped).** Given a controller in exercise A, When it GETs the review queue, Then it
   receives A's `EngineReviewItem`s (Suggest queued + Delayed-auto counting down + auto-HELD), each with
   its storyline context and countdown snapshot, and **never** an item from exercise B.
-- [ ] **Terminal actions publish through the shared seam.** Given a queued / counting-down item, When
+- [x] **Terminal actions publish through the shared seam.** Given a queued / counting-down item, When
   the controller approves (or batch-approves), Then the burst publishes via story 01's
   `IEnginePublishService.PublishBurstAsync` (one decision per burst, not per post); **veto** marks it
   `Vetoed` and nothing publishes; **re-roll** requests a fresh draft and returns it to review; **edit**
   sanitizes the new text (NFR-004) before publishing through the same seam.
-- [ ] **Delayed-auto countdown → AUTO-HOLD on expiry (never auto-send).** Given a Delayed-auto
+- [x] **Delayed-auto countdown → AUTO-HOLD on expiry (never auto-send).** Given a Delayed-auto
   countdown expires with **no** controller decision, When the deadline passes in scenario time, Then the
   draft **auto-HOLDs** (`DraftDisposition.Held`, "timer expired — held for you", surfaces in NEEDS YOU)
   via `AutoHoldPolicy.Evaluate` — silence is never approval (D5-014/1.1). Auto-send on expiry happens
   **only** when swamped mode is explicitly enabled (`EngineAutonomyState.SwampedModeEnabled`, set by a
   lead controller, #36) and the draft is still effectively Delayed-auto.
-- [ ] **Kill switch + degraded mode lower autonomy only.** Given the kill switch fires
+- [x] **Kill switch + degraded mode lower autonomy only.** Given the kill switch fires
   (`EngageKillSwitch`) or the provider health breaches (`AutonomyProviderHealthListener` →
   `DegradeToSuggest`), When autonomy is clamped, Then it drops to Suggest (or full stop) instantly,
   in-flight Delayed-auto countdowns suspend (hold, not send), and autonomy **never** self-escalates —
   Suggest→Delayed→Auto is always an explicit human toggle; recovery clears the alert but does not raise
   autonomy (a human restores via `RestoreFromSafety`).
-- [ ] **SignalR push.** Given a countdown ticks, a disposition changes, or an auto-HOLD fires, When the
+- [x] **SignalR push.** Given a countdown ticks, a disposition changes, or an auto-HOLD fires, When the
   state changes, Then it pushes to the exercise's controllers over the `ExerciseRealtimeHub` pattern
   (exercise-scoped group `exercise:{id}`, never a client-supplied group name).
-- [ ] **Frontend mock→live flip (no cockpit rewrite).** Given the endpoints are Gate-2 clean, When
+- [x] **Frontend mock→live flip (no cockpit rewrite).** Given the endpoints are Gate-2 clean, When
   `useReviewQueue` is flipped, Then it reads the live queue GET and subscribes to the realtime push
   **instead of** the mock `reviewStore`, and delegates actions to the live endpoints — with **no**
   change to `ReviewQueue.tsx` or the `reviewContracts.ts` shapes (the frozen mirror is the seam).
-- [ ] **Safety invariants (E8 §8.2), verbatim in intent.** The above hold as invariants, not just happy
+- [x] **Safety invariants (E8 §8.2), verbatim in intent.** The above hold as invariants, not just happy
   paths: (1) auto-HOLD-on-timeout NEVER auto-sends — silence is never approval (D5-014/1.1); auto-send
   exists only behind the lead-gated swamped-mode toggle (#36). (2) Automation NEVER self-escalates its
   autonomy. (3) Degraded mode + kill switch only ever LOWER autonomy and never auto-recover.
-- [ ] **Isolation (COR-001).** Given a request scoped to exercise A, When it reads the queue or acts on
+- [x] **Isolation (COR-001).** Given a request scoped to exercise A, When it reads the queue or acts on
   an item, Then the data and the SignalR group are exercise-scoped; a cross-exercise queue read or
   action returns 403/404 and extends the standing cross-exercise isolation suite.
-- [ ] **Telemetry (XC-004).** Given a review decision, Then it emits exactly one `engine.reviewed` event
+- [x] **Telemetry (XC-004).** Given a review decision, Then it emits exactly one `engine.reviewed` event
   (action ∈ approve / edit / veto / re-roll / **hold-on-expiry** / **auto-send**), carrying the actor
   incl. the human behind the shared controller account (COR-018), wall + scenario time, and channel —
   against the v0 envelope extended by `engine-telemetry-tuning/01`. One event per **decision**, not per post.
-- [ ] **XC-002.** The cockpit surface is staff-only (COBRA); the engine `origin` and draft internals are
+- [x] **XC-002.** The cockpit surface is staff-only (COBRA); the engine `origin` and draft internals are
   never exposed to a participant surface.
-- [ ] **CTL-034 workload contract.** Given a burst, When it enters the queue, Then it is **one** review
+- [x] **CTL-034 workload contract.** Given a burst, When it enters the queue, Then it is **one** review
   decision (not one per post); the `WorkloadDemandMeter` / `DemandAccounting` surfaces queue-pressure as
   **demand** (amber past ~6/min sustained), never as a controller-performance measure (D5-014/2.7); a
   design past ~6/min is a defect to flag.

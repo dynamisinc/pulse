@@ -248,6 +248,19 @@ output principalId string = account.identity.principalId
 output standardDeploymentName string = standardDeployment.name
 output ambientDeploymentName string = ambientDeployment.name
 
+// Model ids + residency exposed as outputs so EVERY governed Generation:* config value has a bicep
+// output to source from VERBATIM (engine-runtime/04, NFR-005). The backend maps:
+//   Generation:Endpoint                 <- endpoint
+//   Generation:Tiers:Standard:Deployment<- standardDeploymentName   ("standard")
+//   Generation:Tiers:Standard:Model     <- standardModelName        ("gpt-5.4")
+//   Generation:Tiers:Ambient:Deployment <- ambientDeploymentName    ("ambient")
+//   Generation:Tiers:Ambient:Model      <- ambientModelName         ("gpt-5.4-mini")
+//   Generation:Governance:Residency     <- residency                (the deployment region)
+// (Generation:ApiVersion is a data-plane client choice, not a provisioned resource property.)
+output standardModelName string = standardModel
+output ambientModelName string = ambientModel
+output residency string = location
+
 // Base host for the Claude/Anthropic passthrough. The backend's Generation:Endpoint is set to this; the
 // ClaudeFoundryGenerationProvider appends "anthropic/v1/messages". Empty when Claude is not deployed.
 output claudeEndpoint string = deployClaude ? 'https://${account.name}.services.ai.azure.com/' : ''

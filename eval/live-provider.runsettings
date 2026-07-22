@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Live-provider EngineEval RUN CONFIGURATION (engine-runtime/04, NFR-005 / NFR-003 / ADP-024).
+
+  This is the OUT-OF-CI pass that runs the built EngineEval harness against the LIVE governed provider
+  (aif-pulse-uat). It is opt-in by construction: it sets PULSE_LIVE_FOUNDRY=1 so the keyed live tests
+  actually execute. CI NEVER passes this file (`-s`), so CI has no key, the live tests no-op, and the
+  host stays on Provider=Fake (committed appsettings.json) — no CI run can reach a live endpoint.
+
+  Prerequisites (see docs/features/engine-runtime/PROVIDER-GOVERNANCE.md and infrastructure/README.md):
+    1. deployAi=true has provisioned aif-pulse-uat (Azure OpenAI Standard/Ambient tiers).
+    2. Your az-cli login holds "Cognitive Services OpenAI User" on the account (keyless Entra auth).
+       (Add "Cognitive Services User" + deployClaude=true for the ClaudeFoundry comparison.)
+
+  Run (from the repo root):
+    dotnet test pulse.slnx -c Release -s eval/live-provider.runsettings \
+      --filter "FullyQualifiedName~LiveFoundryTests|FullyQualifiedName~MeasuredCostLatencyTests|FullyQualifiedName~ProviderComparisonTests|FullyQualifiedName~LiveInjectionRedTeamTests"
+
+  What the pass covers (each is a built harness asset — this story only configures the run):
+    - LiveInjectionRedTeamTests  : the InjectionRedTeam.Catalog run against the LIVE model — every attack
+                                   stays guard-clean (ADP-024, AC-5). A regression blocks release (§12.2).
+    - LiveFoundryTests           : full generate -> guard -> diversity path resists an injected post live.
+    - MeasuredCostLatencyTests   : measured p50/p95 latency + per-burst cost per tier; asserts p95 sits
+                                   inside the ~10s degraded-mode trip threshold (NFR-003, AC-4).
+    - ProviderComparisonTests    : Azure OpenAI vs Claude-on-Foundry on identical bursts (data-driven default).
+
+  Record the measured numbers in docs/features/engine-generation-infra/MEASURED-RESULTS.md so the §4
+  MODELED cost/latency estimates lock, and flag (do not silently accept) any tier whose measured p95
+  approaches the ~10s trip threshold — see ProviderLiveConfigTests.DegradedModeTripThreshold_*.
+-->
+<RunSettings>
+  <RunConfiguration>
+    <!-- The key that flips the built live tests from no-op to a real live pass. Present ONLY here. -->
+    <EnvironmentVariables>
+      <PULSE_LIVE_FOUNDRY>1</PULSE_LIVE_FOUNDRY>
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>
