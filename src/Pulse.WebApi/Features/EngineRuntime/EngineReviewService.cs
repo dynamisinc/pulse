@@ -137,9 +137,11 @@ public sealed class EngineReviewService
 
     /// <summary>
     /// Approves a queued / counting-down burst: publishes it through story 01's single publish funnel
-    /// (<see cref="IEnginePublishService.PublishBurstAsync"/>, one decision per burst), marks it
-    /// <see cref="DraftDisposition.Published"/>, emits one <c>engine.reviewed</c> (approve), and pushes the
-    /// change. Nothing publishes for a scope/validation/not-found failure.
+    /// (<see cref="IEnginePublishService.PublishBurstAsync"/>, one decision per burst), and — ONLY when every
+    /// post genuinely reached the feed — marks it <see cref="DraftDisposition.Published"/>, emits one
+    /// <c>engine.reviewed</c> (approve), and pushes the change. Nothing publishes for a scope/validation/
+    /// not-found failure; and a burst that does not fully publish is left actionable, not marked Published
+    /// (WR-002), surfacing <see cref="EngineReviewOutcome.PublishFailed"/> to the endpoint.
     /// </summary>
     public Task<EngineReviewActionResult> ApproveAsync(
         Guid draftId,
@@ -285,10 +287,16 @@ public sealed class EngineReviewService
         var outcomes = new List<EngineBatchApproveItemOutcome>(draftIds.Count);
         foreach (var draftId in draftIds)
         {
+            // Best-effort per-item (by design, NOT transactional): each burst is marked Published only if its
+            // OWN publish fully reached the feed (WR-002). A publish failure is reported as 'failed' (distinct
+            // from a 'skipped' already-resolved/foreign item), so the caller sees which bursts did not send.
             var result = await ApproveAsync(draftId, input, cancellationToken);
-            var outcome = result.Outcome == EngineReviewOutcome.Ok
-                ? EngineBatchApproveItem.Published
-                : EngineBatchApproveItem.Skipped;
+            var outcome = result.Outcome switch
+            {
+                EngineReviewOutcome.Ok => EngineBatchApproveItem.Published,
+                EngineReviewOutcome.PublishFailed => EngineBatchApproveItem.Failed,
+                _ => EngineBatchApproveItem.Skipped,
+            };
             outcomes.Add(new EngineBatchApproveItemOutcome(draftId.ToString(), outcome));
         }
 
@@ -407,9 +415,15 @@ public sealed class EngineReviewService
 
             if (evaluation.Disposition == TimeoutDisposition.Publish)
             {
-                // Swamped-mode auto-send (the sole timeout publish path) — publish through the SAME funnel.
-                await PublishBurstAsync(candidate, exerciseId, input: null, leadTextOverride: null, cancellationToken);
-                await ResolveOnTickAsync(candidate.DraftId, exerciseId, DraftDisposition.Published, EngineReviewAction.AutoSend, cancellationToken);
+                // Swamped-mode auto-send (the sole timeout publish path) — publish through the SAME funnel, and
+                // mark Published ONLY when the burst genuinely reached the feed (WR-002). If it did not fully
+                // publish, leave it counting-down so the next tick re-evaluates; never record a false Published.
+                // The same ingest-side draftId idempotency gap (WR-001) applies to the auto-send commit below.
+                var publishResult = await PublishBurstAsync(candidate, exerciseId, input: null, leadTextOverride: null, cancellationToken);
+                if (IsPublishFullySuccessful(publishResult))
+                {
+                    await ResolveOnTickAsync(candidate.DraftId, exerciseId, DraftDisposition.Published, EngineReviewAction.AutoSend, cancellationToken);
+                }
             }
             else
             {
@@ -421,7 +435,7 @@ public sealed class EngineReviewService
 
     // ---- internals ------------------------------------------------------------------------------
 
-    /// <summary>Whether a disposition is a resolved terminal (removed from the queue).</summary>
+    /// <summary>Whether a disposition is a resolved terminal (Published/Vetoed) — the WR-001 guard every request-bound action checks so a terminal item is rejected (→ 409/404) and can never be re-published.</summary>
     private static bool IsResolved(DraftDisposition disposition) =>
         disposition is DraftDisposition.Published or DraftDisposition.Vetoed;
 
@@ -479,13 +493,32 @@ public sealed class EngineReviewService
             return EngineReviewActionResult.NotFound();
         }
 
+        // WR-001 terminal guard: a resolved (Published/Vetoed) item is rejected (→ 409 at the endpoint) so an
+        // already-published burst can NEVER be re-approved into a double-publish. Same guard on veto/re-roll,
+        // and batch-approve inherits it through this path.
         if (IsResolved(item.Disposition))
         {
             return EngineReviewActionResult.AlreadyResolved();
         }
 
-        await PublishBurstAsync(item, exerciseId, input, leadTextOverride, cancellationToken);
+        var publishResult = await PublishBurstAsync(item, exerciseId, input, leadTextOverride, cancellationToken);
 
+        // WR-002 / SG-001: record the burst as Published ONLY when every post genuinely reached the feed. A post
+        // that comes back Invalid (which also covers an unresolved persona handle — SG-001) or ScopeUnresolved
+        // means nothing (or not all) reached the feed, so we must NOT mark Published and must NOT emit a success
+        // engine.reviewed. Leave the item at its current (actionable) queue disposition and surface the failure
+        // so the endpoint returns a non-2xx (→ 502).
+        if (!IsPublishFullySuccessful(publishResult))
+        {
+            return EngineReviewActionResult.PublishFailed();
+        }
+
+        // WR-001 (KNOWN CONSISTENCY LIMITATION — tracked, not silent): the publish above has already reached the
+        // feed, but the disposition + telemetry commit below is a SEPARATE unit of work from the ingest publish.
+        // If SaveChanges throws here, the item stays in-queue while its posts are live, so a later re-approve
+        // would RE-PUBLISH the burst (story 01's publish path does NOT dedupe on draftId). This residual window
+        // cannot be closed from the review side; the fix is ingest-side draftId idempotency (a draftId dedupe on
+        // story 01's publish path / the Post schema), which is OUT OF SCOPE for this hardening pass.
         item.Disposition = DraftDisposition.Published;
         if (item.CountdownStartedScenarioMinute is not null)
         {
@@ -496,8 +529,12 @@ public sealed class EngineReviewService
         return EngineReviewActionResult.Ok(EngineReviewItemDto.FromEntity(item));
     }
 
-    /// <summary>Publishes the burst through story 01's single funnel (one decision per burst, SOC-003), resolving persona handles + server scenario time.</summary>
-    private async Task PublishBurstAsync(
+    /// <summary>Whether a burst publish fully reached the feed — the burst was non-empty AND every post came back <see cref="EnginePublishOutcome.Published"/>. Anything else (an <see cref="EnginePublishOutcome.Invalid"/> post — including an unresolved persona handle, SG-001 — or <see cref="EnginePublishOutcome.ScopeUnresolved"/>) is a publish failure that must NOT mark the burst Published (WR-002).</summary>
+    private static bool IsPublishFullySuccessful(EngineBurstPublishResult result) =>
+        result.Posts.Count > 0 && result.Posts.All(p => p.Outcome == EnginePublishOutcome.Published);
+
+    /// <summary>Publishes the burst through story 01's single funnel (one decision per burst, SOC-003), resolving persona handles + server scenario time, and returns the per-post outcome so the caller can gate on genuine success (WR-002).</summary>
+    private async Task<EngineBurstPublishResult> PublishBurstAsync(
         EngineReviewItemEntity item,
         Guid exerciseId,
         EngineReviewActionInput? input,
@@ -531,7 +568,7 @@ public sealed class EngineReviewService
             Posts = posts,
         };
 
-        await _publisher.PublishBurstAsync(burst, cancellationToken);
+        return await _publisher.PublishBurstAsync(burst, cancellationToken);
     }
 
     /// <summary>Resolves the burst's persona handles to their scoped persona-instance ids (keyed by the '@'-stripped handle).</summary>
@@ -657,6 +694,9 @@ public enum EngineReviewOutcome
 
     /// <summary>The item is already resolved (Published/Vetoed) and cannot be acted on again (409).</summary>
     AlreadyResolved,
+
+    /// <summary>The publish funnel did not fully reach the feed (a post came back Invalid/ScopeUnresolved); the item is left actionable and NOT marked Published (WR-002/SG-001) — mapped to a non-2xx (502).</summary>
+    PublishFailed,
 }
 
 /// <summary>The result of a queue read.</summary>
@@ -714,6 +754,9 @@ public sealed class EngineReviewActionResult
 
     /// <summary>The item is already resolved and cannot be acted on again.</summary>
     public static EngineReviewActionResult AlreadyResolved() => new(EngineReviewOutcome.AlreadyResolved, null, null);
+
+    /// <summary>The publish funnel did not fully succeed; the item is left actionable and was NOT marked Published (WR-002/SG-001).</summary>
+    public static EngineReviewActionResult PublishFailed() => new(EngineReviewOutcome.PublishFailed, null, null);
 }
 
 /// <summary>The per-item outcome kind of a batch approve.</summary>
@@ -724,6 +767,9 @@ public static class EngineBatchApproveItem
 
     /// <summary>The burst was skipped — already resolved, or not visible under the scope (foreign/missing).</summary>
     public const string Skipped = "skipped";
+
+    /// <summary>The burst was attempted but its publish did not fully reach the feed (WR-002); it was left actionable, not marked Published.</summary>
+    public const string Failed = "failed";
 }
 
 /// <summary>One burst's outcome within a batch approve.</summary>

@@ -240,6 +240,9 @@ public static class EngineReviewEndpoints
         EngineReviewOutcome.Invalid => Results.BadRequest(result.ValidationError),
         EngineReviewOutcome.NotFound => Results.NotFound(),
         EngineReviewOutcome.AlreadyResolved => Results.Conflict("The review item is already resolved (published or vetoed)."),
+        // WR-002/SG-001: the publish funnel did not fully reach the feed; the burst is NOT marked Published and
+        // stays actionable. Surfaced as 502 (upstream publish failed), never a 2xx — the same fail-closed style.
+        EngineReviewOutcome.PublishFailed => Results.StatusCode(StatusCodes.Status502BadGateway),
         _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
     };
 
