@@ -1,6 +1,6 @@
 # Story: Participants have no exercise-selection concept
 
-**Feature:** Exercise isolation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Exercise isolation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-004  ·  **Design decisions:** none  ·  **Issue:** #47
 **Stack:** frontend  ·  **Review:** Tier-1
 
@@ -18,18 +18,18 @@ unresolved scope, or an expired session is denied the participant fiction (fail-
 All-Posts default (identity-auth-roles/06) is realized here off the session's `isReadOnly` flag.
 
 ## Acceptance Criteria
-- [ ] Given a participant credential, when they log in, then they land directly in their exercise's
+- [x] Given a participant credential, when they log in, then they land directly in their exercise's
       landing surface — no exercise picker, no exercise list, no simulation-status or admin surface.
-- [ ] A participant account belongs to exactly one exercise; there is no UI path to switch exercises.
-- [ ] In pilot mode (pre-Portal) the landing surface is the Social feed (Master §4); the story does not
+- [x] A participant account belongs to exactly one exercise; there is no UI path to switch exercises.
+- [x] In pilot mode (pre-Portal) the landing surface is the Social feed (Master §4); the story does not
       hard-code the Portal.
-- [ ] No participant-facing surface exposes the concept of exercise selection, simulation status, or
+- [x] No participant-facing surface exposes the concept of exercise selection, simulation status, or
       platform administration (XC-002).
-- [ ] **Make-real route guard:** given a live `useSession()`/`useExerciseContext()`, when the
+- [x] **Make-real route guard:** given a live `useSession()`/`useExerciseContext()`, when the
       participant route mounts, a **participant/PIO** role with a resolved scope renders the landing
       surface; a **staff** role, an **unresolved** scope, or an **expired** session is redirected/denied
       (never rendered into the participant fiction) — fail-closed.
-- [ ] **Read-only landing:** a session with `isReadOnly: true` (identity-auth-roles/06) lands on **All
+- [x] **Read-only landing:** a session with `isReadOnly: true` (identity-auth-roles/06) lands on **All
       Posts**, never the Following feed (COR-015).
 
 ## Out of Scope
@@ -55,3 +55,19 @@ every participant entry point.
 ## Tests
 - Component/integration: participant login routes straight to the landing surface with no exercise
   picker; no admin/status surface is reachable.
+
+## Delivered (Phase B2)
+Built and tested on the B2 Wave-4 merges on `feature/identity-backend`: the participant landing route
+guard against the live `useSession()`/`useExerciseContext()` seams — a resolved participant/PIO session
+renders the landing surface; a staff role, an unresolved scope, or an expired session is redirected/
+denied, fail-closed, with no COBRA chrome ever mounted on the participant path. The read-only
+(`isReadOnly: true`) session lands on All Posts, never Following (COR-015). Both code-review gates
+(Gate-1, Gate-2) clean; umbrella green — frontend `build:check` clean and the feature's suites green.
+
+Tracked follow-up (not a blocker to Complete):
+- **The non-read-only PIO landing default (which feed surface a resolved, non-read-only participant
+  lands on) is `feeds-discovery/01`'s call**, layered on by the feed consumer once that story lands —
+  this guard routes to the participant landing surface without hard-coding a feed choice.
+
+Markdown status flipped to Complete. Not closing the GitHub issue — it closes when the umbrella→main
+PR merges.

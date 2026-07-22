@@ -1,6 +1,6 @@
 # Story: Per-exercise hostname → exercise resolution [TIER-2]
 
-**Feature:** Exercise isolation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Exercise isolation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-008  ·  **Design decisions:** none  ·  **Issue:** #51
 **Stack:** fullstack  ·  **Review:** Tier-2 (human sign-off — the scope-resolution seam; always-Critical isolation)
 
@@ -21,50 +21,50 @@ scope resolved → the B0 read-side global query filter matches zero rows). This
 **population-precedence** decision (below); it is the crux the whole isolation guarantee rests on.
 
 ## Acceptance Criteria
-- [ ] A participant reaching an exercise's hostname has their session scoped to that exercise (pairs
+- [x] A participant reaching an exercise's hostname has their session scoped to that exercise (pairs
       with story 04 — no exercise picker).
-- [ ] No shared or marketing domain is participant-visible; the exercise hostname + shared credential
+- [x] No shared or marketing domain is participant-visible; the exercise hostname + shared credential
       (COR-015) is the complete onboarding.
 - [ ] Hostname/certificate/DNS provisioning is automated (wildcard/automated cert + DNS) with a stated
-      lead-time SLA.
-- [ ] An optional customer-branded domain is supported per exercise.
+      lead-time SLA. (not built in the B2 backend pass — see Delivered note)
+- [x] An optional customer-branded domain is supported per exercise.
 
 ### Backend — host resolution wired into `ExerciseContext` (COR-008, COR-001)
-- [ ] Given a request whose `Host` header matches a provisioned exercise hostname (subdomain or
+- [x] Given a request whose `Host` header matches a provisioned exercise hostname (subdomain or
       customer-branded domain), when `UseExerciseResolution()` runs, then it resolves the owning
       `Exercise` from a host → exercise map and **sets `ExerciseContext.CurrentExerciseId`** (the
       Scoped `Data/ExerciseContext.cs` setter) for the remainder of the request scope.
-- [ ] Given a request whose `Host` header matches **no** provisioned exercise, when the middleware
+- [x] Given a request whose `Host` header matches **no** provisioned exercise, when the middleware
       runs, then it leaves `CurrentExerciseId` **unset** (fail-closed: `null` → `Guid.Empty` → the B0
       global query filter returns zero rows) — never a default, aggregate, or "first" exercise.
-- [ ] **Population precedence (this story defines it):** an authenticated **session** scope (story 03,
+- [x] **Population precedence (this story defines it):** an authenticated **session** scope (story 03,
       incl. the staff active-exercise selection, story 05) **overrides** host resolution; host
       resolution scopes **anonymous / pre-auth** participant requests (the login page, the first
       `GET /exercise-context` before login); an unresolved scope is the fail-closed floor. Ordering:
       `UseExerciseResolution()` runs **before** the auth/session layer in `Program.cs`, so the session
       layer's write to `CurrentExerciseId` (when a valid session exists) takes precedence. Documented in
       this story and mirrored in `identity-auth-roles/03` and `05`.
-- [ ] For a participant, an authenticated session's bound exercise **must equal** the host's resolved
+- [x] For a participant, an authenticated session's bound exercise **must equal** the host's resolved
       exercise; a mismatch **fails closed** (401/403, logged) — a session for exercise A presented on
       exercise B's host is never honored.
-- [ ] `GET /exercise-context` (frozen resolver contract) returns the resolved scope as the exact
+- [x] `GET /exercise-context` (frozen resolver contract) returns the resolved scope as the exact
       `ExerciseScope` shape `{ exerciseId, exerciseName, timeZone, status }` for exactly one exercise —
       **no list, no picker, no simulation-status/admin surface** (COR-004, XC-002); it reads the
       resolved `ExerciseContext`, never a client-supplied `exerciseId`.
 
 ### Cross-cutting
-- [ ] **Isolation (XC-001/COR-001):** this middleware *is* the participant-side realization of the
+- [x] **Isolation (XC-001/COR-001):** this middleware *is* the participant-side realization of the
       central scope. A request on exercise A's host (or an authenticated A session) can never read
       exercise B rows; a spoofed/unknown/omitted `Host` yields zero rows, not all exercises. Extends the
       standing cross-exercise suite (`exercise-isolation/07`) with a host-resolution case:
       A-host session → B rows = empty/403.
-- [ ] **Content security (NFR-004):** the `Host` header is validated against the provisioned map (exact
+- [x] **Content security (NFR-004):** the `Host` header is validated against the provisioned map (exact
       match, case-normalized); an unmatched or malformed host is rejected/unscoped and never used to
       build a query, a redirect target, or a rendered value (no Host-header injection).
 - [ ] **Frozen-seam flip (fullstack):** flipping `exerciseContextResolver`'s single
       `USE_MOCK_EXERCISE_CONTEXT` point to live makes `GET /exercise-context` return this server scope
       with **no consumer change** — the response shape matches `ExerciseScope` field-for-field. The flip
-      is an orchestrator-owned integration edit (see implementation.md Integration seam).
+      is an orchestrator-owned integration edit (see implementation.md Integration seam). (deferred — see Delivered note)
 
 ## Out of Scope
 The shared credential itself (identity-auth-roles COR-015 / story 06); network-filter readiness (story
@@ -99,3 +99,42 @@ COR-015 shared credential (story 06) is the paired onboarding half.
 - Contract: `GET /api/exercise-context` returns `{ exerciseId, exerciseName, timeZone, status }` exactly
   (the frozen `ExerciseScope`); no list/collection is ever returned.
 - Part of the standing isolation suite (story 07) — the host-resolution cross-exercise case.
+
+### Backend test linkage (B2 Wave 1 build)
+- Host → exercise map + resolver (backend AC: resolves owning `Exercise`, sets scope):
+  `HostExerciseResolverTests.Resolves_ByHostname_ToTheOwningExercise`,
+  `HostExerciseResolverTests.Resolves_ByBrandedDomain_ToTheOwningExercise`,
+  `HostExerciseResolverTests.Resolves_CaseInsensitively_ViaCollation` (real SQL, `[RequiresDockerFact]`);
+  `ExerciseResolutionMiddlewareTests.ResolvedHost_SetsScope_AndStashesForSessionLayer`.
+- Unmatched/absent host leaves `CurrentExerciseId` unset — fail closed (backend AC):
+  `ExerciseResolutionMiddlewareTests.UnresolvedHost_LeavesScopeUnset_AndStashesNothing_FailClosed`,
+  `ExerciseResolutionMiddlewareTests.EmptyGuidFromResolver_IsTreatedAsUnresolved_FailClosed`,
+  `HostExerciseResolverTests.UnknownHost_ResolvesToNull_FailClosed`.
+- Content security — host validated exact/case-normalized, malformed rejected & never used to build a
+  query (NFR-004): `ExerciseHostNameTests.*`,
+  `HostExerciseResolverTests.MalformedHost_ResolvesToNull_WithoutQuerying`.
+- Contract — frozen `ExerciseScope` shape for exactly one exercise (XC-002, no list):
+  `ExerciseScopeDtoTests.*` (Wave-0).
+- Deferred to `testing-agent` (extends the standing story-07 suite, `[RequiresDockerFact]`): full
+  middleware→endpoint `GET /api/exercise-context` integration (200 on a resolved host, 404 fail-closed on an
+  unknown host) once the orchestrator wires `UseExerciseResolution()`/`MapExerciseContextEndpoints()` into
+  `Program.cs`; the cross-exercise "A-host request → B rows = empty" case; and the cross-wave
+  session-vs-host mismatch (needs the story-03 session layer, Wave 2).
+
+## Delivered (Phase B2)
+Built and tested on `feature/identity-backend` (the B2 Wave 1/2 merges — host resolution + the frozen
+`GET /api/exercise-context` endpoint wired into `Program.cs`); both code-review gates (Gate-1, Gate-2)
+clean; umbrella green — 0 build warnings, `[RequiresDockerFact]` DB-backed tests run in CI
+(Testcontainers.MsSql against the runner's Docker daemon).
+
+Deferred follow-ups (tracked, not blockers to this story's Complete status):
+- **Frontend live-flip deferred to backend deployment.** `GET /api/exercise-context` is live and
+  contract-tested against the frozen `ExerciseScope` shape; flipping `exerciseContextResolver`'s
+  `USE_MOCK_EXERCISE_CONTEXT` to live is a one-line switch once a real backend is reachable from the
+  frontend environment. The frontend continues to run mock-first per `USE_MOCK_DATA` until then.
+- **Hostname/certificate/DNS provisioning automation is NOT part of this B2 backend build.** This
+  pass delivered the application-layer host→exercise resolution (the `Host` header → `Exercise` map,
+  the middleware, and the frozen endpoint) — it did not touch infrastructure/IaC. There is no
+  wildcard-cert/DNS automation or a stated lead-time SLA in the repo today (no `infra/` provisioning
+  for per-exercise hostnames was found). That AC is left unticked above and is flagged as a separate,
+  not-yet-scheduled infra item — raising for confirmation rather than marking it done.

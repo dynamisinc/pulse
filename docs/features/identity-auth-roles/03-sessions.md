@@ -1,6 +1,6 @@
 # Story: Short-lived exercise-bound sessions
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-012  ·  **Design decisions:** none  ·  **Issue:** #60
 **Stack:** fullstack  ·  **Review:** Tier-1 (session↔scope binding rides the Tier-2 isolation seam it consumes)
 
@@ -27,43 +27,43 @@ scope seam, with **precedence over raw host resolution** (story 08). It is the h
 login method calls to mint a session (story 02 participant, story 05 staff, story 06 shared read-only).
 
 ## Acceptance Criteria
-- [ ] Authenticated sessions are short-lived with a refresh mechanism; expiry forces re-auth.
-- [ ] A participant session is bound to exactly one exercise and one account (or one read-only session,
+- [x] Authenticated sessions are short-lived with a refresh mechanism; expiry forces re-auth.
+- [x] A participant session is bound to exactly one exercise and one account (or one read-only session,
       story 06); the session carries the exercise scope used by central filtering (exercise-isolation
       story 01).
-- [ ] Session tokens do not leak secrets to the browser beyond what's required; refresh is handled
+- [x] Session tokens do not leak secrets to the browser beyond what's required; refresh is handled
       securely.
 
 ### Backend — session issuance, lifecycle, binding, scope population (COR-012)
-- [ ] A session model + issuance mechanism exists: a session is created on a successful login (issued by
+- [x] A session model + issuance mechanism exists: a session is created on a successful login (issued by
       whichever login method authenticated — story 02 / 05 / 06 call this), short-lived, with a refresh
       path; the auth scheme (cookie or token) is chosen and documented, and the browser never receives
       more than the session reference/refresh material required.
-- [ ] `GET /api/session` returns the **frozen `Session` shape** field-for-field —
+- [x] `GET /api/session` returns the **frozen `Session` shape** field-for-field —
       `{ exerciseId, accountId, role, personaId?, actingHumanId, isReadOnly, expiresAt }` — for exactly
       one bound session; it accommodates all three login kinds (participant named account; staff, where
       `exerciseId` = the active-exercise selection and `personaId` is absent; read-only shared, where
       `isReadOnly` is true and `accountId`/`actingHumanId` are the ephemeral identity).
-- [ ] The session **binds session ↔ exercise ↔ account**: the exercise comes from the host-resolved
+- [x] The session **binds session ↔ exercise ↔ account**: the exercise comes from the host-resolved
       exercise (story 08) for participants / the active-exercise selection (story 05) for staff; the
       account is the authenticated principal. A refresh preserves the binding; it never re-scopes to a
       different exercise or account.
-- [ ] **Scope population + precedence:** for an authenticated request, this story **sets
+- [x] **Scope population + precedence:** for an authenticated request, this story **sets
       `ExerciseContext.CurrentExerciseId` from the session's bound exercise**, taking precedence over the
       host middleware's earlier write (story 08 defines the ordering: `UseExerciseResolution()` first,
       then the auth/session layer). For a participant, the session's exercise must equal the host's
       resolved exercise or the request fails closed (401/403).
-- [ ] Expiry forces re-auth: a request with an expired/absent session resolves **no** scope (fail-closed
+- [x] Expiry forces re-auth: a request with an expired/absent session resolves **no** scope (fail-closed
       — zero rows), and `GET /api/session` returns 401 rather than a default/stale session.
-- [ ] `POST /api/auth/refresh` (short-lived → renewed) and `POST /api/auth/logout` (invalidate the
+- [x] `POST /api/auth/refresh` (short-lived → renewed) and `POST /api/auth/logout` (invalidate the
       session) exist; logout invalidates server-side so a stolen reference cannot be replayed.
 
 ### Cross-cutting
-- [ ] **Isolation (XC-001/COR-001):** the session is the authenticated anchor of the exercise scope; a
+- [x] **Isolation (XC-001/COR-001):** the session is the authenticated anchor of the exercise scope; a
       session for exercise A can never yield exercise B rows, and an expired/absent session yields zero
       rows (never all exercises). Extends the standing suite (`exercise-isolation/07`) with a
       session-scope case.
-- [ ] **Telemetry (XC-004):** session **issue** (on login), **refresh**, **expiry-forcing-re-auth**, and
+- [x] **Telemetry (XC-004):** session **issue** (on login), **refresh**, **expiry-forcing-re-auth**, and
       **logout** each emit an XC-004 event against the locked v0 envelope (wall + scenario time, actor,
       channel). Event types `login` / `logout` (known vocab) + `session.refreshed` / `session.expired`
       (open vocab, additive). Actor per session kind: participant → `actor.kind: 'participant'`,
@@ -73,12 +73,12 @@ login method calls to mint a session (story 02 participant, story 05 staff, stor
       success/failure is emitted at the login endpoints, stories 02/05/06 — this story owns the
       session-lifecycle events.) Scenario time uses the exercise's stored scenario time until the
       COR-050 backend clock (B3) lands.
-- [ ] **Content security (NFR-004 / NFR-009):** the session/refresh endpoints are per-IP rate-limited;
+- [x] **Content security (NFR-004 / NFR-009):** the session/refresh endpoints are per-IP rate-limited;
       tokens are signed/opaque; no session material is logged.
 - [ ] **Frozen-seam flip (fullstack):** flipping `sessionResolver`'s single `USE_MOCK_SESSION` point to
       live makes `GET /api/session` drive `useSession()` with **no consumer change** — the response
       matches `Session` field-for-field. Orchestrator-owned integration edit (implementation.md
-      Integration seam).
+      Integration seam). (deferred — see Delivered note)
 
 ## Out of Scope
 The shared-credential lifecycle (story 07); the identity provider integration + staff login endpoint
@@ -111,3 +111,35 @@ authenticated request; `app-shell/01` consumes the live `useSession()`.
 - Contract: `GET /api/session` returns the frozen `Session` shape for participant, staff, and read-only
   kinds.
 - Integration: session issue/refresh/expiry/logout emit the expected XC-004 events.
+
+### Implemented tests (Wave 2, story 03)
+Token/scheme primitives (no DB):
+- `SessionTokensTests` — opaque token entropy/uniqueness; only a non-reversible hash is stored, never the raw token (NFR-009 / AC "tokens do not leak secrets").
+- `SessionTokenExtractorTests` — `Authorization: Bearer` extraction, fail-closed on absent/malformed.
+- `SessionAuthenticationMiddlewareTests` — scope population + precedence (session > host), the participant host↔session fail-closed 403 check, no-token/invalid-token pass-through, staff/read-only not host-bound (AC "scope population + precedence", "host equality").
+- `SessionRegistrationTests` — `AddSessions()` graph resolves; session lifetimes bind; the real `ICurrentStaffSessionAccessor` wins over story 05's Null default (both registration orders).
+- `SessionEndpointsHttpTests` — `GET /api/session` 401 with no token; refresh 401 without a refresh token; logout 204 idempotent; per-IP 429 (AC "expiry forces re-auth", "rate-limited").
+
+DB-backed (`[RequiresDockerFact]`, run in CI):
+- `SessionIssuerTests` — persists only hashes; short-lived expiry + refresh window; binds one exercise/account; satisfies the staff `IssueAsync` request shape (AC "session model + issuance", "bound to one exercise/account").
+- `SessionServiceTests` — `GET /api/session` live/absent/expired(+`session.expired`)/revoked; refresh rotates both tokens + preserves binding (+`session.refreshed`); logout revokes server-side (+`logout`) + idempotent (AC "refresh preserves binding", "logout invalidates", "XC-004 lifecycle events").
+- `CurrentStaffSessionAccessorTests` — staff-only, live-only fail-closed accessor (participant/read-only/expired/revoked/no-token → null).
+- `SessionScopeIsolationTests` — standing-suite extension (exercise-isolation/07): participant session-scope; staff session>host precedence; participant wrong-host 403; session-provides-scope-with-no-host; expired → zero rows fail closed (AC "isolation XC-001").
+- `SessionEndpointContractTests` — end-to-end `GET /api/session` frozen `Session` shape (participant with persona / staff without) + expired → 401 (AC "frozen Session shape", "frozen-seam flip").
+- `StaffAssignmentServiceHardeningTests` — the defense-in-depth staff-session ownership + kind assertion added to `SetActiveExerciseAsync`.
+
+## Delivered (Phase B2)
+Built and tested on `feature/identity-backend` (the B2 Wave 1/2 merges); both code-review gates
+(Gate-1, Gate-2) clean; umbrella green — 0 build warnings, `[RequiresDockerFact]` DB-backed tests run
+in CI (Testcontainers.MsSql against the runner's Docker daemon).
+
+Deferred follow-ups (tracked, not blockers to this story's Complete status):
+- **Frontend live-flip deferred to backend deployment.** The `GET /api/session` /
+  `POST /api/auth/refresh` / `POST /api/auth/logout` endpoints are ready and contract-tested against
+  the frozen `Session` shape; flipping `sessionResolver`'s `USE_MOCK_SESSION` to live is a one-line
+  switch once a real backend is reachable from the frontend environment. The frontend continues to run
+  mock-first per `USE_MOCK_DATA` until then.
+- **Per-IP rate limiter needs forwarded-headers.** The session/refresh/logout endpoints are per-IP
+  rate-limited today against the direct connection IP; behind Azure App Service the real client IP
+  arrives via a forwarded header, so true per-IP partitioning needs forwarded-headers wiring that
+  trusts only the platform proxy. Tracked as a `/security-review` item before the umbrella→main PR.
