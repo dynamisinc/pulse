@@ -61,6 +61,11 @@ builder.Services.AddSessions(builder.Configuration);
 builder.Services.AddParticipantAccounts();
 builder.Services.AddSharedReadOnly();
 
+// Shared-credential lifecycle (identity-auth-roles/07, #64, Phase B2 Wave 4) — staff-only rotate/revoke +
+// rotation-grace + brute-force lockout over story 06's SharedCredential. Reuses 06's "shared-login"
+// rate-limiter policy (registers no new limiter); staff endpoints are gated by ICurrentStaffSessionAccessor.
+builder.Services.AddSharedCredentialLifecycle();
+
 // Social API (Phase B1, feature/social-api) — orchestrator-wired composition root. Each story exposes its
 // own Add*/Map* extension (never edits this file itself); these five DI calls register the read/write
 // services, the persona read, and the SignalR realtime host. AddSocialRealtimeHub also registers
@@ -161,8 +166,9 @@ app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
 app.MapExerciseContextEndpoints();  // #51 GET /api/exercise-context (frozen ExerciseScope; 404 on unknown host)
 app.MapSessionEndpoints();          // #60 GET /api/session, POST /api/auth/refresh, POST /api/auth/logout
 app.MapStaffAuthEndpoints();        // #62 POST /api/auth/staff/login, GET /api/staff/assignments, POST /api/staff/active-exercise
-app.MapSharedReadOnlyEndpoints();   // #64 POST /api/auth/shared (view-only session + ephemeral identity)
-app.MapAccountEndpoints();          // #59 POST /api/auth/login, POST /api/staff/accounts[/import]
+app.MapSharedReadOnlyEndpoints();          // #63 POST /api/auth/shared (view-only session + ephemeral identity)
+app.MapAccountEndpoints();                 // #59 POST /api/auth/login, POST /api/staff/accounts[/import]
+app.MapSharedCredentialLifecycleEndpoints(); // #64 POST /api/staff/shared-credential/{rotate,revoke}
 
 app.Run();
 
