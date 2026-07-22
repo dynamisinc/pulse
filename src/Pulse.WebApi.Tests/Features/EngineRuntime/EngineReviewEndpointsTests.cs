@@ -24,7 +24,9 @@ using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Publishing;
+using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Xunit;
 
 /// <summary>
@@ -247,13 +249,119 @@ public sealed class EngineReviewEndpointsTests
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
+    // ---- COR-005 staff-authorization gate (#286) ------------------------------------------------
+
+    [RequiresDockerFact]
+    public async Task GetQueue_NoStaffSession_ParticipantOrAnonymous_Returns401_FailClosed()
+    {
+        // A non-staff session (participant / anonymous) yields no CurrentStaffSession, so the cockpit is
+        // unreachable even though B2 resolved a valid exercise scope. Fail closed with 401.
+        var exerciseId = Guid.NewGuid();
+        await SeedAsync(Item(Guid.NewGuid(), exerciseId, AutonomyLevel.Suggest, DraftDisposition.Queued, countdown: false));
+
+        await using var host = await StartHostAsync(exerciseId, authenticatedStaff: false);
+        var response = await host.Client.GetAsync(new Uri("/api/engine/review-queue", UriKind.Relative));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "the staff-only cockpit must reject a non-staff session with 401 even when the exercise scope is resolved (COR-005)");
+    }
+
+    [RequiresDockerFact]
+    public async Task Approve_NoStaffSession_ParticipantOrAnonymous_Returns401_AndNeverPublishes()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        await SeedAsync(Item(draftId, exerciseId, AutonomyLevel.DelayedAuto, DraftDisposition.CountingDown, countdown: true));
+
+        await using var host = await StartHostAsync(exerciseId, authenticatedStaff: false);
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri($"/api/engine/review/{draftId}/approve", UriKind.Relative),
+            new { actingHumanId = "controller-7", timeZone = "America/Chicago" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "a safety-critical mutation from a non-staff session must fail closed at the gate, before the handler");
+        host.Publisher.Published.Should().BeEmpty("the gate rejects before the publish funnel is ever reached");
+    }
+
+    [RequiresDockerFact]
+    public async Task GetQueue_SharedReadOnlySession_IsDenied_FailClosed()
+    {
+        // A shared read-only session is NOT a staff session (the real ICurrentStaffSessionAccessor yields null
+        // for it), so it is denied exactly like a participant — the staff cockpit is staff-only by construction.
+        var exerciseId = Guid.NewGuid();
+        await SeedAsync(Item(Guid.NewGuid(), exerciseId, AutonomyLevel.Suggest, DraftDisposition.Queued, countdown: false));
+
+        await using var host = await StartHostAsync(exerciseId, authenticatedStaff: false);
+        var response = await host.Client.GetAsync(new Uri("/api/engine/review-queue", UriKind.Relative));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "a shared read-only session is not a staff session and must not reach the staff cockpit");
+    }
+
+    [RequiresDockerFact]
+    public async Task GetQueue_StaffAssignedToExerciseA_IsAllowed_ForAsQueue()
+    {
+        // The positive case: an authenticated staff user assigned to the resolved exercise passes the gate and
+        // gets A's queue back (the default host wires exactly this — asserted explicitly here).
+        var exerciseA = Guid.NewGuid();
+        var draftA = Guid.NewGuid();
+        await SeedAsync(Item(draftA, exerciseA, AutonomyLevel.Suggest, DraftDisposition.Queued, countdown: false));
+
+        await using var host = await StartHostAsync(exerciseA, authenticatedStaff: true, assignedExerciseId: exerciseA);
+        var response = await host.Client.GetAsync(new Uri("/api/engine/review-queue", UriKind.Relative));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "a staff user assigned to the resolved exercise is authorized (COR-005)");
+        var json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        doc.RootElement.EnumerateArray().Select(i => i.GetProperty("draftId").GetString())
+            .Should().ContainSingle().Which.Should().Be(draftA.ToString());
+    }
+
+    [RequiresDockerFact]
+    public async Task GetQueue_StaffNotAssignedToResolvedExercise_Returns403_FailClosed()
+    {
+        // The staff user is assigned to a DIFFERENT exercise than the one resolved for the request — the gate
+        // must reject with 403 (COR-005), defense-in-depth over B2's session→active-exercise scope.
+        var resolvedExercise = Guid.NewGuid();
+        var assignedElsewhere = Guid.NewGuid();
+        await SeedAsync(Item(Guid.NewGuid(), resolvedExercise, AutonomyLevel.Suggest, DraftDisposition.Queued, countdown: false));
+
+        await using var host = await StartHostAsync(resolvedExercise, authenticatedStaff: true, assignedExerciseId: assignedElsewhere);
+        var response = await host.Client.GetAsync(new Uri("/api/engine/review-queue", UriKind.Relative));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "a staff user not assigned to the resolved exercise must be rejected with 403 (COR-005)");
+    }
+
+    [RequiresDockerFact]
+    public async Task Approve_StaffNotAssignedToResolvedExercise_Returns403_AndNeverPublishes()
+    {
+        var resolvedExercise = Guid.NewGuid();
+        var assignedElsewhere = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        await SeedAsync(Item(draftId, resolvedExercise, AutonomyLevel.DelayedAuto, DraftDisposition.CountingDown, countdown: true));
+
+        await using var host = await StartHostAsync(resolvedExercise, authenticatedStaff: true, assignedExerciseId: assignedElsewhere);
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri($"/api/engine/review/{draftId}/approve", UriKind.Relative),
+            new { actingHumanId = "controller-7", timeZone = "America/Chicago" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "a safety-critical mutation by a staff user not assigned to the resolved exercise must fail closed with 403");
+        host.Publisher.Published.Should().BeEmpty("the gate rejects before the publish funnel is ever reached");
+    }
+
     // ---- host + helpers -------------------------------------------------------------------------
 
-    private async Task<EngineReviewTestHost> StartHostAsync(Guid? currentExerciseId)
+    private async Task<EngineReviewTestHost> StartHostAsync(
+        Guid? currentExerciseId,
+        bool authenticatedStaff = true,
+        Guid? assignedExerciseId = null)
     {
         _fixture.ConnectionString.Should().NotBeNull(
             "the Docker-gated MsSql fixture must have started and captured its connection string before these tests run");
-        return await EngineReviewTestHost.StartAsync(_fixture.ConnectionString!, currentExerciseId);
+        return await EngineReviewTestHost.StartAsync(
+            _fixture.ConnectionString!, currentExerciseId, authenticatedStaff, assignedExerciseId);
     }
 
     private async Task SeedAsync(params EngineReviewItemEntity[] items)
@@ -339,9 +447,29 @@ public sealed class EngineReviewEndpointsTests
 
         public IServiceProvider Services => _app.Services;
 
-        public static async Task<EngineReviewTestHost> StartAsync(string connectionString, Guid? currentExerciseId)
+        public static async Task<EngineReviewTestHost> StartAsync(
+            string connectionString,
+            Guid? currentExerciseId,
+            bool authenticatedStaff = true,
+            Guid? assignedExerciseId = null)
         {
             var publisher = new CapturingEnginePublishService();
+
+            // The staff caller the cockpit authorization filter (COR-005) gates on. A default host is an
+            // authenticated staff user ASSIGNED to the resolved exercise (so the pre-existing route/scope/
+            // publish tests pass through the new gate unchanged); the denial-case tests flip these knobs.
+            var staffUserId = Guid.NewGuid();
+            var accessor = authenticatedStaff
+                ? new StubCurrentStaffSessionAccessor(new CurrentStaffSession { SessionId = Guid.NewGuid(), StaffUserId = staffUserId })
+                : new StubCurrentStaffSessionAccessor(null);
+
+            // Seed the assignment the filter checks against. Defaults to the resolved exercise (authorized);
+            // a denial test can point it at a DIFFERENT exercise to prove the not-assigned 403. GetAssignments
+            // inner-joins Exercise, so the Exercise row must exist for the assignment to surface.
+            if (authenticatedStaff && (assignedExerciseId ?? currentExerciseId) is { } assignExercise)
+            {
+                await SeedStaffAssignmentAsync(connectionString, staffUserId, assignExercise);
+            }
 
             var builder = WebApplication.CreateBuilder();
             builder.WebHost.UseTestServer();
@@ -354,6 +482,13 @@ public sealed class EngineReviewEndpointsTests
             builder.Services.AddEngineRuntimeSeams();
             builder.Services.AddExerciseClock();
             builder.Services.AddEngineReview();
+
+            // B2's staff-identity dependency the cockpit authorization filter reuses (the orchestrator wires
+            // AddStaffIdentity before the engine-review feature in production). Register just the assignment
+            // service + the (stubbed) current-staff-session accessor the filter resolves per request.
+            builder.Services.AddScoped<StaffAssignmentService>();
+            builder.Services.RemoveAll<ICurrentStaffSessionAccessor>();
+            builder.Services.AddScoped<ICurrentStaffSessionAccessor>(_ => accessor);
 
             // The auto-HOLD tick host stays registered (production-faithful) but is inert in these HTTP tests:
             // the scenario clock is never started here, so every exercise reads scenario minute 0 and no
@@ -378,6 +513,37 @@ public sealed class EngineReviewEndpointsTests
         {
             Client.Dispose();
             await _app.DisposeAsync();
+        }
+
+        /// <summary>
+        /// Seeds the <see cref="Exercise"/> + <see cref="StaffAssignment"/> rows the cockpit authorization
+        /// filter reads (via <see cref="StaffAssignmentService.GetAssignmentsAsync"/>) so the seeded staff user
+        /// is assigned to <paramref name="exerciseId"/>. Both are unscoped entities, so the write-guard needs
+        /// no resolved exercise scope here.
+        /// </summary>
+        private static async Task SeedStaffAssignmentAsync(string connectionString, Guid staffUserId, Guid exerciseId)
+        {
+            var options = new DbContextOptionsBuilder<PulseDbContext>()
+                .UseSqlServer(connectionString)
+                .Options;
+
+            await using var context = new PulseDbContext(options);
+            context.Exercises.Add(new Exercise
+            {
+                Id = exerciseId,
+                Name = "Cockpit Auth Test Exercise",
+                TimeZone = "UTC",
+                Status = "active",
+            });
+            context.StaffAssignments.Add(new StaffAssignment
+            {
+                Id = Guid.NewGuid(),
+                StaffUserId = staffUserId,
+                ExerciseId = exerciseId,
+                Role = "controller",
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+            await context.SaveChangesAsync();
         }
     }
 }

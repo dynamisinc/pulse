@@ -66,14 +66,22 @@ public static class EngineReviewEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        endpoints.MapGet("/api/engine/review-queue", GetQueueAsync);
-        endpoints.MapPost("/api/engine/review/{draftId:guid}/approve", ApproveAsync);
-        endpoints.MapPost("/api/engine/review/{draftId:guid}/edit", EditAsync);
-        endpoints.MapPost("/api/engine/review/{draftId:guid}/veto", VetoAsync);
-        endpoints.MapPost("/api/engine/review/{draftId:guid}/re-roll", ReRollAsync);
-        endpoints.MapPost("/api/engine/review/batch-approve", BatchApproveAsync);
-        endpoints.MapPost("/api/engine/autonomy/swamped-mode", SetSwampedModeAsync);
-        endpoints.MapPost("/api/engine/autonomy/kill-switch", EngageKillSwitchAsync);
+        // Every cockpit endpoint is STAFF-only and assigned-exercise-only (COR-005). One shared authorization
+        // filter (EngineCockpitStaffAuthorizationFilter) gates the whole group BEFORE any handler — layered on
+        // top of the service's COR-001 scope resolution, which is unchanged. The group carries an EMPTY prefix
+        // so the absolute route templates stay exactly as before (the orchestrator wires the same paths).
+        var cockpit = endpoints
+            .MapGroup(string.Empty)
+            .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>();
+
+        cockpit.MapGet("/api/engine/review-queue", GetQueueAsync);
+        cockpit.MapPost("/api/engine/review/{draftId:guid}/approve", ApproveAsync);
+        cockpit.MapPost("/api/engine/review/{draftId:guid}/edit", EditAsync);
+        cockpit.MapPost("/api/engine/review/{draftId:guid}/veto", VetoAsync);
+        cockpit.MapPost("/api/engine/review/{draftId:guid}/re-roll", ReRollAsync);
+        cockpit.MapPost("/api/engine/review/batch-approve", BatchApproveAsync);
+        cockpit.MapPost("/api/engine/autonomy/swamped-mode", SetSwampedModeAsync);
+        cockpit.MapPost("/api/engine/autonomy/kill-switch", EngageKillSwitchAsync);
 
         return endpoints;
     }
