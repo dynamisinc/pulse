@@ -49,9 +49,24 @@
  * `accountId` (present for read-only sessions too — satisfies the view
  * superRefine, COR-015). `scenarioTime` is scenario `now`; `wallClockTime` is
  * the telemetry-only wall clock (never rendered).
+ *
+ * WAVE-S3.1 INTEGRATION (orchestrator-owned — reactions/01 + amplification/01
+ * + hashtags-trending/01 "integration seam"): `FeedRow` now ALSO calls
+ * `useReaction()` and `useAmplify()` per post — the same per-row-hook shape
+ * `useReaction`'s own module header anticipates — and threads their state/
+ * handlers into `<PostCard>` exactly like the pre-existing `onOpenThread`
+ * wiring: `likedByViewer`/`onLike` (SOC-030), `onRepost` (SOC-020), and a
+ * per-row "Quote" panel (`<QuoteComposer>`, opened via `onQuote`) that calls
+ * `useAmplify().doQuote`. The row's `post.counts.like` is OVERRIDDEN by the
+ * hook's own optimistic `likeCount` before it reaches `<PostCard>`, so a
+ * toggle renders immediately without waiting on a feed refetch. `onHashtagOpen`
+ * threads straight through to `<PostCard>` (the shell channel supplies it).
+ * None of this touches the row's memoization: `FeedRow`'s OWN internal hook
+ * state doesn't affect whether `React.memo` bails out on unchanged
+ * `post`/`variant`/`onOpenThread`/`onHashtagOpen` props (NFR-002/SOC-071).
  */
 
-import { memo, useEffect, useRef } from 'react'
+import { memo, useMemo, useState, useEffect, useRef } from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { scenarioNow } from '@/core/clock'
@@ -63,6 +78,9 @@ import {
   affordancesAvailable,
 } from '@/features/participant-shell/mountContract'
 import { useFeed } from '../hooks/useFeed'
+import { useReaction } from '../hooks/useReaction'
+import { useAmplify } from '../hooks/useAmplify'
+import { QuoteComposer } from '../components/QuoteComposer'
 import styles from './Feed.module.css'
 
 type CardVariant = 'full' | 'readOnly'
@@ -74,20 +92,63 @@ interface FeedRowProps {
    * identity (a `useCallback`), so the memoized row still skips re-render under
    * burst (NFR-002/SOC-071) even though a function prop is threaded through. */
   onOpenThread?: (id: string) => void
+  /** Opens the tapped hashtag's feed; supplied by the shell channel
+   * (Wave-S3.1). Omitted in isolation — hashtags stay inert links. */
+  onHashtagOpen?: (tag: string) => void
 }
 
 /**
  * A single feed row, memoized so an unchanged post does not re-render when the
  * feed page re-renders (the burst-legibility guarantee — NFR-002/SOC-071).
  * Props are primitives + a referentially-stable `PostView` (see `useFeed`), so
- * the default shallow comparison is correct here.
+ * the default shallow comparison is correct here. Owns its OWN like/repost/
+ * quote wiring (see module header) — that internal state doesn't affect the
+ * memo comparison, which is prop-only.
  */
-const FeedRow = memo(function FeedRow({ post, variant, onOpenThread }: FeedRowProps) {
+const FeedRow = memo(function FeedRow({
+  post,
+  variant,
+  onOpenThread,
+  onHashtagOpen,
+}: FeedRowProps) {
+  const reaction = useReaction({ postId: post.id, initialLikeCount: post.counts.like })
+  const amplify = useAmplify({ postId: post.id })
+  const [quoting, setQuoting] = useState(false)
+
+  // Override the seeded like count with the hook's own optimistic total, so a
+  // toggle renders immediately (SOC-030) without waiting on a feed refetch.
+  const displayPost: PostView = useMemo(
+    () => ({ ...post, counts: { ...post.counts, like: reaction.likeCount } }),
+    [post, reaction.likeCount],
+  )
+
+  const handleQuoteSubmit = (commentary: string) => {
+    amplify.doQuote(commentary)
+    setQuoting(false)
+  }
+
   return (
     <li className={styles.row}>
       {/* Tapping the post body OR its reply affordance opens the flattened
           thread (SOC-011); the shell channel supplies onOpenThread. */}
-      <PostCard post={post} variant={variant} onOpen={onOpenThread} onReply={onOpenThread} />
+      <PostCard
+        post={displayPost}
+        variant={variant}
+        onOpen={onOpenThread}
+        onReply={onOpenThread}
+        likedByViewer={reaction.likedByViewer}
+        onLike={reaction.canReact ? reaction.toggleLike : undefined}
+        onRepost={amplify.canAmplify ? amplify.doRepost : undefined}
+        onQuote={amplify.canAmplify ? () => setQuoting(true) : undefined}
+        onHashtagOpen={onHashtagOpen}
+      />
+      {quoting && (
+        <QuoteComposer
+          authorName={post.author.displayName}
+          onSubmit={handleQuoteSubmit}
+          onCancel={() => setQuoting(false)}
+        />
+      )}
     </li>
   )
 })
@@ -97,9 +158,12 @@ export interface FeedProps {
    * supplies it. Omitted in isolation — the feed still renders, just without
    * thread navigation. */
   readonly onOpenThread?: (id: string) => void
+  /** Opens the tapped hashtag's feed (SOC-040); the shell channel supplies
+   * it. Omitted in isolation — hashtags stay inert links. */
+  readonly onHashtagOpen?: (tag: string) => void
 }
 
-export function Feed({ onOpenThread }: FeedProps = {}) {
+export function Feed({ onOpenThread, onHashtagOpen }: FeedProps = {}) {
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
   const { variant } = useShellContext()
@@ -140,6 +204,7 @@ export function Feed({ onOpenThread }: FeedProps = {}) {
             post={post}
             variant={cardVariant}
             onOpenThread={onOpenThread}
+            onHashtagOpen={onHashtagOpen}
           />
         ))}
       </ul>

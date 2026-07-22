@@ -27,9 +27,19 @@
  * Values mirror `tokens.ts`'s `LIGHT_PALETTE`/`DARK_PALETTE` — keep both in
  * sync by hand if either changes (a CSS Module cannot import a `.ts` file's
  * values directly).
+ *
+ * `.tokens` (Wave-S3.1 orchestrator extraction) is the token-only slice of
+ * `.postCard` — the same custom-property declarations (light default + both
+ * dark triggers) WITHOUT any layout rule. `.postCard` composes it so nothing
+ * here changes for `<PostCard>` itself; other participant-world components
+ * that sit alongside (not inside) a `<PostCard>` — e.g. `<QuotePostCard>`'s
+ * inline-styled roots, `<QuoteComposer>` — apply `.tokens` directly so their
+ * `var(--pc-*)` reads resolve to the SAME palette/dark-mode/`--pulse-ac`
+ * cascade, instead of re-hardcoding the hex values (the Gate-1 token-drift
+ * finding this extraction fixes).
  */
 
-.postCard {
+.tokens {
   /* Light-mode palette (default) */
   --pc-bg: #fff;
   --pc-panel: #f3f5f6;
@@ -39,6 +49,33 @@
   --pc-hover: rgba(14, 21, 24, .045);
   /* Per-exercise accent hook (COR-030) — never hardcode a bare accent color. */
   --pc-accent: var(--pulse-ac, #1e3a5f);
+}
+
+/* OS-level dark mode (no host override). */
+@media (prefers-color-scheme: dark) {
+  .tokens {
+    --pc-bg: #0c1116;
+    --pc-panel: #161e25;
+    --pc-line: #233039;
+    --pc-ink: #e9eef1;
+    --pc-ink-muted: #8aa0ac;
+    --pc-hover: rgba(255, 255, 255, .05);
+  }
+}
+
+/* Host-forced dark mode — `data-theme="dark"` on the token root OR an ancestor. */
+:global([data-theme='dark']) .tokens,
+.tokens:global([data-theme='dark']) {
+  --pc-bg: #0c1116;
+  --pc-panel: #161e25;
+  --pc-line: #233039;
+  --pc-ink: #e9eef1;
+  --pc-ink-muted: #8aa0ac;
+  --pc-hover: rgba(255, 255, 255, .05);
+}
+
+.postCard {
+  composes: tokens;
 
   display: flex;
   align-items: flex-start;
@@ -52,29 +89,6 @@
   color: var(--pc-ink);
   font-family: 'Figtree', system-ui, sans-serif;
   text-align: left;
-}
-
-/* OS-level dark mode (no host override). */
-@media (prefers-color-scheme: dark) {
-  .postCard {
-    --pc-bg: #0c1116;
-    --pc-panel: #161e25;
-    --pc-line: #233039;
-    --pc-ink: #e9eef1;
-    --pc-ink-muted: #8aa0ac;
-    --pc-hover: rgba(255, 255, 255, .05);
-  }
-}
-
-/* Host-forced dark mode — `data-theme="dark"` on the card root OR an ancestor. */
-:global([data-theme='dark']) .postCard,
-.postCard:global([data-theme='dark']) {
-  --pc-bg: #0c1116;
-  --pc-panel: #161e25;
-  --pc-line: #233039;
-  --pc-ink: #e9eef1;
-  --pc-ink-muted: #8aa0ac;
-  --pc-hover: rgba(255, 255, 255, .05);
 }
 
 /* --------------------------------------------------------------------------
@@ -100,6 +114,7 @@
 }
 
 .openable {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -107,11 +122,30 @@
   border-radius: 12px;
 }
 
-.openable[role='button'] {
+/*
+ * The open-region overlay button (WR-001, NFR-001 — Gate-2 fix). A real,
+ * non-nested `<button>` (see `PostCard.tsx`) absolutely positioned to fill
+ * `.openable`'s box — the "stretched-link" pattern, so tapping ANYWHERE in
+ * the card body (header/text/media/link-preview) opens the thread without
+ * that region itself being a `role="button"` ancestor of the linkified
+ * hashtag anchors. Fully transparent: it is a hit target only, never a
+ * visible layer. `z-index: 1` is deliberately LOWER than the hashtag anchor's
+ * (`PostCard.tsx`'s `HASHTAG_LINK_STYLE`, `z-index: 2`) so a hashtag tap
+ * reaches its own link instead of this overlay.
+ */
+.openTarget {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: none;
   cursor: pointer;
 }
 
-.openable:focus-visible {
+.openTarget:focus-visible {
   outline: 2px solid var(--pc-accent);
   outline-offset: 2px;
 }
@@ -247,6 +281,47 @@
 
 .actionButton:hover,
 .actionButton:focus-visible {
+  background: var(--pc-hover);
+  color: var(--pc-accent);
+}
+
+/*
+ * The viewer's own "liked" state (reactions story 01, SOC-030). Color is
+ * paired with a font-weight change on the count (below) AND `aria-pressed` +
+ * an "…, liked" accessible-name suffix on the button itself, so the state is
+ * never color-only (NFR-001).
+ */
+.actionButtonActive {
+  color: var(--pc-accent);
+}
+
+.actionButtonActive .actionCount {
+  font-weight: 700;
+}
+
+/*
+ * The quote trigger — a small, separate control next to the canonical
+ * "repost" action (amplification story 01, SOC-020). Kept OUT of the
+ * `actions.map` canonical set (never a `data-action` attribute) so the
+ * reply/repost/like(/share) order + count stays exactly R-002's contract;
+ * this is reachable as its own sibling control instead of overloading the
+ * repost button with a second meaning.
+ */
+.quoteTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--pc-ink-muted);
+  cursor: pointer;
+}
+
+.quoteTrigger:hover,
+.quoteTrigger:focus-visible {
   background: var(--pc-hover);
   color: var(--pc-accent);
 }

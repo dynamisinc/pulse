@@ -1,0 +1,272 @@
+/*
+ * features/social/pages/Profile.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the persona/participant profile page (feature:
+ * profiles-social-graph, story 01; SOC-050). CSS Module — every class is
+ * locally scoped; nothing leaks a global name and this file carries NO
+ * COBRA/MUI dependency (participant world, Pulse skin).
+ *
+ * Layout mirrors the D1 social column: a LEFT-ANCHORED ~600px column matching
+ * the PostCard max-width, mobile-first (full-bleed below the column width).
+ *
+ * Theming model mirrors `../theme/social.module.css` exactly so the profile
+ * frame tracks the post cards it stacks: `.profile` declares the light-mode
+ * palette as CSS custom properties, then rules read `var(--pf-*)`. Dark mode
+ * has the same TWO independent triggers — the OS `prefers-color-scheme: dark`
+ * media query AND a host-set `[data-theme="dark"]` on the root or any ancestor
+ * — neither dependent on a React theme provider. Values mirror `tokens.ts`'s
+ * LIGHT/DARK_PALETTE; keep both in sync by hand.
+ *
+ * ACCENT (COR-030): the banner is accent-tinted via the shared `--pulse-ac`
+ * custom property (the per-exercise rebrand hook) with the Cadence-navy default
+ * fallback — never a bare hardcoded accent. The verified mark is deliberately
+ * NOT themed here (it uses the fixed seal-blue directly in <VerifiedMark>).
+ */
+
+.profile {
+  /* Light-mode palette (default) — mirrors tokens.ts LIGHT_PALETTE. */
+  --pf-bg: #fff;
+  --pf-panel: #f3f5f6;
+  --pf-line: #e5e8ea;
+  --pf-ink: #0e1518;
+  --pf-ink-muted: #61707a;
+  --pf-hover: rgba(14, 21, 24, .045);
+  /* Per-exercise accent hook (COR-030) — never hardcode a bare accent color. */
+  --pf-accent: var(--pulse-ac, #1e3a5f);
+
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 600px;
+  /* Left-anchored (D1-013) — no auto side margins, sits at the content edge. */
+  margin: 0;
+  background: var(--pf-bg);
+  color: var(--pf-ink);
+  font-family: 'Figtree', system-ui, sans-serif;
+  text-align: left;
+}
+
+/* OS-level dark mode (no host override). */
+@media (prefers-color-scheme: dark) {
+  .profile {
+    --pf-bg: #0c1116;
+    --pf-panel: #161e25;
+    --pf-line: #233039;
+    --pf-ink: #e9eef1;
+    --pf-ink-muted: #8aa0ac;
+    --pf-hover: rgba(255, 255, 255, .05);
+  }
+}
+
+/* Host-forced dark mode — `data-theme="dark"` on the root OR an ancestor. */
+:global([data-theme='dark']) .profile,
+.profile:global([data-theme='dark']) {
+  --pf-bg: #0c1116;
+  --pf-panel: #161e25;
+  --pf-line: #233039;
+  --pf-ink: #e9eef1;
+  --pf-ink-muted: #8aa0ac;
+  --pf-hover: rgba(255, 255, 255, .05);
+}
+
+/* --------------------------------------------------------------------------
+ * Header: accent-tinted banner + overlapping avatar
+ * ------------------------------------------------------------------------ */
+
+.banner {
+  /* Accent-tinted (COR-030) — a soft gradient of the per-exercise accent so a
+   * rebrand recolors the profile hero from the one --pulse-ac variable. */
+  height: 150px;
+  background:
+    linear-gradient(135deg, var(--pf-accent) 0%, color-mix(in srgb, var(--pf-accent) 70%, #000 30%) 100%);
+}
+
+.identity {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 16px 12px;
+}
+
+.avatarRing {
+  /* Pull the avatar up so it overlaps the banner (the familiar social lockup). */
+  margin-top: -42px;
+  margin-bottom: 4px;
+  display: inline-flex;
+  padding: 4px;
+  width: max-content;
+  border-radius: 999px;
+  background: var(--pf-bg);
+}
+
+.nameRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.displayName {
+  margin: 0;
+  overflow: hidden;
+  color: var(--pf-ink);
+  font-size: 20px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.verifiedMark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.handle {
+  color: var(--pf-ink-muted);
+  font-size: 15px;
+}
+
+.bio {
+  margin: 8px 0 0;
+  overflow-wrap: break-word;
+  color: var(--pf-ink);
+  font-size: 15px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+/* --------------------------------------------------------------------------
+ * Meta row (joined; location/link render here when the model carries them)
+ * ------------------------------------------------------------------------ */
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 10px;
+  color: var(--pf-ink-muted);
+  font-size: 14px;
+}
+
+.metaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.metaIcon {
+  width: 14px;
+  height: 14px;
+}
+
+/* --------------------------------------------------------------------------
+ * Follower / following counts
+ * ------------------------------------------------------------------------ */
+
+.stats {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.stat {
+  color: var(--pf-ink-muted);
+  font-size: 14px;
+}
+
+.statValue {
+  color: var(--pf-ink);
+  font-weight: 700;
+}
+
+/* --------------------------------------------------------------------------
+ * Tabs (Posts / Posts & replies / Media / Likes)
+ * ------------------------------------------------------------------------ */
+
+.tabs {
+  display: flex;
+  margin-top: 12px;
+  border-bottom: 1px solid var(--pf-line);
+}
+
+.tab {
+  flex: 1 1 auto;
+  position: relative;
+  margin: 0;
+  padding: 14px 8px;
+  border: none;
+  background: none;
+  color: var(--pf-ink-muted);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab:hover,
+.tab:focus-visible {
+  background: var(--pf-hover);
+  color: var(--pf-ink);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--pf-accent);
+  outline-offset: -2px;
+}
+
+.tabActive {
+  color: var(--pf-ink);
+}
+
+/* The active-tab indicator pairs the color change with a shape (underline) —
+ * never color alone (NFR-001). */
+.tabActive::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 56px;
+  max-width: 70%;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--pf-accent);
+}
+
+/* --------------------------------------------------------------------------
+ * Tab panels + post list
+ * ------------------------------------------------------------------------ */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: block;
+}
+
+/* Calm, in-fiction loading/empty state — no exercise/admin language. */
+.state {
+  padding: 32px 16px;
+  color: var(--pf-ink-muted);
+  font-size: 15px;
+  text-align: center;
+}
+
+.srOnly {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}

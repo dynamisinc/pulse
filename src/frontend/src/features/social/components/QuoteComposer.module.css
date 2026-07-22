@@ -1,0 +1,83 @@
+/*
+ * features/social/components/QuoteComposer.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the inline quote-commentary capture (`QuoteComposer.tsx`,
+ * Wave-S3.1 orchestrator integration — amplification story 01). Reads the
+ * SAME `--pc-*` tokens `../theme/social.module.css`'s `.tokens` class
+ * declares (composed onto this form's root by the component) — no hardcoded
+ * hex here, so a per-exercise accent / dark-mode override cascades exactly as
+ * it does for `PostCard`.
+ */
+
+.quoteComposer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 16px 12px 56px;
+  padding: 8px 12px;
+  border: 1px solid var(--pc-line);
+  border-radius: 14px;
+  background: var(--pc-panel);
+}
+
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid var(--pc-line);
+  border-radius: 8px;
+  background: var(--pc-bg);
+  color: var(--pc-ink);
+  font-family: 'Figtree', system-ui, sans-serif;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 1px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cancelButton,
+.submitButton {
+  margin: 0;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cancelButton {
+  background: none;
+  color: var(--pc-ink-muted);
+}
+
+.cancelButton:hover,
+.cancelButton:focus-visible {
+  background: var(--pc-hover);
+}
+
+.submitButton {
+  background: var(--pc-accent);
+  color: #fff;
+}
+
+.submitButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.submitButton:not(:disabled):hover,
+.submitButton:not(:disabled):focus-visible {
+  filter: brightness(1.08);
+}

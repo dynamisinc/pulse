@@ -18,7 +18,7 @@ safety · Trending", "Fairhaven · East side", "News · Newsline 7") (D1-R5) —
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Hashtags (parse / linkify / feed) | SOC-040 | Not Started | #106 |
+| 01 | Hashtags (parse / linkify / feed) | SOC-040 | Complete | #106 |
 | 02 | Organic trending + controller boost-weight | SOC-041 | Not Started | #107 |
 | 03 | Trending recompute (scoped, ≤60s) | SOC-042 | Not Started | #108 |
 

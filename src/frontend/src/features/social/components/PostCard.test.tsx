@@ -297,12 +297,44 @@ describe('PostCard — keyboard operability (NFR-001)', () => {
     expect(onOpen).toHaveBeenCalledWith('post-9')
   })
 
-  it('exposes role="button" and tabIndex only when onOpen is provided', async () => {
+  it('renders no open-region affordance at all when onOpen is omitted', async () => {
     await renderWithExerciseContext(<PostCard post={buildPost()} />)
 
+    expect(screen.queryByTestId('post-open-target')).not.toBeInTheDocument()
+  })
+
+  it('renders the open-region affordance as a real, non-nested <button> when onOpen is provided (WR-001)', async () => {
+    await renderWithExerciseContext(<PostCard post={buildPost()} onOpen={vi.fn()} />)
+
     const target = screen.getByTestId('post-open-target')
+    // A native <button> — its "button" role/focusability is implicit from the
+    // tag itself, never an explicit `role`/`tabindex` attribute layered onto
+    // a non-interactive container (the pre-fix shape).
+    expect(target.tagName.toLowerCase()).toBe('button')
     expect(target).not.toHaveAttribute('role')
     expect(target).not.toHaveAttribute('tabindex')
+  })
+})
+
+describe('PostCard — open-region overlay never nests an interactive descendant (WR-001, NFR-001)', () => {
+  it('renders the hashtag link as a SIBLING of the open button, never its descendant', async () => {
+    await renderWithExerciseContext(
+      <PostCard
+        post={buildPost({ text: 'Follow #Zone2 for updates.' })}
+        onOpen={vi.fn()}
+        onHashtagOpen={vi.fn()}
+      />,
+    )
+
+    const openButton = screen.getByTestId('post-open-target')
+    const hashtagLink = screen.getByText('#Zone2')
+
+    expect(hashtagLink.tagName.toLowerCase()).toBe('a')
+    // The crux of the WR-001 fix: an interactive descendant of a
+    // role="button"/<button> is invalid ARIA nesting — assert the inverse
+    // directly, in both directions, so this regresses loudly if it comes back.
+    expect(openButton.contains(hashtagLink)).toBe(false)
+    expect(hashtagLink.contains(openButton)).toBe(false)
   })
 })
 

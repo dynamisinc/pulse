@@ -19,9 +19,9 @@ others", never fake lists (D1-012).
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Profile page (banner/avatar/bio/tabs) | SOC-050 | Not Started | #109 |
+| 01 | Profile page (banner/avatar/bio/tabs) | SOC-050 | Complete | #109 |
 | 02 | Follow / unfollow | SOC-051 | Not Started | #110 |
-| 03 | Verification signal & impersonation support | SOC-052 / D1-003, D1-008 | Not Started | #111 |
+| 03 | Verification signal & impersonation support | SOC-052 / D1-003, D1-008 | Complete | #111 |
 | 04 | "Who to follow" suggested follows | SOC-053 / D1-R1 | Not Started | #112 |
 | 05 | Audience magnitude & follower affordance | SOC-054 / D1-012 | Not Started | #113 |
 

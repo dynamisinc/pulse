@@ -17,7 +17,7 @@ a trust signal.
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Like with count | SOC-030 | Not Started | #104 |
+| 01 | Like with count | SOC-030 | Complete | #104 |
 | 02 | Sentiment reaction set (per-exercise) | SOC-031 | Not Started | #105 |
 
 ## Dependencies
