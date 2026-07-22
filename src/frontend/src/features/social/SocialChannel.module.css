@@ -85,3 +85,30 @@
   width: 14px;
   height: 14px;
 }
+
+/*
+ * "View my profile" (Wave-S3.1 — profiles-social-graph/01 reachability) — a
+ * real, standalone control above the feed, never nested inside a
+ * `<PostCard>`. Same visual treatment as `.back` (an in-fiction text link,
+ * never a COBRA control).
+ */
+.viewProfileLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--sc-accent);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.viewProfileLink:hover,
+.viewProfileLink:focus-visible {
+  background: var(--sc-hover);
+}

@@ -41,9 +41,17 @@
  *
  * World: participant (Pulse skin). No COBRA, no themed MUI — plain semantic
  * elements with inline styles (mirrors `<Avatar>`, which is deliberately
- * self-contained and CSS-Module-free); the per-exercise accent reads the shared
- * `--pulse-ac` custom property (COR-030) with the Cadence-navy default.
- * FontAwesome icons only.
+ * self-contained and CSS-Module-free) — but NOT palette-independent: both
+ * root elements below carry `social.module.css`'s shared `.tokens` class (the
+ * token-only slice `<PostCard>`'s own root composes), so every inline style
+ * that reads a `var(--pc-*)` custom property resolves to the SAME light/
+ * dark-mode palette `<PostCard>` uses, rather than a second, hand-copied hex
+ * palette that can drift out of sync (the Gate-1 finding this fixes). This
+ * component does NOT itself use the per-exercise `--pc-accent`/`--pulse-ac`
+ * token — nothing here renders an accent-colored element (the repost icon and
+ * every text run use the ink/muted/line/panel tokens only); the `.tokens`
+ * class still declares `--pc-accent` (composed from `<PostCard>`'s single
+ * definition), it simply goes unread here today. FontAwesome icons only.
  */
 
 import type { CSSProperties } from 'react'
@@ -55,6 +63,7 @@ import { useScenarioTime, type UseScenarioTimeResult } from '@/core/clock'
 import { Avatar } from './Avatar'
 import { VerifiedMark } from './VerifiedMark'
 import { PostCard, type PostView } from './PostCard'
+import tokens from '../theme/social.module.css'
 
 export interface QuotePostCardProps {
   /** The persona doing the amplifying (the reposter / quoter). */
@@ -77,12 +86,16 @@ export interface QuotePostCardProps {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Skin tokens (light palette; mirrors social.module.css's LIGHT_PALETTE).     */
+/* Skin tokens — CSS custom-property reads, NOT hardcoded hex (Gate-1 fix).    */
+/* The fallback after the comma is `social.module.css`'s LIGHT_PALETTE value,  */
+/* used only if `.tokens` is somehow absent from the DOM ancestry; in normal   */
+/* use both root elements below carry `tokens.tokens`, so these always read   */
+/* the SAME light/dark-mode-aware values `<PostCard>` renders with.           */
 /* -------------------------------------------------------------------------- */
-const INK = '#0e1518'
-const INK_MUTED = '#61707a'
-const LINE = '#e5e8ea'
-const PANEL = '#f3f5f6'
+const INK = 'var(--pc-ink, #0e1518)'
+const INK_MUTED = 'var(--pc-ink-muted, #61707a)'
+const LINE = 'var(--pc-line, #e5e8ea)'
+const PANEL = 'var(--pc-panel, #f3f5f6)'
 const FONT = "'Figtree', system-ui, sans-serif"
 
 export function QuotePostCard({
@@ -101,7 +114,12 @@ export function QuotePostCard({
 
   if (!isQuote) {
     return (
-      <div data-testid="quote-post-card" data-amplification="repost" style={rootStyle}>
+      <div
+        data-testid="quote-post-card"
+        data-amplification="repost"
+        className={tokens.tokens}
+        style={rootStyle}
+      >
         <p data-testid="repost-attribution" style={attributionStyle}>
           <FontAwesomeIcon icon={faRetweet} aria-hidden="true" />
           <span>{`${amplifier.displayName} reposted`}</span>
@@ -118,6 +136,7 @@ export function QuotePostCard({
     <article
       data-testid="quote-post-card"
       data-amplification="quote"
+      className={tokens.tokens}
       style={{ ...rootStyle, ...quoteArticleStyle }}
     >
       <div style={{ flex: 'none' }}>
@@ -197,7 +216,7 @@ const rootStyle: CSSProperties = {
   maxWidth: 600,
   fontFamily: FONT,
   textAlign: 'left',
-  background: '#fff',
+  background: 'var(--pc-bg, #fff)',
   color: INK,
 }
 

@@ -43,9 +43,25 @@
  * Isolation (COR-001/XC-002): `useExerciseContext().exerciseId` is read ONLY
  * to stamp the telemetry envelope, never as a query-scoping param — the
  * thread's actual scope is server-side (`useThread`'s resolution seam).
+ *
+ * WAVE-S3.1 INTEGRATION (orchestrator-owned — reactions/01 + amplification/01
+ * + hashtags-trending/01 "integration seam"): every `<PostCard>` this
+ * component renders (ancestors, the focused post, and each visible reply) now
+ * goes through the internal `ThreadCard` wrapper, which calls `useReaction()`/
+ * `useAmplify()` for THAT post and threads `likedByViewer`/`onLike`,
+ * `onRepost`/`onQuote` (+ an inline `<QuoteComposer>`), and `onHashtagOpen`
+ * into it — the exact same per-row-hook shape `Feed.tsx`'s `FeedRow` uses.
+ * `useReaction`/`useAmplify` both gate on the bound session's `isReadOnly`
+ * internally, so an observer session's like/repost/quote here are already
+ * functional no-ops (D1-011) even though — a PRE-EXISTING gap, not
+ * introduced by this pass — this component has never threaded the shell
+ * `variant` into `<PostCard>` (every post here always renders the visually
+ * "full" action row regardless of session type; `ThreadView.test.tsx` also
+ * never wraps a `ShellContextProvider`, so adding that here is a separate,
+ * threads-replies-owned fix, not this integration's seam).
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import { scenarioNow } from '@/core/clock'
@@ -54,11 +70,64 @@ import { useSession } from '@/core/auth'
 import { usePersonas, type Persona } from '@/features/personas'
 import { PostCard, type ParticipantPostView, type PostView } from '@/features/social'
 import { useThread, type ThreadReplyView } from '../hooks/useThread'
+import { useReaction } from '../hooks/useReaction'
+import { useAmplify } from '../hooks/useAmplify'
+import { QuoteComposer } from './QuoteComposer'
 import styles from './ThreadView.module.css'
 
 export interface ThreadViewProps {
   /** The post id the thread is centered on. */
   readonly focusedPostId: string
+  /** Opens the tapped hashtag's feed (SOC-040); the shell channel supplies
+   * it. Omitted in isolation — hashtags stay inert links. */
+  readonly onHashtagOpen?: (tag: string) => void
+}
+
+interface ThreadCardProps {
+  readonly view: PostView
+  readonly onHashtagOpen?: (tag: string) => void
+}
+
+/**
+ * One thread post, wired with its OWN like/repost/quote state — the
+ * Wave-S3.1 analog of `Feed.tsx`'s `FeedRow` (see module header). Not
+ * memoized: unlike the feed's burst surface, a thread's post set is small and
+ * static once resolved, so the `React.memo` guarantee isn't needed here.
+ */
+function ThreadCard({ view, onHashtagOpen }: ThreadCardProps) {
+  const reaction = useReaction({ postId: view.id, initialLikeCount: view.counts.like })
+  const amplify = useAmplify({ postId: view.id })
+  const [quoting, setQuoting] = useState(false)
+
+  const displayView: PostView = useMemo(
+    () => ({ ...view, counts: { ...view.counts, like: reaction.likeCount } }),
+    [view, reaction.likeCount],
+  )
+
+  const handleQuoteSubmit = (commentary: string) => {
+    amplify.doQuote(commentary)
+    setQuoting(false)
+  }
+
+  return (
+    <>
+      <PostCard
+        post={displayView}
+        likedByViewer={reaction.likedByViewer}
+        onLike={reaction.canReact ? reaction.toggleLike : undefined}
+        onRepost={amplify.canAmplify ? amplify.doRepost : undefined}
+        onQuote={amplify.canAmplify ? () => setQuoting(true) : undefined}
+        onHashtagOpen={onHashtagOpen}
+      />
+      {quoting && (
+        <QuoteComposer
+          authorName={view.author.displayName}
+          onSubmit={handleQuoteSubmit}
+          onCancel={() => setQuoting(false)}
+        />
+      )}
+    </>
+  )
 }
 
 /** Builds the `PostView` `<PostCard>` renders from a participant-safe post
@@ -82,7 +151,7 @@ function toPostView(
   }
 }
 
-export function ThreadView({ focusedPostId }: ThreadViewProps) {
+export function ThreadView({ focusedPostId, onHashtagOpen }: ThreadViewProps) {
   const { ancestors, focused, replies, loading, error } = useThread(focusedPostId)
   const { personas } = usePersonas()
   const session = useSession()
@@ -136,17 +205,24 @@ export function ThreadView({ focusedPostId }: ThreadViewProps) {
     <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
       {ancestors.map(ancestor => {
         const view = toPostView(ancestor, personaMap)
-        return view ? <PostCard key={view.id} post={view} /> : null
+        return view
+          ? <ThreadCard key={view.id} view={view} onHashtagOpen={onHashtagOpen} />
+          : null
       })}
 
       {focusedView && (
         <div className={styles.focusedWrap} data-testid="thread-focused">
-          <PostCard post={focusedView} />
+          <ThreadCard view={focusedView} onHashtagOpen={onHashtagOpen} />
         </div>
       )}
 
       {replies.map(reply => (
-        <ThreadReply key={reply.id} reply={reply} personaMap={personaMap} />
+        <ThreadReply
+          key={reply.id}
+          reply={reply}
+          personaMap={personaMap}
+          onHashtagOpen={onHashtagOpen}
+        />
       ))}
     </section>
   )
@@ -155,12 +231,14 @@ export function ThreadView({ focusedPostId }: ThreadViewProps) {
 interface ThreadReplyProps {
   readonly reply: ThreadReplyView
   readonly personaMap: ReadonlyMap<string, Persona>
+  readonly onHashtagOpen?: (tag: string) => void
 }
 
 /** One reply row: the "Replying to @handle" label, then either the reply's
- * `<PostCard>` or - if it was taken down (SOC-005/D1-009) - the interim
- * in-thread tombstone. */
-function ThreadReply({ reply, personaMap }: ThreadReplyProps) {
+ * `<PostCard>` (via `ThreadCard`, wired with its own like/repost/quote state)
+ * or - if it was taken down (SOC-005/D1-009) - the interim in-thread
+ * tombstone (which never gets that wiring — there is nothing to react to). */
+function ThreadReply({ reply, personaMap, onHashtagOpen }: ThreadReplyProps) {
   const repliedToAuthor = personaMap.get(reply.replyToPersonaId)
   const view = toPostView(reply, personaMap)
 
@@ -176,7 +254,7 @@ function ThreadReply({ reply, personaMap }: ThreadReplyProps) {
           This post is unavailable.
         </div>
       ) : (
-        view && <PostCard post={view} />
+        view && <ThreadCard view={view} onHashtagOpen={onHashtagOpen} />
       )}
     </div>
   )

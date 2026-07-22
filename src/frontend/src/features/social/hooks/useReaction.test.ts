@@ -37,7 +37,11 @@ function fixedClock(instant: Date): IExerciseClock {
 }
 
 function wrapper({ children }: { children: ReactNode }) {
-  return createElement(ExerciseContextProvider, null, createElement(SessionProvider, null, children))
+  return createElement(
+    ExerciseContextProvider,
+    null,
+    createElement(SessionProvider, null, children),
+  )
 }
 
 function reactionEvents() {

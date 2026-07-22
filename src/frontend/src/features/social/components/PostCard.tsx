@@ -50,18 +50,42 @@
  * so no existing consumer's behavior changes. `readOnly` counts stay fully
  * inert — `onReply` is never wired to them.
  *
+ * WAVE-S3.1 INTEGRATION (orchestrator-owned — see reactions/01 +
+ * amplification/01 implementation.md "integration seam"): like and
+ * repost/quote follow the EXACT same optional-prop, inert-until-wired
+ * contract `onReply` established above, so every existing consumer (that
+ * doesn't pass the new props) renders byte-identical to before:
+ *  - `onLike`/`likedByViewer` (SOC-030) wire the `like` action-row entry. The
+ *    viewer's own state pairs a color change with a font-weight change on the
+ *    count AND an "…, liked" accessible-name suffix — never color-only
+ *    (NFR-001). The caller (a `useReaction()` consumer) owns the state; this
+ *    component only renders it.
+ *  - `onRepost`/`onQuote` (SOC-020) wire the `repost` action-row entry
+ *    (direct repost) plus a SEPARATE, small "Quote" trigger rendered next to
+ *    it. Quote is deliberately NOT folded into the `repost` action's own
+ *    `data-action`/count — it carries no `data-action` at all, so the
+ *    reply/repost/like(/share) canonical set (R-002) and every existing
+ *    `button[data-action]` assertion are unaffected whether or not `onQuote`
+ *    is supplied. The caller owns what "quote" DOES (e.g. opening a
+ *    commentary composer) — this component only surfaces the tap.
+ *  - `onHashtagOpen` (hashtags-trending/01, SOC-040) fires with the
+ *    normalized tag when a linkified hashtag anchor is activated. Omitted ⇒
+ *    hashtags stay inert links (stop propagation to the card's `onOpen`, do
+ *    nothing else) — the exact pre-Wave-2 behavior.
+ *
  * World: participant (Pulse skin). No COBRA, no themed MUI — plain semantic
  * elements + the scoped `social.module.css` CSS Module (tokens read from CSS
  * custom properties; see that file's header for the theming model).
  */
 
-import type { KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faComment,
   faRetweet,
   faHeart,
   faArrowUpFromBracket,
+  faQuoteRight,
 } from '@fortawesome/free-solid-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import type { Persona } from '@/features/personas'
@@ -124,6 +148,38 @@ export interface PostCardProps {
    * inert there).
    */
   onReply?: (id: string) => void
+  /**
+   * Whether the VIEWER has liked this post (SOC-030) — the caller's
+   * `useReaction()` state, not fetched/derived here. Ignored when `onLike`
+   * is omitted (no active-state rendering without a wired control).
+   */
+  likedByViewer?: boolean
+  /**
+   * Fires with the post id when the like action is activated (click or
+   * keyboard). Optional — omit it and the like button behaves like an
+   * unwired `onReply` (no-op, no active-state styling). Never wired when
+   * `variant === 'readOnly'`.
+   */
+  onLike?: (id: string) => void
+  /**
+   * Fires with the post id when the repost action is activated (SOC-020).
+   * Optional — omit it (with `onQuote` also omitted) and the repost button
+   * behaves exactly as before (no-op).
+   */
+  onRepost?: (id: string) => void
+  /**
+   * Fires with the post id when the SEPARATE "Quote" trigger next to Repost
+   * is activated (SOC-020) — the caller owns what happens next (e.g.
+   * opening a commentary composer); this component only renders the
+   * trigger, and only when a handler is supplied.
+   */
+  onQuote?: (id: string) => void
+  /**
+   * Fires with the normalized tag (no leading `#`) when a linkified hashtag
+   * in the post text is activated (SOC-040). Optional — omit it and
+   * hashtags stay inert links (stop propagation to `onOpen`, no navigation).
+   */
+  onHashtagOpen?: (tag: string) => void
 }
 
 interface ActionSpec {
@@ -160,18 +216,37 @@ const HASHTAG_STYLE = { color: 'var(--pc-accent)' } as const
 
 /**
  * A hashtag tap/keyboard-activation must NOT also open the post's thread (the
- * card body's `onOpen`), so it stops propagation to the enclosing openable
- * region. Actual navigation to the hashtag feed is wired by the shell channel
- * in the Wave-2 integration pass (it reads the `data-hashtag` attribute); this
- * self-contained edit only renders the link and keeps it from triggering
- * onOpen.
+ * card body's `onOpen`), so it ALWAYS stops propagation to the enclosing
+ * openable region — regardless of whether `onHashtagOpen` is wired, so an
+ * unwired hashtag stays inert exactly as before Wave S3.1.
  */
-function stopHashtagClick(event: MouseEvent<HTMLAnchorElement>) {
-  event.stopPropagation()
+function handleHashtagClick(
+  tag: string,
+  onHashtagOpen: ((tag: string) => void) | undefined,
+) {
+  return (event: MouseEvent<HTMLAnchorElement>) => {
+    event.stopPropagation()
+    onHashtagOpen?.(tag)
+  }
 }
 
-function stopHashtagKey(event: KeyboardEvent<HTMLAnchorElement>) {
-  if (OPEN_KEYS.has(event.key)) event.stopPropagation()
+/**
+ * Same stop-propagation guarantee as {@link handleHashtagClick}, on Enter/
+ * Space. `preventDefault` is only called when a handler actually fires (never
+ * when `onHashtagOpen` is omitted), so an unwired hashtag's keyboard behavior
+ * is unchanged from before Wave S3.1.
+ */
+function handleHashtagKeyDown(
+  tag: string,
+  onHashtagOpen: ((tag: string) => void) | undefined,
+) {
+  return (event: KeyboardEvent<HTMLAnchorElement>) => {
+    if (!OPEN_KEYS.has(event.key)) return
+    event.stopPropagation()
+    if (!onHashtagOpen) return
+    event.preventDefault()
+    onHashtagOpen(tag)
+  }
 }
 
 /**
@@ -179,9 +254,13 @@ function stopHashtagKey(event: KeyboardEvent<HTMLAnchorElement>) {
  * render as React text children (never `dangerouslySetInnerHTML`, so a
  * script-like string stays inert — NFR-004); hashtags render as accent-styled,
  * keyboard-focusable `role="link"` anchors carrying the normalized tag in
- * `data-hashtag` (the seam the Wave-2 channel wiring reads to open the feed).
+ * `data-hashtag`, and — when `onHashtagOpen` is supplied (the Wave-2 channel
+ * wiring) — fire it with that tag on activation.
  */
-function renderPostText(text: string): ReactNode {
+function renderPostText(
+  text: string,
+  onHashtagOpen: ((tag: string) => void) | undefined,
+): ReactNode {
   return parseHashtags(text).map((token, index) => {
     if (token.type === 'text') return token.value
     return (
@@ -191,8 +270,8 @@ function renderPostText(text: string): ReactNode {
         tabIndex={0}
         data-hashtag={token.tag}
         style={HASHTAG_STYLE}
-        onClick={stopHashtagClick}
-        onKeyDown={stopHashtagKey}
+        onClick={handleHashtagClick(token.tag, onHashtagOpen)}
+        onKeyDown={handleHashtagKeyDown(token.tag, onHashtagOpen)}
       >
         {token.raw}
       </a>
@@ -200,7 +279,17 @@ function renderPostText(text: string): ReactNode {
   })
 }
 
-export function PostCard({ post, variant = 'full', onOpen, onReply }: PostCardProps) {
+export function PostCard({
+  post,
+  variant = 'full',
+  onOpen,
+  onReply,
+  likedByViewer,
+  onLike,
+  onRepost,
+  onQuote,
+  onHashtagOpen,
+}: PostCardProps) {
   const { timeZone } = useExerciseContext()
   const { format } = useScenarioTime(timeZone)
 
@@ -226,6 +315,23 @@ export function PostCard({ post, variant = 'full', onOpen, onReply }: PostCardPr
       event.preventDefault()
       handleOpen()
     }
+  }
+
+  /**
+   * The reply/like/repost action-row `onClick`s, generalized from the
+   * original reply-only ternary to the same optional-prop, inert-until-wired
+   * contract for all three (see the Wave-S3.1 module-header note). `share`
+   * has no wired handler yet — always `undefined`, unchanged from before.
+   */
+  const actionClickHandler = (key: ActionSpec['key']): (() => void) | undefined => {
+    if (key === 'reply') return onReply ? () => onReply(post.id) : undefined
+    if (key === 'like') return onLike ? () => onLike(post.id) : undefined
+    if (key === 'repost') return onRepost ? () => onRepost(post.id) : undefined
+    return undefined
+  }
+
+  const handleQuoteTrigger = () => {
+    onQuote?.(post.id)
   }
 
   return (
@@ -257,7 +363,7 @@ export function PostCard({ post, variant = 'full', onOpen, onReply }: PostCardPr
             </time>
           </header>
 
-          <p className={styles.text}>{renderPostText(post.text)}</p>
+          <p className={styles.text}>{renderPostText(post.text, onHashtagOpen)}</p>
 
           {post.media && post.media.length > 0 && (
             <div className={styles.media} data-testid="post-media">
@@ -288,31 +394,68 @@ export function PostCard({ post, variant = 'full', onOpen, onReply }: PostCardPr
         </div>
 
         <div className={styles.actions} data-testid="post-actions">
-          {actions.map(action => (
-            isReadOnly ? (
-              <span
-                key={action.key}
-                className={styles.actionInert}
-                data-action={action.key}
-              >
-                <FontAwesomeIcon icon={action.icon} aria-hidden="true" className={styles.actionIcon} />
-                <span className={styles.actionCount}>{action.count}</span>
-                <span className={styles.srOnly}>{action.label}</span>
-              </span>
-            ) : (
-              <button
-                key={action.key}
-                type="button"
-                className={styles.actionButton}
-                data-action={action.key}
-                aria-label={`${action.label}, ${action.count}`}
-                onClick={action.key === 'reply' && onReply ? () => onReply(post.id) : undefined}
-              >
-                <FontAwesomeIcon icon={action.icon} aria-hidden="true" className={styles.actionIcon} />
-                <span className={styles.actionCount}>{action.count}</span>
-              </button>
+          {actions.map(action => {
+            const isLiked =
+              action.key === 'like' && onLike !== undefined && likedByViewer === true
+            const activeClass = `${styles.actionButton} ${styles.actionButtonActive}`
+            const buttonClass = isLiked ? activeClass : styles.actionButton
+            const pressed = action.key === 'like' && onLike ? likedByViewer === true : undefined
+            const label = isLiked
+              ? `${action.label}, ${action.count}, liked`
+              : `${action.label}, ${action.count}`
+
+            return (
+              <Fragment key={action.key}>
+                {isReadOnly ? (
+                  <span
+                    className={styles.actionInert}
+                    data-action={action.key}
+                  >
+                    <FontAwesomeIcon
+                      icon={action.icon}
+                      aria-hidden="true"
+                      className={styles.actionIcon}
+                    />
+                    <span className={styles.actionCount}>{action.count}</span>
+                    <span className={styles.srOnly}>{action.label}</span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className={buttonClass}
+                    data-action={action.key}
+                    aria-label={label}
+                    aria-pressed={pressed}
+                    onClick={actionClickHandler(action.key)}
+                  >
+                    <FontAwesomeIcon
+                      icon={action.icon}
+                      aria-hidden="true"
+                      className={styles.actionIcon}
+                    />
+                    <span className={styles.actionCount}>{action.count}</span>
+                  </button>
+                )}
+                {/* Quote — a SEPARATE control next to Repost (SOC-020), never a
+                    `data-action`/canonical-set member (see module header). */}
+                {action.key === 'repost' && !isReadOnly && onQuote && (
+                  <button
+                    type="button"
+                    className={styles.quoteTrigger}
+                    data-testid="post-quote-trigger"
+                    aria-label="Quote"
+                    onClick={handleQuoteTrigger}
+                  >
+                    <FontAwesomeIcon
+                      icon={faQuoteRight}
+                      aria-hidden="true"
+                      className={styles.actionIcon}
+                    />
+                  </button>
+                )}
+              </Fragment>
             )
-          ))}
+          })}
         </div>
       </div>
     </article>
