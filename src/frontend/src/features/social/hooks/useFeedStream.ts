@@ -33,6 +33,9 @@
  * caller passes `enabled: false`; the hook then NEVER starts the source,
  * subscribes to nothing, keeps `newCount` at 0, and `loadBuffered()` returns
  * `[]`. Nothing streams, so there is nothing for the (hidden) pill to announce.
+ * On an `enabled` true→false transition the buffer is also CLEARED (posts, id
+ * set, and count), so a later re-enable without a full remount starts clean
+ * rather than resurfacing stale pre-disable arrivals.
  *
  * ISOLATION (COR-001) / XC-002. The hook adds no `exerciseId` and never widens
  * a post's shape — it moves already-narrowed `ParticipantPostView`s from the
@@ -100,7 +103,19 @@ export function useFeedStream({
   const [newCount, setNewCount] = useState(0)
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled) {
+      // Disabled transition (D1-011, Copilot #301 round-2). The prior enabled
+      // run's cleanup has already unsubscribed + stopped the source; ALSO drop
+      // any buffered arrivals here so a later RE-enable (without a full remount)
+      // starts clean rather than resurfacing stale pre-disable posts and
+      // inflating the count. Harmless no-op on a first-mount / already-empty
+      // disabled state (empty buffer, `setNewCount(0)` bails out on the same
+      // value). The `enabled ? newCount : 0` return still reports 0 while off.
+      bufferRef.current = []
+      bufferedIdsRef.current.clear()
+      setNewCount(0)
+      return
+    }
 
     const unsubscribe = source.subscribe(post => {
       // Guard against a post the source somehow re-delivers (the transports

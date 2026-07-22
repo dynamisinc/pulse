@@ -143,6 +143,47 @@ describe('useFeedStream — buffers arrivals behind a count only (AC1/AC2)', () 
   })
 })
 
+describe('useFeedStream — a disable transition clears the buffer (Copilot #301 round-2)', () => {
+  it('does not resurface stale buffered posts / count when re-enabled without a remount', async () => {
+    const fake = new FakeFeedStreamSource()
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useFeedStream({ enabled, source: fake }),
+      { initialProps: { enabled: true } },
+    )
+    await waitFor(() => expect(fake.startCalls).toBe(1))
+
+    // Enabled: N arrivals buffer behind the pill → newCount = N.
+    act(() => {
+      fake.push(buildView('p1'))
+      fake.push(buildView('p2'))
+      fake.push(buildView('p3'))
+    })
+    expect(result.current.newCount).toBe(3)
+
+    // Disable (observer/read-only, D1-011): the effect cleanup unsubscribes +
+    // stops AND the buffer is cleared. newCount drops to 0.
+    rerender({ enabled: false })
+    expect(result.current.newCount).toBe(0)
+
+    // Re-enable WITHOUT a remount: the stale 3 must NOT resurface. The count
+    // stays 0 (the buffer was cleared on disable) until a genuinely NEW arrival.
+    rerender({ enabled: true })
+    await waitFor(() => expect(fake.startCalls).toBe(2))
+    expect(result.current.newCount).toBe(0)
+
+    // A fresh arrival now counts from a clean base — 1, not the stale 4.
+    act(() => fake.push(buildView('p4')))
+    expect(result.current.newCount).toBe(1)
+
+    // And the drain hands back only the new post, not the pre-disable ones.
+    let drained: ParticipantPostView[] = []
+    act(() => {
+      drained = result.current.loadBuffered()
+    })
+    expect(drained.map(p => p.id)).toEqual(['p4'])
+  })
+})
+
 describe('useFeedStream — a source whose start() rejects is fail-soft (Copilot #301)', () => {
   it('swallows a rejected start() (no unhandled rejection) and still buffers arrivals', async () => {
     // A pathological source whose start() REJECTS. The hook must swallow it so

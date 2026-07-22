@@ -93,6 +93,7 @@ import {
   useShellContext,
   affordancesAvailable,
 } from '@/features/participant-shell/mountContract'
+import { compareNewestFirst } from '../services/feedService'
 import { useFeed } from '../hooks/useFeed'
 import { useFeedStream } from '../hooks/useFeedStream'
 import { useReaction } from '../hooks/useReaction'
@@ -104,20 +105,12 @@ import styles from './Feed.module.css'
 type CardVariant = 'full' | 'readOnly'
 
 /**
- * Newest-first comparator by scenario-time ISO instant — mirrors
- * `feedService.compareNewestFirst`. `Date.parse(string)` parses a GIVEN instant
- * (it does NOT read the wall clock, unlike the lint-banned `new Date()` /
- * `Date.now()`); an unparseable instant sorts last (treated as oldest).
+ * Sorts a copy of `views` newest-first by `scenarioTime` (COR-053), reusing the
+ * SINGLE shared `feedService.compareNewestFirst` (which the baseline
+ * `assembleFeedView` sort also uses) so the live-arrivals prepend can never
+ * drift from the baseline ordering (Copilot #301 round-2 de-dupe). The
+ * comparator uses `Date.parse(string)` only — no wall clock (COR-053).
  */
-function compareNewestFirst(a: string, b: string): number {
-  const ta = Date.parse(a)
-  const tb = Date.parse(b)
-  const safeA = Number.isNaN(ta) ? -Infinity : ta
-  const safeB = Number.isNaN(tb) ? -Infinity : tb
-  return safeB - safeA
-}
-
-/** Sorts a copy of `views` newest-first by `scenarioTime` (COR-053). */
 function sortNewestFirst(views: readonly PostView[]): PostView[] {
   return views.slice().sort((a, b) => compareNewestFirst(a.scenarioTime, b.scenarioTime))
 }

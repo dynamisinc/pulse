@@ -112,14 +112,17 @@ export async function resolveFeed(): Promise<Post[]> {
 }
 
 /**
- * Compares two scenario-time ISO instants for a newest-first sort.
+ * Compares two scenario-time ISO instants for a newest-first sort. The SINGLE
+ * shared newest-first comparator — `assembleFeedView` (the baseline feed sort)
+ * and `Feed`'s live-arrivals prepend both use it, so the two can never drift
+ * (Copilot #301 round-2 de-dupe).
  *
  * `Date.parse` parses a GIVEN instant string to epoch-ms — it does NOT read the
  * wall clock (unlike `Date.now()` / `new Date()`, which the participant-surface
  * lint ban forbids and which would leak real time onto a COR-053 surface). An
  * unparseable instant sorts last (treated as oldest) rather than throwing.
  */
-function compareNewestFirst(a: string, b: string): number {
+export function compareNewestFirst(a: string, b: string): number {
   const ta = Date.parse(a)
   const tb = Date.parse(b)
   const safeA = Number.isNaN(ta) ? -Infinity : ta
