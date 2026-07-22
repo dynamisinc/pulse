@@ -24,8 +24,26 @@
 
 | Story | Files it owns | Depends-on | Can-run-with | Wave | Effort |
 |-------|---------------|------------|--------------|------|--------|
-| 03 Verification/imperson. | VerifiedMark | posts/02; E1 flag | 01 | 1 | S |
-| 01 Profile page | Profile | posts (PostCard); 03 | 03 | 1 | M |
+| 03 Verification/imperson. | **none** — `VerifiedMark.tsx`/`Avatar.tsx` already ship this (posts/02, Complete) + persona-management fixtures; this is a verification/regression pass exercised via story 01's profile header, not a new component | posts/02 (Complete); E1 flag | 01 | 1 | XS |
+| 01 Profile page | Profile (+ shared view-composition wiring — see seam below) | posts (PostCard); 03 (no real file wait — see note) | 03, reactions/01, amplification/01, hashtags-trending/01 (files disjoint) | 1 | M |
 | 05 Audience magnitude | audience, FollowerList | E1 magnitude band | 01 | 1 | M |
 | 02 Follow | useFollow | 01; feeds Following | 04 | 2 | S |
 | 04 Who to follow | WhoToFollow | 02, 03; E7 CTL-021 | 02 | 2 | S |
+
+Note on 01/03 ordering: 03 has no net-new owned file in this wave (see left column), so 01 does not
+actually block on a file 03 produces — both can build in the same pass; 03's remaining job (a
+regression assertion that the profile header renders the impersonation pair honestly) is verified
+once 01's `Profile.tsx` exists, and 03's Status can close out immediately after.
+
+### Integration seam (orchestrator-owned — never a wave story)
+`Profile.tsx` is a pure consumer of `<PostCard>`/`<VerifiedMark>` — no shared-file edit needed to
+build/test it standalone. Reaching a profile from a tap (author name/handle in a post), however, is a
+shared view-composition change:
+
+| Seam | File(s) | Rule |
+|------|---------|------|
+| Channel view composition | `features/social/SocialChannel.tsx` | Same seam `hashtags-trending/01` needs for its hashtag-feed view (Phase 1's local-`useState` composition root, mirrors `openThreadId`). Orchestrator-owned, serial, in Wave 2 after both stories land their own pages. |
+
+Build `Profile.tsx` and its unit/RTL tests standalone in Wave 1 (rendered directly with a
+personaId/route param, no live tap-through yet); the `SocialChannel.tsx` "open profile" wiring is a
+Wave-2 orchestrator pass alongside hashtag-feed navigation.
