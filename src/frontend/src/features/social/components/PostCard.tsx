@@ -36,10 +36,19 @@
  * renders inert/escaped by construction.
  *
  * Keyboard/a11y (NFR-001): the header/text/media region (NOT the avatar, NOT
- * the action row) is the `onOpen` activation target — `role="button"` +
- * `tabIndex={0}` + Enter/Space, so opening a post never nests one
- * interactive element inside another (the action row's real `<button>`s are
- * SIBLINGS of this region, not descendants of it).
+ * the action row) is the `onOpen` activation target — but the region itself
+ * (`.openable`) is NON-interactive (no role/tabIndex/handlers). Instead, when
+ * `onOpen` is supplied, a real `<button data-testid="post-open-target">`
+ * renders as a transparent, absolutely-positioned OVERLAY filling that
+ * region (the "stretched-link" pattern) — Enter/Space/click are all native
+ * button behavior, nothing custom. The linkified hashtag anchors inside the
+ * text (see `renderPostText`) sit ABOVE the overlay in stacking order
+ * (`position: relative` + a higher `z-index` — `social.module.css`) so they
+ * stay independently clickable/focusable as SIBLINGS of the overlay button,
+ * never DESCENDANTS of it — an interactive element nested inside a
+ * `role="button"`/`<button>` is invalid ARIA and was a Gate-2 finding
+ * (WR-001) this structure fixes. The action row's real `<button>`s remain
+ * siblings of this region too, as before.
  *
  * Reply-to-thread (SOC-011/threads-replies story 02): the reply action in
  * the action row accepts an OPTIONAL `onReply` prop; when a caller supplies
@@ -70,8 +79,11 @@
  *    commentary composer) — this component only surfaces the tap.
  *  - `onHashtagOpen` (hashtags-trending/01, SOC-040) fires with the
  *    normalized tag when a linkified hashtag anchor is activated. Omitted ⇒
- *    hashtags stay inert links (stop propagation to the card's `onOpen`, do
- *    nothing else) — the exact pre-Wave-2 behavior.
+ *    hashtags render as INERT, NON-FOCUSABLE `<span>`s instead of anchors
+ *    (accent color + leading "#" still read as a tag, but no
+ *    role/tabIndex/handlers) — a Gate-2 finding (WR-002): an unwired anchor
+ *    was a focusable no-op, which this avoids by never making it focusable
+ *    at all when there is nothing for it to do.
  *
  * World: participant (Pulse skin). No COBRA, no themed MUI — plain semantic
  * elements + the scoped `social.module.css` CSS Module (tokens read from CSS
@@ -177,7 +189,9 @@ export interface PostCardProps {
   /**
    * Fires with the normalized tag (no leading `#`) when a linkified hashtag
    * in the post text is activated (SOC-040). Optional — omit it and
-   * hashtags stay inert links (stop propagation to `onOpen`, no navigation).
+   * hashtags render as inert, non-focusable `<span>`s instead of anchors
+   * (WR-002, NFR-001): no role/tabIndex/handler, so there is no focusable
+   * no-op.
    */
   onHashtagOpen?: (tag: string) => void
 }
@@ -205,45 +219,44 @@ function buildActions(counts: PostCounts): ActionSpec[] {
 const OPEN_KEYS = new Set(['Enter', ' ', 'Spacebar'])
 
 /**
- * Hashtag link color — the per-exercise accent (COR-030) read from the same
+ * Hashtag styling — the per-exercise accent (COR-030) read from the same
  * `--pc-accent` custom property the card root declares (see
- * `social.module.css`), with the shared Cadence-navy default. Set inline (not a
- * new CSS-module class) so the linkify stays a self-contained edit to the text
- * block. Accent color + the leading `#` glyph + `role="link"` together mark a
- * hashtag as a link WITHOUT relying on color alone (NFR-001).
+ * `social.module.css`), with the shared Cadence-navy default. Set inline (not
+ * a new CSS-module class) so the linkify stays a self-contained edit to the
+ * text block. Accent color + the leading `#` glyph together mark a hashtag as
+ * a tag WITHOUT relying on color alone (NFR-001) — `role="link"` (on the
+ * wired variant only, see {@link renderPostText}) is the third signal.
+ *
+ * `HASHTAG_LINK_STYLE` additionally lifts the INTERACTIVE anchor above the
+ * card's open-region overlay button in stacking order (`position: relative` +
+ * a `z-index` higher than `.openTarget`'s in `social.module.css`) — required
+ * so the hashtag anchor and the overlay button stay SIBLINGS (WR-001) rather
+ * than one nesting the other, while the hashtag remains independently
+ * clickable/focusable on top. The inert `<span>` (WR-002, no handler wired)
+ * needs no such stacking treatment — it is never focusable, so it never
+ * competes with the overlay for a click.
  */
-const HASHTAG_STYLE = { color: 'var(--pc-accent)' } as const
+const HASHTAG_LINK_STYLE = { color: 'var(--pc-accent)', position: 'relative', zIndex: 2 } as const
+const HASHTAG_TEXT_STYLE = { color: 'var(--pc-accent)' } as const
 
 /**
  * A hashtag tap/keyboard-activation must NOT also open the post's thread (the
- * card body's `onOpen`), so it ALWAYS stops propagation to the enclosing
- * openable region — regardless of whether `onHashtagOpen` is wired, so an
- * unwired hashtag stays inert exactly as before Wave S3.1.
+ * card body's `onOpen`), so it always stops propagation — only rendered (see
+ * {@link renderPostText}) when `onHashtagOpen` is actually wired, so `tag`'s
+ * handler is always defined here.
  */
-function handleHashtagClick(
-  tag: string,
-  onHashtagOpen: ((tag: string) => void) | undefined,
-) {
+function handleHashtagClick(tag: string, onHashtagOpen: (tag: string) => void) {
   return (event: MouseEvent<HTMLAnchorElement>) => {
     event.stopPropagation()
-    onHashtagOpen?.(tag)
+    onHashtagOpen(tag)
   }
 }
 
-/**
- * Same stop-propagation guarantee as {@link handleHashtagClick}, on Enter/
- * Space. `preventDefault` is only called when a handler actually fires (never
- * when `onHashtagOpen` is omitted), so an unwired hashtag's keyboard behavior
- * is unchanged from before Wave S3.1.
- */
-function handleHashtagKeyDown(
-  tag: string,
-  onHashtagOpen: ((tag: string) => void) | undefined,
-) {
+/** Same stop-propagation guarantee as {@link handleHashtagClick}, on Enter/Space. */
+function handleHashtagKeyDown(tag: string, onHashtagOpen: (tag: string) => void) {
   return (event: KeyboardEvent<HTMLAnchorElement>) => {
     if (!OPEN_KEYS.has(event.key)) return
     event.stopPropagation()
-    if (!onHashtagOpen) return
     event.preventDefault()
     onHashtagOpen(tag)
   }
@@ -252,10 +265,17 @@ function handleHashtagKeyDown(
 /**
  * Renders post text with hashtags linkified (SOC-040). Plain text segments
  * render as React text children (never `dangerouslySetInnerHTML`, so a
- * script-like string stays inert — NFR-004); hashtags render as accent-styled,
- * keyboard-focusable `role="link"` anchors carrying the normalized tag in
- * `data-hashtag`, and — when `onHashtagOpen` is supplied (the Wave-2 channel
- * wiring) — fire it with that tag on activation.
+ * script-like string stays inert — NFR-004).
+ *
+ * A recognized hashtag renders one of two ways depending on whether a
+ * hashtag-open handler is actually wired (WR-002, NFR-001):
+ *  - wired ⇒ an accent-styled, keyboard-focusable `role="link"` anchor
+ *    carrying the normalized tag in `data-hashtag`, firing `onHashtagOpen`
+ *    with that tag on click/Enter/Space;
+ *  - NOT wired (e.g. `Profile`/`HashtagFeed`, which render `<PostCard>`
+ *    without `onHashtagOpen`) ⇒ an INERT, non-focusable `<span>` — still
+ *    accent-colored with its leading "#" so it visibly reads as a tag, but
+ *    carrying no role/tabIndex/handler, so it can never be a focusable no-op.
  */
 function renderPostText(
   text: string,
@@ -263,13 +283,22 @@ function renderPostText(
 ): ReactNode {
   return parseHashtags(text).map((token, index) => {
     if (token.type === 'text') return token.value
+
+    if (!onHashtagOpen) {
+      return (
+        <span key={`hashtag-${index}`} data-hashtag={token.tag} style={HASHTAG_TEXT_STYLE}>
+          {token.raw}
+        </span>
+      )
+    }
+
     return (
       <a
         key={`hashtag-${index}`}
         role="link"
         tabIndex={0}
         data-hashtag={token.tag}
-        style={HASHTAG_STYLE}
+        style={HASHTAG_LINK_STYLE}
         onClick={handleHashtagClick(token.tag, onHashtagOpen)}
         onKeyDown={handleHashtagKeyDown(token.tag, onHashtagOpen)}
       >
@@ -299,22 +328,12 @@ export function PostCard({
   const isReadOnly = variant === 'readOnly'
   const actions = buildActions(post.counts)
 
+  // The open-region overlay button (rendered below, WR-001) is only ever
+  // mounted when `onOpen` is supplied, so this is called exclusively from
+  // that button's native `onClick` — no custom key handling needed, Enter/
+  // Space on a real `<button>` are native browser behavior.
   const handleOpen = () => {
     onOpen?.(post.id)
-  }
-
-  const handleClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (!onOpen) return
-    event.preventDefault()
-    handleOpen()
-  }
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!onOpen) return
-    if (OPEN_KEYS.has(event.key)) {
-      event.preventDefault()
-      handleOpen()
-    }
   }
 
   /**
@@ -340,15 +359,24 @@ export function PostCard({
         <Avatar persona={post.author} />
       </div>
       <div className={styles.content}>
-        <div
-          className={styles.openable}
-          data-testid="post-open-target"
-          role={onOpen ? 'button' : undefined}
-          tabIndex={onOpen ? 0 : undefined}
-          aria-label={onOpen ? `Open post by ${post.author.displayName}` : undefined}
-          onClick={onOpen ? handleClick : undefined}
-          onKeyDown={onOpen ? handleKeyDown : undefined}
-        >
+        {/*
+          The open-region (WR-001, NFR-001): NON-interactive — no role,
+          tabIndex, or handlers here, so it can never nest an interactive
+          descendant improperly. When `onOpen` is supplied, a real `<button>`
+          overlay (below, absolutely positioned, transparent) is the actual
+          open affordance — a sibling of the hashtag anchors inside the text,
+          never their ancestor.
+        */}
+        <div className={styles.openable}>
+          {onOpen && (
+            <button
+              type="button"
+              className={styles.openTarget}
+              data-testid="post-open-target"
+              aria-label={`Open post by ${post.author.displayName}`}
+              onClick={handleOpen}
+            />
+          )}
           <header className={styles.header}>
             <span className={styles.name}>{post.author.displayName}</span>
             {post.author.verified && (

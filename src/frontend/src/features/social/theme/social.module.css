@@ -114,6 +114,7 @@
 }
 
 .openable {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -121,11 +122,30 @@
   border-radius: 12px;
 }
 
-.openable[role='button'] {
+/*
+ * The open-region overlay button (WR-001, NFR-001 — Gate-2 fix). A real,
+ * non-nested `<button>` (see `PostCard.tsx`) absolutely positioned to fill
+ * `.openable`'s box — the "stretched-link" pattern, so tapping ANYWHERE in
+ * the card body (header/text/media/link-preview) opens the thread without
+ * that region itself being a `role="button"` ancestor of the linkified
+ * hashtag anchors. Fully transparent: it is a hit target only, never a
+ * visible layer. `z-index: 1` is deliberately LOWER than the hashtag anchor's
+ * (`PostCard.tsx`'s `HASHTAG_LINK_STYLE`, `z-index: 2`) so a hashtag tap
+ * reaches its own link instead of this overlay.
+ */
+.openTarget {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: none;
   cursor: pointer;
 }
 
-.openable:focus-visible {
+.openTarget:focus-visible {
   outline: 2px solid var(--pc-accent);
   outline-offset: 2px;
 }
