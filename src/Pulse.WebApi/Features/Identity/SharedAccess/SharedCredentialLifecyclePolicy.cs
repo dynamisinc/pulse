@@ -30,6 +30,19 @@ namespace Pulse.WebApi.Features.Identity.SharedAccess;
 /// a staff rotate (which resets the counter). Raising <see cref="MaxFailedAttempts"/> trades brute-force
 /// resistance for fewer malicious/false lockouts.
 /// </para>
+/// <para>
+/// <b>Accepted lockout lost-update (Gate-1 Minor, documented not fixed).</b> The failed-attempt counter is
+/// advanced in <see cref="SharedReadOnlyLoginService"/> by a non-atomic read-modify-write on the tracked
+/// <see cref="Data.Entities.SharedCredential"/> row (<c>FailedAttemptCount++</c> then one
+/// <c>SaveChangesAsync</c>), with NO concurrency token. Under PARALLEL failed logins two requests can read the
+/// same count and each write back the same +1, losing an increment — so the lockout may take somewhat MORE than
+/// <see cref="MaxFailedAttempts"/> attempts to trip under concurrency. This is a marginal weakening of a
+/// defense-in-depth BACKSTOP, not an isolation/leak issue: the PRIMARY internet-facing control is story 06's
+/// per-IP <c>shared-login</c> rate limit (5/min), which already caps how fast any source can generate failures.
+/// It is left as-is on purpose — a <c>RowVersion</c> token needs a schema column (frozen this phase) and an
+/// atomic <c>ExecuteUpdate</c> would break the single-<c>SaveChanges</c> unit of work the login/telemetry share
+/// (XC-004). Revisit if the concurrency-token schema opens up.
+/// </para>
 /// </remarks>
 public static class SharedCredentialLifecyclePolicy
 {

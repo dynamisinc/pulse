@@ -274,4 +274,56 @@ public sealed class SharedReadOnlyLoginGraceAndLockoutTests
         var credential = await ReadCredentialAsync(exerciseId);
         credential.LockedOutUntil.Should().NotBeNull("the threshold-crossing attempt did trip the lockout");
     }
+
+    [RequiresDockerFact]
+    public async Task Login_LockoutTripAttempt_PersistsExactlyOneLoginEvent_AndOneAuthLockoutEvent()
+    {
+        var exerciseId = await SeedExerciseAsync();
+        // One wrong attempt away from the threshold, so this SINGLE failure IS the trip — the busiest write,
+        // where a login-failure event, an auth.lockout event, and the counter mutation all coexist in one unit
+        // of work. Isolating the trip to a single login attempt lets us pin BOTH event counts exactly (the
+        // full-sequence test emits many login events, so it cannot assert "exactly one login" on the trip).
+        await SeedCredentialAsync(
+            exerciseId,
+            currentPassword: "correct-password",
+            failedAttemptCount: SharedCredentialLifecyclePolicy.MaxFailedAttempts - 1);
+
+        (await LoginOnceAsync(exerciseId, "wrong-password")).Should().Be(SharedReadOnlyLoginOutcome.Rejected);
+
+        (await ReadCredentialAsync(exerciseId)).LockedOutUntil.Should().NotBeNull("the threshold failure trips the lockout");
+
+        (await ReadEventsAsync(exerciseId, "login")).Should().ContainSingle(
+            "the trip attempt persists exactly one login (failure) event — the lockout trip does not double-count the login");
+        (await ReadEventsAsync(exerciseId, "auth.lockout")).Should().ContainSingle(
+            "the trip attempt persists exactly one auth.lockout event, even though the login event, the lockout " +
+            "event, and the counter mutation all land together in the single busiest write");
+    }
+
+    [RequiresDockerFact]
+    public async Task Login_WhileAlreadyLocked_LeavesCounterUnchanged_EmitsNoSecondLockout_OnlyOneLoginFailure()
+    {
+        var exerciseId = await SeedExerciseAsync();
+        // A credential ALREADY locked (window in the future) with a distinctive counter so "unchanged" is
+        // meaningful. A further attempt while locked takes the negative (decoy) path.
+        await SeedCredentialAsync(
+            exerciseId,
+            currentPassword: "correct-password",
+            failedAttemptCount: 4,
+            lockedOutUntil: DateTimeOffset.UtcNow.AddMinutes(10));
+
+        // Even the CORRECT password is rejected while locked (fail closed → bodiless 401 at the endpoint).
+        (await LoginOnceAsync(exerciseId, "correct-password")).Should().Be(
+            SharedReadOnlyLoginOutcome.Rejected, "while already locked, even a correct password is rejected");
+
+        var credential = await ReadCredentialAsync(exerciseId);
+        credential.FailedAttemptCount.Should().Be(4,
+            "an attempt made while already locked takes the decoy path and never increments the counter");
+        credential.LockedOutUntil.Should().NotBeNull("the existing lockout window is left untouched");
+
+        (await ReadEventsAsync(exerciseId, "auth.lockout")).Should().BeEmpty(
+            "an attempt while already locked does not trip a SECOND lockout — no new auth.lockout event");
+        var loginEvents = await ReadEventsAsync(exerciseId, "login");
+        loginEvents.Should().ContainSingle("the while-locked attempt emits only its single login-failure event");
+        loginEvents[0].Payload.Should().Contain("failure", "the sole login event is the rejection");
+    }
 }

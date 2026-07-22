@@ -85,6 +85,8 @@ Brute-force lockout (+ per-IP rate limit is story 06's `SharedReadOnlyEndpointsH
 - `SharedReadOnlyLoginGraceAndLockoutTests.Login_Success_ResetsFailedAttemptCounter`
 - `SharedReadOnlyLoginGraceAndLockoutTests.Login_FailedAttempt_IncrementsFailedAttemptCounter_BelowThreshold`
 - `SharedReadOnlyLoginGraceAndLockoutTests.Login_DisabledCredential_WrongPassword_DoesNotAccrueLockout`
+- `SharedReadOnlyLoginGraceAndLockoutTests.Login_LockoutTripAttempt_PersistsExactlyOneLoginEvent_AndOneAuthLockoutEvent`
+- `SharedReadOnlyLoginGraceAndLockoutTests.Login_WhileAlreadyLocked_LeavesCounterUnchanged_EmitsNoSecondLockout_OnlyOneLoginFailure`
 
 Staff-only + logged (XC-002/XC-004):
 - `SharedCredentialLifecycleEndpointsHttpTests.Rotate_NoAuthenticatedStaffSession_Returns401`

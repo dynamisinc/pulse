@@ -184,6 +184,9 @@ public sealed class SharedReadOnlyLoginService
             // a fixed lockout window, resets the counter, and emits an additive-vocab auth.lockout event.
             if (canAuthenticate && credential is not null)
             {
+                // Non-atomic read-modify-write with no concurrency token: under parallel failures an increment
+                // can be lost, so the lockout may trip a little later than the threshold. Accepted backstop
+                // weakening bounded by the per-IP rate limit — see SharedCredentialLifecyclePolicy remarks (Gate-1).
                 credential.FailedAttemptCount++;
                 if (credential.FailedAttemptCount >= SharedCredentialLifecyclePolicy.MaxFailedAttempts)
                 {
