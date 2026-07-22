@@ -200,8 +200,11 @@ public sealed class ReactionLoopHostTests
         result.ReviewItemsEnqueued.Should().Be(1);
 
         // The enqueued item carries the tick's resolved scope (WR-001) — the contract's stamping rule.
+        // Scoped to this test's exerciseId: the fixture's DB is shared across the test class, so an
+        // unscoped SingleAsync() would see sibling tests' rows too (COR-001 assertion, not just this test).
         await using var unfiltered = _fixture.CreateContext();
-        var item = await unfiltered.EngineReviewItems.IgnoreQueryFilters().SingleAsync();
+        var item = await unfiltered.EngineReviewItems.IgnoreQueryFilters()
+            .SingleAsync(i => i.ExerciseId == exerciseId);
         item.ExerciseId.Should().Be(
             exerciseId, "the review item is stamped from the tick's resolved scope, not any client/entity-supplied field (COR-001)");
     }
@@ -229,8 +232,11 @@ public sealed class ReactionLoopHostTests
             "a storyline whose scope disagrees with the tick must fail loud, never enqueue exercise A's draft under exercise B (COR-001, WR-001)");
 
         // Nothing leaked into either exercise's queue — the guard threw before any enqueue.
+        // Scoped to this test's two exercise ids: the fixture's DB is shared across the test class, so an
+        // unscoped CountAsync() would also count sibling tests' rows.
         await using var unfiltered = _fixture.CreateContext();
-        (await unfiltered.EngineReviewItems.IgnoreQueryFilters().CountAsync()).Should().Be(
+        (await unfiltered.EngineReviewItems.IgnoreQueryFilters()
+            .CountAsync(i => i.ExerciseId == exerciseId || i.ExerciseId == foreignExerciseId)).Should().Be(
             0, "the mismatch is caught before the review item is persisted");
     }
 
