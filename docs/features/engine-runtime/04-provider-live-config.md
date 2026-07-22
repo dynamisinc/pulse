@@ -1,6 +1,6 @@
 # Story: Provider live-config — governed Azure OpenAI + measured eval  `[backend]`
 
-**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Not Started
+**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Complete
 **Requirements:** NFR-005, ADP-025 (NFR-003, ADP-024, NFR-002 / open Q3)  ·  **Design decisions:** none  ·  **Issue:** #288
 
 > **⚠ TIER-2 — NFR-005 LLM data governance.** This story makes a **live**, egressing LLM endpoint
@@ -30,29 +30,29 @@ degraded-mode trip threshold against measured p95; and keep the ADP-024 injectio
 against the live provider. Backend/staff — no participant surface. See `feature.md` and `implementation.md`.
 
 ## Acceptance Criteria
-- [ ] **Live provider selection.** Given `Generation:Provider = AzureOpenAI` (or `ClaudeFoundry`) with a
+- [x] **Live provider selection.** Given `Generation:Provider = AzureOpenAI` (or `ClaudeFoundry`) with a
   governed endpoint configured, When the host starts, Then `AddEngineGeneration` selects the live
   provider behind `IGenerationProvider`; `Fake` remains the default for CI/tests.
-- [ ] **Fail closed on ungoverned config (NFR-005 — Tier-2).** Given a real provider is configured but
+- [x] **Fail closed on ungoverned config (NFR-005 — Tier-2).** Given a real provider is configured but
   the governance keys (tenant-bounded endpoint / no-training / documented residency) are unset or
   invalid, When the host starts, Then `GenerationGovernance.Validate` throws and the host **fails fast
   at startup** — it never constructs an HttpClient or reaches a public/untenanted endpoint (no accidental
   ungoverned egress).
-- [ ] **`ai.bicep` activation.** Given the dormant `infrastructure/modules/ai.bicep` (designed to stand
+- [x] **`ai.bicep` activation.** Given the dormant `infrastructure/modules/ai.bicep` (designed to stand
   up independently), When it is enabled, Then it provisions the live Azure AI Foundry / Azure OpenAI
   endpoint and the `Generation:*` config keys match the bicep outputs verbatim.
-- [ ] **Measured cost/latency replaces modeled.** Given the live provider, When the `EngineEval`
+- [x] **Measured cost/latency replaces modeled.** Given the live provider, When the `EngineEval`
   latency/cost SLO suite runs, Then the E8 §4 *modeled* numbers are replaced with *measured* p50/p95
   latency and per-burst cost per provider/model, recorded so estimates can lock.
-- [ ] **Degraded-mode threshold validated (NFR-003).** Given measured p95, When compared to the §3.5
+- [x] **Degraded-mode threshold validated (NFR-003).** Given measured p95, When compared to the §3.5
   ~p95 10s degraded-mode trip threshold, Then the circuit-breaker config (`Resilience.AttemptTimeout` /
   failure ratio in `AddEngineGeneration`) is tuned to the measurement; if measured p95 approaches the
   threshold, it is flagged rather than silently accepted.
-- [ ] **Injection red-team green against the live provider (ADP-024).** Given the `EngineEval.InjectionRedTeam`
+- [x] **Injection red-team green against the live provider (ADP-024).** Given the `EngineEval.InjectionRedTeam`
   suite, When it runs against the **live** provider (not only `Fake`), Then it stays **green** — a
   regression blocks release (§12.2); the four-layer isolation boundary (`WorldFeedFence` +
   system-prompt framing + `emit_posts` tool shape + `ContentGuard`) holds against a live model.
-- [ ] **LLM governance (NFR-005 / ADP-025) — Tier-2.** The endpoint is tenant-bounded with contractual
+- [x] **LLM governance (NFR-005 / ADP-025) — Tier-2.** The endpoint is tenant-bounded with contractual
   no-training terms and documented residency; ZDR is a config target; participant/world content is
   untrusted data, never instructions (prompt-injection isolation). The governance posture is documented
   and human-signed-off before the live endpoint is reachable.

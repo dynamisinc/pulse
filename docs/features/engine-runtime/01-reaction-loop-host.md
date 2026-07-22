@@ -1,6 +1,6 @@
 # Story: Reaction-loop host — generate / publish / measure back-half  `[backend]`
 
-**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Not Started
+**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Complete
 **Requirements:** E8 arch §1.2/§2, SOC-003 (COR-001, XC-004, XC-002, ADP-023, ADP-024, CTL-034)  ·  **Design decisions:** D5-014/1.1 (inherited)  ·  **Issue:** #285
 
 > **Reconciles `reaction-loop` #159/#160.** Those two stories are "Blocked" pending the E2 publish
@@ -26,47 +26,47 @@ and **measure** (update storyline intensity/sentiment + emit telemetry). It expo
 one publish funnel. Backend/staff — no participant surface. See `feature.md` and `implementation.md`.
 
 ## Acceptance Criteria
-- [ ] **Scenario-time loop.** Given a running exercise with seeded/controller storylines, When the
+- [x] **Scenario-time loop.** Given a running exercise with seeded/controller storylines, When the
   scenario clock (story 03's `IExerciseClock`) advances, Then the host ticks `ObserveStage` →
   `DecideStage` on the loop cadence; a **Freeze** (story 03) halts ticking so no observe/generate runs
   and silence windows do not accrue, and a **time-jump** advances the timers so a storyline that blew
   its response window during the skipped span is surfaced on the next tick.
-- [ ] **Generate stage (guard-before-human).** Given a non-null `GenerationIntent`, When the host runs
+- [x] **Generate stage (guard-before-human).** Given a non-null `GenerationIntent`, When the host runs
   generate, Then it assembles the prompt via `PromptAssembler` + `WorldFeedFence` (untrusted world/
   participant content only inside the fenced turn, §3.4), calls `IGenerationProvider.GenerateAsync`, and
   every draft passes the `EngineEval.ContentGuard` fiction/injection filter (§9) **and** the
   `PersonaVoice.BurstAcceptancePolicy` diversity gate **before** it becomes a review item; a
   guard-failing or diversity-failing burst is auto-re-rolled (bounded retries) or dropped — **never
   surfaced** (§8.5 pre-filtering).
-- [ ] **Publish reuses B1 (SOC-003).** Given an approved / auto-sent burst, When the host publishes,
+- [x] **Publish reuses B1 (SOC-003).** Given an approved / auto-sent burst, When the host publishes,
   Then each post is ingested through `PostIngestService.IngestAsync` with `origin: 'engine'` and fans
   out via `IFeedBroadcaster` — no new publish path; the result is indistinguishable to participants
   from any other post.
-- [ ] **Measure stage.** Given a published burst and subsequent participant reactions/amplification,
+- [x] **Measure stage.** Given a published burst and subsequent participant reactions/amplification,
   When the host runs measure, Then it advances storyline `intensity`/`sentiment` via `Storyline.Tick` /
   `IntensityModel` / `SentimentModel` and records the storyline phase transition.
-- [ ] **Shared publish seam.** The host exposes `IEnginePublishService.PublishBurstAsync(...)`; a
+- [x] **Shared publish seam.** The host exposes `IEnginePublishService.PublishBurstAsync(...)`; a
   manual approve in story 02 publishes through the **same** seam (one publish funnel, not two).
-- [ ] **Isolation — the BackgroundService scope resolution (COR-001).** Given the loop publishes for
+- [x] **Isolation — the BackgroundService scope resolution (COR-001).** Given the loop publishes for
   exercise A, When it calls `PostIngestService.IngestAsync` (which reads scope only from
   `IExerciseContext` and fails closed when unresolved), Then the host has established exercise scope for
   that unit of work by creating a per-exercise `IServiceScope` and populating
   `ExerciseContext.CurrentExerciseId = A` — never a default/unscoped write; a tick for exercise A never
   observes, generates, or publishes into exercise B, and this extends the standing cross-exercise suite.
-- [ ] **Telemetry (XC-004).** Given each stage runs, Then it emits its engine event type against the
+- [x] **Telemetry (XC-004).** Given each stage runs, Then it emits its engine event type against the
   XC-004 v0 envelope (extended by `engine-telemetry-tuning/01`): `engine.observed` (trigger, storyline,
   scenario time), `engine.decided` (intent: personas/tone mix/count, autonomy level, rate-cap state),
   `engine.generated` (model/provider, token usage, latency, guard result), `engine.published` (post
   ref, `origin`, storyline), `engine.measured` (intensity/sentiment delta, amplification observed), and
   `storyline.state_changed` (from→to phase, cause) — each carrying wall + scenario time, actor, channel.
-- [ ] **Injection-hardening stays green (ADP-024).** Given the guard-filter runs before any human sees
+- [x] **Injection-hardening stays green (ADP-024).** Given the guard-filter runs before any human sees
   a draft, Then the `EngineEval.InjectionRedTeam` suite remains **green** against whichever provider the
   host runs (Fake in CI) — a regression here blocks release (§12.2).
-- [ ] **CTL-034 workload.** Given a burst of N posts, When the host enqueues it for review, Then it
+- [x] **CTL-034 workload.** Given a burst of N posts, When the host enqueues it for review, Then it
   enqueues **one** `EngineReviewItem` per burst (`PostCount` informational — one burst = one decision),
   and demanded decisions stay ≤6/min sustained (`WorkloadDemandMeter`) at NFR-002 load; a design that
   pushes demand past ~6/min is flagged, not shipped.
-- [ ] **XC-002.** The engine `origin` is captured but never rendered on a participant surface (inherited
+- [x] **XC-002.** The engine `origin` is captured but never rendered on a participant surface (inherited
   from B1's server-side read projection); the loop never emits a participant-visible provenance signal.
 
 ## Out of Scope

@@ -53,10 +53,10 @@ supersedes D5-005) is inherited by story 02 through the built `autonomy-safety` 
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Reaction-loop host — generate/publish/measure back-half `[backend]` | E8 §1.2, SOC-003 (COR-001, XC-004, XC-002, ADP-023/024, CTL-034) | Not Started | #285 |
-| 02 | Review-cockpit API — serve `EngineReviewItem`s + autonomy/safety `[fullstack] [SAFETY-CRITICAL]` | ADP-040/042, CTL-034 (D5-014/1.1, COR-001, XC-004, XC-002, NFR-004) | Not Started | #286 |
-| 03 | Scenario-clock service — native COR-050 clock driving the loop's timers `[backend]` | COR-050/051/052 (COR-053, COR-001) | Not Started | #287 |
-| 04 | Provider live-config — governed Azure OpenAI + measured eval `[backend] [TIER-2]` | NFR-005, ADP-025, NFR-003, ADP-024 | Not Started | #288 |
+| 01 | Reaction-loop host — generate/publish/measure back-half `[backend]` | E8 §1.2, SOC-003 (COR-001, XC-004, XC-002, ADP-023/024, CTL-034) | Complete | #285 |
+| 02 | Review-cockpit API — serve `EngineReviewItem`s + autonomy/safety `[fullstack] [SAFETY-CRITICAL]` | ADP-040/042, CTL-034 (D5-014/1.1, COR-001, XC-004, XC-002, NFR-004) | Complete | #286 |
+| 03 | Scenario-clock service — native COR-050 clock driving the loop's timers `[backend]` | COR-050/051/052 (COR-053, COR-001) | Complete | #287 |
+| 04 | Provider live-config — governed Azure OpenAI + measured eval `[backend] [TIER-2]` | NFR-005, ADP-025, NFR-003, ADP-024 | Complete | #288 |
 
 ## Dependencies
 **Delivered foundations (referenced by name, not owned here):**
@@ -93,6 +93,22 @@ delivers a scoped slice of #77), `engine-generation-infra` (its live-config + me
 per-request session→exercise binding is what story 02's controller endpoints and the loop's publish
 scope resolve against — it is the clean answer to `implementation.md` open question (b); until B2 lands,
 any B3 spike must use a server-authoritative stopgap scope, never a client-supplied `exerciseId`.
+
+## Post-B3 follow-ups (tracked, non-blocking)
+
+- **WR-001 / partial-publish idempotency** (stories 01+02): the engine publish path (`PostIngestService`)
+  does not dedupe on `draftId`, so a review-approve that succeeds-then-fails-to-commit, OR a
+  partial-publish 502 retry, can double-publish the already-live subset. Root fix: ingest-side `draftId`
+  idempotency on the publish path / `Post` schema. Documented in code at the publish-then-commit site.
+
+- **Zero-post burst guard** (Low): `IsPublishFullySuccessful` requires `Posts.Count > 0`; unreachable
+  today (GenerateStage drops empty bursts) — add a guard if a future draft-regeneration seam can empty
+  a burst.
+
+- **Pre-existing test flake**: `usePersonas()` race in `ReviewQueue.test.tsx` / `EngineDraftEditComposer.test.tsx`
+  (reproduces on baseline without the B3 flip) — a shared personas cache would fix it.
+
+- **Wave-0 LO-002**: add a negative-path (reject unknown literal) test for the engine enum JSON converters.
 
 ## Design notes
 Backend / staff — no participant surface. The two-worlds rule (D0 §2) is enforced here as a
