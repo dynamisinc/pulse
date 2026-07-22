@@ -57,6 +57,7 @@ concurrency:
 env:
   RESOURCE_GROUP: "rg-pulse-uat-centralus"
   SQL_SERVER_NAME: "sql-pulse-uat"
+  SQL_DB_NAME: "sqldb-pulse-uat"
   WEBAPP_NAME: "app-pulse-api-uat-dynamis"
 
 jobs:
@@ -155,7 +156,35 @@ jobs:
             --start-ip-address "$RUNNER_IP" \
             --end-ip-address "$RUNNER_IP"
 
-      - name: Apply EF migration (idempotent)
+      # Azure SQL UAT is serverless (database.bicep: GP_S_Gen5, autoPauseDelay=60), so after ~1h idle it
+      # auto-pauses and the FIRST connection returns "Database '…' is not currently available. Please retry
+      # the connection later." — while that very attempt triggers the resume. A single-shot apply therefore
+      # fails on essentially every merge (each lands after an idle gap). So: a soft first apply to WAKE the
+      # DB, poll until it reports Online, then an authoritative second apply against the resumed DB. The
+      # migration script is idempotent, so re-applying after a partial/failed first attempt is safe.
+      - name: Apply EF migration — attempt 1 (wakes a paused serverless DB; may fail on cold start)
+        id: migrate1
+        continue-on-error: true
+        uses: azure/sql-action@v2.3
+        with:
+          connection-string: ${{ secrets.AZURE_SQL_CONNECTION_STRING }}
+          path: ./migrations/pulse.sql
+
+      - name: Wait for serverless SQL to resume
+        if: steps.migrate1.outcome == 'failure'
+        run: |
+          echo "Attempt 1 failed (expected on a serverless auto-pause cold start) — waiting for resume…"
+          for i in $(seq 1 18); do
+            STATUS=$(az sql db show -g "$RESOURCE_GROUP" -s "$SQL_SERVER_NAME" -n "$SQL_DB_NAME" \
+              --query status -o tsv 2>/dev/null || echo "Unknown")
+            echo "poll $i: db status = $STATUS"
+            [ "$STATUS" = "Online" ] && exit 0
+            sleep 15
+          done
+          echo "::warning::SQL did not report Online within ~4.5m; the authoritative apply below will still try"
+
+      - name: Apply EF migration — attempt 2 (resumed DB; authoritative)
+        if: steps.migrate1.outcome == 'failure'
         uses: azure/sql-action@v2.3
         with:
           connection-string: ${{ secrets.AZURE_SQL_CONNECTION_STRING }}
