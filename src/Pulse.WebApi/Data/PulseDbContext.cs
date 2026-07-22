@@ -5,9 +5,12 @@ using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data.Entities;
 
 /// <summary>
-/// The first durable state in Pulse (COR-001, XC-004) — EF Core on Azure SQL. Exposes exactly the
-/// walking-skeleton entity set; the rest of E1's domain (<c>Organization</c>, <c>ParticipantAccount</c>,
-/// <c>StaffAssignment</c>, <c>Cast</c>) is deferred to the identity phase and is intentionally NOT here.
+/// The first durable state in Pulse (COR-001, XC-004) — EF Core on Azure SQL. Beyond the original
+/// walking-skeleton entities, the Phase-B2 identity tier now lives here too: <c>Account</c> and
+/// <c>SharedCredential</c> (exercise-scoped) alongside the cross-exercise <c>StaffUser</c>,
+/// <c>StaffAssignment</c>, and <c>Session</c> records (deliberately NOT <see cref="IExerciseScoped"/> —
+/// each carries a plain <c>ExerciseId</c> and documents its exemption in its own remarks).
+/// <c>Organization</c> / <c>Cast</c> remain deferred (exercise-isolation/11, gated on multi-customer go-live).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -78,6 +81,21 @@ public class PulseDbContext : DbContext
     /// <summary>The engine review-queue store — one row per generated burst awaiting/resolved review (E8 §8).</summary>
     public DbSet<EngineReviewItemEntity> EngineReviewItems => Set<EngineReviewItemEntity>();
 
+    /// <summary>Provisioned, named participant accounts (COR-011). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<Account> Accounts => Set<Account>();
+
+    /// <summary>Per-exercise shared view-only credentials (COR-015/COR-016). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<SharedCredential> SharedCredentials => Set<SharedCredential>();
+
+    /// <summary>Staff human identities (COR-005/COR-014). NOT exercise-scoped — a staff human spans exercises.</summary>
+    public DbSet<StaffUser> StaffUsers => Set<StaffUser>();
+
+    /// <summary>Staff role-on-one-exercise assignments (COR-005). NOT exercise-scoped — cross-exercise by design.</summary>
+    public DbSet<StaffAssignment> StaffAssignments => Set<StaffAssignment>();
+
+    /// <summary>Persisted server-side sessions (COR-012). NOT exercise-scoped — looked up by opaque token pre-scope-resolution.</summary>
+    public DbSet<Session> Sessions => Set<Session>();
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -91,6 +109,20 @@ public class PulseDbContext : DbContext
         modelBuilder.Entity<Exercise>(entity =>
         {
             entity.HasKey(e => e.Id);
+
+            // B2 story 08: host → exercise map. Bounded lengths (index-key eligible) + FILTERED unique
+            // indexes so many exercises may share a NULL host without colliding, yet a provisioned host is
+            // unique. 253 = max DNS name length.
+            entity.Property(e => e.Hostname).HasMaxLength(253);
+            entity.HasIndex(e => e.Hostname).IsUnique().HasFilter("[Hostname] IS NOT NULL");
+            entity.Property(e => e.BrandedDomain).HasMaxLength(253);
+            entity.HasIndex(e => e.BrandedDomain).IsUnique().HasFilter("[BrandedDomain] IS NOT NULL");
+
+            // Required-with-default so the migration adds them NOT NULL to the existing table and the frozen
+            // ExerciseScope wire fields are never null.
+            entity.Property(e => e.TimeZone).IsRequired().HasDefaultValue("UTC");
+            entity.Property(e => e.Status).IsRequired().HasDefaultValue("scheduled");
+            // CurrentScenarioTime is nullable by its C# type (B2 placeholder) — no extra config.
         });
 
         modelBuilder.Entity<PersonaTemplate>(entity =>
@@ -148,6 +180,73 @@ public class PulseDbContext : DbContext
 
             // The draft posts persist as an owned JSON collection — one nvarchar(max) column, no child table.
             entity.OwnsMany(e => e.Posts, posts => posts.ToJson());
+        });
+
+        // ==========================================================================================
+        // B2 IDENTITY / AUTH SCHEMA (create-then-extend — new DbSets + config only; the central filter
+        // loop and GuardExerciseScope below are untouched). Two of these entities are IExerciseScoped
+        // (Account, SharedCredential) and inherit the read-filter + write-guard automatically via the loop;
+        // three are deliberately UNSCOPED (StaffUser, StaffAssignment, Session — see each entity's XML doc
+        // for the always-Critical safety rationale).
+        // ==========================================================================================
+
+        modelBuilder.Entity<Account>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // IExerciseScoped: required scope + the standard scoped lookup index (house style — Persona/Post).
+            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.HasIndex(e => e.ExerciseId);
+
+            // Login handle: bounded (index-key eligible) and unique PER EXERCISE, never globally (COR-004).
+            entity.Property(e => e.Username).HasMaxLength(256);
+            entity.HasIndex(e => new { e.ExerciseId, e.Username }).IsUnique();
+        });
+
+        modelBuilder.Entity<SharedCredential>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // IExerciseScoped: required scope. Exactly ONE credential per exercise → unique scope index.
+            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.HasIndex(e => e.ExerciseId).IsUnique();
+        });
+
+        modelBuilder.Entity<StaffUser>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // Provider-agnostic identity key: bounded (index-key eligible), unique across Pulse.
+            entity.Property(e => e.ExternalSubject).HasMaxLength(256);
+            entity.HasIndex(e => e.ExternalSubject).IsUnique();
+            // NOT IExerciseScoped: staff-world access record, spans exercises (COR-005). No ExerciseId.
+        });
+
+        modelBuilder.Entity<StaffAssignment>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // NOT IExerciseScoped: cross-exercise by design (COR-005). ExerciseId is a PLAIN column.
+            // One role per (staff user, exercise); plus a reverse index for "who is assigned to exercise X".
+            entity.HasIndex(e => new { e.StaffUserId, e.ExerciseId }).IsUnique();
+            entity.HasIndex(e => e.ExerciseId);
+        });
+
+        modelBuilder.Entity<Session>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // NOT IExerciseScoped: looked up by opaque token pre-scope-resolution (see Session XML doc).
+            // Token/refresh hashes: bounded (index-key eligible), unique; refresh is filtered-unique (nullable).
+            entity.Property(e => e.TokenHash).HasMaxLength(256);
+            entity.HasIndex(e => e.TokenHash).IsUnique();
+            entity.Property(e => e.RefreshTokenHash).HasMaxLength(256);
+            entity.HasIndex(e => e.RefreshTokenHash)
+                .IsUnique()
+                .HasFilter("[RefreshTokenHash] IS NOT NULL");
+
+            // Bound exercise is a plain column; indexed for the story-07 revoke-all-by-exercise query.
+            entity.HasIndex(e => e.ExerciseId);
         });
 
         // ------------------------------------------------------------------------------------------

@@ -220,6 +220,17 @@ reload, persisted, and evaluated.** This is "pilot mode" per PRD §4 (login → 
 
 Makes "log in and land in *your* exercise" real — and unlocks meaningful navigation.
 
+> **Delivered (built + both code-review gates clean on `feature/identity-backend`; umbrella→`main` PR open,
+> pending Tier-2 human sign-off + CI + Copilot + `/security-review`, which came back clean).** The proposed
+> stories below were reconciled into the existing `docs/features/{identity-auth-roles, exercise-isolation,
+> app-shell}` backlog and built there (all now `Status: Complete`): a Wave-0 schema seam-freeze (one migration
+> froze the whole identity schema) + `exercise-isolation/08` (host→exercise resolution), `identity-auth-roles/
+> {05 staff identity, 03 sessions, 02 named accounts, 06 shared read-only, 07 credential lifecycle}`, and the
+> frontend `app-shell/01` (role-aware nav) + `exercise-isolation/04`+`05` (participant guard + staff switcher).
+> `identity-auth-roles/04` (evaluator write-denial) was deferred. Frontend mock→live flips
+> (`USE_MOCK_SESSION`/`USE_MOCK_EXERCISE_CONTEXT`) are deferred to backend deployment; cert/DNS automation
+> (COR-008) remains an infra follow-up. B2 done unblocks Phase B3 (engine-runtime).
+
 | Story (proposed) | Builds | Req |
 |---|---|---|
 | `identity-backend/01-participant-accounts` | Named participant accounts (bulk import), session↔exercise binding | COR-011/012 |
