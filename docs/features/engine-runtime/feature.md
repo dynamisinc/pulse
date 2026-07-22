@@ -110,6 +110,17 @@ any B3 spike must use a server-authoritative stopgap scope, never a client-suppl
 
 - **Wave-0 LO-002**: add a negative-path (reject unknown literal) test for the engine enum JSON converters.
 
+- **Cockpit role granularity (/security-review)**: after the B2 merge, the review-cockpit endpoints
+  (#286) are gated to a staff session **assigned to the resolved exercise** (COR-005) via
+  `EngineCockpitStaffAuthorizationFilter` — but authorize *any* assigned staff role. The safety-critical
+  autonomy controls (kill-switch / swamped-mode / approve / batch) are therefore reachable by a
+  non-controller staff session (e.g. an evaluator) assigned to that exercise. Decided (owner) to keep
+  staff+assigned for now and defer a controller-role restriction to `/security-review` — **safe only while
+  Phase-1 issues exercise assignments to controller-role staff**; escalate if evaluator/observer staff are
+  assigned. Minor: the shared-read-only endpoint test drives a null accessor (same path as anonymous)
+  rather than a real `readonly`-kind session (the real guarantee is proven in the identity suite); and the
+  403 branch returns a bare status with no problem-details body.
+
 ## Design notes
 Backend / staff — no participant surface. The two-worlds rule (D0 §2) is enforced here as a
 **data-layer** guarantee, inherited from B1: every engine post publishes through
