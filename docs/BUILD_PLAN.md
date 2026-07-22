@@ -132,11 +132,32 @@ delivered" notes for exactly what landed vs. what remains).
 > the real-time "new posts" pill remain `feeds-discovery/04`.
 
 ### Wave S3+ ⬜ (fan out; all reuse PostCard)
-- `profiles-social-graph/01-profile-page` → `02-follow-unfollow` → `feeds-discovery/02-following-feed`
-- `reactions/01-like`, `amplification/01-repost-quote`, `hashtags-trending/01-hashtags`
+- ✅ `profiles-social-graph/01-profile-page` (#109) + `03-verification-and-impersonation` (#111) →
+  `02-follow-unfollow` → `feeds-discovery/02-following-feed`
+- ✅ `reactions/01-like` (#104), ✅ `hashtags-trending/01-hashtags` (#106), 🔧 `amplification/01-repost-quote` (#101, AC1 partial)
 - `feeds-discovery/03-search`, `04-realtime-new-posts-pill` (SignalR host + polling fallback), `notifications/01-notification-center`
 - `persona-operation/*` (E7 staff inject surface — after the participant read/compose slice exists)
 - Deferred/stretch: `feeds-discovery/05-for-you-feed`, `reactions/02-sentiment`, `direct-messages/*`
+
+> **Delivered — Wave S3.1 sub-wave** (Gate-2 clean, opus/xhigh — 0 Critical): `reactions/01-like`,
+> `hashtags-trending/01-hashtags`, `profiles-social-graph/01-profile-page` +
+> `03-verification-and-impersonation` are all **Complete** on `feature/social` — like/repost/quote
+> wired into `<PostCard>`/`<Feed>`/`<ThreadView>`'s action row, hashtag-feed + profile navigation
+> wired into `SocialChannel`. `build:check` + `lint` clean, **features/social: 31 files / 257 tests
+> pass**. A WR-001/WR-002 a11y fix also landed (hashtag links no longer nested inside the card's
+> open-button; render inert, not a focusable no-op, when `onHashtagOpen` isn't wired).
+> `amplification/01-repost-quote` stays **In Progress**, not Complete: the compose flow, XC-004
+> telemetry, sanitized quote commentary, and action-row controls are built and tested, but AC1's
+> "appears in the audience's feed attributed 'X reposted'" is not demonstrated end-to-end — feed
+> insertion + the repost/quote count bump are deferred to `amplification/02` (Gate-2 finding WR-004).
+> Umbrella→`main` PR pending.
+>
+> **Gate-2 follow-ups (not blocking, tracked in the affected stories' Deferred notes):** WR-003
+> (`ThreadView`/`Profile` don't thread the shell's read-only `variant` into their `<PostCard>`s, so an
+> observer session sees present-but-inert action controls instead of D1-011's "controls absent");
+> SUG-001 (`SocialChannel`'s focus management doesn't reposition on a detail-to-detail view swap, e.g.
+> thread → hashtag); SUG-002 (`HashtagFeed` can't pivot tag-to-tag — no `onHashtagOpen` threaded to its
+> own cards).
 
 ---
 

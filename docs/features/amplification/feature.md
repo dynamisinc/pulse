@@ -18,7 +18,7 @@ SOC-020, SOC-021, SOC-022 (with XC-004 telemetry, SOC-054 audience magnitude for
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Repost & quote-post | SOC-020 | Not Started | #101 |
+| 01 | Repost & quote-post | SOC-020 | In Progress (AC1 partial — feed-appearance deferred to 02, WR-004) | #101 |
 | 02 | Amplification counts (queryable) | SOC-021 | Not Started | #102 |
 | 03 | Amplification chain reconstruction | SOC-022 | Not Started | #103 |
 

@@ -47,3 +47,9 @@ shared view-composition change:
 Build `Profile.tsx` and its unit/RTL tests standalone in Wave 1 (rendered directly with a
 personaId/route param, no live tap-through yet); the `SocialChannel.tsx` "open profile" wiring is a
 Wave-2 orchestrator pass alongside hashtag-feed navigation.
+
+**Landed (Wave-S3.1 integration, commit `9d935b8`):** a "View my profile" entry point is wired into
+`SocialChannel.tsx` and verified end-to-end (`SocialChannel.navigation.test.tsx`) — stories 01 and 03
+are Complete. Follow-up tracked in story 01's Deferred section: WR-003 (`Profile` doesn't thread the
+shell's read-only `variant` into its `<PostCard>`s, so an observer sees inert-but-present action
+controls instead of D1-011's "absent").

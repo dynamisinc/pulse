@@ -37,3 +37,6 @@ Build `useReaction.ts` + its unit tests standalone in Wave 1 against the CURRENT
 (mock/stub the callback in tests); the orchestrator applies the action-row/Feed/ThreadView wiring in
 one serial pass once both `01`s have landed. Story 01's Status should not move to Complete until that
 integration pass lands and its own AC (control renders in the action row) is verified end-to-end.
+
+**Landed (Wave-S3.1 integration, commit `9d935b8`):** the like control is wired into `<Feed>`'s live
+action row and verified end-to-end (`pages/Feed.actions.test.tsx`) — story 01 is Complete.

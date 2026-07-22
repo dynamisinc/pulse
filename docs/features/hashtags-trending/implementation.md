@@ -38,3 +38,9 @@ Build `hashtags.ts` + `HashtagFeed.tsx` (+ the isolated `PostCard.tsx` text edit
 tests standalone in Wave 1; the `SocialChannel.tsx` "open hashtag feed" wiring is a Wave-2 orchestrator
 pass alongside profile navigation. AC2 ("tapping a hashtag opens its feed") is not fully verifiable
 end-to-end until that pass lands.
+
+**Landed (Wave-S3.1 integration, commit `9d935b8`; WR-001/WR-002 a11y fix, commit `5b5032a`):** hashtag
+navigation is wired into `SocialChannel.tsx` and verified end-to-end
+(`SocialChannel.navigation.test.tsx`) — story 01 is Complete. Follow-ups tracked in the story's Deferred
+section: SUG-002 (no tag-to-tag pivot within `HashtagFeed`) and SUG-001 (`SocialChannel` doesn't
+reposition focus on a detail-to-detail view swap, e.g. thread → hashtag).

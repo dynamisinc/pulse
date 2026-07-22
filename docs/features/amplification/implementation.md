@@ -39,3 +39,10 @@ Build `amplify.ts` + `<QuotePostCard>` + their unit tests standalone in Wave 1 a
 `PostCard` contract; the orchestrator applies the action-row/Feed/ThreadView wiring in one serial pass
 once both `01`s have landed. Story 01's Status should not move to Complete until that integration pass
 lands and its own AC (repost/quote controls render in the action row) is verified end-to-end.
+
+**Landed (Wave-S3.1 integration, commit `9d935b8`):** the repost/quote controls ARE wired into
+`<Feed>`'s live action row and emit telemetry end-to-end (`pages/Feed.actions.test.tsx`) — that part of
+the integration is done. Story 01 remains **In Progress**, not Complete: AC1's "appears in the
+audience's feed attributed 'X reposted'" clause is still not wired (no new feed row is inserted, no
+count bump) — Gate-2 finding WR-004, tracked to land with `amplification/02`. See the story's Deferred
+section.

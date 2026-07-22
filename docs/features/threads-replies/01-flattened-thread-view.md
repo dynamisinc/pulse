@@ -24,6 +24,18 @@ levels on real content).
 Reply composition (posts composer, SOC-001); reply counts on feed cards (story 02); nested layout
 (rejected).
 
+## Deferred (tracked follow-ups, Gate-2 — recorded here during the Wave-S3.1 close-out, not new work)
+- **WR-003.** `ThreadView` doesn't thread the shell's read-only `variant` down to the `<PostCard>`s it
+  renders (ancestors/focused/replies), so an observer session sees present-but-inert action controls
+  instead of D1-011's "controls absent" — the handlers are simply unwired (gated no-ops), not a data
+  leak. Same gap on `Profile` (`profiles-social-graph/01`, tracked there too). Follow-up: thread
+  `variant`/`affordancesAvailable()` from `useShellContext()` into each `<PostCard>` call here,
+  mirroring `<Feed>`'s existing wiring.
+- **SUG-001 (cross-reference).** `SocialChannel`'s detail-to-detail focus gap
+  (`hashtags-trending/01`'s Deferred note) includes the `ThreadView.onHashtagOpen` → hashtag-feed
+  transition, since that view swap doesn't pass through `feed` state. No change needed in this story;
+  noted here for discoverability from the ThreadView side.
+
 ## Technical Notes
 Participant world. Reuses `<PostCard>` (posts/02) for every post here — ancestors, focused, and every
 visible reply — never forked. Flattened is the only layout. The taken-down-reply tombstone is a
