@@ -147,8 +147,13 @@ public sealed class EnginePublishService : IEnginePublishService
             }
         }
 
-        // Emit exactly one engine.published event per published post, in the SAME scoped unit of work; the
-        // write-guard validates ExerciseId != Guid.Empty on each (the burst scope is already resolved).
+        // Each post above was already persisted AND committed individually by PostIngestService.IngestAsync
+        // (one SaveChangesAsync per post). These engine.published events are therefore written here in a
+        // FOLLOWING, best-effort save on the same scoped context — NOT the same transaction as the posts, so
+        // a failure here does NOT roll back posts already published. The write-guard still validates
+        // ExerciseId != Guid.Empty on each event (the burst scope is resolved). Cross-boundary atomicity and
+        // de-dup are the tracked follow-up (ingest-side draftId idempotency — see feature.md "Post-B3
+        // follow-ups").
         if (publishedEvents.Count > 0)
         {
             dbContext.TelemetryEvents.AddRange(publishedEvents);

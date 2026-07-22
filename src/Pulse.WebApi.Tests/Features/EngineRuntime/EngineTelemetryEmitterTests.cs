@@ -108,6 +108,19 @@ public class EngineTelemetryEmitterTests
     }
 
     [Fact]
+    public void BuildEvent_ThrowsOnEmptyRequiredEnvelopeField()
+    {
+        var emitter = new EngineTelemetryEmitter();
+
+        var act = () => emitter.BuildEvent(
+            EngineEventTypes.Observed,
+            ContextFor(Guid.NewGuid()) with { Channel = string.Empty });
+
+        act.Should().Throw<ArgumentException>(
+            "an empty REQUIRED v0-envelope field must fail FAST, never persist an off-envelope row");
+    }
+
+    [Fact]
     public void BuildEvent_NoPayload_LeavesPayloadNull()
     {
         var emitter = new EngineTelemetryEmitter();

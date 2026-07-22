@@ -32,6 +32,14 @@ public sealed class EngineTelemetryEmitter : IEngineTelemetryEmitter
         ArgumentException.ThrowIfNullOrEmpty(eventType);
         ArgumentNullException.ThrowIfNull(context);
 
+        // Defence-in-depth: fail FAST on an empty REQUIRED v0-envelope field the emitter stamps, so an
+        // accidental blank never persists an off-envelope row into a non-nullable column (mirrors the
+        // ingest-side TelemetryEventRequest.Validate). The genuinely-optional fields (origin, actor's
+        // acting-human/session/etc., target) stay null-omitted below and are NOT guarded here.
+        ArgumentException.ThrowIfNullOrEmpty(context.Channel);
+        ArgumentException.ThrowIfNullOrEmpty(context.TimeZone);
+        ArgumentException.ThrowIfNullOrEmpty(context.Actor.Kind);
+
         return new TelemetryEvent
         {
             EventId = Guid.NewGuid().ToString(),
