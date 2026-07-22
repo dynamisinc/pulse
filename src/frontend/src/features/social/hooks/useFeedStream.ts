@@ -122,7 +122,13 @@ export function useFeedStream({
       setNewCount(buffer.length)
     })
 
-    void source.start()
+    // Fail-soft start: a source that cannot start simply yields no stream — the
+    // feed still works. Swallow a rejected `start()` so it never becomes an
+    // unhandled promise rejection (which has crashed vitest worker teardown in
+    // this repo). Defence in depth: the shipped realtime source already degrades
+    // to polling internally (NFR-003) and the mock source resolves, so only a
+    // pathological/future source could reject here.
+    void source.start().catch(() => {})
 
     return () => {
       unsubscribe()

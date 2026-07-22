@@ -267,13 +267,26 @@ export function Feed({ onOpenThread, onHashtagOpen }: FeedProps = {}) {
   }, [liveViews, posts])
 
   const handleLoadNew = useCallback(() => {
+    // Guard BEFORE draining: if the persona cast has not resolved yet, do NOT
+    // drain — every author resolution would fail and the drain would drop the
+    // buffered posts the reader was just told about (data loss) while resetting
+    // the count. Leave the buffer + pill intact so a later tap (once the cast
+    // loads) still works. In practice the cast is loaded by now (the baseline
+    // feed rendered), so this is fail-soft cover with no data loss.
+    if (personaById.size === 0) return
+
     const buffered = loadBuffered()
     if (buffered.length === 0) return
 
     const resolved = resolveLiveViews(buffered, personaById, renderedIds)
-    if (resolved.length > 0) {
-      setLiveViews(prev => sortNewestFirst([...resolved, ...prev]))
-    }
+    // Nothing resolved: every buffered post was a mount-window duplicate already
+    // on screen or an unknown author — both correctly skipped, matching the
+    // baseline `assembleFeedView` skip. The drain above already cleared the
+    // count and hid the pill; don't scroll to a feed that didn't change, and
+    // don't emit a load event for a load that rendered nothing. Return early.
+    if (resolved.length === 0) return
+
+    setLiveViews(prev => sortNewestFirst([...resolved, ...prev]))
 
     // Scroll the feed to the top (AC2) without stealing focus — `scrollIntoView`
     // moves the viewport, never the focus ring. Guarded for environments (jsdom)
@@ -285,7 +298,8 @@ export function Feed({ onOpenThread, onHashtagOpen }: FeedProps = {}) {
 
     // XC-004: ONE event when the reader loads buffered posts. Reuses the 'view'
     // type + feed target the mount view uses (open `eventType`/`entityId`, no new
-    // schema); the buffered count rides the sanctioned `payload` extension point.
+    // schema); the count ACTUALLY loaded into view (`resolved`, not the raw
+    // drained count) rides the sanctioned `payload` extension point.
     buildAndEmit({
       exerciseId,
       eventType: 'view',
@@ -295,7 +309,7 @@ export function Feed({ onOpenThread, onHashtagOpen }: FeedProps = {}) {
       scenarioTime: scenarioNow().toISOString(),
       timeZone,
       target: { entityType: 'feed', entityId: 'all-posts' },
-      payload: { newPostsLoaded: buffered.length },
+      payload: { newPostsLoaded: resolved.length },
     })
   }, [loadBuffered, personaById, renderedIds, exerciseId, timeZone, session.accountId])
 

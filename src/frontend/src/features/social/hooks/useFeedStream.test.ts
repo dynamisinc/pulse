@@ -143,6 +143,35 @@ describe('useFeedStream — buffers arrivals behind a count only (AC1/AC2)', () 
   })
 })
 
+describe('useFeedStream — a source whose start() rejects is fail-soft (Copilot #301)', () => {
+  it('swallows a rejected start() (no unhandled rejection) and still buffers arrivals', async () => {
+    // A pathological source whose start() REJECTS. The hook must swallow it so
+    // it never becomes an unhandled promise rejection (which has crashed vitest
+    // worker teardown in this repo) AND stay fully functional — subscribe is
+    // wired before start(), so arrivals still buffer regardless of the outcome.
+    const fake = new FakeFeedStreamSource()
+    vi.spyOn(fake, 'start').mockRejectedValue(new Error('start blew up'))
+
+    const { result } = renderHook(() => useFeedStream({ enabled: true, source: fake }))
+
+    // Let the rejected start() settle — the hook's own .catch() handles it; if
+    // the fix were missing this microtask would surface an unhandled rejection.
+    await Promise.resolve()
+
+    // Subscription is still live: an arrival buffers as normal.
+    act(() => fake.push(buildView('p1')))
+    expect(result.current.newCount).toBe(1)
+
+    // And draining still works — the hook is not wedged by the failed start.
+    let drained: ParticipantPostView[] = []
+    act(() => {
+      drained = result.current.loadBuffered()
+    })
+    expect(drained.map(p => p.id)).toEqual(['p1'])
+    expect(result.current.newCount).toBe(0)
+  })
+})
+
 describe('useFeedStream — bounded ring under burst (NFR-002, SOC-071)', () => {
   it('never exceeds FEED_STREAM_BUFFER_CAP and keeps the NEWEST arrivals (evict-oldest)', async () => {
     const fake = new FakeFeedStreamSource()

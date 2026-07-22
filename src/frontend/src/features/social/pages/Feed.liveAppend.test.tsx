@@ -24,9 +24,10 @@
  * end: append → buffer → pill → tap → prepend.
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
+import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import { personaIdForHandle } from '@/features/personas'
 import type { Post } from '@/features/social'
@@ -75,8 +76,30 @@ function renderFeed() {
   )
 }
 
+/** The load-time telemetry event (the pill tap), distinguished from the mount
+ * 'view' by its `payload.newPostsLoaded`. The mount view carries no payload. */
+function loadTelemetryEvents() {
+  return getEmittedTelemetryEvents().filter(
+    e => e.eventType === 'view' && e.payload !== undefined && 'newPostsLoaded' in e.payload,
+  )
+}
+
+// jsdom does not implement scrollIntoView; the page guards on its presence, so
+// define a spy to (a) exercise the scroll branch and (b) assert it is NOT called
+// when a tap resolves nothing (Copilot #301).
+type ScrollIntoViewFn = (arg?: boolean | ScrollIntoViewOptions) => void
+let scrollSpy: Mock<ScrollIntoViewFn>
+
+beforeEach(() => {
+  resetTelemetryBuffer()
+  scrollSpy = vi.fn<ScrollIntoViewFn>()
+  HTMLElement.prototype.scrollIntoView = scrollSpy
+})
+
 afterEach(() => {
   postStore.resetForTests()
+  resetTelemetryBuffer()
+  delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView
 })
 
 describe('Feed — real-time arrivals buffer behind the pill (feeds-discovery/04)', () => {
@@ -141,5 +164,61 @@ describe('Feed — real-time arrivals buffer behind the pill (feeds-discovery/04
     ])
     // The pill clears after loading.
     expect(screen.queryByTestId('new-posts-pill')).toBeNull()
+  })
+})
+
+describe('Feed — pill-load guards against empty/dupe resolve (Copilot #301)', () => {
+  it('normal load prepends, scrolls to top, and emits ONE load event with the resolved count', async () => {
+    renderFeed()
+    await screen.findAllByTestId('post-card')
+
+    act(() => {
+      postStore.appendPost(buildLivePost())
+    })
+    const pill = await screen.findByTestId('new-posts-pill')
+
+    fireEvent.click(pill)
+
+    await waitFor(() => {
+      const ids = screen.getAllByTestId('post-card').map(c => c.getAttribute('data-post-id'))
+      expect(ids[0]).toBe('post-live-append-e2e')
+    })
+
+    // Scrolled to top (AC2) …
+    expect(scrollSpy).toHaveBeenCalledTimes(1)
+    expect(scrollSpy).toHaveBeenCalledWith({ block: 'start' })
+
+    // … and exactly ONE load event whose count reflects what actually rendered.
+    const loads = loadTelemetryEvents()
+    expect(loads).toHaveLength(1)
+    expect(loads[0]?.payload?.newPostsLoaded).toBe(1)
+  })
+
+  it('a tap that resolves nothing (unknown author) clears the count WITHOUT scrolling or emitting', async () => {
+    renderFeed()
+    const before = await screen.findAllByTestId('post-card')
+    expect(before.map(c => c.getAttribute('data-post-id'))).toEqual(NEWEST_FIRST_SEEDED_IDS)
+
+    // Buffers fine (the stream source doesn't check authors) — the pill counts
+    // it — but the author is not in the persona cast, so resolveLiveViews skips
+    // it on load and nothing actually renders (matching the baseline skip).
+    act(() => {
+      postStore.appendPost(
+        buildLivePost({ id: 'post-live-unknown-author', authorPersonaId: 'persona-does-not-exist' }),
+      )
+    })
+    const pill = await screen.findByTestId('new-posts-pill')
+    expect(pill).toHaveTextContent('1 new post')
+
+    fireEvent.click(pill)
+
+    // Count clears (drain reset it) and the pill disappears …
+    await waitFor(() => expect(screen.queryByTestId('new-posts-pill')).toBeNull())
+
+    // … but the feed did not change, we did NOT scroll, and NO load event fired.
+    const after = screen.getAllByTestId('post-card')
+    expect(after.map(c => c.getAttribute('data-post-id'))).toEqual(NEWEST_FIRST_SEEDED_IDS)
+    expect(scrollSpy).not.toHaveBeenCalled()
+    expect(loadTelemetryEvents()).toHaveLength(0)
   })
 })
