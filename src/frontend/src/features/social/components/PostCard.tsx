@@ -55,7 +55,7 @@
  * custom properties; see that file's header for the theming model).
  */
 
-import type { KeyboardEvent, MouseEvent } from 'react'
+import type { KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faComment,
@@ -69,6 +69,7 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
 import { Avatar } from './Avatar'
 import { VerifiedMark } from './VerifiedMark'
+import { parseHashtags } from '../utils/hashtags'
 import styles from '../theme/social.module.css'
 
 /** A single media attachment. No URL yet (that lands with real media
@@ -147,6 +148,58 @@ function buildActions(counts: PostCounts): ActionSpec[] {
 
 const OPEN_KEYS = new Set(['Enter', ' ', 'Spacebar'])
 
+/**
+ * Hashtag link color — the per-exercise accent (COR-030) read from the same
+ * `--pc-accent` custom property the card root declares (see
+ * `social.module.css`), with the shared Cadence-navy default. Set inline (not a
+ * new CSS-module class) so the linkify stays a self-contained edit to the text
+ * block. Accent color + the leading `#` glyph + `role="link"` together mark a
+ * hashtag as a link WITHOUT relying on color alone (NFR-001).
+ */
+const HASHTAG_STYLE = { color: 'var(--pc-accent)' } as const
+
+/**
+ * A hashtag tap/keyboard-activation must NOT also open the post's thread (the
+ * card body's `onOpen`), so it stops propagation to the enclosing openable
+ * region. Actual navigation to the hashtag feed is wired by the shell channel
+ * in the Wave-2 integration pass (it reads the `data-hashtag` attribute); this
+ * self-contained edit only renders the link and keeps it from triggering
+ * onOpen.
+ */
+function stopHashtagClick(event: MouseEvent<HTMLAnchorElement>) {
+  event.stopPropagation()
+}
+
+function stopHashtagKey(event: KeyboardEvent<HTMLAnchorElement>) {
+  if (OPEN_KEYS.has(event.key)) event.stopPropagation()
+}
+
+/**
+ * Renders post text with hashtags linkified (SOC-040). Plain text segments
+ * render as React text children (never `dangerouslySetInnerHTML`, so a
+ * script-like string stays inert — NFR-004); hashtags render as accent-styled,
+ * keyboard-focusable `role="link"` anchors carrying the normalized tag in
+ * `data-hashtag` (the seam the Wave-2 channel wiring reads to open the feed).
+ */
+function renderPostText(text: string): ReactNode {
+  return parseHashtags(text).map((token, index) => {
+    if (token.type === 'text') return token.value
+    return (
+      <a
+        key={`hashtag-${index}`}
+        role="link"
+        tabIndex={0}
+        data-hashtag={token.tag}
+        style={HASHTAG_STYLE}
+        onClick={stopHashtagClick}
+        onKeyDown={stopHashtagKey}
+      >
+        {token.raw}
+      </a>
+    )
+  })
+}
+
 export function PostCard({ post, variant = 'full', onOpen, onReply }: PostCardProps) {
   const { timeZone } = useExerciseContext()
   const { format } = useScenarioTime(timeZone)
@@ -204,7 +257,7 @@ export function PostCard({ post, variant = 'full', onOpen, onReply }: PostCardPr
             </time>
           </header>
 
-          <p className={styles.text}>{post.text}</p>
+          <p className={styles.text}>{renderPostText(post.text)}</p>
 
           {post.media && post.media.length > 0 && (
             <div className={styles.media} data-testid="post-media">
