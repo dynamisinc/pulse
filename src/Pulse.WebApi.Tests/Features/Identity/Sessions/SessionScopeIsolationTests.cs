@@ -105,11 +105,13 @@ public sealed class SessionScopeIsolationTests
     public async Task ExpiredSession_OnUnknownHost_SeesZeroRows_FailClosed()
     {
         var (exerciseA, _, _, _, _, _) = await SeedTwoExercisesAsync();
-        await SeedSessionAsync("staff", "expired-token", exerciseA, staffUserId: Guid.NewGuid(),
+        // Globally-unique per-seed token (shared-DB IX_Sessions_TokenHash is global across the collection).
+        var token = $"expired-scope-{Guid.NewGuid():N}";
+        await SeedSessionAsync("staff", token, exerciseA, staffUserId: Guid.NewGuid(),
             expiresAt: DateTimeOffset.UtcNow.AddMinutes(-1));
 
         await using var testHost = await SessionAuthenticationTestHost.StartAsync(_fixture.ConnectionString!);
-        using var client = testHost.CreateClient($"unprovisioned-{Guid.NewGuid():N}.example.com", "expired-token");
+        using var client = testHost.CreateClient($"unprovisioned-{Guid.NewGuid():N}.example.com", token);
 
         var response = await client.GetAsync(new Uri("/test/posts", UriKind.Relative));
         response.StatusCode.Should().Be(HttpStatusCode.OK, "the read endpoint answers 200 — isolation happens inside the scoped read");

@@ -169,10 +169,12 @@ public sealed class SharedReadOnlyWriteDenialIsolationTests
         // The 403 is keyed off IsReadOnly, not off merely being authenticated: a staff (non-read-only) session
         // bound to A passes the guard and reaches the handler (which resolves scope A).
         var seed = await SeedTwoExercisesAsync();
-        await SeedSessionAsync("staff-token", seed.ExerciseA, isReadOnly: false, kind: "staff");
+        // Globally-unique per-seed token (shared-DB IX_Sessions_TokenHash is global across the collection).
+        var token = $"staff-guard-{Guid.NewGuid():N}";
+        await SeedSessionAsync(token, seed.ExerciseA, isReadOnly: false, kind: "staff");
 
         await using var host = await SharedReadOnlyTestHost.StartAsync(_fixture.ConnectionString!);
-        using var staffClient = host.CreateClient(seed.HostA, "staff-token");
+        using var staffClient = host.CreateClient(seed.HostA, token);
 
         var response = await staffClient.PostAsJsonAsync("/test/sim-write", new { });
 

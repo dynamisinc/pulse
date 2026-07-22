@@ -45,8 +45,8 @@ public sealed class SessionServiceTests
     private async Task<Session> SeedSessionAsync(
         Guid exerciseId,
         string kind = "participant",
-        string rawToken = "raw-token",
-        string rawRefreshToken = "raw-refresh",
+        string? rawToken = null,
+        string? rawRefreshToken = null,
         DateTimeOffset? expiresAt = null,
         DateTimeOffset? refreshExpiresAt = null,
         DateTimeOffset? revokedAt = null,
@@ -57,6 +57,14 @@ public sealed class SessionServiceTests
         Guid? staffUserId = null,
         string actingHumanId = "human-1")
     {
+        // The single collection shares ONE database with NO per-test reset, so IX_Sessions_TokenHash (unique)
+        // and IX_Sessions_RefreshTokenHash (unique, filtered on non-null) are GLOBAL across every session-seeding
+        // test. Default each un-overridden raw token to a fresh GUID-derived value so the seeded hashes are
+        // globally unique in any execution order — no authenticating test relies on these defaults (every one
+        // passes an explicit rawToken/rawRefreshToken), so uniqueness here is safe.
+        rawToken ??= $"seed-access-{Guid.NewGuid():N}";
+        rawRefreshToken ??= $"seed-refresh-{Guid.NewGuid():N}";
+
         var session = new Session
         {
             Id = Guid.NewGuid(),
@@ -125,12 +133,15 @@ public sealed class SessionServiceTests
     public async Task GetCurrent_ExpiredSession_ReturnsExpired_EmitsSessionExpired()
     {
         var exerciseId = Guid.NewGuid();
+        // Globally-unique per-seed token: "expired-token" was a cross-file literal shared with
+        // SessionScopeIsolationTests, colliding on the shared-DB IX_Sessions_TokenHash.
+        var token = $"expired-{Guid.NewGuid():N}";
         await SeedExerciseAsync(exerciseId, new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5)));
-        await SeedSessionAsync(exerciseId, rawToken: "expired-token", expiresAt: DateTimeOffset.UtcNow.AddMinutes(-1));
+        await SeedSessionAsync(exerciseId, rawToken: token, expiresAt: DateTimeOffset.UtcNow.AddMinutes(-1));
 
         await using (var context = _fixture.CreateContext())
         {
-            var result = await ServiceFor(context).GetCurrentAsync("expired-token");
+            var result = await ServiceFor(context).GetCurrentAsync(token);
             result.Outcome.Should().Be(SessionQueryOutcome.Expired, "an expired session forces re-auth (401)");
         }
 

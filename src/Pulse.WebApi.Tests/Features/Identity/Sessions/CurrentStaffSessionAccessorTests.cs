@@ -66,10 +66,13 @@ public sealed class CurrentStaffSessionAccessorTests
     public async Task LiveStaffSession_ReturnsCurrentStaffSession()
     {
         var staffUserId = Guid.NewGuid();
-        var sessionId = await SeedSessionAsync("staff", "staff-token", staffUserId);
+        // Globally-unique per-seed token: "staff-token" was a cross-file literal shared with
+        // SharedReadOnlyWriteDenialIsolationTests, colliding on the shared-DB IX_Sessions_TokenHash.
+        var token = $"staff-{Guid.NewGuid():N}";
+        var sessionId = await SeedSessionAsync("staff", token, staffUserId);
 
         await using var context = _fixture.CreateContext();
-        var accessor = new CurrentStaffSessionAccessor(context, AccessorWithToken("staff-token"));
+        var accessor = new CurrentStaffSessionAccessor(context, AccessorWithToken(token));
 
         var current = await accessor.GetCurrentStaffSessionAsync();
 
