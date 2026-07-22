@@ -24,8 +24,8 @@ conduct) — see `docs/features/console-shell/03-static-identity-badge.md`.
 | 01 | Every entity is exercise-scoped (central query filter) | COR-001 | Not Started | #44 |
 | 02 | Scoped surfaces & non-guessable media URLs | COR-002 | Not Started | #45 |
 | 03 | Same persona template, independent instances per exercise | COR-003 | Not Started | #46 |
-| 04 | Participants have no exercise-selection concept | COR-004 | Not Started | #47 |
-| 05 | Staff cross-exercise switcher (staff-only) | COR-005 | Not Started | #48 |
+| 04 | Participants have no exercise-selection concept | COR-004 | Complete | #47 |
+| 05 | Staff cross-exercise switcher (staff-only) | COR-005 | Complete | #48 |
 | 06 | Archived exercises fully separable | COR-006 | Not Started | #49 |
 | 07 | Standing cross-exercise isolation test suite | COR-007 | Not Started | #50 |
 | 08 | Per-exercise hostname (subdomain) | COR-008 | Complete | #51 |

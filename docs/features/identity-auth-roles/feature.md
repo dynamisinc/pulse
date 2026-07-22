@@ -26,7 +26,7 @@ non-negotiables (staff vs participant worlds).
 | 04 | Evaluator read-everything, write-nothing | COR-013 | Not Started | #61 |
 | 05 | Hybrid identity model behind a provider interface | COR-014 | Complete | #62 |
 | 06 | Shared read-only access (view-only session) | COR-015 | Complete | #63 |
-| 07 | Shared-credential lifecycle (rotate/revoke/lockout) | COR-016 | Not Started | #64 |
+| 07 | Shared-credential lifecycle (rotate/revoke/lockout) | COR-016 | Complete | #64 |
 | 08 | Participant admin panel (login triage) | COR-017 | Not Started | #65 |
 | 09 | Organization-account operation (post-as-org, attribution) | COR-018 | Not Started | #66 |
 

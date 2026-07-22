@@ -25,7 +25,7 @@ route table replacement is the orchestrator-owned edit there). Mounts the **exis
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Role-aware global nav (participant landing + staff entry/switcher) | COR-004, COR-005 | Not Started | — |
+| 01 | Role-aware global nav (participant landing + staff entry/switcher) | COR-004, COR-005 | Complete | — |
 
 ## Dependencies
 **Live** `useSession()`/`useRole()` (identity-auth-roles/03) and `useExerciseContext()`

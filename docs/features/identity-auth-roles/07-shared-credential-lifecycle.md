@@ -1,6 +1,6 @@
 # Story: Shared-credential lifecycle (rotate / revoke / lockout) [TIER-2]
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-016 (NFR-009)  ·  **Design decisions:** none  ·  **Issue:** #64
 **Stack:** backend  ·  **Review:** Tier-2 (human sign-off — internet-facing shared secret)
 
@@ -15,34 +15,34 @@ kills all active read-only sessions, brute-force lockout, and per-IP rate limiti
 realization for the shared credential.
 
 ## Acceptance Criteria
-- [ ] The shared password can be **rotated** with an announce + grace window (old password works during
+- [x] The shared password can be **rotated** with an announce + grace window (old password works during
       the grace period, then stops).
-- [ ] **Immediate revocation** kills all active read-only sessions at once.
-- [ ] Brute-force **lockout** and **per-IP rate limiting** protect the shared-credential login.
-- [ ] Lifecycle actions are staff-only (XC-002) and logged (XC-004).
+- [x] **Immediate revocation** kills all active read-only sessions at once.
+- [x] Brute-force **lockout** and **per-IP rate limiting** protect the shared-credential login.
+- [x] Lifecycle actions are staff-only (XC-002) and logged (XC-004).
 
 ### Backend — lifecycle controls (COR-016, NFR-009)
-- [ ] `POST /api/staff/shared-credential/rotate` (staff-only) sets a new password and a grace window
+- [x] `POST /api/staff/shared-credential/rotate` (staff-only) sets a new password and a grace window
       during which the previous password still authenticates; after the window it stops. Both passwords
       are stored hashed; the plaintext is shown to staff once and never persisted in the clear.
-- [ ] `POST /api/staff/shared-credential/revoke` (staff-only) immediately invalidates the credential
+- [x] `POST /api/staff/shared-credential/revoke` (staff-only) immediately invalidates the credential
       **and terminates every active read-only session** for the exercise at once (no grace).
-- [ ] Repeated failed shared-cred logins trigger a **lockout** (per-IP and/or global), and the
+- [x] Repeated failed shared-cred logins trigger a **lockout** (per-IP and/or global), and the
       shared-cred login endpoint is **per-IP rate-limited** — realizing NFR-009 for the shared secret.
-- [ ] Lifecycle state (current grace window, lockout state) is exercise-scoped and staff-only (XC-002);
+- [x] Lifecycle state (current grace window, lockout state) is exercise-scoped and staff-only (XC-002);
       no participant path can read or trigger it.
 
 ### Cross-cutting
-- [ ] **Isolation (XC-001/COR-001):** rotation/revocation/lockout act only on the caller's active
+- [x] **Isolation (XC-001/COR-001):** rotation/revocation/lockout act only on the caller's active
       exercise's `SharedCredential` and its sessions; they can never affect another exercise's credential
       or sessions. `SharedCredential` remains `IExerciseScoped` (story 06).
-- [ ] **Telemetry (XC-004):** rotation, revocation, a lockout trip, and (from story 06) shared-cred login
+- [x] **Telemetry (XC-004):** rotation, revocation, a lockout trip, and (from story 06) shared-cred login
       failures each emit an XC-004 event against the locked v0 envelope (wall + scenario time, actor,
       channel) — `actor.kind: 'system'`, `actor.role` = the acting staff role + `actingHumanId` for
       staff-initiated rotate/revoke; `channel: 'system'`; event types `credential.rotated` /
       `credential.revoked` / `auth.lockout` (open vocab, additive). Scenario time uses the exercise's
       stored scenario time until the COR-050 backend clock (B3) lands.
-- [ ] **Content security (NFR-004 / NFR-009):** the lifecycle endpoints validate/sanitize input and are
+- [x] **Content security (NFR-004 / NFR-009):** the lifecycle endpoints validate/sanitize input and are
       staff-authz-gated; passwords are hashed and never logged; the login lockout/rate-limit is the
       internet-facing abuse-resistance control.
 
@@ -107,3 +107,26 @@ XC-004 unit-of-work (one SaveChanges) + not-provisioned (404) + DI coexistence:
 - `SharedCredentialLifecycleServiceTests.Revoke_NoCredentialProvisioned_NotProvisioned`
 - `SharedCredentialLifecycleEndpointsHttpTests.AddSharedCredentialLifecycle_ComposesWithAddSharedReadOnly_WithoutDuplicatingTheHasher`
 - `SharedCredentialLifecycleEndpointsHttpTests.AddSharedCredentialLifecycle_DoesNotRegisterRateLimiterPolicyOptions`
+
+## Delivered (Phase B2)
+Built and tested on the B2 Wave-4 merges on `feature/identity-backend`: rotation with a grace window,
+immediate revocation (terminates every active read-only session for the exercise at once), brute-force
+lockout, and per-IP rate limiting over the `SharedCredential` (story 06). Both code-review gates
+(Gate-1, Gate-2) clean; umbrella green — 0 build warnings, `[RequiresDockerFact]` DB-backed tests run
+in CI (Testcontainers.MsSql against the runner's Docker daemon).
+
+Grace-window checking, lockout accrual, and the decoy hash comparison (closing story 06's tracked
+timing side-channel) are folded directly into story 06's shared-cred login path rather than layered
+beside it, so 06's fail-closed / no-timing-oracle / exactly-one-persisted-login-event invariants are
+preserved rather than duplicated or re-litigated by this story's changes.
+
+Deferred / tracked follow-ups (not blockers to Complete):
+- **TIER-2 + cross-slice-into-06 → needs `/security-review` + human sign-off at the PR.** This story's
+  build reaches into a second Tier-2 story's (06's) authentication hot path; that cross-slice touch is
+  flagged for the security review + human sign-off at the umbrella→main PR, not resolved here.
+- **Non-atomic `FailedAttemptCount++` lost-update** under concurrent failed logins against the same
+  credential — accepted and documented; bounded by the per-IP rate limit, so a lost increment cannot
+  meaningfully extend a brute-force window.
+
+Markdown status flipped to Complete. Not closing the GitHub issue — it closes when the umbrella→main
+PR merges.
