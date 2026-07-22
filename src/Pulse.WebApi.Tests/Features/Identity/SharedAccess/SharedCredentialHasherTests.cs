@@ -62,4 +62,15 @@ public sealed class SharedCredentialHasherTests
 
         _hasher.Verify(hash, string.Empty).Should().BeFalse("an empty submission can never match a real hash");
     }
+
+    [Fact]
+    public void VerifyDecoy_AlwaysReturnsFalse_RegardlessOfInput()
+    {
+        // Story 07 (Gate-1 timing-oracle fold): the decoy runs a full PBKDF2 verify against a fixed dummy hash so
+        // a NEGATIVE login path (absent / disabled / revoked / locked credential) pays the same slow-KDF cost a
+        // real verify would — but it must NEVER authenticate anything, for any input, including a null/empty guess.
+        _hasher.VerifyDecoy("any-guess").Should().BeFalse("the decoy verify never authenticates anything");
+        _hasher.VerifyDecoy(string.Empty).Should().BeFalse("an empty guess against the decoy still fails closed");
+        _hasher.VerifyDecoy(null).Should().BeFalse("a null submission is treated as empty and still fails closed");
+    }
 }

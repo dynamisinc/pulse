@@ -229,6 +229,29 @@ public sealed class SharedReadOnlyWriteDenialIsolationTests
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a wrong shared password fails closed (401), never a default session");
     }
 
+    [RequiresDockerFact]
+    public async Task SharedLogin_Rejected_ReturnsBodilessUnauthorized_NoCredentialExistenceOracle()
+    {
+        // Story-06 regression pinned post-story-07 fold (grace/lockout/decoy): the endpoint maps EVERY negative
+        // outcome — wrong password, absent/disabled/revoked/locked credential, unresolved host scope — to the
+        // SAME Results.Unauthorized(), which carries NO response body. A wrong password against a real, enabled
+        // credential must therefore be byte-identical (empty body) to every other rejection: there is no way
+        // for a caller to distinguish "wrong password" from "this exercise has no credential at all" (no
+        // credential-existence oracle). Runs through the REAL host-resolution + login pipeline.
+        var seed = await SeedTwoExercisesAsync();
+
+        await using var host = await SharedReadOnlyTestHost.StartAsync(_fixture.ConnectionString!);
+        using var onHostA = host.CreateClient(seed.HostA);
+
+        var response = await onHostA.PostAsJsonAsync("/api/auth/shared", new { password = "definitely-wrong" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().BeEmpty(
+            "a rejected shared login must return a BODILESS 401 — the story-07 grace/lockout/decoy changes must " +
+            "not have added any content that could distinguish one rejection reason from another");
+    }
+
     private static async Task<List<string>> GetPostIdsAsync(HttpClient client)
     {
         var response = await client.GetAsync(new Uri("/test/posts", UriKind.Relative));
