@@ -430,7 +430,7 @@ public sealed class ReactionLoopDriver
                 continue;
             }
 
-            var reviewItem = BuildReviewItem(storyline, intent, generateResult.Posts, draftId, scenarioMinute);
+            var reviewItem = BuildReviewItem(registration.ExerciseId, storyline, intent, generateResult.Posts, draftId, scenarioMinute);
             reviewItems.Add(reviewItem);
 
             // One demanded decision per burst (CTL-034); rate-account the burst's posts for this minute.
@@ -513,13 +513,26 @@ public sealed class ReactionLoopDriver
         };
 
     /// <summary>Builds the one review item for an accepted burst (Suggest → queued; Delayed-auto → counting down).</summary>
+    /// <param name="exerciseId">The tick's resolved server-authoritative scope — the review item is stamped with THIS, never the storyline's own field (COR-001).</param>
     private static EngineReviewItemEntity BuildReviewItem(
+        Guid exerciseId,
         Storyline storyline,
         GenerationIntent intent,
         IReadOnlyList<GeneratedPost> posts,
         Guid draftId,
         int scenarioMinute)
     {
+        // Defense in depth (COR-001, WR-001): the review item MUST carry the tick's resolved scope, and a
+        // storyline whose ExerciseId disagrees with it is a corrupt registration — enqueuing it would file
+        // exercise A's draft under exercise B's review queue (the PulseDbContext write-guard only rejects an
+        // empty scope, not a scope/entity mismatch). Fail loud rather than silently enqueue; the host's
+        // TickExerciseAsync isolates and logs the fault so the loop keeps running for other exercises.
+        if (storyline.ExerciseId != exerciseId)
+        {
+            throw new InvalidOperationException(
+                $"Storyline {storyline.Id} carries ExerciseId {storyline.ExerciseId} but the tick's resolved scope is {exerciseId}; a cross-exercise review item is forbidden (COR-001).");
+        }
+
         var isDelayedAuto = intent.AutonomyLevel == AutonomyLevel.DelayedAuto;
         var tag = storyline.Hashtags.Count > 0 ? storyline.Hashtags[0] : $"#{Slug(storyline.Title)}";
 
@@ -543,7 +556,7 @@ public sealed class ReactionLoopDriver
         return new EngineReviewItemEntity
         {
             DraftId = draftId,
-            ExerciseId = storyline.ExerciseId,
+            ExerciseId = exerciseId,
             StorylineId = storyline.Id,
             RoutedAtLevel = intent.AutonomyLevel,
             Disposition = isDelayedAuto ? DraftDisposition.CountingDown : DraftDisposition.Queued,

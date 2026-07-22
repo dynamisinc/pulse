@@ -184,6 +184,57 @@ public sealed class ReactionLoopHostTests
     }
 
     [RequiresDockerFact]
+    public async Task Tick_ReviewItem_IsStampedWithTheResolvedTickScope_NotTheStorylineField()
+    {
+        var exerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+
+        await using var host = BuildHost(manualTime);
+        var clock = host.GetRequiredService<IExerciseClock>();
+        clock.Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+
+        var cast = Cast("@rosa", "@marcus");
+        var storyline = SeededStoryline(exerciseId, "Water main contamination fears", cast.Keys.ToList());
+        var result = await RunOneTickAsync(host, Registration(exerciseId, [storyline], cast));
+        result.ReviewItemsEnqueued.Should().Be(1);
+
+        // The enqueued item carries the tick's resolved scope (WR-001) — the contract's stamping rule.
+        await using var unfiltered = _fixture.CreateContext();
+        var item = await unfiltered.EngineReviewItems.IgnoreQueryFilters().SingleAsync();
+        item.ExerciseId.Should().Be(
+            exerciseId, "the review item is stamped from the tick's resolved scope, not any client/entity-supplied field (COR-001)");
+    }
+
+    [RequiresDockerFact]
+    public async Task Tick_WhenAStorylineScopeDisagreesWithTheRegistration_FailsLoud_AndEnqueuesNothing()
+    {
+        var exerciseId = Guid.NewGuid();
+        var foreignExerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+
+        await using var host = BuildHost(manualTime);
+        var clock = host.GetRequiredService<IExerciseClock>();
+        clock.Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+
+        // A corrupt registration: the storyline carries a DIFFERENT exercise than the tick's resolved scope.
+        var cast = Cast("@rosa", "@marcus");
+        var foreignStoryline = SeededStoryline(foreignExerciseId, "Water main contamination fears", cast.Keys.ToList());
+        var registration = Registration(exerciseId, [foreignStoryline], cast);
+
+        var tick = async () => await RunOneTickAsync(host, registration);
+
+        await tick.Should().ThrowAsync<InvalidOperationException>(
+            "a storyline whose scope disagrees with the tick must fail loud, never enqueue exercise A's draft under exercise B (COR-001, WR-001)");
+
+        // Nothing leaked into either exercise's queue — the guard threw before any enqueue.
+        await using var unfiltered = _fixture.CreateContext();
+        (await unfiltered.EngineReviewItems.IgnoreQueryFilters().CountAsync()).Should().Be(
+            0, "the mismatch is caught before the review item is persisted");
+    }
+
+    [RequiresDockerFact]
     public async Task Tick_WhileClockFrozenBelowTheWindow_AccruesNoSilence_AndSurfacesNothing()
     {
         var exerciseId = Guid.NewGuid();
