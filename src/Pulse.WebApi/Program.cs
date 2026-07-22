@@ -56,6 +56,16 @@ builder.Services.AddSocialPostWrite();     // #271 POST /api/posts (sanitize + s
 builder.Services.AddSocialPersonaRead();   // #273 GET /api/personas
 builder.Services.AddSocialRealtimeHub();   // #272 exercise-grouped hub + IFeedBroadcaster impl
 
+// Engine runtime — Wave 2 (feature/engine-runtime), orchestrator-wired. AddReactionLoopHost (#285)
+// registers the in-process reaction-loop BackgroundService + the IEnginePublishService publish funnel
+// (publishes through B1's PostIngestService as origin:'engine', reusing IFeedBroadcaster). AddEngineReview
+// (#286) registers the review-cockpit service + endpoints + the SignalR broadcaster (reusing the B1
+// ExerciseRealtimeHub — no second hub) + the auto-HOLD scenario tick, and REPLACES the generation NoOp
+// IProviderHealthListener with the degrade-only autonomy fan-out listener — so it MUST run after
+// AddEngineGeneration (above). Both consume AddExerciseClock + AddEngineRuntimeSeams.
+builder.Services.AddReactionLoopHost();    // #285 reaction-loop host + IEnginePublishService
+builder.Services.AddEngineReview();        // #286 review queue API + autonomy/safety wiring + SignalR push
+
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
 // (no cross-origin access at all) when the key is unset/empty rather than falling open.
@@ -99,6 +109,12 @@ app.MapSocialThreadEndpoints();   // #270 GET /api/threads/{postId}
 app.MapSocialPostEndpoints();     // #271 POST /api/posts
 app.MapSocialPersonaEndpoints();  // #273 GET /api/personas
 app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
+
+// Engine-runtime endpoints (Wave 2) — REST only; the review push reuses the B1 ExerciseRealtimeHub mapped
+// above (no second hub). Scope comes only from the resolved IExerciseContext (COR-001), never a client
+// exerciseId; per-request population lands with Phase B2 (endpoints fail closed until then).
+app.MapEngineRuntime();   // #285 reaction-loop host runtime surface
+app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + swamped-mode + kill-switch
 
 app.Run();
 
