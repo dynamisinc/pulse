@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Persona } from '@/features/personas'
 import type { Post } from '@/features/social'
-import { assembleFeedView, resolveFeed } from './feedService'
+import { assembleFeedView, compareNewestFirst, resolveFeed } from './feedService'
 import { postStore } from './postStore'
 
 function buildPersona(overrides: Partial<Persona> = {}): Persona {
@@ -61,6 +61,26 @@ describe('assembleFeedView — ordering (SOC-080, COR-053)', () => {
     const views = assembleFeedView(posts, personas)
 
     expect(views.map(v => v.id)).toEqual(['newest', 'mid', 'oldest'])
+  })
+})
+
+describe('compareNewestFirst — the shared newest-first comparator (COR-053)', () => {
+  // Now a public export shared by assembleFeedView + Feed's live-arrivals sort
+  // (Copilot #301 round-2). Ordering is covered via assembleFeedView above;
+  // this pins the newer-instant-first sign and the unparseable-sorts-last edge.
+  it('orders a newer scenario instant before an older one', () => {
+    expect(
+      compareNewestFirst('2033-09-04T14:00:00Z', '2033-09-04T12:00:00Z'),
+    ).toBeLessThan(0)
+    expect(
+      compareNewestFirst('2033-09-04T12:00:00Z', '2033-09-04T14:00:00Z'),
+    ).toBeGreaterThan(0)
+  })
+
+  it('treats an unparseable instant as oldest (sorts last) rather than throwing', () => {
+    // -Infinity for the bad one → it always sorts AFTER a real instant.
+    expect(compareNewestFirst('not-a-date', '2033-09-04T12:00:00Z')).toBeGreaterThan(0)
+    expect(compareNewestFirst('2033-09-04T12:00:00Z', 'not-a-date')).toBeLessThan(0)
   })
 })
 

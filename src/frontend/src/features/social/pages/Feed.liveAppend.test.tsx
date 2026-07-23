@@ -1,28 +1,33 @@
 /**
  * features/social/pages/Feed.liveAppend.test.tsx
  * ---------------------------------------------------------------------------
- * Covers the story's Component (RTL) acceptance criterion (feeds-discovery/07;
- * SOC-083 partial, COR-053, NFR-001, NFR-002/SOC-071) at the `<Feed>` level —
- * the seam `useFeed.test.ts` proves at the hook layer, proved here through the
- * real rendered DOM:
- *  - a post appended to the live `postStore` AFTER `<Feed>` has mounted renders
- *    a NEW `<PostCard>` at the TOP of the list (newest-first, COR-053);
- *  - the list's `aria-live="polite"` contract survives the append unchanged
- *    (no new/removed live region, no attribute change — NFR-001);
- *  - the previously-rendered seeded rows are NOT torn down and recreated — the
- *    prior top card's DOM node identity is preserved, just shifted down one
- *    position (the NFR-002/SOC-071 burst-legibility guarantee, proved via the
- *    actual DOM this time, not just the memoized `PostView` array).
+ * Covers the story's real-time behaviour at the `<Feed>` level (feeds-discovery
+ * /04; SOC-083, COR-053, NFR-001/002, SOC-071, D1-005) through the real
+ * rendered DOM — superseding the interim /07 auto-insert this file used to
+ * assert:
+ *  - a post appended to the live `postStore` AFTER `<Feed>` has mounted does
+ *    NOT insert into the reading stream; the seeded rows are untouched and the
+ *    sticky "▲ N new posts" pill surfaces the count instead (AC1);
+ *  - the list's `aria-live="polite"` contract is unchanged by the arrival — no
+ *    new/removed live region, no attribute change, no new row (NFR-001);
+ *  - tapping the pill loads the buffered post at the TOP of the stream (AC2),
+ *    newest-first (COR-053).
+ *
+ * (The exhaustive pill suite — observer hides it, bounded burst buffering,
+ * scroll-to-top, the pill's own polite region — is added by the story's test
+ * pass; this file keeps the pre-existing `<Feed>` integration coverage honest
+ * against the new truth.)
  *
  * Renders through the same real provider stack `Feed.test.tsx` uses
- * (ExerciseContext + Session + ShellContext + the shipped mock adapters) so
- * this exercises the true integration: `postStore` → `feedService.resolveFeed`
- * (mock adapter) / `useFeed`'s subscription → `assembleFeedView` → `<Feed>`.
+ * (ExerciseContext + Session + ShellContext + the shipped mock adapters), so the
+ * default mock stream source (`postStore` → `useFeedStream`) is exercised end to
+ * end: append → buffer → pill → tap → prepend.
  */
-import { act, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
+import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import { personaIdForHandle } from '@/features/personas'
 import type { Post } from '@/features/social'
@@ -44,7 +49,7 @@ function buildLivePost(overrides: Partial<Post> = {}): Post {
     id: 'post-live-append-e2e',
     exerciseId: 'ex-mock-0001',
     // An existing seeded persona so the convergence resolves an author and the
-    // row actually renders (an unknown author is silently skipped).
+    // row actually renders on load (an unknown author is silently skipped).
     authorPersonaId: personaIdForHandle('FairhavenWater'),
     actingHumanId: 'human-simcell-utility',
     text: 'Systems restored — tap water is safe again in Zones 2-4.',
@@ -71,12 +76,34 @@ function renderFeed() {
   )
 }
 
-afterEach(() => {
-  postStore.resetForTests()
+/** The load-time telemetry event (the pill tap), distinguished from the mount
+ * 'view' by its `payload.newPostsLoaded`. The mount view carries no payload. */
+function loadTelemetryEvents() {
+  return getEmittedTelemetryEvents().filter(
+    e => e.eventType === 'view' && e.payload !== undefined && 'newPostsLoaded' in e.payload,
+  )
+}
+
+// jsdom does not implement scrollIntoView; the page guards on its presence, so
+// define a spy to (a) exercise the scroll branch and (b) assert it is NOT called
+// when a tap resolves nothing (Copilot #301).
+type ScrollIntoViewFn = (arg?: boolean | ScrollIntoViewOptions) => void
+let scrollSpy: Mock<ScrollIntoViewFn>
+
+beforeEach(() => {
+  resetTelemetryBuffer()
+  scrollSpy = vi.fn<ScrollIntoViewFn>()
+  HTMLElement.prototype.scrollIntoView = scrollSpy
 })
 
-describe('Feed — live append renders at the top (feeds-discovery/07)', () => {
-  it('mounts a new <PostCard> at position 0, above the previous top row', async () => {
+afterEach(() => {
+  postStore.resetForTests()
+  resetTelemetryBuffer()
+  delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView
+})
+
+describe('Feed — real-time arrivals buffer behind the pill (feeds-discovery/04)', () => {
+  it('does NOT insert an appended post; the pill surfaces the count instead (AC1)', async () => {
     renderFeed()
 
     const before = await screen.findAllByTestId('post-card')
@@ -85,6 +112,45 @@ describe('Feed — live append renders at the top (feeds-discovery/07)', () => {
     act(() => {
       postStore.appendPost(buildLivePost())
     })
+
+    // The pill appears with the count …
+    const pill = await screen.findByTestId('new-posts-pill')
+    expect(pill).toHaveTextContent('1 new post')
+
+    // … and the reading stream is unchanged (no insert, same rows, same order).
+    const after = screen.getAllByTestId('post-card')
+    expect(after.map(c => c.getAttribute('data-post-id'))).toEqual(NEWEST_FIRST_SEEDED_IDS)
+  })
+
+  it('keeps the aria-live="polite" list contract, unchanged by the arrival (NFR-001)', async () => {
+    renderFeed()
+    await screen.findAllByTestId('post-card')
+
+    const list = screen.getByRole('list')
+    expect(list).toHaveAttribute('aria-live', 'polite')
+
+    act(() => {
+      postStore.appendPost(buildLivePost())
+    })
+    await screen.findByTestId('new-posts-pill')
+
+    // Still the SAME list element, still polite, and still only the seeded rows
+    // (the arrival is buffered, not inserted).
+    expect(screen.getByRole('list')).toBe(list)
+    expect(screen.getByRole('list')).toHaveAttribute('aria-live', 'polite')
+    expect(screen.getAllByTestId('post-card')).toHaveLength(NEWEST_FIRST_SEEDED_IDS.length)
+  })
+
+  it('loads the buffered post at the top when the pill is tapped (AC2)', async () => {
+    renderFeed()
+    await screen.findAllByTestId('post-card')
+
+    act(() => {
+      postStore.appendPost(buildLivePost())
+    })
+    const pill = await screen.findByTestId('new-posts-pill')
+
+    fireEvent.click(pill)
 
     await waitFor(() => {
       const ids = screen.getAllByTestId('post-card').map(c => c.getAttribute('data-post-id'))
@@ -96,48 +162,63 @@ describe('Feed — live append renders at the top (feeds-discovery/07)', () => {
       'post-live-append-e2e',
       ...NEWEST_FIRST_SEEDED_IDS,
     ])
+    // The pill clears after loading.
+    expect(screen.queryByTestId('new-posts-pill')).toBeNull()
   })
+})
 
-  it('keeps the aria-live="polite" contract on the list, unchanged by the append', async () => {
+describe('Feed — pill-load guards against empty/dupe resolve (Copilot #301)', () => {
+  it('normal load prepends, scrolls to top, and emits ONE load event with the resolved count', async () => {
     renderFeed()
     await screen.findAllByTestId('post-card')
 
-    const list = screen.getByRole('list')
-    expect(list).toHaveAttribute('aria-live', 'polite')
-
     act(() => {
       postStore.appendPost(buildLivePost())
     })
+    const pill = await screen.findByTestId('new-posts-pill')
+
+    fireEvent.click(pill)
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('post-card')).toHaveLength(NEWEST_FIRST_SEEDED_IDS.length + 1)
+      const ids = screen.getAllByTestId('post-card').map(c => c.getAttribute('data-post-id'))
+      expect(ids[0]).toBe('post-live-append-e2e')
     })
 
-    // Still the SAME list element (not torn down/recreated) and still polite.
-    expect(screen.getByRole('list')).toBe(list)
-    expect(screen.getByRole('list')).toHaveAttribute('aria-live', 'polite')
+    // Scrolled to top (AC2) …
+    expect(scrollSpy).toHaveBeenCalledTimes(1)
+    expect(scrollSpy).toHaveBeenCalledWith({ block: 'start' })
+
+    // … and exactly ONE load event whose count reflects what actually rendered.
+    const loads = loadTelemetryEvents()
+    expect(loads).toHaveLength(1)
+    expect(loads[0]?.payload?.newPostsLoaded).toBe(1)
   })
 
-  it('does not remount the existing rows — the prior top card keeps its DOM identity', async () => {
+  it('a tap that resolves nothing (unknown author) clears the count WITHOUT scrolling or emitting', async () => {
     renderFeed()
-
     const before = await screen.findAllByTestId('post-card')
-    const priorTopCard = before[0]
-    expect(priorTopCard).toBeDefined()
-    expect(priorTopCard?.getAttribute('data-post-id')).toBe('post-seed-kward-correction')
+    expect(before.map(c => c.getAttribute('data-post-id'))).toEqual(NEWEST_FIRST_SEEDED_IDS)
 
+    // Buffers fine (the stream source doesn't check authors) — the pill counts
+    // it — but the author is not in the persona cast, so resolveLiveViews skips
+    // it on load and nothing actually renders (matching the baseline skip).
     act(() => {
-      postStore.appendPost(buildLivePost())
-    })
-
-    await waitFor(() => {
-      expect(screen.getAllByTestId('post-card')[0]?.getAttribute('data-post-id')).toBe(
-        'post-live-append-e2e',
+      postStore.appendPost(
+        buildLivePost({ id: 'post-live-unknown-author', authorPersonaId: 'persona-does-not-exist' }),
       )
     })
+    const pill = await screen.findByTestId('new-posts-pill')
+    expect(pill).toHaveTextContent('1 new post')
 
+    fireEvent.click(pill)
+
+    // Count clears (drain reset it) and the pill disappears …
+    await waitFor(() => expect(screen.queryByTestId('new-posts-pill')).toBeNull())
+
+    // … but the feed did not change, we did NOT scroll, and NO load event fired.
     const after = screen.getAllByTestId('post-card')
-    // The prior top row is now second — same node, not a fresh mount.
-    expect(after[1]).toBe(priorTopCard)
+    expect(after.map(c => c.getAttribute('data-post-id'))).toEqual(NEWEST_FIRST_SEEDED_IDS)
+    expect(scrollSpy).not.toHaveBeenCalled()
+    expect(loadTelemetryEvents()).toHaveLength(0)
   })
 })

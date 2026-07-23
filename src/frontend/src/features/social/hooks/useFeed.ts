@@ -16,19 +16,23 @@
  *      `personaById`/`SEEDED_PERSONAS` (mock-only, fail-open — banned on a
  *      shipped participant surface).
  *
- * LIVE UPDATES (feeds-discovery/07, SOC-083 partial). The hook resolves the
- * baseline ONCE, then subscribes to the module-singleton `postStore` (the same
- * store `resolveFeed`'s mock adapter reads). When a post is appended (e.g. a
- * controller publishing as a persona, wired at integration — not here), the
- * subscription re-reads `postStore.getPosts()` into `rawPosts` and the memoized
- * `assembleFeedView` re-derives, so the new post appears at the TOP
- * (newest-first, by `scenarioTime`) WITHOUT a full remount or a re-fetch of the
- * seeded baseline. This is the deliberately minimal slice — NO "new posts"
- * pill, NO auto-scroll, NO mid-stream slide-in (all the FULL follow-up #123);
- * the arrival is announced only by `<Feed>`'s existing `aria-live="polite"`
- * region (NFR-001). XC-002 is unchanged: `assembleFeedView`/`toParticipantView`
- * stay the sole narrowing, so a just-appended post's provenance is stripped on
- * read exactly like a seeded one.
+ * FROZEN READING STREAM (feeds-discovery/04, SOC-083; supersedes the interim
+ * /07 auto-insert). The hook resolves the baseline ONCE — the current
+ * `postStore` snapshot at resolve time — and then FREEZES it: it does NOT
+ * subscribe to subsequent store changes, so a post appended after mount never
+ * moves, reorders, or slides into the rows the reader is looking at. That is
+ * the deliberate D1-005 decision: real-time arrivals BUFFER behind the "▲ N new
+ * posts" pill (`useFeedStream` + `<NewPostsPill>`, wired in `<Feed>`) and enter
+ * the stream only when the reader taps the pill — the reader's scroll position
+ * is never touched for them (AC1/AC2). This hook owns ONLY the frozen baseline;
+ * the pill layer owns everything that arrives afterwards.
+ *
+ * (A post that lands in the store BEFORE this resolve settles is part of the
+ * initial baseline — the resolve reads the current snapshot, not a stale one —
+ * which is correct: that is the feed the reader first sees, established once.)
+ *
+ * XC-002 is unchanged: `assembleFeedView`/`toParticipantView` stay the sole
+ * narrowing, so the baseline's provenance is stripped on read.
  *
  * The mapped `PostView[]` is memoized on `{posts, personas}`, so the array AND
  * each row object keep a STABLE identity across re-renders that don't change
@@ -73,14 +77,12 @@ export function useFeed(): UseFeedResult {
     resolveFeed()
       .then(() => {
         if (cancelled) return
-        // Set from the store's CURRENT snapshot, NOT the value captured when the
-        // request started: an append that lands while this baseline resolve is
-        // in flight has already updated the store (and fired the subscription
-        // below), so reading the stale `resolved` here would clobber the
-        // just-appended post until the next append. `resolveFeed()` is still
-        // awaited for its validation + fail-closed/loading semantics; the store
-        // (which its mock adapter reads) is the single source of truth for the
-        // rows, read the same way as the subscription.
+        // Freeze the baseline from the store's CURRENT snapshot at resolve time.
+        // `resolveFeed()` is awaited for its validation + fail-closed/loading
+        // semantics; the store (which its mock adapter reads) is the source of
+        // truth for the rows. There is intentionally NO store subscription:
+        // posts appended AFTER this are the pill's to buffer (feeds-discovery/04),
+        // never this hook's to insert — the reading stream stays frozen.
         setRawPosts(postStore.getPosts())
         setPostsError(undefined)
       })
@@ -92,17 +94,8 @@ export function useFeed(): UseFeedResult {
         if (!cancelled) setPostsLoading(false)
       })
 
-    // Live seam (feeds-discovery/07): re-read the store on every append so a new
-    // post surfaces without a re-fetch — the same current-snapshot read as the
-    // resolve path above, so neither can clobber the other regardless of order.
-    const unsubscribe = postStore.subscribe(() => {
-      if (cancelled) return
-      setRawPosts(postStore.getPosts())
-    })
-
     return () => {
       cancelled = true
-      unsubscribe()
     }
   }, [])
 
