@@ -1,0 +1,178 @@
+/*
+ * features/login/pages/ParticipantSignInPage.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the participant sign-in page (feature: login, story 02).
+ * CSS Module — every class is locally scoped by the build; this file carries
+ * NO COBRA / MUI dependency (participant world, D0 §2 two-worlds rule).
+ *
+ * Deliberately BRAND-NEUTRAL: this page renders before any exercise brand is
+ * confirmed (AC5's lookup is non-blocking and may never resolve), so the
+ * palette here is a plain, warm "consumer app" look — not a per-exercise
+ * skin. A channel's own brand skinning (`BrandThemeProvider`) is a different,
+ * post-auth concern this page does not pull in. Colors are screened for WCAG
+ * AA contrast against their own background (NFR-001).
+ */
+
+.page {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: linear-gradient(180deg, #eef3f8 0%, #dfe7ee 100%);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 400px;
+  padding: 32px;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgba(15, 32, 51, 0.12);
+}
+
+.brandRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #2b5f75;
+}
+
+.brandIcon {
+  font-size: 18px;
+}
+
+.brandLabel {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.heading {
+  margin: 0;
+  color: #10202e;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.toggleGroup {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #f0f3f6;
+}
+
+.toggleButton {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #35424c;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toggleButton[aria-pressed='true'] {
+  background: #ffffff;
+  color: #10202e;
+  box-shadow: 0 1px 3px rgba(15, 32, 51, 0.18);
+}
+
+.toggleButton:focus-visible {
+  outline: 2px solid #2b5f75;
+  outline-offset: 2px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  color: #35424c;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.input {
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid #cdd7de;
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: #10202e;
+  font: inherit;
+  font-size: 15px;
+}
+
+.input:focus-visible {
+  border-color: #2b5f75;
+  outline: 2px solid rgba(43, 95, 117, 0.35);
+  outline-offset: 1px;
+}
+
+.submitButton {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  background: #2b5f75;
+  color: #ffffff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.submitButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.submitButton:focus-visible {
+  outline: 2px solid #10202e;
+  outline-offset: 2px;
+}
+
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #e3a2a2;
+  border-radius: 8px;
+  background: #fdeeee;
+  color: #8a2a2a;
+  font-size: 13px;
+}
+
+.status {
+  margin: 0;
+  color: #4a5b68;
+  font-size: 13px;
+}
+
+@media (max-width: 420px) {
+  .card {
+    padding: 24px;
+  }
+}
