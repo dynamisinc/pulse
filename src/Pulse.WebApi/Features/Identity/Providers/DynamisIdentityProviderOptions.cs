@@ -19,8 +19,12 @@ using System.Collections.Generic;
 /// they should never be committed to source-controlled <c>appsettings.json</c>.
 /// </para>
 /// <para>
-/// This config section is a Phase-1 development seam only — it is NOT one of the keys provisioned by
-/// <c>infrastructure/modules/*.bicep</c>; production supplies a real provider behind the same interface.
+/// This config section is a Phase-1 development seam. For the UAT pilot it <b>is</b> provisioned via bicep —
+/// the <c>staffIdentityAccountsJson</c> secure param in <c>infrastructure/modules/webapp.bicep</c> expands the
+/// <c>STAFF_IDENTITY_ACCOUNTS_JSON</c> deployment secret into these indexed
+/// <c>Authentication__StaffIdentity__Accounts__{i}__*</c> keys (story login/06). Production instead swaps a
+/// real Entra/AD/SSO provider in behind the same <see cref="IIdentityProvider"/> interface, so this allowlist
+/// stops being an authentication source there.
 /// </para>
 /// </remarks>
 public sealed class DynamisIdentityProviderOptions

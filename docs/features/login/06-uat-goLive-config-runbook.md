@@ -127,7 +127,11 @@ gh secret set STAFF_IDENTITY_ACCOUNTS_JSON --env uat --body '[{"Username":"contr
 **2 — Deploy infrastructure** (surfaces the new app settings on the App Service). Run the **Deploy
 Infrastructure** workflow (`workflow_dispatch`, environment `uat`). Optionally run once with
 `what_if: true` first to preview — the what-if evaluates the JSON→indexed-settings expansion against
-Azure. Then verify the app settings actually landed:
+Azure. **If you run What-If, confirm the `Authentication__StaffIdentity__Accounts__*__Secret` and
+`Authentication__Bootstrap__Secret` lines are redacted (`null` / `*****`) in the persisted step summary**
+before relying on it — they derive from `@secure()` params so ARM should redact them exactly as it does
+`jwtSecretKey`, but this is a Tier-2 secret-touching change worth eyeballing once. Then verify the app
+settings actually landed:
 
 ```bash
 az account set --subscription 2a127d53-c9bf-471a-8196-3155eae6cb1b

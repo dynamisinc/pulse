@@ -9,8 +9,9 @@ using '../main.bicep'
 // Cost posture: Phase B0's backend (Pulse.WebApi + PulseDbContext) has landed, so this now deploys the
 // App Service host (app-pulse-api-uat), Azure SQL (sqldb-pulse-uat), and App Insights alongside the
 // Free-tier Static Web App. Storage (blob media) and Communication (email) stay gated off until a
-// feature needs them. Before running the Deploy Infrastructure workflow, ensure the SQL_ADMIN_PASSWORD
-// (and JWT_SECRET_KEY) GitHub secrets are set on the uat environment.
+// feature needs them. Before running the Deploy Infrastructure workflow, ensure the SQL_ADMIN_PASSWORD,
+// JWT_SECRET_KEY, and (for login go-live, story login/06) BOOTSTRAP_SECRET + STAFF_IDENTITY_ACCOUNTS_JSON
+// GitHub secrets are set on the uat environment.
 // ============================================================================
 
 param environment = 'uat'
