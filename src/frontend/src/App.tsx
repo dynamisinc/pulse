@@ -33,7 +33,8 @@
  * exactly one Session/ExerciseContext resolves on the participant path.
  */
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from '@/core/services/queryClient'
 import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 
@@ -54,25 +55,9 @@ import { ControllerConsoleRoute } from './features/controller'
 import { ExerciseSwitcher } from '@/features/staff'
 import { createRoleAwareRoutes } from './features/app-shell'
 
-// Sensible React Query defaults. The participant social feed's real-time updates
-// do NOT refetch-on-focus — they ride the shared SignalR transport
-// (`@/core/realtime` → `features/social/services/realtimeFeed`), surfaced through
-// the buffered "▲ N new posts" pill (feeds-discovery/04), with a polling fallback
-// on degrade (NFR-003). That live subscription is turned on by the
-// `USE_MOCK_DATA`-gated source flip in
-// `features/social/services/feedStreamSource.ts` (mock data → the in-tab
-// `postStore`; a real backend → the SignalR transport) — the one composition
-// flip point for the pill, mirroring `feedService`'s `USE_MOCK_FEED`. See D0 §4
-// burst legibility (120 posts/min).
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60,
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
-  },
-})
+// The single shared query client + its defaults now live in
+// `@/core/services/queryClient` so non-component code (core/auth/endSession)
+// can clear the cache on logout against the SAME instance this provider mounts.
 
 /**
  * Inner staff-shell composition for the Evaluator Dashboard. Reads the preview

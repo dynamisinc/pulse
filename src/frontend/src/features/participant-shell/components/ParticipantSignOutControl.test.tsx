@@ -16,11 +16,11 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { ParticipantSignOutControl } from './ParticipantSignOutControl'
-import { logout } from '@/core/auth'
+import { endSession } from '@/core/auth'
 import { LOGIN_PATH } from '@/features/app-shell/constants'
 
 vi.mock('@/core/auth', () => ({
-  logout: vi.fn(),
+  endSession: vi.fn(),
 }))
 
 const mockNavigate = vi.fn()
@@ -29,11 +29,11 @@ vi.mock('react-router-dom', async importOriginal => {
   return { ...actual, useNavigate: () => mockNavigate }
 })
 
-const mockLogout = vi.mocked(logout)
+const mockEndSession = vi.mocked(endSession)
 
 beforeEach(() => {
-  mockLogout.mockReset()
-  mockLogout.mockResolvedValue(undefined)
+  mockEndSession.mockReset()
+  mockEndSession.mockResolvedValue(undefined)
   mockNavigate.mockReset()
 })
 
@@ -53,13 +53,13 @@ describe('ParticipantSignOutControl', () => {
     expect(button.tagName).toBe('BUTTON')
   })
 
-  it('calls the shared logout() helper, then navigates to LOGIN_PATH, on click', async () => {
+  it('calls the shared endSession() helper, then navigates to LOGIN_PATH, on click', async () => {
     const user = userEvent.setup()
     renderControl()
 
     await user.click(screen.getByRole('button', { name: 'Sign out' }))
 
-    await waitFor(() => expect(mockLogout).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockEndSession).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith(LOGIN_PATH))
   })
 
@@ -73,10 +73,10 @@ describe('ParticipantSignOutControl', () => {
 
     await user.keyboard('{Enter}')
 
-    await waitFor(() => expect(mockLogout).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockEndSession).toHaveBeenCalledTimes(1))
   })
 
-  it('never crashes when logout() itself is called — logout() never throws by contract', async () => {
+  it('never crashes when endSession() is called — it never throws by contract', async () => {
     const user = userEvent.setup()
     renderControl()
 
