@@ -32,12 +32,12 @@
  * brand — the same reasoning `ComplianceChrome`/`ChannelNav` already follow for
  * never pulling in brand tokens. No COBRA, no MUI, no default MUI look (D0 §2).
  *
- * Calls the shared `logout()` helper (`@/core/auth`, feature: login story 01)
- * then navigates to `LOGIN_PATH` (`@/features/app-shell/constants`) — the same
+ * Calls the shared `endSession()` helper (`@/core/auth`) — which clears the
+ * React Query cache AND logs out (token clear + best-effort server notify) —
+ * then navigates to `LOGIN_PATH` (`@/features/app-shell/constants`), the same
  * contract `StaffHeader`'s sign-out control follows in the staff world.
- * `logout()` never throws (it always leaves the browser logged out locally
- * regardless of the network call's outcome — see its own module header), so
- * no error handling is needed here.
+ * `endSession()` never throws (its `logout()` swallows any network failure and
+ * leaves the browser logged out locally), so no error handling is needed here.
  *
  * ACCESSIBILITY (NFR-001): a real `<button>` (keyboard-operable by default,
  * no custom key handling needed). Its accessible name is its own visible text
@@ -49,7 +49,7 @@ import type { CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faRightFromBracket } from '@fortawesome/free-solid-svg-icons'
-import { logout } from '@/core/auth'
+import { endSession } from '@/core/auth'
 import { LOGIN_PATH } from '@/features/app-shell/constants'
 
 /** Quiet, shell-chrome row — mirrors `ChannelNav.tsx`'s own palette/typography. */
@@ -81,11 +81,12 @@ export function ParticipantSignOutControl() {
   const navigate = useNavigate()
 
   const handleSignOut = () => {
-    // logout() clears the token store SYNCHRONOUSLY before its best-effort
-    // network call (see core/auth/logout.ts), so navigate IMMEDIATELY rather
-    // than awaiting the POST — the redirect must never block on a slow/hung
-    // request (logout()'s own "never blocks locally" contract).
-    void logout()
+    // endSession() clears the token store AND the React Query cache
+    // SYNCHRONOUSLY before it awaits the best-effort POST /auth/logout (see
+    // core/auth/endSession.ts), so navigate IMMEDIATELY — the redirect must
+    // never block on a slow/hung request, and no prior-user cached data can
+    // survive into the next session on this tab.
+    void endSession()
     navigate(LOGIN_PATH)
   }
 

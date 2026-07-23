@@ -54,9 +54,10 @@
  *      Preview-as-participant button's `Box component="button"` treatment,
  *      hand-styled from `staffShellTokens` + FontAwesome, a real `<button>`
  *      with an accessible name — which IS this header's version of "the
- *      COBRA staff look" (see point 7 above). Calls the shared `logout()`
- *      helper (`@/core/auth`, feature: login story 01) then navigates to
- *      `LOGIN_PATH` — reachable by keyboard like every other control here.
+ *      COBRA staff look" (see point 7 above). Calls the shared `endSession()`
+ *      helper (`@/core/auth` — clears the React Query cache + logs out) then
+ *      navigates to `LOGIN_PATH` — reachable by keyboard like every other
+ *      control here.
  */
 
 import { useEffect, useState } from 'react'
@@ -66,7 +67,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faEye, faEyeSlash, faRightFromBracket } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
-import { logout } from '@/core/auth'
+import { endSession } from '@/core/auth'
 import { LOGIN_PATH } from '@/features/app-shell/constants'
 import { staffShellTokens } from '../staffShellTokens'
 import { useStaffPresence, useStaffRoleCell } from '../staffHeaderMocks'
@@ -164,14 +165,15 @@ export function StaffHeader({
   const { now: scenarioInstant } = useScenarioTime(timeZone, CLOCK_TICK_MS)
   const wallInstant = useWallClockNow()
 
-  // Sign-out (point 8, module header): best-effort server notify + local
-  // token clear (logout() never throws), then hand off to the real login
-  // entry. logout() clears the token store SYNCHRONOUSLY before it awaits the
-  // best-effort POST /auth/logout (see core/auth/logout.ts), so we navigate
-  // IMMEDIATELY rather than in a .then() — the redirect must never block on a
-  // slow/hung network request (that is logout()'s own "never blocks" contract).
+  // Sign-out (point 8, module header). See the inline note below for the
+  // ordering/why; the shared teardown lives in core/auth/endSession.ts.
   const handleSignOut = () => {
-    void logout()
+    // endSession() clears the token store AND the React Query cache
+    // SYNCHRONOUSLY before it awaits the best-effort POST /auth/logout (see
+    // core/auth/endSession.ts), so navigate IMMEDIATELY — the redirect must
+    // never block on a slow/hung request, and no prior-user cached data can
+    // survive into the next session on this tab.
+    void endSession()
     navigate(LOGIN_PATH)
   }
 

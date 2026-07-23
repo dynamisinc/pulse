@@ -35,10 +35,10 @@
  * wraps every call site in a real `MemoryRouter` so none of the existing
  * `render(<StaffHeader ... />)` call sites below need to change.
  * `react-router-dom` keeps its real `MemoryRouter` (via `importOriginal`) and
- * only overrides `useNavigate()` with a spy; `@/core/auth`'s `logout()` is
- * mocked at the module boundary (its own contract is covered by
- * `core/auth/logout.test.ts`) so this file only asserts that the control
- * CALLS it, never re-tests its internals.
+ * only overrides `useNavigate()` with a spy; `@/core/auth`'s `endSession()` is
+ * mocked at the module boundary (its own contract — cache clear + logout — is
+ * covered by `core/auth/endSession.test.ts`) so this file only asserts that the
+ * control CALLS it, never re-tests its internals.
  */
 import type { ReactElement } from 'react'
 import { act, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
@@ -49,7 +49,7 @@ import { StaffHeader, STAFF_CLASSIFICATION } from './StaffHeader'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope, ExerciseStatus } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
-import { logout } from '@/core/auth'
+import { endSession } from '@/core/auth'
 import { LOGIN_PATH } from '@/features/app-shell/constants'
 
 vi.mock('@/core/exerciseContext', () => ({
@@ -57,7 +57,7 @@ vi.mock('@/core/exerciseContext', () => ({
 }))
 
 vi.mock('@/core/auth', () => ({
-  logout: vi.fn(),
+  endSession: vi.fn(),
 }))
 
 const mockNavigate = vi.fn()
@@ -78,7 +78,7 @@ const BASE_SCOPE: ExerciseScope = {
   status: 'active',
 }
 
-const mockLogout = vi.mocked(logout)
+const mockEndSession = vi.mocked(endSession)
 
 function mockScope(overrides: Partial<ExerciseScope> = {}) {
   vi.mocked(useExerciseContext).mockReturnValue({ ...BASE_SCOPE, ...overrides })
@@ -86,8 +86,8 @@ function mockScope(overrides: Partial<ExerciseScope> = {}) {
 
 beforeEach(() => {
   mockScope()
-  mockLogout.mockReset()
-  mockLogout.mockResolvedValue(undefined)
+  mockEndSession.mockReset()
+  mockEndSession.mockResolvedValue(undefined)
   mockNavigate.mockReset()
 })
 
@@ -385,13 +385,13 @@ describe('StaffHeader — sign-out control (feature: login, story 04; COR-012)',
     expect(button.tagName).toBe('BUTTON')
   })
 
-  it('calls the shared logout() helper, then navigates to LOGIN_PATH, on click', async () => {
+  it('calls the shared endSession() helper, then navigates to LOGIN_PATH, on click', async () => {
     const user = userEvent.setup()
     render(<StaffHeader surfaceName="Controller Console" />)
 
     await user.click(screen.getByRole('button', { name: /sign out/i }))
 
-    await waitFor(() => expect(mockLogout).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockEndSession).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith(LOGIN_PATH))
   })
 
@@ -405,6 +405,6 @@ describe('StaffHeader — sign-out control (feature: login, story 04; COR-012)',
 
     await user.keyboard('{Enter}')
 
-    await waitFor(() => expect(mockLogout).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockEndSession).toHaveBeenCalledTimes(1))
   })
 })
