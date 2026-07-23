@@ -1,6 +1,6 @@
 # Story: UAT bootstrap seam (guarded one-time seed endpoint)
 
-**Feature:** Login & UAT go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Login & UAT go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete (PR #310, merged)
 **Requirements:** COR-008, COR-011, COR-014, COR-015 (enablement — no login/session logic changes)
 **Design decisions:** none  ·  **Issue:** #308
 **Stack:** backend  ·  **Review:** Tier-2 (new auth-adjacent surface + a new secret — the always-Critical

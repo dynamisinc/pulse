@@ -1,6 +1,6 @@
 # Story: Participant sign-in (named account + shared read-only code)
 
-**Feature:** Login & UAT go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Login & UAT go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review (PR #313 — code-review clean)
 **Requirements:** COR-011, COR-015  ·  **Design decisions:** none  ·  **Issue:** #305
 **Stack:** frontend  ·  **Review:** Tier-1
 
@@ -72,10 +72,16 @@ World: **participant**. New files under `src/frontend/src/features/login/`:
 axios client for `POST /api/auth/login` and `POST /api/auth/shared`, mirroring the request/response
 shapes already frozen in `Pulse.WebApi`'s `AccountDtos.cs`/`SharedReadOnlyLoginResponseDto.cs` — do not
 invent a different envelope). MUI 9: system props are `sx`-only (see root `CLAUDE.md`). This page needs
-its **own** `ExerciseContextProvider` (a benign, documented re-resolve — the same precedent
-`App.tsx` already uses for `EvaluatorDashboardRoute`) since the `/login` route in `routes.tsx` does not
-currently wrap one; do not reach for the app-wide provider tree, which is hoisted only around the
-post-auth `*` route. See `docs/features/login/implementation.md` for the reuse map and Wave-2 slot.
+its own, page-owned re-resolve of the host exercise (the `/login` route in `routes.tsx` does not wrap a
+provider; do not reach for the app-wide provider tree, hoisted only around the post-auth `*` route).
+**AS BUILT (#313 — supersedes an earlier "mount your own `ExerciseContextProvider`" note):** the
+resolve is done NON-BLOCKINGLY via `useQuery(resolveExerciseContext, { retry: false })`, NOT by mounting
+`ExerciseContextProvider`. That provider is fail-closed — it renders `null` while loading AND on error
+(`core/exerciseContext/exerciseContext.tsx`) — so wrapping the forms in it would hide the entire page on
+an unknown host, directly violating AC5 ("still renders a working form … rather than blocking on the
+exercise lookup"). The soft query leaves `data` `undefined` while loading/erroring and the heading falls
+back to a plain "Sign in", with the forms rendered unconditionally. See
+`docs/features/login/implementation.md` for the reuse map and Wave-2 slot.
 
 ## Dependencies
 

@@ -1,6 +1,6 @@
 # Story: Staff sign-in
 
-**Feature:** Login & UAT go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Login & UAT go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review (PR #314 — code-review clean)
 **Requirements:** COR-014  ·  **Design decisions:** none  ·  **Issue:** #306
 **Stack:** frontend  ·  **Review:** Tier-1
 
@@ -70,9 +70,14 @@ World: **staff**. New files under `src/frontend/src/features/login/`: `pages/Sta
 `POST /api/auth/staff/login`, mirroring `StaffLoginResponseDto`'s frozen shape). Mounts
 `<ThemeProvider theme={cobraTheme}>` directly (same import as `RoleAwareEntry.tsx`'s
 `StaffWorldHandoff`) and uses `@/theme/styledComponents` (`CobraTextField`,
-`CobraPrimaryButton`) — never `@mui/material`'s bare `TextField`/`Button`. Resolves `exerciseId` via its
-own `ExerciseContextProvider` mount (same benign-re-resolve precedent as story 02) — reads
-`useExerciseContext().exerciseId` to populate the login request body. See
+`CobraPrimaryButton`) — never `@mui/material`'s bare `TextField`/`Button`. Resolves `exerciseId` from a
+page-owned re-resolve of the host exercise to populate the login request body. **AS BUILT (#314 —
+supersedes an earlier "mount your own `ExerciseContextProvider` / read `useExerciseContext()`" note):**
+the resolve is NON-BLOCKING via `useQuery(resolveExerciseContext, { retry: false })`, NOT
+`ExerciseContextProvider`. That provider is fail-closed (renders `null` while loading AND on error), which
+would hide the form and make AC1 (the form must render) and AC2 (the unresolved-host error must show ON
+the form) impossible. The form always renders; submission is blocked — and `POST /auth/staff/login` never
+sent — while the query is `isPending`/`isError`/has no `data`. See
 `docs/features/login/implementation.md` for the reuse map and Wave-2 slot.
 
 ## Dependencies

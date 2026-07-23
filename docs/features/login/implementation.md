@@ -26,12 +26,15 @@
     (`ParticipantLoginResponseDto` / `StaffLoginResponseDto` / `SharedReadOnlyLoginResponseDto` all mirror
     each other field-for-field) — stories 02/03 must consume that one shape, not invent per-page variants.
   - `GET /api/exercise-context` — `exercise-isolation/08`, already safely callable pre-auth (host-resolved,
-    no session required). Stories 02/03 both call it for their own benign `ExerciseContextProvider`
-    re-resolve.
+    no session required). Stories 02/03 both re-resolve it per-page. **AS BUILT (#313/#314):** via a
+    NON-BLOCKING `useQuery(resolveExerciseContext, { retry: false })`, NOT the fail-closed
+    `ExerciseContextProvider` — that provider renders `null` on load/error and would hide a login form on
+    an unknown host (breaking participant AC5 / staff AC1+AC2). See each story's Technical Notes.
 - **Frontend seams already frozen (extend, do not fork):** `core/auth/sessionResolver.ts` (`Session` type
   + `USE_MOCK_SESSION`, unchanged by this feature); `core/auth/session.tsx`
   (`SessionProvider`/`useSession()`, story 01 edits its failure branch only); `core/exerciseContext/*`
-  (`ExerciseContextProvider`/`useExerciseContext()`, unchanged, reused per-page by 02/03);
+  (unchanged — 02/03 reuse its `resolveExerciseContext` resolver directly via a soft `useQuery`, NOT the
+  fail-closed `ExerciseContextProvider`; see the `/api/exercise-context` reuse note above);
   `core/services/api.ts` (the one shared axios client every request in the app already goes through —
   story 01's interceptors apply to all of them, transparently); `core/config/mockData.ts`'s
   `USE_MOCK_DATA` (the single flip point story 06's runbook actually flips for UAT).

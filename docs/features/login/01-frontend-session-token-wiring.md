@@ -1,6 +1,6 @@
 # Story: Frontend session & token wiring (live flip)
 
-**Feature:** Login & UAT go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Login & UAT go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete (PR #311, merged)
 **Requirements:** COR-012  ·  **Design decisions:** none  ·  **Issue:** #304
 **Stack:** frontend  ·  **Review:** Tier-1
 
