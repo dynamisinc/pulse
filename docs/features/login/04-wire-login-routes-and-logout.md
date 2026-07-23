@@ -1,6 +1,6 @@
 # Story: Wire real login routes + logout
 
-**Feature:** Login & UAT go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review (PR #316 — code-review clean)
+**Feature:** Login & UAT go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete (PR #316, merged)
 **Requirements:** COR-004, COR-005 (consumed, not re-decided)  ·  **Design decisions:** none  ·  **Issue:** #307
 **Stack:** frontend  ·  **Review:** Tier-1
 

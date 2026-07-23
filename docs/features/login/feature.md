@@ -67,8 +67,8 @@ touched auth).
 | 01 | Frontend session & token wiring (live flip) | COR-012 | Complete (PR #311, merged) | #304 |
 | 02 | Participant sign-in (named account + shared read-only code) | COR-011, COR-015 | In Review (PR #313) | #305 |
 | 03 | Staff sign-in | COR-014 | In Review (PR #314) | #306 |
-| 04 | Wire real login routes + logout (replaces `SignInFallback`) | COR-004, COR-005 (consumed) | In Review (PR #316) | #307 |
-| 05 | UAT bootstrap seam (guarded one-time seed endpoint) | COR-008, COR-011, COR-014, COR-015 (enablement) | Complete (PR #310, merged) | #308 |
+| 04 | Wire real login routes + logout (replaces `SignInFallback`) | COR-004, COR-005 (consumed) | Complete (PR #316, merged) | #307 |
+| 05 | UAT bootstrap seam (guarded one-time seed endpoint) | COR-008, COR-011, COR-014, COR-015 (enablement) | Complete (PR #310 + wiring fix #317, merged) | #308 |
 | 06 | UAT go-live config & runbook (allowlist, environment, mock-data flip) | NFR-009 | Not Started | #309 |
 
 ## Dependencies
