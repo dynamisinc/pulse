@@ -53,7 +53,11 @@ async function renderQueue() {
       </ExerciseContextProvider>
     </ThemeProvider>,
   )
-  await screen.findByText('Fulton County EM')
+  // Personas resolve asynchronously (`usePersonas` is a per-instance fetch with no
+  // shared cache); under heavy parallel-suite CPU load the resolve + re-render can
+  // exceed RTL's default 1000ms findBy timeout. Wait longer (well under the 10s
+  // testTimeout) so this gate is load-robust without weakening the assertion.
+  await screen.findByText('Fulton County EM', undefined, { timeout: 5000 })
   return utils
 }
 
@@ -75,7 +79,12 @@ describe('EngineDraftEditComposer — opened from the queue', () => {
     await renderQueue()
     const editor = await openEditor('draft-fulco-reassure')
 
-    expect(within(editor).getByText('Fulton County EM')).toBeInTheDocument()
+    // The composer mounts its OWN `usePersonas()` instance, which resolves the
+    // identity header asynchronously — so await it (findBy) rather than a one-shot
+    // getBy that races the resolve and intermittently misses under parallel load.
+    expect(
+      await within(editor).findByText('Fulton County EM', undefined, { timeout: 5000 }),
+    ).toBeInTheDocument()
     const field = within(editor).getByLabelText('Edited draft text') as HTMLTextAreaElement
     expect(field.value).toContain('boil-water advisory')
   })

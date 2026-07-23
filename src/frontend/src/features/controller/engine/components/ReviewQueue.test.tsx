@@ -47,8 +47,13 @@ async function renderQueue(node: ReactNode) {
       <ExerciseContextProvider>{node}</ExerciseContextProvider>
     </ThemeProvider>,
   )
-  // Wait for the seeded personas to resolve so identity renders.
-  await screen.findByText('Fulton County EM')
+  // Wait for the seeded personas to resolve so identity renders. `usePersonas`
+  // is a per-instance async fetch with no shared cache, so the resolve + re-render
+  // can exceed RTL's default 1000ms findBy timeout under heavy parallel-suite CPU
+  // load (the "passes in isolation, flakes in the full suite" cause). Wait longer —
+  // still well under the 10s testTimeout — so this gate is load-robust without
+  // weakening the assertion (the text must still appear).
+  await screen.findByText('Fulton County EM', undefined, { timeout: 5000 })
   return utils
 }
 
