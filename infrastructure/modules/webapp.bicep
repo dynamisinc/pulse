@@ -36,7 +36,10 @@ param tags object = {}
 // variable-length allowlist can't be an inline app-settings literal, so it is concat()'d onto the fixed
 // settings below. Empty/unset JSON -> an empty array -> NO account settings emitted -> the provider
 // authenticates no one (fail closed, matching DynamisIdentityProviderOptions' documented default).
-var staffAccounts = empty(staffIdentityAccountsJson) ? [] : json(staffIdentityAccountsJson)
+// trim() first so a secret set to whitespace/newlines (common when pasting JSON into a GitHub secret) still
+// reads as empty and fails closed, rather than making empty() false and json() throw on the padded string.
+var trimmedStaffAccountsJson = trim(staffIdentityAccountsJson)
+var staffAccounts = empty(trimmedStaffAccountsJson) ? [] : json(trimmedStaffAccountsJson)
 var staffAccountSettings = flatten(map(staffAccounts, (account, i) => [
   {
     name: 'Authentication__StaffIdentity__Accounts__${i}__Username'

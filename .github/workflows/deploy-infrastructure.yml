@@ -60,6 +60,23 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # GitHub auto-masks the exact secret VALUES, but the per-account Secret substrings inside the
+      # STAFF_IDENTITY_ACCOUNTS_JSON blob are not registered secrets on their own — so register each (plus the
+      # bootstrap secret) as a mask before any `az ... what-if`/`--verbose` runs. Masks persist for the rest of
+      # the job, covering both the What-If and Deploy steps. Defense in depth: these are also @secure() params
+      # that ARM redacts (story login/06).
+      - name: Mask login go-live secrets in logs
+        env:
+          BOOTSTRAP_SECRET: ${{ secrets.BOOTSTRAP_SECRET }}
+          STAFF_IDENTITY_ACCOUNTS_JSON: ${{ secrets.STAFF_IDENTITY_ACCOUNTS_JSON }}
+        run: |
+          if [ -n "$BOOTSTRAP_SECRET" ]; then echo "::add-mask::$BOOTSTRAP_SECRET"; fi
+          if [ -n "$STAFF_IDENTITY_ACCOUNTS_JSON" ]; then
+            echo "$STAFF_IDENTITY_ACCOUNTS_JSON" | jq -r '.[]?.Secret // empty' | while IFS= read -r s; do
+              [ -n "$s" ] && echo "::add-mask::$s"
+            done
+          fi
+
       - name: Create resource group
         if: github.event.inputs.create_resource_group == 'true'
         run: |

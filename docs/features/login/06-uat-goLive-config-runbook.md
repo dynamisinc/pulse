@@ -54,7 +54,11 @@ If a future story introduces environment-gated behavior (e.g. a dev-only diagnos
 - [x] **`ASPNETCORE_ENVIRONMENT`** — resolved as a **documented decision** (above): UAT stays `Production`
       because no backend code path branches on the environment name, so a non-`Production` value would be
       a behavioral no-op. (The original AC's premise — that `Production` silently changes go-live
-      behavior — does not hold.)
+      behavior — does not hold.) **This is a deliberate deviation from issue #309's literal wording**
+      (which asked for a non-`Production` value); flagged for **Tier-2 sign-off** and recorded as a comment
+      on issue #309. If a reviewer wants the value threaded regardless, the `webapp.bicep`
+      `aspnetcoreEnvironment` param already exists (defaults `'Production'`) — pass it from `main.bicep` +
+      `uat.bicepparam` in a one-line follow-up.
 - [x] **Staff allowlist threaded** — a new `@secure() param staffIdentityAccountsJson` in `webapp.bicep`
       + `main.bicep` (empty default, never committed), sourced from the `STAFF_IDENTITY_ACCOUNTS_JSON`
       GitHub secret. `webapp.bicep` expands the JSON array into the indexed
