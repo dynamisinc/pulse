@@ -8,6 +8,7 @@ using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
+using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 
@@ -80,6 +81,15 @@ builder.Services.AddSharedReadOnly();
 // rotation-grace + brute-force lockout over story 06's SharedCredential. Reuses 06's "shared-login"
 // rate-limiter policy (registers no new limiter); staff endpoints are gated by ICurrentStaffSessionAccessor.
 builder.Services.AddSharedCredentialLifecycle();
+
+// UAT bootstrap seam (feature login/05, #308/#310) — the secret-gated, idempotent seed endpoint that
+// creates the FIRST Exercise/StaffAssignment/SharedCredential/Account in an empty database (no other
+// endpoint can, since they all require an already-authenticated staff session). The slice ships its own
+// Add/Map extensions and never edits this file itself; this is the orchestrator-owned one-line wiring
+// (implementation.md "Integration seam"). Disabled by default — fails closed to 404 unless
+// Authentication:Bootstrap:Secret is configured. No middleware/ordering constraint: the header secret is
+// the only gate, reusing the single app.UseRateLimiter() below.
+builder.Services.AddOpsBootstrap(builder.Configuration);
 
 // Social API (Phase B1, feature/social-api) — orchestrator-wired composition root. Each story exposes its
 // own Add*/Map* extension (never edits this file itself); these five DI calls register the read/write
@@ -194,6 +204,7 @@ app.MapStaffAuthEndpoints();        // #62 POST /api/auth/staff/login, GET /api/
 app.MapSharedReadOnlyEndpoints();          // #63 POST /api/auth/shared (view-only session + ephemeral identity)
 app.MapAccountEndpoints();                 // #59 POST /api/auth/login, POST /api/staff/accounts[/import]
 app.MapSharedCredentialLifecycleEndpoints(); // #64 POST /api/staff/shared-credential/{rotate,revoke}
+app.MapBootstrapEndpoints();               // #308 POST /api/ops/bootstrap-exercise (secret-gated seed; 404 when unconfigured)
 
 // Engine-runtime endpoints (Wave 2) — REST only; the review push reuses the B1 ExerciseRealtimeHub mapped
 // above (no second hub). Scope comes only from the resolved IExerciseContext (COR-001), never a client
