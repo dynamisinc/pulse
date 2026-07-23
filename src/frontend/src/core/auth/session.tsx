@@ -2,13 +2,24 @@
  * core/auth/session.tsx
  * ---------------------------------------------------------------------------
  * The session provider + hook (COR-012; feature: identity-auth-roles, story
- * 03). Mirrors `core/exerciseContext/exerciseContext.tsx` exactly:
+ * 03; the failure-branch redirect below is feature: login, story 01 —
+ * "Frontend session & token wiring", split from `identity-auth-roles/03`'s
+ * deferred AC). Mirrors `core/exerciseContext/exerciseContext.tsx`:
  *
- *   - `SessionProvider` resolves the single bound session via the mock
- *     `resolveSession()` (`./sessionResolver.ts`) and renders `children` only
- *     once it succeeds. It renders nothing while resolving and nothing if
- *     resolution fails — so a descendant can never observe a default, unscoped,
- *     or expired session (fail-closed; COR-012, COR-001).
+ *   - `SessionProvider` resolves the single bound session via
+ *     `resolveSession()` (`./sessionResolver.ts` — now token-attaching + a
+ *     one-shot silent-refresh, via the shared axios client) and renders
+ *     `children` only once it succeeds. It renders nothing while resolving,
+ *     so a descendant can never observe a default, unscoped, or expired
+ *     session (fail-closed; COR-012, COR-001).
+ *   - On resolution FAILURE (a 401 with no usable refresh, or any other
+ *     resolution failure) it renders a redirect to the login entry
+ *     (`LOGIN_PATH`, `/login`) — still fail-closed for CONTENT (no descendant
+ *     ever mounts), now VISIBLE instead of a blank screen. This adds
+ *     `react-router-dom` and `features/app-shell/constants.ts`'s `LOGIN_PATH`
+ *     as imports to a `core/` module; that is an accepted, deliberate
+ *     coupling — it mirrors `RoleAwareEntry.tsx`'s own use of `<Navigate>` for
+ *     the same constant, not a layering smell.
  *   - `useSession()` returns the bound session, and THROWS when called outside
  *     a provider (fail-closed — there is no default session).
  *
@@ -17,13 +28,16 @@
  * session is a display/attribution field, NOT a client query-scoping param
  * (query isolation is enforced server-side — same precedent as `ExerciseScope`).
  *
- * Refresh (COR-012): a session is short-lived. `resolveSession()` is itself the
- * refresh path — re-calling it yields a freshly-stamped session; an expired
- * session fails closed (throws) and forces re-auth. A future real provider adds
- * a timer/token-refresh loop on top of this same seam; the mock does not need
- * one, so this provider resolves once.
+ * Refresh (COR-012): a session is short-lived. `resolveSession()` itself now
+ * rides the shared axios client's one-shot silent-refresh (`core/services/
+ * api.ts`) on a 401 before this provider ever sees a rejection; re-calling
+ * `resolveSession()` yields a freshly-stamped session on success. An expired
+ * session (or a refresh that itself fails) still fails closed (throws) here,
+ * which this provider now turns into a visible redirect rather than a blank
+ * render.
  *
- * World: platform/foundation. No UI chrome, no COBRA, no participant skin.
+ * World: platform/foundation. No COBRA, no participant skin. The
+ * `react-router-dom` import is the one documented exception (see above).
  */
 
 import {
@@ -33,7 +47,9 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { Navigate } from 'react-router-dom'
 import { resolveSession, type Session } from './sessionResolver'
+import { LOGIN_PATH } from '@/features/app-shell/constants'
 
 type SessionState =
   | { readonly kind: 'loading' }
@@ -48,8 +64,9 @@ export interface SessionProviderProps {
 
 /**
  * Resolves and binds the browser to a single session. Renders `children` only
- * after resolution succeeds; renders nothing while resolving or on failure, so
- * no descendant can observe a default/expired session (COR-012, COR-001).
+ * after resolution succeeds; renders nothing while resolving (no descendant
+ * can observe a default/expired session, COR-012, COR-001); redirects to the
+ * login entry on failure (still fail-closed for content — visible, not blank).
  */
 export function SessionProvider({ children }: SessionProviderProps) {
   const [state, setState] = useState<SessionState>({ kind: 'loading' })
@@ -74,7 +91,8 @@ export function SessionProvider({ children }: SessionProviderProps) {
     }
   }, [])
 
-  if (state.kind !== 'ready') return null
+  if (state.kind === 'loading') return null
+  if (state.kind === 'error') return <Navigate to={LOGIN_PATH} replace />
 
   return <SessionContext.Provider value={state.session}>{children}</SessionContext.Provider>
 }
