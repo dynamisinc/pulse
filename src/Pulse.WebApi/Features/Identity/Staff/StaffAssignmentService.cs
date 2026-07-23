@@ -73,19 +73,30 @@ public sealed class StaffAssignmentService
         // Own-only (filtered by StaffUserId) + cross-exercise (StaffAssignment is unscoped). Inner-join to
         // Exercise (the scope root, unfiltered) for the display name — an assignment pointing at a missing
         // exercise is dropped rather than surfaced with a null name.
-        var assignments = await (
+        //
+        // Project the raw Guid (NOT a.ExerciseId.ToString()) so the join materializes first and the Guid is
+        // stringified CLIENT-SIDE below. A `.ToString()` inside this EF projection is translated to SQL and
+        // SQL Server returns a uniqueidentifier as an UPPERCASE string — which would then mismatch the
+        // lowercase exerciseId every other endpoint emits (SessionDto / ExerciseScopeDto both call
+        // Guid.ToString() on an already-materialized entity, i.e. .NET's lowercase form). The switcher
+        // compares assignment.exerciseId against the resolved scope's exerciseId, so an uppercase/lowercase
+        // split makes the active exercise fail to match. Materialize, then ToString() in memory for one
+        // consistent (lowercase) casing across the whole API surface.
+        var rows = await (
             from a in _dbContext.StaffAssignments.AsNoTracking()
             where a.StaffUserId == current.StaffUserId
             join e in _dbContext.Exercises.AsNoTracking() on a.ExerciseId equals e.Id
             orderby e.Name
-            select new StaffAssignmentDto
-            {
-                ExerciseId = a.ExerciseId.ToString(),
-                ExerciseName = e.Name,
-                Role = a.Role,
-            }).ToListAsync(cancellationToken);
+            select new { a.ExerciseId, ExerciseName = e.Name, a.Role }).ToListAsync(cancellationToken);
 
-        return assignments;
+        return rows
+            .Select(r => new StaffAssignmentDto
+            {
+                ExerciseId = r.ExerciseId.ToString(),
+                ExerciseName = r.ExerciseName,
+                Role = r.Role,
+            })
+            .ToList();
     }
 
     /// <summary>

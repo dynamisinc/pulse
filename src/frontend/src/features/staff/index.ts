@@ -14,6 +14,7 @@
  */
 
 export { ExerciseSwitcher } from './components/ExerciseSwitcher'
+export { ExerciseSwitcherSlot } from './components/ExerciseSwitcherSlot'
 export { useStaffAssignments, STAFF_ASSIGNMENTS_QUERY_KEY } from './hooks/useStaffAssignments'
 export { useSetActiveExercise } from './hooks/useSetActiveExercise'
 export {

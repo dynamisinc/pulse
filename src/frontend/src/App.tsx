@@ -51,7 +51,7 @@ import { ShellLayout } from './features/participant-shell/ShellLayout'
 import { ParticipantLandingGuard } from '@/features/participant-shell'
 import { SocialChannel } from './features/social'
 import { ControllerConsoleRoute } from './features/controller'
-import { ExerciseSwitcher } from '@/features/staff'
+import { ExerciseSwitcherSlot } from '@/features/staff'
 import { createRoleAwareRoutes } from './features/app-shell'
 
 // Sensible React Query defaults. The participant social feed's real-time updates
@@ -143,7 +143,11 @@ const router = createBrowserRouter(
       // planner: no Phase-1 staff surface — omitted, so a planner session fails closed.
     },
     participantGuard: ParticipantLandingGuard,
-    staffSwitcher: <ExerciseSwitcher />,
+    // Visibility-gated: the switcher only appears above the staff console when
+    // the caller has >1 exercise to switch between (see ExerciseSwitcherSlot);
+    // a single-exercise staff member gets a clean console (the header identity
+    // badge already shows their exercise).
+    staffSwitcher: <ExerciseSwitcherSlot />,
   }),
 )
 

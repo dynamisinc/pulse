@@ -112,13 +112,19 @@ public sealed class StaffAssignmentServiceTests
 
         assignments.Should().NotBeNull();
         assignments!.Should().HaveCount(2, "a staff user's assignment read spans every exercise they're assigned to (COR-005)");
-        // Guid.Parse(...) rather than a bare string == exerciseX.Id.ToString(): GetAssignmentsAsync's
-        // ExerciseId = a.ExerciseId.ToString() runs INSIDE the LINQ-to-Entities query, so SQL Server (not
-        // .NET) performs the Guid-to-string conversion server-side — which yields UPPERCASE hex, unlike
-        // .NET's lowercase Guid.ToString(). An ordinal string compare would spuriously fail on case alone;
-        // parsing back to a Guid compares the actual identity, which is what these assertions mean.
-        assignments.Should().Contain(a => Guid.Parse(a.ExerciseId) == exerciseA.Id && a.ExerciseName == "Atlanta CIE" && a.Role == "controller");
-        assignments.Should().Contain(a => Guid.Parse(a.ExerciseId) == exerciseB.Id && a.ExerciseName == "Boston Full-Scale" && a.Role == "evaluator");
+        // REGRESSION GUARD (exact string, not Guid.Parse): GetAssignmentsAsync now materializes the joined
+        // rows and calls Guid.ToString() CLIENT-SIDE, so exerciseId is .NET's LOWERCASE form — consistent
+        // with SessionDto / ExerciseScopeDto. Previously the ToString() ran INSIDE the LINQ-to-Entities query,
+        // so SQL Server did the conversion server-side and returned UPPERCASE hex — a casing split between
+        // endpoints that made the cross-exercise switcher's `assignment.exerciseId === scope.exerciseId`
+        // compare fail, mis-marking the active exercise as switchable. Assert the exact lowercase string so a
+        // regression back to a server-side (uppercase) conversion is caught here (only real SQL Server, this
+        // fixture, reproduces it — an in-memory provider always returns .NET's lowercase form).
+        assignments!.Should().OnlyContain(
+            a => a.ExerciseId == a.ExerciseId.ToLowerInvariant(),
+            "exerciseId must be lowercase on the wire, matching /api/session and /api/exercise-context");
+        assignments.Should().Contain(a => a.ExerciseId == exerciseA.Id.ToString() && a.ExerciseName == "Atlanta CIE" && a.Role == "controller");
+        assignments.Should().Contain(a => a.ExerciseId == exerciseB.Id.ToString() && a.ExerciseName == "Boston Full-Scale" && a.Role == "evaluator");
         assignments.Should().NotContain(a => a.Role == "planner",
             "a staff user's assignment read is own-only — it must never surface another staff user's assignment");
     }
@@ -182,10 +188,10 @@ public sealed class StaffAssignmentServiceTests
         assignments!.Should().HaveCount(2,
             "the switch moved the session's bound exercise to B, but the own-assignment read must still list " +
             "both A and B — it is not itself scoped to the currently active exercise");
-        // Guid.Parse(...): see the remark above — GetAssignmentsAsync's ExerciseId string conversion is
-        // translated to SQL Server, which formats it UPPERCASE (unlike .NET's lowercase Guid.ToString()).
-        assignments.Should().Contain(a => Guid.Parse(a.ExerciseId) == exerciseA.Id);
-        assignments.Should().Contain(a => Guid.Parse(a.ExerciseId) == exerciseB.Id);
+        // Exact lowercase string (see the regression-guard remark on the read test above): the exerciseId is
+        // stringified client-side, so it matches .NET's lowercase Guid.ToString().
+        assignments.Should().Contain(a => a.ExerciseId == exerciseA.Id.ToString());
+        assignments.Should().Contain(a => a.ExerciseId == exerciseB.Id.ToString());
     }
 
     [RequiresDockerFact]
