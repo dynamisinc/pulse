@@ -117,19 +117,11 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'Authentication__Jwt__RememberMeDays'
           value: string(jwtRememberMeDays)
         }
-        // Serilog Application Insights sink
-        {
-          name: 'Serilog__WriteTo__1__Name'
-          value: 'ApplicationInsights'
-        }
-        {
-          name: 'Serilog__WriteTo__1__Args__connectionString'
-          value: appInsightsConnectionString
-        }
-        {
-          name: 'Serilog__WriteTo__1__Args__telemetryConverter'
-          value: 'Serilog.Sinks.ApplicationInsights.TelemetryConverters.TraceTelemetryConverter, Serilog.Sinks.ApplicationInsights'
-        }
+        // NOTE: the backend does NOT use Serilog — logging is the ASP.NET Core ILogger
+        // pipeline with the Application Insights logger provider (AddApplicationInsightsTelemetry
+        // in Program.cs), whose captured level is set to Information via appsettings.json
+        // (Logging:ApplicationInsights:LogLevel). The former Serilog__WriteTo__* settings here
+        // were dead config (no Serilog package / UseSerilog) and have been removed.
         // JWT Secret Key (set via --parameters, not stored in repo)
         {
           name: 'Authentication__Jwt__SecretKey'
