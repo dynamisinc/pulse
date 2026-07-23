@@ -48,9 +48,14 @@ const MIN_ASSIGNMENTS_TO_SWITCH = 2
  * one exercise to switch between; otherwise renders nothing. See module header.
  */
 export function ExerciseSwitcherSlot() {
-  const { data } = useStaffAssignments()
+  const { data, isError } = useStaffAssignments()
 
-  if (!data || data.length < MIN_ASSIGNMENTS_TO_SWITCH) {
+  // Gate on `isError` explicitly, not just `!data`: React Query can surface
+  // `isError` while `data` still holds a STALE prior-success array, which would
+  // otherwise mount the switcher against outdated options (and contradict this
+  // file's "renders nothing on error" contract). No data, an error, or fewer
+  // than two exercises to switch between → render nothing.
+  if (isError || !data || data.length < MIN_ASSIGNMENTS_TO_SWITCH) {
     return null
   }
 

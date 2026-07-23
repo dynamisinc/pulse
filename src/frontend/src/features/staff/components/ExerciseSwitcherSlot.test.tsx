@@ -64,4 +64,14 @@ describe('ExerciseSwitcherSlot — visibility gate', () => {
     render(<ExerciseSwitcherSlot />)
     expect(screen.queryByTestId('exercise-switcher-stub')).not.toBeInTheDocument()
   })
+
+  it('renders nothing on error, even when a stale 2+ assignment list is still cached', () => {
+    // React Query can be isError while `data` still holds a prior-success array;
+    // the gate must not mount the switcher against those stale options.
+    mockUseStaffAssignments.mockReturnValue(
+      { data: [A('ex-alpha'), A('ex-bravo')], isError: true } as AssignmentsQuery,
+    )
+    render(<ExerciseSwitcherSlot />)
+    expect(screen.queryByTestId('exercise-switcher-stub')).not.toBeInTheDocument()
+  })
 })
