@@ -165,12 +165,8 @@ export function StaffHeader({
   const { now: scenarioInstant } = useScenarioTime(timeZone, CLOCK_TICK_MS)
   const wallInstant = useWallClockNow()
 
-  // Sign-out (point 8, module header): best-effort server notify + local
-  // token clear (logout() never throws), then hand off to the real login
-  // entry. logout() clears the token store SYNCHRONOUSLY before it awaits the
-  // best-effort POST /auth/logout (see core/auth/logout.ts), so we navigate
-  // IMMEDIATELY rather than in a .then() — the redirect must never block on a
-  // slow/hung network request (that is logout()'s own "never blocks" contract).
+  // Sign-out (point 8, module header). See the inline note below for the
+  // ordering/why; the shared teardown lives in core/auth/endSession.ts.
   const handleSignOut = () => {
     // endSession() clears the token store AND the React Query cache
     // SYNCHRONOUSLY before it awaits the best-effort POST /auth/logout (see

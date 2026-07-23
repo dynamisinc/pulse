@@ -3,13 +3,14 @@
  * ---------------------------------------------------------------------------
  * RTL coverage for the participant sign-out control (feature: login, story
  * 04): a real, accessible, keyboard-operable button that calls the shared
- * `logout()` helper then navigates to `LOGIN_PATH`.
+ * `endSession()` helper then navigates to `LOGIN_PATH`.
  *
- * `@/core/auth`'s `logout()` is mocked at the module boundary — its own
- * contract (token clearing, the best-effort `POST /auth/logout`) is covered
- * by `core/auth/logout.test.ts`; this file only asserts the control CALLS it.
- * `react-router-dom` keeps its real `MemoryRouter` (via `importOriginal`) and
- * only overrides `useNavigate()` with a spy.
+ * `@/core/auth`'s `endSession()` is mocked at the module boundary — its own
+ * contract (React Query cache clear + token clear + best-effort
+ * `POST /auth/logout`) is covered by `core/auth/endSession.test.ts`; this file
+ * only asserts the control CALLS it. `react-router-dom` keeps its real
+ * `MemoryRouter` (via `importOriginal`) and only overrides `useNavigate()`
+ * with a spy.
  */
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
