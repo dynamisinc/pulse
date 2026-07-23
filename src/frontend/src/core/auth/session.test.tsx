@@ -5,14 +5,25 @@
  * exerciseContext.test.tsx:
  *   - useSession() outside a provider throws (fail-closed);
  *   - inside a provider it exposes exactly one bound session;
- *   - a pending/failed resolution renders nothing (no default session leaks);
+ *   - a pending resolution renders nothing (no default session leaks);
+ *   - a FAILED resolution redirects to the login entry (feature: login, story
+ *     01) — still fail-closed for content (no descendant mounts), now visible
+ *     instead of a blank render;
+ *   - a FAILED resolution's console signal never leaks a raw bearer token,
+ *     even when the rejection itself carries one (AC6 / WR-001 — a failed
+ *     silent refresh propagates an AxiosError whose `config.headers` carries
+ *     `Authorization: Bearer <token>`, and `AxiosError` is
+ *     console/`toJSON()`-inspectable);
  *   - useRole() reads the role off that same bound session.
  *
  * `resolveSession()` is mocked at the module boundary so these exercise the
  * provider's state machine, not the resolver's validation (that lives in
- * sessionResolver.test.ts).
+ * sessionResolver.test.ts). The redirect case wraps the provider in a
+ * `MemoryRouter` (mirroring `RoleAwareEntry.test.tsx`'s own pattern) since
+ * `<Navigate>` needs a router ancestor to render.
  */
 import { render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SessionProvider, useSession } from './session'
 import { useRole } from './roles'
@@ -89,20 +100,87 @@ describe('SessionProvider', () => {
     expect(screen.queryByTestId('probe')).not.toBeInTheDocument()
   })
 
-  it('fails closed — renders nothing — when resolution rejects', async () => {
+  it('fails closed — redirects to the login entry — when resolution rejects', async () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     mockResolve.mockRejectedValue(new Error('mock resolution failed'))
 
-    const { container } = render(
-      <SessionProvider>
-        <Probe />
-      </SessionProvider>,
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <SessionProvider>
+                <Probe />
+              </SessionProvider>
+            }
+          />
+          <Route path="/login" element={<div data-testid="login-sentinel" />} />
+        </Routes>
+      </MemoryRouter>,
     )
 
     await waitFor(() => expect(consoleSpy).toHaveBeenCalled())
 
-    expect(container).toBeEmptyDOMElement()
+    // Fail-closed for CONTENT: no descendant of SessionProvider ever mounts...
     expect(screen.queryByTestId('probe')).not.toBeInTheDocument()
+    // ...but the failure is now VISIBLE (a redirect), not a blank render.
+    expect(screen.getByTestId('login-sentinel')).toBeInTheDocument()
+
+    consoleSpy.mockRestore()
+  })
+
+  it('never logs a raw bearer token, even when the rejection carries one (AC6 / WR-001)', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const secretToken = 'super-secret-bearer-token-xyz'
+
+    // An AxiosError-shaped rejection: exactly what a failed silent refresh
+    // (core/services/api.ts) propagates once the request interceptor has
+    // attached a stored token — `config.headers.Authorization` carries it,
+    // and it's reachable both by direct property access AND via `toJSON()`
+    // (some console-capturing reporters call it).
+    class FakeAxiosLikeError extends Error {
+      readonly isAxiosError = true
+      readonly config: { headers: { Authorization: string } }
+      constructor(message: string, token: string) {
+        super(message)
+        this.config = { headers: { Authorization: `Bearer ${token}` } }
+      }
+      toJSON() {
+        return { message: this.message, config: this.config }
+      }
+    }
+    const rejection = new FakeAxiosLikeError('Request failed with status code 401', secretToken)
+    mockResolve.mockRejectedValue(rejection)
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <SessionProvider>
+                <Probe />
+              </SessionProvider>
+            }
+          />
+          <Route path="/login" element={<div data-testid="login-sentinel" />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(consoleSpy).toHaveBeenCalled())
+    expect(screen.getByTestId('login-sentinel')).toBeInTheDocument()
+
+    // Inspect EVERYTHING console.error was actually called with — never the
+    // raw token, and never the string "Bearer " (the header prefix).
+    const loggedText = consoleSpy.mock.calls
+      .flat()
+      .map(arg => (typeof arg === 'string' ? arg : JSON.stringify(arg)))
+      .join(' ')
+
+    expect(loggedText).not.toContain(secretToken)
+    expect(loggedText).not.toContain('Bearer')
 
     consoleSpy.mockRestore()
   })
