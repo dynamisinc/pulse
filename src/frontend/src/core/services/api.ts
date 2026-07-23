@@ -17,17 +17,22 @@
  *     already supplied its own `Authorization` header (`core/auth/logout.ts`
  *     deliberately does, to attach the token it captured before clearing the
  *     store — see its own header). No stored token -> no header is ever set
- *     (never a stale/empty one).
+ *     (never a stale/empty one). `performSilentRefresh()`'s own refresh call
+ *     opts OUT of this attach entirely (`_pulseSkipAuthAttach`, below) — the
+ *     backend reads the refresh token from the request BODY, so presenting
+ *     the (possibly expired) access token on that call is both pointless and
+ *     unnecessary token-exposure surface.
  *   - RESPONSE interceptor: on a 401, with a stored refresh token, attempts
  *     EXACTLY ONE silent `POST /auth/refresh` and retries the ORIGINAL
  *     request once on success, with the rotated token attached. A refresh
  *     failure (401 or a network error) clears both tokens and the original
- *     401 propagates — no retry loop. `/auth/refresh` and the three login
- *     endpoints are excluded from ever TRIGGERING this path, so a failing
- *     refresh can't recursively retrigger itself and a bad-credentials login
- *     401 is never misread as an expired session. Concurrent 401s coalesce
- *     onto a single in-flight refresh call (never more than one outstanding
- *     `POST /auth/refresh` at a time).
+ *     401 propagates — no retry loop. `/auth/refresh`, `/auth/logout`, and
+ *     the three login endpoints are excluded from ever TRIGGERING this path,
+ *     so a failing refresh can't recursively retrigger itself, a logout 401
+ *     can never spin up a refresh (explicit, not left emergent), and a
+ *     bad-credentials login 401 is never misread as an expired session.
+ *     Concurrent 401s coalesce onto a single in-flight refresh call (never
+ *     more than one outstanding `POST /auth/refresh` at a time).
  *
  * DELIBERATELY depends on `core/auth/tokenStore` ONLY — a dependency-free
  * leaf module — never on `core/auth/sessionResolver` or `session.tsx`, so
@@ -38,8 +43,28 @@
  *
  * No token is ever logged (console or otherwise) by this module.
  */
-import axios, { type InternalAxiosRequestConfig } from 'axios'
+import axios, { type AxiosRequestConfig, type InternalAxiosRequestConfig } from 'axios'
 import { getAccessToken, getRefreshToken, setTokens, clearTokens } from '../auth/tokenStore'
+
+/**
+ * Internal per-request flags this module attaches to a config object. Not
+ * part of the public axios config surface — a documented escape hatch this
+ * file alone reads and writes.
+ */
+interface PulseRequestFlags {
+  /**
+   * Tells the REQUEST interceptor to skip attaching the stored access token
+   * for this one call, even though the caller didn't supply its own
+   * `Authorization` header. Used by `performSilentRefresh()`'s own
+   * `POST /auth/refresh` call — see this module's header.
+   */
+  _pulseSkipAuthAttach?: boolean
+  /**
+   * Marks a request that has already gone through one refresh-retry cycle
+   * (response interceptor).
+   */
+  _pulseRefreshRetried?: boolean
+}
 
 /**
  * Shared axios instance for the Pulse backend API.
@@ -59,7 +84,8 @@ export const api = axios.create({
 // ---------------------------------------------------------------------------
 
 api.interceptors.request.use(config => {
-  if (!config.headers.has('Authorization')) {
+  const flags = config as InternalAxiosRequestConfig & PulseRequestFlags
+  if (!flags._pulseSkipAuthAttach && !config.headers.has('Authorization')) {
     const token = getAccessToken()
     if (token) {
       config.headers.set('Authorization', `Bearer ${token}`)
@@ -75,12 +101,15 @@ api.interceptors.request.use(config => {
 /**
  * Endpoints that must NEVER trigger the silent-refresh retry: the refresh
  * endpoint itself (so a failing refresh can't recursively retrigger a
- * refresh) and the three login endpoints (a bad-credentials 401 there is not
- * an expired session — see the three login endpoints' shared envelope,
- * docs/features/login/implementation.md's reuse map).
+ * refresh), the logout endpoint (explicit rather than emergent — a 401 there
+ * must never spin up a refresh either), and the three login endpoints (a
+ * bad-credentials 401 there is not an expired session — see the three login
+ * endpoints' shared envelope, docs/features/login/implementation.md's reuse
+ * map).
  */
 const NO_REFRESH_RETRY_PATHS = new Set([
   '/auth/refresh',
+  '/auth/logout',
   '/auth/login',
   '/auth/staff/login',
   '/auth/shared',
@@ -88,11 +117,6 @@ const NO_REFRESH_RETRY_PATHS = new Set([
 
 function isExcludedFromRefresh(url: string | undefined): boolean {
   return url !== undefined && NO_REFRESH_RETRY_PATHS.has(url)
-}
-
-/** A request config augmented with this module's one-shot retry marker. */
-interface RetryableRequestConfig extends InternalAxiosRequestConfig {
-  _pulseRefreshRetried?: boolean
 }
 
 /** The wire shape this module reads off a `POST /auth/refresh` response. */
@@ -120,7 +144,17 @@ async function performSilentRefresh(): Promise<string | null> {
   }
 
   try {
-    const response = await api.post<RefreshResponseBody>('/auth/refresh', { refreshToken })
+    // `_pulseSkipAuthAttach`: the backend reads the refresh token from the
+    // BODY, never the Authorization header — presenting the (possibly
+    // expired) access token here is pointless and unnecessary exposure.
+    const refreshRequestConfig: AxiosRequestConfig & PulseRequestFlags = {
+      _pulseSkipAuthAttach: true,
+    }
+    const response = await api.post<RefreshResponseBody>(
+      '/auth/refresh',
+      { refreshToken },
+      refreshRequestConfig,
+    )
     const { token, refreshToken: rotatedRefreshToken } = response.data
     if (!token || !rotatedRefreshToken) {
       clearTokens()
@@ -151,7 +185,7 @@ api.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    const config = error.config as RetryableRequestConfig | undefined
+    const config = error.config as (InternalAxiosRequestConfig & PulseRequestFlags) | undefined
     if (!config || config._pulseRefreshRetried || isExcludedFromRefresh(config.url)) {
       return Promise.reject(error)
     }

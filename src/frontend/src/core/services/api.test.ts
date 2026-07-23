@@ -17,7 +17,8 @@
  * adapter) — this is not a simplification, it is the same rejection a live
  * 401 response produces.
  *
- * Covers (feature: login, story 01 ACs):
+ * Covers (feature: login, story 01 ACs, plus the code-review follow-ups
+ * SG-001/SG-002 on #304):
  *   - the request interceptor attaches `Authorization: Bearer <token>` when a
  *     token is stored, and omits it entirely when none is stored;
  *   - the response interceptor's one-shot silent refresh: a 401 with a stored
@@ -25,7 +26,11 @@
  *     original request once on success, storing the rotated tokens;
  *   - a failed refresh clears both tokens and does not loop;
  *   - no refresh is attempted when there is no stored refresh token;
- *   - the refresh/login endpoints themselves never trigger the retry;
+ *   - the refresh/logout/login endpoints themselves never trigger the retry
+ *     (SG-001 adds `/auth/logout` to that exclusion, explicit not emergent);
+ *   - the refresh call itself never presents the stored (possibly expired)
+ *     access token (SG-002 — it's read from the request BODY, not this
+ *     header, so attaching it is unnecessary exposure surface);
  *   - concurrent 401s coalesce onto a single in-flight refresh call;
  *   - a per-call mock adapter (the mock-data pattern) is unaffected/harmless.
  */
@@ -224,6 +229,42 @@ describe('response interceptor — one-shot silent refresh', () => {
     await expect(api.post('/auth/login', {}, { adapter })).rejects.toBeTruthy()
 
     expect(refreshCalls).toBe(0)
+  })
+
+  it('never triggers a refresh for a 401 from the logout endpoint (SG-001)', async () => {
+    setTokens({ token: 'x', refreshToken: 'y' })
+    let refreshCalls = 0
+    const adapter: AxiosAdapter = config => {
+      if (config.url === '/auth/refresh') refreshCalls++
+      return reject401(config)
+    }
+
+    await expect(api.post('/auth/logout', {}, { adapter })).rejects.toBeTruthy()
+
+    expect(refreshCalls).toBe(0)
+  })
+
+  it('never presents the stored (possibly expired) access token on the refresh call itself (SG-002)', async () => {
+    setTokens({ token: 'expired-token', refreshToken: 'refresh-1' })
+
+    let refreshSawAuthHeader: boolean | undefined
+    const adapter: AxiosAdapter = config => {
+      if (config.url === '/auth/refresh') {
+        refreshSawAuthHeader = config.headers.has('Authorization')
+        return Promise.resolve(
+          respond(config, 200, { token: 'new-token', refreshToken: 'refresh-2' }),
+        )
+      }
+      if (config.headers.get('Authorization') === 'Bearer new-token') {
+        return Promise.resolve(respond(config, 200, { ok: true }))
+      }
+      return reject401(config)
+    }
+    api.defaults.adapter = adapter
+
+    await api.get('/protected')
+
+    expect(refreshSawAuthHeader).toBe(false)
   })
 
   it('coalesces concurrent 401s onto a single in-flight refresh call', async () => {

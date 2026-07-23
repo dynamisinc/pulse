@@ -81,8 +81,17 @@ export function SessionProvider({ children }: SessionProviderProps) {
       })
       .catch((error: unknown) => {
         if (cancelled) return
-        // No UI/telemetry surface at this layer; a console signal beats silence.
-        console.error('[session] resolveSession failed; failing closed', error)
+        // No UI/telemetry surface at this layer; a console signal beats
+        // silence. NEVER log the raw error object: once the shared axios
+        // client attaches a stored token (core/services/api.ts), a failed
+        // silent refresh propagates an AxiosError whose `config.headers`
+        // carries `Authorization: Bearer <token>` — and `AxiosError` is
+        // console-inspectable (some reporters call `.toJSON()`, which
+        // includes `config`). Log only a redacted message (AC6).
+        console.error(
+          '[session] resolveSession failed; failing closed',
+          error instanceof Error ? error.message : error,
+        )
         setState({ kind: 'error', error })
       })
 
