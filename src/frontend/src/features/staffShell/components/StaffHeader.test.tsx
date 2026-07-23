@@ -28,18 +28,48 @@
  * test and an un-mocked shipped-path test) — mirroring how
  * `exerciseContextResolver.default.test.ts` sits beside
  * `exerciseContextResolver.test.ts`.
+ *
+ * `StaffHeader` now also calls `useNavigate()` for its sign-out control
+ * (feature: login, story 04) — every render needs a Router ancestor. The
+ * local `render()` wrapper below (shadowing RTL's own, renamed `rtlRender`)
+ * wraps every call site in a real `MemoryRouter` so none of the existing
+ * `render(<StaffHeader ... />)` call sites below need to change.
+ * `react-router-dom` keeps its real `MemoryRouter` (via `importOriginal`) and
+ * only overrides `useNavigate()` with a spy; `@/core/auth`'s `logout()` is
+ * mocked at the module boundary (its own contract is covered by
+ * `core/auth/logout.test.ts`) so this file only asserts that the control
+ * CALLS it, never re-tests its internals.
  */
-import { act, render, screen, within } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { act, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StaffHeader, STAFF_CLASSIFICATION } from './StaffHeader'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope, ExerciseStatus } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
+import { logout } from '@/core/auth'
+import { LOGIN_PATH } from '@/features/app-shell/constants'
 
 vi.mock('@/core/exerciseContext', () => ({
   useExerciseContext: vi.fn(),
 }))
+
+vi.mock('@/core/auth', () => ({
+  logout: vi.fn(),
+}))
+
+const mockNavigate = vi.fn()
+vi.mock('react-router-dom', async importOriginal => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return { ...actual, useNavigate: () => mockNavigate }
+})
+
+/** Wraps every `render(<StaffHeader ... />)` call site in a real Router. */
+function render(ui: ReactElement) {
+  return rtlRender(ui, { wrapper: MemoryRouter })
+}
 
 const BASE_SCOPE: ExerciseScope = {
   exerciseId: 'ex-test-staff-header-0001',
@@ -48,12 +78,17 @@ const BASE_SCOPE: ExerciseScope = {
   status: 'active',
 }
 
+const mockLogout = vi.mocked(logout)
+
 function mockScope(overrides: Partial<ExerciseScope> = {}) {
   vi.mocked(useExerciseContext).mockReturnValue({ ...BASE_SCOPE, ...overrides })
 }
 
 beforeEach(() => {
   mockScope()
+  mockLogout.mockReset()
+  mockLogout.mockResolvedValue(undefined)
+  mockNavigate.mockReset()
 })
 
 afterEach(() => {
@@ -339,5 +374,37 @@ describe('StaffHeader — primary-emphasis text INHERITS its color rather than h
     expect(getComputedStyle(pulseLabel).color).toBe('rgb(10, 20, 30)')
     expect(getComputedStyle(exerciseNameLabel).color).toBe('rgb(10, 20, 30)')
     expect(getComputedStyle(scenarioClockDigits as Element).color).toBe('rgb(10, 20, 30)')
+  })
+})
+
+describe('StaffHeader — sign-out control (feature: login, story 04; COR-012)', () => {
+  it('renders a real button with an accessible "Sign out" name', () => {
+    render(<StaffHeader surfaceName="Controller Console" />)
+
+    const button = screen.getByRole('button', { name: /sign out/i })
+    expect(button.tagName).toBe('BUTTON')
+  })
+
+  it('calls the shared logout() helper, then navigates to LOGIN_PATH, on click', async () => {
+    const user = userEvent.setup()
+    render(<StaffHeader surfaceName="Controller Console" />)
+
+    await user.click(screen.getByRole('button', { name: /sign out/i }))
+
+    await waitFor(() => expect(mockLogout).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith(LOGIN_PATH))
+  })
+
+  it('is keyboard-operable: reachable by Tab and activatable with Enter', async () => {
+    const user = userEvent.setup()
+    render(<StaffHeader surfaceName="Controller Console" />)
+
+    const button = screen.getByRole('button', { name: /sign out/i })
+    button.focus()
+    expect(button).toHaveFocus()
+
+    await user.keyboard('{Enter}')
+
+    await waitFor(() => expect(mockLogout).toHaveBeenCalledTimes(1))
   })
 })

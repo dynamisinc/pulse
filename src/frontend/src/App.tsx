@@ -20,8 +20,10 @@
  *   with the cross-exercise `ExerciseSwitcher` (exercise-isolation/05) mounted at
  *   the staff hand-off inside `RoleAwareEntry`. A staff role with no built
  *   surface (planner, Phase 1) fails closed.
- * - unresolved / expired / unsupported → fail closed to `/login` (a temporary
- *   `SignInFallback` from app-shell until the real login lands, COR-030).
+ * - unresolved / expired / unsupported → fail closed to `/login`, which
+ *   `createRoleAwareRoutes` mounts as the real `ParticipantSignInPage` (feature:
+ *   login; see `docs/features/login/`), with a linked `/staff/login`
+ *   (`StaffSignInPage`) for the staff minority.
  *
  * The staff surfaces (`ControllerConsoleRoute` / `EvaluatorDashboardRoute`) each
  * mount their OWN `ExerciseContextProvider` — a deliberate, benign re-resolve of

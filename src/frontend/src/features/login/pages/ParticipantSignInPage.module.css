@@ -171,6 +171,29 @@
   font-size: 13px;
 }
 
+/* The one cross-world link (to /staff/login) — visually SUBORDINATE to the
+   forms above: small, muted, separated by a top rule so it reads as an
+   escape hatch for the staff minority, never a third form on this page. */
+.staffLinkRow {
+  margin: 4px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid #e5eaf0;
+  color: #7c8894;
+  font-size: 12px;
+  text-align: center;
+}
+
+.staffLink {
+  color: #2b5f75;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.staffLink:focus-visible {
+  outline: 2px solid #2b5f75;
+  outline-offset: 2px;
+}
+
 @media (max-width: 420px) {
   .card {
     padding: 24px;

@@ -19,13 +19,16 @@
  * `@/core/services/api` is mocked at the module boundary (never a real axios
  * sink — the repo's own worker-teardown footgun). `@/core/auth` and
  * `@/core/exerciseContext` are mocked the same way so each test controls
- * `setTokens`/`resolveExerciseContext` directly. `react-router-dom` is
- * mocked to substitute a spy for `useNavigate()` — this page imports nothing
- * else from that module, so a full replacement is safe.
+ * `setTokens`/`resolveExerciseContext` directly. `react-router-dom` keeps its
+ * REAL `Link`/`MemoryRouter` (via `importOriginal`) — this page now renders a
+ * real `<Link to={STAFF_LOGIN_PATH}>` (feature: login, story 04, AC2) that
+ * needs a genuine Router ancestor to resolve — and only overrides
+ * `useNavigate()` with a spy.
  */
 import type { ReactNode } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -33,6 +36,7 @@ import { api } from '@/core/services/api'
 import { setTokens } from '@/core/auth'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
+import { STAFF_LOGIN_PATH } from '@/features/app-shell/constants'
 import { ParticipantSignInPage } from './ParticipantSignInPage'
 
 vi.mock('@/core/services/api', () => ({
@@ -48,9 +52,10 @@ vi.mock('@/core/exerciseContext', () => ({
 }))
 
 const mockNavigate = vi.fn()
-vi.mock('react-router-dom', () => ({
-  useNavigate: () => mockNavigate,
-}))
+vi.mock('react-router-dom', async importOriginal => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return { ...actual, useNavigate: () => mockNavigate }
+})
 
 const mockPost = vi.mocked(api.post)
 const mockSetTokens = vi.mocked(setTokens)
@@ -80,7 +85,11 @@ function renderPage() {
     defaultOptions: { queries: { retry: false } },
   })
   function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    return (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
+    )
   }
   return render(<ParticipantSignInPage />, { wrapper: Wrapper })
 }
@@ -290,6 +299,22 @@ describe('ParticipantSignInPage — exercise-name branding is non-blocking (AC5)
 
     expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
     expect(screen.getByLabelText('Handle')).toBeInTheDocument()
+  })
+})
+
+describe('ParticipantSignInPage — staff link (feature: login, story 04, AC2)', () => {
+  it('renders a real, labelled <a> to STAFF_LOGIN_PATH — never a styled div/onClick', () => {
+    renderPage()
+
+    const link = screen.getByRole('link', { name: /sign in here/i })
+    expect(link.tagName).toBe('A')
+    expect(link).toHaveAttribute('href', STAFF_LOGIN_PATH)
+  })
+
+  it('renders the "Staff or controller?" copy alongside the link', () => {
+    renderPage()
+
+    expect(screen.getByText(/staff or controller\?/i)).toBeInTheDocument()
   })
 })
 

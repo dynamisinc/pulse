@@ -64,15 +64,26 @@
  *
  * SCENARIO TIME (COR-053): not applicable — no participant-visible
  * timestamps on this page.
+ *
+ * STAFF LINK (feature: login, story 04, AC2): a single, clearly-separated,
+ * visually SUBORDINATE link to `STAFF_LOGIN_PATH` ("Staff or controller? Sign
+ * in here.") — the one place the two worlds are allowed to reference each
+ * other, and only as a real react-router `<Link>` (never a styled `div`/
+ * `onClick`), styled entirely by this page's own CSS Module (brand-neutral,
+ * COBRA-free). `STAFF_LOGIN_PATH` is a world-neutral path constant from
+ * `@/features/app-shell/constants` — `core/auth/session.tsx` already imports
+ * its sibling `LOGIN_PATH` from the same module, so this coupling is an
+ * established precedent, not a new layering smell.
  */
 
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTowerBroadcast, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { setTokens } from '@/core/auth'
 import { resolveExerciseContext } from '@/core/exerciseContext'
+import { STAFF_LOGIN_PATH } from '@/features/app-shell/constants'
 import {
   signInWithPassword,
   signInWithSharedCode,
@@ -282,6 +293,16 @@ export function ParticipantSignInPage() {
             Signing in…
           </p>
         ) : null}
+
+        {/* The one cross-world reference (AC2 — see module header). Visually
+            subordinate to the forms above (small, muted, separated by a
+            rule) — a real, labelled <a> via react-router's <Link>. */}
+        <p className={styles.staffLinkRow}>
+          Staff or controller?{' '}
+          <Link to={STAFF_LOGIN_PATH} className={styles.staffLink}>
+            Sign in here.
+          </Link>
+        </p>
       </div>
     </main>
   )

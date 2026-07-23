@@ -18,9 +18,14 @@
  *
  * `ExerciseContextProvider` resolves its mock scope asynchronously (it renders
  * nothing until resolved), so the first assertion waits via `findBy*`.
+ *
+ * `StaffHeader` (mounted inside `EvaluatorDashboardRoute`) calls `useNavigate()`
+ * for its sign-out control (feature: login, story 04) — wrapped in a real
+ * `MemoryRouter` here so this genuinely un-mocked integration path still renders.
  */
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query'
 import { describe, expect, it } from 'vitest'
 import { EvaluatorDashboardRoute } from './App'
@@ -29,9 +34,11 @@ function renderRoute() {
   // A dedicated client so React Query state never leaks between test cases.
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <QueryClientProvider client={client}>
-      <EvaluatorDashboardRoute />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <EvaluatorDashboardRoute />
+      </QueryClientProvider>
+    </MemoryRouter>,
   )
 }
 
