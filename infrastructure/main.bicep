@@ -120,6 +120,14 @@ param staticWebAppCustomDomain string = ''
 param jwtSecretKey string = ''
 
 @secure()
+@description('Bootstrap secret for the one-time UAT seed endpoint (Authentication:Bootstrap:Secret, story login/06). Empty -> the endpoint is disabled (fail closed). Threaded like jwtSecretKey, sourced from the BOOTSTRAP_SECRET GitHub secret in deploy-infrastructure.yml.')
+param bootstrapSecret string = ''
+
+@secure()
+@description('Phase-1 staff allowlist JSON array (Authentication:StaffIdentity:Accounts, story login/06). Empty -> no staff sign-in (fail closed). Threaded like jwtSecretKey, sourced from the STAFF_IDENTITY_ACCOUNTS_JSON GitHub secret; webapp.bicep expands it into the indexed app-setting keys the .NET options binder reads.')
+param staffIdentityAccountsJson string = ''
+
+@secure()
 @description('Azure Communication Services connection string for email')
 param emailConnectionString string = ''
 
@@ -264,6 +272,8 @@ module webApp 'modules/webapp.bicep' = if (deployWebApp) {
     #disable-next-line BCP318
     emailDefaultSenderAddress: deployCommunication ? communication.outputs.managedDomainSenderAddress! : emailSenderAddress
     jwtSecretKey: jwtSecretKey
+    bootstrapSecret: bootstrapSecret
+    staffIdentityAccountsJson: staffIdentityAccountsJson
     tags: tags
   }
 }

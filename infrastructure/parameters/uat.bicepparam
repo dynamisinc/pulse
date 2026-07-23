@@ -62,4 +62,9 @@ param sqlEntraAdminLogin = 'tbull@dynamis.com'
 
 // --- Secrets — sourced from environment variables (set in CI from GitHub secrets)
 param jwtSecretKey = readEnvironmentVariable('JWT_SECRET_KEY', '')
+// Login/06 go-live secrets (see docs/features/login/06-uat-goLive-config-runbook.md). Both default empty
+// (fail closed): an unset BOOTSTRAP_SECRET disables the seed endpoint; an unset/empty allowlist lets no
+// staff sign in. Set these as `uat` environment GitHub secrets before running Deploy Infrastructure.
+param bootstrapSecret = readEnvironmentVariable('BOOTSTRAP_SECRET', '')
+param staffIdentityAccountsJson = readEnvironmentVariable('STAFF_IDENTITY_ACCOUNTS_JSON', '')
 param emailConnectionString = readEnvironmentVariable('EMAIL_CONNECTION_STRING', '')

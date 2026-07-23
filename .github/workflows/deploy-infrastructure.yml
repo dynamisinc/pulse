@@ -73,6 +73,11 @@ jobs:
         env:
           SQL_ADMIN_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          # Login/06 go-live secrets — see docs/features/login/06-uat-goLive-config-runbook.md.
+          # Both fail closed when unset: no BOOTSTRAP_SECRET disables the seed endpoint; no allowlist
+          # lets no staff sign in.
+          BOOTSTRAP_SECRET: ${{ secrets.BOOTSTRAP_SECRET }}
+          STAFF_IDENTITY_ACCOUNTS_JSON: ${{ secrets.STAFF_IDENTITY_ACCOUNTS_JSON }}
           EMAIL_CONNECTION_STRING: ${{ secrets.EMAIL_CONNECTION_STRING }}
         run: |
           echo "## Infrastructure What-If Preview" >> $GITHUB_STEP_SUMMARY
@@ -95,6 +100,11 @@ jobs:
         env:
           SQL_ADMIN_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          # Login/06 go-live secrets — see docs/features/login/06-uat-goLive-config-runbook.md.
+          # Both fail closed when unset: no BOOTSTRAP_SECRET disables the seed endpoint; no allowlist
+          # lets no staff sign in.
+          BOOTSTRAP_SECRET: ${{ secrets.BOOTSTRAP_SECRET }}
+          STAFF_IDENTITY_ACCOUNTS_JSON: ${{ secrets.STAFF_IDENTITY_ACCOUNTS_JSON }}
           EMAIL_CONNECTION_STRING: ${{ secrets.EMAIL_CONNECTION_STRING }}
         run: |
           az deployment group create \

@@ -69,7 +69,7 @@ touched auth).
 | 03 | Staff sign-in | COR-014 | Complete (PR #314, merged) | #306 |
 | 04 | Wire real login routes + logout (replaces `SignInFallback`) | COR-004, COR-005 (consumed) | Complete (PR #316, merged) | #307 |
 | 05 | UAT bootstrap seam (guarded one-time seed endpoint) | COR-008, COR-011, COR-014, COR-015 (enablement) | Complete (PR #310 + wiring fix #317, merged) | #308 |
-| 06 | UAT go-live config & runbook (allowlist, environment, mock-data flip) | NFR-009 | In Progress (code portion in Wave-4 PR; runbook execution human-gated) | #309 |
+| 06 | UAT go-live config & runbook (allowlist, environment, mock-data flip) | NFR-009 | Code portion Complete (Wave-4 PR); runbook execution human-gated | #309 |
 
 ## Dependencies
 
