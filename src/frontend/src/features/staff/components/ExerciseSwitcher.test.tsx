@@ -139,6 +139,24 @@ describe('ExerciseSwitcher — the active exercise is conveyed by MORE than colo
     expect(activeRow.querySelector('svg[data-icon="circle-check"]')).not.toBeNull()
   })
 
+  it('marks the active exercise even when the assignments API returns a DIFFERENT-CASED id (defensive)', async () => {
+    // Backstop for the SQL-Server-vs-.NET GUID casing split: /api/staff/assignments
+    // may emit an UPPERCASE id while the resolved scope is lowercase. The active row
+    // must still be recognized (compared case-insensitively), not shown as switchable.
+    mockGetAssignments.mockResolvedValue([
+      { exerciseId: 'EX-ALPHA', exerciseName: 'Alpha Exercise', role: 'controller' },
+      { exerciseId: 'ex-bravo', exerciseName: 'Bravo Exercise', role: 'evaluator' },
+    ])
+    mockScope({ exerciseId: 'ex-alpha' })
+    renderSwitcher()
+
+    const activeRow = await screen.findByTestId('exercise-switcher-row-EX-ALPHA')
+    expect(activeRow).toHaveAttribute('aria-current', 'true')
+    expect(within(activeRow).getByText('ACTIVE')).toBeInTheDocument()
+    // The genuinely-other exercise is still a switch button, not active.
+    expect(screen.getByTestId('exercise-switcher-switch-button-ex-bravo')).toBeInTheDocument()
+  })
+
   it('renders every non-active assignment as a plain switch button, not the active row', async () => {
     renderSwitcher()
     await screen.findByTestId('exercise-switcher-row-ex-alpha')

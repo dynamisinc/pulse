@@ -120,6 +120,21 @@ function friendlyErrorMessage(error: StaffAssignmentError, fallback: string): st
   }
 }
 
+/**
+ * Compares two exercise ids for identity, CASE-INSENSITIVELY. An exercise id is
+ * an opaque GUID string on the wire, but the API surface has historically
+ * emitted it in mixed casing (SQL Server materializes a `uniqueidentifier` to
+ * an UPPERCASE string when `.ToString()` runs server-side inside a query, vs.
+ * .NET's lowercase `Guid.ToString()` after materialization). The
+ * `/api/staff/assignments`, `/api/session`, and `/api/exercise-context`
+ * responses must all agree for the active row to be marked correctly; comparing
+ * case-insensitively here is a defensive backstop so a future casing drift on
+ * any of them can never silently mis-mark the active exercise as switchable.
+ */
+function sameExercise(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase()
+}
+
 interface AssignmentRowProps {
   assignment: StaffAssignment
   isActive: boolean
@@ -227,7 +242,7 @@ export function ExerciseSwitcher() {
   const activeExerciseId = justSwitchedTo?.exerciseId ?? scope.exerciseId
 
   const handleSelect = (assignment: StaffAssignment) => {
-    if (assignment.exerciseId === activeExerciseId || switchMutation.isPending) return
+    if (sameExercise(assignment.exerciseId, activeExerciseId) || switchMutation.isPending) return
     switchMutation.mutate(assignment.exerciseId, {
       onSuccess: switched => setJustSwitchedTo(switched),
     })
@@ -293,7 +308,7 @@ export function ExerciseSwitcher() {
               <AssignmentRow
                 key={assignment.exerciseId}
                 assignment={assignment}
-                isActive={assignment.exerciseId === activeExerciseId}
+                isActive={sameExercise(assignment.exerciseId, activeExerciseId)}
                 disabled={switchMutation.isPending}
                 onSelect={() => handleSelect(assignment)}
               />
