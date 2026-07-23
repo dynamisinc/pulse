@@ -59,9 +59,12 @@ fullstack.)*
 
 ## Out of Scope
 Read-only shared access (story 06); the session issuance mechanism (story 03 — this story *calls* it);
-org-account grants (story 09, deferred); the **login page theming** (exercise-configuration COR-030);
-per-account posting rate limits (NFR-009, handled where posting is built, E2); the participant landing
-route after login (`exercise-isolation/04` / `app-shell/01`).
+org-account grants (story 09, deferred); the **login page itself** — built by
+`docs/features/login/02-participant-sign-in.md` (corrected: this was previously mis-cited as
+"exercise-configuration COR-030" — the epic's actual COR-030 is per-exercise settings, unrelated to
+sign-in; see `docs/features/login/feature.md`'s naming note); per-account posting rate limits (NFR-009,
+handled where posting is built, E2); the participant landing route after login
+(`exercise-isolation/04` / `app-shell/01`).
 
 ## Technical Notes
 Staff-world provisioning + participant login. **Backend** owns `src/Pulse.WebApi/Features/Identity/`

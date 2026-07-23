@@ -134,11 +134,14 @@ Built and tested on `feature/identity-backend` (the B2 Wave 1/2 merges); both co
 in CI (Testcontainers.MsSql against the runner's Docker daemon).
 
 Deferred follow-ups (tracked, not blockers to this story's Complete status):
-- **Frontend live-flip deferred to backend deployment.** The `GET /api/session` /
+- **Frontend live-flip deferred to backend deployment — now its own feature.** The `GET /api/session` /
   `POST /api/auth/refresh` / `POST /api/auth/logout` endpoints are ready and contract-tested against
-  the frozen `Session` shape; flipping `sessionResolver`'s `USE_MOCK_SESSION` to live is a one-line
-  switch once a real backend is reachable from the frontend environment. The frontend continues to run
-  mock-first per `USE_MOCK_DATA` until then.
+  the frozen `Session` shape; flipping `sessionResolver`'s `USE_MOCK_SESSION` to live needs a token
+  actually attached to the request (nothing did, until now) and a real redirect instead of a blank
+  render on failure. That work — plus the login pages neither this story nor 02/05/06 ever built — is
+  `docs/features/login/01-frontend-session-token-wiring.md` (split from this story's deferred AC above)
+  and its sibling stories. The frontend continues to run mock-first per `USE_MOCK_DATA` until that
+  feature lands.
 - **Per-IP rate limiter needs forwarded-headers.** The session/refresh/logout endpoints are per-IP
   rate-limited today against the direct connection IP; behind Azure App Service the real client IP
   arrives via a forwarded header, so true per-IP partitioning needs forwarded-headers wiring that

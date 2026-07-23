@@ -35,6 +35,13 @@ staff exercise switcher (`exercise-isolation/05`). Mounts the existing `particip
 `staffShell`/`console`, and `evaluator` surfaces. The `App.tsx` route-table replacement is an
 orchestrator-owned composition-root edit (see implementation.md Integration seam).
 
+**`docs/features/login/04-wire-login-routes-and-logout.md` edits this feature's own files** —
+`routes.tsx` and `constants.ts` — to replace the temporary `SignInFallback` placeholder with the real
+login pages and add a `/staff/login` route + logout controls, once `docs/features/login/`'s stories 01–03
+land. That story also corrects the stale `(COR-030, out of scope here)` comments in those two files
+(a misnomer — see `docs/features/login/feature.md`'s naming note). This feature's own story 01
+(`RoleAwareEntry`) is otherwise untouched by that change.
+
 ## Design notes
 Pure **routing glue**, world-neutral at its own root and world-specific only where it hands off to a
 mounted surface. The two-worlds rule (D0 §2) is the sharpest constraint: the participant entry mounts

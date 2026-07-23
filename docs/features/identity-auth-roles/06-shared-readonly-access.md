@@ -61,8 +61,12 @@ such (its **lifecycle** — rotation/revoke/lockout/rate-limit — is story 07).
 The credential **lifecycle** — rotation/revocation/lockout/per-IP-limit tuning (story 07); the session
 issuance mechanism (story 03 — this story *calls* it); the feeds themselves (E2 SOC-080/081); the **All
 Posts landing route** — realized by `app-shell/01` / `exercise-isolation/04` off the session's
-`isReadOnly` flag (this story sets the flag + ephemeral identity, not the route); the login page theming
-(COR-030); the backend native scenario clock (COR-050, Phase B3).
+`isReadOnly` flag (this story sets the flag + ephemeral identity, not the route); the login page itself
+— built by `docs/features/login/02-participant-sign-in.md` (corrected: previously mis-cited as "COR-030";
+the epic's actual COR-030 is per-exercise settings — see `docs/features/login/feature.md`'s naming note);
+provisioning the *first* `SharedCredential` row for a fresh exercise (`docs/features/login/
+05-uat-bootstrap-seam.md` — this story assumes one already exists); the backend native scenario clock
+(COR-050, Phase B3).
 
 ## Technical Notes
 Backend (the ephemeral identity is telemetry-bearing but not a provisioned account). Owns

@@ -34,6 +34,16 @@ non-negotiables (staff vs participant worlds).
 Exercise-isolation (session→exercise scoping, COR-001/008); telemetry (XC-004) for attribution. The
 identity provider stays behind an interface (COR-014).
 
+**`docs/features/login/` is the companion feature that makes this one live.** Stories 02/03/05/06 below
+are backend-Complete, but none of them built a login *page*, the frontend token/interceptor plumbing, or
+a way to bootstrap a fresh (empty) environment's first `Exercise`/`Account`/`StaffAssignment`/
+`SharedCredential` rows — those three gaps, plus the UAT deployment config to actually flip off mock
+data, are `docs/features/login/`'s six stories. Several of the "Out of Scope" notes below and in stories
+02/03/06 previously pointed at "the login story, COR-030" — that was always a misnomer (the epic's real
+COR-030 is per-exercise settings, `exercise-configuration`, unrelated to sign-in); those notes have been
+corrected to point at `docs/features/login/` instead. See that feature's `feature.md` for the full
+naming-note writeup.
+
 **The Organization tenant tier (`exercise-isolation/11`) — deferred to multi-customer go-live.** The customer
 `Organization` that *owns* named accounts (story 02) and staff/`StaffAssignment` (story 05) is
 designed-but-deferred — built in a dedicated wave gated on multi-customer go-live (Option B,
