@@ -81,7 +81,12 @@ export function ParticipantSignOutControl() {
   const navigate = useNavigate()
 
   const handleSignOut = () => {
-    void logout().then(() => navigate(LOGIN_PATH))
+    // logout() clears the token store SYNCHRONOUSLY before its best-effort
+    // network call (see core/auth/logout.ts), so navigate IMMEDIATELY rather
+    // than awaiting the POST — the redirect must never block on a slow/hung
+    // request (logout()'s own "never blocks locally" contract).
+    void logout()
+    navigate(LOGIN_PATH)
   }
 
   return (

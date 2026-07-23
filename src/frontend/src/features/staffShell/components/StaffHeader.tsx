@@ -166,9 +166,13 @@ export function StaffHeader({
 
   // Sign-out (point 8, module header): best-effort server notify + local
   // token clear (logout() never throws), then hand off to the real login
-  // entry. Never blocks on the network call.
+  // entry. logout() clears the token store SYNCHRONOUSLY before it awaits the
+  // best-effort POST /auth/logout (see core/auth/logout.ts), so we navigate
+  // IMMEDIATELY rather than in a .then() — the redirect must never block on a
+  // slow/hung network request (that is logout()'s own "never blocks" contract).
   const handleSignOut = () => {
-    void logout().then(() => navigate(LOGIN_PATH))
+    void logout()
+    navigate(LOGIN_PATH)
   }
 
   // The steering pause tier (when active) overrides the lifecycle status pill
