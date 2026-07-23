@@ -24,9 +24,18 @@
  * present on the content region, and on the region imposing no typography of
  * its OWN - the two things this harness CAN verify, and the two things that
  * would regress AC1 if either were removed.
+ *
+ * `ShellLayout` now also mounts `<ParticipantSignOutControl>` (feature:
+ * login, story 04), which calls `useNavigate()` — every render needs a Router
+ * ancestor, so `renderShell` below wraps the whole tree in a real
+ * `MemoryRouter`. That control's own click -> logout()/navigate behavior is
+ * covered by its own focused test file
+ * (`components/ParticipantSignOutControl.test.tsx`), not re-tested here —
+ * none of the suites below click it.
  */
 import type { CSSProperties, ReactNode } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
@@ -42,11 +51,13 @@ function fixedClock(instant: Date): IExerciseClock {
 function renderShell(children: ReactNode, ancestorStyle?: CSSProperties) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const shell = (
-    <QueryClientProvider client={queryClient}>
-      <ExerciseContextProvider>
-        <ShellLayout>{children}</ShellLayout>
-      </ExerciseContextProvider>
-    </QueryClientProvider>
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <ExerciseContextProvider>
+          <ShellLayout>{children}</ShellLayout>
+        </ExerciseContextProvider>
+      </QueryClientProvider>
+    </MemoryRouter>
   )
 
   return render(

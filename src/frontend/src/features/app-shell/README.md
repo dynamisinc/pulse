@@ -30,8 +30,8 @@ the hand-off inside `RoleAwareEntry`**:
 | File | Role |
 |------|------|
 | `RoleAwareEntry.tsx` | The role-aware decision + guard/switcher composition + focus management + fail-closed boundary. Surfaces, the guard, and the switcher are **injected as props** (IoC) — see below. |
-| `routes.tsx` | `createRoleAwareRoutes(config)` → `RouteObject[]` the orchestrator splices into `App.tsx`. Establishes the world-neutral `ExerciseContextProvider > SessionProvider > RoleAwareEntry` stack + the temporary `/login` placeholder. |
-| `constants.ts` | `LOGIN_PATH` (shared, cycle-free). |
+| `routes.tsx` | `createRoleAwareRoutes(config)` → `RouteObject[]` the orchestrator splices into `App.tsx`. Establishes the world-neutral `ExerciseContextProvider > SessionProvider > RoleAwareEntry` stack, plus the two real, pre-auth login routes (`/login` → `ParticipantSignInPage`, `/staff/login` → `StaffSignInPage`; feature: login, story 04). |
+| `constants.ts` | `LOGIN_PATH` + `STAFF_LOGIN_PATH` (shared, cycle-free). |
 | `index.ts` | Public barrel. |
 
 ## Inversion of control (why surfaces + guard + switcher are props)

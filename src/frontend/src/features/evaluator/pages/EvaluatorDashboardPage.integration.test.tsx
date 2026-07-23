@@ -27,9 +27,14 @@
  *  (c) clicking a tool button opens its flyout, and clicking again closes it;
  *  (d) no participant compliance-chrome banners are present — this is the
  *      staff world, never framed by the participant compliance chrome.
+ *
+ * `StaffHeader` calls `useNavigate()` for its sign-out control (feature:
+ * login, story 04) — wrapped in a real `MemoryRouter` here too, so this
+ * genuinely un-mocked integration path still renders.
  */
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
@@ -40,16 +45,18 @@ import { EvaluatorDashboardPage } from './EvaluatorDashboardPage'
 
 function renderEvaluatorStaffComposition() {
   return render(
-    <ExerciseContextProvider>
-      <ToolstripProvider>
-        <StaffShellFrame
-          header={<StaffHeader surfaceName="Evaluator Dashboard" />}
-          toolstrip={<Toolstrip />}
-        >
-          <EvaluatorDashboardPage />
-        </StaffShellFrame>
-      </ToolstripProvider>
-    </ExerciseContextProvider>,
+    <MemoryRouter>
+      <ExerciseContextProvider>
+        <ToolstripProvider>
+          <StaffShellFrame
+            header={<StaffHeader surfaceName="Evaluator Dashboard" />}
+            toolstrip={<Toolstrip />}
+          >
+            <EvaluatorDashboardPage />
+          </StaffShellFrame>
+        </ToolstripProvider>
+      </ExerciseContextProvider>
+    </MemoryRouter>,
   )
 }
 

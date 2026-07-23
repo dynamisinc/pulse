@@ -43,14 +43,31 @@
  *      behavior itself (staging the participant shell, moment picker) is
  *      story 04 and is deliberately NOT built here, so this component has no
  *      dependency on it.
+ *   8. Sign-out control (feature: login, story 04 — "Wire real login routes +
+ *      logout"; COR-012). STYLING NUANCE: the story calls for "COBRA
+ *      `styledComponents`, never a bare MUI button" — this header does NOT
+ *      reach for a content-area `@/theme/styledComponents` button
+ *      (`CobraLinkButton`/`CobraSecondaryButton`) here, because those are
+ *      styled for the light content canvas and would look visually out of
+ *      place against this navy header bar. Instead it matches THIS
+ *      component's own established COBRA idiom for header controls — the
+ *      Preview-as-participant button's `Box component="button"` treatment,
+ *      hand-styled from `staffShellTokens` + FontAwesome, a real `<button>`
+ *      with an accessible name — which IS this header's version of "the
+ *      COBRA staff look" (see point 7 above). Calls the shared `logout()`
+ *      helper (`@/core/auth`, feature: login story 01) then navigates to
+ *      `LOGIN_PATH` — reachable by keyboard like every other control here.
  */
 
 import { useEffect, useState } from 'react'
 import { Box, Stack, Tooltip, Typography } from '@mui/material'
+import { useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons'
+import { faEye, faEyeSlash, faRightFromBracket } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
+import { logout } from '@/core/auth'
+import { LOGIN_PATH } from '@/features/app-shell/constants'
 import { staffShellTokens } from '../staffShellTokens'
 import { useStaffPresence, useStaffRoleCell } from '../staffHeaderMocks'
 import { STATE_PILL_CONFIG, type StatePillConfig } from './statePillConfig'
@@ -142,9 +159,17 @@ export function StaffHeader({
   const { exerciseName, timeZone, status } = useExerciseContext()
   const { role, cell } = useStaffRoleCell()
   const presence = useStaffPresence()
+  const navigate = useNavigate()
 
   const { now: scenarioInstant } = useScenarioTime(timeZone, CLOCK_TICK_MS)
   const wallInstant = useWallClockNow()
+
+  // Sign-out (point 8, module header): best-effort server notify + local
+  // token clear (logout() never throws), then hand off to the real login
+  // entry. Never blocks on the network call.
+  const handleSignOut = () => {
+    void logout().then(() => navigate(LOGIN_PATH))
+  }
 
   // The steering pause tier (when active) overrides the lifecycle status pill
   // (D7-010); otherwise the lifecycle status drives it (LIVE / STAGED / ...).
@@ -384,6 +409,36 @@ export function StaffHeader({
       >
         <FontAwesomeIcon icon={previewActive ? faEyeSlash : faEye} size="sm" />
         {previewActive ? 'Exit preview' : 'Preview as participant'}
+      </Box>
+
+      {/* 8. Sign-out control — see module header point 8 for the styling
+          nuance (this idiom IS the COBRA staff look for header controls). */}
+      <Box
+        component="button"
+        type="button"
+        data-testid="staff-header-sign-out"
+        onClick={handleSignOut}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.875,
+          background: 'transparent',
+          border: '1px solid rgba(255, 255, 255, 0.35)',
+          borderRadius: '999px',
+          color: staffShellTokens.header.textMuted,
+          font: '600 12px ui-sans-serif, system-ui, sans-serif',
+          px: 1.75,
+          py: 0.875,
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+          flex: 'none',
+          '&:hover': {
+            background: 'rgba(255, 255, 255, 0.12)',
+          },
+        }}
+      >
+        <FontAwesomeIcon icon={faRightFromBracket} size="sm" />
+        Sign out
       </Box>
     </Box>
   )

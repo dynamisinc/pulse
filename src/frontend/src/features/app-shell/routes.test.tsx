@@ -1,26 +1,37 @@
 /**
  * features/app-shell/routes.test.tsx
  * ---------------------------------------------------------------------------
- * Covers the route-table contribution (story 01): the shape the orchestrator
- * wires into `App.tsx`, the world-neutral provider structure it establishes
- * above `RoleAwareEntry`, the role-only catch-all (typed path is ignored,
- * COR-004), and the temporary fail-closed `/login` placeholder.
+ * Covers the route-table contribution (story 01, plus the login-04 route
+ * wiring): the shape the orchestrator wires into `App.tsx`, the world-neutral
+ * provider structure it establishes above `RoleAwareEntry`, the role-only
+ * catch-all (typed path is ignored, COR-004), and the two real, pre-auth login
+ * routes (`/login` -> `ParticipantSignInPage`, `/staff/login` ->
+ * `StaffSignInPage`) that replaced the temporary `SignInFallback` placeholder.
  *
  * The core providers are mocked to pass-through so the async resolve isn't
  * exercised here (that is covered by the seams' own tests); the identity hooks
  * are mocked, and the two composed cross-story seams are injected as stubs
- * (IoC — see RoleAwareEntry.test.tsx).
+ * (IoC — see RoleAwareEntry.test.tsx). Both login pages resolve their exercise
+ * context via `useQuery`, so this file wraps every render in a
+ * `QueryClientProvider`; `@/core/services/api` is mocked so that resolution
+ * never touches a real network call (never a live axios sink — the repo's own
+ * worker-teardown footgun). `react-router-dom` is deliberately left UNMOCKED
+ * here (unlike the login pages' own unit tests) — this file wants the real
+ * `<Link to={STAFF_LOGIN_PATH}>` to actually navigate within the same
+ * `createMemoryRouter`, proving the two routes are genuinely wired together.
  */
 import type { ComponentType, ReactNode } from 'react'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSession, useRole } from '@/core/auth'
 import type { Session } from '@/core/auth'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
 import { createRoleAwareRoutes } from './routes'
-import { LOGIN_PATH } from './constants'
+import { LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
 
 vi.mock('@/core/services/api', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
 
@@ -73,7 +84,12 @@ function renderAt(initialEntry: string) {
   const router = createMemoryRouter(createRoleAwareRoutes(SURFACES), {
     initialEntries: [initialEntry],
   })
-  return render(<RouterProvider router={router} />)
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
 }
 
 beforeEach(() => {
@@ -81,9 +97,9 @@ beforeEach(() => {
 })
 
 describe('createRoleAwareRoutes', () => {
-  it('replaces the flat routes with a /login placeholder + a role-aware catch-all', () => {
+  it('replaces the flat routes with the two login routes + a role-aware catch-all', () => {
     const routes = createRoleAwareRoutes(SURFACES)
-    expect(routes.map(r => r.path)).toEqual([LOGIN_PATH, '*'])
+    expect(routes.map(r => r.path)).toEqual([LOGIN_PATH, STAFF_LOGIN_PATH, '*'])
   })
 
   it('mounts RoleAwareEntry under the catch-all and routes on ROLE, not the typed path', () => {
@@ -99,9 +115,34 @@ describe('createRoleAwareRoutes', () => {
     expect(screen.queryByTestId('staff-surface-controller')).not.toBeInTheDocument()
   })
 
-  it('serves the fail-closed /login placeholder', () => {
+  it('serves the real ParticipantSignInPage at /login — SignInFallback no longer renders', () => {
     renderAt(LOGIN_PATH)
 
-    expect(screen.getByRole('heading', { name: /sign-in required/i })).toBeInTheDocument()
+    // The real page's form, present synchronously regardless of the
+    // exercise-context lookup's outcome (ParticipantSignInPage.tsx AC5).
+    expect(screen.getByLabelText('Handle')).toBeInTheDocument()
+    expect(screen.getByLabelText('Password')).toBeInTheDocument()
+    // The deleted placeholder's own copy must never appear.
+    expect(screen.queryByText(/sign-in required/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/your session could not be resolved/i)).not.toBeInTheDocument()
+  })
+
+  it('serves the real StaffSignInPage at /staff/login', () => {
+    renderAt(STAFF_LOGIN_PATH)
+
+    expect(screen.getByRole('heading', { name: 'Staff sign-in' })).toBeInTheDocument()
+    expect(screen.getByTestId('staff-sign-in-form')).toBeInTheDocument()
+  })
+
+  it('links from the participant sign-in page to the staff sign-in page (the one cross-world reference)', async () => {
+    const user = userEvent.setup()
+    renderAt(LOGIN_PATH)
+
+    const staffLink = screen.getByRole('link', { name: /sign in here/i })
+    expect(staffLink.tagName).toBe('A')
+
+    await user.click(staffLink)
+
+    expect(screen.getByRole('heading', { name: 'Staff sign-in' })).toBeInTheDocument()
   })
 })

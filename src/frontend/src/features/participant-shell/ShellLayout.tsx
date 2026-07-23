@@ -43,6 +43,11 @@
  *     `--pulse-chrome-*` inset vars the content region consumes.
  *   - `<AlertBar>` (story 02) — the EAS-analog host, fixed below the top chrome.
  *   - `<ChannelNav>` (story 03) — the desktop strip / mobile tab bar.
+ *   - `<ParticipantSignOutControl>` (feature: login, story 04) — the
+ *     participant world's minimal sign-out affordance. Kept as its OWN sibling
+ *     rather than folded into `ChannelNav` (see that component's own header for
+ *     why: it would either grow `ChannelNav.tsx`'s tightly-pinned button-count
+ *     assertions or tie sign-out's availability to the channel config).
  *   - `<OverlayLayer>` (story 05) — pause/EndEx (below chrome) + break-fiction
  *     (above everything).
  * Each layer is SELF-CONTAINED (reads its own exercise-scoped mock seam), so
@@ -94,6 +99,7 @@ import { useShellState } from './shellState'
 import { ComplianceChrome } from './components/ComplianceChrome'
 import { AlertBar } from './components/AlertBar/AlertBar'
 import { ChannelNav } from './components/ChannelNav'
+import { ParticipantSignOutControl } from './components/ParticipantSignOutControl'
 import { OverlayLayer } from './components/OverlayLayer'
 
 export interface ShellLayoutProps {
@@ -166,6 +172,10 @@ export function ShellLayout({ children }: ShellLayoutProps) {
           the content region (never inside its reset boundary) — it is shell
           chrome, not channel content (COR-060). */}
       <ChannelNav />
+
+      {/* Participant sign-out (feature: login, story 04). Its own sibling —
+          see the module header for why this is not folded into ChannelNav. */}
+      <ParticipantSignOutControl />
 
       {/* The ONE place a channel mounts: zero-styling reset boundary, chrome
           inset, own stacking context at SHELL_Z.content (AC1/AC3). */}

@@ -13,4 +13,4 @@
 export { RoleAwareEntry } from './RoleAwareEntry'
 export type { RoleAwareEntryProps, StaffSurfaceRole } from './RoleAwareEntry'
 export { createRoleAwareRoutes } from './routes'
-export { LOGIN_PATH } from './constants'
+export { LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
