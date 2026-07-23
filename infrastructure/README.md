@@ -94,7 +94,7 @@ Two `workflow_dispatch` / event-driven workflows under [`.github/workflows/`](..
 
 | Workflow | Trigger | Purpose | Required secrets |
 |---|---|---|---|
-| [`deploy-infrastructure.yml`](../.github/workflows/deploy-infrastructure.yml) | manual | Runs the Bicep deploy (same flow as the CLI above) | `AZURE_CREDENTIALS`; once backend toggles are on: `SQL_ADMIN_PASSWORD`, `JWT_SECRET_KEY`, `EMAIL_CONNECTION_STRING`, `SECURITY_CONTACT_EMAIL` |
+| [`deploy-infrastructure.yml`](../.github/workflows/deploy-infrastructure.yml) | manual | Runs the Bicep deploy (same flow as the CLI above) | `AZURE_CREDENTIALS`; once backend toggles are on: `SQL_ADMIN_PASSWORD`, `JWT_SECRET_KEY`, `EMAIL_CONNECTION_STRING`, `SECURITY_CONTACT_EMAIL`; for login go-live (story login/06): `BOOTSTRAP_SECRET`, `STAFF_IDENTITY_ACCOUNTS_JSON` |
 | [`deploy-frontend.yml`](../.github/workflows/deploy-frontend.yml) | push to `main` (`src/frontend/**`) + manual | Lints, type-checks, tests, builds the Vite SPA, publishes to `stapp-pulse-uat` | `AZURE_STATIC_WEB_APPS_API_TOKEN` |
 
 The security-contact email for Defender is passed to `defender.bicep` directly from the

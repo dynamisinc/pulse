@@ -22,7 +22,42 @@ param jwtSecretKey string = ''
 param jwtAccessTokenMinutes int = 15
 param jwtRefreshTokenHours int = 4
 param jwtRememberMeDays int = 30
+@secure()
+@description('Bootstrap secret for the one-time UAT seed endpoint (Authentication:Bootstrap:Secret, story login/05-06). Empty by default -> the endpoint is disabled entirely (fail closed). Threaded exactly like jwtSecretKey; never committed to appsettings.')
+param bootstrapSecret string = ''
+@secure()
+@description('Phase-1 staff allowlist as a JSON array of {Username,Secret,ExternalSubject,DisplayName} objects, bound to Authentication:StaffIdentity:Accounts (story login/06). Empty by default -> no staff can sign in (fail closed). Expanded below into the indexed env-var keys the .NET options binder reads. Threaded like jwtSecretKey; never committed.')
+param staffIdentityAccountsJson string = ''
 param tags object = {}
+
+// The staff allowlist is supplied as a single JSON-array secret (STAFF_IDENTITY_ACCOUNTS_JSON) and expanded
+// here into the indexed environment-variable keys the .NET configuration binder reads
+// (Authentication__StaffIdentity__Accounts__{i}__{Field} -> DynamisIdentityProviderOptions.Accounts[i]). A
+// variable-length allowlist can't be an inline app-settings literal, so it is concat()'d onto the fixed
+// settings below. Empty/unset JSON -> an empty array -> NO account settings emitted -> the provider
+// authenticates no one (fail closed, matching DynamisIdentityProviderOptions' documented default).
+// trim() first so a secret set to whitespace/newlines (common when pasting JSON into a GitHub secret) still
+// reads as empty and fails closed, rather than making empty() false and json() throw on the padded string.
+var trimmedStaffAccountsJson = trim(staffIdentityAccountsJson)
+var staffAccounts = empty(trimmedStaffAccountsJson) ? [] : json(trimmedStaffAccountsJson)
+var staffAccountSettings = flatten(map(staffAccounts, (account, i) => [
+  {
+    name: 'Authentication__StaffIdentity__Accounts__${i}__Username'
+    value: account.Username
+  }
+  {
+    name: 'Authentication__StaffIdentity__Accounts__${i}__Secret'
+    value: account.Secret
+  }
+  {
+    name: 'Authentication__StaffIdentity__Accounts__${i}__ExternalSubject'
+    value: account.ExternalSubject
+  }
+  {
+    name: 'Authentication__StaffIdentity__Accounts__${i}__DisplayName'
+    value: account.DisplayName
+  }
+]))
 
 resource webApp 'Microsoft.Web/sites@2023-12-01' = {
   name: webAppName
@@ -44,7 +79,7 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         allowedOrigins: [frontendUrl]
         supportCredentials: true
       } : null
-      appSettings: [
+      appSettings: concat([
         // Application Insights
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
@@ -127,12 +162,22 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'Authentication__Jwt__SecretKey'
           value: jwtSecretKey
         }
+        // Bootstrap secret for the one-time UAT seed endpoint (Authentication:Bootstrap:Secret, story
+        // login/05-06). Empty by default -> the endpoint is disabled entirely (fail closed). Set via
+        // --parameters from the BOOTSTRAP_SECRET GitHub secret, never stored in repo — mirrors jwtSecretKey.
+        {
+          name: 'Authentication__Bootstrap__Secret'
+          value: bootstrapSecret
+        }
         // Cookie config for cross-origin SPA
         {
           name: 'Authentication__Cookie__SameSite'
           value: 'None'
         }
-      ]
+        // NOTE: the Phase-1 staff allowlist (Authentication:StaffIdentity:Accounts) is appended after this
+        // fixed array via concat(..., staffAccountSettings) — see the staffAccountSettings var above. It's a
+        // variable-length array expanded from STAFF_IDENTITY_ACCOUNTS_JSON, so it can't be an inline literal.
+      ], staffAccountSettings)
     }
   }
   tags: tags
