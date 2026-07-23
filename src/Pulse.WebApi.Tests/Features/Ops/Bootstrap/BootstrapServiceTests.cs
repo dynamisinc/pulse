@@ -435,6 +435,72 @@ public sealed class BootstrapServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task Bootstrap_Staff_AllowlistEntryWithEmptySecret_ReturnsInvalid_NoDeadAssignment()
+    {
+        var host = NewHostname();
+        var subject = $"idp|{Guid.NewGuid():N}";
+        var username = $"ctrl-{Guid.NewGuid():N}";
+
+        // An allowlist entry with a resolvable external subject but NO configured secret. Staff login
+        // (DynamisIdentityProvider) fails closed on an empty-secret entry, so bootstrapping an assignment for it
+        // would create one that can NEVER authenticate (finding 2 — a dead assignment).
+        var secretlessEntry = new DynamisStaffAccount
+        {
+            Username = username,
+            Secret = string.Empty,
+            ExternalSubject = subject,
+            DisplayName = "Controller",
+        };
+
+        await using var context = _fixture.CreateContext();
+        var result = await NewService(context, secretlessEntry).BootstrapAsync(
+            new BootstrapExerciseRequest
+            {
+                Hostname = host,
+                ExerciseName = "UAT",
+                Staff = new BootstrapStaffRequest { Username = username, Role = "controller" },
+            },
+            Secret);
+
+        result.Outcome.Should().Be(BootstrapOutcome.Invalid,
+            "an allowlist entry with no configured secret can never authenticate — bootstrapping it would create a dead assignment");
+
+        await using var read = _fixture.CreateContext();
+        (await read.Exercises.AnyAsync(e => e.Hostname == host))
+            .Should().BeFalse("a validation failure writes nothing at all (validated before any write)");
+        (await read.StaffUsers.AnyAsync(u => u.ExternalSubject == subject))
+            .Should().BeFalse("no StaffUser (and therefore no dead StaffAssignment) is provisioned when the staff step fails validation");
+    }
+
+    [RequiresDockerFact]
+    public async Task Bootstrap_ConcurrentFirstBootstrapSameHostname_BothSucceed_NoDuplicate()
+    {
+        var host = NewHostname();
+
+        async Task<BootstrapResult> RunAsync()
+        {
+            await using var context = _fixture.CreateContext();
+            return await NewService(context).BootstrapAsync(
+                new BootstrapExerciseRequest { Hostname = host, ExerciseName = "UAT" }, Secret);
+        }
+
+        // Two simultaneous first-bootstraps of the SAME hostname (finding 3 — resolve→insert is not atomic).
+        // Whether or not the Hostname unique-index race actually collides on a given run, the invariant must hold:
+        // both calls succeed and exactly ONE exercise row exists — the loser recovers idempotently via re-resolve
+        // instead of surfacing a DbUpdateException/500 and breaking the idempotent-by-hostname contract.
+        var results = await Task.WhenAll(RunAsync(), RunAsync());
+
+        results.Should().OnlyContain(r => r.Outcome == BootstrapOutcome.Provisioned,
+            "a concurrent first-bootstrap of the same hostname must never 500 — the loser recovers idempotently");
+        results[0].ExerciseId.Should().Be(results[1].ExerciseId,
+            "both concurrent calls resolve to the SAME exercise (idempotent by hostname)");
+
+        await using var read = _fixture.CreateContext();
+        (await read.Exercises.CountAsync(e => e.Hostname == host))
+            .Should().Be(1, "no duplicate exercise row despite the concurrent first-bootstrap");
+    }
+
+    [RequiresDockerFact]
     public async Task Bootstrap_SharedCredential_AuthenticatesViaSharedLogin_AndReRunDoesNotClobber()
     {
         var host = NewHostname();

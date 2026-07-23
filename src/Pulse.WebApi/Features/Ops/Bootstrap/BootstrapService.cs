@@ -168,10 +168,58 @@ public sealed class BootstrapService
 
         var provisionSharedCredential = request.SharedCredential is not null && request.SharedCredential.Enabled != false;
 
-        // 5. All inputs valid — perform every write in ONE unit of work. One wall-clock read is shared across all
-        //    rows and the telemetry (server-authoritative stamping).
+        // 5. All inputs valid — perform every write in ONE unit of work, with a one-shot recovery for the
+        //    concurrent-first-bootstrap hostname race (resolve→insert is not atomic).
+        try
+        {
+            return await RunProvisioningAsync(
+                exercise, exerciseCreated, host, exerciseName, timeZone,
+                staffValidation, accountValidation, provisionSharedCredential, cancellationToken);
+        }
+        catch (DbUpdateException) when (exerciseCreated)
+        {
+            // We attempted to CREATE the exercise but the commit failed. The overwhelmingly likely cause is a
+            // concurrent first-bootstrap of the SAME hostname winning the race and tripping the
+            // Exercises.Hostname unique index (the resolve at step 3 and the insert here are not atomic). Discard
+            // our rolled-back changes and re-resolve: if the hostname now resolves to an exercise, honor the
+            // idempotent-by-hostname contract by re-running provisioning against the winner (exerciseCreated:
+            // false — the provision helpers re-query and reuse, so this is safe). If it does NOT resolve, the
+            // failure was something else — rethrow rather than mask a genuine error as a 200.
+            _dbContext.ChangeTracker.Clear();
+
+            var winner = await _dbContext.Exercises
+                .FirstOrDefaultAsync(e => e.Hostname == host, cancellationToken);
+            if (winner is null)
+            {
+                throw;
+            }
+
+            return await RunProvisioningAsync(
+                winner, exerciseCreated: false, host, exerciseName, timeZone,
+                staffValidation, accountValidation, provisionSharedCredential, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Performs the mutation half of a bootstrap in ONE unit of work: create-or-reuse the exercise, provision the
+    /// optional staff / shared-credential / account rows, add the single XC-004 event, and one
+    /// <c>SaveChangesAsync</c>. Kept separate so <see cref="BootstrapAsync"/> can re-run it against the race-winning
+    /// exercise after a hostname unique-index conflict. One wall-clock read stamps every row + the telemetry.
+    /// </summary>
+    private async Task<BootstrapResult> RunProvisioningAsync(
+        Exercise? existingExercise,
+        bool exerciseCreated,
+        string host,
+        string? exerciseName,
+        string timeZone,
+        StaffValidation staffValidation,
+        AccountValidation accountValidation,
+        bool provisionSharedCredential,
+        CancellationToken cancellationToken)
+    {
         var now = DateTimeOffset.UtcNow;
 
+        var exercise = existingExercise;
         if (exercise is null)
         {
             exercise = new Exercise
@@ -251,6 +299,17 @@ public sealed class BootstrapService
         {
             return StaffValidation.Invalid(
                 $"staff.username '{username}' is not in the configured staff allowlist (Authentication:StaffIdentity).");
+        }
+
+        // The allowlist entry MUST have a configured secret. Staff login (DynamisIdentityProvider) fails closed on
+        // an empty-secret entry, so bootstrapping an assignment for one would create a StaffAssignment that can
+        // NEVER authenticate — silently defeating this story's "unblocks staff login" purpose. Fail the staff step
+        // rather than persist a dead assignment.
+        if (string.IsNullOrEmpty(allowlistEntry.Secret))
+        {
+            return StaffValidation.Invalid(
+                $"staff.username '{username}' has no configured secret in the staff allowlist (Authentication:StaffIdentity) — " +
+                "staff login requires one, so bootstrapping this assignment would create one that can never authenticate.");
         }
 
         return StaffValidation.Ok(new ResolvedStaff(

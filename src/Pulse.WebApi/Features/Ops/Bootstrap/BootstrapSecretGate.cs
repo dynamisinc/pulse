@@ -25,16 +25,16 @@ public static class BootstrapSecretGate
     /// <returns><c>true</c> only when the endpoint is configured AND the presented secret matches exactly.</returns>
     public static bool IsAuthorized(string? configuredSecret, string? presentedSecret)
     {
-        // Fail closed: an unconfigured (null/empty) secret DISABLES the endpoint entirely — the same
-        // "empty configured secret rejects everything" contract the staff allowlist uses. Returning here (rather
-        // than comparing against an empty configured value) keeps a disabled endpoint and a wrong secret
-        // indistinguishable to the caller (both 404).
-        if (string.IsNullOrEmpty(configuredSecret))
-        {
-            return false;
-        }
-
-        return SecretsMatch(presentedSecret ?? string.Empty, configuredSecret);
+        // Run the fixed-time digest comparison UNCONDITIONALLY (never short-circuit on an unconfigured secret),
+        // so a DISABLED endpoint (empty configured secret) and a CONFIGURED-BUT-WRONG one take the identical code
+        // path / time — no enabled-state timing oracle (both still 404 at the endpoint). Mirrors
+        // DynamisIdentityProvider, which computes the constant-time match first and only THEN combines it with the
+        // account-exists / secret-configured checks. AND-ing the configured check keeps an empty configured
+        // secret fail-closed: it can never authorize, not even an empty presented secret ("any secret works" is
+        // impossible). The `&&` short-circuit here is on the CONFIGURED (non-secret) side only — the secret
+        // compare has already run — so it leaks nothing about the presented secret.
+        var matches = SecretsMatch(presentedSecret ?? string.Empty, configuredSecret ?? string.Empty);
+        return matches && !string.IsNullOrEmpty(configuredSecret);
     }
 
     /// <summary>

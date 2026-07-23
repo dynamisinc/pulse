@@ -72,4 +72,18 @@ public sealed class BootstrapSecretGateTests
         BootstrapSecretGate.IsAuthorized(configuredSecret: "short", presentedSecret: "a-much-longer-presented-secret")
             .Should().BeFalse("a length-mismatched secret is rejected via the fixed-time digest compare, never throwing");
     }
+
+    [Fact]
+    public void IsAuthorized_DisabledAndConfiguredWrong_BothReject_NoEarlyReturnOnEmptyConfigured()
+    {
+        // Finding 1 (timing side-channel): a DISABLED endpoint (empty configured secret) and a
+        // CONFIGURED-BUT-WRONG one both reject, and the fixed-time digest compare runs in BOTH cases — the empty
+        // configured path no longer short-circuits before the compare — so the two are indistinguishable to the
+        // caller (both 404) with no enabled-state timing oracle. Behaviour is unchanged (both false); the code
+        // path is now constant.
+        BootstrapSecretGate.IsAuthorized(configuredSecret: string.Empty, presentedSecret: "guess")
+            .Should().BeFalse("a disabled (unconfigured) endpoint rejects every guess");
+        BootstrapSecretGate.IsAuthorized(configuredSecret: "s3cr3t-bootstrap", presentedSecret: "guess")
+            .Should().BeFalse("a configured-but-wrong secret rejects — the same fixed-time path as the disabled case");
+    }
 }
