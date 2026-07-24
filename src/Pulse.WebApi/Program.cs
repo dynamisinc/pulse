@@ -10,6 +10,7 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Features.Ops.EngineContentSeed;
+using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 
@@ -206,6 +207,15 @@ app.MapGroup(string.Empty).DenyReadOnlySessions().MapSocialPostEndpoints();
 
 app.MapSocialPersonaEndpoints();  // #273 GET /api/personas
 app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
+
+// Participant-shell config reads — the six GET endpoints the frozen frontend shell seams call
+// (shell-state, chrome-config, brand-tokens, channel-nav-config, alerts, overlay-state). Fixes the UAT
+// bug where these 404'd with mock data OFF: the shell-state 404 forced the fail-closed readOnly variant,
+// which disabled the realtime feed stream + "new posts" pill so the participant feed never updated live.
+// Fixed Phase-1 config; scope comes only from the resolved IExerciseContext (COR-001), fail-closed 401 on
+// an unresolved scope. GET reads a read-only/observer session must still receive — NOT under
+// DenyReadOnlySessions().
+app.MapParticipantShellEndpoints();
 
 // Identity + exercise-resolution endpoints (Phase B2 Waves 1–3). Scope comes only from the resolved
 // IExerciseContext (COR-001); /exercise-context and /session read the resolved scope, never a client
