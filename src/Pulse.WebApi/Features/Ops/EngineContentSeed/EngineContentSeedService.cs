@@ -179,10 +179,13 @@ public sealed class EngineContentSeedService
         var autonomy = _autonomyRegistry.GetOrCreate(exerciseId);
 
         // 4d. Build the eligible cast keyed by handle (handle → dossier + persona instance id).
+        // OrdinalIgnoreCase to match the storyline factory's ordering comparer and the DB's
+        // case-insensitive handle collation — so a future variable-casing cast input (decision (b))
+        // can never silently drop a persona from the eligible set on a case mismatch.
         var personasByHandle = seeded.ToDictionary(
             persona => persona.Dossier.Handle,
             persona => new EnginePersona(persona.InstanceId, persona.Dossier),
-            StringComparer.Ordinal);
+            StringComparer.OrdinalIgnoreCase);
 
         var registration = new ReactionLoopRegistration
         {

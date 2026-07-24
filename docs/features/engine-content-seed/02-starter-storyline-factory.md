@@ -1,6 +1,6 @@
 # Story: Starter storyline factory — one canned, in-memory storyline  `[backend]`
 
-**Feature:** engine-content-seed  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Not Started
+**Feature:** engine-content-seed  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** In Review (code-review clean; PR pending)
 **Requirements:** E8 arch §1.1 ("Storylines are created by planners (pre-seeded) or controllers (ad
 hoc)"), §6.1 (state machine — arming via `Seed`) — consumption of the already-built `storyline-model`,
 not new storyline-model logic  ·  **Design decisions:** none  ·  **Issue:** #326
@@ -22,7 +22,7 @@ controller console's escalation-dial mock already displays. The instance this fa
 accepted Phase-1 limitation this implies (a restart or a re-seed discards accrued progress).
 
 ## Acceptance Criteria
-- [ ] **Given** a set of seeded persona handles (story 01's output) and an `exerciseId`, **when**
+- [x] **Given** a set of seeded persona handles (story 01's output) and an `exerciseId`, **when**
   `StarterStorylineFactory.Build(exerciseId, personaHandles, options)` runs, **then** it returns one
   `Storyline` via the existing `Storyline.Create(...)` factory with: title `"Water main contamination
   fears"`, expectation `"an official statement from Fulton County Emergency Management addressing the
@@ -32,22 +32,22 @@ accepted Phase-1 limitation this implies (a restart or a re-seed discards accrue
   list order via `EligiblePersonas.Take(allowed)`) picks anxious citizen voices for the first, smaller
   bursts before the official/outlet accounts — matching ADP-001's "the vacuum fills with worry and
   speculation before officials speak" framing, not an arbitrary order.
-- [ ] **Given** a caller-supplied `responseWindowMinutes` (optional), **when** `Build` runs, **then**
+- [x] **Given** a caller-supplied `responseWindowMinutes` (optional), **when** `Build` runs, **then**
   `ResponseWindowMin` is set to that value; when omitted, it defaults to **3 scenario minutes** — a
   deliberately short, demo/pilot-tuned window (not the ~20-minute window used in illustrative tests
   elsewhere), because scenario minutes advance 1:1 with real wall-clock time (`ExerciseClockService`, no
   acceleration multiplier) and a controller running this seed should see the first review-queue item
   within a few real minutes, not twenty. The value is clamped to a documented sane bound (1–180 minutes)
   regardless of what is supplied.
-- [ ] **Given** the built `Storyline`, **when** `Build` returns it, **then** `.Seed(0)` has already been
+- [x] **Given** the built `Storyline`, **when** `Build` returns it, **then** `.Seed(0)` has already been
   called — `Dormant → Seeded`, tick baseline anchored at scenario minute 0 — so it is immediately
   eligible for `ObserveStage`/`MeasureStage` on the very next loop tick after registration, with no
   further setup.
-- [ ] **Isolation (COR-001).** The returned `Storyline.ExerciseId` always equals the `exerciseId`
+- [x] **Isolation (COR-001).** The returned `Storyline.ExerciseId` always equals the `exerciseId`
   parameter — the same field `ReactionLoopDriver.BuildReviewItem` defensively re-checks against the
   tick's resolved scope and **throws** on mismatch (a documented WR-001 defense-in-depth guard); this
   factory must never let a stale or foreign `exerciseId` slip through untouched.
-- [ ] **Pure / stateless.** `Build` has no `PulseDbContext`, no I/O, and no shared mutable state — calling
+- [x] **Pure / stateless.** `Build` has no `PulseDbContext`, no I/O, and no shared mutable state — calling
   it twice with the same inputs is safe and yields two fully independent `Storyline` instances, so a
   re-seed call (story 03) can always rebuild a fresh one without any hidden coupling to a prior call.
 

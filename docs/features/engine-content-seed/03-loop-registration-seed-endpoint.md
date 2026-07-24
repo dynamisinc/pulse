@@ -1,6 +1,6 @@
 # Story: Loop-registration seed endpoint — `POST /api/ops/seed-engine-content`  `[backend]` `[TIER-2]`
 
-**Feature:** engine-content-seed  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Not Started
+**Feature:** engine-content-seed  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** In Review (code-review clean; PR pending)
 **Requirements:** E8 arch §1.2/§2/§14 (the loop's registration seam — closes exactly the gap
 `ReactionLoopHost.cs`'s own doc comment flags as "a later story"), NFR-009 (secret-gated ops surface,
 mirroring `BootstrapOptions`), COR-001/XC-001 (isolation)  ·  **Design decisions:** D5-014/1.1
@@ -36,19 +36,19 @@ gates on the **same** `Authentication:Bootstrap:Secret` the bootstrap seam uses,
 see implementation.md decision (e).]
 
 ## Acceptance Criteria
-- [ ] **Secret gate (mirrors `login/05` exactly).** Gated on `Authentication:Bootstrap:Secret` (reused,
+- [x] **Secret gate (mirrors `login/05` exactly).** Gated on `Authentication:Bootstrap:Secret` (reused,
   presented via the same `X-Bootstrap-Secret` header). Empty/unset by
   default, so the endpoint always returns `404` regardless of the presented header; a configured-but-wrong
   secret also returns `404` (never `401`/`403` — the endpoint does not confirm its own existence to an
   unauthorized caller); the comparison is constant-time (`BootstrapSecretGate.IsAuthorized`, reused, not
   reimplemented) and the secret is never logged.
-- [ ] **Resolve, never create, an exercise.** **Given** a valid secret and a request naming a `hostname`
+- [x] **Resolve, never create, an exercise.** **Given** a valid secret and a request naming a `hostname`
   that already resolves to a bootstrapped `Exercise` (via `ExerciseHostName.TryNormalize` + the same
   `Exercises.Hostname` lookup `login/05`/`ExerciseResolutionMiddleware` use), **when** called, **then** it
   proceeds against that exercise; **given** a `hostname` with no matching exercise, **when** called,
   **then** it returns `404` **without creating one** — this endpoint never creates an `Exercise` (only
   `login/05`'s bootstrap does).
-- [ ] **Compose and register.** **Given** a resolved exercise, **when** called, **then** it: (a) seeds the
+- [x] **Compose and register.** **Given** a resolved exercise, **when** called, **then** it: (a) seeds the
   persona cast via story 01's `PersonaCastSeeder.SeedAsync`; (b) builds the starter storyline via story
   02's `StarterStorylineFactory.Build`, passing the seeded handles; (c) resolves `Autonomy` via
   `EngineAutonomyRegistry.GetOrCreate(exerciseId)` — **the same per-exercise singleton instance**
@@ -62,29 +62,29 @@ see implementation.md decision (e).]
   (e) calls `IReactionLoopRegistry.Register(...)` — after which the existing, unmodified
   `ReactionLoopHost` begins ticking this exercise on its next wall-clock heartbeat, with no further
   action.
-- [ ] **Idempotent re-run (documented limitation).** **Given** the same hostname is seeded twice, **when**
+- [x] **Idempotent re-run (documented limitation).** **Given** the same hostname is seeded twice, **when**
   called again, **then** persona rows are reused, never duplicated (story 01's contract), and the loop
   registration is safely **replaced** (`IReactionLoopRegistry.Register` overwrites by `exerciseId`), never
   duplicated or left orphaned — but the storyline is rebuilt fresh (`Dormant → Seeded` at a new minute 0),
   so any intensity/phase progress accrued since the first seed is reset. This is documented in the
   response and in `feature.md`, not silently swallowed.
-- [ ] **End-to-end proof (the feature's success criterion).** **Given** a freshly seeded exercise,
+- [x] **End-to-end proof (the feature's success criterion).** **Given** a freshly seeded exercise,
   **when** the default 3-scenario-minute silence window elapses (≈3 real minutes — scenario time advances
   1:1 with wall-clock and no freeze/jump occurs), **then** the unmodified loop enqueues a review item in
   the engine review queue (`GET` the review-queue endpoint shows it); **when** a controller approves it
   (`POST /api/engine/review/{id}/approve`, unmodified), **then** the posts appear in `GET /api/feed` —
   proving the offline `Fake`-provider path flows end-to-end with **no** live AI endpoint touched or
   required.
-- [ ] **Isolation (XC-001/COR-001).** The registration and every persona/storyline write this call
+- [x] **Isolation (XC-001/COR-001).** The registration and every persona/storyline write this call
   triggers are scoped to the ops-resolved exercise only; calling the endpoint for exercise A never
   registers, reads, or writes anything against exercise B — extends the standing cross-exercise
   isolation suite with a "seed activates exactly one exercise's loop" case.
-- [ ] **Telemetry (XC-004).** A successful call emits exactly one audit event,
+- [x] **Telemetry (XC-004).** A successful call emits exactly one audit event,
   `engine.content_seeded` (additive, open vocab — mirroring `exercise.bootstrapped`'s own precedent),
   carrying the exercise id, the persona created/reused counts, and the storyline id/title, in the same
   unit of work as story 01's persona writes — a one-time ops seed against a real environment leaves an
   audit trail, not a silent write.
-- [ ] **NFR-009 (abuse resistance).** The endpoint is per-IP rate-limited under its own named policy
+- [x] **NFR-009 (abuse resistance).** The endpoint is per-IP rate-limited under its own named policy
   (`ops-engine-seed`, mirroring the `ops-bootstrap` policy) even though it is secret-gated — defense in
   depth against a leaked/guessed secret being brute-forced.
 

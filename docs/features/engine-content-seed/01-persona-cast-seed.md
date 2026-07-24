@@ -1,6 +1,6 @@
 # Story: Persona cast seed — the engine's minimum viable cast  `[backend]`
 
-**Feature:** engine-content-seed  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Not Started
+**Feature:** engine-content-seed  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** In Review (code-review clean; PR pending)
 **Requirements:** E8 arch §5/§14 (eligible cast the reaction loop needs to voice a burst) — narrow,
 engine-scoped; explicitly NOT COR-020/021 (`persona-management` remains the templates/cast-authoring
 feature — see feature.md "Naming disambiguation")  ·  **Design decisions:** none  ·  **Issue:** #325
@@ -26,31 +26,31 @@ optional `PersonaTemplateId`).
 See `feature.md`'s "Naming disambiguation" note before assuming this satisfies COR-020/021 — it does not.
 
 ## Acceptance Criteria
-- [ ] **Given** an exercise with no seeded personas, **when** `PersonaCastSeeder.SeedAsync(exerciseId, ct)`
+- [x] **Given** an exercise with no seeded personas, **when** `PersonaCastSeeder.SeedAsync(exerciseId, ct)`
   runs, **then** it creates exactly six `Persona` rows stamped with that `exerciseId`: `FairhavenWater`
   ("Fairhaven Water Utility", `org`, verified), `FulcoEM` ("Fulton County EM", `org`, verified),
   `Newsline7` ("Newsline 7", `org`, verified), `mvega_fh` ("Marisol Vega", `human`, unverified),
   `tbrandt41` ("Tom Brandt", `human`, unverified), `kwardFH` ("Keisha Ward", `human`, unverified).
-- [ ] **Given** the same exercise already has some or all of these personas (matched by `Handle` within
+- [x] **Given** the same exercise already has some or all of these personas (matched by `Handle` within
   the exercise), **when** `SeedAsync` runs again, **then** no duplicate rows are created — the existing
   row's `Id` is returned and reused, never overwritten (idempotent, safe to re-run — the same non-
   clobbering contract `BootstrapService` already uses for its own rows).
-- [ ] **Given** `SeedAsync`'s result, **when** a caller (story 03) consumes it, **then** each seeded
+- [x] **Given** `SeedAsync`'s result, **when** a caller (story 03) consumes it, **then** each seeded
   persona is paired with a real `PersonaDossier` (`Handle`, `DisplayName`, `Type`, non-empty
   `VoiceNotes`, a distinguishing `PersonaStyle`, an `AudienceBand`) — not a placeholder/empty dossier —
   so the already-built diversity gate (`BurstAcceptancePolicy`) has real per-persona style to check a
   burst against, and a future live-provider swap (`engine-runtime/04`) has real voice material to work
   with.
-- [ ] Every seeded persona's `Kind` (`org`/`human`) is set correctly and `Verified` is set exactly as
+- [x] Every seeded persona's `Kind` (`org`/`human`) is set correctly and `Verified` is set exactly as
   listed above — no seeded persona invents a false verified badge (SOC-052 stays honest: verification
   is a trainable signal, not a default).
-- [ ] **Isolation (XC-001/COR-001).** Every created/reused row is confined to the caller-resolved
+- [x] **Isolation (XC-001/COR-001).** Every created/reused row is confined to the caller-resolved
   `exerciseId` — never `Guid.Empty`, never another exercise's id. Because this ops seam has **no**
   per-request `IExerciseContext` (mirroring `BootstrapService`'s own documented stopgap — there is no
   session to resolve one from), idempotency reads use `IgnoreQueryFilters()` **plus an explicit
   `ExerciseId` predicate** rather than relying on the (fail-closed-to-empty) global query filter, which
   would otherwise see zero rows and duplicate on every call.
-- [ ] **Content security (NFR-004).** `DisplayName` / `Handle` / `VoiceNotes` pass through the same
+- [x] **Content security (NFR-004).** `DisplayName` / `Handle` / `VoiceNotes` pass through the same
   sanitization the account-import/post paths already use (reuse `PostSanitizer.Sanitize` or the
   `AccountFieldRules` normalization pattern — do not reinvent a third sanitizer) before being persisted.
   These are developer-authored constants today, not attacker input, but the funnel must be the same one
