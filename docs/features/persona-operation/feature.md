@@ -1,16 +1,21 @@
 # Feature: Persona operation
 
 **Epic:** E7 — Controller Command Surface  ·  **Phase:** 1  ·  **Feature ref:** F7.1
-**World:** staff  ·  **Issue:** #3  ·  **Status:** Wave 1 delivered (stories 01–03 Complete, POST-ONLY) — stories 04–05 Not Started
+**World:** staff  ·  **Issue:** #3  ·  **Status:** Wave 1 delivered (stories 01–03 Complete, POST-ONLY) — stories 04–06 Not Started
 
 > **Wave 1 delivered.** Stories 01–03 (post as persona, fast switching, composer persona context)
 > built in the 5-story cross-feature Wave-1 fan-out on `feature/simcell-operator` alongside
 > `console-shell/01` and `feeds-discovery/07` — Gate-1 clean, wired at a serial integration step,
 > Gate-2 clean on the integrated umbrella (684/684 tests, browser-verified end-to-end: ⌘K → picker →
-> compose → publish → appears in the participant feed with no controller-origin leak). Story 01 is
+> compose → publish → appears in the participant feed with no controller-origin leak). **That
+> browser verification was SAME-TAB, in-memory** (the `postStore` module singleton) — it proved the
+> compose→publish→render loop, not cross-session/cross-device fan-out; see story 06. Story 01 is
 > **POST-ONLY** this wave — reply/repost/DM-as-persona are deferred pending a `Post`-model
 > parent/thread extension. Stories 04 (multi-controller presence) and 05 (mid-exercise persona
-> creation) remain out of this wave.
+> creation) remain out of this wave. **Story 06** is the operationalization gap: the Social API B1
+> backend (`POST /api/posts`, `GET /api/feed`, `GET /api/personas`, SignalR `/hubs/exercise`) is now
+> built and wired, but the frontend write path never calls it — story 06 flips it so a controller's
+> persona post reaches OTHER participants' sessions, not just the publishing tab.
 
 ## Summary
 The controller's core loop: post, reply, repost, and DM as **any persona** in the exercise from
@@ -36,6 +41,7 @@ tracked in `console-shell`.
 | 03 | Composer shows persona context while writing | CTL-003, COR-020, SOC-054 | Complete | #16 |
 | 04 | Multi-controller presence & safe co-operation | CTL-004 | Not Started | #17 |
 | 05 | Mid-exercise persona creation from the picker | CTL-005, COR-022 | Not Started | #18 |
+| 06 | Live write-path flip — persona post reaches other participants in near real time | CTL-001, SOC-083 | Not Started | #329 |
 
 ## Dependencies
 - **E1 foundations:** the Persona / PersonaTemplate model + exercise-context scoping (COR-001/003),
@@ -44,8 +50,11 @@ tracked in `console-shell`.
 - **E2 social composer + post pipeline** (posting as a persona publishes through the same pipeline
   as any post; SOC-003 records origin `controller-as-persona`).
 - **console-shell** (the persona dock, command palette, presence chrome host).
-- Backend not present yet — Phase 1 runs against React Query + mock data behind the axios client;
-  the persona picker/compose endpoints are a serial backend-contract edge.
+- The Social API B1 backend is now **built and wired** (`POST /api/posts`, `GET /api/feed`,
+  `GET /api/personas`, SignalR `/hubs/exercise` — see `docs/features/social-api/`). The remaining gap
+  to operationalize CTL-001 across a real, multi-session exercise is the **frontend write path**,
+  which still calls the synchronous in-memory `createPost` instead of the live endpoint — that flip
+  is story 06.
 
 ## Design notes
 **Staff world** — COBRA chrome, dense, keyboard-first (`@/theme/styledComponents`, never raw MUI).

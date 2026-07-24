@@ -60,8 +60,12 @@ token-consistency notes/2 informational); `build:check` + `lint` clean; 684/684 
 DM-as-persona remain deferred to a future `Post`-model parent/thread extension (see the grounding
 correction above), not built this pass. Browser-verified: composing and publishing as
 @FairhavenWater from the console produced a participant-visible post in the `/shell` feed with no
-controller identity/origin leak. Files: `features/controller/{services/composeService.ts,
-hooks/useComposeAsPersona.ts, components/PersonaComposer.tsx}`.
+controller identity/origin leak. **That verification was SAME-TAB, in-memory** (the `postStore`
+module singleton the console and the feed shared in one browser instance) — it proved the
+compose→publish→render loop, not fan-out to a participant in a different session/device; the live,
+cross-session write path is `persona-operation/06`, not yet built. Files:
+`features/controller/{services/composeService.ts, hooks/useComposeAsPersona.ts,
+components/PersonaComposer.tsx}`.
 
 ## Out of Scope
 News/press/weather composing (Phase 3, as those channels land); the persona picker UX
@@ -94,8 +98,12 @@ builder) wires: `console-shell/01`'s persona-dock host renders `persona-operatio
 `persona-operation/01`'s composer → `persona-operation/03`'s context panel, and wires
 `onPublished` to `feeds-discovery/07`'s `postStore.appendPost`.
 
-Publish endpoint is a mock (no `.NET` backend yet) — `createPost` already behaves this way (pure,
-synchronous, in-memory), so there is no additional mock seam to add here.
+At the time this story shipped, there was no backend to call, so `createPost` was left pure,
+synchronous, and in-memory with no additional mock seam. **That has since changed:** the Social API
+B1 backend now exists and is wired (`POST /api/posts`, `Pulse.WebApi/Program.cs`) — but this story's
+`composeAsPersona`/`useComposeAsPersona` still call `createPost` synchronously and never reach it.
+Flipping the frontend write path onto the live endpoint is tracked as
+`persona-operation/06-live-write-path-flip.md` (#329), not a re-open of this story.
 
 See `implementation.md` (story 01) for the file-ownership map + cross-feature wave plan.
 

@@ -1,8 +1,11 @@
 # Implementation: Feeds & discovery
 
 > The participant-world burst surface. Real-time is a **buffered pill, never auto-scroll/live-insert**
-> (D1-005). Backend not present — feed/search queries + the SignalR host are the contract seam; mock
-> now with polling fallback designed in (NFR-003).
+> (D1-005). The feed read API (`GET /api/feed`) and the SignalR realtime host (`/hubs/exercise`,
+> `PostReceived`) are now **built and wired** (Social API B1, `docs/features/social-api/`) — story
+> 04's `feedStreamSource.ts` flips mock↔realtime on `USE_MOCK_DATA`, with the NFR-003 polling
+> fallback already live. Search (story 03) has no backend endpoint of its own yet and remains
+> mock-only until its own contract lands.
 
 > **Wave-1 cross-feature integration slice (story 07).** A minimal slice of story 04's real-time
 > update lands early, as one of a 5-story cross-feature Wave-1 wave alongside `console-shell/01`
