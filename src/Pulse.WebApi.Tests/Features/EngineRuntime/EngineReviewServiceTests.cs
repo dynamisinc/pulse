@@ -549,6 +549,84 @@ public sealed class EngineReviewServiceTests
         state.ResolveEffective(storylineId).Level.Should().Be(before, "swamped mode never raises the autonomy level — automation never self-escalates (§8.2)");
     }
 
+    // ---- Restore-from-safety (the kill-switch UNDO — §8.2 human-only raise) ----------------------
+
+    [RequiresDockerFact]
+    public async Task RestoreFromSafety_AfterFullStopKillSwitch_ResumesEngine_PersistsNoTelemetry()
+    {
+        var exerciseId = Guid.NewGuid();
+        var storylineId = Guid.NewGuid();
+
+        await using var harness = Build(exerciseId);
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetExerciseDefault(AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 0);
+        state.ResolveEffective(storylineId).GenerationStopped.Should().BeTrue("precondition: the full-stop kill switch stopped the engine");
+
+        // The restore acts on the SAME shared per-exercise state instance the loop reads.
+        var result = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        result.State!.GenerationStopped.Should().BeFalse();
+        result.State.SafetyClampActive.Should().BeFalse();
+        state.ResolveEffective(storylineId).GenerationStopped.Should().BeFalse(
+            "restore lifts the full stop so the engine resumes — the kill-switch undo (§8.2 human-only raise)");
+        state.ResolveEffective(storylineId).Level.Should().Be(AutonomyLevel.DelayedAuto,
+            "the base level is preserved underneath the clamp and resumes on restore (§8.2)");
+        (await CountTelemetryAsync(exerciseId)).Should().Be(0,
+            "restore mirrors the kill switch — an autonomy control persists no telemetry (the autonomy→XC-004 mapping is engine-telemetry-tuning's job, not built yet)");
+    }
+
+    [RequiresDockerFact]
+    public async Task RestoreFromSafety_NothingClamped_ReturnsOk_ChangesNothing_PersistsNoTelemetry()
+    {
+        var exerciseId = Guid.NewGuid();
+        var storylineId = Guid.NewGuid();
+
+        await using var harness = Build(exerciseId);
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        var before = state.ResolveEffective(storylineId);
+
+        var result = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok,
+            "restoring an already-running engine is an idempotent no-op SUCCESS, not an error");
+        result.State!.SafetyClampActive.Should().BeFalse();
+        state.ResolveEffective(storylineId).Should().Be(before, "a no-op restore leaves the running engine untouched");
+        (await CountTelemetryAsync(exerciseId)).Should().Be(0, "an idempotent no-op restore persists no telemetry");
+    }
+
+    [RequiresDockerFact]
+    public async Task RestoreFromSafety_UnresolvedScope_FailsClosed_AndDoesNotMutate()
+    {
+        var exerciseId = Guid.NewGuid();
+
+        // The scope is unresolved (per-request binding is Phase B2). Pre-clamp the same-registry state so we can
+        // prove the fail-closed restore returns BEFORE it ever touches the autonomy state.
+        await using var harness = Build(currentExerciseId: null);
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 0);
+
+        var result = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.ScopeUnresolved,
+            "an unresolved scope fails closed — a restore never runs without a resolved exercise (COR-001)");
+        state.SafetyClampActive.Should().BeTrue("the clamp is untouched when the restore fails closed");
+        state.IsGenerationStopped.Should().BeTrue("the full stop remains — nothing was lifted");
+    }
+
+    [RequiresDockerFact]
+    public async Task RestoreFromSafety_MissingActingHumanId_ReturnsInvalid()
+    {
+        var exerciseId = Guid.NewGuid();
+
+        await using var harness = Build(exerciseId);
+        var result = await harness.Service.RestoreFromSafetyAsync(new EngineReviewActionInput(ActingHumanId: null, TimeZone: "UTC"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Invalid,
+            "COR-018 requires the acting human behind the shared controller account");
+    }
+
     // ---- helpers --------------------------------------------------------------------------------
 
     private static EngineReviewActionInput Input(string actingHumanId) => new(actingHumanId, "America/Chicago");
@@ -663,6 +741,15 @@ public sealed class EngineReviewServiceTests
             .Where(e => e.EventType == "engine.reviewed"
                 && e.Target != null && e.Target.EntityId == draftId.ToString())
             .ToListAsync();
+    }
+
+    /// <summary>Counts every telemetry row persisted for an exercise — used to prove an autonomy control (kill switch / restore) writes NONE.</summary>
+    private async Task<int> CountTelemetryAsync(Guid exerciseId)
+    {
+        await using var verify = _fixture.CreateContext();
+        return await verify.TelemetryEvents
+            .IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == exerciseId);
     }
 
     private static string? PayloadAction(TelemetryEvent telemetryEvent)
