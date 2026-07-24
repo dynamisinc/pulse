@@ -1,7 +1,22 @@
 # Story: Live write-path flip — controller persona post reaches other participants in near real time
 
-**Feature:** Persona operation  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Persona operation  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Delivered in PR #338 (one documented deviation, below)
 **Requirements:** CTL-001, SOC-083, SOC-003, XC-002, COR-018, COR-053, COR-001, NFR-003, NFR-004, XC-004  ·  **Design decisions:** none  ·  **Issue:** #329
+
+> **Delivery note (PR #338, UAT fix off `main`, 2026-07-24).** The write-path flip landed at the
+> composer-hook boundary as scoped, PLUS the read-side companion (`useFeed` was discarding
+> `resolveFeed()`'s result and reading in-memory `postStore` — now consumes the live `/api/feed`
+> baseline). AC2 (mock unchanged), AC5 (controller-as-persona origin + actingHumanId), and AC6 (live
+> `GET /api/personas` cast) are met. **Deviation from AC1/AC4 on the controller-persona path only:** the
+> **participant** path (`useComposePost`) is POST-only — no local `createPost`, single-count telemetry
+> (server-owned) — per spec. The **controller-persona** path (`useComposeAsPersona`) additionally keeps
+> the synchronous `createPost` because the console consumes the returned `Post` for its own-tab view +
+> the R-003 origin label; so on that path the caller receives a LOCAL `Post` (not the server one, AC1)
+> and the client emits its own XC-004 `post` event ALONGSIDE the server's (AC4 double-count). Accepted
+> until the Phase-B2 auth item (the same B2 hardening AC5 already flags) lets the server become the sole
+> emitter — the clean fix decouples local-`Post` assembly from telemetry without touching the
+> security-critical `createPost` ingest path. Own-post display is via the SignalR pill (AC3), already
+> wired. Code-review clean; full vitest suite green.
 
 ## Context
 Wave 1 (stories 01–03) shipped **POST-ONLY** persona operation against the in-memory, same-tab

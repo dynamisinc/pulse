@@ -1,7 +1,7 @@
 # Feature: Persona operation
 
 **Epic:** E7 — Controller Command Surface  ·  **Phase:** 1  ·  **Feature ref:** F7.1
-**World:** staff  ·  **Issue:** #3  ·  **Status:** Wave 1 delivered (stories 01–03 Complete, POST-ONLY) — stories 04–06 Not Started
+**World:** staff  ·  **Issue:** #3  ·  **Status:** Wave 1 delivered (stories 01–03 Complete, POST-ONLY); story 06 (live write-path flip) Delivered in PR #338; stories 04–05 Not Started
 
 > **Wave 1 delivered.** Stories 01–03 (post as persona, fast switching, composer persona context)
 > built in the 5-story cross-feature Wave-1 fan-out on `feature/simcell-operator` alongside
@@ -41,7 +41,7 @@ tracked in `console-shell`.
 | 03 | Composer shows persona context while writing | CTL-003, COR-020, SOC-054 | Complete | #16 |
 | 04 | Multi-controller presence & safe co-operation | CTL-004 | Not Started | #17 |
 | 05 | Mid-exercise persona creation from the picker | CTL-005, COR-022 | Not Started | #18 |
-| 06 | Live write-path flip — persona post reaches other participants in near real time | CTL-001, SOC-083 | Not Started | #329 |
+| 06 | Live write-path flip — persona post reaches other participants in near real time | CTL-001, SOC-083 | **Delivered (PR #338)** — one documented deviation: controller-persona path double-emits telemetry (kept `createPost` for the console view) until Phase-B2 | #329 |
 
 ## Dependencies
 - **E1 foundations:** the Persona / PersonaTemplate model + exercise-context scoping (COR-001/003),
