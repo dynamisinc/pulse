@@ -8,28 +8,38 @@
  * Orchestrates the two reads the feed needs and runs them through the story's
  * convergence (`assembleFeedView`, in `../services/feedService`):
  *
- *   1. `resolveFeed()`  — the swappable post read seam (mock now, live `/feed`
- *      later). Wrapped in a thin `useState`/`useEffect` loader mirroring
- *      `usePersonas` (ordinary cacheable data; a later refactor may lift both
- *      onto React Query, the project default).
+ *   1. `resolveFeed()`  — the swappable post read seam (mock adapter reading
+ *      `postStore` today; a live `GET /api/feed` returning `ParticipantPostDto[]`
+ *      when `USE_MOCK_DATA` is false — see `feedService.ts`). Wrapped in a
+ *      thin `useState`/`useEffect` loader mirroring `usePersonas` (ordinary
+ *      cacheable data; a later refactor may lift both onto React Query, the
+ *      project default).
  *   2. `usePersonas()`  — the participant-safe cast read path. NEVER
  *      `personaById`/`SEEDED_PERSONAS` (mock-only, fail-open — banned on a
  *      shipped participant surface).
  *
- * FROZEN READING STREAM (feeds-discovery/04, SOC-083; supersedes the interim
- * /07 auto-insert). The hook resolves the baseline ONCE — the current
- * `postStore` snapshot at resolve time — and then FREEZES it: it does NOT
- * subscribe to subsequent store changes, so a post appended after mount never
- * moves, reorders, or slides into the rows the reader is looking at. That is
- * the deliberate D1-005 decision: real-time arrivals BUFFER behind the "▲ N new
- * posts" pill (`useFeedStream` + `<NewPostsPill>`, wired in `<Feed>`) and enter
- * the stream only when the reader taps the pill — the reader's scroll position
- * is never touched for them (AC1/AC2). This hook owns ONLY the frozen baseline;
- * the pill layer owns everything that arrives afterwards.
+ * THE BASELINE IS WHATEVER `resolveFeed()` RETURNS (UAT fix — the prior build
+ * discarded the resolved value and re-read `postStore.getPosts()` instead,
+ * which meant a LIVE `/feed` response was silently thrown away and every
+ * participant feed rendered the in-memory mock store regardless of what the
+ * backend actually persisted). There is no separate "read the store after the
+ * fact" step any more: `setRawPosts(posts)` uses the array `resolveFeed()`
+ * resolved with, so this works identically in both modes — mock mode's
+ * adapter happens to source that array from `postStore.getPosts()`; live
+ * mode's response comes straight off the wire. Consumers of this hook never
+ * need to know which.
  *
- * (A post that lands in the store BEFORE this resolve settles is part of the
- * initial baseline — the resolve reads the current snapshot, not a stale one —
- * which is correct: that is the feed the reader first sees, established once.)
+ * FROZEN READING STREAM (feeds-discovery/04, SOC-083; supersedes the interim
+ * /07 auto-insert). The hook resolves the baseline ONCE and then FREEZES it:
+ * it does NOT subscribe to `postStore` (or anything else) after that, so a
+ * post appended/arriving after mount never moves, reorders, or slides into the
+ * rows the reader is looking at. That is the deliberate D1-005 decision:
+ * real-time arrivals BUFFER behind the "▲ N new posts" pill (`useFeedStream` +
+ * `<NewPostsPill>`, wired in `<Feed>`, sourced from the shared SignalR
+ * `PostReceived` push in live mode) and enter the stream only when the reader
+ * taps the pill — the reader's scroll position is never touched for them
+ * (AC1/AC2). This hook owns ONLY the frozen baseline; the pill layer owns
+ * everything that arrives afterwards.
  *
  * XC-002 is unchanged: `assembleFeedView`/`toParticipantView` stay the sole
  * narrowing, so the baseline's provenance is stripped on read.
@@ -49,7 +59,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePersonas } from '@/features/personas'
 import type { PostView, Post } from '@/features/social'
 import { resolveFeed, assembleFeedView } from '../services/feedService'
-import { postStore } from '../services/postStore'
 
 export interface UseFeedResult {
   /** The exercise's public posts, newest-first, as participant-safe views. */
@@ -75,15 +84,15 @@ export function useFeed(): UseFeedResult {
     let cancelled = false
     setPostsLoading(true)
     resolveFeed()
-      .then(() => {
+      .then(posts => {
         if (cancelled) return
-        // Freeze the baseline from the store's CURRENT snapshot at resolve time.
-        // `resolveFeed()` is awaited for its validation + fail-closed/loading
-        // semantics; the store (which its mock adapter reads) is the source of
-        // truth for the rows. There is intentionally NO store subscription:
-        // posts appended AFTER this are the pill's to buffer (feeds-discovery/04),
-        // never this hook's to insert — the reading stream stays frozen.
-        setRawPosts(postStore.getPosts())
+        // Freeze the baseline at exactly what `resolveFeed()` resolved with —
+        // the mock adapter's `postStore` snapshot in mock mode, the live
+        // `GET /api/feed` response in live mode. There is intentionally NO
+        // separate re-read of any store and NO subscription: posts that arrive
+        // AFTER this are the pill's to buffer (feeds-discovery/04), never this
+        // hook's to insert — the reading stream stays frozen.
+        setRawPosts(posts)
         setPostsError(undefined)
       })
       .catch((err: unknown) => {

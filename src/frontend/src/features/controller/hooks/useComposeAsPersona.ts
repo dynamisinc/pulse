@@ -14,7 +14,28 @@
  *     `scenarioNow()`) and calls `composeAsPersona` — which forwards to the
  *     shipped `createPost` with `origin: 'controller-as-persona'`. This hook
  *     re-implements NEITHER sanitization (NFR-004) NOR telemetry (XC-004);
- *     both live in `createPost`.
+ *     both live in `createPost`. `composeAsPersona` stays PURE (no network
+ *     call inside it) — see the live persist below.
+ *
+ * LIVE PERSIST (UAT fix — behind `USE_MOCK_DATA`, `@/core/config/mockData`).
+ * The console still needs the LOCAL `Post` `composeAsPersona` returns (its
+ * own-tab optimistic view via `postStore.appendPost`, wired at the
+ * integration root, and the R-003 origin-label line), so this path keeps
+ * calling `composeAsPersona`/`createPost` in EITHER mode. In LIVE mode this
+ * hook ADDITIONALLY fires `livePostActions.publishPost` — fire-and-forget,
+ * `origin: 'controller-as-persona'`, no client `exerciseId` (COR-001) — so
+ * the post actually PERSISTS and reaches participants via the feed baseline
+ * fix (`useFeed`) + the SignalR "▲ N new posts" pill (`useFeedStream`),
+ * instead of living only in the console's own tab.
+ *
+ * ACCEPTED TELEMETRY TRADEOFF: in live mode this path emits the frontend
+ * `createPost` XC-004 event AND the backend emits its own authoritative one
+ * for the same POST — a known, accepted double-count until Phase-B2 auth
+ * makes the server the sole emitter. The participant path
+ * (`useComposePost.publish`) avoids this by being POST-only (no local
+ * `createPost` call at all) because it has no console view depending on the
+ * returned `Post`; this path keeps `createPost` specifically because the
+ * console consumes it.
  *
  * INPUTS, NOT IMPORTS (Wave-1 parallel-build contract):
  *   - `activePersona` — the persona to post AS — is a PROP from
@@ -30,13 +51,17 @@
  *
  * ISOLATION (COR-001): `exerciseId`/`timeZone` from `useExerciseContext()`
  * STAMP the post/telemetry only — never a fetch-scoping param.
+ * `livePostActions.publishPost` drops `exerciseId` from the wire body
+ * entirely; the server stamps scope from the session.
  */
 
 import { useCallback, useMemo, useState } from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { scenarioNow } from '@/core/clock'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import type { Persona } from '@/features/personas'
 import type { Post } from '@/features/social'
+import { publishPost } from '@/features/social/services/livePostActions'
 import { composeAsPersona } from '../services/composeService'
 
 /** Default per-exercise character limit (mirrors the participant composer, SOC-001). */
@@ -98,14 +123,37 @@ export function useComposeAsPersona(
     if (text.trim().length === 0) return
     if ([...text].length > charLimit) return
 
+    const scenarioTime = scenarioNow().toISOString()
+
+    // `composeAsPersona` stays PURE (no network call inside it) — the console
+    // needs this LOCAL `Post` for its own-tab optimistic view + R-003 origin
+    // label regardless of mode (see the module header).
     const post = composeAsPersona({
       exerciseId,
       timeZone,
-      scenarioTime: scenarioNow().toISOString(),
+      scenarioTime,
       authorPersonaId: activePersona.id,
       actingHumanId,
       text,
     })
+
+    // LIVE PERSIST (UAT fix): additionally fire-and-forget the real POST so
+    // the post reaches participants (feed baseline + SignalR pill), never
+    // awaited here — a rejection is swallowed, matching `liveReviewActions`'
+    // fire-and-forget convention. Accepted telemetry tradeoff: this ALSO
+    // means `createPost`'s XC-004 event above fires alongside the backend's
+    // own authoritative one for the same post — see the module header.
+    if (!USE_MOCK_DATA) {
+      publishPost({
+        exerciseId,
+        timeZone,
+        scenarioTime,
+        authorPersonaId: activePersona.id,
+        actingHumanId,
+        text,
+        origin: 'controller-as-persona',
+      }).catch(() => {})
+    }
 
     setText('')
     onPublished?.(post)
