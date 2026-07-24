@@ -104,6 +104,12 @@ public static class StarterStorylineFactory
         StarterStorylineOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(personaHandles);
+        if (exerciseId == Guid.Empty)
+        {
+            // COR-001: fail fast on misuse — a storyline must carry a real exercise scope, never the
+            // default id. The real caller passes the resolved Exercise.Id; this guards a future misuse.
+            throw new ArgumentException("exerciseId must not be empty.", nameof(exerciseId));
+        }
 
         var requested = options?.ResponseWindowMinutes ?? DefaultResponseWindowMinutes;
         var responseWindow = Math.Clamp(requested, MinResponseWindowMinutes, MaxResponseWindowMinutes);

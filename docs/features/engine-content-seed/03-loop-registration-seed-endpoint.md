@@ -5,9 +5,9 @@
 `ReactionLoopHost.cs`'s own doc comment flags as "a later story"), NFR-009 (secret-gated ops surface,
 mirroring `BootstrapOptions`), COR-001/XC-001 (isolation)  ·  **Design decisions:** D5-014/1.1
 (inherited — see AC3; this story wires into the existing auto-HOLD/kill-switch/swamped-mode invariants,
-it does not re-decide them)  ·  **Review:** Tier-2 (a new ops secret, and the call that actually starts
-live content generation into the participant feed — the always-Critical review class per
-`FEATURE_ORCHESTRATION_PLAYBOOK.md`)  ·  **Issue:** #327
+it does not re-decide them)  ·  **Review:** Tier-2 (a secret-gated ops call — reusing the bootstrap
+secret, no new secret — that actually starts live content generation into the participant feed, the
+always-Critical review class per `FEATURE_ORCHESTRATION_PLAYBOOK.md`)  ·  **Issue:** #327
 
 ## Context
 Everything downstream of this story already works and is `Complete`, untouched: the offline

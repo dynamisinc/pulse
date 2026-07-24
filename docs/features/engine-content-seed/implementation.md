@@ -2,8 +2,9 @@
 
 > Closes issue #324 — the last unbuilt seam of `docs/BACKEND_ROADMAP.md` Phase B3
 > (`engine-runtime`, `Complete`). Three small `[backend]` stories, no frontend, no schema migration.
-> Story 03 carries an elevated bar: **`[TIER-2]`** (a new ops secret that activates live content
-> generation into the participant feed — the always-Critical review class). Everything downstream of
+> Story 03 carries an elevated bar: **`[TIER-2]`** (a secret-gated ops call — reusing
+> `Authentication:Bootstrap:Secret`, no new secret — that activates live content generation into the
+> participant feed, the always-Critical review class). Everything downstream of
 > registration (generate/guard/publish/measure, the review cockpit, the feed) is `Complete` and
 > **out of scope for changes** — this feature only feeds it real seed data and turns it on.
 
