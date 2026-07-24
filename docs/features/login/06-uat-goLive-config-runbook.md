@@ -152,12 +152,24 @@ and picks up the new settings. (If infra + backend were already current, a resta
 idempotency key; `staff.username` **must** match a `Username` in the allowlist from step 1. Capture the
 response — the shared-credential `password` is returned **once** and only the hash persists.
 
+> **⚠️ CRITICAL — seed under the host the BACKEND sees, not the frontend domain.** Exercise resolution
+> matches the incoming request's `Host` header exactly (`HostExerciseResolver` → `Request.Host.Host`,
+> against `Exercise.Hostname`/`BrandedDomain`). The current UAT is a **split / cross-origin** topology: the
+> SPA (SWA at `pulse-uat.cobrasoftware.com`) calls the API **directly** at
+> `VITE_API_URL = app-pulse-api-uat-dynamis.azurewebsites.net`, so every SPA→API request carries
+> `Host: app-pulse-api-uat-dynamis.azurewebsites.net`. **Seed the exercise under THAT host** (as below).
+> Seeding under `pulse-uat.cobrasoftware.com` instead makes `/api/exercise-context` return 404 and staff
+> login fail with *"exerciseId must be a non-empty GUID"* — while **participant login still works** (it
+> needs no client-supplied `exerciseId`), which makes the mismatch easy to misdiagnose. Giving the exercise
+> the participant-facing host `pulse-uat.cobrasoftware.com` requires the same-origin setup tracked in
+> **#322** (SWA Standard SKU + linked backend + `UseForwardedHeaders` + `VITE_API_URL=/api`).
+
 ```bash
 curl -sS -X POST https://app-pulse-api-uat-dynamis.azurewebsites.net/api/ops/bootstrap-exercise \
   -H "X-Bootstrap-Secret: <the BOOTSTRAP_SECRET from step 1>" \
   -H "Content-Type: application/json" \
   -d '{
-        "hostname": "pulse-uat.cobrasoftware.com",
+        "hostname": "app-pulse-api-uat-dynamis.azurewebsites.net",
         "exerciseName": "Pulse UAT Pilot",
         "timeZone": "America/Chicago",
         "staff": { "username": "controller1", "role": "controller" },
