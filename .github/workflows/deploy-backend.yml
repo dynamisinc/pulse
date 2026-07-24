@@ -206,13 +206,17 @@ jobs:
 
       - name: Smoke test — liveness must be up (DB-independent)
         run: |
-          for i in 1 2 3 4 5 6; do
+          # ~3-minute window (18 x 10s): a .NET 10 cold start after a fresh deploy can 5xx for up to a
+          # minute — including a transient BadImageFormatException JIT window — before it stabilizes to 200
+          # (#330). The old 60s window red-flagged otherwise-successful deploys. alwaysOn (webapp.bicep)
+          # reduces idle cold starts but the post-deploy restart still cold-starts, so keep a patient gate.
+          for i in $(seq 1 18); do
             CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://${WEBAPP_NAME}.azurewebsites.net/health" || echo 000)
             echo "attempt $i: /health -> $CODE"
             [ "$CODE" = "200" ] && break
             sleep 10
           done
-          [ "$CODE" = "200" ] || { echo "::error::/health did not return 200 after deploy"; exit 1; }
+          [ "$CODE" = "200" ] || { echo "::error::/health did not return 200 after ~3 min post-deploy"; exit 1; }
 
       - name: Smoke test — readiness reflects DB reachability
         run: |
