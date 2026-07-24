@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Pulse.Core.Features.Generation.Models;
 using Pulse.Core.Features.Generation.Services;
 using Pulse.Core.Features.Storylines.Services;
+using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Review;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 
@@ -60,6 +62,26 @@ internal sealed class RecordingFeedBroadcaster : IFeedBroadcaster
     public Task BroadcastPostAsync(Guid exerciseId, ParticipantPostDto post, CancellationToken cancellationToken = default)
     {
         Broadcasts.Add(exerciseId);
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// A recording <see cref="IEngineReviewBroadcaster"/> that captures every (exerciseId, item) push — so a test
+/// can prove the reaction loop broadcasts a freshly enqueued review item to its own exercise (the on-enqueue
+/// SignalR push). The real exercise-grouped SignalR fan-out is proven separately in
+/// <c>EngineReviewBroadcasterTests</c>; here we only need to see WHAT the loop hands the broadcaster.
+/// </summary>
+internal sealed class RecordingReviewBroadcaster : IEngineReviewBroadcaster
+{
+    public List<(Guid ExerciseId, EngineReviewItemDto Item)> Pushes { get; } = [];
+
+    public Task BroadcastReviewItemChangedAsync(
+        Guid exerciseId,
+        EngineReviewItemDto item,
+        CancellationToken cancellationToken = default)
+    {
+        Pushes.Add((exerciseId, item));
         return Task.CompletedTask;
     }
 }

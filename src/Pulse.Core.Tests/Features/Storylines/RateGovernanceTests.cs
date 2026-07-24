@@ -18,6 +18,14 @@ public class RateGovernanceTests
     }
 
     [Fact]
+    public void Default_InheritsTheReactionCadenceDefault()
+    {
+        // The static Default is built via the 2-arg ctor; the init-only property's initializer still applies,
+        // so the per-storyline escalation cadence defaults to 3 scenario minutes (ADP-011).
+        RateGovernanceConfig.Default.MinMinutesBetweenInactionReactions.Should().Be(3);
+    }
+
+    [Fact]
     public void Config_FloorAboveCap_Throws()
     {
         var act = () => new RateGovernanceConfig(maxEnginePostsPerMinute: 5, minBelievableActivity: 6);

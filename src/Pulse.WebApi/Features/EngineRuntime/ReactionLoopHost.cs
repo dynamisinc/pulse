@@ -384,8 +384,14 @@ public sealed class ReactionLoopDriver
             pendingEvents.AddRange(measured.TelemetryEvents);
         }
 
-        // 2. OBSERVE — the refreshed world for inaction triggers (silence windows elapsed).
-        var observed = ObserveStage.Observe(registration.Storylines, addressing: [], scenarioClock);
+        // 2. OBSERVE — the refreshed world for inaction triggers (silence windows elapsed). The reaction
+        //    cadence (ADP-011) suppresses re-reacting to the SAME ongoing silence every tick: an unaddressed
+        //    storyline re-fires at most once per MinMinutesBetweenInactionReactions scenario minutes.
+        var observed = ObserveStage.Observe(
+            registration.Storylines,
+            addressing: [],
+            scenarioClock,
+            registration.RateConfig.MinMinutesBetweenInactionReactions);
         foreach (var trigger in observed.InactionTriggers)
         {
             pendingEvents.Add(BuildObservedEvent(context, trigger));
@@ -436,9 +442,29 @@ public sealed class ReactionLoopDriver
             // One demanded decision per burst (CTL-034); rate-account the burst's posts for this minute.
             tickState.DemandMeter.Record(DemandEventKind.QueueFire, scenarioMinute);
             tickState.PostsThisMinute += reviewItem.Posts.Count;
+
+            // Record the reaction so the next tick's Observe suppresses re-reacting to this storyline's ongoing
+            // silence until the reaction cadence elapses (ADP-011). Does NOT reset the silence clock — an engine
+            // reaction is not an official response, so anxiety keeps building while officials stay silent.
+            storyline.RecordEngineReaction(scenarioMinute);
         }
 
         await PersistAsync(dbContext, reviewStore, pendingEvents, reviewItems, cancellationToken).ConfigureAwait(false);
+
+        // Broadcast AFTER commit so a freshly enqueued inject reaches the controller cockpit live (no manual
+        // refresh) while staying consistent with a reconnect refetch. The scope stays server-derived
+        // (registration.ExerciseId, COR-001). IEngineReviewBroadcaster is Scoped; resolve it per tick from the
+        // tick's scope, never inject it into this singleton driver.
+        if (reviewItems.Count > 0)
+        {
+            var broadcaster = scopedServices.GetRequiredService<IEngineReviewBroadcaster>();
+            foreach (var item in reviewItems)
+            {
+                await broadcaster
+                    .BroadcastReviewItemChangedAsync(registration.ExerciseId, EngineReviewItemDto.FromEntity(item), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
 
         return new ReactionTickResult(scenarioMinute, observed.InactionTriggers.Count, reviewItems.Count);
     }

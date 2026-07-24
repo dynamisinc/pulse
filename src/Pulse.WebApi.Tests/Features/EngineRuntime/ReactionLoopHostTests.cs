@@ -62,6 +62,14 @@ public sealed class ReactionLoopHostTests
         services.AddDbContext<PulseDbContext>(o => o.UseSqlServer(_fixture.ConnectionString));
         services.AddScoped<PostIngestService>();
         services.AddSingleton<IFeedBroadcaster, RecordingFeedBroadcaster>();
+
+        // The on-enqueue review broadcaster (registered by story 02's AddEngineReview in production, wired
+        // alongside AddReactionLoopHost in Program.cs). This harness only pulls in the loop-host slice, so
+        // register a recording double here so the driver can resolve it per tick and a test can assert the push.
+        var reviewBroadcaster = new RecordingReviewBroadcaster();
+        services.AddSingleton(reviewBroadcaster);
+        services.AddSingleton<IEngineReviewBroadcaster>(reviewBroadcaster);
+
         services.AddEngineGeneration(new ConfigurationBuilder().Build()); // Fake
         services.AddExerciseScoping();
         services.AddExerciseClock();
@@ -153,6 +161,34 @@ public sealed class ReactionLoopHostTests
         counts.GetValueOrDefault(EngineEventTypes.Generated).Should().Be(1, "one burst");
         counts.GetValueOrDefault(EngineEventTypes.Measured).Should().Be(1, "one storyline measured this tick");
         counts.GetValueOrDefault(EngineEventTypes.StorylineStateChanged).Should().Be(1, "the window-open transition");
+    }
+
+    [RequiresDockerFact]
+    public async Task Tick_WhenAReviewItemIsEnqueued_BroadcastsItToItsExercise()
+    {
+        var exerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+
+        await using var host = BuildHost(manualTime);
+        var clock = host.GetRequiredService<IExerciseClock>();
+        clock.Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
+        manualTime.Advance(TimeSpan.FromMinutes(25)); // 25 scenario minutes of silence → window (20) blows
+
+        var cast = Cast("@rosa", "@marcus", "@lena");
+        var storyline = SeededStoryline(exerciseId, "Water main contamination fears", cast.Keys.ToList());
+
+        var result = await RunOneTickAsync(host, Registration(exerciseId, [storyline], cast));
+        result.ReviewItemsEnqueued.Should().Be(1);
+
+        // The loop pushes the freshly enqueued inject to its exercise's cockpit — the controller queue updates
+        // live with no manual refresh — AFTER the item is committed, and scoped to the tick's own exercise.
+        var broadcaster = host.GetRequiredService<RecordingReviewBroadcaster>();
+        broadcaster.Pushes.Should().ContainSingle(
+            "a newly enqueued review item is broadcast on enqueue, not only on disposition change");
+        var push = broadcaster.Pushes[0];
+        push.ExerciseId.Should().Be(
+            exerciseId, "the push is scoped to the tick's server-derived exercise (COR-001)");
+        push.Item.ExerciseId.Should().Be(exerciseId.ToString(), "the pushed item is the tick's own review item");
     }
 
     [RequiresDockerFact]
