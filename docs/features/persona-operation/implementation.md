@@ -1,8 +1,11 @@
 # Implementation: Persona operation
 
 > Bridge from the F7.1 stories to a build. Staff-world surface (COBRA), publishing into the SHIPPED
-> `@/features/social` `createPost` pipeline. Backend is not present yet — Phase 1 uses mock data
-> behind the shared axios client; a future real compose endpoint is the serial backend-contract seam.
+> `@/features/social` `createPost` pipeline. The Social API B1 backend now exists and is wired
+> (`POST /api/posts`, `GET /api/feed`, `GET /api/personas`, SignalR `/hubs/exercise` — see
+> `docs/features/social-api/`); stories 01–03 still call `createPost` synchronously against the
+> in-memory `postStore`, so **story 06 owns flipping the frontend write path onto the live
+> endpoint** — see its Wave Plan row below.
 
 > **Wave-1 cross-feature integration composition (supersedes this doc's Wave-Plan ordering for this
 > pass).** Stories 01–03 build **in parallel** as part of a 5-story cross-feature wave alongside
@@ -26,6 +29,7 @@
 | 03 Composer context | A `PersonaContextPanel` (takes `persona: Persona` as a prop) reading voice notes via the shipped `personaTemplateById(persona.templateId)` (voice notes live on the TEMPLATE, not the instance) + audience magnitude off `persona.audienceBand` + a category chip derived from `persona.personaType`. | `features/controller/components/PersonaContextPanel.tsx`, `features/controller/services/personaVoice.ts` | `PersonaContextPanel` |
 | 04 Presence | SignalR presence channel keyed by persona; a presence badge in the picker/composer. | `features/controller/hooks/usePersonaPresence.ts`, `features/controller/components/PresenceBadge.tsx` | `usePersonaPresence()` |
 | 05 Mid-exercise create | A ≤60s "+ New persona" quick-create dialog launched from the picker; writes a Persona in the active exercise. | `features/controller/components/QuickCreatePersonaDialog.tsx` | `QuickCreatePersonaDialog` |
+| 06 Live write-path flip | Flips `composeAsPersona`/`useComposeAsPersona.publish()` (and the participant `useComposePost.publish()`) onto the now-built `POST /api/posts` when `USE_MOCK_DATA` is false, mirroring `feedService.ts`'s mock/live adapter pattern; `createPost` itself stays the synchronous mock/engine path (per `social-api/implementation.md`'s recommended integration approach). Live-path posts arrive back via the already-wired SignalR `PostReceived` push, not `postStore.appendPost`. | `features/controller/services/composeService.ts`, `features/controller/hooks/useComposeAsPersona.ts`, `features/social/hooks/useComposePost.ts`, `features/controller/components/PersonaComposer.tsx` (edits, not new files); `features/personas/personaService.ts`'s existing `USE_MOCK_PERSONAS` flip | async `publish()` contracts other composer callers (incl. the engine review-publish pipeline) must await |
 
 ## Reuse map
 - COBRA theme + `@/theme/styledComponents` (this is a staff surface) — `src/frontend/src/theme/`
@@ -46,6 +50,10 @@
 - **`console-shell/01`'s ⌘K palette + persona-dock host** (this wave) — `02`'s `PersonaPicker` mounts
   its PERSONAS content there; `01`/`03` receive `activePersona`/`actingHumanId`/`callSign` as props
   rather than importing `console-shell`'s files (Wave-1 parallel-build contract, see the callout above)
+- **Social API B1** (SHIPPED, `docs/features/social-api/` — `POST /api/posts`, `GET /api/feed`,
+  `GET /api/personas`, SignalR `/hubs/exercise`) — story 06 is the frontend consumer of the write
+  endpoint; it reuses the mock/live adapter pattern already shipped in `feedService.ts`/
+  `personaService.ts` rather than inventing a new flip mechanism.
 
 ## Wave Plan (DAG-ready)
 
@@ -56,12 +64,15 @@
 | 03 Composer context | PersonaContextPanel, personaVoice | shipped `personaTemplateById()`/`Persona.audienceBand` | 01, 02 | 1 | S |
 | 04 Presence | usePersonaPresence, PresenceBadge | SignalR host (later); 02 | 05 | 3 | M |
 | 05 Mid-exercise create | QuickCreatePersonaDialog | E1 persona create; 02 | 04 | 3 | S |
+| 06 Live write-path flip | composeService, useComposeAsPersona, useComposePost edits, PersonaComposer edits | Social API B1 (SHIPPED); Phase B2 per-request scope resolution; a deployed backend (`VITE_USE_MOCK_DATA=false` + `VITE_API_URL` + bootstrapped exercise) | — | 2 | M |
 
 Notes: **for this pass**, 01/02/03 build in **Wave 1, in parallel**, as part of the 5-story
 cross-feature Wave-1 composition (see the callout above) — they are decoupled via
 props/inputs (`activePersona`, `actingHumanId`, `callSign`, `onPublished`) rather than a real
 build-order dependency, mirroring the shipped `SocialChannel`'s independently-built
 `Composer`+`Feed`+`ThreadView` composition. Outside this pass, the feature's normal internal
-sequencing (02/03 before 01) still applies. Presence (04) waits on the SignalR host landing. Story
-01's publish path uses the shipped, synchronous mock `createPost` — no additional backend-contract
-seam beyond what `createPost` already is.
+sequencing (02/03 before 01) still applies. Presence (04) waits on the SignalR host landing.
+**Story 06 supersedes the earlier "no additional backend-contract seam" note below 01/02/03's
+Wave 1**: the Social API B1 backend is now built, and 06 is the story that actually calls it —
+it lands its own wave once a deployed backend + Phase B2 scope resolution exist to smoke it
+against, per `social-api/implementation.md`'s "Post-B1 follow-ups" guidance.

@@ -24,7 +24,7 @@ composer/pill (D1-011). Read-only sessions default to All Posts (COR-015).
 | 01 | All Posts feed (global chronological) | SOC-080 | Complete | #120 |
 | 02 | Following feed | SOC-081 (COR-015) | Not Started | #121 |
 | 03 | Full-text search (+ People/impersonation) | SOC-082 / D1-008 | Not Started | #122 |
-| 04 | Real-time updates — "new posts" pill (no auto-scroll) | SOC-083 / D1-005 | Not Started | #123 |
+| 04 | Real-time updates — "new posts" pill (no auto-scroll) | SOC-083 / D1-005 | Complete | #123 |
 | 05 | Engagement-weighted "For You" mode (stretch) | SOC-084 | Not Started | #124 |
 | 06 | PIO multi-column mode (grant-gated) | D1-010 | Not Started | #125 |
 | 07 | Live post store — Wave-1 minimal slice (shared store + live read, no pill) | SOC-083 (partial) / D1-005 (partial) | Complete | — |
