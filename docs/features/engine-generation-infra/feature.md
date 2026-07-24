@@ -31,6 +31,7 @@ envelope), §3.4 (four-layer isolation boundary), §3.5 (degraded mode). Prototy
 | 04 | Model tiering & prompt caching | ADP-011 (cost) | Complete | #145 |
 | 05 | Degraded-mode fallback (circuit breaker) | NFR-003 / ADP-042 | Complete | #146 |
 | 06 | Cost/latency spike (measured) | open Q3 / NFR-002 | Complete | #147 |
+| 07 | Fake provider output variety across bursts `[backend]` | NFR-005 / ADP-021 | In Review (PR #336) | #341 |
 
 **#147 was completed *modeled*, not measured (§4.1 caveat) — forward-pointer.** No API key was
 available when #147 shipped, so its cost/latency envelope is analytic (published price table + a

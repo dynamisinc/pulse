@@ -57,6 +57,8 @@ supersedes D5-005) is inherited by story 02 through the built `autonomy-safety` 
 | 02 | Review-cockpit API — serve `EngineReviewItem`s + autonomy/safety `[fullstack] [SAFETY-CRITICAL]` | ADP-040/042, CTL-034 (D5-014/1.1, COR-001, XC-004, XC-002, NFR-004) | Complete | #286 |
 | 03 | Scenario-clock service — native COR-050 clock driving the loop's timers `[backend]` | COR-050/051/052 (COR-053, COR-001) | Complete | #287 |
 | 04 | Provider live-config — governed Azure OpenAI + measured eval `[backend] [TIER-2]` | NFR-005, ADP-025, NFR-003, ADP-024 | Complete | #288 |
+| 05 | Engine-control live flip + `restore` endpoint (kill switch wired to backend) `[fullstack]` | ADP-042 (COR-001, COR-018, XC-004, NFR-001) | In Review (PR #337) | #339 |
+| 06 | Reaction-loop believability: pace inaction reactions + broadcast on enqueue `[backend]` | ADP-011, ADP-001 (COR-001, COR-053, XC-004) | In Review (PR #336) | #340 |
 
 ## Dependencies
 **Delivered foundations (referenced by name, not owned here):**
