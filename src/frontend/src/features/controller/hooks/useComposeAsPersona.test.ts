@@ -5,10 +5,11 @@
  * CTL-001, COR-001, COR-018, COR-053) — the UAT fix that makes a controller's
  * "post as persona" action actually reach participants instead of living only
  * in the console's own tab:
- *  - MOCK mode is UNCHANGED (already covered end-to-end via the real
- *    `<PersonaComposer>` in `../components/PersonaComposer.test.tsx`): this
- *    file additionally pins that MOCK mode never calls
- *    `livePostActions.publishPost`;
+ *  - This file is LIVE-mode only — it forces `USE_MOCK_DATA` false file-wide
+ *    (see the flat `vi.mock` below). MOCK mode is UNCHANGED and its coverage
+ *    lives elsewhere (the real `<PersonaComposer>` in
+ *    `../components/PersonaComposer.test.tsx`); nothing here asserts mock-mode
+ *    behaviour;
  *  - LIVE mode additionally fires `livePostActions.publishPost` with
  *    `origin: 'controller-as-persona'` and no client `exerciseId` (COR-001),
  *    fire-and-forget, WHILE STILL returning the local `Post` via `onPublished`

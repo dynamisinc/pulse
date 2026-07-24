@@ -64,6 +64,11 @@ function toRequestBody(input: CreatePostInput): CreatePostRequestBody {
   return {
     authorPersonaId: input.authorPersonaId,
     actingHumanId: input.actingHumanId,
+    // `text` is forwarded RAW: NFR-004 sanitization for a persisted post is the
+    // SERVER's authoritative boundary — PostIngestService runs PostSanitizer
+    // (strip, never encode) at ingest before persistence — so the client is not
+    // the trust boundary here. (The mock path's `createPost` sanitizes locally
+    // only because it never reaches that server boundary.)
     text: input.text,
     scenarioTime: input.scenarioTime,
     timeZone: input.timeZone,
