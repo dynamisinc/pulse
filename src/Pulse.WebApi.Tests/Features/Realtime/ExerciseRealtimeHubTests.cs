@@ -6,10 +6,16 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 using Moq;
-using Pulse.WebApi.Data;
+using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Realtime;
+// The feature key HubCallerContext.GetHttpContext() looks up is SignalR's connection-layer
+// IHttpContextFeature (Microsoft.AspNetCore.Http.Connections.Features), NOT the plain HTTP one — aliased to
+// keep it unambiguous alongside Microsoft.AspNetCore.Http.Features (FeatureCollection).
+using SignalRHttpContextFeature = Microsoft.AspNetCore.Http.Connections.Features.IHttpContextFeature;
 
 /// <summary>
 /// Fast, Docker-free unit tests of <see cref="ExerciseRealtimeHub"/>'s group-membership logic — story
@@ -18,12 +24,15 @@ using Pulse.WebApi.Features.Realtime;
 /// <c>Data/QueryFilterIsolationTests.cs</c>, the same guarantee's read-side proof).
 /// </summary>
 /// <remarks>
-/// Stubs <see cref="IExerciseContext"/> and mocks the base <see cref="Hub"/>'s <c>Context</c> (a
-/// <see cref="HubCallerContext"/>) and <c>Groups</c> (an <see cref="IGroupManager"/>) directly with Moq,
-/// exactly the "stub IExerciseContext + a test double" shape the story's test notes call for — no
-/// TestServer, no network, no SignalR client, no container. Combined with
-/// <see cref="SignalRFeedBroadcasterTests"/> (the broadcaster targets EXACTLY
-/// <c>exercise:{exerciseId}</c> and no other group) and
+/// The hub resolves its exercise from the connection's host-resolved <c>HttpContext</c>
+/// (<c>Context.GetHttpContext()?.GetHostResolvedExerciseId()</c>), NOT an injected scoped
+/// <see cref="IExerciseContext"/> — because SignalR dispatches <c>OnConnectedAsync</c> in its own DI scope
+/// where that injected context would always be unset. These tests therefore mock the base <see cref="Hub"/>'s
+/// <c>Context</c> (a <see cref="HubCallerContext"/>) and expose a <see cref="DefaultHttpContext"/> through its
+/// <c>Features</c> (the <see cref="IHttpContextFeature"/> that backs <c>Context.GetHttpContext()</c>), stamping
+/// the host-resolved exercise id on it exactly as <c>ExerciseResolutionMiddleware</c> does — no TestServer, no
+/// network, no SignalR client, no container. Combined with <see cref="SignalRFeedBroadcasterTests"/> (the
+/// broadcaster targets EXACTLY <c>exercise:{exerciseId}</c> and no other group) and
 /// <see cref="ExerciseRealtimeHubIsolationTests.Hub_ExposesNoClientInvocableMethod_ThatAcceptsAGroupOrExerciseId"/>
 /// (no client-invocable method exists to request a different group), these three pieces together prove
 /// the full isolation chain: a connection joins EXACTLY the group its server-resolved scope derives,
@@ -38,14 +47,10 @@ public class ExerciseRealtimeHubTests
     public async Task OnConnectedAsync_ResolvedScope_JoinsExactlyTheExercisesGroup_AndDoesNotAbort()
     {
         var exerciseId = Guid.NewGuid();
-        var exerciseContext = new Mock<IExerciseContext>();
-        exerciseContext.SetupGet(c => c.CurrentExerciseId).Returns(exerciseId);
-
-        var context = new Mock<HubCallerContext>();
-        context.SetupGet(c => c.ConnectionId).Returns(ConnectionId);
+        var context = BuildHubContext(hostResolvedExerciseId: exerciseId);
         var groups = new Mock<IGroupManager>();
 
-        var hub = new ExerciseRealtimeHub(exerciseContext.Object)
+        var hub = new ExerciseRealtimeHub
         {
             Context = context.Object,
             Groups = groups.Object,
@@ -56,21 +61,19 @@ public class ExerciseRealtimeHubTests
         groups.Verify(
             g => g.AddToGroupAsync(ConnectionId, $"exercise:{exerciseId}", It.IsAny<CancellationToken>()),
             Times.Once,
-            "the connection must join exactly the group derived from its server-resolved exercise scope");
+            "the connection must join exactly the group derived from its host-resolved exercise scope");
         context.Verify(c => c.Abort(), Times.Never, "a resolved scope must never abort the connection");
     }
 
     [Fact]
-    public async Task OnConnectedAsync_NullScope_Aborts_NeverJoinsAnyGroup()
+    public async Task OnConnectedAsync_NoHostResolved_Aborts_NeverJoinsAnyGroup()
     {
-        var exerciseContext = new Mock<IExerciseContext>();
-        exerciseContext.SetupGet(c => c.CurrentExerciseId).Returns((Guid?)null);
-
-        var context = new Mock<HubCallerContext>();
-        context.SetupGet(c => c.ConnectionId).Returns(ConnectionId);
+        // The host did not resolve to an exercise: the middleware stamped nothing on HttpContext.Items, so
+        // GetHostResolvedExerciseId() returns null — the shipped fail-closed default.
+        var context = BuildHubContext(hostResolvedExerciseId: null);
         var groups = new Mock<IGroupManager>();
 
-        var hub = new ExerciseRealtimeHub(exerciseContext.Object)
+        var hub = new ExerciseRealtimeHub
         {
             Context = context.Object,
             Groups = groups.Object,
@@ -78,7 +81,7 @@ public class ExerciseRealtimeHubTests
 
         await hub.OnConnectedAsync();
 
-        context.Verify(c => c.Abort(), Times.Once, "an unresolved (null) scope must abort the connection — fail closed");
+        context.Verify(c => c.Abort(), Times.Once, "an unresolved (null) host scope must abort the connection — fail closed");
         groups.Verify(
             g => g.AddToGroupAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never,
@@ -86,19 +89,39 @@ public class ExerciseRealtimeHubTests
     }
 
     [Fact]
-    public async Task OnConnectedAsync_ExplicitGuidEmptyScope_Aborts_NeverJoinsAnyGroup()
+    public async Task OnConnectedAsync_NoHttpContext_Aborts_NeverJoinsAnyGroup()
     {
-        // A distinct fail-closed shape from "null" (mirrors QueryFilterIsolationTests' own coverage of
-        // this same distinction on the read-side filter) — guards against a future refactor of the
-        // hub's null-check silently admitting Guid.Empty as if it were a valid scope.
-        var exerciseContext = new Mock<IExerciseContext>();
-        exerciseContext.SetupGet(c => c.CurrentExerciseId).Returns(Guid.Empty);
-
+        // Context.GetHttpContext() itself yields null (no IHttpContextFeature) — the null-conditional read
+        // must still fail closed, never join an ambient group.
         var context = new Mock<HubCallerContext>();
         context.SetupGet(c => c.ConnectionId).Returns(ConnectionId);
+        context.SetupGet(c => c.Features).Returns(new FeatureCollection());
         var groups = new Mock<IGroupManager>();
 
-        var hub = new ExerciseRealtimeHub(exerciseContext.Object)
+        var hub = new ExerciseRealtimeHub
+        {
+            Context = context.Object,
+            Groups = groups.Object,
+        };
+
+        await hub.OnConnectedAsync();
+
+        context.Verify(c => c.Abort(), Times.Once, "a connection with no HttpContext must abort — fail closed");
+        groups.Verify(
+            g => g.AddToGroupAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task OnConnectedAsync_ExplicitGuidEmptyScope_Aborts_NeverJoinsAnyGroup()
+    {
+        // A distinct fail-closed shape from "no host resolved" (mirrors QueryFilterIsolationTests' own
+        // coverage of this same distinction on the read-side filter) — guards against a future refactor of
+        // the hub's null-check silently admitting Guid.Empty as if it were a valid scope.
+        var context = BuildHubContext(hostResolvedExerciseId: Guid.Empty);
+        var groups = new Mock<IGroupManager>();
+
+        var hub = new ExerciseRealtimeHub
         {
             Context = context.Object,
             Groups = groups.Object,
@@ -120,15 +143,9 @@ public class ExerciseRealtimeHubTests
         var exerciseA = Guid.NewGuid();
         var exerciseB = Guid.NewGuid();
 
-        string? groupJoinedByA = null;
-        string? groupJoinedByB = null;
-
         async Task<string?> JoinAndCaptureGroupAsync(Guid exerciseId)
         {
-            var exerciseContext = new Mock<IExerciseContext>();
-            exerciseContext.SetupGet(c => c.CurrentExerciseId).Returns(exerciseId);
-            var context = new Mock<HubCallerContext>();
-            context.SetupGet(c => c.ConnectionId).Returns(ConnectionId);
+            var context = BuildHubContext(hostResolvedExerciseId: exerciseId);
 
             string? capturedGroup = null;
             var groups = new Mock<IGroupManager>();
@@ -137,13 +154,13 @@ public class ExerciseRealtimeHubTests
                 .Callback<string, string, CancellationToken>((_, groupName, _) => capturedGroup = groupName)
                 .Returns(Task.CompletedTask);
 
-            var hub = new ExerciseRealtimeHub(exerciseContext.Object) { Context = context.Object, Groups = groups.Object };
+            var hub = new ExerciseRealtimeHub { Context = context.Object, Groups = groups.Object };
             await hub.OnConnectedAsync();
             return capturedGroup;
         }
 
-        groupJoinedByA = await JoinAndCaptureGroupAsync(exerciseA);
-        groupJoinedByB = await JoinAndCaptureGroupAsync(exerciseB);
+        var groupJoinedByA = await JoinAndCaptureGroupAsync(exerciseA);
+        var groupJoinedByB = await JoinAndCaptureGroupAsync(exerciseB);
 
         groupJoinedByA.Should().NotBeNullOrEmpty();
         groupJoinedByB.Should().NotBeNullOrEmpty();
@@ -164,6 +181,34 @@ public class ExerciseRealtimeHubTests
 
         clientInvocableMethods.Should().BeEmpty(
             "the hub must expose NO client-invocable method a client could use to join or read another " +
-            "exercise's group — group membership is derived from the server-side IExerciseContext only");
+            "exercise's group — group membership is derived from the server-side host-resolved HttpContext only");
+    }
+
+    /// <summary>
+    /// Builds a mocked <see cref="HubCallerContext"/> that exposes a <see cref="DefaultHttpContext"/> through
+    /// its <c>Features</c> (an <see cref="IHttpContextFeature"/>), so <c>Context.GetHttpContext()</c> returns
+    /// it. When <paramref name="hostResolvedExerciseId"/> is supplied it is stamped on the HttpContext exactly
+    /// as <c>ExerciseResolutionMiddleware</c> does; when <c>null</c>, nothing is stamped (an unresolved host).
+    /// </summary>
+    private static Mock<HubCallerContext> BuildHubContext(Guid? hostResolvedExerciseId)
+    {
+        var httpContext = new DefaultHttpContext();
+        if (hostResolvedExerciseId is { } exerciseId)
+        {
+            httpContext.SetHostResolvedExerciseId(exerciseId);
+        }
+
+        // Back Context.GetHttpContext() (which reads Features.Get<IHttpContextFeature>()?.HttpContext) with a
+        // feature exposing our DefaultHttpContext — exactly what the SignalR connection layer does live.
+        var httpContextFeature = new Mock<SignalRHttpContextFeature>();
+        httpContextFeature.SetupGet(f => f.HttpContext).Returns(httpContext);
+
+        var features = new FeatureCollection();
+        features.Set<SignalRHttpContextFeature>(httpContextFeature.Object);
+
+        var context = new Mock<HubCallerContext>();
+        context.SetupGet(c => c.ConnectionId).Returns(ConnectionId);
+        context.SetupGet(c => c.Features).Returns(features);
+        return context;
     }
 }

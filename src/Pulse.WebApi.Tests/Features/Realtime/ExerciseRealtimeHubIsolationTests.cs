@@ -4,6 +4,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
@@ -13,8 +14,7 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Pulse.WebApi.Data;
-using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 
@@ -31,31 +31,29 @@ using Pulse.WebApi.Features.Social;
 /// <para>
 /// <b>Docker-free by design, booting the real <c>Program.cs</c>.</b> The orchestrator's composition-root
 /// edit has landed: <c>Program.cs</c> now calls <see cref="RealtimeExtensions.AddSocialRealtimeHub"/> and
-/// maps <see cref="RealtimeExtensions.MapSocialRealtimeHub"/> at <c>/hubs/exercise</c> itself. These tests
-/// therefore boot the real host via <see cref="WebApplicationFactory{TEntryPoint}"/> over the in-memory
-/// <see cref="TestServer"/> transport and connect to Program.cs's OWN hub mapping — a live proof the hub is
-/// reachable through the composition root, not a test-only stand-in. They stay Docker-free: the host is fed
-/// a dummy, never-connecting connection string so it merely BUILDS (<see cref="ExerciseRealtimeHub"/>
-/// depends only on <see cref="IExerciseContext"/> — no <c>PulseDbContext</c> access on the hub path, so the
-/// database is never opened), and each test overrides the scoped <see cref="IExerciseContext"/> via
-/// <c>ConfigureTestServices</c>. Every test here is a plain <see cref="FactAttribute"/> and runs locally
-/// without a container.
+/// maps <see cref="RealtimeExtensions.MapSocialRealtimeHub"/> at <c>/hubs/exercise</c> itself, behind the
+/// real <c>UseExerciseResolution</c> middleware. These tests therefore boot the real host via
+/// <see cref="WebApplicationFactory{TEntryPoint}"/> over the in-memory <see cref="TestServer"/> transport and
+/// connect to Program.cs's OWN hub mapping — a live proof the hub is reachable, and correctly scoped,
+/// through the composition root, not a test-only stand-in. They stay Docker-free: the host is fed a dummy,
+/// never-connecting connection string so it merely BUILDS (no <c>PulseDbContext</c> access on the hub path,
+/// so the database is never opened), and each test replaces the DB-backed
+/// <see cref="IHostExerciseResolver"/> with a deterministic stub via <c>ConfigureTestServices</c> so the real
+/// middleware stamps the desired host-resolved exercise onto the connection request's
+/// <c>HttpContext.Items</c> — the exact source <see cref="ExerciseRealtimeHub"/> now reads. Every test here
+/// is a plain <see cref="FactAttribute"/> and runs locally without a container.
 /// </para>
 /// <para>
 /// <b>Why a single connection per host, not two simultaneous connections in different exercises.</b>
-/// Per-request <see cref="IExerciseContext"/> resolution (host/session-token auth) is Phase B2 and
-/// doesn't exist yet; ASP.NET Core SignalR also does not expose the connecting request's
-/// <c>HttpContext</c> to a Hub's constructor-injected DI-scoped services (only to Hub methods, via
-/// <c>Context.GetHttpContext()</c>, after construction) — confirmed empirically against this exact
-/// harness. So a single fixed <c>ConfigureTestServices</c> override of <see cref="IExerciseContext"/>
-/// (the pattern the DB-backed integration tests use) is the only reliable way to resolve a scope for a
-/// hub connection in this test host today, and it can only give ONE fixed scope per host instance. Each
-/// test below therefore fixes ONE host to ONE exercise's scope and proves BOTH directions with a single
-/// connection: its own exercise's broadcast IS delivered, and a DIFFERENT exercise's broadcast is NOT —
-/// a real, live proof that <c>Clients.Group(...)</c> delivery is exercise-scoped, not exercise-A-vs-B
-/// process isolation by accident. <see cref="ExerciseRealtimeHubTests"/> covers the complementary
-/// "two different resolved scopes always join two different groups" property directly, without needing
-/// two live connections at once.
+/// <see cref="ExerciseRealtimeHub"/> resolves its group from the connection's host-resolved
+/// <c>HttpContext</c> (<c>Context.GetHttpContext()?.GetHostResolvedExerciseId()</c>) — which the real
+/// <c>UseExerciseResolution</c> middleware populates per connection request from the (stubbed) host resolver.
+/// A single fixed stub resolver gives ONE host → ONE exercise per host instance. Each test below therefore
+/// fixes ONE host to ONE exercise's scope and proves BOTH directions with a single connection: its own
+/// exercise's broadcast IS delivered, and a DIFFERENT exercise's broadcast is NOT — a real, live proof that
+/// <c>Clients.Group(...)</c> delivery is exercise-scoped, not exercise-A-vs-B process isolation by accident.
+/// <see cref="ExerciseRealtimeHubTests"/> covers the complementary "two different resolved scopes always join
+/// two different groups" property directly, without needing two live connections at once.
 /// </para>
 /// </remarks>
 public class ExerciseRealtimeHubIsolationTests
@@ -83,9 +81,9 @@ public class ExerciseRealtimeHubIsolationTests
     [Fact]
     public async Task Connection_WithNoExerciseScopeResolved_IsAborted_NeverJoinsAnyGroup()
     {
-        // The real production default: AddExerciseScoping() registers IExerciseContext starting UNSET
-        // (CurrentExerciseId null) — no test double at all, this IS the shipped fail-closed behaviour.
-        using var server = CreateTestServer(services => services.AddExerciseScoping());
+        // The host does not resolve to any exercise (stub resolver returns null) — the middleware stamps
+        // nothing on HttpContext.Items, so the hub reads no scope. This IS the shipped fail-closed behaviour.
+        using var server = CreateTestServer(hostResolvedExerciseId: null);
 
         await using var connection = BuildConnection(server);
         var closed = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -125,11 +123,9 @@ public class ExerciseRealtimeHubIsolationTests
         var exerciseA = Guid.NewGuid();
         var exerciseB = Guid.NewGuid();
 
-        // Fixed for the whole host, exactly the ConfigureTestServices override pattern the DB-backed
-        // integration tests use — a plain factory closure with NO HttpContext dependency, so it resolves
-        // identically regardless of which DI scope (request or hub-connection) asks for it.
-        using var server = CreateTestServer(services =>
-            services.AddScoped<IExerciseContext>(_ => new ExerciseContext { CurrentExerciseId = exerciseA }));
+        // The whole host resolves to exercise A: the stub resolver returns A for any host, so the real
+        // middleware stamps A on every connection request's HttpContext.Items and the hub joins A's group.
+        using var server = CreateTestServer(hostResolvedExerciseId: exerciseA);
 
         await using var connection = BuildConnection(server);
         var received = new System.Collections.Generic.List<ParticipantPostDto>();
@@ -174,8 +170,7 @@ public class ExerciseRealtimeHubIsolationTests
     public async Task Broadcast_WireJson_NeverCarriesProvenanceKeys_UnconditionalXc002()
     {
         var exerciseId = Guid.NewGuid();
-        using var server = CreateTestServer(services =>
-            services.AddScoped<IExerciseContext>(_ => new ExerciseContext { CurrentExerciseId = exerciseId }));
+        using var server = CreateTestServer(hostResolvedExerciseId: exerciseId);
 
         await using var connection = BuildConnection(server);
         var receivedRaw = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -224,12 +219,12 @@ public class ExerciseRealtimeHubIsolationTests
     /// <summary>
     /// Boots the real <c>Program</c> host (which now owns <see cref="RealtimeExtensions.AddSocialRealtimeHub"/>
     /// / <see cref="RealtimeExtensions.MapSocialRealtimeHub"/>) over the in-memory <see cref="TestServer"/>
-    /// transport, replacing the registered <see cref="IExerciseContext"/> with whatever
-    /// <paramref name="configureExerciseContext"/> supplies. No Docker: a dummy, never-connecting connection
-    /// string lets the host build, and the hub path touches no database.
+    /// transport, replacing the DB-backed <see cref="IHostExerciseResolver"/> with a stub that resolves every
+    /// host to <paramref name="hostResolvedExerciseId"/> (or nothing, when <c>null</c>). No Docker: a dummy,
+    /// never-connecting connection string lets the host build, and the hub path touches no database.
     /// </summary>
-    private static RealtimeHostFactory CreateTestServer(Action<IServiceCollection> configureExerciseContext)
-        => new(configureExerciseContext);
+    private static RealtimeHostFactory CreateTestServer(Guid? hostResolvedExerciseId)
+        => new(hostResolvedExerciseId);
 
     /// <summary>
     /// Builds a client <see cref="HubConnection"/> against <paramref name="factory"/>'s in-memory
@@ -250,11 +245,12 @@ public class ExerciseRealtimeHubIsolationTests
     /// <summary>
     /// Boots the real <c>Program</c> host to exercise Program.cs's OWN SignalR hub mapping over the
     /// in-memory <see cref="TestServer"/> transport — no Docker, no live database. Program.cs now owns the
-    /// hub wiring (<c>AddSocialRealtimeHub()</c> + <c>MapSocialRealtimeHub()</c>); this factory only feeds a
-    /// dummy (never-connecting) connection string so the host BUILDS — the hub path reads only
-    /// <see cref="IExerciseContext"/> and never opens the database — and overrides that scoped
-    /// <see cref="IExerciseContext"/> per test via <c>ConfigureTestServices</c> (which runs last and
-    /// reliably wins over Program.cs's default registration).
+    /// hub wiring (<c>AddSocialRealtimeHub()</c> + <c>MapSocialRealtimeHub()</c>) behind the real
+    /// <c>UseExerciseResolution</c> middleware; this factory only feeds a dummy (never-connecting) connection
+    /// string so the host BUILDS — the hub path never opens the database — and replaces the DB-backed
+    /// <see cref="IHostExerciseResolver"/> per test via <c>ConfigureTestServices</c> (which runs last and
+    /// reliably wins over Program.cs's default registration) so the middleware stamps a deterministic
+    /// host-resolved exercise on each connection request's <c>HttpContext.Items</c> — the source the hub reads.
     /// </summary>
     private sealed class RealtimeHostFactory : WebApplicationFactory<Program>
     {
@@ -265,11 +261,11 @@ public class ExerciseRealtimeHubIsolationTests
         private const string DummyConnectionString =
             "Server=nonexistent;Database=pulse;Trusted_Connection=False;";
 
-        private readonly Action<IServiceCollection> _configureExerciseContext;
+        private readonly Guid? _hostResolvedExerciseId;
 
-        public RealtimeHostFactory(Action<IServiceCollection> configureExerciseContext)
+        public RealtimeHostFactory(Guid? hostResolvedExerciseId)
         {
-            _configureExerciseContext = configureExerciseContext;
+            _hostResolvedExerciseId = hostResolvedExerciseId;
             Environment.SetEnvironmentVariable(ConnectionStringEnvVar, DummyConnectionString);
         }
 
@@ -279,10 +275,12 @@ public class ExerciseRealtimeHubIsolationTests
 
             builder.ConfigureTestServices(services =>
             {
-                // Drop Program.cs's default IExerciseContext registration, then let the test's own
-                // configurator install the scope it wants (a fixed exercise, or the fail-closed default).
-                services.RemoveAll<IExerciseContext>();
-                _configureExerciseContext(services);
+                // Re-point the host→exercise resolver to a deterministic stub so the REAL
+                // UseExerciseResolution middleware stamps the desired host-resolved exercise on each
+                // connection request's HttpContext.Items — exactly the source the hub's OnConnectedAsync now
+                // reads (Context.GetHttpContext()?.GetHostResolvedExerciseId()). No DB is touched.
+                services.RemoveAll<IHostExerciseResolver>();
+                services.AddSingleton<IHostExerciseResolver>(new StubHostExerciseResolver(_hostResolvedExerciseId));
             });
         }
 
@@ -291,5 +289,20 @@ public class ExerciseRealtimeHubIsolationTests
             base.Dispose(disposing);
             Environment.SetEnvironmentVariable(ConnectionStringEnvVar, null);
         }
+    }
+
+    /// <summary>
+    /// Deterministic <see cref="IHostExerciseResolver"/> test double: resolves EVERY host to the fixed
+    /// <c>resolvedExerciseId</c> (or to <c>null</c> — an unresolved host — when that is <c>null</c>), with no
+    /// database access, so the real middleware's host-resolution write is exercised without a live DB.
+    /// </summary>
+    private sealed class StubHostExerciseResolver : IHostExerciseResolver
+    {
+        private readonly Guid? _resolvedExerciseId;
+
+        public StubHostExerciseResolver(Guid? resolvedExerciseId) => _resolvedExerciseId = resolvedExerciseId;
+
+        public Task<Guid?> ResolveExerciseIdAsync(string? rawHost, CancellationToken cancellationToken)
+            => Task.FromResult(_resolvedExerciseId);
     }
 }

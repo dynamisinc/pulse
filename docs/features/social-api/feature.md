@@ -46,6 +46,7 @@ server-side provenance projection — rather than a chrome one; see Design notes
 | 02 | Post write API — `POST /posts` | SOC-003, COR-018 (NFR-004, XC-004, XC-002) | Complete | #271 |
 | 03 | SignalR feed host — real-time fan-out + polling fallback | SOC-083 (NFR-003, COR-001/002, XC-002) | Complete | #272 |
 | 04 | Persona read API — `GET /personas` | XC-005, COR-003 (COR-018, XC-002) | Complete | #273 |
+| 05 | Real-time role-scoped groups — keep staff-only pushes off participant connections (SECURITY / XC-002) | XC-002, SOC-052, COR-001 | Not Started | #346 |
 
 ## Dependencies
 **Phase B0, hard prerequisite for all four stories:** `backend-host/01-webapi-host-bootstrap` (the
