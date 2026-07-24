@@ -454,7 +454,10 @@ public sealed class ReactionLoopDriver
         // Broadcast AFTER commit so a freshly enqueued inject reaches the controller cockpit live (no manual
         // refresh) while staying consistent with a reconnect refetch. The scope stays server-derived
         // (registration.ExerciseId, COR-001). IEngineReviewBroadcaster is Scoped; resolve it per tick from the
-        // tick's scope, never inject it into this singleton driver.
+        // tick's scope, never inject it into this singleton driver. It is provided by AddEngineReview(), which
+        // Program.cs co-wires with AddReactionLoopHost() — GetRequiredService is deliberate: a loop registered
+        // WITHOUT the review services is a composition error that should fail loud, never silently drop the
+        // push (which would resurface the very "queue only updates on refresh" bug this broadcast fixes).
         if (reviewItems.Count > 0)
         {
             var broadcaster = scopedServices.GetRequiredService<IEngineReviewBroadcaster>();

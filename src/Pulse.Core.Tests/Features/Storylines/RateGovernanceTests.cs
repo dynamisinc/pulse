@@ -25,6 +25,19 @@ public class RateGovernanceTests
         RateGovernanceConfig.Default.MinMinutesBetweenInactionReactions.Should().Be(3);
     }
 
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(-100, 0)]
+    [InlineData(0, 0)]
+    [InlineData(5, 5)]
+    public void ReactionCadence_ClampsNegativeToZero(int provided, int expected)
+    {
+        // The cadence never stores a negative value (consistent with the other non-negative rate-governance
+        // fields); a negative clamps to 0 = the "cadence gate disabled" sentinel.
+        var config = RateGovernanceConfig.Default with { MinMinutesBetweenInactionReactions = provided };
+        config.MinMinutesBetweenInactionReactions.Should().Be(expected);
+    }
+
     [Fact]
     public void Config_FloorAboveCap_Throws()
     {
