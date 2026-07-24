@@ -70,7 +70,14 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
     clientAffinityEnabled: false
     siteConfig: {
       linuxFxVersion: 'DOTNETCORE|10.0'
-      use32BitWorkerProcess: true
+      // Keep the worker warm: without this, the Basic-tier app idle-unloads and cold-starts (~1 min of
+      // 5xx, incl. a transient BadImageFormatException JIT window on the .NET 10 runtime) on the next
+      // request — a poor pilot experience and the reason the deploy smoke test intermittently reds (#330).
+      alwaysOn: true
+      // Honest value: this is a LINUX App Service (linuxFxVersion above), where the worker is ALWAYS
+      // 64-bit and use32BitWorkerProcess is ignored by the platform. Set false to reflect reality and
+      // avoid the misleading Windows-ism (flipping it is a no-op here; the real cold-start fix is alwaysOn).
+      use32BitWorkerProcess: false
       minTlsVersion: '1.2'
       ftpsState: 'FtpsOnly'
       http20Enabled: false
