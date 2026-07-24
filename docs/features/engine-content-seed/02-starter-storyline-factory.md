@@ -88,3 +88,11 @@ returns a storyline in `StorylinePhase.Seeded` at scenario minute 0; `Participat
 citizens-first order exactly for the six-handle input; a custom `responseWindowMinutes` is honored, and
 an out-of-bound value (e.g. `0` or `500`) is clamped into `[1, 180]`; `ExerciseId` round-trips exactly for
 two different exercise ids called back to back (no shared static state leaking between calls).
+
+**Delivered tests** (`Pulse.WebApi.Tests/Features/Ops/EngineContentSeed/StarterStorylineFactoryTests.cs`, pure `[Fact]`/`[Theory]`):
+- `Build_SetsTheCannedFairhavenConstants` (AC1 — title/expectation/curve/hashtags)
+- `Build_OrdersParticipatingPersonasCitizensFirst` + `Build_AppendsUnknownHandlesLastWithoutDropping` (AC1 — order)
+- `Build_DefaultsResponseWindowToThreeDemoTunedMinutes` / `Build_HonorsACustomResponseWindow` / `Build_ClampsAnOutOfBoundResponseWindow` (AC2)
+- `Build_ArmsTheStorylineAtScenarioMinuteZero` (AC3 — `.Seed(0)`)
+- `Build_RoundTripsTheExerciseId` (AC4 — COR-001)
+- `Build_IsStateless_TwoCallsYieldIndependentStorylinesForDifferentExercises` (AC5 — pure/stateless)
