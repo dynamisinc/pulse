@@ -81,7 +81,12 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'FtpsOnly'
       http20Enabled: false
-      webSocketsEnabled: false
+      // Required for the in-process SignalR hub (/hubs/exercise) — Azure App Service blocks the WebSocket
+      // upgrade unless this is on, so with it false the controller review queue and the participant feed
+      // both silently fall back to "refresh to see" (no live pushes). The negotiate + CORS already work
+      // (platform CORS below sets supportCredentials); the WS transport was the missing piece. Only relevant
+      // while the hub is self-hosted (signalRConnectionString empty); Azure SignalR Service would offload it.
+      webSocketsEnabled: true
       cors: frontendUrl != '' ? {
         allowedOrigins: [frontendUrl]
         supportCredentials: true
