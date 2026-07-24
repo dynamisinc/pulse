@@ -37,6 +37,23 @@ public sealed record RateGovernanceConfig
     public int MinBelievableActivity { get; init; }
 
     /// <summary>
+    /// Minimum scenario minutes between successive engine reactions to the SAME storyline's ongoing,
+    /// still-unaddressed silence — the per-storyline escalation cadence (ADP-011). Prevents the level-style
+    /// inaction trigger from re-firing every tick and flooding the review queue with near-identical bursts;
+    /// the very first reaction still fires immediately when the window opens. Default 3 scenario minutes;
+    /// tunable per exercise. A value of <c>0</c> disables the cadence gate (pre-cadence level behaviour); a
+    /// negative value is clamped to <c>0</c> so the stored value is never negative (consistent with the other
+    /// non-negative rate-governance fields).
+    /// </summary>
+    public int MinMinutesBetweenInactionReactions
+    {
+        get => _minMinutesBetweenInactionReactions;
+        init => _minMinutesBetweenInactionReactions = Math.Max(0, value);
+    }
+
+    private readonly int _minMinutesBetweenInactionReactions = 3;
+
+    /// <summary>
     /// Defaults sized against NFR-002 / §4.1: the cap matches the peak generated rate (~60/min) and the
     /// floor sits near the ambient-lull baseline (~a handful/min). Tunable per exercise.
     /// </summary>

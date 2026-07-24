@@ -190,4 +190,43 @@ public class StorylineTests
         storyline.MinutesInPhase(34).Should().Be(24);
         storyline.MinutesInPhase(5).Should().Be(0, "time-in-phase is never negative even if the clock is behind entry");
     }
+
+    [Fact]
+    public void RecordEngineReaction_SetsTheMinute_AndIsMonotonic()
+    {
+        var storyline = NewStoryline();
+        storyline.LastEngineReactionScenarioMinute.Should().BeNull("the engine has not reacted to this storyline yet");
+
+        storyline.RecordEngineReaction(20);
+        storyline.LastEngineReactionScenarioMinute.Should().Be(20);
+
+        storyline.RecordEngineReaction(35);
+        storyline.LastEngineReactionScenarioMinute.Should().Be(35, "a later reaction advances the cadence marker");
+
+        storyline.RecordEngineReaction(30);
+        storyline.LastEngineReactionScenarioMinute.Should().Be(
+            35, "a smaller minute never moves the marker backward — the cadence marker is monotonic");
+    }
+
+    [Fact]
+    public void RecordEngineReaction_NegativeMinute_Throws()
+    {
+        var storyline = NewStoryline();
+        var act = () => storyline.RecordEngineReaction(-1);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void RecordEngineReaction_DoesNotResetTheSilenceClock()
+    {
+        var storyline = NewStoryline();
+        var clock = new FakeScenarioClock();
+        storyline.Seed(0);
+        storyline.Tick(clock.Set(30)); // 30 scenario minutes of official silence accrue
+
+        storyline.RecordEngineReaction(30);
+
+        storyline.MinutesSinceLastOfficialResponse.Should().Be(
+            30, "an engine reaction is not an official response — the crowd keeps building while officials stay silent");
+    }
 }

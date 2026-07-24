@@ -101,6 +101,15 @@ public sealed class Storyline
     public int LastTickScenarioMinute { get; private set; }
 
     /// <summary>
+    /// The scenario minute the engine last generated an inaction reaction for this storyline (<c>null</c> = the
+    /// engine has never reacted to it yet). Drives the reaction-cadence gate in the observe stage so the loop
+    /// does not re-react to the same ongoing silence every tick. NOTE: this is distinct from
+    /// <see cref="MinutesSinceLastOfficialResponse"/> — an engine reaction is NOT an official response and must
+    /// NOT reset the silence clock (the crowd's anxiety keeps building while officials stay silent).
+    /// </summary>
+    public int? LastEngineReactionScenarioMinute { get; private set; }
+
+    /// <summary>
     /// Creates a storyline in <see cref="StorylinePhase.Dormant"/> with all §1.1 fields populated and the
     /// reserved <see cref="ExpectedActionRef"/> / <see cref="RumorRefs"/> slots present. Call
     /// <see cref="Seed"/> to arm it.
@@ -361,6 +370,21 @@ public sealed class Storyline
 
         var detail = $"{FormatTarget(from)} → {FormatTarget(target)}";
         return new SteeringActionLogged(Id, SteeringActionKind.TargetChanged, detail, scenarioMinute);
+    }
+
+    /// <summary>
+    /// Records that the engine generated an inaction reaction for this storyline at
+    /// <paramref name="scenarioMinute"/>, so the observe stage's reaction-cadence gate suppresses re-reacting
+    /// to the same ongoing silence until the configured cadence elapses (ADP-011). Set monotonically — a
+    /// later, smaller minute never moves it backward. Does NOT touch
+    /// <see cref="MinutesSinceLastOfficialResponse"/>: an engine reaction is not an official response.
+    /// </summary>
+    /// <param name="scenarioMinute">The scenario minute the reaction was generated, non-negative.</param>
+    public void RecordEngineReaction(int scenarioMinute)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(scenarioMinute);
+
+        LastEngineReactionScenarioMinute = Math.Max(LastEngineReactionScenarioMinute ?? scenarioMinute, scenarioMinute);
     }
 
     /// <summary>Scenario minutes the storyline has spent in its current phase, given the current scenario minute.</summary>

@@ -64,6 +64,45 @@ public class ObserveStageTests
     }
 
     [Fact]
+    public void ReactedWithinTheCadence_SuppressesAFreshTrigger()
+    {
+        var s = SeededStoryline(window: 20);
+        var clock = new FakeScenarioClock();
+        s.Tick(clock.Set(20)); // window elapses → Escalating, silence = 20
+        s.RecordEngineReaction(20); // the engine just reacted at minute 20
+
+        // Two scenario minutes later the storyline is still silent, but the cadence (3) has not elapsed, so
+        // observe does NOT re-raise — the loop stops re-reacting to the same ongoing silence every tick (ADP-011).
+        ObserveStage.Observe([s], NoAddressing, clock.Set(22), minMinutesBetweenReactions: 3)
+            .InactionTriggers.Should().BeEmpty("the engine reacted 2 minutes ago; cadence 3 has not elapsed");
+    }
+
+    [Fact]
+    public void OnceTheCadenceElapses_RaisesTheTriggerAgain()
+    {
+        var s = SeededStoryline(window: 20);
+        var clock = new FakeScenarioClock();
+        s.Tick(clock.Set(20));
+        s.RecordEngineReaction(20);
+
+        // minute - last (23 - 20) >= cadence 3 → the still-unaddressed silence re-fires (escalation continues).
+        ObserveStage.Observe([s], NoAddressing, clock.Set(23), minMinutesBetweenReactions: 3)
+            .InactionTriggers.Should().ContainSingle("the cadence elapsed, so the ongoing silence re-fires");
+    }
+
+    [Fact]
+    public void ANeverReactedStoryline_FiresImmediately_EvenWithACadence()
+    {
+        var s = SeededStoryline(window: 20);
+        var clock = new FakeScenarioClock();
+        s.Tick(clock.Set(20)); // window blows; the engine has never reacted (LastEngineReactionScenarioMinute == null)
+
+        // The first reaction is immediate when the window opens — the cadence only gates RE-reaction.
+        ObserveStage.Observe([s], NoAddressing, clock, minMinutesBetweenReactions: 3)
+            .InactionTriggers.Should().ContainSingle("a never-reacted storyline is never suppressed by the cadence");
+    }
+
+    [Fact]
     public void AnOffPlatformMarker_IsSurfacedAsAnAddressingCandidate_NotMatchedHere()
     {
         var s = SeededStoryline();
