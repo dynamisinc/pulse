@@ -24,12 +24,13 @@
  * `actingHumanId` + `timeZone`; scope is resolved server-side from the
  * session, exactly like `liveReviewActions`'s `actionBody`.
  *
- * AWAITED, NOT FIRE-AND-FORGET. Unlike the review actions (whose synchronous
- * contract forbids awaiting), `useEngineControl.setMode` DOES await this
- * promise so it can revert its optimistic local update on failure — a kill
- * switch must never claim a safety state the backend didn't actually apply.
- * `setMode` here normalizes the axios response to `Promise<void>`; callers
- * decide how to handle rejection.
+ * OUTCOME-HANDLED, NOT FIRE-AND-FORGET. Unlike the review actions (which drop
+ * the promise entirely), `useEngineControl.setMode` attaches a `.catch(...)`
+ * handler to this promise — it does not block/await, but it DOES react to a
+ * rejection by reverting its optimistic local update, because a kill switch
+ * must never claim a safety state the backend didn't actually apply. `setMode`
+ * here normalizes the axios response to `Promise<void>`; callers decide how to
+ * handle rejection.
  */
 
 import { api } from '@/core/services/api'

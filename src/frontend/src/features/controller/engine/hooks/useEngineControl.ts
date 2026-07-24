@@ -241,11 +241,15 @@ export function useEngineControl(): UseEngineControlResult {
       // shown), but not reconciled. Reconciling needs the frontend/backend
       // autonomy-model alignment tracked separately.
       liveSetMode(mode, { actingHumanId: identity.actingHumanId, timeZone }).catch(() => {
-        // Only revert if OUR optimistic value is still the live one — a newer
-        // setMode supersedes us and owns the state, so a stale rejection must
-        // not clobber it (rapid re-toggle safety).
-        if (getSnapshot(exerciseId).mode === next.mode) {
-          setFor(exerciseId, current)
+        // Revert ONLY the mode, and only if OUR optimistic mode is still the
+        // live one — a newer setMode supersedes us and owns the mode, so a
+        // stale rejection must not clobber it (rapid re-toggle safety). Merge
+        // over the CURRENT snapshot rather than restoring the whole `current`,
+        // so an in-flight `degrade()`/`restore()` (which changes `degraded`,
+        // not `mode`) is preserved instead of being wiped by the revert.
+        const live = getSnapshot(exerciseId)
+        if (live.mode === next.mode) {
+          setFor(exerciseId, { ...live, mode: current.mode })
         }
       })
     },

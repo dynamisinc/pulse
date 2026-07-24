@@ -13,7 +13,7 @@
  * `api.post` is mocked (`vi.mock('@/core/services/api')`, hoisted above
  * imports by Vitest) so no real network call is made.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setMode } from './liveEngineControlActions'
 
 const postMock = vi.fn()
@@ -27,6 +27,12 @@ vi.mock('@/core/services/api', () => ({
 const CTX = { actingHumanId: 'human-controller-01', timeZone: 'America/New_York' }
 
 describe('liveEngineControlActions.setMode', () => {
+  // Reset between tests so a stale call can't satisfy a later toHaveBeenCalledWith
+  // (which matches ANY prior call) and mask a wrong request.
+  beforeEach(() => {
+    postMock.mockReset()
+  })
+
   it("'stop' POSTs the kill-switch endpoint with mode: 'full-stop'", async () => {
     postMock.mockResolvedValue({ data: {} })
 
