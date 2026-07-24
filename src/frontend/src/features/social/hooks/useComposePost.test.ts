@@ -2,23 +2,56 @@
  * features/social/hooks/useComposePost.test.ts
  * ---------------------------------------------------------------------------
  * Pure-logic coverage for the compose helpers that back `<Composer>` (story
- * 01; SOC-001, NFR-004). These functions have no React/provider dependency, so
- * they are tested directly:
+ * 01; SOC-001, NFR-004), PLUS the mock-mode publish-path regression coverage
+ * for the UAT live-compose fix:
  *  - `parseHashtags` / `parseMentions` extract distinct tags/mentions for the
  *    model/telemetry (S2 does not navigate them);
  *  - `validateImageFiles` enforces the media rules (0–4 images, MIME, size)
- *    and rejects a video with the documented inline-video follow-up message.
+ *    and rejects a video with the documented inline-video follow-up message;
+ *  - MOCK mode's `publish()` is UNCHANGED by the live-compose addition: it
+ *    still calls `createPost` + `onPosted`, and never touches
+ *    `livePostActions.publishPost`.
  *
- * (The hook's stateful/publish behavior is exercised end-to-end through the
- * real component in `../components/Composer.test.tsx`.)
+ * (The mock-mode publish path is ALSO exercised end-to-end through the real
+ * component in `../components/Composer.test.tsx`; the LIVE-mode branch — which
+ * needs `@/core/config/mockData` mocked file-wide — lives in the sibling
+ * `useComposePost.live.test.ts`, mirroring the `useReaction.readonly.test.ts`
+ * split: `vi.mock` is hoisted per file, so a scenario needing a different mock
+ * shape gets its own file rather than fighting the existing ones.)
  */
-import { describe, expect, it } from 'vitest'
+import type { ReactNode } from 'react'
+import { createElement } from 'react'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ExerciseContextProvider } from '@/core/exerciseContext'
+import { SessionProvider } from '@/core/auth'
+import type { Post } from '@/features/social'
 import {
   MAX_IMAGE_BYTES,
   parseHashtags,
   parseMentions,
+  useComposePost,
   validateImageFiles,
 } from './useComposePost'
+import { publishPost } from '../services/livePostActions'
+
+// The live-persist seam is mocked here purely to assert MOCK mode never calls
+// it — `USE_MOCK_DATA` is on by default in this test environment (Vitest runs
+// with `import.meta.env.DEV`), so the hook's own branch takes the mock path
+// for real; nothing about `@/core/config/mockData` is mocked in this file.
+vi.mock('../services/livePostActions', () => ({
+  publishPost: vi.fn(),
+}))
+
+// This file is `.ts`, not `.tsx` (matches `useReaction.readonly.test.ts`'s own
+// note) — `createElement` stands in for JSX in the provider wrapper.
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(
+    ExerciseContextProvider,
+    null,
+    createElement(SessionProvider, null, children),
+  )
+}
 
 function imageFile(name: string, type = 'image/png', size = 1024): File {
   const file = new File(['x'], name, { type })
@@ -85,5 +118,28 @@ describe('validateImageFiles', () => {
     const result = validateImageFiles([imageFile('clip.mp4', 'video/mp4')], 0)
     expect(result.media).toEqual([])
     expect(result.error).toMatch(/inline video is coming soon/i)
+  })
+})
+
+describe('useComposePost — MOCK mode publish() is unchanged by the live-compose fix', () => {
+  afterEach(() => {
+    vi.mocked(publishPost).mockClear()
+  })
+
+  it('publishes via createPost + onPosted, and never calls livePostActions.publishPost', async () => {
+    const onPosted = vi.fn<(post: Post) => void>()
+    const { result } = renderHook(() => useComposePost({ onPosted }), { wrapper })
+
+    await waitFor(() => expect(result.current.canPost).toBe(true))
+
+    act(() => result.current.setText('Boil-water advisory lifted for zone 3.'))
+    act(() => result.current.publish())
+
+    await waitFor(() => expect(onPosted).toHaveBeenCalledTimes(1))
+    const post = onPosted.mock.calls[0]?.[0]
+    expect(post?.text).toBe('Boil-water advisory lifted for zone 3.')
+    expect(post?.origin).toBe('participant')
+
+    expect(publishPost).not.toHaveBeenCalled()
   })
 })

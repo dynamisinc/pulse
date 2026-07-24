@@ -22,14 +22,21 @@
  * THE WIRED LOOP (the thing this wave demonstrates):
  *   ⌘K / Personas tool → CommandPalette → PersonaPicker (search/select) sets
  *   the active persona → the persona-dock host opens with the PersonaContextPanel
- *   + PersonaComposer for that persona → the controller fires → PersonaComposer
+ *   + PersonaComposer for that persona → the controller fires → `useComposeAsPersona`
  *   publishes through the shipped `createPost` (origin controller-as-persona,
  *   actingHumanId = this controller, scenario-time stamped, sanitized,
  *   telemetried) and its `onPublished` appends the new Post to the shared
- *   `postStore` → the participant Social feed at `/shell` reads that store live
- *   and shows the post at the top (scenario time; the controller origin is never
- *   in the participant view — `toParticipantView` strips it). COR-018/SOC-003/
- *   COR-053/NFR-004/XC-004/COR-001 all hold by construction of the reused seams.
+ *   `postStore` (this console's OWN-TAB optimistic view only). REACHING an
+ *   actual participant is a separate, mode-dependent path: under mock data the
+ *   in-tab `postStore` append is what the participant feed's real-time source
+ *   (`feedStreamSource`'s mock adapter, feeds-discovery/04) buffers behind the
+ *   "▲ N new posts" pill; against the live backend `useComposeAsPersona`
+ *   ADDITIONALLY fire-and-forgets `livePostActions.publishPost` (UAT fix), so
+ *   the post is actually PERSISTED and reaches every participant via
+ *   `useFeed`'s baseline + the SignalR-sourced pill — the controller origin is
+ *   never in the participant view either way (`toParticipantView` strips it).
+ *   COR-018/SOC-003/COR-053/NFR-004/XC-004/COR-001 all hold by construction of
+ *   the reused seams.
  *
  * SERIAL INTEGRATION — the engine review cockpit's edit composer (feature:
  * engine-review-cockpit). `ControllerConsole` docks `<ReviewQueue>` itself; this

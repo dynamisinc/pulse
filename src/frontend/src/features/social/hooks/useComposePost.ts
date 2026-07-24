@@ -13,15 +13,29 @@
  *  - Parsed `#hashtags` / `@mentions` for the model/telemetry (SOC-001). S2
  *    does NOT navigate/link them — it only parses + exposes them.
  *  - `publish()`, the single sanctioned publish path: it assembles a
- *    `CreatePostInput` and calls `createPost` from `@/features/social`, which
- *    is the ONE place sanitization (NFR-004) and the `'post'` telemetry event
- *    (XC-004) happen. This hook re-implements NEITHER — it only supplies the
- *    correct inputs (scenario time COR-053, exercise-scoped stamping XC-002).
+ *    `CreatePostInput` and, behind the ONE `USE_MOCK_DATA` flip point
+ *    (`@/core/config/mockData`, WAVE0-REVIEW precedent 15):
+ *      - MOCK: calls `createPost` from `@/features/social` — the ONE place
+ *        sanitization (NFR-004) and the `'post'` telemetry event (XC-004)
+ *        happen — then fires `onPosted` with the created `Post` so the host
+ *        can refresh its (in-tab) feed.
+ *      - LIVE (UAT fix): fires `livePostActions.publishPost` — a fire-and-
+ *        forget `POST /api/posts` (`.catch(() => {})`) — and does NOT call
+ *        `createPost` or `onPosted`. The published post reaches every
+ *        participant, INCLUDING the author, via the backend's `PostReceived`
+ *        SignalR broadcast and the "▲ N new posts" pill (`useFeedStream`,
+ *        feeds-discovery/04) once `useFeed`'s baseline resolve/the pill tap
+ *        picks it up — never a client-side optimistic insert here (which the
+ *        feed's persona-cast resolution would drop anyway, and which would
+ *        double the XC-004 telemetry the backend now emits authoritatively).
+ *    Either way the draft (`text`/`media`/`mediaError`) is cleared on publish.
  *
  * TWO-WORLDS / ISOLATION
  *  - `exerciseId`/`timeZone` come from `useExerciseContext()` and are used ONLY
  *    to STAMP the created post + its telemetry envelope — never as a fetch
- *    scoping param (COR-001/XC-002).
+ *    scoping param (COR-001/XC-002). `livePostActions.publishPost` drops
+ *    `exerciseId` from the wire body entirely (COR-001) — the server stamps
+ *    scope from the session.
  *  - `authorPersonaId`/`actingHumanId` come from `useSession()` (COR-018). If
  *    the session has no bound persona (`personaId` undefined) there is no
  *    identity to post as, so `canPost` is false and `publish()` is a no-op.
@@ -31,7 +45,8 @@
  *
  * SCENARIO TIME (COR-053): `scenarioTime` is `scenarioNow().toISOString()` from
  * `@/core/clock` — never wall-clock (`new Date()`/`Date.now()` are lint-banned
- * on this path). `createPost` stamps the telemetry `wallClockTime` itself.
+ * on this path). `createPost` stamps the telemetry `wallClockTime` itself
+ * (mock mode); the backend stamps its own wall-clock in live mode.
  *
  * MEDIA (story AC — minimal validated stub): Phase-1 `PostMedia` is image-only
  * (`{kind:'image',alt}`), so the attach affordance validates + accepts 0–4
@@ -47,7 +62,9 @@ import { useCallback, useMemo, useState } from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { scenarioNow } from '@/core/clock'
-import { createPost, type Post, type PostMedia } from '@/features/social'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
+import { createPost, type CreatePostInput, type Post, type PostMedia } from '@/features/social'
+import { publishPost } from '../services/livePostActions'
 import { sanitizeText } from '../services/sanitize'
 
 /** Default per-exercise character limit (SOC-001); overridable via a prop. */
@@ -234,7 +251,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     if (text.trim().length === 0 && media.length === 0) return
     if ([...text].length > charLimit) return
 
-    const post = createPost({
+    const input: CreatePostInput = {
       exerciseId,
       timeZone,
       scenarioTime: scenarioNow().toISOString(),
@@ -243,12 +260,26 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
       text,
       ...(media.length > 0 ? { media: [...media] } : {}),
       origin: 'participant',
-    })
+    }
+
+    if (USE_MOCK_DATA) {
+      const post = createPost(input)
+      onPosted?.(post)
+    } else {
+      // LIVE (UAT fix): POST-only, fire-and-forget. NEVER call `createPost`
+      // here (would double the XC-004 telemetry the backend now emits
+      // authoritatively) and NEVER call `onPosted` (there is no locally-
+      // created `Post` to hand back, and an optimistic insert would be
+      // dropped by the feed's persona-cast resolution anyway) — the
+      // SignalR "new posts" pill (`useFeedStream`) is what surfaces this
+      // post, to every participant including the author, once the request
+      // lands (see the module header).
+      publishPost(input).catch(() => {})
+    }
 
     setText('')
     setMedia([])
     setMediaError(undefined)
-    onPosted?.(post)
   }, [
     exerciseId,
     timeZone,
