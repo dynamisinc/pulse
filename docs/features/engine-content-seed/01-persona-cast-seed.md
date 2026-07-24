@@ -110,3 +110,10 @@ seeding exercise A never creates or reads rows scoped to exercise B (extends the
 suite, `IgnoreQueryFilters()` + explicit predicate proven against a second exercise's pre-existing
 same-handle personas); each returned `SeededPersona.Dossier.VoiceNotes` is non-empty and distinct across
 personas (a quick sanity check that the diversity gate has real material, not five copies of one note).
+
+**Delivered tests** (`Pulse.WebApi.Tests/Features/Ops/EngineContentSeed/PersonaCastSeederTests.cs`, `[RequiresDockerFact]`):
+- `SeedAsync_FreshExercise_CreatesExactlySixPersonas_WithTheExactHandlesKindVerified` (AC1, AC4)
+- `SeedAsync_RunAgain_CreatesNoDuplicates_AndReturnsTheSameIds` (AC2)
+- `SeedAsync_EachReturnedDossier_HasNonEmptyDistinctVoiceNotes_AndRealTypeAndStyle` (AC3)
+- `SeedAsync_ForExerciseA_NeverCreatesOrReadsExerciseBRows_EvenWithSameHandles` (AC5 — isolation, fails closed)
+- `SeedAsync_StoredFreeText_PassesThroughTheSanitizationFunnel` (AC6 — NFR-004)
