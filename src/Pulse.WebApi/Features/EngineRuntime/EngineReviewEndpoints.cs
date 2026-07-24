@@ -15,8 +15,8 @@ using Pulse.Core.Features.Generation.Services;
 
 /// <summary>
 /// The controller review-cockpit API (story 02) on <c>/api/engine</c>: the exercise-scoped queue GET plus the
-/// approve / edit / veto / re-roll / batch-approve review actions and the swamped-mode + kill-switch autonomy
-/// controls. Minimal-API extension methods (the <c>Add*</c>/<c>Map*</c> convention) — the orchestrator wires
+/// approve / edit / veto / re-roll / batch-approve review actions and the swamped-mode + kill-switch + restore
+/// autonomy controls. Minimal-API extension methods (the <c>Add*</c>/<c>Map*</c> convention) — the orchestrator wires
 /// the single <see cref="AddEngineReview"/> / <see cref="MapEngineReview"/> pair into <c>Program.cs</c> AFTER
 /// this story is Gate-2 clean (paired with the mock→live flip of <c>useReviewQueue</c>, a SEPARATE step); no
 /// builder edits <c>Program.cs</c>.
@@ -82,6 +82,7 @@ public static class EngineReviewEndpoints
         cockpit.MapPost("/api/engine/review/batch-approve", BatchApproveAsync);
         cockpit.MapPost("/api/engine/autonomy/swamped-mode", SetSwampedModeAsync);
         cockpit.MapPost("/api/engine/autonomy/kill-switch", EngageKillSwitchAsync);
+        cockpit.MapPost("/api/engine/autonomy/restore", RestoreAsync);
 
         return endpoints;
     }
@@ -237,6 +238,21 @@ public static class EngineReviewEndpoints
         }
 
         var result = await service.EngageKillSwitchAsync(mode, request.ToInput(), cancellationToken);
+        return MapAutonomy(result);
+    }
+
+    /// <summary><c>POST /api/engine/autonomy/restore</c> — the controller UNDO for the kill switch / degraded clamp; resumes generation at the preserved base levels (§8.2 human-only raise).</summary>
+    private static async Task<IResult> RestoreAsync(
+        EngineReviewActionRequest? request,
+        EngineReviewService service,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return Results.BadRequest("A JSON restore body is required.");
+        }
+
+        var result = await service.RestoreFromSafetyAsync(request.ToInput(), cancellationToken);
         return MapAutonomy(result);
     }
 

@@ -361,6 +361,40 @@ public sealed class EngineReviewService
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 
+    /// <summary>
+    /// The controller UNDO for the kill switch (ADP-042) / degraded-mode clamp: lifts the active safety clamp
+    /// for the current exercise so generation resumes, preserving the base levels underneath (per-storyline
+    /// configuration is not lost) and clearing the degraded alert. Delegates to the built
+    /// <see cref="EngineAutonomyState.RestoreFromSafety"/>, the §8.2 human-only raise (automation never
+    /// restores). Restoring an already-running engine (nothing clamped) is an idempotent no-op that STILL
+    /// succeeds — the domain call returns null and the state is simply unchanged.
+    /// </summary>
+    public async Task<EngineAutonomyResult> RestoreFromSafetyAsync(
+        EngineReviewActionInput input,
+        CancellationToken cancellationToken = default)
+    {
+        await Task.CompletedTask;
+
+        if (!TryResolveScope(out var exerciseId))
+        {
+            return EngineAutonomyResult.ScopeUnresolved();
+        }
+
+        if (string.IsNullOrWhiteSpace(input.ActingHumanId))
+        {
+            return EngineAutonomyResult.Invalid("actingHumanId is required (COR-018).");
+        }
+
+        // Resolve the SAME shared per-exercise state instance the reaction loop + auto-HOLD tick read (never a
+        // fresh Create) so a resumed clamp is visible to the loop immediately — this is load-bearing for the
+        // undo. Like the kill-switch / swamped-mode siblings, this control persists NO telemetry (mapping an
+        // autonomy change onto XC-004 is engine-telemetry-tuning's job, not yet built), so the returned
+        // (nullable) level change is discarded exactly as EngageKillSwitch discards EngineKillSwitchFired.
+        var state = _autonomy.GetOrCreate(exerciseId);
+        state.RestoreFromSafety(input.ActingHumanId, _clock.CurrentScenarioMinute(exerciseId));
+        return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
+    }
+
     // ---- Auto-HOLD tick (non-request-bound; silence is never approval, D5-014/1.1) --------------
 
     /// <summary>

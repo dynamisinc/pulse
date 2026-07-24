@@ -11,10 +11,28 @@
  *    `EngineAutonomyState.ResolveEffective`'s "stopped checked first" order —
  *    and `restore()` is the ONLY way to lift it, never automatic;
  *  - per-exercise scoping (COR-001): a different exercise never observes
- *    another exercise's kill-switch/degraded state.
+ *    another exercise's kill-switch/degraded state;
+ *  - MOCK <-> LIVE (UAT engine-pause fix): under `USE_MOCK_DATA` (the default
+ *    here, matching dev/test), `setMode` never reaches the live backend
+ *    action; toggled to live (a dedicated describe block below), it ALSO
+ *    calls `liveEngineControlActions.setMode` with the mode + acting
+ *    human/time zone, and reverts the optimistic flip on a rejected POST.
+ *    The `engine.autonomy_changed` telemetry emit happens in BOTH modes,
+ *    unconditionally — the backend kill-switch/restore endpoints mutate
+ *    in-memory state but emit no telemetry of their own, so this frontend
+ *    emit is the only audit trail (it is logged before the POST fires, so it
+ *    still stands even if the POST later rejects and the optimistic flip is
+ *    reverted).
  *
  * `@/core/exerciseContext` and the sibling `controllerIdentity` module are
  * mocked at the module boundary (mirrors `useSwampedMode.test.tsx`).
+ * `@/core/config/mockData` is mocked via a GETTER so the same test file can
+ * toggle `USE_MOCK_DATA` between describe blocks (default `true`; the
+ * live-mode block below flips it to `false` for its own tests only) — the
+ * getter is read fresh on every access, so `useEngineControl.ts`'s live
+ * `USE_MOCK_DATA` import binding reflects whichever value is current when
+ * `setMode` actually runs. `../services/liveEngineControlActions` is mocked
+ * wholesale (never a real network call).
  */
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -27,6 +45,7 @@ import {
   runningAutonomy,
 } from '../models/reviewContracts'
 import { useControllerIdentity, type ControllerIdentity } from '../../identity/controllerIdentity'
+import * as liveEngineControlActions from '../services/liveEngineControlActions'
 import { engineControlStore, useEngineControl } from './useEngineControl'
 
 vi.mock('@/core/exerciseContext', () => ({
@@ -36,8 +55,26 @@ vi.mock('../../identity/controllerIdentity', () => ({
   useControllerIdentity: vi.fn(),
 }))
 
+/**
+ * Toggled per-describe-block. Default `true` (mock mode — matches dev/UAT and
+ * every pre-existing test below). The live-mode describe block flips this to
+ * `false` for its own tests via a `beforeEach`; the top-level `beforeEach`
+ * resets it to `true` before every test so mock-mode coverage is unaffected.
+ */
+let useMockData = true
+vi.mock('@/core/config/mockData', () => ({
+  get USE_MOCK_DATA() {
+    return useMockData
+  },
+}))
+
+vi.mock('../services/liveEngineControlActions', () => ({
+  setMode: vi.fn(),
+}))
+
 const mockedUseExerciseContext = vi.mocked(useExerciseContext)
 const mockedUseControllerIdentity = vi.mocked(useControllerIdentity)
+const mockedLiveSetMode = vi.mocked(liveEngineControlActions.setMode)
 
 function scopeFor(exerciseId: string): ExerciseScope {
   return { exerciseId, exerciseName: 'Test Exercise', timeZone: 'America/New_York', status: 'active' }
@@ -63,6 +100,7 @@ beforeEach(() => {
   resetTelemetryBuffer()
   mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
   mockedUseControllerIdentity.mockReturnValue(identity())
+  useMockData = true
 })
 
 afterEach(() => {
@@ -116,6 +154,15 @@ describe('useEngineControl — kill switch (ADP-042)', () => {
     expect(result.current.mode).toBe('live')
     expect(result.current.effective).toEqual(runningAutonomy(AutonomyLevel.DelayedAuto))
     expect(autonomyEvents()).toHaveLength(2)
+  })
+
+  it('mock mode never fires the live backend action (fires NO backend POST)', () => {
+    const { result } = renderHook(() => useEngineControl())
+    act(() => result.current.setMode('suggest-only'))
+    act(() => result.current.setMode('stop'))
+    act(() => result.current.setMode('live'))
+
+    expect(mockedLiveSetMode).not.toHaveBeenCalled()
   })
 })
 
@@ -172,5 +219,73 @@ describe('useEngineControl — per-exercise scoping (COR-001)', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-bravo'))
     const bravo = renderHook(() => useEngineControl())
     expect(bravo.result.current.mode).toBe('live')
+  })
+})
+
+describe('useEngineControl — live mode (UAT engine-pause fix; USE_MOCK_DATA=false)', () => {
+  beforeEach(() => {
+    useMockData = false
+  })
+
+  it("setMode('stop') calls the live action with the mode + acting human/time zone, optimistically flips the store, and STILL emits the audit telemetry (the backend endpoint emits none of its own)", () => {
+    mockedLiveSetMode.mockResolvedValue(undefined)
+    const { result } = renderHook(() => useEngineControl())
+
+    act(() => result.current.setMode('stop'))
+
+    // Optimistic — the store flips immediately, without waiting on the POST.
+    expect(result.current.mode).toBe('stop')
+    expect(result.current.effective).toEqual(STOPPED_AUTONOMY)
+    expect(mockedLiveSetMode).toHaveBeenCalledWith('stop', {
+      actingHumanId: 'human-controller-01',
+      timeZone: 'America/New_York',
+    })
+    // The frontend emit is the ONLY audit trail — the backend endpoint mutates
+    // in-memory state but emits no telemetry of its own.
+    expect(autonomyEvents()).toHaveLength(1)
+    expect(autonomyEvents()[0]?.payload).toMatchObject({ cause: 'kill-switch', mode: 'stop' })
+  })
+
+  it("setMode('suggest-only') calls the live action with the right mode and emits telemetry", () => {
+    mockedLiveSetMode.mockResolvedValue(undefined)
+    const { result } = renderHook(() => useEngineControl())
+
+    act(() => result.current.setMode('suggest-only'))
+
+    expect(result.current.mode).toBe('suggest-only')
+    expect(mockedLiveSetMode).toHaveBeenCalledWith('suggest-only', {
+      actingHumanId: 'human-controller-01',
+      timeZone: 'America/New_York',
+    })
+    expect(autonomyEvents()).toHaveLength(1)
+    expect(autonomyEvents()[0]?.payload).toMatchObject({ cause: 'kill-switch', mode: 'suggest-only' })
+  })
+
+  it('reverts the optimistic flip to the prior mode when the live POST rejects, but keeps the telemetry already logged for the attempted change', async () => {
+    mockedLiveSetMode.mockRejectedValue(new Error('network down'))
+    const { result } = renderHook(() => useEngineControl())
+
+    await act(async () => {
+      result.current.setMode('stop')
+      // Flush the microtask queue so the rejected promise's `.catch` runs.
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.mode).toBe('live')
+    expect(result.current.effective).toEqual(runningAutonomy(AutonomyLevel.DelayedAuto))
+    // The attempted change was still logged — the emit happens before the
+    // POST fires, so a later rejection/revert does not erase the audit trail.
+    expect(autonomyEvents()).toHaveLength(1)
+    expect(autonomyEvents()[0]?.payload).toMatchObject({ cause: 'kill-switch', mode: 'stop' })
+  })
+
+  it('is a no-op (no telemetry, no live POST) when set to its current mode', () => {
+    const { result } = renderHook(() => useEngineControl())
+    act(() => result.current.setMode('live'))
+
+    expect(result.current.mode).toBe('live')
+    expect(mockedLiveSetMode).not.toHaveBeenCalled()
+    expect(autonomyEvents()).toHaveLength(0)
   })
 })

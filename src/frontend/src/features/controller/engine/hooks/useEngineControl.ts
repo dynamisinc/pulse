@@ -16,6 +16,24 @@
  *    there is no path back UP from `'stop'`/`'suggest-only'` other than the
  *    controller explicitly calling `setMode('live')` again. The engine never
  *    calls this itself.
+ *
+ * MOCK <-> LIVE (UAT engine-pause fix; COR-001/018). The local per-exercise
+ * store above is ALWAYS the optimistic UI source `<EngineControlBar>` /
+ * `DraftTimerDriver` read `effective` from, in BOTH modes, and the
+ * `engine.autonomy_changed` telemetry below is ALWAYS emitted in BOTH modes
+ * too — the backend `kill-switch`/`restore` endpoints mutate in-memory
+ * autonomy state but emit no telemetry of their own (no autonomy event type
+ * exists there yet), so this frontend emit is the ONLY audit trail of a
+ * steering action; skipping it live would leave zero record. Behind the ONE
+ * `USE_MOCK_DATA` flag (`@/core/config/mockData`), `setMode` additionally:
+ *   - mock: stops there (unchanged legacy behavior — no backend call);
+ *   - live (`USE_MOCK_DATA === false`): ALSO fires
+ *     `liveEngineControlActions.setMode` (the real `kill-switch`/`restore`
+ *     POST) and, if it rejects, REVERTS the optimistic update — the kill
+ *     switch must never claim a safety state that didn't actually take (the
+ *     telemetry already logged the attempted change either way). `degrade`/
+ *     `restore` (the mock provider-degraded clamp) are UNCHANGED — a separate
+ *     mock, not part of this flip.
  *  - `degrade(reason)` / `restore()` — the AUTOMATIC provider-degraded clamp
  *    (mirrors `DegradeToSuggest` / `RestoreFromSafety`): a mock stand-in for a
  *    generation-provider circuit breaker tripping. `degrade` only ever LOWERS
@@ -55,6 +73,7 @@
 
 import { useCallback, useSyncExternalStore } from 'react'
 import { scenarioNow } from '@/core/clock'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
@@ -65,6 +84,7 @@ import {
   runningAutonomy,
   type EffectiveAutonomy,
 } from '../models/reviewContracts'
+import { setMode as liveSetMode } from '../services/liveEngineControlActions'
 
 /** The kill switch's three positions (ADP-042, D5 §2). */
 export type EngineMode = 'live' | 'suggest-only' | 'stop'
@@ -200,10 +220,40 @@ export function useEngineControl(): UseEngineControlResult {
       const current = getSnapshot(exerciseId)
       if (current.mode === mode) return
       const next: EngineControlState = { ...current, mode }
+      // Optimistic in BOTH modes — the console must flip instantly either way.
       setFor(exerciseId, next)
+      // Logged in BOTH modes too — the backend kill-switch/restore endpoints
+      // emit no telemetry of their own, so this is the only audit trail.
       emit('kill-switch', next)
+
+      if (USE_MOCK_DATA) return
+
+      // Live: additionally fire the real kill-switch/restore POST. On
+      // rejection, REVERT the optimistic flip above — the switch must never
+      // claim a safety state (e.g. "STOPPED") that the backend didn't
+      // actually apply. The telemetry above still stands as the record of the
+      // attempted change.
+      //
+      // KNOWN GAP (out of scope here): the endpoints return the authoritative
+      // EngineAutonomyStateDto, but we discard it and keep the optimistic
+      // derivation, so a 'live' restore shows DelayedAuto while a default
+      // exercise resumes at its Suggest base — safe (more restrained than
+      // shown), but not reconciled. Reconciling needs the frontend/backend
+      // autonomy-model alignment tracked separately.
+      liveSetMode(mode, { actingHumanId: identity.actingHumanId, timeZone }).catch(() => {
+        // Revert ONLY the mode, and only if OUR optimistic mode is still the
+        // live one — a newer setMode supersedes us and owns the mode, so a
+        // stale rejection must not clobber it (rapid re-toggle safety). Merge
+        // over the CURRENT snapshot rather than restoring the whole `current`,
+        // so an in-flight `degrade()`/`restore()` (which changes `degraded`,
+        // not `mode`) is preserved instead of being wiped by the revert.
+        const live = getSnapshot(exerciseId)
+        if (live.mode === next.mode) {
+          setFor(exerciseId, { ...live, mode: current.mode })
+        }
+      })
     },
-    [exerciseId, emit],
+    [exerciseId, emit, identity.actingHumanId, timeZone],
   )
 
   const degrade = useCallback(

@@ -62,6 +62,7 @@ public sealed class EngineReviewEndpointsTests
         CountRoutes(dataSource, "POST", "/api/engine/review/batch-approve").Should().Be(1);
         CountRoutes(dataSource, "POST", "/api/engine/autonomy/swamped-mode").Should().Be(1);
         CountRoutes(dataSource, "POST", "/api/engine/autonomy/kill-switch").Should().Be(1);
+        CountRoutes(dataSource, "POST", "/api/engine/autonomy/restore").Should().Be(1);
     }
 
     [RequiresDockerFact]
@@ -247,6 +248,55 @@ public sealed class EngineReviewEndpointsTests
             new { actingHumanId = "lead-1", mode = "nope" });
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [RequiresDockerFact]
+    public async Task Restore_AfterKillSwitch_Returns200_WithClampLifted()
+    {
+        var exerciseId = Guid.NewGuid();
+
+        await using var host = await StartHostAsync(exerciseId);
+
+        // Clamp first (full stop) so there is a live clamp to lift, then restore over the SAME singleton state.
+        var kill = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/kill-switch", UriKind.Relative),
+            new { actingHumanId = "lead-1", mode = "full-stop" });
+        kill.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/restore", UriKind.Relative),
+            new { actingHumanId = "lead-1", timeZone = "America/Chicago" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        doc.RootElement.GetProperty("safetyClampActive").GetBoolean().Should().BeFalse("restore lifts the kill-switch clamp");
+        doc.RootElement.GetProperty("generationStopped").GetBoolean().Should().BeFalse("restore resumes generation");
+    }
+
+    [RequiresDockerFact]
+    public async Task Restore_MissingBody_Returns400()
+    {
+        var exerciseId = Guid.NewGuid();
+
+        await using var host = await StartHostAsync(exerciseId);
+
+        // An explicit JSON 'null' body binds the nullable request to null → the handler's own 400 guard fires.
+        var content = new StringContent("null", System.Text.Encoding.UTF8, "application/json");
+        var response = await host.Client.PostAsync(new Uri("/api/engine/autonomy/restore", UriKind.Relative), content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "a missing restore body is rejected before the service");
+    }
+
+    [RequiresDockerFact]
+    public async Task Restore_UnresolvedScope_Returns401()
+    {
+        await using var host = await StartHostAsync(currentExerciseId: null);
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/restore", UriKind.Relative),
+            new { actingHumanId = "lead-1", timeZone = "America/Chicago" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "an unresolved scope fails closed, never a default/empty-200");
     }
 
     // ---- COR-005 staff-authorization gate (#286) ------------------------------------------------
