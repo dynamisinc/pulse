@@ -1,7 +1,8 @@
 # Implementation: Persona management & cast libraries
 
 > Staff-world authoring over the org library + exercise-scoped instances. Feeds E7 (console operates
-> personas) and E8 (voice notes drive generation). Backend not present yet.
+> personas) and E8 (voice notes drive generation). Only the persona READ endpoint (`GET /api/personas`, Social API B1) exists so far; this
+feature's management/write backend — template CRUD, a cast-seeding API, persona create — is not built yet.
 
 ## Per-story tech notes
 

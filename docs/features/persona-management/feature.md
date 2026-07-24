@@ -29,7 +29,9 @@ believable as these notes (COR-020).
 ## Dependencies
 Exercise-isolation (Persona/PersonaTemplate multi-instance, COR-003); org-library ownership
 (Organization). Feeds E7 persona-operation (the console operates these) and E8 (voice notes drive
-generation). Backend not present yet.
+generation). The persona READ endpoint (`GET /api/personas`, Social API B1) now exists; this feature's
+management/write backend — template CRUD, a cast-seeding API, persona create — is not built yet (the
+engine-side cast seeder #325 is the current persona-seeding path, not a management API).
 
 ## Design notes
 Staff world. Persona *types* (news outlet, agency, citizen, influencer, business, bad actor) drive
