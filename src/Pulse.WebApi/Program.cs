@@ -9,6 +9,7 @@ using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Ops.Bootstrap;
+using Pulse.WebApi.Features.Ops.EngineContentSeed;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 
@@ -111,6 +112,17 @@ builder.Services.AddSocialRealtimeHub();   // #272 exercise-grouped hub + IFeedB
 builder.Services.AddReactionLoopHost();    // #285 reaction-loop host + IEnginePublishService
 builder.Services.AddEngineReview();        // #286 review queue API + autonomy/safety wiring + SignalR push
 
+// Engine content seed (feature engine-content-seed, #324/#327) — orchestrator-wired. AddEngineContentSeed
+// registers the secret-gated POST /api/ops/seed-engine-content ops endpoint that seeds the persona cast +
+// a canned starter storyline and calls IReactionLoopRegistry.Register (the previously-unbuilt production
+// drive path #324 traced). Placed AFTER AddReactionLoopHost/AddEngineReview: it depends on
+// IReactionLoopRegistry being registered and shares AddEngineReview's EngineAutonomyRegistry SINGLETON via
+// GetOrCreate (the load-bearing shared-instance correctness point — a detached autonomy state would
+// desynchronize the loop from the cockpit's kill-switch/swamped-mode). Tolerant of DI order via TryAdd. It
+// reuses Authentication:Bootstrap:Secret (same X-Bootstrap-Secret header) — no new secret/infra; fails
+// closed to 404 when unconfigured. No middleware/ordering constraint (same as MapBootstrapEndpoints).
+builder.Services.AddEngineContentSeed(builder.Configuration);
+
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
 // (no cross-origin access at all) when the key is unset/empty rather than falling open.
@@ -205,6 +217,7 @@ app.MapSharedReadOnlyEndpoints();          // #63 POST /api/auth/shared (view-on
 app.MapAccountEndpoints();                 // #59 POST /api/auth/login, POST /api/staff/accounts[/import]
 app.MapSharedCredentialLifecycleEndpoints(); // #64 POST /api/staff/shared-credential/{rotate,revoke}
 app.MapBootstrapEndpoints();               // #308 POST /api/ops/bootstrap-exercise (secret-gated seed; 404 when unconfigured)
+app.MapEngineContentSeedEndpoints();       // #327 POST /api/ops/seed-engine-content (secret-gated engine drive path; 404 when unconfigured)
 
 // Engine-runtime endpoints (Wave 2) — REST only; the review push reuses the B1 ExerciseRealtimeHub mapped
 // above (no second hub). Scope comes only from the resolved IExerciseContext (COR-001), never a client
