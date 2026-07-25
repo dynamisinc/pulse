@@ -294,6 +294,7 @@ public class PulseDbContext : DbContext
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         GuardExerciseScope();
+        GuardTelemetryEnvelope();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
@@ -301,6 +302,7 @@ public class PulseDbContext : DbContext
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         GuardExerciseScope();
+        GuardTelemetryEnvelope();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
@@ -326,6 +328,44 @@ public class PulseDbContext : DbContext
                 throw new ExerciseScopeViolationException(
                     $"Refusing to persist {entry.Entity.GetType().Name} with a default (empty) ExerciseId " +
                     "(COR-001/XC-001 write-time isolation guard).");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fail-closed write-time telemetry-envelope guard (XC-004, #356). Scans every tracked
+    /// <see cref="TelemetryEvent"/> being added or modified against the LOCKED v0 envelope's
+    /// conditional-requiredness rules (<see cref="TelemetryEnvelopeRules"/>) and THROWS
+    /// <see cref="TelemetryEnvelopeViolationException"/> — before <c>base.SaveChanges</c> runs, so nothing
+    /// reaches the database.
+    /// </summary>
+    /// <remarks>
+    /// Applied CENTRALLY here, for the same reason the exercise-scope guard and the read-side query filter
+    /// are: <c>POST /api/telemetry</c> already re-enforces every conditional rule server-side, but the
+    /// identity/engine services add <see cref="TelemetryEvent"/> rows DIRECTLY to the context, and were on
+    /// the honour system for those rules. One of them wasn't honouring them (#356 — a failed participant
+    /// login persisted <c>actor.kind: 'participant'</c> with no <c>participantId</c>, a shape the ingest
+    /// endpoint rejects with a 400). A guard here makes the class of bug unrepresentable instead of fixing
+    /// one instance of it, and a newly-added emitter is covered automatically.
+    /// </remarks>
+    private void GuardTelemetryEnvelope()
+    {
+        foreach (var entry in ChangeTracker.Entries<TelemetryEvent>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified))
+            {
+                continue;
+            }
+
+            var violations = TelemetryEnvelopeRules.Validate(
+                TelemetryAttributionFacts.FromEntity(entry.Entity));
+
+            if (violations.Count > 0)
+            {
+                throw new TelemetryEnvelopeViolationException(
+                    $"Refusing to persist telemetry event '{entry.Entity.EventType}' " +
+                    $"(eventId {entry.Entity.EventId}): {string.Join(" ", violations)} " +
+                    "(XC-004 write-time envelope guard).");
             }
         }
     }

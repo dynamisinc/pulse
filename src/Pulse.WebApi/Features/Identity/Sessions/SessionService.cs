@@ -227,11 +227,17 @@ public sealed class SessionService
     /// </summary>
     private static TelemetryActor BuildActor(Session session) => session.Kind switch
     {
-        ParticipantKind => new TelemetryActor
-        {
-            Kind = ParticipantActorKind,
-            ParticipantId = string.IsNullOrEmpty(session.PrincipalId) ? null : session.PrincipalId,
-        },
+        // The kind is DERIVED from whether a principal is actually attached, never hardcoded: the v0 envelope
+        // conditionally requires participantId whenever kind is 'participant', so a participant session with no
+        // PrincipalId (defensive — the issuer always sets one) degrades to the identity-less system actor rather
+        // than emitting an off-envelope row (#356). Matches ParticipantLoginService's failure path.
+        ParticipantKind => string.IsNullOrEmpty(session.PrincipalId)
+            ? new TelemetryActor { Kind = SystemActorKind }
+            : new TelemetryActor
+            {
+                Kind = ParticipantActorKind,
+                ParticipantId = session.PrincipalId,
+            },
         ReadOnlyKind => new TelemetryActor
         {
             Kind = SystemActorKind,
