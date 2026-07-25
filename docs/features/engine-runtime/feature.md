@@ -21,7 +21,12 @@ persistence + API + SignalR that serve real `EngineReviewItem`s to the shipped c
 built autonomy/safety services, flipping `useReviewQueue` live (02, **safety-critical**); the
 native exercise clock that drives the loop's scenario-time timers, replacing the hand-cranked
 `IScenarioClock` (03); and the live-provider config that turns the modeled cost/latency into
-measured against a governed Azure OpenAI endpoint (04, **Tier-2**).
+measured against a governed Azure OpenAI endpoint (04, **Tier-2**). A fifth story (05, **Tier-2**)
+closes the gap between "measured once, in a spike" and "actually live": it deploys `ai.bicep` for
+UAT via committed IaC, wires the backend's managed identity so the App Service reaches Foundry
+keylessly, gathers the four pieces of governance evidence for the still-unsigned Tier-2 sign-off,
+and verifies a real AI-authored post reaches the UAT participant feed — Ambient tier, suggest-only,
+UAT-only.
 
 This is a backend/service feature — a sibling to `backend-host` and `social-api`, not a UI feature.
 It has **no design brief** and mounts nothing new in `App.tsx`. **B3 is connective tissue only**:
@@ -57,6 +62,7 @@ supersedes D5-005) is inherited by story 02 through the built `autonomy-safety` 
 | 02 | Review-cockpit API — serve `EngineReviewItem`s + autonomy/safety `[fullstack] [SAFETY-CRITICAL]` | ADP-040/042, CTL-034 (D5-014/1.1, COR-001, XC-004, XC-002, NFR-004) | Complete | #286 |
 | 03 | Scenario-clock service — native COR-050 clock driving the loop's timers `[backend]` | COR-050/051/052 (COR-053, COR-001) | Complete | #287 |
 | 04 | Provider live-config — governed Azure OpenAI + measured eval `[backend] [TIER-2]` | NFR-005, ADP-025, NFR-003, ADP-024 | Complete | #288 |
+| 05 | Live provider UAT go-live — Azure OpenAI, Ambient tier, suggest-only `[backend/infra] [TIER-2]` | NFR-005, ADP-025 (NFR-003, ADP-024) | Not Started | #349 |
 
 ## Dependencies
 **Delivered foundations (referenced by name, not owned here):**
@@ -97,6 +103,12 @@ any B3 spike must use a server-authoritative stopgap scope, never a client-suppl
 ## Post-B3 follow-ups (tracked, non-blocking)
 
 > Mirrored to GitHub: **#296** (WR-001 idempotency), **#297** (cockpit role restriction — under security-review umbrella **#41**), **#298** (test hardening: the two flakes + Wave-0 LO-002 + read-only test fidelity).
+
+- **Temporary Standard→Ambient config alias (story 05).** Story 05 reaches the Ambient tier for UAT
+  go-live by pointing the `Generation:Tiers:Standard:*` config key at the Ambient deployment/model,
+  because the reaction loop's generate stage has no runtime tier selector. This is an explicitly
+  **temporary** shim — remove it once the concurrent `autonomy-safety` story's runtime autonomy/tier
+  lever lands and route Ambient through a real tier selection instead of a config-level alias.
 
 - **WR-001 / partial-publish idempotency** (stories 01+02): the engine publish path (`PostIngestService`)
   does not dedupe on `draftId`, so a review-approve that succeeds-then-fails-to-commit, OR a

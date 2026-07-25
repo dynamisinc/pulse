@@ -11,6 +11,22 @@
 > held while wall-clock advanced; Pause-injects left it running; the guarded confirm was required
 > before Freeze took effect). See `docs/BUILD_PLAN.md`'s "E7 World Steering — Wave 1" section for
 > the full close-out and deferred follow-ups.
+>
+> **Status honesty (post-UAT audit).** "Complete" above means complete **as a frontend seam
+> only** — verified live meant "the browser tab's own clock stopped," not "the engine stopped."
+> `usePauseState` is a frontend module store with no API call anywhere: the backend never learns a
+> tier changed. Freeze installs a browser-local `pausableExerciseClock` that only stops that one
+> tab's header read — the real, already-built backend clock (`ExerciseClockService`) and the
+> reaction loop's own freeze-check (`ReactionLoopHost.TickExerciseAsync`) were never reached, so the
+> engine kept generating while the console read WORLD FROZEN. Pause engine did nothing at all, and
+> sat beside a DIFFERENT control (`<EngineControlBar>`'s kill switch, #337) that actually works.
+> Pause injects has nothing to pause (the inject-queue feature is `Not Started`). That gap is
+> exactly what let this reach the user looking finished while doing nothing live. The
+> server-authoritative fix — a real pause-tier endpoint that calls `ExerciseClockService`, and a
+> frontend-only unification with the working kill switch — is **story 07**
+> (`07-pause-server-authoritative.md`); making Freeze participant-visible is **story 08**
+> (`08-pause-participant-overlay.md`). This story (03) is not superseded; 07/08 are live-wiring
+> follow-ups that reuse this story's state machine and UI unchanged in mock mode.
 
 ## Context
 "Pause" is not one thing. The D5 review **amended** CTL-023 into **three tiers** so a controller can

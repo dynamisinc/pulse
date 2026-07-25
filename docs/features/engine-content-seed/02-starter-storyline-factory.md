@@ -1,6 +1,6 @@
 # Story: Starter storyline factory — one canned, in-memory storyline  `[backend]`
 
-**Feature:** engine-content-seed  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** In Review (code-review clean; PR pending)
+**Feature:** engine-content-seed  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Complete
 **Requirements:** E8 arch §1.1 ("Storylines are created by planners (pre-seeded) or controllers (ad
 hoc)"), §6.1 (state machine — arming via `Seed`) — consumption of the already-built `storyline-model`,
 not new storyline-model logic  ·  **Design decisions:** none  ·  **Issue:** #326

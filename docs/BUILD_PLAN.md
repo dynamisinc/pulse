@@ -329,6 +329,68 @@ area; barrel exports added.
 
 ---
 
+## Controller features operational (post-UAT audit, 2026-07-25) ⬜
+
+The three controller capabilities Tom reported non-functional in UAT — tiered pause, the escalation
+dial, and the AI inject engine. **All three were already marked `Status: Complete` with CLOSED
+issues.** All three were real code that nothing ever consumed: `usePauseState` never called an API;
+the escalation dial read an in-memory `storylineMock`; the live provider shipped behind
+`Generation:Provider = Fake` and `deployAi = false` with an unsigned Tier-2 sign-off. The shared root
+cause is that **"Complete" had come to mean unit-green, not working**, so every story below carries
+*verified in UAT* in its definition of done — a real AI-authored post reaching a participant feed, a
+Freeze that actually stops the loop, a dial move the engine actually follows.
+
+Four **parallel tracks**; only 08 waits on 07. Composition-root wiring is an orchestrator-owned
+serial step per the #310→#317 lesson (a fully-green slice merged with its `Program.cs` wiring never
+executed, leaving the endpoint dead at 404).
+
+- ⬜ **Track A — `engine-runtime/05-live-provider-uat-golive`** (#349, TIER-2, backend/infra).
+  `deployAi = true` for UAT, give the App Service a `SystemAssigned` identity (it has **none** today)
+  and wire `backendPrincipalId`, stage `Generation:*` from bicep outputs verbatim. Standing up the
+  endpoint is **decoupled from routing traffic to it** via a separate toggle — only the latter is
+  gated on the `PROVIDER-GOVERNANCE.md` §8 signature, which is Tom's, not a builder's. Independent of
+  B/C/D; can start immediately. Provider Azure OpenAI in-tenant; **UAT only** (CI + prod stay `Fake`).
+- ⬜ **Track B — `world-steering/07-pause-server-authoritative`** (#350, the keystone) → **`08-pause-participant-overlay`** (#351).
+  07: server-authoritative tier state + `POST /api/steering/pause-tier`; Freeze drives
+  `ExerciseClockService.Freeze/Unfreeze` so the loop genuinely halts; ENGINE PAUSED routed to the
+  existing autonomy kill-switch/restore path (**frontend-only**, so 07 never touches
+  `EngineReviewEndpoints.cs` — keeps it file-disjoint from Track D); injects tier honestly disabled.
+  08: overlay write path + SignalR push so participants see the holding page. 08 edits the *shared*
+  `ParticipantShellEndpoints.cs` (`overlay-state` currently returns a constant) — coordination point.
+- ⬜ **Track C — `world-steering/09-escalation-dial-live`** (#352). Endpoint pair onto the live
+  registry storyline; dial reads real intensity + phase; help/explanation UX folded in.
+  `Storyline.Tick` **already** branches to `IntensityModel.TickTowardTarget`, so no engine/tick code
+  is needed. `TargetFollow.Modulate` stays out of scope and unwired — do not assume it is covered.
+- ⬜ **Track D — `autonomy-safety/05-engine-settings-api`** (#353) → **`06-engine-settings-panel`** (#354).
+  05 exposes the built-but-unreachable `SetExerciseDefault`, which is **what makes delayed-auto exist
+  at all** (`EngineAutonomyState.Create` pins every exercise at `Suggest`, and the 3 existing
+  endpoints only apply/lift *clamps*), plus a runtime tier lever and a settings read; folds in and
+  closes #297. 06 is the console "Engine" toolstrip flyout and **fixes the LIVE/SUGGEST-ONLY
+  mislabel** — those two positions are behaviourally identical today.
+
+> **Two dead seams found during the audit, both structurally identical to the three above.**
+> `SetExerciseDefault`/`SetStorylineOverride` are never called from `Pulse.WebApi`. And
+> `ITierPolicy.PickTier` is registered in DI with **zero call sites** — the real tier decision is a
+> private `IntentComposer.TierFor(ReactionTriggerKind)` keyed on trigger kind, not purpose, so
+> everything the loop generates today is **Standard** tier. Story 05 attaches its lever at
+> `IntentComposer`'s actual call site (`ReactionLoopHost.cs:541`), not the dead seam; refactoring
+> `IntentComposer` onto `ITierPolicy` is a separate cleanup.
+>
+> **Known sharp edge, not solved here:** engine state (loop registration, storylines, autonomy, the
+> clock) lives in **process memory** — no `Storyline` entity exists. Wiring needs no EF migration,
+> but every App Service restart de-registers the loop and needs a re-seed via
+> `POST /api/ops/seed-engine-content`. Accepted for "rudimentary"; documented, not hidden.
+>
+> **Temporary shim to remove:** Ambient for the first live run is achieved by pointing
+> `Generation:Tiers:Standard:Model` at the mini model, because no runtime tier lever exists yet.
+> Track D's lever replaces it — tracked as an engine-runtime follow-up so it doesn't become permanent
+> by silence.
+>
+> **Deliberately unfulfilled:** PAUSE INJECTS ships disabled. There is no inject queue in the product
+> (`inject-queue` #4 is all five stories Not Started, no backend). Tom's call, made knowingly.
+
+---
+
 ## Cross-feature serial edges (don't parallelize across these)
 - `participant-shell/04` (mount contract) **before** `staff-shell/04` (preview-as).
 - `staff-shell/02` (`registerSurfaceTool()`) **before** `console-shell` docks its toolbox.

@@ -1,6 +1,6 @@
 # Story: Loop-registration seed endpoint — `POST /api/ops/seed-engine-content`  `[backend]` `[TIER-2]`
 
-**Feature:** engine-content-seed  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** In Review (code-review clean; PR pending)
+**Feature:** engine-content-seed  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Complete
 **Requirements:** E8 arch §1.2/§2/§14 (the loop's registration seam — closes exactly the gap
 `ReactionLoopHost.cs`'s own doc comment flags as "a later story"), NFR-009 (secret-gated ops surface,
 mirroring `BootstrapOptions`), COR-001/XC-001 (isolation)  ·  **Design decisions:** D5-014/1.1

@@ -1,6 +1,6 @@
 # Story: Persona cast seed — the engine's minimum viable cast  `[backend]`
 
-**Feature:** engine-content-seed  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** In Review (code-review clean; PR pending)
+**Feature:** engine-content-seed  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Complete
 **Requirements:** E8 arch §5/§14 (eligible cast the reaction loop needs to voice a burst) — narrow,
 engine-scoped; explicitly NOT COR-020/021 (`persona-management` remains the templates/cast-authoring
 feature — see feature.md "Naming disambiguation")  ·  **Design decisions:** none  ·  **Issue:** #325

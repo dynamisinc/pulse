@@ -61,9 +61,9 @@ load-bearing correctness point).
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Persona cast seed — the engine's minimum viable cast `[backend]` | E8 arch §5/§14 (narrow, engine-scoped; not COR-020/021) | In Review (code-review clean) | #325 |
-| 02 | Starter storyline factory — one canned, in-memory storyline `[backend]` | E8 arch §1.1/§6.1 | In Review (code-review clean) | #326 |
-| 03 | Loop-registration seed endpoint — `POST /api/ops/seed-engine-content` `[backend]` `[TIER-2]` | E8 arch §1.2/§2/§14, NFR-009 (COR-001, XC-004) | In Review (code-review clean) | #327 |
+| 01 | Persona cast seed — the engine's minimum viable cast `[backend]` | E8 arch §5/§14 (narrow, engine-scoped; not COR-020/021) | Complete | #325 |
+| 02 | Starter storyline factory — one canned, in-memory storyline `[backend]` | E8 arch §1.1/§6.1 | Complete | #326 |
+| 03 | Loop-registration seed endpoint — `POST /api/ops/seed-engine-content` `[backend]` `[TIER-2]` | E8 arch §1.2/§2/§14, NFR-009 (COR-001, XC-004) | Complete | #327 |
 
 ## Dependencies
 **Delivered, reused unchanged:** `engine-runtime` (Complete — `ReactionLoopHost`,
