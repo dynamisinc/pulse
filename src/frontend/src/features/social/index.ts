@@ -66,3 +66,21 @@ export { useThread } from './hooks/useThread'
 
 // The channel composition mounted as the shell's default participant channel.
 export { SocialChannel } from './SocialChannel'
+
+// --- profiles-social-graph/05: audience magnitude & the follower affordance ---
+// `audience.ts` is the SINGLE SOURCE of the SOC-054 reach/velocity formula —
+// imported by E8 (ADP-004 spread velocity) and E10 (EVL-012 reach/impressions)
+// as well as this surface. Never fork the math into another feature.
+export {
+  AUDIENCE_REACH_MODEL,
+  audienceReach,
+  displayedFollowerCount,
+  formatMagnitude,
+  safeCount,
+  spokenMagnitude,
+} from './services/audience'
+export type { AudienceReachInput, AudienceReachResult } from './services/audience'
+
+// The follower list: real follow edges + "…and ~N others" — never fabricated rows.
+export { FollowerList } from './components/FollowerList'
+export type { FollowerListProps, FollowerEdge } from './components/FollowerList'
