@@ -23,9 +23,14 @@ import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { PersonaPicker } from './PersonaPicker'
 import { ActivePersonaProvider, useActivePersona } from '../hooks/useActivePersona'
-import type { Persona } from '@/features/personas'
+import type { StaffPersona } from '@/features/personas'
 
-function buildPersona(overrides: Partial<Persona> & Pick<Persona, 'id' | 'displayName' | 'handle' | 'personaType'>): Persona {
+// STAFF fixtures: the picker filters on `personaType`, which lives only on
+// the staff projection (`StaffPersona`) — SOC-052/D1-008.
+function buildPersona(
+  overrides: Partial<StaffPersona> &
+  Pick<StaffPersona, 'id' | 'displayName' | 'handle' | 'personaType'>,
+): StaffPersona {
   return {
     exerciseId: 'ex-mock-0001',
     templateId: `tmpl-${overrides.id}`,
@@ -63,7 +68,7 @@ const NEWS_OUTLET = buildPersona({
   verified: true,
 })
 
-const FIXTURE_PERSONAS: readonly Persona[] = [FULTON_EM, CITIZEN_TOMMY, NEWS_OUTLET]
+const FIXTURE_PERSONAS: readonly StaffPersona[] = [FULTON_EM, CITIZEN_TOMMY, NEWS_OUTLET]
 
 /** Renders the currently-active persona alongside the picker, like a sibling composer would. */
 function ActivePersonaProbe() {
@@ -183,7 +188,7 @@ describe('PersonaPicker — keyboard-only selection (NFR-001)', () => {
     await user.keyboard('{ArrowDown}{ArrowDown}{ArrowUp}{Enter}')
 
     expect(onSelect).toHaveBeenCalledTimes(1)
-    const selected = onSelect.mock.calls[0]?.[0] as Persona
+    const selected = onSelect.mock.calls[0]?.[0] as StaffPersona
     expect(FIXTURE_PERSONAS.map(p => p.id)).toContain(selected.id)
   })
 })

@@ -14,13 +14,27 @@
  * import `CommandPalette.tsx` / `personaDockHost.*`).
  *
  * ## Data source (COR-001 — exercise-scoped only)
- * Defaults to `usePersonas()` (`@/features/personas`) — the shipped,
- * exercise-scoped read seam. NEVER `SEEDED_PERSONAS`/`personaById` (those are
- * mock-fixture-only exports that fail open on a shipped path). The optional
- * `personas` prop exists so the picker is testable in isolation and so a
- * host that already resolved the exercise's cast (e.g. to share one fetch
- * across several dock sections) can hand it a list directly — it never
- * substitutes a different, non-exercise-scoped source.
+ * Defaults to `useStaffPersonas()` (`@/features/personas`) — the shipped,
+ * exercise-scoped STAFF read seam. NEVER `SEEDED_PERSONAS`/`personaById`
+ * (those are mock-fixture-only exports that fail open on a shipped path), and
+ * never the participant `usePersonas()`: this picker filters on
+ * `personaType`, which exists ONLY on the staff projection
+ * (`StaffPersona`, SOC-052/D1-008). If that read ever reaches the endpoint
+ * without a live staff session it FAILS CLOSED (`resolveStaffPersonas`
+ * throws) rather than handing back personas with an `undefined` archetype —
+ * which would silently show every persona under "all" and render an
+ * unlabeled category chip. The optional `personas` prop exists so the picker
+ * is testable in isolation and so a host that already resolved the exercise's
+ * cast (e.g. to share one fetch across several dock sections) can hand it a
+ * list directly — it never substitutes a different, non-exercise-scoped
+ * source, and it is typed `StaffPersona[]` so a participant-shaped list
+ * cannot be passed in.
+ *
+ * When that default read FAILS, the list renders an explicit, icon-and-text
+ * error row (`persona-picker-error`, `role="alert"` — never color-alone,
+ * NFR-001) instead of the "No personas match this search" empty state: a
+ * failed staff read must not be indistinguishable from a search that matched
+ * nothing.
  *
  * ## Keyboard flow (CTL-002 "<10s reply", NFR-001)
  * Type-to-filter by `displayName`/`handle`/`personaType` (via the search
@@ -77,7 +91,7 @@ import {
   faUser,
   faUserTie,
 } from '@fortawesome/free-solid-svg-icons'
-import { usePersonas, type Persona, type PersonaType } from '@/features/personas'
+import { useStaffPersonas, type Persona, type PersonaType, type StaffPersona } from '@/features/personas'
 // Direct leaf import (not the '@/features/social' barrel) so the staff picker
 // doesn't transitively load the whole participant social feature (postService,
 // Feed, Composer…) just for the seal SVG — and so a test that partially mocks
@@ -106,8 +120,12 @@ const PERSONA_TYPE_FILTERS: readonly PersonaTypeFilterOption[] = [
 /** The "no type filter applied" sentinel — distinct from any real `PersonaType`. */
 type TypeFilter = PersonaType | 'all'
 
+// `matchesQuery` reads only the fields COMMON to both worlds, so it is typed
+// against the narrower `Persona` (a `StaffPersona` is assignable to it) —
+// declaring the field you need, not the widest shape you happen to hold.
+
 interface PickerRow {
-  persona: Persona
+  persona: StaffPersona
   pinned: boolean
 }
 
@@ -127,12 +145,13 @@ function matchesQuery(persona: Persona, normalizedQuery: string): boolean {
 
 export interface PersonaPickerProps {
   /**
-   * Exercise-scoped candidate personas. Defaults to `usePersonas()`. Pass
+   * Exercise-scoped candidate personas, in the STAFF projection (the picker
+   * filters on `personaType`). Defaults to `useStaffPersonas()`. Pass
    * explicitly to test this component in isolation, or when a host has
    * already resolved the exercise's cast — never a substitute for the
    * exercise-scoped read seam on a shipped path.
    */
-  personas?: readonly Persona[]
+  personas?: readonly StaffPersona[]
   /** Initial search text (uncontrolled after mount unless `onQueryChange` is supplied). */
   query?: string
   /** Notified on every keystroke, for a host that wants to mirror the query elsewhere. */
@@ -142,7 +161,7 @@ export interface PersonaPickerProps {
    * Optional — lets a host (the ⌘K palette) react to the selection (e.g.
    * close itself) without this component knowing about the host.
    */
-  onSelect?: (persona: Persona) => void
+  onSelect?: (persona: StaffPersona) => void
   /** Autofocus the search input on mount (the palette-opened case). Defaults `true`. */
   autoFocus?: boolean
 }
@@ -158,8 +177,14 @@ export function PersonaPicker({
   onSelect,
   autoFocus = true,
 }: PersonaPickerProps) {
-  const { personas: resolvedPersonas } = usePersonas()
+  const { personas: resolvedPersonas, error: resolveError } = useStaffPersonas()
   const candidatePersonas = personasProp ?? resolvedPersonas
+  // Only the DEFAULT (hook) data source can fail; a host-supplied `personas`
+  // prop has already resolved. Surfaced explicitly so a failed staff read
+  // reads as a FAILURE, not as "your search matched nothing" — the
+  // fail-closed state must be visible, never quietly indistinguishable from
+  // an empty result (see `resolveStaffPersonas`).
+  const resolutionFailed = personasProp === undefined && resolveError !== undefined
 
   const {
     activePersona,
@@ -198,13 +223,13 @@ export function PersonaPicker({
     const byId = new Map(candidatePersonas.map(persona => [persona.id, persona]))
     const pinnedRows: PickerRow[] = pinnedPersonaIds
       .map(id => byId.get(id))
-      .filter((persona): persona is Persona => persona !== undefined)
+      .filter((persona): persona is StaffPersona => persona !== undefined)
       .map(persona => ({ persona, pinned: true }))
     const pinnedIdSet = new Set(pinnedPersonaIds)
 
     const recentRows: PickerRow[] = recentPersonaIds
       .map(id => byId.get(id))
-      .filter((persona): persona is Persona => persona !== undefined)
+      .filter((persona): persona is StaffPersona => persona !== undefined)
       .filter(persona => !pinnedIdSet.has(persona.id))
       .map(persona => ({ persona, pinned: false }))
     const recentIdSet = new Set(recentRows.map(row => row.persona.id))
@@ -245,7 +270,7 @@ export function PersonaPicker({
     onQueryChange?.(value)
   }, [onQueryChange])
 
-  const handleSelect = useCallback((persona: Persona) => {
+  const handleSelect = useCallback((persona: StaffPersona) => {
     selectPersona(persona)
     onSelect?.(persona)
   }, [selectPersona, onSelect])
@@ -338,7 +363,25 @@ export function PersonaPicker({
         data-testid="persona-picker-list"
         sx={{ m: 0, p: 0, listStyle: 'none', maxHeight: 360, overflowY: 'auto' }}
       >
-        {flatRows.length === 0 && (
+        {resolutionFailed && (
+          // Icon + explicit text (never color-alone, NFR-001) and a live
+          // region so the failure is announced, not silently rendered.
+          <Stack
+            component="li"
+            direction="row"
+            role="alert"
+            data-testid="persona-picker-error"
+            sx={{ alignItems: 'flex-start', gap: 0.75, px: 1, py: 1.5, listStyle: 'none' }}
+          >
+            <FontAwesomeIcon icon={faTriangleExclamation} size="sm" style={{ marginTop: 2 }} />
+            <Typography sx={{ fontSize: 12.5, fontWeight: 600 }}>
+              Persona list unavailable — the staff persona read failed. No personas can be
+              selected until it succeeds.
+            </Typography>
+          </Stack>
+        )}
+
+        {!resolutionFailed && flatRows.length === 0 && (
           <Typography
             data-testid="persona-picker-empty"
             sx={{ px: 1, py: 1.5, fontSize: 12.5, color: 'text.secondary' }}

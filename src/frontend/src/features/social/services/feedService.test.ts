@@ -23,7 +23,6 @@ function buildPersona(overrides: Partial<Persona> = {}): Persona {
     displayName: 'Author A',
     handle: 'authora',
     kind: 'human',
-    personaType: 'citizen',
     verified: false,
     avatarColor: '#7c5cd6',
     initials: 'AA',

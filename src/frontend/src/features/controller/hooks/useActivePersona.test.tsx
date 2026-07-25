@@ -19,9 +19,11 @@ import { renderHook, act, render, screen, fireEvent } from '@testing-library/rea
 import { describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { ActivePersonaProvider, useActivePersona } from './useActivePersona'
-import type { Persona } from '@/features/personas'
+import type { StaffPersona } from '@/features/personas'
 
-function buildPersona(overrides: Partial<Persona> & Pick<Persona, 'id' | 'displayName' | 'handle'>): Persona {
+function buildPersona(
+  overrides: Partial<StaffPersona> & Pick<StaffPersona, 'id' | 'displayName' | 'handle'>,
+): StaffPersona {
   return {
     exerciseId: 'ex-mock-0001',
     templateId: `tmpl-${overrides.id}`,

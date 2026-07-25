@@ -59,6 +59,8 @@ export function EngineDraftEditComposer({
   onSubmit,
   onCancel,
 }: ReviewQueueEditSlotProps) {
+  // Common-fields-only read (handle/displayName/avatar) — no `personaType`, so
+  // the narrower two-world `Persona` contract is the right one (SOC-052/D1-008).
   const { personas } = usePersonas()
   const persona = useMemo(
     () => personas.find(p => p.handle.toLowerCase() === item.leadPersonaHandle.toLowerCase()),

@@ -11,9 +11,9 @@ import { renderHook, act } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ReactNode } from 'react'
 import { ActivePersonaProvider, useActivePersona } from './useActivePersona'
-import type { Persona } from '@/features/personas'
+import type { StaffPersona } from '@/features/personas'
 
-function buildPersona(id: string): Persona {
+function buildPersona(id: string): StaffPersona {
   return {
     id,
     exerciseId: 'ex-mock-0001',
