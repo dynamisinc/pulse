@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Features.ExerciseConfiguration;
 
 /// <summary>
 /// The shared test host for story <c>social-api/01-feed-read-api</c> (#270): <c>GET /api/feed</c> and
@@ -52,6 +53,13 @@ public sealed class SocialApiWebApplicationFactory : WebApplicationFactory<Progr
             // (QueryFilterIsolationTests.AddDbContext_InjectsRegisteredExerciseContext_DrivingTheFilter).
             services.RemoveAll<IExerciseContext>();
             services.AddScoped<IExerciseContext>(_ => new ExerciseContext { CurrentExerciseId = _exerciseId });
+
+            // exercise-configuration/01b: the six participant-shell config GETs mapped by Program.cs now
+            // resolve ParticipantShellConfigService, so the host needs the slice's registration. This call is
+            // idempotent (AddScoped for the concrete services, TryAddScoped for the projection defaults), so
+            // it stays correct once the orchestrator wires AddExerciseConfiguration() into Program.cs — and
+            // until then it is what keeps these Program-booted tests exercising the real routes.
+            services.AddExerciseConfiguration();
         });
     }
 

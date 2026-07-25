@@ -147,6 +147,47 @@ to slice **01b** and are not listed below — 01a ships the schema, the vocabula
 | `exerciseContextResolver.test.ts` → `resolves a scope whose status is "%s"` (all **nine**) | AC-client-first ordering |
 | `StaffHeader.test.tsx` → `status "%s" renders both a dot AND the text label` (all **nine**) | AC-client-first ordering + NFR-001 (a newly-emittable status is never color-only) |
 
+### Shipped in slice 01b — backend (settings API + shell-config projection)
+
+The staff editor's own tests (`ExerciseSettingsPanel`, `useExerciseSettings`, `exerciseSettingsService`)
+are the frontend half of 01b and are listed separately when they land.
+
+| Test | AC |
+|---|---|
+| `ExerciseSettingsEndpointsTests.Put_PersistsEverySettingNamedInCor030_AndSurvivesAReload` | AC1 (settings persist + survive a reload) |
+| `ExerciseSettingsEndpointsTests.Get_ResolvedExercise_ReturnsTheSettingsBlock_AndTheClosedChannelCatalog` | AC1 |
+| `ExerciseSettingsEndpointsTests.Put_OmittedOptionalFields_ClearThemBackToNotConfigured` | AC1 (replace semantics), AC2 (a cleared setting returns to the shipped constant) |
+| `ParticipantShellPerExerciseConfigTests.BrandTokens_ConfiguredExercise_ServesThatExercisesBrand_InTheFrozenShape` | AC2 (per-exercise values on the frozen `BrandTokensResponse`) |
+| `ParticipantShellPerExerciseConfigTests.BrandTokens_PartiallyConfiguredExercise_FallsBackPerFieldToTheShippedConstants` | AC2 |
+| `ParticipantShellPerExerciseConfigTests.BrandTokens_UnconfiguredExercise_ServesTheShippedConstantsUnchanged` | AC2 (no consumer/type-guard change) |
+| `ParticipantShellEndpointsTests.*` (the six pre-existing wire-shape tests, unchanged) | AC2 (byte-for-byte compatible after the constants are gone) |
+| `ParticipantShellPerExerciseConfigTests.ChannelNav_ConfiguredChannels_ReportsPerChannelEnabledFlags_AndAnEnabledCurrentChannel` | AC3 (a disabled channel is reported `enabled: false`) |
+| `ParticipantShellPerExerciseConfigTests.ChannelNav_UnconfiguredExercise_KeepsThePhase1Default_SocialOnly` | AC3 (Phase 1: Social enabled, E3–E6 catalogued-but-off) |
+| `ParticipantShellPerExerciseConfigTests.ChannelNav_UnparseableStoredValue_DegradesToThePlatformDefault_RatherThanBlankingTheShell` | AC3 |
+| `ExerciseSettingsEndpointsTests.Put_DisablingAChannel_ReportsItEnabledFalse_OnTheParticipantCatalog` | AC3 (end to end: staff toggle → participant catalog) |
+| `ExerciseSettingsFieldRulesTests.TryNormalizeTimeZone_AcceptsARealIanaZone` / `_RejectsAbsentUnknownAndWindowsZoneIds` | AC4 (a single IANA zone per exercise, XC-008) |
+| `ExerciseSettingsServiceTests.UpdateAsync_StampsTheTelemetryEventFromTheServerClockAndTheExercisesTimeZone` | AC4 |
+| `ExerciseSettingsEndpointsTests.Put_InExerciseA_NeverTouchesExerciseB_EvenWhenTheBodyNamesIt` | AC5 (isolation — a client-supplied id has nowhere to bind) |
+| `ExerciseSettingsEndpointsTests.Get_InExerciseA_NeverReturnsExerciseBsSettings` | AC5 |
+| `ExerciseSettingsServiceTests.UpdateAsync_InExerciseA_LeavesExerciseBByteForByteUnchanged` | AC5 |
+| `ExerciseSettingsServiceTests.GetAsync_ResolvedScopeWithNoExerciseRow_ReturnsNotFound_NotAnotherExercisesRow` | AC5 (the IDOR case on an unfiltered table) |
+| `ExerciseSettingsServiceTests.GetAsync_UnresolvedScope_FailsClosed_WithoutTouchingTheDatabase` / `GetAsync_EmptyGuidScope_FailsClosed` / `UpdateAsync_UnresolvedScope_FailsClosed_AndWritesNothing` | AC5 (fail closed) |
+| `ExerciseSettingsEndpointsTests.Get_NoStaffSession_Returns401_FailClosed` / `Put_NoStaffSession_Returns401_AndWritesNothing` / `Get_StaffNotAssignedToTheResolvedExercise_Returns403_FailClosed` / `Get_UnresolvedScope_Returns401_FailClosed` | AC5 (XC-002 staff gate) |
+| `ParticipantShellPerExerciseConfigTests.BrandTokens_ExerciseA_NeverServesExerciseBsBrand` / `ChannelNav_ExerciseA_NeverReportsExerciseBsChannelSelection` | AC5 (participant-facing reads extend the standing isolation suite) |
+| `ParticipantShellPerExerciseConfigTests.AllEndpoints_UnresolvedScope_Return401_NeverEmptyOkConfig` / `AllEndpoints_EmptyGuidScope_Return401_BecauseAnUnsetScopeCollapsesToGuidEmpty` | AC5 (the pre-refactor fail-closed 401 is preserved) |
+| `ExerciseSettingsEndpointsTests.Put_MarkupInFreeText_IsStrippedNotEncoded_AllTheWayToTheParticipantSurface` | AC6 (NFR-004 — strips, never entity-encodes) |
+| `ExerciseSettingsEndpointsTests.Put_AllMarkupBrandName_Returns400_RatherThanStoringAnEmptyBrand` | AC6 |
+| `ExerciseSettingsFieldRulesTests.TryNormalizeWorldName_StripsMarkupAndKeepsTheAuthorsLiteralCharacters` / `TryNormalizeBrandName_RejectsAValueThatIsEntirelyMarkup` / `TryNormalizeOutletNames_SanitizesBothKeysAndValues` / `_RejectsAnEntryEmptiedBySanitizing` | AC6 |
+| `ExerciseSettingsEndpointsTests.Put_InvalidTimeZone_Returns400_AndLeavesTheStoredConfigUnchanged` | AC7 (invalid IANA zone → 400, stored config unchanged) |
+| `ExerciseSettingsEndpointsTests.Put_UnknownChannelId_Returns400_AndLeavesTheStoredConfigUnchanged` / `Put_EmptyEnabledChannels_Returns400_RatherThanBlankingTheParticipantWorld` | AC7 (unknown channel id) |
+| `ExerciseSettingsEndpointsTests.Put_OverLengthWorldName_Returns400` / `Put_MissingName_Returns400` / `Put_MalformedColor_Returns400` / `Put_MissingBody_Returns400` | AC7 (over-length text, malformed color) |
+| `ExerciseSettingsServiceTests.UpdateAsync_InvalidRequest_RejectsBeforeAnythingIsApplied_AndEmitsNoTelemetry` | AC7 |
+| `ExerciseSettingsFieldRulesTests.TryNormalize_*` / `ParseStored_*` / `Format_RoundTripsThroughParseStored` / `TryNormalizeColor_*` / `TryNormalizeLocale_*` | AC7 (the strict parser over a column with no DB-level integrity) |
+| `ExerciseSettingsFieldRulesTests.UpdateExerciseSettingsRequest_CarriesNoExerciseIdProperty_SoAClientCannotAimAWriteElsewhere` | AC5 (structural, not merely enforced) |
+| `ExerciseSettingsFieldRulesTests.ExerciseSettingsDto_SerializesTheDocumentedCamelCaseWireKeys` / `_CarriesNoStaffOnlyOrParticipantHiddenState` | AC1, AC2 (XC-002 — no story-02/04 state leaks onto this shape) |
+| `ExerciseConfigurationCompositionTests.ContributedProjection_RegisteredWithReplace_ReachesTheRealEndpoint_EndToEnd` / `ContributedShellVariantAndOverlayProjections_ReachTheirRealEndpoints_EndToEnd` / `_WinsOverTheDefault_InTheOrchestratorsOrder` / `_WinsEvenWhenItRunsBeforeTheDefault` / `ContributedProjection_RegisteredWithTryAdd_IsSilentlyIgnored_WhichIsWhyReplaceIsMandatory` / `WithoutAContributor_ChromeConfig_ServesTheShippedConstants_EndToEnd` / `AddExerciseConfiguration_*` | AC2 + implementation.md "The projection-override contract" (the wave-3 seam) |
+| `ExerciseSettingsEndpointsTests.Put_EmitsExactlyOneSettingsUpdatedTelemetryEvent_ListingTheChangedFields` / `Put_ThatChangesNothing_PersistsNothingAndEmitsNoTelemetry` / `ExerciseSettingsServiceTests.UpdateAsync_PersistsTheMutationAndItsTelemetryEventInExactlyOneSaveChanges` | XC-004 (one event per meaningful action, same unit of work) |
+
 > **Follow-up for whoever next touches `exerciseContextResolver.test.ts`:** the shipped test is named
 > `exposes exactly the ten literals of the transitional superset`. The superset is **nine** — six COR-032
 > values plus the legacy four, with `archived` shared by both — which is what `EXERCISE_STATUSES` and the
