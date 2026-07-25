@@ -283,6 +283,7 @@ describe('useStorylineTarget — exercise scoping (COR-001)', () => {
 function liveState(overrides: Partial<liveStorylineActions.LiveStorylineSteeringState> = {}) {
   return {
     storylineId: 'storyline-real-guid',
+    title: 'Water main contamination fears',
     exerciseId: EX,
     intensity: 40,
     targetIntensity: null,
@@ -296,7 +297,7 @@ describe('useStorylineTarget — live mode (story 09; USE_MOCK_DATA=false)', () 
     useMockData = false
   })
 
-  it('AC1: fetches the real storyline via GET on mount and exposes its actual/target/phase', async () => {
+  it('AC1: fetches the real storyline via GET on mount and exposes its actual/target/phase/title', async () => {
     mockedGetStoryline.mockResolvedValue(liveState({ intensity: 55, targetIntensity: 70, phase: 'Peak' }))
 
     const { result } = renderHook(() => useStorylineTarget())
@@ -307,6 +308,7 @@ describe('useStorylineTarget — live mode (story 09; USE_MOCK_DATA=false)', () 
     expect(result.current.phase).toBe('Peak')
     expect(result.current.phaseLabel).toBe('PEAK')
     expect(result.current.storylineId).toBe('storyline-real-guid')
+    expect(result.current.title).toBe('Water main contamination fears') // Gate-1 W-008
   })
 
   it('uses the PRIMARY_STORYLINE_SENTINEL id (container-agnostic, mirrors MOCK_STORYLINE_ID) until the GET resolves', () => {
@@ -314,8 +316,44 @@ describe('useStorylineTarget — live mode (story 09; USE_MOCK_DATA=false)', () 
     const { result } = renderHook(() => useStorylineTarget())
 
     expect(result.current.storylineId).toBe('primary')
-    expect(result.current.intensity).toBe(0)
-    expect(result.current.phase).toBe('Dormant')
+  })
+
+  describe('dataStatus (Gate-1 CR-002 — never fabricate a calm world)', () => {
+    it('is "loading" before the GET resolves, then "live" once it does', async () => {
+      let resolveGet: (value: liveStorylineActions.LiveStorylineSteeringState) => void = () => {}
+      mockedGetStoryline.mockReturnValue(
+        new Promise(resolve => {
+          resolveGet = resolve
+        }),
+      )
+      const { result } = renderHook(() => useStorylineTarget())
+
+      expect(result.current.dataStatus).toBe('loading')
+
+      act(() => {
+        resolveGet(liveState())
+      })
+      await waitFor(() => expect(result.current.dataStatus).toBe('live'))
+    })
+
+    it('is "unavailable" (never "live") when the GET fails — the placeholder numbers must not be presented as fact', async () => {
+      mockedGetStoryline.mockRejectedValue(new Error('404 — e.g. registry lost after an App Service restart'))
+
+      const { result } = renderHook(() => useStorylineTarget())
+
+      await waitFor(() => expect(result.current.dataStatus).toBe('unavailable'))
+      // The placeholder is exposed for type-safety only — <EscalationDial>
+      // must gate its numeric display on dataStatus, not trust this as fact.
+      expect(result.current.intensity).toBe(0)
+      expect(result.current.phase).toBe('Dormant')
+    })
+
+    it('mock mode always reports "live" (synchronously seeded, never loading/unavailable)', () => {
+      useMockData = true
+      const { result } = renderHook(() => useStorylineTarget())
+
+      expect(result.current.dataStatus).toBe('live')
+    })
   })
 
   it('AC2: setTarget POSTs to the resolved storyline id, updates optimistically, then reconciles against the authoritative response', async () => {
@@ -332,9 +370,38 @@ describe('useStorylineTarget — live mode (story 09; USE_MOCK_DATA=false)', () 
     expect(mockedSetStorylineTarget).toHaveBeenCalledWith('storyline-real-guid', 75)
 
     // Reconciled against the AUTHORITATIVE response — intensity moves to the
-    // server's 42 (never assumed locally), even though only target was set.
+    // server's 42 (never assumed locally), even though only target was set —
+    // and the change is now CONFIRMED (promoted to lastChangeDetail).
     await waitFor(() => expect(result.current.intensity).toBe(42))
     expect(result.current.targetIntensity).toBe(75)
+    expect(result.current.lastChangeDetail).toBe('none → 75')
+    expect(result.current.pendingChangeDetail).toBeNull()
+    expect(result.current.writeError).toBeNull()
+  })
+
+  it('Gate-1 CR-001: holds the change as PENDING (never claimed) while the POST is in flight', async () => {
+    mockedGetStoryline.mockResolvedValue(liveState({ intensity: 40, targetIntensity: null }))
+    let resolvePost: (value: liveStorylineActions.LiveStorylineSteeringState) => void = () => {}
+    mockedSetStorylineTarget.mockReturnValue(
+      new Promise(resolve => {
+        resolvePost = resolve
+      }),
+    )
+    const { result } = renderHook(() => useStorylineTarget())
+    await waitFor(() => expect(result.current.storylineId).toBe('storyline-real-guid'))
+
+    act(() => result.current.setTarget(75))
+
+    // In flight: PENDING, not yet CONFIRMED — the aria-live status line the
+    // dial renders must not announce this as settled fact.
+    expect(result.current.pendingChangeDetail).toBe('none → 75')
+    expect(result.current.lastChangeDetail).toBeNull()
+
+    act(() => {
+      resolvePost(liveState({ intensity: 41, targetIntensity: 75 }))
+    })
+    await waitFor(() => expect(result.current.lastChangeDetail).toBe('none → 75'))
+    expect(result.current.pendingChangeDetail).toBeNull()
   })
 
   it('emits exactly ONE steering_action event, unchanged in shape from the mock branch (XC-004, no double-emit)', async () => {
@@ -359,22 +426,71 @@ describe('useStorylineTarget — live mode (story 09; USE_MOCK_DATA=false)', () 
     })
   })
 
-  it('reverts the optimistic target on a rejected POST, but keeps the telemetry already logged for the attempted change', async () => {
-    mockedGetStoryline.mockResolvedValue(liveState({ intensity: 40, targetIntensity: null }))
-    mockedSetStorylineTarget.mockRejectedValue(new Error('network down'))
-    const { result } = renderHook(() => useStorylineTarget())
-    await waitFor(() => expect(result.current.storylineId).toBe('storyline-real-guid'))
+  describe('a rejected POST (Gate-1 CR-001 + S-003)', () => {
+    it('never claims the change: clears the pending detail, sets a write error, and re-syncs from the server instead of a blind local revert', async () => {
+      mockedGetStoryline.mockResolvedValueOnce(liveState({ intensity: 40, targetIntensity: null }))
+      mockedSetStorylineTarget.mockRejectedValue(new Error('network down'))
+      const { result } = renderHook(() => useStorylineTarget())
+      await waitFor(() => expect(result.current.storylineId).toBe('storyline-real-guid'))
 
-    await act(async () => {
-      result.current.setTarget(90)
-      // Flush the microtask queue so the rejected promise's `.catch` runs.
-      await Promise.resolve()
-      await Promise.resolve()
+      // The post-failure re-sync GET returns the server's untouched truth —
+      // never mutated by the failed POST.
+      mockedGetStoryline.mockResolvedValueOnce(liveState({ intensity: 40, targetIntensity: null }))
+
+      act(() => result.current.setTarget(90))
+
+      // Immediately: optimistic NUMBER update + a PENDING (not yet confirmed) detail.
+      expect(result.current.targetIntensity).toBe(90)
+      expect(result.current.pendingChangeDetail).toBe('none → 90')
+
+      await waitFor(() => expect(result.current.writeError).not.toBeNull())
+
+      expect(result.current.writeError).toBe(
+        'Could not set the target — the change was not applied. Try again.',
+      )
+      expect(result.current.pendingChangeDetail).toBeNull()
+      // NEVER promoted — the change never actually landed.
+      expect(result.current.lastChangeDetail).toBeNull()
+
+      // The re-sync (not a captured pre-POST snapshot, Gate-1 S-003) corrects
+      // the optimistic number back to the server's ground truth.
+      await waitFor(() => expect(result.current.targetIntensity).toBeNull())
+      expect(mockedGetStoryline).toHaveBeenCalledWith('storyline-real-guid')
+
+      // The attempt is still recorded in the audit trail either way (XC-004).
+      expect(steeringEvents()).toHaveLength(1)
+      expect(steeringEvents()[0]?.payload).toMatchObject({ from: null, to: 90 })
     })
 
-    expect(result.current.targetIntensity).toBeNull()
-    expect(steeringEvents()).toHaveLength(1)
-    expect(steeringEvents()[0]?.payload).toMatchObject({ from: null, to: 90 })
+    it('still surfaces a write error (never a silent no-op) even when NOTHING had loaded yet — the "nothing loaded" gap CR-001 flagged', async () => {
+      mockedGetStoryline.mockReturnValue(new Promise(() => {})) // the initial GET never resolves
+      mockedSetStorylineTarget.mockRejectedValue(new Error('empty registry'))
+      const { result } = renderHook(() => useStorylineTarget())
+
+      expect(result.current.dataStatus).toBe('loading')
+
+      act(() => result.current.setTarget(90))
+
+      await waitFor(() => expect(result.current.writeError).not.toBeNull())
+      expect(result.current.lastChangeDetail).toBeNull()
+    })
+
+    it('a fresh attempt clears a previous write error', async () => {
+      mockedGetStoryline.mockResolvedValue(liveState({ intensity: 40, targetIntensity: null }))
+      mockedSetStorylineTarget.mockRejectedValueOnce(new Error('network down'))
+      const { result } = renderHook(() => useStorylineTarget())
+      await waitFor(() => expect(result.current.storylineId).toBe('storyline-real-guid'))
+
+      act(() => result.current.setTarget(90))
+      await waitFor(() => expect(result.current.writeError).not.toBeNull())
+
+      mockedSetStorylineTarget.mockResolvedValueOnce(
+        liveState({ intensity: 40, targetIntensity: 60 }),
+      )
+      act(() => result.current.setTarget(60))
+
+      expect(result.current.writeError).toBeNull()
+    })
   })
 
   it('a setTarget that resolves to the SAME value as the current target is a no-op: no POST, no telemetry', async () => {
@@ -396,5 +512,21 @@ describe('useStorylineTarget — live mode (story 09; USE_MOCK_DATA=false)', () 
 
     expect(mockedGetStoryline).not.toHaveBeenCalled()
     expect(mockedSetStorylineTarget).not.toHaveBeenCalled()
+  })
+
+  it('Gate-1 W-006: acquires the poll reference on mount and releases it on unmount', () => {
+    mockedGetStoryline.mockResolvedValue(liveState())
+    const acquireSpy = vi.spyOn(liveStorylineStore, 'ensureStarted')
+    const releaseSpy = vi.spyOn(liveStorylineStore, 'release')
+
+    const { unmount } = renderHook(() => useStorylineTarget())
+    expect(acquireSpy).toHaveBeenCalledTimes(1)
+    expect(releaseSpy).not.toHaveBeenCalled()
+
+    unmount()
+    expect(releaseSpy).toHaveBeenCalledTimes(1)
+
+    acquireSpy.mockRestore()
+    releaseSpy.mockRestore()
   })
 })

@@ -14,7 +14,8 @@
  *   - MOCK (dev/UAT default, and every pre-existing story-02 test — UNCHANGED
  *     behavior): reads the mock storyline's actual state (`intensity` +
  *     `phase`, from `storylineMock`) and mutates it synchronously via
- *     `storylineMock.setTargetIntensity`.
+ *     `storylineMock.setTargetIntensity`. Always reports `dataStatus: 'live'`
+ *     — the mock is always synchronously present, never loading/unavailable.
  *   - LIVE (`USE_MOCK_DATA === false`): reads the live storyline via
  *     `liveStorylineStore` (an initial `GET /api/steering/storylines/{id}`
  *     plus a ~5s poll — no push, story 09 stays file-disjoint from story 08's
@@ -27,6 +28,16 @@
  *     subsequent call) — mirrors the mock branch's hard-coded
  *     `MOCK_STORYLINE_ID` until a future multi-storyline board keys the store
  *     by id.
+ *
+ * DATA STATUS, NEVER FABRICATED (Gate-1 CR-002). `dataStatus` distinguishes
+ * "no confirmed live read yet" from "genuinely quiet" — a null/failed GET
+ * (including the accepted post-App-Service-restart 404-forever limitation)
+ * must never present as `ACTUAL 0 / DORMANT`, which is indistinguishable from
+ * a real quiet storyline. `intensity`/`targetIntensity`/`phase` fall back to
+ * safe placeholders while `dataStatus !== 'live'` ONLY so the type stays
+ * non-nullable for the mock branch's sake; `<EscalationDial>` MUST gate its
+ * numeric display on `dataStatus` rather than trust those placeholders as
+ * fact.
  *
  * In BOTH modes:
  *   - `setTarget(value)` clamps 0-100 and records the change (mirroring
@@ -41,20 +52,29 @@
  *     actingHumanId, role }` (a controller/system action on world state, not
  *     engine-authored content — never `'engine'`), `target: { entityType:
  *     'storyline', entityId }`, `payload` carrying the before/after detail
- *     string (`"78 → 60"` / `"none → 60"`). The same detail string is exposed
- *     back as `lastChangeDetail` so `<EscalationDial>` can render the exact
- *     transition text the AC calls for, without re-deriving it. Emitted
- *     CLIENT-SIDE ONLY (unchanged in shape from the mock branch) — the live
- *     POST endpoint emits no `steering_action` telemetry of its own, so this
- *     is the ONE emission per commit either way (no double-emit, XC-004).
- *   - LIVE ONLY: the local view updates OPTIMISTICALLY the instant `setTarget`/
- *     `clearTarget` is called (so the dial feels as immediate as the mock),
- *     then RECONCILES against the POST's authoritative response; on a
- *     rejected POST, the optimistic change is REVERTED (mirrors
- *     `useEngineControl`'s kill-switch revert-on-rejection) — the dial must
- *     never claim a target commit the backend didn't actually apply. The
- *     telemetry already emitted still stands as the record of the attempted
- *     change either way.
+ *     string (`"78 → 60"` / `"none → 60"`). Emitted CLIENT-SIDE ONLY
+ *     (unchanged in shape from the mock branch) — the live POST endpoint
+ *     emits no `steering_action` telemetry of its own, so this is the ONE
+ *     emission per commit either way (no double-emit, XC-004).
+ *
+ * NEVER CLAIM A CHANGE BEFORE IT LANDS (Gate-1 CR-001). `lastChangeDetail` —
+ * the text an `aria-live="polite"` status line announces as FACT — is
+ * promoted only in the LIVE branch's POST `.then`, after `reconcile`; before
+ * that it is exposed separately as `pendingChangeDetail` ("in flight, not yet
+ * confirmed"). On a rejected POST (a 404 after an App Service restart, a 401
+ * on session expiry, a network blip) the pending detail is cleared and
+ * `writeError` is set instead — the dial must render an explicit failure
+ * (icon + text, NFR-001), never announce a target change that never actually
+ * applied. The MOCK branch's write is synchronous (no network round trip, so
+ * no window in which to announce a change before it lands) and keeps setting
+ * `lastChangeDetail` directly, exactly as story 02 shipped it.
+ *
+ * RE-SYNC ON FAILURE, NOT A BLIND REVERT (Gate-1 S-003). Rather than
+ * restoring a captured pre-POST snapshot (which could clobber a poll that
+ * landed in between the optimistic update and the rejection), a failed POST
+ * calls `liveStorylineStore.refetchNow` — the server's GET is the ground
+ * truth. This also fixes the "nothing has loaded yet" gap: `refetchNow` runs
+ * regardless of whether a prior snapshot existed.
  *
  * ISOLATION (COR-001) — `exerciseId`/`timeZone` from `useExerciseContext()`
  * STAMP the telemetry event only, never a fetch-scoping parameter (the live
@@ -62,10 +82,13 @@
  * authoritative). STAFF-ONLY (XC-002) — `useControllerIdentity()` supplies the
  * acting human + role.
  *
- * SUBSCRIPTION — reads either store via `useSyncExternalStore` so every mount
- * reacts to a change from ANY source (this hook, another mounted dial, or —
- * live only — the poll / the engine's own tick) without a separate render
- * loop of its own.
+ * SUBSCRIPTION + LIFECYCLE — reads either store via `useSyncExternalStore` so
+ * every mount reacts to a change from ANY source (this hook, another mounted
+ * dial, or — live only — the poll / the engine's own tick). LIVE ONLY: the
+ * `useEffect` acquires the poll on mount and releases it on unmount
+ * (`liveStorylineStore.ensureStarted`/`release`, Gate-1 W-006 reference
+ * counting) — the poll runs only while at least one `<EscalationDial>` is
+ * actually mounted, not for the lifetime of the tab regardless.
  */
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
@@ -85,7 +108,7 @@ import {
   PRIMARY_STORYLINE_SENTINEL,
   setStorylineTarget as liveSetStorylineTarget,
 } from '../services/liveStorylineActions'
-import { liveStorylineStore } from '../services/liveStorylineStore'
+import { liveStorylineStore, type LiveStorylineDataStatus } from '../services/liveStorylineStore'
 
 /**
  * Mirrors `Storyline.FormatTarget` — `null` renders as the literal `"none"`
@@ -105,20 +128,55 @@ export interface UseStorylineTargetResult {
    * stores by id and select here.
    */
   readonly storylineId: string
-  /** Actual intensity, 0-100 (`Storyline.Intensity`) — the track's fill. */
+  /**
+   * The storyline's human title (Gate-1 W-008) — so the dial can name what
+   * it is steering. Empty until known.
+   */
+  readonly title: string
+  /**
+   * Whether `intensity`/`targetIntensity`/`phase` are a confirmed live read
+   * (Gate-1 CR-002). Always `'live'` under mock. `<EscalationDial>` MUST NOT
+   * present the numeric fields as fact while this is not `'live'`.
+   */
+  readonly dataStatus: LiveStorylineDataStatus
+  /**
+   * Actual intensity, 0-100 (`Storyline.Intensity`) — the track's fill.
+   * Meaningful only when `dataStatus === 'live'`.
+   */
   readonly intensity: number
-  /** Controller-set target, 0-100, or `null` when unset (`Storyline.TargetIntensity`). */
+  /**
+   * Controller-set target, 0-100, or `null` when unset
+   * (`Storyline.TargetIntensity`). Meaningful only when `dataStatus === 'live'`.
+   */
   readonly targetIntensity: number | null
-  /** Mirrors `StorylinePhase` (`Storyline.Phase`). */
+  /** Mirrors `StorylinePhase` (`Storyline.Phase`). Meaningful only when `dataStatus === 'live'`. */
   readonly phase: StorylinePhase
   /** Uppercase phase label, exactly as `StorylineBriefProjection.PhaseLabel` produces it. */
   readonly phaseLabel: string
   /**
-   * The from/to detail of the most recent target change this session (e.g.
-   * `"78 → 60"`, `"none → 60"`), mirroring `Storyline.SetTargetIntensity`'s
-   * detail-string convention. `null` before any change has been made yet.
+   * The from/to detail of the most recent CONFIRMED target change this
+   * session (e.g. `"78 → 60"`, `"none → 60"`) — only ever set AFTER the
+   * backend actually applied it (mirrors `Storyline.SetTargetIntensity`'s
+   * detail-string convention). `null` before any change has landed yet.
    */
   readonly lastChangeDetail: string | null
+  /**
+   * LIVE ONLY (Gate-1 CR-001): the from/to detail of a change that has been
+   * REQUESTED but not yet confirmed by the POST's authoritative response —
+   * distinct from `lastChangeDetail`, which is never set until confirmation.
+   * Always `null` under mock (the mock write is synchronous — no in-flight
+   * window). `null` once the request settles (success promotes it to
+   * `lastChangeDetail`; failure clears it and sets `writeError`).
+   */
+  readonly pendingChangeDetail: string | null
+  /**
+   * LIVE ONLY (Gate-1 CR-001): a human-readable failure message when the
+   * most recent target-change POST was rejected — the dial must render this
+   * explicitly (icon + text, NFR-001) rather than silently leaving the
+   * controller to infer failure from nothing changing. Cleared at the start
+   * of the NEXT attempt. Always `null` under mock.
+   */
+  readonly writeError: string | null
   /** Sets the target (clamped 0-100), records it, and emits one `steering_action` event. */
   readonly setTarget: (value: number) => void
   /** Clears the target (`targetIntensity` -> `null`) and emits one `steering_action` event. */
@@ -126,14 +184,23 @@ export interface UseStorylineTargetResult {
 }
 
 /**
- * A safe default view while the LIVE snapshot has not loaded yet (before the
- * first GET resolves).
+ * Safe placeholder values while the LIVE snapshot is not `'live'` (before the
+ * first GET resolves, or after one fails) — NEVER presented as fact by
+ * `<EscalationDial>`, which gates its numeric display on `dataStatus`
+ * (Gate-1 CR-002).
  */
-const LIVE_LOADING_DEFAULTS = {
+const LIVE_PLACEHOLDER = {
+  title: '',
   intensity: 0,
   targetIntensity: null as number | null,
   phase: 'Dormant' as StorylinePhase,
 }
+
+/**
+ * A human-readable write failure — the dial renders this with icon + text
+ * (NFR-001), never silently.
+ */
+const WRITE_ERROR_MESSAGE = 'Could not set the target — the change was not applied. Try again.'
 
 /**
  * The escalation dial's target-management hook. See the module header for the
@@ -148,10 +215,15 @@ export function useStorylineTarget(): UseStorylineTargetResult {
   const { exerciseId, timeZone } = useExerciseContext()
   const { actingHumanId, role } = useControllerIdentity()
 
-  // LIVE only: kick off the initial GET + poll once (idempotent — see
-  // liveStorylineStore.ensureStarted). No-op under mock data.
+  // LIVE only: acquire the poll on mount, release it on unmount (Gate-1
+  // W-006 reference counting — the poll runs only while something is
+  // actually mounted to read it). No-op under mock data.
   useEffect(() => {
-    if (!USE_MOCK_DATA) liveStorylineStore.ensureStarted(PRIMARY_STORYLINE_SENTINEL)
+    if (USE_MOCK_DATA) return
+    liveStorylineStore.ensureStarted(PRIMARY_STORYLINE_SENTINEL)
+    return () => {
+      liveStorylineStore.release()
+    }
   }, [])
 
   const mockStoryline = useSyncExternalStore(
@@ -159,26 +231,32 @@ export function useStorylineTarget(): UseStorylineTargetResult {
     storylineMock.getStoryline,
     storylineMock.getStoryline,
   )
-  const liveStoryline = useSyncExternalStore(
+  const liveSnapshot = useSyncExternalStore(
     liveStorylineStore.subscribe,
     liveStorylineStore.getSnapshot,
     liveStorylineStore.getSnapshot,
   )
 
   const [lastChangeDetail, setLastChangeDetail] = useState<string | null>(null)
+  const [pendingChangeDetail, setPendingChangeDetail] = useState<string | null>(null)
+  const [writeError, setWriteError] = useState<string | null>(null)
+
+  const liveData = liveSnapshot.data
+  const dataStatus: LiveStorylineDataStatus = USE_MOCK_DATA ? 'live' : liveSnapshot.status
 
   const storylineId = USE_MOCK_DATA
     ? MOCK_STORYLINE_ID
-    : (liveStoryline?.storylineId ?? PRIMARY_STORYLINE_SENTINEL)
+    : (liveData?.storylineId ?? PRIMARY_STORYLINE_SENTINEL)
+  const title = USE_MOCK_DATA ? mockStoryline.title : (liveData?.title ?? LIVE_PLACEHOLDER.title)
   const intensity = USE_MOCK_DATA
     ? mockStoryline.intensity
-    : (liveStoryline?.intensity ?? LIVE_LOADING_DEFAULTS.intensity)
+    : (liveData?.intensity ?? LIVE_PLACEHOLDER.intensity)
   const targetIntensity = USE_MOCK_DATA
     ? mockStoryline.targetIntensity
-    : (liveStoryline?.targetIntensity ?? LIVE_LOADING_DEFAULTS.targetIntensity)
+    : (liveData?.targetIntensity ?? LIVE_PLACEHOLDER.targetIntensity)
   const phase: StorylinePhase = USE_MOCK_DATA
     ? mockStoryline.phase
-    : (liveStoryline?.phase ?? LIVE_LOADING_DEFAULTS.phase)
+    : (liveData?.phase ?? LIVE_PLACEHOLDER.phase)
 
   const emitSteeringAction = useCallback(
     (targetId: string, from: number | null, to: number | null, detail: string) => {
@@ -211,39 +289,56 @@ export function useStorylineTarget(): UseStorylineTargetResult {
         if (storylineMock.getStoryline().targetIntensity === value) return
 
         const change = storylineMock.setTargetIntensity(value)
+        // Synchronous write — nothing to be "pending" about; confirmed immediately.
         setLastChangeDetail(change.detail)
         emitSteeringAction(MOCK_STORYLINE_ID, change.from, change.to, change.detail)
         return
       }
 
       // LIVE — read fresh (never a stale closure over a memoized snapshot).
-      const priorSnapshot = liveStorylineStore.getSnapshot()
-      const from = priorSnapshot?.targetIntensity ?? null
+      const priorData = liveStorylineStore.getSnapshot().data
+      const from = priorData?.targetIntensity ?? null
       if (from === value) return // same no-op guard as mock
 
-      const targetId = priorSnapshot?.storylineId ?? PRIMARY_STORYLINE_SENTINEL
+      const targetId = priorData?.storylineId ?? PRIMARY_STORYLINE_SENTINEL
       const detail = `${formatTarget(from)} → ${formatTarget(value)}`
-      setLastChangeDetail(detail)
 
-      // Optimistic local update — the dial feels as immediate as the mock —
-      // then reconciled (or reverted) against the authoritative POST below.
-      if (priorSnapshot) {
-        liveStorylineStore.reconcile({ ...priorSnapshot, targetIntensity: value })
+      // Gate-1 CR-001: this is a REQUEST, not yet a fact — held as PENDING,
+      // never promoted to `lastChangeDetail` (what the aria-live status line
+      // announces as confirmed) until the POST actually succeeds. A fresh
+      // attempt supersedes any previous write error.
+      setWriteError(null)
+      setPendingChangeDetail(detail)
+
+      // Optimistic local NUMBER update — the dial's fill/tick feel as
+      // immediate as the mock — reconciled (or re-synced) below regardless.
+      if (priorData) {
+        liveStorylineStore.reconcile({ ...priorData, targetIntensity: value })
       }
 
       // Emitted BEFORE the POST settles (mirrors useEngineControl): the audit
-      // trail records the attempted change even if the POST later rejects and
-      // the optimistic update is reverted.
+      // trail records the attempted change even if the POST later rejects.
+      // This is a telemetry record of an ATTEMPT, not a UI claim of success —
+      // the UI-facing claim (`lastChangeDetail`) is gated separately below.
       emitSteeringAction(targetId, from, value, detail)
 
       liveSetStorylineTarget(targetId, value)
-        .then(authoritative => liveStorylineStore.reconcile(authoritative))
+        .then(authoritative => {
+          liveStorylineStore.reconcile(authoritative)
+          setPendingChangeDetail(null)
+          setLastChangeDetail(detail)
+        })
         .catch(() => {
-          // The backend never applied this change — revert to the last-known
-          // authoritative snapshot rather than claim a commit that didn't
-          // happen. A no-op if there was no prior snapshot to revert to
-          // (nothing has loaded yet — the next poll tick will seed it).
-          if (priorSnapshot) liveStorylineStore.reconcile(priorSnapshot)
+          // The backend never applied this change: never claim it. Re-sync
+          // from the server (Gate-1 S-003) rather than trust a captured
+          // pre-POST snapshot, which could clobber a poll that landed in
+          // between the optimistic update and this rejection — runs
+          // regardless of whether `priorData` existed (fixes the
+          // "nothing loaded yet" gap where there was previously no
+          // revert at all).
+          setPendingChangeDetail(null)
+          setWriteError(WRITE_ERROR_MESSAGE)
+          void liveStorylineStore.refetchNow(targetId)
         })
     },
     [emitSteeringAction],
@@ -263,11 +358,15 @@ export function useStorylineTarget(): UseStorylineTargetResult {
 
   return {
     storylineId,
+    title,
+    dataStatus,
     intensity,
     targetIntensity,
     phase,
     phaseLabel: phaseLabel(phase),
     lastChangeDetail,
+    pendingChangeDetail,
+    writeError,
     setTarget,
     clearTarget,
   }

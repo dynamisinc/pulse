@@ -24,9 +24,15 @@
  * `StorylineSteeringService.PrimaryStorylineSentinel` constant EXACTLY — is
  * passed until the first successful GET/POST resolves the exercise's real
  * storyline id (which the caller then uses for subsequent calls). The backend
- * resolves the sentinel to the CALLER's own exercise's first registered
- * storyline — never another exercise's (COR-001) — so this is exercise-scoped
- * by construction, not a client-supplied scoping parameter.
+ * compares this literal EXACTLY (Gate-1 W-001) — it resolves to the CALLER's
+ * own exercise's first registered storyline; any other non-GUID literal
+ * (a stray `"undefined"`, a typo, ...) 404s rather than silently wildcarding
+ * to "whichever storyline is first". Exercise-scoped by construction
+ * (COR-001), not a client-supplied scoping parameter.
+ *
+ * URL-ENCODED (Gate-1 S-002). Every storyline id — the sentinel or a real
+ * GUID — is `encodeURIComponent`-ed into the request path, defence in depth
+ * against a malformed/unexpected id value corrupting the route.
  */
 
 import { api } from '@/core/services/api'
@@ -41,6 +47,8 @@ export const PRIMARY_STORYLINE_SENTINEL = 'primary'
  */
 export interface LiveStorylineSteeringState {
   readonly storylineId: string
+  /** The storyline's human title (Gate-1 W-008 — names what the dial is steering). */
+  readonly title: string
   readonly exerciseId: string
   /** 0-100, clamped (`Storyline.Intensity`). */
   readonly intensity: number
@@ -74,6 +82,7 @@ function isWireStorylineSteeringState(value: unknown): value is LiveStorylineSte
     v.targetIntensity === null || v.targetIntensity === undefined || typeof v.targetIntensity === 'number'
   return (
     typeof v.storylineId === 'string' && v.storylineId.length > 0 &&
+    typeof v.title === 'string' &&
     typeof v.exerciseId === 'string' && v.exerciseId.length > 0 &&
     typeof v.intensity === 'number' &&
     targetOk &&
@@ -88,6 +97,7 @@ function isWireStorylineSteeringState(value: unknown): value is LiveStorylineSte
 function toLiveState(wire: LiveStorylineSteeringState): LiveStorylineSteeringState {
   return {
     storylineId: wire.storylineId,
+    title: wire.title,
     exerciseId: wire.exerciseId,
     intensity: wire.intensity,
     targetIntensity: wire.targetIntensity ?? null,
@@ -102,7 +112,7 @@ function toLiveState(wire: LiveStorylineSteeringState): LiveStorylineSteeringSta
  * `liveStorylineStore.refetch` — catches and keeps its previous snapshot).
  */
 export async function getStoryline(storylineId: string): Promise<LiveStorylineSteeringState> {
-  const response = await api.get<unknown>(`/steering/storylines/${storylineId}`)
+  const response = await api.get<unknown>(`/steering/storylines/${encodeURIComponent(storylineId)}`)
   if (!isWireStorylineSteeringState(response.data)) {
     throw new Error('Malformed GET /steering/storylines/{storylineId} response.')
   }
@@ -120,7 +130,10 @@ export async function setStorylineTarget(
   storylineId: string,
   target: number | null,
 ): Promise<LiveStorylineSteeringState> {
-  const response = await api.post<unknown>(`/steering/storylines/${storylineId}/target`, { target })
+  const response = await api.post<unknown>(
+    `/steering/storylines/${encodeURIComponent(storylineId)}/target`,
+    { target },
+  )
   if (!isWireStorylineSteeringState(response.data)) {
     throw new Error('Malformed POST /steering/storylines/{storylineId}/target response.')
   }

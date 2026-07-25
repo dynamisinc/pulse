@@ -15,6 +15,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Tests.Data;
@@ -63,6 +64,11 @@ public sealed class StorylineTargetChaseIntegrationTests
         services.AddEngineRuntimeSeams();
         services.AddReactionLoopHost();
 
+        // W-005: registers StorylineSteeringService over the SAME IReactionLoopRegistry
+        // AddReactionLoopHost() already registered (TryAddSingleton converges on it), so a test can go through
+        // the actual service — not a hand-called SetTargetIntensity stand-in — and then tick.
+        services.AddStorylineSteering();
+
         return services.BuildServiceProvider();
     }
 
@@ -84,6 +90,26 @@ public sealed class StorylineTargetChaseIntegrationTests
         storyline.Seed(0);
         storyline.DetectActivity(0); // Seeded -> Escalating
         storyline.SetTargetIntensity(target, 0); // the SAME mutation StorylineSteeringService.SetTargetAsync performs
+        storyline.RecordEngineReaction(0); // suppress OBSERVE re-firing for the duration of this test
+        return storyline;
+    }
+
+    /// <summary>
+    /// Builds an <see cref="StorylinePhase.Escalating"/> storyline with NO target set yet (W-005) — the test
+    /// sets it through the ACTUAL <see cref="StorylineSteeringService"/>, not a hand-called
+    /// <c>SetTargetIntensity</c> stand-in, so the composition end-to-end (service → registry → tick) is what's
+    /// under test rather than an assumption that the two are equivalent.
+    /// </summary>
+    private static Storyline EscalatingStorylineNoTarget(Guid exerciseId, int initialIntensity)
+    {
+        var storyline = Storyline.Create(
+            exerciseId,
+            title: "Water main contamination fears",
+            expectation: "an official statement from the county",
+            responseWindowMin: 20,
+            initialIntensity: initialIntensity);
+        storyline.Seed(0);
+        storyline.DetectActivity(0); // Seeded -> Escalating
         storyline.RecordEngineReaction(0); // suppress OBSERVE re-firing for the duration of this test
         return storyline;
     }
@@ -180,5 +206,60 @@ public sealed class StorylineTargetChaseIntegrationTests
         manualTime.Advance(TimeSpan.FromMinutes(5));
         await RunOneTickAsync(host, registration);
         storyline.Intensity.Should().Be(62, "once actual reaches the target, the chase holds rather than overshooting it");
+    }
+
+    [RequiresDockerFact]
+    public async Task Composes_SetTargetAsync_ThenTwoTicks_NarrowTheGap_ProvingTheServiceReachesTheSameChase()
+    {
+        // W-005: the other tests in this class hand-call Storyline.SetTargetIntensity with a comment
+        // asserting it is "the same mutation the service performs" — true today, but exactly the kind of
+        // assumption this Gate-1 wave exists to eliminate. This test goes through the ACTUAL
+        // StorylineSteeringService, resolved from DI with a real per-call exercise scope, so the full
+        // composition (service -> registry -> the SAME Storyline object -> tick) is what is proven, not an
+        // assumption that a direct call and the service's call are equivalent.
+        var exerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+
+        await using var host = BuildHost(manualTime);
+        var clock = host.GetRequiredService<IExerciseClock>();
+        clock.Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
+
+        var storyline = EscalatingStorylineNoTarget(exerciseId, initialIntensity: 30);
+        var registration = Registration(exerciseId, storyline);
+
+        // Register the SAME registration into the registry the service reads from (RunOneTickAsync below
+        // ticks it directly via the driver, exactly as the other tests do — the registry registration is
+        // what lets StorylineSteeringService find the SAME Storyline instance to mutate).
+        var registry = host.GetRequiredService<IReactionLoopRegistry>();
+        registry.Register(registration);
+
+        using (var scope = host.CreateScope())
+        {
+            ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = exerciseId;
+            var steeringService = scope.ServiceProvider.GetRequiredService<StorylineSteeringService>();
+
+            var setResult = await steeringService.SetTargetAsync(StorylineSteeringService.PrimaryStorylineSentinel, 90);
+
+            setResult.Outcome.Should().Be(StorylineSteeringOutcome.Ok);
+            setResult.Storyline!.TargetIntensity.Should().Be(90);
+        }
+
+        // The SAME in-memory object was mutated — no shadow/duplicate storyline (AC2).
+        storyline.TargetIntensity.Should().Be(90);
+
+        var before = storyline.Intensity;
+        before.Should().Be(30);
+
+        manualTime.Advance(TimeSpan.FromMinutes(5));
+        await RunOneTickAsync(host, registration);
+        var afterTick1 = storyline.Intensity;
+        afterTick1.Should().BeGreaterThan(before, "the service's SetTargetAsync must reach the SAME chase the other tests prove");
+
+        manualTime.Advance(TimeSpan.FromMinutes(5));
+        await RunOneTickAsync(host, registration);
+        var afterTick2 = storyline.Intensity;
+
+        afterTick2.Should().BeGreaterThan(afterTick1, "the gap keeps narrowing tick over tick, via the SERVICE's own mutation");
+        (90 - afterTick2).Should().BeLessThan(90 - afterTick1);
     }
 }

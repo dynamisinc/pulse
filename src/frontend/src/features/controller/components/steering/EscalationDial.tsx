@@ -36,6 +36,22 @@
  * one-sample drag and behaves the same way. Keyboard sets remain immediate
  * (each key press is already a single discrete commit).
  *
+ * NEVER FABRICATE A CALM WORLD (Gate-1 CR-002). Before a live storyline read
+ * is CONFIRMED (`dial.dataStatus === 'live'`), this component renders NO
+ * numeric readout at all — no `ACTUAL 0 / DORMANT` masquerading as fact. It
+ * instead shows a plain, explicit status (icon + text, NFR-001): "loading"
+ * before the first GET resolves, or "no live storyline" if the most recent
+ * GET failed (including the accepted post-App-Service-restart 404-forever
+ * limitation). Always `'live'` under mock (synchronously seeded).
+ *
+ * NEVER CLAIM AN UNCONFIRMED CHANGE (Gate-1 CR-001). The relationship text
+ * (an `aria-live="polite"` status line) distinguishes a PENDING change
+ * (`dial.pendingChangeDetail`, in flight) from a CONFIRMED one
+ * (`dial.lastChangeDetail`, only ever set after the backend actually applied
+ * it) — it never announces "none → 90" as settled fact before the POST
+ * resolves. A failed write surfaces `dial.writeError` as an explicit,
+ * separate icon+text line, never silently reverting with no signal.
+ *
  * EXPLANATORY UX (story 09, AC5 — static, not per-exercise configured copy).
  * The D5-amended dial shipped with no explanation of what it shows, so this
  * story adds, in place:
@@ -44,7 +60,13 @@
  *     distinct from the "ACTUAL n"/"TARGET n" live VALUE badges above, which
  *     already carry icon + text per story 02's NFR-001 pass);
  *   - a one-line PHASE-MEANING description on hover/focus of the phase label
- *     (a `Tooltip`, keyboard-reachable via `tabIndex`).
+ *     (an MUI `Tooltip` with `describeChild` — Gate-1 W-003: WITHOUT
+ *     `describeChild`, MUI sets the tooltip title as the trigger's
+ *     `aria-label`, which REPLACES "ESCALATING" as the phase label's
+ *     accessible name, so a screen-reader user would never hear the phase
+ *     itself. `describeChild` keeps the phase text as the accessible name
+ *     and moves the description to `aria-describedby`, present only while
+ *     the tooltip is open).
  * None of this is color-only (NFR-001): every explanation is icon + text.
  *
  * THE HONESTY CAVEAT (story 09, AC4). `Storyline.Tick` only drives actual
@@ -54,7 +76,10 @@
  * NOT chase it. Rather than silently implying an immediate chase that will
  * not happen, this component states that plainly whenever a target is set on
  * a non-chasing phase — mirroring the backend's own gate, never re-deriving
- * new domain logic here.
+ * new domain logic here. Once a live target exists, `TargetFollow.Modulate`
+ * (already shipped, unmodified) ALSO shapes burst direction/count on the
+ * SAME storyline — that DECIDE-stage effect is out of this component's
+ * concern (it renders only the MEASURE-stage actual/target relationship).
  *
  * CONTAINER-AGNOSTIC (Phase 0 reconciliation). This widget assumes nothing
  * about its mount point (inline work-area vs. a future "Stories" flyout,
@@ -63,10 +88,16 @@
  * interim step; this component/story does not touch that file.
  */
 
-import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { Box, Stack, Tooltip, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCircleInfo, faGaugeHigh, faLocationDot } from '@fortawesome/free-solid-svg-icons'
+import {
+  faCircleInfo,
+  faGaugeHigh,
+  faHourglassHalf,
+  faLocationDot,
+  faTriangleExclamation,
+} from '@fortawesome/free-solid-svg-icons'
 import { useStorylineTarget } from '../../hooks/useStorylineTarget'
 import type { StorylinePhase } from '../../services/storylineMock'
 
@@ -115,11 +146,30 @@ function valueFromClientX(track: HTMLElement, clientX: number): number {
   return clamp0to100(ratio * 100)
 }
 
+/** The shared panel chrome both the "unavailable" and the live render paths use. */
+function DialPanel({ children }: { children: ReactNode }) {
+  return (
+    <Box
+      data-testid="escalation-dial"
+      sx={{
+        p: 1.5,
+        bgcolor: chrome.panel,
+        border: `1px solid ${chrome.line}`,
+        borderRadius: '8px',
+        fontFamily: "'Figtree', system-ui, sans-serif",
+      }}
+    >
+      {children}
+    </Box>
+  )
+}
+
 /**
  * The one-track actual+target escalation dial. See the module header for the
- * full contract. Self-contained and prop-less — reads/writes the single mock
- * storyline via `useStorylineTarget()` (Wave-1 is single-storyline; a future
- * per-card board reuse arrives with the multi-storyline store, D5-016/017).
+ * full contract. Self-contained and prop-less — reads/writes the single
+ * storyline via `useStorylineTarget()` (Wave-1/2 is single-storyline; a
+ * future per-card board reuse arrives with the multi-storyline store,
+ * D5-016/017).
  */
 export function EscalationDial() {
   const dial = useStorylineTarget()
@@ -215,12 +265,54 @@ export function EscalationDial() {
     [dial],
   )
 
+  // Gate-1 CR-002: before a live read is CONFIRMED, render NOTHING numeric —
+  // an explicit, plain status instead of a fabricated calm/quiet world.
+  if (dial.dataStatus !== 'live') {
+    const isLoading = dial.dataStatus === 'loading'
+    return (
+      <DialPanel>
+        <Stack direction="row" sx={{ alignItems: 'baseline', gap: 1, mb: 1 }}>
+          <Typography
+            component="span"
+            sx={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', color: chrome.inkMuted }}
+          >
+            ESCALATION
+          </Typography>
+        </Stack>
+        <Stack
+          direction="row"
+          data-testid="escalation-dial-unavailable"
+          data-status={dial.dataStatus}
+          sx={{ alignItems: 'flex-start', gap: 0.75 }}
+        >
+          <FontAwesomeIcon
+            icon={isLoading ? faHourglassHalf : faTriangleExclamation}
+            color={chrome.inkMuted}
+            aria-hidden="true"
+          />
+          <Typography component="p" role="status" aria-live="polite" sx={{ fontSize: 11, color: chrome.inkMuted, m: 0 }}>
+            {isLoading
+              ? 'Loading storyline…'
+              : 'No live storyline — engine loop not registered. This is NOT a quiet storyline; ' +
+                'the read failed (a restart may have cleared it — re-seed via ops to recover).'}
+          </Typography>
+        </Stack>
+      </DialPanel>
+    )
+  }
+
   // Live visual value: the in-progress drag position while dragging, else the
   // last COMMITTED target (telemetry has already fired for the latter).
   const displayTargetIntensity = dragValue ?? dial.targetIntensity
   const targetLabel = displayTargetIntensity === null ? 'none' : String(displayTargetIntensity)
+
+  // Gate-1 CR-001: a PENDING (unconfirmed) change takes priority over a
+  // CONFIRMED one, which takes priority over the default prompt — never
+  // announce a change as settled before the backend actually applied it.
   const relationshipText =
-    dial.lastChangeDetail ?? 'Click, drag, or use arrow keys / Home / End on the track to set a target.'
+    dial.pendingChangeDetail ??
+    dial.lastChangeDetail ??
+    'Click, drag, or use arrow keys / Home / End on the track to set a target.'
 
   // AC4 — the honesty caveat: a target is recorded on ANY phase, but the
   // engine only chases it while Escalating/Peak (mirrors Storyline.Tick's own
@@ -230,19 +322,10 @@ export function EscalationDial() {
   const showTargetWontMoveCaveat = dial.targetIntensity !== null && !chasesTowardTarget
 
   return (
-    <Box
-      data-testid="escalation-dial"
-      sx={{
-        p: 1.5,
-        bgcolor: chrome.panel,
-        border: `1px solid ${chrome.line}`,
-        borderRadius: '8px',
-        fontFamily: "'Figtree', system-ui, sans-serif",
-      }}
-    >
+    <DialPanel>
       <Stack
         direction="row"
-        sx={{ alignItems: 'baseline', justifyContent: 'space-between', gap: 1, mb: 1 }}
+        sx={{ alignItems: 'baseline', justifyContent: 'space-between', gap: 1, mb: 0.25 }}
       >
         <Typography
           component="span"
@@ -254,8 +337,11 @@ export function EscalationDial() {
           Phase label — text, uppercase, NOT a color-only indicator (NFR-001).
           Story 09, AC5: a one-line phase-meaning description on hover/focus
           (a Tooltip; tabIndex makes it keyboard-reachable, not mouse-only).
+          `describeChild` (Gate-1 W-003): keeps "ESCALATING" as the phase
+          label's accessible NAME and moves the description to
+          `aria-describedby` instead of overwriting the name with `aria-label`.
         */}
-        <Tooltip title={PHASE_DESCRIPTIONS[dial.phase]}>
+        <Tooltip title={PHASE_DESCRIPTIONS[dial.phase]} describeChild>
           <Typography
             component="span"
             tabIndex={0}
@@ -274,11 +360,22 @@ export function EscalationDial() {
         </Tooltip>
       </Stack>
 
+      {/* Storyline title (Gate-1 W-008) — names what the dial is steering, never just numbers. */}
+      {dial.title ? (
+        <Typography
+          component="p"
+          data-testid="escalation-dial-title"
+          sx={{ fontSize: 11, fontWeight: 600, color: chrome.ink, m: 0, mb: 0.5 }}
+        >
+          {dial.title}
+        </Typography>
+      ) : null}
+
       {/* Scale legend — story 09, AC5: a one-line, plain-language meaning of the 0-100 scale. */}
       <Typography
         component="p"
         data-testid="escalation-dial-scale-legend"
-        sx={{ fontSize: 10, color: chrome.inkMuted, m: 0 }}
+        sx={{ fontSize: 11, color: chrome.inkMuted, m: 0 }}
       >
         {SCALE_LEGEND}
       </Typography>
@@ -384,28 +481,50 @@ export function EscalationDial() {
       >
         <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
           <FontAwesomeIcon icon={faGaugeHigh} color={chrome.blue} aria-hidden="true" />
-          <Typography component="span" sx={{ fontSize: 10, color: chrome.inkMuted }}>
+          <Typography component="span" sx={{ fontSize: 11, color: chrome.inkMuted }}>
             ACTUAL = current real-world attention
           </Typography>
         </Stack>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
           <FontAwesomeIcon icon={faLocationDot} color={chrome.amber} aria-hidden="true" />
-          <Typography component="span" sx={{ fontSize: 10, color: chrome.inkMuted }}>
+          <Typography component="span" sx={{ fontSize: 11, color: chrome.inkMuted }}>
             TARGET = your controller-set goal
           </Typography>
         </Stack>
       </Stack>
 
-      {/* Relationship text — the from/to transition (XC-004 detail convention). */}
+      {/*
+        Relationship text — pending / confirmed transition (Gate-1 CR-001:
+        never claims an unconfirmed change).
+      */}
       <Typography
         component="p"
         data-testid="escalation-dial-relationship"
         role="status"
         aria-live="polite"
-        sx={{ fontSize: 11, color: chrome.inkMuted, mt: 0.75, m: 0 }}
+        sx={{ fontSize: 11, color: chrome.inkMuted, m: 0, mt: 0.75 }}
       >
         {relationshipText}
       </Typography>
+
+      {/*
+        Write-failure notice (Gate-1 CR-001) — a rejected POST never reverts
+        silently; icon + text (NFR-001), a distinct line from the
+        relationship status above.
+      */}
+      {dial.writeError ? (
+        <Stack
+          direction="row"
+          data-testid="escalation-dial-write-error"
+          role="alert"
+          sx={{ alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}
+        >
+          <FontAwesomeIcon icon={faTriangleExclamation} color={chrome.amber} aria-hidden="true" />
+          <Typography component="p" sx={{ fontSize: 11, color: chrome.inkMuted, m: 0 }}>
+            {dial.writeError}
+          </Typography>
+        </Stack>
+      ) : null}
 
       {/*
         Story 09, AC4 — the honesty caveat. Never silently implies an
@@ -420,12 +539,12 @@ export function EscalationDial() {
           sx={{ alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}
         >
           <FontAwesomeIcon icon={faCircleInfo} color={chrome.inkMuted} aria-hidden="true" />
-          <Typography component="p" sx={{ fontSize: 10, color: chrome.inkMuted, m: 0 }}>
+          <Typography component="p" sx={{ fontSize: 11, color: chrome.inkMuted, m: 0 }}>
             This target will not move intensity until the storyline reaches ESCALATING or PEAK
             (currently {dial.phaseLabel}).
           </Typography>
         </Stack>
       ) : null}
-    </Box>
+    </DialPanel>
   )
 }

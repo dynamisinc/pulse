@@ -3,13 +3,15 @@
  * ---------------------------------------------------------------------------
  * Covers the LIVE escalation-dial GET/POST calls (feature: world-steering,
  * story 09 — "Escalation dial live"; CTL-022, COR-001):
- *  - `getStoryline` maps a valid wire body to `LiveStorylineSteeringState`,
- *    defaulting a missing `targetIntensity` to `null`;
+ *  - `getStoryline` maps a valid wire body to `LiveStorylineSteeringState`
+ *    (including `title`, Gate-1 W-008), defaulting a missing `targetIntensity`
+ *    to `null`;
  *  - `setStorylineTarget` posts `{ target }` to the right URL and maps the
  *    authoritative response the same way;
  *  - a malformed response body (missing/wrong-typed field, unknown phase
  *    literal) THROWS rather than being cast blindly (COR-001 defence in
- *    depth) — the caller (`liveStorylineStore`) is what catches it.
+ *    depth) — the caller (`liveStorylineStore`) is what catches it;
+ *  - both request URLs `encodeURIComponent` the storyline id (Gate-1 S-002).
  *
  * `@/core/services/api` is mocked at the module boundary (mirrors
  * `liveReviewStore.test.ts`).
@@ -31,6 +33,7 @@ import { getStoryline, PRIMARY_STORYLINE_SENTINEL, setStorylineTarget } from './
 function wireBody(overrides: Record<string, unknown> = {}) {
   return {
     storylineId: 'storyline-real-guid',
+    title: 'Water main contamination fears',
     exerciseId: 'ex-live-0001',
     intensity: 62,
     targetIntensity: null,
@@ -54,6 +57,7 @@ describe('getStoryline', () => {
     expect(getMock).toHaveBeenCalledWith('/steering/storylines/primary')
     expect(result).toEqual({
       storylineId: 'storyline-real-guid',
+      title: 'Water main contamination fears',
       exerciseId: 'ex-live-0001',
       intensity: 62,
       targetIntensity: 78,
@@ -82,6 +86,14 @@ describe('getStoryline', () => {
 
     await expect(getStoryline('storyline-real-guid')).rejects.toThrow()
   })
+
+  it('URL-encodes the storyline id (Gate-1 S-002)', async () => {
+    getMock.mockResolvedValueOnce({ data: wireBody() })
+
+    await getStoryline('weird id/with?chars')
+
+    expect(getMock).toHaveBeenCalledWith('/steering/storylines/weird%20id%2Fwith%3Fchars')
+  })
 })
 
 describe('setStorylineTarget', () => {
@@ -106,5 +118,13 @@ describe('setStorylineTarget', () => {
     postMock.mockResolvedValueOnce({ data: null })
 
     await expect(setStorylineTarget('storyline-real-guid', 50)).rejects.toThrow()
+  })
+
+  it('URL-encodes the storyline id (Gate-1 S-002)', async () => {
+    postMock.mockResolvedValueOnce({ data: wireBody() })
+
+    await setStorylineTarget('weird id/with?chars', 50)
+
+    expect(postMock).toHaveBeenCalledWith('/steering/storylines/weird%20id%2Fwith%3Fchars/target', { target: 50 })
   })
 })

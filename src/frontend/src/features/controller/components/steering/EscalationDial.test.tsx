@@ -74,6 +74,7 @@ vi.mock('../../services/liveStorylineActions', async () => {
 })
 
 const mockedGetStoryline = vi.mocked(liveStorylineActions.getStoryline)
+const mockedSetStorylineTarget = vi.mocked(liveStorylineActions.setStorylineTarget)
 
 beforeEach(() => {
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:00Z') })
@@ -82,6 +83,7 @@ beforeEach(() => {
   resetTelemetryBuffer()
   mockDataState.useMockData = true
   mockedGetStoryline.mockReset()
+  mockedSetStorylineTarget.mockReset()
 })
 
 afterEach(() => {
@@ -377,15 +379,18 @@ describe('EscalationDial — explanatory UX (story 09, AC5)', () => {
     expect(legend).toHaveTextContent(/TARGET = your controller-set goal/i)
   })
 
-  it('exposes a one-line phase-meaning description via an accessible tooltip on the phase label', async () => {
+  it('exposes a one-line phase-meaning description via an accessible tooltip WITHOUT destroying the phase label\'s accessible name (Gate-1 W-003)', async () => {
     await renderDial()
     const phase = screen.getByTestId('escalation-dial-phase') // seeded phase is Escalating
 
-    // MUI's Tooltip exposes its `title` two ways: an `aria-label` on the
-    // trigger (always present — the accessible-name path screen readers use
-    // regardless of hover/focus timing) AND a visual Popper on hover/focus
-    // (asserted below). Both carry the SAME phase-meaning text.
-    expect(phase).toHaveAttribute('aria-label', 'gaining attention, no qualifying response yet')
+    // `describeChild` (Gate-1 W-003 fix): the phase's accessible NAME stays
+    // its own text ("ESCALATING") — MUI must NOT set `aria-label` to the
+    // tooltip text, which would replace the phase name entirely and leave a
+    // screen-reader user never hearing the phase itself.
+    expect(phase).not.toHaveAttribute('aria-label')
+    expect(phase).toHaveTextContent('ESCALATING')
+    // No description is wired up before the tooltip actually opens.
+    expect(phase).not.toHaveAttribute('aria-describedby')
 
     fireEvent.mouseOver(phase)
     await waitFor(
@@ -394,6 +399,11 @@ describe('EscalationDial — explanatory UX (story 09, AC5)', () => {
       },
       { timeout: 2000 },
     )
+
+    // While open, the description is wired via aria-describedby (never
+    // aria-label) — additive to the name, not a replacement of it.
+    expect(phase).toHaveAttribute('aria-describedby')
+    expect(phase).toHaveTextContent('ESCALATING')
   })
 
   it('the phase-meaning tooltip trigger is keyboard-reachable (tabIndex, not mouse-only)', async () => {
@@ -412,6 +422,7 @@ describe('EscalationDial — the honesty caveat (story 09, AC4; live mode to con
   function liveState(overrides: Partial<liveStorylineActions.LiveStorylineSteeringState> = {}) {
     return {
       storylineId: 'storyline-real-guid',
+      title: 'Water main contamination fears',
       exerciseId: 'ex-mock-0001',
       intensity: 40,
       targetIntensity: null,
@@ -458,5 +469,134 @@ describe('EscalationDial — the honesty caveat (story 09, AC4; live mode to con
     expect(caveat.querySelector('svg')).not.toBeNull() // the FontAwesome info icon
     // ...and real text alongside the icon, not color/shape alone.
     expect(caveat.textContent?.length ?? 0).toBeGreaterThan(0)
+  })
+})
+
+describe('EscalationDial — never fabricate a calm world (Gate-1 CR-002, live mode)', () => {
+  beforeEach(() => {
+    mockDataState.useMockData = false
+  })
+
+  it('shows an explicit "loading" status — NO numeric ACTUAL/DORMANT readout — before the GET resolves', async () => {
+    mockedGetStoryline.mockReturnValue(new Promise(() => {})) // never resolves in this test
+    await renderDial()
+
+    const status = screen.getByTestId('escalation-dial-unavailable')
+    expect(status).toHaveAttribute('data-status', 'loading')
+    expect(status).toHaveTextContent(/loading/i)
+    expect(screen.queryByTestId('escalation-dial-track')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('escalation-dial-actual-label')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('escalation-dial-phase')).not.toBeInTheDocument()
+  })
+
+  it('shows an explicit "unavailable" status — NEVER ACTUAL 0 / DORMANT presented as fact — when the GET fails', async () => {
+    mockedGetStoryline.mockRejectedValue(new Error('404 — registry lost after an App Service restart'))
+    await renderDial()
+
+    const status = await screen.findByTestId('escalation-dial-unavailable')
+    expect(status).toHaveAttribute('data-status', 'unavailable')
+    expect(status).toHaveTextContent(/no live storyline/i)
+    expect(screen.queryByTestId('escalation-dial-track')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('escalation-dial-actual-label')).not.toBeInTheDocument()
+  })
+
+  it('the unavailable/loading status is icon + text, never color alone (NFR-001)', async () => {
+    mockedGetStoryline.mockRejectedValue(new Error('down'))
+    await renderDial()
+
+    const status = await screen.findByTestId('escalation-dial-unavailable')
+    expect(status.querySelector('svg')).not.toBeNull()
+    expect(status.textContent?.length ?? 0).toBeGreaterThan(0)
+  })
+
+  it('moves from the "loading" status to the live numeric dial once the GET resolves', async () => {
+    let resolveGet: (value: liveStorylineActions.LiveStorylineSteeringState) => void = () => {}
+    mockedGetStoryline.mockReturnValue(
+      new Promise(resolve => {
+        resolveGet = resolve
+      }),
+    )
+    await renderDial()
+    expect(screen.getByTestId('escalation-dial-unavailable')).toHaveAttribute('data-status', 'loading')
+
+    resolveGet({
+      storylineId: 'storyline-real-guid',
+      title: 'Water main contamination fears',
+      exerciseId: 'ex-mock-0001',
+      intensity: 55,
+      targetIntensity: null,
+      phase: 'Escalating',
+    })
+
+    await waitFor(() => expect(screen.getByTestId('escalation-dial-actual-label')).toHaveTextContent('ACTUAL 55'))
+    expect(screen.queryByTestId('escalation-dial-unavailable')).not.toBeInTheDocument()
+  })
+})
+
+describe('EscalationDial — write failures are surfaced, never silent (Gate-1 CR-001, live mode)', () => {
+  beforeEach(() => {
+    mockDataState.useMockData = false
+  })
+
+  function liveState(overrides: Partial<liveStorylineActions.LiveStorylineSteeringState> = {}) {
+    return {
+      storylineId: 'storyline-real-guid',
+      title: 'Water main contamination fears',
+      exerciseId: 'ex-mock-0001',
+      intensity: 40,
+      targetIntensity: null,
+      phase: 'Escalating' as const,
+      ...overrides,
+    }
+  }
+
+  it('never claims an unconfirmed change and surfaces an explicit write-error line on a rejected POST', async () => {
+    mockedGetStoryline.mockResolvedValueOnce(liveState())
+    mockedSetStorylineTarget.mockRejectedValue(new Error('network down'))
+    await renderDial()
+    await waitFor(() => expect(screen.getByTestId('escalation-dial-actual-label')).toHaveTextContent('ACTUAL 40'))
+
+    // The re-sync GET the rejection triggers returns the untouched truth.
+    mockedGetStoryline.mockResolvedValueOnce(liveState())
+
+    const track = screen.getByTestId('escalation-dial-track')
+    track.focus()
+    fireEvent.keyDown(track, { key: 'End' }) // none -> 100
+
+    // In flight: the relationship line shows the PENDING detail, not a confirmed claim.
+    expect(screen.getByTestId('escalation-dial-relationship')).toHaveTextContent('none → 100')
+
+    const errorLine = await screen.findByTestId('escalation-dial-write-error')
+    expect(errorLine).toHaveTextContent(/could not set the target/i)
+    expect(errorLine.querySelector('svg')).not.toBeNull() // icon + text (NFR-001), never color alone
+
+    // The re-sync corrects the number back to the server's ground truth.
+    await waitFor(() => expect(screen.getByTestId('escalation-dial-target-label')).toHaveTextContent('TARGET none'))
+  })
+})
+
+describe('EscalationDial — names what it is steering (Gate-1 W-008)', () => {
+  it('shows the storyline title under mock (always present, seeded)', async () => {
+    await renderDial()
+
+    expect(screen.getByTestId('escalation-dial-title')).toHaveTextContent('Water main contamination fears')
+  })
+
+  it('shows the LIVE storyline title once the GET resolves', async () => {
+    mockDataState.useMockData = false
+    mockedGetStoryline.mockResolvedValue({
+      storylineId: 'storyline-real-guid',
+      title: 'Boil-water advisory rumors',
+      exerciseId: 'ex-mock-0001',
+      intensity: 30,
+      targetIntensity: null,
+      phase: 'Escalating',
+    })
+
+    await renderDial()
+
+    await waitFor(() =>
+      expect(screen.getByTestId('escalation-dial-title')).toHaveTextContent('Boil-water advisory rumors'),
+    )
   })
 })

@@ -30,8 +30,21 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 /// directly; <c>POST .../target</c> calls <see cref="Storyline.SetTargetIntensity"/> on that VERY object (no
 /// shadow/duplicate storyline), so the next reaction-loop tick's already-shipped
 /// <c>Storyline.Tick</c>/<c>IntensityModel.TickTowardTarget</c> branch picks the new target up with zero new
-/// engine code. <c>TargetFollow.Modulate</c> (the DECIDE-stage burst-steering half) stays deliberately unwired
-/// this pass (Out of Scope) — only the MEASURE-stage chase is exercised.
+/// engine code.
+/// </para>
+/// <para>
+/// <b>Correction (Gate-1, W-004): <c>TargetFollow.Modulate</c> is NOT unwired.</b> An earlier pass of this
+/// story's docs (and the story text itself) claimed the DECIDE-stage burst-steering half stayed unwired this
+/// pass. That was wrong about the shipped codebase: <c>DecideStage.Decide</c> falls back to
+/// <c>IntentComposer.Compose</c> for any trigger with no registered behavior (the inaction trigger this
+/// endpoint's target feeds registers none), and <c>IntentComposer.Compose</c> already calls
+/// <c>TargetFollow.Modulate</c> to size the requested burst. So the moment a controller sets a live target via
+/// this endpoint, BOTH halves react on the next tick: the MEASURE-stage chase this story exists to prove
+/// (<c>Storyline.Tick</c>/<c>TickTowardTarget</c>, verified in
+/// <c>StorylineTargetChaseIntegrationTests</c>/<c>Composes_SetTargetAsync_Then_TicksTowardIt</c>), AND the
+/// DECIDE-stage burst direction/count (<c>TargetFollow.Modulate</c>'s raise/lower/hold, already shipped,
+/// unmodified by this story). Nobody should be surprised, in UAT or otherwise, that setting a target also
+/// changes how many posts the engine suggests, not only the dial's actual-fill number.
 /// </para>
 /// <para>
 /// <b>Isolation (COR-001/XC-002) — same gate as the review cockpit.</b> Both endpoints sit behind the SAME
@@ -257,8 +270,18 @@ public sealed class StorylineSteeringService
     /// Resolves <paramref name="storylineId"/> to a live <see cref="Storyline"/> WITHIN the registration for
     /// <paramref name="exerciseId"/> ONLY (COR-001) — a registration for any OTHER exercise is never consulted,
     /// so a cross-exercise id can never resolve here. Returns <c>null</c> when the caller's exercise has no
-    /// registered loop, or the loop has no storylines, or no storyline matches the given id.
+    /// registered loop, the loop has no storylines, no storyline matches the given id, or
+    /// <paramref name="storylineId"/> is neither a real GUID nor the exact <see cref="PrimaryStorylineSentinel"/>
+    /// literal (W-001 — a stray non-GUID value such as <c>"undefined"</c>/<c>"null"</c>/a typo must 404, never
+    /// silently wildcard to "whichever storyline is first").
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// A resolved storyline's OWN <see cref="Storyline.ExerciseId"/> disagrees with <paramref name="exerciseId"/>
+    /// — a corrupt registration (W-002 defense-in-depth, mirrors <c>ReactionLoopHost.BuildReviewItem</c>'s
+    /// identical guard). This can only happen if the registry itself is broken; it must fail loud, never
+    /// silently 404 (which would look like an ordinary "not found") or silently serve/mutate another exercise's
+    /// data (COR-001).
+    /// </exception>
     private Storyline? ResolveStoryline(Guid exerciseId, string storylineId)
     {
         var registration = _registry.Active.FirstOrDefault(r => r.ExerciseId == exerciseId);
@@ -267,14 +290,39 @@ public sealed class StorylineSteeringService
             return null;
         }
 
-        if (Guid.TryParse(storylineId, out var parsedId))
+        Storyline? storyline;
+        if (string.Equals(storylineId, PrimaryStorylineSentinel, StringComparison.Ordinal))
         {
-            return registration.Storylines.FirstOrDefault(s => s.Id == parsedId);
+            storyline = registration.Storylines[0];
+        }
+        else if (Guid.TryParse(storylineId, out var parsedId))
+        {
+            storyline = registration.Storylines.FirstOrDefault(s => s.Id == parsedId);
+        }
+        else
+        {
+            // Neither the exact sentinel nor a parseable GUID — a caller error (a stray literal, a typo, or
+            // `String(undefined)`), never a silent "first storyline" wildcard (W-001).
+            return null;
         }
 
-        // Not a GUID — treat as the "primary" sentinel (or any other non-GUID literal) and resolve to this
-        // exercise's first registered storyline (see PrimaryStorylineSentinel's doc).
-        return registration.Storylines[0];
+        if (storyline is null)
+        {
+            return null;
+        }
+
+        // Defense-in-depth (W-002, COR-001): a storyline found under THIS exercise's own registration must
+        // carry THIS exercise's id. A mismatch is a corrupt registration, not an ordinary "not found" — fail
+        // loud exactly like ReactionLoopHost.BuildReviewItem's identical guard, rather than silently 404 (which
+        // would mask the corruption) or silently serve/mutate the wrong exercise's storyline.
+        if (storyline.ExerciseId != exerciseId)
+        {
+            throw new InvalidOperationException(
+                $"Storyline {storyline.Id} carries ExerciseId {storyline.ExerciseId} but was found under exercise " +
+                $"{exerciseId}'s own registration; a cross-exercise storyline read/write is forbidden (COR-001).");
+        }
+
+        return storyline;
     }
 
     /// <summary>Resolves the server-authoritative scope (COR-001); <c>false</c> when unresolved (fail closed).</summary>
@@ -362,6 +410,13 @@ public sealed class StorylineSteeringDto
     [JsonPropertyName("storylineId")]
     public required string StorylineId { get; init; }
 
+    /// <summary>
+    /// The storyline's human title (e.g. "Water main contamination fears", <see cref="Storyline.Title"/>) —
+    /// W-008: so the dial can name what it is steering rather than showing only numbers.
+    /// </summary>
+    [JsonPropertyName("title")]
+    public required string Title { get; init; }
+
     /// <summary>The exercise this storyline belongs to (COR-001), as a GUID string.</summary>
     [JsonPropertyName("exerciseId")]
     public required string ExerciseId { get; init; }
@@ -388,6 +443,7 @@ public sealed class StorylineSteeringDto
         return new StorylineSteeringDto
         {
             StorylineId = storyline.Id.ToString(),
+            Title = storyline.Title,
             ExerciseId = storyline.ExerciseId.ToString(),
             Intensity = storyline.Intensity,
             TargetIntensity = storyline.TargetIntensity,

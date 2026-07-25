@@ -70,14 +70,25 @@ this feature's `implementation.md` for the reuse map and Wave Plan.
 ## Out of Scope
 The "Stories" toolstrip flyout / storyline board listing multiple storylines (D5-016/017, still
 not built — this story stays container-agnostic exactly as story 02 was, and reads a single
-storyline id the same way story 02's mock did); wiring `TargetFollow.Modulate`'s output into the
-DECIDE stage (burst direction/count steering) — only the MEASURE-stage `TickTowardTarget` chase
-(which is what actually moves the dial's actual fill) is exercised this pass; the decide-stage
-refinement is a documented follow-up, called out explicitly so nobody assumes it is covered by this
-story; creating or seeding new storylines (still controller/planner pre-seed only, unchanged);
-real-time SignalR push of actual-intensity changes (this story polls/refetches on an interval, no
-new hub event — kept file-disjoint from story 08's broadcaster work); re-opening a `Resolved`
-storyline; any pause/freeze/Break-Fiction behavior (stories 04/07/08).
+storyline id the same way story 02's mock did); creating or seeding new storylines (still
+controller/planner pre-seed only, unchanged); real-time SignalR push of actual-intensity changes
+(this story polls/refetches on an interval, no new hub event — kept file-disjoint from story 08's
+broadcaster work); re-opening a `Resolved` storyline; any pause/freeze/Break-Fiction behavior
+(stories 04/07/08).
+
+> **Correction (Gate-1, W-004): `TargetFollow.Modulate` is NOT unwired — an earlier draft of this
+> story was wrong about the shipped codebase.** A prior version of this section claimed "wiring
+> `TargetFollow.Modulate`'s output into the DECIDE stage" was out of scope / not yet done. That is
+> incorrect: `DecideStage.Decide` already falls back to `IntentComposer.Compose` for the inaction
+> trigger this story's target feeds, and `IntentComposer.Compose` already calls
+> `TargetFollow.Modulate` to size the requested burst — this has been shipped and unmodified since
+> before this story started. So setting a live target via this story's endpoint affects BOTH the
+> MEASURE-stage chase (`Storyline.Tick`/`TickTowardTarget`, this story's actual subject, verified in
+> `StorylineTargetChaseIntegrationTests`) AND the DECIDE-stage burst direction/count
+> (`TargetFollow.Modulate`'s raise/lower/hold), on the very next tick. Nobody building against this
+> story — or verifying it in UAT — should be surprised that setting a target also changes how many
+> posts the engine suggests, not only the dial's actual-fill number. No code in this story wires
+> `TargetFollow.Modulate`; it was already live before this story touched anything.
 
 ## Technical Notes
 Staff world (COBRA). **Backend:** a new file,
@@ -111,18 +122,65 @@ parallel with them. The orchestrator-owned `Program.cs` wiring for the new `Add*
 lands as a serial step after Gate-2, same #310→#317 caution as the other two stories.
 
 ## Tests
-- Unit (backend): GET/POST against a seeded `ReactionLoopRegistration`'s storyline; POST calls
-  `SetTargetIntensity` and the response matches; a storyline id from another exercise (or an
-  unassigned caller) returns `403`/`404`, never that exercise's data.
-- Integration (backend): two consecutive `ReactionLoopDriver.RunTickAsync` calls, with a target set
-  above current intensity on an `Escalating` storyline, narrow the actual→target gap (or hold once
-  within `TargetFollow.Deadband`) — confirms the chase reaches the existing `Tick`/
-  `TickTowardTarget` path with no new engine code.
-- Unit (frontend): `useStorylineTarget`'s live branch POSTs the target change and reconciles the
-  authoritative actual/target/phase from the response.
-- Component (RTL): the dial's explanatory legend/tooltip renders the scale/actual-vs-target/phase
-  copy, and communicates the "target won't move outside Escalating/Peak" caveat when applicable.
+
+> **AC ↔ test linkage (Gate-1 W-007).** Added post-review so the mapping from each Acceptance
+> Criterion to its concrete proof is explicit and auditable, not just narrative. This section is
+> descriptive of what exists; it does not change scope.
+
+- **AC1** (GET reads the live registry storyline) —
+  `Pulse.WebApi.Tests/Features/EngineRuntime/Steering/StorylineSteeringEndpointsTests.cs`:
+  `GetStoryline_ByRealId_ReturnsActualTargetPhase_FromTheLiveRegisteredStoryline`,
+  `GetStoryline_ByPrimarySentinel_ResolvesToTheCallersOwnFirstStoryline`.
+- **AC2** (POST mutates the SAME object; the dial reconciles against the authoritative response) —
+  backend: `StorylineSteeringEndpointsTests.SetTarget_HappyPath_MutatesTheSameRegistryObject_AndReturnsTheUpdatedState`
+  (asserts `BeSameAs` the original registry object); frontend:
+  `useStorylineTarget.test.ts`'s `'AC2: setTarget POSTs to the resolved storyline id, updates
+  optimistically, then reconciles against the authoritative response'`.
+- **AC3** (the existing `Tick`/`TickTowardTarget` chase is reached, no new engine code) —
+  `Pulse.WebApi.Tests/Features/EngineRuntime/Steering/StorylineTargetChaseIntegrationTests.cs`:
+  `TwoConsecutiveTicks_WithATargetAboveCurrentIntensity_NarrowTheActualToTargetGap_WithNoNewEngineCode`,
+  `Tick_OnceActualReachesTheTarget_HoldsThereRatherThanOvershooting`, and (W-005, composed
+  end-to-end through the actual service rather than a hand-called stand-in)
+  `Composes_SetTargetAsync_ThenTwoTicks_NarrowTheGap_ProvingTheServiceReachesTheSameChase`.
+- **AC4** (the honesty caveat outside Escalating/Peak) —
+  `EscalationDial.test.tsx`'s `'EscalationDial — the honesty caveat (story 09, AC4; live mode to
+  control phase precisely)'` describe block (states the target, the rule, AND the current phase;
+  absent with no target; absent on a chasing phase).
+- **AC5** (the explanatory UX — scale legend, actual-vs-target meaning legend, phase-meaning
+  tooltip) — `EscalationDial.test.tsx`'s `'EscalationDial — explanatory UX (story 09, AC5)'`
+  describe block. The phase tooltip test additionally locks in Gate-1 W-003 (`describeChild` —
+  the phase label's OWN accessible name must survive the tooltip, never replaced by it).
+- **AC6** (the mock path is unchanged) — story 02's original `EscalationDial.test.tsx` /
+  `useStorylineTarget.test.ts` cases all pass unmodified (verified additive-only by numstat at
+  Gate-1); every new live-mode test lives in its own `describe` block gated by the
+  `USE_MOCK_DATA` toggle.
+- **AC7** (isolation + telemetry) — backend IDOR/auth coverage in
+  `StorylineSteeringEndpointsTests.cs` (`GetStoryline_ForeignExerciseStorylineId_Returns404_...`,
+  `SetTarget_ForeignExerciseStorylineId_Returns404_AndNeverMutatesIt`, the 401/403 gate cases) plus
+  the corrupt-registration defense-in-depth guard (Gate-1 W-002) in
+  `StorylineSteeringServiceUnitTests.cs`; telemetry shape-parity in both hook test files'
+  `'emits exactly ONE steering_action event, unchanged in shape from the mock branch'` cases.
+- **Gate-1 CR-001** (never claim an unconfirmed/failed change) —
+  `useStorylineTarget.test.ts`'s `'a rejected POST (Gate-1 CR-001 + S-003)'` describe block;
+  `EscalationDial.test.tsx`'s `'write failures are surfaced, never silent (Gate-1 CR-001, live
+  mode)'` describe block.
+- **Gate-1 CR-002** (never fabricate a calm world) —
+  `useStorylineTarget.test.ts`'s `'dataStatus (Gate-1 CR-002 — never fabricate a calm world)'`
+  describe block; `EscalationDial.test.tsx`'s `'never fabricate a calm world (Gate-1 CR-002, live
+  mode)'` describe block; `liveStorylineStore.test.ts`'s status-transition coverage.
+- **Gate-1 W-001** (the sentinel is exact, never a wildcard) —
+  `StorylineSteeringServiceUnitTests.cs`'s
+  `GetAsync_ANonSentinelNonGuidLiteral_Returns404_NeverWildcardsToTheFirstStoryline` (a `Theory`
+  over `"undefined"`, `"null"`, a typo, wrong casing, stray whitespace).
+- **Gate-1 W-006** (reference-counted poll lifecycle) — `liveStorylineStore.test.ts`'s
+  `'reference-counted lifecycle (Gate-1 W-006)'` describe block;
+  `useStorylineTarget.test.ts`'s `'Gate-1 W-006: acquires the poll reference on mount and releases
+  it on unmount'`.
+- **Gate-1 W-008** (the dial names what it is steering) — `EscalationDial.test.tsx`'s `'names what
+  it is steering (Gate-1 W-008)'` describe block.
 - Regression: `USE_MOCK_DATA=true` — story 02's existing test suite passes unchanged.
 - **Manual/UAT (required for Complete):** with mock off, set a target above current intensity on an
   Escalating storyline in the console; observe (via repeated GET or a page refresh) that actual
-  intensity rises toward the target over subsequent ticks with no manual engine action.
+  intensity rises toward the target over subsequent ticks with no manual engine action. Per the
+  W-004 correction above, also expect the DECIDE-stage burst count/direction to respond to the same
+  target — that is the pre-existing `TargetFollow.Modulate` behavior, not a regression.
