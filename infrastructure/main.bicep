@@ -467,6 +467,16 @@ output aiClaudeEndpoint string = (deployAi && deployClaude) ? ai.outputs.claudeE
 // 'AzureOpenAI' = live, egressing traffic (only when the Tier-2-gated generationProviderLive is set).
 // Surfaced as an output so every Deploy Infrastructure run states it in the job summary (NFR-005 audit).
 output generationProvider string = generationProvider
+// The EFFECTIVE attested governance posture (§2 / NFR-005) — exactly the values emitted as the
+// Generation__Governance__* app settings. Surfaced so a post-deploy audit can read what the deployed app
+// actually asserts from the Deploy Infrastructure job summary, without diffing the parameter file. All
+// false/empty until the §8 signer sets the attestation params (they are human assertions, not derived
+// from deployAi).
+output generationAttestedPosture object = {
+  tenantBounded: deployAi && generationTenantBounded
+  noTraining: deployAi && generationNoTrainingAttested
+  residency: deployAi ? generationResidency : ''
+}
 // Object id of the App Service identity that holds the Foundry data-plane role (engine-runtime/05).
 #disable-next-line BCP318
 output webAppPrincipalId string = deployWebApp ? webApp.outputs.principalId! : ''

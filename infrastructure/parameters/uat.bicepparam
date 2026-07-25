@@ -55,18 +55,26 @@ param generationProviderLive = false
 
 // The two §2 governance attestations, asserted HERE BY A HUMAN — deliberately not derived from deployAi,
 // so GenerationGovernance.Validate remains an independent startup gate that can actually fire rather than
-// a restatement of "did we deploy the account". These are what the PROVIDER-GOVERNANCE.md §8 signature
-// covers (evidence item (i)); they belong in the same reviewed commit as generationProviderLive:
+// a restatement of "did we deploy the account".
+//
+// LEFT FALSE until PROVIDER-GOVERNANCE.md §8 is signed: the signer sets these to true in the SAME
+// reviewed commit as generationProviderLive. Nothing is attested yet. Until then, a stray flip of
+// generationProviderLive alone fails startup by design (GenerationConfigurationException) instead of
+// egressing unattested content — pre-typing them here would disarm exactly that backstop.
+//
+// The justification for setting them TRUE at signing time (not a claim that they are true now) is
+// §8 evidence item (i):
 //   - TenantBounded:      aif-pulse-uat is a single-tenant Cognitive Services account with
 //                         disableLocalAuth (keyless Entra only, no API key exists) and no
 //                         shared/public inference.
 //   - NoTrainingAttested: Azure OpenAI Service does not use customer prompts/completions to train
 //                         models (Microsoft product terms).
-// Both default to FALSE in main.bicep, so any other/future environment parameter file that omits them
-// asserts nothing (fail closed). Setting either false while generationProviderLive is true makes the host
-// throw GenerationConfigurationException at startup instead of egressing — that is the intended behaviour.
-param generationTenantBounded = true
-param generationNoTrainingAttested = true
+// Both also default to FALSE in main.bicep, so any other/future environment parameter file that omits
+// them asserts nothing (fail closed). Harmless today: with generationProviderLive = false the App Service
+// resolves Generation:Provider = Fake, whose in-process posture is compliant by construction and never
+// runs the governance gate.
+param generationTenantBounded = false
+param generationNoTrainingAttested = false
 
 // Flip to true (with deployAi) to also deploy the Claude-on-Foundry tiers for the E8 provider
 // comparison. Requires a Claude-eligible subscription; the Anthropic Marketplace offer is auto-accepted

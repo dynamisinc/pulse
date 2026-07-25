@@ -156,8 +156,8 @@ verbatim to its `ai.bicep` output / §2 attestation per
 | `Generation__Tiers__Standard__Model` | `gpt-5.4-mini` ⚠ **TEMPORARY alias** | `ai.bicep` `ambientModelName` |
 | `Generation__Tiers__Ambient__Deployment` | `ambient` | `ai.bicep` `ambientDeploymentName` |
 | `Generation__Tiers__Ambient__Model` | `gpt-5.4-mini` | `ai.bicep` `ambientModelName` |
-| `Generation__Governance__TenantBounded` | `true` | §2 attestation — the **`generationTenantBounded` param, typed by the §8 signer** (single-tenant account, `disableLocalAuth`) |
-| `Generation__Governance__NoTrainingAttested` | `true` | §2 attestation — the **`generationNoTrainingAttested` param, typed by the §8 signer** (Azure OpenAI product terms) |
+| `Generation__Governance__TenantBounded` | `false` (→ `true` at signing) | §2 attestation — the **`generationTenantBounded` param, typed by the §8 signer** (single-tenant account, `disableLocalAuth`) |
+| `Generation__Governance__NoTrainingAttested` | `false` (→ `true` at signing) | §2 attestation — the **`generationNoTrainingAttested` param, typed by the §8 signer** (Azure OpenAI product terms) |
 | `Generation__Governance__Residency` | `centralus` | `ai.bicep` `residency` |
 | `Generation__Governance__Retention` | `Retained` | §2 (ZDR pending per-subscription approval) |
 
@@ -212,13 +212,16 @@ against Azure *after* they have been applied. Only steps 4–5 are gated on the 
    ordering"), check the Ambient deployment's model **version** against the measured build (§6 → "When to
    re-run"), then get §8 signed — five boxes ticked, signer + date entered. A human step; no builder or
    automation performs it.
-4. **Go live.** In `parameters/uat.bicepparam` (a reviewed, committed change — same discipline as
-   flipping `deployAi`) set `param generationProviderLive = true`, and confirm the signer's two §2
-   assertions `generationTenantBounded` / `generationNoTrainingAttested` are `true` — they are human
-   assertions, not derived from `deployAi`, and a live provider with either `false` fails startup by
-   design (`GenerationConfigurationException`). Re-deploy: it changes exactly one app setting
-   (`Generation__Provider`); the job summary's `generationProvider` output states which provider the
-   deployed app resolves. The App Service restarts on the app-setting change, which **de-registers
+4. **Go live.** In `parameters/uat.bicepparam` — **one atomic reviewed commit**, same discipline as
+   flipping `deployAi` — the signer **sets all three** of `generationProviderLive`,
+   `generationTenantBounded` and `generationNoTrainingAttested` to `true`. All three are `false` on disk
+   today; the two attestations are human assertions the signer types at signing time, **not** values
+   derived from `deployAi`, so flipping `generationProviderLive` on its own leaves a live provider with
+   `false` attestations and **fails startup by design**
+   (`GenerationConfigurationException` — that is the fail-closed backstop working, not a bug).
+   Re-deploy: it changes exactly one app setting (`Generation__Provider`); the job summary's
+   `generationProvider` output states which provider the deployed app resolves, and
+   `generationAttestedPosture` states the effective attested posture. The App Service restarts on the app-setting change, which **de-registers
    the in-memory reaction loop** — re-call `POST /api/ops/seed-engine-content` to re-register it (engine
    state is process-memory this phase; see `engine-content-seed/feature.md`).
 5. **Turn it back off after the verification pass.** ~$0.61/exercise-hour at the measured Ambient rate
