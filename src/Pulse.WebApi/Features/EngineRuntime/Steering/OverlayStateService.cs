@@ -28,6 +28,22 @@ public static class OverlayStateWire
 
     /// <summary><c>out-of-fiction</c> — the calm slate/mono register that names the exercise ("EXERCISE PAUSED").</summary>
     public const string OutOfFiction = "out-of-fiction";
+
+    /// <summary>
+    /// Validates a CLIENT-SUPPLIED overlay register against the two contract literals, FAILING CLOSED to
+    /// <see cref="OutOfFiction"/>: only an exact <c>in-fiction</c> selects the fiction-preserving register, and
+    /// anything else — <c>null</c>, an omitted field, a case variant, a bogus literal — becomes
+    /// <c>out-of-fiction</c>.
+    ///
+    /// <para><b>Why out-of-fiction is the conservative default.</b> An out-of-fiction notice ("EXERCISE PAUSED")
+    /// is safe when the fiction is already broken; wrongly staying in-fiction ("We'll be right back") would HIDE a
+    /// real stop from participants. The register is presentation only, so an unrecognised value is coerced rather
+    /// than refused — a typo must never block the safety action the Freeze is.</para>
+    /// </summary>
+    /// <param name="raw">The client-supplied register literal, or <c>null</c>.</param>
+    /// <returns><see cref="InFiction"/> for an exact <c>in-fiction</c>; otherwise <see cref="OutOfFiction"/>.</returns>
+    public static string CoerceRegister(string? raw) =>
+        string.Equals(raw, InFiction, StringComparison.Ordinal) ? InFiction : OutOfFiction;
 }
 
 /// <summary>

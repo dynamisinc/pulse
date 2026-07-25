@@ -128,10 +128,28 @@ Backend (`src/Pulse.WebApi.Tests/Features/EngineRuntime/Steering/`):
   `PauseOverlayPublisherTests.PublishAsync_Freeze_WritesThePauseOverlay_AndPushesToTheExercisesGroup`,
   `PauseOverlayCompositionTests.AFreezeThroughTheWiredRegistry_WritesTheParticipantOverlay_PerExercise`,
   `OverlayStateEndpointTests.Get_AfterAFreeze_ReturnsTheLiveHoldingPageState_NotTheStaticConstant`.
-  **Partial:** the `register` written is the console's own default selection
-  (`out-of-fiction`), not a transmitted one — the pause-tier POST body/`PauseTierTransition`
-  carry no `overlayRegister` and both are story-07 files, frozen for this story (see
-  `PauseOverlayPublisher.FreezeRegister`; a follow-up story plumbs it in one line).
+- AC1 (the SELECTED register, plumbed end to end) — the console's `overlayRegister` now rides the
+  pause-tier POST (`PauseTierRequest.OverlayRegister` → `PauseTierTransition.OverlayRegister` →
+  `PauseOverlayPublisher`), validated server-side and coerced to `out-of-fiction` unless it is
+  exactly `in-fiction`:
+  `PauseTierEndpointsTests.Post_FreezeWithInFictionSelected_MakesTheParticipantGetReportInFiction`,
+  `.Post_FreezeWithOutOfFictionSelected_MakesTheParticipantGetReportOutOfFiction`,
+  `.Post_FreezeWithAnInvalidOrMissingRegister_CoercesToOutOfFiction_AndStillFreezes`,
+  `.Post_Resume_ClearsTheParticipantOverlay`, `.Post_FreezeInExerciseA_LeavesExerciseBsParticipantOverlayCleared`
+  (full HTTP: controller POST → registry → real publisher → participant `GET /api/overlay-state`);
+  `OverlayStateEndpointTests.Get_AfterAFreezeThroughTheWiredRegistry_ReportsTheSelectedRegister`,
+  `.Get_AfterAFreezeWithAnInvalidRegister_ReportsOutOfFiction`,
+  `.Get_AfterAResumeThroughTheWiredRegistry_ClearsToNoneInFiction`,
+  `.Get_AsExerciseB_NeverSeesAFreezeAppliedToExerciseAThroughTheRegistry`;
+  `PauseTierRegistryTests.SetTierAsync_CarriesTheSelectedOverlayRegister_ToThePublisher`,
+  `.SetTierAsync_AnInvalidOrMissingOverlayRegister_CoercesToOutOfFiction`,
+  `.SetTierAsync_AnInvalidOverlayRegister_StillAppliesTheFreeze`;
+  `PauseOverlayPublisherTests.PublishAsync_Freeze_UsesTheRegisterTheControllerSelected`,
+  `.PublishAsync_Freeze_WithANonContractRegister_FallsBackToOutOfFiction`; and console-side
+  `usePauseState.test.tsx` "sends the SELECTED overlay register with the Freeze POST",
+  "sends the register selection as of the moment of the POST, never a stale one",
+  `livePauseTierActions.test.ts` "POSTs the tier + acting human + time zone + overlay register…",
+  "POSTs the in-fiction register when that is the console selection".
 - AC2 — `PauseOverlayPublisherTests.PublishAsync_Freeze_WritesThePauseOverlay_AndPushesToTheExercisesGroup`,
   `PauseOverlayPublisherTests.PublishAsync_DerivesTheGroupName_ExactlyAsTheHubJoinsIt`.
 - AC3 — `PauseOverlayPublisherTests.PublishAsync_Resume_ClearsTheOverlay_AndPushesTheClearedState`,

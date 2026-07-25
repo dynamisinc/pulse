@@ -422,6 +422,63 @@ public sealed class PauseTierRegistryTests
             .Which.ActingHumanId.Should().Be("human-lead-7", "COR-018 attribution rides the transition");
     }
 
+    // ---- the overlay REGISTER the controller selected (story 08) --------------------------------
+
+    [Theory]
+    [InlineData("in-fiction", "in-fiction")]
+    [InlineData("out-of-fiction", "out-of-fiction")]
+    public async Task SetTierAsync_CarriesTheSelectedOverlayRegister_ToThePublisher(
+        string selected, string expected)
+    {
+        var publisher = new RecordingPauseOverlayPublisher();
+        var registry = RegistryFor(StartedClock(), publisher);
+
+        await registry.SetTierAsync(
+            Guid.NewGuid(), PauseTier.Freeze, "human-controller-01", ClockStart(), selected);
+
+        publisher.Published.Should().ContainSingle()
+            .Which.OverlayRegister.Should().Be(
+                expected,
+                "the controller's register selection must actually reach the participant overlay — a control that "
+                + "does nothing is the failure this wave exists to eliminate");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("In-Fiction")]
+    [InlineData("sideways")]
+    public async Task SetTierAsync_AnInvalidOrMissingOverlayRegister_CoercesToOutOfFiction(string? selected)
+    {
+        var publisher = new RecordingPauseOverlayPublisher();
+        var registry = RegistryFor(StartedClock(), publisher);
+
+        await registry.SetTierAsync(
+            Guid.NewGuid(), PauseTier.Freeze, "human-controller-01", ClockStart(), selected);
+
+        publisher.Published.Should().ContainSingle()
+            .Which.OverlayRegister.Should().Be(
+                "out-of-fiction",
+                "client input is validated, never trusted, and fails closed to the conservative register: wrongly "
+                + "staying in-fiction would HIDE a real stop from participants");
+    }
+
+    [Fact]
+    public async Task SetTierAsync_AnInvalidOverlayRegister_StillAppliesTheFreeze()
+    {
+        var exerciseId = Guid.NewGuid();
+        var registry = RegistryFor(StartedClock(), new RecordingPauseOverlayPublisher());
+
+        var result = await registry.SetTierAsync(
+            exerciseId, PauseTier.Freeze, "human-controller-01", ClockStart(), "sideways");
+
+        result.Outcome.Should().Be(
+            PauseTierOutcome.Applied,
+            "the register is presentation only — a typo in it must never block the safety action a Freeze is");
+        registry.GetTier(exerciseId).Should().Be(PauseTier.Freeze);
+    }
+
     [Fact]
     public async Task NullOverlayPublisher_TheStory07Default_DoesNotThrow()
     {

@@ -141,11 +141,23 @@
  * is the correct, SessionProvider-free actor role, matching `reviewActions.ts`).
  * Staff-only (XC-002).
  *
- * ## Overlay register (seam only)
+ * ## Overlay register — NOW LIVE (world-steering story 08)
  * `overlayRegister` (`'in-fiction' | 'out-of-fiction'`) is exposed alongside the
- * tier as the value `participant-shell`'s (deferred) trigger wiring will read to
- * pick which register the pause/EndEx overlay renders in. This story does NOT
- * call `OverlayLayer`/`overlayState.ts` — it only exposes the value + setter.
+ * tier and picks which register a Freeze's participant holding page renders in
+ * — in-fiction "We'll be right back" (the fiction preserved) vs out-of-fiction
+ * "EXERCISE PAUSED" (the fiction deliberately broken). In LIVE mode the
+ * currently-selected value is SENT with every pause-tier POST, so the server's
+ * overlay publisher pushes the register the controller actually chose; this hook
+ * still never imports `OverlayLayer`/`overlayState.ts` (the participant surface
+ * reads its own state — the two worlds stay separate). Server-side it is
+ * validated, not trusted: anything but `'in-fiction'` is coerced to
+ * `'out-of-fiction'`, the conservative default, and it influences nothing but
+ * the overlay copy. Under mock data nothing is sent at all (unchanged).
+ *
+ * KNOWN LIMITATION (accepted, not an AC): the register is carried by a tier
+ * TRANSITION, so changing the selection WHILE already frozen does not re-push —
+ * participants keep the register that was selected when the Freeze landed until
+ * the next transition.
  */
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
@@ -286,6 +298,15 @@ function applyOverlayRegister(register: OverlayRegister): void {
   if (storeState.overlayRegister === register) return
   storeState = { ...storeState, overlayRegister: register }
   emitStoreChange()
+}
+
+/**
+ * The register selection to SEND with a live pause-tier POST (story 08) — read
+ * from the module store at call time rather than closed over, so a request can
+ * never carry a selection the controller has already changed.
+ */
+function currentOverlayRegister(): OverlayRegister {
+  return storeState.overlayRegister
 }
 
 /**
@@ -525,7 +546,11 @@ export function usePauseState(): PauseState {
         // nobody is claiming any more. Best effort: a failure here does NOT
         // revert again (that would be a ping-pong), and the local state already
         // matches what the controller can see.
-        setPauseTier(reverted.transition.to, { actingHumanId, timeZone }).catch(() => {})
+        setPauseTier(reverted.transition.to, {
+          actingHumanId,
+          timeZone,
+          overlayRegister: currentOverlayRegister(),
+        }).catch(() => {})
       })
 
       if (USE_MOCK_DATA) return
@@ -535,7 +560,10 @@ export function usePauseState(): PauseState {
       // VERIFIED, not assumed: a Freeze that could not reach the clock comes back
       // as a 409 (rejection) or as `clockFrozen: false`, and either way the
       // console stops claiming WORLD FROZEN over a world that is still moving.
-      setPauseTier(next, { actingHumanId, timeZone })
+      // The selected overlay register rides along (story 08): the server's overlay
+      // publisher pushes THIS register to participants, so the controller's choice
+      // between the in-fiction and out-of-fiction holding page actually takes.
+      setPauseTier(next, { actingHumanId, timeZone, overlayRegister: currentOverlayRegister() })
         .then(server => {
           if (!isLatest(sequence)) return
           const serverAppliedIt =

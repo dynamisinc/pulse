@@ -111,11 +111,16 @@ public sealed class PauseOverlayCompositionTests
         var exerciseB = Guid.NewGuid();
         var clockStart = new PauseClockStart(DateTimeOffset.UtcNow, TimeZoneInfo.Utc);
 
-        var frozen = await registry.SetTierAsync(exerciseA, PauseTier.Freeze, "human-controller-01", clockStart);
+        var frozen = await registry.SetTierAsync(
+            exerciseA, PauseTier.Freeze, "human-controller-01", clockStart, "in-fiction");
 
         frozen.Outcome.Should().Be(PauseTierOutcome.Applied);
         overlayState.Get(exerciseA).State.Should().Be(
             "pause", "AC1: the Freeze transition now writes the per-exercise overlay state");
+        overlayState.Get(exerciseA).Register.Should().Be(
+            "in-fiction",
+            "AC1: the controller's SELECTED register survives the whole DI-wired chain — request -> registry -> "
+            + "transition -> publisher -> store");
         overlayState.Get(exerciseB).State.Should().Be(
             "none", "COR-001: exercise B's participants must be untouched by A's Freeze");
 

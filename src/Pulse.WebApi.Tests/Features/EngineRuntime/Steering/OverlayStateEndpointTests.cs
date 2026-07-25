@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.ParticipantShell;
 using Xunit;
@@ -75,6 +76,80 @@ public sealed class OverlayStateEndpointTests
         var body = await host.GetOverlayStateAsync();
 
         body.GetProperty("state").GetString().Should().Be("none", "AC3: a resumed world seeds no holding page");
+    }
+
+    // ---- AC1/AC5 end to end: the controller's SELECTED register reaches the participant GET ------
+
+    [Theory]
+    [InlineData("in-fiction")]
+    [InlineData("out-of-fiction")]
+    public async Task Get_AfterAFreezeThroughTheWiredRegistry_ReportsTheSelectedRegister(string selected)
+    {
+        // The real chain, DI-wired: PauseTierRegistry.SetTierAsync (what POST /api/steering/pause-tier calls)
+        // -> the real IPauseOverlayPublisher -> OverlayStateService -> GET /api/overlay-state over HTTP.
+        var exerciseId = Guid.NewGuid();
+        await using var host = await TestHost.StartAsync(exerciseId);
+
+        var result = await host.FreezeThroughTheRegistryAsync(exerciseId, selected);
+
+        result.Outcome.Should().Be(PauseTierOutcome.Applied);
+        var body = await host.GetOverlayStateAsync();
+        body.GetProperty("state").GetString().Should().Be("pause");
+        body.GetProperty("register").GetString().Should().Be(
+            selected,
+            "AC1/AC5: the register the controller selected is what the participant's shell reads — otherwise the "
+            + "selection would be a control that does nothing");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("sideways")]
+    public async Task Get_AfterAFreezeWithAnInvalidRegister_ReportsOutOfFiction(string? selected)
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await TestHost.StartAsync(exerciseId);
+
+        var result = await host.FreezeThroughTheRegistryAsync(exerciseId, selected);
+
+        result.Outcome.Should().Be(
+            PauseTierOutcome.Applied, "a presentation typo must never block the Freeze itself");
+        var body = await host.GetOverlayStateAsync();
+        body.GetProperty("register").GetString().Should().Be(
+            "out-of-fiction",
+            "client input is validated and fails closed to the conservative register — wrongly staying in-fiction "
+            + "would HIDE a real stop from participants");
+    }
+
+    [Fact]
+    public async Task Get_AfterAResumeThroughTheWiredRegistry_ClearsToNoneInFiction()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await TestHost.StartAsync(exerciseId);
+        await host.FreezeThroughTheRegistryAsync(exerciseId, "in-fiction");
+
+        var resumed = await host.Registry.SetTierAsync(
+            exerciseId, PauseTier.Running, "human-controller-01", host.ClockStart, "in-fiction");
+
+        resumed.Outcome.Should().Be(PauseTierOutcome.Applied);
+        var body = await host.GetOverlayStateAsync();
+        body.GetProperty("state").GetString().Should().Be("none");
+        body.GetProperty("register").GetString().Should().Be("in-fiction", "AC3's cleared shape");
+    }
+
+    [Fact]
+    public async Task Get_AsExerciseB_NeverSeesAFreezeAppliedToExerciseAThroughTheRegistry()
+    {
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+        await using var host = await TestHost.StartAsync(exerciseB);
+
+        await host.FreezeThroughTheRegistryAsync(exerciseA, "in-fiction");
+
+        (await host.GetOverlayStateAsync()).GetProperty("state").GetString().Should().Be(
+            "none",
+            "COR-001: the whole wired chain stays per-exercise — B's participants see nothing of A's Freeze");
+        host.OverlayState.Get(exerciseA).State.Should().Be("pause", "while A's really is frozen");
     }
 
     [Fact]
@@ -159,6 +234,12 @@ public sealed class OverlayStateEndpointTests
         /// <summary>The one overlay store (a singleton) — written directly to stand in for a controller's Freeze.</summary>
         public OverlayStateService OverlayState => _app.Services.GetRequiredService<OverlayStateService>();
 
+        /// <summary>The DI-wired pause-tier registry — drives the REAL publisher, as the POST endpoint does.</summary>
+        public PauseTierRegistry Registry => _app.Services.GetRequiredService<PauseTierRegistry>();
+
+        /// <summary>Where a never-started scenario clock is started, so a Freeze genuinely takes (CR-001).</summary>
+        public PauseClockStart ClockStart { get; } = new(DateTimeOffset.UtcNow, TimeZoneInfo.Utc);
+
         public static async Task<TestHost> StartAsync(Guid? currentExerciseId, bool wireOverlaySlice = true)
         {
             var builder = WebApplication.CreateBuilder();
@@ -166,6 +247,11 @@ public sealed class OverlayStateEndpointTests
 
             if (wireOverlaySlice)
             {
+                // Wired exactly as Program.cs will be: SignalR (the shared hub's IHubContext), the shipped clock,
+                // story 07's pause-tier steering, then this story's overlay swap.
+                builder.Services.AddSignalR();
+                builder.Services.AddExerciseClock();
+                builder.Services.AddPauseTierSteering();
                 builder.Services.AddPauseParticipantOverlay();
             }
 
@@ -187,6 +273,18 @@ public sealed class OverlayStateEndpointTests
         /// <summary>Applies the overlay write a controller's Resume produces for <paramref name="exerciseId"/>.</summary>
         public void Resume(Guid exerciseId) =>
             OverlayState.Apply(exerciseId, "none", "in-fiction", OverlayState.NextSequence());
+
+        /// <summary>
+        /// Drives a Freeze through the WIRED registry — the same call
+        /// <c>POST /api/steering/pause-tier</c> makes — so the real publisher, the store and the participant GET
+        /// are all exercised, not just the store.
+        /// </summary>
+        /// <param name="exerciseId">The exercise to freeze.</param>
+        /// <param name="overlayRegister">The controller's selected register (or an invalid value, to test coercion).</param>
+        /// <returns>The registry's outcome.</returns>
+        public Task<PauseTierResult> FreezeThroughTheRegistryAsync(Guid exerciseId, string? overlayRegister) =>
+            Registry.SetTierAsync(
+                exerciseId, PauseTier.Freeze, "human-controller-01", ClockStart, overlayRegister);
 
         public async Task<JsonElement> GetOverlayStateAsync()
         {

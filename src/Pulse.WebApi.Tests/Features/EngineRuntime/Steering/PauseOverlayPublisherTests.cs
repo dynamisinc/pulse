@@ -41,13 +41,43 @@ public sealed class PauseOverlayPublisherTests
 
         var stored = harness.OverlayState.Get(exerciseId);
         stored.State.Should().Be("pause", "AC1: a Freeze must make GET /api/overlay-state report the holding page");
-        stored.Register.Should().Be(
-            "out-of-fiction",
-            "the console's own default overlayRegister selection — see PauseOverlayPublisher.FreezeRegister for the documented wire gap");
+        stored.Register.Should().Be("out-of-fiction", "the register the transition carried");
 
         harness.PushesTo($"exercise:{exerciseId}").Should().ContainSingle(
             "AC2: exactly one OverlayStateChanged push per transition, to the exercise's own group");
         harness.PushesTo($"exercise:{exerciseId}")[0].State.Should().Be("pause");
+    }
+
+    [Theory]
+    [InlineData("in-fiction")]
+    [InlineData("out-of-fiction")]
+    public async Task PublishAsync_Freeze_UsesTheRegisterTheControllerSelected(string selected)
+    {
+        var exerciseId = Guid.NewGuid();
+        var harness = new Harness(tier: PauseTier.Freeze);
+
+        await harness.Publisher.PublishAsync(
+            new PauseTierTransition(
+                exerciseId, PauseTier.Running, PauseTier.Freeze, StaffActingHumanId, selected));
+
+        harness.OverlayState.Get(exerciseId).Register.Should().Be(
+            selected, "AC1/AC5: the participant sees the register the controller actually chose");
+        harness.PushesTo($"exercise:{exerciseId}")[0].Register.Should().Be(selected);
+    }
+
+    [Fact]
+    public async Task PublishAsync_Freeze_WithANonContractRegister_FallsBackToOutOfFiction()
+    {
+        // Last line of defence before a PARTICIPANT-visible value: a non-contract literal would be dropped by the
+        // client's own guard, which would leave the Freeze invisible — the very bug this story fixes.
+        var exerciseId = Guid.NewGuid();
+        var harness = new Harness(tier: PauseTier.Freeze);
+
+        await harness.Publisher.PublishAsync(
+            new PauseTierTransition(
+                exerciseId, PauseTier.Running, PauseTier.Freeze, StaffActingHumanId, "sideways"));
+
+        harness.PushesTo($"exercise:{exerciseId}")[0].Register.Should().Be("out-of-fiction");
     }
 
     [Fact]
@@ -120,7 +150,8 @@ public sealed class PauseOverlayPublisherTests
         var harness = new Harness(tier: PauseTier.Freeze);
 
         await harness.Publisher.PublishAsync(
-            new PauseTierTransition(Guid.Empty, PauseTier.Running, PauseTier.Freeze, StaffActingHumanId));
+            new PauseTierTransition(
+                Guid.Empty, PauseTier.Running, PauseTier.Freeze, StaffActingHumanId, "out-of-fiction"));
 
         harness.GroupsPushed.Should().BeEmpty(
             "fail closed: an unscoped transition must never fan out to an ambient/empty exercise group");
@@ -136,7 +167,8 @@ public sealed class PauseOverlayPublisherTests
         var harness = new Harness(tier: PauseTier.Freeze);
 
         await harness.Publisher.PublishAsync(
-            new PauseTierTransition(exerciseId, PauseTier.Running, PauseTier.Freeze, "human-director-42"));
+            new PauseTierTransition(
+                exerciseId, PauseTier.Running, PauseTier.Freeze, "human-director-42", "out-of-fiction"));
 
         var payload = harness.RawPayloads.Should().ContainSingle().Subject;
         payload.Should().BeOfType<ParticipantOverlayStateDto>();
@@ -255,7 +287,7 @@ public sealed class PauseOverlayPublisherTests
     }
 
     private static PauseTierTransition Transition(Guid exerciseId, PauseTier from, PauseTier to) =>
-        new(exerciseId, from, to, StaffActingHumanId);
+        new(exerciseId, from, to, StaffActingHumanId, "out-of-fiction");
 
     /// <summary>
     /// The publisher under test wired over a recording <see cref="IHubContext{THub}"/> (which group each payload

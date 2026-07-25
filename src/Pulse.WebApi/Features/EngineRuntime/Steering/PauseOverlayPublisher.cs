@@ -49,9 +49,12 @@ public delegate PauseTier PauseTierReader(Guid exerciseId);
 /// </para>
 /// <para>
 /// <b>Two worlds (XC-002).</b> The pushed payload is <see cref="ParticipantOverlayStateDto"/>, built only from
-/// an <see cref="OverlayStateSnapshot"/>. <see cref="PauseTierTransition.ActingHumanId"/> is read NOWHERE in
-/// this type, and the staff <see cref="PauseTier"/> names never cross: a participant learns that the world is
-/// held, never which controller held it, and never the staff vocabulary for it.
+/// an <see cref="OverlayStateSnapshot"/>. Exactly two fields of the transition are read —
+/// <see cref="PauseTierTransition.ExerciseId"/> (the fan-out scope) and
+/// <see cref="PauseTierTransition.OverlayRegister"/> (the controller's presentation choice, which IS what
+/// participants are meant to see). <see cref="PauseTierTransition.ActingHumanId"/> is read NOWHERE in this type,
+/// and the staff <see cref="PauseTier"/> names never cross: a participant learns that the world is held, never
+/// which controller held it, and never the staff vocabulary for it.
 /// </para>
 /// <para>
 /// <b>Never throws into the controller's action (WR-004).</b> <see cref="PauseTierRegistry"/> applies the tier
@@ -80,22 +83,6 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
     /// shared connection (<c>core/realtime/connection.ts</c>).
     /// </summary>
     internal const string OverlayStateChangedEvent = "OverlayStateChanged";
-
-    /// <summary>
-    /// The register a Freeze's holding page renders in.
-    ///
-    /// <para><b>Known plumbing gap (documented, deliberately not worked around).</b> The register the controller
-    /// has SELECTED lives in the console (<c>usePauseState().overlayRegister</c>) and is NOT on the wire: story
-    /// 07's frozen <c>POST /api/steering/pause-tier</c> body carries only <c>tier</c>/<c>actingHumanId</c>/
-    /// <c>timeZone</c>, and <see cref="PauseTierTransition"/> has no register field. Adding one means editing
-    /// story 07's files, which are frozen for this story. So the participant sees the console's OWN default
-    /// selection — <c>usePauseState</c>'s store initializes <c>overlayRegister</c> to
-    /// <c>'out-of-fiction'</c> — which is exactly what the console displays as selected until a controller
-    /// changes it. A follow-up story should add <c>overlayRegister</c> to the pause-tier request and carry it
-    /// through <see cref="PauseTierTransition"/> to here; <see cref="OverlayStateService.Apply"/> already takes
-    /// the register as a parameter, so that change lands in this one line.</para>
-    /// </summary>
-    internal const string FreezeRegister = OverlayStateWire.OutOfFiction;
 
     private readonly IHubContext<ExerciseRealtimeHub> _hubContext;
     private readonly OverlayStateService _overlayState;
@@ -129,8 +116,8 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
     {
         ArgumentNullException.ThrowIfNull(transition);
 
-        // ONLY the exercise is read off the transition here (plus the tier, from the registry). ActingHumanId is
-        // never touched — see the type's XC-002 note.
+        // ONLY the exercise and the controller's overlay REGISTER are read off the transition here (plus the tier,
+        // from the registry). ActingHumanId is never touched — see the type's XC-002 note.
         var exerciseId = transition.ExerciseId;
         if (exerciseId == Guid.Empty)
         {
@@ -145,8 +132,16 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
             var sequence = _overlayState.NextSequence();
             var tier = _tierReader(exerciseId);
 
+            // The controller's SELECTED register decides which holding page participants see (AC1/AC5) — the
+            // registry already coerced it to a contract literal, and this re-coercion is the last line of defence
+            // before a participant-visible value (a non-contract literal would be dropped by the client's own
+            // guard, leaving a Freeze invisible). A cleared overlay always reverts to in-fiction (AC3).
             var snapshot = tier == PauseTier.Freeze
-                ? _overlayState.Apply(exerciseId, OverlayStateWire.Pause, FreezeRegister, sequence)
+                ? _overlayState.Apply(
+                    exerciseId,
+                    OverlayStateWire.Pause,
+                    OverlayStateWire.CoerceRegister(transition.OverlayRegister),
+                    sequence)
                 : _overlayState.Apply(exerciseId, OverlayStateWire.None, OverlayStateWire.InFiction, sequence);
 
             // Store BEFORE push: a reconnecting participant's GET must never read older state than a push that
