@@ -20,6 +20,44 @@
  *     pattern belongs to Break Fiction, story 04).
  * Selecting a tier — or Resume (`'running'`) — replaces the prior one.
  *
+ * ## MOCK <-> LIVE (story 07 — server-authoritative pause)
+ * Behind the ONE `USE_MOCK_DATA` flag (`@/core/config/mockData`), mirroring
+ * `useReviewQueue`'s split:
+ *   - **mock** (dev/UAT, and every story-03 test): UNCHANGED — the tier lives in
+ *     the module store below and Freeze installs the browser-local
+ *     `pausableExerciseClock`. No backend call is made.
+ *   - **live** (`USE_MOCK_DATA === false`): the tier flip is still optimistic and
+ *     local (the console must respond instantly), and ADDITIONALLY
+ *     `livePauseTierActions.setPauseTier` POSTs `/api/steering/pause-tier`, where
+ *     the backend records the tier and, on the `freeze` transition, calls the
+ *     native `IExerciseClock.Freeze`/`Unfreeze` — the clock
+ *     `ReactionLoopHost.TickExerciseAsync` already checks (`IsFrozen`) to skip a
+ *     tick, so a Freeze genuinely halts the engine. On REJECTION the optimistic
+ *     flip is reverted **unless a newer transition has superseded it** (the same
+ *     guarded revert `useEngineControl.setMode` uses, #337): the console must
+ *     never claim WORLD FROZEN when the world is still running, and a stale
+ *     rejection must never clobber a newer toggle. A freshly mounted console
+ *     also RESYNCS once via `fetchPauseTier()` so it adopts the tier the
+ *     exercise is actually in instead of assuming `running`.
+ *
+ * ## ENGINE PAUSED is the #337 kill switch (a FRONTEND-only unification)
+ * `usePauseState()` composes `useEngineControl()` internally (both hooks are
+ * called unconditionally on every render) and calls its `setMode('stop')` when
+ * the `engine` tier is ENTERED and `setMode('live')` when it is LEFT — so the
+ * tier pill and `<EngineControlBar>` read the ONE `engineControlStore` module
+ * singleton and can never contradict each other about whether the engine is
+ * stopped. There is deliberately NO new backend engine-control endpoint: this
+ * reuses the shipped `kill-switch`/`restore` wiring.
+ *
+ * KNOWN GAPS (accepted, story 07 "Out of Scope"): Pause engine always sets
+ * `'stop'` and leaving it always sets `'live'`, so a controller who had manually
+ * chosen SUGGEST-ONLY before pausing loses that nuance. `engine -> freeze` keeps
+ * the engine stopped (a stronger pause must not restart it), and `freeze ->
+ * running` never touches the kill switch, so a Freeze reached from Pause-engine
+ * leaves the switch where Pause-engine put it until a controller raises it
+ * explicitly on `<EngineControlBar>` (safety only ever un-stops on an explicit
+ * human action, §8.2).
+ *
  * ## Clock: the safety invariant — stops on Freeze, and ONLY on Freeze
  * The FIRST Freeze installs the feature-local `pausableExerciseClock` via the
  * SHIPPED `setExerciseClock()` and calls `freeze()`, so the `staff-shell`
@@ -41,7 +79,15 @@
  *
  * ## Telemetry (XC-004)
  * EVERY tier change — including the transition back to `running` — emits ONE
- * `steering_action` event via the caller-safe `buildAndEmit` (never throws into
+ * `steering_action` event in BOTH modes, with the SHAPE UNCHANGED from story 03.
+ * Story 07 deliberately does NOT duplicate it now that a live POST also fires:
+ * the backend endpoint emits no telemetry of its own, so this remains the single
+ * audit record of a pause action (and it stands even if the POST later rejects
+ * and the optimistic flip is reverted — the attempted change was real). A
+ * server-sourced RESYNC adopt is not a controller action and emits nothing (the
+ * controller who caused it already logged it).
+ *
+ * It is emitted via the caller-safe `buildAndEmit` (never throws into
  * the action): `channel: 'system'`, `actor: { kind: 'system', actingHumanId,
  * role }`, `target: { entityType: 'exercise', entityId }`, `payload` naming the
  * transition. `exerciseId`/`timeZone` are STAMPING-ONLY (COR-001), sourced from
@@ -59,14 +105,17 @@
  * call `OverlayLayer`/`overlayState.ts` — it only exposes the value + setter.
  */
 
-import { useCallback, useMemo, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import { setExerciseClock } from '@/core/clock'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import { scenarioNow } from '@/core/clock'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useControllerIdentity } from '../identity/controllerIdentity'
+import { useEngineControl, type EngineMode } from '../engine/hooks/useEngineControl'
 import { pausableExerciseClock } from '../services/pausableExerciseClock'
+import { fetchPauseTier, setPauseTier } from '../services/livePauseTierActions'
 
 /** The active pause tier. Exactly one is active at a time. */
 export type PauseTier = 'running' | 'injects' | 'engine' | 'freeze'
@@ -178,6 +227,32 @@ function applyOverlayRegister(register: OverlayRegister): void {
 }
 
 /**
+ * The engine-tier -> kill-switch mapping (the #337 unification). Entering the
+ * `engine` tier STOPS the engine; leaving it for a weaker tier restores it to
+ * live. Leaving it for `freeze` deliberately keeps the engine stopped — a
+ * stronger pause must never restart generation. See the module header's KNOWN
+ * GAPS for the accepted suggest-only / `freeze -> running` nuances.
+ */
+function applyEngineTierMode(
+  transition: PauseTransition,
+  setEngineMode: (mode: EngineMode) => void,
+): void {
+  if (transition.to === 'engine') {
+    setEngineMode('stop')
+  } else if (transition.from === 'engine' && transition.to !== 'freeze') {
+    setEngineMode('live')
+  }
+}
+
+/**
+ * Whether the live-mode one-shot resync GET has already been kicked off for this
+ * runtime — `usePauseState()` is mounted by more than one surface (the pill and
+ * the header), and only ONE of them should read the server tier (mirrors
+ * `liveReviewStore.ensureStarted`'s idempotence).
+ */
+let resyncStarted = false
+
+/**
  * TEST-ONLY reset: returns the module store + ambient clock to the `running`
  * baseline between tests. Not for production — production has one long-lived
  * ambient pause fact per runtime.
@@ -185,6 +260,7 @@ function applyOverlayRegister(register: OverlayRegister): void {
 export function resetPauseStateForTest(): void {
   if (storeState.tier === 'freeze') pausableExerciseClock.resume()
   storeState = { tier: 'running', overlayRegister: 'out-of-fiction' }
+  resyncStarted = false
   emitStoreChange()
 }
 
@@ -202,6 +278,10 @@ export function resetPauseStateForTest(): void {
 export function usePauseState(): PauseState {
   const { exerciseId, timeZone } = useExerciseContext()
   const { actingHumanId, role } = useControllerIdentity()
+
+  // The #337 kill switch — composed, not duplicated, so ENGINE PAUSED and
+  // <EngineControlBar> read the ONE engineControlStore snapshot (see header).
+  const { setMode: setEngineMode } = useEngineControl()
 
   const state = useSyncExternalStore(subscribeStore, getStoreSnapshot, getStoreSnapshot)
 
@@ -230,10 +310,52 @@ export function usePauseState(): PauseState {
   const setTier = useCallback(
     (next: PauseTier) => {
       const transition = applyTier(next)
-      if (transition) emitTierChange(transition)
+      if (!transition) return
+
+      // ONE steering_action per transition, in BOTH modes, shape unchanged from
+      // story 03 — logged BEFORE any POST so the attempted change is recorded
+      // even if the POST later rejects and the optimistic flip is reverted.
+      emitTierChange(transition)
+
+      // ENGINE PAUSED drives the SAME kill switch <EngineControlBar> drives.
+      applyEngineTierMode(transition, setEngineMode)
+
+      if (USE_MOCK_DATA) return
+
+      // Live: make the tier SERVER-authoritative (and, on Freeze, actually stop
+      // the reaction loop via the native clock). On rejection, revert the
+      // optimistic flip — but ONLY if our tier is still the live one: a newer
+      // transition supersedes us and owns the tier, so a stale rejection can
+      // never clobber a newer toggle (mirrors useEngineControl.setMode, #337).
+      setPauseTier(next, { actingHumanId, timeZone }).catch(() => {
+        if (getStoreSnapshot().tier !== transition.to) return
+        const reverted = applyTier(transition.from)
+        if (reverted) applyEngineTierMode(reverted, setEngineMode)
+      })
     },
-    [emitTierChange],
+    [emitTierChange, setEngineMode, actingHumanId, timeZone],
   )
+
+  // Live path only: resync ONCE from the server so a freshly mounted console
+  // adopts the tier the exercise is actually in (including a Freeze another
+  // controller applied) instead of assuming `running`. Idempotent across the
+  // multiple surfaces that mount this hook. A server-sourced adopt is not a
+  // controller action: it emits NO telemetry and fires NO POST, but it DOES
+  // apply the tier's local effects (the pausable clock, the kill switch) so the
+  // console never contradicts the server. No-op under mock data.
+  useEffect(() => {
+    if (USE_MOCK_DATA || resyncStarted) return
+    resyncStarted = true
+    fetchPauseTier()
+      .then(serverTier => {
+        const adopted = applyTier(serverTier)
+        if (adopted) applyEngineTierMode(adopted, setEngineMode)
+      })
+      .catch(() => {
+        // A failed/unrecognised resync leaves the local baseline untouched —
+        // never a guessed tier. The controller's own next action is authoritative.
+      })
+  }, [setEngineMode])
 
   const resume = useCallback(() => setTier('running'), [setTier])
 

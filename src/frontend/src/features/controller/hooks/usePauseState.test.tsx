@@ -16,6 +16,18 @@
  *    `steering_action` telemetry event with the correct actor/target/payload,
  *    scoped to the active exercise (COR-001).
  *
+ * Story 07 (server-authoritative pause) adds, WITHOUT changing any of the above:
+ *  - the ENGINE-tier unification with the #337 kill switch — entering/leaving
+ *    the `engine` tier calls `useEngineControl().setMode('stop'|'live')`, and
+ *    the tier pill + `<EngineControlBar>` read the SAME `engineControlStore`
+ *    snapshot (asserted through the real store, not a mocked hook);
+ *  - the live branch (`USE_MOCK_DATA === false`): the optimistic flip, the
+ *    `/api/steering/pause-tier` POST, the guarded revert on rejection (and NO
+ *    revert once a newer transition has superseded it), and the one-shot resync
+ *    GET a freshly mounted console performs;
+ *  - mock mode (the default here) fires NO backend call at all — story 03's
+ *    behavior is untouched.
+ *
  * `@/core/exerciseContext` and the sibling `controllerIdentity` module are
  * mocked at the module boundary (mirrors `useSwampedMode.test.tsx` /
  * `useEngineControl.test.ts`'s hook-mock precedent) so each test controls the
@@ -30,14 +42,41 @@ import { getExerciseClock, resetExerciseClock, scenarioNow } from '@/core/clock'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { useControllerIdentity, type ControllerIdentity } from '../identity/controllerIdentity'
+import { engineControlStore, useEngineControl } from '../engine/hooks/useEngineControl'
 import { pausableExerciseClock } from '../services/pausableExerciseClock'
-import { resetPauseStateForTest, usePauseState } from './usePauseState'
+import * as livePauseTierActions from '../services/livePauseTierActions'
+import { resetPauseStateForTest, usePauseState, type PauseTier } from './usePauseState'
 
 vi.mock('@/core/exerciseContext', () => ({
   useExerciseContext: vi.fn(),
 }))
 vi.mock('../identity/controllerIdentity', () => ({
   useControllerIdentity: vi.fn(),
+}))
+
+/**
+ * Toggled per-describe-block. Default `true` (mock mode — matches dev/UAT and
+ * every story-03 test below). The live-mode block flips it to `false` for its
+ * own tests only; the top-level `beforeEach` resets it, so story 03's coverage
+ * is unaffected. A GETTER is used so the `USE_MOCK_DATA` import binding in
+ * `usePauseState.ts` reads whichever value is current at call time (mirrors
+ * `useEngineControl.test.ts`).
+ */
+let useMockData = true
+vi.mock('@/core/config/mockData', () => ({
+  get USE_MOCK_DATA() {
+    return useMockData
+  },
+}))
+
+// The live pause-tier POST/GET and the shipped kill-switch POST are mocked
+// wholesale — never a real network call.
+vi.mock('../services/livePauseTierActions', () => ({
+  setPauseTier: vi.fn(),
+  fetchPauseTier: vi.fn(),
+}))
+vi.mock('../engine/services/liveEngineControlActions', () => ({
+  setMode: vi.fn().mockResolvedValue(undefined),
 }))
 // The real telemetry sink fire-and-forgets a POST through the shared axios
 // client; with no backend that rejects ASYNCHRONOUSLY and logs during teardown
@@ -49,6 +88,8 @@ vi.mock('@/core/services/api', () => ({
 
 const mockedUseExerciseContext = vi.mocked(useExerciseContext)
 const mockedUseControllerIdentity = vi.mocked(useControllerIdentity)
+const mockedSetPauseTier = vi.mocked(livePauseTierActions.setPauseTier)
+const mockedFetchPauseTier = vi.mocked(livePauseTierActions.fetchPauseTier)
 
 function scopeFor(exerciseId: string): ExerciseScope {
   return { exerciseId, exerciseName: 'Test Exercise', timeZone: 'America/New_York', status: 'active' }
@@ -73,6 +114,8 @@ beforeEach(() => {
   mockedUseControllerIdentity.mockReturnValue(identity())
   resetTelemetryBuffer()
   resetPauseStateForTest()
+  engineControlStore.resetForTests()
+  useMockData = true
 })
 
 afterEach(() => {
@@ -300,5 +343,222 @@ describe('usePauseState — per-exercise scoping (COR-001, stamping-only)', () =
     expect(events).toHaveLength(1)
     expect(events[0]?.exerciseId).toBe('ex-bravo')
     expect(events[0]?.target).toEqual({ entityType: 'exercise', entityId: 'ex-bravo' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Story 07: ENGINE PAUSED unifies with the #337 kill switch (frontend-only)
+// ---------------------------------------------------------------------------
+
+/** Renders the pause hook AND the kill-switch hook, so both read the one store. */
+function renderBothSurfaces() {
+  return renderHook(() => ({ pause: usePauseState(), engine: useEngineControl() }))
+}
+
+describe('usePauseState — ENGINE PAUSED drives the SAME kill switch <EngineControlBar> reads', () => {
+  it("entering the engine tier calls setMode('stop') — the tier pill and the control bar agree", () => {
+    const { result } = renderBothSurfaces()
+
+    act(() => result.current.pause.setTier('engine'))
+
+    expect(result.current.pause.tier).toBe('engine')
+    expect(result.current.engine.mode).toBe('stop')
+    // Both surfaces read ONE engineControlStore snapshot — the tier pill and
+    // <EngineControlBar> can never show contradictory states.
+    expect(engineControlStore.getSnapshot('ex-mock-0001').mode).toBe('stop')
+  })
+
+  it("leaving the engine tier for Resume calls setMode('live')", () => {
+    const { result } = renderBothSurfaces()
+
+    act(() => result.current.pause.setTier('engine'))
+    act(() => result.current.pause.resume())
+
+    expect(result.current.pause.tier).toBe('running')
+    expect(result.current.engine.mode).toBe('live')
+    expect(engineControlStore.getSnapshot('ex-mock-0001').mode).toBe('live')
+  })
+
+  it('leaving the engine tier for Freeze keeps the engine STOPPED (a stronger pause never restarts it)', () => {
+    const { result } = renderBothSurfaces()
+
+    act(() => result.current.pause.setTier('engine'))
+    act(() => result.current.pause.setTier('freeze'))
+
+    expect(result.current.pause.tier).toBe('freeze')
+    expect(result.current.engine.mode).toBe('stop')
+  })
+
+  it('the injects and freeze tiers never touch the kill switch on their own', () => {
+    const { result } = renderBothSurfaces()
+
+    act(() => result.current.pause.setTier('injects'))
+    expect(result.current.engine.mode).toBe('live')
+
+    act(() => result.current.pause.setTier('freeze'))
+    expect(result.current.engine.mode).toBe('live')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Story 07: the live branch (server-authoritative pause)
+// ---------------------------------------------------------------------------
+
+describe('usePauseState — mock mode fires NO backend call (story 03 path unchanged)', () => {
+  it('never POSTs a tier change and never GETs a resync', () => {
+    const { result } = renderHook(() => usePauseState())
+
+    act(() => result.current.setTier('injects'))
+    act(() => result.current.setTier('freeze'))
+    act(() => result.current.resume())
+
+    expect(mockedSetPauseTier).not.toHaveBeenCalled()
+    expect(mockedFetchPauseTier).not.toHaveBeenCalled()
+  })
+})
+
+describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false)', () => {
+  beforeEach(() => {
+    useMockData = false
+    mockedSetPauseTier.mockResolvedValue(undefined)
+    mockedFetchPauseTier.mockRejectedValue(new Error('no resync in this test'))
+  })
+
+  it('flips the tier optimistically AND POSTs it with the acting human + time zone', () => {
+    const { result } = renderHook(() => usePauseState())
+
+    act(() => result.current.setTier('freeze'))
+
+    // Optimistic — the console flips immediately, without waiting on the POST.
+    expect(result.current.tier).toBe('freeze')
+    expect(result.current.isFrozen).toBe(true)
+    expect(mockedSetPauseTier).toHaveBeenCalledWith('freeze', {
+      actingHumanId: 'human-controller-01',
+      timeZone: 'America/New_York',
+    })
+    // Exactly ONE steering_action, shape unchanged — never duplicated because a
+    // live POST also fired.
+    expect(steeringEvents()).toHaveLength(1)
+    expect(steeringEvents()[0]?.payload).toMatchObject({
+      action: 'pause-tier',
+      from: 'running',
+      to: 'freeze',
+    })
+  })
+
+  it('POSTs the Resume transition too', () => {
+    const { result } = renderHook(() => usePauseState())
+
+    act(() => result.current.setTier('freeze'))
+    act(() => result.current.resume())
+
+    expect(mockedSetPauseTier).toHaveBeenLastCalledWith('running', {
+      actingHumanId: 'human-controller-01',
+      timeZone: 'America/New_York',
+    })
+  })
+
+  it('reverts the optimistic flip when the POST rejects, keeping the telemetry already logged', async () => {
+    mockedSetPauseTier.mockRejectedValue(new Error('network down'))
+    const { result } = renderHook(() => usePauseState())
+
+    await act(async () => {
+      result.current.setTier('freeze')
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.tier).toBe('running')
+    expect(result.current.isFrozen).toBe(false)
+    // The attempted change is still logged — the emit happens before the POST.
+    expect(steeringEvents()).toHaveLength(1)
+    expect(steeringEvents()[0]?.payload).toMatchObject({ from: 'running', to: 'freeze' })
+  })
+
+  it('does NOT revert when a newer transition has superseded the rejected one', async () => {
+    let rejectFirst: ((reason: Error) => void) | undefined
+    mockedSetPauseTier
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectFirst = reject
+          }),
+      )
+      .mockResolvedValue(undefined)
+
+    const { result } = renderHook(() => usePauseState())
+
+    act(() => result.current.setTier('injects'))
+    // A NEWER transition lands before the first POST's rejection arrives.
+    act(() => result.current.setTier('freeze'))
+
+    await act(async () => {
+      rejectFirst?.(new Error('network down'))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.tier).toBe('freeze')
+    expect(result.current.isFrozen).toBe(true)
+  })
+
+  it('reverts the engine kill switch too when an engine-tier POST rejects', async () => {
+    mockedSetPauseTier.mockRejectedValue(new Error('network down'))
+    const { result } = renderBothSurfaces()
+
+    await act(async () => {
+      result.current.pause.setTier('engine')
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.pause.tier).toBe('running')
+    expect(result.current.engine.mode).toBe('live')
+  })
+
+  it('resyncs ONCE on mount and adopts the server tier without emitting telemetry or POSTing', async () => {
+    mockedFetchPauseTier.mockResolvedValue('freeze')
+
+    const { result } = renderHook(() => usePauseState())
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mockedFetchPauseTier).toHaveBeenCalledTimes(1)
+    expect(result.current.tier).toBe('freeze')
+    expect(result.current.isFrozen).toBe(true)
+    // A resync is not a controller action — the controller who caused it already
+    // logged it, so adopting it must not emit a second event or echo a POST.
+    expect(steeringEvents()).toHaveLength(0)
+    expect(mockedSetPauseTier).not.toHaveBeenCalled()
+  })
+
+  it('keeps the local baseline when the resync GET fails (never a guessed tier)', async () => {
+    mockedFetchPauseTier.mockRejectedValue(new Error('401'))
+
+    const { result } = renderHook(() => usePauseState())
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.tier).toBe('running')
+    expect(steeringEvents()).toHaveLength(0)
+  })
+
+  it('resyncs only once across several mounted surfaces', async () => {
+    mockedFetchPauseTier.mockResolvedValue('engine' as PauseTier)
+
+    const first = renderHook(() => usePauseState())
+    const second = renderHook(() => usePauseState())
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mockedFetchPauseTier).toHaveBeenCalledTimes(1)
+    expect(first.result.current.tier).toBe('engine')
+    expect(second.result.current.tier).toBe('engine')
   })
 })

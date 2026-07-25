@@ -129,16 +129,68 @@ the shipped `EngineCockpitStaffAuthorizationFilter`; the shipped kill-switch/res
   exercise A never marks exercise B frozen); entering/leaving `freeze` calls the injected
   `IExerciseClock.Freeze`/`Unfreeze` exactly once each; every transition invokes the registered
   `IPauseOverlayPublisher` (a fake in the test, asserting the no-op default doesn't throw).
+  - `PauseTierRegistryTests.GetTier_UnknownExercise_DefaultsToRunning` (AC-7)
+  - `PauseTierRegistryTests.SetTierAsync_KeysEachExerciseIndependently` (AC-7)
+  - `PauseTierRegistryTests.SetTierAsync_FreezeOnExerciseA_NeverTouchesExerciseBsClock` (AC-7)
+  - `PauseTierRegistryTests.SetTierAsync_EmptyExercise_ThrowsFailClosed` (AC-7)
+  - `PauseTierRegistryTests.SetTierAsync_BlankActingHuman_ThrowsFailClosed` (AC-7)
+  - `PauseTierRegistryTests.SetTierAsync_EnteringFreeze_CallsClockFreezeExactlyOnce` (AC-1)
+  - `PauseTierRegistryTests.SetTierAsync_LeavingFreezeToRunning_CallsClockUnfreezeExactlyOnce` (AC-2)
+  - `PauseTierRegistryTests.SetTierAsync_ReSelectingFreeze_DoesNotFreezeTwice` (AC-1)
+  - `PauseTierRegistryTests.SetTierAsync_NonFreezeTiers_NeverTouchTheClock` (AC-1)
+  - `PauseTierRegistryTests.SetTierAsync_FreezeWithNoStartedClock_RecordsTheTierWithoutCallingTheClock` (AC-1)
+  - `PauseTierRegistryTests.SetTierAsync_EveryTransition_InvokesTheOverlayPublisher` (AC-7)
+  - `PauseTierRegistryTests.SetTierAsync_NoChange_PublishesNothing` (AC-7)
+  - `PauseTierRegistryTests.SetTierAsync_CarriesTheActingHuman_ToThePublisher` (AC-7, COR-018)
+  - `PauseTierRegistryTests.NullOverlayPublisher_TheStory07Default_DoesNotThrow` (AC-7)
+  - `PauseTierRegistryTests.PauseTierWire_RoundTripsTheFrozenClientLiterals` (AC-1)
+  - `PauseTierRegistryTests.PauseTierWire_RejectsAnythingElse` (AC-1)
 - Unit (backend): the endpoint fails closed — no staff session `401`, staff-but-unassigned `403`,
   assigned staff `200` — via the reused filter (no new authorization code).
+  - `PauseTierEndpointsTests.Routes_AreMappedExactlyOnce` (AC-1)
+  - `PauseTierEndpointsTests.Post_NoStaffSession_Returns401_FailClosed` (AC-7)
+  - `PauseTierEndpointsTests.Post_UnresolvedScope_Returns401_FailClosed` (AC-7)
+  - `PauseTierEndpointsTests.Post_StaffNotAssignedToResolvedExercise_Returns403_AndNeverFreezes` (AC-7)
+  - `PauseTierEndpointsTests.Get_NoStaffSession_Returns401_FailClosed` (AC-7)
+  - `PauseTierEndpointsTests.Get_AssignedStaff_Returns200WithTheRunningBaseline` (AC-7)
+  - `PauseTierEndpointsTests.Post_Freeze_FreezesTheResolvedExercisesClock` (AC-1)
+  - `PauseTierEndpointsTests.Post_Resume_UnfreezesWithoutLosingScenarioTime` (AC-2)
+  - `PauseTierEndpointsTests.Post_FreezeInExerciseA_NeverFreezesExerciseB` (AC-7)
+  - `PauseTierEndpointsTests.Post_NonFreezeTier_LeavesTheClockRunning` (AC-1)
+  - `PauseTierEndpointsTests.Get_AfterAPost_ResyncsTheRecordedTier` (AC-7)
+  - `PauseTierEndpointsTests.Post_UnknownTier_Returns400` / `Post_MissingActingHuman_Returns400` (AC-7)
+  - `PauseTierEndpointsTests.AddPauseTierSteering_RegistersTheNoOpOverlayPublisherDefault` (AC-7)
 - Unit (frontend): `usePauseState`'s live branch — optimistic flip, POST, and revert-on-rejection
   unless superseded by a newer transition (mirrors the `useEngineControl.setMode` revert test).
+  - `usePauseState — live mode > flips the tier optimistically AND POSTs it with the acting human + time zone` (AC-1)
+  - `usePauseState — live mode > POSTs the Resume transition too` (AC-2)
+  - `usePauseState — live mode > reverts the optimistic flip when the POST rejects, keeping the telemetry already logged` (AC-4)
+  - `usePauseState — live mode > does NOT revert when a newer transition has superseded the rejected one` (AC-4)
+  - `usePauseState — live mode > reverts the engine kill switch too when an engine-tier POST rejects` (AC-4)
+  - `usePauseState — live mode > resyncs ONCE on mount and adopts the server tier without emitting telemetry or POSTing` (AC-7)
+  - `usePauseState — live mode > keeps the local baseline when the resync GET fails` / `resyncs only once across several mounted surfaces` (AC-7)
+  - `livePauseTierActions.setPauseTier > POSTs the tier + acting human + time zone, and NO client exerciseId (COR-001)` (AC-7)
+  - `livePauseTierActions.fetchPauseTier > GETs the pause-tier path with no parameters and returns the server tier` (AC-7)
 - Unit (frontend): entering/leaving the `engine` tier calls `useEngineControl().setMode('stop'|'live')`
   with the correct value; `<EngineControlBar>` and the tier pill read the same store snapshot.
+  - `usePauseState — ENGINE PAUSED ... > entering the engine tier calls setMode('stop') — the tier pill and the control bar agree` (AC-3)
+  - `usePauseState — ENGINE PAUSED ... > leaving the engine tier for Resume calls setMode('live')` (AC-3)
+  - `usePauseState — ENGINE PAUSED ... > leaving the engine tier for Freeze keeps the engine STOPPED` (AC-3)
+  - `usePauseState — ENGINE PAUSED ... > the injects and freeze tiers never touch the kill switch on their own` (AC-3)
 - Unit (frontend): the Pause-injects control is disabled and inert (no `setTier('injects')` call
   reaches the store) and communicates its reason via an accessible name/description, not color
   alone (NFR-001).
+  - `PausePill — Pause injects ships DISABLED and INERT > renders the tier but disables its radio` (AC-5)
+  - `PausePill — Pause injects ships DISABLED and INERT > communicates its reason as TEXT in the accessible name + description, not colour alone (NFR-001)` (AC-5)
+  - `PausePill — Pause injects ships DISABLED and INERT > takes NO action — clicking it never selects it and no setTier("injects") ever reaches the store` (AC-5)
+  - `PausePill — Pause injects ships DISABLED and INERT > pre-selects the first SELECTABLE tier when running` (AC-5)
+  - `PausePill — Pause injects ships DISABLED and INERT > keyboard activation cannot select it either` (AC-5, NFR-001)
 - Regression: `USE_MOCK_DATA=true` — story 03's existing test suite passes unchanged.
+  - `usePauseState — mock mode fires NO backend call (story 03 path unchanged)` (AC-6)
+  - story 03's `usePauseState.test.tsx` clock/telemetry/tier blocks and `pausableExerciseClock.test.ts`
+    pass untouched (AC-6). ONE story-03 `PausePill.test.tsx` case necessarily changed — the former
+    "selecting Pause injects applies immediately" now asserts Pause **engine** applies immediately,
+    because AC-5 deliberately disables the injects tier.
 - **Manual/UAT (required for Complete):** with mock off, open the console against a live exercise;
   select Freeze; confirm via the review queue (or `engine.*` telemetry) that no new items/events
   appear while frozen; select Resume; confirm ticking resumes with no scenario-minute jump. Select

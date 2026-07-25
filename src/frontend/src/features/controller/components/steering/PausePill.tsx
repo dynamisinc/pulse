@@ -13,6 +13,15 @@
  * active tier's LABEL text beside a status dot — the dot's colour is decorative
  * reinforcement, never the sole signal.
  *
+ * PAUSE INJECTS SHIPS DISABLED (story 07, a deliberate product decision). There
+ * is no inject queue in the product yet (`inject-queue`, feature #4, is Not
+ * Started), so the tier is rendered but DISABLED and INERT with an honest inline
+ * reason — "No inject queue yet" — rather than pretending to pause something.
+ * CTL-023's three-tier shape is preserved for a later phase. Per NFR-001 the
+ * reason is TEXT carried in the radio's accessible name and `aria-describedby`
+ * (plus a non-colour icon), never colour alone, and a disabled radio takes no
+ * action: the Pause button cannot apply it.
+ *
  * THE PAUSE POPOVER (D5-014/1.3). Opening the pill reveals three radio tiers —
  * Pause injects / Pause engine / Freeze world. The footer has a **Cancel** link
  * (dismiss, no change), a **Resume** button that appears while any tier is
@@ -30,6 +39,7 @@
 import { useEffect, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
+  faBan,
   faCirclePause,
   faPause,
   faPlay,
@@ -68,13 +78,28 @@ interface TierOption {
   readonly label: string
   readonly hint: string
   readonly amber: boolean
+  /**
+   * Why this tier cannot be selected in this build, or `undefined` when it can.
+   * A disabled tier is INERT — it is never applied (see the module header).
+   */
+  readonly disabledReason?: string
 }
 
 const TIER_OPTIONS: readonly TierOption[] = [
-  { value: 'injects', label: 'Pause injects', hint: 'World keeps living', amber: false },
+  {
+    value: 'injects',
+    label: 'Pause injects',
+    hint: 'World keeps living',
+    amber: false,
+    disabledReason: 'No inject queue yet',
+  },
   { value: 'engine', label: 'Pause engine', hint: 'No new AI content', amber: false },
   { value: 'freeze', label: 'Freeze world', hint: 'Participants notice — guarded', amber: true },
 ]
+
+/** The tier the popover pre-selects when running — the first SELECTABLE option. */
+const DEFAULT_CHOICE: PauseChoice =
+  TIER_OPTIONS.find(option => !option.disabledReason)?.value ?? 'engine'
 
 /** The dot colour for each tier — decorative reinforcement of the label text. */
 const TIER_DOT: Readonly<Record<PauseTier, string>> = {
@@ -94,14 +119,14 @@ export function PausePill() {
 
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
   const open = Boolean(anchorEl)
-  const [choice, setChoice] = useState<PauseChoice>('injects')
+  const [choice, setChoice] = useState<PauseChoice>(DEFAULT_CHOICE)
   const [confirmingFreeze, setConfirmingFreeze] = useState(false)
 
   // Each time the popover opens, seed the radio from the active tier (or the
-  // first option when running) and clear any stale confirm step.
+  // first SELECTABLE option when running) and clear any stale confirm step.
   useEffect(() => {
     if (!open) return
-    setChoice(tier === 'running' ? 'injects' : tier)
+    setChoice(tier === 'running' ? DEFAULT_CHOICE : tier)
     setConfirmingFreeze(false)
   }, [open, tier])
 
@@ -111,6 +136,10 @@ export function PausePill() {
   }
 
   const applyChoice = () => {
+    // A disabled tier is inert — it never reaches `setTier` (story 07: Pause
+    // injects has nothing to pause and must not pretend otherwise).
+    if (TIER_OPTIONS.find(option => option.value === choice)?.disabledReason) return
+
     // Freeze is guarded — route through the confirm step, don't apply yet.
     if (choice === 'freeze') {
       setConfirmingFreeze(true)
@@ -255,8 +284,19 @@ export function PausePill() {
                   <FormControlLabel
                     key={option.value}
                     value={option.value}
+                    disabled={Boolean(option.disabledReason)}
                     data-testid={`pause-tier-option-${option.value}`}
-                    control={<Radio size="small" sx={{ color: chrome.inkMuted, py: 0.4 }} />}
+                    control={
+                      <Radio
+                        size="small"
+                        sx={{ color: chrome.inkMuted, py: 0.4 }}
+                        slotProps={{
+                          input: option.disabledReason
+                            ? { 'aria-describedby': `pause-tier-reason-${option.value}` }
+                            : undefined,
+                        }}
+                      />
+                    }
                     label={
                       <Stack sx={{ py: 0.2 }}>
                         <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
@@ -266,6 +306,13 @@ export function PausePill() {
                               color={chrome.amber}
                               aria-hidden="true"
                               style={{ fontSize: 10 }}
+                            />
+                          )}
+                          {option.disabledReason && (
+                            <FontAwesomeIcon
+                              icon={faBan}
+                              aria-hidden="true"
+                              style={{ fontSize: 10, color: chrome.inkFaint }}
                             />
                           )}
                           <Typography
@@ -279,8 +326,23 @@ export function PausePill() {
                             {option.label}
                           </Typography>
                         </Stack>
-                        <Typography component="span" sx={{ fontSize: 10.5, color: chrome.inkFaint }}>
-                          {option.hint}
+                        {/* NFR-001: the reason is TEXT (and part of the radio's
+                            accessible name + description), never colour alone. */}
+                        <Typography
+                          component="span"
+                          id={
+                            option.disabledReason ? `pause-tier-reason-${option.value}` : undefined
+                          }
+                          data-testid={
+                            option.disabledReason
+                              ? `pause-tier-reason-${option.value}`
+                              : undefined
+                          }
+                          sx={{ fontSize: 10.5, color: chrome.inkFaint }}
+                        >
+                          {option.disabledReason
+                            ? `Unavailable — ${option.disabledReason}`
+                            : option.hint}
                         </Typography>
                       </Stack>
                     }
