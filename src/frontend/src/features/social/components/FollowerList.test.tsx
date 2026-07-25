@@ -165,6 +165,32 @@ describe('FollowerList — accessibility (NFR-001)', () => {
     expect(others.closest('[aria-hidden="true"]')).toBeNull()
   })
 
+  it('spells the approximation out for AT, since "~" may be dropped or read "tilde" (S-5)', () => {
+    render(<FollowerList edges={EDGES} magnitude={48_200} />)
+
+    // The accessible name carries the nuance the visible "~" may lose.
+    const others = screen.getByRole('note', { name: 'and approximately 48.2 thousand others' })
+    expect(others).toBe(screen.getByTestId('follower-others'))
+    // `note` (not the default `paragraph` role) is what makes the name VALID:
+    // paragraph is name-prohibited, so the label could be dropped outright.
+    expect(others.tagName).toBe('P')
+    // …and the visible text is still there, so an AT that ignores the label
+    // announces the line rather than nothing. The label can only add.
+    expect(others).toHaveTextContent('…and ~48.2K others')
+  })
+
+  it('keeps the visible text EXACTLY as designed while the label reads naturally', () => {
+    const { rerender } = render(<FollowerList edges={EDGES} magnitude={1_500_000} />)
+    expect(screen.getByTestId('follower-others')).toHaveTextContent('…and ~1.5M others')
+    expect(screen.getByTestId('follower-others'))
+      .toHaveAccessibleName('and approximately 1.5 million others')
+
+    rerender(<FollowerList edges={EDGES} magnitude={450} />)
+    expect(screen.getByTestId('follower-others')).toHaveTextContent('…and ~450 others')
+    expect(screen.getByTestId('follower-others'))
+      .toHaveAccessibleName('and approximately 450 others')
+  })
+
   it('renders the verified seal by presence/absence only (SOC-052/D1-008)', () => {
     render(<FollowerList edges={EDGES} magnitude={48_200} />)
 

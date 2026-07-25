@@ -86,13 +86,14 @@ E1 audience-magnitude band (COR-020); story 02 (real edges). Shared by E8 (ADP-0
 - Unit: count = magnitude + edges; reach/velocity formula; follower list shows edges + "…and ~N
   others", never fabricated rows.
 
-**Delivered (52 tests, all green):**
-- `src/frontend/src/features/social/services/audience.test.ts` — 36 tests: the count sum, the
-  magnitude-format boundaries, the reach/velocity formula at its boundaries, scenario-time accrual,
-  the fail-closed input semantics, output totality, and the frozen model/version contract.
-- `src/frontend/src/features/social/components/FollowerList.test.tsx` — 16 tests: real edges + the
+**Delivered (59 tests, all green):**
+- `src/frontend/src/features/social/services/audience.test.ts` — 44 tests: the count sum, the
+  magnitude-format boundaries (incl. the `T` unit and the bounded `"9007.1T"` ceiling), the spoken
+  AT form, the reach/velocity formula at its boundaries, scenario-time accrual, the fail-closed
+  input semantics, output totality, and the frozen model/version contract.
+- `src/frontend/src/features/social/components/FollowerList.test.tsx` — 15 tests: real edges + the
   affordance, the never-fabricate rule at four magnitudes, honest empty states, and the a11y
-  contract (labelled region, real list, the affordance announced and kept OUT of the list so the
-  item count never lies).
+  contract (labelled region, real list, the affordance announced, kept OUT of the list so the item
+  count never lies, and its accessible name spelling out the approximation).
 - **Not yet covered (integration pass):** the profile-rendered count, the Followers expand
   interaction, the AC4 exercise-scope assertion, and WR-005's XC-004 emit on expand.

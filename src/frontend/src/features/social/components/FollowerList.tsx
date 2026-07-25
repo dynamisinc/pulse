@@ -35,6 +35,14 @@
  *    image. A screen-reader user learns the audience scale exactly as a sighted
  *    one does. It sits OUTSIDE the `<ul>` deliberately: inside, AT would count
  *    it as a follower row and the list length would lie.
+ *  - That line also carries an `aria-label` spelling the figure out in words
+ *    ("and approximately 48.2 thousand others"), because AT handles the visible
+ *    "~" inconsistently — dropping it or reading "tilde" — which can lose the
+ *    APPROXIMATION and leave a reader hearing an exact count. Two deliberate
+ *    details: `role="note"` is set because the default `paragraph` role
+ *    PROHIBITS an accessible name (the label would be invalid and could be
+ *    dropped), and the visible text is never hidden, so an AT that ignores the
+ *    label still announces the line — the change can only add, never silence.
  *  - The verified seal is `<VerifiedMark>` (its own `role="img"` + label); its
  *    ABSENCE is the untrusted signal (SOC-052/D1-008 — the platform never
  *    labels an account fake, and this list never adds a badge of its own).
@@ -45,7 +53,7 @@ import { faUserGroup } from '@fortawesome/free-solid-svg-icons'
 import type { Persona } from '@/features/personas'
 import { Avatar } from './Avatar'
 import { VerifiedMark } from './VerifiedMark'
-import { formatMagnitude, safeCount } from '../services/audience'
+import { formatMagnitude, safeCount, spokenMagnitude } from '../services/audience'
 import styles from './FollowerList.module.css'
 
 /** The avatar scale for a follower row (between the 42px card and 80px profile). */
@@ -127,7 +135,21 @@ export function FollowerList({ edges, magnitude }: FollowerListProps) {
       )}
 
       {others > 0 && (
-        <p className={styles.others} data-testid="follower-others">
+        <p
+          className={styles.others}
+          data-testid="follower-others"
+          // `note` = content parenthetic/ancillary to the list above it, which
+          // is exactly what this line is — and, unlike the default `paragraph`
+          // role, `note` PERMITS an accessible name, so the label below is
+          // valid ARIA rather than name-prohibited and silently dropped.
+          role="note"
+          // The visible "~" is unreliable in AT (dropped, or read "tilde"), so
+          // the approximation can be lost and the figure heard as exact. The
+          // label spells it out. The visible text is deliberately NOT hidden:
+          // if an AT ignores the label, the reader still hears the line rather
+          // than nothing (fail-safe, never silent).
+          aria-label={`and approximately ${spokenMagnitude(others)} others`}
+        >
           <FontAwesomeIcon icon={faUserGroup} aria-hidden="true" className={styles.othersIcon} />
           {`…and ~${formatMagnitude(others)} others`}
         </p>

@@ -266,12 +266,34 @@ export function displayedFollowerCount(magnitude: number, followEdges = 0): numb
   return clampCount(Math.floor(safeCount(magnitude)) + Math.floor(safeCount(followEdges)))
 }
 
-/** Compact-form unit thresholds, largest first. */
-const MAGNITUDE_UNITS: readonly { readonly value: number; readonly suffix: string }[] = [
-  { value: 1_000_000_000, suffix: 'B' },
-  { value: 1_000_000, suffix: 'M' },
-  { value: 1_000, suffix: 'K' },
+/**
+ * Compact-form unit thresholds, largest first, each with the SPOKEN word
+ * `spokenMagnitude` uses (NFR-001). One table, so the visual and the announced
+ * form can never disagree about where a unit starts.
+ *
+ * `T` (trillion) is the top row deliberately: follower counts never approach it,
+ * but E10 (EVL-012) aggregates IMPRESSIONS across a whole exercise, where 1e12
+ * is reachable — and without a T row that renders as the 13-digit string
+ * "1000000000000B". With it, the model's own `Number.MAX_SAFE_INTEGER`
+ * saturation caps the longest possible output at "9007.1T" (see
+ * `formatMagnitude`), so no input can produce an unbounded digit run.
+ */
+const MAGNITUDE_UNITS: readonly {
+  readonly value: number
+  readonly suffix: string
+  readonly spoken: string
+}[] = [
+  { value: 1_000_000_000_000, suffix: 'T', spoken: 'trillion' },
+  { value: 1_000_000_000, suffix: 'B', spoken: 'billion' },
+  { value: 1_000_000, suffix: 'M', spoken: 'million' },
+  { value: 1_000, suffix: 'K', spoken: 'thousand' },
 ]
+
+/** Splits a guarded figure into `{ whole, tenth }` at `unit`, truncating. */
+function magnitudeParts(safe: number, unit: number): { whole: number; tenth: number } {
+  const tenths = Math.floor(safe / (unit / 10))
+  return { whole: Math.floor(tenths / 10), tenth: tenths % 10 }
+}
 
 /**
  * Formats an audience figure in the compact in-fiction form participants see
@@ -286,6 +308,12 @@ const MAGNITUDE_UNITS: readonly { readonly value: number; readonly suffix: strin
  *  - fractions are floored, and a negative / NaN / infinite input yields `"0"`
  *    rather than throwing — a broken count must never break a profile render.
  *
+ * CEILING: units run K → M → B → **T**. The T row exists for E10 (EVL-012),
+ * which aggregates impressions exercise-wide where 1e12 is reachable; combined
+ * with the model's `Number.MAX_SAFE_INTEGER` saturation the longest output this
+ * function can EVER return is `"9007.1T"` (9,007,199,254,740,991). There is no
+ * input that renders an unbounded digit run.
+ *
  * Integer arithmetic (divide by a tenth of the unit) is used deliberately:
  * float division would render 2,900,000 as "2.8M".
  */
@@ -294,10 +322,34 @@ export function formatMagnitude(value: number): string {
 
   for (const unit of MAGNITUDE_UNITS) {
     if (safe < unit.value) continue
-    const tenths = Math.floor(safe / (unit.value / 10))
-    const whole = Math.floor(tenths / 10)
-    const tenth = tenths % 10
+    const { whole, tenth } = magnitudeParts(safe, unit.value)
     return tenth === 0 ? `${whole}${unit.suffix}` : `${whole}.${tenth}${unit.suffix}`
+  }
+
+  return String(safe)
+}
+
+/**
+ * The SPOKEN form of the same figure, for assistive technology (NFR-001):
+ * `48200 → "48.2 thousand"`, `1500000 → "1.5 million"`, `450 → "450"`.
+ *
+ * Why this exists. Screen readers treat the compact suffix inconsistently —
+ * "48.2K" may be announced as "forty-eight point two kay" — and, worse, the "~"
+ * in the visible "…and ~48.2K others" is variously DROPPED or read as "tilde",
+ * so the approximation nuance can be lost entirely and a reader may hear an
+ * exact count. `<FollowerList>` pairs this with the word "approximately" to
+ * build an accessible name that carries the same meaning the sighted reading
+ * carries. It is a sibling of `formatMagnitude`, sharing one unit table so the
+ * two forms can never disagree about where a unit starts; the truncation and
+ * guard rules are identical.
+ */
+export function spokenMagnitude(value: number): string {
+  const safe = Math.floor(safeCount(value))
+
+  for (const unit of MAGNITUDE_UNITS) {
+    if (safe < unit.value) continue
+    const { whole, tenth } = magnitudeParts(safe, unit.value)
+    return tenth === 0 ? `${whole} ${unit.spoken}` : `${whole}.${tenth} ${unit.spoken}`
   }
 
   return String(safe)

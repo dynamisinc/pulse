@@ -32,6 +32,7 @@ import {
   displayedFollowerCount,
   formatMagnitude,
   safeCount,
+  spokenMagnitude,
   type AudienceReachInput,
 } from './audience'
 
@@ -103,6 +104,50 @@ describe('formatMagnitude — compact in-fiction counts (D1-012)', () => {
     expect(formatMagnitude(Number.NaN)).toBe('0')
     expect(formatMagnitude(Number.POSITIVE_INFINITY)).toBe('0')
     expect(formatMagnitude(1_234.9)).toBe('1.2K')
+  })
+
+  it('carries a T unit for exercise-wide impression aggregates (S-4)', () => {
+    // Unreachable for follower counts, but E10 (EVL-012) aggregates impressions
+    // across a whole exercise, where 1e12 IS reachable — without T that
+    // rendered as the 13-digit string "1000000000000B".
+    expect(formatMagnitude(1_000_000_000_000)).toBe('1T')
+    expect(formatMagnitude(3_450_000_000_000)).toBe('3.4T')
+    expect(formatMagnitude(999_999_999_999)).toBe('999.9B')
+  })
+
+  it('has a BOUNDED ceiling: the longest possible output is "9007.1T" (S-4)', () => {
+    // The model saturates at MAX_SAFE_INTEGER, so this is the largest figure any
+    // consumer can ever be handed — no input produces an unbounded digit run.
+    expect(formatMagnitude(Number.MAX_SAFE_INTEGER)).toBe('9007.1T')
+    expect(formatMagnitude(Number.MAX_SAFE_INTEGER).length).toBeLessThanOrEqual(8)
+    expect(formatMagnitude(audienceReach({ magnitude: Number.MAX_VALUE }).impressions))
+      .toBe('1080.8T')
+  })
+})
+
+describe('spokenMagnitude — the AT form of the same figure (S-5, NFR-001)', () => {
+  it('spells the unit out in words at every threshold', () => {
+    expect(spokenMagnitude(48_200)).toBe('48.2 thousand')
+    expect(spokenMagnitude(1_000)).toBe('1 thousand')
+    expect(spokenMagnitude(1_500_000)).toBe('1.5 million')
+    expect(spokenMagnitude(2_400_000_000)).toBe('2.4 billion')
+    expect(spokenMagnitude(1_000_000_000_000)).toBe('1 trillion')
+  })
+
+  it('leaves small counts as the plain number (nothing to spell out)', () => {
+    expect(spokenMagnitude(450)).toBe('450')
+    expect(spokenMagnitude(999)).toBe('999')
+    expect(spokenMagnitude(0)).toBe('0')
+  })
+
+  it('shares the visual form\'s unit table, so the two can never disagree', () => {
+    // Same thresholds, same truncation, same guards — only the suffix differs.
+    for (const value of [999, 1_000, 48_299, 999_999, 2_900_000, 999_999_999_999, -1, Number.NaN]) {
+      const visual = formatMagnitude(value)
+      const spoken = spokenMagnitude(value)
+      const digits = (text: string) => text.replace(/[^\d.]/g, '')
+      expect(digits(spoken)).toBe(digits(visual))
+    }
   })
 })
 
