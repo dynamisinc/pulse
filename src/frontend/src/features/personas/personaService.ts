@@ -2,16 +2,37 @@
  * features/personas/personaService.ts
  * ---------------------------------------------------------------------------
  * The read seam for exercise-scoped persona INSTANCES (feature:
- * persona-management, story 02). `resolvePersonas()` is routed through the
- * shared axios client with a dev mock adapter (mirroring
+ * persona-management, story 02; profiles-social-graph backend story 06). Routed
+ * through the shared axios client with a dev mock adapter (mirroring
  * `exerciseContextResolver`): in the current no-backend scaffold it returns the
  * Fairhaven baseline cast seeded for the mock exercise, so a Pulse feed has
  * believable authors; swapping the adapter for a live `/personas` endpoint
  * needs no consumer change.
  *
- * PRECEDENT — `resolvePersonas()` takes NO client `exerciseId` param: query
- * isolation is server-side (COR-001); the session already binds the exercise.
- * The mock resolves the ONE exercise's cast.
+ * ## TWO READS, ONE ENDPOINT (SOC-052 / D1-008)
+ * `GET /personas` projects by WORLD, mirroring the backend's two DTOs:
+ *
+ *   - `resolvePersonas()` / `usePersonas()` -> `Persona[]` — the PARTICIPANT
+ *     projection (`PersonaResponseDto`). No `personaType`, structurally. This
+ *     read additionally re-narrows every element through
+ *     `toParticipantPersona()`, so even if the CALLER happens to hold a staff
+ *     token (e.g. a staff browser rendering a participant preview) the objects
+ *     handed to a participant surface carry no archetype tell at runtime
+ *     either — belt and braces on top of the type-level omission.
+ *
+ *   - `resolveStaffPersonas()` / `useStaffPersonas()` -> `StaffPersona[]` — the
+ *     STAFF projection (`StaffPersonaResponseDto`), which the backend serves
+ *     ONLY to a live staff-kind session. The staff bearer token is attached by
+ *     `core/services/api.ts`'s request interceptor, so this needs no extra
+ *     request wiring — but it VALIDATES `personaType` and throws when it is
+ *     absent/out-of-vocabulary. That is the fail-closed answer to "what if a
+ *     staff path calls this before a token exists": the picker surfaces an
+ *     error instead of silently showing every persona under an unfiltered
+ *     "all" and rendering an unlabeled category chip.
+ *
+ * PRECEDENT — neither read takes a client `exerciseId` param: query isolation
+ * is server-side (COR-001); the session already binds the exercise. The mock
+ * resolves the ONE exercise's cast.
  *
  * `usePersonaTemplates()` exposes the org-library templates (NOT
  * exercise-scoped, story 01). Staff/data world — no UI, no COBRA.
@@ -24,7 +45,7 @@ import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { PERSONA_TEMPLATES } from './personaTemplates'
 import { FAIRHAVEN_BASELINE } from './casts'
 import { seedCast } from './seedCast'
-import type { Persona, PersonaTemplate } from './types'
+import { isPersonaType, type Persona, type PersonaTemplate, type StaffPersona } from './types'
 
 /** The mock exercise this scaffold resolves against (matches the session/exercise mocks). */
 const MOCK_EXERCISE_ID = 'ex-mock-0001'
@@ -42,23 +63,67 @@ const MOCK_EXERCISE_ID = 'ex-mock-0001'
  * `usePersonas()` / `resolvePersonas()`. These exist for the mock adapter, unit
  * tests, and other mock fixtures (e.g. mock post authorship) only.
  */
-export const SEEDED_PERSONAS: readonly Persona[] = seedCast(
+export const SEEDED_PERSONAS: readonly StaffPersona[] = seedCast(
   FAIRHAVEN_BASELINE,
   MOCK_EXERCISE_ID,
   PERSONA_TEMPLATES,
 )
 
 /**
- * Look up a seeded persona instance by id (undefined if absent). MOCK SCAFFOLD
- * — same caveat as {@link SEEDED_PERSONAS}: mock fixtures + tests only, never a
+ * Look up a seeded persona instance by id (undefined if absent). Returns the
+ * FULL (staff) shape — it is a fixture accessor, not a wire read, and a
+ * `StaffPersona` is usable anywhere a `Persona` is expected. MOCK SCAFFOLD —
+ * same caveat as {@link SEEDED_PERSONAS}: mock fixtures + tests only, never a
  * shipped participant surface (use `usePersonas()` there).
  */
-export function personaById(id: string): Persona | undefined {
+export function personaById(id: string): StaffPersona | undefined {
   return SEEDED_PERSONAS.find(p => p.id === id)
 }
 
-/** Short-circuits the network with the seeded cast, exercising the axios pipeline. */
-const mockAdapter: AxiosAdapter = config => Promise.resolve({
+/**
+ * The ONLY sanctioned way to hand a persona to a participant surface. Builds a
+ * fresh object literal from participant-safe fields only, so `personaType` is
+ * genuinely ABSENT from the result rather than merely unread (SOC-052/D1-008)
+ * — mirroring `postService.toParticipantView`'s XC-002 guarantee.
+ *
+ * Takes a `Persona` (not a `StaffPersona`) so it accepts BOTH: a staff
+ * instance narrows down, and a wire object that is already participant-shaped
+ * is stripped of any unexpected extra keys the transport may have carried.
+ * Never hand-pick persona fields elsewhere; always route through this.
+ */
+export function toParticipantPersona(persona: Persona): Persona {
+  return {
+    id: persona.id,
+    exerciseId: persona.exerciseId,
+    templateId: persona.templateId,
+    displayName: persona.displayName,
+    handle: persona.handle,
+    kind: persona.kind,
+    verified: persona.verified,
+    avatarColor: persona.avatarColor,
+    initials: persona.initials,
+    audienceBand: persona.audienceBand,
+    followerCount: persona.followerCount,
+    joinedAt: persona.joinedAt,
+    ...(persona.bio !== undefined ? { bio: persona.bio } : {}),
+  }
+}
+
+/**
+ * Short-circuits the network with the PARTICIPANT projection of the seeded
+ * cast — the mock is honest about the world split, so a dev/UAT participant
+ * surface never receives a `personaType` over the wire either.
+ */
+const participantMockAdapter: AxiosAdapter = config => Promise.resolve({
+  data: SEEDED_PERSONAS.map(toParticipantPersona),
+  status: 200,
+  statusText: 'OK',
+  headers: {},
+  config,
+})
+
+/** Short-circuits the network with the STAFF projection (archetype included). */
+const staffMockAdapter: AxiosAdapter = config => Promise.resolve({
   data: SEEDED_PERSONAS,
   status: 200,
   statusText: 'OK',
@@ -89,17 +154,63 @@ function isPersonaArray(data: unknown): data is Persona[] {
 }
 
 /**
- * Resolves the current exercise's seeded persona instances. Throws on request
- * failure or a malformed body (fail-closed — no default/empty author set is
- * silently substituted).
+ * The staff guard: everything `isValidPersona` requires, PLUS an in-vocabulary
+ * `personaType`. A body that satisfies the first but not the second is the
+ * PARTICIPANT projection — i.e. the backend did not see a live staff-kind
+ * session on this call — and must fail loudly here (see
+ * `resolveStaffPersonas`), never flow on as `undefined`.
+ */
+function isValidStaffPersona(value: unknown): value is StaffPersona {
+  return isValidPersona(value) && isPersonaType((value as StaffPersona).personaType)
+}
+
+function isStaffPersonaArray(data: unknown): data is StaffPersona[] {
+  return Array.isArray(data) && data.every(isValidStaffPersona)
+}
+
+/**
+ * Resolves the current exercise's seeded persona instances in the PARTICIPANT
+ * projection. Throws on request failure or a malformed body (fail-closed — no
+ * default/empty author set is silently substituted).
+ *
+ * Every element is re-narrowed through `toParticipantPersona`, so the result
+ * carries no staff-only field at runtime regardless of what the caller's token
+ * earned from the endpoint.
  */
 export async function resolvePersonas(): Promise<Persona[]> {
   const response = await api.get<Persona[]>(
     '/personas',
-    USE_MOCK_PERSONAS ? { adapter: mockAdapter } : undefined,
+    USE_MOCK_PERSONAS ? { adapter: participantMockAdapter } : undefined,
   )
   if (!isPersonaArray(response.data)) {
     throw new Error('resolvePersonas: resolution returned a malformed persona set')
+  }
+  return response.data.map(toParticipantPersona)
+}
+
+/**
+ * Resolves the current exercise's persona instances in the STAFF projection
+ * (archetype included). Staff surfaces that read `personaType` MUST use this
+ * rather than casting the participant read.
+ *
+ * Fails closed and VISIBLY when the body is the participant projection: that
+ * means this call reached the endpoint without a live staff-kind session (no
+ * bearer token attached, an expired/read-only session, …). Returning the
+ * personas anyway would leave `personaType` `undefined`, which silently
+ * degrades the console — the picker's type filter would match nothing and the
+ * "POSTING AS {category}" chip would hit its exhaustiveness guard.
+ */
+export async function resolveStaffPersonas(): Promise<StaffPersona[]> {
+  const response = await api.get<StaffPersona[]>(
+    '/personas',
+    USE_MOCK_PERSONAS ? { adapter: staffMockAdapter } : undefined,
+  )
+  if (!isStaffPersonaArray(response.data)) {
+    throw new Error(
+      'resolveStaffPersonas: resolution returned a malformed or participant-shaped persona ' +
+      'set (no personaType). A staff persona read requires a live staff session — failing ' +
+      'closed rather than rendering an unfiltered, uncategorized persona list.',
+    )
   }
   return response.data
 }
@@ -110,21 +221,31 @@ export interface UsePersonasResult {
   readonly error: unknown
 }
 
+export interface UseStaffPersonasResult {
+  readonly personas: readonly StaffPersona[]
+  readonly loading: boolean
+  readonly error: unknown
+}
+
 /**
- * Resolves the exercise's persona instances for a component. A thin
- * useState/useEffect wrapper over `resolvePersonas()` — the feed maps posts to
- * their authors from this set. (Ordinary cacheable data; a later refactor may
- * move it to React Query, the project default.)
+ * Shared body for the two persona hooks: a thin useState/useEffect wrapper
+ * over the supplied resolver (ordinary cacheable data; a later refactor may
+ * move both to React Query, the project default). `resolve` must be a stable
+ * module-level function reference — both call sites pass one.
  */
-export function usePersonas(): UsePersonasResult {
-  const [personas, setPersonas] = useState<readonly Persona[]>([])
+function usePersonaResolution<T extends Persona>(resolve: () => Promise<T[]>): {
+  readonly personas: readonly T[]
+  readonly loading: boolean
+  readonly error: unknown
+} {
+  const [personas, setPersonas] = useState<readonly T[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(undefined)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    resolvePersonas()
+    resolve()
       .then(resolved => {
         if (cancelled) return
         setPersonas(resolved)
@@ -132,6 +253,8 @@ export function usePersonas(): UsePersonasResult {
       })
       .catch((err: unknown) => {
         if (cancelled) return
+        // Fail closed: the list stays EMPTY (it is never populated before a
+        // successful resolve) and the error is surfaced to the caller.
         setError(err)
       })
       .finally(() => {
@@ -140,9 +263,30 @@ export function usePersonas(): UsePersonasResult {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [resolve])
 
   return { personas, loading, error }
+}
+
+/**
+ * Resolves the exercise's persona instances (PARTICIPANT projection) for a
+ * component — the feed maps posts to their authors from this set. Staff
+ * components that need only the common fields (name/handle/avatar/verified)
+ * may use this too; anything that reads the archetype must use
+ * {@link useStaffPersonas}.
+ */
+export function usePersonas(): UsePersonasResult {
+  return usePersonaResolution(resolvePersonas)
+}
+
+/**
+ * Resolves the exercise's persona instances in the STAFF projection. Staff
+ * world only. On a tokenless/participant-shaped response the hook reports an
+ * error with an EMPTY persona list (fail-closed + visible), instead of a list
+ * whose `personaType` is silently `undefined`.
+ */
+export function useStaffPersonas(): UseStaffPersonasResult {
+  return usePersonaResolution(resolveStaffPersonas)
 }
 
 /**

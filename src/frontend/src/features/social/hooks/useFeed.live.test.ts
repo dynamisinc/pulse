@@ -35,7 +35,11 @@ vi.mock('@/core/services/api', () => ({
   api: { get: (...args: unknown[]) => getMock(...args) },
 }))
 
-/** A single fixture author, shaped like a live `GET /api/personas` response. */
+/**
+ * A single fixture author, shaped like a live `GET /api/personas` response in
+ * the PARTICIPANT projection — no `personaType` (SOC-052/D1-008): the feed is
+ * a participant surface, so the archetype tell is structurally absent here.
+ */
 const API_PERSONA: Persona = {
   id: 'persona-fairhavenwater',
   exerciseId: 'ex-live-0001',
@@ -43,7 +47,6 @@ const API_PERSONA: Persona = {
   displayName: 'Fairhaven Water',
   handle: 'FairhavenWater',
   kind: 'org',
-  personaType: 'agency',
   verified: true,
   avatarColor: '#19647e',
   initials: 'FW',

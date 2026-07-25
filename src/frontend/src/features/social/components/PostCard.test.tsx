@@ -48,7 +48,6 @@ function buildPersona(overrides: Partial<Persona> = {}): Persona {
     displayName: 'Test Author',
     handle: 'testauthor',
     kind: 'human',
-    personaType: 'citizen',
     verified: false,
     avatarColor: '#7c5cd6',
     initials: 'TA',

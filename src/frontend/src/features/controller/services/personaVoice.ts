@@ -15,6 +15,17 @@
  * wrong-persona-defense label from `PersonaType` — text-only, never
  * color-only (NFR-001), and exhaustive over every `PersonaType` so a future
  * archetype fails the build here rather than silently rendering blank.
+ *
+ * TWO-WORLDS NOTE (SOC-052/D1-008): `personaType` exists ONLY on the staff
+ * projection (`StaffPersona`); the participant `Persona` structurally omits
+ * it. `categoryChipLabel` therefore takes a `PersonaType` VALUE, which only a
+ * staff caller can produce — its `never` exhaustiveness guard is reachable
+ * solely by adding an 8th archetype, never by an `undefined` from a
+ * participant-shaped payload (the staff read seam,
+ * `personaService.resolveStaffPersonas`, rejects such a body outright).
+ * `resolveVoiceNotes` reads only `templateId`, a field COMMON to both worlds,
+ * so it keeps the narrower `Persona` parameter — a `StaffPersona` is
+ * assignable to it.
  */
 
 import { personaTemplateById, type Persona, type PersonaType, type AudienceBand } from '@/features/personas'

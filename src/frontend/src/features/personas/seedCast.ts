@@ -3,7 +3,11 @@
  * ---------------------------------------------------------------------------
  * One-action cast seeding (feature: persona-management, story 02; COR-021).
  * `seedCast` instantiates every template in a cast into an exercise-scoped
- * `Persona` with believable DERIVED STATE a template cannot carry:
+ * `StaffPersona` — the FULL instance, including the staff-only `personaType`
+ * (seeding is a staff/planner action, and the archetype is what drives
+ * `deriveJoinedAt` below). Narrowing to the participant `Persona` projection
+ * happens at the READ seam (`personaService.toParticipantPersona`), never
+ * here — with believable DERIVED STATE a template cannot carry:
  *   - `followerCount` — derived from the template's `audienceBand` (SOC-054)
  *     with a deterministic per-handle jitter (so counts vary but tests are
  *     stable — no Math.random);
@@ -22,7 +26,12 @@
  */
 
 import type { Cast } from './casts'
-import { personaIdForHandle, type AudienceBand, type Persona, type PersonaTemplate } from './types'
+import {
+  personaIdForHandle,
+  type AudienceBand,
+  type PersonaTemplate,
+  type StaffPersona,
+} from './types'
 
 /** Approximate follower floor per audience-magnitude band (SOC-054). */
 const BAND_BASE: Record<AudienceBand, number> = {
@@ -81,14 +90,14 @@ export function seedCast(
   cast: Cast,
   exerciseId: string,
   templates: readonly PersonaTemplate[],
-): Persona[] {
+): StaffPersona[] {
   const byId = new Map(templates.map(t => [t.id, t]))
 
   return cast.templateIds.flatMap(templateId => {
     const template = byId.get(templateId)
     if (!template) return []
 
-    const persona: Persona = {
+    const persona: StaffPersona = {
       id: personaIdForHandle(template.handle),
       exerciseId,
       templateId: template.id,

@@ -40,7 +40,6 @@ const MALICIOUS_PERSONA: Persona = {
   displayName: `Innocent Name ${IMG_PAYLOAD}`,
   handle: 'xsshero',
   kind: 'human',
-  personaType: 'citizen',
   verified: false,
   avatarColor: '#334455',
   initials: 'IX',

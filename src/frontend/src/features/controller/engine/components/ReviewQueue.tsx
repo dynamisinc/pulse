@@ -147,6 +147,8 @@ function isReviewable(item: EngineReviewItem): boolean {
 export function ReviewQueue({ editSlot }: ReviewQueueProps = {}) {
   const queue = useReviewQueue()
   const { items, nowMs, pendingCount, heldCount, timersUnder60sCount } = queue
+  // Common-fields-only read (handle/displayName/avatar) — no `personaType`, so
+  // the narrower two-world `Persona` contract is the right one (SOC-052/D1-008).
   const { personas } = usePersonas()
 
   const personaByHandle = useMemo(() => {
