@@ -119,3 +119,56 @@ caution as story 07.
   the holding page in the selected register with no manual refresh; Resume; confirm it clears
   live; refresh the participant tab mid-Freeze and confirm it still shows the holding page
   (GET-seeds-on-reconnect).
+
+### AC ↔ test linkage (as built)
+
+Backend (`src/Pulse.WebApi.Tests/Features/EngineRuntime/Steering/`):
+- AC1 — `OverlayStateServiceTests.Apply_Pause_ThenGet_ReflectsTheHoldingPageState`,
+  `OverlayStateServiceTests.Apply_EitherRegister_IsStoredVerbatim`,
+  `PauseOverlayPublisherTests.PublishAsync_Freeze_WritesThePauseOverlay_AndPushesToTheExercisesGroup`,
+  `PauseOverlayCompositionTests.AFreezeThroughTheWiredRegistry_WritesTheParticipantOverlay_PerExercise`,
+  `OverlayStateEndpointTests.Get_AfterAFreeze_ReturnsTheLiveHoldingPageState_NotTheStaticConstant`.
+  **Partial:** the `register` written is the console's own default selection
+  (`out-of-fiction`), not a transmitted one — the pause-tier POST body/`PauseTierTransition`
+  carry no `overlayRegister` and both are story-07 files, frozen for this story (see
+  `PauseOverlayPublisher.FreezeRegister`; a follow-up story plumbs it in one line).
+- AC2 — `PauseOverlayPublisherTests.PublishAsync_Freeze_WritesThePauseOverlay_AndPushesToTheExercisesGroup`,
+  `PauseOverlayPublisherTests.PublishAsync_DerivesTheGroupName_ExactlyAsTheHubJoinsIt`.
+- AC3 — `PauseOverlayPublisherTests.PublishAsync_Resume_ClearsTheOverlay_AndPushesTheClearedState`,
+  `OverlayStateEndpointTests.Get_AfterAResume_ReturnsTheClearedStateAgain`,
+  `OverlayStateServiceTests.Apply_None_AfterAPause_ClearsTheOverlay`.
+- AC4 — `OverlayStateEndpointTests.Get_AfterAFreeze_ReturnsTheLiveHoldingPageState_NotTheStaticConstant`
+  (+ `Get_BeforeAnyFreeze_ReturnsTheClearedNoneState`,
+  `Get_WhenTheOverlaySliceIsNotWired_StillServesThePreStoryNoneConstant`).
+- AC6 — `OverlayStateServiceTests.Apply_IsKeyedPerExercise_AFreezeInANeverTouchesB`,
+  `OverlayStateServiceTests.Get_EmptyScope_ReadsTheClearedState_NeverAnExercisesOverlay`,
+  `PauseOverlayPublisherTests.PublishAsync_TargetsOnlyTheOwningExercisesGroup_NeverAnothers`,
+  `OverlayStateEndpointTests.Get_ParticipantInExerciseB_NeverSeesExerciseAsFreeze`,
+  `OverlayStateEndpointTests.Get_UnresolvedScope_Returns401_NeverAnEmptyButOk200`.
+- AC7 (XC-004) — `PauseOverlayPublisherTests.PauseOverlayWritePath_TakesNoTelemetryOrPersistenceDependency`.
+- XC-002 — `PauseOverlayPublisherTests.PublishAsync_PayloadIsTheParticipantProjection_WithNoStaffFieldAtAll`,
+  `PauseOverlayPublisherTests.ParticipantOverlayStateDto_ExposesNoStaffProperty`,
+  `OverlayStateEndpointTests.Get_ResponseCarriesOnlyParticipantSafeKeys`.
+- Composition (the #310→#317 lesson) — `PauseOverlayCompositionTests.ResolvedPauseOverlayPublisher_IsTheRealImplementation_NotTheNoOpDefault`,
+  `.AddPauseParticipantOverlay_AfterStory07_ReplacesTheNoOpDefault`,
+  `.AddPauseParticipantOverlay_BeforeStory07_StillWins`,
+  `.ResolvingThePauseTierRegistry_DoesNotDeadlockOnTheOverlayPublisherCycle`.
+- Out-of-order publishes (story-07 review SG-206) —
+  `OverlayStateServiceTests.Apply_AnOlderSequence_DoesNotOverwriteANewerState`,
+  `PauseOverlayPublisherTests.PublishAsync_ReadsTheAuthoritativeTier_NotTheTransitionsPossiblyStaleTarget`,
+  `PauseOverlayPublisherTests.PublishAsync_BroadcastsTheStoresCurrentState_NotTheStateItTriedToWrite`.
+- WR-004 — `PauseOverlayPublisherTests.PublishAsync_WhenTheHubThrows_SwallowsTheFailure_SoTheFreezeStands`.
+
+Frontend (`src/frontend/src/features/participant-shell/components/OverlayLayer/`):
+- AC2 — `OverlayLayer.live.test.tsx` "renders nothing until a Freeze arrives, then shows the
+  out-of-fiction holding page live", `overlayState.live.test.ts` "reconciles a Freeze push …".
+- AC3 — `OverlayLayer.live.test.tsx` "clears the holding page when the Resume push arrives",
+  `overlayState.live.test.ts` "reconciles a Resume push back to \"none\"".
+- AC4 — `overlayState.live.test.ts` "seeds a mid-Freeze holding page from the GET…",
+  "re-GETs the authoritative state on every (re)connect", "treats the re-GET as ground truth…",
+  `OverlayLayer.live.test.tsx` "shows the holding page from the SEEDING GET alone…".
+- AC5 — `OverlayLayer.live.test.tsx` "renders the in-fiction register's copy…" (against an
+  UNMODIFIED `OverlayLayer.tsx`), `overlayState.live.test.ts` "carries the in-fiction register
+  verbatim".
+- Defensive validation / ordering — `overlayState.live.test.ts` "drops a malformed push payload…",
+  "drops a STALE push…", "keeps the previous snapshot when the GET fails…".
