@@ -21,6 +21,7 @@
 | 07 Credential lifecycle **[Tier-2]** | **backend** | Rotation w/ grace, immediate revoke (kills all read-only sessions), brute-force lockout, per-IP rate limit; staff-only + logged. | `Features/Identity/` shared-cred lifecycle slice (`SharedCredentialLifecycleEndpoints`, rotation/lockout logic, `AddSharedCredentialLifecycle()`) | `/api/staff/shared-credential/rotate`, `/revoke` |
 | 08 Participant admin | *deferred (out of B2)* | COR-017 — staff login-triage panel. Not authored this slice. | — | — |
 | 09 Org-account operation | *deferred (out of B2)* | COR-018 — post-as-org + per-human attribution. Not authored this slice. | — | — |
+| 11 API session enforcement **[Tier-2, #359]** | backend | Closes the unbuilt half of COR-012: a composition-root default-deny gate (every endpoint requires a live session except the 5-item pre-auth allowlist), server-side `authorPersonaId`/`origin`/`actingHumanId` derivation on `POST /api/posts` (never client body), and the anonymous-401 regression suite. Touches `Program.cs` directly (not a normal parallel wave). | `src/Pulse.WebApi/Program.cs`; a new default-deny gate component (`Features/Identity/Sessions/`); `Features/Social/PostWriteEndpoints.cs` + `PostIngestService.cs`; a new general session-identity accessor; `Features/Identity/SharedAccess/ReadOnlySessionWriteFilter.cs` (doc/behavior fix) | The default-deny gate (consumed by every other endpoint from this point forward); the new session-identity accessor pattern |
 
 ## Reuse map
 <Name B0's real seams — build on them, do not recreate.>
@@ -104,10 +105,16 @@ then on. The only cross-exercise object in the model is this access record, by d
 | 07 Credential lifecycle **[Tier-2]** | backend | `Features/Identity/` shared-cred lifecycle slice | 06 | 04; `app-shell/01`; `exercise-isolation/04`+`05` | 4 | M |
 | 08 Participant admin | *deferred* | — | — | — | — | — |
 | 09 Org-account operation | *deferred* | — | — | — | — | — |
+| 11 API session enforcement **[Tier-2, #359]** | backend | `Program.cs` (direct edit — see note below); new default-deny gate; `Features/Social/PostWriteEndpoints.cs`+`PostIngestService.cs`; new session-identity accessor; `ReadOnlySessionWriteFilter.cs` | 03, 05, 06, `exercise-isolation/08`, `social-api` (all merged) | — (serial; see the story's own 3-sub-wave split) | 5 | L |
 
 File-disjointness within a wave: each B2 backend story owns its own slice folder under
 `Features/Identity/*` (distinct files) and its own `PulseDbContext` `OnModelCreating`/migration addition;
-`Program.cs` is orchestrator-owned (below), so no two stories collide there.
+`Program.cs` is orchestrator-owned (below), so no two stories collide there. **Story 11 is the one
+exception:** it edits `Program.cs` itself (the default-deny wrapper) rather than exporting a single
+`Add*()`/`Map*()` line for the orchestrator to wire, so it cannot fan out in parallel with any other
+`Program.cs`-touching change and is scheduled after every prior wave has merged. Its own file
+documents a further 3-sub-wave split (gate+allowlist → `POST /api/posts` attribution → regression
+suite) since it is too broad for one commit.
 
 ### Integration seams (orchestrator-owned — never a wave story)
 
