@@ -2,18 +2,36 @@
  * features/controller/hooks/useStorylineTarget.ts
  * ---------------------------------------------------------------------------
  * The escalation-dial's target-setting hook (feature: world-steering, story 02
- * — "Escalation dial — actual + target, engine follows"; CTL-022 / D5-014/2.2).
- * STAFF world — pure hook, no UI, no COBRA.
+ * — "Escalation dial — actual + target, engine follows"; CTL-022 / D5-014/2.2.
+ * story 09 — "Escalation dial live" — adds the LIVE branch below). STAFF
+ * world — pure hook, no UI, no COBRA.
  *
- * Reads the mock storyline's actual state (`intensity` + `phase`, from
- * `storylineMock`) and manages the controller-set `targetIntensity`:
- *   - `setTarget(value)` clamps 0-100 and records the change on the mock store
- *     (mirroring `Storyline.SetTargetIntensity`'s from/to semantics).
+ * MOCK <-> LIVE (story 09 flip; mirrors `useReviewQueue`'s `USE_MOCK_DATA`
+ * split — `@/core/config/mockData`). Both branches expose the BYTE-FOR-BYTE
+ * same `UseStorylineTargetResult` shape — `<EscalationDial>` needs no
+ * awareness of which is active:
+ *
+ *   - MOCK (dev/UAT default, and every pre-existing story-02 test — UNCHANGED
+ *     behavior): reads the mock storyline's actual state (`intensity` +
+ *     `phase`, from `storylineMock`) and mutates it synchronously via
+ *     `storylineMock.setTargetIntensity`.
+ *   - LIVE (`USE_MOCK_DATA === false`): reads the live storyline via
+ *     `liveStorylineStore` (an initial `GET /api/steering/storylines/{id}`
+ *     plus a ~5s poll — no push, story 09 stays file-disjoint from story 08's
+ *     broadcaster work) and writes via `liveStorylineActions.setStorylineTarget`
+ *     (`POST .../target`), which returns the AUTHORITATIVE actual/target/phase
+ *     the dial's optimistic local update reconciles against (AC2). Wave-1/2
+ *     has no Stories board (D5-016/017) yet, so the live branch addresses the
+ *     exercise's storyline via `PRIMARY_STORYLINE_SENTINEL` until the first
+ *     successful call resolves the real storyline id (then used for every
+ *     subsequent call) — mirrors the mock branch's hard-coded
+ *     `MOCK_STORYLINE_ID` until a future multi-storyline board keys the store
+ *     by id.
+ *
+ * In BOTH modes:
+ *   - `setTarget(value)` clamps 0-100 and records the change (mirroring
+ *     `Storyline.SetTargetIntensity`'s from/to semantics).
  *   - `clearTarget()` unsets the target (`setTargetIntensity(null)`).
- *   - Both EXPOSE the current `targetIntensity` for the deferred (Phase 2) E8
- *     engine-follow tick (`Storyline.Tick`'s `TickTowardTarget` branch, which
- *     runs server-side) to consume later — that loop itself is a no-op stub
- *     this pass; this hook only captures + exposes the target.
  *   - A call that resolves to the SAME value as the current target (a no-op,
  *     e.g. `End` while already at 100) records + emits NOTHING — guards
  *     against redundant `"100 -> 100"`-style events (XC-004 hygiene).
@@ -25,21 +43,35 @@
  *     'storyline', entityId }`, `payload` carrying the before/after detail
  *     string (`"78 → 60"` / `"none → 60"`). The same detail string is exposed
  *     back as `lastChangeDetail` so `<EscalationDial>` can render the exact
- *     transition text the AC calls for, without re-deriving it.
+ *     transition text the AC calls for, without re-deriving it. Emitted
+ *     CLIENT-SIDE ONLY (unchanged in shape from the mock branch) — the live
+ *     POST endpoint emits no `steering_action` telemetry of its own, so this
+ *     is the ONE emission per commit either way (no double-emit, XC-004).
+ *   - LIVE ONLY: the local view updates OPTIMISTICALLY the instant `setTarget`/
+ *     `clearTarget` is called (so the dial feels as immediate as the mock),
+ *     then RECONCILES against the POST's authoritative response; on a
+ *     rejected POST, the optimistic change is REVERTED (mirrors
+ *     `useEngineControl`'s kill-switch revert-on-rejection) — the dial must
+ *     never claim a target commit the backend didn't actually apply. The
+ *     telemetry already emitted still stands as the record of the attempted
+ *     change either way.
  *
  * ISOLATION (COR-001) — `exerciseId`/`timeZone` from `useExerciseContext()`
- * STAMP the telemetry event only, never a fetch-scoping parameter. STAFF-ONLY
- * (XC-002) — `useControllerIdentity()` supplies the acting human + role.
+ * STAMP the telemetry event only, never a fetch-scoping parameter (the live
+ * GET/POST carry no client `exerciseId` either — scope is server-
+ * authoritative). STAFF-ONLY (XC-002) — `useControllerIdentity()` supplies the
+ * acting human + role.
  *
- * SUBSCRIPTION — reads `storylineMock` via `useSyncExternalStore` so every
- * mount reacts to a target/intensity change from ANY source (this hook,
- * another mounted dial, or — later — the Phase-2 engine tick) without a
- * separate polling loop.
+ * SUBSCRIPTION — reads either store via `useSyncExternalStore` so every mount
+ * reacts to a change from ANY source (this hook, another mounted dial, or —
+ * live only — the poll / the engine's own tick) without a separate render
+ * loop of its own.
  */
 
-import { useCallback, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { scenarioNow } from '@/core/clock'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import { useControllerIdentity } from '../identity/controllerIdentity'
@@ -49,13 +81,28 @@ import {
   storylineMock,
   type StorylinePhase,
 } from '../services/storylineMock'
+import {
+  PRIMARY_STORYLINE_SENTINEL,
+  setStorylineTarget as liveSetStorylineTarget,
+} from '../services/liveStorylineActions'
+import { liveStorylineStore } from '../services/liveStorylineStore'
+
+/**
+ * Mirrors `Storyline.FormatTarget` — `null` renders as the literal `"none"`
+ * (the XC-004 detail convention).
+ */
+function formatTarget(value: number | null): string {
+  return value === null ? 'none' : String(value)
+}
 
 /** The escalation dial's read/write surface for one storyline's target. */
 export interface UseStorylineTargetResult {
   /**
-   * The storyline this target applies to. Wave-1 is single-storyline: this is
-   * always `MOCK_STORYLINE_ID` (the one seeded mock). A multi-storyline board
-   * (D5-016/017, deferred) will key `storylineMock` by id and select here.
+   * The storyline this target applies to. Wave-1/2 is single-storyline: MOCK
+   * is always `MOCK_STORYLINE_ID`; LIVE is `PRIMARY_STORYLINE_SENTINEL` until
+   * the first GET/POST resolves the exercise's real storyline id (then that
+   * real id). A multi-storyline board (D5-016/017, deferred) will key both
+   * stores by id and select here.
    */
   readonly storylineId: string
   /** Actual intensity, 0-100 (`Storyline.Intensity`) — the track's fill. */
@@ -79,39 +126,62 @@ export interface UseStorylineTargetResult {
 }
 
 /**
+ * A safe default view while the LIVE snapshot has not loaded yet (before the
+ * first GET resolves).
+ */
+const LIVE_LOADING_DEFAULTS = {
+  intensity: 0,
+  targetIntensity: null as number | null,
+  phase: 'Dormant' as StorylinePhase,
+}
+
+/**
  * The escalation dial's target-management hook. See the module header for the
- * full contract; `<EscalationDial>` is its intended consumer.
+ * full MOCK/LIVE contract; `<EscalationDial>` is its intended consumer.
  *
- * Wave-1 is single-storyline: the hook always targets `MOCK_STORYLINE_ID` (the
- * one seeded mock `storylineMock` snapshot), and stamps telemetry with that id.
- * A `storylineId` selector param is deliberately NOT accepted yet — it would be
- * a false affordance while `storylineMock` is a single un-keyed store (a passed
- * id would mutate the one storyline while stamping telemetry for another). It
- * arrives with the multi-storyline board (D5-016/017, deferred), which keys the
- * store by id.
+ * Wave-1/2 is single-storyline: the hook always targets one storyline (see
+ * `storylineId`'s doc) — a `storylineId` selector param is deliberately NOT
+ * accepted yet (a false affordance while neither store is keyed by id); it
+ * arrives with the multi-storyline board (D5-016/017, deferred).
  */
 export function useStorylineTarget(): UseStorylineTargetResult {
   const { exerciseId, timeZone } = useExerciseContext()
   const { actingHumanId, role } = useControllerIdentity()
 
-  const storyline = useSyncExternalStore(
+  // LIVE only: kick off the initial GET + poll once (idempotent — see
+  // liveStorylineStore.ensureStarted). No-op under mock data.
+  useEffect(() => {
+    if (!USE_MOCK_DATA) liveStorylineStore.ensureStarted(PRIMARY_STORYLINE_SENTINEL)
+  }, [])
+
+  const mockStoryline = useSyncExternalStore(
     storylineMock.subscribe,
     storylineMock.getStoryline,
     storylineMock.getStoryline,
   )
+  const liveStoryline = useSyncExternalStore(
+    liveStorylineStore.subscribe,
+    liveStorylineStore.getSnapshot,
+    liveStorylineStore.getSnapshot,
+  )
 
   const [lastChangeDetail, setLastChangeDetail] = useState<string | null>(null)
 
-  const applyTarget = useCallback(
-    (value: number | null) => {
-      // No-op guard (Gate-1 Minor): a resolved target equal to the current
-      // one (e.g. End while already at 100, or a drag rounding back to the
-      // same value) records/emits NOTHING — no redundant "100 -> 100" event.
-      if (storylineMock.getStoryline().targetIntensity === value) return
+  const storylineId = USE_MOCK_DATA
+    ? MOCK_STORYLINE_ID
+    : (liveStoryline?.storylineId ?? PRIMARY_STORYLINE_SENTINEL)
+  const intensity = USE_MOCK_DATA
+    ? mockStoryline.intensity
+    : (liveStoryline?.intensity ?? LIVE_LOADING_DEFAULTS.intensity)
+  const targetIntensity = USE_MOCK_DATA
+    ? mockStoryline.targetIntensity
+    : (liveStoryline?.targetIntensity ?? LIVE_LOADING_DEFAULTS.targetIntensity)
+  const phase: StorylinePhase = USE_MOCK_DATA
+    ? mockStoryline.phase
+    : (liveStoryline?.phase ?? LIVE_LOADING_DEFAULTS.phase)
 
-      const change = storylineMock.setTargetIntensity(value)
-      setLastChangeDetail(change.detail)
-
+  const emitSteeringAction = useCallback(
+    (targetId: string, from: number | null, to: number | null, detail: string) => {
       buildAndEmit({
         exerciseId,
         eventType: 'steering_action',
@@ -120,16 +190,63 @@ export function useStorylineTarget(): UseStorylineTargetResult {
         wallClockTime: wallClockNowIso(),
         scenarioTime: scenarioNow().toISOString(),
         timeZone,
-        target: { entityType: 'storyline', entityId: MOCK_STORYLINE_ID },
+        target: { entityType: 'storyline', entityId: targetId },
         payload: {
           action: 'target-changed',
-          from: change.from,
-          to: change.to,
-          detail: change.detail,
+          from,
+          to,
+          detail,
         },
       })
     },
     [exerciseId, timeZone, actingHumanId, role],
+  )
+
+  const applyTarget = useCallback(
+    (value: number | null) => {
+      if (USE_MOCK_DATA) {
+        // No-op guard (Gate-1 Minor): a resolved target equal to the current
+        // one (e.g. End while already at 100, or a drag rounding back to the
+        // same value) records/emits NOTHING — no redundant "100 -> 100" event.
+        if (storylineMock.getStoryline().targetIntensity === value) return
+
+        const change = storylineMock.setTargetIntensity(value)
+        setLastChangeDetail(change.detail)
+        emitSteeringAction(MOCK_STORYLINE_ID, change.from, change.to, change.detail)
+        return
+      }
+
+      // LIVE — read fresh (never a stale closure over a memoized snapshot).
+      const priorSnapshot = liveStorylineStore.getSnapshot()
+      const from = priorSnapshot?.targetIntensity ?? null
+      if (from === value) return // same no-op guard as mock
+
+      const targetId = priorSnapshot?.storylineId ?? PRIMARY_STORYLINE_SENTINEL
+      const detail = `${formatTarget(from)} → ${formatTarget(value)}`
+      setLastChangeDetail(detail)
+
+      // Optimistic local update — the dial feels as immediate as the mock —
+      // then reconciled (or reverted) against the authoritative POST below.
+      if (priorSnapshot) {
+        liveStorylineStore.reconcile({ ...priorSnapshot, targetIntensity: value })
+      }
+
+      // Emitted BEFORE the POST settles (mirrors useEngineControl): the audit
+      // trail records the attempted change even if the POST later rejects and
+      // the optimistic update is reverted.
+      emitSteeringAction(targetId, from, value, detail)
+
+      liveSetStorylineTarget(targetId, value)
+        .then(authoritative => liveStorylineStore.reconcile(authoritative))
+        .catch(() => {
+          // The backend never applied this change — revert to the last-known
+          // authoritative snapshot rather than claim a commit that didn't
+          // happen. A no-op if there was no prior snapshot to revert to
+          // (nothing has loaded yet — the next poll tick will seed it).
+          if (priorSnapshot) liveStorylineStore.reconcile(priorSnapshot)
+        })
+    },
+    [emitSteeringAction],
   )
 
   const setTarget = useCallback(
@@ -145,11 +262,11 @@ export function useStorylineTarget(): UseStorylineTargetResult {
   }, [applyTarget])
 
   return {
-    storylineId: MOCK_STORYLINE_ID,
-    intensity: storyline.intensity,
-    targetIntensity: storyline.targetIntensity,
-    phase: storyline.phase,
-    phaseLabel: phaseLabel(storyline.phase),
+    storylineId,
+    intensity,
+    targetIntensity,
+    phase,
+    phaseLabel: phaseLabel(phase),
     lastChangeDetail,
     setTarget,
     clearTarget,

@@ -1,0 +1,128 @@
+/**
+ * features/controller/services/liveStorylineActions.ts
+ * ---------------------------------------------------------------------------
+ * The LIVE escalation-dial storyline READ/WRITE calls (feature: world-steering,
+ * story 09 — "Escalation dial live"; CTL-022 / D5-014/2.2 mock->live flip,
+ * COR-001). STAFF world — pure service module, no UI, no COBRA. Used ONLY when
+ * `USE_MOCK_DATA` is false (`@/core/config/mockData`); `useStorylineTarget`'s
+ * live branch (and `liveStorylineStore`'s poll) call these, mirroring
+ * `liveEngineControlActions.ts`'s conventions:
+ *
+ *   - NO client `exerciseId` (COR-001) — every request carries only the
+ *     storyline id in the URL; scope is resolved server-side from the
+ *     session, exactly like `liveEngineControlActions`'s kill-switch POST.
+ *   - AWAITED, not fire-and-forget (unlike the review actions) — the dial's
+ *     optimistic local update must reconcile against the AUTHORITATIVE
+ *     actual/target/phase these calls return (AC2), not trust its own guess.
+ *   - Fail-closed narrowing (mirrors `liveReviewStore`'s wire validation): a
+ *     malformed response body throws rather than being cast blindly, so a
+ *     caller's `.catch` (not a silent bad value) handles it.
+ *
+ * THE "PRIMARY" SENTINEL (mirrors `MOCK_STORYLINE_ID`). Wave-1/2 has no
+ * Stories board (D5-016/017, still not built) for a controller to pick a real
+ * storyline id from, so `PRIMARY_STORYLINE_SENTINEL` — matching the backend's
+ * `StorylineSteeringService.PrimaryStorylineSentinel` constant EXACTLY — is
+ * passed until the first successful GET/POST resolves the exercise's real
+ * storyline id (which the caller then uses for subsequent calls). The backend
+ * resolves the sentinel to the CALLER's own exercise's first registered
+ * storyline — never another exercise's (COR-001) — so this is exercise-scoped
+ * by construction, not a client-supplied scoping parameter.
+ */
+
+import { api } from '@/core/services/api'
+import type { StorylinePhase } from './storylineMock'
+
+/** Mirrors the backend's `StorylineSteeringService.PrimaryStorylineSentinel` exactly. */
+export const PRIMARY_STORYLINE_SENTINEL = 'primary'
+
+/**
+ * The live actual/target/phase state — a field-for-field mirror of the
+ * backend's `StorylineSteeringDto`.
+ */
+export interface LiveStorylineSteeringState {
+  readonly storylineId: string
+  readonly exerciseId: string
+  /** 0-100, clamped (`Storyline.Intensity`). */
+  readonly intensity: number
+  /** 0-100, or `null` when unset (`Storyline.TargetIntensity`). */
+  readonly targetIntensity: number | null
+  /**
+   * The PascalCase `StorylinePhase` member name (e.g. `Escalating`) — see
+   * `storylineMock.ts`'s `StorylinePhase`.
+   */
+  readonly phase: StorylinePhase
+}
+
+const KNOWN_PHASES: ReadonlySet<string> = new Set<StorylinePhase>([
+  'Dormant',
+  'Seeded',
+  'Escalating',
+  'Peak',
+  'Addressed',
+  'Decaying',
+  'Resolved',
+])
+
+/**
+ * Narrows an unknown response body to the frozen wire shape — never a blind
+ * cast (COR-001 defence in depth).
+ */
+function isWireStorylineSteeringState(value: unknown): value is LiveStorylineSteeringState {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  const targetOk =
+    v.targetIntensity === null || v.targetIntensity === undefined || typeof v.targetIntensity === 'number'
+  return (
+    typeof v.storylineId === 'string' && v.storylineId.length > 0 &&
+    typeof v.exerciseId === 'string' && v.exerciseId.length > 0 &&
+    typeof v.intensity === 'number' &&
+    targetOk &&
+    typeof v.phase === 'string' && KNOWN_PHASES.has(v.phase)
+  )
+}
+
+/**
+ * Projects a validated wire payload to the live state (a missing
+ * `targetIntensity` defaults to `null`).
+ */
+function toLiveState(wire: LiveStorylineSteeringState): LiveStorylineSteeringState {
+  return {
+    storylineId: wire.storylineId,
+    exerciseId: wire.exerciseId,
+    intensity: wire.intensity,
+    targetIntensity: wire.targetIntensity ?? null,
+    phase: wire.phase,
+  }
+}
+
+/**
+ * `GET /api/steering/storylines/{storylineId}` — the storyline's CURRENT
+ * actual/target/phase, read directly off the live `Storyline` the reaction
+ * loop ticks. Throws on a network failure or a malformed body (the caller —
+ * `liveStorylineStore.refetch` — catches and keeps its previous snapshot).
+ */
+export async function getStoryline(storylineId: string): Promise<LiveStorylineSteeringState> {
+  const response = await api.get<unknown>(`/steering/storylines/${storylineId}`)
+  if (!isWireStorylineSteeringState(response.data)) {
+    throw new Error('Malformed GET /steering/storylines/{storylineId} response.')
+  }
+  return toLiveState(response.data)
+}
+
+/**
+ * `POST /api/steering/storylines/{storylineId}/target` — sets (or, with
+ * `target: null`, clears) the controller's dial target on the live storyline,
+ * returning the updated actual/target/phase so the caller can reconcile its
+ * optimistic local update against this authoritative response (AC2). Throws
+ * on a network failure or a malformed body.
+ */
+export async function setStorylineTarget(
+  storylineId: string,
+  target: number | null,
+): Promise<LiveStorylineSteeringState> {
+  const response = await api.post<unknown>(`/steering/storylines/${storylineId}/target`, { target })
+  if (!isWireStorylineSteeringState(response.data)) {
+    throw new Error('Malformed POST /steering/storylines/{storylineId}/target response.')
+  }
+  return toLiveState(response.data)
+}

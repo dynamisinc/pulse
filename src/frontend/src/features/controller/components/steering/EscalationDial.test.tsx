@@ -3,7 +3,8 @@
  * ---------------------------------------------------------------------------
  * Covers the storyline escalation dial (feature: world-steering, story 02 —
  * "Escalation dial — actual + target, engine follows"; CTL-022 / D5-014/2.2,
- * NFR-001):
+ * NFR-001; story 09 — "Escalation dial live" adds the explanatory-UX and
+ * live-mode describe blocks near the bottom):
  *
  *  - one track renders the actual intensity as a fill AND a distinct target
  *    tick (absent when unset);
@@ -18,6 +19,12 @@
  *    ONE `steering_action` telemetry event (XC-004 hygiene, Gate-1 Minor) —
  *    NOT one per `pointermove`; a discrete click and each keyboard set
  *    likewise emit exactly one event.
+ *  - story 09, AC5: the scale legend, the actual-vs-target MEANING legend,
+ *    and a phase-meaning tooltip on hover/focus all render as static text
+ *    (never color-only, NFR-001).
+ *  - story 09, AC4: the "target won't move outside Escalating/Peak" caveat
+ *    appears when a target is set on a non-chasing phase, and is absent when
+ *    the phase IS Escalating/Peak.
  *
  * Rendered through the REAL `ExerciseContextProvider` (mirrors
  * `EngineControlBar.test.tsx`). jsdom does not implement the Pointer Capture
@@ -25,7 +32,7 @@
  * stubbed per test (documented at each stub) — this is a jsdom limitation,
  * not a production behavior difference.
  */
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
@@ -33,16 +40,53 @@ import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { storylineMock } from '../../services/storylineMock'
+import * as liveStorylineActions from '../../services/liveStorylineActions'
+import { liveStorylineStore } from '../../services/liveStorylineStore'
 import { EscalationDial } from './EscalationDial'
+
+/**
+ * Toggled per-describe-block. Default `true` (mock mode — matches every
+ * pre-existing test above/below). The live-mode block near the bottom flips
+ * this to `false` for its own tests only — mirrors
+ * `useStorylineTarget.test.ts`'s live-mode block, but boxed via `vi.hoisted`:
+ * this file renders through the REAL (unmocked) `ExerciseContextProvider`,
+ * whose resolver reads `USE_MOCK_DATA` at MODULE-TOP-LEVEL — i.e. during this
+ * file's OWN import evaluation, before a plain `let` below would have run —
+ * so the boxed value must be created inside `vi.hoisted` (hoisted to the very
+ * top alongside `vi.mock`, same as `useStorylineTarget.test.ts`'s simpler
+ * `let` works there only because it mocks `@/core/exerciseContext` directly,
+ * never loading the real, eager resolver).
+ */
+const mockDataState = vi.hoisted(() => ({ useMockData: true }))
+vi.mock('@/core/config/mockData', () => ({
+  get USE_MOCK_DATA() {
+    return mockDataState.useMockData
+  },
+}))
+
+vi.mock('../../services/liveStorylineActions', async () => {
+  const actual = await vi.importActual<typeof liveStorylineActions>('../../services/liveStorylineActions')
+  return {
+    PRIMARY_STORYLINE_SENTINEL: actual.PRIMARY_STORYLINE_SENTINEL,
+    getStoryline: vi.fn(),
+    setStorylineTarget: vi.fn(),
+  }
+})
+
+const mockedGetStoryline = vi.mocked(liveStorylineActions.getStoryline)
 
 beforeEach(() => {
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:00Z') })
   storylineMock.resetForTests()
+  liveStorylineStore.resetForTests()
   resetTelemetryBuffer()
+  mockDataState.useMockData = true
+  mockedGetStoryline.mockReset()
 })
 
 afterEach(() => {
   resetExerciseClock()
+  liveStorylineStore.resetForTests()
 })
 
 async function renderDial() {
@@ -313,5 +357,106 @@ describe('EscalationDial — telemetry hygiene: one event per gesture (XC-004, G
     fireEvent.keyDown(track, { key: 'End' }) // already 100 -> no-op
     expect(steeringEvents()).toHaveLength(1)
     expect(screen.getByTestId('escalation-dial-target-label')).toHaveTextContent('TARGET 100')
+  })
+})
+
+describe('EscalationDial — explanatory UX (story 09, AC5)', () => {
+  it('renders a one-line plain-language scale legend (0-100 meaning)', async () => {
+    await renderDial()
+
+    expect(screen.getByTestId('escalation-dial-scale-legend')).toHaveTextContent(
+      '0 = quiet · 100 = crisis-level attention',
+    )
+  })
+
+  it('renders a LABELED actual-vs-target meaning legend — not just relative position on the track', async () => {
+    await renderDial()
+
+    const legend = screen.getByTestId('escalation-dial-actual-target-legend')
+    expect(legend).toHaveTextContent(/ACTUAL = current real-world attention/i)
+    expect(legend).toHaveTextContent(/TARGET = your controller-set goal/i)
+  })
+
+  it('exposes a one-line phase-meaning description via an accessible tooltip on the phase label', async () => {
+    await renderDial()
+    const phase = screen.getByTestId('escalation-dial-phase') // seeded phase is Escalating
+
+    // MUI's Tooltip exposes its `title` two ways: an `aria-label` on the
+    // trigger (always present — the accessible-name path screen readers use
+    // regardless of hover/focus timing) AND a visual Popper on hover/focus
+    // (asserted below). Both carry the SAME phase-meaning text.
+    expect(phase).toHaveAttribute('aria-label', 'gaining attention, no qualifying response yet')
+
+    fireEvent.mouseOver(phase)
+    await waitFor(
+      () => {
+        expect(screen.getByRole('tooltip')).toHaveTextContent('gaining attention, no qualifying response yet')
+      },
+      { timeout: 2000 },
+    )
+  })
+
+  it('the phase-meaning tooltip trigger is keyboard-reachable (tabIndex, not mouse-only)', async () => {
+    await renderDial()
+    const phase = screen.getByTestId('escalation-dial-phase')
+
+    expect(phase).toHaveAttribute('tabindex', '0')
+  })
+})
+
+describe('EscalationDial — the honesty caveat (story 09, AC4; live mode to control phase precisely)', () => {
+  beforeEach(() => {
+    mockDataState.useMockData = false
+  })
+
+  function liveState(overrides: Partial<liveStorylineActions.LiveStorylineSteeringState> = {}) {
+    return {
+      storylineId: 'storyline-real-guid',
+      exerciseId: 'ex-mock-0001',
+      intensity: 40,
+      targetIntensity: null,
+      phase: 'Escalating' as const,
+      ...overrides,
+    }
+  }
+
+  it('states plainly that the target will not move intensity when the phase is OUTSIDE Escalating/Peak (e.g. Seeded)', async () => {
+    mockedGetStoryline.mockResolvedValue(liveState({ phase: 'Seeded', targetIntensity: 60 }))
+
+    await renderDial()
+
+    const caveat = await screen.findByTestId('escalation-dial-target-caveat')
+    expect(caveat).toHaveTextContent(/will not move intensity/i)
+    expect(caveat).toHaveTextContent(/ESCALATING or PEAK/i)
+    expect(caveat).toHaveTextContent(/SEEDED/i) // states the CURRENT phase, not just the rule
+  })
+
+  it('is ABSENT when no target is set, even on a non-chasing phase', async () => {
+    mockedGetStoryline.mockResolvedValue(liveState({ phase: 'Addressed', targetIntensity: null }))
+
+    await renderDial()
+    await screen.findByTestId('escalation-dial-phase')
+
+    expect(screen.queryByTestId('escalation-dial-target-caveat')).not.toBeInTheDocument()
+  })
+
+  it('is ABSENT when a target IS set on a CHASING phase (Escalating/Peak) — never a false caveat', async () => {
+    mockedGetStoryline.mockResolvedValue(liveState({ phase: 'Peak', targetIntensity: 80 }))
+
+    await renderDial()
+    await waitFor(() => expect(screen.getByTestId('escalation-dial-target-label')).toHaveTextContent('TARGET 80'))
+
+    expect(screen.queryByTestId('escalation-dial-target-caveat')).not.toBeInTheDocument()
+  })
+
+  it('never conveys the caveat by color alone — icon + text (NFR-001)', async () => {
+    mockedGetStoryline.mockResolvedValue(liveState({ phase: 'Decaying', targetIntensity: 20 }))
+
+    await renderDial()
+
+    const caveat = await screen.findByTestId('escalation-dial-target-caveat')
+    expect(caveat.querySelector('svg')).not.toBeNull() // the FontAwesome info icon
+    // ...and real text alongside the icon, not color/shape alone.
+    expect(caveat.textContent?.length ?? 0).toBeGreaterThan(0)
   })
 })

@@ -2,9 +2,11 @@
  * features/controller/components/steering/EscalationDial.tsx
  * ---------------------------------------------------------------------------
  * The storyline escalation dial (feature: world-steering, story 02 —
- * "Escalation dial — actual + target, engine follows"; CTL-022 / D5-014/2.2).
- * STAFF world (COBRA) — dark operator-chrome tokens matching the console's
- * other steering/engine surfaces (`EngineControlBar`, `ReviewQueue`); MUI 9
+ * "Escalation dial — actual + target, engine follows"; CTL-022 / D5-014/2.2;
+ * story 09 — "Escalation dial live" — adds the explanatory legend/tooltip
+ * below and the live data branch via `useStorylineTarget`). STAFF world
+ * (COBRA) — dark operator-chrome tokens matching the console's other
+ * steering/engine surfaces (`EngineControlBar`, `ReviewQueue`); MUI 9
  * `sx`-only system props; FontAwesome icons only; fully keyboard-operable
  * (NFR-001).
  *
@@ -21,9 +23,10 @@
  * the track's bounding box mid-drag). The SAME track is a `role="slider"`
  * that arrow keys (±1), Home (0), and End (100) operate with no loss of the
  * click/drag path. Every commit goes through `useStorylineTarget().setTarget`,
- * which clamps, records the change on the mock storyline, and emits the one
+ * which clamps, records the change (mock or live), and emits the one
  * `steering_action` telemetry event (XC-004) — this component owns no
- * telemetry/clamping logic itself.
+ * telemetry/clamping/data-source logic itself (mock vs. live is entirely the
+ * hook's concern).
  *
  * DRAG = ONE COMMIT (Gate-1 Minor). A drag's in-progress position is tracked
  * in local state (`dragValue`) purely for LIVE visual feedback (the tick/fill
@@ -33,6 +36,26 @@
  * one-sample drag and behaves the same way. Keyboard sets remain immediate
  * (each key press is already a single discrete commit).
  *
+ * EXPLANATORY UX (story 09, AC5 — static, not per-exercise configured copy).
+ * The D5-amended dial shipped with no explanation of what it shows, so this
+ * story adds, in place:
+ *   - a one-line SCALE legend (what 0-100 means);
+ *   - a labeled ACTUAL-vs-TARGET legend (what each value on the track MEANS,
+ *     distinct from the "ACTUAL n"/"TARGET n" live VALUE badges above, which
+ *     already carry icon + text per story 02's NFR-001 pass);
+ *   - a one-line PHASE-MEANING description on hover/focus of the phase label
+ *     (a `Tooltip`, keyboard-reachable via `tabIndex`).
+ * None of this is color-only (NFR-001): every explanation is icon + text.
+ *
+ * THE HONESTY CAVEAT (story 09, AC4). `Storyline.Tick` only drives actual
+ * toward a target while the storyline is `Escalating`/`Peak` (see
+ * `Storyline.cs`'s own gating) — a target set on a `Seeded`/`Addressed`/
+ * `Decaying`/`Resolved`/`Dormant` storyline is recorded but the engine will
+ * NOT chase it. Rather than silently implying an immediate chase that will
+ * not happen, this component states that plainly whenever a target is set on
+ * a non-chasing phase — mirroring the backend's own gate, never re-deriving
+ * new domain logic here.
+ *
  * CONTAINER-AGNOSTIC (Phase 0 reconciliation). This widget assumes nothing
  * about its mount point (inline work-area vs. a future "Stories" flyout,
  * D5-016/017) — no flyout/popover chrome of its own, no fixed width. The
@@ -41,10 +64,35 @@
  */
 
 import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
-import { Box, Stack, Typography } from '@mui/material'
+import { Box, Stack, Tooltip, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faGaugeHigh, faLocationDot } from '@fortawesome/free-solid-svg-icons'
+import { faCircleInfo, faGaugeHigh, faLocationDot } from '@fortawesome/free-solid-svg-icons'
 import { useStorylineTarget } from '../../hooks/useStorylineTarget'
+import type { StorylinePhase } from '../../services/storylineMock'
+
+/**
+ * The phases in which `Storyline.Tick` actually drives actual intensity
+ * toward a live target (story 09, AC4).
+ */
+const CHASING_PHASES: ReadonlySet<StorylinePhase> = new Set(['Escalating', 'Peak'])
+
+/**
+ * A one-line, plain-language description of what each phase means — read on
+ * hover/focus of the phase label (AC5). Mirrors the lifecycle documented on
+ * `StorylinePhase.cs`; text only, never re-deriving new domain meaning.
+ */
+const PHASE_DESCRIPTIONS: Record<StorylinePhase, string> = {
+  Dormant: 'not yet active — the world isn’t reacting to this yet',
+  Seeded: 'planted; the silence window is running',
+  Escalating: 'gaining attention, no qualifying response yet',
+  Peak: 'at maximum public pressure',
+  Addressed: 'an official response was matched; pressure is coming off',
+  Decaying: 'cooling off toward baseline',
+  Resolved: 'burned out; re-openable by a new trigger',
+}
+
+/** The one-line, plain-language scale legend (AC5) — static, not per-exercise configured copy. */
+const SCALE_LEGEND = '0 = quiet · 100 = crisis-level attention'
 
 /** Dark operator-chrome tokens (matches `EngineControlBar`/`ReviewQueue`'s tokens). Staff-only. */
 const chrome = {
@@ -174,6 +222,13 @@ export function EscalationDial() {
   const relationshipText =
     dial.lastChangeDetail ?? 'Click, drag, or use arrow keys / Home / End on the track to set a target.'
 
+  // AC4 — the honesty caveat: a target is recorded on ANY phase, but the
+  // engine only chases it while Escalating/Peak (mirrors Storyline.Tick's own
+  // gating). Shown whenever a target is set on a non-chasing phase — never
+  // silently implying an immediate chase that will not happen.
+  const chasesTowardTarget = CHASING_PHASES.has(dial.phase)
+  const showTargetWontMoveCaveat = dial.targetIntensity !== null && !chasesTowardTarget
+
   return (
     <Box
       data-testid="escalation-dial"
@@ -195,15 +250,38 @@ export function EscalationDial() {
         >
           ESCALATION
         </Typography>
-        {/* Phase label — text, uppercase, NOT a color-only indicator (NFR-001). */}
-        <Typography
-          component="span"
-          data-testid="escalation-dial-phase"
-          sx={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.04em', color: chrome.ink }}
-        >
-          {dial.phaseLabel}
-        </Typography>
+        {/*
+          Phase label — text, uppercase, NOT a color-only indicator (NFR-001).
+          Story 09, AC5: a one-line phase-meaning description on hover/focus
+          (a Tooltip; tabIndex makes it keyboard-reachable, not mouse-only).
+        */}
+        <Tooltip title={PHASE_DESCRIPTIONS[dial.phase]}>
+          <Typography
+            component="span"
+            tabIndex={0}
+            data-testid="escalation-dial-phase"
+            sx={{
+              fontSize: 11,
+              fontWeight: 800,
+              letterSpacing: '0.04em',
+              color: chrome.ink,
+              cursor: 'help',
+              '&:focus-visible': { outline: `2px solid ${chrome.blue}`, outlineOffset: '2px' },
+            }}
+          >
+            {dial.phaseLabel}
+          </Typography>
+        </Tooltip>
       </Stack>
+
+      {/* Scale legend — story 09, AC5: a one-line, plain-language meaning of the 0-100 scale. */}
+      <Typography
+        component="p"
+        data-testid="escalation-dial-scale-legend"
+        sx={{ fontSize: 10, color: chrome.inkMuted, m: 0 }}
+      >
+        {SCALE_LEGEND}
+      </Typography>
 
       <Box
         ref={trackRef}
@@ -292,6 +370,32 @@ export function EscalationDial() {
         </Stack>
       </Stack>
 
+      {/*
+        Actual-vs-target MEANING legend — story 09, AC5: distinct from the
+        live VALUE badges above ("ACTUAL n" / "TARGET n"), this defines what
+        each one IS, so the relationship between them is never inferred from
+        position on the track alone. Icon + text, matching each badge's own
+        icon (NFR-001 — never color-only).
+      */}
+      <Stack
+        direction="row"
+        data-testid="escalation-dial-actual-target-legend"
+        sx={{ alignItems: 'flex-start', gap: 2, mt: 0.5, flexWrap: 'wrap' }}
+      >
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
+          <FontAwesomeIcon icon={faGaugeHigh} color={chrome.blue} aria-hidden="true" />
+          <Typography component="span" sx={{ fontSize: 10, color: chrome.inkMuted }}>
+            ACTUAL = current real-world attention
+          </Typography>
+        </Stack>
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
+          <FontAwesomeIcon icon={faLocationDot} color={chrome.amber} aria-hidden="true" />
+          <Typography component="span" sx={{ fontSize: 10, color: chrome.inkMuted }}>
+            TARGET = your controller-set goal
+          </Typography>
+        </Stack>
+      </Stack>
+
       {/* Relationship text — the from/to transition (XC-004 detail convention). */}
       <Typography
         component="p"
@@ -302,6 +406,26 @@ export function EscalationDial() {
       >
         {relationshipText}
       </Typography>
+
+      {/*
+        Story 09, AC4 — the honesty caveat. Never silently implies an
+        immediate chase that will not happen: text + icon (NFR-001), not
+        color-only, and not an aria-live interruption (it is contextual, not a
+        fresh event notification like the relationship text above).
+      */}
+      {showTargetWontMoveCaveat ? (
+        <Stack
+          direction="row"
+          data-testid="escalation-dial-target-caveat"
+          sx={{ alignItems: 'flex-start', gap: 0.5, mt: 0.5 }}
+        >
+          <FontAwesomeIcon icon={faCircleInfo} color={chrome.inkMuted} aria-hidden="true" />
+          <Typography component="p" sx={{ fontSize: 10, color: chrome.inkMuted, m: 0 }}>
+            This target will not move intensity until the storyline reaches ESCALATING or PEAK
+            (currently {dial.phaseLabel}).
+          </Typography>
+        </Stack>
+      ) : null}
     </Box>
   )
 }
