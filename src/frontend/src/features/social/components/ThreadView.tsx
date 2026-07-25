@@ -52,13 +52,16 @@
  * `onRepost`/`onQuote` (+ an inline `<QuoteComposer>`), and `onHashtagOpen`
  * into it — the exact same per-row-hook shape `Feed.tsx`'s `FeedRow` uses.
  * `useReaction`/`useAmplify` both gate on the bound session's `isReadOnly`
- * internally, so an observer session's like/repost/quote here are already
- * functional no-ops (D1-011) even though — a PRE-EXISTING gap, not
- * introduced by this pass — this component has never threaded the shell
- * `variant` into `<PostCard>` (every post here always renders the visually
- * "full" action row regardless of session type; `ThreadView.test.tsx` also
- * never wraps a `ShellContextProvider`, so adding that here is a separate,
- * threads-replies-owned fix, not this integration's seam).
+ * internally, so an observer session's like/repost/quote here were already
+ * functional no-ops (D1-011).
+ *
+ * READ-ONLY VARIANT (WR-003, COR-015/D1-011 — RESOLVED): this component now
+ * reads the shell mount variant via `useShellContext()`, exactly like
+ * `<Feed>`, and threads `cardVariant` (`affordancesAvailable(variant) ?
+ * 'full' : 'readOnly'`) into every `ThreadCard` (ancestors, the focused post,
+ * and each visible reply) — the visual "controls absent, counts inert"
+ * treatment now matches `<Feed>`'s for an observer session, not just the
+ * handlers' functional no-op.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -69,11 +72,19 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { usePersonas, type Persona } from '@/features/personas'
 import { PostCard, type ParticipantPostView, type PostView } from '@/features/social'
+import {
+  useShellContext,
+  affordancesAvailable,
+} from '@/features/participant-shell/mountContract'
 import { useThread, type ThreadReplyView } from '../hooks/useThread'
 import { useReaction } from '../hooks/useReaction'
 import { useAmplify } from '../hooks/useAmplify'
 import { QuoteComposer } from './QuoteComposer'
 import styles from './ThreadView.module.css'
+
+/** Mirrors `Feed.tsx`'s local `CardVariant` — the two `<PostCard>` render
+ * modes a shell variant maps to (COR-015/D1-011). */
+type CardVariant = 'full' | 'readOnly'
 
 export interface ThreadViewProps {
   /** The post id the thread is centered on. */
@@ -85,6 +96,9 @@ export interface ThreadViewProps {
 
 interface ThreadCardProps {
   readonly view: PostView
+  /** WR-003: threaded from the shell variant (COR-015/D1-011) — governs
+   * whether `<PostCard>` renders the interactive action row at all. */
+  readonly variant: CardVariant
   readonly onHashtagOpen?: (tag: string) => void
 }
 
@@ -94,7 +108,7 @@ interface ThreadCardProps {
  * memoized: unlike the feed's burst surface, a thread's post set is small and
  * static once resolved, so the `React.memo` guarantee isn't needed here.
  */
-function ThreadCard({ view, onHashtagOpen }: ThreadCardProps) {
+function ThreadCard({ view, variant, onHashtagOpen }: ThreadCardProps) {
   const reaction = useReaction({ postId: view.id, initialLikeCount: view.counts.like })
   const amplify = useAmplify({ postId: view.id })
   const [quoting, setQuoting] = useState(false)
@@ -113,6 +127,7 @@ function ThreadCard({ view, onHashtagOpen }: ThreadCardProps) {
     <>
       <PostCard
         post={displayView}
+        variant={variant}
         likedByViewer={reaction.likedByViewer}
         onLike={reaction.canReact ? reaction.toggleLike : undefined}
         onRepost={amplify.canAmplify ? amplify.doRepost : undefined}
@@ -156,6 +171,13 @@ export function ThreadView({ focusedPostId, onHashtagOpen }: ThreadViewProps) {
   const { personas } = usePersonas()
   const session = useSession()
   const { exerciseId, timeZone } = useExerciseContext()
+
+  // WR-003 (COR-015/D1-011): mirrors `<Feed>`/`<Profile>` exactly — the shell
+  // variant decides whether every `<PostCard>` this thread renders (ancestors,
+  // focused post, replies) gets the interactive action row or the
+  // absent-controls/inert-counts read-only treatment.
+  const { variant } = useShellContext()
+  const cardVariant: CardVariant = affordancesAvailable(variant) ? 'full' : 'readOnly'
 
   const personaMap = useMemo(
     () => new Map(personas.map(persona => [persona.id, persona])),
@@ -206,13 +228,20 @@ export function ThreadView({ focusedPostId, onHashtagOpen }: ThreadViewProps) {
       {ancestors.map(ancestor => {
         const view = toPostView(ancestor, personaMap)
         return view
-          ? <ThreadCard key={view.id} view={view} onHashtagOpen={onHashtagOpen} />
+          ? (
+            <ThreadCard
+              key={view.id}
+              view={view}
+              variant={cardVariant}
+              onHashtagOpen={onHashtagOpen}
+            />
+          )
           : null
       })}
 
       {focusedView && (
         <div className={styles.focusedWrap} data-testid="thread-focused">
-          <ThreadCard view={focusedView} onHashtagOpen={onHashtagOpen} />
+          <ThreadCard view={focusedView} variant={cardVariant} onHashtagOpen={onHashtagOpen} />
         </div>
       )}
 
@@ -221,6 +250,7 @@ export function ThreadView({ focusedPostId, onHashtagOpen }: ThreadViewProps) {
           key={reply.id}
           reply={reply}
           personaMap={personaMap}
+          variant={cardVariant}
           onHashtagOpen={onHashtagOpen}
         />
       ))}
@@ -231,6 +261,8 @@ export function ThreadView({ focusedPostId, onHashtagOpen }: ThreadViewProps) {
 interface ThreadReplyProps {
   readonly reply: ThreadReplyView
   readonly personaMap: ReadonlyMap<string, Persona>
+  /** WR-003: threaded through to the reply's `ThreadCard` (COR-015/D1-011). */
+  readonly variant: CardVariant
   readonly onHashtagOpen?: (tag: string) => void
 }
 
@@ -238,7 +270,7 @@ interface ThreadReplyProps {
  * `<PostCard>` (via `ThreadCard`, wired with its own like/repost/quote state)
  * or - if it was taken down (SOC-005/D1-009) - the interim in-thread
  * tombstone (which never gets that wiring — there is nothing to react to). */
-function ThreadReply({ reply, personaMap, onHashtagOpen }: ThreadReplyProps) {
+function ThreadReply({ reply, personaMap, variant, onHashtagOpen }: ThreadReplyProps) {
   const repliedToAuthor = personaMap.get(reply.replyToPersonaId)
   const view = toPostView(reply, personaMap)
 
@@ -254,7 +286,7 @@ function ThreadReply({ reply, personaMap, onHashtagOpen }: ThreadReplyProps) {
           This post is unavailable.
         </div>
       ) : (
-        view && <ThreadCard view={view} onHashtagOpen={onHashtagOpen} />
+        view && <ThreadCard view={view} variant={variant} onHashtagOpen={onHashtagOpen} />
       )}
     </div>
   )

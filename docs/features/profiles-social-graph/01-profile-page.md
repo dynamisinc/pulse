@@ -21,13 +21,17 @@ Follow button behavior (story 02); verification rules (story 03); magnitude math
 follows (story 04).
 
 ## Deferred (tracked follow-ups, Gate-2)
-- **WR-003.** `Profile` doesn't thread the shell's read-only `variant` down to the `<PostCard>`s it
-  renders in each tab, so an observer session sees present-but-inert action controls (like/repost/
-  quote) instead of D1-011's "controls absent" — the click handlers are simply unwired (gated no-ops),
-  not a data leak, but it is a visual/AC gap against D1-011. Same gap on `ThreadView` (pre-existing,
-  `threads-replies/01`) — tracked there too. Follow-up: thread `variant`/`affordancesAvailable()` from
-  `useShellContext()` through `Profile`/`ThreadView` into each `<PostCard>` call, mirroring how `<Feed>`
-  already does it (`Feed.actions.test.tsx` confirms `<Feed>` alone gets this right today).
+- **WR-003 — RESOLVED (#88).** `Profile` and `ThreadView` (`threads-replies/01`) now read the shell's
+  mount variant via `useShellContext()`/`affordancesAvailable()` and thread the resulting `'full'` |
+  `'readOnly'` `variant` through to every `<PostCard>` they render — `Profile` via `ProfilePostList`
+  across all four tabs, `ThreadView` via its internal `ThreadCard` wrapper for ancestors, the focused
+  post, and every visible reply. This mirrors `<Feed>`'s existing pattern exactly (same local
+  `CardVariant` shape), so an observer/read-only session now sees the controls genuinely ABSENT (not
+  disabled) on all three surfaces, matching D1-011. Counts and post content remain fully visible.
+  Covered by new cases in `Profile.test.tsx` and `ThreadView.test.tsx` (mirroring
+  `Feed.actions.test.tsx`'s read-only assertions); the pre-existing suites for both were updated to
+  wrap a `<ShellContextProvider>` (previously implicit/undeclared) so `useShellContext()` doesn't
+  throw outside a shell mount.
 - **SUG-001.** `SocialChannel`'s focus management only moves focus on a feed↔detail transition (see its
   module header); a future detail-to-detail path that lands on `Profile` (e.g. an author-name tap from
   inside an open thread or hashtag feed, not yet built — `SocialChannel.tsx`'s own comment defers this

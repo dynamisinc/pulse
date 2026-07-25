@@ -52,6 +52,14 @@
  * edges yet; the real following count is supplied once the follow graph lands
  * (story 02). Follower magnitude BANDING is story 05; this story renders the raw
  * `followerCount`.
+ *
+ * READ-ONLY VARIANT (WR-003, COR-015/D1-011): the shell mount variant is read
+ * via `useShellContext()`, exactly like `<Feed>` — `affordancesAvailable(variant)`
+ * decides `cardVariant` (`'full'` | `'readOnly'`), threaded into every
+ * `<PostCard>` this page renders (all four tabs, via `ProfilePostList`). An
+ * observer/read-only session therefore sees the SAME "controls absent, counts
+ * inert" treatment here that `<Feed>` already gave it — counts and post content
+ * stay fully visible; only the interactive reply/repost/like affordances go.
  */
 
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
@@ -64,8 +72,16 @@ import { wallClockNowIso } from '@/core/time/wallClock'
 import { buildAndEmit } from '@/core/telemetry'
 import { PostCard, VerifiedMark, Avatar, type PostView } from '@/features/social'
 import { usePersonas } from '@/features/personas'
+import {
+  useShellContext,
+  affordancesAvailable,
+} from '@/features/participant-shell/mountContract'
 import { useFeed } from '../hooks/useFeed'
 import styles from './Profile.module.css'
+
+/** Mirrors `Feed.tsx`'s local `CardVariant` — the two `<PostCard>` render
+ * modes a shell variant maps to (COR-015/D1-011). */
+type CardVariant = 'full' | 'readOnly'
 
 /** The profile avatar diameter (larger than the 42px post-card scale). */
 const PROFILE_AVATAR_SIZE = 80
@@ -90,6 +106,9 @@ const PROFILE_TABS: readonly ProfileTabSpec[] = [
 interface ProfilePostListProps {
   readonly posts: readonly PostView[]
   readonly emptyLabel: string
+  /** WR-003: threaded from the shell variant (COR-015/D1-011) into every
+   * `<PostCard>` this list renders. */
+  readonly variant: CardVariant
 }
 
 /**
@@ -98,7 +117,11 @@ interface ProfilePostListProps {
  * (NFR-002/SOC-071). Renders the calm in-fiction empty state when the tab has
  * no posts — never exercise/admin language.
  */
-const ProfilePostList = memo(function ProfilePostList({ posts, emptyLabel }: ProfilePostListProps) {
+const ProfilePostList = memo(function ProfilePostList({
+  posts,
+  emptyLabel,
+  variant,
+}: ProfilePostListProps) {
   if (posts.length === 0) {
     return <p className={styles.state}>{emptyLabel}</p>
   }
@@ -106,7 +129,7 @@ const ProfilePostList = memo(function ProfilePostList({ posts, emptyLabel }: Pro
     <ul className={styles.list}>
       {posts.map(post => (
         <li key={post.id} className={styles.row}>
-          <PostCard post={post} />
+          <PostCard post={post} variant={variant} />
         </li>
       ))}
     </ul>
@@ -129,6 +152,12 @@ export function Profile({ personaId }: ProfileProps) {
   const { personas, loading: personasLoading, error: personasError } = usePersonas()
   const { posts, loading: postsLoading } = useFeed()
   const { format } = useScenarioTime(timeZone)
+
+  // WR-003 (COR-015/D1-011): mirrors `<Feed>` exactly — the shell variant
+  // decides whether every `<PostCard>` this page renders gets the interactive
+  // action row or the absent-controls/inert-counts read-only treatment.
+  const { variant } = useShellContext()
+  const cardVariant: CardVariant = affordancesAvailable(variant) ? 'full' : 'readOnly'
 
   const [activeTab, setActiveTab] = useState<ProfileTabId>('posts')
 
@@ -302,7 +331,11 @@ export function Profile({ personaId }: ProfileProps) {
         id={`profile-tabpanel-${activeTab}`}
         aria-labelledby={`profile-tab-${activeTab}`}
       >
-        <ProfilePostList posts={postsByTab[activeTab]} emptyLabel={emptyByTab[activeTab]} />
+        <ProfilePostList
+          posts={postsByTab[activeTab]}
+          emptyLabel={emptyByTab[activeTab]}
+          variant={cardVariant}
+        />
       </div>
     </section>
   )

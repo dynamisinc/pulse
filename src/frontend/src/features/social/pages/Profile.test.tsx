@@ -20,6 +20,11 @@
  *    personaId (no unmount) re-emits exactly once, while a re-render on the
  *    SAME id does not;
  *  - an unknown persona fails gracefully in-fiction (no crash, no COBRA).
+ *  - WR-003 (COR-015/D1-011): under a read-only/observer shell variant, every
+ *    <PostCard> this page renders has its action controls ABSENT (not
+ *    disabled) — counts and content stay visible; under the default 'full'
+ *    variant the controls are present. Mirrors `Feed.actions.test.tsx`'s
+ *    assertions.
  *
  * `api.post` (the telemetry sink's fire-and-forget send) is spied to resolve so
  * a rejected mock POST can't race worker teardown; `api.get` (and its mock
@@ -42,6 +47,10 @@ import {
 } from '@/core/telemetry'
 import { api } from '@/core/services/api'
 import { personaById } from '@/features/personas'
+import {
+  ShellContextProvider,
+  type ShellVariant,
+} from '@/features/participant-shell/mountContract'
 import { Profile } from './Profile'
 
 const MOCK_TIME_ZONE = 'America/New_York'
@@ -54,12 +63,18 @@ function fixedClock(instant: Date): IExerciseClock {
   return { scenarioNow: () => instant }
 }
 
-/** Renders <Profile> through the real provider stack for a given persona. */
-function renderProfile(personaId: string) {
+/** Renders <Profile> through the real provider stack for a given persona, at
+ * a given shell variant (defaults to 'full' — every existing assertion in
+ * this suite was written against the full/interactive variant). */
+function renderProfile(personaId: string, variant: ShellVariant = 'full') {
   return render(
     <ExerciseContextProvider>
       <SessionProvider>
-        <Profile personaId={personaId} />
+        <ShellContextProvider
+          value={{ variant, scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+        >
+          <Profile personaId={personaId} />
+        </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,
   )
@@ -223,7 +238,11 @@ describe('Profile — telemetry (XC-004)', () => {
     utils.rerender(
       <ExerciseContextProvider>
         <SessionProvider>
-          <Profile personaId={TBRANDT_ID} />
+          <ShellContextProvider
+            value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+          >
+            <Profile personaId={TBRANDT_ID} />
+          </ShellContextProvider>
         </SessionProvider>
       </ExerciseContextProvider>,
     )
@@ -249,7 +268,11 @@ describe('Profile — telemetry (XC-004)', () => {
     utils.rerender(
       <ExerciseContextProvider>
         <SessionProvider>
-          <Profile personaId={FW_ID} />
+          <ShellContextProvider
+            value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+          >
+            <Profile personaId={FW_ID} />
+          </ShellContextProvider>
         </SessionProvider>
       </ExerciseContextProvider>,
     )
@@ -263,5 +286,34 @@ describe('Profile — unknown persona', () => {
     renderProfile('persona-does-not-exist')
     expect(await screen.findByText('This account doesn’t exist.')).toBeInTheDocument()
     expect(getEmittedTelemetryEvents().filter(e => e.eventType === 'view')).toHaveLength(0)
+  })
+})
+
+describe('Profile — read-only shell variant (WR-003, COR-015/D1-011)', () => {
+  it('renders NO action controls on the profile’s post cards under a read-only (observer) session', async () => {
+    renderProfile(FW_ID, 'readOnly')
+    await screen.findByRole('heading', { name: 'Fairhaven Water Utility' })
+
+    const actionsRegions = await screen.findAllByTestId('post-actions')
+    expect(actionsRegions.length).toBeGreaterThan(0)
+    for (const region of actionsRegions) {
+      expect(within(region).queryAllByRole('button')).toHaveLength(0)
+    }
+
+    // Counts/content stay fully visible — only the affordances go (never a
+    // data leak, just absent controls).
+    const cards = await screen.findAllByTestId('post-card')
+    expect(cards.length).toBeGreaterThan(0)
+  })
+
+  it('renders the interactive action controls on the profile’s post cards under the full variant', async () => {
+    renderProfile(FW_ID, 'full')
+    await screen.findByRole('heading', { name: 'Fairhaven Water Utility' })
+
+    const actionsRegions = await screen.findAllByTestId('post-actions')
+    expect(actionsRegions.length).toBeGreaterThan(0)
+    for (const region of actionsRegions) {
+      expect(within(region).queryAllByRole('button').length).toBeGreaterThan(0)
+    }
   })
 })
