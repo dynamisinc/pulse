@@ -90,11 +90,16 @@ export { EngineDraftEditComposer } from './components/EngineDraftEditComposer'
 
 // --- Engine settings panel (story 06) — the console admin surface for the
 // exercise autonomy default + tier-policy mode (story 05's API). The single
-// source both this panel and `EngineControlBar`'s "Live" label read. ---
-export { useEngineSettings, engineSettingsStore } from './hooks/useEngineSettings'
+// source both this panel and `EngineControlBar`'s "Live" label read.
+// `engineSettingsStore` (incl. its test-only `setForTests` fabrication seam)
+// is DELIBERATELY NOT re-exported here (S-001) — mirrors `engineControlStore`,
+// which is likewise absent from this barrel; tests import the store directly
+// from `./hooks/useEngineSettings`. ---
+export { useEngineSettings } from './hooks/useEngineSettings'
 export type {
   UseEngineSettingsResult,
   AutonomyDefaultLevel,
+  EngineSettingsAutonomy,
   EngineSettingsDto,
   TierPolicyMode,
 } from './hooks/useEngineSettings'

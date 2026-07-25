@@ -36,15 +36,27 @@
  *
  * A11Y (NFR-001): every state (autonomy level, tier mode, clamp/stopped note,
  * errors) is TEXT, never colour alone. Every control is a native `<button>`
- * (tab-reachable, Enter/Space-activate for free). `Escape` closes the flyout;
- * on open, focus moves to the close button; on close, focus returns to
- * whatever opened it (mirrors `PersonaDockHost`'s focus contract).
+ * (tab-reachable, Enter/Space-activate for free). The selected autonomy/tier
+ * segment carries a check-glyph + "(current)" IN ADDITION TO its colour/border
+ * treatment (Gate-1 S-002) — `aria-pressed` already covers assistive tech, but
+ * a sighted user must not depend on colour alone either. `Escape` closes the
+ * flyout; on open, focus moves to the close button; on close, focus returns
+ * to whatever opened it (mirrors `PersonaDockHost`'s focus contract).
+ *
+ * STALENESS (Gate-1 CR-001): every time this flyout OPENS (the transition,
+ * not "each render while open"), it calls `useEngineSettings().refetch()` —
+ * an operator is about to look at this snapshot, so it must not be serving a
+ * fetch-once-per-page-load cache that predates a kill-switch trip or a
+ * server-side degrade. A failed initial GET also gets a visible "Retry"
+ * affordance that calls the SAME `refetch()` (Gate-1 WR-004) — a transient
+ * blip is not a permanent dead end.
  */
 
 import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { Box, IconButton, Stack, Tooltip, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
+  faCheck,
   faCircleInfo,
   faTriangleExclamation,
   faXmark,
@@ -95,6 +107,21 @@ function autonomyLevelCopy(level: AutonomyDefaultLevel): string {
   return level === 'delayed-auto' ? 'Delayed-auto' : 'Suggest'
 }
 
+/**
+ * A segmented-control option's content — a check glyph + "(current)" suffix
+ * on the SELECTED option, in addition to (never instead of) `aria-pressed`
+ * and the colour/border treatment (Gate-1 S-002: the selected segment must
+ * not be conveyed by colour/border alone for a sighted user either).
+ */
+function SegmentLabel({ label, selected }: { label: string; selected: boolean }) {
+  return (
+    <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
+      {selected && <FontAwesomeIcon icon={faCheck} aria-hidden="true" />}
+      <Box component="span">{label}{selected ? ' (current)' : ''}</Box>
+    </Stack>
+  )
+}
+
 export interface EngineSettingsPanelProps {
   /** Whether the flyout is open — the console owns this via `useToolstrip().isActive(...)`. */
   open: boolean
@@ -110,7 +137,7 @@ export interface EngineSettingsPanelProps {
 export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps) {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const openerRef = useRef<Element | null>(null)
-  const { settings, loading, error, forbidden, setAutonomyDefault, setTierPolicyMode } =
+  const { settings, loading, error, forbidden, setAutonomyDefault, setTierPolicyMode, refetch } =
     useEngineSettings()
 
   useEffect(() => {
@@ -125,6 +152,18 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
     }
     openerRef.current = null
   }, [open])
+
+  // Gate-1 CR-001 — refetch on every OPEN TRANSITION (not "while open"), so
+  // an operator opening this panel never sees a snapshot that predates a
+  // kill-switch trip or a server-side degrade that happened while it was
+  // closed.
+  const wasOpenRef = useRef(false)
+  useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      refetch()
+    }
+    wasOpenRef.current = open
+  }, [open, refetch])
 
   if (!open) return null
 
@@ -144,7 +183,11 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
       ? 'Generation is fully stopped — no autonomy level is currently in effect.'
       : autonomy.effectiveLevel
         ? `Currently running at: ${autonomyLevelCopy(autonomy.effectiveLevel).toUpperCase()}`
-        : 'Currently running at: (no effective level reported)'
+        // Gate-1 S-004: this is UNREACHABLE under story 05's contract
+        // (`effectiveLevel` is `null` IFF `generationStopped` is `true`) — if
+        // ever seen, it names itself as a contract violation rather than
+        // reading as an ordinary, silent state.
+        : 'CONTRACT VIOLATION: no effective level reported while generation is not stopped.'
     : null
   // CLAMP DETECTION — derived ONLY from `safetyClampActive` (kill switch OR
   // degraded mode), NEVER by comparing `effectiveLevel` to
@@ -225,7 +268,31 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
             sx={{ alignItems: 'flex-start', gap: 0.75, p: 1, border: `1px solid ${chrome.red}`, borderRadius: '7px' }}
           >
             <FontAwesomeIcon icon={faTriangleExclamation} color={chrome.red} aria-hidden="true" />
-            <Typography sx={{ fontSize: 11.5, color: chrome.ink }}>{error}</Typography>
+            <Stack sx={{ gap: 0.5, flex: 1 }}>
+              <Typography sx={{ fontSize: 11.5, color: chrome.ink }}>{error}</Typography>
+              {/* Gate-1 WR-004: a failed initial GET is not a permanent dead
+                  end — this calls the SAME refetch() the open-transition
+                  effect above uses. */}
+              <Box
+                component="button"
+                type="button"
+                data-testid="engine-settings-retry"
+                onClick={() => refetch()}
+                sx={{
+                  alignSelf: 'flex-start',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: chrome.blue,
+                  bgcolor: 'transparent',
+                  border: 'none',
+                  p: 0,
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >
+                Retry
+              </Box>
+            </Stack>
           </Stack>
         )}
 
@@ -271,7 +338,7 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                         '&:hover': forbidden ? undefined : { borderColor: chrome.blue },
                       }}
                     >
-                      {option.label}
+                      <SegmentLabel label={option.label} selected={selected} />
                     </Box>
                   )
                 })}
@@ -342,7 +409,7 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                         '&:hover': forbidden ? undefined : { borderColor: chrome.blue },
                       }}
                     >
-                      {option.label}
+                      <SegmentLabel label={option.label} selected={selected} />
                     </Box>
                   )
                 })}

@@ -9,6 +9,11 @@
  *    toolstrip contract the "Personas" tool already uses, so opening ENGINE
  *    closes an already-open Personas palette and vice versa;
  *  - Escape closes the panel and returns focus to the toolstrip button.
+ *  - Gate-1 WR-005: activating ENGINE while the persona-dock host is open
+ *    (from an EARLIER persona selection — a state independent of the
+ *    toolstrip's `activeToolId`) closes that dock, so a still-mounted,
+ *    still-Tab-reachable persona composer is never left obscured underneath
+ *    the engine panel.
  *
  * Mirrors `ControllerConsole.test.tsx`'s / `.engineDock.test.tsx`'s render
  * setup (real `ExerciseContextProvider` + `ToolstripProvider` + the shipped
@@ -122,5 +127,44 @@ describe('ControllerConsole — the "ENGINE" settings tool', () => {
     await user.click(await screen.findByTestId('toolstrip-tool-personas'))
     expect(await screen.findByRole('dialog', { name: /command palette/i })).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByTestId('engine-settings-panel')).not.toBeInTheDocument())
+  })
+
+  it('Gate-1 WR-005: activating ENGINE closes an already-open persona-dock host, so a mounted composer is never obscured underneath it', async () => {
+    const user = userEvent.setup()
+    render(
+      <ThemeProvider theme={cobraTheme}>
+        <ExerciseContextProvider>
+          <ToolstripProvider>
+            <ControllerConsole
+              renderPersonaResults={({ onSelectPersona }) => (
+                <button
+                  type="button"
+                  data-testid="pick-persona"
+                  onClick={() => onSelectPersona('persona-1')}
+                >
+                  pick persona-1
+                </button>
+              )}
+            />
+            <Toolstrip />
+          </ToolstripProvider>
+        </ExerciseContextProvider>
+      </ThemeProvider>,
+    )
+    await screen.findByTestId('controller-console')
+
+    // Open the palette and select a persona — this closes the palette (its
+    // OWN `onClose`) but opens the persona-dock host, a state the toolstrip's
+    // `activeToolId` does NOT track.
+    await user.click(await screen.findByTestId('toolstrip-tool-personas'))
+    await user.click(await screen.findByTestId('pick-persona'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await screen.findByTestId('persona-dock-host')).toBeInTheDocument()
+
+    // Activating ENGINE must close the still-open dock rather than painting
+    // the engine panel over it.
+    await user.click(await screen.findByTestId('toolstrip-tool-engine-settings'))
+    expect(await screen.findByTestId('engine-settings-panel')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByTestId('persona-dock-host')).not.toBeInTheDocument())
   })
 })

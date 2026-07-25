@@ -54,9 +54,13 @@
  * is the console admin surface for the exercise autonomy default + tier-policy
  * mode (`../engine`'s `useEngineSettings`, story 05's `GET/POST
  * /api/engine/settings`) — the same one-flyout-at-a-time toolstrip contract,
- * not a new extension point.
+ * not a new extension point. The persona-dock host is closed whenever ENGINE
+ * activates (Gate-1 WR-005) — the toolstrip's one-flyout-at-a-time contract
+ * only governs `activeToolId`, but the persona-dock host's `open` is a
+ * SEPARATE `dockPersonaId !== null` flag (set by picking a persona from the
+ * palette), so without this the engine panel could paint over a still-
+ * mounted, still-Tab-reachable persona composer instead of replacing it.
  *
-
  * ## Entry points to "post as persona" (both funnel to the persona-dock host)
  *  1. ⌘K / Ctrl+K, or activating the "Personas" toolstrip tool → the command
  *     palette opens (its PERSONAS section is the search/select entry point).
@@ -226,6 +230,17 @@ export function ControllerConsole(
     setDockPersonaId(personaId)
   }, [])
   const closeDock = useCallback(() => setDockPersonaId(null), [])
+
+  // Gate-1 WR-005: the persona-dock host's `open` (`dockPersonaId !== null`)
+  // is independent of the toolstrip's one-flyout-at-a-time `activeToolId` —
+  // activating ENGINE does not, by itself, close a dock left open from an
+  // earlier persona selection. Both flyouts render at the same edge/width/
+  // z-index, so without this a still-mounted, still-Tab-reachable persona
+  // composer would sit obscured underneath the engine panel instead of being
+  // replaced by it. Close the dock whenever ENGINE activates.
+  useEffect(() => {
+    if (engineSettingsOpen) setDockPersonaId(null)
+  }, [engineSettingsOpen])
 
   return (
     <Box

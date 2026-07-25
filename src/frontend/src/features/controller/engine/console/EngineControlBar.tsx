@@ -13,16 +13,30 @@
  *     status dot; the dot is a SUPPLEMENT to the text label, never the sole
  *     signal (NFR-001). The "Live" position's label is additionally suffixed
  *     with the TRUE effective autonomy level — "ENGINE · LIVE (SUGGEST)" vs.
- *     "ENGINE · LIVE (DELAYED-AUTO)" — read from `useEngineSettings()` (feature:
- *     autonomy-safety, story 06), NEVER assumed. This fixes the audit finding
- *     that "Live" used to unconditionally imply Delayed-auto
- *     (`useEngineControl.ts`'s `deriveEffective`) while the real backend
- *     exercise default has been permanently Suggest — LIVE and SUGGEST-ONLY
- *     were behaviourally identical. The suffix is read from
- *     `effectiveLevel` (WR-003), never re-derived from `exerciseDefaultLevel`
- *     + `safetyClampActive` — that inference is the exact bug class this fix
- *     exists to close, so a clamp active on a Delayed-auto base still shows
- *     "(SUGGEST)" here, honestly.
+ *     "ENGINE · LIVE (DELAYED-AUTO)" vs. "ENGINE · LIVE (GENERATION STOPPED)"
+ *     — read from `useEngineSettings()` (feature: autonomy-safety, story 06),
+ *     NEVER assumed. This fixes the audit finding that "Live" used to
+ *     unconditionally imply Delayed-auto (`useEngineControl.ts`'s
+ *     `deriveEffective`) while the real backend exercise default has been
+ *     permanently Suggest — LIVE and SUGGEST-ONLY were behaviourally
+ *     identical. The suffix is read from the FULL `autonomy` snapshot
+ *     (`generationStopped` checked FIRST, then `effectiveLevel`), never
+ *     re-derived from `exerciseDefaultLevel` + `safetyClampActive` — that
+ *     inference is the exact bug class this fix exists to close, so a clamp
+ *     active on a Delayed-auto base still shows "(SUGGEST)" here, honestly.
+ *     Passing the flattened, nullable `effectiveLevel` alone would conflate
+ *     "settings not loaded yet" with "generation fully stopped" (both read
+ *     `null`) — Gate-1 WR-001 — so `labelFor` takes the whole snapshot (or
+ *     `null` while genuinely not yet loaded) and checks `generationStopped`
+ *     explicitly rather than inferring it from a null level.
+ *
+ *     STALENESS (Gate-1 CR-001): the kill switch mutates the SAME server-side
+ *     autonomy state `useEngineSettings()` describes, entirely outside that
+ *     hook — so this component calls `engineSettings.refetch()` whenever
+ *     `engineControl.mode`/`degraded` changes (skipping the initial mount, to
+ *     avoid a redundant duplicate of the hook's own first GET), closing the
+ *     window where tripping the kill switch would leave this label reporting
+ *     a clamp that's no longer (or newly) accurate.
  *  b. The degrade-mode indicator — text + icon, shown only while
  *     `useEngineControl().degraded` is true (a mock provider-degraded clamp to
  *     Suggest). A small dev-only affordance toggles it for demoing the
@@ -37,7 +51,7 @@
  *  e. `<SwampedModeToggle>` — self-contained, lead-gated.
  */
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { Box, Stack, Tooltip, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -50,7 +64,7 @@ import {
 import { SwampedModeToggle } from '../components/SwampedModeToggle'
 import { useDemandMeter } from '../hooks/useDemandMeter'
 import { useEngineControl, type EngineMode } from '../hooks/useEngineControl'
-import { useEngineSettings, type AutonomyDefaultLevel } from '../hooks/useEngineSettings'
+import { useEngineSettings, type EngineSettingsAutonomy } from '../hooks/useEngineSettings'
 import { useReviewQueue } from '../hooks/useReviewQueue'
 
 /** D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only. */
@@ -83,15 +97,28 @@ function nextMode(mode: EngineMode): EngineMode {
 
 /**
  * The displayed label for `mode` — the "Live" position ALONE gets a suffix
- * naming the TRUE effective autonomy level (WR-003), read verbatim off
- * `useEngineSettings()`; Suggest-only/Stopped already say exactly what they
- * mean and are left unsuffixed. `effectiveLevel === null` (a full backend
- * stop) or not-yet-loaded settings render with no suffix rather than a guess.
+ * naming the TRUE effective autonomy posture, read verbatim off
+ * `useEngineSettings()`'s FULL autonomy snapshot; Suggest-only/Stopped
+ * already say exactly what they mean and are left unsuffixed.
+ *
+ * `autonomy === null` (settings not loaded yet, live mode only) renders with
+ * NO suffix — a guess would be worse than silence. `generationStopped` is
+ * checked EXPLICITLY, before `effectiveLevel` — a flattened, nullable
+ * `effectiveLevel` alone cannot distinguish "not loaded" from "fully
+ * stopped" (both would read `null`); collapsing them would reproduce the
+ * exact pre-fix ambiguous label at the one moment the server is routing at
+ * NO level (Gate-1 WR-001).
  */
-function labelFor(mode: EngineMode, effectiveLevel: AutonomyDefaultLevel | null): string {
+function labelFor(mode: EngineMode, autonomy: EngineSettingsAutonomy | null): string {
   const base = MODE_COPY[mode].label
-  if (mode !== 'live' || effectiveLevel === null) return base
-  return effectiveLevel === 'delayed-auto' ? `${base} (DELAYED-AUTO)` : `${base} (SUGGEST)`
+  if (mode !== 'live' || !autonomy) return base
+  if (autonomy.generationStopped) return `${base} (GENERATION STOPPED)`
+  if (autonomy.effectiveLevel === 'delayed-auto') return `${base} (DELAYED-AUTO)`
+  if (autonomy.effectiveLevel === 'suggest') return `${base} (SUGGEST)`
+  // Contract violation (story 05): `effectiveLevel` is documented `null` IFF
+  // `generationStopped` is `true`. Reaching here means a non-stopped snapshot
+  // reported no effective level — render unsuffixed rather than guess.
+  return base
 }
 
 export function EngineControlBar() {
@@ -100,15 +127,34 @@ export function EngineControlBar() {
   const demand = useDemandMeter()
   const { pendingCount, timersUnder60sCount } = useReviewQueue()
 
-  const effectiveLevel = engineSettings.settings?.autonomy.effectiveLevel ?? null
+  const autonomy = engineSettings.settings?.autonomy ?? null
   const modeCopy = MODE_COPY[engineControl.mode]
-  const modeLabel = labelFor(engineControl.mode, effectiveLevel)
-  const nextModeLabel = labelFor(nextMode(engineControl.mode), effectiveLevel)
+  const modeLabel = labelFor(engineControl.mode, autonomy)
+  const nextModeLabel = labelFor(nextMode(engineControl.mode), autonomy)
   const demandFraction = useMemo(
     () => Math.min(1, demand.demand / Math.max(1, demand.budget)),
     [demand.demand, demand.budget],
   )
   const allClear = pendingCount === 0 && timersUnder60sCount === 0
+
+  // Gate-1 CR-001 — the kill switch mutates the SAME server-side autonomy
+  // state `engineSettings` describes, entirely outside that hook. Refetch
+  // whenever the kill-switch mode or the degraded clamp changes so this
+  // label can never go stale relative to a safety-relevant flip. Skips the
+  // very first run (the hook's own mount effect already fetched once) —
+  // only a subsequent CHANGE re-triggers it.
+  const skippedInitialRefetch = useRef(false)
+  useEffect(() => {
+    if (!skippedInitialRefetch.current) {
+      skippedInitialRefetch.current = true
+      return
+    }
+    engineSettings.refetch()
+    // Only `mode`/`degraded` are meaningful triggers here — `engineSettings`
+    // itself changes identity on every store notification (including the
+    // refetch this effect just caused), which would otherwise self-trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engineControl.mode, engineControl.degraded])
 
   return (
     <Stack

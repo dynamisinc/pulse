@@ -16,7 +16,20 @@
  *    another exercise's settings;
  *  - the optimistic autonomy-default patch mirrors `effectiveLevel` ONLY when
  *    no safety clamp is active — while clamped, `effectiveLevel` is left
- *    untouched by the optimistic patch (never guessed).
+ *    untouched by the optimistic patch (never guessed);
+ *  - Gate-1 CR-002: a rejection reverts to the LAST SERVER-CONFIRMED
+ *    snapshot, never a click-time optimistic value — proved with an EXACT
+ *    repro (two never-resolved-until-rejected requests) where the old logic
+ *    would revert to a stale, never-confirmed value;
+ *  - Gate-1 WR-002: the "only the newest request owns the field" guard is
+ *    proved OBSERVABLE (not tautological) via the 3-valued `tierPolicyMode`
+ *    (`auto -> standard (pending) -> ambient (resolves) -> reject standard`
+ *    stays at `ambient`, not `auto`), and doubles as WR-003 coverage (no
+ *    stale error banner over an already-successful change);
+ *  - Gate-1 CR-001: `refetch()` forces a fresh GET regardless of whether one
+ *    already completed, picking up a clamp the kill switch applied entirely
+ *    outside this hook; Gate-1 WR-004: a failed initial GET is retried the
+ *    same way rather than being a permanent dead end.
  *
  * `@/core/exerciseContext`, the sibling `controllerIdentity` module, and
  * `../services/engineSettingsActions` are mocked at the module boundary
@@ -147,6 +160,14 @@ describe('useEngineSettings — mock mode (USE_MOCK_DATA=true, the default)', ()
     act(() => result.current.setTierPolicyMode('auto'))
 
     expect(result.current.settings).toBe(before)
+  })
+
+  it('refetch() is a no-op under mock — no network call (there is nothing to refetch)', () => {
+    const { result } = renderHook(() => useEngineSettings())
+
+    act(() => result.current.refetch())
+
+    expect(mockedGetSettings).not.toHaveBeenCalled()
   })
 })
 
@@ -301,44 +322,141 @@ describe('useEngineSettings — live mode (USE_MOCK_DATA=false)', () => {
     expect(result.current.settings?.autonomy.effectiveLevel).toBe('suggest')
   })
 
-  it('a stale rejection does not clobber a newer change (rapid re-toggle safety)', async () => {
+  // ---------------------------------------------------------------------
+  // Gate-1 CR-002 / WR-002 — the revert baseline must be the LAST
+  // SERVER-CONFIRMED snapshot, never a click-time optimistic value; a stale
+  // rejection must be discarded ENTIRELY (no error, no revert), not merely
+  // "declined to revert" (that guard alone still leaves a stale-failure
+  // error banner — WR-003).
+  // ---------------------------------------------------------------------
+
+  it('CR-002 exact repro: reverts to the TRUE last-confirmed baseline, never a stale click-time optimistic value, when BOTH requests reject', async () => {
+    // Confirmed server baseline: 'suggest'.
     mockedGetSettings.mockResolvedValue(dto())
     const { result } = renderHook(() => useEngineSettings())
     await waitFor(() => expect(result.current.settings).not.toBeNull())
 
-    let rejectFirst: (reason?: unknown) => void = () => {}
-    mockedSetAutonomyDefault.mockImplementationOnce(
-      () => new Promise((_, reject) => { rejectFirst = reject }),
-    )
-    act(() => result.current.setAutonomyDefault('delayed-auto'))
+    let rejectA: (reason?: unknown) => void = () => {}
+    let rejectB: (reason?: unknown) => void = () => {}
+    mockedSetAutonomyDefault
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectA = reject }))
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectB = reject }))
 
-    // A second, newer flip supersedes the first before it rejects.
-    mockedSetAutonomyDefault.mockResolvedValueOnce(
+    // A: click Delayed-auto — optimistic 'delayed-auto', POST A pending.
+    act(() => result.current.setAutonomyDefault('delayed-auto'))
+    expect(result.current.settings?.autonomy.exerciseDefaultLevel).toBe('delayed-auto')
+
+    // B: click Suggest — optimistic 'suggest' (a NEW request; B's own
+    // click-time snapshot is A's still-UNCONFIRMED 'delayed-auto' — the
+    // exact value the old, buggy revert-to-click-time-snapshot logic would
+    // have produced below).
+    act(() => result.current.setAutonomyDefault('suggest'))
+    expect(result.current.settings?.autonomy.exerciseDefaultLevel).toBe('suggest')
+
+    // A rejects first — STALE (a newer request, B, has since been issued).
+    // Must be discarded entirely: no revert, no error.
+    await act(async () => {
+      rejectA(Object.assign(new Error('stale'), { isAxiosError: true, response: { status: 500, data: '' } }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.settings?.autonomy.exerciseDefaultLevel).toBe('suggest')
+    expect(result.current.error).toBeNull()
+
+    // B rejects too — the NEWEST request, so it owns the field. Neither POST
+    // ever succeeded, so the display must revert to the ORIGINAL
+    // server-confirmed 'suggest' — NOT to A's stale, never-confirmed
+    // 'delayed-auto' (the CR-002 bug: reverting to whatever was on screen
+    // when B was clicked, which was A's unconfirmed optimistic guess).
+    await act(async () => {
+      rejectB(Object.assign(new Error('Bad Request'), { isAxiosError: true, response: { status: 400, data: 'rejected' } }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.settings?.autonomy.exerciseDefaultLevel).toBe('suggest')
+    expect(result.current.settings?.autonomy.effectiveLevel).toBe('suggest')
+    expect(result.current.error).toBe('rejected')
+  })
+
+  it('WR-002 guard is OBSERVABLE (not tautological): auto -> standard (A pending) -> ambient (B resolves, confirmed) -> reject A leaves it at ambient, with no stale error', async () => {
+    mockedGetSettings.mockResolvedValue(dto()) // tierPolicyMode: 'auto'
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.settings).not.toBeNull())
+
+    let rejectA: (reason?: unknown) => void = () => {}
+    mockedSetTierPolicyMode.mockImplementationOnce(
+      () => new Promise((_, reject) => { rejectA = reject }),
+    )
+
+    // A: 'standard' — optimistic, POST A pending.
+    act(() => result.current.setTierPolicyMode('standard'))
+    expect(result.current.settings?.tierPolicyMode).toBe('standard')
+
+    // B: 'ambient' — a NEWER request, resolves successfully and becomes the
+    // confirmed baseline.
+    mockedSetTierPolicyMode.mockResolvedValueOnce(dto({ tierPolicyMode: 'ambient' }))
+    act(() => result.current.setTierPolicyMode('ambient'))
+    await waitFor(() => expect(result.current.settings?.tierPolicyMode).toBe('ambient'))
+
+    // A (stale) rejects. Discarded entirely — must NOT revert to 'auto'
+    // (the value showing when A was issued) and must NOT raise an error over
+    // B's already-successful change (WR-003).
+    await act(async () => {
+      rejectA(Object.assign(new Error('stale'), { isAxiosError: true, response: { status: 500, data: '' } }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.settings?.tierPolicyMode).toBe('ambient')
+    expect(result.current.error).toBeNull()
+  })
+
+  // ---------------------------------------------------------------------
+  // Gate-1 CR-001 — the settings snapshot must be refreshable on demand, so
+  // a sibling mutation of the SAME server-side autonomy state (the kill
+  // switch) or an operator about to look (the flyout opening) is never
+  // served a stale, fetch-once cache.
+  // ---------------------------------------------------------------------
+
+  it('refetch() forces a fresh GET even after the initial one already completed, picking up a clamp applied out-of-band', async () => {
+    mockedGetSettings.mockResolvedValueOnce(dto())
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.settings?.autonomy.safetyClampActive).toBe(false))
+    expect(mockedGetSettings).toHaveBeenCalledTimes(1)
+
+    // The kill switch trips server-side, entirely outside this hook.
+    mockedGetSettings.mockResolvedValueOnce(
       dto({
         autonomy: {
           swampedMode: false,
           generationStopped: false,
-          safetyClampActive: false,
-          degradedReason: null,
+          safetyClampActive: true,
+          degradedReason: 'kill switch engaged',
           exerciseDefaultLevel: 'suggest',
           effectiveLevel: 'suggest',
         },
       }),
     )
-    act(() => result.current.setAutonomyDefault('suggest'))
-    await waitFor(() => expect(result.current.settings?.autonomy.exerciseDefaultLevel).toBe('suggest'))
 
-    await act(async () => {
-      rejectFirst(Object.assign(new Error('stale'), { isAxiosError: true, response: { status: 500, data: '' } }))
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    act(() => result.current.refetch())
 
-    // The stale rejection must NOT revert the newer 'suggest' value back to
-    // the original 'suggest' base — it stays 'suggest' either way, so assert
-    // the FLIP happened (delayed-auto never came back) via the intermediate
-    // read instead: the settings object still reflects the second call's
-    // resolution, not a reversion to some third value.
-    expect(result.current.settings?.autonomy.exerciseDefaultLevel).toBe('suggest')
+    expect(mockedGetSettings).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(result.current.settings?.autonomy.safetyClampActive).toBe(true))
+    expect(result.current.settings?.autonomy.degradedReason).toBe('kill switch engaged')
   })
+
+  it('WR-004: a failed initial GET can be retried via refetch() rather than being a permanent dead end', async () => {
+    mockedGetSettings.mockRejectedValueOnce(new Error('network down'))
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.error).toMatch(/could not be applied/i))
+    expect(result.current.settings).toBeNull()
+
+    mockedGetSettings.mockResolvedValueOnce(dto())
+    act(() => result.current.refetch())
+
+    await waitFor(() => expect(result.current.settings).not.toBeNull())
+    expect(result.current.error).toBeNull()
+    expect(mockedGetSettings).toHaveBeenCalledTimes(2)
+  })
+
 })

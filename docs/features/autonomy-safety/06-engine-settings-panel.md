@@ -138,10 +138,81 @@ registration (the pattern this story mirrors, not replaces).
   `renders a plausible static snapshot with NO network call` (mock), `a different exercise never
   observes another exercise's mutation` (per-exercise scoping), `fetches GET /api/engine/settings once
   per exercise` / `a second hook instance for the SAME exercise does not refire the GET` (live).
-- **Clamp-detection correctness (Gate-2 amendment — `effectiveLevel === exerciseDefaultLevel` does NOT
-  imply "no clamp")** — `EngineSettingsPanel.test.tsx` describe `the clamp indicator (WR-003 trap
-  case)`: `renders the clamp note when safetyClampActive is true, EVEN WHEN effectiveLevel equals
-  exerciseDefaultLevel`, `shows no clamp note when safetyClampActive is false`, `reports "generation
-  fully stopped" from generationStopped alone, not from a null effectiveLevel guess`. The panel derives
-  its clamp indicator from `autonomy.safetyClampActive`/`autonomy.generationStopped` only — never by
-  comparing the two levels.
+- **Clamp-detection correctness (pre-empted, confirmed clean at Gate-1 — `effectiveLevel ===
+  exerciseDefaultLevel` does NOT imply "no clamp")** — `EngineSettingsPanel.test.tsx` describe `the
+  clamp indicator (WR-003 trap case)`: `renders the clamp note when safetyClampActive is true, EVEN
+  WHEN effectiveLevel equals exerciseDefaultLevel`, `shows no clamp note when safetyClampActive is
+  false`, `reports "generation fully stopped" from generationStopped alone, not from a null
+  effectiveLevel guess`. The panel derives its clamp indicator from
+  `autonomy.safetyClampActive`/`autonomy.generationStopped` only — never by comparing the two levels.
+
+### Gate-1 review findings — fixed, this pass (2 Critical + 5 Warnings + 4 Small)
+
+Both traps the brief singled out (the label deriving from `effectiveLevel` verbatim, and the clamp
+indicator deriving from `safetyClampActive`/`generationStopped` only) were confirmed genuinely handled
+from the start. The two Criticals found were the SAME bug class reached a different way — a control
+asserting a state the server never applied — via **staleness** and a **bad revert baseline**, not a
+bad derivation:
+
+- **CR-001 (staleness)** — the live settings snapshot was fetched exactly once per exercise per page
+  load, with no invalidation path, so the sibling kill switch (which mutates the SAME server-side
+  `EngineAutonomyState`) or a server-side degrade could leave this hook reporting "no clamp"
+  indefinitely. Fixed with `useEngineSettings().refetch()` (a forced, unconditional re-GET, no-op under
+  mock): `<EngineControlBar>` calls it whenever `engineControl.mode`/`degraded` changes (skipping the
+  initial mount), and `<EngineSettingsPanel>` calls it on every OPEN TRANSITION. Tests:
+  `useEngineSettings.test.ts` (`refetch() forces a fresh GET even after the initial one already
+  completed, picking up a clamp applied out-of-band`), `EngineControlBar.refetchOnKillSwitch.test.tsx`
+  (wiring: refetches once per kill-switch mode change, not merely on mount),
+  `EngineSettingsPanel.refetchOnOpen.test.tsx` (wiring: refetches on each open TRANSITION, not "each
+  render while open").
+- **CR-002 (bad revert baseline)** — a rejection reverted to the OPTIMISTIC value captured at
+  click-time, which under a rapid re-toggle can itself be another in-flight request's unconfirmed
+  guess — so a double-rejection could leave the panel claiming a posture NEITHER POST ever actually
+  applied. Fixed by tracking the last SERVER-CONFIRMED snapshot separately from the optimistic display,
+  plus a per-exercise sequence number (shared across both mutation kinds) so only the newest issued
+  request's own resolution may touch the display; a stale rejection is discarded entirely (no revert,
+  no error). Test: `useEngineSettings.test.ts` — `CR-002 exact repro: reverts to the TRUE last-confirmed
+  baseline, never a stale click-time optimistic value, when BOTH requests reject` (two
+  never-resolved-until-explicitly-rejected requests; the old logic would have reverted to the first
+  request's never-confirmed value).
+- **WR-001 (`effectiveLevel: null` conflated with "not loaded")** — `EngineControlBar`'s `labelFor` took
+  a flattened, nullable `effectiveLevel`, so "settings not loaded" and "generation fully stopped" both
+  rendered the same (unsuffixed, pre-fix-ambiguous) label. Fixed by passing the FULL `autonomy` snapshot
+  (or `null` while genuinely not loaded) and checking `generationStopped` explicitly, first — the label
+  now reads `ENGINE · LIVE (GENERATION STOPPED)` distinctly. Covered implicitly by
+  `EngineControlBar.test.tsx`'s existing label describe block (unsuffixed only while `autonomy` is
+  `null`) — see `labelFor`'s doc comment for the explicit contract.
+- **WR-002 (tautological stale-rejection test)** — the original test happened to assert a value both
+  the guarded and unguarded code produced, so it passed even with the guard deleted. Replaced with the
+  3-valued `tierPolicyMode` fixture the review suggested (`auto -> standard (pending) -> ambient
+  (resolves, confirmed) -> reject standard` — guarded stays `ambient`, unguarded would revert to
+  `auto`): `useEngineSettings.test.ts` — `WR-002 guard is OBSERVABLE (not tautological): ...`.
+- **WR-003 (a superseded rejection could still raise an error banner over a change that succeeded)** —
+  fixed as part of the CR-002 rework: a stale request's rejection is discarded ENTIRELY (not just
+  "declined to revert the value") — no `error` write either. Proved by the same WR-002 test (asserts
+  `error` stays `null` after the stale rejection).
+- **WR-004 (a failed initial GET was terminal)** — `liveFetchStarted` is now cleared in the `catch`, and
+  the panel's load-error state renders a visible "Retry" button calling the same `refetch()`. Tests:
+  `useEngineSettings.test.ts` (`WR-004: a failed initial GET can be retried via refetch()...`),
+  `EngineSettingsPanel.refetchOnOpen.test.tsx` (`a failed initial GET shows a Retry button that calls
+  the SAME refetch()`).
+- **WR-005 (the engine flyout could obscure a mounted, Tab-focusable persona composer)** — the
+  persona-dock host's `open` (`dockPersonaId !== null`) is independent of the toolstrip's
+  one-flyout-at-a-time `activeToolId`, so activating ENGINE didn't close a dock left open from an
+  earlier persona selection. Fixed with a `useEffect` in `ControllerConsole` that clears
+  `dockPersonaId` whenever the ENGINE tool activates. Test:
+  `ControllerConsole.engineSettingsTool.test.tsx` — `Gate-1 WR-005: activating ENGINE closes an
+  already-open persona-dock host...` (drives a real persona selection via `renderPersonaResults`, then
+  asserts the dock closes on ENGINE activation).
+- **S-001 (`setForTests` re-exported through the production barrel)** — `engine/index.ts` no longer
+  re-exports `engineSettingsStore`; it mirrors `engineControlStore` (also absent from that barrel).
+  Every test that needs the store imports it directly from `./hooks/useEngineSettings`.
+- **S-002 (selected segment conveyed by colour/border alone for sighted users)** — both option groups
+  now render a check-glyph + "(current)" suffix on the selected segment (`SegmentLabel`), in addition to
+  (never instead of) `aria-pressed` and the colour/border treatment. Covered by the existing
+  `aria-pressed` assertions plus the visible text these add.
+- **S-003 (stray blank line in `ControllerConsole.tsx`'s docblock)** — removed.
+- **S-004 (`'(no effective level reported)'` read as an ordinary state)** — reworded to
+  `'CONTRACT VIOLATION: no effective level reported while generation is not stopped.'` so the
+  (unreachable-under-contract) case names itself as a bug if ever seen, rather than reading as silent,
+  ordinary output.
