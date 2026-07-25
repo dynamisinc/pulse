@@ -29,31 +29,47 @@ be needed — out of scope here; flagged as a follow-up, not built speculatively
 
 ## Acceptance Criteria
 
-- [ ] **Given** a staff member navigates to `/staff/login`, **when** the page renders, **then** it shows
+- [x] **Given** a staff member navigates to `/staff/login`, **when** the page renders, **then** it shows
       a COBRA-styled form with **username** and **secret** fields only (no exercise field — see Context).
-- [ ] **Given** the page cannot resolve `GET /api/exercise-context` for the current host, **when** the
+      Verified: `StaffSignInForm` renders exactly two `CobraTextField`s ("Username", "Secret") inside a
+      `ThemeProvider theme={cobraTheme}` mount — no exercise-id field.
+- [x] **Given** the page cannot resolve `GET /api/exercise-context` for the current host, **when** the
       staff member attempts to sign in, **then** the form shows a clear, actionable error ("This address
       isn't configured for staff sign-in — check the URL your planner gave you.") **before** attempting
       `POST /api/auth/staff/login` (never silently sending an empty/guessed `exerciseId`).
-- [ ] **Given** a valid username + secret + the resolved `exerciseId`, **when** submitted, **then** the
+      Verified: `handleSubmit` checks `contextQuery.isPending || contextQuery.isError || !contextQuery.data`
+      and returns (setting `UNRESOLVED_CONTEXT_MESSAGE`) **before** `staffSignIn(...)` is ever called.
+- [x] **Given** a valid username + secret + the resolved `exerciseId`, **when** submitted, **then** the
       returned `{ token, refreshToken?, session }` envelope is handed to `tokenStore` (story 01) and the
       app navigates to `/` (the role-aware entry lands the staff member on their console/evaluator
       surface per `app-shell/01` — this story does not re-decide that).
-- [ ] **Given** a `401` (rejected credential), **when** the response arrives, **then** the form shows one
+      Verified: `staffSignIn({ username, secret, exerciseId })` on success calls `setTokens()` then
+      `navigate('/')`.
+- [x] **Given** a `401` (rejected credential), **when** the response arrives, **then** the form shows one
       generic message ("Those credentials weren't recognized.") and clears only the secret field.
-- [ ] **Given** a `403` (authenticated but not assigned to this exercise — `StaffLoginOutcome.NotAssigned`),
+      Verified: `friendlySignInErrorMessage`'s `case 401` returns `INVALID_CREDENTIALS_MESSAGE`; `secret`
+      is cleared only `if (signInError.status === 401)`.
+- [x] **Given** a `403` (authenticated but not assigned to this exercise — `StaffLoginOutcome.NotAssigned`),
       **when** the response arrives, **then** the form shows a **distinct** message from the 401 case
       ("You're not assigned to this exercise. Contact your planner.") — this is a genuinely different,
       actionable failure and collapsing it into the generic 401 copy would send staff chasing the wrong
       fix.
+      Verified: `case 403` returns the distinct `NOT_ASSIGNED_MESSAGE`; the secret-clear branch is
+      `status === 401` only, so a 403 leaves the form's credentials intact.
 
 ### Cross-cutting
 
-- [ ] **Accessibility (NFR-001):** labelled `<form>` inputs, the secret field masked
+- [x] **Accessibility (NFR-001):** labelled `<form>` inputs, the secret field masked
       (`type="password"`), error states `role="alert"` pairing icon + text (never color alone), a
       submit-in-flight state announced via `aria-live="polite"` — same pattern as `ExerciseSwitcher`.
-- [ ] **Content security (NFR-004/NFR-009):** the secret is never logged, never rendered back, and the
+      Verified: `CobraTextField label=...` on both fields, `type="password"` on the secret field,
+      `SignInAlert` is `role="alert"` pairing `faTriangleExclamation` with text, the submitting block is
+      `role="status" aria-live="polite"`.
+- [x] **Content security (NFR-004/NFR-009):** the secret is never logged, never rendered back, and the
       input is a real `<input type="password">` (not `text`) so it isn't shoulder-surfable by default.
+      Verified: no console output anywhere in `StaffSignInPage.tsx`/`staffSignInService.ts`; the secret
+      field is `type="password"`; `toStaffSignInError()` only ever captures `status`/`serverMessage`
+      (never the request body).
 
 ## Out of Scope
 

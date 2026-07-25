@@ -67,11 +67,14 @@ own a distinct page + service pair under `features/login/` — zero overlap. Wav
 serial integration story (multiple small edits across two worlds' headers) — not parallelized further
 because it is inherently one coherent routing change. Wave 4 is explicitly **not** a normal build wave:
 its code portion is small, but its completion gate is a human running the runbook against a real Azure
-deployment (see story 06 Technical Notes) — do not schedule it inside an unattended fan-out.
+deployment (see story 06 Technical Notes) — do not schedule it inside an unattended fan-out. **Wave 4 is
+the last wave: this feature is complete at four waves.** A fifth wave was briefly planned for the
+participant persona binding, which has since been relocated to `identity-auth-roles/10` (#342) — see
+`feature.md`'s note on why it never belonged to this feature's scope.
 
 ### Integration seam (orchestrator-owned — never a wave story)
 
 | Seam | File(s) | Rule |
 |------|---------|------|
-| Backend composition root | `src/Pulse.WebApi/Program.cs` | Story 05 exports its own `AddOpsBootstrap()`/`MapBootstrapEndpoints()`; the orchestrator wires the one-line calls, same pattern as every other B2 slice. No new middleware ordering constraint (the bootstrap endpoint needs no exercise-scope/session middleware — its own header secret is the only gate). |
+| Backend composition root | `src/Pulse.WebApi/Program.cs` | Story 05 exports its own `AddOpsBootstrap()`/`MapBootstrapEndpoints()`; the orchestrator wires the one-line calls, same pattern as every other B2 slice. No new middleware ordering constraint (the bootstrap endpoint needs no exercise-scope/session middleware — its own header secret is the only gate). **Any later story extending this slice** (e.g. `identity-auth-roles/10`, the relocated persona binding) must either fold its route into the existing `MapBootstrapEndpoints()` mapping — preferred, since it makes the wiring unmissable — or treat a new `Map*` call as this same orchestrator-owned serial edit, never wired by the story's own PR. This is not a hypothetical: story 05 itself merged fully green (PR #310) with its `AddOpsBootstrap()`/`MapBootstrapEndpoints()` wiring **never executed** in `Program.cs`, leaving the endpoint dead at 404 until the follow-up fix (#317, tracked from #308) — the slice's self-mapped `TestServer` tests stayed green and masked it. Such a story's tests must include a composition-root wiring guard asserting the route is mapped in the **real** app, not only in a `TestServer` the test project builds itself. |
 | Frontend composition root | `src/frontend/src/App.tsx` | This feature's route changes live inside `features/app-shell/routes.tsx`'s exported route table (already the orchestrator-owned splice point per `app-shell/implementation.md`) — no story here edits `App.tsx` directly. |

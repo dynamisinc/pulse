@@ -24,30 +24,44 @@ there) — see `docs/features/login/feature.md` Design notes for why the split l
 
 ## Acceptance Criteria
 
-- [ ] **Given** a successful login response from any of the three login endpoints (`/api/auth/login`,
+- [x] **Given** a successful login response from any of the three login endpoints (`/api/auth/login`,
       `/api/auth/staff/login`, `/api/auth/shared` — all three return the same `{ token, refreshToken?,
       session }` envelope), **when** the caller hands that envelope to the new token store, **then** the
       access token and refresh token (if present) are persisted for the session's lifetime and are
       retrievable by the shared axios client on every subsequent request.
-- [ ] **Given** a stored access token, **when** any request goes out through the shared axios client
+      Verified: `core/auth/tokenStore.ts`'s `setTokens()` writes both keys to `sessionStorage` (clearing
+      the refresh key when absent, never a stale one); `core/services/api.ts`'s request interceptor reads
+      `getAccessToken()` on every call.
+- [x] **Given** a stored access token, **when** any request goes out through the shared axios client
       (`core/services/api.ts`), **then** it carries an `Authorization: Bearer <token>` header; a request
       made with **no** stored token carries no `Authorization` header (never a stale/empty one).
-- [ ] **Given** a request that comes back `401`, **when** the client has a stored refresh token, **then**
+      Verified: `api.ts` lines 86-95 (request interceptor) — only sets the header when `getAccessToken()`
+      returns a token and the caller hasn't already supplied one.
+- [x] **Given** a request that comes back `401`, **when** the client has a stored refresh token, **then**
       it attempts **exactly one** silent `POST /api/auth/refresh`, and on success stores the rotated
       tokens and retries the original request once; **on refresh failure** (401/network error), it clears
       both tokens and does not retry further (no refresh loop; the refresh/login endpoints themselves are
       excluded from this retry so a failing refresh can't recursively trigger itself).
-- [ ] **Given** `SessionProvider` fails to resolve a session (401 with no usable refresh, or any other
+      Verified: `api.ts`'s response interceptor (`_pulseRefreshRetried` flag caps the retry at one),
+      `performSilentRefresh()` + `silentRefresh()` (coalesces concurrent 401s onto one in-flight call),
+      `NO_REFRESH_RETRY_PATHS` excludes `/auth/refresh`, `/auth/logout`, and all three login endpoints.
+- [x] **Given** `SessionProvider` fails to resolve a session (401 with no usable refresh, or any other
       resolution failure), **when** that failure occurs, **then** it renders a redirect to the login entry
       (`LOGIN_PATH`, `/login`) instead of rendering nothing — still fail-closed for **content** (no
       descendant ever mounts), now visible instead of blank.
-- [ ] **Given** a call to `POST /api/auth/logout`, **when** it completes (or fails — logout always
+      Verified (independently confirmed pre-session): `core/auth/session.tsx:104`.
+- [x] **Given** a call to `POST /api/auth/logout`, **when** it completes (or fails — logout always
       succeeds client-side per the backend's idempotent `204`), **then** both stored tokens are cleared
       immediately, before the network call resolves is acceptable but the tokens must not survive the
       call either way.
-- [ ] No token (access or refresh) is ever written to `console.log`/`console.error`, and the interceptor's
+      Verified: `core/auth/logout.ts`'s `logout()` captures the token, calls `clearTokens()`, **then**
+      awaits the `POST /auth/logout` inside a `try`/`catch` that swallows any failure.
+- [x] No token (access or refresh) is ever written to `console.log`/`console.error`, and the interceptor's
       own error logging (mirroring the existing `[session]`/`[exerciseContext]` console-signal precedent)
       never includes the raw token value.
+      Verified: `api.ts`/`tokenStore.ts`/`logout.ts` have no console output at all; `session.tsx`'s
+      `console.error` explicitly logs only `error.message` (never the raw `AxiosError`, whose
+      `config.headers` would carry the bearer token) — see its inline comment at line 90.
 
 ## Out of Scope
 
