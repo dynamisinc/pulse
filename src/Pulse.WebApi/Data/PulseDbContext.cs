@@ -136,6 +136,22 @@ public class PulseDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.ExerciseId).IsRequired();
             entity.HasIndex(e => e.ExerciseId);
+
+            // Handle uniqueness PER EXERCISE, never globally (docs/01-platform-core-isolation.md §7 Q3,
+            // resolved in favour of the recommended per-exercise scope; see backend-host/03). Two different
+            // exercises may each run a "@FulcoEM" — that is the point of an isolated world — but within ONE
+            // exercise a handle identifies exactly one persona, which PersonaCastSeeder's idempotency read and
+            // every by-handle resolver already assume. Same shape as Account.Username above.
+            //
+            // Case-insensitivity comes from the model-wide SQL_Latin1_General_CP1_CI_AS collation set above:
+            // the index key comparison uses the column's collation, so "mvega_fh" and "MVega_FH" COLLIDE
+            // rather than coexisting — consistent with the OrdinalIgnoreCase matching the seeder does in
+            // memory and with the CI `==`/`Contains` the resolvers do on the server.
+            //
+            // The MaxLength is load-bearing, not cosmetic: nvarchar(max) is not index-key eligible in SQL
+            // Server, so the migration narrows this column to make the index possible at all.
+            entity.Property(e => e.Handle).HasMaxLength(256);
+            entity.HasIndex(e => new { e.ExerciseId, e.Handle }).IsUnique();
         });
 
         modelBuilder.Entity<Post>(entity =>

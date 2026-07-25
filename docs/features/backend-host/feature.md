@@ -34,6 +34,7 @@ Plan / composition-root / gate contracts this feature's `implementation.md` foll
 |---|-------|----------------|--------|-------|
 | 01 | WebApi host bootstrap (composition root, health, CORS, App Insights) | none directly — unblocks COR-001/050, XC-004, NFR-006 | Complete | #268 |
 | 02 | Persistence: `PulseDbContext` + EF Core walking-skeleton entities | COR-001 (schema precondition), XC-004 (durable event store), COR domain model §3.1 (partial) | Complete | #269 |
+| 03 | Persona handle uniqueness: the `(ExerciseId, Handle)` unique index (resolves §7 Q3) | COR-001 (per-exercise scope), COR-020/022 (the policy the authoring stories validate against) | Complete | — |
 
 ## Dependencies
 None upstream — this is Phase B0, the serial prerequisite for the rest of the Backend Roadmap. Reuses the

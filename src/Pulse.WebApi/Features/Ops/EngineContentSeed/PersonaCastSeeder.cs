@@ -152,13 +152,18 @@ public sealed class PersonaCastSeeder
 
         // Idempotency read: the ops seam has no resolved request scope, so bypass the fail-closed-to-empty
         // global filter and confine the read with an EXPLICIT ExerciseId predicate (still one exercise only).
-        // The CI collation makes the handle IN-match case-insensitive, matching a future (ExerciseId, Handle)
-        // uniqueness contract.
+        // The CI collation makes the handle IN-match case-insensitive, matching the (ExerciseId, Handle)
+        // uniqueness contract now enforced by IX_Personas_ExerciseId_Handle (backend-host/03) — so this read
+        // returns at most ONE row per catalog handle and the idempotency below is sound, not best-effort.
         var existing = await _dbContext.Personas
             .IgnoreQueryFilters()
             .Where(persona => persona.ExerciseId == exerciseId && handles.Contains(persona.Handle))
             .ToListAsync(cancellationToken);
 
+        // The GroupBy stays now that the unique index exists: it is what keeps the ToDictionary from THROWING on
+        // a same-handle pair, and it costs one pass over six rows. Under the index that pair is unreachable, so
+        // this is a deliberate belt-and-braces layer, not a live code path — dropping it would trade a
+        // constraint-guaranteed no-op for a crash if the index were ever dropped or the read widened.
         var existingByHandle = existing
             .GroupBy(persona => persona.Handle, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
