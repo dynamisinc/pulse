@@ -14,6 +14,21 @@
  * shapes here are locked; do not add/rename fields without checking those
  * consumers.
  *
+ * FOLLOW-GRAPH COUNT FIELDS (profiles-social-graph/02 + backend story 07,
+ * SOC-051/SOC-054): `followerCount` is the DISPLAYED count (magnitude + real
+ * inbound follow edges); `followingCount` is the real outbound-edge count;
+ * `audienceMagnitude` is the raw SOC-054 simulated-crowd number
+ * `followerCount` is composed from. All three now ride the wire
+ * (`GET /api/personas`) on BOTH world shapes — they carry no archetype tell,
+ * unlike `personaType`. They are declared OPTIONAL here (not narrowed at the
+ * read seam the way `bio` is) because the Wave-1 mock cast
+ * (`personaService.SEEDED_PERSONAS` / `seedCast`) does not populate
+ * `followingCount`/`audienceMagnitude` yet — only `followerCount` — and
+ * making them required would force an unrelated mock-fixture rewrite outside
+ * this story's scope. A real backend response supplies both; treat their
+ * absence as "not yet known" (e.g. render nothing / a loading dash), never as
+ * zero.
+ *
  * Design decisions consumed downstream (not rendered here — this module is
  * pure data/logic, no UI, no COBRA):
  * - R-004 (avatar treatment): `kind` distinguishes human (duotone silhouette)
@@ -143,8 +158,24 @@ export interface Persona {
   readonly initials: string
   readonly bio?: string
   readonly audienceBand: AudienceBand
-  /** Derived from `audienceBand` at seed time (COR-021, SOC-054) — never authored directly. */
+  /** Derived from `audienceBand` at seed time (COR-021, SOC-054) — never authored directly.
+   * This is the DISPLAYED count (magnitude + real inbound follow edges, backend story 07). */
   readonly followerCount: number
+  /**
+   * The real outbound follow-edge count (profiles-social-graph/02+07,
+   * SOC-051) — how many accounts THIS persona follows. Optional: see the
+   * module header's "FOLLOW-GRAPH COUNT FIELDS" note. Absence means "not yet
+   * known", never zero.
+   */
+  readonly followingCount?: number
+  /**
+   * The raw SOC-054 audience-magnitude number `followerCount` is composed
+   * from (profiles-social-graph/05's `audienceReach()`/`FollowerList` consume
+   * this once story 05 wires it live). Optional: see the module header's
+   * "FOLLOW-GRAPH COUNT FIELDS" note. Absence means "not yet known", never
+   * zero.
+   */
+  readonly audienceMagnitude?: number
   /** Scenario ISO instant PREDATING the exercise (rendered later via COR-053; never wall-clock). */
   readonly joinedAt: string
 }
