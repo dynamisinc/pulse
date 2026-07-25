@@ -24,6 +24,7 @@ public static class ReactionLoopHostExtensions
     ///   <item><see cref="GenerateStage"/> / <see cref="MeasureStage"/> — stateless stages (singletons).</item>
     ///   <item><see cref="ReactionLoopDriver"/> — the per-tick stage driver (singleton; holds per-exercise counters).</item>
     ///   <item><see cref="IReactionLoopRegistry"/> — the active-loop registry (singleton).</item>
+    ///   <item><see cref="EngineTierPolicyRegistry"/> — the per-exercise tier-policy override the driver reads (singleton, TryAdd).</item>
     ///   <item><see cref="IEnginePublishService"/> — the single publish funnel (singleton; always builds its own
     ///   server-authoritative scope) that story 02's approve path also calls.</item>
     ///   <item><see cref="ReactionLoopHost"/> — the hosted <see cref="Microsoft.Extensions.Hosting.BackgroundService"/>.</item>
@@ -43,6 +44,11 @@ public static class ReactionLoopHostExtensions
         services.TryAddSingleton<ReactionLoopDriver>();
         services.TryAddSingleton<IReactionLoopRegistry, ReactionLoopRegistry>();
         services.TryAddSingleton<ReactionLoopHostOptions>();
+
+        // The per-exercise model-tier-policy override the driver reads per burst (autonomy-safety story 05).
+        // TryAdd so this and AddEngineReview (which the settings POST writes through) converge on ONE singleton
+        // whichever is wired first — a detached registry would silently drop a controller's tier choice.
+        services.TryAddSingleton<EngineTierPolicyRegistry>();
 
         // The single publish funnel (SOC-003) — a singleton that establishes its own per-exercise scope for
         // every publish unit of work (COR-001), so both the loop and story 02's approve share one path.

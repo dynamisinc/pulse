@@ -178,6 +178,54 @@ public static class EngineEventPayloads
         public required double Amplification { get; init; }
     }
 
+    /// <summary>
+    /// Payload for <see cref="EngineEventTypes.AutonomyDefaultChanged"/> — the exercise autonomy default's
+    /// from→to plus whether a safety clamp is still holding underneath (so the audit shows a raise that was
+    /// deliberately NOT effective yet, §8.2: a default change never lifts a kill switch).
+    /// </summary>
+    public sealed record AutonomyDefaultChanged
+    {
+        /// <summary>The exercise default level before the change.</summary>
+        [JsonPropertyName("fromLevel")]
+        [JsonConverter(typeof(AutonomyLevelJsonConverter))]
+        public required AutonomyLevel FromLevel { get; init; }
+
+        /// <summary>The exercise default level after the change.</summary>
+        [JsonPropertyName("toLevel")]
+        [JsonConverter(typeof(AutonomyLevelJsonConverter))]
+        public required AutonomyLevel ToLevel { get; init; }
+
+        /// <summary>Whether a safety clamp (kill switch / degraded mode) is still clamping autonomy below the new default.</summary>
+        [JsonPropertyName("safetyClampActive")]
+        public required bool SafetyClampActive { get; init; }
+
+        /// <summary>The scenario minute the change was made at (COR-050/053).</summary>
+        [JsonPropertyName("scenarioMinute")]
+        public required int ScenarioMinute { get; init; }
+    }
+
+    /// <summary>
+    /// Payload for <see cref="EngineEventTypes.TierPolicyChanged"/> — the exercise tier-policy mode's from→to.
+    /// Carries only the tier ROLE selection; the governed tier→model/deployment mapping is not settable at
+    /// runtime and is therefore never part of this record.
+    /// </summary>
+    public sealed record TierPolicyChanged
+    {
+        /// <summary>The tier-policy mode before the change (<c>auto</c> / <c>standard</c> / <c>ambient</c>).</summary>
+        [JsonPropertyName("fromMode")]
+        [JsonConverter(typeof(TierPolicyModeJsonConverter))]
+        public required TierPolicyMode FromMode { get; init; }
+
+        /// <summary>The tier-policy mode after the change.</summary>
+        [JsonPropertyName("toMode")]
+        [JsonConverter(typeof(TierPolicyModeJsonConverter))]
+        public required TierPolicyMode ToMode { get; init; }
+
+        /// <summary>The scenario minute the change was made at (COR-050/053).</summary>
+        [JsonPropertyName("scenarioMinute")]
+        public required int ScenarioMinute { get; init; }
+    }
+
     /// <summary>Payload for <see cref="EngineEventTypes.StorylineStateChanged"/> — from→to phase + cause.</summary>
     public sealed record StorylineStateChanged
     {

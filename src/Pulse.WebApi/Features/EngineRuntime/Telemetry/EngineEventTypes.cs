@@ -31,6 +31,22 @@ public static class EngineEventTypes
     public const string StorylineStateChanged = "storyline.state_changed";
 
     /// <summary>
+    /// <c>engine.autonomy_default_changed</c> — a controller changed the exercise's AUTONOMY DEFAULT at runtime
+    /// (autonomy-safety story 05). Additive vocabulary, reviewer-approved: the autonomy state itself is process
+    /// memory, so this event is the only record of the change that survives a restart. Distinct from the
+    /// frontend's own <c>engine.autonomy_changed</c> emit (<c>useEngineControl.ts</c>), which continues
+    /// unchanged — this is the server-side, server-timed companion, not a replacement.
+    /// </summary>
+    public const string AutonomyDefaultChanged = "engine.autonomy_default_changed";
+
+    /// <summary>
+    /// <c>engine.tier_policy_changed</c> — a controller changed the exercise's MODEL-TIER POLICY mode
+    /// (<c>auto</c> / <c>standard</c> / <c>ambient</c>) at runtime (autonomy-safety story 05). Records only the
+    /// tier ROLE selection; the governed tier→deployment mapping is never settable at runtime (NFR-005).
+    /// </summary>
+    public const string TierPolicyChanged = "engine.tier_policy_changed";
+
+    /// <summary>
     /// The v1.1 rumor-lineage event family (E8 architecture §10/§11). RESERVED now so the rumor model
     /// (<c>rumor-model</c>, v1.1) needs no envelope migration when it lands — these names + the
     /// <c>rumorRef</c>/<c>mutationOf</c> lineage fields (see <see cref="EngineEventPayloads"/>) are already

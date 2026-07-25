@@ -8,8 +8,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Autonomy.Services;
+using Pulse.Core.Features.Generation.Models;
+using Pulse.Core.Features.Generation.Services;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
@@ -436,6 +440,7 @@ public sealed class EngineReviewSafetyInvariantTests
 
             Publisher = new RecordingPublishService();
             Registry = new EngineAutonomyRegistry();
+            TierPolicy = new EngineTierPolicyRegistry();
 
             Service = new EngineReviewService(
                 new FakeReviewStore(items),
@@ -445,7 +450,11 @@ public sealed class EngineReviewSafetyInvariantTests
                 new EngineTelemetryEmitter(),
                 Publisher,
                 new RecordingBroadcaster(),
-                Registry);
+                Registry,
+                TierPolicy,
+                new FakeGenerationProvider(),
+                Options.Create(new GenerationOptions()),
+                NullLogger<EngineReviewService>.Instance);
         }
 
         public EngineReviewService Service { get; }
@@ -453,6 +462,8 @@ public sealed class EngineReviewSafetyInvariantTests
         public RecordingPublishService Publisher { get; }
 
         public EngineAutonomyRegistry Registry { get; }
+
+        public EngineTierPolicyRegistry TierPolicy { get; }
 
         public void Advance(int minutes) => _time.Advance(TimeSpan.FromMinutes(minutes));
 
