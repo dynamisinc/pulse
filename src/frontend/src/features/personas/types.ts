@@ -20,14 +20,22 @@
  * `audienceMagnitude` is the raw SOC-054 simulated-crowd number
  * `followerCount` is composed from. All three now ride the wire
  * (`GET /api/personas`) on BOTH world shapes — they carry no archetype tell,
- * unlike `personaType`. They are declared OPTIONAL here (not narrowed at the
- * read seam the way `bio` is) because the Wave-1 mock cast
- * (`personaService.SEEDED_PERSONAS` / `seedCast`) does not populate
- * `followingCount`/`audienceMagnitude` yet — only `followerCount` — and
- * making them required would force an unrelated mock-fixture rewrite outside
- * this story's scope. A real backend response supplies both; treat their
- * absence as "not yet known" (e.g. render nothing / a loading dash), never as
- * zero.
+ * unlike `personaType`.
+ *
+ * `followingCount`/`audienceMagnitude` are declared OPTIONAL here for ONE
+ * reason ONLY — avoiding a churn edit to the ~15 files (several owned by
+ * parallel builders: `PersonaPicker`, `PersonaContextPanel`,
+ * `PersonaComposer`, and their tests) that construct `Persona`/`StaffPersona`
+ * object literals and would otherwise need updating the moment these fields
+ * became required. It is NOT because either value is ever genuinely absent
+ * in practice: the live backend (story 07) always returns both, and the
+ * Wave-1 mock cast (`seedCast.ts`) populates both on every seeded instance
+ * too (see that module's "MOCK/LIVE PARITY" note) — `followerCount ===
+ * audienceMagnitude` and `followingCount === 0` for a freshly seeded
+ * instance is an asserted invariant (`seedCast.test.ts`). **Promote both to
+ * required once the parallel literal-construction sites have caught up** —
+ * until then, do not write a defensive "what if this is undefined" branch
+ * expecting it to ever actually trigger from a real read path; it can't.
  *
  * Design decisions consumed downstream (not rendered here — this module is
  * pure data/logic, no UI, no COBRA):
