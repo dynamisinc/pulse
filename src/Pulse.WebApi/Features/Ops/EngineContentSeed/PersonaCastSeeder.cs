@@ -106,6 +106,31 @@ public sealed class PersonaCastSeeder
     private const string MegaBand = "mega";
 
     /// <summary>
+    /// The CLOSED frontend <c>PersonaType</c> union (<c>features/personas/types.ts:36-43</c>) — the only
+    /// archetypes an authored persona may carry.
+    /// </summary>
+    /// <remarks>
+    /// ORDINAL, like <see cref="AudienceBandFloors"/>, and validated at type load for the same
+    /// safety reason: <see cref="DeriveJoinedAt"/> singles out <see cref="BadActorProfileType"/> to backdate
+    /// an impersonator by only 3-6 days. A typo'd or mis-cased archetype (<c>"Bad-Actor"</c>,
+    /// <c>"bad_actor"</c>) that merely fell through to the <c>else</c> branch would ship the SOC-052 lookalike
+    /// with an ESTABLISHED, up-to-two-year-old account — the "joined this week" tell inverted, silently. So
+    /// an unknown archetype is a hard failure at both the authoring boundary and the derivation, never a
+    /// quiet default.
+    /// </remarks>
+    private static readonly HashSet<string> KnownProfileTypes =
+        new(StringComparer.Ordinal)
+        {
+            NewsOutletProfileType,
+            AgencyProfileType,
+            "weather-scientific",
+            CitizenProfileType,
+            InfluencerProfileType,
+            "business",
+            BadActorProfileType,
+        };
+
+    /// <summary>
     /// The approximate follower floor per audience-magnitude band (SOC-054) — a verbatim mirror of the
     /// frontend mock's <c>BAND_BASE</c> table (<c>features/personas/seedCast.ts</c>), so a live-seeded
     /// exercise and the mock agree on believable numbers for the same handle/band pairing.
@@ -272,15 +297,35 @@ public sealed class PersonaCastSeeder
     ];
 
     /// <summary>
-    /// Authoring-time guard: validates the developer-authored <see cref="Catalog"/> the moment this type is
-    /// first touched, so a mistake surfaces on the FIRST test/boot that uses the seeder rather than as an
-    /// opaque truncation error at <c>SaveChangesAsync</c> (or, worse, a silently over-long value that only
-    /// fails against a real SQL Server in CI). Checks every bio against the <see cref="Persona.MaxBioLength"/>
-    /// column bound and every band against the closed SOC-054 vocabulary.
+    /// Authoring-time guard: validates the developer-authored <see cref="Catalog"/> and the band table the
+    /// moment this type is first touched, so a mistake surfaces on the FIRST test/boot that uses the seeder
+    /// rather than as an opaque truncation error at <c>SaveChangesAsync</c> — or, far worse, as a silently
+    /// wrong SOC-052 join date nobody notices. Checks, for every entry: the bio against the
+    /// <see cref="Persona.MaxBioLength"/> column bound, the band against the closed SOC-054 vocabulary, and
+    /// the archetype against the closed <see cref="KnownProfileTypes"/> union. Also asserts every band floor
+    /// is positive.
     /// </summary>
-    /// <exception cref="InvalidOperationException">A catalog bio exceeds the stored column's bound.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A catalog bio exceeds the stored column's bound, a catalog archetype is outside the closed union, or a
+    /// band floor is not positive.
+    /// </exception>
     static PersonaCastSeeder()
     {
+        foreach (var (band, floor) in AudienceBandFloors)
+        {
+            // A zero/negative floor would let DeriveAudienceMagnitude return 0 for a real, authored persona —
+            // which would collide with the migration's column default and RESURRECT the sentinel ambiguity
+            // BackfillSentinelPresentationFields depends on being unreachable (a sentinel row would then be
+            // indistinguishable from an authored one, and could be silently rewritten).
+            if (floor <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Audience band '{band}' has a floor of {floor}. Every band floor must be POSITIVE: a zero "
+                    + "floor would make an authored magnitude of 0 possible, colliding with the column default "
+                    + "the sentinel backfill treats as 'never authored'.");
+            }
+        }
+
         foreach (var spec in Catalog)
         {
             if (spec.Bio.Length > Persona.MaxBioLength)
@@ -290,8 +335,19 @@ public sealed class PersonaCastSeeder
                     + $"stored column bound of {Persona.MaxBioLength}. Shorten the authored bio.");
             }
 
-            // Throws ArgumentOutOfRangeException on an unknown band — an authored band typo fails here too.
+            if (!KnownProfileTypes.Contains(spec.ProfileType))
+            {
+                throw new InvalidOperationException(
+                    $"Persona catalog entry '{spec.Handle}' declares archetype '{spec.ProfileType}', which is not "
+                    + "in the closed PersonaType union. An unrecognized archetype would silently derive an "
+                    + "ESTABLISHED join date for what may be a bad actor — the SOC-052 'joined this week' tell "
+                    + "inverted. Use one of: " + string.Join(", ", KnownProfileTypes.Order(StringComparer.Ordinal)) + ".");
+            }
+
+            // Both derivations throw on a value outside their closed vocabulary, so an authored band or
+            // archetype typo fails here too, at type load.
             _ = DeriveAudienceMagnitude(spec.Band, spec.Handle);
+            _ = DeriveJoinedAt(spec.ProfileType, spec.Handle);
         }
     }
 
@@ -370,6 +426,7 @@ public sealed class PersonaCastSeeder
             {
                 // Idempotent re-run: reuse the existing row's id, never overwrite an AUTHORED value.
                 BackfillSentinelPresentationFields(row, spec, bio, magnitude, joinedAt);
+                ReconcileCastableOneWay(row, spec);
                 seeded.Add(new SeededPersona(row.Id, dossier, Created: false, Castable: row.Castable));
                 continue;
             }
@@ -446,6 +503,46 @@ public sealed class PersonaCastSeeder
     }
 
     /// <summary>
+    /// Reconciles a reused row's <see cref="Persona.Castable"/> gate with the catalog in ONE direction only:
+    /// a row that is castable while the catalog says it must NOT be is closed (<c>true → false</c>). The
+    /// reverse is never done — a <c>false</c> row is left alone whatever the catalog says.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why reconcile at all (Gate-1 WR-B).</b> <see cref="Persona.Castable"/> arrived one commit after the
+    /// bad-actor handles did, so a database seeded by that intermediate build holds
+    /// <c>@FairhavenWaterUpd</c>/<c>@TheScoopHQ</c> rows carrying the column DEFAULT (<c>true</c>). Such a row
+    /// is not a sentinel row (its magnitude is a real derived value), so the presentation backfill cannot see
+    /// it, and reuse would otherwise preserve the wrong value forever: the gate would silently not hold and
+    /// the engine could voice the impersonator. Deployed databases are unaffected (they predate both handles,
+    /// so both personas are CREATED with an explicit <c>false</c>), but a dev/CI database is exactly where a
+    /// silently-open safety gate goes unnoticed.
+    /// </para>
+    /// <para>
+    /// <b>Why only one direction.</b> The seeder may only ever TIGHTEN this gate. Closing a wrongly-open gate
+    /// is fail-safe: the worst case is an engine voice withheld, which is visible and recoverable. Opening a
+    /// closed one would hand the engine a voice a human deliberately withheld, which is neither.
+    /// </para>
+    /// <para>
+    /// <b>The cost, stated plainly.</b> This DOES override a scenario that deliberately opted the lookalike
+    /// IN by flipping the column to <c>true</c>: the next re-seed closes it again. That is accepted while the
+    /// opt-in has no authoring surface (there is no UI for it — see <c>engine-content-seed</c>'s standing
+    /// "no scenario toggle" note); when a real opt-in is built it must live somewhere the seeder does not
+    /// own — a scenario-level allowlist consulted here — rather than in this column alone. An opt-OUT of an
+    /// ordinarily-castable persona is preserved, since this method never sets <c>Castable = true</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The existing row being reused.</param>
+    /// <param name="spec">The catalog spec for this handle.</param>
+    private static void ReconcileCastableOneWay(Persona row, PersonaSeedSpec spec)
+    {
+        if (row.Castable && !spec.Castable)
+        {
+            row.Castable = false;
+        }
+    }
+
+    /// <summary>
     /// The fixed pre-exercise SCENARIO epoch every seeded join instant precedes — the same constant the
     /// frontend mock counts back from (<c>seedCast.ts</c>'s <c>SEED_EPOCH_MS</c>,
     /// <c>2026-06-15T12:00:00Z</c>), shared with <see cref="Persona.DefaultJoinedAt"/> so exactly one epoch
@@ -489,13 +586,34 @@ public sealed class PersonaCastSeeder
     /// joins RECENTLY (3-6 days before the epoch; the lookalike "joined this week" tell), every other
     /// archetype joins well before the exercise (~3 months to ~2 years). Never reads the server clock.
     /// </summary>
+    /// <remarks>
+    /// <b>An unrecognized archetype THROWS; it never falls through to the established-account branch.</b>
+    /// The <c>else</c> here is not a safe default: it is the two-year-old-account branch, so a mis-cased or
+    /// typo'd <c>"Bad-Actor"</c>/<c>"bad_actor"</c> quietly reaching it would ship the SOC-052 lookalike with
+    /// an established history and invert the "joined this week" tell — the exact failure this derivation
+    /// exists to produce correctly. The archetype vocabulary is therefore validated ordinally and closed,
+    /// symmetrically with <see cref="DeriveAudienceMagnitude"/>'s band check.
+    /// </remarks>
     /// <param name="personaProfileType">The authored frontend <c>PersonaType</c> union value.</param>
     /// <param name="handle">The persona's stored handle (without a leading <c>@</c>).</param>
     /// <returns>The derived scenario join instant, always strictly before <see cref="SeedEpoch"/>.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// The archetype is outside the closed <c>PersonaType</c> union (including a mis-cased variant).
+    /// </exception>
     public static DateTimeOffset DeriveJoinedAt(string personaProfileType, string handle)
     {
         ArgumentNullException.ThrowIfNull(personaProfileType);
         ArgumentNullException.ThrowIfNull(handle);
+
+        if (!KnownProfileTypes.Contains(personaProfileType))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(personaProfileType),
+                personaProfileType,
+                "Unknown persona archetype — the PersonaType union is closed and case-sensitive. Falling "
+                + "through to the established-account branch would silently give a bad actor a two-year-old "
+                + "account (SOC-052 inverted).");
+        }
 
         var hash = StableHash(handle);
         var offsetDays = string.Equals(personaProfileType, BadActorProfileType, StringComparison.Ordinal)
@@ -568,10 +686,16 @@ public sealed class PersonaCastSeeder
 /// (drives story 03's created-vs-reused audit counts).
 /// </param>
 /// <param name="Castable">
-/// Whether the ENGINE may voice this persona (<see cref="Persona.Castable"/>, read from the persisted row on
-/// a reuse). The composing caller MUST filter on this when it builds the reaction loop's eligible cast: a
-/// non-castable persona (the SOC-052 lookalike, the low-credibility outlet) exists as a row and is returned
-/// here, but must never be handed to the engine as a voice until a scenario opts in. Server-side only —
-/// never projected onto a participant-facing DTO.
+/// Whether the ENGINE may voice this persona (<see cref="Persona.Castable"/>). The composing caller MUST
+/// filter on this when it builds the reaction loop's eligible cast: a non-castable persona (the SOC-052
+/// lookalike, the low-credibility outlet) exists as a row and is returned here, but must never be handed to
+/// the engine as a voice until a scenario opts in. Server-side only — never projected onto a
+/// participant-facing DTO.
+/// <para>
+/// On a CREATE this is the catalog's value; on a REUSE it is the persisted row's value AFTER the seeder's
+/// one-way reconciliation (a row that is castable while the catalog says it must not be is closed first — see
+/// <c>PersonaCastSeeder.ReconcileCastableOneWay</c>). So this always reports the value the row actually
+/// carries after the call, and it can only ever be as restrictive as the catalog, never more permissive.
+/// </para>
 /// </param>
 public sealed record SeededPersona(Guid InstanceId, PersonaDossier Dossier, bool Created, bool Castable);

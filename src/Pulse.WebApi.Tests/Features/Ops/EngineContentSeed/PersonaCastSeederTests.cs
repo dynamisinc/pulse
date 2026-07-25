@@ -332,6 +332,83 @@ public sealed class PersonaCastSeederTests
     }
 
     [RequiresDockerFact]
+    public async Task SeedAsync_ReusedRow_ReportsAndPersistsCastability_ClosingAWronglyOpenGate()
+    {
+        // WR-B. A database seeded by the intermediate build (bad-actor handles present, Castable column not
+        // yet) holds a lookalike row carrying the column DEFAULT true. It is NOT a sentinel row (its
+        // magnitude is a real derived value), so the presentation backfill cannot see it — reuse alone would
+        // preserve the wrongly-open gate forever and let the engine voice the impersonator.
+        var exerciseId = Guid.NewGuid();
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Personas.Add(new Persona
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exerciseId,
+                DisplayName = "Fairhaven Water Update",
+                Handle = "FairhavenWaterUpd",
+                Kind = "org",
+                Verified = false,
+                Bio = "Real-time Fairhaven water updates. Stay informed.",
+                PersonaType = "bad-actor",
+                AudienceBand = "nano",
+                AudienceMagnitude = PersonaCastSeeder.DeriveAudienceMagnitude("nano", "FairhavenWaterUpd"),
+                JoinedAt = PersonaCastSeeder.DeriveJoinedAt("bad-actor", "FairhavenWaterUpd"),
+                Castable = true, // the intermediate build's column default — the wrongly-open gate
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var seeded = await SeedAndSaveAsync(exerciseId);
+
+        var reused = seeded.Single(p => !p.Created);
+        reused.Castable.Should().BeFalse(
+            "the REPORTED castability of a reused row must reflect the reconciled value — the composing "
+            + "caller filters the engine's eligible cast on exactly this (WR-B)");
+
+        var row = (await ReadPersonasAsync(exerciseId)).Single(r => r.Handle == "FairhavenWaterUpd");
+        row.Castable.Should().BeFalse(
+            "the seeder closes a gate the catalog says must be closed, so the fix survives the next re-seed too");
+    }
+
+    [RequiresDockerFact]
+    public async Task SeedAsync_ReusedRow_NeverReOpensAGateAHumanClosed()
+    {
+        // The reconciliation is ONE-WAY: it may only tighten. An ordinarily-castable persona that someone
+        // deliberately opted OUT stays out — the seeder never hands the engine a voice a human withheld.
+        var exerciseId = Guid.NewGuid();
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Personas.Add(new Persona
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exerciseId,
+                DisplayName = "Marisol Vega",
+                Handle = "mvega_fh",
+                Kind = "human",
+                Verified = false,
+                Bio = "Fairhaven east side. Mom, nurse, neighbor.",
+                PersonaType = "citizen",
+                AudienceBand = "micro",
+                AudienceMagnitude = PersonaCastSeeder.DeriveAudienceMagnitude("micro", "mvega_fh"),
+                JoinedAt = PersonaCastSeeder.DeriveJoinedAt("citizen", "mvega_fh"),
+                Castable = false, // a deliberate human opt-out of an ordinarily-castable persona
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var seeded = await SeedAndSaveAsync(exerciseId);
+
+        seeded.Single(p => string.Equals(p.Dossier.Handle, "mvega_fh", StringComparison.OrdinalIgnoreCase))
+            .Castable.Should().BeFalse("a deliberate opt-out is preserved and reported (WR-B, one-way only)");
+
+        (await ReadPersonasAsync(exerciseId)).Single(r => r.Handle == "mvega_fh")
+            .Castable.Should().BeFalse("the seeder never sets Castable = true on an existing row");
+    }
+
+    [RequiresDockerFact]
     public async Task SeedAsync_RunAgain_CreatesNoDuplicates_AndReturnsTheSameIds()
     {
         var exerciseId = Guid.NewGuid();

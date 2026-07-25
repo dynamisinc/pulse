@@ -57,13 +57,15 @@ cast** (`PersonaCastSeeder`) and the **read projection** (`PersonaResponseDto`) 
       every other caller — participant, read-only, anonymous, expired token — receives
       `PersonaResponseDto`, which **structurally omits** it. The branch fails closed to the narrow
       shape. `avatarColor`/`initials` stay derived, not persisted, in both shapes.
-      **Frozen-contract consequence (needs an orchestrator-sequenced frontend change, NOT made here):**
+      **Frozen-contract consequence — being built separately, do not duplicate it.**
       `features/personas/types.ts:91` declares `personaType` as a REQUIRED field of `Persona`, so the
       participant payload no longer structurally satisfies that TS type. Nothing breaks at runtime —
       `isValidPersona` does not check the field, and no participant surface reads it (its only readers
       are the staff console's `PersonaPicker.tsx`, `PersonaContextPanel.tsx` and
-      `controller/services/personaVoice.ts`) — but the type must become optional (`personaType?:`) or
-      split into participant/staff shapes for the contract to be honest.
+      `controller/services/personaVoice.ts`). The approved resolution is a participant/staff **type
+      split** (`Persona` without `personaType`; a staff shape widening by that one field), in progress
+      on branch `build/profiles-social-graph/persona-contract-split`. It is explicitly NOT "make
+      `personaType` optional" — do not implement that variant.
 - [x] **Seeder populates real state.** `PersonaCastSeeder` (`Features/Ops/EngineContentSeed/
       PersonaCastSeeder.cs`) populates all five new fields for every catalog persona.
       `AudienceMagnitude` is derived from `AudienceBand` the same way the frontend's mock derivation
@@ -86,6 +88,12 @@ cast** (`PersonaCastSeeder`) and the **read projection** (`PersonaResponseDto`) 
       frontend's nine-template cast handle-for-handle. Matching the platform's own rule (D1-008),
       the seeder never marks or flags the lookalike in any field — the absent `Verified` flag is the
       only signal, exactly as every other unverified persona is represented.
+      **Re-review (WR-C): the archetype vocabulary is closed and validated.** `DeriveJoinedAt`'s
+      non-bad-actor branch is the 90-729-day ESTABLISHED-account branch, so a mis-cased or typo'd
+      archetype falling through it would ship the lookalike with a two-year-old account — this AC's
+      tell inverted, silently. An archetype outside the frozen `PersonaType` union now throws, both at
+      the derivation and at the seeder's authoring-time (static-constructor) guard, symmetrically with
+      the band vocabulary.
       **AMENDED (Gate-1 WR-002) — the engine cannot voice them: `Persona.Castable`.**
       `engine-content-seed`'s standing objection to seeding a bad-actor voice ("content the platform
       has no way to turn off") is answered with a real gate rather than an ordering heuristic:
@@ -95,6 +103,14 @@ cast** (`PersonaCastSeeder`) and the **read projection** (`PersonaResponseDto`) 
       storyline's participating personas. A scenario opts in by flipping the column. The flag is
       server-side only and is projected onto **no** DTO, participant or staff — a `castable` field on
       the wire would be the same machine-readable lookalike tell as `personaType`.
+      **Re-review (WR-B): reuse reconciles the gate ONE WAY.** A row that is castable while the catalog
+      says it must not be is closed on re-seed (`true → false`); the reverse never happens. The seeder
+      may only ever TIGHTEN this gate — closing a wrongly-open one costs a withheld engine voice
+      (visible, recoverable), opening a closed one would hand the engine a voice a human deliberately
+      withheld. Accepted cost: a scenario that opted the lookalike IN by flipping the column is
+      overridden on the next re-seed; when a real opt-in surface exists it must live somewhere the
+      seeder does not own (a scenario-level allowlist), not in this column alone. An opt-OUT of an
+      ordinarily-castable persona is preserved.
 - [x] **No new leak (XC-002).** Exercise scope (COR-001) is unchanged — every new field is exposed
       only through the existing exercise-scoped `GET /api/personas` read, with no new provenance/
       operator/session-attribution field added to either DTO, and no participant-reachable field that
@@ -196,8 +212,12 @@ locally); the rest are model-only `[Fact]`/`[Theory]` and run everywhere.
 - `PersonaCastDerivationTests.DeriveAudienceMagnitude_MatchesTheFrontendMock_ForTheSameHandleAndBand`
   (per-handle parity with `seedCast.ts`), `..._StaysWithinTheBandsFloorPlusForty` (the `BAND_BASE` band
   ranges), `..._IsDeterministic_AndBandOrdered`, `..._UnknownBand_Throws_RatherThanInventingANumber`
-- `PersonaCastDerivationTests.Catalog_PassesItsAuthoringTimeGuard_BiosFitTheColumn_AndBandsAreKnown` (S-002)
-- `PersonaCastDerivationTests.DeriveAudienceMagnitude_IsCaseSensitive_MatchingTheBadActorComparison` (S-001)
+- `PersonaCastDerivationTests.Catalog_PassesItsAuthoringTimeGuard_BiosBandsArchetypesAndPositiveFloors`
+  (S-002 + WR-C + S-A — the positive-floor invariant keeps the CR-001 sentinel structurally unreachable)
+- `PersonaCastDerivationTests.DeriveAudienceMagnitude_RejectsAnythingOutsideTheClosedBandVocabulary` (S-001)
+- `PersonaCastDerivationTests.DeriveJoinedAt_RejectsAnArchetypeOutsideTheClosedUnion_NeverSilentlyEstablishes`
+  (WR-C — replaces the earlier test that pinned the silent fallthrough as intended)
+- `PersonaCastDerivationTests.DeriveJoinedAt_EveryArchetypeInTheClosedUnion_IsAccepted` (WR-C, the other half)
 - `PersonaCastDerivationTests.DeriveJoinedAt_MatchesTheFrontendMock_AndAlwaysPredatesTheEpoch`,
   `..._BadActor_JoinsWithinAWeekOfTheEpoch_EstablishedPersonasJoinMuchEarlier`,
   `PersonaCastDerivationTests.SeedEpoch_IsTheFixedPreExerciseScenarioConstant_NeverTheWallClock`
@@ -215,6 +235,9 @@ locally); the rest are model-only `[Fact]`/`[Theory]` and run everywhere.
   [docker] (the WR-002 `Castable` gate at the row level)
 - `EngineContentSeedServiceTests.Seed_EligibleCast_ExcludesTheNonCastablePersonas_TheEngineCannotVoiceTheImpersonator`
   [docker] — the rows exist, but neither the eligible cast nor the storyline can voice them
+- `PersonaCastSeederTests.SeedAsync_ReusedRow_ReportsAndPersistsCastability_ClosingAWronglyOpenGate` [docker]
+  (WR-B — an intermediate-build row carrying the column default `true` is closed and REPORTED closed)
+- `PersonaCastSeederTests.SeedAsync_ReusedRow_NeverReOpensAGateAHumanClosed` [docker] (WR-B, one-way only)
 
 **No new leak (AC5)**
 - `PersonaEndpointsTests.WiderProjection_StillLeaksNothingAcrossExercises_ScopeA_NeverSeesBsPresentationFields`
