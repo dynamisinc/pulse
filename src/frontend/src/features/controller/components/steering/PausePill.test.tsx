@@ -110,17 +110,17 @@ describe('PausePill — the pause popover', () => {
     expect(screen.getByTestId('pause-apply')).toHaveTextContent('Pause')
   })
 
-  it('selecting Pause injects and applying calls setTier("injects") immediately (no confirm step)', async () => {
+  it('selecting Pause engine and applying calls setTier("engine") immediately (no confirm step)', async () => {
     const user = userEvent.setup()
     const setTier = vi.fn()
     mockedUsePauseState.mockReturnValue(stub('running', { setTier }))
     renderWithTheme(<PausePill />)
 
     await user.click(screen.getByTestId('pause-pill'))
-    await user.click(screen.getByTestId('pause-tier-option-injects'))
+    await user.click(screen.getByTestId('pause-tier-option-engine'))
     await user.click(screen.getByTestId('pause-apply'))
 
-    expect(setTier).toHaveBeenCalledWith('injects')
+    expect(setTier).toHaveBeenCalledWith('engine')
     expect(setTier).toHaveBeenCalledTimes(1)
     expect(screen.queryByTestId('pause-freeze-confirm')).not.toBeInTheDocument()
   })
@@ -146,6 +146,85 @@ describe('PausePill — the pause popover', () => {
 
     await user.click(screen.getByTestId('pause-pill'))
     expect(screen.queryByTestId('pause-resume')).not.toBeInTheDocument()
+  })
+})
+
+describe('PausePill — Pause injects ships DISABLED and INERT (story 07)', () => {
+  it('renders the tier but disables its radio (CTL-023 three-tier shape preserved)', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running'))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    const injects = screen.getByTestId('pause-tier-option-injects')
+    expect(injects).toBeInTheDocument()
+    expect(injects.querySelector('input')).toBeDisabled()
+  })
+
+  it('communicates its reason as TEXT in the accessible name + description, not colour alone (NFR-001)', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running'))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    // The reason is readable text on the surface...
+    expect(screen.getByTestId('pause-tier-reason-injects')).toHaveTextContent(
+      /Unavailable — No inject queue yet/,
+    )
+    // ...it is part of the radio's accessible NAME (the label wraps it)...
+    expect(screen.getByRole('radio', { name: /No inject queue yet/i })).toBeInTheDocument()
+    // ...and it is wired as the radio's accessible DESCRIPTION.
+    expect(screen.getByTestId('pause-tier-option-injects').querySelector('input')).toHaveAttribute(
+      'aria-describedby',
+      'pause-tier-reason-injects',
+    )
+  })
+
+  it('takes NO action — clicking it never selects it and no setTier("injects") ever reaches the store', async () => {
+    const user = userEvent.setup()
+    const setTier = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { setTier }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+    await user.click(screen.getByTestId('pause-tier-option-injects'))
+
+    // The radio never takes the selection, so the visible choice (and anything
+    // Pause could apply) is never the injects tier.
+    expect(screen.getByTestId('pause-tier-option-injects').querySelector('input')).not.toBeChecked()
+
+    await user.click(screen.getByTestId('pause-apply'))
+    expect(setTier).not.toHaveBeenCalledWith('injects')
+  })
+
+  it('pre-selects the first SELECTABLE tier when running, so Pause is never a no-op by default', async () => {
+    const user = userEvent.setup()
+    const setTier = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { setTier }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+    await user.click(screen.getByTestId('pause-apply'))
+
+    expect(setTier).toHaveBeenCalledWith('engine')
+  })
+
+  it('keyboard activation cannot select it either (a disabled radio is unfocusable)', async () => {
+    const user = userEvent.setup()
+    const setTier = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { setTier }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    const injectsRadio = screen.getByTestId('pause-tier-option-injects').querySelector('input')
+    injectsRadio?.focus()
+    await user.keyboard(' ')
+
+    expect(injectsRadio).not.toBeChecked()
+    expect(setTier).not.toHaveBeenCalledWith('injects')
   })
 })
 

@@ -166,9 +166,31 @@ public sealed class ReactionLoopHost : BackgroundService
     }
 
     /// <summary>
+    /// Whether the loop must START exercise <paramref name="exerciseId"/>'s scenario clock on first sight — i.e.
+    /// nothing has started it yet.
+    ///
+    /// <para><b>LOAD-BEARING for the tiered pause (world-steering/07).</b> A controller Freeze that arrives
+    /// before the loop's first tick STARTS the clock itself and then freezes it
+    /// (<c>Steering/PauseTierRegistry</c>); this predicate is the only reason the loop then leaves that frozen
+    /// clock alone. If it ever returned <c>true</c> for a frozen clock, the loop would restart it UNFROZEN and the
+    /// engine would generate while the console reads WORLD FROZEN — the exact failure story 07 exists to
+    /// eliminate. It is exposed (rather than inlined) so the pause suite asserts against THIS definition of the
+    /// rule instead of re-implementing it.</para>
+    /// </summary>
+    /// <param name="clock">The exercise clock to inspect.</param>
+    /// <param name="exerciseId">The exercise whose clock the loop is about to tick.</param>
+    /// <returns><c>true</c> only when the clock is neither running nor frozen.</returns>
+    public static bool ShouldStartClock(IExerciseClock clock, Guid exerciseId)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        return !clock.IsRunning(exerciseId) && !clock.IsFrozen(exerciseId);
+    }
+
+    /// <summary>
     /// Starts an exercise's scenario clock once, on first sight. Never restarts an already-running or frozen
     /// clock (that would reset the scenario minute) — a controller/seed path or a test may have already
-    /// started, jumped, or frozen it.
+    /// started, jumped, or frozen it. See <see cref="ShouldStartClock"/>: that guard is load-bearing for the
+    /// tiered pause.
     /// </summary>
     private void EnsureClockStarted(ReactionLoopRegistration registration)
     {
@@ -179,7 +201,7 @@ public sealed class ReactionLoopHost : BackgroundService
 
         _startedClocks.Add(registration.ExerciseId);
 
-        if (!_exerciseClock.IsRunning(registration.ExerciseId) && !_exerciseClock.IsFrozen(registration.ExerciseId))
+        if (ShouldStartClock(_exerciseClock, registration.ExerciseId))
         {
             _exerciseClock.Start(registration.ExerciseId, registration.ScenarioStart, registration.TimeZoneInfo);
         }
