@@ -30,6 +30,7 @@ import { resetExerciseClock, setExerciseClock, type IExerciseClock } from '@/cor
 import { resetTelemetryBuffer } from '@/core/telemetry'
 import type { StaffPersona } from '@/features/personas'
 import type { Post } from '@/features/social'
+import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { PersonaComposer } from './PersonaComposer'
 
 function fixedClock(instant: Date): IExerciseClock {
@@ -68,6 +69,10 @@ async function renderComposer(children: ReactNode) {
 
 beforeEach(() => {
   resetTelemetryBuffer()
+  // Gate-1 WR-103's persisted-draft store is a module singleton keyed by
+  // (exerciseId, personaId) — every `it()` below reuses the SAME
+  // `ACTIVE_PERSONA`/mock exercise, so reset it between tests.
+  composeAsPersonaDraftStore.resetForTests()
 })
 
 afterEach(() => {

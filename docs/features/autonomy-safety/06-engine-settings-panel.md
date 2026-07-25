@@ -185,8 +185,15 @@ bad derivation:
 - **WR-002 (tautological stale-rejection test)** — the original test happened to assert a value both
   the guarded and unguarded code produced, so it passed even with the guard deleted. Replaced with the
   3-valued `tierPolicyMode` fixture the review suggested (`auto -> standard (pending) -> ambient
-  (resolves, confirmed) -> reject standard` — guarded stays `ambient`, unguarded would revert to
-  `auto`): `useEngineSettings.test.ts` — `WR-002 guard is OBSERVABLE (not tautological): ...`.
+  (resolves, confirmed) -> reject standard`): `useEngineSettings.test.ts` — `WR-002 guard is OBSERVABLE
+  (not tautological): ...`. **Corrected rationale (Gate-1 S-101):** the `tierPolicyMode` assertion in
+  that test is STILL tautological on its own — an UNGUARDED revert-on-rejection lands on
+  `confirmedSettings.tierPolicyMode`, which by the time the stale rejection resolves is already
+  `'ambient'` (B's success already advanced the confirmed baseline), so `tierPolicyMode` reads
+  `'ambient'` either way. The assertion that actually proves the guard is doing work is
+  `expect(error).toBeNull()` — an unguarded implementation writes A's stale rejection message over B's
+  already-successful change. Do not remove that assertion under the belief the value check alone covers
+  the guard.
 - **WR-003 (a superseded rejection could still raise an error banner over a change that succeeded)** —
   fixed as part of the CR-002 rework: a stale request's rejection is discarded ENTIRELY (not just
   "declined to revert the value") — no `error` write either. Proved by the same WR-002 test (asserts
@@ -216,3 +223,95 @@ bad derivation:
   `'CONTRACT VIOLATION: no effective level reported while generation is not stopped.'` so the
   (unreachable-under-contract) case names itself as a bug if ever seen, rather than reading as silent,
   ordinary output.
+
+### Gate-1 re-review findings — fixed, this pass (2 new Criticals + 3 Warnings)
+
+The first Gate-1 pass's two Criticals were confirmed genuinely fixed on re-review. But **the fixes
+themselves introduced two NEW Criticals of the exact same class** — a control asserting a state the
+server never applied — reached via a race and a wrong sequencing granularity:
+
+- **CR-101 (the refetch raced the POST it was meant to observe)** — `EngineControlBar`'s CR-001 fix
+  watched raw `engineControl.mode`, which `setMode` flips OPTIMISTICALLY AND SYNCHRONOUSLY in the same
+  call that fires the live kill-switch POST — so the settings GET (one filter) raced the POST (mutation
+  + validation + a telemetry write) and was favoured to WIN, applying a pre-trip snapshot as
+  authoritative with nothing left to correct it (`mode`/`degraded` never change again on their own). A
+  second, independent hole: `startLiveFetch` silently DROPPED a `refetch()` that arrived while one was
+  already in flight. Fixed in two halves:
+  1. `useEngineControl` now exposes `modeSettledCount` — a monotonic counter bumped in BOTH the `.then`
+     and `.catch` of the live kill-switch POST (a settle SIGNAL, never itself a value) — and
+     `EngineControlBar` watches `[degraded, modeSettledCount]`, NOT raw `mode`, so the refetch fires
+     only once the POST has actually concluded. `degraded` stays watched directly — `degrade()`/
+     `restore()` are synchronous, mock-only clamps with no live round trip, so there is no race to guard
+     for them.
+  2. `startLiveFetch` now QUEUES a refetch that arrives while one is in flight (`refetchQueued`) and
+     re-runs it from that fetch's `.finally`, rather than dropping it.
+  Tests: `useEngineControl.test.ts` (`modeSettledCount bumps AFTER the optimistic flip...`, `...ALSO
+  bumps on a rejected POST`, `...bumps once per settle, across repeated flips`, mock-mode
+  `modeSettledCount` never changes); `EngineControlBar.refetchOnKillSwitch.test.tsx` (rewritten —
+  mocks BOTH `useEngineControl` and `useEngineSettings` to independently drive `mode`/`degraded`/
+  `modeSettledCount` across renders and prove the optimistic flip alone does NOT refetch, while a
+  `modeSettledCount` bump does); `useEngineSettings.test.ts` (`CR-101: a refetch() that arrives while
+  one is already in flight is QUEUED, never silently dropped`).
+- **CR-102 (the sequence counter was shared across mutation kinds that write DISJOINT fields — wrong
+  granularity)** — a counter shared across `setAutonomyDefault`/`setTierPolicyMode` meant a rejection of
+  ONE field reverted the WHOLE display, including the OTHER field's still-in-flight (and later
+  successful) change, whose authoritative response then had nowhere to land (its own sequence no longer
+  "owned" the resource-wide counter) — reproduced empirically: an autonomy-default flip left in flight
+  while a tier-policy rejection reverted the whole snapshot, then the autonomy-default success was
+  silently discarded, leaving the panel reporting `suggest` while the server's genuine default was
+  `delayed-auto`. **This fails unsafe** — the mirror image of the original audit finding (operator
+  believes the engine is MORE restrained than it actually is). Fixed with independent sequence trackers
+  PER FIELD (`autonomyDefault` | `tierPolicy`, sharing only the underlying issuing counter for a total
+  order), reconciling a success/rejection via `withFieldFrom` — touching ONLY that field, never the
+  other. Errors are tracked per field too (`fieldError`) plus a separate `loadError` for GET failures,
+  combined for display, so an unrelated field's success can never erase a DIFFERENT field's own
+  rejection message. Test: `useEngineSettings.test.ts` — `CR-102 exact cross-field repro: a tier-policy
+  rejection must NOT revert an in-flight autonomy-default change, and that change's later success must
+  NOT erase the tier-policy rejection's error`.
+- **WR-101 (the GET didn't participate in the same sequencing as the mutations)** — a GET issued before
+  a mutation but resolving after it could overwrite that mutation's just-confirmed field with
+  pre-mutation data, corrupting the field's revert baseline too. Fixed: the GET's own issuance bumps
+  `latestIssuedSeqByField` for BOTH fields, and its resolution applies each field independently, gated
+  by the SAME "am I still the newest attempt for this field" rule a mutation uses. Test:
+  `useEngineSettings.test.ts` — `WR-101: a GET issued before a mutation but resolving after it does not
+  clobber that field or corrupt its revert baseline`.
+- **WR-102 (the refetch un-stuck `forbidden`)** — every successful GET wrote `forbidden: false`
+  unconditionally; since story 05's `GET /settings` stays 200 for a non-controller (AC6) and this
+  story's own open-transition refetch runs a GET on every open, an evaluator's 403 would silently clear
+  itself the next time the panel reopened. Fixed: `forbidden` is a single, STICKY, shared boolean —
+  never written `false` by a GET success. Test: `useEngineSettings.test.ts` — `WR-102: forbidden is
+  STICKY — a later successful GET never clears it`.
+- **WR-103 (new finding: activating ENGINE silently destroyed an in-progress persona draft)** — the
+  WR-005 fix (closing the persona dock on ENGINE activation) unmounted `<PersonaComposer>`, and with it
+  `useComposeAsPersona`'s local `useState('')` draft — unsaved injection text gone, no warning, on a
+  staff surface mid-exercise. **Preferred fix taken:** the draft is lifted into a small module-level
+  store (`composeAsPersonaDraftStore`, `useComposeAsPersona.ts`) keyed by `(exerciseId, personaId)`,
+  mirrored on every `setText` and cleared on `publish()`; a remount for the SAME persona restores the
+  in-progress text instead of starting empty. The EXPLICIT close paths (Esc/X on the dock) are
+  UNCHANGED — this only protects against the non-explicit ENGINE-activation close. Tests:
+  `useComposeAsPersona.test.ts` (new describe `the draft SURVIVES an unmount`: remount-restores,
+  publish-clears, a different persona never observes another's draft); reset hygiene added to
+  `useComposeAsPersona.test.ts`/`PersonaComposer.test.tsx` (both reuse the same persona/exercise ids
+  across `it()` blocks, so the module-singleton store is reset in `beforeEach`).
+- **S-101 (corrected rationale)** — see the WR-002 entry above; the story-doc note and the test comment
+  now correctly identify `expect(error).toBeNull()`, not the `tierPolicyMode` value, as the assertion
+  that actually exercises the guard.
+- **S-103 (the WR-005 test didn't assert where focus lands)** — adding the assertion SURFACED A REAL BUG:
+  closing the persona dock via a `useEffect` reacting to `engineSettingsOpen` closed it ONE RENDER LATE,
+  so `PersonaDockHost`'s own focus-restore effect fired in a LATER commit than
+  `EngineSettingsPanel`'s open-focus effect and won the race, stealing focus back to the persona
+  toolstrip button instead of leaving it on the engine panel's close button. Fixed by gating the
+  RENDERED `open` prop directly (`dockPersonaOpen = dockPersonaId !== null && !engineSettingsOpen`) so
+  the dock closes in the SAME commit ENGINE opens in — `PersonaDockHost` is declared before
+  `EngineSettingsPanel` in the JSX, so its focus-restore fires first and the engine panel's own focus
+  (firing second, in the same commit) is what's left standing. The `useEffect` clearing the underlying
+  `dockPersonaId` state is unchanged (still needed so a LATER close of the engine panel doesn't
+  resurrect a stale dock) but no longer does the actual closing work. Test:
+  `ControllerConsole.engineSettingsTool.test.tsx`'s WR-005 test, extended with a `toHaveFocus()`
+  assertion on `engine-settings-close`.
+- **S-104 (`labelFor`'s contract-violation branch was silent while the panel names the identical case
+  loudly)** — documented as a DELIBERATE asymmetry rather than fixed to match: the compact kill-switch
+  pill stays unsuffixed for this (unreachable-under-contract) case rather than cramming the panel's full
+  `'CONTRACT VIOLATION: ...'` sentence into a small badge; an operator who needs the detail opens the
+  panel, already one click away, which always shows the honest long-form text. Recorded in `labelFor`'s
+  doc comment.

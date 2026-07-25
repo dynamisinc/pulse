@@ -166,5 +166,15 @@ describe('ControllerConsole — the "ENGINE" settings tool', () => {
     await user.click(await screen.findByTestId('toolstrip-tool-engine-settings'))
     expect(await screen.findByTestId('engine-settings-panel')).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByTestId('persona-dock-host')).not.toBeInTheDocument())
+
+    // Gate-1 S-103: assert where focus actually LANDS, not just that the dock
+    // is gone — `PersonaDockHost`'s own focus-restore effect (returning focus
+    // to whatever opened it) runs in the SAME commit window as
+    // `EngineSettingsPanel`'s open effect (which focuses ITS OWN close
+    // button), so this is the one place the two could plausibly fight over
+    // focus. The engine panel's close button must end up focused — a
+    // keyboard user landing back on the (now-removed) persona toolstrip
+    // button, or nowhere at all, would both be a11y regressions (NFR-001).
+    await waitFor(() => expect(screen.getByTestId('engine-settings-close')).toHaveFocus())
   })
 })

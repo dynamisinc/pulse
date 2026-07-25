@@ -29,7 +29,20 @@
  *  - Gate-1 CR-001: `refetch()` forces a fresh GET regardless of whether one
  *    already completed, picking up a clamp the kill switch applied entirely
  *    outside this hook; Gate-1 WR-004: a failed initial GET is retried the
- *    same way rather than being a permanent dead end.
+ *    same way rather than being a permanent dead end;
+ *  - Gate-1 re-review CR-101: a `refetch()` that arrives while one is already
+ *    in flight is QUEUED (never silently dropped) and runs once the in-flight
+ *    one settles;
+ *  - Gate-1 re-review CR-102: sequencing is PER FIELD, not per resource — an
+ *    exact cross-field repro proves a tier-policy rejection never reverts an
+ *    in-flight autonomy-default change, and that change's later success never
+ *    erases the tier-policy rejection's error message;
+ *  - Gate-1 re-review WR-101: the GET participates in the SAME per-field
+ *    sequencing as the mutations, so a GET issued before a mutation but
+ *    resolving after it cannot clobber that field or corrupt its revert
+ *    baseline;
+ *  - Gate-1 re-review WR-102: `forbidden` is STICKY — a later successful GET
+ *    (including this hook's own open-transition refetch) never clears it.
  *
  * `@/core/exerciseContext`, the sibling `controllerIdentity` module, and
  * `../services/engineSettingsActions` are mocked at the module boundary
@@ -378,6 +391,17 @@ describe('useEngineSettings — live mode (USE_MOCK_DATA=false)', () => {
     expect(result.current.error).toBe('rejected')
   })
 
+  // Gate-1 S-101 (re-review correction): this test's assertion that actually
+  // proves the guard is doing work is `expect(result.current.error).toBeNull()`
+  // — NOT the `tierPolicyMode` value. Under the current (correct)
+  // implementation, an UNGUARDED revert-on-rejection would land on
+  // `confirmedSettings.tierPolicyMode`, which by this point in the repro IS
+  // `'ambient'` (B's own success already advanced the confirmed baseline) —
+  // so the `tierPolicyMode` assertion alone would pass even with the "is this
+  // still the newest issued request for this field" guard deleted. The
+  // `error` assertion is what a deleted guard actually breaks (an unguarded
+  // implementation writes A's stale rejection message, clobbering the fact
+  // that B already succeeded) — do not "tidy away" that assertion.
   it('WR-002 guard is OBSERVABLE (not tautological): auto -> standard (A pending) -> ambient (B resolves, confirmed) -> reject A leaves it at ambient, with no stale error', async () => {
     mockedGetSettings.mockResolvedValue(dto()) // tierPolicyMode: 'auto'
     const { result } = renderHook(() => useEngineSettings())
@@ -459,4 +483,204 @@ describe('useEngineSettings — live mode (USE_MOCK_DATA=false)', () => {
     expect(mockedGetSettings).toHaveBeenCalledTimes(2)
   })
 
+  it('CR-101: a refetch() that arrives while one is already in flight is QUEUED, never silently dropped', async () => {
+    let resolveFirst: (value: EngineSettingsDto) => void = () => {}
+    mockedGetSettings.mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }))
+
+    const { result } = renderHook(() => useEngineSettings())
+    expect(mockedGetSettings).toHaveBeenCalledTimes(1) // the initial mount GET, still in flight
+
+    // A second refetch arrives (e.g. the kill switch settles) WHILE the first
+    // is still in flight — must be QUEUED, not dropped.
+    mockedGetSettings.mockResolvedValueOnce(dto({ tierPolicyMode: 'standard' }))
+    act(() => result.current.refetch())
+    // Still only ONE call has actually been ISSUED — the second is queued,
+    // not fired concurrently (dedupe against a fetch already in flight).
+    expect(mockedGetSettings).toHaveBeenCalledTimes(1)
+
+    // The first GET resolves — the queued refetch must now fire on its own,
+    // from the `.finally`, rather than being treated as already satisfied.
+    await act(async () => {
+      resolveFirst(dto({ tierPolicyMode: 'auto' }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(mockedGetSettings).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.settings?.tierPolicyMode).toBe('standard'))
+  })
+
+  // ---------------------------------------------------------------------
+  // Gate-1 re-review CR-102 — sequencing MUST be per field, not per
+  // resource. A counter shared across both mutation kinds let a rejection of
+  // ONE field revert the WHOLE display, including the OTHER field's
+  // still-in-flight (and later successful) change, whose authoritative
+  // response then had nowhere to land.
+  // ---------------------------------------------------------------------
+
+  it("CR-102 exact cross-field repro: a tier-policy rejection must NOT revert an in-flight autonomy-default change, and that change's later success must NOT erase the tier-policy rejection's error", async () => {
+    // Server: autonomy=suggest, tier=auto.
+    mockedGetSettings.mockResolvedValue(dto())
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.settings).not.toBeNull())
+
+    let resolveAutonomy: (value: EngineSettingsDto) => void = () => {}
+    mockedSetAutonomyDefault.mockReturnValueOnce(
+      new Promise(resolve => { resolveAutonomy = resolve }),
+    )
+    let rejectTier: (reason?: unknown) => void = () => {}
+    mockedSetTierPolicyMode.mockReturnValueOnce(new Promise((_, reject) => { rejectTier = reject }))
+
+    // 1. click Delayed-auto — autonomy-default field, POST pending.
+    act(() => result.current.setAutonomyDefault('delayed-auto'))
+    expect(result.current.settings?.autonomy.exerciseDefaultLevel).toBe('delayed-auto')
+
+    // 2. click tier "Standard" — a DIFFERENT field, its own POST pending.
+    act(() => result.current.setTierPolicyMode('standard'))
+    expect(result.current.settings?.tierPolicyMode).toBe('standard')
+
+    // 3. the tier-policy POST rejects 400 (exactly story 05's real shape for
+    // an unbound tier against the Fake provider — see MOCK_ENGINE_SETTINGS's
+    // own `deployment: ''`). Only the TIER field may be affected.
+    await act(async () => {
+      rejectTier(Object.assign(new Error('Bad Request'), {
+        isAxiosError: true,
+        response: { status: 400, data: "tier 'Standard' has no deployment configured" },
+      }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    // The tier field reverted to its confirmed value ('auto') — but the
+    // autonomy-default field, still in flight, must be COMPLETELY UNTOUCHED.
+    expect(result.current.settings?.tierPolicyMode).toBe('auto')
+    expect(result.current.settings?.autonomy.exerciseDefaultLevel).toBe('delayed-auto')
+    expect(result.current.error).toBe("tier 'Standard' has no deployment configured")
+
+    // 4. the autonomy-default POST now succeeds, confirming 'delayed-auto'.
+    await act(async () => {
+      resolveAutonomy(
+        dto({
+          tierPolicyMode: 'auto', // irrelevant to this field's own merge — ignored
+          autonomy: {
+            swampedMode: false,
+            generationStopped: false,
+            safetyClampActive: false,
+            degradedReason: null,
+            exerciseDefaultLevel: 'delayed-auto',
+            effectiveLevel: 'delayed-auto',
+          },
+        }),
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    // The GATE-1 CR-102 assertion: the server's genuinely-applied
+    // 'delayed-auto' must be REFLECTED, never silently reverted to 'suggest'
+    // (the whole-object-revert bug) — and the tier field (already fixed in
+    // step 3) stays exactly as it was.
+    expect(result.current.settings?.autonomy.exerciseDefaultLevel).toBe('delayed-auto')
+    expect(result.current.settings?.autonomy.effectiveLevel).toBe('delayed-auto')
+    expect(result.current.settings?.tierPolicyMode).toBe('auto')
+    // The tier-policy rejection's error must SURVIVE the unrelated
+    // autonomy-default success — an unrelated field succeeding must never
+    // erase the report that THIS field's own change was refused.
+    expect(result.current.error).toBe("tier 'Standard' has no deployment configured")
+  })
+
+  // ---------------------------------------------------------------------
+  // Gate-1 re-review WR-101 — the GET must participate in the SAME per-field
+  // sequencing as the mutations, so a GET issued before a mutation but
+  // resolving after it cannot overwrite that mutation's just-confirmed field
+  // (or corrupt that field's revert baseline) with pre-mutation data.
+  // ---------------------------------------------------------------------
+
+  it('WR-101: a GET issued before a mutation but resolving after it does not clobber that field or corrupt its revert baseline', async () => {
+    mockedGetSettings.mockResolvedValueOnce(dto()) // initial load
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.settings).not.toBeNull())
+
+    // A refetch is issued (e.g. the panel opening) and held pending.
+    let resolveRefetch: (value: EngineSettingsDto) => void = () => {}
+    mockedGetSettings.mockReturnValueOnce(new Promise(resolve => { resolveRefetch = resolve }))
+    act(() => result.current.refetch())
+
+    // While that GET is still in flight, an autonomy-default mutation is
+    // issued AFTER it and resolves quickly — it is now the newest attempt
+    // for that field.
+    mockedSetAutonomyDefault.mockResolvedValueOnce(
+      dto({
+        autonomy: {
+          swampedMode: false,
+          generationStopped: false,
+          safetyClampActive: false,
+          degradedReason: null,
+          exerciseDefaultLevel: 'delayed-auto',
+          effectiveLevel: 'delayed-auto',
+        },
+      }),
+    )
+    await act(async () => {
+      result.current.setAutonomyDefault('delayed-auto')
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.settings?.autonomy.exerciseDefaultLevel).toBe('delayed-auto')
+
+    // NOW the stale GET (issued before the mutation) finally resolves,
+    // carrying PRE-mutation data ('suggest'). It must NOT overwrite the
+    // mutation's just-confirmed field.
+    await act(async () => {
+      resolveRefetch(dto()) // 'suggest' — stale relative to the mutation above
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.settings?.autonomy.exerciseDefaultLevel).toBe('delayed-auto')
+    expect(result.current.settings?.autonomy.effectiveLevel).toBe('delayed-auto')
+
+    // The revert baseline must also be uncorrupted: a LATER rejection of a
+    // NEW autonomy-default attempt must revert to 'delayed-auto' (the true
+    // confirmed value), never back to the stale GET's 'suggest'.
+    mockedSetAutonomyDefault.mockRejectedValueOnce(
+      Object.assign(new Error('Bad Request'), { isAxiosError: true, response: { status: 400, data: 'no' } }),
+    )
+    await act(async () => {
+      result.current.setAutonomyDefault('suggest')
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.settings?.autonomy.exerciseDefaultLevel).toBe('delayed-auto')
+  })
+
+  // ---------------------------------------------------------------------
+  // Gate-1 re-review WR-102 — `forbidden` is STICKY: a later successful GET
+  // (including this hook's own open-transition refetch) must never clear it.
+  // ---------------------------------------------------------------------
+
+  it('WR-102: forbidden is STICKY — a later successful GET never clears it', async () => {
+    mockedGetSettings.mockResolvedValue(dto())
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.settings).not.toBeNull())
+
+    mockedSetTierPolicyMode.mockRejectedValueOnce(
+      Object.assign(new Error('Forbidden'), { isAxiosError: true, response: { status: 403, data: 'Forbidden' } }),
+    )
+    await act(async () => {
+      result.current.setTierPolicyMode('standard')
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.forbidden).toBe(true)
+
+    // A subsequent refetch (e.g. re-opening the panel) succeeds — story 05's
+    // GET stays 200 even for a non-controller (AC6), so a naive
+    // `forbidden: false` on every GET success would silently re-enable the
+    // controls here.
+    act(() => result.current.refetch())
+    await waitFor(() => expect(mockedGetSettings).toHaveBeenCalledTimes(2))
+
+    expect(result.current.forbidden).toBe(true)
+  })
 })

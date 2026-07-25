@@ -115,9 +115,17 @@ function labelFor(mode: EngineMode, autonomy: EngineSettingsAutonomy | null): st
   if (autonomy.generationStopped) return `${base} (GENERATION STOPPED)`
   if (autonomy.effectiveLevel === 'delayed-auto') return `${base} (DELAYED-AUTO)`
   if (autonomy.effectiveLevel === 'suggest') return `${base} (SUGGEST)`
-  // Contract violation (story 05): `effectiveLevel` is documented `null` IFF
-  // `generationStopped` is `true`. Reaching here means a non-stopped snapshot
-  // reported no effective level — render unsuffixed rather than guess.
+  // Gate-1 S-104 — DELIBERATE ASYMMETRY, documented rather than left
+  // accidental: this is a contract violation (story 05 documents
+  // `effectiveLevel` as `null` IFF `generationStopped` is `true`; reaching
+  // here means a non-stopped snapshot reported no effective level at all).
+  // `<EngineSettingsPanel>` names this loudly ("CONTRACT VIOLATION: ...") in
+  // its own full-text autonomy-effective-label, since that panel IS the
+  // diagnostic surface for this state. This compact kill-switch pill stays
+  // silent (unsuffixed) rather than guessing OR cramming that same sentence
+  // into a small badge — an operator who needs the detail opens the panel,
+  // which is already reachable one click away and always shows the honest
+  // long-form text.
   return base
 }
 
@@ -138,11 +146,26 @@ export function EngineControlBar() {
   const allClear = pendingCount === 0 && timersUnder60sCount === 0
 
   // Gate-1 CR-001 — the kill switch mutates the SAME server-side autonomy
-  // state `engineSettings` describes, entirely outside that hook. Refetch
-  // whenever the kill-switch mode or the degraded clamp changes so this
-  // label can never go stale relative to a safety-relevant flip. Skips the
-  // very first run (the hook's own mount effect already fetched once) —
-  // only a subsequent CHANGE re-triggers it.
+  // state `engineSettings` describes, entirely outside that hook, so this
+  // label must refetch to stay accurate. Gate-1 CR-101 (re-review): watching
+  // raw `engineControl.mode` was WRONG — `setMode` flips `mode` optimistically
+  // and SYNCHRONOUSLY, in the same call that fires the live kill-switch POST,
+  // so a watcher on `mode` refetches settings WHILE that POST is still
+  // in-flight. The settings GET reaches its read point after one filter; the
+  // kill-switch POST reaches its mutation point after two filters, validation,
+  // and a telemetry write — the GET is favoured to win that race, meaning the
+  // "stale read" isn't a corner case, it's the LIKELY ordering. A GET that
+  // wins applies a PRE-trip snapshot as authoritative, and nothing ever
+  // refetches again (`mode` won't change again on its own).
+  //
+  // Fixed by watching `modeSettledCount` (bumped in BOTH the `.then` and
+  // `.catch` of the live POST, `useEngineControl`'s module header) instead of
+  // `mode` — a settle SIGNAL, not the optimistic value itself, so this only
+  // fires once the kill-switch request has actually concluded. `degraded` is
+  // still watched directly: `degrade()`/`restore()` are synchronous, mock-only
+  // clamps with no live round trip, so there is no settle race for them.
+  // Skips the very first run (the hook's own mount effect already fetched
+  // once) — only a subsequent settle/degraded CHANGE re-triggers it.
   const skippedInitialRefetch = useRef(false)
   useEffect(() => {
     if (!skippedInitialRefetch.current) {
@@ -150,11 +173,11 @@ export function EngineControlBar() {
       return
     }
     engineSettings.refetch()
-    // Only `mode`/`degraded` are meaningful triggers here — `engineSettings`
-    // itself changes identity on every store notification (including the
-    // refetch this effect just caused), which would otherwise self-trigger.
+    // `engineSettings` itself changes identity on every store notification
+    // (including the refetch this effect just caused), which would otherwise
+    // self-trigger — only `degraded`/`modeSettledCount` are meaningful here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engineControl.mode, engineControl.degraded])
+  }, [engineControl.degraded, engineControl.modeSettledCount])
 
   return (
     <Stack

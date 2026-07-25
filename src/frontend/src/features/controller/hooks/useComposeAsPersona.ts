@@ -53,9 +53,24 @@
  * STAMP the post/telemetry only — never a fetch-scoping param.
  * `livePostActions.publishPost` drops `exerciseId` from the wire body
  * entirely; the server stamps scope from the session.
+ *
+ * DRAFT SURVIVES UNMOUNT (autonomy-safety story 06, Gate-1 WR-103). The
+ * console can unmount `<PersonaComposer>` out from under an in-progress draft
+ * for reasons that are NOT an explicit close intent — e.g. `ControllerConsole`
+ * closes the persona-dock host when a DIFFERENT toolstrip tool activates
+ * (WR-005), which is not the operator choosing to discard their text. A
+ * `useState('')` alone would silently drop unsaved text in that case. So the
+ * draft is ADDITIONALLY mirrored into a tiny module-level store keyed by
+ * `(exerciseId, personaId)` (`draftByKey`, below) on every `setText`; a fresh
+ * mount for the SAME target seeds its initial state from that store instead
+ * of `''`, and `publish()` clears the stored entry (mirroring the local
+ * `setText('')` it already does) so a sent post never reappears as a leftover
+ * draft. This does not change the EXPLICIT discard paths (Esc/X on the dock)
+ * — those still lose the draft, which is the correct, expected behavior for
+ * an explicit close.
  */
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { scenarioNow } from '@/core/clock'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
@@ -66,6 +81,39 @@ import { composeAsPersona } from '../services/composeService'
 
 /** Default per-exercise character limit (mirrors the participant composer, SOC-001). */
 export const DEFAULT_CHAR_LIMIT = 280
+
+// ---------------------------------------------------------------------------
+// The unsaved-draft-survives-unmount store (Gate-1 WR-103)
+// ---------------------------------------------------------------------------
+
+/** `"exerciseId::personaId" -> in-progress draft text`. Absent = no draft (the common case). */
+const draftByKey = new Map<string, string>()
+
+function draftKey(exerciseId: string, personaId: string): string {
+  return `${exerciseId}::${personaId}`
+}
+
+function getPersistedDraft(exerciseId: string, personaId: string): string {
+  return draftByKey.get(draftKey(exerciseId, personaId)) ?? ''
+}
+
+/** Empty text is never worth remembering — treat it as "no draft" (keeps the map small). */
+function setPersistedDraft(exerciseId: string, personaId: string, text: string): void {
+  const key = draftKey(exerciseId, personaId)
+  if (text === '') {
+    draftByKey.delete(key)
+  } else {
+    draftByKey.set(key, text)
+  }
+}
+
+/** Clears every persisted draft. Test-only — prevents cross-test pollution. */
+function resetForTests(): void {
+  draftByKey.clear()
+}
+
+/** The module-singleton persisted-draft store. Exposed for test-only reset. */
+export const composeAsPersonaDraftStore = { resetForTests }
 
 /** Options for {@link useComposeAsPersona}. */
 export interface UseComposeAsPersonaOptions {
@@ -108,7 +156,30 @@ export function useComposeAsPersona(
   const { activePersona, actingHumanId, charLimit = DEFAULT_CHAR_LIMIT, onPublished } = options
   const { exerciseId, timeZone } = useExerciseContext()
 
-  const [text, setText] = useState('')
+  const [text, setTextState] = useState(() => getPersistedDraft(exerciseId, activePersona.id))
+
+  // If the compose TARGET changes (a different exercise or persona — NOT
+  // merely a remount for the SAME one, which the lazy initializer above
+  // already handles), adopt THAT target's own persisted draft instead of
+  // carrying over whatever was mid-typed for the previous target. One extra
+  // render on a genuine target change is an acceptable, standard trade for
+  // staying lint-clean (`react-hooks/refs` forbids reading/writing a ref
+  // during render, even for this "adjust state" pattern).
+  useEffect(() => {
+    // Deliberately re-seeds on every mount too (redundant with, but never in
+    // conflict with, the lazy initializer above — same value either way).
+    setTextState(getPersistedDraft(exerciseId, activePersona.id))
+  }, [exerciseId, activePersona.id])
+
+  // Mirrors every keystroke into the persisted-draft store (Gate-1 WR-103) —
+  // see the module header. Cheap (a single Map write).
+  const setText = useCallback(
+    (value: string) => {
+      setTextState(value)
+      setPersistedDraft(exerciseId, activePersona.id, value)
+    },
+    [exerciseId, activePersona.id],
+  )
 
   // Code-point length so a multi-byte emoji counts as one character (X-style).
   const length = useMemo(() => [...text].length, [text])
@@ -155,9 +226,11 @@ export function useComposeAsPersona(
       }).catch(() => {})
     }
 
+    // Clears both the local state AND the persisted draft (WR-103) — a sent
+    // post must never reappear as a leftover draft on a later remount.
     setText('')
     onPublished?.(post)
-  }, [exerciseId, timeZone, activePersona.id, actingHumanId, text, charLimit, onPublished])
+  }, [exerciseId, timeZone, activePersona.id, actingHumanId, text, charLimit, onPublished, setText])
 
   return {
     text,

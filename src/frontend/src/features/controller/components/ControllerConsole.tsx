@@ -237,7 +237,26 @@ export function ControllerConsole(
   // earlier persona selection. Both flyouts render at the same edge/width/
   // z-index, so without this a still-mounted, still-Tab-reachable persona
   // composer would sit obscured underneath the engine panel instead of being
-  // replaced by it. Close the dock whenever ENGINE activates.
+  // replaced by it.
+  //
+  // GATE-1 S-103 FOLLOW-UP (found via the added focus assertion): closing the
+  // dock via a `useEffect` reacting to `engineSettingsOpen` closes it ONE
+  // RENDER LATE — `EngineSettingsPanel`'s own open-transition effect (which
+  // focuses ITS close button) fires in the FIRST commit (the one where
+  // `engineSettingsOpen` flips true), while an effect-driven
+  // `setDockPersonaId(null)` only takes effect in a SECOND, later commit.
+  // `PersonaDockHost`'s own focus-RESTORE effect then fires in that second,
+  // LATER commit, stealing focus back to whatever opened the dock — landing
+  // AFTER, and so overriding, the engine panel's own focus. Fixed by gating
+  // the RENDERED `open` prop directly (`dockPersonaOpen`, below) so the dock
+  // closes in the SAME commit ENGINE opens in; `PersonaDockHost` is declared
+  // BEFORE `EngineSettingsPanel` in the JSX below, so within that one commit
+  // its closing (focus-restoring) effect fires FIRST and the engine panel's
+  // own focus, firing second, is what's left standing. The `useEffect` below
+  // still clears the underlying `dockPersonaId` STATE (one render later, with
+  // no visible/focus effect — the dock is already not rendered by then) so a
+  // LATER close of the engine panel doesn't resurrect a stale dock.
+  const dockPersonaOpen = dockPersonaId !== null && !engineSettingsOpen
   useEffect(() => {
     if (engineSettingsOpen) setDockPersonaId(null)
   }, [engineSettingsOpen])
@@ -354,7 +373,7 @@ export function ControllerConsole(
         renderPersonaResults={renderPersonaResults}
       />
 
-      <PersonaDockHost open={dockPersonaId !== null} onClose={closeDock} slots={dockSlots} />
+      <PersonaDockHost open={dockPersonaOpen} onClose={closeDock} slots={dockSlots} />
 
       <EngineSettingsPanel open={engineSettingsOpen} onClose={closeEngineSettings} />
     </Box>

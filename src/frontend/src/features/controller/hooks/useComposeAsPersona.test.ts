@@ -27,7 +27,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import type { StaffPersona } from '@/features/personas'
 import type { Post } from '@/features/social'
-import { useComposeAsPersona } from './useComposeAsPersona'
+import { composeAsPersonaDraftStore, useComposeAsPersona } from './useComposeAsPersona'
 
 vi.mock('@/core/services/api', () => ({
   api: { post: vi.fn().mockResolvedValue(undefined) },
@@ -82,6 +82,10 @@ const ACTIVE_PERSONA: StaffPersona = {
 beforeEach(() => {
   mockedUseExerciseContext.mockReturnValue(scope())
   vi.mocked(publishPost).mockReset().mockResolvedValue(undefined)
+  // Gate-1 WR-103's persisted-draft store is a module singleton keyed by
+  // (exerciseId, personaId) — both tests below reuse the SAME persona/exercise,
+  // so reset it to prevent one test's draft from leaking into the next.
+  composeAsPersonaDraftStore.resetForTests()
 })
 
 describe('useComposeAsPersona — LIVE persist (UAT fix)', () => {
@@ -127,5 +131,66 @@ describe('useComposeAsPersona — LIVE persist (UAT fix)', () => {
     expect(() => act(() => result.current.publish())).not.toThrow()
 
     await waitFor(() => expect(publishPost).toHaveBeenCalledTimes(1))
+  })
+})
+
+describe('useComposeAsPersona — the draft SURVIVES an unmount (Gate-1 WR-103)', () => {
+  it('typing a draft, unmounting (e.g. the console closes the dock for an unrelated reason), and remounting for the SAME persona restores the exact text', () => {
+    const first = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    act(() => first.result.current.setText('Boil-water notice lifted for Zone 3.'))
+    expect(first.result.current.text).toBe('Boil-water notice lifted for Zone 3.')
+
+    // Simulates ControllerConsole unmounting <PersonaComposer> for a reason
+    // that is NOT the operator choosing to discard their text (WR-005
+    // closing the dock when a different toolstrip tool activates).
+    first.unmount()
+
+    const second = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    expect(second.result.current.text).toBe('Boil-water notice lifted for Zone 3.')
+  })
+
+  it('publish() clears the persisted draft too, so a later remount for the SAME persona starts empty', async () => {
+    const first = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    act(() => first.result.current.setText('Sent already.'))
+    act(() => first.result.current.publish())
+    await waitFor(() => expect(publishPost).toHaveBeenCalledTimes(1))
+    first.unmount()
+
+    const second = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    expect(second.result.current.text).toBe('')
+  })
+
+  it('a DIFFERENT persona never observes another persona\'s in-progress draft', () => {
+    const other: StaffPersona = { ...ACTIVE_PERSONA, id: 'persona-other' }
+
+    const first = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    act(() => first.result.current.setText('Only for Fairhaven Water.'))
+    first.unmount()
+
+    const second = renderHook(() =>
+      useComposeAsPersona({ activePersona: other, actingHumanId: 'human-ctl-7' }),
+    )
+    expect(second.result.current.text).toBe('')
+  })
+
+  it('the explicit Esc/X close-and-discard path is UNCHANGED — a fresh renderHook after resetForTests() starts empty', () => {
+    // resetForTests() stands in for whatever the console's explicit discard
+    // path does today (it never mirrors into the persisted store to begin
+    // with — this just asserts the baseline "no draft" case still works).
+    composeAsPersonaDraftStore.resetForTests()
+    const { result } = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    expect(result.current.text).toBe('')
   })
 })
