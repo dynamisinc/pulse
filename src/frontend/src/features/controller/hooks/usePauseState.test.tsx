@@ -284,7 +284,7 @@ describe('usePauseState — clock safety: stops ONLY on Freeze (COR-050/053)', (
   })
 })
 
-describe('usePauseState — overlay register (seam value only)', () => {
+describe('usePauseState — overlay register', () => {
   it('defaults to out-of-fiction and is settable', () => {
     const { result } = renderHook(() => usePauseState())
     expect(result.current.overlayRegister).toBe('out-of-fiction')
@@ -488,7 +488,7 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
     mockedFetchPauseTier.mockRejectedValue(new Error('no resync in this test'))
   })
 
-  it('flips the tier optimistically AND POSTs it with the acting human + time zone', () => {
+  it('flips the tier optimistically AND POSTs it with the acting human + time zone + register', () => {
     const { result } = renderHook(() => usePauseState())
 
     act(() => result.current.setTier('freeze'))
@@ -499,6 +499,7 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
     expect(mockedSetPauseTier).toHaveBeenCalledWith('freeze', {
       actingHumanId: 'human-controller-01',
       timeZone: 'America/New_York',
+      overlayRegister: 'out-of-fiction',
     })
     // Exactly ONE steering_action, shape unchanged — never duplicated because a
     // live POST also fired.
@@ -519,6 +520,38 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
     expect(mockedSetPauseTier).toHaveBeenLastCalledWith('running', {
       actingHumanId: 'human-controller-01',
       timeZone: 'America/New_York',
+      overlayRegister: 'out-of-fiction',
+    })
+  })
+
+  it('sends the SELECTED overlay register with the Freeze POST (world-steering/08)', () => {
+    // The selection is what decides which holding page participants see, so it has
+    // to leave the console — a register that never reaches the server would be a
+    // control that does nothing.
+    const { result } = renderHook(() => usePauseState())
+
+    act(() => result.current.setOverlayRegister('in-fiction'))
+    act(() => result.current.setTier('freeze'))
+
+    expect(mockedSetPauseTier).toHaveBeenLastCalledWith('freeze', {
+      actingHumanId: 'human-controller-01',
+      timeZone: 'America/New_York',
+      overlayRegister: 'in-fiction',
+    })
+  })
+
+  it('sends the register selection as of the moment of the POST, never a stale one', () => {
+    const { result } = renderHook(() => usePauseState())
+    act(() => result.current.setOverlayRegister('in-fiction'))
+    act(() => result.current.setTier('freeze'))
+
+    act(() => result.current.setOverlayRegister('out-of-fiction'))
+    act(() => result.current.resume())
+
+    expect(mockedSetPauseTier).toHaveBeenLastCalledWith('running', {
+      actingHumanId: 'human-controller-01',
+      timeZone: 'America/New_York',
+      overlayRegister: 'out-of-fiction',
     })
   })
 
@@ -793,10 +826,12 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
     expect(mockedSetPauseTier).toHaveBeenCalledWith('engine', {
       actingHumanId: 'human-controller-01',
       timeZone: 'America/New_York',
+      overlayRegister: 'out-of-fiction',
     })
     expect(mockedSetPauseTier).toHaveBeenLastCalledWith('running', {
       actingHumanId: 'human-controller-01',
       timeZone: 'America/New_York',
+      overlayRegister: 'out-of-fiction',
     })
   })
 

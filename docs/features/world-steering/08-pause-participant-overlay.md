@@ -100,6 +100,23 @@ extended, not rebuilt. The orchestrator-owned `Program.cs` wiring (the new `Add*
 the `RemoveAll<IPauseOverlayPublisher>` swap) lands as a serial step after Gate-2 — same #310→#317
 caution as story 07.
 
+## Follow-ups recorded during build
+
+- **A register change WHILE already frozen does not re-push (accepted, not a defect of this story).**
+  The register rides a tier TRANSITION: `usePauseState`'s `setOverlayRegister` only updates the
+  console's local selection, and the selection is sent with the next pause-tier POST. So a
+  controller who freezes in `out-of-fiction` and then flips the toggle to `in-fiction` sees no
+  change on the participant tab until the next transition (Resume, or a re-Freeze). This is outside
+  AC1, which is transition-scoped ("*when* the pause-tier transition lands"), and outside AC5, which
+  is about the register the controller selected *for that Freeze*. **A UAT tester who flips the
+  register mid-Freeze and sees nothing should file it against a follow-up story, not this one.**
+  Making it live needs either a register-only POST + publish, or the console re-POSTing the current
+  tier on a register change — both un-specced here. Noted in `usePauseState.ts`'s module header.
+- **`OverlayStateService` is in-memory (a singleton), like `PauseTierRegistry`/`ExerciseClockService`.**
+  An App Service restart clears overlay state; the participant's next reconnect re-GETs and heals to
+  `'none'` (never a stuck holding page), and the client re-bases its sequence cutoff on that GET so
+  the restarted host's re-numbered pushes are still accepted.
+
 ## Tests
 - Unit (backend): `OverlayStateService` reflects Freeze/Resume transitions correctly, keyed
   independently per exercise.
@@ -119,3 +136,81 @@ caution as story 07.
   the holding page in the selected register with no manual refresh; Resume; confirm it clears
   live; refresh the participant tab mid-Freeze and confirm it still shows the holding page
   (GET-seeds-on-reconnect).
+
+### AC ↔ test linkage (as built)
+
+Backend (`src/Pulse.WebApi.Tests/Features/EngineRuntime/Steering/`):
+- AC1 — `OverlayStateServiceTests.Apply_Pause_ThenGet_ReflectsTheHoldingPageState`,
+  `OverlayStateServiceTests.Apply_EitherRegister_IsStoredVerbatim`,
+  `PauseOverlayPublisherTests.PublishAsync_Freeze_WritesThePauseOverlay_AndPushesToTheExercisesGroup`,
+  `PauseOverlayCompositionTests.AFreezeThroughTheWiredRegistry_WritesTheParticipantOverlay_PerExercise`,
+  `OverlayStateEndpointTests.Get_AfterAFreeze_ReturnsTheLiveHoldingPageState_NotTheStaticConstant`.
+- AC1 (the SELECTED register, plumbed end to end) — the console's `overlayRegister` now rides the
+  pause-tier POST (`PauseTierRequest.OverlayRegister` → `PauseTierTransition.OverlayRegister` →
+  `PauseOverlayPublisher`), validated server-side and coerced to `out-of-fiction` unless it is
+  exactly `in-fiction`:
+  `PauseTierEndpointsTests.Post_FreezeWithInFictionSelected_MakesTheParticipantGetReportInFiction`,
+  `.Post_FreezeWithOutOfFictionSelected_MakesTheParticipantGetReportOutOfFiction`,
+  `.Post_FreezeWithAnInvalidOrMissingRegister_CoercesToOutOfFiction_AndStillFreezes`,
+  `.Post_Resume_ClearsTheParticipantOverlay`, `.Post_FreezeInExerciseA_LeavesExerciseBsParticipantOverlayCleared`
+  (full HTTP: controller POST → registry → real publisher → participant `GET /api/overlay-state`);
+  `OverlayStateEndpointTests.Get_AfterAFreezeThroughTheWiredRegistry_ReportsTheSelectedRegister`,
+  `.Get_AfterAFreezeWithAnInvalidRegister_ReportsOutOfFiction`,
+  `.Get_AfterAResumeThroughTheWiredRegistry_ClearsToNoneInFiction`,
+  `.Get_AsExerciseB_NeverSeesAFreezeAppliedToExerciseAThroughTheRegistry`;
+  `PauseTierRegistryTests.SetTierAsync_CarriesTheSelectedOverlayRegister_ToThePublisher`,
+  `.SetTierAsync_AnInvalidOrMissingOverlayRegister_CoercesToOutOfFiction`,
+  `.SetTierAsync_AnInvalidOverlayRegister_StillAppliesTheFreeze`;
+  `PauseOverlayPublisherTests.PublishAsync_Freeze_UsesTheRegisterTheControllerSelected`,
+  `.PublishAsync_Freeze_WithANonContractRegister_FallsBackToOutOfFiction`; and console-side
+  `usePauseState.test.tsx` "sends the SELECTED overlay register with the Freeze POST",
+  "sends the register selection as of the moment of the POST, never a stale one",
+  `livePauseTierActions.test.ts` "POSTs the tier + acting human + time zone + overlay register…",
+  "POSTs the in-fiction register when that is the console selection".
+- AC2 — `PauseOverlayPublisherTests.PublishAsync_Freeze_WritesThePauseOverlay_AndPushesToTheExercisesGroup`,
+  `PauseOverlayPublisherTests.PublishAsync_DerivesTheGroupName_ExactlyAsTheHubJoinsIt`.
+- AC3 — `PauseOverlayPublisherTests.PublishAsync_Resume_ClearsTheOverlay_AndPushesTheClearedState`,
+  `OverlayStateEndpointTests.Get_AfterAResume_ReturnsTheClearedStateAgain`,
+  `OverlayStateServiceTests.Apply_None_AfterAPause_ClearsTheOverlay`.
+- AC4 — `OverlayStateEndpointTests.Get_AfterAFreeze_ReturnsTheLiveHoldingPageState_NotTheStaticConstant`
+  (+ `Get_BeforeAnyFreeze_ReturnsTheClearedNoneState`,
+  `Get_WhenTheOverlaySliceIsNotWired_StillServesThePreStoryNoneConstant`).
+- AC6 — `OverlayStateServiceTests.Apply_IsKeyedPerExercise_AFreezeInANeverTouchesB`,
+  `OverlayStateServiceTests.Get_EmptyScope_ReadsTheClearedState_NeverAnExercisesOverlay`,
+  `PauseOverlayPublisherTests.PublishAsync_TargetsOnlyTheOwningExercisesGroup_NeverAnothers`,
+  `OverlayStateEndpointTests.Get_ParticipantInExerciseB_NeverSeesExerciseAsFreeze`,
+  `OverlayStateEndpointTests.Get_UnresolvedScope_Returns401_NeverAnEmptyButOk200`.
+- AC7 (XC-004) — `PauseOverlayPublisherTests.PauseOverlayWritePath_TakesNoTelemetryOrPersistenceDependency`.
+- XC-002 — `PauseOverlayPublisherTests.PublishAsync_PayloadIsTheParticipantProjection_WithNoStaffFieldAtAll`,
+  `PauseOverlayPublisherTests.ParticipantOverlayStateDto_ExposesNoStaffProperty`,
+  `OverlayStateEndpointTests.Get_ResponseCarriesOnlyParticipantSafeKeys`.
+- Composition (the #310→#317 lesson) — `PauseOverlayCompositionTests.ResolvedPauseOverlayPublisher_IsTheRealImplementation_NotTheNoOpDefault`,
+  `.AddPauseParticipantOverlay_AfterStory07_ReplacesTheNoOpDefault`,
+  `.AddPauseParticipantOverlay_BeforeStory07_StillWins`,
+  `.ResolvingThePauseTierRegistry_DoesNotDeadlockOnTheOverlayPublisherCycle`.
+- Out-of-order publishes (story-07 review SG-206) —
+  `OverlayStateServiceTests.Apply_AnOlderSequence_DoesNotOverwriteANewerState`,
+  `PauseOverlayPublisherTests.PublishAsync_ReadsTheAuthoritativeTier_NotTheTransitionsPossiblyStaleTarget`,
+  `PauseOverlayPublisherTests.PublishAsync_BroadcastsTheStoresCurrentState_NotTheStateItTriedToWrite`.
+- WR-004 — `PauseOverlayPublisherTests.PublishAsync_WhenTheHubThrows_SwallowsTheFailure_SoTheFreezeStands`.
+
+Frontend (`src/frontend/src/features/participant-shell/components/OverlayLayer/`):
+- AC2 — `OverlayLayer.live.test.tsx` "renders nothing until a Freeze arrives, then shows the
+  out-of-fiction holding page live", `overlayState.live.test.ts` "reconciles a Freeze push …".
+- AC3 — `OverlayLayer.live.test.tsx` "clears the holding page when the Resume push arrives",
+  `overlayState.live.test.ts` "reconciles a Resume push back to \"none\"".
+- AC4 — `overlayState.live.test.ts` "seeds a mid-Freeze holding page from the GET…",
+  "re-GETs the authoritative state on every (re)connect", "treats the re-GET as ground truth…",
+  `OverlayLayer.live.test.tsx` "shows the holding page from the SEEDING GET alone…".
+- AC5 — `OverlayLayer.live.test.tsx` "renders the in-fiction register's copy…" (against an
+  UNMODIFIED `OverlayLayer.tsx`), `overlayState.live.test.ts` "carries the in-fiction register
+  verbatim".
+- Defensive validation / ordering — `overlayState.live.test.ts` "drops a malformed push payload…",
+  "drops a STALE push…", "keeps the previous snapshot when the GET fails…", and the Gate-1 CR-001/SG-002
+  guards: "drops a SUPERSEDED seed GET body that resolves last, keeping the newer truth", "drops a GET
+  body that a push overtook while it was in flight", "drops a push with no sequence", "still accepts a
+  sequence-less GET body — the pre-wiring fallback shape".
+- Composition, story-07 standalone (WR-001) —
+  `PauseOverlayCompositionTests.AddPauseTierSteering_Alone_StillResolvesAWorkingNoOpPublisher`.
+- Participant-payload hygiene (SG-001) —
+  `OverlayStateServiceTests.NextSequence_IsCountedPerExercise_NeverLeakingAnotherExercisesActivity`.

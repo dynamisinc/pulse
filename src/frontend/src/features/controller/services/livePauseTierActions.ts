@@ -19,11 +19,20 @@
  *     assuming `running`.
  *
  * NO CLIENT `exerciseId` (COR-001) — the POST body carries only `tier` +
- * `actingHumanId` + `timeZone`; scope is resolved server-side from the session,
- * exactly like `liveEngineControlActions`'s body. The GET takes no parameters
- * at all. The endpoint is gated by the SAME staff-plus-assigned-exercise filter
- * the review cockpit uses, so an unauthenticated/unscoped caller gets 401 and a
- * staff caller not assigned to the resolved exercise gets 403.
+ * `actingHumanId` + `timeZone` + `overlayRegister`; scope is resolved
+ * server-side from the session, exactly like `liveEngineControlActions`'s body.
+ * The GET takes no parameters at all. The endpoint is gated by the SAME
+ * staff-plus-assigned-exercise filter the review cockpit uses, so an
+ * unauthenticated/unscoped caller gets 401 and a staff caller not assigned to
+ * the resolved exercise gets 403.
+ *
+ * `overlayRegister` (world-steering story 08) is the console's selected
+ * participant-overlay register — a PRESENTATION choice, legitimately
+ * client-supplied exactly like `tier`, and validated server-side (anything but
+ * `'in-fiction'` is coerced to `'out-of-fiction'`, the conservative default). It
+ * decides which holding page a Freeze shows participants — "We'll be right back"
+ * vs "EXERCISE PAUSED" — and influences nothing else: never the scope, the tier,
+ * or the scenario clock.
  *
  * OUTCOME-HANDLED, NOT FIRE-AND-FORGET. Like the kill switch (#337),
  * `usePauseState.setTier` attaches handlers to `setPauseTier` — it does not
@@ -46,12 +55,18 @@
  */
 
 import { api } from '@/core/services/api'
-import type { PauseTier } from '../hooks/usePauseState'
+import type { OverlayRegister, PauseTier } from '../hooks/usePauseState'
 
 /** The pause-tier request context — no client `exerciseId` (COR-001). */
 export interface PauseTierActionContext {
   readonly actingHumanId: string
   readonly timeZone: string
+  /**
+   * The console's selected participant-overlay register (story 08) — which
+   * holding page a Freeze shows participants. Presentation only; validated
+   * server-side (see the module header).
+   */
+  readonly overlayRegister: OverlayRegister
 }
 
 /** `POST`/`GET /api/steering/pause-tier` (relative to the shared axios client's `/api` base). */
@@ -96,9 +111,9 @@ export function setPauseTier(
   tier: PauseTier,
   ctx: PauseTierActionContext,
 ): Promise<PauseTierServerState> {
-  const { actingHumanId, timeZone } = ctx
+  const { actingHumanId, timeZone, overlayRegister } = ctx
   return api
-    .post(PAUSE_TIER_PATH, { tier, actingHumanId, timeZone })
+    .post(PAUSE_TIER_PATH, { tier, actingHumanId, timeZone, overlayRegister })
     .then(response => parseState(response.data))
 }
 

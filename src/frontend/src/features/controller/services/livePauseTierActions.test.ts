@@ -4,8 +4,9 @@
  * Covers the LIVE tiered-pause actions (world-steering/07; CTL-023, COR-001,
  * COR-018):
  *  - `setPauseTier` POSTs `/steering/pause-tier` with the tier + acting human +
- *    time zone, and NO client `exerciseId` (COR-001 — the scope is resolved
- *    server-side, exactly like `liveEngineControlActions`);
+ *    time zone + the selected participant-overlay register (story 08), and NO
+ *    client `exerciseId` (COR-001 — the scope is resolved server-side, exactly
+ *    like `liveEngineControlActions`);
  *  - it resolves with the SERVER's `{ tier, clockFrozen }` — never discarding it
  *    (CR-001: `clockFrozen` is how the console learns a Freeze did not actually
  *    reach the clock) — and rejects on failure so `usePauseState` can revert its
@@ -30,7 +31,11 @@ vi.mock('@/core/services/api', () => ({
   },
 }))
 
-const CTX = { actingHumanId: 'human-controller-01', timeZone: 'America/New_York' }
+const CTX = {
+  actingHumanId: 'human-controller-01',
+  timeZone: 'America/New_York',
+  overlayRegister: 'out-of-fiction',
+} as const
 
 beforeEach(() => {
   postMock.mockReset()
@@ -38,7 +43,7 @@ beforeEach(() => {
 })
 
 describe('livePauseTierActions.setPauseTier', () => {
-  it('POSTs the tier + acting human + time zone, and NO client exerciseId (COR-001)', async () => {
+  it('POSTs the tier + acting human + time zone + overlay register, and NO client exerciseId (COR-001)', async () => {
     postMock.mockResolvedValue({ data: { tier: 'freeze', clockFrozen: true } })
 
     await setPauseTier('freeze', CTX)
@@ -47,6 +52,7 @@ describe('livePauseTierActions.setPauseTier', () => {
       tier: 'freeze',
       actingHumanId: 'human-controller-01',
       timeZone: 'America/New_York',
+      overlayRegister: 'out-of-fiction',
     })
     const body = postMock.mock.calls[0]?.[1] as Record<string, unknown>
     expect(body).not.toHaveProperty('exerciseId')
@@ -61,7 +67,17 @@ describe('livePauseTierActions.setPauseTier', () => {
       tier: 'running',
       actingHumanId: 'human-controller-01',
       timeZone: 'America/New_York',
+      overlayRegister: 'out-of-fiction',
     })
+  })
+
+  it('POSTs the in-fiction register when that is the console selection (world-steering/08)', async () => {
+    postMock.mockResolvedValue({ data: { tier: 'freeze', clockFrozen: true } })
+
+    await setPauseTier('freeze', { ...CTX, overlayRegister: 'in-fiction' })
+
+    const body = postMock.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(body.overlayRegister).toBe('in-fiction')
   })
 
   it("resolves with the SERVER's resulting state, never discarding it (the caller verifies it)", async () => {

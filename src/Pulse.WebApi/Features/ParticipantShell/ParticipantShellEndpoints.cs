@@ -1,9 +1,13 @@
 namespace Pulse.WebApi.Features.ParticipantShell;
 
+using System.Threading;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 
 /// <summary>
 /// The six participant-shell CONFIG read endpoints the frozen frontend shell seams call
@@ -96,7 +100,11 @@ public static class ParticipantShellEndpoints
         Alerts = [],
     };
 
-    /// <summary><c>GET /api/overlay-state</c> — Phase-1 constant: no overlay active.</summary>
+    /// <summary>
+    /// <c>GET /api/overlay-state</c> — the "no overlay active" answer. Still the response whenever the
+    /// world-steering overlay write path (story 08's <c>AddPauseParticipantOverlay()</c>) is not registered;
+    /// see <see cref="GetOverlayState"/>.
+    /// </summary>
     private static readonly OverlayStateResponse OverlayState = new()
     {
         State = "none",
@@ -131,9 +139,85 @@ public static class ParticipantShellEndpoints
         endpoints.MapGet("/api/alerts", (IExerciseContext exerciseContext) =>
             exerciseContext.CurrentExerciseId is null ? Results.Unauthorized() : Results.Ok(Alerts));
 
-        endpoints.MapGet("/api/overlay-state", (IExerciseContext exerciseContext) =>
-            exerciseContext.CurrentExerciseId is null ? Results.Unauthorized() : Results.Ok(OverlayState));
+        endpoints.MapGet("/api/overlay-state", GetOverlayState);
 
         return endpoints;
     }
+
+    /// <summary>
+    /// <c>GET /api/overlay-state</c> — the resolved exercise's LIVE participant overlay state (world-steering
+    /// story 08). Fails closed with <c>401</c> on an unresolved scope, exactly as before; on a resolved scope it
+    /// reads the per-exercise <see cref="OverlayStateService"/> so a controller's Freeze is visible to a
+    /// participant who joins or refreshes MID-Freeze — this was a hardcoded <c>state: "none"</c> constant, which
+    /// meant a Freeze changed nothing a participant could see.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the store is resolved optionally rather than injected.</b> <c>Program.cs</c> is orchestrator-owned:
+    /// <see cref="MapParticipantShellEndpoints"/> is ALREADY wired there, while story 08's
+    /// <c>AddPauseParticipantOverlay()</c> lands as a separate, serial edit. A hard handler parameter for an
+    /// unregistered type is inferred as a request BODY on a <c>GET</c> and throws while the route is being built
+    /// — i.e. the whole host (and every <c>WebApplicationFactory&lt;Program&gt;</c> test) would fail to start
+    /// until that line existed, taking the other five shell-config endpoints down with it. Resolving it from
+    /// <see cref="HttpContext.RequestServices"/> keeps this endpoint correct in both states: with the slice wired
+    /// it serves the live per-exercise state; without it, the pre-story <c>none</c> constant — never an invented
+    /// overlay (fail closed).
+    /// </para>
+    /// <para>
+    /// <b>Isolation (COR-001).</b> The exercise comes ONLY from <see cref="IExerciseContext"/> and is passed
+    /// straight to the store's per-exercise key, so a participant in exercise B can never read exercise A's
+    /// Freeze. <b>XC-002:</b> the response is <see cref="ParticipantOverlayStateDto"/>, which structurally cannot
+    /// carry the acting controller or the staff pause-tier vocabulary.
+    /// </para>
+    /// </remarks>
+    /// <param name="httpContext">The request, used only to resolve the optional overlay store (see remarks).</param>
+    /// <param name="exerciseContext">The server-resolved exercise scope (COR-001).</param>
+    /// <param name="loggerFactory">Logs the one-time "overlay slice not wired" warning (see remarks).</param>
+    /// <returns><c>401</c> on an unresolved scope; otherwise <c>200</c> with the exercise's overlay state.</returns>
+    private static IResult GetOverlayState(
+        HttpContext httpContext,
+        IExerciseContext exerciseContext,
+        ILoggerFactory loggerFactory)
+    {
+        if (exerciseContext.CurrentExerciseId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var overlayState = httpContext.RequestServices.GetService<OverlayStateService>();
+        if (overlayState is null)
+        {
+            // WR-002: the fallback is deliberately quiet on the wire (never an invented overlay) but must NOT be
+            // quiet in the logs — a missing composition-root line would otherwise be indistinguishable from
+            // "nobody has frozen anything". Warned ONCE per host process: this is a participant-polled endpoint,
+            // so a per-request warning would be log spam, and one line per instance start is the loud signal.
+            if (Interlocked.Exchange(ref overlayWiringWarned, 1) == 0)
+            {
+                LogOverlayStateSliceNotWired(
+                    loggerFactory.CreateLogger(typeof(ParticipantShellEndpoints).FullName!), null);
+            }
+
+            return Results.Ok(OverlayState);
+        }
+
+        return Results.Ok(ParticipantOverlayStateDto.FromSnapshot(
+            overlayState.Get(exerciseContext.CurrentExerciseId.Value)));
+    }
+
+    /// <summary>Whether the "overlay slice not wired" warning has already been logged for this host process.</summary>
+    private static int overlayWiringWarned;
+
+    /// <summary>
+    /// Source-generated warning for a MISSING <c>AddPauseParticipantOverlay()</c> (CA1848: no per-call
+    /// allocation). <c>LoggerMessage.Define</c> rather than the <c>[LoggerMessage]</c> attribute because this is a
+    /// static endpoint class with no logger field (mirrors <c>PauseTierEndpoints.LogTimeZoneFallback</c>).
+    /// </summary>
+    private static readonly Action<ILogger, Exception?> LogOverlayStateSliceNotWired =
+        LoggerMessage.Define(
+            LogLevel.Warning,
+            new EventId(1, nameof(LogOverlayStateSliceNotWired)),
+            "GET /api/overlay-state is serving the static 'none' overlay because OverlayStateService is not " +
+            "registered — Program.cs is missing builder.Services.AddPauseParticipantOverlay() " +
+            "(world-steering/08). A controller's WORLD FROZEN will NOT be visible to participants until that " +
+            "line is wired. This warning is logged once per host process.");
 }

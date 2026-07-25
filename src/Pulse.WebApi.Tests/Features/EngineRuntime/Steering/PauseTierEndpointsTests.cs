@@ -23,6 +23,7 @@ using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.Identity.Staff;
+using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Xunit;
@@ -361,15 +362,114 @@ public sealed class PauseTierEndpointsTests
         host.Registry.GetTier(exerciseId).Should().Be(PauseTier.Running);
     }
 
-    // ---- composition: the no-op overlay publisher default (story 08 swaps it) -------------------
+    // ---- the participant overlay register, over real HTTP (story 08, AC1/AC5) -------------------
 
     [RequiresDockerFact]
-    public async Task AddPauseTierSteering_RegistersTheNoOpOverlayPublisherDefault()
+    public async Task Post_FreezeWithInFictionSelected_MakesTheParticipantGetReportInFiction()
+    {
+        // The FULL live path a controller drives: POST /api/steering/pause-tier carrying the console's selected
+        // overlayRegister -> registry -> the REAL overlay publisher -> GET /api/overlay-state, the participant read.
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new
+            {
+                tier = "freeze",
+                actingHumanId = "human-controller-01",
+                timeZone = "America/Chicago",
+                overlayRegister = "in-fiction",
+            });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var overlay = await host.ReadOverlayStateAsync();
+        overlay.State.Should().Be("pause", "the Freeze is now participant-visible (D5-014/1.3)");
+        overlay.Register.Should().Be(
+            "in-fiction",
+            "the controller chose the fiction-preserving holding page (\"We'll be right back\") and that choice "
+            + "must actually reach participants");
+    }
+
+    [RequiresDockerFact]
+    public async Task Post_FreezeWithOutOfFictionSelected_MakesTheParticipantGetReportOutOfFiction()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01", overlayRegister = "out-of-fiction" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var overlay = await host.ReadOverlayStateAsync();
+        overlay.State.Should().Be("pause");
+        overlay.Register.Should().Be("out-of-fiction", "\"EXERCISE PAUSED\" — the fiction deliberately broken");
+    }
+
+    [RequiresDockerFact]
+    public async Task Post_FreezeWithAnInvalidOrMissingRegister_CoercesToOutOfFiction_AndStillFreezes()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+
+        var bogus = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01", overlayRegister = "sideways" });
+
+        bogus.StatusCode.Should().Be(
+            HttpStatusCode.OK, "the register is presentation only — it must never fail a safety action");
+        var overlay = await host.ReadOverlayStateAsync();
+        overlay.Register.Should().Be(
+            "out-of-fiction", "client input is validated server-side and fails closed to the conservative register");
+        host.Clock.IsFrozen(exerciseId).Should().BeTrue("and the Freeze itself still took");
+    }
+
+    [RequiresDockerFact]
+    public async Task Post_Resume_ClearsTheParticipantOverlay()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+        await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01", overlayRegister = "in-fiction" });
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "running", actingHumanId = "human-controller-01", overlayRegister = "in-fiction" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var overlay = await host.ReadOverlayStateAsync();
+        overlay.State.Should().Be("none", "AC3: Resume clears the participant holding page");
+        overlay.Register.Should().Be("in-fiction");
+    }
+
+    [RequiresDockerFact]
+    public async Task Post_FreezeInExerciseA_LeavesExerciseBsParticipantOverlayCleared()
+    {
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseA);
+        await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01", overlayRegister = "in-fiction" });
+
+        host.OverlayState.Get(exerciseA).State.Should().Be("pause");
+        host.OverlayState.Get(exerciseB).State.Should().Be(
+            "none", "COR-001: exercise B's participants must never receive exercise A's Freeze");
+    }
+
+    // ---- composition: story 08's swap of the no-op overlay publisher default --------------------
+
+    [RequiresDockerFact]
+    public async Task AddPauseParticipantOverlay_ReplacesTheStory07NoOpOverlayPublisher()
     {
         await using var host = await StartHostAsync(Guid.NewGuid());
 
-        host.Services.GetRequiredService<IPauseOverlayPublisher>().Should().BeOfType<NullPauseOverlayPublisher>(
-            "story 07 ships the no-op default via TryAddSingleton; story 08 replaces it with RemoveAll + AddSingleton");
+        host.Services.GetRequiredService<IPauseOverlayPublisher>().Should()
+            .BeOfType<PauseOverlayPublisher>(
+                "story 07 ships the no-op default via TryAddSingleton and story 08 replaces it with RemoveAll + "
+                + "AddSingleton — a surviving NullPauseOverlayPublisher would make every Freeze invisible");
         host.Services.GetRequiredService<PauseTierRegistry>().Should().BeSameAs(
             host.Services.GetRequiredService<PauseTierRegistry>(),
             "the registry is a singleton — one in-memory tier per exercise for the whole host");
@@ -431,6 +531,9 @@ public sealed class PauseTierEndpointsTests
     /// <summary>The staff-only wire projection, read back field-for-field (XC-002: tier + clock state only).</summary>
     private sealed record PauseTierWireState(string? Tier, bool ClockFrozen);
 
+    /// <summary>The PARTICIPANT overlay wire projection (story 08) — state + register, no staff field.</summary>
+    private sealed record OverlayWireState(string? State, string? Register);
+
     private static int CountRoutes(EndpointDataSource dataSource, string method, string rawText)
         => dataSource.Endpoints
             .OfType<RouteEndpoint>()
@@ -464,6 +567,29 @@ public sealed class PauseTierEndpointsTests
         /// <summary>The one pause-tier registry (a singleton) — asserted on directly.</summary>
         public PauseTierRegistry Registry => _app.Services.GetRequiredService<PauseTierRegistry>();
 
+        /// <summary>
+        /// The one participant-overlay store (a singleton, story 08) — asserted on directly for the
+        /// cross-exercise proof.
+        /// </summary>
+        public OverlayStateService OverlayState => _app.Services.GetRequiredService<OverlayStateService>();
+
+        /// <summary>
+        /// Reads <c>GET /api/overlay-state</c> — the PARTICIPANT-facing read (story 08), mapped on this host so a
+        /// controller's POST can be followed all the way to what a participant would receive.
+        /// </summary>
+        /// <returns>The participant overlay wire state.</returns>
+        public async Task<OverlayWireState> ReadOverlayStateAsync()
+        {
+            var response = await Client.GetAsync(new Uri("/api/overlay-state", UriKind.Relative));
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var document = JsonDocument.Parse(json);
+            return new OverlayWireState(
+                document.RootElement.GetProperty("state").GetString(),
+                document.RootElement.GetProperty("register").GetString());
+        }
+
         public static async Task<PauseTierTestHost> StartAsync(
             string connectionString,
             Guid? currentExerciseId,
@@ -492,6 +618,12 @@ public sealed class PauseTierEndpointsTests
             builder.Services.AddExerciseClock();
             builder.Services.AddPauseTierSteering();
 
+            // Story 08: the REAL participant-overlay publisher replaces story 07's no-op default, plus the shared
+            // hub's IHubContext it pushes through (AddSignalR — no second hub). Wired exactly as Program.cs will
+            // be, so a Freeze POST here follows the same path to the participant read as it does in production.
+            builder.Services.AddSignalR();
+            builder.Services.AddPauseParticipantOverlay();
+
             // A test may substitute a non-conforming clock to force the fail-closed 409 path (WR-103).
             if (clockOverride is not null)
             {
@@ -511,6 +643,10 @@ public sealed class PauseTierEndpointsTests
 
             var app = builder.Build();
             app.MapPauseTierSteering();
+
+            // The participant-shell config GETs (already wired in Program.cs) — story 08's one-handler edit makes
+            // /api/overlay-state serve the live per-exercise overlay this host's POSTs write.
+            app.MapParticipantShellEndpoints();
             await app.StartAsync();
 
             return new PauseTierTestHost(app);

@@ -140,8 +140,16 @@ public static class PauseTierEndpoints
         var logger = loggerFactory.CreateLogger(typeof(PauseTierEndpoints).FullName!);
         var clockStart = await ResolveClockStartAsync(dbContext, scope.Value, logger, cancellationToken);
 
+        // The overlay register is passed through as the controller's PRESENTATION selection and is validated
+        // (coerced to 'out-of-fiction' unless it is exactly 'in-fiction') inside SetTierAsync — see
+        // PauseTierRequest.OverlayRegister. It never touches scope, the tier, or the clock.
         var result = await registry.SetTierAsync(
-            scope.Value, tier, request.ActingHumanId, clockStart, cancellationToken);
+            scope.Value,
+            tier,
+            request.ActingHumanId,
+            clockStart,
+            request.OverlayRegister,
+            cancellationToken);
 
         return result.Outcome switch
         {
@@ -240,6 +248,27 @@ public sealed class PauseTierRequest
     /// <summary>The individual controller behind the shared console account (COR-018) — required.</summary>
     [JsonPropertyName("actingHumanId")]
     public string? ActingHumanId { get; init; }
+
+    /// <summary>
+    /// Which register a Freeze's PARTICIPANT holding page renders in (story 08; CTL-023, D7-004) —
+    /// <c>in-fiction</c> ("We'll be right back", the fiction preserved) or <c>out-of-fiction</c> ("EXERCISE
+    /// PAUSED", the fiction deliberately broken). The console's own
+    /// <c>usePauseState().overlayRegister</c> selection.
+    ///
+    /// <para><b>Legitimately client-supplied, unlike the scope.</b> This is a PRESENTATION choice the controller
+    /// makes, exactly like <see cref="Tier"/> and <see cref="ActingHumanId"/> — not a scoping input. It is
+    /// VALIDATED server-side, never trusted: <see cref="PauseTierRegistry.SetTierAsync"/> coerces anything that is
+    /// not exactly <c>in-fiction</c> (including a missing field) to <c>out-of-fiction</c>, the conservative
+    /// default.</para>
+    ///
+    /// <para><b>MUST NOT influence anything but the overlay copy</b> (the same rule
+    /// <see cref="TimeZone"/> carries for the clock). It cannot select an exercise or change who receives the
+    /// push — that is the server-resolved <see cref="IExerciseContext"/> scope alone (COR-001) — and it cannot
+    /// affect the tier, the scenario clock, or authorization. A future story that needs it for anything else must
+    /// justify that separately.</para>
+    /// </summary>
+    [JsonPropertyName("overlayRegister")]
+    public string? OverlayRegister { get; init; }
 
     /// <summary>
     /// The exercise IANA time zone the console stamps on its own <c>steering_action</c> event (XC-008). Accepted

@@ -38,7 +38,22 @@ public enum PauseTier
 /// two-worlds rule. Any participant-facing projection off this record must structurally omit it (see
 /// <c>ParticipantPostDto.FromPost</c> for the established pattern).</para>
 /// </param>
-public sealed record PauseTierTransition(Guid ExerciseId, PauseTier From, PauseTier To, string ActingHumanId);
+/// <param name="OverlayRegister">
+/// Which register a Freeze's participant holding page renders in (story 08; D7-004) — one of
+/// <see cref="OverlayStateWire.InFiction"/> / <see cref="OverlayStateWire.OutOfFiction"/>, ALWAYS already
+/// coerced to one of those two by <see cref="PauseTierRegistry.SetTierAsync"/>.
+/// <para>This is the ONE field on this record a participant-visible projection may read, and it is a pure
+/// PRESENTATION choice — the controller's console selection, not a scoping or authorization input. It must never
+/// influence anything but the overlay copy (contrast <see cref="PauseTierRequest.TimeZone"/>'s own MUST-NOT
+/// annotation): it cannot select an exercise, cannot change which participants receive the push (that is
+/// <see cref="ExerciseId"/> alone, COR-001), and cannot alter the tier or the scenario clock.</para>
+/// </param>
+public sealed record PauseTierTransition(
+    Guid ExerciseId,
+    PauseTier From,
+    PauseTier To,
+    string ActingHumanId,
+    string OverlayRegister);
 
 /// <summary>
 /// What a clock that has never been STARTED should be started at, so a Freeze arriving before the reaction loop
@@ -170,6 +185,15 @@ public sealed partial class PauseTierRegistry
     /// Where to START a clock that has never been started, so a Freeze before the engine's first tick still
     /// genuinely halts the exercise. <c>null</c> means "cannot be started" — a Freeze then fails closed.
     /// </param>
+    /// <param name="overlayRegister">
+    /// The console's selected participant-overlay register (story 08) — a PRESENTATION choice, carried through to
+    /// <see cref="PauseTierTransition.OverlayRegister"/> for the overlay publisher and read by nothing else.
+    /// VALIDATED here rather than trusted: anything that is not exactly <c>in-fiction</c> (including <c>null</c>,
+    /// an omitted field, or a bogus literal) is coerced to <c>out-of-fiction</c> — the conservative default, since
+    /// an out-of-fiction notice is safe when the fiction is already broken, whereas wrongly staying in-fiction
+    /// would HIDE a real stop from participants. A presentation typo must never block a safety action, so this
+    /// coerces instead of refusing the Freeze.
+    /// </param>
     /// <param name="cancellationToken">Cancels the overlay publish.</param>
     /// <returns>The outcome plus the completed transition when one happened.</returns>
     public async Task<PauseTierResult> SetTierAsync(
@@ -177,6 +201,7 @@ public sealed partial class PauseTierRegistry
         PauseTier tier,
         string actingHumanId,
         PauseClockStart? clockStart = null,
+        string? overlayRegister = null,
         CancellationToken cancellationToken = default)
     {
         if (exerciseId == Guid.Empty)
@@ -204,7 +229,12 @@ public sealed partial class PauseTierRegistry
             }
 
             _tiers[exerciseId] = tier;
-            transition = new PauseTierTransition(exerciseId, from, tier, actingHumanId);
+
+            // The register is CLIENT-SUPPLIED presentation (like tier/actingHumanId, unlike the scope) — validated
+            // to one of the two contract literals HERE, the single place a transition is constructed, so every
+            // downstream reader (the participant overlay publisher) is guaranteed a legal, fiction-safe value.
+            transition = new PauseTierTransition(
+                exerciseId, from, tier, actingHumanId, OverlayStateWire.CoerceRegister(overlayRegister));
         }
 
         LogTierChanged(transition.ExerciseId, transition.From, transition.To, transition.ActingHumanId);
