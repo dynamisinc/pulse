@@ -77,6 +77,18 @@ public sealed class BootstrapSharedCredentialRequest
 /// The optional participant-account sub-request. All free text goes through the SAME account-import
 /// sanitization/validation (NFR-004); the <see cref="Password"/> is optional and never logged (NFR-009).
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Persona binding (story identity-auth-roles/10).</b> <see cref="PersonaHandle"/> / <see cref="PersonaId"/> optionally bind
+/// the provisioned account to one of the exercise's <c>Persona</c> rows, which is what makes
+/// <c>Session.personaId</c> non-null on login and therefore the participant composer available (COR-015). The
+/// persona MUST already exist in the SAME exercise (COR-001) — it is resolved with an explicit exercise
+/// predicate, so a handle/id belonging to another exercise is rejected exactly like an unknown one. Note the
+/// ordering reality: a brand-new exercise has no cast yet, so a binding is resolvable only AFTER
+/// <c>POST /api/ops/seed-engine-content</c> has seeded the personas (a bootstrap re-run then binds), or via
+/// <c>POST /api/ops/bind-participant-persona</c> for an already-provisioned account.
+/// </para>
+/// </remarks>
 public sealed class BootstrapParticipantAccountRequest
 {
     /// <summary>The login handle (unique within the exercise).</summary>
@@ -94,6 +106,23 @@ public sealed class BootstrapParticipantAccountRequest
     /// <summary>The optional initial password; slow-KDF hashed when present, never persisted in the clear.</summary>
     [JsonPropertyName("password")]
     public string? Password { get; init; }
+
+    /// <summary>
+    /// Optional: the handle of the exercise's persona to bind this account to (e.g. <c>FairhavenWater</c> or
+    /// <c>@mvega_fh</c> — a leading <c>@</c> is normalized away, matching is case-insensitive). The PREFERRED
+    /// identifier, because a handle is discoverable from the seeded cast whereas a persona id is not returned by
+    /// any ops endpoint. Must name a persona in this same exercise (COR-001) or the call is rejected.
+    /// </summary>
+    [JsonPropertyName("personaHandle")]
+    public string? PersonaHandle { get; init; }
+
+    /// <summary>
+    /// Optional: the persona instance id to bind, as an alternative to <see cref="PersonaHandle"/>. When both are
+    /// supplied the id wins and the handle must agree (a mismatch is a 400, never a silent ignore). Must name a
+    /// persona in this same exercise (COR-001).
+    /// </summary>
+    [JsonPropertyName("personaId")]
+    public string? PersonaId { get; init; }
 }
 
 /// <summary>
@@ -167,6 +196,9 @@ public sealed class BootstrapExerciseResponseDto
                     AccountId = account.AccountId.ToString(),
                     Username = account.Username,
                     Created = account.Created,
+                    PersonaId = account.PersonaId?.ToString(),
+                    PersonaHandle = account.PersonaHandle,
+                    PersonaBound = account.PersonaBound,
                 }
                 : null,
         };
@@ -219,4 +251,29 @@ public sealed class BootstrapParticipantAccountResponseDto
     /// <summary><c>true</c> when this call created the account; <c>false</c> when it already existed.</summary>
     [JsonPropertyName("created")]
     public required bool Created { get; init; }
+
+    /// <summary>
+    /// The account's persona binding AFTER this call (story identity-auth-roles/10) — the value that becomes
+    /// <c>Session.personaId</c> on login. Omitted when the account has no binding (the composer then stays
+    /// absent, COR-015).
+    /// </summary>
+    [JsonPropertyName("personaId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PersonaId { get; init; }
+
+    /// <summary>
+    /// The stored handle of the persona resolved for this call, echoed so an operator can confirm which cast
+    /// member was matched. Omitted when no binding was requested.
+    /// </summary>
+    [JsonPropertyName("personaHandle")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PersonaHandle { get; init; }
+
+    /// <summary>
+    /// <c>true</c> when THIS call wrote the binding; <c>false</c> when no binding was requested, when the account
+    /// was already bound to the requested persona, or when a DIFFERENT existing binding was left untouched
+    /// (bootstrap is non-clobbering — use <c>POST /api/ops/bind-participant-persona</c> to rebind).
+    /// </summary>
+    [JsonPropertyName("personaBound")]
+    public required bool PersonaBound { get; init; }
 }

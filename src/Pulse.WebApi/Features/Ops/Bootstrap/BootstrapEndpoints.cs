@@ -15,11 +15,12 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 
 /// <summary>
 /// The ops-only bootstrap slice HTTP surface + composition-root seams (story login/05): the secret-gated,
-/// idempotent <c>POST /api/ops/bootstrap-exercise</c> seed endpoint. Exposes the extension methods the
-/// orchestrator wires into <c>Program.cs</c> (<see cref="AddOpsBootstrap"/> / <see cref="MapBootstrapEndpoints"/>);
-/// this feature never edits <c>Program.cs</c> itself. Follows the <c>Features/Identity/Staff/*</c> minimal-API
-/// endpoint-extension pattern; route base <c>/api</c>, namespaced <c>/api/ops/*</c> to read distinctly from
-/// <c>/api/staff/*</c>.
+/// idempotent <c>POST /api/ops/bootstrap-exercise</c> seed endpoint, plus story identity-auth-roles/10's secret-gated
+/// <c>POST /api/ops/bind-participant-persona</c> (persona binding for an already-provisioned account). Exposes
+/// the extension methods the orchestrator wires into <c>Program.cs</c> (<see cref="AddOpsBootstrap"/> /
+/// <see cref="MapBootstrapEndpoints"/>); this feature never edits <c>Program.cs</c> itself. Follows the
+/// <c>Features/Identity/Staff/*</c> minimal-API endpoint-extension pattern; route base <c>/api</c>, namespaced
+/// <c>/api/ops/*</c> to read distinctly from <c>/api/staff/*</c>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -37,6 +38,15 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 ///   <item><description>Endpoints: <c>app.MapBootstrapEndpoints()</c>.</description></item>
 /// </list>
 /// </para>
+/// <para>
+/// <b>Story identity-auth-roles/10 adds NO new composition-root line, deliberately.</b> The persona-binding endpoint is mapped
+/// INSIDE the existing <see cref="MapBootstrapEndpoints"/> and its services are registered INSIDE the existing
+/// <see cref="AddOpsBootstrap"/> (the option <c>login/implementation.md</c>'s integration seam explicitly
+/// prefers). So the already-wired <c>Program.cs</c> calls light it up with zero further edits — structurally
+/// removing the "merged green but never wired, dead at 404" failure mode that hit story 05 itself (PR #310 →
+/// fix #317). <c>Features/Ops/Bootstrap/CompositionRootWiringTests</c> asserts BOTH routes are mapped exactly
+/// once on the REAL host, not just on a self-mapped <c>TestServer</c>.
+/// </para>
 /// </remarks>
 public static class BootstrapEndpoints
 {
@@ -46,6 +56,13 @@ public static class BootstrapEndpoints
     /// already-wired <c>app.UseRateLimiter()</c> (orchestrator-owned).
     /// </summary>
     public const string BootstrapRateLimitPolicy = "ops-bootstrap";
+
+    /// <summary>
+    /// The per-IP rate-limit policy name applied to the persona-binding endpoint (story identity-auth-roles/10, NFR-009). Its
+    /// OWN policy (not the bootstrap one) so neither ops endpoint can exhaust the other's window; enforcement
+    /// needs the already-wired <c>app.UseRateLimiter()</c>.
+    /// </summary>
+    public const string BindParticipantPersonaRateLimitPolicy = "ops-bind-persona";
 
     /// <summary>The header the caller presents the configured bootstrap secret in.</summary>
     public const string BootstrapSecretHeaderName = "X-Bootstrap-Secret";
@@ -77,15 +94,28 @@ public static class BootstrapEndpoints
         services.TryAddSingleton<ISharedCredentialHasher, SharedCredentialHasher>();
         services.TryAddSingleton<ParticipantPasswordHasher>();
 
-        // Scoped to match the PulseDbContext unit of work it writes through.
+        // Scoped to match the PulseDbContext unit of work they write through. Story identity-auth-roles/10 adds the shared,
+        // exercise-confined persona resolver (COR-001) + the persona-binding service HERE rather than behind a new
+        // Add* call, so no further Program.cs wiring is required.
         services.AddScoped<BootstrapService>();
+        services.AddScoped<OpsPersonaResolver>();
+        services.AddScoped<ParticipantPersonaBindingService>();
 
-        // Per-IP fixed-window limiter (NFR-009). Bootstrap is a rare ops action, so a modest window is ample; this
-        // only ADDS a named policy to the shared limiter (AddRateLimiter is additive across features).
+        // Per-IP fixed-window limiters (NFR-009). Both are rare ops actions, so a modest window is ample; this
+        // only ADDS named policies to the shared limiter (AddRateLimiter is additive across features).
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
             options.AddPolicy(BootstrapRateLimitPolicy, httpContext =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    }));
+            options.AddPolicy(BindParticipantPersonaRateLimitPolicy, httpContext =>
                 RateLimitPartition.GetFixedWindowLimiter(
                     partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     factory: _ => new FixedWindowRateLimiterOptions
@@ -99,7 +129,7 @@ public static class BootstrapEndpoints
         return services;
     }
 
-    /// <summary>Maps the bootstrap endpoint onto the given route builder.</summary>
+    /// <summary>Maps the bootstrap + persona-binding endpoints onto the given route builder.</summary>
     /// <param name="endpoints">The endpoint route builder.</param>
     /// <returns>The same builder, for chaining.</returns>
     public static IEndpointRouteBuilder MapBootstrapEndpoints(this IEndpointRouteBuilder endpoints)
@@ -108,6 +138,11 @@ public static class BootstrapEndpoints
 
         endpoints.MapPost("/api/ops/bootstrap-exercise", BootstrapAsync)
             .RequireRateLimiting(BootstrapRateLimitPolicy);
+
+        // Story identity-auth-roles/10 — mapped in the EXISTING extension so the already-wired Program.cs call reaches it with
+        // no new composition-root edit (see the class remarks).
+        endpoints.MapPost("/api/ops/bind-participant-persona", BindParticipantPersonaAsync)
+            .RequireRateLimiting(BindParticipantPersonaRateLimitPolicy);
 
         return endpoints;
     }
@@ -131,6 +166,36 @@ public static class BootstrapEndpoints
             BootstrapOutcome.Invalid => Results.BadRequest(result.Error),
             // 404 (not 401/403): an unauthorized caller must not even learn this endpoint exists.
             BootstrapOutcome.Rejected => Results.NotFound(),
+            _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
+        };
+    }
+
+    /// <summary>
+    /// Binds (or rebinds) a persona to an already-provisioned participant account (story identity-auth-roles/10). Fails closed:
+    /// a missing/wrong secret returns <c>404</c>; an unknown hostname, account handle, or persona (including a
+    /// persona belonging to ANOTHER exercise — COR-001) likewise returns <c>404</c> without writing anything; an
+    /// invalid body returns <c>400</c>; success returns <c>200</c> with the ops response (an idempotent rebind to
+    /// the same persona is a <c>200</c> with <c>changed: false</c>).
+    /// </summary>
+    private static async Task<IResult> BindParticipantPersonaAsync(
+        BindParticipantPersonaRequest? request,
+        [FromHeader(Name = BootstrapSecretHeaderName)] string? bootstrapSecret,
+        ParticipantPersonaBindingService service,
+        CancellationToken cancellationToken)
+    {
+        var result = await service.BindPersonaAsync(request, bootstrapSecret, cancellationToken);
+
+        return result.Outcome switch
+        {
+            ParticipantPersonaBindingOutcome.Bound => Results.Ok(BindParticipantPersonaResponseDto.From(result)),
+            ParticipantPersonaBindingOutcome.Invalid => Results.BadRequest(result.Error),
+            // 404 (not 401/403): an unauthorized caller must not even learn this endpoint exists.
+            ParticipantPersonaBindingOutcome.Rejected => Results.NotFound(),
+            // 404: a valid caller naming a host/account/persona that does not exist in the target exercise. The
+            // persona case is deliberately identical for a cross-exercise persona — no existence hint, no binding.
+            ParticipantPersonaBindingOutcome.HostNotFound => Results.NotFound(),
+            ParticipantPersonaBindingOutcome.AccountNotFound => Results.NotFound(),
+            ParticipantPersonaBindingOutcome.PersonaNotFound => Results.NotFound(),
             _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
         };
     }

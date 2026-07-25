@@ -49,7 +49,8 @@ public sealed class BootstrapServiceTests
             Options.Create(new BootstrapOptions { Secret = Secret }),
             Options.Create(new DynamisIdentityProviderOptions { Accounts = new List<DynamisStaffAccount>(allowlist) }),
             _sharedHasher,
-            _participantHasher);
+            _participantHasher,
+            new OpsPersonaResolver(context));
 
     [RequiresDockerFact]
     public async Task Bootstrap_EmptyDatabase_CreatesHostBoundActiveExercise()

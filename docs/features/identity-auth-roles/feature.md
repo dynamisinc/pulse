@@ -13,6 +13,12 @@ attribution. Identity providers stay behind an interface — Entra/SSO is a futu
 COR-010, COR-011, COR-012, COR-013, COR-014, COR-015, COR-016, COR-017, COR-018 (with NFR-009 abuse
 resistance and XC-004 attribution).
 
+**COR-018 is split across two stories.** Story 10 delivers the **provisioning-time, single-persona,
+ops-endpoint** half of story 09's first AC (Complete, #342) — relocated in from `login/07` (see
+Dependencies below). Story 09 still owns the rest: multi-persona grants, the live staff-console action
+path, per-human attribution behind a shared handle, concurrent multi-human operation, and the
+participant-facing switcher (Not Started, #66) — see story 09's own boundary note.
+
 ## Design references
 Master §3 scope decision 6 (hybrid identity), decision 6/COR-011 (no fake-signup theater). D0
 non-negotiables (staff vs participant worlds).
@@ -29,9 +35,18 @@ non-negotiables (staff vs participant worlds).
 | 07 | Shared-credential lifecycle (rotate/revoke/lockout) | COR-016 | Complete | #64 |
 | 08 | Participant admin panel (login triage) | COR-017 | Not Started | #65 |
 | 09 | Organization-account operation (post-as-org, attribution) | COR-018 | Not Started | #66 |
+| 10 | Participant persona binding (provision a participant account with a posting persona) | COR-018, SOC-001, SOC-003 (consumed), COR-011 | Complete | #342 |
 | 11 | Default-deny session enforcement across the API surface | COR-012 (+COR-001, COR-015, COR-018, NFR-009) | Not Started | #361 |
 
 ## Dependencies
+
+**Story 10 (#342) was relocated in from `login/07`.** It was built and Tier-2 reviewed under the
+`login` feature because the gap surfaced during that feature's UAT rollout, but its requirements
+(COR-018, SOC-001/SOC-003) belong here, not to `login`'s sign-in scope (COR-011/012/014/015). It extends
+`login/05`'s bootstrap slice in place (additive edit, not a fork) and is a downstream consumer of that
+feature's seam — see `docs/features/login/feature.md`'s note and story 10's own "Why this story lives
+here" section for the full trail in both directions.
+
 Exercise-isolation (session→exercise scoping, COR-001/008); telemetry (XC-004) for attribution. The
 identity provider stays behind an interface (COR-014).
 

@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Ops.Bootstrap;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
@@ -46,6 +47,14 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 /// via the account path, <see cref="ISharedCredentialHasher"/> + <see cref="SharedCredentialPasswordGenerator"/>,
 /// <see cref="ParticipantPasswordHasher"/>, and <c>DynamisIdentityProviderOptions</c> (allowlist resolution).
 /// </para>
+/// <para>
+/// <b>Persona binding (story identity-auth-roles/10).</b> The participant sub-request may name a persona (by handle, or by id)
+/// to bind onto <see cref="Account.PersonaId"/> — the value <c>ParticipantLoginService</c> already carries onto
+/// <c>Session.personaId</c>, which is what makes the participant composer available. The binding is resolved
+/// through the shared <see cref="OpsPersonaResolver"/>, confined to the target exercise (COR-001): an unknown or
+/// cross-exercise persona is a 400 that writes nothing. Reused accounts follow the non-clobbering contract — an
+/// absent binding is filled, a differing one is preserved (see <c>ProvisionAccountAsync</c>).
+/// </para>
 /// </remarks>
 public sealed class BootstrapService
 {
@@ -76,6 +85,7 @@ public sealed class BootstrapService
     private readonly DynamisIdentityProviderOptions _staffAllowlist;
     private readonly ISharedCredentialHasher _sharedCredentialHasher;
     private readonly ParticipantPasswordHasher _participantPasswordHasher;
+    private readonly OpsPersonaResolver _personaResolver;
 
     /// <summary>Creates the bootstrap service over its collaborators.</summary>
     /// <param name="dbContext">The persistence context every seed row is written through in one unit of work.</param>
@@ -83,24 +93,28 @@ public sealed class BootstrapService
     /// <param name="staffAllowlist">The Phase-1 staff allowlist a named staff identity's external subject is resolved from.</param>
     /// <param name="sharedCredentialHasher">The slow-KDF hasher the shared password is hashed with (NFR-009).</param>
     /// <param name="participantPasswordHasher">The slow-KDF hasher an optional participant password is hashed with (NFR-009).</param>
+    /// <param name="personaResolver">The shared, exercise-confined persona resolver an optional account persona binding is resolved through (story identity-auth-roles/10, COR-001).</param>
     public BootstrapService(
         PulseDbContext dbContext,
         IOptions<BootstrapOptions> options,
         IOptions<DynamisIdentityProviderOptions> staffAllowlist,
         ISharedCredentialHasher sharedCredentialHasher,
-        ParticipantPasswordHasher participantPasswordHasher)
+        ParticipantPasswordHasher participantPasswordHasher,
+        OpsPersonaResolver personaResolver)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(staffAllowlist);
         ArgumentNullException.ThrowIfNull(sharedCredentialHasher);
         ArgumentNullException.ThrowIfNull(participantPasswordHasher);
+        ArgumentNullException.ThrowIfNull(personaResolver);
 
         _dbContext = dbContext;
         _options = options.Value ?? new BootstrapOptions();
         _staffAllowlist = staffAllowlist.Value ?? new DynamisIdentityProviderOptions();
         _sharedCredentialHasher = sharedCredentialHasher;
         _participantPasswordHasher = participantPasswordHasher;
+        _personaResolver = personaResolver;
     }
 
     /// <summary>
@@ -243,9 +257,21 @@ public sealed class BootstrapService
             ? await ProvisionSharedCredentialAsync(exerciseId, now, cancellationToken)
             : null;
 
-        var accountResult = accountValidation.Resolved is { } account
-            ? await ProvisionAccountAsync(exerciseId, account, now, cancellationToken)
-            : null;
+        BootstrapAccountResult? accountResult = null;
+        if (accountValidation.Resolved is { } account)
+        {
+            var provisioned = await ProvisionAccountAsync(exerciseId, account, now, cancellationToken);
+            if (provisioned.Error is { } accountError)
+            {
+                // A persona binding that does not resolve WITHIN this exercise (unknown, or belonging to another
+                // exercise — COR-001) is a terminal 400. Returning BEFORE the single SaveChangesAsync below means
+                // nothing is committed, preserving "a validation failure writes nothing at all"; the request-scoped
+                // context is discarded with the staged inserts still uncommitted.
+                return BootstrapResult.Invalid(accountError);
+            }
+
+            accountResult = provisioned.Result;
+        }
 
         // Exactly one XC-004 audit event per successful call (COR-001-stamped with the exercise's own id).
         _dbContext.TelemetryEvents.Add(BuildBootstrapTelemetry(
@@ -347,7 +373,19 @@ public sealed class BootstrapService
             return AccountValidation.Invalid($"participantAccount.password {passwordError}");
         }
 
-        return AccountValidation.Ok(new ResolvedAccount(username, displayName, role, password));
+        // Story identity-auth-roles/10: the optional persona binding is validated SYNTACTICALLY here (before any write); the
+        // exercise-confined lookup happens in ProvisionAccountAsync, once the target exercise id is known.
+        if (!OpsPersonaResolver.TryNormalizeHandle(account.PersonaHandle, out var personaHandle, out var handleError))
+        {
+            return AccountValidation.Invalid($"participantAccount.{handleError}");
+        }
+
+        if (!OpsPersonaResolver.TryParsePersonaId(account.PersonaId, out var personaId, out var personaIdError))
+        {
+            return AccountValidation.Invalid($"participantAccount.{personaIdError}");
+        }
+
+        return AccountValidation.Ok(new ResolvedAccount(username, displayName, role, password, personaId, personaHandle));
     }
 
     /// <summary>Provisions (or reuses) the <see cref="StaffUser"/> + <see cref="StaffAssignment"/> for the exercise.</summary>
@@ -424,10 +462,44 @@ public sealed class BootstrapService
         return new BootstrapSharedCredentialResult(Created: true, Password: password);
     }
 
-    /// <summary>Provisions one participant account, or reuses an existing same-handle account (never duplicated).</summary>
-    private async Task<BootstrapAccountResult> ProvisionAccountAsync(
+    /// <summary>
+    /// Provisions one participant account, or reuses an existing same-handle account (never duplicated), applying
+    /// the story-07 persona binding when one was requested. Returns a terminal error instead of a result when the
+    /// requested persona does not resolve within THIS exercise (unknown or cross-exercise — COR-001).
+    /// </summary>
+    /// <remarks>
+    /// <b>Binding semantics on a reused account.</b> Bootstrap stays non-clobbering: an UNBOUND account has its
+    /// binding filled in (completing provisioning — the one mutation a re-run makes, and the only way this
+    /// endpoint can help an account created before its cast was seeded), an account already bound to the
+    /// requested persona is a no-op success, and an account bound to a DIFFERENT persona is left untouched (the
+    /// response reports <c>personaBound: false</c> plus the surviving binding; rebinding is
+    /// <c>POST /api/ops/bind-participant-persona</c>'s explicit job).
+    /// </remarks>
+    private async Task<AccountProvisionOutcome> ProvisionAccountAsync(
         Guid exerciseId, ResolvedAccount account, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        // Story identity-auth-roles/10: resolve the optional persona binding FIRST, so an unresolvable one aborts before any row is
+        // staged. The resolver confines the lookup to THIS exercise with IgnoreQueryFilters() + an explicit
+        // ExerciseId predicate (the ops context has no ambient scope) — a cross-exercise persona is NotFound.
+        var resolution = await _personaResolver.ResolveAsync(
+            exerciseId, account.PersonaId, account.PersonaHandle, cancellationToken);
+
+        switch (resolution.Outcome)
+        {
+            case PersonaBindingOutcome.Invalid:
+                return AccountProvisionOutcome.Failed($"participantAccount.{resolution.Error}");
+            case PersonaBindingOutcome.NotFound:
+                return AccountProvisionOutcome.Failed(
+                    "participantAccount persona binding did not resolve: no persona with that handle/id exists in "
+                    + "this exercise (a persona from another exercise can never be bound, COR-001). Seed the cast "
+                    + "first (POST /api/ops/seed-engine-content).");
+            default:
+                break;
+        }
+
+        var personaId = resolution.PersonaId;
+        var personaHandle = resolution.Handle;
+
         // Account is IExerciseScoped and the captured scope is empty here — ignore the global filter and confine
         // the duplicate-handle read with an EXPLICIT ExerciseId predicate (CI collation makes the handle match
         // case-insensitively, matching the (ExerciseId, Username) unique index).
@@ -437,7 +509,27 @@ public sealed class BootstrapService
 
         if (existing is not null)
         {
-            return new BootstrapAccountResult(existing.Id, existing.Username, Created: false);
+            // Non-clobbering: fill an ABSENT binding, never overwrite a different existing one.
+            var bound = personaId is not null && existing.PersonaId is null;
+            if (bound)
+            {
+                existing.PersonaId = personaId;
+            }
+
+            // Only echo the resolved handle when it actually DESCRIBES the binding being reported. `personaId`
+            // here is the SURVIVING binding, while `personaHandle` is the one the caller ASKED for — on the
+            // non-clobber path those are two different personas, and pairing them would tell an operator that
+            // the account ended up on a persona it did not. This is the one surface whose whole job is
+            // confirming which persona an account is bound to, so it must not be ambiguous (CR WR-001).
+            var handleDescribesTheBinding = bound || (personaId is not null && existing.PersonaId == personaId);
+
+            return AccountProvisionOutcome.Ok(new BootstrapAccountResult(
+                existing.Id,
+                existing.Username,
+                Created: false,
+                existing.PersonaId,
+                handleDescribesTheBinding ? personaHandle : null,
+                bound));
         }
 
         var entity = new Account
@@ -447,12 +539,14 @@ public sealed class BootstrapService
             Username = account.Username,
             DisplayName = account.DisplayName,
             Role = account.Role,
+            PersonaId = personaId,
             CredentialHash = account.Password is null ? null : _participantPasswordHasher.Hash(account.Password),
             CreatedAt = now,
         };
         _dbContext.Accounts.Add(entity);
 
-        return new BootstrapAccountResult(entity.Id, entity.Username, Created: true);
+        return AccountProvisionOutcome.Ok(new BootstrapAccountResult(
+            entity.Id, entity.Username, Created: true, personaId, personaHandle, personaId is not null));
     }
 
     /// <summary>
@@ -473,7 +567,12 @@ public sealed class BootstrapService
             $"{{\"exerciseCreated\":{Bool(exerciseCreated)}," +
             $"\"staffAssignmentCreated\":{Bool(staff?.Created == true)}," +
             $"\"sharedCredentialCreated\":{Bool(sharedCredential?.Created == true)}," +
-            $"\"participantAccountCreated\":{Bool(account?.Created == true)}}}");
+            $"\"participantAccountCreated\":{Bool(account?.Created == true)}," +
+            $"\"participantPersonaBound\":{Bool(account?.PersonaBound == true)}," +
+            // WHICH persona, not merely THAT one was bound (AC5 / XC-004). The `Accounts.PersonaId` column is
+            // mutable — a later rebind overwrites it — so without this the audit trail cannot reconstruct the
+            // identity a participant was provisioned as, which is the whole point of auditing the binding.
+            $"\"participantPersonaId\":{Quote(account?.PersonaId?.ToString())}}}");
 
         return new TelemetryEvent
         {
@@ -499,11 +598,49 @@ public sealed class BootstrapService
     /// <summary>Renders a bool as its lowercase JSON literal for the opaque telemetry payload.</summary>
     private static string Bool(bool value) => value ? "true" : "false";
 
+    /// <summary>
+    /// Renders a nullable string as a JSON string literal, or the <c>null</c> literal when absent. Goes through
+    /// <see cref="JsonSerializer"/> rather than hand-quoting so a value can never break out of the payload —
+    /// these ids are server-generated GUIDs today, but the helper must not be the weak link if that changes.
+    /// </summary>
+    private static string Quote(string? value) =>
+        value is null ? "null" : JsonSerializer.Serialize(value);
+
     /// <summary>The resolved allowlist staff identity + canonical role a bootstrap staff sub-request maps to.</summary>
     private sealed record ResolvedStaff(string ExternalSubject, string DisplayName, string Username, string Role);
 
-    /// <summary>The validated participant-account fields a bootstrap account sub-request maps to.</summary>
-    private sealed record ResolvedAccount(string Username, string DisplayName, string Role, string? Password);
+    /// <summary>
+    /// The validated participant-account fields a bootstrap account sub-request maps to, including the
+    /// syntactically-validated (not yet resolved) story-07 persona binding.
+    /// </summary>
+    private sealed record ResolvedAccount(
+        string Username,
+        string DisplayName,
+        string Role,
+        string? Password,
+        Guid? PersonaId,
+        string? PersonaHandle);
+
+    /// <summary>
+    /// Internal carrier for the account-provisioning step: either the provisioned result, or a terminal error
+    /// (an unresolvable persona binding) the caller surfaces as a 400 BEFORE any commit.
+    /// </summary>
+    private readonly struct AccountProvisionOutcome
+    {
+        private AccountProvisionOutcome(BootstrapAccountResult? result, string? error)
+        {
+            Result = result;
+            Error = error;
+        }
+
+        public BootstrapAccountResult? Result { get; }
+
+        public string? Error { get; }
+
+        public static AccountProvisionOutcome Ok(BootstrapAccountResult result) => new(result, null);
+
+        public static AccountProvisionOutcome Failed(string error) => new(null, error);
+    }
 
     /// <summary>Internal carrier for the staff-validation step: either a resolved identity, a terminal error, or absent.</summary>
     private readonly struct StaffValidation
@@ -574,7 +711,16 @@ public sealed record BootstrapSharedCredentialResult(bool Created, string? Passw
 /// <param name="AccountId">The (created or reused) account id.</param>
 /// <param name="Username">The account login handle.</param>
 /// <param name="Created">Whether the account was created (vs reused) on this call.</param>
-public sealed record BootstrapAccountResult(Guid AccountId, string Username, bool Created);
+/// <param name="PersonaId">The account's persona binding AFTER this call (story identity-auth-roles/10), or <c>null</c> when unbound.</param>
+/// <param name="PersonaHandle">The stored handle of the persona resolved for this call, or <c>null</c> when no binding was requested.</param>
+/// <param name="PersonaBound">Whether THIS call wrote the binding (<c>false</c> for a no-op or a preserved differing binding).</param>
+public sealed record BootstrapAccountResult(
+    Guid AccountId,
+    string Username,
+    bool Created,
+    Guid? PersonaId = null,
+    string? PersonaHandle = null,
+    bool PersonaBound = false);
 
 /// <summary>
 /// The result of a bootstrap attempt. <see cref="BootstrapOutcome.Provisioned"/> carries the exercise id/host +
