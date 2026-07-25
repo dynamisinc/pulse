@@ -53,6 +53,21 @@ param deployAi = true
 // leaving it on indefinitely.
 param generationProviderLive = false
 
+// The two §2 governance attestations, asserted HERE BY A HUMAN — deliberately not derived from deployAi,
+// so GenerationGovernance.Validate remains an independent startup gate that can actually fire rather than
+// a restatement of "did we deploy the account". These are what the PROVIDER-GOVERNANCE.md §8 signature
+// covers (evidence item (i)); they belong in the same reviewed commit as generationProviderLive:
+//   - TenantBounded:      aif-pulse-uat is a single-tenant Cognitive Services account with
+//                         disableLocalAuth (keyless Entra only, no API key exists) and no
+//                         shared/public inference.
+//   - NoTrainingAttested: Azure OpenAI Service does not use customer prompts/completions to train
+//                         models (Microsoft product terms).
+// Both default to FALSE in main.bicep, so any other/future environment parameter file that omits them
+// asserts nothing (fail closed). Setting either false while generationProviderLive is true makes the host
+// throw GenerationConfigurationException at startup instead of egressing — that is the intended behaviour.
+param generationTenantBounded = true
+param generationNoTrainingAttested = true
+
 // Flip to true (with deployAi) to also deploy the Claude-on-Foundry tiers for the E8 provider
 // comparison. Requires a Claude-eligible subscription; the Anthropic Marketplace offer is auto-accepted
 // from the attestation below. Set the org name to the real entity using the model.

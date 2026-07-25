@@ -56,6 +56,12 @@ param claudeOrganizationName string = 'Dynamis'
 @description('ROUTE ENGINE GENERATION TRAFFIC TO THE LIVE GOVERNED MODEL. Deliberately SEPARATE from deployAi: deployAi provisions the endpoint, this decides whether application code is pointed at it. OFF by default — flipping it makes the App Service resolve Generation:Provider = AzureOpenAI instead of Fake, i.e. real LLM egress. TIER-2 (NFR-005 / ADP-025): requires the signed sign-off in docs/features/engine-runtime/PROVIDER-GOVERNANCE.md §8 before it is set true in any environment.')
 param generationProviderLive bool = false
 
+@description('TIER-2 HUMAN ASSERTION (NFR-005 §2), NOT a derived value: the signer attests that the generation endpoint is bounded to this tenant — a single-tenant Cognitive Services account, keyless (disableLocalAuth), no shared/public inference. Typed by the §8 signer in the environment parameter file, in the same reviewed commit as generationProviderLive. Deliberately NOT derived from deployAi: derived, it would make GenerationGovernance.Validate a restatement of deployAi instead of an independent gate. False by default, so a parameter file that omits it cannot accidentally assert a posture — and with a live provider a false assertion throws GenerationConfigurationException at startup (fail closed) rather than egressing.')
+param generationTenantBounded bool = false
+
+@description('TIER-2 HUMAN ASSERTION (NFR-005 §2 / ADP-025), NOT a derived value: the signer attests the contractual no-training terms covering this endpoint (Microsoft product terms for Azure OpenAI; the Anthropic Marketplace offer for Claude). Typed by the §8 signer in the environment parameter file alongside generationProviderLive; deliberately NOT derived from deployAi, for the same reason as generationTenantBounded. False by default (fail closed); a false assertion under a live provider throws at startup rather than egressing.')
+param generationNoTrainingAttested bool = false
+
 // ============================================================================
 // SQL Parameters (only consumed when deployDatabase = true)
 // ============================================================================
@@ -221,13 +227,11 @@ var generationStandardTierModel = generationAmbientModelName
 var generationLive = deployAi && generationProviderLive
 var generationProvider = generationLive ? 'AzureOpenAI' : 'Fake'
 
-// The §2 attestations are true because ai.bicep provisioned the posture they describe: a single-tenant
-// Cognitive Services account with disableLocalAuth (no key, Entra-only) and no shared/public inference;
-// and Azure OpenAI's product terms are the contractual no-training basis. With deployAi = false there is
-// nothing provisioned and nothing to attest, so both stay false (fail closed — a real provider on that
-// posture is rejected at startup by GenerationGovernance.Validate).
-var generationTenantBounded = deployAi
-var generationNoTrainingAttested = deployAi
+// The §2 governance attestations are PARAMETERS, not locals derived from deployAi (see their
+// @description()s above): the §8 signer types them, so GenerationGovernance.Validate stays an
+// independent gate that can actually fire. They are zeroed out at the webApp call site when
+// deployAi = false — not to re-derive the assertion, but because with no endpoint provisioned there is
+// nothing for it to describe, and every other Generation:* value is emptied the same way.
 
 // = ai.bicep output 'residency' (the model deployments' region, DataZoneStandard SKU / US data zone).
 var generationResidency = location
@@ -341,8 +345,9 @@ module webApp 'modules/webapp.bicep' = if (deployWebApp) {
     generationAmbientDeployment: deployAi ? generationAmbientDeploymentName : ''
     generationAmbientModel: deployAi ? generationAmbientModelName : ''
     generationResidency: deployAi ? generationResidency : ''
-    generationTenantBounded: generationTenantBounded
-    generationNoTrainingAttested: generationNoTrainingAttested
+    // The signer's §2 assertions, emptied along with the rest of the block when no endpoint exists.
+    generationTenantBounded: deployAi && generationTenantBounded
+    generationNoTrainingAttested: deployAi && generationNoTrainingAttested
     tags: tags
   }
 }

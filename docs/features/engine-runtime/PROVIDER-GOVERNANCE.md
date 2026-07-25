@@ -189,12 +189,25 @@ default (Azure OpenAI in-tenant is the v1 default; Claude is the per-deployment 
 3. **Only then sign §8** — the boxes below assert an observed posture, not an authored intent.
 4. **Then flip the live-traffic gate** (next paragraph).
 
-**What signing actually authorizes** (the one mechanical change): set `param generationProviderLive = true`
-in `infrastructure/parameters/uat.bicepparam` and run **Deploy Infrastructure**. That flips exactly one
-App Service setting — `Generation__Provider` `Fake` → `AzureOpenAI`. Everything else (`Endpoint`, the
-tier deployment/model pairs, the governance attestations) is already staged and unchanged by the flip;
-step 1 above has by then provisioned the endpoint and the role assignment **without** routing any
-traffic. See `infrastructure/README.md` → "`Generation:*` app settings and the live-traffic gate" for the
+**What signing actually authorizes** — three parameters in `infrastructure/parameters/uat.bicepparam`,
+which belong in **one reviewed commit** so the human assertion lands with the go-live rather than
+somewhere upstream of it:
+
+| Parameter | Signing sets it to | What it means |
+|---|---|---|
+| `generationProviderLive` | `true` | Route traffic: `Generation__Provider` `Fake` → `AzureOpenAI`. The only setting the flip changes. |
+| `generationTenantBounded` | `true` | **The signer's §2 assertion** (evidence i): single-tenant, keyless, no shared/public inference. Not derived from `deployAi` — a human types it. |
+| `generationNoTrainingAttested` | `true` | **The signer's §2 assertion** (evidence i): contractual no-training terms cover this endpoint. |
+
+The two attestations are deliberately **not** computed from `deployAi`, so
+`GenerationGovernance.Validate` stays an independent startup gate: leave either `false` under a live
+provider and the host throws `GenerationConfigurationException` at startup instead of egressing (fail
+closed, §3). Both default to `false` in `main.bicep`, so any other environment's parameter file that
+omits them asserts nothing.
+
+Everything else (`Endpoint`, the tier deployment/model pairs, residency, retention) is already staged and
+unchanged by the flip; step 1 above has by then provisioned the endpoint and the role assignment
+**without** routing any traffic. See `infrastructure/README.md` → "`Generation:*` app settings and the live-traffic gate" for the
 runbook, including the post-flip `POST /api/ops/seed-engine-content` re-registration (an app-setting
 change restarts the App Service, and engine loop state is process-memory this phase) and the standing
 cost note (~$0.61/exercise-hour on Ambient while a storyline is active — flip it back off after the
