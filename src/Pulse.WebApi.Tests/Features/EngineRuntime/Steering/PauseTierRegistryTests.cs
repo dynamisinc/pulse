@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
@@ -196,19 +197,46 @@ public sealed class PauseTierRegistryTests
     [Fact]
     public async Task SetTierAsync_FreezeOnAColdClock_SurvivesTheReactionLoopsOwnLazyStart()
     {
-        // ReactionLoopHost.EnsureClockStarted only starts a clock that is neither running NOR frozen, so the
-        // loop's first tick must NOT clobber a freeze applied before it — otherwise the engine would generate
-        // while the console reads WORLD FROZEN.
+        // The loop's lazy start only starts a clock that is neither running NOR frozen, so its first tick must NOT
+        // clobber a freeze applied before it — otherwise the engine would generate while the console reads WORLD
+        // FROZEN. This calls the PRODUCTION predicate (ReactionLoopHost.ShouldStartClock, which
+        // EnsureClockStarted itself uses) rather than re-implementing the boolean, so a regression there fails
+        // HERE — the whole CR-001 fix rests on that guard.
         var exerciseId = Guid.NewGuid();
         var clock = new ExerciseClockService(new ManualTimeProvider(DateTimeOffset.UnixEpoch));
         var registry = RegistryFor(clock, new RecordingPauseOverlayPublisher());
+
+        ReactionLoopHost.ShouldStartClock(clock, exerciseId).Should().BeTrue(
+            "sanity: before the freeze this cold clock is exactly what the loop WOULD start");
+
         await registry.SetTierAsync(exerciseId, PauseTier.Freeze, "human-controller-01", ClockStart());
 
-        // Exactly what EnsureClockStarted does on the loop's first tick for this exercise.
-        var loopWouldStart = !clock.IsRunning(exerciseId) && !clock.IsFrozen(exerciseId);
-
-        loopWouldStart.Should().BeFalse("the loop leaves an already-frozen clock alone");
+        ReactionLoopHost.ShouldStartClock(clock, exerciseId).Should().BeFalse(
+            "the loop must leave an already-frozen clock alone");
         clock.IsFrozen(exerciseId).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SetTierAsync_RefusedFreeze_LeavesTheClockUnfrozen_NeverHalfFrozen()
+    {
+        // SG-202: a clock that accepts Freeze but reports itself unfrozen is non-conforming. Since the tier is
+        // refused (the console will show RUNNING), the clock must not be left held — that is the mirror-image lie.
+        var exerciseId = Guid.NewGuid();
+        var frozenCalls = 0;
+        var unfrozenCalls = 0;
+        var clock = new Mock<IExerciseClock>();
+        clock.Setup(c => c.IsRunning(It.IsAny<Guid>())).Returns(true);
+        clock.Setup(c => c.IsFrozen(It.IsAny<Guid>())).Returns(false);
+        clock.Setup(c => c.Freeze(It.IsAny<Guid>())).Callback(() => frozenCalls++);
+        clock.Setup(c => c.Unfreeze(It.IsAny<Guid>())).Callback(() => unfrozenCalls++);
+        var registry = RegistryFor(clock, new RecordingPauseOverlayPublisher());
+
+        var result = await registry.SetTierAsync(exerciseId, PauseTier.Freeze, "human-controller-01", ClockStart());
+
+        result.Outcome.Should().Be(PauseTierOutcome.ClockUnavailable);
+        frozenCalls.Should().Be(1);
+        unfrozenCalls.Should().Be(1, "the refused freeze is compensated, so nothing is left half-frozen");
+        registry.GetTier(exerciseId).Should().Be(PauseTier.Running);
     }
 
     [Fact]

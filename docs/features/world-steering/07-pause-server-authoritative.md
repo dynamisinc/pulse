@@ -67,6 +67,15 @@ Ticks STORY-UPDATES.md §A **CTL-023** (already applied by story 03; this story 
 - [ ] Given `USE_MOCK_DATA` is true (the dev/UAT default), then `usePauseState`'s existing
       browser-local `pausableExerciseClock` behavior from story 03 is **unchanged** — this story
       adds a live branch; it does not alter or remove the mock path.
+> **AC-7's "exactly one `steering_action`" — refined during build (WR-104).** An **applied**
+> transition emits exactly one event, now tagged `payload.outcome: 'applied'` (additive; the story-03
+> shape is otherwise unchanged). A transition that does **not stand** — the server refused the Freeze,
+> or its outcome was unknown and the authoritative re-read disagreed — emits a **second** event for the
+> correcting transition, `payload.outcome: 'reverted'` + `reverted: true`. That is deliberate, not a
+> duplicate: the telemetry is emitted before the POST, so without the counter-event an AAR would show
+> WORLD FROZEN for a freeze the server refused with a `409` — the story's own thesis ("never report a
+> pause the server did not apply") moved into the audit trail. This is the ONLY two-event transition.
+
 - [ ] Isolation (COR-001/XC-002): pause-tier state is held per-exercise, server-side, keyed the
       same way `ExerciseClockService` keys its own state; the endpoint is gated by the same
       staff-plus-assigned-exercise filter the review cockpit uses (`EngineCockpitStaffAuthorizationFilter`,
@@ -75,6 +84,25 @@ Ticks STORY-UPDATES.md §A **CTL-023** (already applied by story 03; this story 
       exercise B's clock. Every tier transition still emits exactly one `steering_action` XC-004
       event (unchanged shape from story 03) — this story does not duplicate that emission when the
       live POST additionally fires.
+
+## Follow-ups recorded during build (NOT built here)
+- **A fresh console can restore `'live'` past another controller's SUGGEST-ONLY.** The displaced
+  kill-switch position (`engineModeBeforePause`) lives in one browser runtime, so console B — which
+  adopted `engine` from the server resync and never saw console A's pre-pause choice — seeds from its
+  own `'live'` default and restores that on Resume. Within this story's declared Out of Scope (the
+  suggest-only nuance); the real fix is making the kill-switch position itself server-authoritative,
+  which needs the frontend/backend autonomy-model alignment already tracked separately. Commented at
+  the adopt site in `usePauseState.ts`.
+- **The overlay publish is not ordered.** `PauseTierRegistry` publishes OUTSIDE its lock (you cannot
+  await inside one), so two rapid transitions on the same exercise can reach
+  `IPauseOverlayPublisher` out of order even though the tier state itself is serialized and correct.
+  Carried into story 08's brief: a participant-visible publisher should carry its own
+  sequence/timestamp rather than trusting arrival order. Noted at the publish site.
+- **Scenario-epoch coupling once COR-050 lands.** Because the reaction loop never re-`Start`s a frozen
+  clock, whichever of "a pre-seed Freeze" or "the seed's first tick" happens first will decide the
+  exercise's scenario epoch once `Exercise.CurrentScenarioTime` is populated for real. Invisible today
+  (the column is a usually-null placeholder, so both paths read the server wall clock). Documented at
+  `ResolveClockStartAsync`; to be reconciled with the native scenario clock in B3.
 
 ## Out of Scope
 Building the inject queue or making Pause injects functionally pause anything (tracked separately
@@ -165,8 +193,16 @@ the shipped `EngineCockpitStaffAuthorizationFilter`; the shipped kill-switch/res
   - `PauseTierRegistryTests.SetTierAsync_ResumeIsNeverBlockedByAnUnstartedClock` (AC-2)
   - `PauseTierRegistryTests.SetTierAsync_AThrowingOverlayPublisher_NeverUndoesAnAppliedFreeze` (AC-7) —
     story 08's real publisher lands on this seam
+  - `PauseTierRegistryTests.SetTierAsync_RefusedFreeze_LeavesTheClockUnfrozen_NeverHalfFrozen` (AC-1)
   - `PauseTierEndpointsTests.Post_Freeze_OnAColdClock_StartsAndFreezesIt_ReportingTheTruth` (AC-1)
   - `PauseTierEndpointsTests.Post_Freeze_OnAColdClock_ThenTheLoopsLazyStart_LeavesItFrozen` (AC-1)
+  - `PauseTierEndpointsTests.Post_Freeze_WhenTheClockRefuses_Returns409_AndRecordsNothing` (AC-1) — the
+    409 the whole frontend revert hangs off, proven over real HTTP (never a 500)
+  - `PauseTierEndpointsTests.Get_AfterARefusedFreeze_StillReportsRunning` (AC-1)
+  - `PauseTierEndpointsTests.Post_NonFreezeTier_StillSucceeds_WhenTheClockWouldRefuseAFreeze` (AC-1)
+  - `SetTierAsync_FreezeOnAColdClock_SurvivesTheReactionLoopsOwnLazyStart` asserts the PRODUCTION
+    predicate `ReactionLoopHost.ShouldStartClock` (extracted for exactly this reason), so a regression at
+    the loop's lazy-start guard — which the whole CR-001 fix rests on — fails this test.
 - Unit (backend): the endpoint fails closed — no staff session `401`, staff-but-unassigned `403`,
   assigned staff `200` — via the reused filter (no new authorization code).
   - `PauseTierEndpointsTests.Routes_AreMappedExactlyOnce` (AC-1)
@@ -203,7 +239,17 @@ the shipped `EngineCockpitStaffAuthorizationFilter`; the shipped kill-switch/res
   - `livePauseTierActions.setPauseTier > surfaces a Freeze the server did NOT apply as clockFrozen: false`
     / `treats a missing clockFrozen as NOT frozen (fail closed, never assumed)`
     / `resolves with the SERVER's resulting state, never discarding it` (AC-1)
+- Unit (frontend), **the revert must not lie either (WR-101) — a failed POST is ASKED about, not guessed**:
+  - `usePauseState — live mode > KEEPS a Resume whose response was lost but which the server actually applied` (AC-4)
+  - `usePauseState — live mode > falls back to undoing its own flip only when the authoritative re-GET also fails` (AC-4)
+  - `usePauseState — live mode > a stale failure never clobbers a newer transition that happens to share its tier VALUE` (AC-4)
+  - `usePauseState — live mode > reverts a Freeze the server REFUSED (the 409 rejection path), after ASKING what is true` (AC-1/AC-4)
+- Unit (frontend), **WR-104 — the audit trail never shows a pause that did not stand**:
+  - `usePauseState — live mode > emits a second steering_action marking the reverted transition, never a silent correction` (AC-7)
+  - `usePauseState — live mode > an APPLIED transition stays exactly one event, tagged applied` (AC-7)
 - Unit (frontend), **CR-002 — ENGINE PAUSED cannot outlive a failed kill-switch POST**:
+  - `usePauseState — live mode > POSTs the reverted tier after a kill-switch failure, so the server does not keep the abandoned tier` (AC-3/AC-7)
+  - `usePauseState — live mode > a failed revert POST does not ping-pong (no further revert, no further POST)` (AC-3)
   - `usePauseState — live mode > reverts the tier when the KILL-SWITCH POST fails, even though the pause-tier POST succeeded` (AC-3)
   - `usePauseState — live mode > does NOT revert a kill-switch failure once a newer transition has superseded it` (AC-3/AC-4)
   - `useEngineControl — kill switch > invokes the optional onRejected callback after reverting, so a composing caller can undo coupled state` (AC-3)

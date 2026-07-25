@@ -110,6 +110,7 @@ public static class PauseTierEndpoints
         PauseTierRegistry registry,
         IExerciseContext exerciseContext,
         PulseDbContext dbContext,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -136,7 +137,8 @@ public static class PauseTierEndpoints
 
         // Where to start a clock the reaction loop has not started yet, so a Freeze before the engine's first
         // tick still genuinely halts the exercise (CR-001). Server-authoritative: read from the exercise row.
-        var clockStart = await ResolveClockStartAsync(dbContext, scope.Value, cancellationToken);
+        var logger = loggerFactory.CreateLogger(typeof(PauseTierEndpoints).FullName!);
+        var clockStart = await ResolveClockStartAsync(dbContext, scope.Value, logger, cancellationToken);
 
         var result = await registry.SetTierAsync(
             scope.Value, tier, request.ActingHumanId, clockStart, cancellationToken);
@@ -157,13 +159,28 @@ public static class PauseTierEndpoints
 
     /// <summary>
     /// Resolves the scenario start + time zone a never-started clock should be started at, from the
-    /// <see cref="Exercise"/> row (server-authoritative, never client input). Mirrors
-    /// <c>EngineContentSeedService</c>'s convention: the stored scenario instant when configured, otherwise one
-    /// server wall-clock read. Returns <c>null</c> when the exercise row is missing — a Freeze then fails closed.
+    /// <see cref="Exercise"/> row (server-authoritative, never client input — in particular NOT
+    /// <see cref="PauseTierRequest.TimeZone"/>). Returns <c>null</c> when the exercise row is missing — a Freeze
+    /// then fails closed.
+    ///
+    /// <para><b>Start point.</b> <see cref="Exercise.CurrentScenarioTime"/> when configured, otherwise ONE server
+    /// wall-clock read. Note this is NOT identical to <c>EngineContentSeedService</c>, which uses its
+    /// wall-clock <c>now</c> unconditionally for a registration's <c>ScenarioStart</c> — the stored column is
+    /// preferred here because a Freeze may be the FIRST thing that ever starts this exercise's clock.</para>
+    ///
+    /// <para><b>Coupling to watch (COR-050).</b> Because the reaction loop never re-<c>Start</c>s a clock that is
+    /// already frozen (<c>ReactionLoopHost.ShouldStartClock</c>), whichever of "a Freeze" or "the seed's first
+    /// tick" happens FIRST decides the exercise's scenario epoch. Today
+    /// <see cref="Exercise.CurrentScenarioTime"/> is a documented placeholder that is usually null, so both paths
+    /// land on a server wall-clock read and the difference is invisible. Once COR-050 populates that column for
+    /// real, a pre-seed Freeze will anchor the epoch to the stored instant while a seed-first run anchors it to
+    /// <c>now</c> — the two must be reconciled when the native scenario clock lands (B3 follow-up), not left to
+    /// ordering.</para>
     /// </summary>
     private static async Task<PauseClockStart?> ResolveClockStartAsync(
         PulseDbContext dbContext,
         Guid exerciseId,
+        ILogger logger,
         CancellationToken cancellationToken)
     {
         // Exercise is deliberately UNSCOPED (its own Id IS the scope), so this is a direct read by the resolved
@@ -180,7 +197,8 @@ public static class PauseTierEndpoints
         }
 
         // An unrecognised IANA id must not block a safety action — the zone only affects how the scenario
-        // INSTANT is projected, never the minute count the engine's timers read. Fall back to UTC.
+        // INSTANT is projected, never the minute count the engine's timers read. Fall back to UTC, but LOG it:
+        // a misconfigured exercise time zone is a real data problem and must not be silent (SG-203).
         TimeZoneInfo timeZone;
         try
         {
@@ -189,10 +207,23 @@ public static class PauseTierEndpoints
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
         {
             timeZone = TimeZoneInfo.Utc;
+            LogTimeZoneFallback(logger, row.TimeZone, exerciseId, ex);
         }
 
         return new PauseClockStart(row.CurrentScenarioTime ?? DateTimeOffset.UtcNow, timeZone);
     }
+
+    /// <summary>
+    /// Source-generated warning for the UTC time-zone fallback (CA1848: no per-call allocation).
+    /// <c>LoggerMessage.Define</c> rather than the <c>[LoggerMessage]</c> attribute because this is a static
+    /// endpoint class with no logger field (mirrors <c>ReactionLoopHost</c>'s own <c>Define</c> usage).
+    /// </summary>
+    private static readonly Action<ILogger, string, Guid, Exception?> LogTimeZoneFallback =
+        LoggerMessage.Define<string, Guid>(
+            LogLevel.Warning,
+            new EventId(1, nameof(LogTimeZoneFallback)),
+            "Exercise {TimeZoneId} is not a recognised time zone for exercise {ExerciseId}; the pause tier " +
+            "started its scenario clock in UTC instead. Fix the exercise's TimeZone column (XC-008).");
 }
 
 /// <summary>
@@ -213,7 +244,13 @@ public sealed class PauseTierRequest
     /// <summary>
     /// The exercise IANA time zone the console stamps on its own <c>steering_action</c> event (XC-008). Accepted
     /// for wire parity with the other steering/cockpit POSTs; this endpoint emits no telemetry of its own, so it
-    /// is optional here.
+    /// is optional and currently UNREAD.
+    ///
+    /// <para><b>MUST NOT be used for the scenario clock.</b> The clock's start point and time zone come ONLY from
+    /// the <see cref="Exercise"/> row (see <c>ResolveClockStartAsync</c>) — a client-supplied zone must never
+    /// influence server-authoritative scenario time (COR-001/COR-050), any more than a client-supplied
+    /// <c>exerciseId</c> may influence scope. If a future story needs this value for telemetry, read it there;
+    /// do not wire it into the clock.</para>
     /// </summary>
     [JsonPropertyName("timeZone")]
     public string? TimeZone { get; init; }

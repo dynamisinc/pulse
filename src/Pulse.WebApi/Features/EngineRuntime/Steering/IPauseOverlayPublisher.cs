@@ -23,6 +23,14 @@ using System.Threading.Tasks;
 /// An implementation must fan out to that exercise alone (story 08's broadcaster is
 /// <c>ExerciseRealtimeHub.GroupNameFor(exerciseId)</c>-scoped).</para>
 ///
+/// <para><b>The transition is a STAFF record crossing into a participant-facing path (XC-002).</b>
+/// <see cref="PauseTierTransition.ActingHumanId"/> is staff-side attribution and MUST NEVER be projected into a
+/// participant-visible payload — a pause overlay tells participants the exercise is paused, never which
+/// controller paused it. An implementation reads <see cref="PauseTierTransition.ExerciseId"/> and
+/// <see cref="PauseTierTransition.To"/>; a participant DTO must structurally omit the rest (the
+/// <c>ParticipantPostDto.FromPost</c> pattern). Likewise the internal <see cref="PauseTier"/> names are staff
+/// vocabulary — participants see fiction-safe copy, never "ENGINE PAUSED".</para>
+///
 /// <para><b>Never throws into the controller's action.</b> Implementations swallow their own transport
 /// failures: a broken overlay push must not fail the tier change (or the clock freeze) that already happened.
 /// </para>

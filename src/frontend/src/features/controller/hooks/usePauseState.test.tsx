@@ -524,19 +524,25 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
 
   it('reverts the optimistic flip when the POST rejects, keeping the telemetry already logged', async () => {
     mockedSetPauseTier.mockRejectedValue(new Error('network down'))
+    mockedFetchPauseTier.mockResolvedValue(serverState('running', false))
     const { result } = renderHook(() => usePauseState())
 
     await act(async () => {
       result.current.setTier('freeze')
-      await Promise.resolve()
-      await Promise.resolve()
+      await flushMicrotasks()
     })
 
     expect(result.current.tier).toBe('running')
     expect(result.current.isFrozen).toBe(false)
-    // The attempted change is still logged — the emit happens before the POST.
-    expect(steeringEvents()).toHaveLength(1)
-    expect(steeringEvents()[0]?.payload).toMatchObject({ from: 'running', to: 'freeze' })
+    // The attempted change is still logged — the emit happens before the POST —
+    // and the correction is logged too (WR-104), never silently applied.
+    expect(steeringEvents()).toHaveLength(2)
+    expect(steeringEvents()[0]?.payload).toMatchObject({
+      from: 'running',
+      to: 'freeze',
+      outcome: 'applied',
+    })
+    expect(steeringEvents()[1]?.payload).toMatchObject({ outcome: 'reverted', reverted: true })
   })
 
   it('does NOT revert when a newer transition has superseded the rejected one', async () => {
@@ -583,8 +589,53 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
     expect(result.current.label).toBe('RUNNING')
   })
 
-  it('reverts a Freeze the server REFUSED (the 409 rejection path)', async () => {
+  it('reverts a Freeze the server REFUSED (the 409 rejection path), after ASKING what is true', async () => {
     mockedSetPauseTier.mockRejectedValue(new Error('Request failed with status code 409'))
+    mockedFetchPauseTier.mockResolvedValue(serverState('running', false))
+    const { result } = renderHook(() => usePauseState())
+
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+
+    expect(mockedFetchPauseTier).toHaveBeenCalled()
+    expect(result.current.tier).toBe('running')
+    expect(result.current.isFrozen).toBe(false)
+  })
+
+  // ---- WR-101: a failed POST must not be GUESSED at ----
+
+  it('KEEPS a Resume whose response was lost but which the server actually applied', async () => {
+    // The UAT App Service has a documented cold-start 5xx history, so a proxy
+    // 502/504 on a request the server DID apply is a real mode. Blind-reverting
+    // would put WORLD FROZEN back on screen over a ticking engine.
+    mockedSetPauseTier.mockResolvedValueOnce(serverState('freeze', true))
+    const { result } = renderHook(() => usePauseState())
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+    expect(result.current.tier).toBe('freeze')
+
+    // Resume: the server unfreezes, then the response is lost.
+    mockedSetPauseTier.mockRejectedValueOnce(new Error('502 Bad Gateway'))
+    mockedFetchPauseTier.mockResolvedValue(serverState('running', false))
+
+    await act(async () => {
+      result.current.resume()
+      await flushMicrotasks()
+    })
+
+    expect(mockedFetchPauseTier).toHaveBeenCalled()
+    expect(result.current.tier).toBe('running')
+    expect(result.current.isFrozen).toBe(false)
+    expect(result.current.label).toBe('RUNNING')
+  })
+
+  it('falls back to undoing its own flip only when the authoritative re-GET also fails', async () => {
+    mockedSetPauseTier.mockRejectedValue(new Error('network down'))
+    mockedFetchPauseTier.mockRejectedValue(new Error('network down'))
     const { result } = renderHook(() => usePauseState())
 
     await act(async () => {
@@ -594,6 +645,54 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
 
     expect(result.current.tier).toBe('running')
     expect(result.current.isFrozen).toBe(false)
+  })
+
+  it('a stale failure never clobbers a newer transition that happens to share its tier VALUE', async () => {
+    // freeze -> running (hangs) -> freeze -> running. The first request's late
+    // failure must NOT match the third transition by tier value and re-freeze the
+    // world minutes later. `api.ts` sets no axios timeout, so this is reachable.
+    mockedSetPauseTier.mockResolvedValueOnce(serverState('freeze', true))
+    const { result } = renderHook(() => usePauseState())
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+
+    let failFirstResume: ((reason: Error) => void) | undefined
+    mockedSetPauseTier.mockImplementationOnce(
+      () =>
+        new Promise<PauseTierServerState>((_resolve, reject) => {
+          failFirstResume = reject
+        }),
+    )
+    act(() => result.current.resume()) // hangs
+
+    // Two more transitions land, ending on the SAME value the hung one asked for.
+    mockedSetPauseTier.mockImplementation(tier =>
+      Promise.resolve(serverState(tier, tier === 'freeze')),
+    )
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+    await act(async () => {
+      result.current.setTier('running')
+      await flushMicrotasks()
+    })
+
+    // If the stale failure were honoured it would re-GET (and this stub would
+    // hand it back a freeze). It must not even ask.
+    mockedFetchPauseTier.mockResolvedValue(serverState('freeze', true))
+    const reconcileReadsBefore = mockedFetchPauseTier.mock.calls.length
+
+    await act(async () => {
+      failFirstResume?.(new Error('finally failed, minutes later'))
+      await flushMicrotasks()
+    })
+
+    expect(result.current.tier).toBe('running')
+    expect(result.current.isFrozen).toBe(false)
+    expect(mockedFetchPauseTier.mock.calls.length).toBe(reconcileReadsBefore)
   })
 
   it('reverts when the server recorded a DIFFERENT tier than the one requested', async () => {
@@ -666,6 +765,7 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
 
   it('reverts the engine kill switch too when the PAUSE-TIER POST rejects', async () => {
     mockedSetPauseTier.mockRejectedValue(new Error('network down'))
+    mockedFetchPauseTier.mockResolvedValue(serverState('running', false))
     const { result } = renderBothSurfaces()
 
     await act(async () => {
@@ -675,6 +775,90 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
 
     expect(result.current.pause.tier).toBe('running')
     expect(result.current.engine.mode).toBe('live')
+  })
+
+  it('POSTs the reverted tier after a kill-switch failure, so the server does not keep the abandoned tier', async () => {
+    // WR-102: the pause-tier POST succeeded, so the server holds `engine`. Once
+    // the console gives that tier up, the server must hear about it — story 08's
+    // overlay publisher would otherwise show participants a pause nobody claims.
+    mockedLiveEngineSetMode.mockRejectedValue(new Error('kill switch unreachable'))
+    const { result } = renderBothSurfaces()
+
+    await act(async () => {
+      result.current.pause.setTier('engine')
+      await flushMicrotasks()
+    })
+
+    expect(result.current.pause.tier).toBe('running')
+    expect(mockedSetPauseTier).toHaveBeenCalledWith('engine', {
+      actingHumanId: 'human-controller-01',
+      timeZone: 'America/New_York',
+    })
+    expect(mockedSetPauseTier).toHaveBeenLastCalledWith('running', {
+      actingHumanId: 'human-controller-01',
+      timeZone: 'America/New_York',
+    })
+  })
+
+  it('a failed revert POST does not ping-pong (no further revert, no further POST)', async () => {
+    mockedLiveEngineSetMode.mockRejectedValue(new Error('kill switch unreachable'))
+    mockedSetPauseTier.mockImplementation(tier =>
+      tier === 'running'
+        ? Promise.reject(new Error('the revert POST also failed'))
+        : Promise.resolve(serverState(tier, false)),
+    )
+    const { result } = renderBothSurfaces()
+
+    await act(async () => {
+      result.current.pause.setTier('engine')
+      await flushMicrotasks()
+      await flushMicrotasks()
+    })
+
+    expect(result.current.pause.tier).toBe('running')
+    expect(mockedSetPauseTier).toHaveBeenCalledTimes(2)
+  })
+
+  // ---- WR-104: the audit trail never shows a pause that did not stand ----
+
+  it('emits a second steering_action marking the reverted transition, never a silent correction', async () => {
+    mockedSetPauseTier.mockResolvedValue(serverState('freeze', false))
+    const { result } = renderHook(() => usePauseState())
+
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+
+    const events = steeringEvents()
+    expect(events).toHaveLength(2)
+    expect(events[0]?.payload).toMatchObject({
+      action: 'pause-tier',
+      from: 'running',
+      to: 'freeze',
+      outcome: 'applied',
+    })
+    expect(events[1]?.payload).toMatchObject({
+      action: 'pause-tier',
+      from: 'freeze',
+      to: 'running',
+      outcome: 'reverted',
+      reverted: true,
+    })
+  })
+
+  it('an APPLIED transition stays exactly one event, tagged applied', async () => {
+    mockedSetPauseTier.mockResolvedValue(serverState('freeze', true))
+    const { result } = renderHook(() => usePauseState())
+
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+
+    expect(steeringEvents()).toHaveLength(1)
+    expect(steeringEvents()[0]?.payload).toMatchObject({ outcome: 'applied' })
+    expect(steeringEvents()[0]?.payload).not.toHaveProperty('reverted')
   })
 
   // ---- the one-shot resync ----

@@ -275,6 +275,62 @@ public sealed class PauseTierEndpointsTests
         state.ClockFrozen.Should().BeTrue();
     }
 
+    // ---- CR-001 over HTTP: a refused freeze is a 409, not a 500 (WR-103) -----------------------
+
+    [RequiresDockerFact]
+    public async Task Post_Freeze_WhenTheClockRefuses_Returns409_AndRecordsNothing()
+    {
+        // The whole frontend revert hangs off this STATUS: a 409 rejects the axios promise and the console falls
+        // back to RUNNING, whereas a 500 would look like an infrastructure blip on an unknown state. Forced by
+        // injecting a clock whose Freeze throws — the same RemoveAll + re-add the host already does for
+        // IExerciseContext.
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, clockOverride: new RefusingExerciseClock());
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "a freeze that cannot reach the clock fails closed with 409 — never a 200 claiming a pause, never a 500");
+        host.Registry.GetTier(exerciseId).Should().Be(
+            PauseTier.Running, "a refused freeze records NO tier, so a later GET cannot resurrect it");
+    }
+
+    [RequiresDockerFact]
+    public async Task Get_AfterARefusedFreeze_StillReportsRunning()
+    {
+        // The console's failure path re-GETs to ask what is actually true (rather than guessing) — that read must
+        // not report the freeze it just refused.
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, clockOverride: new RefusingExerciseClock());
+        await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01" });
+
+        var response = await host.Client.GetAsync(new Uri("/api/steering/pause-tier", UriKind.Relative));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var state = await ReadStateAsync(response);
+        state.Tier.Should().Be("running");
+        state.ClockFrozen.Should().BeFalse();
+    }
+
+    [RequiresDockerFact]
+    public async Task Post_NonFreezeTier_StillSucceeds_WhenTheClockWouldRefuseAFreeze()
+    {
+        // Only Freeze depends on the clock — Engine-paused must not be collateral damage.
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, clockOverride: new RefusingExerciseClock());
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "engine", actingHumanId = "human-controller-01" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await ReadStateAsync(response)).Tier.Should().Be("engine");
+    }
+
     // ---- validation (400s, never a silent guess) -----------------------------------------------
 
     [RequiresDockerFact]
@@ -324,12 +380,43 @@ public sealed class PauseTierEndpointsTests
     private async Task<PauseTierTestHost> StartHostAsync(
         Guid? currentExerciseId,
         bool authenticatedStaff = true,
-        Guid? assignedExerciseId = null)
+        Guid? assignedExerciseId = null,
+        IExerciseClock? clockOverride = null)
     {
         _fixture.ConnectionString.Should().NotBeNull(
             "the Docker-gated MsSql fixture must have started and captured its connection string before these tests run");
         return await PauseTierTestHost.StartAsync(
-            _fixture.ConnectionString!, currentExerciseId, authenticatedStaff, assignedExerciseId);
+            _fixture.ConnectionString!, currentExerciseId, authenticatedStaff, assignedExerciseId, clockOverride);
+    }
+
+    /// <summary>
+    /// A non-conforming clock that ACCEPTS a started exercise but refuses to freeze — the cheapest way to reach
+    /// <see cref="PauseTierOutcome.ClockUnavailable"/> over real HTTP (WR-103). Everything else behaves.
+    /// </summary>
+    private sealed class RefusingExerciseClock : IExerciseClock
+    {
+        public void Start(Guid exerciseId, DateTimeOffset scenarioStart, TimeZoneInfo timeZone)
+        {
+        }
+
+        public void Freeze(Guid exerciseId) =>
+            throw new InvalidOperationException("This clock cannot be frozen.");
+
+        public void Unfreeze(Guid exerciseId)
+        {
+        }
+
+        public void Jump(Guid exerciseId, int scenarioMinutes)
+        {
+        }
+
+        public int CurrentScenarioMinute(Guid exerciseId) => 0;
+
+        public DateTimeOffset? CurrentScenarioTime(Guid exerciseId) => null;
+
+        public bool IsFrozen(Guid exerciseId) => false;
+
+        public bool IsRunning(Guid exerciseId) => true;
     }
 
     private static async Task<PauseTierWireState> ReadStateAsync(HttpResponseMessage response)
@@ -381,7 +468,8 @@ public sealed class PauseTierEndpointsTests
             string connectionString,
             Guid? currentExerciseId,
             bool authenticatedStaff = true,
-            Guid? assignedExerciseId = null)
+            Guid? assignedExerciseId = null,
+            IExerciseClock? clockOverride = null)
         {
             // The staff caller the REUSED cockpit authorization filter gates on. A default host is an
             // authenticated staff user ASSIGNED to the resolved exercise; the denial tests flip these knobs.
@@ -403,6 +491,13 @@ public sealed class PauseTierEndpointsTests
             builder.Services.AddExerciseScoping();
             builder.Services.AddExerciseClock();
             builder.Services.AddPauseTierSteering();
+
+            // A test may substitute a non-conforming clock to force the fail-closed 409 path (WR-103).
+            if (clockOverride is not null)
+            {
+                builder.Services.RemoveAll<IExerciseClock>();
+                builder.Services.AddSingleton(clockOverride);
+            }
 
             // B2's staff-identity dependency the reused filter resolves per request (the orchestrator wires
             // AddStaffIdentity before the steering feature in production).

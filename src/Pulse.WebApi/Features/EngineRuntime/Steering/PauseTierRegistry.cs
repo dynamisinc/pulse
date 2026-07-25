@@ -29,7 +29,15 @@ public enum PauseTier
 /// <param name="ExerciseId">The server-resolved exercise the transition applies to (COR-001) — never client-supplied.</param>
 /// <param name="From">The tier the exercise was in.</param>
 /// <param name="To">The tier the exercise is now in.</param>
-/// <param name="ActingHumanId">The individual controller behind the shared console account (COR-018).</param>
+/// <param name="ActingHumanId">
+/// The individual controller behind the shared console account (COR-018).
+/// <para><b>STAFF-ONLY — MUST NEVER appear in a participant-visible payload (XC-002).</b> This record crosses a
+/// seam whose implementation pushes to PARTICIPANTS (story 08's overlay broadcaster), so this field is here for
+/// staff-side attribution ONLY. A participant overlay says "the exercise is paused" and nothing about who paused
+/// it: projecting this into an overlay DTO would leak a controller's identity into the fiction and break the
+/// two-worlds rule. Any participant-facing projection off this record must structurally omit it (see
+/// <c>ParticipantPostDto.FromPost</c> for the established pattern).</para>
+/// </param>
 public sealed record PauseTierTransition(Guid ExerciseId, PauseTier From, PauseTier To, string ActingHumanId);
 
 /// <summary>
@@ -205,6 +213,12 @@ public sealed partial class PauseTierRegistry
         // that implementations swallow their own transport failures, but documentation is not enforcement — story
         // 08's real SignalR publisher lands on this seam next, and a throw here would 500 a request whose clock
         // was already frozen, making the client revert to RUNNING while the server's world stays FROZEN.
+        //
+        // NOTE for story 08 (SG-206, carried into its brief): the publish happens deliberately OUTSIDE `_gate`
+        // (you cannot await inside a lock), so two rapid transitions on the same exercise can be PUBLISHED out of
+        // order even though the tier state itself is serialized and correct. A real publisher that participants
+        // see should therefore carry its own ordering signal (a sequence/timestamp) rather than trusting arrival
+        // order.
         try
         {
             await _overlayPublisher.PublishAsync(transition, cancellationToken).ConfigureAwait(false);
@@ -248,6 +262,14 @@ public sealed partial class PauseTierRegistry
         Message = "Pause tier {Tier} for exercise {ExerciseId} was REFUSED: the scenario-clock effect failed.")]
     private partial void LogClockEffectFailed(Exception exception, PauseTier tier, Guid exerciseId);
 
+    /// <summary>Source-generated "a refused freeze still started the clock" warning (CA1848, SG-201).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "A REFUSED Freeze for exercise {ExerciseId} had already started its scenario clock, and " +
+                  "IExerciseClock offers no un-start: the clock now runs from the start point resolved for the " +
+                  "freeze rather than the reaction loop's own.")]
+    private partial void LogClockStartLeaked(Guid exerciseId);
+
     /// <summary>Source-generated best-effort overlay-publish failure warning (CA1848).</summary>
     [LoggerMessage(
         Level = LogLevel.Warning,
@@ -287,6 +309,7 @@ public sealed partial class PauseTierRegistry
             return true;
         }
 
+        var startedHere = false;
         try
         {
             if (entering && !started)
@@ -297,9 +320,10 @@ public sealed partial class PauseTierRegistry
                     return false;
                 }
 
-                // ReactionLoopHost.EnsureClockStarted only starts a clock that is neither running NOR frozen, so
+                // ReactionLoopHost.ShouldStartClock only starts a clock that is neither running NOR frozen, so
                 // starting-then-freezing here is safe: the loop will leave this frozen clock exactly as it is.
                 _clock.Start(exerciseId, clockStart.ScenarioStart, clockStart.TimeZone);
+                startedHere = true;
                 LogClockStartedForFreeze(exerciseId, clockStart.ScenarioStart, clockStart.TimeZone.Id);
             }
 
@@ -310,6 +334,10 @@ public sealed partial class PauseTierRegistry
                 // Verify, never assume — the console must not be told a freeze took when it did not.
                 if (!_clock.IsFrozen(exerciseId))
                 {
+                    // SG-202: a clock that ACCEPTED Freeze but reports itself unfrozen is non-conforming. Since we
+                    // are about to refuse the tier, compensate so we cannot leave it half-frozen either — a frozen
+                    // clock under a console reading RUNNING is the mirror-image lie.
+                    CompensateFailedFreeze(exerciseId, startedHere);
                     LogClockUnavailable(to, exerciseId);
                     return false;
                 }
@@ -322,8 +350,42 @@ public sealed partial class PauseTierRegistry
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
+            if (entering)
+            {
+                CompensateFailedFreeze(exerciseId, startedHere);
+            }
+
             LogClockEffectFailed(ex, to, exerciseId);
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort cleanup after a REFUSED freeze, so a rejected transition leaves as little behind as the
+    /// <see cref="IExerciseClock"/> contract allows:
+    /// <list type="bullet">
+    ///   <item>an <see cref="IExerciseClock.Unfreeze"/> in case the freeze partially took (SG-202) — the refusal
+    ///   means the console will show RUNNING, so the clock must not stay held;</item>
+    ///   <item>a LOG when this call had already STARTED the clock (SG-201). The interface has no "un-start", so
+    ///   the started clock is a real, unavoidable side effect of a refused freeze: it now runs from the start
+    ///   point resolved here rather than the one the reaction loop would have supplied. It is logged loudly
+    ///   rather than left silent.</item>
+    /// </list>
+    /// </summary>
+    private void CompensateFailedFreeze(Guid exerciseId, bool startedHere)
+    {
+        try
+        {
+            _clock.Unfreeze(exerciseId);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            LogClockEffectFailed(ex, PauseTier.Running, exerciseId);
+        }
+
+        if (startedHere)
+        {
+            LogClockStartLeaked(exerciseId);
         }
     }
 }
