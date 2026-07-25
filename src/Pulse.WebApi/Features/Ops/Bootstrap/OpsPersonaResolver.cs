@@ -41,8 +41,10 @@ public sealed class OpsPersonaResolver
 {
     /// <summary>
     /// Maximum accepted persona-handle length for a lookup — a bounds/DoS guard on operator input, matching
-    /// <see cref="Pulse.WebApi.Features.Identity.Accounts.AccountFieldRules.MaxUsernameLength"/>. (The
-    /// <see cref="Persona.Handle"/> column itself is unbounded today; this bounds only what an ops caller may send.)
+    /// <see cref="Pulse.WebApi.Features.Identity.Accounts.AccountFieldRules.MaxUsernameLength"/>. It also matches
+    /// the <c>nvarchar(256)</c> width <c>backend-host/03</c>'s migration gives the <see cref="Persona.Handle"/>
+    /// column (narrowed from <c>nvarchar(max)</c> so it can carry the unique index) — keep the two in lockstep, so
+    /// an ops caller can never send a handle that is valid here but too long to have been stored.
     /// </summary>
     public const int MaxHandleLength = 256;
 
@@ -181,9 +183,21 @@ public sealed class OpsPersonaResolver
             return PersonaBindingResolution.Resolved(byId.Id, byId.Handle);
         }
 
-        // Handle path: the CI collation makes this match case-insensitively. Ordered by Id so a (currently
-        // possible) duplicate-handle cast resolves DETERMINISTICALLY — a re-bind of the same handle must always
-        // pick the same persona, or "idempotent" would not be true.
+        // Handle path: the CI collation makes this match case-insensitively. Ordered by Id so a duplicate-handle
+        // cast resolves DETERMINISTICALLY — a re-bind of the same handle must always pick the same persona, or
+        // "idempotent" would not be true.
+        //
+        // KEPT DELIBERATELY, as a fail-safe rather than a live path. `backend-host/03` adds
+        // IX_Personas_ExerciseId_Handle — (ExerciseId, Handle) unique, case-insensitive under the same collation
+        // this query relies on — which makes the duplicate UNREACHABLE for this lookup: we query the single
+        // normalized spelling, so the index guarantees at most one candidate and the OrderBy becomes a no-op that
+        // costs nothing (the index turns this into a one-row seek regardless). Note this resolver does NOT share
+        // EngineReviewService.ResolvePersonaHandlesAsync's residual ambiguity: that one fetches both the '@' and
+        // no-'@' spellings and folds them client-side, and the index treats those as two distinct legal keys.
+        // Here, TryNormalizeHandle strips the '@' from the INPUT and we match the stored handle exactly, so a
+        // persona stored WITH a leading '@' is simply not findable by this path — a normalization quirk, not a
+        // uniqueness one, and not something the OrderBy affects either way. Retained so that dropping or
+        // reverting the index degrades this to "deterministic" rather than to "arbitrary".
         var byHandle = await _dbContext.Personas
             .IgnoreQueryFilters()
             .AsNoTracking()
