@@ -21,6 +21,7 @@
 | 07 Credential lifecycle **[Tier-2]** | **backend** | Rotation w/ grace, immediate revoke (kills all read-only sessions), brute-force lockout, per-IP rate limit; staff-only + logged. | `Features/Identity/` shared-cred lifecycle slice (`SharedCredentialLifecycleEndpoints`, rotation/lockout logic, `AddSharedCredentialLifecycle()`) | `/api/staff/shared-credential/rotate`, `/revoke` |
 | 08 Participant admin | *deferred (out of B2)* | COR-017 — staff login-triage panel. Not authored this slice. | — | — |
 | 09 Org-account operation | *deferred (out of B2)* | COR-018 — post-as-org + per-human attribution. Not authored this slice. | — | — |
+| 10 Participant persona binding **[Tier-2]** | **backend** | Provisioning-time half of COR-018's AC1 (see story 09's boundary note). Extends `login/05`'s bootstrap slice additively — a persona-reference field on the participant sub-request, plus a new secret-gated rebind endpoint for an already-provisioned account. Relocated in from `login/07` (#342) after `login` closed at six stories. | `src/Pulse.WebApi/Features/Ops/Bootstrap/` (edits: `BootstrapDtos.cs`, `BootstrapService.cs`, `BootstrapEndpoints.cs`; new: `OpsPersonaResolver.cs`, `ParticipantPersonaBindingService.cs`, `ParticipantPersonaBindingDtos.cs`) | `POST /api/ops/bind-participant-persona`; the extended `bootstrap-exercise` participant sub-request persona binding; `OpsPersonaResolver` (the ops-context isolation seam — see Reuse map) |
 | 11 API session enforcement **[Tier-2, #359]** | backend | Closes the unbuilt half of COR-012: a composition-root default-deny gate (every endpoint requires a live session except the 5-item pre-auth allowlist), server-side `authorPersonaId`/`origin`/`actingHumanId` derivation on `POST /api/posts` (never client body), and the anonymous-401 regression suite. Touches `Program.cs` directly (not a normal parallel wave). | `src/Pulse.WebApi/Program.cs`; a new default-deny gate component (`Features/Identity/Sessions/`); `Features/Social/PostWriteEndpoints.cs` + `PostIngestService.cs`; a new general session-identity accessor; `Features/Identity/SharedAccess/ReadOnlySessionWriteFilter.cs` (doc/behavior fix) | The default-deny gate (consumed by every other endpoint from this point forward); the new session-identity accessor pattern |
 
 ## Reuse map
@@ -66,6 +67,26 @@
 - **Consumed by:** `app-shell/01` (live session/role + StaffAssignment), `exercise-isolation/04`
   (participant guard), `exercise-isolation/05` (switcher), E2 SOC-006 (account switcher), E7 (attribution).
 
+### `OpsPersonaResolver` — the isolation seam for ops endpoints (story 10)
+
+`Features/Ops/Bootstrap/OpsPersonaResolver.cs` is where the exercise-isolation rule for **ops-surface**
+persona lookups lives, and any future ops endpoint that resolves a persona should call it rather than
+reinvent the pattern. The reason it exists as its own class: ops endpoints (`bootstrap-exercise`,
+`seed-engine-content`, `bind-participant-persona`) run with **no ambient exercise scope** — there is no
+session/exercise-scope middleware in front of them, only the `X-Bootstrap-Secret` header gate — so the
+injected `PulseDbContext` sits on the fail-closed `Guid.Empty` central filter. Every scoped read through
+`OpsPersonaResolver` therefore uses `IgnoreQueryFilters()` **plus** an explicit `ExerciseId` predicate;
+dropping either half either resolves nothing (filter left in place) or resolves across every exercise's
+cast (predicate dropped) — COR-001 violated either way.
+
+**Do not copy `EngineReviewService.ResolvePersonaHandlesAsync` for this purpose.** That resolver is
+correct for its own caller because it runs *inside* an authenticated, session-scoped request where
+`PulseDbContext`'s central filter is already correctly populated — it relies on that filter rather than
+predicating explicitly. Reused from an ops context (no scope populated) it would resolve **nothing**, or,
+if a scope happens to be stale/wrong, **the wrong exercise's persona** — exactly the bug this story exists
+to prevent. `OpsPersonaResolver` and `EngineReviewService`'s resolver are not interchangeable; they solve
+the same lookup under two different scope regimes.
+
 ### The `ExerciseContext.CurrentExerciseId` precedence model (the crux — one seam, three populators)
 `ExerciseContext.CurrentExerciseId` is a single Scoped, settable value written by three populators, in
 this precedence:
@@ -105,16 +126,22 @@ then on. The only cross-exercise object in the model is this access record, by d
 | 07 Credential lifecycle **[Tier-2]** | backend | `Features/Identity/` shared-cred lifecycle slice | 06 | 04; `app-shell/01`; `exercise-isolation/04`+`05` | 4 | M |
 | 08 Participant admin | *deferred* | — | — | — | — | — |
 | 09 Org-account operation | *deferred* | — | — | — | — | — |
-| 11 API session enforcement **[Tier-2, #359]** | backend | `Program.cs` (direct edit — see note below); new default-deny gate; `Features/Social/PostWriteEndpoints.cs`+`PostIngestService.cs`; new session-identity accessor; `ReadOnlySessionWriteFilter.cs` | 03, 05, 06, `exercise-isolation/08`, `social-api` (all merged) | — (serial; see the story's own 3-sub-wave split) | 5 | L |
+| 10 Participant persona binding **[Tier-2]** | backend | `Features/Ops/Bootstrap/*` (edits) + `OpsPersonaResolver.cs`, `ParticipantPersonaBindingService.cs`, `ParticipantPersonaBindingDtos.cs` (new) | `login/05` (the bootstrap slice it extends, merged); `engine-content-seed` (the persona cast) | — | 5 (post-B2, relocated in Complete from `login/07`, #342) | M |
+| 11 API session enforcement **[Tier-2, #359]** | backend | `Program.cs` (direct edit — see note below); new default-deny gate; `Features/Social/PostWriteEndpoints.cs`+`PostIngestService.cs`; new session-identity accessor; `ReadOnlySessionWriteFilter.cs` | 03, 05, 06, `exercise-isolation/08`, `social-api` (all merged) | — (serial; see the story's own 3-sub-wave split) | 6 | L |
 
 File-disjointness within a wave: each B2 backend story owns its own slice folder under
 `Features/Identity/*` (distinct files) and its own `PulseDbContext` `OnModelCreating`/migration addition;
-`Program.cs` is orchestrator-owned (below), so no two stories collide there. **Story 11 is the one
-exception:** it edits `Program.cs` itself (the default-deny wrapper) rather than exporting a single
-`Add*()`/`Map*()` line for the orchestrator to wire, so it cannot fan out in parallel with any other
-`Program.cs`-touching change and is scheduled after every prior wave has merged. Its own file
-documents a further 3-sub-wave split (gate+allowlist → `POST /api/posts` attribution → regression
-suite) since it is too broad for one commit.
+`Program.cs` is orchestrator-owned (below), so no two stories collide there.
+
+**Story 10** sits outside the B2 wave numbering (it was built and shipped later, under `login`, then
+relocated here) — its own files live under `Features/Ops/Bootstrap/*`, disjoint from every
+`Features/Identity/*` slice above, so it never collided with B2's waves in practice.
+
+**Story 11 is the one exception to the orchestrator-owned rule:** it edits `Program.cs` itself (the
+default-deny wrapper) rather than exporting a single `Add*()`/`Map*()` line for the orchestrator to wire,
+so it cannot fan out in parallel with any other `Program.cs`-touching change and is scheduled after every
+prior wave has merged. Its own file documents a further 3-sub-wave split (gate+allowlist → `POST /api/posts`
+attribution → regression suite) since it is too broad for one commit.
 
 ### Integration seams (orchestrator-owned — never a wave story)
 

@@ -9,7 +9,7 @@ using Pulse.WebApi.Features.Social;
 
 /// <summary>
 /// Resolves ONE exercise's <see cref="Persona"/> from an operator-supplied handle (or id) for the ops/bootstrap
-/// context (story login/07). Shared by BOTH persona-binding paths — the <c>bootstrap-exercise</c> participant
+/// context (story identity-auth-roles/10). Shared by BOTH persona-binding paths — the <c>bootstrap-exercise</c> participant
 /// sub-request and <c>POST /api/ops/bind-participant-persona</c> — so the isolation rule lives in exactly one
 /// reviewable place. Scoped lifetime, matching the <see cref="PulseDbContext"/> unit of work its callers write
 /// through.

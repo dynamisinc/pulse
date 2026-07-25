@@ -17,7 +17,7 @@ using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 
 /// <summary>
-/// Story login/07 (Tier-2) integration tests for the <see cref="BootstrapService"/> PERSONA-BINDING extension
+/// Story identity-auth-roles/10 (Tier-2) integration tests for the <see cref="BootstrapService"/> PERSONA-BINDING extension
 /// against REAL SQL Server (Testcontainers, or a local SQL Server via <c>PULSE_TEST_SQL_CONNECTION</c>). Proves
 /// AC1/AC3/AC4/AC5: the <c>bootstrap-exercise</c> participant sub-request binds a persona by handle (or id) onto
 /// <see cref="Account.PersonaId"/>; a bound account's login carries the persona onto the session while an unbound

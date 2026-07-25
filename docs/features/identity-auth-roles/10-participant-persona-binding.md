@@ -1,9 +1,21 @@
 # Story: Participant persona binding — provision a participant account with a posting persona
 
-**Feature:** Login  ·  **Epic:** E1 — Platform Core & Exercise Isolation  ·  **Phase:** 1  ·  **Status:** Complete (built + Tier-2 reviewed clean; review findings WR-001/WR-002 folded)
-**Requirements:** COR-011, COR-018, SOC-001, SOC-003 (COR-001, COR-015)  ·  **Design decisions:** none  ·  **Issue:** #342
+**Feature:** Identity, auth & roles  ·  **Epic:** E1 — Platform Core & Exercise Isolation  ·  **Phase:** 1  ·  **Status:** Complete (built + Tier-2 reviewed clean; review findings WR-001/WR-002 folded)
+**Requirements:** COR-018, SOC-001, SOC-003 (consumed), COR-011, (COR-001, COR-015)  ·  **Design decisions:** none  ·  **Issue:** #342
 **Stack:** backend  ·  **Review:** Tier-2 (a new ops surface, auth-adjacent, behind the existing bootstrap
-secret — same review class as story 05)
+secret — same review class as `login/05`)
+
+## Why this story lives here (relocation note)
+
+This story was built and numbered as `login/07` — filed under the `login` feature because the gap
+surfaced during that feature's UAT rollout (a bootstrapped `participant1` account with no way to bind
+a persona to it). It has since been **relocated** to `identity-auth-roles` and renumbered **10**,
+because its requirement is COR-018 (organization-account operation) and SOC-001/SOC-003 (E2's post
+entity and authorship), not sign-in (COR-011/012/014/015 — `login`'s actual scope). Nothing about the
+built code, its ACs, or its Complete status changed in the move — only its filing. See
+`docs/features/login/feature.md`'s note on the relocation, and `09-org-account-operation.md`'s
+"Relationship to `identity-auth-roles/10`" note on exactly which half of COR-018's first AC this story
+delivers and which half it does not.
 
 ## Context
 A participant can now SEE engine-approved and manual-persona posts in the feed (PR #338), but a participant cannot CREATE a post, because their account has no bound persona. `Account.PersonaId` is nullable and nothing in the ops/bootstrap surface ever sets it: the `bootstrap-exercise` participant sub-request (`BootstrapParticipantAccountRequest`) has no `personaId` field, and `BootstrapService` never assigns one. So `ParticipantLoginService` issues a session with `personaId` null, the frontend `canPost` is false, and the composer stays hidden ("Posting isn't available on this account"). This is the remaining half of the participant compose flow that PR #338 wired end to end but which is inert without a bound persona; today the only way to bind one is a manual `UPDATE Accounts SET PersonaId = ...`.
@@ -30,7 +42,7 @@ persona binding); AC2 covers an **already-provisioned** account — which is UAT
       account, because a silently-unbound account is the exact bug this story exists to eliminate. The real
       sequence is **bootstrap → seed-engine-content → bind** (a bootstrap re-run with a handle, or AC2's
       endpoint). Consequence worth knowing: an operator who keeps `personaHandle` in a standard payload gets
-      no exercise at all on a fresh environment — documented in story 06's runbook step 4b.
+      no exercise at all on a fresh environment — documented in `login/06`'s runbook step 4b.
       Verified: `Bootstrap_WithPersonaHandle_BindsPersonaToTheAccount`,
       `Bootstrap_WithPersonaId_BindsPersonaToTheAccount`,
       `Bootstrap_FreshExerciseWithPersonaHandle_IsRejected_BecauseTheCastIsNotSeededYet`.
@@ -102,10 +114,10 @@ persona binding); AC2 covers an **already-provisioned** account — which is UAT
   data (UAT included), which is outside this story's blast radius — tracked separately.
 
 ## Technical Notes
-World: **backend, ops-only** — same posture as story 05 (`src/Pulse.WebApi/Features/Ops/Bootstrap/`; no
+World: **backend, ops-only** — same posture as `login/05` (`src/Pulse.WebApi/Features/Ops/Bootstrap/`; no
 participant/staff session gate, the secret header is the only gate). `Account.PersonaId` (nullable) and
 `ParticipantLoginService` already carry the persona through to `Session.personaId`; the gap is purely
-provisioning. Extends story 05's existing bootstrap slice in place — `BootstrapDtos.cs` (the new
+provisioning. Extends `login/05`'s existing bootstrap slice in place — `BootstrapDtos.cs` (the new
 persona-reference field on `BootstrapParticipantAccountRequest`, and the new `POST
 /api/ops/bind-participant-persona` request/response DTOs), `BootstrapService.cs` (persona resolution +
 the new bind/rebind method), `BootstrapEndpoints.cs` (the new endpoint mapping) — this is an **edit to
@@ -132,10 +144,12 @@ other idempotency reads) — **never** across exercises. Fail closed (400) on an
 that resolves to a persona in a *different* exercise (COR-001).
 
 ## Dependencies
-Login story 05 (the bootstrap seam, #308) that this extends — same slice, additive edit, not a fork;
-`engine-content-seed` (the persona cast, `PersonaCastSeeder`, a participant would be bound to — and the
-reason AC1/AC2 resolve by handle rather than id, see Technical Notes); PR #338 (the participant compose +
-feed write path this makes reachable).
+Extends `login/05`'s bootstrap slice (the guarded seed seam, #308, merged) — an additive edit to the same
+files, not a fork, and not a sibling story within this feature. Also depends on: `engine-content-seed`
+(the persona cast, `PersonaCastSeeder`, a participant would be bound to — and the reason AC1/AC2 resolve
+by handle rather than id, see Technical Notes); PR #338 (the participant compose + feed write path this
+makes reachable). Consumed by `identity-auth-roles/09`'s first AC (provisioning-time half only — see that
+story's note on the boundary).
 
 ## Tests
 - Backend: AC1 — bootstrapping a participant account with a persona **handle** binds it onto

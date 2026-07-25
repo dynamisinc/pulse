@@ -17,7 +17,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.Ops.Bootstrap;
 
 /// <summary>
-/// HTTP-level coverage of <c>POST /api/ops/bind-participant-persona</c> (story login/07) over a self-hosted
+/// HTTP-level coverage of <c>POST /api/ops/bind-participant-persona</c> (story identity-auth-roles/10) over a self-hosted
 /// <see cref="TestServer"/> that maps <see cref="BootstrapEndpoints.MapBootstrapEndpoints"/> directly. These are
 /// plain <c>[Fact]</c> (no Docker): they exercise only the FAIL-CLOSED paths that short-circuit BEFORE any database
 /// access (unconfigured/missing/wrong secret → 404; a bad body → 400) plus the endpoint's own rate-limit policy,

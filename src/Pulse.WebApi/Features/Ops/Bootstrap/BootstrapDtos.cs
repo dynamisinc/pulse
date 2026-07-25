@@ -79,7 +79,7 @@ public sealed class BootstrapSharedCredentialRequest
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Persona binding (story login/07).</b> <see cref="PersonaHandle"/> / <see cref="PersonaId"/> optionally bind
+/// <b>Persona binding (story identity-auth-roles/10).</b> <see cref="PersonaHandle"/> / <see cref="PersonaId"/> optionally bind
 /// the provisioned account to one of the exercise's <c>Persona</c> rows, which is what makes
 /// <c>Session.personaId</c> non-null on login and therefore the participant composer available (COR-015). The
 /// persona MUST already exist in the SAME exercise (COR-001) — it is resolved with an explicit exercise
@@ -253,7 +253,7 @@ public sealed class BootstrapParticipantAccountResponseDto
     public required bool Created { get; init; }
 
     /// <summary>
-    /// The account's persona binding AFTER this call (story login/07) — the value that becomes
+    /// The account's persona binding AFTER this call (story identity-auth-roles/10) — the value that becomes
     /// <c>Session.personaId</c> on login. Omitted when the account has no binding (the composer then stays
     /// absent, COR-015).
     /// </summary>

@@ -10,7 +10,7 @@ using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
 
 /// <summary>
-/// The guarded ops service behind <c>POST /api/ops/bind-participant-persona</c> (story login/07): binds — or
+/// The guarded ops service behind <c>POST /api/ops/bind-participant-persona</c> (story identity-auth-roles/10): binds — or
 /// rebinds — one of an exercise's <see cref="Persona"/> rows onto an ALREADY-PROVISIONED participant
 /// <see cref="Account"/>, by login handle. This is the half of the story that unblocks a live environment, where
 /// the participant account already exists and its <see cref="Account.PersonaId"/> is null, so

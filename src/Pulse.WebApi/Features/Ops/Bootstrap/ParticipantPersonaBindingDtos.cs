@@ -3,7 +3,7 @@ namespace Pulse.WebApi.Features.Ops.Bootstrap;
 using System.Text.Json.Serialization;
 
 /// <summary>
-/// The <c>POST /api/ops/bind-participant-persona</c> request body (camelCase JSON, story login/07). Every scalar
+/// The <c>POST /api/ops/bind-participant-persona</c> request body (camelCase JSON, story identity-auth-roles/10). Every scalar
 /// is nullable so a missing required field is a validation concern (a 400), never a deserialization failure. No
 /// <c>exerciseId</c> is accepted — the target exercise is resolved by <see cref="Hostname"/> (never created), and
 /// both the account and the persona are looked up WITHIN that exercise only (COR-001); this endpoint never
@@ -47,7 +47,7 @@ public sealed class BindParticipantPersonaRequest
 }
 
 /// <summary>
-/// The <c>POST /api/ops/bind-participant-persona</c> success response (story login/07). An OPS/staff-world
+/// The <c>POST /api/ops/bind-participant-persona</c> success response (story identity-auth-roles/10). An OPS/staff-world
 /// response (no participant surface here), so it may carry ids. Every property has an explicit camelCase
 /// <see cref="JsonPropertyNameAttribute"/>. <see cref="Changed"/> distinguishes a real rebind from the idempotent
 /// no-op (the account was already bound to this persona) — both are a 200.

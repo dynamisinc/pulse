@@ -13,7 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 /// <see cref="WebApplicationFactory{TEntryPoint}"/> host, resolves the aggregate
 /// <see cref="EndpointDataSource"/> from its <c>Services</c>, and asserts <c>Program.cs</c> wires the slice's
 /// routes EXACTLY ONCE — the bootstrap seed endpoint (story login/05) and the persona-binding endpoint (story
-/// login/07, mapped inside the SAME <c>MapBootstrapEndpoints()</c> so it needs no new composition-root line).
+/// identity-auth-roles/10, mapped inside the SAME <c>MapBootstrapEndpoints()</c> so it needs no new composition-root line).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -59,7 +59,7 @@ public sealed class CompositionRootWiringTests
 
         CountRoutes(dataSource, "POST", "/api/ops/bind-participant-persona").Should().Be(
             1,
-            "POST /api/ops/bind-participant-persona must be reachable on the REAL host (story login/07 AC2) — it is "
+            "POST /api/ops/bind-participant-persona must be reachable on the REAL host (story identity-auth-roles/10 AC2) — it is "
             + "mapped inside the existing MapBootstrapEndpoints(), so no new Program.cs line is needed and the "
             + "#310/#317 'merged green but never wired, dead at 404' failure mode cannot recur; the slice's own "
             + "self-mapped TestServer tests could not have caught that");

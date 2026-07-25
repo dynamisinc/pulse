@@ -48,7 +48,7 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 /// <see cref="ParticipantPasswordHasher"/>, and <c>DynamisIdentityProviderOptions</c> (allowlist resolution).
 /// </para>
 /// <para>
-/// <b>Persona binding (story login/07).</b> The participant sub-request may name a persona (by handle, or by id)
+/// <b>Persona binding (story identity-auth-roles/10).</b> The participant sub-request may name a persona (by handle, or by id)
 /// to bind onto <see cref="Account.PersonaId"/> — the value <c>ParticipantLoginService</c> already carries onto
 /// <c>Session.personaId</c>, which is what makes the participant composer available. The binding is resolved
 /// through the shared <see cref="OpsPersonaResolver"/>, confined to the target exercise (COR-001): an unknown or

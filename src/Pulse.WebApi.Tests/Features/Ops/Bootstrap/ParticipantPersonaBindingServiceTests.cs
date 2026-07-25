@@ -14,7 +14,7 @@ using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 
 /// <summary>
-/// Story login/07 (Tier-2) integration tests for <see cref="ParticipantPersonaBindingService"/> — the guarded
+/// Story identity-auth-roles/10 (Tier-2) integration tests for <see cref="ParticipantPersonaBindingService"/> — the guarded
 /// <c>POST /api/ops/bind-participant-persona</c> ops path that binds/rebinds a persona onto an ALREADY-PROVISIONED
 /// participant account (AC2/AC3/AC5) — against REAL SQL Server (Testcontainers, or a local SQL Server via
 /// <c>PULSE_TEST_SQL_CONNECTION</c>). Proves: a handle binds and the account's next login carries the persona; a

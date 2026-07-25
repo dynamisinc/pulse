@@ -15,7 +15,7 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 
 /// <summary>
 /// The ops-only bootstrap slice HTTP surface + composition-root seams (story login/05): the secret-gated,
-/// idempotent <c>POST /api/ops/bootstrap-exercise</c> seed endpoint, plus story login/07's secret-gated
+/// idempotent <c>POST /api/ops/bootstrap-exercise</c> seed endpoint, plus story identity-auth-roles/10's secret-gated
 /// <c>POST /api/ops/bind-participant-persona</c> (persona binding for an already-provisioned account). Exposes
 /// the extension methods the orchestrator wires into <c>Program.cs</c> (<see cref="AddOpsBootstrap"/> /
 /// <see cref="MapBootstrapEndpoints"/>); this feature never edits <c>Program.cs</c> itself. Follows the
@@ -39,7 +39,7 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 /// </list>
 /// </para>
 /// <para>
-/// <b>Story login/07 adds NO new composition-root line, deliberately.</b> The persona-binding endpoint is mapped
+/// <b>Story identity-auth-roles/10 adds NO new composition-root line, deliberately.</b> The persona-binding endpoint is mapped
 /// INSIDE the existing <see cref="MapBootstrapEndpoints"/> and its services are registered INSIDE the existing
 /// <see cref="AddOpsBootstrap"/> (the option <c>login/implementation.md</c>'s integration seam explicitly
 /// prefers). So the already-wired <c>Program.cs</c> calls light it up with zero further edits — structurally
@@ -58,7 +58,7 @@ public static class BootstrapEndpoints
     public const string BootstrapRateLimitPolicy = "ops-bootstrap";
 
     /// <summary>
-    /// The per-IP rate-limit policy name applied to the persona-binding endpoint (story login/07, NFR-009). Its
+    /// The per-IP rate-limit policy name applied to the persona-binding endpoint (story identity-auth-roles/10, NFR-009). Its
     /// OWN policy (not the bootstrap one) so neither ops endpoint can exhaust the other's window; enforcement
     /// needs the already-wired <c>app.UseRateLimiter()</c>.
     /// </summary>
@@ -94,7 +94,7 @@ public static class BootstrapEndpoints
         services.TryAddSingleton<ISharedCredentialHasher, SharedCredentialHasher>();
         services.TryAddSingleton<ParticipantPasswordHasher>();
 
-        // Scoped to match the PulseDbContext unit of work they write through. Story login/07 adds the shared,
+        // Scoped to match the PulseDbContext unit of work they write through. Story identity-auth-roles/10 adds the shared,
         // exercise-confined persona resolver (COR-001) + the persona-binding service HERE rather than behind a new
         // Add* call, so no further Program.cs wiring is required.
         services.AddScoped<BootstrapService>();
@@ -139,7 +139,7 @@ public static class BootstrapEndpoints
         endpoints.MapPost("/api/ops/bootstrap-exercise", BootstrapAsync)
             .RequireRateLimiting(BootstrapRateLimitPolicy);
 
-        // Story login/07 — mapped in the EXISTING extension so the already-wired Program.cs call reaches it with
+        // Story identity-auth-roles/10 — mapped in the EXISTING extension so the already-wired Program.cs call reaches it with
         // no new composition-root edit (see the class remarks).
         endpoints.MapPost("/api/ops/bind-participant-persona", BindParticipantPersonaAsync)
             .RequireRateLimiting(BindParticipantPersonaRateLimitPolicy);
@@ -171,7 +171,7 @@ public static class BootstrapEndpoints
     }
 
     /// <summary>
-    /// Binds (or rebinds) a persona to an already-provisioned participant account (story login/07). Fails closed:
+    /// Binds (or rebinds) a persona to an already-provisioned participant account (story identity-auth-roles/10). Fails closed:
     /// a missing/wrong secret returns <c>404</c>; an unknown hostname, account handle, or persona (including a
     /// persona belonging to ANOTHER exercise — COR-001) likewise returns <c>404</c> without writing anything; an
     /// invalid body returns <c>400</c>; success returns <c>200</c> with the ops response (an idempotent rebind to
