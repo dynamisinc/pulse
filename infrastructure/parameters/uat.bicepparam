@@ -29,9 +29,44 @@ param deployCommunication = false
 // Standard_S1 for real exercise load (Free_F1 caps at 20 connections / 20k msgs/day).
 param deploySignalR = false
 
-// Flip to true to stand up the E8 Azure AI Foundry endpoint + model deployments (independent of the
-// backend). Needed for the story-06 measured cost/latency pass. See infrastructure/README.md.
-param deployAi = false
+// --- E8 engine generation provider (engine-runtime/05, NFR-005 / ADP-025) ----
+// deployAi = true stands up aif-pulse-uat (Cognitive Services / AIServices) with the `standard`
+// (gpt-5.4) and `ambient` (gpt-5.4-mini) model deployments, keyless (disableLocalAuth), and grants the
+// App Service's system-assigned identity "Cognitive Services OpenAI User" on it. This is PROVISIONING
+// ONLY: with generationProviderLive = false below, the App Service still resolves
+// Generation:Provider = Fake, so no application code can reach the endpoint and NOTHING egresses.
+// Idempotent — re-running the deploy neither fails nor duplicates the deployments.
+param deployAi = true
+
+// ⚠ THE LIVE-TRAFFIC GATE (TIER-2, NFR-005 / ADP-025). Deliberately SEPARATE from deployAi: flipping
+// this — and only this — points the engine's generate stage at the live governed model
+// (Generation:Provider = AzureOpenAI), i.e. real LLM egress of world/persona content.
+//
+// DO NOT set this true until docs/features/engine-runtime/PROVIDER-GOVERNANCE.md §8 is SIGNED (all five
+// boxes ticked, signer + date entered) for this environment. §8 carries the four evidence items
+// (governance contract, fail-closed gate green in CI, measured p95 vs the 10s degraded-mode threshold,
+// InjectionRedTeam 10/10 live). The startup gate (GenerationGovernance.Validate) is the mechanical
+// backstop; this toggle is the contractual one. Both must hold.
+//
+// Cost, once live: ~$0.61/exercise-hour at the measured Ambient rate while a storyline is active
+// (MEASURED-RESULTS.md). Cheap, not free — flip it back to false after a verification pass rather than
+// leaving it on indefinitely.
+param generationProviderLive = false
+
+// The two §2 governance attestations, asserted HERE BY A HUMAN — deliberately not derived from deployAi,
+// so GenerationGovernance.Validate remains an independent startup gate that can actually fire rather than
+// a restatement of "did we deploy the account". These are what the PROVIDER-GOVERNANCE.md §8 signature
+// covers (evidence item (i)); they belong in the same reviewed commit as generationProviderLive:
+//   - TenantBounded:      aif-pulse-uat is a single-tenant Cognitive Services account with
+//                         disableLocalAuth (keyless Entra only, no API key exists) and no
+//                         shared/public inference.
+//   - NoTrainingAttested: Azure OpenAI Service does not use customer prompts/completions to train
+//                         models (Microsoft product terms).
+// Both default to FALSE in main.bicep, so any other/future environment parameter file that omits them
+// asserts nothing (fail closed). Setting either false while generationProviderLive is true makes the host
+// throw GenerationConfigurationException at startup instead of egressing — that is the intended behaviour.
+param generationTenantBounded = true
+param generationNoTrainingAttested = true
 
 // Flip to true (with deployAi) to also deploy the Claude-on-Foundry tiers for the E8 provider
 // comparison. Requires a Claude-eligible subscription; the Anthropic Marketplace offer is auto-accepted

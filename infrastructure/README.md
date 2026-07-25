@@ -8,26 +8,25 @@ Dynamis (Azure CAF) resource-naming scheme used by Cadence and C5.
 - **Region:** `centralus`
 - **Resource group:** `rg-pulse-uat-centralus`
 
-## Current cost posture — Static Web App only
+## Current cost posture — toggled per environment
 
-Pulse has **no .NET backend yet** (it's a frontend-only Vite SPA). Provisioning
-App Service / Azure SQL / Storage / SignalR now would bill against nothing, so this
-deployment stands up **only the Free-tier Static Web App** (`stapp-pulse-uat`, ~$0/mo).
+Everything heavier than the Free-tier Static Web App is fully authored in
+[`main.bicep`](main.bicep) but gated behind cost/feature toggles, all defaulting to `false` in the
+template and flipped per environment in [`parameters/uat.bicepparam`](parameters/uat.bicepparam):
 
-Everything heavier is fully authored in [`main.bicep`](main.bicep) but gated behind
-cost toggles (all `false` today in [`parameters/uat.bicepparam`](parameters/uat.bicepparam)):
+| Toggle | Turns on | `main.bicep` default | UAT today |
+|---|---|---|---|
+| `deployMonitoring` | Log Analytics + Application Insights | `false` | `true` |
+| `deployStorage` | Storage account (blob media) | `false` | `false` |
+| `deployDatabase` | Azure SQL server + database | `false` | `true` |
+| `deployBackend` | App Service / Function App (per `hostingModel`) | `false` | `true` |
+| `deploySignalR` | Azure SignalR Service (real-time fan-out) | `false` | `false` (hub self-hosted) |
+| `deployCommunication` | ACS + Email Service | `false` | `false` |
+| `deployAi` | Azure AI Foundry account + E8 model deployments (Standard/Ambient) | `false` | `true` |
+| `generationProviderLive` | **Routes engine generation traffic to the live model** (`Generation:Provider` → `AzureOpenAI`). Separate from `deployAi` on purpose; **Tier-2 gated** | `false` | `false` |
 
-| Toggle | Turns on | Default |
-|---|---|---|
-| `deployMonitoring` | Log Analytics + Application Insights | `false` |
-| `deployStorage` | Storage account (blob media) | `false` |
-| `deployDatabase` | Azure SQL server + database | `false` |
-| `deployBackend` | App Service / Function App (per `hostingModel`) | `false` |
-| `deployCommunication` | ACS + Email Service | `false` |
-| `deployAi` | Azure AI Foundry account + E8 model deployments (Standard/Ambient) | `false` |
-
-The Static Web App **always** deploys. To scale up when the backend lands: flip the
-relevant toggles to `true`, set the SQL secrets, and re-deploy — no template rewrite.
+The Static Web App **always** deploys. To scale up: flip the relevant toggles to `true`, set the
+required secrets, and re-deploy — no template rewrite.
 
 ## Naming scheme (CAF abbreviations)
 
@@ -118,13 +117,115 @@ does (e.g. for the story-06 measured cost/latency pass).
   tokens (`DefaultAzureCredential`). Nothing to leak; matches NFR-005.
 - **Residency.** Model deployments default to the `DataZoneStandard` SKU (US data zone). Override
   `modelSkuName` per the customer's approved list.
-- **Access for the measured spike (story 06):** the module's role assignment is skipped until a backend
-  managed identity is supplied, so grant your own identity the data-plane role once after deploy:
+- **Access is now wired for the App Service (engine-runtime/05).** `webapp.bicep` gives
+  `app-pulse-api-uat-dynamis` a **system-assigned managed identity** and outputs its `principalId`;
+  `main.bicep` passes it to `ai.bicep` as `backendPrincipalId`, which grants **Cognitive Services OpenAI
+  User** (plus **Cognitive Services User** when `deployClaude` is set) on `aif-pulse-uat`. The runtime
+  path therefore authenticates with `DefaultAzureCredential` using **no API key and no developer
+  `az login`**. The dependency is one-directional — `ai` depends on `webApp`'s identity; `webApp` never
+  reads `ai`'s outputs (see the `Generation:*` note below).
+- **Access for a *local* pass (developer machine / `deployBackend = false`):** the role assignment is
+  skipped when there is no App Service, so grant your own identity the data-plane role once:
   ```bash
   az role assignment create --role "Cognitive Services OpenAI User" \
     --assignee <your-object-id> \
     --scope $(az cognitiveservices account show -n aif-pulse-uat -g rg-pulse-uat-centralus --query id -o tsv)
   ```
+
+### `Generation:*` app settings and the live-traffic gate (Tier-2)
+
+**`deployAi` provisions; `generationProviderLive` routes.** They are two separate toggles by design — if
+they were one, standing the Foundry account up would itself start real LLM egress before the NFR-005
+sign-off. With the committed UAT posture (`deployAi = true`, `generationProviderLive = false`) the
+endpoint exists, the App Service holds the data-plane role, the full `Generation:*` config is staged —
+and `Generation__Provider` is still `Fake`, so no application code can reach the model.
+
+`main.bicep` computes every governed value as a **plain local** (the account-name pattern, `location`,
+the literal model ids) and passes the *same* literal into both `ai.bicep` and `webapp.bicep`
+independently. `webapp.bicep` deliberately does **not** read `ai`'s outputs: `ai` already depends on
+`webApp`'s `principalId`, so the reverse edge would be a module cycle Bicep rejects. Each key maps
+verbatim to its `ai.bicep` output / §2 attestation per
+[`PROVIDER-GOVERNANCE.md` §4](../docs/features/engine-runtime/PROVIDER-GOVERNANCE.md):
+
+| App setting | Value (UAT, `deployAi = true`) | Source |
+|---|---|---|
+| `Generation__Provider` | `Fake` (→ `AzureOpenAI` only when `generationProviderLive = true`) | the live-traffic gate |
+| `Generation__Endpoint` | `https://aif-pulse-uat.cognitiveservices.azure.com/` | `ai.bicep` `endpoint` |
+| `Generation__ApiVersion` | `2025-04-01-preview` | data-plane client choice (not provisioned) |
+| `Generation__Tiers__Standard__Deployment` | `ambient` ⚠ **TEMPORARY alias** | `ai.bicep` `ambientDeploymentName` |
+| `Generation__Tiers__Standard__Model` | `gpt-5.4-mini` ⚠ **TEMPORARY alias** | `ai.bicep` `ambientModelName` |
+| `Generation__Tiers__Ambient__Deployment` | `ambient` | `ai.bicep` `ambientDeploymentName` |
+| `Generation__Tiers__Ambient__Model` | `gpt-5.4-mini` | `ai.bicep` `ambientModelName` |
+| `Generation__Governance__TenantBounded` | `true` | §2 attestation — the **`generationTenantBounded` param, typed by the §8 signer** (single-tenant account, `disableLocalAuth`) |
+| `Generation__Governance__NoTrainingAttested` | `true` | §2 attestation — the **`generationNoTrainingAttested` param, typed by the §8 signer** (Azure OpenAI product terms) |
+| `Generation__Governance__Residency` | `centralus` | `ai.bicep` `residency` |
+| `Generation__Governance__Retention` | `Retained` | §2 (ZDR pending per-subscription approval) |
+
+⚠ **The Standard→Ambient alias is temporary.** The first live run is deliberately on the **Ambient**
+tier (`gpt-5.4-mini`: ~3× cheaper, same 10/10 injection + voice-diversity results), but the reaction
+loop has no runtime tier selector yet, so the Standard tier *key* is pointed at the Ambient
+deployment. Remove it when `autonomy-safety/05` (engine settings API — runtime autonomy + tier policy,
+#353) lands the real tier seam; tracked in
+[`docs/features/engine-runtime/feature.md`](../docs/features/engine-runtime/feature.md).
+
+#### ⚠ Deploy prerequisite: the CI service principal needs role-assignment write
+
+`deployAi = true` makes `ai.bicep`'s `Cognitive Services OpenAI User` grant the **first**
+`Microsoft.Authorization/roleAssignments` resource in the `main.bicep`-reachable deploy path. That write
+is **not** covered by Contributor: an `AZURE_CREDENTIALS` service principal without
+`Microsoft.Authorization/roleAssignments/write` on `rg-pulse-uat-centralus` fails the **whole**
+deployment with `AuthorizationFailed` (the role assignment is a template resource, not a best-effort
+step). Grant the SP **User Access Administrator** (least-privilege for this) or **Owner** on the resource
+group before the first `deployAi = true` run:
+
+```bash
+# Check what the deploy SP currently holds on the RG:
+az role assignment list --assignee <AZURE_CREDENTIALS clientId> \
+  --scope /subscriptions/2a127d53-c9bf-471a-8196-3155eae6cb1b/resourceGroups/rg-pulse-uat-centralus \
+  -o table
+
+# If it is Contributor-only, add role-assignment write (scoped to the RG, not the subscription):
+az role assignment create --role "User Access Administrator" \
+  --assignee <AZURE_CREDENTIALS clientId> \
+  --scope /subscriptions/2a127d53-c9bf-471a-8196-3155eae6cb1b/resourceGroups/rg-pulse-uat-centralus
+```
+
+**Run `Deploy Infrastructure` with `what_if: true` first.** What-if evaluates the template and surfaces
+the role-assignment write (and the new App Service `identity` + `Generation__*` settings) **without
+performing them**, so a missing permission shows up as a preview failure instead of a half-applied
+deployment.
+
+**Provisioning first, then signing, then going live.** Steps 1–2 are safe to run *before* the Tier-2
+sign-off — they stand the endpoint up without routing traffic — and in fact must run first, because
+`PROVIDER-GOVERNANCE.md` §8 evidence (i) (the keyless identity + role assignment) is only confirmable
+against Azure *after* they have been applied. Only steps 4–5 are gated on the signature.
+
+1. **What-if.** Run **Deploy Infrastructure** with `what_if: true` on the committed params
+   (`deployAi = true`, `generationProviderLive = false`) and confirm the preview shows the role
+   assignment, the App Service identity, and the `Generation__*` settings — with
+   `Generation__Provider = Fake`.
+2. **Provision.** Re-run with `what_if: false`. This creates `aif-pulse-uat` + the model deployments,
+   gives the App Service its system-assigned identity, and grants it the data-plane role. Idempotent;
+   routes **no** traffic.
+3. **Verify + sign.** Confirm the identity really holds the role (commands in
+   [`PROVIDER-GOVERNANCE.md`](../docs/features/engine-runtime/PROVIDER-GOVERNANCE.md) §8 → "Deploy
+   ordering"), check the Ambient deployment's model **version** against the measured build (§6 → "When to
+   re-run"), then get §8 signed — five boxes ticked, signer + date entered. A human step; no builder or
+   automation performs it.
+4. **Go live.** In `parameters/uat.bicepparam` (a reviewed, committed change — same discipline as
+   flipping `deployAi`) set `param generationProviderLive = true`, and confirm the signer's two §2
+   assertions `generationTenantBounded` / `generationNoTrainingAttested` are `true` — they are human
+   assertions, not derived from `deployAi`, and a live provider with either `false` fails startup by
+   design (`GenerationConfigurationException`). Re-deploy: it changes exactly one app setting
+   (`Generation__Provider`); the job summary's `generationProvider` output states which provider the
+   deployed app resolves. The App Service restarts on the app-setting change, which **de-registers
+   the in-memory reaction loop** — re-call `POST /api/ops/seed-engine-content` to re-register it (engine
+   state is process-memory this phase; see `engine-content-seed/feature.md`).
+5. **Turn it back off after the verification pass.** ~$0.61/exercise-hour at the measured Ambient rate
+   while a storyline is active — cheap, not free.
+
+**No new secrets** anywhere in this sequence: the `Generation:*` values are non-secret config and auth is
+keyless, so `deploy-infrastructure.yml` needs no new GitHub secret.
 
 ### Claude on Foundry (serverless MaaS) — the E8 provider comparison
 
@@ -166,10 +267,12 @@ the OpenAI surface's `cognitiveservices.azure.com`), data-plane role **`Cognitiv
 
 ## Follow-ups
 
-- Wire the backend host's managed identity into `ai.bicep` (`backendPrincipalId`) once `deployBackend`
-  is on, so the app gets `Cognitive Services OpenAI User` (and, when `deployClaude` is set,
-  `Cognitive Services User`) automatically (needs `webapp.bicep` / `functionapp.bicep` to output
-  `principalId`).
+- ~~Wire the backend host's managed identity into `ai.bicep` (`backendPrincipalId`)~~ — **done**
+  (engine-runtime/05): `webapp.bicep` has a system-assigned identity + `principalId` output and
+  `main.bicep` threads it into `ai.bicep`, so the App Service gets `Cognitive Services OpenAI User`
+  (and `Cognitive Services User` when `deployClaude` is set) automatically. **Still open for
+  `functionapp.bicep`** — that host has no identity or `principalId` output yet; wire it the same way if
+  the reaction loop ever moves out-of-process (`engine-runtime/implementation.md` open question (a)).
 - Set the `AZURE_STATIC_WEB_APPS_API_TOKEN` repo secret so `deploy-frontend.yml` can publish.
 - Decide the wildcard DNS + TLS strategy for per-exercise subdomains (COR-008) before
   backend hosting is finalized, then set `frontendUrl` in `uat.bicepparam`.
