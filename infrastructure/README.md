@@ -24,9 +24,19 @@ template and flipped per environment in [`parameters/uat.bicepparam`](parameters
 | `deployCommunication` | ACS + Email Service | `false` | `false` |
 | `deployAi` | Azure AI Foundry account + E8 model deployments (Standard/Ambient) | `false` | `true` |
 | `generationProviderLive` | **Routes engine generation traffic to the live model** (`Generation:Provider` → `AzureOpenAI`). Separate from `deployAi` on purpose; **Tier-2 gated** | `false` | `false` |
+| `generationTenantBounded` | **§2 governance assertion, typed by a human** (`Generation:Governance:TenantBounded`) — not derived from `deployAi` | `false` | `false` |
+| `generationNoTrainingAttested` | **§2 governance assertion, typed by a human** (`Generation:Governance:NoTrainingAttested`) — not derived from `deployAi` | `false` | `false` |
 
 The Static Web App **always** deploys. To scale up: flip the relevant toggles to `true`, set the
 required secrets, and re-deploy — no template rewrite.
+
+⚠ **The last three go together.** The `PROVIDER-GOVERNANCE.md` §8 signer sets
+`generationProviderLive` + both attestations to `true` in **one atomic reviewed commit** — the
+attestations are deliberately human assertions rather than values derived from `deployAi`, so flipping
+`generationProviderLive` on its own leaves a live provider with `false` attestations and **fails startup
+by design** (`GenerationConfigurationException`). See
+"[`Generation:*` app settings and the live-traffic gate](#generation-app-settings-and-the-live-traffic-gate-tier-2)"
+below and [`docs/features/engine-runtime/PROVIDER-GOVERNANCE.md`](../docs/features/engine-runtime/PROVIDER-GOVERNANCE.md) §8.
 
 ## Naming scheme (CAF abbreviations)
 
