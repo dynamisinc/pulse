@@ -106,6 +106,47 @@ integration. State clearly in the PR if a build finds a reason to diverge from t
 Cross-reference `implementation.md`'s reuse map + Wave Plan (Wave 0, serial with story 06 — both
 touch `Data/Migrations/**`, `PulseDbContextModelSnapshot.cs`, and `Program.cs`).
 
+### As built (record of the four choices the ACs asked to be recorded)
+
+1. **Counts seam — as planned, plus one field.** `PersonaResponseDto`/`StaffPersonaResponseDto` gained the
+   composed counts (no second round trip): `followerCount` is now the **displayed** count
+   (`AudienceMagnitude + real inbound edges`) and `followingCount` is real outbound edges only. A THIRD field,
+   `audienceMagnitude`, carries the magnitude term on its own — **required for correctness**, not decoration:
+   `features/social/services/audience.ts`'s `audienceReach()` (the single source of the reach formula, imported
+   by E8/ADP-004 and E10/EVL-012) takes `magnitude` and `edges` **separately**, and its own docs say
+   "the seeded `Persona.followerCount` IS the audience magnitude … pass it as `magnitude`, never as the whole
+   count". Folding edges into `followerCount` without also emitting the raw magnitude would have made every
+   future `audienceReach()` caller double-count the edges. Edges stay recoverable as
+   `followerCount - audienceMagnitude`. `Profile.tsx` renders `persona.followerCount` raw today, so it shows the
+   correct displayed count with **no frontend change**. (Frozen-contract note for the orchestrator:
+   `features/personas/types.ts`'s `Persona` should gain `audienceMagnitude`/`followingCount` — extra wire fields
+   are ignored at runtime, so nothing breaks meanwhile.)
+2. **Feed scope seam — as planned.** `GET /api/feed?scope=following`, a query-string toggle on the existing
+   endpoint (`all` is the default and what an omitted parameter means). An **unrecognized** value is a `400`,
+   never a silent fall-back to All Posts: a typo must not hand a participant the unfiltered feed under a
+   "Following" label. An empty follow set (or a caller with no session persona) yields an empty `200`.
+3. **Directed reads.** `GET /api/personas/{id}/following` (the exclusion set `04-who-to-follow` needs) and
+   `GET /api/personas/{id}/followers` (the real-edge follower **list** `05-audience-magnitude` renders). Ids
+   only — persona fields keep coming from `GET /api/personas`, so the per-world split (story 06) is not
+   duplicated or drifted from here.
+4. **Composition root — no `Program.cs` edit.** The four routes hang off the persona resource, so
+   `FollowEndpoints.AddSocialFollowGraph()`/`MapSocialFollowEndpoints()` are composed into the already-wired
+   `PersonaEndpoints.AddSocialPersonaRead()`/`MapSocialPersonaEndpoints()` (and the DI half additionally into
+   `AddSocialFeedRead()`, `TryAdd`-based, for the Following scope). `Program.cs` is untouched and the wiring
+   demonstrably executes — proven on the real `WebApplicationFactory<Program>` host, routes AND service
+   resolution (AC7).
+
+**Telemetry vocabulary.** `follow` is in the Phase-1 known `eventType` list; its inverse is emitted as
+`unfollow`, a new value. The v0 envelope types `eventType` as an open `z.string()` and documents the list as
+"documentation only … later features extend the vocabulary additively with no envelope migration" (the engine
+event types did exactly this), so this needs no envelope change — but a consumer filtering on
+`KNOWN_TELEMETRY_EVENT_TYPES` should have `unfollow` added to that list.
+
+**One event per state CHANGE, not per request.** An idempotent repeat (following twice, unfollowing a
+non-edge) writes no row, so it emits no event — "exactly one XC-004 event per meaningful action" is honoured
+by the mutation, in the same unit of work as the edge. A rejected cross-exercise attempt emits nothing in
+either exercise.
+
 ## Dependencies
 `backend-host/02` (persistence/EF Core); `social-api/04` (`GET /api/personas`, extended here);
 `social-api/01` (`GET /api/feed`, extended here for the following-scoped variant); story 06
@@ -116,20 +157,59 @@ profiles-social-graph stories 02, 04, 05 (frontend write/read paths); `feeds-dis
 feed, #121).
 
 ## Tests
-xUnit, `src/Pulse.WebApi.Tests/Features/Social/Follows/`:
-- Follow then unfollow round-trips the edge; following twice, or unfollowing when not following, is
-  an idempotent success (no error, no duplicate row).
-- A read-only session is refused on both `POST` and `DELETE` (`ReadOnlySessionWriteFilter`).
-- A follow request naming a followee persona that belongs to a *different* exercise is rejected —
-  a real two-exercise test (mirroring `identity-auth-roles/10`'s cross-exercise test pattern:
-  positively assert the target persona exists in exercise B **and** that no edge is created in
-  either exercise's graph), not merely an empty-result false pass.
-- Displayed follower count = `AudienceMagnitude` + real inbound edge count; following count = real
-  outbound edge count only (magnitude never contributes to the following side).
-- Follow/unfollow each emit exactly one XC-004 event, scenario-time stamped, with
-  exercise/actor/`actingHumanId` stamped server-side regardless of any client-supplied value.
-- `GET /api/feed?scope=following` returns only posts authored by followed personas, exercise-scoped,
-  and an empty follow list yields an empty (not error, not All-Posts-fallback) result.
-- Composition-root wiring: the follow endpoints are reachable through the real `WebApplicationFactory
-  <Program>` host, not only a self-mapped `TestServer` (extends the pattern `identity-auth-roles/10`'s
-  `CompositionRootWiringTests` established).
+xUnit, `src/Pulse.WebApi.Tests/Features/Social/Follows/`. Tests marked **[docker]** are
+`[RequiresDockerFact]` (real SQL Server: Testcontainers in CI, or `PULSE_TEST_SQL_CONNECTION` locally); the
+rest are model-only `[Fact]` and run everywhere. Every `[docker]` test below drives the REAL `Program` host
+through real host→exercise resolution and real session authentication — nothing stubs the scope or the
+caller's persona.
+
+**Entity + isolation (AC1)**
+- `FollowGraphIsolationTests.ScopeA_SeesOnlyItsOwnEdges_NeverExerciseBs` [docker]
+- `FollowGraphIsolationTests.UnsetScope_SeesZeroEdges_FailClosed_AndIgnoreQueryFiltersProvesTheRowsExist` [docker]
+- `FollowGraphIsolationTests.LookupByAKnownCrossExerciseEdgeId_ReturnsNull_Idor` [docker]
+- `FollowGraphIsolationTests.AggregateCount_NeverLeaksAnotherExercisesGraphSize` [docker]
+- `FollowGraphIsolationTests.SamePersonaPairInTwoExercises_AreDistinctEdges_TheUniqueIndexIsScopeLed` [docker]
+- `FollowGraphIsolationTests.WriteGuard_RefusesAnEdgeWithAnEmptyExerciseId` [docker]
+
+**Follow / unfollow endpoints + idempotency (AC2)**
+- `FollowEndpointTests.Follow_ThenUnfollow_RoundTripsTheEdge` [docker]
+- `FollowEndpointTests.FollowingTwice_IsIdempotentSuccess_OneRow_NoError` [docker]
+- `FollowEndpointTests.UnfollowingWhenNotFollowing_IsIdempotentSuccess_NoError` [docker]
+- `FollowEndpointTests.ReadOnlySession_IsRefused_OnBothFollowAndUnfollow` [docker] — the read-only session
+  carries a persona binding, so the 403 can only come from `ReadOnlySessionWriteFilter`
+- `FollowEndpointTests.AnonymousCaller_WithNoSessionPersona_IsRefused_AndWritesNothing` [docker]
+- `FollowEndpointTests.UnresolvedScope_Returns401_OnTheWrite_NotAnEmptyOk` [docker]
+- `FollowEndpointTests.SelfFollow_IsRejected_NoEdgeIsWritten` [docker]
+
+**Displayed counts (AC3)**
+- `PersonaResponseDtoTests.FromPersona_ComposesTheDisplayedFollowerCount_MagnitudePlusRealInboundEdges`
+- `PersonaResponseDtoTests.FromPersona_FollowingCount_IsRealOutboundEdgesOnly_MagnitudeNeverInflatesIt`
+- `PersonaResponseDtoTests.StaffFromPersona_ComposesTheSameCounts_TheFollowGraphIsNotStaffOnlyData`
+- `FollowEndpointTests.PersonaRead_DisplayedFollowerCount_IsMagnitudePlusEdges_FollowingCountIsEdgesOnly` [docker]
+- `FollowEndpointTests.PersonaRead_Counts_NeverIncludeAnotherExercisesEdges` [docker]
+
+**Following read + feed scoping (AC4)**
+- `FollowEndpointTests.FollowingAndFollowersReads_ReturnTheRealEdges_InBothDirections` [docker]
+- `FollowEndpointTests.FollowingFeed_ReturnsOnlyPostsAuthoredByFollowedPersonas` [docker]
+- `FollowEndpointTests.FollowingFeed_WithAnEmptyFollowList_IsEmpty_NotAnAllPostsFallback` [docker]
+- `FollowEndpointTests.Feed_UnknownScope_Returns400_RatherThanSilentlyServingAllPosts` [docker]
+- `FollowEndpointTests.DirectedReads_FailClosedWith401_OnAnUnresolvedScope` [docker]
+
+**Telemetry (AC5)**
+- `FollowEndpointTests.Follow_EmitsExactlyOneXc004Event_WithServerStampedScopeActorAndScenarioTime` [docker]
+- `FollowEndpointTests.Unfollow_EmitsExactlyOneXc004Event_AndAnIdempotentRepeatEmitsNone` [docker]
+- `FollowEndpointTests.RejectedCrossExerciseFollow_EmitsNoTelemetryInEitherExercise` [docker]
+
+**Cross-exercise isolation (AC6, always-Critical)**
+- `FollowEndpointTests.CrossExerciseFollow_IsRejected_AndNoEdgeExistsInEitherGraph` [docker] — positively
+  asserts the target persona EXISTS in exercise B, then asserts the 404 and that no edge exists in either
+  graph (read back with `IgnoreQueryFilters`)
+- `FollowEndpointTests.CrossExerciseFollowersRead_NeverReturnsAnotherExercisesEdges` [docker]
+- `FollowEndpointTests.FollowingFeed_NeverReturnsAnotherExercisesPost` [docker]
+
+**Composition-root wiring (AC7, regression class)**
+- `Features/Social/CompositionRootWiringTests.ProgramCs_MapsEachFollowGraphRouteExactlyOnce_AndResolvesItsServices`
+  — plain `[Fact]`, boots the real `WebApplicationFactory<Program>`, asserts each of the four routes is mapped
+  exactly once AND that `FollowService`/`ICurrentSessionPersonaAccessor`/`PersonaReadService`/`PostReadService`
+  all resolve from the real composition root (routes existing is not enough — an unregistered dependency 500s
+  on first request).

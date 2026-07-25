@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Staff;
+using Pulse.WebApi.Features.Social.Follows;
 
 /// <summary>
 /// Registers and maps the persona read API (XC-005, COR-003, story <c>social-api/04</c>) — the production
@@ -14,13 +15,22 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// </summary>
 public static class PersonaEndpoints
 {
-    /// <summary>Registers <see cref="PersonaReadService"/> for DI. Called once from the composition root.</summary>
+    /// <summary>
+    /// Registers <see cref="PersonaReadService"/> for DI, together with the follow-graph services
+    /// (<see cref="FollowEndpoints.AddSocialFollowGraph"/>) the persona read composes its counts from and the
+    /// follow routes depend on. Called once from the composition root.
+    /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns><paramref name="services"/>, for chaining.</returns>
     public static IServiceCollection AddSocialPersonaRead(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddScoped<PersonaReadService>();
+
+        // profiles-social-graph/07: the follow graph is composed into the persona surface (its routes hang off
+        // /api/personas/{id}) rather than asking for a separate Program.cs line the orchestrator owns.
+        services.AddSocialFollowGraph();
+
         return services;
     }
 
@@ -84,6 +94,11 @@ public static class PersonaEndpoints
 
             return Results.Ok(await personaReadService.GetStaffPersonasAsync(cancellationToken));
         });
+
+        // profiles-social-graph/07: POST/DELETE /api/personas/{id}/follow and the two directed reads. Mapped
+        // from here because they are routes ON the persona resource and this Map* is already reached from the
+        // orchestrator-owned Program.cs — a slice whose wiring is never executed is dead at 404 (#310→#317).
+        endpoints.MapSocialFollowEndpoints();
 
         return endpoints;
     }
@@ -184,12 +199,33 @@ public sealed class PersonaResponseDto
     public required string AudienceBand { get; init; }
 
     /// <summary>
-    /// The persisted SOC-054 <see cref="Data.Entities.Persona.AudienceMagnitude"/> — the band-derived reach
-    /// a persona carries independent of any real follow edge (story 07 adds the edges, and
-    /// <c>profiles-social-graph/05</c> composes the two at read time).
+    /// The DISPLAYED follower count (SOC-054, <c>profiles-social-graph/05</c>): the persisted
+    /// <see cref="Data.Entities.Persona.AudienceMagnitude"/> PLUS the real inbound <c>Follow</c> edges in this
+    /// exercise. The two populations are disjoint — magnitude is the simulated crowd that exists as a number,
+    /// edges are the accounts that exist as rows — so the sum is the honest figure a profile renders.
+    /// <see cref="AudienceMagnitude"/> carries the magnitude term on its own for
+    /// <c>audienceReach()</c>, which takes magnitude and edges separately and must never be handed this
+    /// composite as its <c>magnitude</c> input.
     /// </summary>
     [JsonPropertyName("followerCount")]
     public required int FollowerCount { get; init; }
+
+    /// <summary>
+    /// The persisted SOC-054 magnitude ALONE — the band-derived reach a persona carries independent of any
+    /// real follow edge. Emitted separately from <see cref="FollowerCount"/> so the shared reach formula
+    /// (<c>features/social/services/audience.ts</c>, imported by E8/ADP-004 and E10/EVL-012) can take
+    /// <c>magnitude</c> and <c>edges = followerCount - audienceMagnitude</c> without double-counting the
+    /// edges already folded into the displayed count.
+    /// </summary>
+    [JsonPropertyName("audienceMagnitude")]
+    public required int AudienceMagnitude { get; init; }
+
+    /// <summary>
+    /// The number of accounts this persona follows — REAL outbound <c>Follow</c> edges only. The SOC-054
+    /// magnitude is a follower-side construct and NEVER inflates a following count.
+    /// </summary>
+    [JsonPropertyName("followingCount")]
+    public required int FollowingCount { get; init; }
 
     /// <summary>
     /// The persisted SCENARIO join instant (<see cref="Data.Entities.Persona.JoinedAt"/>) emitted round-trip
@@ -208,8 +244,17 @@ public sealed class PersonaResponseDto
     /// (XC-002), here protecting the SOC-052 trust signal (D1-008).
     /// </summary>
     /// <param name="persona">The full persona entity to project.</param>
+    /// <param name="inboundFollowEdges">
+    /// The persona's REAL inbound follow-edge count in the caller's exercise scope (<c>profiles-social-graph/07</c>),
+    /// added to the magnitude for the displayed follower count. Defaults to zero — the honest value when the
+    /// caller has no follow graph to compose against.
+    /// </param>
+    /// <param name="outboundFollowEdges">The persona's REAL outbound follow-edge count — the following count verbatim.</param>
     /// <returns>The participant-safe projection of <paramref name="persona"/>.</returns>
-    public static PersonaResponseDto FromPersona(Data.Entities.Persona persona)
+    public static PersonaResponseDto FromPersona(
+        Data.Entities.Persona persona,
+        int inboundFollowEdges = 0,
+        int outboundFollowEdges = 0)
     {
         ArgumentNullException.ThrowIfNull(persona);
 
@@ -226,7 +271,9 @@ public sealed class PersonaResponseDto
             Initials = PersonaDerivedPresentation.InitialsForDisplayName(persona.DisplayName),
             Bio = persona.Bio,
             AudienceBand = persona.AudienceBand,
-            FollowerCount = persona.AudienceMagnitude,
+            FollowerCount = persona.AudienceMagnitude + inboundFollowEdges,
+            AudienceMagnitude = persona.AudienceMagnitude,
+            FollowingCount = outboundFollowEdges,
             JoinedAt = PersonaDerivedPresentation.ToScenarioIsoInstant(persona.JoinedAt),
         };
     }
@@ -294,9 +341,21 @@ public sealed class StaffPersonaResponseDto
     [JsonPropertyName("audienceBand")]
     public required string AudienceBand { get; init; }
 
-    /// <inheritdoc cref="Data.Entities.Persona.AudienceMagnitude" />
+    /// <summary>
+    /// The DISPLAYED follower count — <see cref="Data.Entities.Persona.AudienceMagnitude"/> plus the real
+    /// inbound follow edges, identical to the participant shape's figure (the follow graph is not staff-only
+    /// data; only <c>personaType</c> widens this shape).
+    /// </summary>
     [JsonPropertyName("followerCount")]
     public required int FollowerCount { get; init; }
+
+    /// <inheritdoc cref="Data.Entities.Persona.AudienceMagnitude" />
+    [JsonPropertyName("audienceMagnitude")]
+    public required int AudienceMagnitude { get; init; }
+
+    /// <summary>The number of accounts this persona follows — REAL outbound follow edges only.</summary>
+    [JsonPropertyName("followingCount")]
+    public required int FollowingCount { get; init; }
 
     /// <summary>The persisted SCENARIO join instant (COR-053), emitted in the frontend mock's ISO format.</summary>
     [JsonPropertyName("joinedAt")]
@@ -307,8 +366,13 @@ public sealed class StaffPersonaResponseDto
     /// plus the authoring archetype. Never projects <see cref="Data.Entities.Persona.Castable"/>.
     /// </summary>
     /// <param name="persona">The full persona entity to project.</param>
+    /// <param name="inboundFollowEdges">The persona's REAL inbound follow-edge count in the caller's exercise scope.</param>
+    /// <param name="outboundFollowEdges">The persona's REAL outbound follow-edge count.</param>
     /// <returns>The staff-facing projection of <paramref name="persona"/>.</returns>
-    public static StaffPersonaResponseDto FromPersona(Data.Entities.Persona persona)
+    public static StaffPersonaResponseDto FromPersona(
+        Data.Entities.Persona persona,
+        int inboundFollowEdges = 0,
+        int outboundFollowEdges = 0)
     {
         ArgumentNullException.ThrowIfNull(persona);
 
@@ -326,7 +390,9 @@ public sealed class StaffPersonaResponseDto
             Initials = PersonaDerivedPresentation.InitialsForDisplayName(persona.DisplayName),
             Bio = persona.Bio,
             AudienceBand = persona.AudienceBand,
-            FollowerCount = persona.AudienceMagnitude,
+            FollowerCount = persona.AudienceMagnitude + inboundFollowEdges,
+            AudienceMagnitude = persona.AudienceMagnitude,
+            FollowingCount = outboundFollowEdges,
             JoinedAt = PersonaDerivedPresentation.ToScenarioIsoInstant(persona.JoinedAt),
         };
     }
