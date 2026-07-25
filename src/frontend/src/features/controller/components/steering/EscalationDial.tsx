@@ -44,13 +44,17 @@
  * GET failed (including the accepted post-App-Service-restart 404-forever
  * limitation). Always `'live'` under mock (synchronously seeded).
  *
- * NEVER CLAIM AN UNCONFIRMED CHANGE (Gate-1 CR-001). The relationship text
- * (an `aria-live="polite"` status line) distinguishes a PENDING change
- * (`dial.pendingChangeDetail`, in flight) from a CONFIRMED one
- * (`dial.lastChangeDetail`, only ever set after the backend actually applied
- * it) — it never announces "none → 90" as settled fact before the POST
- * resolves. A failed write surfaces `dial.writeError` as an explicit,
- * separate icon+text line, never silently reverting with no signal.
+ * NEVER CLAIM AN UNCONFIRMED CHANGE (Gate-1 CR-001, qualified further at
+ * Gate-2 W-101). The relationship line (`role="status" aria-live="polite"`)
+ * distinguishes a PENDING change (`dial.pendingChangeDetail`, in flight) from
+ * a CONFIRMED one (`dial.lastChangeDetail`, only ever set after the backend
+ * actually applied it) — NOT ONLY by which field is set, but in the RENDERED
+ * TEXT itself: the pending case reads "Setting target: X… (not yet
+ * confirmed)" with an hourglass icon, never the bare "X" a confirmed commit
+ * shows, so a screen reader never announces an in-flight request identically
+ * to a settled one. A failed write surfaces `dial.writeError` as an
+ * explicit, separate icon+text line, never silently reverting with no
+ * signal.
  *
  * EXPLANATORY UX (story 09, AC5 — static, not per-exercise configured copy).
  * The D5-amended dial shipped with no explanation of what it shows, so this
@@ -306,13 +310,15 @@ export function EscalationDial() {
   const displayTargetIntensity = dragValue ?? dial.targetIntensity
   const targetLabel = displayTargetIntensity === null ? 'none' : String(displayTargetIntensity)
 
-  // Gate-1 CR-001: a PENDING (unconfirmed) change takes priority over a
-  // CONFIRMED one, which takes priority over the default prompt — never
-  // announce a change as settled before the backend actually applied it.
-  const relationshipText =
-    dial.pendingChangeDetail ??
-    dial.lastChangeDetail ??
-    'Click, drag, or use arrow keys / Home / End on the track to set a target.'
+  // Gate-1 CR-001 / Gate-2 W-101: a PENDING (unconfirmed) change takes
+  // priority over a CONFIRMED one, which takes priority over the default
+  // prompt — and the PENDING case is worded distinctly (never the bare
+  // confirmed string) so a screen reader never announces an in-flight
+  // request as settled fact.
+  const isPending = dial.pendingChangeDetail !== null
+  const relationshipText = isPending
+    ? `Setting target: ${dial.pendingChangeDetail}… (not yet confirmed)`
+    : (dial.lastChangeDetail ?? 'Click, drag, or use arrow keys / Home / End on the track to set a target.')
 
   // AC4 — the honesty caveat: a target is recorded on ANY phase, but the
   // engine only chases it while Escalating/Peak (mirrors Storyline.Tick's own
@@ -494,18 +500,25 @@ export function EscalationDial() {
       </Stack>
 
       {/*
-        Relationship text — pending / confirmed transition (Gate-1 CR-001:
-        never claims an unconfirmed change).
+        Relationship text — pending / confirmed transition (Gate-1 CR-001 /
+        Gate-2 W-101: the PENDING case is worded + icon-distinct from a
+        CONFIRMED commit, never the bare same string in the same aria-live
+        region).
       */}
-      <Typography
-        component="p"
+      <Stack
+        direction="row"
         data-testid="escalation-dial-relationship"
         role="status"
         aria-live="polite"
-        sx={{ fontSize: 11, color: chrome.inkMuted, m: 0, mt: 0.75 }}
+        sx={{ alignItems: 'flex-start', gap: 0.5, mt: 0.75 }}
       >
-        {relationshipText}
-      </Typography>
+        {isPending ? (
+          <FontAwesomeIcon icon={faHourglassHalf} color={chrome.inkMuted} aria-hidden="true" />
+        ) : null}
+        <Typography component="p" sx={{ fontSize: 11, color: chrome.inkMuted, m: 0 }}>
+          {relationshipText}
+        </Typography>
+      </Stack>
 
       {/*
         Write-failure notice (Gate-1 CR-001) — a rejected POST never reverts

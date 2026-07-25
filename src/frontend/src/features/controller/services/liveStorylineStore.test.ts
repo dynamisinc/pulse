@@ -79,7 +79,7 @@ describe('liveStorylineStore — status (Gate-1 CR-002: never data alone)', () =
     liveStorylineStore.ensureStarted('primary')
     await vi.waitFor(() => expect(liveStorylineStore.getSnapshot().status).toBe('live'))
 
-    expect(getMock).toHaveBeenCalledWith('/steering/storylines/primary')
+    expect(getMock).toHaveBeenCalledWith('/steering/storylines/primary', { timeout: 8000 })
     expect(liveStorylineStore.getSnapshot().data?.intensity).toBe(62)
   })
 
@@ -145,7 +145,7 @@ describe('liveStorylineStore — polling lifecycle', () => {
     expect(liveStorylineStore.getSnapshot().status).toBe('loading')
 
     await vi.waitFor(() => expect(liveStorylineStore.getSnapshot().data?.storylineId).toBe('storyline-b'))
-    expect(getMock).toHaveBeenLastCalledWith('/steering/storylines/storyline-b')
+    expect(getMock).toHaveBeenLastCalledWith('/steering/storylines/storyline-b', { timeout: 8000 })
   })
 })
 
@@ -196,14 +196,55 @@ describe('liveStorylineStore — reconcile', () => {
   it('applies an authoritative response immediately as "live", notifying subscribers', () => {
     const listener = vi.fn()
     liveStorylineStore.subscribe(listener)
+    const token = liveStorylineStore.beginWrite()
 
-    liveStorylineStore.reconcile(wireBody({ intensity: 55, targetIntensity: 80 }))
+    liveStorylineStore.reconcile(wireBody({ intensity: 55, targetIntensity: 80 }), token)
 
     expect(liveStorylineStore.getSnapshot()).toMatchObject({
       status: 'live',
       data: { intensity: 55, targetIntensity: 80 },
     })
     expect(listener).toHaveBeenCalled()
+  })
+
+  it('drops a STALE response (Gate-2 W-102) — a newer write has since begun', () => {
+    const tokenA = liveStorylineStore.beginWrite() // e.g. setTarget(60)
+    const tokenB = liveStorylineStore.beginWrite() // e.g. setTarget(80), issued after A
+
+    // B's response arrives FIRST.
+    liveStorylineStore.reconcile(wireBody({ targetIntensity: 80 }), tokenB)
+    expect(liveStorylineStore.getSnapshot().data?.targetIntensity).toBe(80)
+
+    // A's response arrives LATE — must be dropped, never overwrite B's result
+    // (a stale response must never win over the currently-latest write,
+    // regardless of arrival order).
+    liveStorylineStore.reconcile(wireBody({ targetIntensity: 60 }), tokenA)
+    expect(liveStorylineStore.getSnapshot().data?.targetIntensity).toBe(80)
+  })
+})
+
+describe('liveStorylineStore — applyOptimistic preserves status (Gate-2 S-101)', () => {
+  it('patches data WITHOUT forcing status to "live" — an optimistic guess never masquerades as confirmed', async () => {
+    getMock.mockResolvedValueOnce({ data: wireBody({ intensity: 40, targetIntensity: null }) })
+    liveStorylineStore.ensureStarted('primary')
+    await vi.waitFor(() => expect(liveStorylineStore.getSnapshot().status).toBe('live'))
+
+    getMock.mockRejectedValueOnce(new Error('down'))
+    await vi.advanceTimersByTimeAsync(POLL_MS)
+    await vi.waitFor(() => expect(liveStorylineStore.getSnapshot().status).toBe('unavailable'))
+
+    liveStorylineStore.applyOptimistic({ targetIntensity: 90 })
+
+    const snapshot = liveStorylineStore.getSnapshot()
+    expect(snapshot.data?.targetIntensity).toBe(90)
+    // An optimistic local patch must never flip an unconfirmed read to "live" by itself.
+    expect(snapshot.status).toBe('unavailable')
+  })
+
+  it('is a no-op when there is no data yet to patch onto', () => {
+    liveStorylineStore.applyOptimistic({ targetIntensity: 90 })
+
+    expect(liveStorylineStore.getSnapshot()).toEqual({ status: 'loading', data: null })
   })
 })
 
@@ -214,7 +255,8 @@ describe('liveStorylineStore — refetchNow (Gate-1 S-003)', () => {
     await vi.waitFor(() => expect(liveStorylineStore.getSnapshot().data?.intensity).toBe(40))
 
     getMock.mockResolvedValueOnce({ data: wireBody({ intensity: 77 }) })
-    await liveStorylineStore.refetchNow('primary')
+    const token = liveStorylineStore.beginWrite()
+    await liveStorylineStore.refetchNow('primary', token)
 
     expect(liveStorylineStore.getSnapshot().data?.intensity).toBe(77)
   })
@@ -225,9 +267,72 @@ describe('liveStorylineStore — refetchNow (Gate-1 S-003)', () => {
     await vi.waitFor(() => expect(liveStorylineStore.getSnapshot().data?.intensity).toBe(40))
 
     getMock.mockRejectedValueOnce(new Error('still down'))
-    await liveStorylineStore.refetchNow('primary')
+    const token = liveStorylineStore.beginWrite()
+    await liveStorylineStore.refetchNow('primary', token)
 
     expect(liveStorylineStore.getSnapshot()).toMatchObject({ status: 'unavailable', data: { intensity: 40 } })
+  })
+
+  it('drops a STALE re-sync (Gate-2 W-102) — a newer write has since begun', async () => {
+    const staleToken = liveStorylineStore.beginWrite()
+    liveStorylineStore.beginWrite() // a newer write supersedes staleToken
+
+    getMock.mockResolvedValueOnce({ data: wireBody({ intensity: 999 }) })
+    await liveStorylineStore.refetchNow('primary', staleToken)
+
+    expect(liveStorylineStore.getSnapshot()).toEqual({ status: 'loading', data: null })
+  })
+})
+
+describe('liveStorylineStore — self-healing recovery (Gate-2 W-105)', () => {
+  it('a subsequent poll tick that succeeds moves "unavailable" back to "live"', async () => {
+    getMock.mockRejectedValueOnce(new Error('404 — registry lost after a restart'))
+    liveStorylineStore.ensureStarted('primary')
+    await vi.waitFor(() => expect(liveStorylineStore.getSnapshot().status).toBe('unavailable'))
+
+    // The controller re-seeds via ops; the NEXT poll tick succeeds.
+    getMock.mockResolvedValueOnce({ data: wireBody({ intensity: 12 }) })
+    await vi.advanceTimersByTimeAsync(POLL_MS)
+
+    await vi.waitFor(() => expect(liveStorylineStore.getSnapshot().status).toBe('live'))
+    expect(liveStorylineStore.getSnapshot().data?.intensity).toBe(12)
+  })
+})
+
+describe('liveStorylineStore — id re-point invalidates in-flight generations (Gate-2 S-103 + W-102)', () => {
+  it('a GET in flight for the PREVIOUS id never lands as "live" after ensureStarted re-points to a new id', async () => {
+    let resolvePreviousGet: (value: { data: LiveStorylineSteeringState }) => void = () => {}
+    getMock.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolvePreviousGet = resolve
+      }),
+    )
+    liveStorylineStore.ensureStarted('storyline-a')
+
+    getMock.mockResolvedValueOnce({ data: wireBody({ storylineId: 'storyline-b', intensity: 77 }) })
+    liveStorylineStore.ensureStarted('storyline-b')
+    await vi.waitFor(() => expect(liveStorylineStore.getSnapshot().data?.storylineId).toBe('storyline-b'))
+
+    // The stale GET for storyline-a resolves LATE — must never overwrite storyline-b's snapshot.
+    resolvePreviousGet({ data: wireBody({ storylineId: 'storyline-a', intensity: 1 }) })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(liveStorylineStore.getSnapshot().data?.storylineId).toBe('storyline-b')
+  })
+
+  it('an in-flight write for the OLD id never reconciles against the NEW id (W-102)', async () => {
+    getMock.mockResolvedValue({ data: wireBody() })
+    liveStorylineStore.ensureStarted('storyline-a')
+    await vi.waitFor(() => expect(liveStorylineStore.getSnapshot().status).toBe('live'))
+
+    const staleWriteToken = liveStorylineStore.beginWrite() // a write in flight for storyline-a
+
+    liveStorylineStore.ensureStarted('storyline-b') // the id changes underneath the in-flight write
+
+    liveStorylineStore.reconcile(wireBody({ storylineId: 'storyline-a', intensity: 999 }), staleWriteToken)
+
+    expect(liveStorylineStore.getSnapshot().data?.storylineId).not.toBe('storyline-a')
   })
 })
 

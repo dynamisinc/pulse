@@ -367,7 +367,8 @@ describe('useStorylineTarget — live mode (story 09; USE_MOCK_DATA=false)', () 
 
     // Optimistic — reflects immediately, before the POST settles.
     expect(result.current.targetIntensity).toBe(75)
-    expect(mockedSetStorylineTarget).toHaveBeenCalledWith('storyline-real-guid', 75)
+    // The actual POST fires once the coalescing debounce goes quiet (Gate-2 W-102).
+    await waitFor(() => expect(mockedSetStorylineTarget).toHaveBeenCalledWith('storyline-real-guid', 75))
 
     // Reconciled against the AUTHORITATIVE response — intensity moves to the
     // server's 42 (never assumed locally), even though only target was set —
@@ -412,7 +413,8 @@ describe('useStorylineTarget — live mode (story 09; USE_MOCK_DATA=false)', () 
 
     act(() => result.current.setTarget(60))
 
-    expect(steeringEvents()).toHaveLength(1)
+    // The telemetry emit fires once the coalescing debounce settles (Gate-2 W-102).
+    await waitFor(() => expect(steeringEvents()).toHaveLength(1))
     const evt = steeringEvents()[0]
     expect(evt?.exerciseId).toBe(EX)
     expect(evt?.channel).toBe('system')
@@ -446,7 +448,8 @@ describe('useStorylineTarget — live mode (story 09; USE_MOCK_DATA=false)', () 
       await waitFor(() => expect(result.current.writeError).not.toBeNull())
 
       expect(result.current.writeError).toBe(
-        'Could not set the target — the change was not applied. Try again.',
+        'Could not confirm the target change — the dial has been re-synced from the server. ' +
+          'Check the value and try again.',
       )
       expect(result.current.pendingChangeDetail).toBeNull()
       // NEVER promoted — the change never actually landed.
@@ -490,6 +493,127 @@ describe('useStorylineTarget — live mode (story 09; USE_MOCK_DATA=false)', () 
       act(() => result.current.setTarget(60))
 
       expect(result.current.writeError).toBeNull()
+    })
+  })
+
+  describe('coalesced commits + request ordering (Gate-2 W-102)', () => {
+    it('a rapid burst of calls (e.g. keyboard auto-repeat) coalesces into ONE POST + ONE telemetry event, using the LATEST value', async () => {
+      mockedGetStoryline.mockResolvedValue(liveState({ intensity: 40, targetIntensity: null }))
+      mockedSetStorylineTarget.mockResolvedValue(liveState({ intensity: 40, targetIntensity: 80 }))
+      const { result } = renderHook(() => useStorylineTarget())
+      await waitFor(() => expect(result.current.storylineId).toBe('storyline-real-guid'))
+
+      act(() => {
+        result.current.setTarget(60)
+        result.current.setTarget(70)
+        result.current.setTarget(80)
+      })
+
+      // Optimistic reflects the LATEST value immediately, on every call.
+      expect(result.current.targetIntensity).toBe(80)
+
+      await waitFor(() => expect(mockedSetStorylineTarget).toHaveBeenCalledTimes(1))
+      expect(mockedSetStorylineTarget).toHaveBeenCalledWith('storyline-real-guid', 80)
+
+      await waitFor(() => expect(steeringEvents()).toHaveLength(1))
+      expect(steeringEvents()[0]?.payload).toMatchObject({ from: null, to: 80, detail: 'none → 80' })
+    })
+
+    it('a burst that nets back to the confirmed baseline settles to a no-op: no POST, no telemetry', async () => {
+      mockedGetStoryline.mockResolvedValue(liveState({ intensity: 40, targetIntensity: 50 }))
+      const { result } = renderHook(() => useStorylineTarget())
+      await waitFor(() => expect(result.current.targetIntensity).toBe(50))
+
+      act(() => {
+        result.current.setTarget(80)
+        result.current.setTarget(50) // back to the original confirmed value
+      })
+
+      // Let the coalescing debounce settle.
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 220))
+      })
+
+      expect(mockedSetStorylineTarget).not.toHaveBeenCalled()
+      expect(steeringEvents()).toHaveLength(0)
+    })
+
+    it('a stale response (an earlier, now-superseded write) never overwrites a newer one or announces itself as confirmed', async () => {
+      mockedGetStoryline.mockResolvedValue(liveState({ intensity: 40, targetIntensity: null }))
+      type Resolver = (value: liveStorylineActions.LiveStorylineSteeringState) => void
+      let resolveFirstPost: Resolver = () => {}
+      let resolveSecondPost: Resolver = () => {}
+      mockedSetStorylineTarget
+        .mockImplementationOnce(() => new Promise(resolve => { resolveFirstPost = resolve }))
+        .mockImplementationOnce(() => new Promise(resolve => { resolveSecondPost = resolve }))
+
+      const { result } = renderHook(() => useStorylineTarget())
+      await waitFor(() => expect(result.current.storylineId).toBe('storyline-real-guid'))
+
+      // Burst A (settles, waits past the debounce so it issues its OWN POST).
+      act(() => result.current.setTarget(60))
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 220))
+      })
+      await waitFor(() => expect(mockedSetStorylineTarget).toHaveBeenCalledTimes(1))
+
+      // Burst B — a separate, LATER commit (also past the debounce).
+      act(() => result.current.setTarget(80))
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 220))
+      })
+      await waitFor(() => expect(mockedSetStorylineTarget).toHaveBeenCalledTimes(2))
+
+      // B's response arrives FIRST. (B's own baseline is 60 — burst A's still-
+      // unconfirmed optimistic value at the moment B started — not "none";
+      // that is expected: B's "from" is whatever was last requested.)
+      act(() => resolveSecondPost(liveState({ intensity: 40, targetIntensity: 80 })))
+      await waitFor(() => expect(result.current.lastChangeDetail).toBe('60 → 80'))
+      expect(result.current.targetIntensity).toBe(80)
+
+      // A's response arrives LATE — must be dropped: never claimed as confirmed,
+      // never overwrites B's result in the store.
+      act(() => resolveFirstPost(liveState({ intensity: 40, targetIntensity: 60 })))
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(result.current.targetIntensity).toBe(80)
+      expect(result.current.lastChangeDetail).toBe('60 → 80')
+    })
+  })
+
+  describe('the no-op guard only trusts a CONFIRMED snapshot (Gate-2 W-104)', () => {
+    it('never suppresses a retry against a retained-but-unconfirmed value after a failed write whose own re-sync also failed', async () => {
+      mockedGetStoryline.mockResolvedValueOnce(liveState({ intensity: 40, targetIntensity: null }))
+      mockedSetStorylineTarget.mockRejectedValueOnce(new Error('first attempt fails'))
+      const { result } = renderHook(() => useStorylineTarget())
+      await waitFor(() => expect(result.current.storylineId).toBe('storyline-real-guid'))
+
+      // The post-failure re-sync ALSO fails — dataStatus moves to 'unavailable',
+      // but the optimistic (never-confirmed) 90 is retained in the snapshot.
+      mockedGetStoryline.mockRejectedValueOnce(new Error('re-sync also fails'))
+
+      act(() => result.current.setTarget(90))
+      await waitFor(() => expect(result.current.writeError).not.toBeNull())
+      await waitFor(() => expect(result.current.dataStatus).toBe('unavailable'))
+      expect(result.current.targetIntensity).toBe(90) // retained, but UNCONFIRMED
+
+      // A retry with the SAME numeric value (90) must NOT be treated as a
+      // no-op — that retained 90 was never confirmed by the server.
+      mockedSetStorylineTarget.mockResolvedValueOnce(
+        liveState({ intensity: 40, targetIntensity: 90 }),
+      )
+      act(() => result.current.setTarget(90))
+
+      // The stale error is cleared at the TOP of the new attempt, synchronously.
+      expect(result.current.writeError).toBeNull()
+
+      await waitFor(() =>
+        expect(mockedSetStorylineTarget).toHaveBeenCalledWith('storyline-real-guid', 90),
+      )
+      await waitFor(() => expect(result.current.lastChangeDetail).not.toBeNull())
+      // The failed attempt + the retry, both recorded.
+      expect(steeringEvents().length).toBeGreaterThanOrEqual(2)
     })
   })
 

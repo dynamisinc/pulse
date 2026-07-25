@@ -28,7 +28,12 @@ vi.mock('@/core/services/api', () => ({
   },
 }))
 
-import { getStoryline, PRIMARY_STORYLINE_SENTINEL, setStorylineTarget } from './liveStorylineActions'
+import {
+  getStoryline,
+  PRIMARY_STORYLINE_SENTINEL,
+  REQUEST_TIMEOUT_MS,
+  setStorylineTarget,
+} from './liveStorylineActions'
 
 function wireBody(overrides: Record<string, unknown> = {}) {
   return {
@@ -54,7 +59,7 @@ describe('getStoryline', () => {
 
     const result = await getStoryline(PRIMARY_STORYLINE_SENTINEL)
 
-    expect(getMock).toHaveBeenCalledWith('/steering/storylines/primary')
+    expect(getMock).toHaveBeenCalledWith('/steering/storylines/primary', { timeout: REQUEST_TIMEOUT_MS })
     expect(result).toEqual({
       storylineId: 'storyline-real-guid',
       title: 'Water main contamination fears',
@@ -92,7 +97,10 @@ describe('getStoryline', () => {
 
     await getStoryline('weird id/with?chars')
 
-    expect(getMock).toHaveBeenCalledWith('/steering/storylines/weird%20id%2Fwith%3Fchars')
+    expect(getMock).toHaveBeenCalledWith(
+      '/steering/storylines/weird%20id%2Fwith%3Fchars',
+      { timeout: REQUEST_TIMEOUT_MS },
+    )
   })
 })
 
@@ -102,7 +110,11 @@ describe('setStorylineTarget', () => {
 
     const result = await setStorylineTarget('storyline-real-guid', 90)
 
-    expect(postMock).toHaveBeenCalledWith('/steering/storylines/storyline-real-guid/target', { target: 90 })
+    expect(postMock).toHaveBeenCalledWith(
+      '/steering/storylines/storyline-real-guid/target',
+      { target: 90 },
+      { timeout: REQUEST_TIMEOUT_MS },
+    )
     expect(result.targetIntensity).toBe(90)
   })
 
@@ -111,7 +123,11 @@ describe('setStorylineTarget', () => {
 
     await setStorylineTarget('storyline-real-guid', null)
 
-    expect(postMock).toHaveBeenCalledWith('/steering/storylines/storyline-real-guid/target', { target: null })
+    expect(postMock).toHaveBeenCalledWith(
+      '/steering/storylines/storyline-real-guid/target',
+      { target: null },
+      { timeout: REQUEST_TIMEOUT_MS },
+    )
   })
 
   it('throws on a malformed body', async () => {
@@ -125,6 +141,10 @@ describe('setStorylineTarget', () => {
 
     await setStorylineTarget('weird id/with?chars', 50)
 
-    expect(postMock).toHaveBeenCalledWith('/steering/storylines/weird%20id%2Fwith%3Fchars/target', { target: 50 })
+    expect(postMock).toHaveBeenCalledWith(
+      '/steering/storylines/weird%20id%2Fwith%3Fchars/target',
+      { target: 50 },
+      { timeout: REQUEST_TIMEOUT_MS },
+    )
   })
 })

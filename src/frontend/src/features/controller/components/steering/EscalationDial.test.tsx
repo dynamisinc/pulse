@@ -567,11 +567,79 @@ describe('EscalationDial — write failures are surfaced, never silent (Gate-1 C
     expect(screen.getByTestId('escalation-dial-relationship')).toHaveTextContent('none → 100')
 
     const errorLine = await screen.findByTestId('escalation-dial-write-error')
-    expect(errorLine).toHaveTextContent(/could not set the target/i)
+    expect(errorLine).toHaveTextContent(/could not confirm the target change/i)
     expect(errorLine.querySelector('svg')).not.toBeNull() // icon + text (NFR-001), never color alone
 
     // The re-sync corrects the number back to the server's ground truth.
     await waitFor(() => expect(screen.getByTestId('escalation-dial-target-label')).toHaveTextContent('TARGET none'))
+  })
+
+  it('Gate-2 W-101: the PENDING relationship line is worded + icon-distinct from a CONFIRMED one, never the bare same string', async () => {
+    mockedGetStoryline.mockResolvedValueOnce(liveState())
+    let resolvePost: (value: liveStorylineActions.LiveStorylineSteeringState) => void = () => {}
+    mockedSetStorylineTarget.mockReturnValue(
+      new Promise(resolve => {
+        resolvePost = resolve
+      }),
+    )
+    await renderDial()
+    await waitFor(() => expect(screen.getByTestId('escalation-dial-actual-label')).toHaveTextContent('ACTUAL 40'))
+
+    const track = screen.getByTestId('escalation-dial-track')
+    track.focus()
+    fireEvent.keyDown(track, { key: 'End' }) // none -> 100
+
+    const relationship = screen.getByTestId('escalation-dial-relationship')
+    expect(relationship).toHaveTextContent(/setting target/i)
+    expect(relationship).toHaveTextContent(/not yet confirmed/i)
+    expect(relationship.querySelector('svg')).not.toBeNull() // the hourglass icon (NFR-001)
+
+    resolvePost(liveState({ targetIntensity: 100 }))
+    await waitFor(() => expect(relationship).not.toHaveTextContent(/not yet confirmed/i))
+    // Confirmed: the bare detail, no hourglass, no "not yet confirmed" qualifier.
+    expect(relationship).toHaveTextContent('none → 100')
+    expect(relationship.querySelector('svg')).toBeNull()
+  })
+})
+
+describe('EscalationDial — self-healing recovery from "unavailable" (Gate-2 W-105, live mode)', () => {
+  beforeEach(() => {
+    mockDataState.useMockData = false
+  })
+
+  it('replaces the unavailable panel with the real reading once a later poll succeeds', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'setTimeout'] })
+    try {
+      mockedGetStoryline.mockRejectedValueOnce(new Error('404 — registry lost after a restart'))
+      render(
+        <ThemeProvider theme={cobraTheme}>
+          <ExerciseContextProvider>
+            <EscalationDial />
+          </ExerciseContextProvider>
+        </ThemeProvider>,
+      )
+
+      await vi.waitFor(() => expect(screen.getByTestId('escalation-dial-unavailable')).toHaveAttribute(
+        'data-status',
+        'unavailable',
+      ))
+
+      // The controller re-seeds via ops; the NEXT poll tick succeeds.
+      mockedGetStoryline.mockResolvedValueOnce({
+        storylineId: 'storyline-real-guid',
+        title: 'Water main contamination fears',
+        exerciseId: 'ex-mock-0001',
+        intensity: 33,
+        targetIntensity: null,
+        phase: 'Escalating',
+      })
+      await vi.advanceTimersByTimeAsync(5000)
+
+      await vi.waitFor(() => expect(screen.queryByTestId('escalation-dial-unavailable')).not.toBeInTheDocument())
+      expect(screen.getByTestId('escalation-dial-actual-label')).toHaveTextContent('ACTUAL 33')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

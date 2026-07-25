@@ -32,18 +32,49 @@
  *     last-known numbers for context still can, but `status` tells the truth
  *     about whether they are current. `<EscalationDial>` must render this
  *     status explicitly rather than presenting stale/default numbers as fact.
+ *     THIS IS SELF-HEALING (Gate-2 W-105): the very next poll tick that
+ *     succeeds moves status back to `'live'` — `'unavailable'` is not a
+ *     terminal/sticky state.
  *
- * RECONCILIATION AFTER A WRITE (AC2). `reconcile(state)` lets the hook apply
- * the AUTHORITATIVE response from a `setStorylineTarget` POST immediately
- * (rather than waiting for the next poll tick) — the dial's optimistic local
- * update is corrected/confirmed against this the instant the POST resolves,
- * and `status` moves to `'live'` (a successful POST is itself live proof).
+ * TWO INDEPENDENT GENERATION COUNTERS (Gate-2 W-102 + S-103) — responses
+ * arrive in NETWORK order, not ISSUE order, so a stale one landing after a
+ * newer request must never be applied:
+ *   - `pollEpoch` bumps ONLY when `ensureStarted` re-points to a DIFFERENT
+ *     storyline id. The poll (and its seeding GET) captures this epoch ONCE
+ *     and every tick re-validates it before applying — closes S-103 (an
+ *     in-flight GET for a PREVIOUS id landing as `'live'` after the id
+ *     changed underneath it). Ordinary writes never bump this.
+ *   - `writeGeneration` bumps on EVERY `beginWrite()` call (a NEW write
+ *     attempt) — closes W-102 (e.g. `setTarget(60)` then `setTarget(80)`,
+ *     B's response landing first, A's landing late: A's token is stale the
+ *     instant B calls `beginWrite()`, so `reconcile`/`refetchNow` carrying
+ *     A's token are dropped even though A's network response arrived AFTER
+ *     B applied). Re-pointing to a different id ALSO bumps `writeGeneration`
+ *     — an in-flight write for the OLD id must never land against the NEW
+ *     one's snapshot.
  *
- * RE-SYNC ON A FAILED WRITE (Gate-1 S-003). `refetchNow(storylineId)` is the
- * PUBLIC re-sync entry point a failed POST's `.catch` calls — re-reading the
- * server's ground truth rather than the caller restoring a captured pre-POST
- * snapshot, which could clobber a POLL that landed in between the optimistic
- * update and the rejection.
+ * RECONCILIATION AFTER A WRITE (AC2). `reconcile(state, token)` lets the hook
+ * apply the AUTHORITATIVE response from a `setStorylineTarget` POST
+ * immediately (rather than waiting for the next poll tick) — the dial's
+ * optimistic local update is corrected/confirmed against this the instant the
+ * POST resolves, and `status` moves to `'live'` (a successful POST is itself
+ * live proof) — UNLESS `token` is stale (W-102), in which case the call is a
+ * silent no-op.
+ *
+ * OPTIMISTIC PATCHES PRESERVE STATUS (Gate-2 S-101). `applyOptimistic(patch)`
+ * is the ONLY way a caller stamps an unconfirmed local guess onto the
+ * snapshot — unlike `reconcile`, it does NOT force `status` to `'live'`; it
+ * keeps whatever status was already there (`'loading'`/`'live'`/
+ * `'unavailable'`). This makes CR-002's "never fabricate a confirmed read"
+ * invariant airtight BY CONSTRUCTION (a local guess literally cannot flip the
+ * store into looking authoritative) rather than by every call site
+ * remembering to avoid `reconcile` for a guess.
+ *
+ * RE-SYNC ON A FAILED WRITE (Gate-1 S-003). `refetchNow(storylineId, token)`
+ * is the PUBLIC re-sync entry point a failed POST's `.catch` calls —
+ * re-reading the server's ground truth rather than the caller restoring a
+ * captured pre-POST snapshot, which could clobber a POLL that landed in
+ * between the optimistic update and the rejection. Also token-gated (W-102).
  *
  * REFERENCE-COUNTED LIFECYCLE (Gate-1 W-006). Unlike `liveReviewStore`'s
  * shared PUSH subscription (no recurring cost once connected),
@@ -83,13 +114,28 @@ const LOADING_SNAPSHOT: LiveStorylineSnapshot = { status: 'loading', data: null 
 /** The current snapshot. Identity swaps (never mutates) on change. */
 let current: LiveStorylineSnapshot = LOADING_SNAPSHOT
 
-/** The storyline id the current poll is running for, or `null` when stopped. */
+/**
+ * The storyline id the current poll is running for, or `null` when stopped.
+ * Gate-2 S-102 (noted, not built): a single id behind the shared reference
+ * count means a DIFFERENT-id consumer would re-point the ONE poll out from
+ * under an existing consumer. Unreachable today — the hook hard-codes
+ * `PRIMARY_STORYLINE_SENTINEL`, so every consumer always requests the SAME
+ * id — and stays unreachable until the Stories board (D5-016/017) lets a
+ * controller address a specific storyline; THAT is the trigger to replace
+ * this single id with an id-keyed map of independent polls.
+ */
 let startedForId: string | null = null
 
 let pollHandle: ReturnType<typeof setInterval> | null = null
 
 /** How many live consumers currently want this poll running (W-006). */
 let subscriberCount = 0
+
+/** Bumped ONLY on an id re-point (Gate-2 S-103). Guards the poll/seed GET. */
+let pollEpoch = 0
+
+/** Bumped on every `beginWrite()` AND on an id re-point (Gate-2 W-102). Guards write responses. */
+let writeGeneration = 0
 
 /** Active change listeners; notified on every mutation. */
 const listeners = new Set<() => void>()
@@ -119,21 +165,57 @@ function stopPolling(): void {
 }
 
 /**
- * Refetches `storylineId`. On success, replaces the snapshot with the fresh
- * data and marks it `'live'`. On failure (network, an expected pre-scope
- * 401/403, or a 404 before/after the exercise's storyline is registered),
- * marks the snapshot `'unavailable'` WITHOUT discarding the previous `data`
- * (CR-002) — the next poll tick may recover it.
+ * Refetches `storylineId`, applying the result only if `epoch` is STILL the
+ * current `pollEpoch` (Gate-2 S-103) — a response for an id this store has
+ * since moved on from is dropped, never applied as if it were current. On
+ * success, replaces the snapshot with the fresh data and marks it `'live'`.
+ * On failure (network, an expected pre-scope 401/403, or a 404 before/after
+ * the exercise's storyline is registered), marks the snapshot `'unavailable'`
+ * WITHOUT discarding the previous `data` (CR-002) — the next poll tick may
+ * recover it (self-healing, Gate-2 W-105).
  */
-async function refetch(storylineId: string): Promise<void> {
+async function refetchForEpoch(storylineId: string, epoch: number): Promise<void> {
   try {
     const next = await getStoryline(storylineId)
+    if (epoch !== pollEpoch) return
     current = { status: 'live', data: next }
     notify()
   } catch {
+    if (epoch !== pollEpoch) return
     current = { status: 'unavailable', data: current.data }
     notify()
   }
+}
+
+/**
+ * Applies an UNCONFIRMED local guess (Gate-2 S-101) — the ONLY way a caller
+ * stamps an optimistic patch onto the snapshot. Unlike `reconcile`, this
+ * PRESERVES the current `status` rather than forcing `'live'`, so an
+ * optimistic write can never make an unconfirmed/failed read masquerade as
+ * confirmed (CR-002 stays airtight by construction). A no-op if there is no
+ * data yet to patch onto.
+ */
+function applyOptimistic(patch: Partial<LiveStorylineSteeringState>): void {
+  if (current.data === null) return
+  current = { status: current.status, data: { ...current.data, ...patch } }
+  notify()
+}
+
+/**
+ * Begins a new write attempt (Gate-2 W-102) and returns its generation token.
+ * The caller threads this token through `reconcile`/`refetchNow` for THIS
+ * attempt only; a call carrying an OLDER token than the current
+ * `writeGeneration` is a stale response — silently dropped, regardless of
+ * arrival order.
+ */
+function beginWrite(): number {
+  writeGeneration += 1
+  return writeGeneration
+}
+
+/** Whether `token` (from a prior `beginWrite()`) is STILL the latest write attempt. */
+function isCurrentWrite(token: number): boolean {
+  return token === writeGeneration
 }
 
 /**
@@ -141,9 +223,11 @@ async function refetch(storylineId: string): Promise<void> {
  * away (AC2) — the hook calls this the instant the POST resolves, so the
  * dial's optimistic local update reconciles immediately rather than waiting
  * for the next poll tick. A successful POST is itself live proof, so status
- * moves to `'live'`.
+ * moves to `'live'`. Dropped as stale (Gate-2 W-102) if `token` is no longer
+ * the current write generation.
  */
-function reconcile(state: LiveStorylineSteeringState): void {
+function reconcile(state: LiveStorylineSteeringState, token: number): void {
+  if (!isCurrentWrite(token)) return
   current = { status: 'live', data: state }
   notify()
 }
@@ -154,21 +238,26 @@ function reconcile(state: LiveStorylineSteeringState): void {
  * interval; a subsequent acquire for the SAME id only bumps the reference
  * count (idempotent — a second mounted `<EscalationDial>` causes no
  * duplicate polling). Acquiring a DIFFERENT id tears the previous poll down,
- * resets to `'loading'`, and starts fresh. Pair every call with `release()`.
+ * bumps BOTH generation counters (Gate-2 W-102/S-103 — invalidates any
+ * in-flight GET/write for the OLD id), resets to `'loading'`, and starts
+ * fresh. Pair every call with `release()`.
  */
 function ensureStarted(storylineId: string): void {
   subscriberCount += 1
 
   if (startedForId !== storylineId) {
     stopPolling()
+    pollEpoch += 1
+    writeGeneration += 1
     startedForId = storylineId
     current = LOADING_SNAPSHOT
     notify()
   }
 
   if (pollHandle === null) {
-    void refetch(storylineId)
-    pollHandle = setInterval(() => void refetch(storylineId), POLL_MS)
+    const epoch = pollEpoch
+    void refetchForEpoch(storylineId, epoch)
+    pollHandle = setInterval(() => void refetchForEpoch(storylineId, epoch), POLL_MS)
   }
 }
 
@@ -191,22 +280,33 @@ function release(): void {
  * Re-syncs `storylineId` from the server right now (Gate-1 S-003) — the
  * PUBLIC entry point a failed write's `.catch` calls, rather than the caller
  * restoring a captured pre-POST snapshot (which could clobber a poll that
- * landed in between the optimistic update and the rejection). Shares the
- * exact same success/failure handling as the recurring poll.
+ * landed in between the optimistic update and the rejection). Token-gated
+ * (Gate-2 W-102): dropped as stale if a newer write has since begun.
  */
-function refetchNow(storylineId: string): Promise<void> {
-  return refetch(storylineId)
+async function refetchNow(storylineId: string, token: number): Promise<void> {
+  try {
+    const next = await getStoryline(storylineId)
+    if (!isCurrentWrite(token)) return
+    current = { status: 'live', data: next }
+    notify()
+  } catch {
+    if (!isCurrentWrite(token)) return
+    current = { status: 'unavailable', data: current.data }
+    notify()
+  }
 }
 
 /**
- * Tears the poll down and clears the snapshot + listeners + reference count.
- * Test-only — prevents a live-mode test from leaking a running interval or a
- * stale snapshot into the next.
+ * Tears the poll down and clears the snapshot + listeners + reference count
+ * + both generation counters. Test-only — prevents a live-mode test from
+ * leaking a running interval or a stale snapshot into the next.
  */
 function resetForTests(): void {
   stopPolling()
   startedForId = null
   subscriberCount = 0
+  pollEpoch = 0
+  writeGeneration = 0
   current = LOADING_SNAPSHOT
   listeners.clear()
 }
@@ -217,6 +317,9 @@ export const liveStorylineStore = {
   subscribe,
   ensureStarted,
   release,
+  applyOptimistic,
+  beginWrite,
+  isCurrentWrite,
   reconcile,
   refetchNow,
   resetForTests,

@@ -33,6 +33,13 @@
  * URL-ENCODED (Gate-1 S-002). Every storyline id — the sentinel or a real
  * GUID — is `encodeURIComponent`-ed into the request path, defence in depth
  * against a malformed/unexpected id value corrupting the route.
+ *
+ * BOUNDED REQUEST TIME (Gate-2 W-101). The shared `core/services/api.ts`
+ * axios instance sets no default `timeout` (a wider change out of this
+ * story's footprint), so a hung request here would otherwise leave the
+ * dial's PENDING claim (`useStorylineTarget`'s `pendingChangeDetail`)
+ * standing indefinitely with nothing to resolve it. Both calls in this file
+ * set `REQUEST_TIMEOUT_MS` explicitly, scoped to just this story's requests.
  */
 
 import { api } from '@/core/services/api'
@@ -40,6 +47,13 @@ import type { StorylinePhase } from './storylineMock'
 
 /** Mirrors the backend's `StorylineSteeringService.PrimaryStorylineSentinel` exactly. */
 export const PRIMARY_STORYLINE_SENTINEL = 'primary'
+
+/**
+ * Bounds how long a GET/POST here may hang before axios rejects it with a
+ * timeout error (Gate-2 W-101) — comfortably above the `POLL_MS` cadence and
+ * ordinary network latency, but never unbounded.
+ */
+export const REQUEST_TIMEOUT_MS = 8000
 
 /**
  * The live actual/target/phase state — a field-for-field mirror of the
@@ -112,7 +126,9 @@ function toLiveState(wire: LiveStorylineSteeringState): LiveStorylineSteeringSta
  * `liveStorylineStore.refetch` — catches and keeps its previous snapshot).
  */
 export async function getStoryline(storylineId: string): Promise<LiveStorylineSteeringState> {
-  const response = await api.get<unknown>(`/steering/storylines/${encodeURIComponent(storylineId)}`)
+  const response = await api.get<unknown>(`/steering/storylines/${encodeURIComponent(storylineId)}`, {
+    timeout: REQUEST_TIMEOUT_MS,
+  })
   if (!isWireStorylineSteeringState(response.data)) {
     throw new Error('Malformed GET /steering/storylines/{storylineId} response.')
   }
@@ -133,6 +149,7 @@ export async function setStorylineTarget(
   const response = await api.post<unknown>(
     `/steering/storylines/${encodeURIComponent(storylineId)}/target`,
     { target },
+    { timeout: REQUEST_TIMEOUT_MS },
   )
   if (!isWireStorylineSteeringState(response.data)) {
     throw new Error('Malformed POST /steering/storylines/{storylineId}/target response.')
