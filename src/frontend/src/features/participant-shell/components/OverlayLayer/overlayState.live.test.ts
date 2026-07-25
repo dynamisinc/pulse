@@ -15,6 +15,12 @@
  *    cannot re-show a holding page over a resumed world;
  *  - a hub reconnect RE-GETs the authoritative state ("GET seeds, push updates,
  *    reconnect re-GETs");
+ *  - NO GET response is trusted on arrival order (CR-001): a superseded seed GET
+ *    (production issues TWO, and they race) and a GET body overtaken by a push
+ *    are both DROPPED — neither may show a stale page nor rewind the stale-push
+ *    cutoff below a push that has already been consumed;
+ *  - a push with no `sequence` is unorderable and therefore dropped (SG-002),
+ *    while the sequence-less GET fallback body stays acceptable;
  *  - a failed GET leaves the previous snapshot alone rather than inventing one.
  *
  * Uses the module's own test seam (`ensureStarted(connection)`) with a
@@ -40,6 +46,7 @@ class FakeConnection implements RealtimeConnection {
   state: HubConnectionState = HubConnectionState.Disconnected
   startCallCount = 0
   subscribedEvents: string[] = []
+  startImpl: () => Promise<void> = () => Promise.resolve()
 
   private readonly pushHandlers = new Set<RealtimeEventHandler>()
   private readonly stateListeners = new Set<(state: HubConnectionState) => void>()
@@ -58,7 +65,13 @@ class FakeConnection implements RealtimeConnection {
 
   start(): Promise<void> {
     this.startCallCount += 1
-    return Promise.resolve()
+    return this.startImpl().then(() => {
+      // The REAL SharedRealtimeConnection.start() emits Connected on success
+      // (core/realtime/connection.ts:152-155), which fires the store's resync
+      // listener — so production issues a SECOND seed GET. A fake that stayed
+      // silent here hid the CR-001 race entirely.
+      this.setState(HubConnectionState.Connected)
+    })
   }
 
   push(payload: unknown): void {
@@ -77,6 +90,15 @@ function wireState(overrides: Partial<OverlayState & { sequence: number }> = {})
 
 function resolveGet(body: unknown): void {
   getMock.mockResolvedValue({ data: body })
+}
+
+/** A promise whose resolution the test controls — for interleaving two in-flight GETs. */
+function deferred<T>(): { promise: Promise<T>, resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(r => {
+    resolve = r
+  })
+  return { promise, resolve }
 }
 
 /** Lets the store's own `void refetchLive()` promise settle. */
@@ -120,14 +142,17 @@ describe('liveOverlayStateStore — seeding GET (AC4)', () => {
     expect(getMock).toHaveBeenCalledWith('/overlay-state')
   })
 
-  it('subscribes to OverlayStateChanged on the shared connection and starts it exactly once', async () => {
+  it('subscribes to OverlayStateChanged once and starts the shared connection once', async () => {
     liveOverlayStateStore.ensureStarted(connection)
     liveOverlayStateStore.ensureStarted(connection)
     await flush()
 
     expect(connection.subscribedEvents).toEqual(['OverlayStateChanged'])
     expect(connection.startCallCount).toBe(1)
-    expect(getMock).toHaveBeenCalledTimes(1)
+    // TWO seed GETs, which is what production really does: ensureStarted issues one
+    // directly and connection.start()'s Connected transition fires the resync
+    // listener. They race, so refetchLive is generation-guarded (CR-001).
+    expect(getMock).toHaveBeenCalledTimes(2)
   })
 
   it('keeps the previous snapshot when the GET fails (never invents an overlay)', async () => {
@@ -214,7 +239,7 @@ describe('liveOverlayStateStore — reconnect resync (AC4)', () => {
     connection.setState(HubConnectionState.Connected)
     await flush()
 
-    expect(getMock).toHaveBeenCalledTimes(2)
+    expect(getMock).toHaveBeenCalledTimes(3)
     expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
   })
 
@@ -232,6 +257,85 @@ describe('liveOverlayStateStore — reconnect resync (AC4)', () => {
     expect(liveOverlayStateStore.getSnapshot().state).toBe('none')
 
     connection.push(wireState({ state: 'pause', register: 'out-of-fiction', sequence: 1 }))
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
+  })
+})
+
+describe('liveOverlayStateStore — no trust in arrival order (CR-001)', () => {
+  it('drops a SUPERSEDED seed GET body that resolves last, keeping the newer truth', async () => {
+    // Production issues two seed GETs (ensureStarted + the Connected transition) with no
+    // response-ordering guarantee. If the OLDER one resolved last unguarded, a participant
+    // would sit with no holding page over a frozen world until the next transition.
+    const first = deferred<{ data: unknown }>()
+    const second = deferred<{ data: unknown }>()
+    getMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+    expect(getMock).toHaveBeenCalledTimes(2)
+
+    // The newer GET answers first, with the current truth: frozen.
+    second.resolve({ data: wireState({ state: 'pause', register: 'out-of-fiction', sequence: 7 }) })
+    await flush()
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
+
+    // The older GET answers late, carrying the PRE-Freeze body.
+    first.resolve({ data: wireState({ state: 'none', register: 'in-fiction', sequence: 6 }) })
+    await flush()
+
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
+
+    // ...and the cutoff was not rewound to 6 behind the consumed sequence 7.
+    connection.push(wireState({ state: 'pause', register: 'in-fiction', sequence: 7 }))
+    expect(liveOverlayStateStore.getSnapshot().register).toBe('out-of-fiction')
+    connection.push(wireState({ state: 'none', register: 'in-fiction', sequence: 8 }))
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('none')
+  })
+
+  it('drops a GET body that a push overtook while it was in flight', async () => {
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+
+    const pending = deferred<{ data: unknown }>()
+    getMock.mockReturnValueOnce(pending.promise)
+    connection.setState(HubConnectionState.Connected)
+
+    // The Freeze push lands mid-flight. The server writes its store BEFORE it pushes, so
+    // this is strictly newer than the in-flight GET's body.
+    connection.push(wireState({ state: 'pause', register: 'out-of-fiction', sequence: 3 }))
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
+
+    pending.resolve({ data: wireState({ state: 'none', register: 'in-fiction', sequence: 2 }) })
+    await flush()
+
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
+
+    // The cutoff still reflects the applied push: an equal/older push is dropped, a newer applies.
+    connection.push(wireState({ state: 'none', register: 'in-fiction', sequence: 3 }))
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
+    connection.push(wireState({ state: 'none', register: 'in-fiction', sequence: 4 }))
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('none')
+  })
+})
+
+describe('liveOverlayStateStore — an unorderable push is malformed (SG-002)', () => {
+  it('drops a push with no sequence', async () => {
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+    connection.push(wireState({ state: 'pause', register: 'out-of-fiction', sequence: 5 }))
+
+    connection.push({ state: 'none', register: 'in-fiction', message: '' })
+    connection.push({ state: 'none', register: 'in-fiction', message: '', sequence: 'later' })
+
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
+  })
+
+  it('still accepts a sequence-less GET body — the pre-wiring fallback shape', async () => {
+    resolveGet({ state: 'pause', register: 'out-of-fiction', message: '' })
+
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+
     expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
   })
 })

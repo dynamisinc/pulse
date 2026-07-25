@@ -47,8 +47,18 @@
  * authoritative state, so nothing missed while disconnected is stranded. A
  * malformed push is DROPPED, never cast blindly, and a push that is OLDER than
  * what we have already applied is dropped too — the server publishes a
- * monotonic `sequence` precisely so a late out-of-order push cannot re-show a
- * holding page over a world the controller has already resumed.
+ * per-exercise monotonic `sequence` precisely so a late out-of-order push cannot
+ * re-show a holding page over a world the controller has already resumed.
+ *
+ * NOTHING HERE TRUSTS ARRIVAL ORDER (CR-001). Two seed GETs race on every
+ * startup — `ensureStarted` issues one and `connection.start()`'s `Connected`
+ * transition fires the resync listener — and a push can land while a GET is in
+ * flight. So every GET carries a generation + a push-count watermark taken when
+ * it was ISSUED and is discarded if either moved (see `refetchLive`); otherwise
+ * an older body could not only show the wrong page but REWIND the stale-push
+ * cutoff below a push that has already been consumed and can never be replayed,
+ * leaving a participant with no holding page over a frozen world until the next
+ * transition.
  *
  * This story owns the TYPES (`./types.ts`) and this resolution seam. It does
  * NOT build the triggers that set overlay state server-side — Break Fiction's
@@ -239,6 +249,26 @@ let liveSnapshot: OverlayState = DEFAULT_OVERLAY_STATE
 /** The `sequence` of the most recently applied state — the stale-push cutoff. */
 let lastAppliedSequence = 0
 
+/**
+ * Bumped for every GET *issued*, so a response can tell whether a newer GET has
+ * since been issued and it is therefore stale. Production really does run two
+ * concurrent seed GETs — `ensureStartedLive` fires one directly and
+ * `connection.start()` emits `Connected`, which fires the resync listener — and
+ * HTTP gives no response-ordering guarantee, so arrival order must not be
+ * trusted (CR-001).
+ */
+let fetchGeneration = 0
+
+/**
+ * How many pushes have been APPLIED. Captured when a GET is issued and compared
+ * when it resolves: a push that landed mid-flight is strictly more recent than
+ * that GET's body (the server writes its store BEFORE it pushes), so the GET is
+ * dropped rather than allowed to rewind the state — and, critically, rather than
+ * allowed to rewind `lastAppliedSequence` below a push that has already been
+ * consumed and can never be replayed.
+ */
+let appliedPushCount = 0
+
 const liveListeners = new Set<() => void>()
 
 let liveStarted = false
@@ -282,15 +312,38 @@ function applyLive(next: OverlayState, sequence: number): void {
 
 /**
  * Re-reads the authoritative state from `GET /api/overlay-state` — the seed on
- * start and the resync on every (re)connect. The GET is GROUND TRUTH: it also
- * RESETS the sequence cutoff, so a server restart (which restarts the sequence
- * counter) can never leave a client permanently dropping every later push. A
- * failed/malformed read leaves the previous snapshot in place — never a guessed
+ * start and the resync on every (re)connect. The GET is GROUND TRUTH for the
+ * SEQUENCE BASELINE as well as the state: adopting it re-bases
+ * `lastAppliedSequence`, so a server restart (which restarts the per-exercise
+ * sequence counter) can never leave a client permanently dropping every later
+ * push.
+ *
+ * Because it re-bases, it is ORDERING-GUARDED (CR-001) — a response is dropped
+ * when either:
+ *   - a NEWER GET has since been issued (`fetchGeneration`): two seed GETs really
+ *     do race on every startup, and adopting the older body would show a pause
+ *     state the server is not in; or
+ *   - a push has been applied since this GET was issued (`appliedPushCount`): the
+ *     server writes its overlay store BEFORE it broadcasts, so any push is
+ *     strictly more recent than an in-flight GET's body.
+ * A stale response is therefore discarded whole — never partially adopted, and
+ * never allowed to rewind the cutoff below an already-consumed push.
+ *
+ * A failed/malformed read leaves the previous snapshot in place — never a guessed
  * or invented overlay — and the next reconnect retries.
  */
 async function refetchLive(): Promise<void> {
+  const generation = ++fetchGeneration
+  const pushesWhenIssued = appliedPushCount
+
   try {
     const response = await api.get<unknown>(OVERLAY_STATE_PATH)
+
+    // Superseded by a newer GET, or overtaken by a push — either way this body is
+    // no longer the freshest thing we know. Dropping it is safe: the newer GET
+    // adopts its own body, and a push has already been applied.
+    if (generation !== fetchGeneration || appliedPushCount !== pushesWhenIssued) return
+
     if (!isWireOverlayState(response.data)) return
     applyLive(toOverlayState(response.data), readSequence(response.data))
   } catch {
@@ -303,12 +356,20 @@ async function refetchLive(): Promise<void> {
  * Reconciles one pushed `OverlayStateChanged` payload. A malformed payload is
  * dropped; so is one whose `sequence` is not NEWER than what we have already
  * applied (the out-of-order guard — see the module header).
+ *
+ * SG-002: an UNORDERABLE push — one with no (or a non-numeric) `sequence` — is
+ * treated as malformed and dropped. The server stamps a sequence on every push;
+ * only the GET fallback body served before the overlay slice is wired legitimately
+ * lacks one, so tolerating a sequence-less PUSH would just be a hole in the stale
+ * check.
  */
 function reconcileLive(payload: unknown): void {
   if (!isWireOverlayState(payload)) return
   const sequence = readSequence(payload)
-  if (sequence !== 0 && sequence <= lastAppliedSequence) return
-  applyLive(toOverlayState(payload), Math.max(sequence, lastAppliedSequence))
+  if (sequence === 0 || sequence <= lastAppliedSequence) return
+
+  applyLive(toOverlayState(payload), sequence)
+  appliedPushCount += 1
 }
 
 /**
@@ -345,6 +406,8 @@ function resetLiveForTests(): void {
   liveStarted = false
   liveSnapshot = DEFAULT_OVERLAY_STATE
   lastAppliedSequence = 0
+  fetchGeneration = 0
+  appliedPushCount = 0
   liveListeners.clear()
 }
 

@@ -129,7 +129,7 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
         try
         {
             // The ticket comes FIRST, so the last-invoked publish holds the highest one (see the remarks).
-            var sequence = _overlayState.NextSequence();
+            var sequence = _overlayState.NextSequence(exerciseId);
             var tier = _tierReader(exerciseId);
 
             // The controller's SELECTED register decides which holding page participants see (AC1/AC5) — the

@@ -37,7 +37,7 @@ public sealed class OverlayStateServiceTests
         var service = new OverlayStateService();
         var exerciseId = Guid.NewGuid();
 
-        service.Apply(exerciseId, "pause", "out-of-fiction", service.NextSequence());
+        service.Apply(exerciseId, "pause", "out-of-fiction", service.NextSequence(exerciseId));
 
         var snapshot = service.Get(exerciseId);
         snapshot.State.Should().Be("pause", "GET /api/overlay-state must serve this instead of the static 'none' constant");
@@ -50,9 +50,9 @@ public sealed class OverlayStateServiceTests
     {
         var service = new OverlayStateService();
         var exerciseId = Guid.NewGuid();
-        service.Apply(exerciseId, "pause", "out-of-fiction", service.NextSequence());
+        service.Apply(exerciseId, "pause", "out-of-fiction", service.NextSequence(exerciseId));
 
-        service.Apply(exerciseId, "none", "in-fiction", service.NextSequence());
+        service.Apply(exerciseId, "none", "in-fiction", service.NextSequence(exerciseId));
 
         var snapshot = service.Get(exerciseId);
         snapshot.State.Should().Be("none", "Resume must clear the rendered holding page (OverlayLayer renders null for 'none')");
@@ -66,8 +66,8 @@ public sealed class OverlayStateServiceTests
         var inFiction = Guid.NewGuid();
         var outOfFiction = Guid.NewGuid();
 
-        service.Apply(inFiction, "pause", "in-fiction", service.NextSequence());
-        service.Apply(outOfFiction, "pause", "out-of-fiction", service.NextSequence());
+        service.Apply(inFiction, "pause", "in-fiction", service.NextSequence(inFiction));
+        service.Apply(outOfFiction, "pause", "out-of-fiction", service.NextSequence(outOfFiction));
 
         service.Get(inFiction).Register.Should().Be(
             "in-fiction", "the hyphenated wire literal is the frozen client's union member, not a C# enum name");
@@ -83,7 +83,7 @@ public sealed class OverlayStateServiceTests
         var exerciseA = Guid.NewGuid();
         var exerciseB = Guid.NewGuid();
 
-        service.Apply(exerciseA, "pause", "out-of-fiction", service.NextSequence());
+        service.Apply(exerciseA, "pause", "out-of-fiction", service.NextSequence(exerciseA));
 
         service.Get(exerciseA).State.Should().Be("pause");
         service.Get(exerciseB).State.Should().Be(
@@ -97,7 +97,7 @@ public sealed class OverlayStateServiceTests
     {
         var service = new OverlayStateService();
         var exerciseId = Guid.NewGuid();
-        service.Apply(exerciseId, "pause", "out-of-fiction", service.NextSequence());
+        service.Apply(exerciseId, "pause", "out-of-fiction", service.NextSequence(exerciseId));
 
         var snapshot = service.Get(Guid.Empty);
 
@@ -152,12 +152,43 @@ public sealed class OverlayStateServiceTests
     {
         var service = new OverlayStateService();
 
-        var first = service.NextSequence();
-        var second = service.NextSequence();
-        var third = service.NextSequence();
+        var exerciseId = Guid.NewGuid();
 
-        first.Should().BeLessThan(second);
-        second.Should().BeLessThan(third);
+        var first = service.NextSequence(exerciseId);
+        var second = service.NextSequence(exerciseId);
+        var third = service.NextSequence(exerciseId);
+
+        first.Should().Be(1, "an exercise's first overlay write is sequence 1 — 0 means 'never written'");
+        second.Should().Be(2);
+        third.Should().Be(3);
+    }
+
+    [Fact]
+    public void NextSequence_IsCountedPerExercise_NeverLeakingAnotherExercisesActivity()
+    {
+        // SG-001: the sequence is the ONE number that rides a participant-visible payload, so it must be derived
+        // from this exercise's own overlay writes and nothing else — a host-global counter would have made it a
+        // coarse side channel about other exercises' activity (XC-002).
+        var service = new OverlayStateService();
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+
+        service.NextSequence(exerciseA);
+        service.NextSequence(exerciseA);
+        service.NextSequence(exerciseA);
+
+        service.NextSequence(exerciseB).Should().Be(
+            1, "exercise B's first write is B's sequence 1, however busy exercise A has been");
+    }
+
+    [Fact]
+    public void NextSequence_EmptyExercise_Throws()
+    {
+        var service = new OverlayStateService();
+
+        var act = () => service.NextSequence(Guid.Empty);
+
+        act.Should().Throw<ArgumentException>("a ticket must name a server-resolved exercise (COR-001)");
     }
 
     [Fact]

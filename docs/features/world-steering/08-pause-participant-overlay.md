@@ -100,6 +100,23 @@ extended, not rebuilt. The orchestrator-owned `Program.cs` wiring (the new `Add*
 the `RemoveAll<IPauseOverlayPublisher>` swap) lands as a serial step after Gate-2 — same #310→#317
 caution as story 07.
 
+## Follow-ups recorded during build
+
+- **A register change WHILE already frozen does not re-push (accepted, not a defect of this story).**
+  The register rides a tier TRANSITION: `usePauseState`'s `setOverlayRegister` only updates the
+  console's local selection, and the selection is sent with the next pause-tier POST. So a
+  controller who freezes in `out-of-fiction` and then flips the toggle to `in-fiction` sees no
+  change on the participant tab until the next transition (Resume, or a re-Freeze). This is outside
+  AC1, which is transition-scoped ("*when* the pause-tier transition lands"), and outside AC5, which
+  is about the register the controller selected *for that Freeze*. **A UAT tester who flips the
+  register mid-Freeze and sees nothing should file it against a follow-up story, not this one.**
+  Making it live needs either a register-only POST + publish, or the console re-POSTing the current
+  tier on a register change — both un-specced here. Noted in `usePauseState.ts`'s module header.
+- **`OverlayStateService` is in-memory (a singleton), like `PauseTierRegistry`/`ExerciseClockService`.**
+  An App Service restart clears overlay state; the participant's next reconnect re-GETs and heals to
+  `'none'` (never a stuck holding page), and the client re-bases its sequence cutoff on that GET so
+  the restarted host's re-numbered pushes are still accepted.
+
 ## Tests
 - Unit (backend): `OverlayStateService` reflects Freeze/Resume transitions correctly, keyed
   independently per exercise.
@@ -189,4 +206,11 @@ Frontend (`src/frontend/src/features/participant-shell/components/OverlayLayer/`
   UNMODIFIED `OverlayLayer.tsx`), `overlayState.live.test.ts` "carries the in-fiction register
   verbatim".
 - Defensive validation / ordering — `overlayState.live.test.ts` "drops a malformed push payload…",
-  "drops a STALE push…", "keeps the previous snapshot when the GET fails…".
+  "drops a STALE push…", "keeps the previous snapshot when the GET fails…", and the Gate-1 CR-001/SG-002
+  guards: "drops a SUPERSEDED seed GET body that resolves last, keeping the newer truth", "drops a GET
+  body that a push overtook while it was in flight", "drops a push with no sequence", "still accepts a
+  sequence-less GET body — the pre-wiring fallback shape".
+- Composition, story-07 standalone (WR-001) —
+  `PauseOverlayCompositionTests.AddPauseTierSteering_Alone_StillResolvesAWorkingNoOpPublisher`.
+- Participant-payload hygiene (SG-001) —
+  `OverlayStateServiceTests.NextSequence_IsCountedPerExercise_NeverLeakingAnotherExercisesActivity`.

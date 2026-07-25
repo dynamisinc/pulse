@@ -74,6 +74,33 @@ public sealed class PauseOverlayCompositionTests
     }
 
     [Fact]
+    public async Task AddPauseTierSteering_Alone_StillResolvesAWorkingNoOpPublisher()
+    {
+        // WR-001: story 07 must stay standalone-green BY ASSERTION. Its own HTTP suite now wires this story's
+        // slice (so it can follow a Freeze POST all the way to the participant read), which left nothing proving
+        // that AddPauseTierSteering() ALONE resolves a usable IPauseOverlayPublisher — i.e. that deleting its
+        // TryAddSingleton default would be a startup failure. This is that proof, without Docker or a database.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddExerciseClock();
+        services.AddPauseTierSteering();
+
+        using var provider = services.BuildServiceProvider(validateScopes: true);
+
+        var publisher = provider.GetRequiredService<IPauseOverlayPublisher>();
+        publisher.Should().BeOfType<NullPauseOverlayPublisher>(
+            "story 07's default is the no-op; only story 08's AddPauseParticipantOverlay() replaces it");
+        provider.GetRequiredService<PauseTierRegistry>().Should().NotBeNull(
+            "a story-07-only host must still be constructible");
+
+        var act = async () => await publisher.PublishAsync(
+            new PauseTierTransition(
+                Guid.NewGuid(), PauseTier.Running, PauseTier.Freeze, "human-controller-01", "out-of-fiction"));
+
+        await act.Should().NotThrowAsync("the no-op default publishes nothing, safely");
+    }
+
+    [Fact]
     public void ResolvedPauseOverlayPublisher_IsTheRealImplementation_NotTheNoOpDefault()
     {
         using var provider = BuildProvider();

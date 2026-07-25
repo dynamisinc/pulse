@@ -268,11 +268,11 @@ public sealed class OverlayStateEndpointTests
 
         /// <summary>Applies the overlay write a controller's Freeze produces for <paramref name="exerciseId"/>.</summary>
         public void Freeze(Guid exerciseId) =>
-            OverlayState.Apply(exerciseId, "pause", "out-of-fiction", OverlayState.NextSequence());
+            OverlayState.Apply(exerciseId, "pause", "out-of-fiction", OverlayState.NextSequence(exerciseId));
 
         /// <summary>Applies the overlay write a controller's Resume produces for <paramref name="exerciseId"/>.</summary>
         public void Resume(Guid exerciseId) =>
-            OverlayState.Apply(exerciseId, "none", "in-fiction", OverlayState.NextSequence());
+            OverlayState.Apply(exerciseId, "none", "in-fiction", OverlayState.NextSequence(exerciseId));
 
         /// <summary>
         /// Drives a Freeze through the WIRED registry — the same call

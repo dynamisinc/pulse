@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Features.EngineRuntime.Steering;
 
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Threading;
 
 /// <summary>
@@ -59,8 +60,13 @@ public static class OverlayStateWire
 /// frozen <c>OverlayState</c> triple (Break Fiction, story 04, is what will one day populate it).
 /// </param>
 /// <param name="Sequence">
-/// The monotonic write sequence this snapshot was applied at (0 = never written). Used to make the overlay
-/// converge under out-of-order writes/pushes — see <see cref="OverlayStateService"/>.
+/// The monotonic write sequence this snapshot was applied at (0 = never written), counted PER EXERCISE. Used to
+/// make the overlay converge under out-of-order writes/pushes — see <see cref="OverlayStateService"/>.
+/// <para><b>Per-exercise by design (XC-002/COR-001).</b> This is the one number on a participant-visible payload,
+/// so it must be derived from THIS exercise's own overlay writes and nothing else. A host-global counter would
+/// have made it a coarse side channel about other exercises' activity ("13 overlay writes happened somewhere on
+/// this host") — harmless-looking, but a cross-exercise-derived value on a participant wire is exactly what
+/// XC-002 exists to prevent.</para>
 /// </param>
 public sealed record OverlayStateSnapshot(string State, string Register, string Message, long Sequence);
 
@@ -109,7 +115,10 @@ public sealed class OverlayStateService
 {
     private readonly ConcurrentDictionary<Guid, OverlayStateSnapshot> _states = new();
 
-    private long _sequence;
+    // One ticket counter PER EXERCISE (SG-001): the sequence rides a participant-visible payload, so it must
+    // never be derived from another exercise's activity. A StrongBox holds the counter so the increment is a
+    // plain Interlocked on a field — unambiguously atomic, without depending on AddOrUpdate's retry semantics.
+    private readonly ConcurrentDictionary<Guid, StrongBox<long>> _sequences = new();
 
     /// <summary>
     /// The CLEARED overlay — no overlay active. What an exercise that has never been frozen reads, what a
@@ -120,11 +129,25 @@ public sealed class OverlayStateService
         new(OverlayStateWire.None, OverlayStateWire.InFiction, string.Empty, 0);
 
     /// <summary>
-    /// Takes the next monotonic write ticket. Taken by a publisher BEFORE it reads the authoritative pause tier,
-    /// so the last-invoked publish holds the highest ticket (see the type's out-of-order note).
+    /// Takes exercise <paramref name="exerciseId"/>'s next monotonic write ticket. Taken by a publisher BEFORE it
+    /// reads the authoritative pause tier, so the last-invoked publish for that exercise holds the highest ticket
+    /// (see the type's out-of-order note).
+    ///
+    /// <para>Counted per exercise, so the participant-visible <see cref="OverlayStateSnapshot.Sequence"/> reveals
+    /// nothing about any other exercise (SG-001) — and the client's own stale-push cutoff compares only values
+    /// from its own exercise, which is all it ever sees.</para>
     /// </summary>
-    /// <returns>A strictly increasing sequence number.</returns>
-    public long NextSequence() => Interlocked.Increment(ref _sequence);
+    /// <param name="exerciseId">The SERVER-resolved exercise the ticket belongs to (COR-001).</param>
+    /// <returns>A strictly increasing sequence number for that exercise, starting at 1.</returns>
+    public long NextSequence(Guid exerciseId)
+    {
+        if (exerciseId == Guid.Empty)
+        {
+            throw new ArgumentException("An overlay-state ticket must name an exercise (COR-001).", nameof(exerciseId));
+        }
+
+        return Interlocked.Increment(ref _sequences.GetOrAdd(exerciseId, _ => new StrongBox<long>(0L)).Value);
+    }
 
     /// <summary>
     /// The overlay state exercise <paramref name="exerciseId"/> is currently in. An exercise that has never
@@ -175,6 +198,6 @@ public sealed class OverlayStateService
     internal void ResetForTests()
     {
         _states.Clear();
-        Interlocked.Exchange(ref _sequence, 0);
+        _sequences.Clear();
     }
 }
