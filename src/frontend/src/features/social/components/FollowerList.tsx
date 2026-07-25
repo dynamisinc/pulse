@@ -45,7 +45,7 @@ import { faUserGroup } from '@fortawesome/free-solid-svg-icons'
 import type { Persona } from '@/features/personas'
 import { Avatar } from './Avatar'
 import { VerifiedMark } from './VerifiedMark'
-import { formatMagnitude } from '../services/audience'
+import { formatMagnitude, safeCount } from '../services/audience'
 import styles from './FollowerList.module.css'
 
 /** The avatar scale for a follower row (between the 42px card and 80px profile). */
@@ -57,10 +57,25 @@ const FOLLOWER_MARK_SIZE = 15
  * One REAL follow edge — the participant-safe subset of a `Persona` a row
  * needs. Structurally a `Persona` satisfies it, so callers can pass resolved
  * personas straight through without mapping.
+ *
+ * `exerciseId` is carried deliberately (COR-001/AC4): callers already have it
+ * on the persona, and without it neither the integration pass nor a test can
+ * even EXPRESS the assertion that every rendered edge belongs to the active
+ * exercise. This component does not filter on it — isolation is enforced at the
+ * query layer, server-side — but the field's presence keeps that guarantee
+ * checkable at the render boundary instead of invisible.
  */
 export type FollowerEdge = Pick<
   Persona,
-  'id' | 'displayName' | 'handle' | 'verified' | 'kind' | 'avatarColor' | 'initials' | 'bio'
+  | 'id'
+  | 'exerciseId'
+  | 'displayName'
+  | 'handle'
+  | 'verified'
+  | 'kind'
+  | 'avatarColor'
+  | 'initials'
+  | 'bio'
 >
 
 export interface FollowerListProps {
@@ -83,7 +98,8 @@ export interface FollowerListProps {
  * enforce.
  */
 export function FollowerList({ edges, magnitude }: FollowerListProps) {
-  const others = Number.isFinite(magnitude) && magnitude > 0 ? Math.floor(magnitude) : 0
+  // One definition of "a broken count is 0", shared with the model (S-7).
+  const others = Math.floor(safeCount(magnitude))
   const hasEdges = edges.length > 0
 
   return (

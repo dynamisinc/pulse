@@ -76,6 +76,7 @@ export {
   audienceReach,
   displayedFollowerCount,
   formatMagnitude,
+  safeCount,
 } from './services/audience'
 export type { AudienceReachInput, AudienceReachResult } from './services/audience'
 

@@ -50,7 +50,7 @@
  *   intensity   F = 1 + INTENSITY_LIFT · clamp(intensity,0,100)/100     → [1, 2]
  *   organic     O = A · BASE_EXPOSURE_RATE · F
  *   amplified   M = amplifications^AMPLIFICATION_EXPONENT
- *                     · amplifierMagnitude · BASE_EXPOSURE_RATE · F
+ *                     · meanAmplifierMagnitude · BASE_EXPOSURE_RATE · F
  *   impressions I∞ = round(O) + round(M)                    (eventual reach)
  *   spread time τ = SPREAD_TIME_CONSTANT_MINUTES / F        (scenario minutes)
  *   velocity    v = I∞ / τ                    (impressions per scenario minute)
@@ -79,6 +79,27 @@
  *  - Velocity is the initial slope of that curve (dI/dt at t=0 = I∞/τ), so the
  *    rate and the total are two views of ONE model and cannot drift apart.
  *
+ * ── MODEL VERSIONING (#371) ─────────────────────────────────────────────────
+ * `AUDIENCE_REACH_MODEL.modelVersion` stamps the coefficient set. The definition
+ * workshop (#371) will retune these numbers; when it does, BUMP the version in
+ * the same commit. Anything that persists or exports a reach figure (notably the
+ * E10 AAR export) must record the version alongside it, so two figures computed
+ * under different coefficients are never silently compared.
+ *
+ * ── FAIL-CLOSED INPUT HANDLING ──────────────────────────────────────────────
+ * Every optional input distinguishes OMITTED from BROKEN, and they mean
+ * different things:
+ *   - omitted   → the documented default (no edges, no amplification, quiet
+ *                 world, "fully accrued" elapsed, peer-magnitude amplifiers);
+ *   - broken    → a negative / NaN / Infinite value is an upstream bug, and is
+ *                 clamped to the CONSERVATIVE end, never the flattering one.
+ * Concretely: a broken `elapsedScenarioMinutes` accrues NOTHING (t=0) rather
+ * than reporting peak reach to an evaluator, and a broken
+ * `meanAmplifierMagnitude` contributes ZERO amplified reach rather than
+ * silently substituting a plausible peer default. Outputs are likewise total:
+ * every returned field is a finite, non-negative number (see `clampCount`), so
+ * a NaN can never reach a rendered figure.
+ *
  * ── MAGNITUDE FORMATTING (D1-012) ───────────────────────────────────────────
  * `formatMagnitude` produces the compact in-fiction form ("48.2K"). It
  * TRUNCATES rather than rounds, so a count is never overstated, and it uses
@@ -98,6 +119,13 @@
  * header for the rationale behind each value.
  */
 export const AUDIENCE_REACH_MODEL = Object.freeze({
+  /**
+   * The coefficient-set version (#371). Bump it in the SAME commit as any
+   * coefficient change, and stamp it onto anything that persists or exports a
+   * reach figure (E10 AAR export) so figures from different tunings are never
+   * compared as if they were the same measurement.
+   */
+  modelVersion: 'v0',
   /** Fraction of an addressable audience that sees a given post organically. */
   baseExposureRate: 0.12,
   /** Extra exposure multiplier at full storyline intensity (F ∈ [1, 1 + lift]). */
@@ -120,40 +148,65 @@ export interface AudienceReachInput {
   readonly magnitude: number
   /** Real follow edges into the author (story 02's graph). Defaults to 0. */
   readonly followEdges?: number
-  /** Observed reposts + quotes of the content (E2 amplification). Defaults to 0. */
+  /**
+   * Observed reposts + quotes of the content (E2 amplification). A COUNT —
+   * floored, like every other count here, so half a repost cannot contribute
+   * reach. Defaults to 0.
+   */
   readonly amplifications?: number
   /**
-   * MEAN audience magnitude of the amplifying accounts. When omitted (and
-   * amplifications > 0) it defaults to the author's own `magnitude` — the
+   * The MEAN audience magnitude PER amplifying account (not the sum across
+   * them). When OMITTED it defaults to the author's own `magnitude` — the
    * stated "absent data, assume amplifiers are peers" assumption, so a caller
    * that hasn't wired the amplifier set yet still gets a sane, documented
-   * number rather than a silent zero.
+   * number rather than a silent zero. A SUPPLIED-but-broken value (negative /
+   * NaN / Infinite) does NOT take that path: it clamps to 0, so a caller that
+   * mis-derives its mean gets an obviously-empty amplification term instead of
+   * a plausible, un-flaggable one.
    */
-  readonly amplifierMagnitude?: number
+  readonly meanAmplifierMagnitude?: number
   /**
-   * Storyline intensity 0–100 (E8 ADP-003). Clamped into range. Defaults to 0
-   * — a quiet world, no attention lift.
+   * Storyline intensity 0–100 (E8 ADP-003). Clamped into range (a negative or
+   * broken value reads as 0). Defaults to 0 — a quiet world, no attention lift.
    */
   readonly intensity?: number
   /**
    * SCENARIO minutes elapsed since publication (COR-053 — never wall-clock).
-   * Omitted means "fully accrued", i.e. `accruedImpressions === impressions`.
+   * OMITTED means "fully accrued", i.e. `accruedImpressions === impressions`.
+   * A SUPPLIED-but-broken value (negative — the scenario clock is behind
+   * publication — or NaN/Infinite) accrues NOTHING (t=0): an upstream delta bug
+   * must never render as peak reach on an evaluator's panel.
    */
   readonly elapsedScenarioMinutes?: number
 }
 
-/** The shared reach/velocity result. Impression figures are whole people;
- * `velocity` and `spreadMinutes` are unrounded rates. */
+/**
+ * The shared reach/velocity result. Impression figures are whole people;
+ * `velocity` and `spreadMinutes` are unrounded rates.
+ *
+ * ROUNDING CONTRACT (read this before rendering a breakdown, E10): the two
+ * parts are ROUNDED FIRST and the total is their SUM — `impressions ===
+ * organicImpressions + amplifiedImpressions` exactly, so a panel that shows the
+ * split and the total can never display an off-by-one that looks like a bug.
+ * The trade is that the total may differ by ±1 from rounding the unrounded sum.
+ *
+ * TOTALITY: every field is finite and non-negative. Absurd inputs saturate at
+ * `Number.MAX_SAFE_INTEGER` rather than returning `Infinity`/`NaN` (monotonic:
+ * a bigger audience never yields a smaller figure).
+ */
 export interface AudienceReachResult {
   /** Addressable base: magnitude + real edges (the same sum the profile shows). */
   readonly audience: number
-  /** Impressions from the author's own audience. */
+  /** Impressions from the author's own audience (rounded). */
   readonly organicImpressions: number
-  /** Additional impressions delivered by reposts/quotes (overlap-discounted). */
+  /** Additional impressions delivered by reposts/quotes (overlap-discounted, rounded). */
   readonly amplifiedImpressions: number
-  /** Eventual total impressions (I∞) — `organic + amplified`. */
+  /** Eventual total impressions (I∞) — exactly `organicImpressions + amplifiedImpressions`. */
   readonly impressions: number
-  /** Impressions accrued by `elapsedScenarioMinutes` on the saturating curve. */
+  /**
+   * Impressions accrued by `elapsedScenarioMinutes` on the saturating curve.
+   * Equals `impressions` when elapsed is OMITTED; 0 when it is supplied broken.
+   */
   readonly accruedImpressions: number
   /** Spread velocity: impressions per SCENARIO minute at t=0 (E8 ADP-004). */
   readonly velocity: number
@@ -161,11 +214,36 @@ export interface AudienceReachResult {
   readonly spreadMinutes: number
 }
 
-/** Coerces any numeric input to a finite, non-negative value (defensive: a NaN
- * or negative count is a caller bug, and must not poison a rendered figure). */
-function safeCount(value: number | undefined, fallback = 0): number {
-  if (value === undefined || !Number.isFinite(value) || value < 0) return fallback
+/**
+ * THE one definition of "a broken count is 0". Coerces any numeric input to a
+ * finite, non-negative value: a NaN, Infinite, or negative count is a caller
+ * bug and must never poison a rendered figure.
+ *
+ * Exported so every consumer of this model (including `<FollowerList>`) guards
+ * counts identically rather than re-implementing the check — one place to
+ * change if the policy ever does.
+ *
+ * @param value    the possibly-broken count
+ * @param fallback what an OMITTED (`undefined`) value means; note a broken
+ *                 value does NOT use the fallback — it clamps to 0, so
+ *                 "not supplied" and "supplied wrong" stay distinguishable
+ */
+export function safeCount(value: number | undefined, fallback = 0): number {
+  if (value === undefined) return fallback
+  if (!Number.isFinite(value) || value < 0) return 0
   return value
+}
+
+/**
+ * Clamps a COMPUTED figure into the renderable range: non-negative, finite, and
+ * saturating at `Number.MAX_SAFE_INTEGER` instead of overflowing to `Infinity`
+ * (which would propagate `NaN` through the accrual curve). Guarding inputs is
+ * not enough — the products of guarded inputs can still overflow — and this
+ * module's contract is that no caller ever receives a non-finite number.
+ */
+function clampCount(value: number): number {
+  if (Number.isNaN(value) || value < 0) return 0
+  return value > Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : value
 }
 
 /**
@@ -177,11 +255,15 @@ function safeCount(value: number | undefined, fallback = 0): number {
  * the exercise — so the sum double-counts nobody. Callers render it through
  * `formatMagnitude()`.
  *
+ * Total by construction: broken inputs read as 0 and the sum saturates at
+ * `Number.MAX_SAFE_INTEGER`, so a profile can never render `NaN` or `Infinity`
+ * followers.
+ *
  * @param magnitude   the account's audience magnitude (Phase 1: `Persona.followerCount`)
  * @param followEdges the count of REAL follow edges (story 02); defaults to 0
  */
 export function displayedFollowerCount(magnitude: number, followEdges = 0): number {
-  return Math.floor(safeCount(magnitude)) + Math.floor(safeCount(followEdges))
+  return clampCount(Math.floor(safeCount(magnitude)) + Math.floor(safeCount(followEdges)))
 }
 
 /** Compact-form unit thresholds, largest first. */
@@ -247,29 +329,39 @@ export function audienceReach(input: AudienceReachInput): AudienceReachResult {
 
   const organicRaw = audience * baseExposureRate * intensityFactor
 
-  const amplifications = safeCount(input.amplifications)
-  // Absent amplifier data, assume the amplifiers are the author's peers (see
-  // `amplifierMagnitude` doc) rather than silently contributing zero reach.
-  const amplifierMagnitude = safeCount(input.amplifierMagnitude, safeCount(input.magnitude))
+  // A count, like magnitude and edges — floored, so half a repost spreads nothing.
+  const amplifications = Math.floor(safeCount(input.amplifications))
+  // OMITTED amplifier data assumes the amplifiers are the author's peers (see
+  // `meanAmplifierMagnitude`); a SUPPLIED-but-broken value clamps to 0 instead,
+  // so a mis-derived mean shows up as an empty term rather than a plausible one.
+  const meanAmplifierMagnitude = safeCount(
+    input.meanAmplifierMagnitude,
+    safeCount(input.magnitude),
+  )
   const effectiveAmplifiers = amplifications === 0
     ? 0
     : Math.pow(amplifications, amplificationExponent)
-  const amplifiedRaw = effectiveAmplifiers * amplifierMagnitude * baseExposureRate * intensityFactor
+  const amplifiedRaw =
+    effectiveAmplifiers * meanAmplifierMagnitude * baseExposureRate * intensityFactor
 
   // Parts are rounded first and the total is their sum, so the reported total
-  // always equals the reported breakdown (an evaluator can add them up).
-  const organicImpressions = Math.round(organicRaw)
-  const amplifiedImpressions = Math.round(amplifiedRaw)
-  const impressions = organicImpressions + amplifiedImpressions
+  // always equals the reported breakdown (an evaluator can add them up). Both
+  // are clamped so an absurd input saturates rather than emitting Infinity/NaN.
+  const organicImpressions = clampCount(Math.round(organicRaw))
+  const amplifiedImpressions = clampCount(Math.round(amplifiedRaw))
+  const impressions = clampCount(organicImpressions + amplifiedImpressions)
 
   // τ shrinks as intensity rises: a hot storyline spreads faster AND further.
   const spreadMinutes = spreadTimeConstantMinutes / intensityFactor
-  const velocity = impressions / spreadMinutes
+  const velocity = clampCount(impressions / spreadMinutes)
 
+  // FAIL CLOSED (WR-002): only an OMITTED elapsed means "fully accrued". A
+  // negative delta (scenario clock behind publication) or a NaN/Infinite one is
+  // an upstream bug, and must accrue NOTHING rather than reporting peak reach.
   const elapsed = input.elapsedScenarioMinutes
-  const accruedImpressions = elapsed === undefined || !Number.isFinite(elapsed) || elapsed < 0
+  const accruedImpressions = elapsed === undefined
     ? impressions
-    : Math.round(impressions * (1 - Math.exp(-elapsed / spreadMinutes)))
+    : clampCount(Math.round(impressions * (1 - Math.exp(-safeCount(elapsed) / spreadMinutes))))
 
   return {
     audience,

@@ -13,6 +13,15 @@
  *  - the magnitude formatting boundaries (999/1000, 999999/1000000, the
  *    truncate-never-round rule, and the float-artifact case 2,900,000).
  *
+ * FAIL-CLOSED SEMANTICS (Gate-1 WR-001/002/003) are pinned here deliberately,
+ * because they are the assertions most likely to be "simplified" back into
+ * fail-open by a later refactor:
+ *  - a BROKEN `elapsedScenarioMinutes` accrues 0, never the full total (an E10
+ *    panel fed a bad delta must not show an evaluator peak reach);
+ *  - a BROKEN `meanAmplifierMagnitude` contributes 0, and does NOT fall back to
+ *    the peer default that an OMITTED one gets;
+ *  - every returned field is finite and non-negative at any input.
+ *
  * Pure unit tests: no React, no clock, no network — mirroring the module's own
  * purity contract.
  */
@@ -22,6 +31,8 @@ import {
   audienceReach,
   displayedFollowerCount,
   formatMagnitude,
+  safeCount,
+  type AudienceReachInput,
 } from './audience'
 
 describe('displayedFollowerCount — count = magnitude + real edges (AC1, SOC-054)', () => {
@@ -149,15 +160,42 @@ describe('audienceReach — the shared reach model (AC3; E10 EVL-012)', () => {
     expect(ten.amplifiedImpressions).toBeGreaterThan(one.amplifiedImpressions)
   })
 
-  it('uses the supplied amplifier magnitude when the amplifier set is known', () => {
+  it('uses the supplied MEAN amplifier magnitude when the amplifier set is known', () => {
     const peers = audienceReach({ magnitude: 10_000, amplifications: 4 })
     const megaphones = audienceReach({
       magnitude: 10_000,
       amplifications: 4,
-      amplifierMagnitude: 1_000_000,
+      meanAmplifierMagnitude: 1_000_000,
     })
 
     expect(megaphones.amplifiedImpressions).toBeGreaterThan(peers.amplifiedImpressions)
+  })
+
+  it('FAILS CLOSED on a broken mean amplifier magnitude — no plausible peer default (WR-001)', () => {
+    // OMITTED means "assume peers"; SUPPLIED-but-broken must contribute zero,
+    // so a mis-derived mean is visibly empty rather than plausibly wrong.
+    const omitted = audienceReach({ magnitude: 10_000, amplifications: 4 })
+    expect(omitted.amplifiedImpressions).toBeGreaterThan(0)
+
+    for (const broken of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const result = audienceReach({
+        magnitude: 10_000,
+        amplifications: 4,
+        meanAmplifierMagnitude: broken,
+      })
+      expect(result.amplifiedImpressions).toBe(0)
+      expect(result.impressions).toBe(result.organicImpressions)
+    }
+  })
+
+  it('floors the amplification COUNT — half a repost spreads nothing (S-1)', () => {
+    const none = audienceReach({ magnitude: 10_000 })
+    const half = audienceReach({ magnitude: 10_000, amplifications: 0.5 })
+    const oneish = audienceReach({ magnitude: 10_000, amplifications: 1.9 })
+    const one = audienceReach({ magnitude: 10_000, amplifications: 1 })
+
+    expect(half).toEqual(none)
+    expect(oneish).toEqual(one)
   })
 })
 
@@ -231,14 +269,26 @@ describe('audienceReach — scenario-time accrual (COR-053: minutes are passed i
     expect(t30).toBeLessThan(t90)
   })
 
-  it('ignores a negative or non-finite elapsed time rather than producing nonsense', () => {
+  it('FAILS CLOSED on a broken elapsed time — accrues nothing, never peak reach (WR-002)', () => {
+    // A negative delta means the scenario clock is BEHIND publication: an
+    // upstream bug. It must clamp to t=0, not to "fully accrued" — an E10 reach
+    // panel fed a bad delta must never show an evaluator peak reach.
     const total = audienceReach({ magnitude: 46_000 }).impressions
+    expect(total).toBeGreaterThan(0)
 
-    expect(audienceReach({ magnitude: 46_000, elapsedScenarioMinutes: -10 }).accruedImpressions)
-      .toBe(total)
-    expect(
-      audienceReach({ magnitude: 46_000, elapsedScenarioMinutes: Number.NaN }).accruedImpressions,
-    ).toBe(total)
+    for (const broken of [-1, -10_000, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const result = audienceReach({ magnitude: 46_000, elapsedScenarioMinutes: broken })
+      expect(result.accruedImpressions).toBe(0)
+      expect(result.accruedImpressions).not.toBe(total)
+    }
+  })
+
+  it('distinguishes OMITTED from BROKEN — only omission means fully accrued', () => {
+    const omitted = audienceReach({ magnitude: 46_000 })
+    const broken = audienceReach({ magnitude: 46_000, elapsedScenarioMinutes: -5 })
+
+    expect(omitted.accruedImpressions).toBe(omitted.impressions)
+    expect(broken.accruedImpressions).toBe(0)
   })
 })
 
@@ -249,6 +299,13 @@ describe('audienceReach — the model is a frozen, shared contract', () => {
     expect(AUDIENCE_REACH_MODEL.amplificationExponent).toBeLessThan(1)
     expect(AUDIENCE_REACH_MODEL.spreadTimeConstantMinutes).toBeGreaterThan(0)
     expect(Object.isFrozen(AUDIENCE_REACH_MODEL)).toBe(true)
+  })
+
+  it('stamps a model version so retuned coefficients are never silently compared (#371, S-6)', () => {
+    // The definition workshop (#371) will retune the coefficients; the version
+    // MUST be bumped in the same commit, and stamped onto any exported figure.
+    expect(AUDIENCE_REACH_MODEL.modelVersion).toBe('v0')
+    expect(typeof AUDIENCE_REACH_MODEL.modelVersion).toBe('string')
   })
 
   it('is pure: the same inputs always produce the same outputs', () => {
@@ -263,5 +320,63 @@ describe('audienceReach — the model is a frozen, shared contract', () => {
     for (const value of Object.values(result)) {
       expect(typeof value).toBe('number')
     }
+  })
+
+  it('is TOTAL: every returned field is finite and non-negative, at any input (WR-003)', () => {
+    const extremes: AudienceReachInput[] = [
+      { magnitude: Number.MAX_VALUE },
+      { magnitude: Number.MAX_VALUE, amplifications: Number.MAX_SAFE_INTEGER },
+      {
+        magnitude: Number.MAX_VALUE,
+        followEdges: Number.MAX_VALUE,
+        amplifications: Number.MAX_VALUE,
+        meanAmplifierMagnitude: Number.MAX_VALUE,
+        intensity: 100,
+        elapsedScenarioMinutes: Number.MAX_VALUE,
+      },
+      { magnitude: 1e308, amplifications: 1e308, elapsedScenarioMinutes: 0 },
+      { magnitude: Number.NaN, followEdges: Number.NEGATIVE_INFINITY, intensity: Number.NaN },
+      { magnitude: 0, amplifications: 0, intensity: 0, elapsedScenarioMinutes: 0 },
+    ]
+
+    for (const input of extremes) {
+      const result = audienceReach(input)
+      for (const [field, value] of Object.entries(result)) {
+        expect(`${field}:${Number.isFinite(value)}`).toBe(`${field}:true`)
+        expect(value).toBeGreaterThanOrEqual(0)
+      }
+    }
+  })
+
+  it('saturates rather than overflowing — a bigger audience never yields a smaller figure', () => {
+    const huge = audienceReach({ magnitude: Number.MAX_VALUE })
+    const mega = audienceReach({ magnitude: 1_500_000 })
+
+    // The addressable base saturates at the cap instead of overflowing…
+    expect(huge.audience).toBe(Number.MAX_SAFE_INTEGER)
+    // …and everything downstream stays finite and correctly ordered.
+    expect(huge.impressions).toBeGreaterThan(mega.impressions)
+    expect(huge.velocity).toBeGreaterThan(mega.velocity)
+    expect(Number.isFinite(huge.impressions)).toBe(true)
+  })
+})
+
+describe('safeCount — the one definition of "a broken count is 0" (S-7)', () => {
+  it('passes finite non-negative values through', () => {
+    expect(safeCount(0)).toBe(0)
+    expect(safeCount(48_200)).toBe(48_200)
+    expect(safeCount(1.5)).toBe(1.5)
+  })
+
+  it('uses the fallback ONLY for an omitted value', () => {
+    expect(safeCount(undefined)).toBe(0)
+    expect(safeCount(undefined, 99)).toBe(99)
+  })
+
+  it('clamps a broken value to 0 — never to the fallback (omitted ≠ supplied-wrong)', () => {
+    expect(safeCount(-1, 99)).toBe(0)
+    expect(safeCount(Number.NaN, 99)).toBe(0)
+    expect(safeCount(Number.POSITIVE_INFINITY, 99)).toBe(0)
+    expect(safeCount(Number.NEGATIVE_INFINITY, 99)).toBe(0)
   })
 })

@@ -16,14 +16,22 @@
  *    platform never labels a lookalike fake).
  *
  * Rendered STANDALONE (no profile page, no fetch) — the component takes its
- * already exercise-scoped edges as props.
+ * already exercise-scoped edges as props. The COR-001/AC4 assertion ("every
+ * rendered edge belongs to the active exercise") is DEFERRED to the integration
+ * pass: it is vacuous until something actually queries for edges. The fixtures
+ * below carry `exerciseId` so that assertion is expressible the moment the
+ * Followers view is wired to a real read.
  */
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { FollowerList, type FollowerEdge } from './FollowerList'
 
+/** The active exercise every fixture edge belongs to (COR-001/AC4). */
+const EXERCISE_ID = 'exercise-fairhaven'
+
 const edge = (overrides: Partial<FollowerEdge> & Pick<FollowerEdge, 'id' | 'handle'>):
 FollowerEdge => ({
+  exerciseId: EXERCISE_ID,
   displayName: 'Maria Vega',
   kind: 'human',
   verified: false,
@@ -111,6 +119,17 @@ describe('FollowerList — NEVER fabricates followers (the hard rule: SOC-054/D1
 
     expect(screen.queryByTestId('follower-others')).toBeNull()
     expect(screen.getAllByTestId('follower-row')).toHaveLength(3)
+  })
+
+  it('degrades safely on a broken magnitude — no line, no NaN, real rows intact', () => {
+    // Shares the model's `safeCount` guard: a broken count is 0, never rendered.
+    for (const broken of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const { unmount } = render(<FollowerList edges={EDGES} magnitude={broken} />)
+      expect(screen.queryByTestId('follower-others')).toBeNull()
+      expect(screen.getAllByTestId('follower-row')).toHaveLength(3)
+      expect(screen.queryByText(/NaN|Infinity/)).toBeNull()
+      unmount()
+    }
   })
 
   it('shows an honest empty state when there are neither edges nor an audience', () => {
