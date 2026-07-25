@@ -94,3 +94,44 @@ feed write path this makes reachable).
   fully-wired `app` — not only a self-mapped `TestServer` built by this story's own test project (see
   `implementation.md`'s integration-seam note on #308/#317).
 - Frontend: with a bound persona the composer is available and publishes live; without one it stays absent.
+
+### As built (backend)
+All under `src/Pulse.WebApi.Tests/Features/Ops/Bootstrap/`. DB-backed tests are `[RequiresDockerFact]`
+(real SQL Server via Testcontainers, or a local SQL Server via `PULSE_TEST_SQL_CONNECTION`).
+
+| Test | AC |
+|------|----|
+| `BootstrapPersonaBindingTests.Bootstrap_WithPersonaHandle_BindsPersonaToTheAccount` | AC1 |
+| `BootstrapPersonaBindingTests.Bootstrap_WithPersonaId_BindsPersonaToTheAccount` | AC1 |
+| `BootstrapPersonaBindingTests.Bootstrap_PersonaHandle_MatchesCaseInsensitivelyAndIgnoresLeadingAt` | AC1 |
+| `BootstrapPersonaBindingTests.Bootstrap_ReRun_FillsAnAbsentBinding_ButNeverClobbersADifferentOne` | AC1 |
+| `BootstrapPersonaBindingTests.Bootstrap_FreshExerciseWithPersonaHandle_IsRejected_BecauseTheCastIsNotSeededYet` | AC1 |
+| `BootstrapPersonaBindingTests.Bootstrap_PersonaIdAndHandleDisagree_IsRejected` | AC1 |
+| `BootstrapPersonaBindingTests.Bootstrap_BoundAccount_LoginPopulatesSessionPersonaId` | AC3 |
+| `BootstrapPersonaBindingTests.Bootstrap_AccountWithNoBinding_LoginYieldsNullPersonaSession` | AC4 |
+| `BootstrapPersonaBindingTests.Bootstrap_CrossExercisePersonaHandle_IsRejected_AndWritesNothing` | AC1, AC5 |
+| `BootstrapPersonaBindingTests.Bootstrap_CrossExercisePersonaId_IsRejected_AndWritesNothing` | AC1, AC5 |
+| `BootstrapPersonaBindingTests.Bootstrap_UnknownPersonaHandle_IsRejected_AndWritesNothing` | AC1 |
+| `BootstrapPersonaBindingTests.Bootstrap_WithPersonaBinding_RecordsItOnTheSingleBootstrappedTelemetryEvent` | AC5 |
+| `ParticipantPersonaBindingServiceTests.Bind_ByHandle_BindsThePersona_AndTheNextLoginCarriesIt` | AC2, AC3 |
+| `ParticipantPersonaBindingServiceTests.Bind_ById_BindsThePersona` | AC2 |
+| `ParticipantPersonaBindingServiceTests.Bind_ByHandle_MatchesCaseInsensitivelyAndIgnoresLeadingAt` | AC2 |
+| `ParticipantPersonaBindingServiceTests.Bind_SamePersonaTwice_IsAnIdempotentNoOpSuccess` | AC2 |
+| `ParticipantPersonaBindingServiceTests.Bind_ToADifferentPersona_RebindsAndReportsThePrevious` | AC2 |
+| `ParticipantPersonaBindingServiceTests.Bind_UnknownUsername_FailsClosed_WithoutCreatingAnAccount` | AC2 |
+| `ParticipantPersonaBindingServiceTests.Bind_UnknownHostname_FailsClosed_WithoutCreatingAnExercise` | AC2 |
+| `ParticipantPersonaBindingServiceTests.Bind_UnknownPersonaHandle_FailsClosed` | AC2 |
+| `ParticipantPersonaBindingServiceTests.Bind_NeitherHandleNorId_IsInvalid` | AC2 |
+| `ParticipantPersonaBindingServiceTests.Bind_PersonaIdAndHandleDisagree_IsInvalid` | AC2 |
+| `ParticipantPersonaBindingServiceTests.Bind_WrongSecret_IsRejected_AndWritesNothing` | AC2 |
+| `ParticipantPersonaBindingServiceTests.Bind_UnconfiguredSecret_IsRejected_RegardlessOfPresentedValue` | AC2 |
+| `ParticipantPersonaBindingServiceTests.Bind_CrossExercisePersonaHandle_FailsClosed_AndLeavesTheAccountUnbound` | AC5 |
+| `ParticipantPersonaBindingServiceTests.Bind_CrossExercisePersonaId_FailsClosed_AndLeavesTheAccountUnbound` | AC5 |
+| `ParticipantPersonaBindingServiceTests.Bind_CrossExerciseUsername_FailsClosed` | AC5 |
+| `ParticipantPersonaBindingServiceTests.Bind_Success_EmitsExactlyOnePersonaBoundTelemetryEvent` | AC5 |
+| `ParticipantPersonaBindingServiceTests.Bind_IdempotentNoOp_IsStillAudited` | AC5 |
+| `ParticipantPersonaBindingEndpointHttpTests.*` (7 plain `[Fact]`, no Docker — 404/400 fail-closed mapping + the per-IP 429) | AC2 |
+| `CompositionRootWiringTests.ProgramCs_MapsTheBindParticipantPersonaEndpointExactlyOnce` | AC2 |
+
+Frontend: no change was required — `useComposePost.ts` already derives `canPost` from `session.personaId`
+and `Composer.tsx` already renders the absent case (AC4), so no frontend test was added.

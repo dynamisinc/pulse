@@ -11,8 +11,9 @@ using Microsoft.Extensions.DependencyInjection;
 /// Composition-root guard for the Ops bootstrap slice (plain <see cref="FactAttribute"/>, no Docker),
 /// mirroring <c>Features/Social/CompositionRootWiringTests.cs</c>: boots the real
 /// <see cref="WebApplicationFactory{TEntryPoint}"/> host, resolves the aggregate
-/// <see cref="EndpointDataSource"/> from its <c>Services</c>, and asserts <c>Program.cs</c> wires the
-/// bootstrap route EXACTLY ONCE.
+/// <see cref="EndpointDataSource"/> from its <c>Services</c>, and asserts <c>Program.cs</c> wires the slice's
+/// routes EXACTLY ONCE — the bootstrap seed endpoint (story login/05) and the persona-binding endpoint (story
+/// login/07, mapped inside the SAME <c>MapBootstrapEndpoints()</c> so it needs no new composition-root line).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -47,6 +48,21 @@ public sealed class CompositionRootWiringTests
             "POST /api/ops/bootstrap-exercise must be wired into Program.cs exactly once — without "
             + "MapBootstrapEndpoints() the endpoint is dead code (404) and the UAT go-live runbook cannot seed "
             + "the first exercise");
+    }
+
+    [Fact]
+    public void ProgramCs_MapsTheBindParticipantPersonaEndpointExactlyOnce()
+    {
+        using var factory = new WiringProbeFactory();
+
+        var dataSource = factory.Services.GetRequiredService<EndpointDataSource>();
+
+        CountRoutes(dataSource, "POST", "/api/ops/bind-participant-persona").Should().Be(
+            1,
+            "POST /api/ops/bind-participant-persona must be reachable on the REAL host (story login/07 AC2) — it is "
+            + "mapped inside the existing MapBootstrapEndpoints(), so no new Program.cs line is needed and the "
+            + "#310/#317 'merged green but never wired, dead at 404' failure mode cannot recur; the slice's own "
+            + "self-mapped TestServer tests could not have caught that");
     }
 
     private static int CountRoutes(EndpointDataSource dataSource, string method, string rawText)
