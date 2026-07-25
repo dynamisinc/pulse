@@ -1,18 +1,27 @@
 /**
  * features/social/services/feedService.test.ts
  * ---------------------------------------------------------------------------
- * Covers story 01's read seam + convergence (SOC-080, COR-053, XC-002):
+ * Covers story 01's read seam + convergence (SOC-080, COR-053, XC-002) and
+ * story 02's Following scope (SOC-081):
  *  - `assembleFeedView` sorts newest-first by scenarioTime, resolves each
  *    post's author persona, SKIPS a post whose author is absent (no crash),
  *    and structurally strips provenance (XC-002 — no `origin`/`actingHumanId`
  *    on the participant-safe view);
  *  - `resolveFeed` (the shipped mock-adapter path, USE_MOCK_DATA on in test)
- *    resolves the seeded posts through the real axios pipeline.
+ *    resolves the seeded posts through the real axios pipeline;
+ *  - `resolveFeed('following')` filters to the mock following set, and an
+ *    empty follow set resolves an empty array — never an All-Posts fallback.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Persona } from '@/features/personas'
+import { personaIdForHandle } from '@/features/personas'
 import type { Post } from '@/features/social'
-import { assembleFeedView, compareNewestFirst, resolveFeed } from './feedService'
+import {
+  assembleFeedView,
+  compareNewestFirst,
+  resolveFeed,
+  setMockFollowingForTests,
+} from './feedService'
 import { postStore } from './postStore'
 
 function buildPersona(overrides: Partial<Persona> = {}): Persona {
@@ -141,5 +150,41 @@ describe('resolveFeed — shipped mock-adapter path (NFR-003 seam)', () => {
     // the appended post rides through the same axios pipeline as the baseline.
     expect(posts.some(p => p.id === 'post-live-appended')).toBe(true)
     expect(posts.some(p => p.id === 'post-seed-fw-advisory')).toBe(true)
+  })
+})
+
+describe('resolveFeed(\'following\') — mock-adapter scope filtering (SOC-081)', () => {
+  afterEach(() => {
+    postStore.resetForTests()
+    setMockFollowingForTests(undefined)
+  })
+
+  it('resolves ONLY posts from the mock following set, never every seeded author', async () => {
+    setMockFollowingForTests([personaIdForHandle('FairhavenWater')])
+
+    const posts = await resolveFeed('following')
+
+    expect(posts.length).toBeGreaterThan(0)
+    expect(posts.every(p => p.authorPersonaId === personaIdForHandle('FairhavenWater'))).toBe(true)
+    // A seeded author NOT in the follow set never leaks through.
+    expect(posts.some(p => p.authorPersonaId === personaIdForHandle('Newsline7'))).toBe(false)
+  })
+
+  it('resolves an empty array for an empty follow set — never an All-Posts fallback', async () => {
+    setMockFollowingForTests([])
+
+    const posts = await resolveFeed('following')
+
+    expect(posts).toEqual([])
+  })
+
+  it('does not affect the default (\'all\') scope — the two calls stay independent', async () => {
+    setMockFollowingForTests([])
+
+    const allPosts = await resolveFeed()
+    const followingPosts = await resolveFeed('following')
+
+    expect(allPosts.length).toBeGreaterThan(0)
+    expect(followingPosts).toEqual([])
   })
 })
