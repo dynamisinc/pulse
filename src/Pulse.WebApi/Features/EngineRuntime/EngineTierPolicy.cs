@@ -54,6 +54,31 @@ public static class TierPolicyModes
         ToWire.TryGetValue(mode, out var wire) ? wire : ToWire[TierPolicyMode.Auto];
 
     /// <summary>
+    /// The concrete <see cref="GenerationTier"/> a non-<see cref="TierPolicyMode.Auto"/> mode forces, or false
+    /// for <see cref="TierPolicyMode.Auto"/> (which forces nothing). The returned tier's
+    /// <see cref="Enum.ToString()"/> is EXACTLY the <c>Generation:Tiers:{key}</c> configuration key the
+    /// providers look a deployment up by, so a caller can validate the binding before accepting a mode.
+    /// </summary>
+    /// <param name="mode">The tier-policy mode.</param>
+    /// <param name="tier">The forced tier when the mode is not <see cref="TierPolicyMode.Auto"/>.</param>
+    /// <returns><c>true</c> when the mode forces a specific tier.</returns>
+    public static bool TryGetForcedTier(TierPolicyMode mode, out GenerationTier tier)
+    {
+        switch (mode)
+        {
+            case TierPolicyMode.Standard:
+                tier = GenerationTier.Standard;
+                return true;
+            case TierPolicyMode.Ambient:
+                tier = GenerationTier.Ambient;
+                return true;
+            default:
+                tier = GenerationTier.Standard;
+                return false;
+        }
+    }
+
+    /// <summary>
     /// Parses a client-supplied tier-policy literal. Returns false for anything outside
     /// <c>{auto, standard, ambient}</c> so the endpoint rejects it with a 400 — never a silent default.
     /// </summary>

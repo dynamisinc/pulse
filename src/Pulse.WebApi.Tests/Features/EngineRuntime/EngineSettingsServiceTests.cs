@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Pulse.Core.Features.Autonomy.Models;
@@ -131,6 +132,144 @@ public sealed class EngineSettingsServiceTests
             "the effective disposition the loop routes on is still STOPPED, not the freshly raised default");
         result.Settings!.Autonomy.SafetyClampActive.Should().BeTrue("the response reports the clamp honestly");
         result.Settings!.Autonomy.ExerciseDefaultLevel.Should().Be(AutonomyLevel.DelayedAuto);
+    }
+
+    [RequiresDockerFact]
+    public async Task SetAutonomyDefault_WhileClamped_ReportsAnEffectiveLevelBelowTheBase_SoNoConsumerReDerivesIt()
+    {
+        // WR-003: the wire must carry BOTH levels. A consumer that has to infer "clamp active ⇒ effectively
+        // Suggest" is the mislabelled-posture bug class this feature exists to fix.
+        var exerciseId = Guid.NewGuid();
+        await using var harness = Build(exerciseId);
+
+        var clean = await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
+        clean.Settings!.Autonomy.EffectiveLevel.Should().Be(
+            AutonomyLevel.DelayedAuto, "with no clamp the effective level IS the base default");
+
+        harness.Registry.GetOrCreate(exerciseId).EngageKillSwitch(KillSwitchMode.DropToSuggest, "lead-1", 0);
+        var clamped = await harness.Service.GetSettingsAsync();
+
+        clamped.Settings!.Autonomy.ExerciseDefaultLevel.Should().Be(
+            AutonomyLevel.DelayedAuto, "the base default the controller set is preserved underneath");
+        clamped.Settings!.Autonomy.EffectiveLevel.Should().Be(
+            AutonomyLevel.Suggest, "the clamp lowers what the loop actually routes on — reported, not left to be re-derived");
+        clamped.Settings!.Autonomy.EffectiveLevel.Should().NotBe(clamped.Settings!.Autonomy.ExerciseDefaultLevel);
+    }
+
+    [RequiresDockerFact]
+    public async Task GetSettings_WhenGenerationIsFullyStopped_ReportsNoEffectiveLevel()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var harness = Build(exerciseId);
+
+        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
+        harness.Registry.GetOrCreate(exerciseId).EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 0);
+
+        var result = await harness.Service.GetSettingsAsync();
+
+        result.Settings!.Autonomy.EffectiveLevel.Should().BeNull(
+            "a full stop routes at NO level — null is the honest projection, not a misleading 'suggest'");
+        result.Settings!.Autonomy.GenerationStopped.Should().BeTrue();
+        result.Settings!.Autonomy.ExerciseDefaultLevel.Should().Be(AutonomyLevel.DelayedAuto);
+    }
+
+    [RequiresDockerFact]
+    public async Task GetSettings_AfterRestore_ReportsTheEffectiveLevelBackAtTheBase()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var harness = Build(exerciseId);
+
+        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
+        await harness.Service.EngageKillSwitchAsync(KillSwitchMode.FullStop, Input("lead-1"));
+        await harness.Service.RestoreFromSafetyAsync(Input("lead-1"));
+
+        var result = await harness.Service.GetSettingsAsync();
+
+        result.Settings!.Autonomy.EffectiveLevel.Should().Be(
+            AutonomyLevel.DelayedAuto, "an explicit restore returns the effective level to the preserved base (§8.2)");
+        result.Settings!.Autonomy.SafetyClampActive.Should().BeFalse();
+    }
+
+    // ---- WR-002: a forced tier must be one this deployment actually bound -------------------------
+
+    [RequiresDockerFact]
+    public async Task SetTierPolicy_ForATierWithNoConfiguredDeployment_IsRejected400_NamingTheMissingKey()
+    {
+        // A governed deployment that bound only Standard: forcing Ambient would return 200 and then throw
+        // GenerationConfigurationException on every later tick inside the loop's catch — the engine would stop
+        // producing with nothing but a log line. Rejected up front instead.
+        var exerciseId = Guid.NewGuid();
+        var options = new GenerationOptions();
+        options.Tiers["Standard"] = new TierModelOptions { Model = "claude-sonnet-5", Deployment = "standard" };
+        await using var harness = Build(exerciseId, options);
+
+        var result = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Invalid);
+        result.ValidationError.Should().Contain(
+            "Generation:Tiers:Ambient:Deployment", "the 400 must name the exact config key an operator has to set");
+        harness.TierPolicy.GetMode(exerciseId).Should().Be(
+            TierPolicyMode.Auto, "an unservable tier is never recorded — the engine keeps generating");
+    }
+
+    [RequiresDockerFact]
+    public async Task SetTierPolicy_ForATierBoundWithAnEmptyDeployment_IsAlsoRejected400()
+    {
+        var exerciseId = Guid.NewGuid();
+        var options = new GenerationOptions();
+        options.Tiers["Standard"] = new TierModelOptions { Model = "claude-sonnet-5", Deployment = "standard" };
+        options.Tiers["Ambient"] = new TierModelOptions { Model = "claude-haiku-5", Deployment = "   " };
+        await using var harness = Build(exerciseId, options);
+
+        var result = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+
+        result.Outcome.Should().Be(
+            EngineReviewOutcome.Invalid,
+            "the same empty-Deployment rule the generation providers apply — an accepted mode is one generation can serve");
+    }
+
+    [RequiresDockerFact]
+    public async Task SetTierPolicy_ForABoundTier_IsAccepted()
+    {
+        var exerciseId = Guid.NewGuid();
+        var options = new GenerationOptions();
+        options.Tiers["Standard"] = new TierModelOptions { Model = "claude-sonnet-5", Deployment = "standard" };
+        options.Tiers["Ambient"] = new TierModelOptions { Model = "claude-haiku-5", Deployment = "ambient" };
+        await using var harness = Build(exerciseId, options);
+
+        var standard = await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-7"));
+        var ambient = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+
+        standard.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        ambient.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        harness.TierPolicy.GetMode(exerciseId).Should().Be(TierPolicyMode.Ambient);
+    }
+
+    [RequiresDockerFact]
+    public async Task SetTierPolicy_Auto_IsAlwaysAccepted_EvenWithNoTierBound()
+    {
+        var exerciseId = Guid.NewGuid();
+        var options = new GenerationOptions();
+        options.Tiers["Standard"] = new TierModelOptions { Model = "claude-sonnet-5", Deployment = "standard" };
+        await using var harness = Build(exerciseId, options);
+
+        var result = await harness.Service.SetTierPolicyModeAsync("auto", Input("controller-7"));
+
+        result.Outcome.Should().Be(
+            EngineReviewOutcome.Ok, "'auto' forces no tier, so there is no binding to check — clearing is always allowed");
+    }
+
+    [RequiresDockerFact]
+    public async Task SetTierPolicy_WithNoTiersConfiguredAtAll_IsAccepted_SoTheOfflineProviderIsUnaffected()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var harness = Build(exerciseId); // no Generation:Tiers at all — the Fake provider's normal state
+
+        var result = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+
+        result.Outcome.Should().Be(
+            EngineReviewOutcome.Ok, "the offline Fake provider ignores the tier, so an unconfigured Tiers map is not an error");
+        harness.TierPolicy.GetMode(exerciseId).Should().Be(TierPolicyMode.Ambient);
     }
 
     // ---- AC5: fail-closed scope + COR-018 attribution --------------------------------------------
@@ -425,7 +564,8 @@ public sealed class EngineSettingsServiceTests
             registry,
             tiers,
             new FakeGenerationProvider(),
-            Options.Create(generationOptions ?? new GenerationOptions()));
+            Options.Create(generationOptions ?? new GenerationOptions()),
+            NullLogger<EngineReviewService>.Instance);
 
         return new Harness(service, db, registry, tiers);
     }

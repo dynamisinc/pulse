@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Pulse.Core.Features.Autonomy.Models;
@@ -678,7 +679,8 @@ public sealed class EngineReviewServiceTests
             registry,
             new EngineTierPolicyRegistry(),
             new FakeGenerationProvider(),
-            Options.Create(new GenerationOptions()));
+            Options.Create(new GenerationOptions()),
+            NullLogger<EngineReviewService>.Instance);
 
         return new Harness(service, db, published, registry, time);
     }

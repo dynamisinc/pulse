@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Autonomy.Services;
@@ -452,7 +453,8 @@ public sealed class EngineReviewSafetyInvariantTests
                 Registry,
                 TierPolicy,
                 new FakeGenerationProvider(),
-                Options.Create(new GenerationOptions()));
+                Options.Create(new GenerationOptions()),
+                NullLogger<EngineReviewService>.Instance);
         }
 
         public EngineReviewService Service { get; }

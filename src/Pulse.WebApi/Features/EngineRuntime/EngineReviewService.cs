@@ -59,7 +59,7 @@ using Pulse.WebApi.Features.Social;
 /// event is the only record of the change that survives a restart.
 /// </para>
 /// </remarks>
-public sealed class EngineReviewService
+public sealed partial class EngineReviewService
 {
     private const string EngineOrigin = "engine";
     private const string DraftEntityType = "engine-draft";
@@ -78,6 +78,7 @@ public sealed class EngineReviewService
     private readonly EngineTierPolicyRegistry _tierPolicy;
     private readonly IGenerationProvider _generationProvider;
     private readonly GenerationOptions _generationOptions;
+    private readonly ILogger<EngineReviewService> _logger;
 
     /// <summary>Creates the review service over its persistence, scope, clock, telemetry, publish, push, and autonomy collaborators.</summary>
     /// <param name="store">The seam-freeze review-item persistence store (reads + lookup).</param>
@@ -91,6 +92,7 @@ public sealed class EngineReviewService
     /// <param name="tierPolicy">The per-exercise model-tier-policy registry the reaction loop reads per burst.</param>
     /// <param name="generationProvider">The active generation provider — read ONLY for its name on the settings GET.</param>
     /// <param name="generationOptions">The governed <c>Generation</c> configuration — read-only here (never mutated, NFR-005).</param>
+    /// <param name="logger">Diagnostics for the loud (non-fatal) engine-settings audit-persist failure path.</param>
     public EngineReviewService(
         IEngineReviewStore store,
         PulseDbContext dbContext,
@@ -102,7 +104,8 @@ public sealed class EngineReviewService
         EngineAutonomyRegistry autonomy,
         EngineTierPolicyRegistry tierPolicy,
         IGenerationProvider generationProvider,
-        IOptions<GenerationOptions> generationOptions)
+        IOptions<GenerationOptions> generationOptions,
+        ILogger<EngineReviewService> logger)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(dbContext);
@@ -115,6 +118,7 @@ public sealed class EngineReviewService
         ArgumentNullException.ThrowIfNull(tierPolicy);
         ArgumentNullException.ThrowIfNull(generationProvider);
         ArgumentNullException.ThrowIfNull(generationOptions);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _store = store;
         _dbContext = dbContext;
@@ -127,6 +131,7 @@ public sealed class EngineReviewService
         _tierPolicy = tierPolicy;
         _generationProvider = generationProvider;
         _generationOptions = generationOptions.Value;
+        _logger = logger;
     }
 
     // ---- Queue read -----------------------------------------------------------------------------
@@ -548,6 +553,18 @@ public sealed class EngineReviewService
             return EngineSettingsResult.Invalid("mode must be one of 'standard', 'ambient' or 'auto'.");
         }
 
+        // Reject a tier the deployment has not actually bound, BEFORE recording it. Otherwise this returns 200
+        // and every later tick throws GenerationConfigurationException inside the loop's per-exercise catch —
+        // the engine stops producing with nothing but a log line: a control that appears to work and quietly
+        // breaks generation. Skipped when NO tiers are configured at all, which is the offline Fake provider's
+        // normal state (it ignores the tier), so local/CI behaviour is unchanged.
+        if (ForcedTierIsUnbound(requested, out var unboundTierKey))
+        {
+            return EngineSettingsResult.Invalid(
+                $"tier '{unboundTierKey}' has no deployment configured for this environment " +
+                $"(set Generation:Tiers:{unboundTierKey}:Deployment). Choose a bound tier or 'auto'.");
+        }
+
         var scenarioMinute = _clock.CurrentScenarioMinute(exerciseId);
         var from = _tierPolicy.SetMode(exerciseId, requested);
 
@@ -662,6 +679,26 @@ public sealed class EngineReviewService
         _tierPolicy.GetMode(exerciseId));
 
     /// <summary>
+    /// Whether <paramref name="mode"/> would force a tier this deployment has NOT bound to a deployment name —
+    /// checked against the SAME <c>Generation:Tiers:{Tier}</c> key (and the same empty-<c>Deployment</c> rule)
+    /// the generation providers look up, so an accepted mode is one generation can actually serve. Always false
+    /// for <c>auto</c>, and false when no tiers are configured at all (the offline Fake provider).
+    /// </summary>
+    private bool ForcedTierIsUnbound(TierPolicyMode mode, out string tierKey)
+    {
+        tierKey = string.Empty;
+
+        if (!TierPolicyModes.TryGetForcedTier(mode, out var forced) || _generationOptions.Tiers.Count == 0)
+        {
+            return false;
+        }
+
+        tierKey = forced.ToString();
+        return !_generationOptions.Tiers.TryGetValue(tierKey, out var tier)
+            || string.IsNullOrWhiteSpace(tier.Deployment);
+    }
+
+    /// <summary>
     /// Parses the frozen autonomy-level wire literal (<c>suggest</c> / <c>delayed-auto</c> / <c>auto</c>). The
     /// v1.1 <c>auto</c> literal parses SUCCESSFULLY here so the rejection is made by
     /// <see cref="AutonomyLevels.EnsureSelectable"/> (the single place the v1 selectability invariant lives),
@@ -692,6 +729,14 @@ public sealed class EngineReviewService
     /// record, and it is the deliberate divergence from the swamped-mode/kill-switch/restore trio (which emit no
     /// backend telemetry). One server clock read is shared by the envelope's wall clock + emittedAt.
     /// </summary>
+    /// <remarks>
+    /// <b>Deliberately NOT atomic with the in-memory posture change, and deliberately not fatal.</b> The
+    /// registry mutation has already happened and is already live for the next burst, so a failure to persist
+    /// the audit row must NOT surface as a 500: that would tell the operator "your change did not apply" while
+    /// it very much did. The failure is logged at Error (the loud path — an audit gap is an ops event) and the
+    /// applied snapshot is still returned. Closing this window properly needs the posture itself to be
+    /// persisted, which is out of scope for story 05 (process memory, like the kill switch it sits beside).
+    /// </remarks>
     private async Task CommitSettingsEventAsync(
         string eventType,
         Guid exerciseId,
@@ -714,8 +759,28 @@ public sealed class EngineReviewService
         };
 
         _dbContext.TelemetryEvents.Add(_telemetry.BuildEvent(eventType, context, payload));
-        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+#pragma warning disable CA1031 // The posture change is already applied and live; an audit-persist failure must be loud, not fatal.
+        catch (Exception ex)
+        {
+            LogSettingsAuditPersistFailed(eventType, exerciseId, ex);
+        }
+#pragma warning restore CA1031
     }
+
+    /// <summary>Source-generated Error log for an engine-settings audit row that could not be persisted (CA1848: no per-call allocation).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Engine settings change '{EventType}' for exercise {ExerciseId} was APPLIED in memory but its XC-004 audit event could not be persisted; the posture change is live and unaudited.")]
+    private partial void LogSettingsAuditPersistFailed(string eventType, Guid exerciseId, Exception exception);
 
     /// <summary>Validates a request-bound action's COR-018 actor + XC-008 zone; null when valid.</summary>
     private EngineReviewActionResult? ValidateAction(EngineReviewActionInput input)
@@ -1132,12 +1197,29 @@ public sealed class EngineAutonomyStateDto
     [System.Text.Json.Serialization.JsonConverter(typeof(AutonomyLevelJsonConverter))]
     public required AutonomyLevel ExerciseDefaultLevel { get; init; }
 
+    /// <summary>
+    /// The level the loop ACTUALLY routes on: <see cref="ExerciseDefaultLevel"/> lowered by any active safety
+    /// clamp (§8.2), or <c>null</c> when generation is fully STOPPED (kill-switch full stop — nothing routes at
+    /// any level). Projected from the domain's own <see cref="EngineAutonomyState.ResolveEffective"/> so a
+    /// consumer never has to re-derive "a clamp is active, therefore effectively Suggest" — re-deriving it is
+    /// exactly the class of bug (a mislabelled posture) that story 06 exists to fix.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonPropertyName("effectiveLevel")]
+    [System.Text.Json.Serialization.JsonConverter(typeof(NullableAutonomyLevelJsonConverter))]
+    public AutonomyLevel? EffectiveLevel { get; init; }
+
     /// <summary>Projects the built autonomy state to the staff wire snapshot.</summary>
     /// <param name="state">The exercise's autonomy state.</param>
     /// <returns>The wire snapshot.</returns>
     public static EngineAutonomyStateDto From(EngineAutonomyState state)
     {
         ArgumentNullException.ThrowIfNull(state);
+
+        // The EXERCISE-level effective disposition. Guid.Empty can never carry a per-storyline override
+        // (SetStorylineOverride rejects an empty storyline id), so ResolveBase falls through to the exercise
+        // default and this is exactly "the default, lowered by the clamp" — read from the domain, not re-derived.
+        var effective = state.ResolveEffective(Guid.Empty);
+
         return new EngineAutonomyStateDto
         {
             SwampedMode = state.SwampedModeEnabled,
@@ -1145,6 +1227,7 @@ public sealed class EngineAutonomyStateDto
             SafetyClampActive = state.SafetyClampActive,
             DegradedReason = state.DegradedReason,
             ExerciseDefaultLevel = state.ExerciseDefault,
+            EffectiveLevel = effective.GenerationStopped ? null : effective.Level,
         };
     }
 }

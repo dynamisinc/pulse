@@ -208,6 +208,50 @@ public sealed class EngineSettingsEndpointsTests
             "only the three tier ROLE literals are settable — a concrete model/deployment is never expressible here (NFR-005)");
     }
 
+    [RequiresDockerFact]
+    public async Task GetSettings_ReportsBothTheBaseDefaultAndTheEffectiveLevel_WhileAClampIsActive()
+    {
+        // WR-003: story 06 must never have to infer "clamp active ⇒ effectively Suggest" from the wire.
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+
+        await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/settings/autonomy-default", UriKind.Relative),
+            new { actingHumanId = "controller-7", level = "delayed-auto" });
+        await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/kill-switch", UriKind.Relative),
+            new { actingHumanId = "lead-1", mode = "drop-to-suggest" });
+
+        var response = await host.Client.GetAsync(new Uri("/api/engine/settings", UriKind.Relative));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var autonomy = doc.RootElement.GetProperty("autonomy");
+        autonomy.GetProperty("exerciseDefaultLevel").GetString().Should().Be("delayed-auto");
+        autonomy.GetProperty("effectiveLevel").GetString().Should().Be(
+            "suggest", "the clamped level the loop actually routes on is on the wire, not re-derived by the consumer");
+        autonomy.GetProperty("safetyClampActive").GetBoolean().Should().BeTrue();
+    }
+
+    [RequiresDockerFact]
+    public async Task GetSettings_WhenFullyStopped_SerializesEffectiveLevelAsJsonNull()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+
+        await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/kill-switch", UriKind.Relative),
+            new { actingHumanId = "lead-1", mode = "full-stop" });
+
+        var response = await host.Client.GetAsync(new Uri("/api/engine/settings", UriKind.Relative));
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var autonomy = doc.RootElement.GetProperty("autonomy");
+        autonomy.GetProperty("effectiveLevel").ValueKind.Should().Be(
+            JsonValueKind.Null, "a full stop routes at no level; the key is present and null, never a misleading literal");
+        autonomy.GetProperty("generationStopped").GetBoolean().Should().BeTrue();
+    }
+
     // ---- COR-001: fail closed on an unresolved scope ----------------------------------------------
 
     [RequiresDockerFact]
@@ -271,6 +315,71 @@ public sealed class EngineSettingsEndpointsTests
     }
 
     // ---- #297: the controller-role gate -----------------------------------------------------------
+
+    [RequiresDockerFact]
+    public async Task EveryMutatingEngineRouteInTheRealRouteTable_IsCoveredByTheRoleGateTests()
+    {
+        // WR-001 drift guard: the gate-completeness tests above loop a HARDCODED list, and route→group
+        // assignment is manual — a future story writing cockpit.MapPost("/api/engine/...") would get no role
+        // gate AND no failing test (exactly the omission #297 was filed about). So derive the mutating
+        // /api/engine surface from the REAL EndpointDataSource and require every route to be covered.
+        await using var host = await StartHostAsync(Guid.NewGuid());
+        var draftId = Guid.NewGuid();
+        var covered = MutatingRoutes(draftId).Select(r => r.Route).ToList();
+
+        var discovered = host.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Where(e => e.RoutePattern.RawText is { } raw
+                && raw.StartsWith("/api/engine", StringComparison.OrdinalIgnoreCase))
+            .Where(e => (e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [])
+                .Any(m => !string.Equals(m, "GET", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(m, "HEAD", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(m, "OPTIONS", StringComparison.OrdinalIgnoreCase)))
+            .Select(e => e.RoutePattern.RawText!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        discovered.Should().NotBeEmpty("the cockpit's mutating routes must be discoverable, or this guard proves nothing");
+
+        // The matcher must discriminate, or every assertion below would pass vacuously.
+        MatchesTemplate("/api/engine/review/{draftId:guid}/approve", $"/api/engine/review/{draftId}/approve")
+            .Should().BeTrue();
+        MatchesTemplate("/api/engine/review/{draftId:guid}/approve", $"/api/engine/review/{draftId}/veto")
+            .Should().BeFalse();
+        MatchesTemplate("/api/engine/settings/tier-policy", "/api/engine/settings/autonomy-default")
+            .Should().BeFalse();
+
+        foreach (var template in discovered)
+        {
+            covered.Should().Contain(
+                route => MatchesTemplate(template, route),
+                $"the mutating route '{template}' must be exercised by the controller-role gate tests — add it to " +
+                "MutatingRoutes (and confirm it is mapped on the 'steering' sub-group), or #297 regresses silently");
+        }
+
+        foreach (var route in covered)
+        {
+            discovered.Should().Contain(
+                template => MatchesTemplate(template, route),
+                $"the covered route '{route}' is no longer in the route table — the gate list is stale");
+        }
+    }
+
+    /// <summary>Whether a concrete request path matches a route template (each <c>{...}</c> segment is a wildcard).</summary>
+    private static bool MatchesTemplate(string template, string concreteRoute)
+    {
+        var pattern = "^" + string.Join(
+            "[^/]+",
+            template.Split('/')
+                .Select(segment => segment.StartsWith('{') && segment.EndsWith('}')
+                    ? " "
+                    : System.Text.RegularExpressions.Regex.Escape(segment))
+                .Aggregate((a, b) => a + "/" + b)
+                .Split(' ')) + "$";
+
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            concreteRoute, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
 
     [RequiresDockerFact]
     public async Task EveryMutatingRoute_FromANonControllerAssignedStaffSession_Returns403()
