@@ -21,7 +21,7 @@
 | Story | Approach | Key files (owns) | Exports |
 |-------|----------|------------------|---------|
 | 01 All Posts | Virtualized chronological global feed. | `features/social/pages/Feed.tsx`, `hooks/useFeed.ts` | `<Feed>`, `useFeed()` |
-| 02 Following | Follow-edge-filtered feed + tabs. | (extends Feed with a Following source) | — |
+| 02 Following | Follow-edge-filtered feed (`FeedScope` param on the story-01 read seam; server-side filter live, `GET /api/feed?scope=following`). Tab UI itself is a separate integration pass — see the story's Technical Notes for the exact `<Feed scope>` mount point. | Edits to `features/social/pages/Feed.tsx`, `hooks/useFeed.ts`, `services/feedService.ts` (no new files) | `FeedScope`, `<Feed scope?>`, `useFeed(scope?)`, `resolveFeed(scope?)`, `setMockFollowingForTests()` (test-only) |
 | 03 Search | Scoped full-text + Top/Recent + People. | `features/social/pages/Search.tsx`, `hooks/useSearch.ts` | `useSearch()` |
 | 04 New-posts pill | Buffer + sticky pill; SignalR + polling fallback. | `features/social/components/NewPostsPill.tsx`, `hooks/useFeedStream.ts` | `useFeedStream()` |
 | 05 For You (stretch) | Engagement ranking, config-gated. | `features/social/services/forYouRank.ts` | — |

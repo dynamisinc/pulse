@@ -1,22 +1,35 @@
 /**
  * features/social/hooks/useFeed.ts
  * ---------------------------------------------------------------------------
- * The All Posts feed data hook (feature: feeds-discovery, story 01; SOC-080,
- * COR-001, COR-053, XC-002, NFR-002/003). Participant world (Pulse Social
- * skin) — no UI, no COBRA.
+ * The All Posts / Following feed data hook (feature: feeds-discovery, story 01
+ * "All Posts" + story 02 "Following"; SOC-080, SOC-081, COR-001, COR-053,
+ * XC-002, NFR-002/003). Participant world (Pulse Social skin) — no UI, no
+ * COBRA.
  *
  * Orchestrates the two reads the feed needs and runs them through the story's
  * convergence (`assembleFeedView`, in `../services/feedService`):
  *
- *   1. `resolveFeed()`  — the swappable post read seam (mock adapter reading
- *      `postStore` today; a live `GET /api/feed` returning `ParticipantPostDto[]`
- *      when `USE_MOCK_DATA` is false — see `feedService.ts`). Wrapped in a
- *      thin `useState`/`useEffect` loader mirroring `usePersonas` (ordinary
- *      cacheable data; a later refactor may lift both onto React Query, the
- *      project default).
+ *   1. `resolveFeed(scope)` — the swappable post read seam (mock adapter
+ *      reading `postStore` today; a live `GET /api/feed[?scope=following]`
+ *      returning `ParticipantPostDto[]` when `USE_MOCK_DATA` is false — see
+ *      `feedService.ts`). Wrapped in a thin `useState`/`useEffect` loader
+ *      mirroring `usePersonas` (ordinary cacheable data; a later refactor may
+ *      lift both onto React Query, the project default).
  *   2. `usePersonas()`  — the participant-safe cast read path. NEVER
  *      `personaById`/`SEEDED_PERSONAS` (mock-only, fail-open — banned on a
  *      shipped participant surface).
+ *
+ * SCOPE (story 02, SOC-081): `useFeed(scope)` defaults to `'all'` — every
+ * existing call site (`useFeed()`) is unaffected. Passing `'following'` re-runs
+ * the same load effect against the SAME seam with a different `scope`, so
+ * switching scopes is just a re-fetch, not a second code path. THIS HOOK DOES
+ * NOT DECIDE which scope to request — the COR-015 "read-only/no-persona
+ * sessions default to All Posts" guard belongs to the caller (`<Feed>`),
+ * because only the caller has the session; this hook trusts whatever `scope`
+ * it is given and freezes THAT baseline (see below). An empty result for
+ * `'following'` (no follow edges) resolves as an empty `posts` array with
+ * `loading: false, error: undefined` — the honest "nothing to show" state, not
+ * a fallback to `'all'`.
  *
  * THE BASELINE IS WHATEVER `resolveFeed()` RETURNS (UAT fix — the prior build
  * discarded the resolved value and re-read `postStore.getPosts()` instead,
@@ -58,7 +71,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { usePersonas } from '@/features/personas'
 import type { PostView, Post } from '@/features/social'
-import { resolveFeed, assembleFeedView } from '../services/feedService'
+import { resolveFeed, assembleFeedView, type FeedScope } from '../services/feedService'
 
 export interface UseFeedResult {
   /** The exercise's public posts, newest-first, as participant-safe views. */
@@ -70,10 +83,12 @@ export interface UseFeedResult {
 }
 
 /**
- * Resolves the All Posts feed for a component: raw posts + the persona cast,
- * converged into the `PostView[]` `<Feed>` renders. See the module header.
+ * Resolves a feed for a component: raw posts (for `scope`, default `'all'`) +
+ * the persona cast, converged into the `PostView[]` `<Feed>` renders. See the
+ * module header — the caller decides `scope`, this hook only fetches +
+ * converges it.
  */
-export function useFeed(): UseFeedResult {
+export function useFeed(scope: FeedScope = 'all'): UseFeedResult {
   const [rawPosts, setRawPosts] = useState<readonly Post[]>([])
   const [postsLoading, setPostsLoading] = useState(true)
   const [postsError, setPostsError] = useState<unknown>(undefined)
@@ -83,7 +98,7 @@ export function useFeed(): UseFeedResult {
   useEffect(() => {
     let cancelled = false
     setPostsLoading(true)
-    resolveFeed()
+    resolveFeed(scope)
       .then(posts => {
         if (cancelled) return
         // Freeze the baseline at exactly what `resolveFeed()` resolved with —
@@ -106,7 +121,11 @@ export function useFeed(): UseFeedResult {
     return () => {
       cancelled = true
     }
-  }, [])
+    // Re-resolves (and re-freezes a fresh baseline) whenever `scope` changes —
+    // switching All Posts <-> Following is a re-fetch against the same seam,
+    // not a mount-once concern (story 01's original effect only ever ran once
+    // because `scope` was fixed at `'all'`).
+  }, [scope])
 
   const posts = useMemo(
     () => assembleFeedView(rawPosts, personas),
