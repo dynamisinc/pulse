@@ -27,8 +27,31 @@ import { postStore } from '@/features/social/services/postStore'
 import { DraftDisposition } from '../models/reviewContracts'
 import { reviewStore } from '../services/reviewStore'
 import { engineControlStore } from '../hooks/useEngineControl'
+import { engineSettingsStore, type EngineSettingsDto } from '../hooks/useEngineSettings'
 import { ReviewQueue } from '../components/ReviewQueue'
 import { EngineControlBar } from './EngineControlBar'
+
+/** The fixed exercise id `ExerciseContextProvider`'s mock resolver returns. */
+const EXERCISE_ID = 'ex-mock-0001'
+
+function settingsDto(overrides: Partial<EngineSettingsDto> = {}): EngineSettingsDto {
+  return {
+    provider: 'Fake',
+    tiers: [],
+    autonomy: {
+      swampedMode: false,
+      generationStopped: false,
+      safetyClampActive: false,
+      degradedReason: null,
+      exerciseDefaultLevel: 'suggest',
+      effectiveLevel: 'suggest',
+    },
+    tierPolicyMode: 'auto',
+    inMemoryState: true,
+    inMemoryStateNote: 'reset on restart',
+    ...overrides,
+  }
+}
 
 beforeEach(() => {
   // 30s into the minute so the seeded 1-minute burst reads a genuine sub-60s
@@ -38,11 +61,13 @@ beforeEach(() => {
   postStore.resetForTests()
   reviewStore.resetForTests()
   engineControlStore.resetForTests()
+  engineSettingsStore.resetForTests()
   resetTelemetryBuffer()
 })
 
 afterEach(() => {
   resetExerciseClock()
+  engineSettingsStore.resetForTests()
 })
 
 async function renderBarAndQueue() {
@@ -112,5 +137,59 @@ describe('EngineControlBar — the CTL-034 demand meter', () => {
     await renderBarAndQueue()
     expect(screen.getByTestId('demand-meter-count')).toHaveTextContent('0 / 6')
     expect(screen.getByTestId('demand-meter')).toHaveAttribute('data-over-budget', 'false')
+  })
+})
+
+describe('EngineControlBar — the "Live" label honestly states the TRUE effective level (autonomy-safety story 06)', () => {
+  it('the Suggest-today case: "Live" reads "ENGINE · LIVE (SUGGEST)", not an assumed Delayed-auto', async () => {
+    engineSettingsStore.setForTests(EXERCISE_ID, settingsDto())
+    await renderBarAndQueue()
+
+    const killSwitch = screen.getByTestId('engine-kill-switch')
+    expect(killSwitch).toHaveTextContent('ENGINE · LIVE (SUGGEST)')
+    expect(killSwitch).not.toHaveTextContent('DELAYED-AUTO')
+  })
+
+  it('the Delayed-auto-after-a-flip case: "Live" reads "ENGINE · LIVE (DELAYED-AUTO)"', async () => {
+    engineSettingsStore.setForTests(
+      EXERCISE_ID,
+      settingsDto({
+        autonomy: {
+          swampedMode: false,
+          generationStopped: false,
+          safetyClampActive: false,
+          degradedReason: null,
+          exerciseDefaultLevel: 'delayed-auto',
+          effectiveLevel: 'delayed-auto',
+        },
+      }),
+    )
+    await renderBarAndQueue()
+
+    expect(screen.getByTestId('engine-kill-switch')).toHaveTextContent('ENGINE · LIVE (DELAYED-AUTO)')
+  })
+
+  it('follows effectiveLevel, NOT exerciseDefaultLevel, while a safety clamp is active', async () => {
+    // Base default has been raised to Delayed-auto, but a safety clamp is
+    // holding the ACTUAL effective level down at Suggest — the label must
+    // say SUGGEST, never re-deriving "raised base -> Delayed-auto" itself.
+    engineSettingsStore.setForTests(
+      EXERCISE_ID,
+      settingsDto({
+        autonomy: {
+          swampedMode: false,
+          generationStopped: false,
+          safetyClampActive: true,
+          degradedReason: 'provider degraded',
+          exerciseDefaultLevel: 'delayed-auto',
+          effectiveLevel: 'suggest',
+        },
+      }),
+    )
+    await renderBarAndQueue()
+
+    const killSwitch = screen.getByTestId('engine-kill-switch')
+    expect(killSwitch).toHaveTextContent('ENGINE · LIVE (SUGGEST)')
+    expect(killSwitch).not.toHaveTextContent('DELAYED-AUTO')
   })
 })

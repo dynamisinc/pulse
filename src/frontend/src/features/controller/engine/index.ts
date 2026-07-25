@@ -87,3 +87,16 @@ export { EngineControlBar } from './console/EngineControlBar'
 export { DraftTimerDriver } from './console/DraftTimerDriver'
 export type { DraftTimerDriverProps, DraftTimerDriverContext } from './console/DraftTimerDriver'
 export { EngineDraftEditComposer } from './components/EngineDraftEditComposer'
+
+// --- Engine settings panel (story 06) — the console admin surface for the
+// exercise autonomy default + tier-policy mode (story 05's API). The single
+// source both this panel and `EngineControlBar`'s "Live" label read. ---
+export { useEngineSettings, engineSettingsStore } from './hooks/useEngineSettings'
+export type {
+  UseEngineSettingsResult,
+  AutonomyDefaultLevel,
+  EngineSettingsDto,
+  TierPolicyMode,
+} from './hooks/useEngineSettings'
+export { EngineSettingsPanel, ENGINE_SETTINGS_TOOL_ID } from './components/EngineSettingsPanel'
+export type { EngineSettingsPanelProps } from './components/EngineSettingsPanel'

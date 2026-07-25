@@ -11,7 +11,18 @@
  *  a. The ALWAYS-VISIBLE kill switch (ADP-042) — cycles Live -> Suggest-only ->
  *     STOP ENGINE -> Live via `useEngineControl().setMode`. Text + icon + a
  *     status dot; the dot is a SUPPLEMENT to the text label, never the sole
- *     signal (NFR-001).
+ *     signal (NFR-001). The "Live" position's label is additionally suffixed
+ *     with the TRUE effective autonomy level — "ENGINE · LIVE (SUGGEST)" vs.
+ *     "ENGINE · LIVE (DELAYED-AUTO)" — read from `useEngineSettings()` (feature:
+ *     autonomy-safety, story 06), NEVER assumed. This fixes the audit finding
+ *     that "Live" used to unconditionally imply Delayed-auto
+ *     (`useEngineControl.ts`'s `deriveEffective`) while the real backend
+ *     exercise default has been permanently Suggest — LIVE and SUGGEST-ONLY
+ *     were behaviourally identical. The suffix is read from
+ *     `effectiveLevel` (WR-003), never re-derived from `exerciseDefaultLevel`
+ *     + `safetyClampActive` — that inference is the exact bug class this fix
+ *     exists to close, so a clamp active on a Delayed-auto base still shows
+ *     "(SUGGEST)" here, honestly.
  *  b. The degrade-mode indicator — text + icon, shown only while
  *     `useEngineControl().degraded` is true (a mock provider-degraded clamp to
  *     Suggest). A small dev-only affordance toggles it for demoing the
@@ -39,6 +50,7 @@ import {
 import { SwampedModeToggle } from '../components/SwampedModeToggle'
 import { useDemandMeter } from '../hooks/useDemandMeter'
 import { useEngineControl, type EngineMode } from '../hooks/useEngineControl'
+import { useEngineSettings, type AutonomyDefaultLevel } from '../hooks/useEngineSettings'
 import { useReviewQueue } from '../hooks/useReviewQueue'
 
 /** D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only. */
@@ -69,12 +81,29 @@ function nextMode(mode: EngineMode): EngineMode {
   return MODE_CYCLE[(index + 1) % MODE_CYCLE.length] ?? 'live'
 }
 
+/**
+ * The displayed label for `mode` — the "Live" position ALONE gets a suffix
+ * naming the TRUE effective autonomy level (WR-003), read verbatim off
+ * `useEngineSettings()`; Suggest-only/Stopped already say exactly what they
+ * mean and are left unsuffixed. `effectiveLevel === null` (a full backend
+ * stop) or not-yet-loaded settings render with no suffix rather than a guess.
+ */
+function labelFor(mode: EngineMode, effectiveLevel: AutonomyDefaultLevel | null): string {
+  const base = MODE_COPY[mode].label
+  if (mode !== 'live' || effectiveLevel === null) return base
+  return effectiveLevel === 'delayed-auto' ? `${base} (DELAYED-AUTO)` : `${base} (SUGGEST)`
+}
+
 export function EngineControlBar() {
   const engineControl = useEngineControl()
+  const engineSettings = useEngineSettings()
   const demand = useDemandMeter()
   const { pendingCount, timersUnder60sCount } = useReviewQueue()
 
+  const effectiveLevel = engineSettings.settings?.autonomy.effectiveLevel ?? null
   const modeCopy = MODE_COPY[engineControl.mode]
+  const modeLabel = labelFor(engineControl.mode, effectiveLevel)
+  const nextModeLabel = labelFor(nextMode(engineControl.mode), effectiveLevel)
   const demandFraction = useMemo(
     () => Math.min(1, demand.demand / Math.max(1, demand.budget)),
     [demand.demand, demand.budget],
@@ -102,7 +131,7 @@ export function EngineControlBar() {
         type="button"
         data-testid="engine-kill-switch"
         data-mode={engineControl.mode}
-        aria-label={`${modeCopy.label} — activate to switch to ${MODE_COPY[nextMode(engineControl.mode)].label}`}
+        aria-label={`${modeLabel} — activate to switch to ${nextModeLabel}`}
         onClick={() => engineControl.setMode(nextMode(engineControl.mode))}
         sx={{
           display: 'inline-flex',
@@ -122,7 +151,7 @@ export function EngineControlBar() {
         }}
       >
         <FontAwesomeIcon icon={faPowerOff} color={modeCopy.tone} aria-hidden="true" />
-        {modeCopy.label}
+        {modeLabel}
         <Box
           aria-hidden="true"
           sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: modeCopy.tone, flex: 'none' }}

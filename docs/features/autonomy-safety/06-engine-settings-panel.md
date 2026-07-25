@@ -105,3 +105,43 @@ registration (the pattern this story mirrors, not replaces).
   subsequently generated burst actually counts down instead of queuing (cross-checked against story
   05's own UAT pass); flip back to Suggest and confirm the label + behavior follow. Screenshot or
   recording attached to the story/issue before flipping Status to Complete.
+
+### As implemented — AC ↔ test linkage (unit-green; UAT above still outstanding)
+
+- **AC1 (ENGINE tool registration + flyout via `isActive`)** —
+  `ControllerConsole.engineSettingsTool.test.tsx`: `registers into the toolstrip SURFACE zone with no
+  badge`, `opens the settings panel when activated, keeping the console body mounted`, `activating
+  ENGINE closes an already-open Personas palette (one-flyout-at-a-time)`, `activating Personas closes
+  an already-open ENGINE settings panel`.
+- **AC2 (read-only autonomy default / tier-policy mode / provider+tier mapping)** —
+  `EngineSettingsPanel.test.tsx`: `shows the current autonomy default, tier-policy mode, and read-only
+  provider/tier mapping`, `never renders the provider/tier mapping as an editable field`, `always
+  surfaces the inMemoryStateNote — never hidden`.
+- **AC3 (autonomy flip — optimistic, reverts on rejection)** — `useEngineSettings.test.ts`:
+  `setAutonomyDefault optimistically flips, calls the live POST, and reconciles from the authoritative
+  response`, `reverts ONLY the changed field when the live POST rejects, and records the 400 body
+  verbatim`, `a stale rejection does not clobber a newer change (rapid re-toggle safety)`, `does not
+  touch effectiveLevel optimistically while a safety clamp is active`.
+- **AC4 (tier-policy pick — same pattern; provider/model never editable)** —
+  `useEngineSettings.test.ts`: `setTierPolicyMode flips the mode with no live POST` (mock),
+  `a 403 flips forbidden` (live); `EngineSettingsPanel.test.tsx`: `never renders the provider/tier
+  mapping as an editable field`.
+- **AC5 (`EngineControlBar`'s "Live" label states the TRUE effective level)** —
+  `EngineControlBar.test.tsx`, describe `the "Live" label honestly states the TRUE effective level`:
+  `the Suggest-today case`, `the Delayed-auto-after-a-flip case`, and — the WR-003 trap case — `follows
+  effectiveLevel, NOT exerciseDefaultLevel, while a safety clamp is active`.
+- **NFR-001 (text not colour; keyboard-operable; Escape closes)** — `EngineSettingsPanel.test.tsx`
+  describe `a11y`: `closes on Escape`, `moves focus to the close button on open`, `every autonomy/tier
+  control is keyboard-reachable and Enter-activatable`; the clamp/stopped/read-only states are all
+  rendered as `Typography` text (asserted via `toHaveTextContent`), never a colour-only cue.
+- **COR-001/XC-002 (exercise-scoped; mock/live split honoured)** — `useEngineSettings.test.ts`:
+  `renders a plausible static snapshot with NO network call` (mock), `a different exercise never
+  observes another exercise's mutation` (per-exercise scoping), `fetches GET /api/engine/settings once
+  per exercise` / `a second hook instance for the SAME exercise does not refire the GET` (live).
+- **Clamp-detection correctness (Gate-2 amendment — `effectiveLevel === exerciseDefaultLevel` does NOT
+  imply "no clamp")** — `EngineSettingsPanel.test.tsx` describe `the clamp indicator (WR-003 trap
+  case)`: `renders the clamp note when safetyClampActive is true, EVEN WHEN effectiveLevel equals
+  exerciseDefaultLevel`, `shows no clamp note when safetyClampActive is false`, `reports "generation
+  fully stopped" from generationStopped alone, not from a null effectiveLevel guess`. The panel derives
+  its clamp indicator from `autonomy.safetyClampActive`/`autonomy.generationStopped` only — never by
+  comparing the two levels.

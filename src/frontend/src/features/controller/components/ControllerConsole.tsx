@@ -47,6 +47,16 @@
  * storylines, rumor tracker, trainee monitor, break-fiction, or pause tiers —
  * those remain separate features/stories.
  *
+ * ## ENGINE SETTINGS tool (feature: autonomy-safety, story 06)
+ * A sibling "ENGINE" surface tool, registered the same way as "Personas"
+ * (`useRegisterSurfaceTool()`, no badge) — activating it opens
+ * `<EngineSettingsPanel>`, keyed on `isActive(ENGINE_SETTINGS_TOOL_ID)`. This
+ * is the console admin surface for the exercise autonomy default + tier-policy
+ * mode (`../engine`'s `useEngineSettings`, story 05's `GET/POST
+ * /api/engine/settings`) — the same one-flyout-at-a-time toolstrip contract,
+ * not a new extension point.
+ *
+
  * ## Entry points to "post as persona" (both funnel to the persona-dock host)
  *  1. ⌘K / Ctrl+K, or activating the "Personas" toolstrip tool → the command
  *     palette opens (its PERSONAS section is the search/select entry point).
@@ -64,7 +74,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faMasksTheater, faTowerBroadcast } from '@fortawesome/free-solid-svg-icons'
+import { faGear, faMasksTheater, faTowerBroadcast } from '@fortawesome/free-solid-svg-icons'
 import { usePersonas } from '@/features/personas'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useRegisterSurfaceTool, useToolstrip } from '@/features/staffShell/toolRegistry'
@@ -83,7 +93,9 @@ import { PausePill } from './steering/PausePill'
 import {
   DraftDisposition,
   DraftTimerDriver,
+  ENGINE_SETTINGS_TOOL_ID,
   EngineControlBar,
+  EngineSettingsPanel,
   ReviewQueue,
   useEngineControl,
   useReviewQueue,
@@ -167,6 +179,22 @@ export function ControllerConsole(
     tooltip: 'Post as persona (⌘K) — search a persona and compose',
     badge: personaCount > 0 ? { count: personaCount, escalating: false } : undefined,
   })
+
+  // The "ENGINE" consult-on-demand tool (feature: autonomy-safety, story 06) —
+  // the console admin surface for the exercise autonomy default + tier-policy
+  // mode (story 05's API). No badge (this is a settings surface, not a
+  // pending-attention one). Its flyout is keyed on `isActive(...)` below,
+  // exactly like the "Personas" tool's palette above.
+  useRegisterSurfaceTool({
+    id: ENGINE_SETTINGS_TOOL_ID,
+    label: 'ENGINE',
+    icon: faGear,
+    tooltip: 'Engine settings — autonomy default, tier policy, provider (read-only)',
+  })
+  const engineSettingsOpen = isActive(ENGINE_SETTINGS_TOOL_ID)
+  const closeEngineSettings = useCallback(() => {
+    if (isActive(ENGINE_SETTINGS_TOOL_ID)) toggleTool(ENGINE_SETTINGS_TOOL_ID)
+  }, [isActive, toggleTool])
 
   // The "Personas" toolstrip tool's active state is the SINGLE source of truth
   // for whether the ⌘K palette is open, so the toolstrip button always reflects
@@ -312,6 +340,8 @@ export function ControllerConsole(
       />
 
       <PersonaDockHost open={dockPersonaId !== null} onClose={closeDock} slots={dockSlots} />
+
+      <EngineSettingsPanel open={engineSettingsOpen} onClose={closeEngineSettings} />
     </Box>
   )
 }
