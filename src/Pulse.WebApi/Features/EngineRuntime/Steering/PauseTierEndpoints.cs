@@ -1,13 +1,16 @@
 namespace Pulse.WebApi.Features.EngineRuntime.Steering;
 
+using System.Linq;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 
 /// <summary>
@@ -96,13 +99,17 @@ public static class PauseTierEndpoints
 
     /// <summary>
     /// <c>POST /api/steering/pause-tier</c> — records the tier for the resolved exercise and, on the Freeze
-    /// transition, freezes/unfreezes that exercise's scenario clock. Idempotent: re-selecting the active tier
-    /// returns the same <c>200</c> state without touching the clock or publishing an overlay change.
+    /// transition, starts (if needed) then freezes/unfreezes that exercise's scenario clock. Idempotent:
+    /// re-selecting the active tier returns the same <c>200</c> state without touching the clock or publishing an
+    /// overlay change. A Freeze whose clock effect could not be applied records nothing and returns <c>409</c>, so
+    /// the console reverts instead of claiming a pause the world never felt (CR-001). The <c>200</c> body always
+    /// carries the HONEST <c>clockFrozen</c> read off the clock itself — the client verifies it.
     /// </summary>
     private static async Task<IResult> SetPauseTierAsync(
         PauseTierRequest? request,
         PauseTierRegistry registry,
         IExerciseContext exerciseContext,
+        PulseDbContext dbContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -127,8 +134,64 @@ public static class PauseTierEndpoints
             return Results.BadRequest("tier must be one of 'running', 'injects', 'engine' or 'freeze'.");
         }
 
-        await registry.SetTierAsync(scope.Value, tier, request.ActingHumanId, cancellationToken);
-        return Results.Ok(PauseTierStateDto.From(registry, scope.Value));
+        // Where to start a clock the reaction loop has not started yet, so a Freeze before the engine's first
+        // tick still genuinely halts the exercise (CR-001). Server-authoritative: read from the exercise row.
+        var clockStart = await ResolveClockStartAsync(dbContext, scope.Value, cancellationToken);
+
+        var result = await registry.SetTierAsync(
+            scope.Value, tier, request.ActingHumanId, clockStart, cancellationToken);
+
+        return result.Outcome switch
+        {
+            PauseTierOutcome.Applied or PauseTierOutcome.Unchanged =>
+                Results.Ok(PauseTierStateDto.From(registry, scope.Value)),
+
+            // The tier was NOT recorded because its clock effect could not be applied. Fail closed with a 409 so
+            // the console's guarded revert fires — never a 200 claiming a pause the world never felt (CR-001).
+            PauseTierOutcome.ClockUnavailable => Results.Conflict(
+                "The exercise scenario clock could not be reached, so the pause tier was not applied."),
+
+            _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
+        };
+    }
+
+    /// <summary>
+    /// Resolves the scenario start + time zone a never-started clock should be started at, from the
+    /// <see cref="Exercise"/> row (server-authoritative, never client input). Mirrors
+    /// <c>EngineContentSeedService</c>'s convention: the stored scenario instant when configured, otherwise one
+    /// server wall-clock read. Returns <c>null</c> when the exercise row is missing — a Freeze then fails closed.
+    /// </summary>
+    private static async Task<PauseClockStart?> ResolveClockStartAsync(
+        PulseDbContext dbContext,
+        Guid exerciseId,
+        CancellationToken cancellationToken)
+    {
+        // Exercise is deliberately UNSCOPED (its own Id IS the scope), so this is a direct read by the resolved
+        // scope's id — never a client-supplied one.
+        var row = await dbContext.Exercises
+            .AsNoTracking()
+            .Where(exercise => exercise.Id == exerciseId)
+            .Select(exercise => new { exercise.CurrentScenarioTime, exercise.TimeZone })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (row is null)
+        {
+            return null;
+        }
+
+        // An unrecognised IANA id must not block a safety action — the zone only affects how the scenario
+        // INSTANT is projected, never the minute count the engine's timers read. Fall back to UTC.
+        TimeZoneInfo timeZone;
+        try
+        {
+            timeZone = TimeZoneInfo.FindSystemTimeZoneById(row.TimeZone);
+        }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            timeZone = TimeZoneInfo.Utc;
+        }
+
+        return new PauseClockStart(row.CurrentScenarioTime ?? DateTimeOffset.UtcNow, timeZone);
     }
 }
 

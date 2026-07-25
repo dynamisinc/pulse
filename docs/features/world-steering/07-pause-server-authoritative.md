@@ -125,6 +125,15 @@ the shipped `EngineCockpitStaffAuthorizationFilter`; the shipped kill-switch/res
 `IPauseOverlayPublisher` seam. Ticks STORY-UPDATES.md §A **CTL-023**'s "server enforces this" gap.
 
 ## Tests
+> **Running the backend suite.** The 16 `PauseTierEndpointsTests` cases below are
+> `[RequiresDockerFact]` — they SKIP (a real *Skipped*, never a silent *Passed*) on a Docker-less
+> machine. They were run for real against LocalDB via the escape hatch, and must be run that way (or
+> in CI, which has Docker) for the linkage below to mean anything:
+> ```
+> $env:PULSE_TEST_SQL_CONNECTION = 'Server=(localdb)\MSSQLLocalDB;Integrated Security=true;TrustServerCertificate=true'
+> dotnet test pulse.slnx
+> ```
+
 - Unit (backend): `PauseTierRegistry` records a tier per exercise, keyed independently (a Freeze on
   exercise A never marks exercise B frozen); entering/leaving `freeze` calls the injected
   `IExerciseClock.Freeze`/`Unfreeze` exactly once each; every transition invokes the registered
@@ -138,13 +147,26 @@ the shipped `EngineCockpitStaffAuthorizationFilter`; the shipped kill-switch/res
   - `PauseTierRegistryTests.SetTierAsync_LeavingFreezeToRunning_CallsClockUnfreezeExactlyOnce` (AC-2)
   - `PauseTierRegistryTests.SetTierAsync_ReSelectingFreeze_DoesNotFreezeTwice` (AC-1)
   - `PauseTierRegistryTests.SetTierAsync_NonFreezeTiers_NeverTouchTheClock` (AC-1)
-  - `PauseTierRegistryTests.SetTierAsync_FreezeWithNoStartedClock_RecordsTheTierWithoutCallingTheClock` (AC-1)
   - `PauseTierRegistryTests.SetTierAsync_EveryTransition_InvokesTheOverlayPublisher` (AC-7)
   - `PauseTierRegistryTests.SetTierAsync_NoChange_PublishesNothing` (AC-7)
   - `PauseTierRegistryTests.SetTierAsync_CarriesTheActingHuman_ToThePublisher` (AC-7, COR-018)
   - `PauseTierRegistryTests.NullOverlayPublisher_TheStory07Default_DoesNotThrow` (AC-7)
   - `PauseTierRegistryTests.PauseTierWire_RoundTripsTheFrozenClientLiterals` (AC-1)
   - `PauseTierRegistryTests.PauseTierWire_RejectsAnythingElse` (AC-1)
+- Unit (backend), **CR-001 — a Freeze either really takes or is refused; it is never a silent no-op**
+  (an unstarted clock is the DEFAULT state of a fresh host, since only
+  `ReactionLoopHost.EnsureClockStarted` ever starts one):
+  - `PauseTierRegistryTests.SetTierAsync_FreezeOnAColdClock_StartsItThenFreezesIt_AgainstTheRealClock`
+    (AC-1) — runs against the REAL `ExerciseClockService`, which throws on an unstarted `Freeze`
+  - `PauseTierRegistryTests.SetTierAsync_FreezeOnAColdClock_SurvivesTheReactionLoopsOwnLazyStart` (AC-1)
+  - `PauseTierRegistryTests.SetTierAsync_FreezeWithNoStartPoint_IsREFUSED_AndRecordsNothing` (AC-1)
+  - `PauseTierRegistryTests.SetTierAsync_FreezeWhenTheClockThrows_IsREFUSED_AndRecordsNothing` (AC-1)
+  - `PauseTierRegistryTests.SetTierAsync_FreezeThatCannotBeVerified_IsREFUSED` (AC-1)
+  - `PauseTierRegistryTests.SetTierAsync_ResumeIsNeverBlockedByAnUnstartedClock` (AC-2)
+  - `PauseTierRegistryTests.SetTierAsync_AThrowingOverlayPublisher_NeverUndoesAnAppliedFreeze` (AC-7) —
+    story 08's real publisher lands on this seam
+  - `PauseTierEndpointsTests.Post_Freeze_OnAColdClock_StartsAndFreezesIt_ReportingTheTruth` (AC-1)
+  - `PauseTierEndpointsTests.Post_Freeze_OnAColdClock_ThenTheLoopsLazyStart_LeavesItFrozen` (AC-1)
 - Unit (backend): the endpoint fails closed — no staff session `401`, staff-but-unassigned `403`,
   assigned staff `200` — via the reused filter (no new authorization code).
   - `PauseTierEndpointsTests.Routes_AreMappedExactlyOnce` (AC-1)
@@ -166,17 +188,40 @@ the shipped `EngineCockpitStaffAuthorizationFilter`; the shipped kill-switch/res
   - `usePauseState — live mode > POSTs the Resume transition too` (AC-2)
   - `usePauseState — live mode > reverts the optimistic flip when the POST rejects, keeping the telemetry already logged` (AC-4)
   - `usePauseState — live mode > does NOT revert when a newer transition has superseded the rejected one` (AC-4)
-  - `usePauseState — live mode > reverts the engine kill switch too when an engine-tier POST rejects` (AC-4)
+  - `usePauseState — live mode > reverts the engine kill switch too when the PAUSE-TIER POST rejects` (AC-4)
   - `usePauseState — live mode > resyncs ONCE on mount and adopts the server tier without emitting telemetry or POSTing` (AC-7)
+  - `usePauseState — live mode > a resync that lands AFTER the controller acted never overwrites their choice` (AC-4)
   - `usePauseState — live mode > keeps the local baseline when the resync GET fails` / `resyncs only once across several mounted surfaces` (AC-7)
   - `livePauseTierActions.setPauseTier > POSTs the tier + acting human + time zone, and NO client exerciseId (COR-001)` (AC-7)
-  - `livePauseTierActions.fetchPauseTier > GETs the pause-tier path with no parameters and returns the server tier` (AC-7)
+  - `livePauseTierActions.fetchPauseTier > GETs the pause-tier path with no parameters and returns the server state` (AC-7)
+- Unit (frontend), **CR-001 — the console never renders a pause the server did not apply**:
+  - `usePauseState — live mode > reverts a Freeze the server reports it did NOT apply (clockFrozen: false)` (AC-1/AC-4)
+  - `usePauseState — live mode > reverts a Freeze the server REFUSED (the 409 rejection path)` (AC-1/AC-4)
+  - `usePauseState — live mode > reverts when the server recorded a DIFFERENT tier than the one requested` (AC-4)
+  - `usePauseState — live mode > keeps the Freeze when the server confirms the clock IS frozen` (AC-1)
+  - `usePauseState — live mode > never adopts a Freeze the server reports as NOT applied` (AC-1)
+  - `livePauseTierActions.setPauseTier > surfaces a Freeze the server did NOT apply as clockFrozen: false`
+    / `treats a missing clockFrozen as NOT frozen (fail closed, never assumed)`
+    / `resolves with the SERVER's resulting state, never discarding it` (AC-1)
+- Unit (frontend), **CR-002 — ENGINE PAUSED cannot outlive a failed kill-switch POST**:
+  - `usePauseState — live mode > reverts the tier when the KILL-SWITCH POST fails, even though the pause-tier POST succeeded` (AC-3)
+  - `usePauseState — live mode > does NOT revert a kill-switch failure once a newer transition has superseded it` (AC-3/AC-4)
+  - `useEngineControl — kill switch > invokes the optional onRejected callback after reverting, so a composing caller can undo coupled state` (AC-3)
+  - `useEngineControl — kill switch > never invokes onRejected when the live POST succeeds` (AC-3)
+  - `useEngineControl — kill switch > a throwing onRejected can never break the kill switch's own revert` (AC-3)
+- Unit (frontend), **the resync writes no safety action nobody performed** (COR-018/XC-004 accuracy):
+  - `usePauseState — live mode > adopting the engine tier reflects the STOP locally with no autonomy telemetry and no kill-switch POST` (AC-7)
+  - `engineControlStore.adoptServerMode > reflects a server-reported mode locally without emitting an autonomy event or POSTing` (AC-7)
+  - `engineControlStore.adoptServerMode > is a no-op when the adopted mode already matches` / `adopts per exercise — never leaking into another exercise (COR-001)` (AC-7)
 - Unit (frontend): entering/leaving the `engine` tier calls `useEngineControl().setMode('stop'|'live')`
   with the correct value; `<EngineControlBar>` and the tier pill read the same store snapshot.
   - `usePauseState — ENGINE PAUSED ... > entering the engine tier calls setMode('stop') — the tier pill and the control bar agree` (AC-3)
   - `usePauseState — ENGINE PAUSED ... > leaving the engine tier for Resume calls setMode('live')` (AC-3)
   - `usePauseState — ENGINE PAUSED ... > leaving the engine tier for Freeze keeps the engine STOPPED` (AC-3)
   - `usePauseState — ENGINE PAUSED ... > the injects and freeze tiers never touch the kill switch on their own` (AC-3)
+  - `usePauseState — ENGINE PAUSED ... > engine -> freeze -> Resume restores the engine (never RUNNING over a stuck STOP)` (AC-3)
+  - `usePauseState — ENGINE PAUSED ... > Resume restores a manually chosen SUGGEST-ONLY rather than raising to LIVE (§8.2)` (AC-3)
+  - `usePauseState — ENGINE PAUSED ... > leaving the engine tier for Pause injects restores the engine` (AC-3)
 - Unit (frontend): the Pause-injects control is disabled and inert (no `setTier('injects')` call
   reaches the store) and communicates its reason via an accessible name/description, not color
   alone (NFR-001).
@@ -191,7 +236,25 @@ the shipped `EngineCockpitStaffAuthorizationFilter`; the shipped kill-switch/res
     pass untouched (AC-6). ONE story-03 `PausePill.test.tsx` case necessarily changed — the former
     "selecting Pause injects applies immediately" now asserts Pause **engine** applies immediately,
     because AC-5 deliberately disables the injects tier.
-- **Manual/UAT (required for Complete):** with mock off, open the console against a live exercise;
-  select Freeze; confirm via the review queue (or `engine.*` telemetry) that no new items/events
-  appear while frozen; select Resume; confirm ticking resumes with no scenario-minute jump. Select
-  Pause engine; confirm `<EngineControlBar>` shows STOP; Resume; confirm it shows LIVE again.
+- **Manual/UAT (required for Complete).** With `VITE_USE_MOCK_DATA` off, against a live backend. A
+  control's POSITION is NOT evidence — that is exactly the class of proof that let stories 02/03 ship
+  as inert seams. Every step below is verified by ENGINE ACTIVITY (the review queue and/or `engine.*`
+  telemetry), not by what the console renders:
+  1. **Freeze before the engine is seeded** (the cold-clock case CR-001 was about): with a fresh
+     backend process and no `POST /api/ops/seed-engine-content` yet, select Freeze. The POST must
+     return `200` with `clockFrozen: true` (check the network tab) — not a `200` with
+     `clockFrozen: false`, and not a `409`. Then seed the engine and confirm NO
+     `engine.observed`/`decided`/`generated` telemetry and NO new review items appear: the loop's
+     first tick must find the clock already frozen and skip.
+  2. **Freeze while the engine is running:** with the loop ticking and items arriving, select Freeze.
+     Confirm new review items STOP arriving and no `engine.generated` events are emitted while frozen.
+  3. **Resume:** confirm ticking resumes, items arrive again, and the header SCENARIO clock continues
+     from the minute it held (no jump forward by the frozen span, COR-050).
+  4. **Pause engine:** confirm `<EngineControlBar>` shows STOP **and** that generation actually
+     stopped (no new review items / no `engine.generated` while ENGINE PAUSED). Resume; confirm the
+     bar returns to the position it was on before the pause (LIVE, or SUGGEST-ONLY if that is what the
+     controller had chosen) **and** that generation resumes.
+  5. **Failure honesty:** with dev-tools offline (or the backend stopped), select Freeze. The pill must
+     fall back to RUNNING — it must never sit on WORLD FROZEN after a failed POST.
+  6. **Pause injects:** confirm the tier is visibly disabled, reads "Unavailable — No inject queue
+     yet", and cannot be applied by mouse or keyboard.

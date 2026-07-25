@@ -6,10 +6,13 @@
  *  - `setPauseTier` POSTs `/steering/pause-tier` with the tier + acting human +
  *    time zone, and NO client `exerciseId` (COR-001 — the scope is resolved
  *    server-side, exactly like `liveEngineControlActions`);
- *  - it resolves void on success and rejects on failure so `usePauseState` can
- *    revert its optimistic flip;
- *  - `fetchPauseTier` GETs the same path and returns the server tier, rejecting
- *    an unrecognised/missing tier rather than guessing one.
+ *  - it resolves with the SERVER's `{ tier, clockFrozen }` — never discarding it
+ *    (CR-001: `clockFrozen` is how the console learns a Freeze did not actually
+ *    reach the clock) — and rejects on failure so `usePauseState` can revert its
+ *    optimistic flip;
+ *  - `fetchPauseTier` GETs the same path and returns the same state, rejecting
+ *    an unrecognised/missing tier rather than guessing one, and treating an
+ *    absent `clockFrozen` as NOT frozen (fail closed).
  *
  * `api` is mocked (`vi.mock('@/core/services/api')`, hoisted above imports by
  * Vitest) so no real network call is made.
@@ -61,10 +64,39 @@ describe('livePauseTierActions.setPauseTier', () => {
     })
   })
 
-  it('resolves void on a successful POST', async () => {
+  it("resolves with the SERVER's resulting state, never discarding it (the caller verifies it)", async () => {
     postMock.mockResolvedValue({ data: { tier: 'engine', clockFrozen: false } })
 
-    await expect(setPauseTier('engine', CTX)).resolves.toBeUndefined()
+    await expect(setPauseTier('engine', CTX)).resolves.toEqual({
+      tier: 'engine',
+      clockFrozen: false,
+    })
+  })
+
+  it('surfaces a Freeze the server did NOT apply as clockFrozen: false', async () => {
+    // CR-001: this is the truth signal that stops the console rendering WORLD
+    // FROZEN over a world that is still moving.
+    postMock.mockResolvedValue({ data: { tier: 'freeze', clockFrozen: false } })
+
+    await expect(setPauseTier('freeze', CTX)).resolves.toEqual({
+      tier: 'freeze',
+      clockFrozen: false,
+    })
+  })
+
+  it('treats a missing clockFrozen as NOT frozen (fail closed, never assumed)', async () => {
+    postMock.mockResolvedValue({ data: { tier: 'freeze' } })
+
+    await expect(setPauseTier('freeze', CTX)).resolves.toEqual({
+      tier: 'freeze',
+      clockFrozen: false,
+    })
+  })
+
+  it('rejects an unrecognised tier in the POST response rather than guessing one', async () => {
+    postMock.mockResolvedValue({ data: { tier: 'world-frozen', clockFrozen: true } })
+
+    await expect(setPauseTier('freeze', CTX)).rejects.toThrow(/Unrecognised pause tier/)
   })
 
   it('rejects when the POST rejects (the caller reverts its optimistic flip)', async () => {
@@ -75,17 +107,23 @@ describe('livePauseTierActions.setPauseTier', () => {
 })
 
 describe('livePauseTierActions.fetchPauseTier', () => {
-  it('GETs the pause-tier path with no parameters and returns the server tier', async () => {
+  it('GETs the pause-tier path with no parameters and returns the server state', async () => {
     getMock.mockResolvedValue({ data: { tier: 'freeze', clockFrozen: true } })
 
-    await expect(fetchPauseTier()).resolves.toBe('freeze')
+    await expect(fetchPauseTier()).resolves.toEqual({ tier: 'freeze', clockFrozen: true })
     expect(getMock).toHaveBeenCalledWith('/steering/pause-tier')
   })
 
   it('returns the running baseline when the server reports it', async () => {
     getMock.mockResolvedValue({ data: { tier: 'running', clockFrozen: false } })
 
-    await expect(fetchPauseTier()).resolves.toBe('running')
+    await expect(fetchPauseTier()).resolves.toEqual({ tier: 'running', clockFrozen: false })
+  })
+
+  it('carries an unapplied freeze through as clockFrozen: false, so the caller can refuse to adopt it', async () => {
+    getMock.mockResolvedValue({ data: { tier: 'freeze', clockFrozen: false } })
+
+    await expect(fetchPauseTier()).resolves.toEqual({ tier: 'freeze', clockFrozen: false })
   })
 
   it('rejects an unrecognised tier rather than guessing one', async () => {

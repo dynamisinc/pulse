@@ -134,6 +134,49 @@ public sealed class PauseTierEndpointsTests
     // ---- Freeze reaches the SHIPPED clock the reaction loop already checks (AC 1/2) -------------
 
     [RequiresDockerFact]
+    public async Task Post_Freeze_OnAColdClock_StartsAndFreezesIt_ReportingTheTruth()
+    {
+        // CR-001: the DEFAULT state of a fresh host — no reaction loop has ticked, so nothing has ever called
+        // IExerciseClock.Start for this exercise. The freeze must still be REAL, and the response must say so.
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+        host.Clock.IsFrozen(exerciseId).Should().BeFalse("no clock has been started for this exercise yet");
+        host.Clock.IsRunning(exerciseId).Should().BeFalse();
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var state = await ReadStateAsync(response);
+        state.Tier.Should().Be("freeze");
+        state.ClockFrozen.Should().BeTrue(
+            "the response must never claim a freeze the clock did not take — the console verifies this field");
+        host.Clock.IsFrozen(exerciseId).Should().BeTrue(
+            "ReactionLoopHost.TickExerciseAsync skips a tick on exactly this flag, so the engine is genuinely halted");
+    }
+
+    [RequiresDockerFact]
+    public async Task Post_Freeze_OnAColdClock_ThenTheLoopsLazyStart_LeavesItFrozen()
+    {
+        // ReactionLoopHost.EnsureClockStarted starts a clock only when it is neither running NOR frozen, so a
+        // freeze applied before the loop's first tick survives it (rather than the loop starting a RUNNING clock
+        // under a console reading WORLD FROZEN).
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+
+        await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01" });
+
+        var loopWouldStartTheClock =
+            !host.Clock.IsRunning(exerciseId) && !host.Clock.IsFrozen(exerciseId);
+
+        loopWouldStartTheClock.Should().BeFalse("the loop must leave the already-frozen clock exactly as it is");
+        host.Clock.IsFrozen(exerciseId).Should().BeTrue();
+    }
+
+    [RequiresDockerFact]
     public async Task Post_Freeze_FreezesTheResolvedExercisesClock()
     {
         var exerciseId = Guid.NewGuid();

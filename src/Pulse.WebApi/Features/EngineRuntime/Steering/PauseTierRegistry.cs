@@ -33,6 +33,36 @@ public enum PauseTier
 public sealed record PauseTierTransition(Guid ExerciseId, PauseTier From, PauseTier To, string ActingHumanId);
 
 /// <summary>
+/// What a clock that has never been STARTED should be started at, so a Freeze arriving before the reaction loop
+/// has ever ticked can still genuinely halt the exercise (CR-001). Resolved by the endpoint from the
+/// <see cref="Pulse.WebApi.Data.Entities.Exercise"/> row — server-authoritative, never client input.
+/// </summary>
+/// <param name="ScenarioStart">The scenario instant the clock reads as scenario minute 0.</param>
+/// <param name="TimeZone">The exercise time zone the scenario instant is expressed in (XC-008).</param>
+public sealed record PauseClockStart(DateTimeOffset ScenarioStart, TimeZoneInfo TimeZone);
+
+/// <summary>The outcome of a pause-tier change — the endpoint maps it to a status, fail-closed.</summary>
+public enum PauseTierOutcome
+{
+    /// <summary>The tier changed and every side effect (clock, overlay publish) was applied.</summary>
+    Applied = 0,
+
+    /// <summary>The requested tier was already active — nothing was touched and nothing published.</summary>
+    Unchanged = 1,
+
+    /// <summary>
+    /// The tier was NOT recorded because its scenario-clock effect could not be applied. Fail closed: the
+    /// console must never be told a Freeze took when the world kept moving (CR-001).
+    /// </summary>
+    ClockUnavailable = 2,
+}
+
+/// <summary>The result of a pause-tier change — the outcome plus the transition when one actually happened.</summary>
+/// <param name="Outcome">Whether the tier was applied, unchanged, or refused.</param>
+/// <param name="Transition">The completed transition, or <c>null</c> for <see cref="PauseTierOutcome.Unchanged"/>/<see cref="PauseTierOutcome.ClockUnavailable"/>.</param>
+public sealed record PauseTierResult(PauseTierOutcome Outcome, PauseTierTransition? Transition);
+
+/// <summary>
 /// The server-authoritative tiered-pause registry (feature: world-steering, story 07; CTL-023, COR-001,
 /// COR-050/052). Holds ONE independently mutable tier per exercise — keyed by <c>exerciseId</c> in a
 /// <see cref="ConcurrentDictionary{TKey,TValue}"/> exactly the way <see cref="ExerciseClockService"/> keys its
@@ -47,6 +77,19 @@ public sealed record PauseTierTransition(Guid ExerciseId, PauseTier From, PauseT
 ///   <item>every transition invokes <see cref="IPauseOverlayPublisher"/> — a no-op until story 08 replaces the
 ///   default registration.</item>
 /// </list>
+///
+/// <para><b>A Freeze is never reported unless it actually took (CR-001).</b> A clock that has never been STARTED
+/// cannot be frozen, and that is the DEFAULT state of a fresh host: the only production caller of
+/// <see cref="IExerciseClock.Start"/> is <c>ReactionLoopHost.EnsureClockStarted</c>, which runs on the first tick
+/// of a registered exercise and starts the clock UNFROZEN. So a Freeze arriving before the engine is seeded would
+/// otherwise no-op forever, and a Freeze arriving before the loop's first tick would be clobbered by a running
+/// clock. This registry therefore STARTS the clock itself (from the exercise row, via
+/// <see cref="PauseClockStart"/>) and then freezes it — <c>EnsureClockStarted</c>'s own
+/// <c>IsRunning || IsFrozen</c> guard means the loop then leaves the frozen clock alone. If the freeze cannot be
+/// applied (or cannot be VERIFIED via <see cref="IExerciseClock.IsFrozen"/>), the tier is NOT recorded and
+/// <see cref="PauseTierOutcome.ClockUnavailable"/> is returned so the caller fails closed and the console reverts
+/// — never a success reported for a world that kept moving. The clock effect is applied BEFORE the tier is
+/// recorded, so a throwing clock can never leave a recorded tier behind.</para>
 ///
 /// <para><b>Isolation (COR-001).</b> Isolation is structural: there is no shared tier, so a Freeze on exercise A
 /// records A's tier and freezes A's clock and can never touch exercise B's. This is an in-memory runtime service
@@ -106,19 +149,26 @@ public sealed partial class PauseTierRegistry
     public bool IsClockFrozen(Guid exerciseId) => _clock.IsFrozen(exerciseId);
 
     /// <summary>
-    /// Records <paramref name="tier"/> for exercise <paramref name="exerciseId"/>, applies the Freeze/Unfreeze
-    /// clock effect, and publishes the transition to <see cref="IPauseOverlayPublisher"/>. Setting the
-    /// already-active tier is a no-op: no clock call, no publish, and <c>null</c> is returned.
+    /// Applies the Freeze/Unfreeze clock effect, records <paramref name="tier"/> for exercise
+    /// <paramref name="exerciseId"/>, and publishes the transition to <see cref="IPauseOverlayPublisher"/>.
+    /// Setting the already-active tier is a no-op (<see cref="PauseTierOutcome.Unchanged"/>): no clock call, no
+    /// publish. A Freeze whose clock effect cannot be applied and verified records NOTHING and returns
+    /// <see cref="PauseTierOutcome.ClockUnavailable"/> — never a success for a world that kept moving (CR-001).
     /// </summary>
     /// <param name="exerciseId">The server-resolved exercise (COR-001); must not be <see cref="Guid.Empty"/>.</param>
     /// <param name="tier">The tier to enter.</param>
     /// <param name="actingHumanId">The controller behind the shared account (COR-018).</param>
+    /// <param name="clockStart">
+    /// Where to START a clock that has never been started, so a Freeze before the engine's first tick still
+    /// genuinely halts the exercise. <c>null</c> means "cannot be started" — a Freeze then fails closed.
+    /// </param>
     /// <param name="cancellationToken">Cancels the overlay publish.</param>
-    /// <returns>The completed transition, or <c>null</c> when the tier was already active.</returns>
-    public async Task<PauseTierTransition?> SetTierAsync(
+    /// <returns>The outcome plus the completed transition when one happened.</returns>
+    public async Task<PauseTierResult> SetTierAsync(
         Guid exerciseId,
         PauseTier tier,
         string actingHumanId,
+        PauseClockStart? clockStart = null,
         CancellationToken cancellationToken = default)
     {
         if (exerciseId == Guid.Empty)
@@ -134,18 +184,37 @@ public sealed partial class PauseTierRegistry
             var from = GetTier(exerciseId);
             if (from == tier)
             {
-                return null;
+                return new PauseTierResult(PauseTierOutcome.Unchanged, null);
+            }
+
+            // SG-002 + CR-001: the clock effect happens FIRST and must succeed. A refused or unverifiable
+            // freeze/unfreeze leaves NO recorded tier behind, so the console can never render a pause state the
+            // server did not apply.
+            if (!TryApplyClockEffect(exerciseId, from, tier, clockStart))
+            {
+                return new PauseTierResult(PauseTierOutcome.ClockUnavailable, null);
             }
 
             _tiers[exerciseId] = tier;
-            ApplyClockEffect(exerciseId, from, tier);
             transition = new PauseTierTransition(exerciseId, from, tier, actingHumanId);
         }
 
         LogTierChanged(transition.ExerciseId, transition.From, transition.To, transition.ActingHumanId);
 
-        await _overlayPublisher.PublishAsync(transition, cancellationToken).ConfigureAwait(false);
-        return transition;
+        // WR-004: the overlay publish is BEST-EFFORT and must never undo an applied tier. The interface documents
+        // that implementations swallow their own transport failures, but documentation is not enforcement — story
+        // 08's real SignalR publisher lands on this seam next, and a throw here would 500 a request whose clock
+        // was already frozen, making the client revert to RUNNING while the server's world stays FROZEN.
+        try
+        {
+            await _overlayPublisher.PublishAsync(transition, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogOverlayPublishFailed(ex, transition.ExerciseId, transition.To);
+        }
+
+        return new PauseTierResult(PauseTierOutcome.Applied, transition);
     }
 
     /// <summary>
@@ -159,46 +228,102 @@ public sealed partial class PauseTierRegistry
         Message = "Pause tier for exercise {ExerciseId} moved {From} -> {To} by {ActingHumanId}.")]
     private partial void LogTierChanged(Guid exerciseId, PauseTier from, PauseTier to, string actingHumanId);
 
-    /// <summary>Source-generated "the Freeze never reached a started clock" warning (CA1848).</summary>
+    /// <summary>Source-generated "a Freeze had no clock to start" warning (CA1848) — the fail-closed case.</summary>
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "Pause tier {Tier} for exercise {ExerciseId} did not reach the scenario clock: no clock has " +
-                  "been started for it (no reaction loop has ticked), so there is no scenario time to hold.")]
-    private partial void LogClockNotStarted(PauseTier tier, Guid exerciseId);
+        Message = "Pause tier {Tier} for exercise {ExerciseId} was REFUSED: its scenario clock has never been " +
+                  "started and no start point could be resolved, so the freeze could not be applied.")]
+    private partial void LogClockUnavailable(PauseTier tier, Guid exerciseId);
+
+    /// <summary>Source-generated "the clock was started by a Freeze" audit log (CA1848).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Pause tier Freeze for exercise {ExerciseId} started its scenario clock at {ScenarioStart} " +
+                  "({TimeZoneId}) before freezing — the reaction loop had not ticked it yet.")]
+    private partial void LogClockStartedForFreeze(Guid exerciseId, DateTimeOffset scenarioStart, string timeZoneId);
+
+    /// <summary>Source-generated clock-effect failure warning (CA1848) — the fail-closed case.</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Pause tier {Tier} for exercise {ExerciseId} was REFUSED: the scenario-clock effect failed.")]
+    private partial void LogClockEffectFailed(Exception exception, PauseTier tier, Guid exerciseId);
+
+    /// <summary>Source-generated best-effort overlay-publish failure warning (CA1848).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The pause overlay publish for exercise {ExerciseId} (tier {Tier}) failed; the tier and its " +
+                  "clock effect STAND — participants may not have been notified.")]
+    private partial void LogOverlayPublishFailed(Exception exception, Guid exerciseId, PauseTier tier);
 
     /// <summary>
-    /// The clock is touched on entering/leaving <see cref="PauseTier.Freeze"/> and ONLY there — Injects-paused
-    /// and Engine-paused leave scenario time advancing exactly as when running (the story-03 safety invariant,
-    /// now enforced server-side).
+    /// Applies the tier's scenario-clock effect, returning whether it took. The clock is touched on
+    /// entering/leaving <see cref="PauseTier.Freeze"/> and ONLY there — Injects-paused and Engine-paused leave
+    /// scenario time advancing exactly as when running (the story-03 safety invariant, now enforced server-side).
     ///
-    /// <para>An exercise whose clock has never been STARTED cannot be frozen (<c>ExerciseClockService</c>
-    /// throws for an unstarted clock, and <c>ReactionLoopHost</c> starts it lazily on its first tick for a
-    /// registered exercise). Rather than 500 on a controller's safety action, the tier is still recorded and the
-    /// clock call is skipped + logged: with no started clock the engine is not ticking that exercise at all, so
-    /// there is no scenario time to hold.</para>
+    /// <para><b>Entering Freeze STARTS an unstarted clock first (CR-001).</b> An unstarted clock is the default
+    /// state of a fresh host, so simply skipping the freeze would silently no-op the controller's safety action
+    /// forever (and a later reaction-loop tick would start a RUNNING clock under a console reading WORLD FROZEN).
+    /// The freeze is then VERIFIED via <see cref="IExerciseClock.IsFrozen"/> — this method returns
+    /// <c>false</c> if it cannot be applied or cannot be verified, and the caller records nothing.</para>
+    ///
+    /// <para><b>Leaving Freeze must also really take.</b> A Resume that cannot unfreeze would leave the world
+    /// frozen under a console reading RUNNING — the same class of lie — so it fails closed too. An exercise with
+    /// no started clock at all has nothing to unfreeze and succeeds trivially.</para>
     /// </summary>
-    private void ApplyClockEffect(Guid exerciseId, PauseTier from, PauseTier to)
+    private bool TryApplyClockEffect(Guid exerciseId, PauseTier from, PauseTier to, PauseClockStart? clockStart)
     {
         var entering = to == PauseTier.Freeze;
         var leaving = from == PauseTier.Freeze;
         if (!entering && !leaving)
         {
-            return;
+            return true;
         }
 
-        if (!_clock.IsRunning(exerciseId) && !_clock.IsFrozen(exerciseId))
+        var started = _clock.IsRunning(exerciseId) || _clock.IsFrozen(exerciseId);
+
+        if (leaving && !started)
         {
-            LogClockNotStarted(to, exerciseId);
-            return;
+            // Nothing was ever ticking, so there is nothing to resume. Never block a Resume on this.
+            return true;
         }
 
-        if (entering)
+        try
         {
-            _clock.Freeze(exerciseId);
-        }
-        else
-        {
+            if (entering && !started)
+            {
+                if (clockStart is null)
+                {
+                    LogClockUnavailable(to, exerciseId);
+                    return false;
+                }
+
+                // ReactionLoopHost.EnsureClockStarted only starts a clock that is neither running NOR frozen, so
+                // starting-then-freezing here is safe: the loop will leave this frozen clock exactly as it is.
+                _clock.Start(exerciseId, clockStart.ScenarioStart, clockStart.TimeZone);
+                LogClockStartedForFreeze(exerciseId, clockStart.ScenarioStart, clockStart.TimeZone.Id);
+            }
+
+            if (entering)
+            {
+                _clock.Freeze(exerciseId);
+
+                // Verify, never assume — the console must not be told a freeze took when it did not.
+                if (!_clock.IsFrozen(exerciseId))
+                {
+                    LogClockUnavailable(to, exerciseId);
+                    return false;
+                }
+
+                return true;
+            }
+
             _clock.Unfreeze(exerciseId);
+            return !_clock.IsFrozen(exerciseId);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            LogClockEffectFailed(ex, to, exerciseId);
+            return false;
         }
     }
 }

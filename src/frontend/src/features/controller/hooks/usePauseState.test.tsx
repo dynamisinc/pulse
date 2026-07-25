@@ -45,6 +45,8 @@ import { useControllerIdentity, type ControllerIdentity } from '../identity/cont
 import { engineControlStore, useEngineControl } from '../engine/hooks/useEngineControl'
 import { pausableExerciseClock } from '../services/pausableExerciseClock'
 import * as livePauseTierActions from '../services/livePauseTierActions'
+import type { PauseTierServerState } from '../services/livePauseTierActions'
+import * as liveEngineControlActions from '../engine/services/liveEngineControlActions'
 import { resetPauseStateForTest, usePauseState, type PauseTier } from './usePauseState'
 
 vi.mock('@/core/exerciseContext', () => ({
@@ -90,6 +92,7 @@ const mockedUseExerciseContext = vi.mocked(useExerciseContext)
 const mockedUseControllerIdentity = vi.mocked(useControllerIdentity)
 const mockedSetPauseTier = vi.mocked(livePauseTierActions.setPauseTier)
 const mockedFetchPauseTier = vi.mocked(livePauseTierActions.fetchPauseTier)
+const mockedLiveEngineSetMode = vi.mocked(liveEngineControlActions.setMode)
 
 function scopeFor(exerciseId: string): ExerciseScope {
   return { exerciseId, exerciseName: 'Test Exercise', timeZone: 'America/New_York', status: 'active' }
@@ -109,12 +112,19 @@ function steeringEvents() {
   return getEmittedTelemetryEvents().filter(e => e.eventType === 'steering_action')
 }
 
+/** The kill switch's own audit events — must stay empty on a server-sourced resync (WR-002). */
+function autonomyEvents() {
+  return getEmittedTelemetryEvents().filter(e => e.eventType === 'engine.autonomy_changed')
+}
+
 beforeEach(() => {
   mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
   mockedUseControllerIdentity.mockReturnValue(identity())
   resetTelemetryBuffer()
   resetPauseStateForTest()
   engineControlStore.resetForTests()
+  // The composed kill switch's live POST resolves unless a test says otherwise.
+  mockedLiveEngineSetMode.mockResolvedValue(undefined)
   useMockData = true
 })
 
@@ -355,6 +365,18 @@ function renderBothSurfaces() {
   return renderHook(() => ({ pause: usePauseState(), engine: useEngineControl() }))
 }
 
+/** The server's `{ tier, clockFrozen }` answer, as `livePauseTierActions` parses it. */
+function serverState(tier: PauseTier, clockFrozen: boolean): PauseTierServerState {
+  return { tier, clockFrozen }
+}
+
+/** Flushes the microtask queue so an in-flight promise's handlers run. */
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 describe('usePauseState — ENGINE PAUSED drives the SAME kill switch <EngineControlBar> reads', () => {
   it("entering the engine tier calls setMode('stop') — the tier pill and the control bar agree", () => {
     const { result } = renderBothSurfaces()
@@ -389,6 +411,45 @@ describe('usePauseState — ENGINE PAUSED drives the SAME kill switch <EngineCon
     expect(result.current.engine.mode).toBe('stop')
   })
 
+  it('engine -> freeze -> Resume restores the engine (never RUNNING over a stuck STOP)', () => {
+    // WR-003: the two surfaces must not be able to disagree. Reaching `running`
+    // via freeze used to leave the bar at STOP under a pill reading RUNNING.
+    const { result } = renderBothSurfaces()
+
+    act(() => result.current.pause.setTier('engine'))
+    act(() => result.current.pause.setTier('freeze'))
+    act(() => result.current.pause.resume())
+
+    expect(result.current.pause.tier).toBe('running')
+    expect(result.current.engine.mode).toBe('live')
+    expect(engineControlStore.getSnapshot('ex-mock-0001').mode).toBe('live')
+  })
+
+  it('Resume restores a manually chosen SUGGEST-ONLY rather than raising to LIVE (§8.2)', () => {
+    const { result } = renderBothSurfaces()
+
+    // The controller's own pre-pause choice.
+    act(() => result.current.engine.setMode('suggest-only'))
+    act(() => result.current.pause.setTier('engine'))
+    expect(result.current.engine.mode).toBe('stop')
+
+    act(() => result.current.pause.resume())
+
+    // Restoring 'live' here would be an AUTOMATIC autonomy raise out of a
+    // human's deliberate clamp.
+    expect(result.current.engine.mode).toBe('suggest-only')
+  })
+
+  it('leaving the engine tier for Pause injects restores the engine (injects paused, engine live)', () => {
+    const { result } = renderBothSurfaces()
+
+    act(() => result.current.pause.setTier('engine'))
+    act(() => result.current.pause.setTier('injects'))
+
+    expect(result.current.pause.tier).toBe('injects')
+    expect(result.current.engine.mode).toBe('live')
+  })
+
   it('the injects and freeze tiers never touch the kill switch on their own', () => {
     const { result } = renderBothSurfaces()
 
@@ -420,7 +481,10 @@ describe('usePauseState — mock mode fires NO backend call (story 03 path uncha
 describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false)', () => {
   beforeEach(() => {
     useMockData = false
-    mockedSetPauseTier.mockResolvedValue(undefined)
+    // The server APPLIED whatever was asked of it, unless a test says otherwise.
+    mockedSetPauseTier.mockImplementation(tier =>
+      Promise.resolve(serverState(tier, tier === 'freeze')),
+    )
     mockedFetchPauseTier.mockRejectedValue(new Error('no resync in this test'))
   })
 
@@ -480,11 +544,11 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
     mockedSetPauseTier
       .mockImplementationOnce(
         () =>
-          new Promise<void>((_resolve, reject) => {
+          new Promise<PauseTierServerState>((_resolve, reject) => {
             rejectFirst = reject
           }),
       )
-      .mockResolvedValue(undefined)
+      .mockImplementation(tier => Promise.resolve(serverState(tier, tier === 'freeze')))
 
     const { result } = renderHook(() => usePauseState())
 
@@ -494,35 +558,133 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
 
     await act(async () => {
       rejectFirst?.(new Error('network down'))
-      await Promise.resolve()
-      await Promise.resolve()
+      await flushMicrotasks()
     })
 
     expect(result.current.tier).toBe('freeze')
     expect(result.current.isFrozen).toBe(true)
   })
 
-  it('reverts the engine kill switch too when an engine-tier POST rejects', async () => {
+  // ---- CR-001: a Freeze the server did not apply must never render as frozen ----
+
+  it('reverts a Freeze the server reports it did NOT apply (clockFrozen: false)', async () => {
+    // The endpoint answered 200 with the HONEST truth that the scenario clock is
+    // not frozen. WORLD FROZEN must not survive that.
+    mockedSetPauseTier.mockResolvedValue(serverState('freeze', false))
+    const { result } = renderHook(() => usePauseState())
+
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+
+    expect(result.current.tier).toBe('running')
+    expect(result.current.isFrozen).toBe(false)
+    expect(result.current.label).toBe('RUNNING')
+  })
+
+  it('reverts a Freeze the server REFUSED (the 409 rejection path)', async () => {
+    mockedSetPauseTier.mockRejectedValue(new Error('Request failed with status code 409'))
+    const { result } = renderHook(() => usePauseState())
+
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+
+    expect(result.current.tier).toBe('running')
+    expect(result.current.isFrozen).toBe(false)
+  })
+
+  it('reverts when the server recorded a DIFFERENT tier than the one requested', async () => {
+    mockedSetPauseTier.mockResolvedValue(serverState('running', false))
+    const { result } = renderHook(() => usePauseState())
+
+    await act(async () => {
+      result.current.setTier('engine')
+      await flushMicrotasks()
+    })
+
+    expect(result.current.tier).toBe('running')
+  })
+
+  it('keeps the Freeze when the server confirms the clock IS frozen', async () => {
+    mockedSetPauseTier.mockResolvedValue(serverState('freeze', true))
+    const { result } = renderHook(() => usePauseState())
+
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+
+    expect(result.current.tier).toBe('freeze')
+    expect(result.current.isFrozen).toBe(true)
+    expect(result.current.label).toBe('WORLD FROZEN')
+  })
+
+  // ---- CR-002: ENGINE PAUSED cannot outlive a failed kill-switch POST ----
+
+  it('reverts the tier when the KILL-SWITCH POST fails, even though the pause-tier POST succeeded', async () => {
+    // The engine tier fires TWO independent requests. When the kill switch is the
+    // one that fails, the bar snaps back to LIVE — the pill must not keep reading
+    // ENGINE PAUSED over a generating engine (AC3: never contradictory).
+    mockedLiveEngineSetMode.mockRejectedValue(new Error('kill switch unreachable'))
+    const { result } = renderBothSurfaces()
+
+    await act(async () => {
+      result.current.pause.setTier('engine')
+      await flushMicrotasks()
+    })
+
+    expect(result.current.engine.mode).toBe('live')
+    expect(result.current.pause.tier).toBe('running')
+    expect(result.current.pause.label).toBe('RUNNING')
+    expect(engineControlStore.getSnapshot('ex-mock-0001').mode).toBe('live')
+  })
+
+  it('does NOT revert a kill-switch failure once a newer transition has superseded it', async () => {
+    let rejectKillSwitch: ((reason: Error) => void) | undefined
+    mockedLiveEngineSetMode.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectKillSwitch = reject
+        }),
+    )
+    const { result } = renderBothSurfaces()
+
+    act(() => result.current.pause.setTier('engine'))
+    // A NEWER transition lands before the kill switch's rejection arrives.
+    act(() => result.current.pause.setTier('freeze'))
+
+    await act(async () => {
+      rejectKillSwitch?.(new Error('kill switch unreachable'))
+      await flushMicrotasks()
+    })
+
+    expect(result.current.pause.tier).toBe('freeze')
+  })
+
+  it('reverts the engine kill switch too when the PAUSE-TIER POST rejects', async () => {
     mockedSetPauseTier.mockRejectedValue(new Error('network down'))
     const { result } = renderBothSurfaces()
 
     await act(async () => {
       result.current.pause.setTier('engine')
-      await Promise.resolve()
-      await Promise.resolve()
+      await flushMicrotasks()
     })
 
     expect(result.current.pause.tier).toBe('running')
     expect(result.current.engine.mode).toBe('live')
   })
 
+  // ---- the one-shot resync ----
+
   it('resyncs ONCE on mount and adopts the server tier without emitting telemetry or POSTing', async () => {
-    mockedFetchPauseTier.mockResolvedValue('freeze')
+    mockedFetchPauseTier.mockResolvedValue(serverState('freeze', true))
 
     const { result } = renderHook(() => usePauseState())
     await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
+      await flushMicrotasks()
     })
 
     expect(mockedFetchPauseTier).toHaveBeenCalledTimes(1)
@@ -534,13 +696,66 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
     expect(mockedSetPauseTier).not.toHaveBeenCalled()
   })
 
+  it('never adopts a Freeze the server reports as NOT applied', async () => {
+    mockedFetchPauseTier.mockResolvedValue(serverState('freeze', false))
+
+    const { result } = renderHook(() => usePauseState())
+    await act(async () => {
+      await flushMicrotasks()
+    })
+
+    expect(result.current.tier).toBe('running')
+    expect(result.current.isFrozen).toBe(false)
+  })
+
+  it('adopting the engine tier reflects the STOP locally with no autonomy telemetry and no kill-switch POST', async () => {
+    // WR-002: the stop was some OTHER human's action, already logged by them.
+    // Emitting engine.autonomy_changed here would attribute a safety action to
+    // this console's acting human for something they never did (COR-018).
+    mockedFetchPauseTier.mockResolvedValue(serverState('engine', false))
+
+    const { result } = renderBothSurfaces()
+    await act(async () => {
+      await flushMicrotasks()
+    })
+
+    expect(result.current.pause.tier).toBe('engine')
+    expect(result.current.engine.mode).toBe('stop')
+    expect(autonomyEvents()).toHaveLength(0)
+    expect(steeringEvents()).toHaveLength(0)
+    expect(mockedLiveEngineSetMode).not.toHaveBeenCalled()
+  })
+
+  it('a resync that lands AFTER the controller acted never overwrites their choice', async () => {
+    // WR-001: the adopt path carries the same supersede guard the POST path does.
+    let resolveResync: ((state: PauseTierServerState) => void) | undefined
+    mockedFetchPauseTier.mockImplementation(
+      () =>
+        new Promise<PauseTierServerState>(resolve => {
+          resolveResync = resolve
+        }),
+    )
+
+    const { result } = renderHook(() => usePauseState())
+
+    // The controller acts while the GET is still in flight.
+    act(() => result.current.setTier('injects'))
+
+    await act(async () => {
+      resolveResync?.(serverState('freeze', true))
+      await flushMicrotasks()
+    })
+
+    expect(result.current.tier).toBe('injects')
+    expect(result.current.isFrozen).toBe(false)
+  })
+
   it('keeps the local baseline when the resync GET fails (never a guessed tier)', async () => {
     mockedFetchPauseTier.mockRejectedValue(new Error('401'))
 
     const { result } = renderHook(() => usePauseState())
     await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
+      await flushMicrotasks()
     })
 
     expect(result.current.tier).toBe('running')
@@ -548,13 +763,12 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
   })
 
   it('resyncs only once across several mounted surfaces', async () => {
-    mockedFetchPauseTier.mockResolvedValue('engine' as PauseTier)
+    mockedFetchPauseTier.mockResolvedValue(serverState('engine', false))
 
     const first = renderHook(() => usePauseState())
     const second = renderHook(() => usePauseState())
     await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
+      await flushMicrotasks()
     })
 
     expect(mockedFetchPauseTier).toHaveBeenCalledTimes(1)
