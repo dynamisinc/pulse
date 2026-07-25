@@ -70,7 +70,16 @@ touched auth).
 | 04 | Wire real login routes + logout (replaces `SignInFallback`) | COR-004, COR-005 (consumed) | Complete (PR #316, merged) | #307 |
 | 05 | UAT bootstrap seam (guarded one-time seed endpoint) | COR-008, COR-011, COR-014, COR-015 (enablement) | Complete (PR #310 + wiring fix #317, merged) | #308 |
 | 06 | UAT go-live config & runbook (allowlist, environment, mock-data flip) | NFR-009 | Complete | #309 |
-| 07 | Participant persona binding (provision a participant account with a posting persona) | COR-011, COR-018, SOC-001/003 | In Progress | #342 |
+
+**Story 07 (participant persona binding, #342) was RELOCATED out of this feature** to
+`identity-auth-roles/10-participant-persona-binding.md`, and this feature is **closed without it**. It was
+filed here because the gap surfaced during this feature's UAT rollout, but it does not belong to this
+feature's scope: it carries **SOC-001/SOC-003** (E2 — the post entity and its authorship) and **COR-018**
+(org-account operation), and it is the provisioning-time half of `identity-auth-roles/09`'s first AC
+("a participant can be granted operation of one or more org personas... in setup"). Nothing in this
+feature's requirements (COR-011/012/014/015) concerns *composing* a post — only signing in. A participant
+with no bound persona seeing no composer is **correct COR-015 observer behavior**, not an unmet AC of this
+feature. See that story for the work itself (built, Tier-2 reviewed clean).
 
 ## Dependencies
 
@@ -82,11 +91,12 @@ This feature is a **pure consumer** of all of those contracts — no story here 
 existing identity slice, except story 05, which **adds** a new, narrowly-scoped slice alongside it.
 
 **Internal:** 02 and 03 depend on 01 (the token store they persist into); 04 depends on 02 + 03 (the
-pages it routes to); 06 depends on 04 (frontend) and 05 (backend) both being merged/deployable. 07
-**extends** 05's bootstrap slice in place (same files, additive edit, not a fork — see 07's Technical
-Notes) rather than depending on it as a separate merged artifact, and additionally depends on
-`engine-content-seed` (the persona cast a binding targets, and the reason it resolves by handle rather
-than id).
+pages it routes to); 06 depends on 04 (frontend) and 05 (backend) both being merged/deployable.
+
+**Outbound (a consumer, not a dependency of this feature):** `identity-auth-roles/10` (the relocated
+persona binding, #342) *extends* story 05's bootstrap slice in place — additive edits to the same files,
+not a fork. It is a downstream consumer of this feature's seam; nothing here depends on it, which is why
+this feature closes without it.
 
 ## Design notes
 

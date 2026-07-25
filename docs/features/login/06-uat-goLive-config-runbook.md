@@ -221,7 +221,10 @@ curl -sS -X POST https://app-pulse-api-uat-dynamis.azurewebsites.net/api/ops/boo
   re-check step 1 landed and the backend restarted (step 3).
 - **400** → invalid body (e.g. missing `hostname`, or `staff.username` not in the allowlist).
 
-**4b — Bind a posting persona to the participant account** (story 07, #342). Without this the participant
+**4b — Bind a posting persona to the participant account** (`identity-auth-roles/10`, #342 — a downstream
+consumer of this feature's bootstrap seam, **not** a step this feature depends on: skip 4b entirely if the
+exercise's participants are meant to observe rather than post, which is a legitimate COR-015 mode). Without
+it the participant
 signs in and sees the feed, but the **composer is absent** — `Account.PersonaId` is null, so the session
 carries no `personaId` and `canPost` is false. That is correct COR-015 observer behavior, *not* a
 regression, but it is not what you want for a participant who is meant to post.
