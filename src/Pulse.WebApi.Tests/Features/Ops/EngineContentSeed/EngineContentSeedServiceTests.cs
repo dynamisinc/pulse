@@ -102,7 +102,7 @@ public sealed class EngineContentSeedServiceTests
     }
 
     [RequiresDockerFact]
-    public async Task Seed_ResolvesExistingExercise_SeedsSixPersonas_AndRegistersTheLoop()
+    public async Task Seed_ResolvesExistingExercise_SeedsNinePersonas_AndRegistersTheLoop()
     {
         var hostname = UniqueHostname();
         var exerciseId = await InsertExerciseAsync(hostname);
@@ -114,14 +114,14 @@ public sealed class EngineContentSeedServiceTests
 
         result.Outcome.Should().Be(EngineContentSeedOutcome.Provisioned);
         result.ExerciseId.Should().Be(exerciseId, "the loop is registered for the resolved exercise (COR-001)");
-        result.PersonasCreated.Should().Be(6);
+        result.PersonasCreated.Should().Be(9);
         result.PersonasReused.Should().Be(0);
 
         registry.Active.Should().ContainSingle().Which.ExerciseId.Should().Be(exerciseId);
 
         await using var verify = _fixture.CreateContext();
         (await verify.Personas.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == exerciseId)).Should().Be(
-            6, "story 01's cast is seeded for the resolved exercise");
+            9, "story 01's cast is seeded for the resolved exercise");
     }
 
     [RequiresDockerFact]
@@ -156,14 +156,14 @@ public sealed class EngineContentSeedServiceTests
         {
             var first = BuildService(db1, registry, autonomyRegistry);
             (await first.SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret))
-                .PersonasCreated.Should().Be(6);
+                .PersonasCreated.Should().Be(9);
         }
 
         await using (var db2 = _fixture.CreateContext())
         {
             var second = BuildService(db2, registry, autonomyRegistry);
             var result = await second.SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret);
-            result.PersonasReused.Should().Be(6, "the second seed reuses story 01's rows (idempotent)");
+            result.PersonasReused.Should().Be(9, "the second seed reuses story 01's rows (idempotent)");
             result.PersonasCreated.Should().Be(0);
         }
 
@@ -172,7 +172,7 @@ public sealed class EngineContentSeedServiceTests
 
         await using var verify = _fixture.CreateContext();
         (await verify.Personas.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == exerciseId)).Should().Be(
-            6, "re-running the seed creates zero additional persona rows (AC4)");
+            9, "re-running the seed creates zero additional persona rows (AC4)");
     }
 
     [RequiresDockerFact]
@@ -199,7 +199,7 @@ public sealed class EngineContentSeedServiceTests
         evt.Target!.EntityId.Should().Be(exerciseId.ToString());
 
         using var payload = JsonDocument.Parse(evt.Payload!);
-        payload.RootElement.GetProperty("personasCreated").GetInt32().Should().Be(6);
+        payload.RootElement.GetProperty("personasCreated").GetInt32().Should().Be(9);
         payload.RootElement.GetProperty("storylineTitle").GetString().Should().Be("Water main contamination fears");
     }
 

@@ -111,20 +111,50 @@ extends). None on story 07 (file-disjoint at the code level; only the migration-
 serial — see `implementation.md`).
 
 ## Tests
-xUnit, `src/Pulse.WebApi.Tests/Features/Social/` and `.../Ops/Bootstrap/` (or the engine-content-seed
-test project, matching wherever `PersonaCastSeederTests` already lives):
-- `PersonaResponseDto.FromPersona` projects a persisted persona's real `Bio`/`PersonaType`/
-  `AudienceBand`/`AudienceMagnitude`/`JoinedAt` — never the removed B1 constants.
-- `PersonaCastSeeder` seeds all nine catalog personas (the six existing plus `@FairhavenWaterUpd`,
-  `@TheScoopHQ`, `@dreyes_fh`) with `Verified = false` on the lookalike and non-empty
-  presentation fields on every persona.
-- Re-running the seeder against an already-seeded exercise is idempotent: no duplicate rows, no
-  overwritten fields, and the three new handles are added exactly once when seeding an
-  exercise that predates them.
-- `AudienceMagnitude` derivation matches the frontend's per-band ranges (`seedCast.ts`'s
-  `BAND_BASE`) for the same handle/band pairing (a documented parity assertion, not necessarily a
-  byte-for-byte port of the jitter function).
-- `JoinedAt` is a deterministic, backdated scenario instant for every persona, and is more recent for
-  the impersonator than for the verified/established cast (the "joined this week" tell).
-- Cross-exercise isolation on `GET /api/personas` still holds with the wider projection (extends the
-  standing isolation suite, `exercise-isolation/07`) — no regression from the added fields.
+xUnit, `src/Pulse.WebApi.Tests/Features/Social/` and `.../Features/Ops/EngineContentSeed/`. Tests marked
+**[docker]** are `[RequiresDockerFact]` (real SQL Server: Testcontainers in CI, or `PULSE_TEST_SQL_CONNECTION`
+locally); the rest are model-only `[Fact]`/`[Theory]` and run everywhere.
+
+**Persisted fields (AC1)**
+- `PersonaEndpointsTests.Persona_MigrationRoundTrip_PersistsThePresentationFields_AndDefaultsSafely` [docker]
+  — all five columns round-trip through a separate read context, and a row written without them lands on the
+  documented contract-valid defaults (never `""`/`0001-01-01`).
+
+**Real projection, unchanged contract (AC2)**
+- `PersonaResponseDtoTests.FromPersona_ProjectsThePersistedPresentationValues_NotTheB1StandIns`
+- `PersonaResponseDtoTests.FromPersona_KeepsAvatarColorAndInitials_DerivedAndStable`
+- `PersonaResponseDtoTests.FromPersona_NullBio_OmitsTheKeyEntirely_RatherThanEmittingNull`
+- `PersonaEndpointsTests.Response_ProjectsThePersistedPresentationFields_NotTheB1StandIns` [docker] — over
+  HTTP, incl. the exact wire field-set (frozen contract + the optional `bio`, nothing more).
+
+**Seeder populates real state (AC3)**
+- `PersonaCastSeederTests.SeedAsync_PopulatesEveryPresentationField_ForEveryPersona` [docker]
+- `PersonaCastDerivationTests.DeriveAudienceMagnitude_MatchesTheFrontendMock_ForTheSameHandleAndBand`
+  (per-handle parity with `seedCast.ts`), `..._StaysWithinTheBandsFloorPlusForty` (the `BAND_BASE` band
+  ranges), `..._IsDeterministic_AndBandOrdered`, `..._UnknownBand_Throws_RatherThanInventingANumber`
+- `PersonaCastDerivationTests.DeriveJoinedAt_MatchesTheFrontendMock_AndAlwaysPredatesTheEpoch`,
+  `..._BadActor_JoinsWithinAWeekOfTheEpoch_EstablishedPersonasJoinMuchEarlier`,
+  `PersonaCastDerivationTests.SeedEpoch_IsTheFixedPreExerciseScenarioConstant_NeverTheWallClock`
+- `PersonaCastSeederTests.SeedAsync_StoredFreeText_PassesThroughTheSanitizationFunnel` [docker] (now
+  covers `Bio`, NFR-004)
+
+**Impersonation pair + live-cast parity (AC4)**
+- `PersonaCastSeederTests.SeedAsync_FreshExercise_CreatesExactlyNinePersonas_WithTheExactHandlesKindVerified`
+  [docker]
+- `PersonaCastSeederTests.SeedAsync_SeedsTheImpersonationPair_UnverifiedLookalike_WithNoFlagOfAnyKind`
+  [docker] — `Verified = false`, no flag field of any kind, recent join date
+- `PersonaResponseDtoTests.FromPersona_NeverFlagsAnUnverifiedLookalike_TheAbsentSealIsTheOnlySignal`
+
+**No new leak (AC5)**
+- `PersonaEndpointsTests.WiderProjection_StillLeaksNothingAcrossExercises_ScopeA_NeverSeesBsPresentationFields`
+  [docker] — extends the standing isolation suite (`exercise-isolation/07`)
+- `PersonaEndpointsTests.Response_ContainsOnlyShippedPersonaFields_NoProvenanceOrOperatorLeak` [docker]
+  (existing, still green), `PersonaResponseDtoTests.FromPersona_CarriesNoProvenanceOrOperatorField_XC002`
+
+**Idempotent seeding (AC6)**
+- `PersonaCastSeederTests.SeedAsync_RunAgain_CreatesNoDuplicates_AndReturnsTheSameIds` [docker]
+- `PersonaCastSeederTests.SeedAsync_AgainstAnExercisePredatingTheNewHandles_AddsExactlyThoseThree_AndDisturbsNothing`
+  [docker]
+- `EngineContentSeedServiceTests.Seed_ResolvesExistingExercise_SeedsNinePersonas_AndRegistersTheLoop` /
+  `EngineContentSeedServiceTests.Seed_RunTwice_ReusesPersonas_AndReplacesRegistration_NeverDuplicates`
+  [docker] (updated 6 → 9)

@@ -152,6 +152,21 @@ public class PulseDbContext : DbContext
             // Server, so the migration narrows this column to make the index possible at all.
             entity.Property(e => e.Handle).HasMaxLength(256);
             entity.HasIndex(e => new { e.ExerciseId, e.Handle }).IsUnique();
+
+            // profiles-social-graph/06 presentation fields (COR-020/COR-021/SOC-054). Bounded lengths (the
+            // two union-valued columns are short, closed vocabularies); Bio is optional free text.
+            entity.Property(e => e.Bio).HasMaxLength(512);
+
+            // Required-WITH-DEFAULT, the same shape Exercise.TimeZone/Status use above: the migration adds
+            // these NOT NULL to a table that already holds seeded rows, so the default backfills a
+            // contract-VALID value ("citizen"/"nano"/the fixed pre-exercise scenario epoch) instead of an
+            // empty string or a 0001-01-01 sentinel that would reach a participant surface.
+            entity.Property(e => e.PersonaType).IsRequired().HasMaxLength(32)
+                .HasDefaultValue(Persona.DefaultPersonaType);
+            entity.Property(e => e.AudienceBand).IsRequired().HasMaxLength(16)
+                .HasDefaultValue(Persona.DefaultAudienceBand);
+            entity.Property(e => e.AudienceMagnitude).IsRequired().HasDefaultValue(0);
+            entity.Property(e => e.JoinedAt).IsRequired().HasDefaultValue(Persona.DefaultJoinedAt);
         });
 
         modelBuilder.Entity<Post>(entity =>
