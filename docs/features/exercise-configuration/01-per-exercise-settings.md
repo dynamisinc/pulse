@@ -1,6 +1,7 @@
 # Story: Per-exercise settings
 
-**Feature:** Exercise configuration  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Exercise configuration  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+*(slice **01a** — schema + COR-032 vocabulary + the client guard — has shipped; the flip to Complete belongs to slice **01b**, the settings API + shell-config service + staff editor.)*
 **Requirements:** COR-030 (XC-008)  ·  **Design decisions:** none  ·  **Issue:** #67
 
 ## Context
@@ -116,3 +117,25 @@ every channel (enablement/theming), and stories 02/03/04 (which build on this st
   `[InlineData]` set is extended with the six new values.
 - Data migration: existing rows land on the mapped COR-032 literals; `MigrationRoundTripTests`' default
   expectation is updated to the new `HasDefaultValue`.
+
+### Shipped in slice 01a (schema + vocabulary + guard)
+
+The settings API/editor, the constants→per-exercise projection, isolation and sanitization tests belong
+to slice **01b** and are not listed below — 01a ships the schema, the vocabulary and the client guard.
+
+| Test | AC |
+|---|---|
+| `MigrationRoundTripTests.Exercise_RoundTrips_WithExerciseConfigurationColumns` | AC1 (the COR-030 settings columns persist), AC-watermark |
+| `MigrationRoundTripTests.Exercise_RoundTrips_WithUnconfiguredSettings_CarryingSafeDefaults` | AC1, AC-watermark (real column, safe default) |
+| `MigrationRoundTripTests.Exercise_RoundTrips_WithDefaultTimeZoneAndStatus_WhenNotSet` | AC-vocabulary (`PulseDbContext`'s new `HasDefaultValue`), AC4 (single IANA zone) |
+| `ExerciseConfigurationMigrationTests.Up_MapsEveryLegacyStatusOntoItsCor032Replacement` | AC-vocabulary (existing rows are mapped by the data migration) |
+| `ExerciseConfigurationMigrationTests.Up_LeavesRowsAlreadyOnTheCor032Vocabulary_Untouched` | AC-vocabulary |
+| `ExerciseConfigurationMigrationTests.Up_BackfillsPreExistingRows_WithSafeSwitchDefaults_AndNullSettings` | AC1, AC-watermark |
+| `ExerciseConfigurationMigrationTests.Down_ReturnsEveryRowToTheLegacyVocabulary` | AC-client-first ordering (a rollback strands no client) |
+| `ExerciseScopeDtoTests.Status_SerializesAsTheLowercaseExerciseStatusString` (9 `[InlineData]`) | AC-vocabulary (`FromExercise` passes it through unchanged) |
+| `ExerciseScopeDtoTests.Serialized_KeepsTheFrozenFourKeys_WhenACor032StatusFlowsThrough` | AC2 (no DTO is reshaped) |
+| `BootstrapServiceTests.Bootstrap_EmptyDatabase_CreatesHostBoundLiveExercise` | AC-vocabulary (`BootstrapService`'s seed uses the new literals) |
+| `BootstrapServiceTests.Bootstrap_SeedsAnExerciseThatStillResolves_AndProjectsOntoTheFrozenScopeShape` | AC-vocabulary, AC2 |
+| `exerciseContextResolver.test.ts` → `isExerciseStatus — the transitional superset` (accepts the six + the legacy four; rejects coined variants, wrong case, non-strings) | AC-client-first ordering |
+| `exerciseContextResolver.test.ts` → `resolves a scope whose status is "%s"` (all ten) | AC-client-first ordering |
+| `StaffHeader.test.tsx` → `status "%s" renders both a dot AND the text label` (all ten) | AC-client-first ordering + NFR-001 (a newly-emittable status is never color-only) |

@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.SharedAccess;
@@ -53,7 +54,7 @@ public sealed class BootstrapServiceTests
             new OpsPersonaResolver(context));
 
     [RequiresDockerFact]
-    public async Task Bootstrap_EmptyDatabase_CreatesHostBoundActiveExercise()
+    public async Task Bootstrap_EmptyDatabase_CreatesHostBoundLiveExercise()
     {
         var host = NewHostname();
 
@@ -75,7 +76,53 @@ public sealed class BootstrapServiceTests
         exercise.Id.Should().Be(result.ExerciseId!.Value, "the exercise is host-bound so ExerciseResolutionMiddleware can resolve it");
         exercise.Name.Should().Be("UAT Pilot");
         exercise.TimeZone.Should().Be("America/New_York");
-        exercise.Status.Should().Be("active", "a bootstrapped exercise is created active");
+        exercise.Status.Should().Be(
+            "live",
+            "a bootstrapped exercise is created running — exercise-configuration story 01a moved that seed onto " +
+            "the COR-032 vocabulary, where the legacy 'active' is spelled 'live'");
+    }
+
+    /// <summary>
+    /// Story exercise-configuration/01a: the vocabulary change and the new required columns must not break the
+    /// one path that can seed a fresh, empty database. The seeded exercise is still host-resolvable and still
+    /// projects onto the FROZEN <see cref="ExerciseScopeDto"/> with a status drawn from
+    /// <c>implementation.md</c>'s authoritative COR-032 list — which is exactly the set the widened frontend
+    /// guard accepts, so a bootstrapped UAT resolves a scope instead of blanking the participant world.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task Bootstrap_SeedsAnExerciseThatStillResolves_AndProjectsOntoTheFrozenScopeShape()
+    {
+        var host = NewHostname();
+
+        await using (var context = _fixture.CreateContext())
+        {
+            var result = await NewService(context).BootstrapAsync(
+                new BootstrapExerciseRequest { Hostname = host, ExerciseName = "UAT Pilot" }, Secret);
+            result.Outcome.Should().Be(BootstrapOutcome.Provisioned);
+        }
+
+        await using var read = _fixture.CreateContext();
+
+        // Resolvable: the host→exercise lookup ExerciseResolutionMiddleware performs (Exercise is unscoped,
+        // so this read is not filtered — that is what lets it discover the scope).
+        var exercise = await read.Exercises.AsNoTracking().SingleOrDefaultAsync(e => e.Hostname == host);
+        exercise.Should().NotBeNull("the seeded exercise must still resolve by hostname after the schema change");
+
+        var scope = ExerciseScopeDto.FromExercise(exercise!);
+
+        scope.ExerciseId.Should().Be(exercise!.Id.ToString());
+        scope.ExerciseName.Should().Be("UAT Pilot");
+        scope.TimeZone.Should().Be("UTC", "an unspecified time zone normalizes to the UTC default");
+        scope.Status.Should().BeOneOf(
+            ["build", "staged", "live", "paused", "completed", "archived"],
+            "the seed must carry a COR-032 literal from implementation.md's authoritative list — anything else " +
+            "is an unknown status to the fail-closed client guard");
+
+        // The new columns land on their safe defaults, so a bootstrapped exercise is immediately usable:
+        // chrome + watermark ON (NFR-008 never-both-off holds), practice OFF (real conduct).
+        exercise.ComplianceChromeEnabled.Should().BeTrue();
+        exercise.WatermarkEnabled.Should().BeTrue();
+        exercise.IsPracticeMode.Should().BeFalse();
     }
 
     [RequiresDockerFact]

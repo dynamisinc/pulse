@@ -159,7 +159,12 @@ describe('StaffHeader — identity badge is STATIC during conduct (COR-005)', ()
     expect(badge.tagName).not.toBe('BUTTON')
   })
 
-  const ALL_STATUSES: ExerciseStatus[] = ['scheduled', 'active', 'complete', 'archived']
+  // The transitional superset story 01a widened `ExerciseStatus` to: the COR-032
+  // six plus the legacy four still valid through the transition.
+  const ALL_STATUSES: ExerciseStatus[] = [
+    'build', 'staged', 'live', 'paused', 'completed', 'archived',
+    'scheduled', 'active', 'complete',
+  ]
 
   it.each(ALL_STATUSES)(
     'status "%s" renders no switcher control either (switching UX is out of scope for this story)',
@@ -175,11 +180,19 @@ describe('StaffHeader — identity badge is STATIC during conduct (COR-005)', ()
 })
 
 describe('StaffHeader — exercise state pill (NFR-001: never color-only)', () => {
+  // Exhaustive by its `Record` type over the widened union — so a status the
+  // backend can now emit (COR-032's six) can never render a pill with no text
+  // label. The legacy four are aliases of their COR-032 replacement.
   const EXPECTED_LABELS: Record<ExerciseStatus, string> = {
+    build: 'BUILD',
+    staged: 'STAGED',
+    live: 'LIVE',
+    paused: 'PAUSED',
+    completed: 'ENDEX',
+    archived: 'ARCHIVED',
     active: 'LIVE',
     scheduled: 'STAGED',
     complete: 'ENDEX',
-    archived: 'ARCHIVED',
   }
 
   it.each(Object.entries(EXPECTED_LABELS) as Array<[ExerciseStatus, string]>)(

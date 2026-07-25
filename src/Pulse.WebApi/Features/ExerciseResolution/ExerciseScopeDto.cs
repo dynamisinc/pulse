@@ -11,11 +11,24 @@ using Pulse.WebApi.Data.Entities;
 /// <c>USE_MOCK_EXERCISE_CONTEXT</c> live drives <c>useExerciseContext()</c> with no consumer change.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Wave-0 freezes the shape only; the host-resolution middleware + endpoint are story 08 (exercise-isolation
 /// feature), which owns this <c>Features/ExerciseResolution/</c> slice. Every property has an explicit
-/// <see cref="JsonPropertyNameAttribute"/> (camelCase); <c>status</c> is the lowercase <c>ExerciseStatus</c>
-/// vocabulary (<c>scheduled</c> / <c>active</c> / <c>complete</c> / <c>archived</c>). The <c>exerciseId</c>
-/// is a display/telemetry-stamping value, NEVER a client-supplied query-scoping parameter (COR-001).
+/// <see cref="JsonPropertyNameAttribute"/> (camelCase). The <c>exerciseId</c> is a display/telemetry-stamping
+/// value, NEVER a client-supplied query-scoping parameter (COR-001).
+/// </para>
+/// <para>
+/// <b>The SHAPE stays frozen; only <c>status</c>'s VOCABULARY widened</b> (exercise-configuration story 01a —
+/// Option B, Tier-2 sign-off given). <c>status</c> is the lowercase <c>ExerciseStatus</c> string passed
+/// through from <see cref="Exercise.Status"/> VERBATIM — no mapping, no projection, no default. It now
+/// carries the COR-032 vocabulary (<c>build</c> / <c>staged</c> / <c>live</c> / <c>paused</c> /
+/// <c>completed</c> / <c>archived</c>) while the legacy four (<c>scheduled</c> / <c>active</c> /
+/// <c>complete</c> / <c>archived</c>) remain valid through the transition. The frontend's
+/// <c>isExerciseStatus</c> guard accepts that transitional superset and FAILS CLOSED on anything else, so a
+/// literal coined here that is not in <c>implementation.md</c>'s authoritative list blanks the participant
+/// world rather than raising a type error. Adding, removing or renaming a FIELD here is still a Tier-2
+/// contract change.
+/// </para>
 /// </remarks>
 public sealed class ExerciseScopeDto
 {
@@ -31,7 +44,10 @@ public sealed class ExerciseScopeDto
     [JsonPropertyName("timeZone")]
     public required string TimeZone { get; init; }
 
-    /// <summary>Lifecycle status — the lowercase <c>ExerciseStatus</c> vocabulary.</summary>
+    /// <summary>
+    /// Lifecycle status — the lowercase <c>ExerciseStatus</c> vocabulary, passed through verbatim (COR-032's
+    /// six, plus the legacy four still valid through the transition — see the type remarks).
+    /// </summary>
     [JsonPropertyName("status")]
     public required string Status { get; init; }
 
