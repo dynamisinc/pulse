@@ -29,6 +29,7 @@ non-negotiables (staff vs participant worlds).
 | 07 | Shared-credential lifecycle (rotate/revoke/lockout) | COR-016 | Complete | #64 |
 | 08 | Participant admin panel (login triage) | COR-017 | Not Started | #65 |
 | 09 | Organization-account operation (post-as-org, attribution) | COR-018 | Not Started | #66 |
+| 11 | Default-deny session enforcement across the API surface | COR-012 (+COR-001, COR-015, COR-018, NFR-009) | Not Started | #361 |
 
 ## Dependencies
 Exercise-isolation (session→exercise scoping, COR-001/008); telemetry (XC-004) for attribution. The
@@ -55,6 +56,15 @@ a second context. **`StaffUser`/`StaffAssignment` are deliberately NOT `IExercis
 by design, COR-005 — see implementation.md). Stories **01** (roles) and **04** (evaluator read-only) keep
 their prior scope; stories **08** (participant admin, COR-017) and **09** (org-account, COR-018) are
 **deferred out of the B2 slice**.
+
+**Story 11 — the unbuilt half of COR-012 (#359).** Story 03 built the session *model*
+(issuance/refresh/`GET /api/session`); it never enforced that a live session is *required* before
+any other endpoint honors a request — every endpoint gated only on "is a scope resolved," which
+`ExerciseResolutionMiddleware`'s anonymous host resolution (`exercise-isolation/08`) satisfies for
+free. Confirmed live against UAT: `GET /api/personas`, `GET /api/feed`, and `POST /api/posts` all
+succeeded with zero credentials presented. Story 11 adds the missing default-deny gate at the
+composition root; see its own file for the full analysis and the correction it adds to story 03's
+AC record.
 
 ## Design notes
 Foundation, spanning staff and participant worlds. Read-only sessions still get an ephemeral identity

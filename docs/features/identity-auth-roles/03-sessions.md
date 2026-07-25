@@ -55,6 +55,25 @@ login method calls to mint a session (story 02 participant, story 05 staff, stor
       resolved exercise or the request fails closed (401/403).
 - [x] Expiry forces re-auth: a request with an expired/absent session resolves **no** scope (fail-closed
       — zero rows), and `GET /api/session` returns 401 rather than a default/stale session.
+
+  > **Correction (found during #359 triage; not reopening this story — see `identity-auth-roles/11`):**
+  > this bullet is only **partially met** as built. The `GET /api/session` clause is true — that
+  > endpoint has always required a live session and correctly 401s without one. The **"an
+  > expired/absent session resolves no scope" clause is false** for every *other* endpoint. An
+  > absent session does not clear the scope to unset/zero-rows — it simply leaves whatever
+  > `ExerciseResolutionMiddleware`'s anonymous **host** resolution already wrote (COR-008), because
+  > `SessionAuthenticationMiddleware` only *overrides* the host's provisional scope on a *live*
+  > session; on no/expired/revoked session it changes nothing and passes the request on. That host
+  > scope is exactly as good as a real session's scope to any endpoint that only checks "is a scope
+  > resolved" — which is every endpoint except `GET /api/session` (`grep -rc RequireAuthorization
+  > src/Pulse.WebApi` → 0). Confirmed live against the deployed UAT host with **no credential
+  > presented at all**: `GET /api/personas` → 200 (full roster), `GET /api/feed` → 200, and
+  > `POST /api/posts` → 201 Created using attacker-supplied `authorPersonaId`/`origin`/
+  > `actingHumanId` (returned as `""`). This is a gap in session **enforcement**, not in this
+  > story's session **model** — the model this story built (issuance, refresh, the frozen
+  > `GET /api/session` shape, the precedence write) is exactly as documented and is not being
+  > relitigated. The enforcement half is `identity-auth-roles/11-api-session-enforcement.md`
+  > (issue #359).
 - [x] `POST /api/auth/refresh` (short-lived → renewed) and `POST /api/auth/logout` (invalidate the
       session) exist; logout invalidates server-side so a stolen reference cannot be replayed.
 
