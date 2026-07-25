@@ -104,11 +104,22 @@ any B3 spike must use a server-authoritative stopgap scope, never a client-suppl
 
 > Mirrored to GitHub: **#296** (WR-001 idempotency), **#297** (cockpit role restriction — under security-review umbrella **#41**), **#298** (test hardening: the two flakes + Wave-0 LO-002 + read-only test fidelity).
 
-- **Temporary Standard→Ambient config alias (story 05).** Story 05 reaches the Ambient tier for UAT
-  go-live by pointing the `Generation:Tiers:Standard:*` config key at the Ambient deployment/model,
-  because the reaction loop's generate stage has no runtime tier selector. This is an explicitly
-  **temporary** shim — remove it once the concurrent `autonomy-safety` story's runtime autonomy/tier
-  lever lands and route Ambient through a real tier selection instead of a config-level alias.
+- **Temporary Standard→Ambient config alias (story 05) — OPEN, remove with `autonomy-safety/05` (#353).**
+  Story 05 reaches the Ambient tier for UAT go-live by pointing the `Generation:Tiers:Standard:*` config
+  keys at the **Ambient** deployment/model, because the reaction loop's generate stage has no runtime
+  tier selector (`IntentComposer.TierFor` hardcodes Standard for every trigger but `AmbientFloor`). This
+  is an explicitly **temporary** shim, live in the IaC at two marked sites:
+  - `infrastructure/main.bicep` — the `generationStandardTierDeployment` / `generationStandardTierModel`
+    locals (`= generationAmbientDeploymentName` / `generationAmbientModelName`), under an inline
+    `TEMPORARY` marker.
+  - `infrastructure/modules/webapp.bicep` — the `Generation__Tiers__Standard__*` app settings, same
+    marker (values arrive from the locals above).
+
+  **Removal:** when `autonomy-safety/05` — *Engine settings API (autonomy default + tier policy,
+  runtime-settable)*, **#353** — lands the real per-exercise tier seam at `IntentComposer.Compose`, point
+  those two locals back at `'standard'` / `generationStandardModelName` and route Ambient through the
+  real tier selection instead of a config-level alias. Also documented in
+  `infrastructure/README.md` → "`Generation:*` app settings and the live-traffic gate".
 
 - **WR-001 / partial-publish idempotency** (stories 01+02): the engine publish path (`PostIngestService`)
   does not dedupe on `draftId`, so a review-approve that succeeds-then-fails-to-commit, OR a

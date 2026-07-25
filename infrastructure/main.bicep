@@ -53,6 +53,9 @@ param deployClaude bool = false
 @description('Legal organization name for the Anthropic Marketplace attestation (modelProviderData), used only when deployClaude = true.')
 param claudeOrganizationName string = 'Dynamis'
 
+@description('ROUTE ENGINE GENERATION TRAFFIC TO THE LIVE GOVERNED MODEL. Deliberately SEPARATE from deployAi: deployAi provisions the endpoint, this decides whether application code is pointed at it. OFF by default — flipping it makes the App Service resolve Generation:Provider = AzureOpenAI instead of Fake, i.e. real LLM egress. TIER-2 (NFR-005 / ADP-025): requires the signed sign-off in docs/features/engine-runtime/PROVIDER-GOVERNANCE.md §8 before it is set true in any environment.')
+param generationProviderLive bool = false
+
 // ============================================================================
 // SQL Parameters (only consumed when deployDatabase = true)
 // ============================================================================
@@ -176,6 +179,59 @@ var deployWebApp = deployBackend && (hostingModel == 'webapi' || hostingModel ==
 var deployFunctions = deployBackend && (hostingModel == 'functions' || hostingModel == 'both')
 
 // ============================================================================
+// E8 engine generation (Generation:*) — engine-runtime/05, NFR-005 / ADP-025
+// ----------------------------------------------------------------------------
+// These are DELIBERATELY plain locals, not reads of module ai's outputs. modules/ai.bicep depends on
+// modules/webapp.bicep (it needs the App Service's ARM-assigned principalId for the role assignment);
+// if webapp were then to read ai's outputs for its Generation:* app settings, the two modules would form
+// a cycle Bicep rejects. Every governed Generation:* value is deterministic from params both modules already
+// take (the account-name pattern, location, the literal model ids), so it is computed ONCE here and
+// passed as the SAME literal into both modules independently — which also keeps the config values
+// verbatim-identical to what ai.bicep actually deploys (PROVIDER-GOVERNANCE.md §4 mapping table).
+// ============================================================================
+
+// = ai.bicep output 'endpoint'. The account sets customSubDomainName = the account name (required for
+// Entra token auth), so the data-plane host is deterministic from the name alone.
+var generationEndpoint = 'https://${aiFoundryName}.cognitiveservices.azure.com/'
+
+// The model ids ai.bicep deploys — passed into the ai module below so the deployed models and the app
+// config can never drift apart. (The deployment NAMES are ai.bicep resource names: 'standard' /
+// 'ambient'; only 'ambient' is referenced today because of the temporary alias immediately below.)
+var generationStandardModelName = 'gpt-5.4'
+var generationAmbientDeploymentName = 'ambient'
+var generationAmbientModelName = 'gpt-5.4-mini'
+
+// TEMPORARY (engine-runtime/05 AC4) — Ambient tier for the first live UAT run, reached by ALIASING the
+// Standard tier config key at the Ambient deployment/model. The reaction loop's generate stage has no
+// runtime tier selector (IntentComposer.TierFor hardcodes Standard for everything but AmbientFloor), so
+// this config-level alias is the only way to reach Ambient today. gpt-5.4-mini is ~3x cheaper than
+// gpt-5.4 and cleared the same 10/10 InjectionRedTeam + voice-diversity gates (MEASURED-RESULTS.md).
+// REMOVE THIS ALIAS in autonomy-safety/05 — "Engine settings API (autonomy default + tier policy,
+// runtime-settable)", #353 — which adds the real per-exercise tier seam at IntentComposer.Compose. When
+// it lands, point these two back at 'standard' / generationStandardModelName (the real Standard tier).
+// Tracked as an open follow-up in docs/features/engine-runtime/feature.md.
+var generationStandardTierDeployment = generationAmbientDeploymentName
+var generationStandardTierModel = generationAmbientModelName
+
+// The live-traffic decision. Requires BOTH toggles: generationProviderLive is the reviewed, Tier-2-gated
+// intent, and deployAi is the precondition that the governed endpoint actually exists (routing at a
+// non-existent endpoint would only produce a startup failure). deployAi alone NEVER routes traffic —
+// that separation is the whole point of the two toggles.
+var generationLive = deployAi && generationProviderLive
+var generationProvider = generationLive ? 'AzureOpenAI' : 'Fake'
+
+// The §2 attestations are true because ai.bicep provisioned the posture they describe: a single-tenant
+// Cognitive Services account with disableLocalAuth (no key, Entra-only) and no shared/public inference;
+// and Azure OpenAI's product terms are the contractual no-training basis. With deployAi = false there is
+// nothing provisioned and nothing to attest, so both stay false (fail closed — a real provider on that
+// posture is rejected at startup by GenerationGovernance.Validate).
+var generationTenantBounded = deployAi
+var generationNoTrainingAttested = deployAi
+
+// = ai.bicep output 'residency' (the model deployments' region, DataZoneStandard SKU / US data zone).
+var generationResidency = location
+
+// ============================================================================
 // Module Deployments
 // ============================================================================
 
@@ -274,6 +330,18 @@ module webApp 'modules/webapp.bicep' = if (deployWebApp) {
     jwtSecretKey: jwtSecretKey
     bootstrapSecret: bootstrapSecret
     staffIdentityAccountsJson: staffIdentityAccountsJson
+    // E8 generation provider (engine-runtime/05). Plain locals — NOT module ai's outputs; see the
+    // no-cycle note above the locals. Provider is Fake unless BOTH deployAi and the Tier-2-gated
+    // generationProviderLive are set, so standing the endpoint up never routes traffic by itself.
+    generationProvider: generationProvider
+    generationEndpoint: deployAi ? generationEndpoint : ''
+    generationStandardDeployment: deployAi ? generationStandardTierDeployment : ''
+    generationStandardModel: deployAi ? generationStandardTierModel : ''
+    generationAmbientDeployment: deployAi ? generationAmbientDeploymentName : ''
+    generationAmbientModel: deployAi ? generationAmbientModelName : ''
+    generationResidency: deployAi ? generationResidency : ''
+    generationTenantBounded: generationTenantBounded
+    generationNoTrainingAttested: generationNoTrainingAttested
     tags: tags
   }
 }
@@ -317,15 +385,28 @@ module communication 'modules/communication.bicep' = if (deployCommunication) {
 }
 
 // Azure AI Foundry for the E8 Adaptive Content Engine. Independent of deployBackend — the engine's
-// generation endpoint can stand up before the app host exists (e.g. for the story-06 measured spike).
-// The role assignment is skipped until a backend managed identity is passed; grant your az-login
-// identity "Cognitive Services OpenAI User" manually to run the spike against it.
+// generation endpoint can stand up before the app host exists (e.g. for the 2026-07-18 measured spike).
+// Standing this account up does NOT route generation traffic to it: that is generationProviderLive's
+// job (see the locals above), so provisioning and going live stay two separately-flippable decisions
+// (NFR-005 Tier-2, engine-runtime/05).
+//
+// backendPrincipalId closes the keyless-auth gap (engine-runtime/05): the App Service's own
+// system-assigned identity gets "Cognitive Services OpenAI User" on this account, so the runtime path
+// uses DefaultAzureCredential with no API key (the account sets disableLocalAuth) and no developer
+// az-login credential. The dependency is one-directional — ai reads webApp's principalId; webApp reads
+// only main.bicep locals, never ai's outputs (a cycle Bicep would reject). When deployWebApp is false the
+// role assignment is skipped as before; grant your az-login identity the role manually for a local pass.
 module ai 'modules/ai.bicep' = if (deployAi) {
   name: 'aiDeploy'
   params: {
     location: location
     aiFoundryName: aiFoundryName
-    backendPrincipalId: ''
+    #disable-next-line BCP318
+    backendPrincipalId: deployWebApp ? webApp.outputs.principalId! : ''
+    // The same literals fed to webApp's Generation:* settings, so the deployed models and the app config
+    // are provably identical (PROVIDER-GOVERNANCE.md §4 "verbatim").
+    standardModel: generationStandardModelName
+    ambientModel: generationAmbientModelName
     deployClaude: deployClaude
     claudeOrganizationName: claudeOrganizationName
     tags: tags
@@ -371,3 +452,10 @@ output aiFoundryAccountName string = deployAi ? ai.outputs.name! : ''
 // Base host for the Claude/Anthropic passthrough (Generation:Endpoint for the ClaudeFoundry provider).
 #disable-next-line BCP318
 output aiClaudeEndpoint string = (deployAi && deployClaude) ? ai.outputs.claudeEndpoint! : ''
+// Which generation provider the deployed App Service resolves. 'Fake' = in-process, NO LLM egress;
+// 'AzureOpenAI' = live, egressing traffic (only when the Tier-2-gated generationProviderLive is set).
+// Surfaced as an output so every Deploy Infrastructure run states it in the job summary (NFR-005 audit).
+output generationProvider string = generationProvider
+// Object id of the App Service identity that holds the Foundry data-plane role (engine-runtime/05).
+#disable-next-line BCP318
+output webAppPrincipalId string = deployWebApp ? webApp.outputs.principalId! : ''
