@@ -221,6 +221,43 @@ curl -sS -X POST https://app-pulse-api-uat-dynamis.azurewebsites.net/api/ops/boo
   re-check step 1 landed and the backend restarted (step 3).
 - **400** → invalid body (e.g. missing `hostname`, or `staff.username` not in the allowlist).
 
+**4b — Bind a posting persona to the participant account** (story 07, #342). Without this the participant
+signs in and sees the feed, but the **composer is absent** — `Account.PersonaId` is null, so the session
+carries no `personaId` and `canPost` is false. That is correct COR-015 observer behavior, *not* a
+regression, but it is not what you want for a participant who is meant to post.
+
+> **Ordering constraint — this step comes after the persona cast is seeded, not before.**
+> `bootstrap-exercise` creates the *exercise*; personas only exist once
+> `POST /api/ops/seed-engine-content` has run. A `personaHandle` supplied on the **first** bootstrap of a
+> fresh host can therefore never resolve, and is rejected **400** by design (fail closed) rather than
+> silently provisioning an unbound account. So the real order on a fresh environment is: bootstrap →
+> seed-engine-content → **then** bind (either by re-running bootstrap with a `personaHandle`, which fills
+> an *absent* binding but never overwrites a differing one, or via the dedicated endpoint below).
+
+```bash
+curl -sS -X POST https://app-pulse-api-uat-dynamis.azurewebsites.net/api/ops/bind-participant-persona \
+  -H "X-Bootstrap-Secret: <the BOOTSTRAP_SECRET from step 1>" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "hostname": "app-pulse-api-uat-dynamis.azurewebsites.net",
+        "username": "participant1",
+        "personaHandle": "mvega_fh"
+      }'
+```
+
+Bind by **handle**, not id — the seed endpoint returns only persona *counts*, and `GET /api/personas`
+needs a session, so no id is discoverable from the ops surface. `PersonaCastSeeder.Catalog` seeds
+`mvega_fh`, `tbrandt41`, `kwardFH` (individual people — the right choice for a participant) plus
+`FairhavenWater`, `FulcoEM`, `Newsline7` (organization/outlet accounts — **not** what you want bound to a
+human participant). Handles match case-insensitively and a leading `@` is ignored.
+
+- **200** → bound; re-binding the same persona is an idempotent no-op success, and re-binding a
+  *different* one rebinds and reports the previous persona.
+- **404** → uniformly returned for a wrong/missing secret, an unknown hostname, an unknown username, or a
+  persona that is unknown **or belongs to another exercise** (COR-001 — a cross-exercise persona is
+  deliberately indistinguishable from one that does not exist, so this endpoint is not an existence
+  oracle). Re-check the secret and that the cast has been seeded for *this* exercise.
+
 **5 — Verify real logins against the deployed backend** (still on mock frontend — hit the API directly):
 
 ```bash
