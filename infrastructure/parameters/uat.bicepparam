@@ -57,9 +57,9 @@ param frontendUrl = 'https://pulse-uat.cobrasoftware.com'
 // hardening pass, but NOT required for B1 go-live.
 param sqlAdminLogin = 'sqladmin'
 param sqlAdminPassword = readEnvironmentVariable('SQL_ADMIN_PASSWORD', '')
-param sqlEntraAdminLogin = 'tbull@dynamis.com'
-// TODO (optional, hardening): set the Entra object id for tbull@dynamis.com to enable the AAD admin:
-//   param sqlEntraAdminObjectId = '<az ad user show --id tbull@dynamis.com --query id -o tsv>'
+// Entra admin — note the tenant UPN is @dynamiscobra.com (tenantDefaultDomain), not @dynamis.com.
+param sqlEntraAdminLogin = 'tbull@dynamiscobra.com'
+param sqlEntraAdminObjectId = '2b210ee5-c558-4eef-92ce-79186cae6595'
 
 // --- Secrets — sourced from environment variables (set in CI from GitHub secrets)
 param jwtSecretKey = readEnvironmentVariable('JWT_SECRET_KEY', '')
