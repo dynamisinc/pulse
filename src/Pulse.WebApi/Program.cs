@@ -3,6 +3,7 @@ using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -124,6 +125,22 @@ builder.Services.AddEngineReview();        // #286 review queue API + autonomy/s
 // closed to 404 when unconfigured. No middleware/ordering constraint (same as MapBootstrapEndpoints).
 builder.Services.AddEngineContentSeed(builder.Configuration);
 
+// World steering — Wave 2 (feature/world-steering-wave2), orchestrator-wired. AddPauseTierSteering (#350)
+// registers the per-exercise PauseTierRegistry + the pause-tier endpoints; entering the `freeze` tier calls
+// the ALREADY-BUILT IExerciseClock.Freeze (started first from the Exercise row if the loop has never ticked)
+// and VERIFIES it took, so a tier is only ever recorded against a genuinely frozen clock. It TryAdds a no-op
+// IPauseOverlayPublisher. AddPauseParticipantOverlay (#351) then REPLACES that no-op (RemoveAll + AddSingleton)
+// with the real publisher, which writes OverlayStateService and pushes OverlayStateChanged over the B1
+// ExerciseRealtimeHub (no second hub) — so it MUST run after AddPauseTierSteering, and needs
+// AddSocialRealtimeHub (above) for IHubContext. Without this line GET /api/overlay-state silently serves the
+// pre-story `none` constant and a Freeze is invisible to participants (it now logs a warning once, and
+// CompositionRootWiringTests asserts the real publisher resolves). AddStorylineSteering (#352) registers the
+// GET/POST pair that reaches the live Storyline objects the reaction loop ticks off IReactionLoopRegistry —
+// no EF entity, so it converges on AddReactionLoopHost's registry via TryAdd.
+builder.Services.AddPauseTierSteering();        // #350 POST/GET /api/steering/pause-tier
+builder.Services.AddPauseParticipantOverlay();  // #351 REPLACES the #350 no-op overlay publisher
+builder.Services.AddStorylineSteering();        // #352 storyline target GET/POST
+
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
 // (no cross-origin access at all) when the key is unset/empty rather than falling open.
@@ -238,6 +255,14 @@ app.MapEngineContentSeedEndpoints();       // #327 POST /api/ops/seed-engine-con
 // the safety-critical cockpit. Requires AddStaffIdentity (above) to precede AddEngineReview — it does.
 app.MapEngineRuntime();   // #285 reaction-loop host runtime surface
 app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + swamped-mode + kill-switch
+
+// World-steering endpoints (Wave 2) — same COR-001 discipline as the cockpit above: scope comes only from the
+// resolved IExerciseContext, never a client exerciseId, and both groups reuse EngineCockpitStaffAuthorizationFilter
+// unmodified (401 unauthenticated/unscoped, 403 not-assigned). #351 maps NO route of its own: participants read
+// through participant-shell's already-mapped GET /api/overlay-state and the push rides the already-mapped
+// /hubs/exercise, so it is service-registration only (above).
+app.MapPauseTierSteering();   // #350 pause tier (Freeze reaches the real clock)
+app.MapStorylineSteering();   // #352 storyline actual/target read + target set
 
 app.Run();
 
