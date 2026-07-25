@@ -1,6 +1,7 @@
 # Story: Per-exercise settings
 
-**Feature:** Exercise configuration  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Exercise configuration  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+*(slice **01a** — schema + COR-032 vocabulary + the client guard — has shipped; the flip to Complete belongs to slice **01b**, the settings API + shell-config service + staff editor.)*
 **Requirements:** COR-030 (XC-008)  ·  **Design decisions:** none  ·  **Issue:** #67
 
 ## Context

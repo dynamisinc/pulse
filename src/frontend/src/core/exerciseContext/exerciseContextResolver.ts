@@ -131,7 +131,11 @@ const MOCK_EXERCISE_CONTEXT: ExerciseContextResponseBody = {
   exerciseId: 'ex-mock-0001',
   exerciseName: 'Coastal Surge (Mock Exercise)',
   timeZone: 'America/New_York',
-  status: 'active',
+  // A COR-032 literal on purpose (story 01a): dev and any VITE_USE_MOCK_DATA
+  // UAT must exercise the CURRENT vocabulary end to end, not the legacy one
+  // the backend no longer writes. ('active' would still be accepted — the
+  // legacy four stay valid through the transition — it just proves nothing.)
+  status: 'live',
 }
 
 /**

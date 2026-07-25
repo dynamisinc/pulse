@@ -139,6 +139,12 @@ public class PulseDbContext : DbContext
             // enforces on write; the opaque OutletNamesJson blob is the one deliberate exception.
             // NULLABLE by design: null = "not configured", so the projection keeps serving the shipped
             // Phase-1 constant and no existing row changes behaviour when the migration lands.
+            //
+            // ISOLATION WARNING (always-Critical, COR-001/XC-002). Exercise is the SCOPE, not an
+            // IExerciseScoped entity, so the central read-side query filter applied at the bottom of this
+            // method DOES NOT COVER THIS TABLE — a settings query here is unfiltered and can return another
+            // exercise's row. Take the exercise from IExerciseContext (or the server-held staff
+            // active-exercise selection), NEVER from a client-supplied id/body/route/query value.
             // ---------------------------------------------------------------------------------------
             entity.Property(e => e.WorldName).HasMaxLength(200);
             entity.Property(e => e.Locale).HasMaxLength(35);           // BCP-47 tags are far shorter in practice.

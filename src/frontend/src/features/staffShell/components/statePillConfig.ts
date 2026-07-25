@@ -91,6 +91,14 @@ export const STATE_PILL_CONFIG: Record<ExerciseStatus, StatePillConfig> = {
   },
   staged: STAGED_PILL,
   live: LIVE_PILL,
+  // UNRECONCILED, story 03's to settle: this COR-032 Paused pill and world-
+  // steering's CTL-023 Freeze (`pauseStatePillConfig` below) now render the
+  // same amber register on the same pill, and `StaffHeader` resolves
+  // `stateOverride ?? STATE_PILL_CONFIG[status]` — so a Freeze override
+  // silently masks the lifecycle state. Nothing keys off it yet. See
+  // implementation.md -> Integration hazard 1 (duplicate pause semantics):
+  // compose them into ONE overlay/pill state deliberately, do not inherit this
+  // as settled.
   paused: {
     label: 'PAUSED',
     accentColor: STATE_PILL_STAGED_ACCENT,

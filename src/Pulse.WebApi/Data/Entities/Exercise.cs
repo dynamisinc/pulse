@@ -25,6 +25,13 @@ namespace Pulse.WebApi.Data.Entities;
 /// projection falls back to the shipped Phase-1 constant in <c>ParticipantShellEndpoints</c>", which is what
 /// makes story 01b's constant-preserving defaults truthful for existing rows — or non-nullable with a safe
 /// default (the two chrome/watermark switches default ON, the practice flag defaults OFF).
+/// <b>ISOLATION WARNING for every builder who reads or writes these columns:</b> this entity is the SCOPE, not
+/// an <see cref="IExerciseScoped"/> entity, so <c>PulseDbContext</c>'s central read-side query filter is a
+/// NO-OP on this table — a query here is NOT protected by it, and <c>Exercises.SingleAsync(e =&gt; e.Id ==
+/// someId)</c> will happily return ANOTHER exercise's settings. Every settings read and write must take the
+/// exercise from <c>IExerciseContext</c> (or, on a staff surface, the server-held active-exercise selection)
+/// and NEVER from a client-supplied id, body field, route or query parameter — that is exactly the
+/// cross-exercise-leak vector COR-001 / XC-002 forbid.
 /// </para>
 /// </remarks>
 public sealed class Exercise
