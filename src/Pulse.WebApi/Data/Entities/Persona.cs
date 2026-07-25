@@ -17,7 +17,15 @@ public sealed class Persona : IExerciseScoped
     /// <summary>Display name shown on participant surfaces.</summary>
     public required string DisplayName { get; set; }
 
-    /// <summary>Social handle shown on participant surfaces (uniqueness policy is out of scope here).</summary>
+    /// <summary>
+    /// Social handle shown on participant surfaces. Unique PER EXERCISE and case-insensitively — enforced by
+    /// <c>IX_Personas_ExerciseId_Handle</c> (migration <c>PersonaHandleUniqueIndex</c>, <c>backend-host/03</c>)
+    /// under the <c>SQL_Latin1_General_CP1_CI_AS</c> collation, so <c>mvega_fh</c> and <c>MVega_FH</c> cannot
+    /// coexist in one exercise. NOT unique globally: two exercises may each run a <c>@FulcoEM</c>
+    /// (<c>docs/01-platform-core-isolation.md</c> §7 Q3). Stored WITHOUT a leading <c>@</c> by
+    /// <c>PersonaCastSeeder</c>; the index treats <c>@x</c> and <c>x</c> as distinct keys, so callers that accept
+    /// either spelling normalize it themselves rather than relying on the constraint.
+    /// </summary>
     public required string Handle { get; set; }
 
     /// <summary>

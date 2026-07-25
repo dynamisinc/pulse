@@ -13,7 +13,10 @@ This is the E1 data/create capability behind the E7 console quick-create UI (per
       type, and avatar.
 - [ ] The new persona is exercise-scoped (exercise-isolation), immediately usable, and enrichable later
       via template fields (story 01).
-- [ ] Handle uniqueness is enforced per-exercise (open question 3 default).
+- [ ] Handle uniqueness is enforced per-exercise (§7 Q3, **resolved**: per-exercise, case-insensitive). The
+      database constraint already exists (`IX_Personas_ExerciseId_Handle`, `backend-host/03`) — this story adds
+      the pre-write validation and its error surface, so a taken handle never reaches a raw
+      `DbUpdateException`.
 - [ ] The create is a controller action, logged (XC-004), staff-only (XC-002).
 
 ## Out of Scope

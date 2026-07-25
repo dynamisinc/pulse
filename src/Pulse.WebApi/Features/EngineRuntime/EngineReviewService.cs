@@ -622,6 +622,14 @@ public sealed class EngineReviewService
             .ToListAsync(cancellationToken);
 
         // Normalize both sides by stripping a leading '@' so "@mvega_fh" and "mvega_fh" resolve alike.
+        //
+        // The GroupBy/First() stays even though IX_Personas_ExerciseId_Handle (backend-host/03) now makes
+        // (ExerciseId, Handle) unique case-insensitively. The index does NOT make this collapse a no-op: it keys
+        // on the STORED handle, so "@mvega_fh" and "mvega_fh" are two distinct, both-legal keys within one
+        // exercise, and TrimStart('@') folds them together here. Without the grouping ToDictionary would throw on
+        // that pair; with it, First() picks one arbitrarily (query order, unordered). That residual ambiguity is a
+        // handle-NORMALIZATION gap (nothing forbids storing the '@' form), not a uniqueness gap, and is out of
+        // scope for the index — see backend-host/03 Out of Scope.
         return personas
             .GroupBy(p => p.Handle.TrimStart('@'), StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.Ordinal);
