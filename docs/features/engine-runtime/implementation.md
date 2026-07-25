@@ -16,6 +16,7 @@
 | 02 Review-cockpit API | Persist + serve real `EngineReviewItem`s to the shipped cockpit; drive the built autonomy/safety services from endpoints; push disposition/countdown changes over SignalR; flip `useReviewQueue` live. GET queue (scoped) + approve/edit/veto/re-roll/batch-approve (edit sanitizes NFR-004, then calls 01's `IEnginePublishService`) + swamped-mode + kill-switch. Auto-HOLD-on-expiry via `AutoHoldPolicy.Evaluate` on the scenario tick — **never** auto-send. | Backend: `Pulse.WebApi/Features/EngineRuntime/{EngineReviewEndpoints.cs, EngineReviewService.cs, EngineReviewBroadcaster.cs}` (+ xUnit). Frontend (flip): `features/controller/engine/hooks/useReviewQueue.ts` | The review-queue REST + SignalR contract the cockpit consumes (JSON must deserialize into the frozen `reviewContracts.ts` shapes) |
 | 03 Scenario-clock service | The native COR-050 exercise clock as a backend service (StartEx + freeze/pause + discrete time-jump), behind a swappable `IExerciseClock`; adapt the engine's `IScenarioClock` onto it so `ObserveStage`/`Storyline.Tick`/`DelayedAutoCountdown` read one clock. Freeze holds the minute; a jump leaps it. | `Pulse.WebApi/Features/EngineRuntime/Clock/{ExerciseClockService.cs, ScenarioClockAdapter.cs}` (+ xUnit) | `IExerciseClock` (the native clock 01's loop + 02's countdown subscribe to); the `IScenarioClock` adapter the engine reads |
 | 04 Provider live-config | Land Azure OpenAI in-tenant as the v1 default live provider via `ai.bicep`; `AddEngineGeneration` config-selects it and **fails closed** on ungoverned config; run the built `EngineEval` harness against the live provider to replace *modeled* cost/latency with *measured*, validate the §3.5 trip threshold, and keep the injection red-team green. No new provider code. | `infrastructure/modules/ai.bicep` (activation/params); `Generation:*` `appsettings` keys; the live-provider `EngineEval` run config (+ xUnit for the fail-closed gate) | The live `IGenerationProvider` selection (01's generate stage consumes it via DI); the measured cost/latency + trip-threshold record |
+| 05 Live provider UAT go-live | Deploy `ai.bicep` for UAT via committed IaC (`deployAi=true`); give the App Service a system-assigned identity and wire `backendPrincipalId` into `ai.bicep` (closes the `infrastructure/README.md:169` gap); source `Generation:*` app settings from the bicep outputs verbatim behind a **separate** live-traffic toggle (decoupled from `deployAi` so provisioning ≠ routing); alias the Standard tier key to the Ambient deployment (temporary, tracked); gather the four §8 evidence pieces for the human Tier-2 sign-off; verify a real AI-authored post reaches the UAT participant feed post-signature. No new provider code. | `infrastructure/modules/{ai.bicep, webapp.bicep, main.bicep}`; `infrastructure/parameters/uat.bicepparam`; `docs/features/engine-runtime/PROVIDER-GOVERNANCE.md` §8 (evidence + sign-off) | The UAT-deployed live `IGenerationProvider` (Azure OpenAI, Ambient-aliased) that 01's generate stage calls in the real UAT environment; the signed §8 sign-off other environments' go-lives reference |
 
 ## Reuse map
 
@@ -73,7 +74,14 @@
   `ExerciseRealtimeHub`. Each engine-runtime story exposes its own `Add*/Map*` extension; the
   orchestrator wires the one-line calls serially between waves.
 - `infrastructure/modules/functionapp.bicep` (dormant — the eventual out-of-process host target for 01,
-  open question (a)); `ai.bicep` (dormant — 04 activates it); `signalr.bicep` (active since B1).
+  open question (a)); `ai.bicep` (dormant — 04 activates it; 05 deploys it for UAT via committed IaC and
+  wires its `backendPrincipalId`); `signalr.bicep` (active since B1).
+
+**Story 05's own reuse (built by 01–04, unmodified):** `AddEngineGeneration`,
+`GenerationGovernance.Validate`, `AzureOpenAIGenerationProvider`, `DefaultAzureCredential`, the
+`EngineEval` suites, `ProviderLiveConfigTests` — see `05-live-provider-uat-golive.md` Technical Notes for
+the bicep wiring shape (including the no-circular-module-dependency constraint between `ai` and
+`webApp`).
 
 ## Wave Plan (DAG-ready)
 
@@ -83,6 +91,7 @@
 | 04 Provider live-config | backend | `infrastructure/modules/ai.bicep` (params); `Generation:*` appsettings; live-provider `EngineEval` run config (+ xUnit for the fail-closed gate) | B0; built `engine-generation-infra` + `engine-eval-harness` | 03 | 1 | M |
 | 01 Reaction-loop host | backend | `Pulse.WebApi/Features/EngineRuntime/{ReactionLoopHost.cs, GenerateStage.cs, MeasureStage.cs, EnginePublishService.cs}` (+ xUnit) | B0 + B1 (`PostIngestService`, `IFeedBroadcaster`); 03 (`IExerciseClock`) + 04 (live `IGenerationProvider`) via DI wired between waves; contract-first `EngineReviewItem` + `IEnginePublishService` seam with 02 | 02\* | 2 | L |
 | 02 Review-cockpit API | fullstack | Backend: `Pulse.WebApi/Features/EngineRuntime/{EngineReviewEndpoints.cs, EngineReviewService.cs, EngineReviewBroadcaster.cs}` (+ xUnit). Frontend: `features/controller/engine/hooks/useReviewQueue.ts` (flip) | B0 + B1 (`ExerciseRealtimeHub`, `core/realtime`); built `autonomy-safety`; shipped `engine-review-cockpit`; 03 (countdown clock); contract-first `IEnginePublishService` + `EngineReviewItem` seam with 01 | 01\* | 2 | L |
+| 05 Live provider UAT go-live | backend/infra | `infrastructure/modules/{ai.bicep, webapp.bicep, main.bicep}`; `infrastructure/parameters/uat.bicepparam`; `PROVIDER-GOVERNANCE.md` §8 | 04 (Complete — the fail-closed gate + config-key mapping this story applies); `engine-content-seed` (Complete — the seed endpoint the UAT verification pass exercises); **serial, human edge:** the Tier-2 sign-off (a person, not a builder) gates the live-traffic half of this story | none (single-story, post-hoc wave) | 3 | M |
 
 `Stack` (`backend | fullstack`) tells the orchestrator which builder to spawn and which Gate-0 command
 to run (`ORCHESTRATION_MECHANICS.md §5`): `03/04/01` run `dotnet build + dotnet test`; `02` also runs
@@ -106,6 +115,14 @@ root between Wave 1 and Wave 2** (a serial `Program.cs` edit, not a file depende
 (`useReviewQueue` mock→live) lands only when 02's endpoints are **Gate-2 clean**. If a seam shape must
 change once a builder is underway, it is coordinated as a short serial patch (the Wave-1 cross-feature
 convention), not a re-plan.
+
+**Wave 3 = 05, a post-hoc wave added after 01–04 shipped.** It has no file overlap with 01–04 (infra +
+appsettings only, no `Pulse.Core`/`Pulse.WebApi` C# edits) so it needs no re-analysis of the earlier
+waves. Its dependency edge is unusual: half of it (`ai.bicep` activation, identity wiring, config
+staging) is a normal serial builder edge on top of 04; the other half (actually routing live traffic +
+the UAT verification pass) is gated on a **human sign-off** (`PROVIDER-GOVERNANCE.md` §8), not another
+builder's output — treat that as a hard stop in the middle of the story, not a wave boundary to plan
+around.
 
 ### Wave-0 seam-freeze (decided — lands before the fan-out)
 

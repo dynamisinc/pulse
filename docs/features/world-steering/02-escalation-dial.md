@@ -9,6 +9,16 @@
 > pre-existing failures are an untouched `ReviewQueue.test.tsx` parallel-load flake, 10/10 in
 > isolation). See `docs/BUILD_PLAN.md`'s "E7 World Steering — Wave 1" section for the full
 > close-out and deferred follow-ups.
+>
+> **Status honesty (post-UAT audit).** "Complete" above means complete **as a frontend seam only**
+> — the dial is a fully-tested UI over `storylineMock.ts`, an in-memory mirror that is connected to
+> nothing real. It was never wired to the live `Storyline` the engine actually ticks, so the number
+> shown is not a real storyline and setting a target goes nowhere. That gap is exactly what let
+> this reach the user looking finished while doing nothing live. The live wiring — a real
+> `GET`/`POST` against the `IReactionLoopRegistry` storyline the engine ticks, confirming the
+> already-built `Storyline.Tick`/`TickTowardTarget` chase actually engages, plus the missing
+> explanatory UX — is **story 09** (`09-escalation-dial-live.md`). This story (02) is not
+> superseded; 09 is a live-wiring follow-up that reuses this story's UI unchanged in mock mode.
 
 ## Context
 The controller's intensity control for automated public reaction. The D5 review **amended** it from a
