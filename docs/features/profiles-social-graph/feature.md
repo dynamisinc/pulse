@@ -24,6 +24,20 @@ others", never fake lists (D1-012).
 | 03 | Verification signal & impersonation support | SOC-052 / D1-003, D1-008 | Complete | #111 |
 | 04 | "Who to follow" suggested follows | SOC-053 / D1-R1 | Not Started | #112 |
 | 05 | Audience magnitude & follower affordance | SOC-054 / D1-012 | Not Started | #113 |
+| 06 | Persona presentation fields (backend) | COR-020, COR-021, SOC-052, SOC-054, XC-005 | Not Started | _TBD_ |
+| 07 | Follow graph (backend) | SOC-051, SOC-054, SOC-081, COR-001, XC-004 | Not Started | _TBD_ |
+
+**Stories 01 and 03 are Complete against the mock only.** Both were built and verified against the
+frontend's `SEEDED_PERSONAS`/`seedCast()` mock fixture, which already carries real bios, varied
+follower counts, distinct join dates, and the `@FairhavenWater`/`@FairhavenWaterUpd` impersonation
+pair. The **live** `GET /api/personas` does not: `PersonaResponseDto` currently returns documented
+B1 stand-in values for `personaType`/`avatarColor`/`initials`/`audienceBand`/`followerCount`/
+`joinedAt` (and omits `bio` entirely), and the live-seeded cast (`PersonaCastSeeder.Catalog`) has no
+impersonator and only six of the mock's nine personas. So in UAT (mock off) today, every profile
+renders 0 followers, no bio, an identical join date, and no lookalike account exists to demonstrate
+SOC-052 against. Stories 06 and 07 are what make 01 and 03 true against live data, and what unblock
+02/04/05, which cannot be honestly built against a backend with no real presentation fields and no
+follow edges at all.
 
 ## Dependencies
 posts (PostCard, verified mark); E1 verification flag, isolation, telemetry; persona-management
