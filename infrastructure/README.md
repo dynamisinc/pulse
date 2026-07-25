@@ -168,21 +168,61 @@ deployment. Remove it when `autonomy-safety/05` (engine settings API — runtime
 #353) lands the real tier seam; tracked in
 [`docs/features/engine-runtime/feature.md`](../docs/features/engine-runtime/feature.md).
 
-**Going live (only after `PROVIDER-GOVERNANCE.md` §8 is signed):**
+#### ⚠ Deploy prerequisite: the CI service principal needs role-assignment write
 
-1. Confirm §8 is signed for `uat` — five boxes ticked, signer + date entered. This is a human step; no
-   builder or automation performs it.
-2. Set `param generationProviderLive = true` in `parameters/uat.bicepparam` (a reviewed, committed
-   change — same discipline as flipping `deployAi`) and run **Deploy Infrastructure**. It changes exactly
-   one app setting (`Generation__Provider`); the job summary's `generationProvider` output states which
-   provider the deployed app resolves.
-3. The App Service restarts on the app-setting change, which **de-registers the in-memory reaction loop** —
-   re-call `POST /api/ops/seed-engine-content` to re-register it (engine state is process-memory this
-   phase; see `engine-content-seed/feature.md`).
-4. **No new secrets.** The `Generation:*` values are non-secret config and auth is keyless, so
-   `deploy-infrastructure.yml` needs no new GitHub secret for this.
-5. **Turn it back off after a verification pass.** ~$0.61/exercise-hour at the measured Ambient rate
+`deployAi = true` makes `ai.bicep`'s `Cognitive Services OpenAI User` grant the **first**
+`Microsoft.Authorization/roleAssignments` resource in the `main.bicep`-reachable deploy path. That write
+is **not** covered by Contributor: an `AZURE_CREDENTIALS` service principal without
+`Microsoft.Authorization/roleAssignments/write` on `rg-pulse-uat-centralus` fails the **whole**
+deployment with `AuthorizationFailed` (the role assignment is a template resource, not a best-effort
+step). Grant the SP **User Access Administrator** (least-privilege for this) or **Owner** on the resource
+group before the first `deployAi = true` run:
+
+```bash
+# Check what the deploy SP currently holds on the RG:
+az role assignment list --assignee <AZURE_CREDENTIALS clientId> \
+  --scope /subscriptions/2a127d53-c9bf-471a-8196-3155eae6cb1b/resourceGroups/rg-pulse-uat-centralus \
+  -o table
+
+# If it is Contributor-only, add role-assignment write (scoped to the RG, not the subscription):
+az role assignment create --role "User Access Administrator" \
+  --assignee <AZURE_CREDENTIALS clientId> \
+  --scope /subscriptions/2a127d53-c9bf-471a-8196-3155eae6cb1b/resourceGroups/rg-pulse-uat-centralus
+```
+
+**Run `Deploy Infrastructure` with `what_if: true` first.** What-if evaluates the template and surfaces
+the role-assignment write (and the new App Service `identity` + `Generation__*` settings) **without
+performing them**, so a missing permission shows up as a preview failure instead of a half-applied
+deployment.
+
+**Provisioning first, then signing, then going live.** Steps 1–2 are safe to run *before* the Tier-2
+sign-off — they stand the endpoint up without routing traffic — and in fact must run first, because
+`PROVIDER-GOVERNANCE.md` §8 evidence (i) (the keyless identity + role assignment) is only confirmable
+against Azure *after* they have been applied. Only steps 4–5 are gated on the signature.
+
+1. **What-if.** Run **Deploy Infrastructure** with `what_if: true` on the committed params
+   (`deployAi = true`, `generationProviderLive = false`) and confirm the preview shows the role
+   assignment, the App Service identity, and the `Generation__*` settings — with
+   `Generation__Provider = Fake`.
+2. **Provision.** Re-run with `what_if: false`. This creates `aif-pulse-uat` + the model deployments,
+   gives the App Service its system-assigned identity, and grants it the data-plane role. Idempotent;
+   routes **no** traffic.
+3. **Verify + sign.** Confirm the identity really holds the role (commands in
+   [`PROVIDER-GOVERNANCE.md`](../docs/features/engine-runtime/PROVIDER-GOVERNANCE.md) §8 → "Deploy
+   ordering"), check the Ambient deployment's model **version** against the measured build (§6 → "When to
+   re-run"), then get §8 signed — five boxes ticked, signer + date entered. A human step; no builder or
+   automation performs it.
+4. **Go live.** Set `param generationProviderLive = true` in `parameters/uat.bicepparam` (a reviewed,
+   committed change — same discipline as flipping `deployAi`) and re-deploy. It changes exactly one app
+   setting (`Generation__Provider`); the job summary's `generationProvider` output states which provider
+   the deployed app resolves. The App Service restarts on the app-setting change, which **de-registers
+   the in-memory reaction loop** — re-call `POST /api/ops/seed-engine-content` to re-register it (engine
+   state is process-memory this phase; see `engine-content-seed/feature.md`).
+5. **Turn it back off after the verification pass.** ~$0.61/exercise-hour at the measured Ambient rate
    while a storyline is active — cheap, not free.
+
+**No new secrets** anywhere in this sequence: the `Generation:*` values are non-secret config and auth is
+keyless, so `deploy-infrastructure.yml` needs no new GitHub secret.
 
 ### Claude on Foundry (serverless MaaS) — the E8 provider comparison
 

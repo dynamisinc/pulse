@@ -190,8 +190,9 @@ var deployFunctions = deployBackend && (hostingModel == 'functions' || hostingMo
 // verbatim-identical to what ai.bicep actually deploys (PROVIDER-GOVERNANCE.md §4 mapping table).
 // ============================================================================
 
-// = ai.bicep output 'endpoint'. The account sets customSubDomainName = the account name (required for
-// Entra token auth), so the data-plane host is deterministic from the name alone.
+// = ai.bicep output 'endpoint'. The account's customSubDomainName IS the data-plane host and is pinned to
+// the account name below (customSubDomain: aiFoundryName on the ai module call, passed explicitly so an
+// override there can't silently desync this literal), so the host is deterministic from the name alone.
 var generationEndpoint = 'https://${aiFoundryName}.cognitiveservices.azure.com/'
 
 // The model ids ai.bicep deploys — passed into the ai module below so the deployed models and the app
@@ -401,6 +402,11 @@ module ai 'modules/ai.bicep' = if (deployAi) {
   params: {
     location: location
     aiFoundryName: aiFoundryName
+    // Passed EXPLICITLY (rather than relying on ai.bicep's default of the account name) because the
+    // custom subdomain IS the data-plane host, and generationEndpoint above reconstructs that host as a
+    // literal. Tying them together here means an override can't silently desync the app's
+    // Generation:Endpoint from the endpoint the account actually serves.
+    customSubDomain: aiFoundryName
     #disable-next-line BCP318
     backendPrincipalId: deployWebApp ? webApp.outputs.principalId! : ''
     // The same literals fed to webApp's Generation:* settings, so the deployed models and the app config
