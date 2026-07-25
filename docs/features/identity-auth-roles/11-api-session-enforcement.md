@@ -4,6 +4,18 @@
 **Requirements:** COR-012  ·  **Design decisions:** none  ·  **Issue:** #361
 **Stack:** backend  ·  **Review:** Tier-2 (auth surface + the isolation seam; always-Critical class)
 
+> **📋 Build from [`ENDPOINT-AUTH-AUDIT.md`](ENDPOINT-AUTH-AUDIT.md).** A full audit of all **38** routes was
+> run against the sandbox on 2026-07-25 — every route probed unauthenticated with the correct verb. It carries
+> the authoritative in/out inventory (**12 open**, 18 correctly gated, 8 intentionally pre-auth), the three
+> confirmed exploits, a wave-by-wave scope of work with the two open technical decisions called out, and the
+> audit's own stated limits. **Do not re-derive the allowlist — take it from there**, and validate it early
+> against a live `EndpointDataSource` enumeration (the audit's inventory is static grep, which is its main
+> limitation).
+>
+> Two things the audit found that this story's first draft did not know: the **SignalR hub is also open**
+> (confirmed — an unauthenticated client received a live `PostReceived` frame), so Wave 1 must gate the hub
+> too; and there is **no FK on `TelemetryEvent.ExerciseId`**, so orphan rows are storable.
+
 ## Context
 COR-012 (`docs/01-platform-core-isolation.md`): *"Sessions are short-lived with refresh; a
 participant session is bound to one exercise and one account (or one read-only session per
