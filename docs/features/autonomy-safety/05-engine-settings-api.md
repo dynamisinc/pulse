@@ -129,18 +129,125 @@ the tier-override read site); B2 staff identity (`StaffAssignmentService`, `Staf
 — the controller-role gate); #297 (closed by this story).
 
 ## Tests
-- Unit: `POST` autonomy-default calls `SetExerciseDefault` on the SAME registry instance the loop
-  reads; rejects `auto`/invalid levels with 400 and no mutation; does not lift an active safety clamp.
-- Unit: `POST` tier-policy records/clears the per-exercise override; `GET /settings` reflects
-  provider/tiers/autonomy-default/tier-policy-mode/clamp state accurately.
-- Unit: the controller-role gate rejects a non-controller assigned staff session (403) on every
-  mutating route in this group and allows it through on the two GETs; a cross-exercise attempt on
-  any route still fails closed (401/403) per the existing COR-001 scope resolution.
-- Integration: setting Delayed-auto then generating a burst produces a counting-down draft (not
-  Suggest-queued) — the end-to-end proof the "unreachable" gap is closed.
+
+**Written (backend, `src/Pulse.WebApi.Tests/Features/EngineRuntime/`):**
+
+AC1 (autonomy default settable at runtime, on the SHARED registry, `auto`/invalid → 400 no mutation)
+- `EngineSettingsServiceTests.SetAutonomyDefault_DelayedAuto_MutatesTheSameSharedStateTheLoopReads (AC-1)`
+- `EngineSettingsServiceTests.SetAutonomyDefault_BackToSuggest_LowersItAgain (AC-1)`
+- `EngineSettingsServiceTests.SetAutonomyDefault_Auto_IsRejected400_AndMutatesNothing (AC-1)`
+- `EngineSettingsServiceTests.SetAutonomyDefault_UnknownLiteral_IsRejected400_AndMutatesNothing (AC-1)`
+- `EngineSettingsEndpointsTests.PostAutonomyDefault_DelayedAuto_Returns200_AndTheSnapshotReportsTheNewDefault (AC-1)`
+- `EngineSettingsEndpointsTests.PostAutonomyDefault_Auto_Returns400_AndChangesNothing (AC-1)`
+
+AC2 (a default change never lifts an active safety clamp, §8.2)
+- `EngineSettingsServiceTests.SetAutonomyDefault_WhileKillSwitchClamped_SetsTheBaseUnderneath_ButNeverLiftsTheClamp (AC-2)`
+- `EngineSettingsLoopIntegrationTests.WhileAKillSwitchClampIsActive_SettingDelayedAuto_StillProducesNoAutonomousBurst (AC-2)`
+
+AC3 (tier-policy override recorded + applied at the loop's `IntentComposer` call site; `auto` clears it)
+- `EngineSettingsServiceTests.SetTierPolicy_RecordsThePerExerciseOverride_AndAppliesItToAComposedTier (AC-3)`
+- `EngineSettingsServiceTests.SetTierPolicy_Auto_ClearsTheOverride_RestoringThePurposeBasedMap (AC-3)`
+- `EngineSettingsServiceTests.SetTierPolicy_UnknownMode_IsRejected400_AndMutatesNothing (AC-3)`
+- `EngineSettingsLoopIntegrationTests.AfterSettingTheTierPolicy_TheNextBurstIsGeneratedAtThatTier_AndAutoRestoresThePurposeMap (AC-3)`
+- `EngineTierPolicyTests.*` (store semantics, wire literals, and the **shared-singleton** composition:
+  `WiringBothSlices_ConvergesOnOneSharedTierPolicyRegistry_EitherOrder`) `(AC-3)`
+- `EngineSettingsEndpointsTests.PostTierPolicy_Returns200_AndTheSnapshotReportsTheMode (AC-3)`
+- `EngineSettingsEndpointsTests.PostTierPolicy_UnknownMode_Returns400 (AC-3)`
+
+AC4 (`GET /settings` read model: provider, governed tiers, autonomy default, tier-policy mode, clamp)
+- `EngineSettingsServiceTests.GetSettings_ReportsProvider_GovernedTiers_AutonomyDefault_TierPolicyMode_AndClamp (AC-4)`
+- `EngineSettingsServiceTests.GetSettings_WithNoTiersConfigured_ReportsAnEmptyMapping_NotAFailure (AC-4)`
+- `EngineSettingsEndpointsTests.GetSettings_ReturnsTheFullSnapshot_InTheDocumentedWireShape (AC-4)`
+- `EngineSettingsEndpointsTests.SettingsRoutes_AreMappedExactlyOnce_OnTheExistingEngineGroup (AC-4)`
+
+AC5 (COR-001 fail-closed scope + COR-018 attribution)
+- `EngineSettingsServiceTests.SetAutonomyDefault_UnresolvedScope_FailsClosed_AndMutatesNothing (AC-5)`
+- `EngineSettingsServiceTests.SetTierPolicy_UnresolvedScope_FailsClosed_AndMutatesNothing (AC-5)`
+- `EngineSettingsServiceTests.GetSettings_UnresolvedScope_FailsClosed_WithNoSnapshot (AC-5)`
+- `EngineSettingsServiceTests.SetAutonomyDefault_MissingActingHumanId_ReturnsInvalid (AC-5)`
+- `EngineSettingsServiceTests.SetTierPolicy_MissingActingHumanId_ReturnsInvalid (AC-5)`
+- `EngineSettingsServiceTests.SetAutonomyDefault_InExerciseA_NeverMovesExerciseB (AC-5)`
+- `EngineSettingsServiceTests.GetSettings_InExerciseA_ReportsAsPosture_NotBs (AC-5)`
+- `EngineSettingsEndpointsTests.GetSettings_UnresolvedScope_Returns401_FailClosed (AC-5)`
+- `EngineSettingsEndpointsTests.SettingsPosts_UnresolvedScope_Return401_FailClosed (AC-5)`
+- `EngineSettingsEndpointsTests.PostAutonomyDefault_MissingActingHumanId_Returns400 (AC-5)`
+- `EngineSettingsEndpointsTests.PostAutonomyDefault_MissingBody_Returns400 (AC-5)`
+- `EngineSettingsLoopIntegrationTests.ATierPolicySetOnExerciseA_NeverChangesExerciseBsBursts (AC-5)`
+
+AC6 (#297 controller-role gate on every mutating route; both GETs stay open)
+- `EngineSettingsEndpointsTests.EveryMutatingRoute_FromANonControllerAssignedStaffSession_Returns403 (AC-6)`
+  — loops **all ten** mutating routes (approve / edit / veto / re-roll / batch-approve / swamped-mode /
+  kill-switch / restore / settings-autonomy-default / settings-tier-policy)
+- `EngineSettingsEndpointsTests.BothGets_FromANonControllerAssignedStaffSession_Are200_SoAnEvaluatorCanWatch (AC-6)`
+- `EngineSettingsEndpointsTests.EveryMutatingRoute_FromAControllerAssignedStaffSession_IsNotBlockedByTheRoleGate (AC-6)`
+- `EngineSettingsEndpointsTests.EveryRoute_FromAStaffSessionAssignedToADifferentExercise_FailsClosed (AC-6)`
+- `EngineSettingsEndpointsTests.SettingsPosts_FromANonStaffSession_Return401 (AC-6)`
+
+AC7 (the two additive XC-004 events)
+- `EngineSettingsServiceTests.SetAutonomyDefault_EmitsExactlyOneAutonomyDefaultChangedEvent_WithTheFromToAndActor (AC-7)`
+- `EngineSettingsServiceTests.SetTierPolicy_EmitsExactlyOneTierPolicyChangedEvent_WithTheFromToModes (AC-7)`
+- `EngineSettingsServiceTests.SetAutonomyDefault_EmitsNoOtherEngineEvent (AC-7)`
+
+**Integration — the headline proof the "unreachable" gap is closed:**
+- `EngineSettingsLoopIntegrationTests.AfterSettingDelayedAuto_TheNextBurstIsACountingDownDraft_NotSuggestQueued`
+  (before: `Queued` + `RoutedAtLevel: Suggest` + no countdown; after the settings call on the same running
+  loop: `CountingDown` + `RoutedAtLevel: DelayedAuto` + a started countdown) `(AC-1)`
+- `EngineSettingsLoopIntegrationTests.AfterSettingDelayedAutoThenBackToSuggest_TheNextBurstQueuesAgain (AC-1)`
+
+- **UAT (still required — see below).**
 - **UAT (required — not just unit-green; this feature's own root-cause lesson).** Deployed to UAT
   with `mock=false`: as a controller, flip the exercise default to Delayed-auto via this API (curl or
   the story 06 panel once it lands), confirm a live-generated burst counts down instead of queuing;
   flip a tier-policy mode and confirm `GET /settings` reflects it; restart the App Service and confirm
   the GET response honestly reports the reset-to-Suggest/auto state (documented behavior, not a
   silent surprise). Do not mark Complete on unit-green alone.
+
+## Build notes (as implemented)
+
+**Telemetry decision (AC7) — reviewer go-ahead GIVEN: the vocab was introduced.** `EngineEventTypes.
+AutonomyDefaultChanged` (`engine.autonomy_default_changed`) and `EngineEventTypes.TierPolicyChanged`
+(`engine.tier_policy_changed`) were added, each with one `EngineEventPayloads` record, and are emitted
+server-side through the already-wired `IEngineTelemetryEmitter` — one event per change, alongside (not
+replacing) the frontend's existing `engine.autonomy_changed` emit. **Rationale:** the autonomy/tier state is
+process memory, so this event is the only record of an operator's change that survives a restart. This is a
+deliberate divergence from the legacy swamped-mode / kill-switch / restore trio, which still emit no backend
+telemetry — flagged for the reviewer rather than silently generalised.
+
+**Endpoint contract (the artifact story 06 builds against).** All three endpoints return the SAME
+`EngineSettingsDto` body on success, so a mutation needs no follow-up read:
+
+```
+GET  /api/engine/settings                      → 200 EngineSettingsDto | 401 | 403
+POST /api/engine/settings/autonomy-default     { actingHumanId, level: 'suggest'|'delayed-auto', timeZone? }
+                                               → 200 EngineSettingsDto | 400 | 401 | 403
+POST /api/engine/settings/tier-policy          { actingHumanId, mode: 'standard'|'ambient'|'auto', timeZone? }
+                                               → 200 EngineSettingsDto | 400 | 401 | 403
+
+EngineSettingsDto = {
+  provider: string,                            // IGenerationProvider.Name, read-only
+  tiers: [{ tier, model, deployment, zdrCapable }],   // governed config, informational only
+  autonomy: { swampedMode, generationStopped, safetyClampActive, degradedReason,
+              exerciseDefaultLevel: 'suggest'|'delayed-auto' },   // NEW additive field
+  tierPolicyMode: 'standard'|'ambient'|'auto',
+  inMemoryState: true, inMemoryStateNote: string       // reset-on-restart, reported honestly
+}
+```
+
+No `exerciseId` is accepted on any request body — scope is server-authoritative from `IExerciseContext`.
+`timeZone` is optional (XC-004 envelope zone; defaults to `UTC`).
+
+**No `Program.cs` change is needed.** The three routes were added to the EXISTING `/api/engine` group in
+`MapEngineReview()`, which `Program.cs` already calls, and the new `EngineTierPolicyRegistry` is registered by
+the already-called `AddEngineReview()` / `AddReactionLoopHost()` (`TryAddSingleton`, so both converge on one
+instance). `AddEngineReview()` now additionally depends on `AddEngineGeneration` having run first (the
+settings read needs `IGenerationProvider` + `IOptions<GenerationOptions>`); `Program.cs` already wires it in
+that order.
+
+**#297 was implemented as a SIBLING filter**, `EngineCockpitControllerRoleFilter`, applied to a mutating
+sub-group inside `MapEngineReview()` — `EngineCockpitStaffAuthorizationFilter` is left UNMODIFIED so
+concurrent stories that reuse it are unaffected. The two compose: a mutation passes both, a read passes only
+the staff/assignment gate.
+
+**Out of scope, confirmed not built:** `SetStorylineOverride` endpoint, `AutonomyLevel.Auto`, the
+`IntentComposer` → `ITierPolicy.PickTier` refactor (`ITierPolicy` still has zero call sites), frontend
+reconciliation (story 06), restart persistence (no EF entity, no migration).

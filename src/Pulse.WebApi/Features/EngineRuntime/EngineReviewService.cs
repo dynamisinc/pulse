@@ -10,8 +10,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Autonomy.Services;
+using Pulse.Core.Features.Generation.Models;
 using Pulse.Core.Features.Generation.Services;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
@@ -49,7 +51,12 @@ using Pulse.WebApi.Features.Social;
 /// <b>Telemetry (XC-004).</b> Exactly ONE <c>engine.reviewed</c> event per review DECISION (one per burst,
 /// not per post — CTL-034), built via the seam-freeze <see cref="IEngineTelemetryEmitter"/> and committed in
 /// the SAME unit of work as the disposition mutation. The publish itself is a separate funnel (story 01's
-/// <see cref="IEnginePublishService"/> → B1 ingest), which emits its own per-post <c>post</c> events.
+/// <see cref="IEnginePublishService"/> → B1 ingest), which emits its own per-post <c>post</c> events. The two
+/// engine-SETTINGS mutations (autonomy default / tier policy, story 05) likewise emit exactly one additive
+/// event each (<see cref="EngineEventTypes.AutonomyDefaultChanged"/> /
+/// <see cref="EngineEventTypes.TierPolicyChanged"/>) — a deliberate, reviewer-approved divergence from the
+/// swamped-mode/kill-switch/restore trio, which persist none: those controls' state is process memory, so the
+/// event is the only record of the change that survives a restart.
 /// </para>
 /// </remarks>
 public sealed class EngineReviewService
@@ -68,6 +75,9 @@ public sealed class EngineReviewService
     private readonly IEnginePublishService _publisher;
     private readonly IEngineReviewBroadcaster _broadcaster;
     private readonly EngineAutonomyRegistry _autonomy;
+    private readonly EngineTierPolicyRegistry _tierPolicy;
+    private readonly IGenerationProvider _generationProvider;
+    private readonly GenerationOptions _generationOptions;
 
     /// <summary>Creates the review service over its persistence, scope, clock, telemetry, publish, push, and autonomy collaborators.</summary>
     /// <param name="store">The seam-freeze review-item persistence store (reads + lookup).</param>
@@ -78,6 +88,9 @@ public sealed class EngineReviewService
     /// <param name="publisher">Story 01's single publish funnel (contract-first seam); approve/edit/batch/auto-send call it.</param>
     /// <param name="broadcaster">The exercise-scoped SignalR push (reuses the B1 hub).</param>
     /// <param name="autonomy">The per-exercise autonomy-state registry the safety controls + auto-HOLD read.</param>
+    /// <param name="tierPolicy">The per-exercise model-tier-policy registry the reaction loop reads per burst.</param>
+    /// <param name="generationProvider">The active generation provider — read ONLY for its name on the settings GET.</param>
+    /// <param name="generationOptions">The governed <c>Generation</c> configuration — read-only here (never mutated, NFR-005).</param>
     public EngineReviewService(
         IEngineReviewStore store,
         PulseDbContext dbContext,
@@ -86,7 +99,10 @@ public sealed class EngineReviewService
         IEngineTelemetryEmitter telemetry,
         IEnginePublishService publisher,
         IEngineReviewBroadcaster broadcaster,
-        EngineAutonomyRegistry autonomy)
+        EngineAutonomyRegistry autonomy,
+        EngineTierPolicyRegistry tierPolicy,
+        IGenerationProvider generationProvider,
+        IOptions<GenerationOptions> generationOptions)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(dbContext);
@@ -96,6 +112,9 @@ public sealed class EngineReviewService
         ArgumentNullException.ThrowIfNull(publisher);
         ArgumentNullException.ThrowIfNull(broadcaster);
         ArgumentNullException.ThrowIfNull(autonomy);
+        ArgumentNullException.ThrowIfNull(tierPolicy);
+        ArgumentNullException.ThrowIfNull(generationProvider);
+        ArgumentNullException.ThrowIfNull(generationOptions);
 
         _store = store;
         _dbContext = dbContext;
@@ -105,6 +124,9 @@ public sealed class EngineReviewService
         _publisher = publisher;
         _broadcaster = broadcaster;
         _autonomy = autonomy;
+        _tierPolicy = tierPolicy;
+        _generationProvider = generationProvider;
+        _generationOptions = generationOptions.Value;
     }
 
     // ---- Queue read -----------------------------------------------------------------------------
@@ -395,6 +417,153 @@ public sealed class EngineReviewService
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 
+    // ---- Engine settings (story 05: the runtime-settable autonomy default + tier policy) ---------
+
+    /// <summary>
+    /// The staff-only engine-settings READ: the active provider name, the governed
+    /// <c>Generation:Tiers:*</c> mapping (informational — never editable here), the exercise's autonomy default
+    /// + active safety clamp, and its tier-policy mode. Open to any assigned staff caller (an evaluator may
+    /// WATCH); fails closed on an unresolved scope (COR-001).
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The settings snapshot, or <see cref="EngineReviewOutcome.ScopeUnresolved"/> (fail closed).</returns>
+    public async Task<EngineSettingsResult> GetSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        await Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!TryResolveScope(out var exerciseId))
+        {
+            return EngineSettingsResult.ScopeUnresolved();
+        }
+
+        return EngineSettingsResult.Ok(BuildSettings(exerciseId));
+    }
+
+    /// <summary>
+    /// Sets the exercise's DEFAULT autonomy level at runtime — the control that makes
+    /// <see cref="AutonomyLevel.DelayedAuto"/> reachable at all (before story 05 nothing in
+    /// <c>Pulse.WebApi</c> ever called the built <see cref="EngineAutonomyState.SetExerciseDefault"/>, so every
+    /// exercise stayed permanently at the <see cref="AutonomyLevel.Suggest"/> seed).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Resolves the SHARED per-exercise state via <see cref="EngineAutonomyRegistry.GetOrCreate"/> — never a
+    /// fresh <see cref="EngineAutonomyState.Create"/> — so the reaction loop's registration and the auto-HOLD
+    /// tick observe the new default on the very next burst, with no redeploy and no restart.
+    /// </para>
+    /// <para>
+    /// <b>A default change never lifts a safety clamp (§8.2).</b> <see cref="EngineAutonomyState.SetExerciseDefault"/>
+    /// sets the base level UNDERNEATH an active kill-switch/degraded clamp; only an explicit
+    /// <see cref="RestoreFromSafetyAsync"/> releases it. <see cref="AutonomyLevels.EnsureSelectable"/> rejects
+    /// <see cref="AutonomyLevel.Auto"/> (v1.1) with a 400 — never a silent clamp to Suggest.
+    /// </para>
+    /// </remarks>
+    /// <param name="level">The requested level literal (<c>suggest</c> / <c>delayed-auto</c>).</param>
+    /// <param name="input">The acting human (COR-018) + optional telemetry zone (XC-008).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The resulting settings snapshot, or a fail-closed/invalid outcome.</returns>
+    public async Task<EngineSettingsResult> SetExerciseAutonomyDefaultAsync(
+        string? level,
+        EngineReviewActionInput input,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveScope(out var exerciseId))
+        {
+            return EngineSettingsResult.ScopeUnresolved();
+        }
+
+        if (string.IsNullOrWhiteSpace(input.ActingHumanId))
+        {
+            return EngineSettingsResult.Invalid("actingHumanId is required (COR-018).");
+        }
+
+        // Validate BEFORE touching the shared state, so a rejected level mutates nothing at all.
+        if (!TryParseAutonomyLevel(level, out var requested))
+        {
+            return EngineSettingsResult.Invalid("level must be one of 'suggest' or 'delayed-auto'.");
+        }
+
+        try
+        {
+            AutonomyLevels.EnsureSelectable(requested);
+        }
+        catch (NotSupportedException ex)
+        {
+            // 'auto' is reserved for v1.1: rejected explicitly (400), never silently clamped or ignored.
+            return EngineSettingsResult.Invalid(ex.Message);
+        }
+
+        var scenarioMinute = _clock.CurrentScenarioMinute(exerciseId);
+        var state = _autonomy.GetOrCreate(exerciseId);
+        var from = state.ExerciseDefault;
+        state.SetExerciseDefault(requested, input.ActingHumanId, scenarioMinute);
+
+        var payload = new EngineEventPayloads.AutonomyDefaultChanged
+        {
+            FromLevel = from,
+            ToLevel = state.ExerciseDefault,
+            SafetyClampActive = state.SafetyClampActive,
+            ScenarioMinute = scenarioMinute,
+        };
+
+        await CommitSettingsEventAsync(
+            EngineEventTypes.AutonomyDefaultChanged, exerciseId, input, payload, cancellationToken);
+
+        return EngineSettingsResult.Ok(BuildSettings(exerciseId));
+    }
+
+    /// <summary>
+    /// Sets the exercise's model-tier POLICY mode at runtime (<c>standard</c> / <c>ambient</c> / <c>auto</c>).
+    /// The override is recorded in the shared <see cref="EngineTierPolicyRegistry"/> the reaction loop reads at
+    /// its existing <c>IntentComposer</c> call site, so it takes effect on the next generated burst;
+    /// <c>auto</c> CLEARS the override, restoring the purpose-based static map's role.
+    /// </summary>
+    /// <remarks>
+    /// Only the tier ROLE is settable. Which concrete deployment/model a tier resolves to stays governed
+    /// <c>Generation:Tiers:*</c> configuration behind the fail-closed startup gate (NFR-005 / ADP-025) — this
+    /// endpoint can never point generation at an unattested endpoint.
+    /// </remarks>
+    /// <param name="mode">The requested mode literal (<c>standard</c> / <c>ambient</c> / <c>auto</c>).</param>
+    /// <param name="input">The acting human (COR-018) + optional telemetry zone (XC-008).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The resulting settings snapshot, or a fail-closed/invalid outcome.</returns>
+    public async Task<EngineSettingsResult> SetTierPolicyModeAsync(
+        string? mode,
+        EngineReviewActionInput input,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveScope(out var exerciseId))
+        {
+            return EngineSettingsResult.ScopeUnresolved();
+        }
+
+        if (string.IsNullOrWhiteSpace(input.ActingHumanId))
+        {
+            return EngineSettingsResult.Invalid("actingHumanId is required (COR-018).");
+        }
+
+        if (!TierPolicyModes.TryParse(mode, out var requested))
+        {
+            return EngineSettingsResult.Invalid("mode must be one of 'standard', 'ambient' or 'auto'.");
+        }
+
+        var scenarioMinute = _clock.CurrentScenarioMinute(exerciseId);
+        var from = _tierPolicy.SetMode(exerciseId, requested);
+
+        var payload = new EngineEventPayloads.TierPolicyChanged
+        {
+            FromMode = from,
+            ToMode = requested,
+            ScenarioMinute = scenarioMinute,
+        };
+
+        await CommitSettingsEventAsync(
+            EngineEventTypes.TierPolicyChanged, exerciseId, input, payload, cancellationToken);
+
+        return EngineSettingsResult.Ok(BuildSettings(exerciseId));
+    }
+
     // ---- Auto-HOLD tick (non-request-bound; silence is never approval, D5-014/1.1) --------------
 
     /// <summary>
@@ -483,6 +652,69 @@ public sealed class EngineReviewService
         var scope = _exerciseContext.CurrentExerciseId;
         exerciseId = scope ?? Guid.Empty;
         return scope is not null && scope.Value != Guid.Empty;
+    }
+
+    /// <summary>Composes the current settings snapshot for an exercise (provider + governed tiers + autonomy + tier policy).</summary>
+    private EngineSettingsDto BuildSettings(Guid exerciseId) => EngineSettingsDto.From(
+        _generationProvider.Name,
+        _generationOptions,
+        EngineAutonomyStateDto.From(_autonomy.GetOrCreate(exerciseId)),
+        _tierPolicy.GetMode(exerciseId));
+
+    /// <summary>
+    /// Parses the frozen autonomy-level wire literal (<c>suggest</c> / <c>delayed-auto</c> / <c>auto</c>). The
+    /// v1.1 <c>auto</c> literal parses SUCCESSFULLY here so the rejection is made by
+    /// <see cref="AutonomyLevels.EnsureSelectable"/> (the single place the v1 selectability invariant lives),
+    /// not by a second, drifting list of accepted strings.
+    /// </summary>
+    private static bool TryParseAutonomyLevel(string? raw, out AutonomyLevel level)
+    {
+        switch (raw)
+        {
+            case "suggest":
+                level = AutonomyLevel.Suggest;
+                return true;
+            case "delayed-auto":
+                level = AutonomyLevel.DelayedAuto;
+                return true;
+            case "auto":
+                level = AutonomyLevel.Auto;
+                return true;
+            default:
+                level = AutonomyLevel.Suggest;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Persists the ONE XC-004 event for a settings change (XC-004: exactly one event per meaningful action) in
+    /// its own single <c>SaveChanges</c> — the mutation itself is process memory, so this event IS the durable
+    /// record, and it is the deliberate divergence from the swamped-mode/kill-switch/restore trio (which emit no
+    /// backend telemetry). One server clock read is shared by the envelope's wall clock + emittedAt.
+    /// </summary>
+    private async Task CommitSettingsEventAsync(
+        string eventType,
+        Guid exerciseId,
+        EngineReviewActionInput input,
+        object payload,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var context = new EngineTelemetryContext
+        {
+            ExerciseId = exerciseId,
+            WallClockTime = now,
+            ScenarioTime = _clock.CurrentScenarioTime(exerciseId) ?? now,
+            TimeZone = string.IsNullOrWhiteSpace(input.TimeZone) ? TickTimeZoneFallback : input.TimeZone,
+            Channel = "social",
+            Origin = EngineOrigin,
+            // COR-018: the controller behind the shared account. Empty is null-omitted by the emitter (the v0
+            // schema types actor.actingHumanId as optional/min-1), never persisted as "".
+            Actor = new EngineTelemetryActor { Kind = EngineOrigin, ActingHumanId = input.ActingHumanId },
+        };
+
+        _dbContext.TelemetryEvents.Add(_telemetry.BuildEvent(eventType, context, payload));
+        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>Validates a request-bound action's COR-018 actor + XC-008 zone; null when valid.</summary>
@@ -888,6 +1120,18 @@ public sealed class EngineAutonomyStateDto
     [System.Text.Json.Serialization.JsonPropertyName("degradedReason")]
     public string? DegradedReason { get; init; }
 
+    /// <summary>
+    /// The per-exercise DEFAULT autonomy level (<c>suggest</c> / <c>delayed-auto</c>) BEFORE any storyline
+    /// override or safety clamp — the level a controller sets via
+    /// <c>POST /api/engine/settings/autonomy-default</c> (autonomy-safety story 05). Added additively to the
+    /// snapshot every autonomy control already returns, so the cockpit can show the real posture instead of
+    /// assuming it. When <see cref="SafetyClampActive"/> is <c>true</c> this default is deliberately NOT the
+    /// effective level: the clamp still holds underneath until an explicit restore (§8.2).
+    /// </summary>
+    [System.Text.Json.Serialization.JsonPropertyName("exerciseDefaultLevel")]
+    [System.Text.Json.Serialization.JsonConverter(typeof(AutonomyLevelJsonConverter))]
+    public required AutonomyLevel ExerciseDefaultLevel { get; init; }
+
     /// <summary>Projects the built autonomy state to the staff wire snapshot.</summary>
     /// <param name="state">The exercise's autonomy state.</param>
     /// <returns>The wire snapshot.</returns>
@@ -900,6 +1144,7 @@ public sealed class EngineAutonomyStateDto
             GenerationStopped = state.IsGenerationStopped,
             SafetyClampActive = state.SafetyClampActive,
             DegradedReason = state.DegradedReason,
+            ExerciseDefaultLevel = state.ExerciseDefault,
         };
     }
 }
