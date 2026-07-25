@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -365,20 +366,20 @@ public sealed class EngineSettingsEndpointsTests
         }
     }
 
-    /// <summary>Whether a concrete request path matches a route template (each <c>{...}</c> segment is a wildcard).</summary>
+    /// <summary>
+    /// Whether a concrete request path matches a route template, each <c>{...}</c> placeholder standing for one
+    /// path segment. Tokenizes the template into placeholder-or-literal runs and escapes ONLY the literals, so
+    /// no sentinel character is round-tripped through the pattern (a literal space or brace in a future template
+    /// would otherwise be indistinguishable from a placeholder marker).
+    /// </summary>
     private static bool MatchesTemplate(string template, string concreteRoute)
     {
-        var pattern = "^" + string.Join(
-            "[^/]+",
-            template.Split('/')
-                .Select(segment => segment.StartsWith('{') && segment.EndsWith('}')
-                    ? " "
-                    : System.Text.RegularExpressions.Regex.Escape(segment))
-                .Aggregate((a, b) => a + "/" + b)
-                .Split(' ')) + "$";
+        var pattern = "^" + Regex.Replace(
+            template,
+            @"\{[^{}]*\}|[^{}]+",
+            match => match.Value.StartsWith('{') ? "[^/]+" : Regex.Escape(match.Value)) + "$";
 
-        return System.Text.RegularExpressions.Regex.IsMatch(
-            concreteRoute, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return Regex.IsMatch(concreteRoute, pattern, RegexOptions.IgnoreCase);
     }
 
     [RequiresDockerFact]

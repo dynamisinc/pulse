@@ -205,6 +205,14 @@ AC7 (the two additive XC-004 events)
 - `EngineSettingsServiceTests.SetTierPolicy_EmitsExactlyOneTierPolicyChangedEvent_WithTheFromToModes (AC-7)`
 - `EngineSettingsServiceTests.SetAutonomyDefault_EmitsNoOtherEngineEvent (AC-7)`
 
+AC7 / WR-005 (audit-persist failure is loud, non-fatal, and cancellation still propagates — fault-injected,
+Docker-free so the contract is provable on any machine)
+- `EngineSettingsAuditFailureTests.SetAutonomyDefault_WhenTheAuditRowCannotBePersisted_StillSucceeds_WithTheAppliedPosture (AC-7)`
+- `EngineSettingsAuditFailureTests.SetAutonomyDefault_WhenTheAuditRowCannotBePersisted_LogsAtError (AC-7)`
+- `EngineSettingsAuditFailureTests.SetTierPolicy_WhenTheAuditRowCannotBePersisted_StillSucceeds_AndLogsAtError (AC-7)`
+- `EngineSettingsAuditFailureTests.SetAutonomyDefault_WhenThePersistIsCancelled_PropagatesTheCancellation_AndDoesNotLogItAsAnAuditGap (AC-7)`
+- `EngineSettingsAuditFailureTests.SetAutonomyDefault_WhenTheAuditRowPersistsFine_LogsNothing (AC-7)`
+
 **Integration — the headline proof the "unreachable" gap is closed:**
 - `EngineSettingsLoopIntegrationTests.AfterSettingDelayedAuto_TheNextBurstIsACountingDownDraft_NotSuggestQueued`
   (before: `Queued` + `RoutedAtLevel: Suggest` + no countdown; after the settings call on the same running
@@ -269,6 +277,13 @@ operator/seed-authored data rather than a pinned wire literal.
 `EngineAutonomyState.ResolveEffective` — a consumer must never re-derive "clamp active ⇒ effectively Suggest",
 since that inference is the exact bug class (`EngineControlBar` mislabelling the posture) story 06 exists to
 fix. It is `null` when `generationStopped` is true (a full stop routes at NO level).
+
+**Do NOT infer "no clamp" from `effectiveLevel === exerciseDefaultLevel`.** Effective is `Lower(base, clamp)`,
+so a clamp that is not *below* the base yields two EQUAL levels while `safetyClampActive` is `true` — e.g. a
+base already at `suggest` plus a `drop-to-suggest` kill switch reports
+`exerciseDefaultLevel: 'suggest', effectiveLevel: 'suggest', safetyClampActive: true`. A consumer's clamp /
+emergency-brake indicator must therefore read `safetyClampActive` (and `generationStopped`), never a comparison
+of the two levels; the levels answer "what posture", the flags answer "is the brake on".
 
 **A forced tier is validated against the deployment's bound tiers (WR-002).** `POST .../tier-policy` with
 `standard`/`ambient` returns **400 naming `Generation:Tiers:{Tier}:Deployment`** when that tier has no
