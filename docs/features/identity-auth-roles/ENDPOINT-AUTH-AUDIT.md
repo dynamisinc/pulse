@@ -1,5 +1,31 @@
 # Endpoint authentication audit — evidence + scope of work
 
+> **Superseded by the four-story split + inventory corrections (2026-07-25, same day).** The
+> single story this document scoped (`11-api-session-enforcement.md`, #361) is now **four** stories per
+> the one-story-per-file convention — do not re-derive the scope-of-work waves below as three sub-waves
+> of one story; they are now:
+> - **[`11-api-session-enforcement.md`](11-api-session-enforcement.md)** (#361) — Wave 1: the gate + allowlist + hub.
+> - **[`12-post-attribution-server-side.md`](12-post-attribution-server-side.md)** (#366) — Wave 2a: `POST /api/posts` attribution.
+> - **[`13-telemetry-exercise-scope-authority.md`](13-telemetry-exercise-scope-authority.md)** (#362, retitled) — Wave 2b: `POST /api/telemetry` scope authority.
+> - **[`14-anonymous-access-regression-suite.md`](14-anonymous-access-regression-suite.md)** (#367) — Wave 3: the regression suite.
+>
+> **Two inventory corrections, validated against a live `EndpointDataSource` dump from a real
+> `WebApplicationFactory<Program>` host** (the cross-check this audit's own "Limits" section asked for):
+> - **The route count is 40, not 38.** The delta: `/hubs/exercise` and `/hubs/exercise/negotiate` are two
+>   endpoints (SignalR expands the hub route — this audit's static grep counted the hub once), and
+>   `POST /api/ops/bind-participant-persona` landed with story 10 (PR #364) after this audit ran. The
+>   rest of the static inventory below is otherwise exactly right.
+> - **The allowlist is 11 routes, not 8.** The three secret-gated `/api/ops/*` endpoints
+>   (`bootstrap-exercise`, `seed-engine-content`, `bind-participant-persona`) must be added: this audit
+>   classified them "correctly gated" (below) because their own secret check answers 404, but the
+>   default-deny mechanism story 11 picked (`AuthorizationMiddleware`'s `FallbackPolicy`) runs **before**
+>   that secret check ever executes — so a legitimate, secret-bearing, session-less bootstrap call
+>   (which by definition runs against an empty database with no session to present) would 401 before
+>   reaching the gate that was supposed to authorize it. See story 11's own file for the full reasoning.
+>
+> This document is otherwise left as originally written — it is evidence, not a living spec. Do not edit
+> the sections below to match the four-story split; read them through this note.
+>
 > **Purpose.** The definitive in/out list that story `11-api-session-enforcement.md` (#361) builds its
 > allowlist from, plus a scoped plan a dedicated fix session can start from without re-deriving anything.
 > This is **evidence**, not requirements — the ACs live in the story.
