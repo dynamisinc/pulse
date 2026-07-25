@@ -50,6 +50,7 @@ Wave-2 orchestrator pass alongside hashtag-feed navigation.
 
 **Landed (Wave-S3.1 integration, commit `9d935b8`):** a "View my profile" entry point is wired into
 `SocialChannel.tsx` and verified end-to-end (`SocialChannel.navigation.test.tsx`) — stories 01 and 03
-are Complete. Follow-up tracked in story 01's Deferred section: WR-003 (`Profile` doesn't thread the
-shell's read-only `variant` into its `<PostCard>`s, so an observer sees inert-but-present action
-controls instead of D1-011's "absent").
+are Complete. **WR-003 — RESOLVED (#88).** `Profile` (and `ThreadView`, `threads-replies/01`) now
+thread the shell's read-only `variant` through to every `<PostCard>` they render — an observer/
+read-only session sees the action controls genuinely absent (D1-011), not present-and-inert. See
+story 01's Deferred section for the full resolution note.
