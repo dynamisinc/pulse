@@ -1,0 +1,66 @@
+/*
+ * features/social/components/FollowButton.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the follow/unfollow control (profiles-social-graph/02,
+ * SOC-051, NFR-001). CSS Module — locally scoped, no global leak, NO
+ * COBRA/MUI dependency (participant world, Pulse skin).
+ *
+ * Theming mirrors the sibling social modules (`NewPostsPill.module.css`): the
+ * per-exercise accent `var(--pulse-ac)` (COR-030) with the Cadence-navy
+ * fallback drives both states (filled "Follow" / outlined "Following"), so no
+ * separate dark-mode palette is needed here — the accent variable is the only
+ * color input and it is supplied by the ancestor brand theme in both modes.
+ *
+ * The "Following" state is deliberately NOT a color-only change (NFR-001):
+ * it swaps to an outlined treatment (no filled background) AND the component
+ * swaps both its icon and its text — see FollowButton.tsx's module header.
+ */
+
+.button {
+  --fb-accent: var(--pulse-ac, #1e3a5f);
+
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border: 1.5px solid var(--fb-accent);
+  border-radius: 999px;
+  background: var(--fb-accent);
+  color: #fff;
+  font-family: 'Figtree', system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--fb-accent);
+  outline-offset: 2px;
+}
+
+.button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+/* Following state: outlined, not filled — a shape/color change together,
+ * never color alone (NFR-001; the icon + text swap in FollowButton.tsx are
+ * the other two signals). */
+.following {
+  background: transparent;
+  color: var(--fb-accent);
+}
+
+.icon {
+  width: 12px;
+  height: 12px;
+}
+
+.text {
+  white-space: nowrap;
+}

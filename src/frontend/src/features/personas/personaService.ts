@@ -106,6 +106,13 @@ export function toParticipantPersona(persona: Persona): Persona {
     followerCount: persona.followerCount,
     joinedAt: persona.joinedAt,
     ...(persona.bio !== undefined ? { bio: persona.bio } : {}),
+    // Optional follow-graph counts (profiles-social-graph/02+07) — forwarded
+    // only when present, mirroring `bio`'s pattern, so an absent value stays
+    // genuinely absent rather than becoming an `undefined` key.
+    ...(persona.followingCount !== undefined ? { followingCount: persona.followingCount } : {}),
+    ...(persona.audienceMagnitude !== undefined
+      ? { audienceMagnitude: persona.audienceMagnitude }
+      : {}),
   }
 }
 
@@ -145,7 +152,14 @@ function isValidPersona(value: unknown): value is Persona {
     // `verified` drives the SOC-052 trust signal PostCard renders — an
     // undefined/coerced value would silently misrender it, so validate it
     // strictly rather than accept any element with a string id.
-    typeof p.verified === 'boolean'
+    typeof p.verified === 'boolean' &&
+    // `followingCount`/`audienceMagnitude` (profiles-social-graph/02+07) are
+    // OPTIONAL (see types.ts's module header) — validated only when present,
+    // same treatment as `bio`, so this never rejects the still-current mock
+    // fixtures that omit them, but a present-and-wrong-typed value still
+    // fails closed rather than silently misrendering a follow count.
+    (p.followingCount === undefined || typeof p.followingCount === 'number') &&
+    (p.audienceMagnitude === undefined || typeof p.audienceMagnitude === 'number')
   )
 }
 

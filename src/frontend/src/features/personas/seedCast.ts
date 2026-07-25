@@ -23,6 +23,24 @@
  * pre-exercise epoch constant — it is authored scenario data, never a read of
  * the wall clock. (This module is not a participant surface, but it still never
  * reads `Date.now()`; the value is a deterministic scenario instant.)
+ *
+ * MOCK/LIVE PARITY (profiles-social-graph/02+07): a seeded instance ALSO
+ * populates `audienceMagnitude` and `followingCount` — not just
+ * `followerCount` — even though `types.ts` declares both optional. The live
+ * backend (story 07) composes `followerCount = audienceMagnitude + real
+ * inbound edges` and separately reports the raw `audienceMagnitude`; anything
+ * that reads magnitude directly (`audienceReach()`, `displayedFollowerCount()`
+ * — profiles-social-graph/05) needs THAT number, not the already-composed
+ * `followerCount`. A freshly seeded instance has zero real follow edges, so
+ * its `audienceMagnitude` is exactly `deriveFollowerCount`'s output (the same
+ * number `followerCount` used to mean, pre-story-07) and `followingCount` is
+ * `0` — the honest seed-time value, not a placeholder. Leaving either
+ * `undefined` here would make the MOCK path (`USE_MOCK_DATA`, true in UAT)
+ * silently diverge from the live path on every magnitude-dependent surface —
+ * exactly the mock-says-one-thing/live-says-another shape that motivated
+ * this feature's own bug report — and a divergence only visible in UAT, never
+ * in the test suite, since every seedCast test runs mock-shaped by
+ * construction.
  */
 
 import type { Cast } from './casts'
@@ -110,7 +128,12 @@ export function seedCast(
       initials: template.initials,
       bio: template.bio,
       audienceBand: template.audienceBand,
+      // A freshly seeded instance has NO real follow edges yet, so the
+      // composed displayed count (magnitude + real edges) is just the
+      // magnitude itself — see the module header's "MOCK/LIVE PARITY" note.
       followerCount: deriveFollowerCount(template.audienceBand, template.handle),
+      audienceMagnitude: deriveFollowerCount(template.audienceBand, template.handle),
+      followingCount: 0,
       joinedAt: deriveJoinedAt(template),
     }
     return [persona]
