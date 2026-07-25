@@ -75,6 +75,9 @@ public class PulseDbContext : DbContext
     /// <summary>Posts authored within a single exercise run.</summary>
     public DbSet<Post> Posts => Set<Post>();
 
+    /// <summary>The REAL follow graph — directed persona→persona edges within a single exercise run (SOC-051).</summary>
+    public DbSet<Follow> Follows => Set<Follow>();
+
     /// <summary>The durable telemetry event store (XC-004).</summary>
     public DbSet<TelemetryEvent> TelemetryEvents => Set<TelemetryEvent>();
 
@@ -190,6 +193,27 @@ public class PulseDbContext : DbContext
             // Provenance columns (Origin / ActingHumanId / CreatedWallClock — NOT NULL; InjectId — NULL)
             // likewise derive their nullability from their C# types (required / value type vs. string?), so
             // they need no explicit config either.
+        });
+
+        modelBuilder.Entity<Follow>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // IExerciseScoped: required scope + the standard scoped lookup index (house style — Persona/Post).
+            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.HasIndex(e => e.ExerciseId);
+
+            // ONE edge per (exercise, follower, followee) — the database is the last word on the idempotency
+            // POST /api/personas/{id}/follow promises: a duplicate follow can only ever be the same row, even
+            // under a concurrent double-submit that beats the service's existence check. Scope leads the key so
+            // the same ordered persona pair in two exercises is two distinct, non-colliding edges (COR-001).
+            entity.HasIndex(e => new { e.ExerciseId, e.FollowerPersonaId, e.FolloweePersonaId })
+                .IsUnique();
+
+            // The inbound direction ("who follows persona X", and the displayed-follower-count aggregate) is
+            // the read the profile surface performs per persona; the unique index above only serves the
+            // outbound (follower-leading) direction.
+            entity.HasIndex(e => new { e.ExerciseId, e.FolloweePersonaId });
         });
 
         modelBuilder.Entity<TelemetryEvent>(entity =>

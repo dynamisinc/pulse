@@ -54,6 +54,50 @@ public sealed class PersonaResponseDtoTests
     }
 
     [Fact]
+    public void FromPersona_ComposesTheDisplayedFollowerCount_MagnitudePlusRealInboundEdges()
+    {
+        // profiles-social-graph/07 AC3: displayed follower count = AudienceMagnitude + real inbound edges.
+        var dto = PersonaResponseDto.FromPersona(AuthoredPersona(), inboundFollowEdges: 3, outboundFollowEdges: 7);
+
+        dto.FollowerCount.Should().Be(
+            50189, "the displayed follower count is the SOC-054 magnitude PLUS the real inbound follow edges");
+        dto.AudienceMagnitude.Should().Be(
+            50186,
+            "the magnitude term is emitted on its own so audienceReach() — which takes magnitude and edges "
+            + "SEPARATELY — can never be handed the composite and double-count the edges");
+        dto.FollowerCount.Should().Be(
+            dto.AudienceMagnitude + 3, "edges are recoverable as followerCount - audienceMagnitude");
+    }
+
+    [Fact]
+    public void FromPersona_FollowingCount_IsRealOutboundEdgesOnly_MagnitudeNeverInflatesIt()
+    {
+        // profiles-social-graph/07 AC3: SOC-054's magnitude is a FOLLOWER-side construct only.
+        var dto = PersonaResponseDto.FromPersona(AuthoredPersona(), inboundFollowEdges: 3, outboundFollowEdges: 7);
+
+        dto.FollowingCount.Should().Be(
+            7, "the following count is real outbound edges only — the audience magnitude never contributes");
+
+        var noEdges = PersonaResponseDto.FromPersona(AuthoredPersona());
+        noEdges.FollowingCount.Should().Be(
+            0,
+            "a persona with a 50K audience magnitude and no outbound edges follows NOBODY — a magnitude-derived "
+            + "following count would be a fabrication");
+        noEdges.FollowerCount.Should().Be(50186, "with no edges the displayed count is the magnitude alone");
+    }
+
+    [Fact]
+    public void StaffFromPersona_ComposesTheSameCounts_TheFollowGraphIsNotStaffOnlyData()
+    {
+        var dto = StaffPersonaResponseDto.FromPersona(AuthoredPersona(), inboundFollowEdges: 3, outboundFollowEdges: 7);
+
+        dto.FollowerCount.Should().Be(50189);
+        dto.AudienceMagnitude.Should().Be(50186);
+        dto.FollowingCount.Should().Be(
+            7, "only personaType widens the staff shape — the follow counts are identical in both worlds");
+    }
+
+    [Fact]
     public void FromPersona_JoinedAt_MatchesJavaScriptToISOString_ForANonUtcOffsetToo()
     {
         var persona = AuthoredPersona();

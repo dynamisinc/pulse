@@ -56,6 +56,11 @@ public class PersonaEndpointsTests
     [
         "id", "exerciseId", "templateId", "displayName", "handle", "kind", "verified",
         "avatarColor", "initials", "audienceBand", "followerCount", "joinedAt",
+        // profiles-social-graph/07: followerCount is now the DISPLAYED count (magnitude + real inbound
+        // edges); audienceMagnitude carries the magnitude term alone (so audienceReach() cannot
+        // double-count edges) and followingCount the real outbound edges. All three are participant-safe
+        // count fields — no provenance, nothing that distinguishes the SOC-052 lookalike.
+        "audienceMagnitude", "followingCount",
     ];
 
     /// <summary>

@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Social;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Social.Follows;
 
 /// <summary>
 /// The read seam for exercise-scoped <see cref="Persona"/> instances (XC-005, COR-003) — the server-side
@@ -14,13 +15,24 @@ using Pulse.WebApi.Data.Entities;
 public sealed class PersonaReadService
 {
     private readonly PulseDbContext _dbContext;
+    private readonly FollowService _followService;
 
-    /// <summary>Creates the service with the injected persistence context.</summary>
+    /// <summary>Creates the service with the injected persistence context and follow-graph read.</summary>
     /// <param name="dbContext">The scoped EF Core context (already bound to the request's exercise scope).</param>
-    public PersonaReadService(PulseDbContext dbContext)
+    /// <param name="followService">
+    /// The follow graph (<c>profiles-social-graph/07</c>) the displayed counts compose from. Reading it at
+    /// persona-read time is the RECORDED response seam for the composed counts: <c>GET /api/personas</c> is
+    /// already the one unconditional persona read every consumer resolves against, and
+    /// <c>05-audience-magnitude</c>'s formula needs both figures wherever a profile renders — so composing
+    /// here avoids the second, client-sequenced round trip a dedicated follow-summary endpoint would force.
+    /// </param>
+    public PersonaReadService(PulseDbContext dbContext, FollowService followService)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
+        ArgumentNullException.ThrowIfNull(followService);
+
         _dbContext = dbContext;
+        _followService = followService;
     }
 
     /// <summary>
@@ -36,7 +48,12 @@ public sealed class PersonaReadService
     public async Task<IReadOnlyList<PersonaResponseDto>> GetParticipantPersonasAsync(CancellationToken cancellationToken)
     {
         var personas = await ReadScopedAsync(cancellationToken);
-        return personas.ConvertAll(PersonaResponseDto.FromPersona);
+        var edges = await _followService.GetEdgeCountsAsync(cancellationToken);
+
+        return personas.ConvertAll(persona => PersonaResponseDto.FromPersona(
+            persona,
+            edges.InboundFor(persona.Id),
+            edges.OutboundFor(persona.Id)));
     }
 
     /// <summary>
@@ -50,7 +67,12 @@ public sealed class PersonaReadService
     public async Task<IReadOnlyList<StaffPersonaResponseDto>> GetStaffPersonasAsync(CancellationToken cancellationToken)
     {
         var personas = await ReadScopedAsync(cancellationToken);
-        return personas.ConvertAll(StaffPersonaResponseDto.FromPersona);
+        var edges = await _followService.GetEdgeCountsAsync(cancellationToken);
+
+        return personas.ConvertAll(persona => StaffPersonaResponseDto.FromPersona(
+            persona,
+            edges.InboundFor(persona.Id),
+            edges.OutboundFor(persona.Id)));
     }
 
     /// <summary>The one scoped entity read both projections share (central query filter only, COR-001).</summary>
