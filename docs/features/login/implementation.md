@@ -15,6 +15,7 @@
 | 04 Wire routes + logout | Route-table edit (delete `SignInFallback`, mount 02/03) + a logout control in each world. | `features/app-shell/routes.tsx`, `constants.ts` (edits); `features/staffShell/components/StaffHeader.tsx` (edit — logout control); participant shell header (edit — logout control) | The live `/login` + `/staff/login` routes; nothing new exported (pure integration) |
 | 05 UAT bootstrap seam | A secret-gated, idempotent seed endpoint creating `Exercise`/`StaffAssignment`/`Account`/`SharedCredential` rows directly. | `src/Pulse.WebApi/Features/Ops/Bootstrap/` (`BootstrapEndpoints.cs`, `BootstrapOptions.cs`, `BootstrapService.cs`) | `POST /api/ops/bootstrap-exercise`; `AddOpsBootstrap()` / `MapBootstrapEndpoints()` |
 | 06 UAT go-live config & runbook | bicep param threading (mirrors `jwtSecretKey`) + a written, human-executed runbook. | `infrastructure/modules/webapp.bicep`, `infrastructure/main.bicep` (edits); `.github/workflows/deploy-infrastructure.yml` (edit — new secrets) | The deployed UAT app settings; no code seam (an ops runbook, not an API) |
+| 07 Participant persona binding | Extends story 05's bootstrap slice (does not fork it): (a) an optional `personaId`/handle on the `bootstrap-exercise` participant sub-request, persisted onto `Account.PersonaId`; (b) a new guarded `POST /api/ops/bind-participant-persona` for an already-provisioned account, behind the same `BootstrapSecretGate`. Both resolve a persona by **handle** (id also accepted), scoped to the target exercise only. | `src/Pulse.WebApi/Features/Ops/Bootstrap/BootstrapDtos.cs`, `BootstrapService.cs`, `BootstrapEndpoints.cs` (edits — new sub-request field + new endpoint, same slice, not a fork) | `POST /api/ops/bind-participant-persona`; the extended `bootstrap-exercise` participant sub-request's persona binding |
 
 ## Reuse map
 
@@ -60,6 +61,7 @@
 | 03 Staff sign-in | frontend | `features/login/pages/StaffSignInPage.tsx`, `features/login/services/staffSignInService.ts` | 01 (`tokenStore`) | 02 (disjoint files) | 2 | M |
 | 04 Wire routes + logout | frontend | `features/app-shell/routes.tsx`, `constants.ts`, `staffShell/components/StaffHeader.tsx`, participant shell header (edits) | 01, 02, 03 (mounts their exports) | — | 3 | S |
 | 06 UAT go-live config & runbook | infra/ops | `infrastructure/modules/webapp.bicep`, `main.bicep`, `.github/workflows/deploy-infrastructure.yml` (edits); the runbook itself | 04 (frontend must work before flipping the flag), 05 (the endpoint the runbook calls) | — | 4 | M (code) + human-gated execution |
+| 07 Participant persona binding | backend | `src/Pulse.WebApi/Features/Ops/Bootstrap/*` (edits: `BootstrapDtos.cs`, `BootstrapService.cs`, `BootstrapEndpoints.cs`) | 05 (the bootstrap seam it extends, same slice), `engine-content-seed` (the persona cast a binding targets) | — (everything else in the feature is already merged) | 5 | M |
 
 File-disjointness within a wave: Wave 1's two stories touch entirely different repos-within-the-repo
 (`src/frontend/src/core/*` vs `src/Pulse.WebApi/Features/Ops/*`) — zero overlap. Wave 2's two stories each
@@ -67,11 +69,14 @@ own a distinct page + service pair under `features/login/` — zero overlap. Wav
 serial integration story (multiple small edits across two worlds' headers) — not parallelized further
 because it is inherently one coherent routing change. Wave 4 is explicitly **not** a normal build wave:
 its code portion is small, but its completion gate is a human running the runbook against a real Azure
-deployment (see story 06 Technical Notes) — do not schedule it inside an unattended fan-out.
+deployment (see story 06 Technical Notes) — do not schedule it inside an unattended fan-out. Wave 5 is a
+single, later, additive story: everything else in this feature is merged, so it runs alone against the
+now-live UAT backend — no fan-out partner. **Review tier:** Tier-2 (a new ops surface, auth-adjacent,
+behind the existing bootstrap secret — same class as story 05).
 
 ### Integration seam (orchestrator-owned — never a wave story)
 
 | Seam | File(s) | Rule |
 |------|---------|------|
-| Backend composition root | `src/Pulse.WebApi/Program.cs` | Story 05 exports its own `AddOpsBootstrap()`/`MapBootstrapEndpoints()`; the orchestrator wires the one-line calls, same pattern as every other B2 slice. No new middleware ordering constraint (the bootstrap endpoint needs no exercise-scope/session middleware — its own header secret is the only gate). |
+| Backend composition root | `src/Pulse.WebApi/Program.cs` | Story 05 exports its own `AddOpsBootstrap()`/`MapBootstrapEndpoints()`; the orchestrator wires the one-line calls, same pattern as every other B2 slice. No new middleware ordering constraint (the bootstrap endpoint needs no exercise-scope/session middleware — its own header secret is the only gate). **Story 07 (AC2's new `POST /api/ops/bind-participant-persona`):** if it adds a new `Map*` call rather than folding into the existing `MapBootstrapEndpoints()` mapping, that call is this same orchestrator-owned serial edit — never wired by the story's own PR. This is not a hypothetical: story 05 itself merged fully green (PR #310) with its `AddOpsBootstrap()`/`MapBootstrapEndpoints()` wiring **never executed** in `Program.cs`, leaving the endpoint dead at 404 until the follow-up fix (#317, tracked from #308). Story 07's tests must include a composition-root wiring guard (asserting the route is actually mapped in the real app, not only a self-mapped `TestServer` built by the story's own test project) — self-mapped `TestServer` tests alone would have masked exactly the #308/#317 gap. |
 | Frontend composition root | `src/frontend/src/App.tsx` | This feature's route changes live inside `features/app-shell/routes.tsx`'s exported route table (already the orchestrator-owned splice point per `app-shell/implementation.md`) — no story here edits `App.tsx` directly. |

@@ -1,6 +1,6 @@
 # Story: UAT go-live config & runbook
 
-**Feature:** Login & UAT go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Code portion Complete (Wave-4 PR); runbook execution human-gated (not yet run)
+**Feature:** Login & UAT go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** NFR-009  ·  **Design decisions:** none  ·  **Issue:** #309
 **Stack:** infra/ops (bicep + GitHub Actions config; **not** buildable end-to-end by a coding agent alone
 — see the human-action callouts below)
@@ -8,11 +8,12 @@
 
 > **Close-out status.** The **code portion** — the bicep param threading (`bootstrapSecret` +
 > `staffIdentityAccountsJson` in `webapp.bicep`/`main.bicep`/`uat.bicepparam`) and the two new workflow
-> secrets in `deploy-infrastructure.yml` — **has landed** (this Wave-4 PR). What remains is the
-> **human-gated execution** in the *Operator runbook* below: a repo-admin sets the two GitHub secrets,
-> runs the bootstrap endpoint against UAT, verifies real logins, and only then flips
-> `VITE_USE_MOCK_DATA=false` and redeploys the frontend. **No agent runs those steps** — the secret
-> *values* are generated and stored by a human and never pass through an agent session (NFR-009).
+> secrets in `deploy-infrastructure.yml` — **has landed** (this Wave-4 PR). The **human-gated execution**
+> in the *Operator runbook* below has now **also run**: a repo-admin set the two GitHub secrets, ran the
+> bootstrap endpoint against UAT, and flipped `VITE_USE_MOCK_DATA=false` — the frontend has been redeployed
+> and verified live off mock data. See "Runbook executed against UAT" below for the evidence and its one
+> documented residual caveat. **No agent ran those steps** — the secret *values* were generated and stored
+> by a human and never passed through an agent session (NFR-009).
 
 ## Context
 
@@ -74,8 +75,39 @@ If a future story introduces environment-gated behavior (e.g. a dev-only diagnos
 - [x] **A written runbook** (the *Operator runbook* below) states the fresh-database order of operations.
 - [x] **The runbook states the rollback** (setting `VITE_USE_MOCK_DATA` back to `true` + redeploy the
       frontend is the immediate kill-switch).
-- [ ] **Runbook executed against UAT** (human-gated — the remaining work). Record the seeded
-      staff/participant/shared credentials in the go-live PR/issue, **never in committed docs** (NFR-009).
+- [x] **Runbook executed against UAT.** Verified live on 2026-07-25 against
+      `https://app-pulse-api-uat-dynamis.azurewebsites.net` and `https://pulse-uat.cobrasoftware.com`
+      (credential **values** live only where step 1 put them — the `uat` GitHub environment secrets —
+      never recorded here or in any other committed doc, NFR-009):
+      - **Step 2** — `az webapp config appsettings list` on `rg-pulse-uat-centralus/app-pulse-api-uat-dynamis`
+        confirms `Authentication__Bootstrap__Secret` and the indexed
+        `Authentication__StaffIdentity__Accounts__0__{Username,Secret,ExternalSubject,DisplayName}` app
+        settings all landed.
+      - **Step 3** — `GET /health` returns `200`.
+      - **Step 4** — `GET /api/exercise-context` returns `200` with
+        `{"exerciseId":"a72df119-81f2-48e3-acf6-c5d07a7682eb","exerciseName":"Pulse UAT Pilot",
+        "timeZone":"America/Chicago","status":"active"}` — the exercise is seeded under the **backend**
+        host, exactly as the step's CRITICAL callout requires (not the frontend domain — see #322). The
+        bootstrap gate itself still fails closed post-seed: `POST /api/ops/bootstrap-exercise` with no
+        secret, or with a wrong secret, both return `404`.
+      - **Step 5** — all three login endpoints are live and fail closed with anti-enumeration intact:
+        participant, staff (against the real seeded `exerciseId`), and shared all return `401` on bogus
+        credentials with empty bodies — notably **not** the `"exerciseId must be a non-empty GUID"` error
+        that would indicate the host-mismatch failure mode the CRITICAL callout warns about.
+        `GET /api/session` unauthenticated returns `401`.
+      - **Step 6** — the `uat` GitHub environment has `VITE_USE_MOCK_DATA=false` and
+        `VITE_API_URL=https://app-pulse-api-uat-dynamis.azurewebsites.net/api`. Live `/login` renders the
+        participant sign-in surface with the heading **"Sign in to Pulse UAT Pilot"** — the exercise name
+        resolved from the real backend, conclusive proof the SPA is off mock data — with the Account
+        sign-in / Exercise code tabs and the "Staff or controller? Sign in here." link to `/staff/login`.
+        Live `/staff/login` renders username + secret only (no exercise field), COBRA-themed, as story 03
+        specifies.
+
+      **Remaining caveat (not re-verified in this pass, and deliberately not verifiable without
+      credential values passing through an agent session, NFR-009):** a successful `200` on the three
+      login endpoints using the real seeded credentials; an idempotent re-POST of the bootstrap endpoint
+      with the real secret; and the in-browser "a real login lands on the feed" / "a real staff login
+      reaches the console" walkthrough. Those remain operator-executed, by design.
 
 ## As-built config reference
 
@@ -240,10 +272,11 @@ actually happens) — for UAT, secret-gated is the accepted control.
 ## Technical Notes
 
 The **code portion** (bicep param threading + workflow secrets) is done and validated (`az bicep build` +
-`az bicep build-params` clean; CI's *Infra (Bicep)* check re-validates on Linux). The **runbook execution**
-is a manual, human-gated final step: the secret *values* are generated and stored as GitHub Actions
-environment secrets by a human with repo-admin access — never generated by, or passed through, an agent
-session. See `docs/features/login/implementation.md` for the reuse map and Wave-4 slot.
+`az bicep build-params` clean; CI's *Infra (Bicep)* check re-validates on Linux). The **runbook
+execution** was a manual, human-gated step: the secret *values* were generated and stored as GitHub
+Actions environment secrets by a human with repo-admin access — never generated by, or passed through, an
+agent session — and the runbook has now run against UAT (see the final AC's evidence). See
+`docs/features/login/implementation.md` for the reuse map and Wave-4 slot.
 
 ## Dependencies
 
@@ -255,5 +288,6 @@ Story 05 (the bootstrap endpoint this runbook calls — merged, PR #310 + wiring
 - No automated test suite covers bicep parameter threading; validated by `az bicep build` +
   `az bicep build-params` (clean) and the CI *Infra (Bicep)* check. Verify the deployed app settings after
   a `Deploy Infrastructure` run (step 2 above).
-- The manual runbook walk-through (steps 1–6, run once against the real UAT deploy) is the acceptance
-  check — record the seeded credentials in the go-live PR/issue, not in committed docs (NFR-009).
+- The manual runbook walk-through (steps 1–6) is the acceptance check and has now **run once against the
+  real UAT deploy** (2026-07-25 — see the final AC's evidence); the seeded credentials themselves are
+  never recorded in committed docs (NFR-009), only where step 1 put them.

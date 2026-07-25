@@ -69,8 +69,8 @@ touched auth).
 | 03 | Staff sign-in | COR-014 | Complete (PR #314, merged) | #306 |
 | 04 | Wire real login routes + logout (replaces `SignInFallback`) | COR-004, COR-005 (consumed) | Complete (PR #316, merged) | #307 |
 | 05 | UAT bootstrap seam (guarded one-time seed endpoint) | COR-008, COR-011, COR-014, COR-015 (enablement) | Complete (PR #310 + wiring fix #317, merged) | #308 |
-| 06 | UAT go-live config & runbook (allowlist, environment, mock-data flip) | NFR-009 | Code portion Complete (Wave-4 PR); runbook execution human-gated | #309 |
-| 07 | Participant persona binding (provision a participant account with a posting persona) | COR-011, COR-018, SOC-001/003 | Not Started | #342 |
+| 06 | UAT go-live config & runbook (allowlist, environment, mock-data flip) | NFR-009 | Complete | #309 |
+| 07 | Participant persona binding (provision a participant account with a posting persona) | COR-011, COR-018, SOC-001/003 | In Progress | #342 |
 
 ## Dependencies
 
@@ -82,7 +82,11 @@ This feature is a **pure consumer** of all of those contracts — no story here 
 existing identity slice, except story 05, which **adds** a new, narrowly-scoped slice alongside it.
 
 **Internal:** 02 and 03 depend on 01 (the token store they persist into); 04 depends on 02 + 03 (the
-pages it routes to); 06 depends on 04 (frontend) and 05 (backend) both being merged/deployable.
+pages it routes to); 06 depends on 04 (frontend) and 05 (backend) both being merged/deployable. 07
+**extends** 05's bootstrap slice in place (same files, additive edit, not a fork — see 07's Technical
+Notes) rather than depending on it as a separate merged artifact, and additionally depends on
+`engine-content-seed` (the persona cast a binding targets, and the reason it resolves by handle rather
+than id).
 
 ## Design notes
 
