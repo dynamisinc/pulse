@@ -190,20 +190,27 @@ default (Azure OpenAI in-tenant is the v1 default; Claude is the per-deployment 
 4. **Then flip the live-traffic gate** (next paragraph).
 
 **What signing actually authorizes** — three parameters in `infrastructure/parameters/uat.bicepparam`,
-which belong in **one reviewed commit** so the human assertion lands with the go-live rather than
-somewhere upstream of it:
+set together in **one atomic reviewed commit**. All three are `false` on disk today; the signature is what
+turns them on, so the human assertion lands *with* the go-live rather than somewhere upstream of it:
 
-| Parameter | Signing sets it to | What it means |
-|---|---|---|
-| `generationProviderLive` | `true` | Route traffic: `Generation__Provider` `Fake` → `AzureOpenAI`. The only setting the flip changes. |
-| `generationTenantBounded` | `true` | **The signer's §2 assertion** (evidence i): single-tenant, keyless, no shared/public inference. Not derived from `deployAi` — a human types it. |
-| `generationNoTrainingAttested` | `true` | **The signer's §2 assertion** (evidence i): contractual no-training terms cover this endpoint. |
+| Parameter | On disk today | Signing sets it to | What it means |
+|---|---|---|---|
+| `generationProviderLive` | `false` | `true` | Route traffic: `Generation__Provider` `Fake` → `AzureOpenAI`. The only app setting the flip changes. |
+| `generationTenantBounded` | `false` | `true` | **The signer's §2 assertion** (evidence i): single-tenant, keyless, no shared/public inference. Not derived from `deployAi` — a human types it. |
+| `generationNoTrainingAttested` | `false` | `true` | **The signer's §2 assertion** (evidence i): contractual no-training terms cover this endpoint. |
 
-The two attestations are deliberately **not** computed from `deployAi`, so
-`GenerationGovernance.Validate` stays an independent startup gate: leave either `false` under a live
-provider and the host throws `GenerationConfigurationException` at startup instead of egressing (fail
-closed, §3). Both default to `false` in `main.bicep`, so any other environment's parameter file that
+**Do not pre-type the attestations ahead of the signature.** All three moving together is what makes the
+fail-closed backstop real: because the attestations are **not** computed from `deployAi`,
+`GenerationGovernance.Validate` is an independent startup gate, so a stray flip of
+`generationProviderLive` **alone** throws `GenerationConfigurationException` at startup instead of
+egressing unattested (§3). Setting the attestations early would disarm precisely that protection for this
+environment. Both also default to `false` in `main.bicep`, so any other environment's parameter file that
 omits them asserts nothing.
+
+Leaving them `false` costs nothing today: with `generationProviderLive = false` the App Service resolves
+`Generation:Provider = Fake`, and `AddEngineGeneration` takes the `FakeGenerationProvider` branch — the
+governance gate is only reached for a real, egressing provider, and `Fake`'s in-process posture is
+compliant by construction.
 
 Everything else (`Endpoint`, the tier deployment/model pairs, residency, retention) is already staged and
 unchanged by the flip; step 1 above has by then provisioned the endpoint and the role assignment
