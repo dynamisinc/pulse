@@ -152,6 +152,32 @@ public class PulseDbContext : DbContext
             // Server, so the migration narrows this column to make the index possible at all.
             entity.Property(e => e.Handle).HasMaxLength(256);
             entity.HasIndex(e => new { e.ExerciseId, e.Handle }).IsUnique();
+
+            // profiles-social-graph/06 presentation fields (COR-020/COR-021/SOC-054). Bounded lengths (the
+            // two union-valued columns are short, closed vocabularies); Bio is optional free text.
+            entity.Property(e => e.Bio).HasMaxLength(Persona.MaxBioLength);
+
+            // Server-side engine-casting gate (never projected to a participant DTO — see the entity's doc).
+            // Required-with-default TRUE so every pre-existing row stays castable exactly as it was.
+            //
+            // HasSentinel(true) is LOAD-BEARING, not decoration: with a store default configured, EF omits a
+            // property from the INSERT when its value equals the sentinel and lets the database default win.
+            // The sentinel would otherwise be the CLR default (false) — so seeding a deliberately
+            // NON-castable persona (the SOC-052 lookalike) would silently insert Castable = TRUE and hand the
+            // engine the very voice this gate exists to withhold. Pinning the sentinel to `true` inverts that:
+            // `true` rides the database default, `false` is always written explicitly.
+            entity.Property(e => e.Castable).IsRequired().HasDefaultValue(true).HasSentinel(true);
+
+            // Required-WITH-DEFAULT, the same shape Exercise.TimeZone/Status use above: the migration adds
+            // these NOT NULL to a table that already holds seeded rows, so the default backfills a
+            // contract-VALID value ("citizen"/"nano"/the fixed pre-exercise scenario epoch) instead of an
+            // empty string or a 0001-01-01 sentinel that would reach a participant surface.
+            entity.Property(e => e.PersonaType).IsRequired().HasMaxLength(32)
+                .HasDefaultValue(Persona.DefaultPersonaType);
+            entity.Property(e => e.AudienceBand).IsRequired().HasMaxLength(16)
+                .HasDefaultValue(Persona.DefaultAudienceBand);
+            entity.Property(e => e.AudienceMagnitude).IsRequired().HasDefaultValue(0);
+            entity.Property(e => e.JoinedAt).IsRequired().HasDefaultValue(Persona.DefaultJoinedAt);
         });
 
         modelBuilder.Entity<Post>(entity =>

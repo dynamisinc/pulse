@@ -165,8 +165,14 @@ public sealed class EngineContentSeedService
         var personasCreated = seeded.Count(persona => persona.Created);
         var personasReused = seeded.Count - personasCreated;
 
-        // 4b. Build the canned starter storyline (story 02) from the seeded handles.
-        var handles = seeded.Select(persona => persona.Dossier.Handle).ToList();
+        // 4b. Build the canned starter storyline (story 02) from the seeded handles — CASTABLE ones only.
+        // profiles-social-graph/06: the SOC-052 lookalike and the low-credibility outlet are seeded as ROWS
+        // (so participants can browse the impersonator's profile and learn to spot it) but ship
+        // Castable = false, so the engine can never voice them until a scenario opts in by flipping the
+        // column. This is the real gate behind engine-content-seed's "no way to turn a troll voice off"
+        // concern — the eligible cast is filtered here, not merely ordered.
+        var castable = seeded.Where(persona => persona.Castable).ToList();
+        var handles = castable.Select(persona => persona.Dossier.Handle).ToList();
         var storyline = StarterStorylineFactory.Build(
             exerciseId,
             handles,
@@ -181,7 +187,7 @@ public sealed class EngineContentSeedService
         // OrdinalIgnoreCase to match the storyline factory's ordering comparer and the DB's
         // case-insensitive handle collation — so a future variable-casing cast input (decision (b))
         // can never silently drop a persona from the eligible set on a case mismatch.
-        var personasByHandle = seeded.ToDictionary(
+        var personasByHandle = castable.ToDictionary(
             persona => persona.Dossier.Handle,
             persona => new EnginePersona(persona.InstanceId, persona.Dossier),
             StringComparer.OrdinalIgnoreCase);
