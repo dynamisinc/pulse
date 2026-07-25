@@ -1,7 +1,7 @@
-# Story: Compliance chrome (configurable banners)
+# Story: Compliance chrome — per-exercise config
 
 **Feature:** Exercise configuration  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-031 (XC-003, NFR-008)  ·  **Design decisions:** R-006 (banner chrome interim)  ·  **Issue:** #68
+**Requirements:** COR-031 (XC-003, NFR-008)  ·  **Design decisions:** R-006 (banner presentation deferred to D7); D7 SHELL-CONTRACT §1 / D7-008 (chrome-off is legal)  ·  **Issue:** #68
 
 ## Context
 Government exercises require classification/exercise markings. Compliance chrome is configurable
@@ -10,36 +10,69 @@ top/bottom banners (text, e.g. "UNCLASSIFIED // FOR EXERCISE PURPOSES ONLY"; col
 Looking Glass green-bar precedent. It can be disabled per exercise, but **never simultaneously with
 in-content watermarks off** (COR-031, XC-003, NFR-008).
 
-> **Interim — superseded by D7 shell (R-006).** Both mockups improvised these banners and diverge on
-> count/placement, classification voice, and styling (`docs/design/COMPONENTS.md` "Shell extraction",
-> divergences #1–3); the containment model is divergence #8. The **D7 unified-shell session owns the
-> banner presentation** — do not spec count, placement, or styling further in this story. The
-> requirement itself (configurable compliance chrome + the chrome↔watermark guard) stands.
+> **The chrome itself already ships.** `participant-shell/01` (Complete, #185) delivered
+> `features/participant-shell/components/ComplianceChrome.tsx` + the `chromeConfig.ts` config seam:
+> two config-driven banners outside the app frame, chrome-off legal, and the NFR-008
+> `isWatermarkRequired()` fallback signal. The backend serves the config from
+> `GET /api/chrome-config` — but as a **hardcoded constant** in
+> `Features/ParticipantShell/ParticipantShellEndpoints.cs`, identical for every exercise, editable by
+> nobody.
+>
+> **This story is therefore scoped to:** make that config **per-exercise, staff-editable and
+> persisted**, serve it through the **unchanged frozen `ChromeConfigResponse` shape**, and enforce the
+> NFR-008 chrome↔watermark mutual guard **server-side** so it cannot be defeated by a client.
+
+> **Presentation stays frozen (R-006 / D7).** Banner count, placement, classification voice and styling
+> are owned by the D7 shell contract (`docs/design/D7-application-shells/SHELL-CONTRACT.md` §1) — do not
+> respec them here, and do not restyle the shipped component.
 
 ## Acceptance Criteria
-- [ ] Compliance chrome renders as persistent banners **outside** the simulated app frame,
-      consistently across every enabled channel (XC-003), with configurable text and colors
-      *(banner count/placement/styling: interim — superseded by D7 shell, R-006)*.
-- [ ] Chrome is configurable per exercise and can be disabled — but the platform **prevents** chrome
-      and in-content watermarks (NFR-008) from both being off at once.
-- [ ] The banner text/state is not conveyed by color alone (NFR-001) and does not break in-app
-      immersion (it's framing, not part of the fiction).
-- [ ] Chrome renders on participant surfaces from platform-open.
+- [ ] Given a planner with a staff session, when they edit the compliance-chrome config (enabled,
+      top/bottom banner text + fg/bg colors) and save, then it persists on that exercise and is
+      unchanged for every other exercise.
+- [ ] Given a saved chrome config, when a participant calls `GET /api/chrome-config`, then the response
+      carries that exercise's values in the **existing frozen `ChromeConfigResponse` shape**
+      (`{ enabled, top{text,fg,bg}, bottom{text,fg,bg} }`) — the constant is gone, the DTO is unchanged,
+      and `chromeConfig.ts`'s `isChromeConfig` guard and `ComplianceChrome.tsx` need no change.
+- [ ] **NFR-008 guard, server-side:** given an exercise whose in-content watermark is off, when a
+      planner attempts to disable compliance chrome (or vice versa), then the write is rejected with a
+      400 and an explanatory message — chrome and watermark are never both off, and the rule holds
+      regardless of what the client sends.
+- [ ] **Content security (NFR-004):** given banner text is free text rendered on every participant
+      channel, when it is saved, then it is length-bounded and sanitized server-side; a stored
+      `<script>` in a banner never executes in a participant session.
+- [ ] **Isolation (XC-001/002, COR-001):** given a chrome-config read, when it is served, then the
+      exercise comes from the server-resolved scope (`IExerciseContext`), never a client parameter; a
+      cross-exercise chrome read/write returns 403/404.
+- [ ] Given chrome is enabled, when it renders, then its state is not conveyed by color alone (NFR-001)
+      and it remains framing outside the fiction — no change to the shipped component's markup is
+      required to satisfy this.
 
 ## Out of Scope
-The in-content EXERCISE watermark itself (NFR-008 fast-follow, participant-content concern); per-channel
-skins (channel epics); the real-world Break-Fiction overlay (E7 CTL-024 — a different, alien mechanism).
+**Building or restyling the banner component** (`participant-shell/01`, shipped; presentation owned by
+D7/R-006); the in-content EXERCISE watermark itself (NFR-008 fast-follow, a participant-content
+concern — this story only reads/enforces its on/off state); per-channel skins (channel epics); the
+real-world Break-Fiction overlay (E7 CTL-024 — a different, alien mechanism); reshaping
+`ChromeConfigResponse`.
 
 ## Technical Notes
-Participant world framing. Rendered by the app shell outside each channel's skin subtree. The
-chrome-off↔watermark-off mutual guard is enforced centrally. The `<ComplianceChrome>` presentation
-lands as part of the D7 unified shell — build the config model + guard now; treat any banner visuals
-as placeholder until D7. Story 05 (participant exercise identity) may add a chrome **content**
-requirement here. See implementation.md (story 02).
+The **config and the guard are backend/staff-world work**; the participant-side render is already
+done. The staff editor panel is COBRA (`@/theme/styledComponents`, FontAwesome, MUI 9 `sx`-only) and
+lives in `src/frontend/src/features/planner/` — it must never mount a participant brand theme. The
+served payload is participant-world data.
+
+The chrome column ships in story 01's single migration; this story owns the projection + guard + panel.
+It reads the chrome config through the per-exercise shell-config seam story 01 introduces rather than
+editing `ParticipantShellEndpoints.cs` again. Story 05 (participant exercise identity) may later add a
+chrome **content** requirement here. See implementation.md (story 02).
 
 ## Dependencies
-Story 01 (settings); the participant app shell; NFR-008 watermark slot (fast-follow) for the guard.
+Story 01 (the settings slice, the chrome column in its migration, and the constants→service refactor of
+the shell-config endpoints); `participant-shell/01` (`ComplianceChrome.tsx` + `chromeConfig.ts`,
+merged); the NFR-008 watermark on/off state the guard reads.
 
 ## Tests
-- Component: chrome renders outside the app frame on every channel; disabling chrome while watermark is
-  off is blocked.
+- Integration: per-exercise chrome config persists and is served per exercise; two exercises differ.
+- Contract: the response still satisfies `isChromeConfig` — no consumer change.
+- Guard: disabling chrome while the watermark is off is rejected server-side (and the reverse).
+- Sanitization: a `<script>` payload in banner text is neutralized end to end.

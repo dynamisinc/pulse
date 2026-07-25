@@ -48,7 +48,9 @@ Any visual or shell design (D7 owns the shell — R-006); the staff identity bad
 hostname-scoping mechanics (`exercise-isolation/08`).
 
 ## Technical Notes
-Requirements/documentation story — no code. The likely resolution surface is the COR-031
+**Requirements/documentation story — no code, no stack, and deliberately excluded from the Wave Plan**
+(`implementation.md`): it is never dispatched to a builder and never appears in a wave fan-out. The
+likely resolution surface is the COR-031
 environment chrome (outside the fiction frame), already per-exercise-configurable text — that
 path keeps XC-002 intact and needs no new participant-world element. Whatever is decided must
 hold on every participant channel (social, portal, outlets, weather — XC-003).
