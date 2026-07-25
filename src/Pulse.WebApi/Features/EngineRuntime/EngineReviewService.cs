@@ -1203,10 +1203,14 @@ public sealed class EngineAutonomyStateDto
     /// any level). Projected from the domain's own <see cref="EngineAutonomyState.ResolveEffective"/> so a
     /// consumer never has to re-derive "a clamp is active, therefore effectively Suggest" — re-deriving it is
     /// exactly the class of bug (a mislabelled posture) that story 06 exists to fix.
+    ///
+    /// <para><b><c>required</c> although nullable, deliberately.</b> <c>null</c> means "fully stopped" to every
+    /// consumer, so a construction site that simply forgot this field would publish a high-consequence silent
+    /// default. <c>required</c> keeps null expressible while forcing the decision at every construction site.</para>
     /// </summary>
     [System.Text.Json.Serialization.JsonPropertyName("effectiveLevel")]
     [System.Text.Json.Serialization.JsonConverter(typeof(NullableAutonomyLevelJsonConverter))]
-    public AutonomyLevel? EffectiveLevel { get; init; }
+    public required AutonomyLevel? EffectiveLevel { get; init; }
 
     /// <summary>Projects the built autonomy state to the staff wire snapshot.</summary>
     /// <param name="state">The exercise's autonomy state.</param>
