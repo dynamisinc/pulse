@@ -323,6 +323,50 @@ public class FollowEndpointTests
     }
 
     [RequiresDockerFact]
+    public async Task TelemetryOrigin_IsDerivedFromTheSessionKind_NotHardcodedParticipant()
+    {
+        // SG-003: the accessor resolves ANY live session carrying a persona binding. Today only a participant
+        // login sets one, but E7 persona-operation lets a controller act AS a persona — a hardcoded
+        // 'participant' origin would then quietly mis-attribute the audit record. Both kinds are pinned here.
+        var participantWorld = await SeedWorldAsync();
+
+        var staffWorld = await SeedWorldAsync();
+        var staffToken = $"staff-{Guid.NewGuid():N}";
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Sessions.Add(FollowTestHost.NewSession(
+                staffToken, staffWorld.Exercise, staffWorld.Follower, kind: "staff"));
+            await seed.SaveChangesAsync();
+        }
+
+        await using var host = CreateHost();
+
+        using (var participantClient = host.CreateClientFor(participantWorld.Host, participantWorld.Token))
+        {
+            (await participantClient.PostAsync(FollowUri(participantWorld.Followee), content: null))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        using (var staffClient = host.CreateClientFor(staffWorld.Host, staffToken))
+        {
+            (await staffClient.PostAsync(FollowUri(staffWorld.Followee), content: null))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        (await ReadEventsAsync(participantWorld.Exercise, "follow")).Should().ContainSingle().Which
+            .Origin.Should().Be("participant", "a participant session acts as its own account");
+
+        var staffEvent = (await ReadEventsAsync(staffWorld.Exercise, "follow")).Should().ContainSingle().Subject;
+        staffEvent.Origin.Should().Be(
+            "controller-as-persona",
+            "a staff session operating a persona is a CONTROLLER acting on the participants' behalf — the "
+            + "origin is derived from Session.Kind, never assumed");
+        staffEvent.Actor.ActingHumanId.Should().NotBeNullOrEmpty(
+            "COR-018: a controller-as-persona origin must carry the acting human, and the v0 envelope guard "
+            + "refuses the row otherwise");
+    }
+
+    [RequiresDockerFact]
     public async Task RejectedCrossExerciseFollow_EmitsNoTelemetryInEitherExercise()
     {
         var worldA = await SeedWorldAsync();

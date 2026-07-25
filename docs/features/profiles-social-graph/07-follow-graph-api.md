@@ -1,7 +1,7 @@
 # Story: Follow graph (backend)
 
-**Feature:** Profiles & social graph  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** SOC-051, SOC-054, SOC-081, COR-001, XC-004  ·  **Design decisions:** none  ·  **Issue:** _TBD — mirrored after authoring_
+**Feature:** Profiles & social graph  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Complete
+**Requirements:** SOC-051, SOC-054, SOC-081, COR-001, XC-004  ·  **Design decisions:** none  ·  **Issue:** #370
 **Stack:** backend
 
 ## Context
@@ -18,7 +18,12 @@ default for citizen-role participants with named accounts"; tracked as feeds-dis
 actually build against.
 
 ## Acceptance Criteria
-- [ ] **Entity + isolation.** A `Follow` entity implementing `IExerciseScoped` records a directed
+> **Gate-1 amendment (approved by the coordinator, folded in the second commit).** AC8 below promotes a rule
+> the build added beyond the original ACs to a real acceptance criterion: story 02's `useFollow` will code
+> against the self-follow rejection as a permanent behavioural contract, so it belongs in the contract rather
+> than living only as a test name.
+
+- [x] **Entity + isolation.** A `Follow` entity implementing `IExerciseScoped` records a directed
       edge (follower persona → followee persona) with a unique index on `(ExerciseId,
       FollowerPersonaId, FolloweePersonaId)` so following the same account twice is the same row,
       not a duplicate. An EF Core migration adds the table. Isolation is **inherited** from
@@ -26,43 +31,50 @@ actually build against.
       `IExerciseScoped` entity — this slice never applies its own `exerciseId` filter and never
       accepts one from a client (COR-001); the exercise scope comes only from the resolved request
       context, the same posture `PersonaEndpoints`/`FeedEndpoints` already use.
-- [ ] **Follow / unfollow endpoints.** `POST /api/personas/{id}/follow` and `DELETE
+- [x] **Follow / unfollow endpoints.** `POST /api/personas/{id}/follow` and `DELETE
       /api/personas/{id}/follow` create/remove the edge for the caller's session-bound persona
       (the follower). Both are idempotent — following an already-followed persona, or unfollowing an
       already-unfollowed one, succeeds without erroring. Both are refused for a read-only session
       via the existing `ReadOnlySessionWriteFilter` (COR-015, D1-011) — the same gate `POST /posts`
       is denied through.
-- [ ] **Displayed counts.** A persona's follower/following counts are servable such that the
+- [x] **Displayed counts.** A persona's follower/following counts are servable such that the
       **displayed follower count** = `AudienceMagnitude` (story 06) + real inbound `Follow` edges,
       and the **following count** = real outbound edges only (magnitude never inflates a following
       count — SOC-054's magnitude is a follower-side construct only). State in Technical Notes
       exactly which response seam was chosen — extending `PersonaResponseDto`/`GET /api/personas`
       with the composed counts, vs. a dedicated `GET /api/personas/{id}/follow-summary` (or
       equivalent) endpoint — and why.
-- [ ] **Following read + feed scoping.** The caller can read which personas their session-bound
+- [x] **Following read + feed scoping.** The caller can read which personas their session-bound
       persona follows (the set `04-who-to-follow` needs to exclude already-followed accounts from
       its suggestions, and `05-audience-magnitude`'s follower **list** needs the inverse — real
       followers of a given persona). The feed read supports a following-scoped variant (e.g. `GET
       /api/feed?scope=following`, or an equivalent explicitly named in Technical Notes) so
       `feeds-discovery/02`'s Following feed can consume it without a second, client-composed round
       trip against the full feed.
-- [ ] **Telemetry (XC-004).** Follow and unfollow each emit exactly one XC-004 event server-side
+- [x] **Telemetry (XC-004).** Follow and unfollow each emit exactly one XC-004 event server-side
       against the locked v0 envelope — scenario-time stamped, exercise scope and actor
       (`actor.kind: 'persona'`, the follower persona id, `actingHumanId` the authenticated human
       behind the session) stamped **server-side**, never accepted as client-supplied fields, mirroring
       `POST /posts`'s existing server-stamping posture.
-- [ ] **Cross-exercise isolation (always-Critical, COR-001).** A persona in exercise A can never be
+- [x] **Cross-exercise isolation (always-Critical, COR-001).** A persona in exercise A can never be
       followed by a persona in exercise B, and never appears in exercise B's follow graph in either
       direction — a follow request naming a followee id that resolves to a *different* exercise's
       persona is rejected, not silently a no-op that looks like success. Add this to the standing
       isolation suite (`exercise-isolation/07`).
-  - [ ] **Composition-root wiring (regression class, not a one-off check).** The new `Add*`/`Map*`
+  - [x] **Composition-root wiring (regression class, not a one-off check).** The new `Add*`/`Map*`
       calls are verified reached from `Program.cs` on the real, fully-wired host — not only a
       self-mapped `TestServer` built by this story's own test project — mirroring
       `CompositionRootWiringTests`'s existing pattern (`identity-auth-roles/10`'s
       `ProgramCs_MapsTheBindParticipantPersonaEndpointExactlyOnce`). A slice has merged fully green
       here before with its wiring never executed (#310→#317, dead at 404); this story does not repeat
       that failure mode.
+- [x] **Self-follow is refused (AMENDED — Gate-1, promoted from the build's own rule).** A follow request
+      naming the caller's OWN session-bound persona is rejected with `400` and writes no edge. A self-edge
+      would inflate a persona's displayed follower count with itself, corrupting the very
+      `magnitude + edges` figure AC3 defines, and there is no participant-meaningful "follow yourself". This
+      is a permanent behavioural contract, not an implementation detail: story 02's `useFollow` codes against
+      it (a self-follow affordance should never be rendered, and a `400` from this path is not an error state
+      to surface).
 
 ## Out of Scope
 The Follow **button** and `useFollow` hook (story 02, frontend — that story's write path calls
@@ -145,7 +157,51 @@ event types did exactly this), so this needs no envelope change — but a consum
 **One event per state CHANGE, not per request.** An idempotent repeat (following twice, unfollowing a
 non-edge) writes no row, so it emits no event — "exactly one XC-004 event per meaningful action" is honoured
 by the mutation, in the same unit of work as the edge. A rejected cross-exercise attempt emits nothing in
-either exercise.
+either exercise. (Gate-1 agreed: per-request emission would inflate every AAR action count in exactly the way
+a retrying client makes unavoidable.)
+
+**`unfollow` is now in the documented vocabulary (Gate-1 WR-003).** `KNOWN_TELEMETRY_EVENT_TYPES`
+(`src/frontend/src/core/telemetry/schema.ts`) gained `'unfollow'` (list length 14 → 15). The envelope needed
+no change — `eventType` is an open `z.string()` — but a later AAR/evaluator consumer filtering on that list
+would otherwise have silently dropped every unfollow from production data.
+
+**`origin` is DERIVED from `Session.Kind`, not hardcoded (Gate-1 SG-003).** A `staff`-kind session operating a
+persona emits `controller-as-persona`; every other kind emits `participant`. Only a participant login binds a
+persona to a session today, so this is always `participant` in practice — but the accessor resolves ANY live
+session carrying a `PersonaId`, and E7 persona-operation lets a controller act as a persona. A hardcoded
+origin would then keep reporting `participant` for a controller's action: wrong-but-plausible audit data,
+much harder to notice after the fact than a missing field. `CurrentSessionPersona` carries `Kind` for this.
+
+**Two rules this build added beyond the original ACs (Gate-1 asked both be recorded):**
+
+1. **Self-follow → `400`.** Promoted to a real acceptance criterion (AC8 above) rather than living only as a
+   test name, because story 02's `useFollow` will code against it as a permanent behavioural contract.
+2. **The concurrency fold — a `200` can come from a CAUGHT write failure.** Both write paths catch
+   `DbUpdateException` and fold it into the idempotent `Unchanged` success, because a concurrent request
+   carrying the same intent fails differently in each direction: the follow side violates the unique
+   `(ExerciseId, Follower, Followee)` index, while the unfollow side issues `DELETE … WHERE Id = @p0`, affects
+   ZERO rows because the racing request already removed it, and EF raises `DbUpdateConcurrencyException` (a
+   `DbUpdateException` **subclass**). The fold was originally guarded `when (follow)`, which left a
+   double-tapped Unfollow — the likelier participant gesture — surfacing as a **500** (Gate-1 WR-001; the
+   regression was reproduced empirically before the fix and is now pinned by
+   `FollowConcurrencyTests`). The fold is deliberately NOT blanket: after `ChangeTracker.Clear()` it re-reads
+   the edge and rethrows unless the database agrees with the caller's intent, so a genuine persistence failure
+   still surfaces rather than returning a `200` that claims a write succeeded
+   (`AGenuineWriteFailure_StillSurfaces_TheFoldNeverHidesItBehindA200`). The losing request's telemetry event
+   is discarded with its mutation — the winner already emitted the one event for the one state change.
+
+**Known limits, recorded rather than fixed (Gate-1 SG-001 / SG-002):**
+
+- **The directed reads are UNPAGINATED.** `GET /api/personas/{id}/following` and `/followers` return the full
+  id set. Fine at Phase-1 scale (a nine-persona seeded cast plus participant-created edges) and it is what
+  stories 04 and 05 consume, but a large exercise's follower list would return an unbounded array. Paging is a
+  later change, and additive: the response is an object (`personaId` / `personaIds` / `count`), not a bare
+  array, precisely so a `nextCursor` can be added without breaking the shape.
+- **`GetEdgeCountsAsync` runs TWO whole-exercise aggregates per `GET /api/personas`.** Two grouped counts over
+  the scoped `Follows` set, composed in memory, which is why the persona read stays a single round trip and
+  avoids an N+1 per persona. If that read ever gets hot, the documented escape hatch is the seam AC3 named and
+  this story declined: a dedicated `GET /api/personas/{id}/follow-summary`, or a denormalized counter column.
+  Nothing in Phase 1's scale profile motivates either yet.
 
 ## Dependencies
 `backend-host/02` (persistence/EF Core); `social-api/04` (`GET /api/personas`, extended here);
@@ -179,6 +235,12 @@ caller's persona.
   carries a persona binding, so the 403 can only come from `ReadOnlySessionWriteFilter`
 - `FollowEndpointTests.AnonymousCaller_WithNoSessionPersona_IsRefused_AndWritesNothing` [docker]
 - `FollowEndpointTests.UnresolvedScope_Returns401_OnTheWrite_NotAnEmptyOk` [docker]
+- `FollowConcurrencyTests.ConcurrentDoubleUnfollow_FoldsToIdempotentSuccess_NotA500` [docker] (Gate-1 WR-001)
+- `FollowConcurrencyTests.ConcurrentDoubleFollow_FoldsToIdempotentSuccess_NotA500` [docker]
+- `FollowConcurrencyTests.AGenuineWriteFailure_StillSurfaces_TheFoldNeverHidesItBehindA200` [docker] — the
+  counterweight: the fold can never hide a real persistence failure behind a 200
+
+**Self-follow refused (AC8)**
 - `FollowEndpointTests.SelfFollow_IsRejected_NoEdgeIsWritten` [docker]
 
 **Displayed counts (AC3)**
@@ -199,6 +261,9 @@ caller's persona.
 - `FollowEndpointTests.Follow_EmitsExactlyOneXc004Event_WithServerStampedScopeActorAndScenarioTime` [docker]
 - `FollowEndpointTests.Unfollow_EmitsExactlyOneXc004Event_AndAnIdempotentRepeatEmitsNone` [docker]
 - `FollowEndpointTests.RejectedCrossExerciseFollow_EmitsNoTelemetryInEitherExercise` [docker]
+- `FollowEndpointTests.TelemetryOrigin_IsDerivedFromTheSessionKind_NotHardcodedParticipant` [docker] (Gate-1
+  SG-003 — a participant session emits `participant`, a staff session operating a persona emits
+  `controller-as-persona`)
 
 **Cross-exercise isolation (AC6, always-Critical)**
 - `FollowEndpointTests.CrossExerciseFollow_IsRejected_AndNoEdgeExistsInEitherGraph` [docker] — positively

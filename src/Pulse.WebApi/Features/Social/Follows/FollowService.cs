@@ -25,10 +25,11 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 /// <b>Idempotent by design, and by constraint.</b> Following an already-followed persona and unfollowing a
 /// persona that is not followed both succeed without writing a second row or erroring. Because a no-op is not
 /// a meaningful action, it emits NO telemetry: exactly one XC-004 event accompanies exactly one state change,
-/// in the SAME unit of work as the edge itself. The unique index
-/// <c>(ExerciseId, FollowerPersonaId, FolloweePersonaId)</c> is the backstop for a concurrent double-submit
-/// that beats the existence check — the resulting unique-violation is folded back into the same idempotent
-/// success rather than surfacing as a 500.
+/// in the SAME unit of work as the edge itself. A concurrent double-submit that beats the existence check is
+/// folded back into that same idempotent success SYMMETRICALLY — the follow side's unique-index violation and
+/// the unfollow side's zero-rows-affected <c>DbUpdateConcurrencyException</c> are the same "one tap late"
+/// event — but only after re-reading the database and confirming it agrees with the caller's intent, so a
+/// genuine persistence failure still surfaces rather than hiding behind a 200.
 /// </para>
 /// <para>
 /// <b>Scenario time is server-side (COR-053).</b> The edge's and the event's scenario instant come from the
@@ -52,9 +53,17 @@ public sealed class FollowService
 
     private const string SocialChannel = "social";
     private const string PersonaActorKind = "persona";
-    private const string ParticipantOrigin = "participant";
     private const string PersonaEntityType = "persona";
     private const string FallbackTimeZone = "UTC";
+
+    /// <summary>The <c>Session.Kind</c> that means a staff human is operating the persona (COR-018).</summary>
+    private const string StaffSessionKind = "staff";
+
+    /// <summary>The <c>PostOrigin</c> value for a participant acting as their own account.</summary>
+    private const string ParticipantOrigin = "participant";
+
+    /// <summary>The <c>PostOrigin</c> value for a controller operating a persona on the participants' behalf.</summary>
+    private const string ControllerAsPersonaOrigin = "controller-as-persona";
 
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
@@ -307,27 +316,37 @@ public sealed class FollowService
             // write-guard validates ExerciseId != Guid.Empty on both scoped rows (COR-001).
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException) when (follow)
+        catch (DbUpdateException)
         {
-            // The unique index caught a concurrent double-submit that beat the existence check above. The
-            // caller's intent ("I follow this persona") holds either way, so fold it into the same idempotent
-            // success — but drop THIS unit of work's telemetry event with it, since the winning request
-            // already emitted the one event for the one state change.
+            // A concurrent request carrying the SAME intent beat this one past the existence check above.
+            // The failure looks different in each direction but means the same thing:
+            //   FOLLOW   — the unique (ExerciseId, Follower, Followee) index rejected the duplicate row.
+            //   UNFOLLOW — EF's DELETE ... WHERE Id = @p0 affected ZERO rows because the racing request had
+            //              already removed it, which EF reports as DbUpdateConcurrencyException (a
+            //              DbUpdateException subclass). A double-tapped Unfollow is the likeliest way a
+            //              participant reaches this, so it must NOT surface as a 500 when the equivalent
+            //              follow-side race folds to a 200.
+            // Clearing the tracker drops THIS unit of work's telemetry event along with the mutation, since
+            // the winning request already emitted the one event for the one state change.
             _dbContext.ChangeTracker.Clear();
 
-            var raced = await _dbContext.Follows
+            var edgeExists = await _dbContext.Follows
                 .AsNoTracking()
                 .AnyAsync(
                     edge => edge.FollowerPersonaId == sessionPersona.PersonaId
                         && edge.FolloweePersonaId == followeePersonaId,
                     cancellationToken);
 
-            if (!raced)
+            if (edgeExists != follow)
             {
+                // The database does NOT agree with the caller's intent, so this was never the double-submit
+                // race — it is a genuine persistence failure. Surface it rather than hide it behind a 200
+                // that would tell the caller a write succeeded when nothing was written.
                 throw;
             }
 
-            return FollowResult.Unchanged(following: true);
+            // The world already holds what the caller asked for, one tap late: the idempotent no-op case.
+            return FollowResult.Unchanged(following: follow);
         }
 
         return FollowResult.Changed(follow, edgeId, scenarioTime);
@@ -362,7 +381,7 @@ public sealed class FollowService
                 ActingHumanId = string.IsNullOrEmpty(sessionPersona.ActingHumanId) ? null : sessionPersona.ActingHumanId,
                 SessionId = sessionPersona.SessionId.ToString(),
             },
-            Origin = ParticipantOrigin,
+            Origin = OriginForSessionKind(sessionPersona.Kind),
             WallClockTime = now,
             ScenarioTime = scenarioTime,
             TimeZone = timeZone,
@@ -373,6 +392,24 @@ public sealed class FollowService
             },
             EmittedAt = now,
         };
+
+    /// <summary>
+    /// Derives the XC-004 <c>origin</c> from WHO is really acting, rather than assuming the participant case:
+    /// a <c>staff</c>-kind session operating a persona is <c>controller-as-persona</c> (COR-018 — the acting
+    /// human is already carried on the actor), and every other kind is <c>participant</c>.
+    /// </summary>
+    /// <remarks>
+    /// Today only a participant login binds a persona to a session, so this always returns
+    /// <c>participant</c> in practice. It is derived anyway because E7 persona-operation lets a controller act
+    /// AS a persona: a hardcoded origin would then keep reporting <c>participant</c> for a controller's action
+    /// — wrong-but-plausible audit data, which is far harder to notice after the fact than a missing field.
+    /// </remarks>
+    /// <param name="sessionKind">The persisted <c>Session.Kind</c>.</param>
+    /// <returns>The <c>PostOrigin</c> union value for the envelope.</returns>
+    private static string OriginForSessionKind(string sessionKind) =>
+        string.Equals(sessionKind, StaffSessionKind, StringComparison.Ordinal)
+            ? ControllerAsPersonaOrigin
+            : ParticipantOrigin;
 
     /// <summary>
     /// Reads the request's resolved exercise scope, treating an unset scope AND the <see cref="Guid.Empty"/>

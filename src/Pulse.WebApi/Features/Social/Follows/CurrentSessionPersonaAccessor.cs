@@ -44,6 +44,15 @@ public sealed class CurrentSessionPersona
     public required Guid PersonaId { get; init; }
 
     /// <summary>
+    /// The session KIND (<c>participant</c> / <c>staff</c> / <c>readonly</c>) verbatim. Carried so the write
+    /// path can derive the XC-004 <c>origin</c> from WHO is really acting rather than assuming, since the
+    /// accessor resolves any live session that carries a persona binding — today only a participant login
+    /// sets one, but E7 persona-operation lets a controller act AS a persona, and a hardcoded
+    /// <c>participant</c> origin would then quietly mis-attribute the audit record.
+    /// </summary>
+    public required string Kind { get; init; }
+
+    /// <summary>
     /// The exercise the session is bound to. Compared against the request's resolved
     /// <see cref="IExerciseContext"/> scope by the write path as defense in depth (COR-001) — the
     /// session middleware already enforces the binding, but a scope/session disagreement must never be
@@ -113,6 +122,7 @@ public sealed class CurrentSessionPersonaAccessor : ICurrentSessionPersonaAccess
         {
             SessionId = session.Id,
             PersonaId = personaId,
+            Kind = session.Kind,
             ExerciseId = session.ExerciseId,
             ActingHumanId = session.ActingHumanId,
         };
