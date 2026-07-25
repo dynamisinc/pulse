@@ -68,6 +68,13 @@ public sealed class BootstrapService
     private const string ExerciseEntityType = "exercise";
 
     /// <summary>
+    /// The COR-032 lifecycle literal a bootstrapped exercise is seeded with (exercise-configuration story
+    /// 01a, Option B). Verbatim from <c>implementation.md</c> → "Lifecycle string literals"; <c>live</c>
+    /// replaces the legacy <c>active</c>.
+    /// </summary>
+    private const string LiveStatus = "live";
+
+    /// <summary>
     /// The staff roles a bootstrapped <see cref="StaffAssignment"/> may carry, keyed case-insensitively to their
     /// canonical frozen lowercase value so a request that says <c>Controller</c> stores <c>controller</c> (the
     /// exact <c>Session.role</c> vocabulary), mirroring <see cref="AccountFieldRules"/>'s participant-role map.
@@ -242,7 +249,10 @@ public sealed class BootstrapService
                 Name = exerciseName!,
                 Hostname = host,
                 TimeZone = timeZone,
-                Status = "active",
+                // COR-032 vocabulary (Option B — exercise-configuration story 01a): the bootstrap seed marks
+                // a RUNNING exercise, so the legacy "active" becomes "live" (StartEx has effectively
+                // occurred), matching the data migration's legacy→new mapping for existing rows.
+                Status = LiveStatus,
             };
             _dbContext.Exercises.Add(exercise);
         }

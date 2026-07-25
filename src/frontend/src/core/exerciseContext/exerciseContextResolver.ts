@@ -26,23 +26,67 @@ import type { AxiosAdapter } from 'axios'
 import { api } from '../services/api'
 import { USE_MOCK_DATA } from '../config/mockData'
 
-/** Exercise lifecycle status, as surfaced on a single bound scope (no list). */
-export type ExerciseStatus = 'scheduled' | 'active' | 'complete' | 'archived'
+/**
+ * Exercise lifecycle status, as surfaced on a single bound scope (no list).
+ *
+ * THE TRANSITIONAL SUPERSET (exercise-configuration story 01a — COR-032
+ * Option B, Tier-2 sign-off given). Two vocabularies are valid at once, on
+ * purpose:
+ *
+ * - the COR-032 six — `build | staged | live | paused | completed | archived`
+ *   (note `completed`, NOT `complete`), which the backend now stores and
+ *   serves on `ExerciseScope.status`;
+ * - the legacy four — `scheduled | active | complete | archived` — a
+ *   placeholder that predates COR-032 and stays valid through the transition.
+ *
+ * Why both: UAT is a SPLIT DEPLOYMENT (Azure SWA frontend + App Service
+ * backend) whose halves deploy independently, and `isExerciseStatus` FAILS
+ * CLOSED on an unknown value — the provider then resolves nothing and the
+ * participant shell renders nothing. A backend-ahead deploy of a narrow guard
+ * is therefore a BLANK PARTICIPANT WORLD, not a type error. Accepting the
+ * superset means no deploy order can strand the client.
+ *
+ * Retiring the legacy four is a documented follow-up, taken once no deployed
+ * client and no database row carries them — do not "clean them up" here.
+ */
+export type ExerciseStatus =
+  // COR-032 (the current vocabulary)
+  | 'build'
+  | 'staged'
+  | 'live'
+  | 'paused'
+  | 'completed'
+  | 'archived'
+  // Legacy (pre-COR-032) — still accepted through the transition
+  | 'scheduled'
+  | 'active'
+  | 'complete'
 
 /**
- * All valid exercise statuses. The runtime guard checks membership here so it
- * matches the wire contract — this seam swaps to a live endpoint with no
- * consumer change, so an out-of-enum `status` must fail closed, not be cast
- * blindly to `ExerciseStatus`.
+ * All valid exercise statuses — the transitional superset described on
+ * `ExerciseStatus`. The runtime guard checks membership here so it matches the
+ * wire contract: this seam is a live endpoint, so an out-of-enum `status` must
+ * fail closed, not be cast blindly to `ExerciseStatus`.
  */
-const EXERCISE_STATUSES: readonly ExerciseStatus[] = [
+export const EXERCISE_STATUSES: readonly ExerciseStatus[] = [
+  'build',
+  'staged',
+  'live',
+  'paused',
+  'completed',
+  'archived',
   'scheduled',
   'active',
   'complete',
-  'archived',
 ]
 
-function isExerciseStatus(value: unknown): value is ExerciseStatus {
+/**
+ * Fail-closed runtime guard for a wire `status`. Anything outside
+ * `EXERCISE_STATUSES` — a coined variant, a capitalised spelling, a non-string
+ * — is rejected, which is what makes an unresolved scope a closed door rather
+ * than a blindly-cast lie.
+ */
+export function isExerciseStatus(value: unknown): value is ExerciseStatus {
   return typeof value === 'string' && (EXERCISE_STATUSES as readonly string[]).includes(value)
 }
 

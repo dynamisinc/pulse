@@ -321,7 +321,9 @@ public class MigrationRoundTripTests
         reloaded.Hostname.Should().Be(exercise.Hostname);
         reloaded.BrandedDomain.Should().Be(exercise.BrandedDomain);
         reloaded.TimeZone.Should().Be("America/New_York");
-        reloaded.Status.Should().Be("active");
+        reloaded.Status.Should().Be(
+            "active",
+            "the legacy vocabulary is still storable through the COR-032 transition — there is no CHECK constraint");
         reloaded.CurrentScenarioTime.Should().Be(currentScenarioTime);
     }
 
@@ -340,10 +342,129 @@ public class MigrationRoundTripTests
         var reloaded = await readContext.Exercises.SingleAsync(e => e.Id == id);
 
         reloaded.TimeZone.Should().Be("UTC", "the C# default applies when TimeZone is left unset on the entity");
-        reloaded.Status.Should().Be("scheduled", "the C# default applies when Status is left unset on the entity");
+        reloaded.Status.Should().Be(
+            "build",
+            "exercise-configuration story 01a moved the default to the COR-032 vocabulary — an exercise created " +
+            "and never configured is still in staff-only content development (Build), not the legacy 'scheduled'");
         reloaded.Hostname.Should().BeNull();
         reloaded.BrandedDomain.Should().BeNull();
         reloaded.CurrentScenarioTime.Should().BeNull();
+    }
+
+    // --- Exercise-configuration story 01a: the settings / chrome / watermark / practice columns -------------
+
+    /// <summary>
+    /// Story exercise-configuration/01a (AC1, AC-watermark): every column the feature's ONE migration adds
+    /// actually round-trips through real SQL Server with the right type and nullability — the COR-030
+    /// settings, the COR-031 chrome config, the NFR-008 watermark switch and the COR-033 practice flag. If
+    /// one of these is wrong, stories 01b/02/04 discover it with no migration of their own to fix it.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task Exercise_RoundTrips_WithExerciseConfigurationColumns()
+    {
+        var id = Guid.NewGuid();
+        var scheduledStart = new DateTimeOffset(2033, 6, 14, 8, 0, 0, TimeSpan.FromHours(-5));
+        var scheduledEnd = scheduledStart.AddDays(2);
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.Exercises.Add(new Exercise
+            {
+                Id = id,
+                Name = "Configured Exercise",
+                Status = "staged",
+                WorldName = "Fairhaven County",
+                Locale = "en-US",
+                ScheduledStartAt = scheduledStart,
+                ScheduledEndAt = scheduledEnd,
+                EnabledChannels = "social,news",
+                BrandName = "Fairhaven Exercise Network",
+                BrandPrimary = "#2b5f75",
+                BrandAccent = "#d97706",
+                BrandSurface = "#ffffff",
+                BrandOnSurface = "#1c1c1c",
+                OutletNamesJson = """{"news":"Newsline 7","weather":"Fairhaven Weather Service"}""",
+                ComplianceChromeEnabled = false,
+                ChromeTopText = "UNCLASSIFIED // EXERCISE",
+                ChromeTopFg = "#eaf5e6",
+                ChromeTopBg = "#2e6b2e",
+                ChromeBottomText = "SIMULATED INFORMATION SPACE",
+                ChromeBottomFg = "#eaf5e6",
+                ChromeBottomBg = "#2e6b2e",
+                WatermarkEnabled = true,
+                IsPracticeMode = true,
+            });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = _fixture.CreateContext();
+        var reloaded = await readContext.Exercises.SingleAsync(e => e.Id == id);
+
+        reloaded.Status.Should().Be("staged", "the COR-032 vocabulary stores verbatim, no mapping");
+        reloaded.WorldName.Should().Be("Fairhaven County");
+        reloaded.Locale.Should().Be("en-US");
+        reloaded.ScheduledStartAt.Should().Be(scheduledStart);
+        reloaded.ScheduledEndAt.Should().Be(scheduledEnd);
+        reloaded.EnabledChannels.Should().Be("social,news");
+        reloaded.BrandName.Should().Be("Fairhaven Exercise Network");
+        reloaded.BrandPrimary.Should().Be("#2b5f75");
+        reloaded.BrandAccent.Should().Be("#d97706");
+        reloaded.BrandSurface.Should().Be("#ffffff");
+        reloaded.BrandOnSurface.Should().Be("#1c1c1c");
+        reloaded.OutletNamesJson.Should().Be("""{"news":"Newsline 7","weather":"Fairhaven Weather Service"}""");
+        reloaded.ComplianceChromeEnabled.Should().BeFalse("chrome-off is a legal stored state (D7-008)");
+        reloaded.ChromeTopText.Should().Be("UNCLASSIFIED // EXERCISE");
+        reloaded.ChromeTopFg.Should().Be("#eaf5e6");
+        reloaded.ChromeTopBg.Should().Be("#2e6b2e");
+        reloaded.ChromeBottomText.Should().Be("SIMULATED INFORMATION SPACE");
+        reloaded.ChromeBottomFg.Should().Be("#eaf5e6");
+        reloaded.ChromeBottomBg.Should().Be("#2e6b2e");
+        reloaded.WatermarkEnabled.Should().BeTrue(
+            "the NFR-008 watermark switch is real per-exercise state story 02's guard reads, not a constant");
+        reloaded.IsPracticeMode.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Story exercise-configuration/01a: an exercise nobody has configured carries NULL for every settings
+    /// column — which is what lets story 01b's projection keep serving the shipped Phase-1 constants — and
+    /// the three switches carry their SAFE defaults (chrome ON + watermark ON, so NFR-008's "never both off"
+    /// holds by construction; practice OFF, so a never-flagged exercise is real conduct).
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task Exercise_RoundTrips_WithUnconfiguredSettings_CarryingSafeDefaults()
+    {
+        var id = Guid.NewGuid();
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.Exercises.Add(new Exercise { Id = id, Name = "Unconfigured Exercise" });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = _fixture.CreateContext();
+        var reloaded = await readContext.Exercises.SingleAsync(e => e.Id == id);
+
+        reloaded.WorldName.Should().BeNull();
+        reloaded.Locale.Should().BeNull();
+        reloaded.ScheduledStartAt.Should().BeNull();
+        reloaded.ScheduledEndAt.Should().BeNull();
+        reloaded.EnabledChannels.Should().BeNull();
+        reloaded.BrandName.Should().BeNull();
+        reloaded.BrandPrimary.Should().BeNull();
+        reloaded.BrandAccent.Should().BeNull();
+        reloaded.BrandSurface.Should().BeNull();
+        reloaded.BrandOnSurface.Should().BeNull();
+        reloaded.OutletNamesJson.Should().BeNull();
+        reloaded.ChromeTopText.Should().BeNull();
+        reloaded.ChromeTopFg.Should().BeNull();
+        reloaded.ChromeTopBg.Should().BeNull();
+        reloaded.ChromeBottomText.Should().BeNull();
+        reloaded.ChromeBottomFg.Should().BeNull();
+        reloaded.ChromeBottomBg.Should().BeNull();
+
+        reloaded.ComplianceChromeEnabled.Should().BeTrue("compliance chrome defaults ON (COR-031/NFR-008)");
+        reloaded.WatermarkEnabled.Should().BeTrue("the in-content watermark defaults ON (NFR-008)");
+        reloaded.IsPracticeMode.Should().BeFalse("an exercise that has never been flagged is real conduct (COR-033)");
     }
 
     [RequiresDockerFact]
