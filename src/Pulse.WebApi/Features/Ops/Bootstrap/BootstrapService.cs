@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Ops.Bootstrap;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
@@ -515,8 +516,20 @@ public sealed class BootstrapService
                 existing.PersonaId = personaId;
             }
 
+            // Only echo the resolved handle when it actually DESCRIBES the binding being reported. `personaId`
+            // here is the SURVIVING binding, while `personaHandle` is the one the caller ASKED for — on the
+            // non-clobber path those are two different personas, and pairing them would tell an operator that
+            // the account ended up on a persona it did not. This is the one surface whose whole job is
+            // confirming which persona an account is bound to, so it must not be ambiguous (CR WR-001).
+            var handleDescribesTheBinding = bound || (personaId is not null && existing.PersonaId == personaId);
+
             return AccountProvisionOutcome.Ok(new BootstrapAccountResult(
-                existing.Id, existing.Username, Created: false, existing.PersonaId, personaHandle, bound));
+                existing.Id,
+                existing.Username,
+                Created: false,
+                existing.PersonaId,
+                handleDescribesTheBinding ? personaHandle : null,
+                bound));
         }
 
         var entity = new Account
@@ -555,7 +568,11 @@ public sealed class BootstrapService
             $"\"staffAssignmentCreated\":{Bool(staff?.Created == true)}," +
             $"\"sharedCredentialCreated\":{Bool(sharedCredential?.Created == true)}," +
             $"\"participantAccountCreated\":{Bool(account?.Created == true)}," +
-            $"\"participantPersonaBound\":{Bool(account?.PersonaBound == true)}}}");
+            $"\"participantPersonaBound\":{Bool(account?.PersonaBound == true)}," +
+            // WHICH persona, not merely THAT one was bound (AC5 / XC-004). The `Accounts.PersonaId` column is
+            // mutable — a later rebind overwrites it — so without this the audit trail cannot reconstruct the
+            // identity a participant was provisioned as, which is the whole point of auditing the binding.
+            $"\"participantPersonaId\":{Quote(account?.PersonaId?.ToString())}}}");
 
         return new TelemetryEvent
         {
@@ -580,6 +597,14 @@ public sealed class BootstrapService
 
     /// <summary>Renders a bool as its lowercase JSON literal for the opaque telemetry payload.</summary>
     private static string Bool(bool value) => value ? "true" : "false";
+
+    /// <summary>
+    /// Renders a nullable string as a JSON string literal, or the <c>null</c> literal when absent. Goes through
+    /// <see cref="JsonSerializer"/> rather than hand-quoting so a value can never break out of the payload —
+    /// these ids are server-generated GUIDs today, but the helper must not be the weak link if that changes.
+    /// </summary>
+    private static string Quote(string? value) =>
+        value is null ? "null" : JsonSerializer.Serialize(value);
 
     /// <summary>The resolved allowlist staff identity + canonical role a bootstrap staff sub-request maps to.</summary>
     private sealed record ResolvedStaff(string ExternalSubject, string DisplayName, string Username, string Role);

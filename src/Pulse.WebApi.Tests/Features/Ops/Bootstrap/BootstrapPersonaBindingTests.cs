@@ -545,6 +545,10 @@ public sealed class BootstrapPersonaBindingTests
             result.ParticipantAccount!.PersonaBound.Should().BeFalse(
                 "bootstrap never clobbers an existing binding — rebinding is bind-participant-persona's explicit job");
             result.ParticipantAccount.PersonaId.Should().Be(firstPersona, "the response reports the SURVIVING binding");
+            result.ParticipantAccount.PersonaHandle.Should().BeNull(
+                "the handle must NOT be echoed here: personaId is the surviving persona while the requested "
+                + "handle names a DIFFERENT one, and pairing them would tell an operator the account ended up "
+                + "on a persona it is not bound to (CR WR-001)");
         }
 
         await using (var read = _fixture.CreateContext(ScopeFor(exerciseId)))
@@ -558,7 +562,7 @@ public sealed class BootstrapPersonaBindingTests
     public async Task Bootstrap_WithPersonaBinding_RecordsItOnTheSingleBootstrappedTelemetryEvent()
     {
         var host = NewHostname();
-        var (exerciseId, _, handle) = await SeedExerciseWithPersonaAsync(host);
+        var (exerciseId, personaId, handle) = await SeedExerciseWithPersonaAsync(host);
         var username = $"participant-{Guid.NewGuid():N}";
 
         await using (var context = _fixture.CreateContext())
@@ -587,5 +591,10 @@ public sealed class BootstrapPersonaBindingTests
         events[0].Payload.Should().Contain(
             "\"participantPersonaBound\":true",
             "the binding is auditable on the bootstrap event's opaque payload (XC-004, AC5)");
+        events[0].Payload.Should().Contain(
+            $"\"participantPersonaId\":\"{personaId}\"",
+            "the audit records WHICH persona was bound, not merely that one was: Accounts.PersonaId is mutable "
+            + "and a later rebind overwrites it, so the event is the only durable record of the identity a "
+            + "participant was provisioned as (CR WR-002, AC5)");
     }
 }
