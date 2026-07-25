@@ -169,9 +169,18 @@ own doc comment says so explicitly ("Out of scope (by story): per-session/hostna
 `exerciseId` claim"). That is a related but distinct gap (an unauthenticated writer can attribute a
 fabricated telemetry event to any exercise it names), predates this story, and is not folded into
 these ACs — raised here so it is not lost, and given its own issue rather than being silently absorbed
-into #359's fix: **#362**. Note that unlike #359 it was **not** confirmed by writing (doing so means
-putting junk into the evaluation record), so it is a code-read finding awaiting reproduction in a
-disposable environment.
+into #359's fix: **#362**. **CONFIRMED against the sandbox** (both probes `HTTP 202`, no credential):
+a write naming the real exercise is accepted, and so is one naming
+`deadbeef-0000-4000-8000-000000000001` — an exercise that does not exist — with a forged
+`actor.kind: participant` / `actingHumanId`. So there is no scope authority, **no FK constraint on
+`TelemetryEvent.ExerciseId`** (orphan rows are storable), and actor identity is entirely caller-asserted.
+`202` is a synchronous durable write (`SaveChangesAsync` precedes it), not a queue.
+
+**Why it is deliberately not in scope here:** #359's fix is "require a live session before the handler
+runs". #362's fix is "stop trusting a field in the body and stamp it server-side" — and it has a genuine
+open question this story should not prejudge, namely what to do about legitimately pre-auth emitters (a
+login-failure event has no session by definition). Folding them together would let the harder question
+ride along unexamined.
 
 ## Technical Notes
 **Backend only; the composition root is the seam.** Owns/touches:
