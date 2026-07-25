@@ -130,14 +130,21 @@ surface an operator has access to:
 - `POST /api/ops/seed-engine-content` (`EngineContentSeedResponseDto`) returns only
   `personasCreated`/`personasReused` **counts** — never the seeded personas' ids (see
   `src/Pulse.WebApi/Features/Ops/EngineContentSeed/EngineContentSeedDtos.cs`).
-- `GET /api/personas` (`src/Pulse.WebApi/Features/Social/PersonaEndpoints.cs`) requires an authenticated
-  session — which, for a fresh/UAT environment, is exactly the chicken-and-egg this whole ops surface
-  exists to break.
+- `GET /api/personas` (`src/Pulse.WebApi/Features/Social/PersonaEndpoints.cs`) **does** return the ids, and
+  — **corrected 2026-07-25** — it does *not* require an authenticated session. It gates only on a
+  host-resolved exercise scope (`exerciseContext.CurrentExerciseId is null → 401`), and there is no
+  `RequireAuthorization()` anywhere in `Pulse.WebApi`. Verified empirically: an unauthenticated `curl` of
+  the deployed UAT host returns `200` with the full roster including every `id`.
+  **An earlier draft of this story asserted the opposite and used it as the justification for handles.**
+  That premise was wrong; it is corrected here rather than left as load-bearing-but-false reasoning. The
+  open-read behavior itself is tracked as **#359** — the API enforces no session at all (no
+  `RequireAuthorization()` anywhere), which is a much larger finding than this story's premise.
 
-So an operator following the runbook has no way to *obtain* a `personaId` short of a manual SQL query —
-the exact thing this story exists to eliminate. A handle (e.g. `"river_ortiz"`) is discoverable directly
-from the seeder's known cast (`PersonaCastSeeder`); a GUID is not discoverable at all without that SQL
-escape hatch. Resolve the handle case-insensitively (mirrors `Account.Username`'s CI collation policy)
+So a handle is still the right input, but on **ergonomics and stability**, not on "an id is unobtainable":
+a handle (e.g. `"mvega_fh"`) is knowable up front from the seeder's declared cast (`PersonaCastSeeder.Catalog`)
+and is stable across re-seeds, so it can be written into a runbook; an id is environment-specific, must be
+looked up per environment, and is meaningless in a document. Accepting an id as well costs nothing, so both
+are supported. Resolve the handle case-insensitively (mirrors `Account.Username`'s CI collation policy)
 against `Persona.Handle` (`Data/Entities/Persona.cs`), scoped with an explicit `ExerciseId` predicate
 (the captured request scope is empty here, same reasoning `BootstrapService` already documents for its
 other idempotency reads) — **never** across exercises. Fail closed (400) on an unknown handle/id or one
