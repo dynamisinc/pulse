@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -16,6 +17,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Tests.Data;
 
 /// <summary>
@@ -42,16 +44,17 @@ public class PersonaEndpointsTests
     private static readonly Uri PersonasUri = new("/api/personas", UriKind.Relative);
 
     /// <summary>
-    /// The exact JSON property set the shipped, frozen <c>Persona</c> contract (<c>personas/types.ts:84-101</c>)
-    /// allows — anything outside this set (in particular a provenance/operator/session field) is an XC-002
-    /// violation. <c>bio</c> is contract-optional and, since <c>profiles-social-graph/06</c>, emitted only
-    /// when the persona actually HAS one, so it is intentionally NOT in this allow-list: the exact-set
-    /// assertion below runs against a bio-less persona. The with-a-bio shape is pinned separately by
-    /// <see cref="Response_ProjectsThePersistedPresentationFields_NotTheB1StandIns"/>.
+    /// The exact JSON property set a PARTICIPANT-reachable response may carry. Anything outside this set (a
+    /// provenance/operator/session field — or <c>personaType</c>, the SOC-052/D1-008 impersonator tell) is a
+    /// violation. <c>bio</c> is contract-optional and emitted only when the persona actually HAS one, so it
+    /// is intentionally NOT in this allow-list: the exact-set assertion below runs against a bio-less persona.
+    /// The with-a-bio shape is pinned separately by
+    /// <see cref="Response_ProjectsThePersistedPresentationFields_NotTheB1StandIns"/>, and the wider staff
+    /// shape by <see cref="StaffSession_ReceivesPersonaType_ParticipantDoesNot"/>.
     /// </summary>
     private static readonly HashSet<string> AllowedPersonaFields =
     [
-        "id", "exerciseId", "templateId", "displayName", "handle", "kind", "personaType", "verified",
+        "id", "exerciseId", "templateId", "displayName", "handle", "kind", "verified",
         "avatarColor", "initials", "audienceBand", "followerCount", "joinedAt",
     ];
 
@@ -197,8 +200,9 @@ public class PersonaEndpointsTests
     [RequiresDockerFact]
     public async Task Response_ProjectsThePersistedPresentationFields_NotTheB1StandIns()
     {
-        // profiles-social-graph/06 AC2, end to end over HTTP: the five presentation fields come from the
-        // persisted row, and bio is emitted when the persona has one.
+        // profiles-social-graph/06 AC2, end to end over HTTP: the participant-safe presentation fields come
+        // from the persisted row, and bio is emitted when the persona has one. (personaType is staff-only —
+        // see StaffSession_ReceivesPersonaType_ParticipantDoesNot.)
         var exerciseA = Guid.NewGuid();
         var joinedAt = new DateTimeOffset(2025, 4, 2, 9, 15, 0, TimeSpan.Zero);
         var persona = NewPersona(Guid.NewGuid(), exerciseA, kind: "org", verified: true);
@@ -223,21 +227,113 @@ public class PersonaEndpointsTests
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var item = doc.RootElement.EnumerateArray().Single(e => e.GetProperty("id").GetString() == persona.Id.ToString());
 
-        item.GetProperty("personaType").GetString().Should().Be("agency", "never the 'citizen' stand-in (AC2)");
         item.GetProperty("audienceBand").GetString().Should().Be("mid", "never the 'micro' stand-in (AC2)");
         item.GetProperty("followerCount").GetInt32().Should().Be(50232, "never the stand-in 0 (AC2, SOC-054)");
         item.GetProperty("bio").GetString().Should().Be(
             "Official account of the Fairhaven municipal water utility.", "bio is no longer omitted (AC2)");
+        item.GetProperty("joinedAt").GetString().Should().Be(
+            "2025-04-02T09:15:00.000Z",
+            "joinedAt is the persisted scenario instant in the frontend mock's toISOString() format — never a "
+            + "fixed stand-in and never re-derived from the server clock (COR-053, WR-004)");
         DateTimeOffset.Parse(
                 item.GetProperty("joinedAt").GetString()!,
                 System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.RoundtripKind)
-            .Should().Be(joinedAt, "joinedAt round-trips the persisted scenario instant, never a fixed stand-in (COR-053)");
+            .Should().Be(joinedAt, "the emitted instant round-trips to the persisted one exactly");
 
         var actualFields = item.EnumerateObject().Select(p => p.Name).ToHashSet();
         actualFields.Should().BeEquivalentTo(
             AllowedPersonaFields.Append("bio"),
-            "the wire shape is the frozen contract's fields plus the contract-optional bio — no new field (XC-002)");
+            "the participant wire shape is the contract's participant-safe fields plus the optional bio — no "
+            + "personaType, no new field (XC-002 / D1-008)");
+    }
+
+    [RequiresDockerFact]
+    public async Task StaffSession_ReceivesPersonaType_ParticipantDoesNot()
+    {
+        // WR-001 (SOC-052 / D1-008): the archetype is the machine-readable impersonator tell, so it is
+        // STAFF-ONLY. Same endpoint, same exercise, same row — two shapes, split on the caller's world
+        // exactly as ParticipantPostDto/StaffPostDto split provenance.
+        var exerciseId = Guid.NewGuid();
+        var lookalike = NewPersona(Guid.NewGuid(), exerciseId, kind: "org", verified: false);
+        lookalike.PersonaType = "bad-actor";
+        lookalike.DisplayName = "Fairhaven Water Update";
+
+        var staffToken = $"staff-{Guid.NewGuid():N}";
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Personas.Add(lookalike);
+            seed.Sessions.Add(NewStaffSession(staffToken, exerciseId));
+            await seed.SaveChangesAsync();
+        }
+
+        await using var factory = CreateFactory(exerciseId);
+
+        // 1. Participant / anonymous caller — no bearer token at all.
+        using (var participantClient = factory.CreateClient())
+        {
+            var participantBody = await (await participantClient.GetAsync(PersonasUri)).Content.ReadAsStringAsync();
+            participantBody.Should().NotContain(
+                "personaType", "a participant response must not carry the archetype at all (D1-008)");
+            participantBody.Should().NotContain(
+                "bad-actor", "the lookalike must be indistinguishable from any other unverified account");
+
+            using var participantDoc = JsonDocument.Parse(participantBody);
+            var participantItem = participantDoc.RootElement.EnumerateArray().Single();
+            participantItem.EnumerateObject().Select(p => p.Name).ToHashSet().Should().BeEquivalentTo(
+                AllowedPersonaFields, "the participant shape is exactly the participant-safe field set");
+            participantItem.GetProperty("verified").GetBoolean().Should().BeFalse(
+                "the absent seal is the ONLY signal a participant gets");
+        }
+
+        // 2. Staff caller — a live staff-kind session bound to the same exercise.
+        using (var staffClient = factory.CreateClient())
+        {
+            staffClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", staffToken);
+
+            var staffResponse = await staffClient.GetAsync(PersonasUri);
+            staffResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            using var staffDoc = JsonDocument.Parse(await staffResponse.Content.ReadAsStringAsync());
+            var staffItem = staffDoc.RootElement.EnumerateArray().Single();
+            staffItem.GetProperty("personaType").GetString().Should().Be(
+                "bad-actor",
+                "the controller console's persona picker and POSTING AS chip read the archetype (COR-020) — "
+                + "staff reads its own world's authoring data");
+            staffItem.TryGetProperty("castable", out _).Should().BeFalse(
+                "the engine-casting gate is never projected, not even for staff");
+        }
+    }
+
+    [RequiresDockerFact]
+    public async Task ExpiredStaffSession_FallsBackToTheParticipantShape_FailClosed()
+    {
+        // The branch must fail CLOSED to the narrow shape: anything short of a live staff session is treated
+        // as a participant.
+        var exerciseId = Guid.NewGuid();
+        var persona = NewPersona(Guid.NewGuid(), exerciseId, kind: "org", verified: false);
+        persona.PersonaType = "bad-actor";
+
+        var expiredToken = $"staff-expired-{Guid.NewGuid():N}";
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Personas.Add(persona);
+            var session = NewStaffSession(expiredToken, exerciseId);
+            session.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+            seed.Sessions.Add(session);
+            await seed.SaveChangesAsync();
+        }
+
+        await using var factory = CreateFactory(exerciseId);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", expiredToken);
+
+        var body = await (await client.GetAsync(PersonasUri)).Content.ReadAsStringAsync();
+
+        body.Should().NotContain(
+            "personaType",
+            "an expired staff session is not a staff caller — the projection falls back to the participant "
+            + "shape rather than widening on a stale token");
     }
 
     [RequiresDockerFact]
@@ -354,6 +450,27 @@ public class PersonaEndpointsTests
         item.GetProperty("kind").GetString().Should().BeOneOf("human", "org");
         item.GetProperty("verified").ValueKind.Should().BeOneOf(JsonValueKind.True, JsonValueKind.False);
     }
+
+    /// <summary>
+    /// A live <c>staff</c>-kind session bound to <paramref name="exerciseId"/> — the only thing that widens
+    /// the projection. Bound to the SAME exercise the test's <see cref="IExerciseContext"/> override uses,
+    /// because <c>SessionAuthenticationMiddleware</c> re-writes the request scope from the session with
+    /// precedence (COR-001).
+    /// </summary>
+    private static Session NewStaffSession(string rawToken, Guid exerciseId) => new()
+    {
+        Id = Guid.NewGuid(),
+        TokenHash = SessionTokens.Hash(rawToken),
+        Kind = "staff",
+        ExerciseId = exerciseId,
+        PrincipalId = Guid.NewGuid().ToString(),
+        StaffUserId = Guid.NewGuid(),
+        Role = "controller",
+        ActingHumanId = "human-1",
+        IsReadOnly = false,
+        IssuedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+        ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+    };
 
     private static Persona NewPersona(Guid id, Guid exerciseId, string kind, bool verified, Guid? templateId = null) => new()
     {

@@ -36,10 +36,16 @@ using Pulse.WebApi.Features.Social;
 /// impersonation-spotting against. Matching the platform's own rule (D1-008) the seeder never marks or flags
 /// the lookalike in ANY field — no "suspected"/"unverified reason"/"impersonator" column exists; the ABSENT
 /// <see cref="Persona.Verified"/> seal is the only signal, exactly as for every other unverified persona.
-/// (The engine-side caveat behind the old exclusion note is unchanged and narrowed by ordering, not removed:
-/// these handles are absent from <c>StarterStorylineFactory</c>'s citizens-first table, so they sort LAST in
-/// the eligible cast and are only reached by larger bursts, and every generated post still passes the review
-/// queue before publication.)
+/// </para>
+/// <para>
+/// <b>…but the ENGINE cannot voice them: <see cref="Persona.Castable"/> is the gate.</b> The old exclusion
+/// note's real concern was seeding a troll voice the platform has no way to turn off. Both accounts therefore
+/// ship <c>Castable = false</c>: the ROWS exist (so a participant can browse the lookalike's profile and a
+/// controller can see it in the cast), while <see cref="SeededPersona.Castable"/> keeps them OUT of the
+/// eligible-cast set <c>EngineContentSeedService</c> hands the reaction loop — the engine literally cannot
+/// generate as them until a scenario opts in by flipping the column. A real gate, not a priority ordering.
+/// The flag is server-side only and is never projected onto a participant DTO (it would be another
+/// machine-readable lookalike tell).
 /// </para>
 /// <para>
 /// <b>Isolation (always-Critical, COR-001).</b> Every created/reused row is confined to the caller-resolved
@@ -104,8 +110,16 @@ public sealed class PersonaCastSeeder
     /// frontend mock's <c>BAND_BASE</c> table (<c>features/personas/seedCast.ts</c>), so a live-seeded
     /// exercise and the mock agree on believable numbers for the same handle/band pairing.
     /// </summary>
+    /// <remarks>
+    /// ORDINAL, deliberately — the same case discipline <see cref="DeriveJoinedAt"/> applies to the
+    /// archetype comparison. Both vocabularies are closed, developer-authored, lower-case union values, so a
+    /// stray <c>"Mid"</c> is an authoring bug that must fail loudly here rather than be silently folded by one
+    /// lookup and missed by the other (a case-insensitive band lookup beside a case-sensitive
+    /// <c>bad-actor</c> check would mean <c>"Bad-Actor"</c> quietly produced an established join date for an
+    /// impersonator — SOC-052 backwards).
+    /// </remarks>
     private static readonly Dictionary<string, int> AudienceBandFloors =
-        new(StringComparer.OrdinalIgnoreCase)
+        new(StringComparer.Ordinal)
         {
             [NanoBand] = 450,
             [MicroBand] = 4800,
@@ -136,7 +150,8 @@ public sealed class PersonaCastSeeder
             VoiceNotes: "Measured, factual, procedural. Leads with what is confirmed vs. pending; never "
                 + "speculates and defers to the county on advisories.",
             Style: new PersonaStyle { AvgLength = 180, EmojiRate = 0.0, HashtagRate = 0.2, CapsConvention = "normal" },
-            DossierAudience: 5000),
+            DossierAudience: 5000,
+            Castable: true),
         new PersonaSeedSpec(
             // SOC-052 impersonation pair: an UNVERIFIED near-identical lockup of the verified utility above.
             // Nothing here flags it as fake — the missing verified seal is the only participant-visible tell
@@ -153,7 +168,8 @@ public sealed class PersonaCastSeeder
                 + "wrong; overstates contamination to drive shares. Near-identical lockup to "
                 + "@FairhavenWater — the missing verified mark is the only signal.",
             Style: new PersonaStyle { AvgLength = 120, EmojiRate = 0.1, HashtagRate = 0.6, CapsConvention = "normal" },
-            DossierAudience: 300),
+            DossierAudience: 300,
+            Castable: false),
         new PersonaSeedSpec(
             Handle: "FulcoEM",
             DisplayName: "Fulton County EM",
@@ -166,7 +182,8 @@ public sealed class PersonaCastSeeder
             VoiceNotes: "Authoritative but calm. Issues plain-language advisories with zones and actions; "
                 + "coordinates with and gently corrects other voices.",
             Style: new PersonaStyle { AvgLength = 200, EmojiRate = 0.0, HashtagRate = 0.3, CapsConvention = "normal" },
-            DossierAudience: 8000),
+            DossierAudience: 8000,
+            Castable: true),
         new PersonaSeedSpec(
             Handle: "Newsline7",
             DisplayName: "Newsline 7",
@@ -179,7 +196,8 @@ public sealed class PersonaCastSeeder
             VoiceNotes: "Broadcast-news cadence, headline first. Attributes claims to officials; reports "
                 + "developments without editorializing.",
             Style: new PersonaStyle { AvgLength = 140, EmojiRate = 0.0, HashtagRate = 0.5, CapsConvention = "normal" },
-            DossierAudience: 20000),
+            DossierAudience: 20000,
+            Castable: true),
         new PersonaSeedSpec(
             Handle: "TheScoopHQ",
             DisplayName: "The Scoop",
@@ -193,7 +211,8 @@ public sealed class PersonaCastSeeder
                 + "fact and leans on the lookalike account's claims; a deliberate contrast to the verified "
                 + "voices.",
             Style: new PersonaStyle { AvgLength = 100, EmojiRate = 0.4, HashtagRate = 0.7, CapsConvention = "normal" },
-            DossierAudience: 12000),
+            DossierAudience: 12000,
+            Castable: false),
         new PersonaSeedSpec(
             Handle: "mvega_fh",
             DisplayName: "Marisol Vega",
@@ -206,7 +225,8 @@ public sealed class PersonaCastSeeder
             VoiceNotes: "Concerned resident who asks practical questions (is the water safe for my kids?). "
                 + "Shares official posts; occasionally rattled by the rumor mill.",
             Style: new PersonaStyle { AvgLength = 90, EmojiRate = 0.3, HashtagRate = 0.4, CapsConvention = "normal" },
-            DossierAudience: 400),
+            DossierAudience: 400,
+            Castable: true),
         new PersonaSeedSpec(
             Handle: "tbrandt41",
             DisplayName: "Tom Brandt",
@@ -219,7 +239,8 @@ public sealed class PersonaCastSeeder
             VoiceNotes: "Skeptical, a little cynical. Complains about mixed messaging; sometimes reposts a "
                 + "sensational take before thinking twice.",
             Style: new PersonaStyle { AvgLength = 70, EmojiRate = 0.1, HashtagRate = 0.1, CapsConvention = "lower" },
-            DossierAudience: 80),
+            DossierAudience: 80,
+            Castable: true),
         new PersonaSeedSpec(
             Handle: "kwardFH",
             DisplayName: "Keisha Ward",
@@ -232,7 +253,8 @@ public sealed class PersonaCastSeeder
             VoiceNotes: "Level-headed, community-minded. Steers neighbors to the verified utility and county "
                 + "accounts; keeps a calm, organizing tone.",
             Style: new PersonaStyle { AvgLength = 110, EmojiRate = 0.2, HashtagRate = 0.3, CapsConvention = "normal" },
-            DossierAudience: 350),
+            DossierAudience: 350,
+            Castable: true),
         new PersonaSeedSpec(
             Handle: "dreyes_fh",
             DisplayName: "Dana Reyes",
@@ -245,8 +267,33 @@ public sealed class PersonaCastSeeder
             VoiceNotes: "Reads more than they post. Occasional questions and reposts; the ordinary "
                 + "logged-in resident's voice.",
             Style: new PersonaStyle { AvgLength = 80, EmojiRate = 0.2, HashtagRate = 0.2, CapsConvention = "normal" },
-            DossierAudience: 120),
+            DossierAudience: 120,
+            Castable: true),
     ];
+
+    /// <summary>
+    /// Authoring-time guard: validates the developer-authored <see cref="Catalog"/> the moment this type is
+    /// first touched, so a mistake surfaces on the FIRST test/boot that uses the seeder rather than as an
+    /// opaque truncation error at <c>SaveChangesAsync</c> (or, worse, a silently over-long value that only
+    /// fails against a real SQL Server in CI). Checks every bio against the <see cref="Persona.MaxBioLength"/>
+    /// column bound and every band against the closed SOC-054 vocabulary.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A catalog bio exceeds the stored column's bound.</exception>
+    static PersonaCastSeeder()
+    {
+        foreach (var spec in Catalog)
+        {
+            if (spec.Bio.Length > Persona.MaxBioLength)
+            {
+                throw new InvalidOperationException(
+                    $"Persona catalog entry '{spec.Handle}' has a {spec.Bio.Length}-character bio, exceeding the "
+                    + $"stored column bound of {Persona.MaxBioLength}. Shorten the authored bio.");
+            }
+
+            // Throws ArgumentOutOfRangeException on an unknown band — an authored band typo fails here too.
+            _ = DeriveAudienceMagnitude(spec.Band, spec.Handle);
+        }
+    }
 
     private readonly PulseDbContext _dbContext;
 
@@ -316,10 +363,14 @@ public sealed class PersonaCastSeeder
                 AudienceBand = spec.DossierAudience,
             };
 
+            var magnitude = DeriveAudienceMagnitude(spec.Band, handle);
+            var joinedAt = DeriveJoinedAt(spec.ProfileType, handle);
+
             if (existingByHandle.TryGetValue(spec.Handle, out var row))
             {
-                // Idempotent re-run: reuse the existing row's id, never overwrite it.
-                seeded.Add(new SeededPersona(row.Id, dossier, Created: false));
+                // Idempotent re-run: reuse the existing row's id, never overwrite an AUTHORED value.
+                BackfillSentinelPresentationFields(row, spec, bio, magnitude, joinedAt);
+                seeded.Add(new SeededPersona(row.Id, dossier, Created: false, Castable: row.Castable));
                 continue;
             }
 
@@ -337,14 +388,61 @@ public sealed class PersonaCastSeeder
                 AudienceBand = spec.Band,
                 // Derived from the AUTHORED band + the stored handle (COR-021/SOC-054) — varied but
                 // deterministic, and never a wall-clock read for the join instant (COR-053/COR-023).
-                AudienceMagnitude = DeriveAudienceMagnitude(spec.Band, handle),
-                JoinedAt = DeriveJoinedAt(spec.ProfileType, handle),
+                AudienceMagnitude = magnitude,
+                JoinedAt = joinedAt,
+                Castable = spec.Castable,
             };
             _dbContext.Personas.Add(persona);
-            seeded.Add(new SeededPersona(persona.Id, dossier, Created: true));
+            seeded.Add(new SeededPersona(persona.Id, dossier, Created: true, Castable: spec.Castable));
         }
 
         return seeded;
+    }
+
+    /// <summary>
+    /// Backfills the presentation fields of a row that predates them — and ONLY such a row (the bounded
+    /// exception to "a re-run never overwrites an existing row", <c>profiles-social-graph/06</c> AC6 as
+    /// amended).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this is safe.</b> The sentinel is <c>AudienceMagnitude == 0 AND JoinedAt == SeedEpoch</c> — a
+    /// pair NO authored row can hold: <see cref="DeriveAudienceMagnitude"/> never returns less than the
+    /// smallest band floor (450), and <see cref="DeriveJoinedAt"/> always subtracts at least three days, so a
+    /// seeded row is always strictly before the epoch. That combination therefore means exactly one thing:
+    /// the row was written before these columns existed and is carrying the migration's column DEFAULTS.
+    /// </para>
+    /// <para>
+    /// <b>Why it is required (SOC-052).</b> Left alone, the six pre-existing personas would read as joining
+    /// ON the epoch (2026-06-15) while the newly seeded lookalike derives 2026-06-09 — INVERTING the "joined
+    /// this week" tell and making the impersonator look like the OLDER, more established account: the exact
+    /// signal this story exists to create, backwards. <c>Bio</c> is filled only when absent
+    /// (<c>??=</c>), so an authored bio is never clobbered.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The existing row being reused.</param>
+    /// <param name="spec">The catalog spec for this handle.</param>
+    /// <param name="bio">The sanitized catalog bio.</param>
+    /// <param name="magnitude">The derived SOC-054 magnitude for this handle/band.</param>
+    /// <param name="joinedAt">The derived backdated scenario join instant for this handle.</param>
+    private static void BackfillSentinelPresentationFields(
+        Persona row,
+        PersonaSeedSpec spec,
+        string bio,
+        int magnitude,
+        DateTimeOffset joinedAt)
+    {
+        var carriesOnlyColumnDefaults = row.AudienceMagnitude == 0 && row.JoinedAt == SeedEpoch;
+        if (!carriesOnlyColumnDefaults)
+        {
+            return;
+        }
+
+        row.Bio ??= bio;
+        row.PersonaType = spec.ProfileType;
+        row.AudienceBand = spec.Band;
+        row.AudienceMagnitude = magnitude;
+        row.JoinedAt = joinedAt;
     }
 
     /// <summary>
@@ -441,6 +539,7 @@ public sealed class PersonaCastSeeder
     /// <param name="VoiceNotes">The generation-facing voice material.</param>
     /// <param name="Style">The generation-facing style parameters.</param>
     /// <param name="DossierAudience">The engine dossier's numeric audience input (prompt material — NOT the persisted SOC-054 magnitude).</param>
+    /// <param name="Castable">Whether the ENGINE may voice this persona (<see cref="Persona.Castable"/>); server-side only.</param>
     private sealed record PersonaSeedSpec(
         string Handle,
         string DisplayName,
@@ -452,7 +551,8 @@ public sealed class PersonaCastSeeder
         PersonaType Type,
         string VoiceNotes,
         PersonaStyle Style,
-        int DossierAudience);
+        int DossierAudience,
+        bool Castable);
 }
 
 /// <summary>
@@ -467,4 +567,11 @@ public sealed class PersonaCastSeeder
 /// <c>true</c> when this call created the row; <c>false</c> when an existing same-handle row was reused
 /// (drives story 03's created-vs-reused audit counts).
 /// </param>
-public sealed record SeededPersona(Guid InstanceId, PersonaDossier Dossier, bool Created);
+/// <param name="Castable">
+/// Whether the ENGINE may voice this persona (<see cref="Persona.Castable"/>, read from the persisted row on
+/// a reuse). The composing caller MUST filter on this when it builds the reaction loop's eligible cast: a
+/// non-castable persona (the SOC-052 lookalike, the low-credibility outlet) exists as a row and is returned
+/// here, but must never be handed to the engine as a voice until a scenario opts in. Server-side only —
+/// never projected onto a participant-facing DTO.
+/// </param>
+public sealed record SeededPersona(Guid InstanceId, PersonaDossier Dossier, bool Created, bool Castable);

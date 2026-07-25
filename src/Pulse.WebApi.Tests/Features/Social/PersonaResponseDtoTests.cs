@@ -42,16 +42,71 @@ public sealed class PersonaResponseDtoTests
 
         var dto = PersonaResponseDto.FromPersona(persona);
 
-        dto.PersonaType.Should().Be("influencer", "the archetype comes from the entity, not the 'citizen' stand-in");
         dto.AudienceBand.Should().Be("mid", "the band comes from the entity, not the 'micro' stand-in");
         dto.FollowerCount.Should().Be(
             50186, "followerCount is the persisted SOC-054 magnitude, not the stand-in 0");
         dto.Bio.Should().Be(
             "The stories they don't want you to see.", "bio is projected now, no longer omitted unconditionally");
         dto.JoinedAt.Should().Be(
-            AuthoredJoinedAt.ToString("O"),
-            "joinedAt is the persisted SCENARIO instant round-tripped, never the fixed 2026-01-01 stand-in and "
-            + "never re-derived from the server clock (COR-053)");
+            "2024-03-09T08:30:00.000Z",
+            "joinedAt is the persisted SCENARIO instant (COR-053), emitted in the frontend mock's own "
+            + "toISOString() format so the mock→live flip changes no rendered dateline (WR-004)");
+    }
+
+    [Fact]
+    public void FromPersona_JoinedAt_MatchesJavaScriptToISOString_ForANonUtcOffsetToo()
+    {
+        var persona = AuthoredPersona();
+        // A persisted instant with a non-zero offset must normalize to UTC first, exactly as Date#toISOString
+        // does — otherwise the same instant would render as a different dateline than the mock's.
+        persona.JoinedAt = new DateTimeOffset(2025, 7, 8, 14, 0, 0, TimeSpan.FromHours(2));
+
+        PersonaResponseDto.FromPersona(persona).JoinedAt.Should().Be(
+            "2025-07-08T12:00:00.000Z", "the wire instant is UTC with millisecond precision and a literal Z");
+    }
+
+    [Fact]
+    public void FromPersona_StructurallyOmitsPersonaType_TheImpersonatorTellStaysStaffOnly()
+    {
+        var json = JsonSerializer.Serialize(PersonaResponseDto.FromPersona(AuthoredPersona()));
+
+        using var document = JsonDocument.Parse(json);
+        document.RootElement.TryGetProperty("personaType", out _).Should().BeFalse(
+            "the archetype labels exactly one seeded account 'bad-actor' — emitting it to a participant would "
+            + "be a machine-readable flag on the SOC-052 lookalike, which D1-008 forbids");
+        typeof(PersonaResponseDto).GetProperty("PersonaType").Should().BeNull(
+            "the omission is STRUCTURAL — there is no property to populate, so it cannot be reintroduced by "
+            + "an accidental edit to the factory");
+    }
+
+    [Fact]
+    public void StaffFromPersona_CarriesPersonaType_AndTheSameParticipantFields()
+    {
+        var persona = AuthoredPersona();
+
+        var dto = StaffPersonaResponseDto.FromPersona(persona);
+
+        dto.PersonaType.Should().Be(
+            "influencer", "the staff console's persona picker filters and labels on the archetype (COR-020)");
+        dto.AudienceBand.Should().Be("mid");
+        dto.FollowerCount.Should().Be(50186);
+        dto.JoinedAt.Should().Be("2024-03-09T08:30:00.000Z", "both worlds render the same scenario instant");
+        dto.AvatarColor.Should().Be(
+            PersonaResponseDto.FromPersona(persona).AvatarColor,
+            "the derived avatar is identical in both worlds — the split is about the archetype only");
+    }
+
+    [Fact]
+    public void StaffFromPersona_NeverProjectsTheCastableGate()
+    {
+        var json = JsonSerializer.Serialize(StaffPersonaResponseDto.FromPersona(AuthoredPersona()));
+
+        using var document = JsonDocument.Parse(json);
+        document.RootElement.TryGetProperty("castable", out _).Should().BeFalse(
+            "the engine-casting gate is server-side authoring state — projecting it would single out the "
+            + "lookalike on the wire, the same defect as leaking personaType to a participant");
+        typeof(StaffPersonaResponseDto).GetProperty("Castable").Should().BeNull();
+        typeof(PersonaResponseDto).GetProperty("Castable").Should().BeNull();
     }
 
     [Fact]
@@ -98,18 +153,40 @@ public sealed class PersonaResponseDtoTests
     [Fact]
     public void FromPersona_NeverFlagsAnUnverifiedLookalike_TheAbsentSealIsTheOnlySignal()
     {
-        // SOC-052 / D1-008: a bad-actor archetype projects exactly like any other persona — the only
-        // difference a participant can see is verified: false.
+        // SOC-052 / D1-008, asserted on the field that actually carried the tell: a bad-actor persona and an
+        // ordinary citizen must serialize to payloads that differ in NOTHING a client could branch on except
+        // `verified`. Before the WR-001 fix this was false — `personaType: "bad-actor"` was on the wire.
         var lookalike = AuthoredPersona();
         lookalike.DisplayName = "Fairhaven Water Update";
         lookalike.Handle = "FairhavenWaterUpd";
         lookalike.PersonaType = "bad-actor";
+        lookalike.Verified = false;
 
-        var json = JsonSerializer.Serialize(PersonaResponseDto.FromPersona(lookalike));
+        // Identical in EVERY respect except the archetype — same ids, so any byte of difference in the two
+        // payloads can only come from personaType.
+        var ordinary = AuthoredPersona();
+        ordinary.Id = lookalike.Id;
+        ordinary.ExerciseId = lookalike.ExerciseId;
+        ordinary.DisplayName = "Fairhaven Water Update";
+        ordinary.Handle = "FairhavenWaterUpd";
+        ordinary.PersonaType = "citizen";
+        ordinary.Verified = false;
 
-        using var document = JsonDocument.Parse(json);
-        document.RootElement.GetProperty("verified").GetBoolean().Should().BeFalse();
-        foreach (var forbidden in new[] { "suspected", "impersonator", "flagged", "trustWarning", "isFake" })
+        var lookalikeJson = JsonSerializer.Serialize(PersonaResponseDto.FromPersona(lookalike));
+        var ordinaryJson = JsonSerializer.Serialize(PersonaResponseDto.FromPersona(ordinary));
+
+        lookalikeJson.Should().Be(
+            ordinaryJson,
+            "the archetype must make NO difference to a participant payload — otherwise the platform is "
+            + "flagging the lookalike for any client that reads the field (D1-008)");
+        lookalikeJson.Should().NotContain(
+            "bad-actor", "the bad-actor archetype must never appear anywhere in a participant response");
+
+        using var document = JsonDocument.Parse(lookalikeJson);
+        document.RootElement.GetProperty("verified").GetBoolean().Should().BeFalse(
+            "the ABSENT verified seal is the only trust signal a participant ever sees (SOC-052)");
+        foreach (var forbidden in new[]
+                 { "personaType", "castable", "suspected", "impersonator", "flagged", "trustWarning", "isFake" })
         {
             document.RootElement.TryGetProperty(forbidden, out _).Should().BeFalse(
                 $"the platform never flags a lookalike — '{forbidden}' must not exist on the wire (D1-008)");

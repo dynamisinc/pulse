@@ -155,7 +155,18 @@ public class PulseDbContext : DbContext
 
             // profiles-social-graph/06 presentation fields (COR-020/COR-021/SOC-054). Bounded lengths (the
             // two union-valued columns are short, closed vocabularies); Bio is optional free text.
-            entity.Property(e => e.Bio).HasMaxLength(512);
+            entity.Property(e => e.Bio).HasMaxLength(Persona.MaxBioLength);
+
+            // Server-side engine-casting gate (never projected to a participant DTO — see the entity's doc).
+            // Required-with-default TRUE so every pre-existing row stays castable exactly as it was.
+            //
+            // HasSentinel(true) is LOAD-BEARING, not decoration: with a store default configured, EF omits a
+            // property from the INSERT when its value equals the sentinel and lets the database default win.
+            // The sentinel would otherwise be the CLR default (false) — so seeding a deliberately
+            // NON-castable persona (the SOC-052 lookalike) would silently insert Castable = TRUE and hand the
+            // engine the very voice this gate exists to withhold. Pinning the sentinel to `true` inverts that:
+            // `true` rides the database default, `false` is always written explicitly.
+            entity.Property(e => e.Castable).IsRequired().HasDefaultValue(true).HasSentinel(true);
 
             // Required-WITH-DEFAULT, the same shape Exercise.TimeZone/Status use above: the migration adds
             // these NOT NULL to a table that already holds seeded rows, so the default backfills a

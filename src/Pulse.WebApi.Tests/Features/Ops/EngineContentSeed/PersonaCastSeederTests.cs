@@ -222,6 +222,116 @@ public sealed class PersonaCastSeederTests
     }
 
     [RequiresDockerFact]
+    public async Task SeedAsync_RowCarryingOnlyTheColumnDefaults_IsBackfilled_SoTheImpersonatorStaysTheNewestAccount()
+    {
+        // CR-001. A row written BEFORE the presentation columns existed carries the migration defaults
+        // (magnitude 0, JoinedAt == the epoch). Left alone it would read as joining ON the epoch while the
+        // newly seeded lookalike derives six days EARLIER — inverting the SOC-052 "joined this week" tell and
+        // making the impersonator look like the older, more established account.
+        var exerciseId = Guid.NewGuid();
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Personas.Add(new Persona
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exerciseId,
+                DisplayName = "Fairhaven Water Utility",
+                Handle = "FairhavenWater",
+                Kind = "org",
+                Verified = true,
+
+                // Exactly the state the PersonaPresentationFields migration leaves on a pre-existing row.
+                Bio = null,
+                PersonaType = Persona.DefaultPersonaType,
+                AudienceBand = Persona.DefaultAudienceBand,
+                AudienceMagnitude = 0,
+                JoinedAt = Persona.DefaultJoinedAt,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await SeedAndSaveAsync(exerciseId);
+
+        var rows = await ReadPersonasAsync(exerciseId);
+        var utility = rows.Single(r => r.Handle == "FairhavenWater");
+        var lookalike = rows.Single(r => r.Handle == "FairhavenWaterUpd");
+
+        utility.AudienceMagnitude.Should().Be(
+            PersonaCastSeeder.DeriveAudienceMagnitude("mid", "FairhavenWater"),
+            "a sentinel row is backfilled with its real derived magnitude (CR-001)");
+        utility.AudienceBand.Should().Be("mid");
+        utility.PersonaType.Should().Be("agency", "the archetype is backfilled too, not left on 'citizen'");
+        utility.Bio.Should().NotBeNullOrWhiteSpace("an absent bio is filled in from the catalog");
+        utility.JoinedAt.Should().BeBefore(
+            PersonaCastSeeder.SeedEpoch, "the backfilled join instant is genuinely backdated");
+
+        lookalike.JoinedAt.Should().BeAfter(
+            utility.JoinedAt,
+            "THE point of the backfill: the impersonator must remain the NEWEST account, or the SOC-052 "
+            + "'joined this week' tell is inverted (CR-001)");
+    }
+
+    [RequiresDockerFact]
+    public async Task SeedAsync_NeverOverwritesAuthoredValues_OnlyTheSentinelPair()
+    {
+        // The bounded exception must stay bounded: a row holding ANY authored presentation state is left
+        // exactly as it is, even where the catalog would say otherwise.
+        var exerciseId = Guid.NewGuid();
+        var authoredJoinedAt = new DateTimeOffset(2024, 1, 2, 3, 4, 5, TimeSpan.Zero);
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Personas.Add(new Persona
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exerciseId,
+                DisplayName = "Fairhaven Water Utility",
+                Handle = "FairhavenWater",
+                Kind = "org",
+                Verified = true,
+                Bio = "a planner wrote this",
+                PersonaType = "business",
+                AudienceBand = "mega",
+                AudienceMagnitude = 1234,
+                JoinedAt = authoredJoinedAt,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await SeedAndSaveAsync(exerciseId);
+
+        var utility = (await ReadPersonasAsync(exerciseId)).Single(r => r.Handle == "FairhavenWater");
+        utility.Bio.Should().Be("a planner wrote this");
+        utility.PersonaType.Should().Be("business");
+        utility.AudienceBand.Should().Be("mega");
+        utility.AudienceMagnitude.Should().Be(1234, "an authored magnitude is never recomputed (AC6)");
+        utility.JoinedAt.Should().Be(authoredJoinedAt, "an authored join instant is never rewritten (AC6)");
+    }
+
+    [RequiresDockerFact]
+    public async Task SeedAsync_MarksTheBadActorAndLowCredibilityAccounts_NonCastable_EveryoneElseCastable()
+    {
+        // The engine-casting gate: the SOC-052 lookalike and the sensational outlet EXIST as rows (so
+        // participants can browse them) but the engine may never voice them until a scenario opts in.
+        var exerciseId = Guid.NewGuid();
+
+        var seeded = await SeedAndSaveAsync(exerciseId);
+        var rows = await ReadPersonasAsync(exerciseId);
+
+        rows.Single(r => r.Handle == "FairhavenWaterUpd").Castable.Should().BeFalse(
+            "the impersonator is seeded as a row but withheld from the engine's eligible cast");
+        rows.Single(r => r.Handle == "TheScoopHQ").Castable.Should().BeFalse(
+            "the low-credibility outlet is likewise seeded but not engine-castable");
+
+        rows.Where(r => r.Handle is not ("FairhavenWaterUpd" or "TheScoopHQ"))
+            .Should().OnlyContain(r => r.Castable, "every ordinary persona stays castable");
+
+        seeded.Count(p => p.Castable).Should().Be(
+            7, "the seeder reports castability so the composing caller can filter the eligible cast");
+    }
+
+    [RequiresDockerFact]
     public async Task SeedAsync_RunAgain_CreatesNoDuplicates_AndReturnsTheSameIds()
     {
         var exerciseId = Guid.NewGuid();

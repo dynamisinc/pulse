@@ -125,6 +125,38 @@ public sealed class EngineContentSeedServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task Seed_EligibleCast_ExcludesTheNonCastablePersonas_TheEngineCannotVoiceTheImpersonator()
+    {
+        // profiles-social-graph/06: all nine personas are seeded as ROWS, but the SOC-052 lookalike and the
+        // low-credibility outlet ship Castable = false, so the reaction loop's eligible cast (and the
+        // storyline's participating personas) must contain neither — the engine literally cannot generate as
+        // them until a scenario opts in. This is the real gate replacing an ordering-only mitigation.
+        var hostname = UniqueHostname();
+        var exerciseId = await InsertExerciseAsync(hostname);
+        var registry = new ReactionLoopRegistry();
+
+        await using var db = _fixture.CreateContext();
+        var service = BuildService(db, registry, new EngineAutonomyRegistry());
+        await service.SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret);
+
+        var registration = registry.Active.Single(r => r.ExerciseId == exerciseId);
+
+        registration.PersonasByHandle.Keys.Should().NotContain(
+            ["FairhavenWaterUpd", "TheScoopHQ"],
+            "a non-castable persona must never reach the engine's eligible cast");
+        registration.PersonasByHandle.Should().HaveCount(
+            7, "the seven castable personas remain available to the loop");
+        registration.Storylines.Single().ParticipatingPersonas.Should().NotContain(
+            ["FairhavenWaterUpd", "TheScoopHQ"],
+            "the starter storyline is built from the castable handles only");
+
+        await using var verify = _fixture.CreateContext();
+        (await verify.Personas.IgnoreQueryFilters()
+            .CountAsync(p => p.ExerciseId == exerciseId && !p.Castable)).Should().Be(
+            2, "both accounts still EXIST as rows — participants must be able to browse the lookalike (SOC-052)");
+    }
+
+    [RequiresDockerFact]
     public async Task Seed_RegistrationAutonomy_IsTheSharedRegistryInstance_NotADetachedOne()
     {
         var hostname = UniqueHostname();

@@ -51,11 +51,34 @@ public sealed class Persona : IExerciseScoped
     public bool Verified { get; set; }
 
     /// <summary>
-    /// Optional participant-visible profile bio (COR-020) — free text, sanitized on the write path
-    /// (NFR-004). Nullable: a persona may legitimately have no bio, and the frozen client contract types
-    /// <c>bio</c> as optional, so a null here is OMITTED from the wire payload rather than emitted as null.
+    /// Optional participant-visible profile bio (COR-020) — free text. Nullable: a persona may legitimately
+    /// have no bio, and the frozen client contract types <c>bio</c> as optional, so a null here is OMITTED
+    /// from the wire payload rather than emitted as null.
     /// </summary>
+    /// <remarks>
+    /// <b>Every write path MUST route this through <c>PostSanitizer.Sanitize</c> (NFR-004).</b> Today the only
+    /// writer is <c>PersonaCastSeeder</c>, which does; the guarantee therefore lives at ONE call site, not in
+    /// the type. Any future writer (planner template authoring COR-020, mid-exercise persona creation
+    /// COR-022, an import) must sanitize at its own ingest boundary — strip, never encode — before assigning
+    /// here, exactly as the post ingest funnel does, because a stored bio renders on a participant profile.
+    /// Bounded by <see cref="MaxBioLength"/> in the schema, so an over-long value is an authoring bug.
+    /// </remarks>
     public string? Bio { get; set; }
+
+    /// <summary>
+    /// Whether the ENGINE may voice this persona (cast it into a storyline's eligible set). Server-side
+    /// authoring state only — it is NEVER projected onto any participant-facing DTO, because a flag that
+    /// singles out the impersonator would be exactly the machine-readable tell SOC-052/D1-008 forbid.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <c>true</c>: an ordinary persona is castable. The seeded bad-actor / low-credibility
+    /// accounts (the SOC-052 lookalike and the sensational outlet) ship <c>false</c>, so they EXIST as rows —
+    /// participants can browse the lookalike's profile and learn to spot it — while the engine can never
+    /// generate content as them until a scenario explicitly opts in by flipping this column. That honours
+    /// <c>engine-content-seed</c>'s standing concern (seeding a troll voice the platform "has no way to turn
+    /// off") without withholding the SOC-052 training material.
+    /// </remarks>
+    public bool Castable { get; set; } = true;
 
     /// <summary>
     /// The frontend <c>PersonaType</c> union value — <c>news-outlet</c> / <c>agency</c> /
@@ -102,6 +125,9 @@ public sealed class Persona : IExerciseScoped
     /// existed read back as a contract-valid value rather than an empty string.
     /// </summary>
     public const string DefaultPersonaType = "citizen";
+
+    /// <summary>The maximum stored <see cref="Bio"/> length — the schema bound, shared with the seeder's authoring-time guard.</summary>
+    public const int MaxBioLength = 512;
 
     /// <summary>
     /// The audience band a persona row carries when none was authored — the smallest of the frontend

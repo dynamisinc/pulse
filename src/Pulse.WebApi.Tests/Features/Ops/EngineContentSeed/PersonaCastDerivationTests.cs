@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Tests.Features.Ops.EngineContentSeed;
 
 using System;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using FluentAssertions;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Ops.EngineContentSeed;
@@ -130,6 +131,33 @@ public sealed class PersonaCastDerivationTests
             PersonaCastSeeder.SeedEpoch.AddDays(-89),
             "every other archetype is an established account (~3 months to ~2 years old)");
         lookalike.Should().BeAfter(utility, "the impersonator is always the newer of the pair");
+    }
+
+    [Fact]
+    public void Catalog_PassesItsAuthoringTimeGuard_BiosFitTheColumn_AndBandsAreKnown()
+    {
+        // S-002: the seeder's static constructor validates every authored bio against the stored column bound
+        // and every authored band against the closed SOC-054 vocabulary, so an over-long bio or a typo'd band
+        // fails HERE (first touch of the type) rather than as an opaque truncation at SaveChangesAsync.
+        var act = () => RuntimeHelpers.RunClassConstructor(typeof(PersonaCastSeeder).TypeHandle);
+
+        act.Should().NotThrow(
+            "every catalog bio must fit Persona.MaxBioLength and every catalog band must be a known SOC-054 band");
+        Persona.MaxBioLength.Should().Be(512, "the guard and the schema bound are the same constant");
+    }
+
+    [Fact]
+    public void DeriveAudienceMagnitude_IsCaseSensitive_MatchingTheBadActorComparison()
+    {
+        // S-001: both closed vocabularies are compared ORDINALLY, so a mis-cased value fails loudly in the
+        // band lookup instead of being folded there and missed by the archetype check.
+        var act = () => PersonaCastSeeder.DeriveAudienceMagnitude("Mid", "FulcoEM");
+        act.Should().Throw<ArgumentOutOfRangeException>("the band vocabulary is ordinal, lower-case only");
+
+        PersonaCastSeeder.DeriveJoinedAt("BAD-ACTOR", "FairhavenWaterUpd").Should().Be(
+            PersonaCastSeeder.DeriveJoinedAt("citizen", "FairhavenWaterUpd"),
+            "the archetype comparison is ordinal too — a mis-cased 'bad-actor' is simply not the bad-actor "
+            + "archetype, consistently with the band lookup rejecting a mis-cased band");
     }
 
     [Fact]

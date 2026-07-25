@@ -1,7 +1,7 @@
 # Story: Persona presentation fields (backend)
 
-**Feature:** Profiles & social graph  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-020, COR-021, SOC-052, SOC-054, XC-005  ·  **Design decisions:** none  ·  **Issue:** _TBD — mirrored after authoring_
+**Feature:** Profiles & social graph  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Complete
+**Requirements:** COR-020, COR-021, SOC-052, SOC-054, XC-005  ·  **Design decisions:** none  ·  **Issue:** #369
 **Stack:** backend
 
 ## Context
@@ -30,20 +30,41 @@ is a separate, later feature (see Out of Scope) — this story only makes the **
 cast** (`PersonaCastSeeder`) and the **read projection** (`PersonaResponseDto`) tell the truth.
 
 ## Acceptance Criteria
-- [ ] **Persisted fields.** The `Persona` entity gains `Bio` (nullable `string`), `PersonaType`
+> **Gate-1 amendments (approved by the story owner, folded in the second commit).** Three ACs below carry
+> amendments recorded inline: **AC2** now splits the projection per world (`personaType` is STAFF-ONLY —
+> emitting the archetype to a participant would be a machine-readable flag on the SOC-052 lookalike, D1-008);
+> **AC4** adds the `Castable` engine-casting gate (the impersonator/low-credibility rows exist, but the engine
+> cannot voice them until a scenario opts in); **AC6** adds a bounded, sentinel-only backfill exception to
+> "never overwrite".
+
+- [x] **Persisted fields.** The `Persona` entity gains `Bio` (nullable `string`), `PersonaType`
       (`string`, mirrors the frontend `PersonaType` union), `AudienceBand` (`string`, mirrors the
       frontend `AudienceBand` union: `nano`/`micro`/`mid`/`large`/`mega`), `AudienceMagnitude`
       (`int` — the SOC-054 magnitude derived from the band at seed time, **distinct from the real
       follow graph**, which story 07 adds separately), and `JoinedAt` (`DateTimeOffset` or
       equivalent scenario-instant representation). An EF Core migration adds all five columns.
-- [ ] **Real projection, unchanged contract.** `PersonaResponseDto.FromPersona` projects the real
-      persisted `Bio`/`PersonaType`/`AudienceBand`/`AudienceMagnitude`/`JoinedAt` values — the five
-      hardcoded B1 stand-ins (`"citizen"`, `"micro"`, `0`, the fixed `2026-01-01` instant) and the
-      `bio`-omission are removed from the DTO. The frozen client contract shape
-      (`features/personas/types.ts:84-101`) is **unchanged** — field names, types, and
-      required/optional status stay exactly as shipped — so only the *values* become real and no
-      frontend code change is required to consume this story.
-- [ ] **Seeder populates real state.** `PersonaCastSeeder` (`Features/Ops/EngineContentSeed/
+- [x] **Real projection, unchanged contract.** `PersonaResponseDto.FromPersona` projects the real
+      persisted `Bio`/`AudienceBand`/`AudienceMagnitude`/`JoinedAt` values — the hardcoded B1
+      stand-ins (`"citizen"`, `"micro"`, `0`, the fixed `2026-01-01` instant) and the `bio`-omission
+      are removed from the DTO. No frontend code change is required to consume this story.
+      **AMENDED (Gate-1 WR-001) — the projection is now per-world.** `personaType` is **staff-only**:
+      the archetype labels exactly one seeded account `bad-actor`, so emitting it on the endpoint the
+      participant feed calls would hand a client a machine-readable way to flag the SOC-052 lookalike
+      without the verified seal — exactly what D1-008 forbids. `GET /api/personas` therefore branches
+      on the caller's world, the same way `ParticipantPostDto`/`StaffPostDto` already split post
+      provenance (XC-002): a caller with a live `staff`-kind session (resolved through the standing
+      `ICurrentStaffSessionAccessor` seam) receives `StaffPersonaResponseDto` **with** `personaType`;
+      every other caller — participant, read-only, anonymous, expired token — receives
+      `PersonaResponseDto`, which **structurally omits** it. The branch fails closed to the narrow
+      shape. `avatarColor`/`initials` stay derived, not persisted, in both shapes.
+      **Frozen-contract consequence (needs an orchestrator-sequenced frontend change, NOT made here):**
+      `features/personas/types.ts:91` declares `personaType` as a REQUIRED field of `Persona`, so the
+      participant payload no longer structurally satisfies that TS type. Nothing breaks at runtime —
+      `isValidPersona` does not check the field, and no participant surface reads it (its only readers
+      are the staff console's `PersonaPicker.tsx`, `PersonaContextPanel.tsx` and
+      `controller/services/personaVoice.ts`) — but the type must become optional (`personaType?:`) or
+      split into participant/staff shapes for the contract to be honest.
+- [x] **Seeder populates real state.** `PersonaCastSeeder` (`Features/Ops/EngineContentSeed/
       PersonaCastSeeder.cs`) populates all five new fields for every catalog persona.
       `AudienceMagnitude` is derived from `AudienceBand` the same way the frontend's mock derivation
       does — read `src/frontend/src/features/personas/seedCast.ts`'s `BAND_BASE` table and
@@ -55,7 +76,7 @@ cast** (`PersonaCastSeeder`) and the **read projection** (`PersonaResponseDto`) 
       COR-023) — with bad-actor/impersonator personas joining **recently** (3-6 days before the
       epoch; the lookalike "joined this week" tell) and every other persona joining well before the
       exercise (weeks to ~2 years).
-- [ ] **Impersonation pair + live-cast parity.** The seeded catalog gains the SOC-052 impersonation
+- [x] **Impersonation pair + live-cast parity.** The seeded catalog gains the SOC-052 impersonation
       pair currently present only in the frontend mock (`personaTemplates.ts`) and absent from the
       live `PersonaCastSeeder.Catalog`: `@FairhavenWaterUpd` (org, `Verified = false`, display name
       `"Fairhaven Water Update"` — a near-identical lockup of the verified `"Fairhaven Water
@@ -65,14 +86,34 @@ cast** (`PersonaCastSeeder`) and the **read projection** (`PersonaResponseDto`) 
       frontend's nine-template cast handle-for-handle. Matching the platform's own rule (D1-008),
       the seeder never marks or flags the lookalike in any field — the absent `Verified` flag is the
       only signal, exactly as every other unverified persona is represented.
-- [ ] **No new leak (XC-002).** Exercise scope (COR-001) is unchanged — every new field is exposed
+      **AMENDED (Gate-1 WR-002) — the engine cannot voice them: `Persona.Castable`.**
+      `engine-content-seed`'s standing objection to seeding a bad-actor voice ("content the platform
+      has no way to turn off") is answered with a real gate rather than an ordering heuristic:
+      `@FairhavenWaterUpd` and `@TheScoopHQ` are seeded with `Castable = false`, so the ROWS exist
+      (participants can browse the lookalike's profile — the SOC-052 training material) while
+      `EngineContentSeedService` filters them out of the reaction loop's eligible cast and the starter
+      storyline's participating personas. A scenario opts in by flipping the column. The flag is
+      server-side only and is projected onto **no** DTO, participant or staff — a `castable` field on
+      the wire would be the same machine-readable lookalike tell as `personaType`.
+- [x] **No new leak (XC-002).** Exercise scope (COR-001) is unchanged — every new field is exposed
       only through the existing exercise-scoped `GET /api/personas` read, with no new provenance/
-      operator/session-attribution field added to the DTO.
-- [ ] **Idempotent seeding.** Re-running the seeder for an already-seeded exercise does not duplicate
+      operator/session-attribution field added to either DTO, and no participant-reachable field that
+      distinguishes the lookalike other than `verified` (see AC2/AC4 as amended).
+- [x] **Idempotent seeding.** Re-running the seeder for an already-seeded exercise does not duplicate
       rows or overwrite an existing row's fields (mirrors the seeder's existing `(ExerciseId,
       Handle)`-keyed idempotency, `IX_Personas_ExerciseId_Handle`) — the three new catalog handles
       are added on the first re-seed of an exercise that predates them, without disturbing the six
       that already exist.
+      **AMENDED (Gate-1 CR-001) — one bounded exception: the sentinel backfill.** A reused row whose
+      `AudienceMagnitude == 0` **and** `JoinedAt == SeedEpoch` is backfilled once with its catalog
+      archetype/band and derived magnitude/join instant (`Bio` only when absent, via `??=`). That pair
+      is a state **no authored row can hold** — the derivation never returns a magnitude below the
+      smallest band floor (450) and always subtracts at least three days from the epoch — so it means
+      exactly one thing: the row predates these columns and is carrying the migration's defaults.
+      Without the backfill the six pre-existing personas would read as joining ON the epoch
+      (2026-06-15) while the newly seeded lookalike derives 2026-06-09, making the **impersonator look
+      like the older, more established account** and inverting the very SOC-052 "joined this week"
+      tell this story exists to create. Any row holding authored values is still never overwritten.
 
 ## Out of Scope
 The real follow graph and the edges component of the displayed follower count (story 07). Planner-
@@ -94,6 +135,20 @@ helpers mirroring `seedCast.ts`). Every new stored free-text field (`Bio`) runs 
 `PostSanitizer.Sanitize` funnel the seeder already uses for `DisplayName`/`Handle`/`VoiceNotes`
 (NFR-004), even though these are developer-authored constants today — consistent with the seeder's
 existing posture on that point.
+
+**Sanitization is a call-site guarantee, not a type guarantee (Gate-1 S-003).** `PostSanitizer` runs at
+the seeder's ingest boundary — it is NOT enforced by the `Persona` entity, EF, or the DTO. Every FUTURE
+`Bio` writer (planner template authoring COR-020, mid-exercise persona creation COR-022, any import or
+staff edit) must strip-not-encode through the same funnel at its own boundary before assigning, because a
+stored bio renders on a participant profile (NFR-004). This is recorded on `Persona.Bio`'s XML docs as
+well, so the obligation travels with the property.
+
+**Per-world projection seam (Gate-1 WR-001).** The staff/participant split is a role branch on the
+EXISTING `GET /api/personas`, not a new staff endpoint: the staff console's `PersonaPicker.tsx` /
+`PersonaContextPanel.tsx` reach personas through `usePersonas()` → `resolvePersonas()` → `/personas`, and
+the shared axios instance already attaches the staff bearer token, so staff keeps `personaType` with **no
+frontend edit at all**. A separate `/api/staff/personas` would have required editing those frozen
+frontend files (forbidden this wave) or shipping an endpoint nobody calls.
 
 `AudienceMagnitude` vs. the eventual displayed follower **count**: this story only adds the
 magnitude (the SOC-054 band-derived number a persona has independent of any real follow edge).
@@ -120,18 +175,29 @@ locally); the rest are model-only `[Fact]`/`[Theory]` and run everywhere.
   — all five columns round-trip through a separate read context, and a row written without them lands on the
   documented contract-valid defaults (never `""`/`0001-01-01`).
 
-**Real projection, unchanged contract (AC2)**
+**Real projection, unchanged contract (AC2, incl. the WR-001 per-world split)**
 - `PersonaResponseDtoTests.FromPersona_ProjectsThePersistedPresentationValues_NotTheB1StandIns`
 - `PersonaResponseDtoTests.FromPersona_KeepsAvatarColorAndInitials_DerivedAndStable`
 - `PersonaResponseDtoTests.FromPersona_NullBio_OmitsTheKeyEntirely_RatherThanEmittingNull`
+- `PersonaResponseDtoTests.FromPersona_StructurallyOmitsPersonaType_TheImpersonatorTellStaysStaffOnly`
+- `PersonaResponseDtoTests.StaffFromPersona_CarriesPersonaType_AndTheSameParticipantFields`
+- `PersonaResponseDtoTests.StaffFromPersona_NeverProjectsTheCastableGate`
+- `PersonaResponseDtoTests.FromPersona_JoinedAt_MatchesJavaScriptToISOString_ForANonUtcOffsetToo` (WR-004 —
+  the wire instant is byte-identical to the mock's `toISOString()`)
 - `PersonaEndpointsTests.Response_ProjectsThePersistedPresentationFields_NotTheB1StandIns` [docker] — over
-  HTTP, incl. the exact wire field-set (frozen contract + the optional `bio`, nothing more).
+  HTTP, incl. the exact participant wire field-set (participant-safe fields + the optional `bio`, no
+  `personaType`)
+- `PersonaEndpointsTests.StaffSession_ReceivesPersonaType_ParticipantDoesNot` [docker] — one row, one
+  endpoint, two shapes: an anonymous caller vs. a live staff-kind session
+- `PersonaEndpointsTests.ExpiredStaffSession_FallsBackToTheParticipantShape_FailClosed` [docker]
 
 **Seeder populates real state (AC3)**
 - `PersonaCastSeederTests.SeedAsync_PopulatesEveryPresentationField_ForEveryPersona` [docker]
 - `PersonaCastDerivationTests.DeriveAudienceMagnitude_MatchesTheFrontendMock_ForTheSameHandleAndBand`
   (per-handle parity with `seedCast.ts`), `..._StaysWithinTheBandsFloorPlusForty` (the `BAND_BASE` band
   ranges), `..._IsDeterministic_AndBandOrdered`, `..._UnknownBand_Throws_RatherThanInventingANumber`
+- `PersonaCastDerivationTests.Catalog_PassesItsAuthoringTimeGuard_BiosFitTheColumn_AndBandsAreKnown` (S-002)
+- `PersonaCastDerivationTests.DeriveAudienceMagnitude_IsCaseSensitive_MatchingTheBadActorComparison` (S-001)
 - `PersonaCastDerivationTests.DeriveJoinedAt_MatchesTheFrontendMock_AndAlwaysPredatesTheEpoch`,
   `..._BadActor_JoinsWithinAWeekOfTheEpoch_EstablishedPersonasJoinMuchEarlier`,
   `PersonaCastDerivationTests.SeedEpoch_IsTheFixedPreExerciseScenarioConstant_NeverTheWallClock`
@@ -143,7 +209,12 @@ locally); the rest are model-only `[Fact]`/`[Theory]` and run everywhere.
   [docker]
 - `PersonaCastSeederTests.SeedAsync_SeedsTheImpersonationPair_UnverifiedLookalike_WithNoFlagOfAnyKind`
   [docker] — `Verified = false`, no flag field of any kind, recent join date
-- `PersonaResponseDtoTests.FromPersona_NeverFlagsAnUnverifiedLookalike_TheAbsentSealIsTheOnlySignal`
+- `PersonaResponseDtoTests.FromPersona_NeverFlagsAnUnverifiedLookalike_TheAbsentSealIsTheOnlySignal` — the
+  bad-actor and the citizen payloads are byte-identical; only `verified` may ever differ
+- `PersonaCastSeederTests.SeedAsync_MarksTheBadActorAndLowCredibilityAccounts_NonCastable_EveryoneElseCastable`
+  [docker] (the WR-002 `Castable` gate at the row level)
+- `EngineContentSeedServiceTests.Seed_EligibleCast_ExcludesTheNonCastablePersonas_TheEngineCannotVoiceTheImpersonator`
+  [docker] — the rows exist, but neither the eligible cast nor the storyline can voice them
 
 **No new leak (AC5)**
 - `PersonaEndpointsTests.WiderProjection_StillLeaksNothingAcrossExercises_ScopeA_NeverSeesBsPresentationFields`
@@ -151,8 +222,12 @@ locally); the rest are model-only `[Fact]`/`[Theory]` and run everywhere.
 - `PersonaEndpointsTests.Response_ContainsOnlyShippedPersonaFields_NoProvenanceOrOperatorLeak` [docker]
   (existing, still green), `PersonaResponseDtoTests.FromPersona_CarriesNoProvenanceOrOperatorField_XC002`
 
-**Idempotent seeding (AC6)**
+**Idempotent seeding (AC6, incl. the CR-001 sentinel backfill)**
 - `PersonaCastSeederTests.SeedAsync_RunAgain_CreatesNoDuplicates_AndReturnsTheSameIds` [docker]
+- `PersonaCastSeederTests.SeedAsync_RowCarryingOnlyTheColumnDefaults_IsBackfilled_SoTheImpersonatorStaysTheNewestAccount`
+  [docker] — pins the corrected behaviour: after a re-seed the lookalike is still the NEWEST account
+- `PersonaCastSeederTests.SeedAsync_NeverOverwritesAuthoredValues_OnlyTheSentinelPair` [docker] — the
+  exception stays bounded
 - `PersonaCastSeederTests.SeedAsync_AgainstAnExercisePredatingTheNewHandles_AddsExactlyThoseThree_AndDisturbsNothing`
   [docker]
 - `EngineContentSeedServiceTests.Seed_ResolvesExistingExercise_SeedsNinePersonas_AndRegistersTheLoop` /
