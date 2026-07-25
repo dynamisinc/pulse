@@ -17,8 +17,32 @@ values are **hardcoded constants** in `Features/ParticipantShell/ParticipantShel
 (`BrandTokens`, `ChannelNavConfig`).
 
 This story also **owns the feature's one EF migration** (see feature.md "Single-migration rule"): the
-columns stories 03 (lifecycle) and 04 (practice flag) need are authored here, in the same migration,
-even though their *behavior* lands in those stories.
+columns stories 02 (chrome config + the watermark on/off flag), 03 (lifecycle) and 04 (practice flag)
+need are authored here, in the same migration, even though their *behavior* lands in those stories.
+
+### It also carries the story-03 vocabulary widening (Option B, Tier-2 signed off)
+
+The human chose **Option B** for the COR-032 lifecycle reconciliation (see `03-exercise-lifecycle.md`)
+and **gave the Tier-2 sign-off**. Because the sole-migration-author rule lives here, the `Status` column
+change travels in *this* story's migration, not story 03's:
+
+- widen `Exercise.Status` to the COR-032 vocabulary (the authoritative literals are in
+  `implementation.md` → "Lifecycle string literals"), including `PulseDbContext`'s `HasDefaultValue`
+  and `BootstrapService`'s seed value, plus a data migration mapping existing rows;
+- widen the **frontend** guard (`EXERCISE_STATUSES` / `isExerciseStatus` / the `ExerciseStatus` union in
+  `core/exerciseContext/exerciseContextResolver.ts`) **first**, additively, so a deployed client accepts
+  the new values *before* any backend emits them;
+- let `ExerciseScopeDto.FromExercise` pass the widened vocabulary through unchanged.
+
+This deliberately reaches into files nominally owned by `exercise-isolation/08` (the `ExerciseScopeDto`
+/ resolver seam). **That is sanctioned by the Tier-2 sign-off — it is the entire point of Option B** and
+is not a scope violation to be flagged at review.
+
+**The residual risk this must defend against:** UAT is a split deployment (Azure SWA frontend + App
+Service backend) that deploys independently. A backend-ahead-of-frontend deploy writes `staged` /
+`live` / `paused` into a client whose `isExerciseStatus` guard **fails closed on unknown values** — a
+blank participant world, not a type error. The mitigation is ordering discipline, and it is cheap
+because the client change is purely additive.
 
 ## Acceptance Criteria
 - [ ] Given a planner with a staff session, when they open the exercise-settings panel and save, then
@@ -45,6 +69,18 @@ even though their *behavior* lands in those stories.
       server-side, and a stored `<script>` in any of them never executes in a participant session.
 - [ ] Given a settings write, when it is rejected (invalid IANA zone, over-length text, unknown channel
       id), then the write fails closed with a 400 and the stored config is unchanged.
+- [ ] **Vocabulary widening (Option B, Tier-2 signed off):** given the widened `Status` column, when an
+      exercise's status is read, then it carries a COR-032 literal from `implementation.md`'s
+      authoritative list; existing rows are mapped by the data migration; `PulseDbContext`'s default and
+      `BootstrapService`'s seed use the new literals; and `ExerciseScopeDto.FromExercise` passes the
+      value through unchanged.
+- [ ] **Client-first ordering (the split-deploy guard):** given the frontend guard widening is purely
+      additive, when this story ships, then `EXERCISE_STATUSES` / `isExerciseStatus` accept **both** the
+      legacy and the COR-032 vocabularies, and the frontend is deployed **no later than** the backend —
+      so no deploy order can present an unknown status to a fail-closed client. Retiring the legacy four
+      literals is a documented follow-up, not part of this story.
+- [ ] Given the watermark on/off flag, when it is stored, then it is a real per-exercise column story
+      02's NFR-008 guard reads — not a constant.
 
 ## Out of Scope
 Compliance chrome config + its editor (story 02 — this story ships only the column); the lifecycle
@@ -75,3 +111,8 @@ every channel (enablement/theming), and stories 02/03/04 (which build on this st
   runtime type-guards (`isBrandTokens`, `isChannelNavConfigResponseBody`) after the constants are gone.
 - Isolation: a cross-exercise settings read/write is refused; added to the standing isolation suite.
 - Sanitization: a `<script>` payload in world name / brand name is neutralized end to end.
+- Vocabulary: `isExerciseStatus` accepts every COR-032 literal **and** every legacy literal (the
+  transitional superset — this is what makes the deploy order safe); `ExerciseScopeDtoTests`'
+  `[InlineData]` set is extended with the six new values.
+- Data migration: existing rows land on the mapped COR-032 literals; `MigrationRoundTripTests`' default
+  expectation is updated to the new `HasDefaultValue`.

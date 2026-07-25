@@ -2,7 +2,7 @@
 
 **Feature:** Exercise configuration  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
 **Requirements:** COR-032  ·  **Design decisions:** none  ·  **Issue:** #69
-**Review tier:** **Tier-2 — human sign-off required** (schema/contract change, `docs/ORCHESTRATION_MECHANICS.md` §3)
+**Review tier:** Tier-2 (schema/contract change, `docs/ORCHESTRATION_MECHANICS.md` §3) — **sign-off GIVEN** (see "Reconciliation decision")
 
 ## Context
 The exercise lifecycle: **Build → Staged → Live → Paused → Completed (EndEx) → Archived** (COR-032).
@@ -18,32 +18,61 @@ stored *"verbatim as the frozen frontend vocabulary (`exerciseContextResolver.ts
 `Features/ExerciseResolution/ExerciseScopeDto.FromExercise` projects it straight onto the **frozen**
 `ExerciseScope.status` wire field served by `GET /api/exercise-context`.
 
-COR-032 specifies six different states. **These two vocabularies must be reconciled explicitly by this
-story — a builder must not quietly widen the stored column.** The hard constraint:
-`src/frontend/src/core/exerciseContext/exerciseContextResolver.ts` validates `status` against
-`EXERCISE_STATUSES` and **fails closed on an unknown value** — the provider then resolves nothing and
-the participant shell renders nothing. Writing `"staged"` into the existing column with today's client
-deployed is a blank participant world, not a type error.
+COR-032 specifies six different states. That clash has now been **reconciled by an explicit human
+decision** (below) — it is not an open question, and it is not resolved inside this story's diff. The
+hard constraint that shaped the decision: `src/frontend/src/core/exerciseContext/exerciseContextResolver.ts`
+validates `status` against `EXERCISE_STATUSES` and **fails closed on an unknown value** — the provider
+then resolves nothing and the participant shell renders nothing. Writing `"staged"` into the existing
+column against an un-widened client is a blank participant world, not a type error.
 
-Known consumers of the vocabulary today (verify before changing anything):
+Consumers of the vocabulary today (the migration surface story 01a works through — verified in-repo):
 `Data/PulseDbContext.cs` (`HasDefaultValue("scheduled")`), `ExerciseScopeDto.FromExercise`,
 `Features/Ops/Bootstrap/BootstrapService.cs` (seeds `Status = "active"`),
 `core/exerciseContext/exerciseContextResolver.ts` (`ExerciseStatus` union + `isExerciseStatus` guard,
 re-exported via `core/exerciseContext/index.ts`).
 
-**The two options this story must choose between (and record the choice + rationale in the story before
-building):**
+### Reconciliation decision — **Option B: widen the frozen vocabulary.** Tier-2 sign-off GIVEN.
 
-| | **Option A — distinct lifecycle column + projection** | **Option B — widen the frozen vocabulary, migrate consumers** |
-|---|---|---|
-| Shape | New `LifecycleState` column carrying the COR-032 six; `Status` stays as-is and becomes a **derived projection** of it (e.g. Build→`scheduled`, Staged/Live/Paused→`active`, Completed→`complete`, Archived→`archived`). | `Status` itself carries the COR-032 six; `ExerciseStatus`, `isExerciseStatus`, `ExerciseScopeDto` docs, the DbContext default and the bootstrap seed all move with it, plus a data migration for existing rows. |
-| Pros | No wire break; `/api/exercise-context` and its runtime guard are untouched; no cross-feature file edits; deployable in any order. | One vocabulary, no lossy mapping, no dual-write drift. |
-| Cons | Two vocabularies to keep in sync; the projection is **lossy** — Staged / Live / Paused all collapse to `active`, so any consumer needing that distinction must read a different signal (`/api/shell-state`, `/api/overlay-state`), which must then be stated explicitly. | Breaks a frozen wire contract *and* its fail-closed client guard: an un-upgraded client blanks the participant shell. Requires a coordinated frontend+backend deploy and edits files owned by other features (`exercise-isolation/08`). |
+Two options were on the table: **A**, a distinct lifecycle column with `Status` kept as a lossy
+projection of it; **B**, `Status` itself carrying COR-032's six, with `ExerciseStatus`,
+`isExerciseStatus`, the DbContext default, the bootstrap seed and existing rows all migrated.
 
-Whichever is chosen, these invariants hold: `GET /api/exercise-context` keeps returning a value the
-deployed client's guard accepts; the participant-shell DTOs are not reshaped; and the decision is
-recorded here with its rationale. **This is a schema/contract change — Tier-2 human sign-off before
-merge; do not decide it inside a build agent.**
+**The decision is B**, taken by the human, whose reasoning was:
+
+- UAT is an expendable playground that can be blown away at any time, so the data-migration cost is
+  ~zero — Option A's main advantage evaporates.
+- `scheduled | active | complete | archived` is a **placeholder that predates COR-032**, not a
+  requirement. COR-032 is the requirement. Option A would permanently layer a lossy projection over a
+  known-wrong vocabulary on the platform's aggregate root.
+- Option A's lossiness is substantive, not cosmetic: nothing downstream could ever ask the exercise
+  record itself "Staged or Live?" — it would have to consult a different endpoint. That is the wrong
+  shape for the aggregate root's own status field.
+- E1 is the foundation epic; it was chosen precisely because it is load-bearing, so it gets done right.
+
+**Tier-2 human sign-off for this frozen-contract change has been given** (`docs/ORCHESTRATION_MECHANICS.md`
+§3). It is therefore **no longer an orchestration gate** blocking wave 1, and the reach into files
+nominally owned by `exercise-isolation/08` (the `ExerciseScopeDto` / resolver seam) is sanctioned — that
+reach *is* Option B.
+
+**Where the change actually lands:** not here. The sole-migration-author rule puts the `Status` column
+change, the data migration, the `PulseDbContext` default, the `BootstrapService` seed, the additive
+frontend guard widening and the `ExerciseScopeDto` pass-through in **story 01a's single migration**
+(wave 1). This story layers behavior onto a column that already carries the right vocabulary. The
+authoritative string literals are in `implementation.md` → "Lifecycle string literals" — use those exact
+strings; do not coin variants.
+
+### ⚠ Residual risk that survives Option B — split-deploy ordering
+
+UAT is a **split deployment** (Azure SWA frontend + App Service backend) whose two halves deploy
+independently. A **backend-ahead-of-frontend** deploy writes `staged` / `live` / `paused` into a client
+whose `isExerciseStatus` guard fails closed on unknown values → **a blank participant world, not a type
+error**.
+
+The mitigation is ordering discipline, and it is cheap because the client change is purely additive:
+**widen the frontend `EXERCISE_STATUSES` / `isExerciseStatus` guard FIRST (wave 1, story 01a), then let
+the backend emit the new values.** The widened client accepts both the legacy and the COR-032
+vocabularies during the transition, so no deploy order can strand it. Retiring the legacy four literals
+is a later cleanup, deliberately not bundled here.
 
 ### Where the lifecycle is observed
 The already-frozen participant-shell endpoints are the surfaces this state machine drives (constants
@@ -55,10 +84,9 @@ today, per-exercise data after this story — **same wire shapes, no consumer ch
   (`state: pause`, `register: in-fiction | out-of-fiction`).
 
 ## Acceptance Criteria
-- [ ] **Reconciliation recorded first:** given the frozen `Status` vocabulary above, when this story
-      starts, then the chosen option (A or B) and its rationale are written into this file and signed
-      off by a human (Tier-2) — and `GET /api/exercise-context` continues to return a value the
-      deployed `isExerciseStatus` guard accepts.
+- [ ] Given the Option-B vocabulary already shipped by story 01a, when this story reads or writes a
+      lifecycle state, then it uses the authoritative literals from `implementation.md` verbatim and
+      introduces **no second vocabulary, no parallel lifecycle column and no projection layer**.
 - [ ] Given an exercise, when its lifecycle state is read, then it is one of Build / Staged / Live /
       Paused / Completed / Archived, and only the transitions COR-032 allows succeed; a disallowed
       transition is rejected with a 409 and no state change.
@@ -81,33 +109,47 @@ today, per-exercise data after this story — **same wire shapes, no consumer ch
 
 ## Out of Scope
 The gated go-live/StartEx actions themselves (exercise-build-golive COR-043); the clock (exercise-clock
-COR-050); the holding-page **content authoring** UI; EndEx specifics (exercise-clock COR-054); the
-controller's tiered pause / Freeze (E7 CTL-023 — `world-steering`, in flight; this story consumes the
-overlay-state write path it introduces rather than competing with it); reshaping any frozen DTO.
+COR-050); the holding-page **content authoring** UI; EndEx specifics (exercise-clock COR-054); **any
+schema or migration work** (story 01a owns it — including the `Status` vocabulary); reshaping any frozen
+DTO.
 
 ## Technical Notes
 **Backend / staff world.** Foundation state machine other features subscribe to; Staged vs Live is the
-key distinction. The lifecycle column ships in **story 01's single migration** (feature.md
-"Single-migration rule") — this story adds behavior, not schema, unless option B's data migration is
-signed off, in which case it is authored as a second, serial migration after story 01's has merged.
+key distinction. **This story authors no schema and no migration** — story 01a's single migration
+already delivers the widened `Status` column, so this story is transition rules, gating, projections and
+telemetry only.
 
-**In-flight collision:** the unmerged `feature/world-steering-wave2` umbrella rewrites
-`Features/ParticipantShell/ParticipantShellEndpoints.cs`, making `/api/overlay-state` a real write path
-with SignalR push, and edits `Program.cs`. This story must land **after** that work integrates and
-build on it. See implementation.md → "Integration hazards".
+### The `/api/overlay-state` collision is known, accepted and yours to reconcile
+The unmerged `feature/world-steering-wave2` umbrella rewrites the `/api/overlay-state` handler in
+`Features/ParticipantShell/ParticipantShellEndpoints.cs` into a real write path with SignalR push, and
+edits `Program.cs`. The human has decided to **proceed on all waves and absorb the conflict at merge
+time** rather than sequence around it. Two things follow for this story's builder:
 
-See implementation.md (story 03).
+- The textual conflict surface is small and known: world-steering rewrites **only** the
+  `/api/overlay-state` handler. `chrome-config`, `brand-tokens`, `channel-nav-config` and `shell-state`
+  are untouched by it.
+- **The semantic conflict is the real one.** World-steering's CTL-023 Freeze and COR-032's Paused
+  holding page target the **same surface and the same register** (`OverlayStateResponse`'s `state` /
+  `register`). Do **not** add a second, parallel pause mechanism alongside it: reconcile explicitly —
+  decide and document how a COR-032 `Paused` lifecycle state and a CTL-023 Freeze compose into one
+  overlay state, and route through world-steering's write path rather than beside it.
+
+See implementation.md → "Integration hazards" and (story 03).
 
 ## Dependencies
-Story 01 (settings slice, the lifecycle column in its migration, the constants→service refactor of the
-shell-config endpoints); `exercise-isolation/04` + `/06` (participant route guard, archived separation);
-`world-steering` Wave 2 (the overlay-state write path). Consumed by exercise-build-golive (transitions),
-exercise-clock (Live starts the clock), E8 (dormant until Live).
+Story 01a (the widened `Status` vocabulary + the single migration) and 01b (the settings slice and the
+constants→service refactor of the shell-config endpoints); `exercise-isolation/04` + `/06` (participant
+route guard, archived separation); `world-steering` Wave 2's overlay-state write path — **a merge-time
+reconciliation, not a scheduling blocker** (decision recorded above). Consumed by exercise-build-golive
+(transitions), exercise-clock (Live starts the clock), E8 (dormant until Live).
 
 ## Tests
 - Unit: allowed transitions enforced; disallowed transitions 409 with no state change.
 - Integration: participants blocked outside Staged/Live; Paused serves the holding page through the
   frozen overlay-state shape.
 - Contract: `/api/exercise-context`, `/api/shell-state` and `/api/overlay-state` responses still satisfy
-  the frontend runtime guards after the change (the regression that catches a silent vocabulary widen).
+  the frontend runtime guards once real lifecycle values flow through them (the regression that proves
+  story 01a's widened guard actually covers what this story emits).
 - Telemetry: a transition emits exactly one v0 envelope with from/to states and the acting human.
+- Overlay composition: a COR-032 `Paused` state and a CTL-023 Freeze produce **one** coherent overlay
+  state, not two competing ones.

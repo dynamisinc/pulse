@@ -31,7 +31,7 @@ these stories describe already exist. **Read this before building any story here
 | Already exists | Where | What it means for this feature |
 |---|---|---|
 | The `Exercise` entity — `Id`, `Name`, `Hostname`, `BrandedDomain`, `TimeZone` (IANA, default `UTC`), `Status`, `CurrentScenarioTime` | `src/Pulse.WebApi/Data/Entities/Exercise.cs` | Story 01 is **extend + expose**, not invent. Name and time zone are already stored and already served. |
-| `GET /api/exercise-context` serving the **frozen** `ExerciseScope { exerciseId, exerciseName, timeZone, status }` | `Features/ExerciseResolution/ExerciseScopeDto.cs` | `status` on this wire shape is frozen to `scheduled \| active \| complete \| archived` — a *different* vocabulary from COR-032's six lifecycle states. See the hazard section in `03-exercise-lifecycle.md`. |
+| `GET /api/exercise-context` serving the **frozen** `ExerciseScope { exerciseId, exerciseName, timeZone, status }` | `Features/ExerciseResolution/ExerciseScopeDto.cs` | `status` was frozen to `scheduled \| active \| complete \| archived` — a *different* vocabulary from COR-032's six. **Resolved: Option B (widen it), Tier-2 signed off** — see `03-exercise-lifecycle.md` and the literals in `implementation.md`. |
 | Six participant-shell config GETs with **frozen** response DTOs, currently returning hardcoded constants | `Features/ParticipantShell/ParticipantShellEndpoints.cs` + `ParticipantShellDtos.cs` | The work in stories 01/02/03 is *replacing constants with per-exercise data behind the same wire shapes* — **no consumer change**. |
 | The compliance-chrome **component** (`ComplianceChrome.tsx`) + its config seam (`chromeConfig.ts`) with the NFR-008 watermark-fallback signal | `src/frontend/src/features/participant-shell/` (`participant-shell/01`, Complete, #185) | Story 02 is **not** "build the chrome". It is "make the chrome config per-exercise, staff-editable, persisted, and guarded server-side". |
 | `PulseDbContext` central exercise query filter, `IExerciseScoped`, `IExerciseContext`, `ExerciseScopeViolationException`, EF migrations | `src/Pulse.WebApi/Data/` | Isolation is enforced by the existing central filter — do not hand-roll scoping. |
@@ -39,20 +39,24 @@ these stories describe already exist. **Read this before building any story here
 
 **Frozen-contract rule for this feature:** `ExerciseScopeDto` and the six `ParticipantShellDtos` wire
 shapes are frozen. A story here fills them with real per-exercise data; it does not reshape them. Any
-change to those shapes — or to the `ExerciseScope.status` vocabulary — is a **schema/contract change →
-Tier-2 human sign-off** (`docs/ORCHESTRATION_MECHANICS.md` §3).
+change to those shapes is a **schema/contract change → Tier-2 human sign-off**
+(`docs/ORCHESTRATION_MECHANICS.md` §3). **One such change has been signed off:** the
+`ExerciseScope.status` vocabulary is widened to COR-032's six lifecycle states (Option B — see
+`03-exercise-lifecycle.md`; authoritative literals in `implementation.md`). No other reshaping is
+sanctioned.
 
-**Single-migration rule:** stories 01, 03 and 04 all add columns to the `Exercises` table. Two parallel
+**Single-migration rule:** stories 01, 02, 03 and 04 all need `Exercises`-table columns. Two parallel
 builders each scaffolding an EF migration corrupt the model snapshot, so **all** schema work for this
-feature is authored once, by one builder, in wave 1 (`implementation.md` story slice **01a**). Later
-stories layer behavior on columns that already exist.
+feature — the COR-030 settings columns, the chrome config, the **watermark on/off flag**, the practice
+flag, and the `Status` vocabulary widening — is authored once, by one builder, in wave 1
+(`implementation.md` story slice **01a**). Later stories layer behavior on columns that already exist.
 
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
 | 01 | Per-exercise settings (locale, TZ, channels, theming) — *extends the existing `Exercise` entity; owns the feature's one migration* | COR-030 | Not Started | #67 |
 | 02 | Compliance chrome — *per-exercise config + server-side NFR-008 guard (the banner component already ships)* | COR-031 | Not Started | #68 |
-| 03 | Exercise lifecycle state machine — **Tier-2: reconciles COR-032 against the frozen `status` vocabulary** | COR-032 | Not Started | #69 |
+| 03 | Exercise lifecycle state machine — *Tier-2 signed off; the vocabulary widening ships in 01a, this story is behavior only* | COR-032 | Not Started | #69 |
 | 04 | Practice/sandbox flag | COR-033 | Not Started | #70 |
 | 05 | Participant-visible exercise identity *(requirements decision, no code — excluded from the Wave Plan)* | COR-005 gap / R-006, COMPONENTS.md #5 | Not Started | #180 |
 
@@ -63,10 +67,11 @@ time zone; build/go-live (`exercise-build-golive`) drives the lifecycle transiti
 Story 02 consumes the shipped `participant-shell/01` chrome component and its `chromeConfig.ts` seam.
 The staff editor mounts into the existing `features/planner/` staff surface.
 
-**In-flight collision:** the unmerged `feature/world-steering-wave2` umbrella rewrites
-`Features/ParticipantShell/ParticipantShellEndpoints.cs` (turning `/api/overlay-state` into a real write
-path with SignalR push) and edits `Program.cs`. Stories 01 and 03 want the same file — see
-`implementation.md` → "Integration hazards".
+**In-flight collision (known + accepted):** the unmerged `feature/world-steering-wave2` umbrella rewrites
+the `/api/overlay-state` handler in `Features/ParticipantShell/ParticipantShellEndpoints.cs` (a real
+write path with SignalR push) and edits `Program.cs`. The human has decided to **proceed on all waves
+and resolve it at merge time** rather than sequence around it — see `implementation.md` → "Integration
+hazards".
 
 ## Design notes
 Staff world. Compliance chrome renders as persistent environment chrome **outside** the simulated app

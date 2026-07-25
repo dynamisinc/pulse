@@ -67,9 +67,10 @@ editing `ParticipantShellEndpoints.cs` again. Story 05 (participant exercise ide
 chrome **content** requirement here. See implementation.md (story 02).
 
 ## Dependencies
-Story 01 (the settings slice, the chrome column in its migration, and the constants→service refactor of
-the shell-config endpoints); `participant-shell/01` (`ComplianceChrome.tsx` + `chromeConfig.ts`,
-merged); the NFR-008 watermark on/off state the guard reads.
+Story 01 (the settings slice, the constants→service refactor of the shell-config endpoints, and — in its
+single migration — **both** the chrome-config column **and the per-exercise watermark on/off column**,
+so this story's NFR-008 guard reads real per-exercise state rather than a constant);
+`participant-shell/01` (`ComplianceChrome.tsx` + `chromeConfig.ts`, merged).
 
 ## Tests
 - Integration: per-exercise chrome config persists and is served per exercise; two exercises differ.
