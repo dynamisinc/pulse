@@ -6,6 +6,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 
 /// <summary>
@@ -91,6 +92,44 @@ public sealed class SteeringCompositionRootWiringTests
             + "optionally and falls back to the static 'none' constant when it is absent, so its absence is "
             + "indistinguishable from 'nobody froze anything'");
     }
+
+    /// <summary>
+    /// The "second registry would be catastrophic" invariant, made mechanical. Both
+    /// <c>AddReactionLoopHost</c> and <c>AddStorylineSteering</c> <c>TryAdd</c> the SAME
+    /// <see cref="IReactionLoopRegistry"/>, so they converge on one instance in either order — but that is a
+    /// source-reading argument today. If a refactor ever registered a second registry (or resolved the
+    /// concrete type), the steering endpoints would read <c>Storyline</c> objects the reaction loop never
+    /// ticks: a controller's target would be recorded against a shadow object and the engine would never
+    /// chase it. That is precisely the "real code nothing consumes" defect this wave exists to eliminate, and
+    /// it would be invisible to every slice-level test.
+    /// </summary>
+    [Fact]
+    public void ProgramCs_ResolvesExactlyOneReactionLoopRegistry_SharedByTheLoopAndTheSteeringEndpoints()
+    {
+        using var factory = new WiringProbeFactory();
+
+        var first = factory.Services.GetRequiredService<IReactionLoopRegistry>();
+        var second = factory.Services.GetRequiredService<IReactionLoopRegistry>();
+
+        second.Should().BeSameAs(
+            first,
+            "IReactionLoopRegistry must be a singleton shared by the reaction-loop host and the storyline "
+            + "steering endpoints — two instances would let a controller set a target on a storyline the loop "
+            + "never ticks (#352)");
+
+        factory.Services.GetServices<IReactionLoopRegistry>().Should().HaveCount(
+            1,
+            "only ONE IReactionLoopRegistry registration may exist; AddReactionLoopHost and "
+            + "AddStorylineSteering both TryAdd it precisely so they converge rather than compete");
+    }
+
+    // NOT asserted here, deliberately: that each steering route still carries
+    // EngineCockpitStaffAuthorizationFilter. `AddEndpointFilter<T>()` compiles the filter INTO the endpoint's
+    // request delegate and leaves no metadata naming the filter type, so there is nothing to assert from the
+    // EndpointDataSource — any check that looked like it verified the gate here would in fact verify nothing,
+    // which is worse than no check. The real coverage is behavioural and lives where it can be observed: both
+    // slices' TestServer suites drive the genuine Map* extensions and assert 401 (no staff session / unresolved
+    // scope) and 403 (staff assigned elsewhere) — see PauseTierEndpointsTests and StorylineSteeringEndpointsTests.
 
     private static int CountRoutes(EndpointDataSource dataSource, string method, string rawText)
         => dataSource.Endpoints
