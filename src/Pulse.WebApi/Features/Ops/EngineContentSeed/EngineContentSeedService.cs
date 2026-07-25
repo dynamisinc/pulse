@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Pulse.Core.Features.Storylines.Models;
 using Pulse.WebApi.Data;
@@ -51,7 +52,7 @@ using Pulse.WebApi.Features.Ops.Bootstrap;
 /// exercise only.
 /// </para>
 /// </remarks>
-public sealed class EngineContentSeedService
+public sealed partial class EngineContentSeedService
 {
     /// <summary>The XC-004 audit event type emitted on a successful seed (additive open vocab, mirroring <c>exercise.bootstrapped</c>).</summary>
     private const string ContentSeededEventType = "engine.content_seeded";
@@ -80,6 +81,7 @@ public sealed class EngineContentSeedService
     private readonly IReactionLoopRegistry _registry;
     private readonly EngineAutonomyRegistry _autonomyRegistry;
     private readonly TimeProvider _timeProvider;
+    private readonly ILogger<EngineContentSeedService> _logger;
 
     /// <summary>Creates the seed service over its collaborators.</summary>
     /// <param name="dbContext">The persistence context the persona rows + the single audit event commit through (one unit of work).</param>
@@ -88,13 +90,15 @@ public sealed class EngineContentSeedService
     /// <param name="registry">The in-memory reaction-loop registry this service populates (the #324 gap).</param>
     /// <param name="autonomyRegistry">The per-exercise autonomy-state registry the cockpit reads/writes — the SHARED instance the registration must use (AC3).</param>
     /// <param name="timeProvider">The server wall-clock source (never client input) for <c>ScenarioStart</c> + the telemetry envelope.</param>
+    /// <param name="logger">Diagnostics logger — records the seeder's mutations to EXISTING rows (Gate-1 S-B); never logs a secret.</param>
     public EngineContentSeedService(
         PulseDbContext dbContext,
         IOptions<BootstrapOptions> options,
         PersonaCastSeeder personaSeeder,
         IReactionLoopRegistry registry,
         EngineAutonomyRegistry autonomyRegistry,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        ILogger<EngineContentSeedService> logger)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(options);
@@ -102,6 +106,7 @@ public sealed class EngineContentSeedService
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(autonomyRegistry);
         ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _dbContext = dbContext;
         _options = options.Value ?? new BootstrapOptions();
@@ -109,6 +114,7 @@ public sealed class EngineContentSeedService
         _registry = registry;
         _autonomyRegistry = autonomyRegistry;
         _timeProvider = timeProvider;
+        _logger = logger;
     }
 
     /// <summary>
@@ -165,6 +171,17 @@ public sealed class EngineContentSeedService
         var personasCreated = seeded.Count(persona => persona.Created);
         var personasReused = seeded.Count - personasCreated;
 
+        // The two mutations the seeder is allowed to make to an EXISTING row are reported separately from the
+        // reuse count (Gate-1 S-B). "6 reused" hid the fact that six rows had five columns rewritten; a
+        // re-seed now says "6 reused, 6 backfilled", and a gate closed on an existing row — which changes what
+        // the ENGINE may do — is never silent.
+        var personasBackfilled = seeded.Count(persona => persona.PresentationBackfilled);
+        var personasCastableClosed = seeded.Count(persona => persona.CastableClosed);
+        if (personasBackfilled > 0 || personasCastableClosed > 0)
+        {
+            LogExistingRowsMutated(personasBackfilled, personasCastableClosed, exerciseId);
+        }
+
         // 4b. Build the canned starter storyline (story 02) from the seeded handles — CASTABLE ones only.
         // profiles-social-graph/06: the SOC-052 lookalike and the low-credibility outlet are seeded as ROWS
         // (so participants can browse the impersonator's profile and learn to spot it) but ship
@@ -209,7 +226,8 @@ public sealed class EngineContentSeedService
         // 5. Exactly one XC-004 audit event (COR-001-stamped with the exercise's own id) in the SAME unit of
         //    work as story 01's persona writes (AC7).
         _dbContext.TelemetryEvents.Add(BuildSeededTelemetry(
-            exercise, now, personasCreated, personasReused, storyline));
+            exercise, now, new PersonaSeedCounts(
+                personasCreated, personasReused, personasBackfilled, personasCastableClosed), storyline));
 
         // One SaveChanges — the write-guard runs here; every scoped row carries the non-empty exercise id.
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -221,12 +239,25 @@ public sealed class EngineContentSeedService
         return EngineContentSeedResult.Provisioned(
             exerciseId,
             host,
-            personasCreated,
-            personasReused,
+            new PersonaSeedCounts(personasCreated, personasReused, personasBackfilled, personasCastableClosed),
             storyline.Id,
             storyline.Title,
             storyline.ResponseWindowMin);
     }
+
+    /// <summary>
+    /// Records the seeder's mutations to EXISTING rows (Gate-1 S-B). Emitted only when at least one occurred,
+    /// so an ordinary idempotent re-seed stays quiet, and a re-seed that rewrote presentation columns or
+    /// closed an engine-casting gate always says so. No secret material is ever logged.
+    /// </summary>
+    /// <param name="personasBackfilled">How many existing rows had their presentation columns backfilled.</param>
+    /// <param name="personasCastableClosed">How many existing rows had their engine-casting gate closed.</param>
+    /// <param name="exerciseId">The exercise whose rows were mutated.</param>
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Information,
+        Message = "Engine content seed mutated EXISTING persona rows for exercise {ExerciseId}: {PersonasBackfilled} presentation-backfilled (rows carrying only the migration defaults), {PersonasCastableClosed} engine-casting gate(s) closed to match the catalog.")]
+    private partial void LogExistingRowsMutated(int personasBackfilled, int personasCastableClosed, Guid exerciseId);
 
     /// <summary>
     /// Turns the exercise's IANA time-zone string into a <see cref="TimeZoneInfo"/> for the scenario clock,
@@ -263,15 +294,19 @@ public sealed class EngineContentSeedService
     private static TelemetryEvent BuildSeededTelemetry(
         Exercise exercise,
         DateTimeOffset now,
-        int personasCreated,
-        int personasReused,
+        PersonaSeedCounts counts,
         Storyline storyline)
     {
         var payload = JsonSerializer.Serialize(
             new
             {
-                personasCreated,
-                personasReused,
+                personasCreated = counts.Created,
+                personasReused = counts.Reused,
+
+                // Gate-1 S-B: the mutations to EXISTING rows are part of the durable audit trail, not just
+                // the response an operator happens to be looking at when they run the seed.
+                personasBackfilled = counts.PresentationBackfilled,
+                personasCastableClosed = counts.CastableClosed,
                 storylineId = storyline.Id.ToString(),
                 storylineTitle = storyline.Title,
                 responseWindowMinutes = storyline.ResponseWindowMin,
@@ -329,8 +364,7 @@ public sealed class EngineContentSeedResult
         string? error,
         Guid? exerciseId,
         string? hostname,
-        int personasCreated,
-        int personasReused,
+        PersonaSeedCounts personas,
         Guid? storylineId,
         string? storylineTitle,
         int responseWindowMinutes)
@@ -339,8 +373,7 @@ public sealed class EngineContentSeedResult
         Error = error;
         ExerciseId = exerciseId;
         Hostname = hostname;
-        PersonasCreated = personasCreated;
-        PersonasReused = personasReused;
+        Personas = personas;
         StorylineId = storylineId;
         StorylineTitle = storylineTitle;
         ResponseWindowMinutes = responseWindowMinutes;
@@ -358,11 +391,28 @@ public sealed class EngineContentSeedResult
     /// <summary>The host the exercise is bound to — non-null only on <see cref="EngineContentSeedOutcome.Provisioned"/>.</summary>
     public string? Hostname { get; }
 
+    /// <summary>What the persona seed did — created/reused, plus the mutations it made to EXISTING rows.</summary>
+    public PersonaSeedCounts Personas { get; }
+
     /// <summary>How many persona rows this call created.</summary>
-    public int PersonasCreated { get; }
+    public int PersonasCreated => Personas.Created;
 
     /// <summary>How many persona rows this call reused.</summary>
-    public int PersonasReused { get; }
+    public int PersonasReused => Personas.Reused;
+
+    /// <summary>
+    /// How many REUSED rows had their presentation columns backfilled because they carried only the
+    /// migration's defaults (the CR-001 sentinel backfill). Reported separately from
+    /// <see cref="PersonasReused"/> so the one mutation the seeder may make to an existing row is never
+    /// invisible in the seed's own output (Gate-1 S-B).
+    /// </summary>
+    public int PersonasBackfilled => Personas.PresentationBackfilled;
+
+    /// <summary>
+    /// How many REUSED rows had their engine-casting gate CLOSED to match the catalog. This one changes what
+    /// the engine may do with an existing persona, so it is always reported.
+    /// </summary>
+    public int PersonasCastableClosed => Personas.CastableClosed;
 
     /// <summary>The freshly-built storyline's id — non-null only on <see cref="EngineContentSeedOutcome.Provisioned"/>.</summary>
     public Guid? StorylineId { get; }
@@ -376,8 +426,7 @@ public sealed class EngineContentSeedResult
     /// <summary>A successful seed.</summary>
     /// <param name="exerciseId">The resolved exercise id.</param>
     /// <param name="hostname">The bound host.</param>
-    /// <param name="personasCreated">How many persona rows were created.</param>
-    /// <param name="personasReused">How many persona rows were reused.</param>
+    /// <param name="personas">What the persona seed did (created/reused/backfilled/gates closed).</param>
     /// <param name="storylineId">The built storyline id.</param>
     /// <param name="storylineTitle">The built storyline title.</param>
     /// <param name="responseWindowMinutes">The clamped silence window.</param>
@@ -385,31 +434,52 @@ public sealed class EngineContentSeedResult
     public static EngineContentSeedResult Provisioned(
         Guid exerciseId,
         string hostname,
-        int personasCreated,
-        int personasReused,
+        PersonaSeedCounts personas,
         Guid storylineId,
         string storylineTitle,
         int responseWindowMinutes)
     {
         ArgumentException.ThrowIfNullOrEmpty(hostname);
+        ArgumentNullException.ThrowIfNull(personas);
         return new EngineContentSeedResult(
             EngineContentSeedOutcome.Provisioned, null, exerciseId, hostname,
-            personasCreated, personasReused, storylineId, storylineTitle, responseWindowMinutes);
+            personas, storylineId, storylineTitle, responseWindowMinutes);
     }
 
     /// <summary>A validation failure.</summary>
     /// <param name="error">The human-readable reason.</param>
     /// <returns>An invalid result.</returns>
     public static EngineContentSeedResult Invalid(string error) =>
-        new(EngineContentSeedOutcome.Invalid, error, null, null, 0, 0, null, null, 0);
+        new(EngineContentSeedOutcome.Invalid, error, null, null, PersonaSeedCounts.None, null, null, 0);
 
     /// <summary>The fail-closed result for an unconfigured/wrong secret.</summary>
     /// <returns>A rejected result.</returns>
     public static EngineContentSeedResult Rejected() =>
-        new(EngineContentSeedOutcome.Rejected, null, null, null, 0, 0, null, null, 0);
+        new(EngineContentSeedOutcome.Rejected, null, null, null, PersonaSeedCounts.None, null, null, 0);
 
     /// <summary>The result for a hostname that resolves to no exercise (never creating one).</summary>
     /// <returns>A host-not-found result.</returns>
     public static EngineContentSeedResult HostNotFound() =>
-        new(EngineContentSeedOutcome.HostNotFound, null, null, null, 0, 0, null, null, 0);
+        new(EngineContentSeedOutcome.HostNotFound, null, null, null, PersonaSeedCounts.None, null, null, 0);
+}
+
+/// <summary>
+/// What one persona-seed pass did: rows created, rows reused, and — reported separately so they are never
+/// silent (Gate-1 S-B) — the two mutations the seeder is allowed to make to an EXISTING row.
+/// </summary>
+/// <param name="Created">Rows this pass created.</param>
+/// <param name="Reused">Rows this pass reused (already present from a prior seed).</param>
+/// <param name="PresentationBackfilled">
+/// Reused rows whose presentation columns were rewritten because the row carried only the migration's
+/// defaults (the CR-001 sentinel backfill). A subset of <paramref name="Reused"/>, not an addition to it.
+/// </param>
+/// <param name="CastableClosed">
+/// Reused rows whose engine-casting gate was closed to match the catalog. Also a subset of
+/// <paramref name="Reused"/>. This mutation changes what the ENGINE may do with an existing persona, so a
+/// non-zero value here is the one an operator should actually read.
+/// </param>
+public sealed record PersonaSeedCounts(int Created, int Reused, int PresentationBackfilled, int CastableClosed)
+{
+    /// <summary>The all-zero counts carried by every non-provisioned outcome.</summary>
+    public static PersonaSeedCounts None { get; } = new(0, 0, 0, 0);
 }

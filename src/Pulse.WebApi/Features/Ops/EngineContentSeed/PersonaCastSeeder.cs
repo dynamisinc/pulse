@@ -424,10 +424,18 @@ public sealed class PersonaCastSeeder
 
             if (existingByHandle.TryGetValue(spec.Handle, out var row))
             {
-                // Idempotent re-run: reuse the existing row's id, never overwrite an AUTHORED value.
-                BackfillSentinelPresentationFields(row, spec, bio, magnitude, joinedAt);
-                ReconcileCastableOneWay(row, spec);
-                seeded.Add(new SeededPersona(row.Id, dossier, Created: false, Castable: row.Castable));
+                // Idempotent re-run: reuse the existing row's id, never overwrite an AUTHORED value. The two
+                // mutations the seeder IS allowed to make on an existing row are both REPORTED, never silent
+                // (Gate-1 S-B) — the caller surfaces them in the seed response and the XC-004 audit event.
+                var backfilled = BackfillSentinelPresentationFields(row, spec, bio, magnitude, joinedAt);
+                var castableClosed = ReconcileCastableOneWay(row, spec);
+                seeded.Add(new SeededPersona(
+                    row.Id,
+                    dossier,
+                    Created: false,
+                    Castable: row.Castable,
+                    PresentationBackfilled: backfilled,
+                    CastableClosed: castableClosed));
                 continue;
             }
 
@@ -450,7 +458,15 @@ public sealed class PersonaCastSeeder
                 Castable = spec.Castable,
             };
             _dbContext.Personas.Add(persona);
-            seeded.Add(new SeededPersona(persona.Id, dossier, Created: true, Castable: spec.Castable));
+            seeded.Add(new SeededPersona(
+                persona.Id,
+                dossier,
+                Created: true,
+                Castable: spec.Castable,
+
+                // A brand-new row is authored correctly from the start: nothing was backfilled or closed.
+                PresentationBackfilled: false,
+                CastableClosed: false));
         }
 
         return seeded;
@@ -482,7 +498,8 @@ public sealed class PersonaCastSeeder
     /// <param name="bio">The sanitized catalog bio.</param>
     /// <param name="magnitude">The derived SOC-054 magnitude for this handle/band.</param>
     /// <param name="joinedAt">The derived backdated scenario join instant for this handle.</param>
-    private static void BackfillSentinelPresentationFields(
+    /// <returns><c>true</c> when the row WAS backfilled (so the caller can report it); otherwise <c>false</c>.</returns>
+    private static bool BackfillSentinelPresentationFields(
         Persona row,
         PersonaSeedSpec spec,
         string bio,
@@ -492,7 +509,7 @@ public sealed class PersonaCastSeeder
         var carriesOnlyColumnDefaults = row.AudienceMagnitude == 0 && row.JoinedAt == SeedEpoch;
         if (!carriesOnlyColumnDefaults)
         {
-            return;
+            return false;
         }
 
         row.Bio ??= bio;
@@ -500,6 +517,7 @@ public sealed class PersonaCastSeeder
         row.AudienceBand = spec.Band;
         row.AudienceMagnitude = magnitude;
         row.JoinedAt = joinedAt;
+        return true;
     }
 
     /// <summary>
@@ -534,12 +552,20 @@ public sealed class PersonaCastSeeder
     /// </remarks>
     /// <param name="row">The existing row being reused.</param>
     /// <param name="spec">The catalog spec for this handle.</param>
-    private static void ReconcileCastableOneWay(Persona row, PersonaSeedSpec spec)
+    /// <returns>
+    /// <c>true</c> when the gate WAS closed by this call. Reported, never silent (Gate-1 S-B): this mutation
+    /// changes what the ENGINE may do with an existing row, so it must always be visible in the seed
+    /// response and the audit event.
+    /// </returns>
+    private static bool ReconcileCastableOneWay(Persona row, PersonaSeedSpec spec)
     {
-        if (row.Castable && !spec.Castable)
+        if (!row.Castable || spec.Castable)
         {
-            row.Castable = false;
+            return false;
         }
+
+        row.Castable = false;
+        return true;
     }
 
     /// <summary>
@@ -698,4 +724,21 @@ public sealed class PersonaCastSeeder
 /// carries after the call, and it can only ever be as restrictive as the catalog, never more permissive.
 /// </para>
 /// </param>
-public sealed record SeededPersona(Guid InstanceId, PersonaDossier Dossier, bool Created, bool Castable);
+/// <param name="PresentationBackfilled">
+/// <c>true</c> when this call REWROTE an existing row's presentation columns because the row carried only the
+/// migration's defaults (the CR-001 sentinel backfill). The composing caller surfaces the count in the seed
+/// response and the XC-004 audit event, so the one mutation the seeder is allowed to make on an existing row
+/// is never silent (Gate-1 S-B) — a re-seed reports "6 reused, 6 backfilled", not just "6 reused".
+/// </param>
+/// <param name="CastableClosed">
+/// <c>true</c> when this call CLOSED an existing row's engine-casting gate (<c>true → false</c>) to match the
+/// catalog. Reported for the same reason, and more sharply: this one changes what the engine may do with an
+/// existing row, so it must never happen unreported.
+/// </param>
+public sealed record SeededPersona(
+    Guid InstanceId,
+    PersonaDossier Dossier,
+    bool Created,
+    bool Castable,
+    bool PresentationBackfilled,
+    bool CastableClosed);

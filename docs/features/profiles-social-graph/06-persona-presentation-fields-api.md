@@ -130,6 +130,12 @@ cast** (`PersonaCastSeeder`) and the **read projection** (`PersonaResponseDto`) 
       (2026-06-15) while the newly seeded lookalike derives 2026-06-09, making the **impersonator look
       like the older, more established account** and inverting the very SOC-052 "joined this week"
       tell this story exists to create. Any row holding authored values is still never overwritten.
+      **Re-review (S-B): every mutation to an existing row is REPORTED.** `personasBackfilled` and
+      `personasCastableClosed` (subsets of `personasReused`, not additions to it) are returned on the
+      seed response, written into the `engine.content_seeded` XC-004 payload, and logged once per seed
+      when non-zero; the response `note` also says so in plain language. A re-seed now reports
+      "6 reused, 6 backfilled" rather than a flat "6 reused" — the flat count is precisely what let
+      CR-001 hide for a whole review cycle.
 
 ## Out of Scope
 The real follow graph and the edges component of the displayed follower count (story 07). Planner-
@@ -158,6 +164,16 @@ the seeder's ingest boundary — it is NOT enforced by the `Persona` entity, EF,
 staff edit) must strip-not-encode through the same funnel at its own boundary before assigning, because a
 stored bio renders on a participant profile (NFR-004). This is recorded on `Persona.Bio`'s XML docs as
 well, so the obligation travels with the property.
+
+**`DeriveJoinedAt`/`DeriveAudienceMagnitude` THROW on a value outside their closed vocabulary — do not call
+them from a request handler over database-sourced input.** Both are authoring-time helpers: an unrecognized
+archetype or band is a bug that must fail loudly, because the alternative (`DeriveJoinedAt`'s `else` branch)
+silently gives a bad actor an established two-year-old account and inverts the SOC-052 tell. The consequence
+to plan for: a legacy/hand-edited row carrying an out-of-union `PersonaType` read back from the database
+would THROW rather than derive. That posture is deliberate and is to be kept — so a future persona-authoring
+path (COR-020 template authoring, COR-022 mid-exercise creation, an import) must validate the archetype at
+its own ingest boundary and surface a 400, rather than passing a stored value straight into these helpers
+inside a request handler and turning a bad legacy row into a 500.
 
 **Per-world projection seam (Gate-1 WR-001).** The staff/participant split is a role branch on the
 EXISTING `GET /api/personas`, not a new staff endpoint: the staff console's `PersonaPicker.tsx` /
@@ -238,6 +254,11 @@ locally); the rest are model-only `[Fact]`/`[Theory]` and run everywhere.
 - `PersonaCastSeederTests.SeedAsync_ReusedRow_ReportsAndPersistsCastability_ClosingAWronglyOpenGate` [docker]
   (WR-B — an intermediate-build row carrying the column default `true` is closed and REPORTED closed)
 - `PersonaCastSeederTests.SeedAsync_ReusedRow_NeverReOpensAGateAHumanClosed` [docker] (WR-B, one-way only)
+- `EngineContentSeedServiceTests.Seed_OverAnUnmigratedLookingCast_ReportsBackfillAndGateClosure_InTheResponseAndTheAuditEvent`
+  [docker] (S-B — the counts appear in the result, the response DTO + its note, and the XC-004 payload)
+- `EngineContentSeedServiceTests.Seed_EmitsExactlyOneContentSeededEvent_InTheSameUnitOfWork` /
+  `..._RunTwice_ReusesPersonas_...` [docker] — the audit keys are always present, and an ordinary re-seed
+  reports zero mutations
 
 **No new leak (AC5)**
 - `PersonaEndpointsTests.WiderProjection_StillLeaksNothingAcrossExercises_ScopeA_NeverSeesBsPresentationFields`
