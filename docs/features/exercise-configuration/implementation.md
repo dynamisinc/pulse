@@ -24,10 +24,10 @@
 
 | Story | Stack | Approach | Key files (owns) | Exports / seams (that others import) |
 |-------|-------|----------|------------------|--------------------------------------|
-| **01a** Settings schema + vocabulary widening | **fullstack** | The feature's **only** schema change. Extends the existing `Exercise` entity with the COR-030 settings columns, the **chrome config**, the **watermark on/off flag** (so 02's NFR-008 guard reads real state) and the **practice/sandbox flag**, in one EF migration — *and* carries story 03's **Option B vocabulary widening**: the `Status` column + data migration, `PulseDbContext`'s default, `BootstrapService`'s seed, and the **additive frontend guard widening that must ship first** (see "Lifecycle string literals" + "Client-first ordering"). | `Data/Entities/Exercise.cs`; `Data/PulseDbContext.cs` (the `Exercise` `OnModelCreating` block only); `Data/Migrations/<ts>_ExerciseConfiguration.*` + `PulseDbContextModelSnapshot.cs`; `Features/Ops/Bootstrap/BootstrapService.cs` (seed literal only); `Features/ExerciseResolution/ExerciseScopeDto.cs` (doc/pass-through only); `core/exerciseContext/exerciseContextResolver.ts` (`ExerciseStatus` union + `EXERCISE_STATUSES` + `isExerciseStatus`) | The extended `Exercise` entity + **the COR-032 status vocabulary** — every other story in this feature reads/writes these columns and authors **no** migration |
-| **01b** Settings — API + shell-config service + staff editor | **fullstack** | New `Features/ExerciseConfiguration/` slice: staff read/write of the COR-030 settings, plus the **constants → per-exercise projection refactor** of the six participant-shell handlers. Staff editor in the existing COBRA `features/planner/` surface. | `Features/ExerciseConfiguration/{ExerciseSettingsDtos,ExerciseSettingsService,ExerciseSettingsEndpoints,ParticipantShellConfigService,ExerciseConfigurationExtensions}.cs`; `Features/ParticipantShell/ParticipantShellEndpoints.cs` (**refactor — serialized file, see hazards**); `features/planner/pages/ExerciseSettingsPage.tsx`, `features/planner/components/ExerciseSettingsPanel.tsx`, `features/planner/hooks/useExerciseSettings.ts`, `features/planner/services/exerciseSettingsService.ts` | `AddExerciseConfiguration()` / `MapExerciseConfigurationEndpoints()`; **`ParticipantShellConfigService`** plus the **per-concern projection interfaces** it resolves from DI (`IChromeConfigProjection`, `IShellVariantProjection`, `IOverlayStateProjection`) with constant-preserving defaults — this is what lets 02 and 03 contribute in their **own** files and run in the same wave; `GET/PUT /api/staff/exercise-settings`; `ExerciseSettingsPage` (the panel host) |
-| **02** Compliance chrome — per-exercise config + NFR-008 guard | **fullstack** | The banner component already ships (`participant-shell/01`). This adds the per-exercise chrome config, the **server-side** chrome↔watermark mutual guard, and the staff panel; it serves through the unchanged frozen `ChromeConfigResponse`. | `Features/ExerciseConfiguration/Chrome/{ChromeConfigProjection,ComplianceChromeGuard,ChromeSettingsEndpoints,ChromeExtensions}.cs`; `features/planner/components/ComplianceChromePanel.tsx`, `features/planner/hooks/useChromeSettings.ts`, `features/planner/services/chromeSettingsService.ts` | `IChromeConfigProjection` impl (resolved by `ParticipantShellConfigService`); `ComplianceChromeGuard` (the NFR-008 invariant, one place); `AddComplianceChromeConfig()` |
-| **03** Lifecycle **[Tier-2 — sign-off given]** | backend | COR-032's six states + allowed transitions (409 on disallowed), participant gating (Staged/Live only), the Paused holding page, and XC-004 transition telemetry — layered onto the vocabulary 01a already shipped. **Authors no schema and no migration.** Supplies the shell-variant + overlay-state projections behind 01b's seam. | `Features/ExerciseConfiguration/Lifecycle/{ExerciseLifecycleState,ExerciseLifecycleService,LifecycleProjection,LifecycleEndpoints,LifecycleExtensions}.cs` | `ExerciseLifecycleService` — the single lifecycle read other features subscribe to (build/go-live, clock, engine); `AddExerciseLifecycle()`; the shell-variant + overlay-state projection implementations |
+| **01a** Settings schema + vocabulary widening | **fullstack** | The feature's **only** schema change. Extends the existing `Exercise` entity with the COR-030 settings columns, the **chrome config**, the **watermark on/off flag** (so 02's NFR-008 guard reads real state) and the **practice/sandbox flag**, in one EF migration — *and* carries story 03's **Option B vocabulary widening**: the `Status` column + data migration, `PulseDbContext`'s default, `BootstrapService`'s seed, and the **additive frontend guard widening that must ship first** (see "Lifecycle string literals" + "Client-first ordering"). | `Data/Entities/Exercise.cs`; `Data/PulseDbContext.cs` (the `Exercise` `OnModelCreating` block only); `Data/Migrations/<ts>_ExerciseConfiguration.*` + `PulseDbContextModelSnapshot.cs`; `Features/Ops/Bootstrap/BootstrapService.cs` (seed literal only); `Features/ExerciseResolution/ExerciseScopeDto.cs` (doc/pass-through only); `core/exerciseContext/exerciseContextResolver.ts` (`ExerciseStatus` union + `EXERCISE_STATUSES` + `isExerciseStatus`); `features/staffShell/components/statePillConfig.ts` + `StaffHeader.test.tsx` (the exhaustive status→pill `Record` must gain a key per literal) | The extended `Exercise` entity + **the COR-032 status vocabulary** — every other story in this feature reads/writes these columns and authors **no** migration |
+| **01b** Settings — API + shell-config service + staff editor | **fullstack** | New `Features/ExerciseConfiguration/` slice: staff read/write of the COR-030 settings, plus the **constants → per-exercise projection refactor** of the six participant-shell handlers. Staff editor in the existing COBRA `features/planner/` surface. | `Features/ExerciseConfiguration/{ExerciseSettingsDtos,ExerciseSettingsService,ExerciseSettingsEndpoints,ParticipantShellConfigService,ExerciseConfigurationExtensions}.cs`; `Features/ParticipantShell/ParticipantShellEndpoints.cs` (**refactor — serialized file, see hazards**); `features/planner/pages/ExerciseSettingsPage.tsx`, `features/planner/components/ExerciseSettingsPanel.tsx`, `features/planner/hooks/useExerciseSettings.ts`, `features/planner/services/exerciseSettingsService.ts` | `AddExerciseConfiguration()` / `MapExerciseConfigurationEndpoints()`; **`ParticipantShellConfigService`** plus the **per-concern projection interfaces** it resolves from DI (`IChromeConfigProjection`, `IShellVariantProjection`, `IOverlayStateProjection`), whose constant-preserving defaults are registered with **`TryAddScoped`** per the projection-override contract — this is what lets 02 and 03 contribute in their **own** files and run in the same wave; `GET/PUT /api/staff/exercise-settings`; `ExerciseSettingsPage` (the panel host) |
+| **02** Compliance chrome — per-exercise config + NFR-008 guard | **fullstack** | The banner component already ships (`participant-shell/01`). This adds the per-exercise chrome config, the **server-side** chrome↔watermark mutual guard, and the staff panel; it serves through the unchanged frozen `ChromeConfigResponse`. | `Features/ExerciseConfiguration/Chrome/{ChromeConfigProjection,ComplianceChromeGuard,ChromeSettingsEndpoints,ChromeExtensions}.cs`; `features/planner/components/ComplianceChromePanel.tsx`, `features/planner/hooks/useChromeSettings.ts`, `features/planner/services/chromeSettingsService.ts` | `IChromeConfigProjection` impl, registered via `services.Replace(...)` per the projection-override contract; `ComplianceChromeGuard` (the NFR-008 invariant, one place); `AddComplianceChromeConfig()` |
+| **03** Lifecycle **[Tier-2 — sign-off given]** | backend | COR-032's six states + allowed transitions (409 on disallowed), participant gating (Staged/Live only), the Paused holding page, and XC-004 transition telemetry — layered onto the vocabulary 01a already shipped. **Authors no schema and no migration.** Supplies the shell-variant + overlay-state projections behind 01b's seam. | `Features/ExerciseConfiguration/Lifecycle/{ExerciseLifecycleState,ExerciseLifecycleService,LifecycleProjection,LifecycleEndpoints,LifecycleExtensions,ExerciseLifecycleGatingMiddleware}.cs` | `ExerciseLifecycleService` — the single lifecycle read other features subscribe to (build/go-live, clock, engine); `AddExerciseLifecycle()`; **`UseExerciseLifecycleGating()`** (the participant fail-closed seam — orchestrator-wired); the shell-variant + overlay-state projections, registered via `Replace` |
 | **04** Practice flag | **fullstack** | Behavior only (the column ships in 01a): set/read the flag and publish the one evaluation-eligibility seam E10 will filter on, plus the staff indicator (icon + text, never color-only). | `Features/ExerciseConfiguration/PracticeMode/{PracticeModeService,PracticeModeEndpoints,PracticeModeExtensions}.cs`; `features/planner/components/PracticeModePanel.tsx`, `features/planner/hooks/usePracticeMode.ts`, `features/planner/services/practiceModeService.ts` | `IEvaluationEligibility` (the single read E10's export filtering consumes); `PracticeModePanel` |
 | **05** Participant exercise identity | *none — requirements decision, no code* | Resolves COMPONENTS.md divergence #5; the outcome lands in story 02's chrome **content** and the D7 shell. **Explicitly excluded from the Wave Plan** — never dispatched to a builder, never in a fan-out. | — | the decision (a D7 input) |
 
@@ -57,14 +57,23 @@ coin `Build`, `in_progress`, `ended` or any other variant anywhere in the stack.
 | `complete` | `completed` | spelling change only |
 | `archived` | `archived` | unchanged |
 
+> **`scheduled` has two defensible readings — this table governs persistence.** The shipped
+> `features/staffShell/components/statePillConfig.ts` treats legacy `scheduled` as an **alias of
+> `staged`** and renders it "STAGED", while the table above migrates the stored value to **`build`**.
+> Both are reasonable (an unconfigured row is arguably either), and the divergence is unobservable once
+> the migration has run, because **no row carries `scheduled` afterwards**. The rule: **this table is
+> authoritative for the stored value**; the pill's alias governs only how a not-yet-migrated legacy row
+> *displays* during the transition. A story-03 builder reading `statePillConfig.ts` to learn the visual
+> vocabulary should not infer a lifecycle mapping from it.
+
 ### Client-first ordering (the split-deploy guard)
 
 UAT is a split deployment (Azure SWA frontend + App Service backend) whose halves deploy independently,
 and `isExerciseStatus` **fails closed on unknown values** — a backend-ahead deploy blanks the participant
 world rather than erroring. So 01a's frontend change is **purely additive and ships first**:
 `EXERCISE_STATUSES` / `isExerciseStatus` / the `ExerciseStatus` union accept the **transitional superset**
-(both vocabularies, ten literals) before any backend emits a new value, and the frontend is deployed **no
-later than** the backend.
+— **nine literals**, not ten: the six COR-032 values plus the legacy four, with `archived` shared by both
+— before any backend emits a new value, and the frontend is deployed **no later than** the backend.
 
 Keeping the legacy four valid through the transition is also what keeps wave 1's diff small: `'active'`
 is a fixture literal in ~25 frontend test files and a dozen backend tests. **Retiring the legacy four is
@@ -102,12 +111,32 @@ Build on these; do not recreate any of them.
     03's lifecycle-transition events emit against.
   - `Features/Ops/Bootstrap/BootstrapService.cs` — creates the first `Exercise` (`Status = "active"`,
     normalized `TimeZone`). A vocabulary or required-column change must keep bootstrap working.
+  - **`Features/Social/PostSanitizer.cs` — the shipped server-side free-text sanitizer (NFR-004). Call
+    it; do not hand-roll a second one.** Every NFR-004 AC in this feature (story 01's world/brand/outlet
+    names, story 02's banner text) is satisfied through it.
+    > **Strip, never entity-encode.** Its header documents the rule and the reason: the participant
+    > render path is a React text node that already escapes `& < > " '`, so entity-encoding server-side
+    > DOUBLE-encodes ordinary text (`don't` → `don&#39;t`) and breaks the fiction. Reaching for
+    > `HtmlEncoder` here would ship banner text reading `UNCLASSIFIED &#47;&#47; EXERCISE` on every
+    > participant channel. It is a pure static function — no DI registration, call it at the one write
+    > boundary.
+  - `Features/Identity/Accounts/AccountFieldRules.cs` — the length/field-bounds validation pattern the
+    settings and chrome writes reuse for their "length-bounded, fails closed with 400" ACs.
 - **Frontend (merged):**
-  - `features/participant-shell/components/ComplianceChrome.tsx` + `chromeConfig.ts` (`useChromeConfig`,
-    `isChromeConfig`, `isWatermarkRequired`) — **story 02 does not rebuild or restyle these.**
+  - `features/participant-shell/components/ComplianceChrome.tsx` + `chromeConfig.ts` — which export
+    **exactly `useChromeConfig` and `isWatermarkRequired`**. **Story 02 does not rebuild or restyle
+    these.**
   - `features/participant-shell/{shellState,brandTokens,channelNavConfig}.ts` and
     `components/OverlayLayer/overlayState.ts` — the consuming seams whose runtime guards define what
     "unchanged wire shape" means.
+    > **The guards are module-private — do not try to import them.** `isBrandTokens`,
+    > `isChannelNavConfigResponseBody` and `isChromeConfig` are unexported internals of a **different,
+    > Complete feature** (`participant-shell`), and no story here owns those files. **Write the contract
+    > test the intended way:** drive the public hook — `useChromeConfig()`, `useBrandConfig()` /
+    > `useBrandTokens()`, `useChannelNav()` — through a **mocked axios adapter returning the real
+    > response body**, and assert the hook resolves that body rather than falling back to its default.
+    > A hook that silently returns its safe default *is* the guard rejecting the shape, so this proves
+    > the contract without exporting anything.
   - `core/exerciseContext/exerciseContextResolver.ts` — the `ExerciseStatus` union + `isExerciseStatus`
     guard that **fails closed on an unknown status**. Story 01a widens it additively (both vocabularies)
     and ships that change first — this is the split-deploy guard, not a file to leave alone.
@@ -122,14 +151,36 @@ Build on these; do not recreate any of them.
 - **Consumed by:** `exercise-build-golive` (lifecycle transitions), `exercise-clock` (time zone; Live
   starts the clock), every channel (enablement + theming), E8 (dormant until Live), E10 (practice flag).
 
+## The projection-override contract (authoritative — wave 3's concurrency depends on it)
+
+Wave 3's whole fan-out rests on "01b ships constant-preserving defaults; 02/03/04 each override one
+projection from their own file". That only works if the override mechanism is pinned, because
+`TryAdd*` (first registration wins) and `Add*` (last wins) give **opposite** outcomes, and the outcome
+also depends on the order the orchestrator writes the calls into `Program.cs`. Both idioms already
+exist in this codebase — `AddStaffIdentity` deliberately `TryAdd`s a fail-closed null accessor. So:
+
+| Role | Registration | Rule |
+|---|---|---|
+| **01b's defaults** (`IChromeConfigProjection`, `IShellVariantProjection`, `IOverlayStateProjection`) | `services.TryAddScoped<IX, ConstantX>()` | Fail-safe floor: present iff nobody has contributed a real one. Never `AddScoped` — that would stack a second registration and let last-wins order decide silently. |
+| **Contributors** (02 chrome, 03 shell-variant + overlay-state) | `services.Replace(ServiceDescriptor.Scoped<IX, RealX>())` | `Replace` is order-independent and unambiguous: it swaps the descriptor whether or not the default is already registered. Do **not** use bare `AddScoped` to "override". |
+| **Orchestrator** (`Program.cs`) | contributor `Add*()` calls go **after** `AddExerciseConfiguration()` | Belt-and-braces: with `TryAdd` + `Replace` the order is already safe, but keeping it consistent means a future contributor that gets the idiom wrong still resolves correctly. |
+
+**The failure this prevents** (silent, ships green): 01b `TryAdd`s the constant default, story 02
+registers its real projection with `AddScoped`, story 02's unit tests pass because they exercise the
+projection class directly — and at runtime the constant default still wins, so `/api/chrome-config`
+serves identical banners for every exercise. **Testing the projection class in isolation cannot catch
+this.** Hence the DI-resolution AC on stories 02, 03 and 04: resolve the interface from a fully
+composed service provider (the slice's real `Add*()` calls, in the orchestrator's order) and assert the
+**contributed** implementation comes back and produces per-exercise output end to end.
+
 ## Wave Plan (DAG-ready)
 
 | Story | Stack | Files it owns | Depends-on | Can-run-with | Wave | Effort |
 |-------|-------|---------------|------------|--------------|------|--------|
-| **01a** Settings schema + vocabulary widening | **fullstack** | `Data/Entities/Exercise.cs`; `Data/PulseDbContext.cs` (`Exercise` block); `Data/Migrations/<ts>_ExerciseConfiguration.*` + snapshot; `Features/Ops/Bootstrap/BootstrapService.cs` (seed literal); `Features/ExerciseResolution/ExerciseScopeDto.cs` (pass-through/doc); `core/exerciseContext/exerciseContextResolver.ts` (additive guard widening) | — (main; `exercise-isolation` 01/08 merged) | **nothing** — sole migration author this feature | 1 | M |
+| **01a** Settings schema + vocabulary widening ✅ *shipped* | **fullstack** | `Data/Entities/Exercise.cs`; `Data/PulseDbContext.cs` (`Exercise` block); `Data/Migrations/<ts>_ExerciseConfiguration.*` + snapshot; `Features/Ops/Bootstrap/BootstrapService.cs` (seed literal); `Features/ExerciseResolution/ExerciseScopeDto.cs` (pass-through/doc); `core/exerciseContext/exerciseContextResolver.ts` (additive guard widening); **`features/staffShell/components/statePillConfig.ts` + `StaffHeader.test.tsx`** (the exhaustive `Record<ExerciseStatus, StatePillConfig>` gains a key per new literal — see hazard 1) | — (main; `exercise-isolation` 01/08 merged) | **nothing** — sole migration author this feature | 1 | M |
 | **01b** Settings API + shell-config service + staff editor | **fullstack** | `Features/ExerciseConfiguration/{ExerciseSettingsDtos,ExerciseSettingsService,ExerciseSettingsEndpoints,ParticipantShellConfigService,ExerciseConfigurationExtensions}.cs` (incl. the three projection interfaces + constant-preserving defaults); `Features/ParticipantShell/ParticipantShellEndpoints.cs` (refactor); `features/planner/{pages/ExerciseSettingsPage.tsx,components/ExerciseSettingsPanel.tsx,hooks/useExerciseSettings.ts,services/exerciseSettingsService.ts}` | 01a | — (solo: owns the serialized endpoints file) | 2 | L |
 | **02** Compliance chrome config + NFR-008 guard | **fullstack** | `Features/ExerciseConfiguration/Chrome/*`; `features/planner/{components/ComplianceChromePanel.tsx,hooks/useChromeSettings.ts,services/chromeSettingsService.ts}` | 01a, 01b; `participant-shell/01` (merged) | 03, 04 | 3 | M |
-| **03** Lifecycle **[Tier-2 — signed off]** | backend | `Features/ExerciseConfiguration/Lifecycle/*` | 01a (the vocabulary), 01b (the projection seam) | 02, 04 | 3 | L |
+| **03** Lifecycle **[Tier-2 — signed off]** | backend | `Features/ExerciseConfiguration/Lifecycle/*` — **including the `UseExerciseLifecycleGating()` middleware** it exports for the orchestrator to wire (see "The participant-gating seam") | 01a (the vocabulary), 01b (the projection seam), **`exercise-isolation/06` (#49, Not Started — see the split below)** | 02, 04 | 3 | L |
 | **04** Practice/sandbox flag | **fullstack** | `Features/ExerciseConfiguration/PracticeMode/*`; `features/planner/{components/PracticeModePanel.tsx,hooks/usePracticeMode.ts,services/practiceModeService.ts}` | 01a, 01b | 02, 03 | 3 | S |
 | **05** Participant exercise identity | *none* | — | — | — | **excluded — no code, not dispatched** | — |
 
@@ -152,6 +203,44 @@ Build on these; do not recreate any of them.
   seam, and the `world-steering` overlay-state conflict is now an accepted **merge-time** reconciliation
   rather than a scheduling constraint (hazard 1).
 
+### The participant-gating seam (story 03) — a projection cannot fail closed
+
+Story 03's "in Build / Completed / Archived the participant surface is not served" is **not**
+implementable as an `IShellVariantProjection`: that interface only changes
+`ShellStateResponse.variant`, so a builder could return `readOnly`, tick the AC, and `/api/feed` would
+still serve posts into an archived world. Refusing service is a **pipeline** concern.
+
+Story 03 therefore owns and exports **`UseExerciseLifecycleGating()`** — an `IApplicationBuilder`
+extension living in `Features/ExerciseConfiguration/Lifecycle/` — which the orchestrator wires into
+`Program.cs` (integration seam below), positioned **after** the exercise-resolution and session
+middleware so a scope is already resolved. It must cover, for a **participant** session whose exercise
+is in `build` / `completed` / `archived`:
+
+- the social reads/writes — `/api/feed`, `/api/threads/{id}`, `/api/personas`, `POST /api/posts`;
+- all six participant-shell config GETs — `/api/shell-state`, `/api/chrome-config`, `/api/brand-tokens`,
+  `/api/channel-nav-config`, `/api/alerts`, `/api/overlay-state`;
+- and it must **not** gate staff/evaluator sessions (staff work in `build` is the point of `build`), nor
+  the pre-auth allowlist (`/api/exercise-context`, login).
+
+This keeps 03 out of the shared endpoint files entirely — it adds no `Map*` and edits no other slice.
+
+### Story 03 ↔ `exercise-isolation/06`: the circular dependency, split
+
+`03` names `exercise-isolation/06` (archived separation, #49) as a dependency; `/06` names
+"exercise lifecycle (exercise-configuration COR-032)" as *its* dependency. That is a genuine cycle, and
+it is resolved by splitting the Archived behavior rather than by sequencing:
+
+- **Story 03 owns now:** the `archived` lifecycle state itself, the transitions into it, and
+  **participant access refusal** while in it (the gating middleware above). Nothing data-layer.
+- **`/06` owns later:** data-layer separation — archived content never appearing in any *other*
+  exercise's live queries, and the self-contained AAR-exportable set. That is a query/scoping concern on
+  top of the central filter, not a lifecycle concern.
+
+So story 03 depends on `/06` only for *naming* — it consumes the `archived` state it already defines and
+**must not invent a parallel archived-exclusion query mechanism**; `/06` will build that against the
+state 03 ships. Story 03 must not carry an AC asserting cross-exercise archived exclusion, because it
+cannot meet one.
+
 ### Integration seams (orchestrator-owned — never a wave story)
 
 | Seam | File(s) | Rule |
@@ -160,6 +249,13 @@ Build on these; do not recreate any of them.
 | Frontend route table | `src/frontend/src/App.tsx` (+ `features/app-shell/createRoleAwareRoutes`) | The staff planner settings route is mounted by the orchestrator after wave 2 merges. No builder branch edits the route table. |
 | Planner barrel | `src/frontend/src/features/planner/index.ts` | Every story here adds an export line to the same barrel. Orchestrator-owned: one edit per wave, after the wave's branches merge. |
 | Planner settings page composition | `features/planner/pages/ExerciseSettingsPage.tsx` | Created by 01b. From wave 3 on it is a **composition point**: 02 and 04 export self-contained panels (`ComplianceChromePanel`, `PracticeModePanel`) and the orchestrator adds the one-line mount — so two wave-3 builders never edit the same page file. |
+| Planner README | `src/frontend/src/features/planner/README.md` | The shipped README documents **every file in the surface in one table**, so each story would append to it. Orchestrator-owned: one edit per wave, alongside the barrel. |
+| Backend pipeline | `src/Pulse.WebApi/Program.cs` (middleware ordering) | Story 03 exports `UseExerciseLifecycleGating()`; the orchestrator inserts the single `app.Use…()` call **after** `UseExerciseResolution()` and the session middleware, so a scope and a session kind are resolved before gating decides. No builder edits the pipeline. |
+
+**`features/planner/types.ts` is deliberately NOT a shared seam.** Rather than serialize a fourth file,
+the rule is: **02 and 04 keep their client-contract types local to their own service module**
+(`chromeSettingsService.ts`, `practiceModeService.ts`), exporting them from there. `types.ts` stays what
+it is today — the `identity-auth-roles/02` account-import contract — and no wave-3 builder opens it.
 
 ### Integration hazards
 
@@ -177,6 +273,15 @@ Build on these; do not recreate any of them.
      Paused holding page target the **same surface and the same register**. The story-03 builder must
      reconcile them explicitly — one composed overlay state routed through world-steering's write path —
      and must **not** add a second parallel pause mechanism beside it.
+   - **A second, frontend conflict surface: `features/staffShell/components/statePillConfig.ts`.**
+     Story 01a necessarily widened that file's exhaustive `Record<ExerciseStatus, StatePillConfig>` (a
+     key per new literal, or it does not compile), and the same file hosts `pauseStatePillConfig` —
+     world-steering's D5-014 tiered-pause factory. **Risk inference, not a confirmed textual conflict:**
+     `world-steering-wave2` is local and unmerged and was not inspected, so treat this as "expect to
+     meet here", not "will conflict here". If the merge does touch it, the thing to check is that
+     **every** `ExerciseStatus` key survives: a dropped key means that status renders as a dot with no
+     text label — color-only, an NFR-001 break — and TypeScript will only catch it if the `Record` stays
+     exhaustive.
 2. **Migration serialization.** One migration author per feature (01a) — and 01a's scope now includes the
    `Status` vocabulary change, so nothing is left for a later wave to migrate. Pin `dotnet-ef` to the
    runtime version and never scaffold with `--no-build`, or the snapshot is rewritten against a stale

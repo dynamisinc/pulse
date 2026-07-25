@@ -26,6 +26,11 @@ tested read seam E10 will filter on — not the export filtering itself.
 - [ ] **Isolation / staff-only (XC-001/002):** given the flag, when it is read or written, then it is a
       staff-world value scoped by the server-resolved exercise, never exposed on a participant surface
       and never settable from a client-supplied exercise parameter.
+- [ ] **The seam actually resolves:** given a fully composed service provider wired in the orchestrator's
+      order, when `IEvaluationEligibility` is resolved, then this story's implementation comes back and
+      answers correctly for a flagged and an unflagged exercise — proving `AddPracticeMode()` is
+      genuinely wired, not just that the service class works in isolation (a slice can merge fully green
+      with its composition-root wiring never executed).
 
 ## Out of Scope
 The evaluation export itself and its filtering (E10, Phase 4 — this story only publishes the seam); the
@@ -34,9 +39,12 @@ indication of practice mode (there is none — XC-002).
 
 ## Technical Notes
 **Staff world.** The indicator component is COBRA (`@/theme/styledComponents`, FontAwesome, MUI 9
-`sx`-only) and lives in `src/frontend/src/features/planner/`; the orchestrator mounts it (integration
-seam — see implementation.md). Backend behavior lands in the `Features/ExerciseConfiguration/` slice
-story 01 creates. No schema work here. See implementation.md (story 04).
+`sx`-only) and lives in `src/frontend/src/features/planner/`; the orchestrator mounts it and edits the
+planner barrel + README (integration seams — see implementation.md). **Keep this story's client-contract
+types local to `services/practiceModeService.ts`** — do not append to `features/planner/types.ts`, which
+belongs to the account-import contract and would collide with the other wave-3 builder. Backend behavior
+lands in the `Features/ExerciseConfiguration/` slice story 01b creates. No schema work here. See
+implementation.md (story 04).
 
 ## Dependencies
 Story 01 (settings slice + the flag column in its migration). Consumed later by E10 export

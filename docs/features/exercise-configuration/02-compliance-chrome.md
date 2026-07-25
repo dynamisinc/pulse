@@ -39,8 +39,15 @@ in-content watermarks off** (COR-031, XC-003, NFR-008).
       400 and an explanatory message — chrome and watermark are never both off, and the rule holds
       regardless of what the client sends.
 - [ ] **Content security (NFR-004):** given banner text is free text rendered on every participant
-      channel, when it is saved, then it is length-bounded and sanitized server-side; a stored
-      `<script>` in a banner never executes in a participant session.
+      channel, when it is saved, then it is length-bounded and sanitized server-side **through the
+      shipped `Features/Social/PostSanitizer.cs`**; a stored `<script>` in a banner never executes in a
+      participant session. **Strip, never entity-encode** — an `HtmlEncoder` here ships banner text
+      reading `UNCLASSIFIED &#47;&#47; EXERCISE` on every participant channel.
+- [ ] **The override actually resolves (projection-override contract):** given a fully composed service
+      provider wired in the orchestrator's order, when `IChromeConfigProjection` is resolved, then the
+      **contributed** implementation comes back (registered via `services.Replace(...)`, not a bare
+      `AddScoped`) and `/api/chrome-config` returns per-exercise banners end to end — a test of the
+      projection class in isolation does not satisfy this AC.
 - [ ] **Isolation (XC-001/002, COR-001):** given a chrome-config read, when it is served, then the
       exercise comes from the server-resolved scope (`IExerciseContext`), never a client parameter; a
       cross-exercise chrome read/write returns 403/404.
@@ -61,9 +68,12 @@ done. The staff editor panel is COBRA (`@/theme/styledComponents`, FontAwesome, 
 lives in `src/frontend/src/features/planner/` — it must never mount a participant brand theme. The
 served payload is participant-world data.
 
-The chrome column ships in story 01's single migration; this story owns the projection + guard + panel.
-It reads the chrome config through the per-exercise shell-config seam story 01 introduces rather than
-editing `ParticipantShellEndpoints.cs` again. Story 05 (participant exercise identity) may later add a
+The chrome column **and the per-exercise watermark on/off column** ship in story 01a's single migration;
+this story owns the projection + guard + panel. It contributes its `IChromeConfigProjection` via
+`services.Replace(...)` (implementation.md's projection-override contract) rather than editing
+`ParticipantShellEndpoints.cs` or `ParticipantShellConfigService.cs`. **Keep this story's
+client-contract types local to `services/chromeSettingsService.ts`** — do not append to
+`features/planner/types.ts`, which the other wave-3 builder would also touch. Story 05 (participant exercise identity) may later add a
 chrome **content** requirement here. See implementation.md (story 02).
 
 ## Dependencies
@@ -74,6 +84,11 @@ so this story's NFR-008 guard reads real per-exercise state rather than a consta
 
 ## Tests
 - Integration: per-exercise chrome config persists and is served per exercise; two exercises differ.
-- Contract: the response still satisfies `isChromeConfig` — no consumer change.
+- Contract: the response is still accepted by the frontend — **drive `useChromeConfig()` through a
+  mocked axios adapter returning the real body and assert it resolves that body rather than falling back
+  to `DEFAULT_CHROME_CONFIG`** (the fallback *is* the private guard rejecting the shape). Do not import
+  `isChromeConfig`; it is module-private in `participant-shell`, a different Complete feature.
+- DI: the contributed `IChromeConfigProjection` wins from a fully composed provider (the override
+  contract), not just in isolation.
 - Guard: disabling chrome while the watermark is off is rejected server-side (and the reverse).
 - Sanitization: a `<script>` payload in banner text is neutralized end to end.

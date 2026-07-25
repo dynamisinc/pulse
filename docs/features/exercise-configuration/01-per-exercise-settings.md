@@ -66,8 +66,11 @@ because the client change is purely additive.
       the staff active-exercise selection) and never from a client-supplied parameter; a cross-exercise
       settings read or write returns 403/404 and the case extends the standing isolation suite.
 - [ ] **Content security (NFR-004):** given free-text settings that reach a participant surface (world
-      name, brand name, outlet names), when they are saved, then they are length-bounded and sanitized
-      server-side, and a stored `<script>` in any of them never executes in a participant session.
+      name, brand name, outlet names), when they are saved, then they are length-bounded
+      (`AccountFieldRules` pattern) and sanitized server-side **through the shipped
+      `Features/Social/PostSanitizer.cs` — which strips markup and never entity-encodes** (encoding would
+      double-encode ordinary text and break the fiction); a stored `<script>` in any of them never
+      executes in a participant session, and no new sanitizer is hand-rolled.
 - [ ] Given a settings write, when it is rejected (invalid IANA zone, over-length text, unknown channel
       id), then the write fails closed with a 400 and the stored config is unchanged.
 - [ ] **Vocabulary widening (Option B, Tier-2 signed off):** given the widened `Status` column, when an
@@ -108,8 +111,12 @@ every channel (enablement/theming), and stories 02/03/04 (which build on this st
 
 ## Tests
 - Integration: settings persist per exercise; a disabled channel is reported `enabled: false`.
-- Contract: `/api/brand-tokens` and `/api/channel-nav-config` responses still satisfy the frontend
-  runtime type-guards (`isBrandTokens`, `isChannelNavConfigResponseBody`) after the constants are gone.
+- Contract: `/api/brand-tokens` and `/api/channel-nav-config` responses are still accepted by the
+  frontend after the constants are gone. **Do not import the guards** — `isBrandTokens` and
+  `isChannelNavConfigResponseBody` are module-private in a different, Complete feature. Instead drive
+  the public hooks (`useBrandConfig()` / `useBrandTokens()`, `useChannelNav()`) through a mocked axios
+  adapter returning the real response body, and assert the hook resolves *that* body rather than falling
+  back to its default — a fallback is the private guard rejecting the shape.
 - Isolation: a cross-exercise settings read/write is refused; added to the standing isolation suite.
 - Sanitization: a `<script>` payload in world name / brand name is neutralized end to end.
 - Vocabulary: `isExerciseStatus` accepts every COR-032 literal **and** every legacy literal (the
@@ -137,5 +144,11 @@ to slice **01b** and are not listed below — 01a ships the schema, the vocabula
 | `BootstrapServiceTests.Bootstrap_EmptyDatabase_CreatesHostBoundLiveExercise` | AC-vocabulary (`BootstrapService`'s seed uses the new literals) |
 | `BootstrapServiceTests.Bootstrap_SeedsAnExerciseThatStillResolves_AndProjectsOntoTheFrozenScopeShape` | AC-vocabulary, AC2 |
 | `exerciseContextResolver.test.ts` → `isExerciseStatus — the transitional superset` (accepts the six + the legacy four; rejects coined variants, wrong case, non-strings) | AC-client-first ordering |
-| `exerciseContextResolver.test.ts` → `resolves a scope whose status is "%s"` (all ten) | AC-client-first ordering |
-| `StaffHeader.test.tsx` → `status "%s" renders both a dot AND the text label` (all ten) | AC-client-first ordering + NFR-001 (a newly-emittable status is never color-only) |
+| `exerciseContextResolver.test.ts` → `resolves a scope whose status is "%s"` (all **nine**) | AC-client-first ordering |
+| `StaffHeader.test.tsx` → `status "%s" renders both a dot AND the text label` (all **nine**) | AC-client-first ordering + NFR-001 (a newly-emittable status is never color-only) |
+
+> **Follow-up for whoever next touches `exerciseContextResolver.test.ts`:** the shipped test is named
+> `exposes exactly the ten literals of the transitional superset`. The superset is **nine** — six COR-032
+> values plus the legacy four, with `archived` shared by both — which is what `EXERCISE_STATUSES` and the
+> assertion itself actually carry. Only the test *name* is wrong. It is not edited here because that file
+> belongs to no story in this feature's current wave; rename it opportunistically.

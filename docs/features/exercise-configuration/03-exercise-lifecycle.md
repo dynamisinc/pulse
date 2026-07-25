@@ -91,8 +91,18 @@ today, per-exercise data after this story — **same wire shapes, no consumer ch
       Paused / Completed / Archived, and only the transitions COR-032 allows succeed; a disallowed
       transition is rejected with a 409 and no state change.
 - [ ] Given a participant request, when the exercise is in Build / Completed / Archived, then the
-      participant surface is not served (fail closed); **Staged** and **Live** are the only
-      participant-accessible states.
+      participant surface is **not served** (fail closed) — enforced by this story's exported
+      **`UseExerciseLifecycleGating()`** middleware covering `/api/feed`, `/api/threads/{id}`,
+      `/api/personas`, `POST /api/posts` and all six participant-shell config GETs; **Staged** and
+      **Live** are the only participant-accessible states. A shell **variant** change alone does not
+      satisfy this AC — a projection cannot refuse service, and `/api/feed` must not still return posts.
+- [ ] Given staff and evaluator sessions, when the exercise is in Build (or any non-participant state),
+      then gating does **not** apply to them — staff working in Build is the point of Build — and the
+      pre-auth allowlist (`/api/exercise-context`, login) is never gated.
+- [ ] **The overrides actually resolve (projection-override contract):** given a fully composed service
+      provider wired in the orchestrator's order, when `IShellVariantProjection` and
+      `IOverlayStateProjection` are resolved, then this story's implementations come back (registered via
+      `services.Replace(...)`) and drive `/api/shell-state` and `/api/overlay-state` end to end.
 - [ ] Given the exercise is **Paused**, when a participant's shell resolves, then `GET /api/overlay-state`
       returns the configurable holding page (`state: pause` with the configured `register` and
       `message`) in the **unchanged frozen `OverlayStateResponse` shape**, and `GET /api/shell-state`
@@ -119,6 +129,13 @@ key distinction. **This story authors no schema and no migration** — story 01a
 already delivers the widened `Status` column, so this story is transition rules, gating, projections and
 telemetry only.
 
+Everything it ships lives under `Features/ExerciseConfiguration/Lifecycle/`: the state machine, the two
+projection implementations (registered with `services.Replace(...)` — see implementation.md's
+projection-override contract), and the `UseExerciseLifecycleGating()` middleware the orchestrator wires
+into `Program.cs`. It adds no `Map*` and **edits no other slice's endpoint file**. Do not read
+`statePillConfig.ts`'s `scheduled ≡ staged` alias as a lifecycle mapping — the authoritative legacy→new
+mapping is implementation.md's table.
+
 ### The `/api/overlay-state` collision is known, accepted and yours to reconcile
 The unmerged `feature/world-steering-wave2` umbrella rewrites the `/api/overlay-state` handler in
 `Features/ParticipantShell/ParticipantShellEndpoints.cs` into a real write path with SignalR push, and
@@ -138,15 +155,33 @@ See implementation.md → "Integration hazards" and (story 03).
 
 ## Dependencies
 Story 01a (the widened `Status` vocabulary + the single migration) and 01b (the settings slice and the
-constants→service refactor of the shell-config endpoints); `exercise-isolation/04` + `/06` (participant
-route guard, archived separation); `world-steering` Wave 2's overlay-state write path — **a merge-time
-reconciliation, not a scheduling blocker** (decision recorded above). Consumed by exercise-build-golive
-(transitions), exercise-clock (Live starts the clock), E8 (dormant until Live).
+constants→service refactor of the shell-config endpoints); `exercise-isolation/04` (participant route
+guard); `world-steering` Wave 2's overlay-state write path — **a merge-time reconciliation, not a
+scheduling blocker** (decision recorded above). Consumed by exercise-build-golive (transitions),
+exercise-clock (Live starts the clock), E8 (dormant until Live).
+
+### `exercise-isolation/06` (#49) is a **mutual** dependency — here is the split
+`/06` (archived separation) is **Not Started** and names "exercise lifecycle (exercise-configuration
+COR-032)" as *its* dependency, while this story names `/06`. The cycle is resolved by splitting the
+Archived behavior, not by sequencing:
+
+- **This story owns now:** the `archived` state, the transitions into it, and **participant access
+  refusal** while in it (the gating middleware). Nothing data-layer.
+- **`/06` owns later:** archived content never appearing in any *other* exercise's live queries, and the
+  self-contained AAR-exportable set — a query/scoping concern layered on the central filter.
+
+So: **do not invent a parallel archived-exclusion query mechanism**, and do not carry an AC asserting
+cross-exercise archived exclusion — this story cannot meet one. `/06` builds that against the state
+shipped here.
 
 ## Tests
 - Unit: allowed transitions enforced; disallowed transitions 409 with no state change.
-- Integration: participants blocked outside Staged/Live; Paused serves the holding page through the
-  frozen overlay-state shape.
+- Integration: in Build/Completed/Archived a participant session gets **no service** from `/api/feed`,
+  `/api/threads/{id}`, `/api/personas`, `POST /api/posts` or the six shell GETs (assert the feed
+  specifically — that is the AC a variant-only implementation would fake); staff/evaluator sessions and
+  the pre-auth allowlist are unaffected; Paused serves the holding page through the frozen
+  overlay-state shape.
+- DI: the contributed shell-variant and overlay-state projections win from a fully composed provider.
 - Contract: `/api/exercise-context`, `/api/shell-state` and `/api/overlay-state` responses still satisfy
   the frontend runtime guards once real lifecycle values flow through them (the regression that proves
   story 01a's widened guard actually covers what this story emits).
