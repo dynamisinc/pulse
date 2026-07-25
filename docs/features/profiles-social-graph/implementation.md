@@ -53,10 +53,32 @@ each its own reviewed commit. Stories 02/04/05 (previously Wave 1/2 with no back
 recorded) now additionally depend on Wave 0: 05 needs story 06's real `AudienceMagnitude`, and
 02/04 need story 07's endpoints/following-read to be anything more than a mock-backed seam.
 
-**06 requires no frontend change.** The frozen client contract (`features/personas/types.ts:84-101`)
-and `PersonaResponseDto`'s JSON shape are unchanged by story 06 — only the values move from B1
-stand-ins to real persisted data. `resolvePersonas()`/`usePersonas()` need no edit; the mock→live
-flip alone is sufficient for the live cast to render real bios/bands/join dates/impersonator.
+**~~06 requires no frontend change.~~ CORRECTED (Gate-1 WR-001, story-owner-approved amendment).** This
+paragraph previously said the frozen client contract and `PersonaResponseDto`'s JSON shape were both
+unchanged by story 06. **Both halves are now false**, and stories 05/07 and the frontend integration
+must plan against the amended reality:
+
+- **The JSON shape changed, per world.** `GET /api/personas` now returns one of two shapes, branching on
+  the caller's session (`ICurrentStaffSessionAccessor`, fail-closed to participant, mirroring the
+  `ParticipantPostDto`/`StaffPostDto` provenance split). The **participant** shape structurally OMITS
+  `personaType`: the archetype labels exactly one seeded account `bad-actor`, so serving it to the feed
+  would be a machine-readable flag on the SOC-052 lookalike (D1-008). The **staff** shape
+  (`StaffPersonaResponseDto`) keeps `personaType` for `PersonaPicker.tsx` / `PersonaContextPanel.tsx` /
+  `controller/services/personaVoice.ts`. Everything else (`bio`, `audienceBand`, `followerCount`,
+  `joinedAt`, `avatarColor`, `initials`) is identical in both and now carries real persisted values.
+- **The frozen contract therefore needs a change, and it is already being built elsewhere.**
+  `features/personas/types.ts:91` declares `personaType` as required on `Persona`, which the participant
+  payload no longer satisfies. The approved resolution is a **participant/staff TYPE SPLIT** — `Persona`
+  without `personaType`, plus a staff shape widening by exactly that one field — being built on branch
+  **`build/profiles-social-graph/persona-contract-split`**. It is explicitly **NOT** "make `personaType`
+  optional"; do not implement that version. Nothing breaks at runtime in the meantime: `isValidPersona`
+  does not check the field and no participant surface reads it.
+- **Still true:** no story-06 change was made to any frontend file, and the mock→live flip needs no
+  consumer edit for bios/bands/join dates/the impersonator to render.
+
+**06 also added a server-side `Persona.Castable` gate** (not on any DTO, participant or staff): the
+SOC-052 lookalike and `@TheScoopHQ` are seeded as rows but excluded from the engine's eligible cast until
+a scenario opts in. Story 07 and any future persona read must keep it off the wire.
 
 Note on 01/03 ordering: 03 has no net-new owned file in this wave (see left column), so 01 does not
 actually block on a file 03 produces — both can build in the same pass; 03's remaining job (a

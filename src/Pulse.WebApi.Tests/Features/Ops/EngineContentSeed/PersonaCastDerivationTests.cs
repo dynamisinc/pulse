@@ -134,30 +134,65 @@ public sealed class PersonaCastDerivationTests
     }
 
     [Fact]
-    public void Catalog_PassesItsAuthoringTimeGuard_BiosFitTheColumn_AndBandsAreKnown()
+    public void Catalog_PassesItsAuthoringTimeGuard_BiosBandsArchetypesAndPositiveFloors()
     {
-        // S-002: the seeder's static constructor validates every authored bio against the stored column bound
-        // and every authored band against the closed SOC-054 vocabulary, so an over-long bio or a typo'd band
-        // fails HERE (first touch of the type) rather than as an opaque truncation at SaveChangesAsync.
+        // S-002 + WR-C + S-A: the seeder's static constructor validates every authored bio against the stored
+        // column bound, every authored band AND archetype against its closed vocabulary, and every band floor
+        // as positive — so an authoring mistake fails HERE (first touch of the type) rather than as an opaque
+        // truncation at SaveChangesAsync or, worse, a silently wrong SOC-052 join date.
         var act = () => RuntimeHelpers.RunClassConstructor(typeof(PersonaCastSeeder).TypeHandle);
 
         act.Should().NotThrow(
-            "every catalog bio must fit Persona.MaxBioLength and every catalog band must be a known SOC-054 band");
+            "every catalog bio must fit Persona.MaxBioLength, every band must be a known SOC-054 band with a "
+            + "positive floor, and every archetype must be in the closed PersonaType union");
         Persona.MaxBioLength.Should().Be(512, "the guard and the schema bound are the same constant");
     }
 
-    [Fact]
-    public void DeriveAudienceMagnitude_IsCaseSensitive_MatchingTheBadActorComparison()
+    [Theory]
+    [InlineData("Mid")]
+    [InlineData("MID")]
+    [InlineData("midd")]
+    [InlineData("")]
+    public void DeriveAudienceMagnitude_RejectsAnythingOutsideTheClosedBandVocabulary(string band)
     {
-        // S-001: both closed vocabularies are compared ORDINALLY, so a mis-cased value fails loudly in the
-        // band lookup instead of being folded there and missed by the archetype check.
-        var act = () => PersonaCastSeeder.DeriveAudienceMagnitude("Mid", "FulcoEM");
-        act.Should().Throw<ArgumentOutOfRangeException>("the band vocabulary is ordinal, lower-case only");
+        // S-001: the band vocabulary is ordinal and closed — a mis-cased or typo'd band is an authoring bug
+        // that must fail loudly, never be folded to a neighbouring band.
+        var act = () => PersonaCastSeeder.DeriveAudienceMagnitude(band, "FulcoEM");
 
-        PersonaCastSeeder.DeriveJoinedAt("BAD-ACTOR", "FairhavenWaterUpd").Should().Be(
-            PersonaCastSeeder.DeriveJoinedAt("citizen", "FairhavenWaterUpd"),
-            "the archetype comparison is ordinal too — a mis-cased 'bad-actor' is simply not the bad-actor "
-            + "archetype, consistently with the band lookup rejecting a mis-cased band");
+        act.Should().Throw<ArgumentOutOfRangeException>("the band vocabulary is ordinal, lower-case only");
+    }
+
+    [Theory]
+    [InlineData("Bad-Actor")]
+    [InlineData("BAD-ACTOR")]
+    [InlineData("bad_actor")]
+    [InlineData("badactor")]
+    [InlineData("troll")]
+    [InlineData("")]
+    public void DeriveJoinedAt_RejectsAnArchetypeOutsideTheClosedUnion_NeverSilentlyEstablishes(string archetype)
+    {
+        // WR-C — the finding this replaces a weaker assertion for. DeriveJoinedAt's `else` is NOT a safe
+        // default: it is the 90-729-day ESTABLISHED-account branch. A mis-cased "bad-actor" falling through
+        // it would ship the SOC-052 lookalike with a two-year-old account — the "joined this week" tell
+        // inverted, silently. So an unrecognized archetype throws, symmetrically with the band check, rather
+        // than deriving anything at all.
+        var act = () => PersonaCastSeeder.DeriveJoinedAt(archetype, "FairhavenWaterUpd");
+
+        act.Should().Throw<ArgumentOutOfRangeException>(
+            "an unrecognized archetype must fail loudly, never fall through to the established-account branch");
+    }
+
+    [Fact]
+    public void DeriveJoinedAt_EveryArchetypeInTheClosedUnion_IsAccepted()
+    {
+        // The other half of WR-C: the guard must reject typos WITHOUT rejecting a legitimate archetype the
+        // frontend union allows but this catalog does not currently author (weather-scientific, business).
+        foreach (var archetype in new[]
+                 { "news-outlet", "agency", "weather-scientific", "citizen", "influencer", "business", "bad-actor" })
+        {
+            var act = () => PersonaCastSeeder.DeriveJoinedAt(archetype, "someHandle");
+            act.Should().NotThrow($"'{archetype}' is a member of the frozen PersonaType union");
+        }
     }
 
     [Fact]
