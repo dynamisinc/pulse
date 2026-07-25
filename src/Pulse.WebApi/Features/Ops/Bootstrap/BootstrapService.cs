@@ -93,7 +93,7 @@ public sealed class BootstrapService
     /// <param name="staffAllowlist">The Phase-1 staff allowlist a named staff identity's external subject is resolved from.</param>
     /// <param name="sharedCredentialHasher">The slow-KDF hasher the shared password is hashed with (NFR-009).</param>
     /// <param name="participantPasswordHasher">The slow-KDF hasher an optional participant password is hashed with (NFR-009).</param>
-    /// <param name="personaResolver">The shared, exercise-confined persona resolver an optional account persona binding is resolved through (story 07, COR-001).</param>
+    /// <param name="personaResolver">The shared, exercise-confined persona resolver an optional account persona binding is resolved through (story identity-auth-roles/10, COR-001).</param>
     public BootstrapService(
         PulseDbContext dbContext,
         IOptions<BootstrapOptions> options,
@@ -373,7 +373,7 @@ public sealed class BootstrapService
             return AccountValidation.Invalid($"participantAccount.password {passwordError}");
         }
 
-        // Story 07: the optional persona binding is validated SYNTACTICALLY here (before any write); the
+        // Story identity-auth-roles/10: the optional persona binding is validated SYNTACTICALLY here (before any write); the
         // exercise-confined lookup happens in ProvisionAccountAsync, once the target exercise id is known.
         if (!OpsPersonaResolver.TryNormalizeHandle(account.PersonaHandle, out var personaHandle, out var handleError))
         {
@@ -478,7 +478,7 @@ public sealed class BootstrapService
     private async Task<AccountProvisionOutcome> ProvisionAccountAsync(
         Guid exerciseId, ResolvedAccount account, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        // Story 07: resolve the optional persona binding FIRST, so an unresolvable one aborts before any row is
+        // Story identity-auth-roles/10: resolve the optional persona binding FIRST, so an unresolvable one aborts before any row is
         // staged. The resolver confines the lookup to THIS exercise with IgnoreQueryFilters() + an explicit
         // ExerciseId predicate (the ops context has no ambient scope) — a cross-exercise persona is NotFound.
         var resolution = await _personaResolver.ResolveAsync(
@@ -711,7 +711,7 @@ public sealed record BootstrapSharedCredentialResult(bool Created, string? Passw
 /// <param name="AccountId">The (created or reused) account id.</param>
 /// <param name="Username">The account login handle.</param>
 /// <param name="Created">Whether the account was created (vs reused) on this call.</param>
-/// <param name="PersonaId">The account's persona binding AFTER this call (story 07), or <c>null</c> when unbound.</param>
+/// <param name="PersonaId">The account's persona binding AFTER this call (story identity-auth-roles/10), or <c>null</c> when unbound.</param>
 /// <param name="PersonaHandle">The stored handle of the persona resolved for this call, or <c>null</c> when no binding was requested.</param>
 /// <param name="PersonaBound">Whether THIS call wrote the binding (<c>false</c> for a no-op or a preserved differing binding).</param>
 public sealed record BootstrapAccountResult(

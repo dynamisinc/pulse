@@ -29,11 +29,14 @@ public sealed class BindParticipantPersonaRequest
 
     /// <summary>
     /// The handle of the persona to bind (e.g. <c>FairhavenWater</c> or <c>@mvega_fh</c> — a leading <c>@</c> is
-    /// normalized away, matching is case-insensitive). The PREFERRED identifier: the seeded cast's handles are
-    /// discoverable, whereas <c>POST /api/ops/seed-engine-content</c> returns only counts and
-    /// <c>GET /api/personas</c> requires an authenticated session — so an operator has no way to obtain a
-    /// persona id without the manual SQL this endpoint exists to eliminate. Either this or
-    /// <see cref="PersonaId"/> is required.
+    /// normalized away, matching is case-insensitive). The PREFERRED identifier, on ERGONOMICS: a handle is
+    /// stable across re-seeds and knowable up front from <c>PersonaCastSeeder.Catalog</c>, so it can be written
+    /// into a runbook, whereas a persona id is environment-specific and must be looked up per environment.
+    /// (An earlier draft of this comment claimed <c>GET /api/personas</c> requires an authenticated session and
+    /// that an id was therefore unobtainable. That was WRONG — it gates only on a host-resolved exercise scope
+    /// and returns ids to an unauthenticated caller, which is itself the subject of issue #359. The handle
+    /// preference stands on its own merits; the false premise is removed rather than left as reasoning a
+    /// future reader would trust.) Either this or <see cref="PersonaId"/> is required.
     /// </summary>
     [JsonPropertyName("personaHandle")]
     public string? PersonaHandle { get; init; }
