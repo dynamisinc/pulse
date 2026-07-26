@@ -4,6 +4,9 @@ using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseConfiguration;
+using Pulse.WebApi.Features.ExerciseConfiguration.Chrome;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
+using Pulse.WebApi.Features.ExerciseConfiguration.PracticeMode;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -84,6 +87,19 @@ builder.Services.AddSessions(builder.Configuration);
 // a silent no-op leaving the constant serving. (A bare AddScoped would in fact still win, last-descriptor;
 // the trap is copying THIS line's TryAdd idiom.) Guarded by ExerciseConfiguration/CompositionRootWiringTests.
 builder.Services.AddExerciseConfiguration();
+
+// E1 exercise-configuration WAVE 3 — the three contributor slices, each shipping its own Add*/Map* pair from
+// its own extensions file (no builder edits this one). All three override an AddExerciseConfiguration()
+// TryAdd()ed default with services.Replace(), which is ORDER-INDEPENDENT — so listing them after the line
+// above is this feature's CONVENTION for readability, not a correctness requirement. (The convention exists
+// so the mistaken TryAdd idiom can never appear to work: a TryAdd here would silently stand down and leave
+// 01b's constant serving.) Practice mode is the one seam with NO fail-safe default anywhere — deliberately,
+// so a missing AddPracticeMode() is a loud GetRequiredService throw rather than a silent "everything is
+// eligible" that would leak rehearsal data into an AAR. Guarded by
+// ExerciseConfiguration/CompositionRootWiringTests.
+builder.Services.AddComplianceChromeConfig();   // story 02 — per-exercise COR-031 chrome + the NFR-008 guard
+builder.Services.AddPracticeMode();             // story 04 — COR-033 practice flag + IEvaluationEligibility
+builder.Services.AddExerciseLifecycle();        // story 03 — COR-032 state machine + shell/overlay projections
 
 // Participant login methods (Phase B2 Wave 3). AddParticipantAccounts (identity-auth-roles/02) registers the
 // participant credential-login + staff account-provisioning services + the "participant-login" rate-limiter
@@ -190,6 +206,19 @@ app.UseWhen(
 // host-after-session inverts precedence (shows the wrong exercise) — keep it exactly here.
 app.UseSessionAuthentication();
 
+// COR-032 participant lifecycle gating (exercise-configuration story 03) — in build/completed/archived the
+// participant-world routes are NOT SERVED (403); staff sessions and every un-listed route pass through.
+// ORDER IS LOAD-BEARING, and this is the ONLY middleware-ordering constraint wave 3 introduces: it MUST run
+// AFTER both UseExerciseResolution() (host → provisional scope) and UseSessionAuthentication() (session
+// scope, higher precedence) above, because it decides from the RESOLVED scope. Wired any earlier it reads an
+// unset scope on every request, finds no lifecycle to check, and passes everything through — a SILENT, TOTAL
+// no-op: a gate that looks wired, breaks no test, and lets /api/feed hand a participant an archived world's
+// posts. It sits before UseRateLimiter() only because that is where "immediately after the scope is final"
+// falls; the limiter's policies are per-endpoint, so no gated route's behaviour depends on that adjacency.
+// The mis-ordering itself is caught by ExerciseConfiguration/LifecycleGatingPipelineOrderTests' real-SQL 403
+// probe, the only test that can see it (a slice-composed host fixes its own scope, so it cannot).
+app.UseExerciseLifecycleGating();
+
 // Rate limiting (identity-auth-roles/05 staff-login + /03 session-endpoints policies). NOTE (Gate-1,
 // tracked for /security-review before the umbrella→main PR): the staff-login limiter partitions on
 // Connection.RemoteIpAddress, which behind the Azure App Service reverse proxy is the platform proxy's
@@ -238,6 +267,15 @@ app.MapParticipantShellEndpoints();
 // Staff-gated (XC-002) and exercise-scoped from the server-resolved scope — the route takes no exercise id
 // in any form, so there is no IDOR surface. The other half of the required line-pair above.
 app.MapExerciseConfigurationEndpoints();
+
+// E1 exercise-configuration WAVE 3 staff surfaces — the endpoint half of the three DI lines above. All three
+// are staff-gated (XC-002) and take the exercise from the server-resolved scope alone: no route, query or
+// body carries an exercise id, so none of them has an IDOR surface. None of them maps a PARTICIPANT route —
+// /api/chrome-config, /api/shell-state and /api/overlay-state stay on MapParticipantShellEndpoints() above;
+// wave 3 only changed what backs them (the Replace()d projections).
+app.MapComplianceChromeEndpoints();     // story 02 — GET/PUT /api/staff/chrome-settings
+app.MapPracticeModeEndpoints();         // story 04 — GET/PUT /api/staff/practice-mode
+app.MapExerciseLifecycleEndpoints();    // story 03 — GET /api/staff/exercise-lifecycle, POST .../transition
 
 // Identity + exercise-resolution endpoints (Phase B2 Waves 1–3). Scope comes only from the resolved
 // IExerciseContext (COR-001); /exercise-context and /session read the resolved scope, never a client

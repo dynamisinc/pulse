@@ -32,6 +32,50 @@ the scope from the staff session (COR-001), so this surface cannot address anoth
 exercise. `400` validation, `401` no staff session, `403` not assigned, `404` gone.
 See `src/Pulse.WebApi/Features/ExerciseConfiguration/`.
 
+## Story 02 — Compliance chrome: per-exercise config + NFR-008 guard (COR-031 / XC-003 / NFR-008, feature: exercise-configuration)
+
+The **compliance-chrome editor**: a planner turns the classification banners on or
+off for this exercise, sets their copy and colours, and flips the in-content
+EXERCISE watermark the NFR-008 mutual guard is evaluated against.
+
+| File | Role |
+|------|------|
+| `components/ComplianceChromePanel.tsx` | The COBRA chrome editor, **mounted into `ExerciseSettingsPage`**. Self-contained: no props, own query/mutation/states. Three rules it exists to get right — NFR-008 chrome and watermark are never both off (mirrored client-side for the message; the **server** is the enforcement point and returns 400 regardless); `PUT` is a **full replace, not a patch** (`ChromeSettingsUpdate`'s every property is required, so a forgotten field is a compile error, not silent data loss); a `null` banner field means "not configured" and renders EMPTY, never pre-filled with the fallback constant. Banner *presentation* stays frozen in `features/participant-shell/ComplianceChrome.tsx` — this panel edits config only. |
+| `hooks/useChromeSettings.ts` | React Query 5 `useChromeSettings()` (query) + `useSaveChromeSettings()` (mutation, seeds the cache with the server's re-projection). Exports `CHROME_SETTINGS_QUERY_KEY`; the key carries **no exercise id** — scope is server-resolved (COR-001). |
+| `services/chromeSettingsService.ts` | The data seam. Shared axios client, one env-guarded mock flip point, fail-closed response validation, transport-agnostic `ChromeSettingsError`. Owns its client-contract types (`ChromeSettings`, `ChromeSettingsUpdate`) and the field bounds (`MAX_BANNER_TEXT_LENGTH`, `CHROME_HEX_COLOR_PATTERN`, `violatesWatermarkInvariant`) — deliberately **not** in `types.ts`. |
+
+### Backend contract consumed
+
+`GET /api/staff/chrome-settings` → `200 ChromeSettingsDto`
+`PUT /api/staff/chrome-settings` → `200 ChromeSettingsDto` (re-projected).
+**No exercise id in the path or body.** `400` validation — including the NFR-008
+both-off attempt, with nothing persisted; `401` no staff session / unresolved
+scope; `403` not assigned; `404` gone. The participant-facing
+`GET /api/chrome-config` is unchanged in shape — this story only changed what backs
+it (`IChromeConfigProjection`). See
+`src/Pulse.WebApi/Features/ExerciseConfiguration/Chrome/`.
+
+## Story 04 — Practice / sandbox flag (COR-033, feature: exercise-configuration)
+
+The **practice/sandbox control**: a planner marks an exercise as a rehearsal — a
+load test, a controller dry-run — so its data is excluded from evaluation exports
+and never pollutes the AAR.
+
+| File | Role |
+|------|------|
+| `components/PracticeModePanel.tsx` | The COBRA practice-mode control, **mounted into `ExerciseSettingsPage`**. Self-contained: no props, own query/mutation/states. The state indicator is **never colour-only** (NFR-001): a FontAwesome icon **and** a text label carry it, inside a `role="status"` region, using measured COBRA-native tokens (`notifications.warningText` / `successText`) — not stock-MUI `warning.*`, which `cobraTheme` never defines and which failed AA at 3.79:1. `evaluationEligible` is rendered from the **server's** verdict, never re-derived client-side. |
+| `hooks/usePracticeMode.ts` | React Query 5 `usePracticeMode()` (query) + `useSetPracticeMode()` (mutation). Exports `PRACTICE_MODE_QUERY_KEY`; again **no exercise id** in the key. |
+| `services/practiceModeService.ts` | The data seam. Shared axios client, one env-guarded mock flip point, fail-closed validation, transport-agnostic `PracticeModeError`. Owns its client-contract types (`PracticeModeState`, `PracticeModeUpdate`) locally rather than in `types.ts`. |
+
+### Backend contract consumed
+
+`GET /api/staff/practice-mode` → `200 PracticeModeDto`
+`PUT /api/staff/practice-mode` → `200 PracticeModeDto` (re-projected).
+**No exercise id in the path or body.** `400` missing `isPracticeMode` (nothing
+persisted); `401` no staff session / unresolved scope; `403` not assigned; `404`
+gone. **Staff world only (XC-002)** — practice state appears on no participant
+surface. See `src/Pulse.WebApi/Features/ExerciseConfiguration/PracticeMode/`.
+
 ## Story 02 — Named participant accounts (COR-011, feature: identity-auth-roles)
 
 The **bulk account-import panel** a planner uses to provision named participant
@@ -66,6 +110,14 @@ the route table.
   It renders inside `StaffShellFrame` (which mounts the COBRA `ThemeProvider`) and the
   app's React Query `QueryClientProvider`. That composition is covered by
   `src/frontend/src/App.integration.test.tsx`.
+- **`ComplianceChromePanel` and `PracticeModePanel` ARE mounted.** Both now render
+  inside `ExerciseSettingsPage`'s panel stack — one JSX line each, added by the
+  orchestrator at the wave-3 merge (they had shipped as inert, exported-only slices
+  with the mount left as a comment). Each is self-contained — no props, its own hook,
+  service, query and states — so mounting them threaded nothing through the page, and
+  the page still holds no state, no fetching and no cross-panel coordination. They
+  inherit `ExerciseSettingsPage`'s envelope: the COBRA `ThemeProvider` from
+  `StaffShellFrame` and the app's `QueryClientProvider`.
 - **`AccountImport` is exported but NOT mounted anywhere.** It is reachable only by
   importing it from this barrel; no route, page or panel renders it today, so a
   planner has no way to reach the CSV import in the running app. This is a known

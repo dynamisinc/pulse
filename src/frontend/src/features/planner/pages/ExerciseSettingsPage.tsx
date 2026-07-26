@@ -19,8 +19,8 @@
  * seams", from wave 3 on this file is where the feature's other stories hang
  * their panels, one line each:
  *
- *   story 02 (compliance chrome)  ->  <ComplianceChromePanel />
- *   story 04 (practice/sandbox)   ->  <PracticeModePanel />
+ *   story 02 (compliance chrome)  ->  <ComplianceChromePanel />   MOUNTED
+ *   story 04 (practice/sandbox)   ->  <PracticeModePanel />      MOUNTED
  *
  * Each of those panels is SELF-CONTAINED: it owns its own hook, service, query
  * and states, so mounting it is a single JSX line the ORCHESTRATOR adds at merge
@@ -50,6 +50,8 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faGears } from '@fortawesome/free-solid-svg-icons'
 import CobraStyles from '@/theme/CobraStyles'
 import { ExerciseSettingsPanel } from '../components/ExerciseSettingsPanel'
+import { ComplianceChromePanel } from '../components/ComplianceChromePanel'
+import { PracticeModePanel } from '../components/PracticeModePanel'
 
 /**
  * Work-area content for the planner's exercise-settings route: a page title and
@@ -83,11 +85,12 @@ export function ExerciseSettingsPage() {
         <ExerciseSettingsPanel />
 
         {/*
-          WAVE 3 MOUNT POINTS (orchestrator-owned, one line each — see the
-          module header):
-            <ComplianceChromePanel />   story 02
-            <PracticeModePanel />       story 04
+          WAVE 3 MOUNTS (orchestrator-owned, one line each — see the module
+          header). Both panels are self-contained: no props, own hook, service,
+          query and states. Keep it that way.
         */}
+        <ComplianceChromePanel />
+        <PracticeModePanel />
       </Stack>
     </Box>
   )

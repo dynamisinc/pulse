@@ -14,11 +14,23 @@ export { useAccountImport } from './hooks/useAccountImport'
 
 // E1 exercise-configuration, story 01b — the per-exercise settings editor (COR-030).
 // `ExerciseSettingsPage` is the surface App.tsx mounts as the PLANNER staff surface;
-// it is a composition point, so wave 3 adds `ComplianceChromePanel` (story 02) and
-// `PracticeModePanel` (story 04) exports alongside these.
+// it is a composition point, and wave 3's two panels are now mounted into it (see
+// below) as well as exported here.
 export { ExerciseSettingsPage } from './pages/ExerciseSettingsPage'
 export { ExerciseSettingsPanel } from './components/ExerciseSettingsPanel'
 export { useExerciseSettings } from './hooks/useExerciseSettings'
+
+// E1 exercise-configuration, story 02 — the COR-031 compliance-chrome panel + the
+// NFR-008 chrome/watermark guard. Mounted into `ExerciseSettingsPage`; the panel is
+// self-contained and takes no props.
+export { ComplianceChromePanel } from './components/ComplianceChromePanel'
+export { useChromeSettings, useSaveChromeSettings } from './hooks/useChromeSettings'
+
+// E1 exercise-configuration, story 04 — the COR-033 practice/sandbox flag panel.
+// Mounted into `ExerciseSettingsPage`; self-contained, no props. STAFF-WORLD ONLY:
+// practice state is never projected onto a participant surface (XC-002).
+export { PracticeModePanel } from './components/PracticeModePanel'
+export { usePracticeMode, useSetPracticeMode } from './hooks/usePracticeMode'
 export {
   AccountImportError,
   IMPORT_FILE_ACCEPT,
