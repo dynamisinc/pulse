@@ -1,8 +1,6 @@
 # Story: Follow / unfollow
 
-**Feature:** Profiles & social graph  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Built (hook +
-write path + guard); wiring into `<Profile>`'s header is a parallel integration pass — see
-"Not yet wired" below
+**Feature:** Profiles & social graph  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** SOC-051 (COR-001, COR-015)  ·  **Design decisions:** none  ·  **Issue:** #110
 
 ## Context
@@ -53,25 +51,33 @@ story's frontend calls is `profiles-social-graph/07-follow-graph-api.md` (#370, 
       `hooks/useFollow.readonly.test.ts` / `hooks/useFollow.noPersona.test.ts` /
       `components/FollowButton.readonly.test.tsx` / `components/FollowButton.noPersona.test.tsx`.)*
 
-## Not yet wired (why Status isn't Complete)
-`<FollowButton>` is built and tested standalone (mirrors `<FollowerList>`'s own build order). It is
-**not yet mounted inside `<Profile>`'s header** — that integration (rendering the button beside a
-profile's follower/following counts, keeping a header-level count display in sync via
-`onFollowerCountChange`, see SG-003 below) is a parallel pass over `pages/Profile.tsx` this story does
-not own. **Do not flip this Status to Complete until that pass lands and is verified** — this story's
-own scope (the hook + write path + control, all standalone-tested) is done; the wiring is not.
+## Wired (RESOLVED — profiles-social-graph final integration pass, #88)
+`<FollowButton>` is now mounted inside `<Profile>`'s header (`pages/Profile.tsx`, beside the
+follower/following counts), calling the live `POST`/`DELETE /api/personas/{id}/follow` seam (story
+07, #370). This is verified by `pages/Profile.test.tsx` (the button renders, and is absent for
+observer/no-persona/own-profile sessions per AC4).
+
+## Known residual (not previously flagged as a gap — record honestly)
+`<Profile>` does **not** pass `onFollowerCountChange` to `<FollowButton>`. The header's displayed
+follower count (`persona.followerCount`, from `usePersonas()`) is therefore **not** live-updated when
+a viewer follows/unfollows the profiled account from that same page — the count only catches up on a
+`usePersonas()` refetch (e.g. a reload). `useFollow`'s own optimistic count is still correct inside the
+button itself; only the SEPARATE header figure is stale until then. No test asserts the header count
+updates after a follow toggle (confirmed: `pages/Profile.test.tsx` has no such assertion). Fixing this
+is a small `Profile.tsx` follow-up (thread `onFollowerCountChange` into a small local override of the
+displayed count), not a change to this story's own hook/service/button.
 
 ## Deferred (tracked follow-ups)
-- **`<Profile>` integration** — see "Not yet wired" above.
-- **SG-003 (fold, this pass):** `<FollowButton>`'s `onFollowerCountChange` effect depends on the
-  callback's IDENTITY; the component's own doc comment now tells a host to `useCallback` it (a stable
-  dependency) rather than pass an inline arrow, since the component itself cannot defend against an
-  unstable prop identity without silently dropping legitimate rapid-fire count changes. Relevant once
-  the `<Profile>` integration above lands and actually passes this prop.
+- **The header-count sync gap above.**
+- **SG-003 (fold, prior pass):** `<FollowButton>`'s `onFollowerCountChange` effect depends on the
+  callback's IDENTITY; the component's own doc comment tells a host to `useCallback` it (a stable
+  dependency) rather than pass an inline arrow. Relevant to whichever future pass closes the residual
+  above.
 
 ## Out of Scope
 Magnitude display (story 05); the Following feed itself (feeds-discovery); suggested follows
-(story 04); wiring the control into `<Profile>` (parallel integration pass, see "Not yet wired").
+(story 04); the header follower-count live-sync gap (see "Known residual" above — a `Profile.tsx`
+follow-up, not this story's hook/service/button).
 
 ## Technical Notes
 Participant world. `hooks/useFollow.ts` (the optimistic state machine: toggle, rollback-on-reject,
@@ -88,6 +94,15 @@ reader follows anyone. `resetMockFollowEdges()` (test-only) does NOT restore tha
 it clears the graph to genuinely empty, the clean slate the rest of the suite (including
 `04-who-to-follow`'s suggestion-exclusion specs) already depends on; a spec that wants the seeded
 default back on purpose calls `feedService.setMockFollowingForTests(undefined)` instead.
+
+**Known residual — mock-mode counts do not survive a reload.** `services/followEdgeStore.ts` is a
+plain module-level in-memory store (confirmed: its own header says the edges persist "across calls...
+but reset on reload — fine for dev/test/UAT-no-backend, never [production]"). Following/unfollowing an
+account in mock mode changes `followerCount`/the Following feed for the rest of that session, but a
+page reload silently reverts every mock-mode follow edge (and therefore every mock-mode follower
+count) to the seeded default. Nothing tracked under this story or `05-audience-magnitude` currently
+fixes this — recording it here as an open residual rather than letting it go unmentioned. (Live mode
+is unaffected: real edges persist in `Follow`, story 07/#370.)
 
 **Wire contract, SG-001/SG-002 fold.** The real endpoint (`FollowEndpoints.cs`'s `MapResult`) returns
 `200` + `FollowStateResponseDto` (`personaId`/`following`/`changed`) for BOTH the state-changing and
