@@ -160,3 +160,52 @@ describe('useFollow — follow/unfollow + optimistic count (SOC-051)', () => {
     await waitFor(() => expect(result.current.pending).toBe(false))
   })
 })
+
+describe('useFollow — a viewer can never follow themselves (story 07 AC8)', () => {
+  it('withholds the control on the viewer\'s OWN profile, and toggling is a no-op', async () => {
+    // `persona-dreyes_fh` is the mock session's own bound persona (sessionResolver.ts).
+    const { result } = renderHook(
+      () => useFollow({ personaId: 'persona-dreyes_fh', initialFollowerCount: 42 }),
+      { wrapper },
+    )
+
+    // The server rejects a self-follow with 400; without the guard the control would
+    // render and every tap would flicker optimistic-on -> 400 -> rollback.
+    await waitFor(() => expect(result.current.isReadOnly).toBe(false))
+    expect(result.current.canFollow).toBe(false)
+
+    act(() => { result.current.toggleFollow() })
+    expect(followPersona).not.toHaveBeenCalled()
+    expect(result.current.followerCount).toBe(42)
+  })
+
+  it('still allows following any OTHER persona from the same session', async () => {
+    const { result } = renderHook(
+      () => useFollow({ personaId: 'persona-fulcoem', initialFollowerCount: 7 }),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.canFollow).toBe(true))
+  })
+})
+
+describe('useFollow — re-points when the TARGET changes (no stale carry-over)', () => {
+  it('resets state to the new persona\'s seed instead of keeping the previous one\'s', async () => {
+    const { result, rerender } = renderHook(
+      ({ id, count }: { id: string; count: number }) =>
+        useFollow({ personaId: id, initialFollowerCount: count }),
+      { wrapper, initialProps: { id: 'persona-fairhavenwater', count: 120 } },
+    )
+
+    await waitFor(() => expect(result.current.canFollow).toBe(true))
+    await act(async () => { result.current.toggleFollow() })
+    await waitFor(() => expect(result.current.isFollowing).toBe(true))
+    expect(result.current.followerCount).toBe(121)
+
+    // A mounted instance re-pointed at a DIFFERENT persona (profile-to-profile
+    // navigation reuses the page) must not inherit the previous target's state.
+    rerender({ id: 'persona-newsline7', count: 900 })
+
+    expect(result.current.isFollowing).toBe(false)
+    expect(result.current.followerCount).toBe(900)
+  })
+})

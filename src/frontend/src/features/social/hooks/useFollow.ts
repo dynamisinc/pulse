@@ -46,7 +46,7 @@
  * the live post-publish path.
  */
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSession } from '@/core/auth'
 import { followPersona, unfollowPersona } from '../services/followService'
 
@@ -99,15 +99,47 @@ export function useFollow(options: UseFollowOptions): UseFollowResult {
   const [pending, setPending] = useState(false)
 
   const isReadOnly = session.isReadOnly
-  const canFollow = !isReadOnly && session.personaId !== undefined
+  // A viewer can never follow THEMSELVES: the server rejects a self-follow with 400
+  // (story 07 AC8 — a self-edge would inflate a persona's own displayed follower count
+  // with itself). Without this clause the control renders on the viewer's own profile
+  // and every tap is optimistic-on -> 400 -> rollback flicker.
+  const canFollow = !isReadOnly
+    && session.personaId !== undefined
+    && session.personaId !== personaId
 
-  // Guards a stray resolve/rejection from an ABANDONED request (e.g. the
-  // target changed, or the component unmounted) from mutating state that no
-  // longer corresponds to the in-flight call.
+  // Guards a stray resolve/rejection from an ABANDONED request (one whose target
+  // changed mid-flight) from mutating state that no longer corresponds to it. The
+  // token is bumped by the personaId reset below as well as by each toggle — without
+  // that reset it could never actually differ at resolve time, since `pending` already
+  // blocks a second toggle, and the guard would be decorative.
   const requestTokenRef = useRef(0)
+
+  // Re-point the hook when the TARGET changes. `useState` seeds once, so a mounted
+  // instance whose `personaId` prop changes would otherwise keep the PREVIOUS persona's
+  // follow state and count, and an in-flight write would settle onto them. This is
+  // reachable the moment the control is wired into <Profile>, where profile-to-profile
+  // navigation reuses the mounted page rather than remounting it. Adjusting state during
+  // render (rather than in an effect) is React's documented pattern for a prop-derived
+  // reset — it re-renders before committing, so no stale frame is ever painted.
+  const [trackedPersonaId, setTrackedPersonaId] = useState(personaId)
+  if (trackedPersonaId !== personaId) {
+    setTrackedPersonaId(personaId)
+    setIsFollowing(initiallyFollowing)
+    setFollowerCount(initialFollowerCount)
+    setPending(false)
+  }
+
+  // Invalidate any in-flight write when the target changes. This lives in an effect
+  // rather than in the render-phase reset above because refs must not be touched during
+  // render; it still runs on commit, i.e. before any pending promise can resolve, so a
+  // write issued for the PREVIOUS persona can never settle onto the new one's state.
+  useEffect(() => {
+    requestTokenRef.current += 1
+  }, [personaId])
 
   const toggleFollow = useCallback(() => {
     if (session.isReadOnly || session.personaId === undefined) return
+    if (session.personaId === personaId) return // self-follow: server 400s (story 07 AC8)
     if (pending) return
 
     const wasFollowing = isFollowing

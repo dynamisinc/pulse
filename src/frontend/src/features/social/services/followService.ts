@@ -97,20 +97,27 @@ const unfollowMockAdapter: AxiosAdapter = config => {
   return Promise.resolve({ data: undefined, status: 204, statusText: 'No Content', headers: {}, config })
 }
 
+/** Builds the server's `FollowListResponseDto` envelope so mock and live parse identically. */
+function mockFollowListBody(personaId: string, personaIds: readonly string[]) {
+  return { personaId, personaIds: [...personaIds], count: personaIds.length }
+}
+
 const followingMockAdapter: AxiosAdapter = config => {
   const personaId = extractPersonaId(config.url, 'following')
-  const data = personaId !== undefined ? [...mockFollowedSet(personaId)] : []
+  const ids = personaId !== undefined ? [...mockFollowedSet(personaId)] : []
+  const data = mockFollowListBody(personaId ?? '', ids)
   return Promise.resolve({ data, status: 200, statusText: 'OK', headers: {}, config })
 }
 
 const followersMockAdapter: AxiosAdapter = config => {
   const personaId = extractPersonaId(config.url, 'followers')
-  const data: string[] = []
+  const ids: string[] = []
   if (personaId !== undefined) {
     for (const [followerId, followedIds] of MOCK_EDGES) {
-      if (followedIds.has(personaId)) data.push(followerId)
+      if (followedIds.has(personaId)) ids.push(followerId)
     }
   }
+  const data = mockFollowListBody(personaId ?? '', ids)
   return Promise.resolve({ data, status: 200, statusText: 'OK', headers: {}, config })
 }
 
@@ -142,11 +149,27 @@ export async function unfollowPersona(personaId: string): Promise<void> {
   )
 }
 
-/** The wire shape of a follow/followers-ids response — ids only. */
-type FollowIdsResponse = string[]
+/**
+ * The wire shape of a follow/followers-ids response.
+ *
+ * This is an ENVELOPE, not a bare array — verified against the server's
+ * `FollowListResponseDto` (`Pulse.WebApi/Features/Social/Follows/FollowEndpoints.cs`),
+ * which emits `personaId` / `personaIds` / `count`. An earlier revision typed this
+ * as `string[]` and threw on every live call while the mock adapter returned a bare
+ * array, so the whole suite stayed green — the mock/live divergence this feature has
+ * to keep designing against. The mock adapters below emit the SAME envelope precisely
+ * so a shape regression fails in test rather than only in UAT.
+ */
+interface FollowIdsResponse {
+  readonly personaId: string
+  readonly personaIds: readonly string[]
+  readonly count: number
+}
 
-function isStringArray(data: unknown): data is FollowIdsResponse {
-  return Array.isArray(data) && data.every(item => typeof item === 'string')
+function isFollowIdsResponse(data: unknown): data is FollowIdsResponse {
+  if (!data || typeof data !== 'object') return false
+  const body = data as FollowIdsResponse
+  return Array.isArray(body.personaIds) && body.personaIds.every(id => typeof id === 'string')
 }
 
 /**
@@ -159,10 +182,10 @@ export async function resolveFollowing(personaId: string): Promise<string[]> {
     `/personas/${personaId}/following`,
     USE_MOCK_FOLLOW ? { adapter: followingMockAdapter } : undefined,
   )
-  if (!isStringArray(response.data)) {
+  if (!isFollowIdsResponse(response.data)) {
     throw new Error('resolveFollowing: resolution returned a malformed id list')
   }
-  return response.data
+  return [...response.data.personaIds]
 }
 
 /**
@@ -175,8 +198,8 @@ export async function resolveFollowers(personaId: string): Promise<string[]> {
     `/personas/${personaId}/followers`,
     USE_MOCK_FOLLOW ? { adapter: followersMockAdapter } : undefined,
   )
-  if (!isStringArray(response.data)) {
+  if (!isFollowIdsResponse(response.data)) {
     throw new Error('resolveFollowers: resolution returned a malformed id list')
   }
-  return response.data
+  return [...response.data.personaIds]
 }
