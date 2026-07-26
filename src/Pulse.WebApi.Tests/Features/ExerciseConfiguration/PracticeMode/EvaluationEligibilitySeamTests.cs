@@ -130,7 +130,56 @@ public sealed class EvaluationEligibilitySeamTests
         verdictB.ExerciseId.Should().Be(exerciseB);
     }
 
+    [RequiresDockerFact]
+    public async Task Verdict_AskedRepeatedly_PersistsNothingAndEmitsNoTelemetry()
+    {
+        // Promise 6 of the IEvaluationEligibility contract: "It is a pure read. Asking changes nothing — no
+        // persistence, no telemetry, no lifecycle effect." That is the promise most likely to rot, because
+        // "let's just log every eligibility check" is such a reasonable-sounding future request — and it would
+        // quietly turn E10's export pass into a writer that mutates the very run it is exporting.
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId, practiceMode: true);
+
+        var before = await SnapshotAsync(exerciseId);
+
+        await using var host = await StartHostAsync(exerciseId);
+        for (var i = 0; i < 5; i++)
+        {
+            // A fresh scope each time — the realistic shape of an export asking once per unit of work.
+            var verdict = await GetVerdictAsync(host);
+            verdict.IsEligible.Should().BeFalse("the flag is set and asking must not change it");
+            verdict.Reason.Should().Be(EvaluationEligibilityReason.PracticeExercise);
+        }
+
+        var after = await SnapshotAsync(exerciseId);
+
+        after.TelemetryCount.Should().Be(
+            before.TelemetryCount,
+            "asking whether an exercise is evaluation-eligible is not a meaningful action — it emits NO XC-004 "
+            + "event, no matter how many times it is asked");
+        after.TelemetryCount.Should().Be(0, "no verdict read has ever been an auditable action");
+        after.IsPracticeMode.Should().Be(before.IsPracticeMode, "a pure read never writes the flag back");
+        after.Status.Should().Be(before.Status, "a pure read has no lifecycle effect");
+        after.Name.Should().Be(before.Name);
+    }
+
     // ---- helpers ---------------------------------------------------------------------------------
+
+    /// <summary>The observable state promise 6 says a verdict read must leave untouched.</summary>
+    private sealed record ExerciseSnapshot(bool IsPracticeMode, string Status, string Name, int TelemetryCount);
+
+    private async Task<ExerciseSnapshot> SnapshotAsync(Guid exerciseId)
+    {
+        await using var context = _fixture.CreateContext();
+
+        var exercise = await context.Exercises.AsNoTracking().SingleAsync(e => e.Id == exerciseId);
+        var telemetryCount = await context.TelemetryEvents
+            .IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == exerciseId);
+
+        return new ExerciseSnapshot(exercise.IsPracticeMode, exercise.Status, exercise.Name, telemetryCount);
+    }
+
 
     /// <summary>Resolves the seam from the host's FULLY COMPOSED provider — the point of the AC.</summary>
     private static async Task<EvaluationEligibilityVerdict> GetVerdictAsync(PracticeModeTestHost host)

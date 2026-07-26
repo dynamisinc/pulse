@@ -130,7 +130,10 @@ public sealed class PracticeModeTestHost : IAsyncDisposable
             context.Exercises.Add(new Exercise
             {
                 Id = exerciseId,
-                Name = "Practice Mode Test Exercise",
+                // Leak-word-free by design: the shell-config assertions reject any body containing
+                // "practice"/"sandbox", so a fixture name carrying those words would one day fail on
+                // ITSELF rather than on a real XC-002 leak. See PracticeModeEndpointsTests.SeedExerciseAsync.
+                Name = "Rehearsal Fixture Host Exercise",
                 TimeZone = "UTC",
                 Status = "live",
             });

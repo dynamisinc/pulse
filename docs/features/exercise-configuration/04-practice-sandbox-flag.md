@@ -1,6 +1,10 @@
 # Story: Practice/sandbox flag
 
-**Feature:** Exercise configuration  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Exercise configuration  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+*(The slice is **built and green** — service, endpoints, the `IEvaluationEligibility` seam and the
+COBRA panel all ship with their tests. It stays In Progress because it is **inert in a running app**
+until the orchestrator lands the three mount lines in "Wiring dependency" below; the flip to Complete
+belongs to whoever lands them.)*
 **Requirements:** COR-033  ·  **Design decisions:** none  ·  **Issue:** #70
 
 ## Context
@@ -13,24 +17,54 @@ export) is Phase 4 and does not exist yet**, so the deliverable here is the flag
 tested read seam E10 will filter on — not the export filtering itself.
 
 ## Acceptance Criteria
-- [ ] Given a planner with a staff session, when they flag an exercise practice/sandbox, then the flag
+- [x] Given a planner with a staff session, when they flag an exercise practice/sandbox, then the flag
       persists on that exercise and defaults to off for every exercise that has never been flagged.
-- [ ] Given the flag is set, when a consumer asks whether an exercise's data is evaluation-eligible,
+      *(Proven against real SQL by `PracticeModeEndpointsTests`. **Needs wiring** — the route only
+      exists in a running app once `MapPracticeModeEndpoints()` lands.)*
+- [x] Given the flag is set, when a consumer asks whether an exercise's data is evaluation-eligible,
       then a single documented server-side seam answers it — so E10's export filtering has exactly one
       thing to read and no consumer re-derives the rule.
-- [ ] Given the flag is set, when the exercise runs, then it remains **otherwise fully functional** for
+      *(`IEvaluationEligibility` + `PracticeModeEvaluationEligibility`; the panel renders the server's
+      verdict and never re-derives it. **Needs wiring** — `AddPracticeMode()` is deliberately the only
+      registration, so a missing call is a loud DI failure, never a silent "everything is eligible".)*
+- [x] Given the flag is set, when the exercise runs, then it remains **otherwise fully functional** for
       the rehearsal (no channel, engine or telemetry behavior changes because of the flag).
-- [ ] Given the flag is set, when a staff surface renders, then the practice/sandbox state is clearly
+      *(Held by `FlaggingPracticeMode_LeavesEveryParticipantShellConfigByteIdentical_AndMentionsItNowhere`
+      plus the two telemetry tests: flipping the flag emits exactly the one XC-004 audit event and
+      changes no other telemetry. Independent of wiring.)*
+- [x] Given the flag is set, when a staff surface renders, then the practice/sandbox state is clearly
       indicated — with icon + text, **never color alone** (NFR-001) — so a rehearsal is never mistaken
       for real conduct.
-- [ ] **Isolation / staff-only (XC-001/002):** given the flag, when it is read or written, then it is a
+      *(`faFlask` + "Practice / sandbox" vs `faCircleCheck` + "Real conduct", in a `role="status"`
+      region; gate-1 finding **WR-001** additionally replaced a stock-MUI `warning.*` leak that failed
+      WCAG AA at 3.79:1 with COBRA `notifications.warningText` / `successText` at 7.44:1 / 5.14:1.
+      **Needs wiring** — no staff surface renders it until `<PracticeModePanel />` is mounted.)*
+- [x] **Isolation / staff-only (XC-001/002):** given the flag, when it is read or written, then it is a
       staff-world value scoped by the server-resolved exercise, never exposed on a participant surface
       and never settable from a client-supplied exercise parameter.
-- [ ] **The seam actually resolves:** given a fully composed service provider wired in the orchestrator's
+      *(401/403 fail-closed cases plus the two cross-exercise cases; the client sends no exercise
+      parameter at all. **Needs wiring** for the routes to be reachable.)*
+- [x] **The seam actually resolves:** given a fully composed service provider wired in the orchestrator's
       order, when `IEvaluationEligibility` is resolved, then this story's implementation comes back and
       answers correctly for a flagged and an unflagged exercise — proving `AddPracticeMode()` is
       genuinely wired, not just that the service class works in isolation (a slice can merge fully green
       with its composition-root wiring never executed).
+      *(`ComposedProvider_ResolvesTheSeamAndTheService_InTheOrchestratorsOrder` builds exactly that
+      provider, so the AC as written holds. **It does not yet assert the real `Program.cs`** — the
+      composition-root guard for `AddPracticeMode()` is tracked separately as gate-1 finding W-003 and
+      lands with the wiring.)*
+
+### Wiring dependency (orchestrator-owned — why this is In Progress, not Complete)
+Everything above is built and tested, but **nothing in this story is reachable in a running app yet**.
+Three lines, none of them a builder's to write:
+
+1. `builder.Services.AddPracticeMode();` in `Program.cs` (after `AddExerciseConfiguration()`);
+2. `app.MapPracticeModeEndpoints();` in `Program.cs`;
+3. `<PracticeModePanel />` in `pages/ExerciseSettingsPage.tsx` (plus the barrel + README lines).
+
+ACs 1, 2, 4, 5 and 6 are satisfied by this slice's code and tests; they become **observable in a
+deployed app** only once those land. AC 3 holds regardless. Verified absent at the time of writing:
+`Program.cs` calls neither extension, and the page/barrel carry the mount only as a comment.
 
 ## Out of Scope
 The evaluation export itself and its filtering (E10, Phase 4 — this story only publishes the seam); the
@@ -88,6 +122,9 @@ Story 01 (settings slice + the flag column in its migration). Consumed later by 
 - `Verdict_ForAScopeWithNoExerciseRow_IsNotEligible_FailingClosed` (AC2)
 - `Verdict_IsReadLive_SoFlaggingAnExerciseTakesEffectImmediately` (AC2)
 - `Verdict_InExerciseA_IsUnaffectedByExerciseBsFlag` (AC5)
+- `Verdict_AskedRepeatedly_PersistsNothingAndEmitsNoTelemetry` (AC2, AC3 — pins promise 6 of the
+  `IEvaluationEligibility` contract, "a pure read": five reads leave the flag, the status, the name and the
+  telemetry count all unchanged, so nobody later turns the seam into a writer)
 
 `PracticeModeRegistrationTests` (pure DI, plain `[Fact]`, deliberately OUTSIDE `MsSqlCollection`):
 - `AddPracticeMode_RegistersTheSeamAndTheServiceAtScopedLifetime` (AC6)

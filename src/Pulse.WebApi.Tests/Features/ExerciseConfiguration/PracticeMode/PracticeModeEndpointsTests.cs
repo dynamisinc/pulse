@@ -351,9 +351,18 @@ public sealed class PracticeModeEndpointsTests
         return bodies;
     }
 
+    /// <remarks>
+    /// The fixture name deliberately contains NEITHER "practice" NOR "sandbox".
+    /// <see cref="FlaggingPracticeMode_LeavesEveryParticipantShellConfigByteIdentical_AndMentionsItNowhere"/>
+    /// asserts no shell body contains those words; naming the fixture "Practice Mode Exercise" made that
+    /// assertion pass only because no shell response happens to echo the exercise name today. The moment
+    /// story 02 routes a name into <c>brand-tokens</c> or <c>chrome-config</c>, such a fixture would fail on
+    /// its OWN name rather than on a real XC-002 leak — a false positive that hides the real check. Keep this
+    /// name leak-word-free so the assertion tests only what it claims.
+    /// </remarks>
     private async Task SeedExerciseAsync(Guid exerciseId, bool practiceMode = false)
     {
-        var exercise = ExerciseConfigurationTestData.UnconfiguredExercise(exerciseId, "Practice Mode Exercise");
+        var exercise = ExerciseConfigurationTestData.UnconfiguredExercise(exerciseId, "Rehearsal Fixture Exercise");
         exercise.IsPracticeMode = practiceMode;
 
         await using var context = _fixture.CreateContext();

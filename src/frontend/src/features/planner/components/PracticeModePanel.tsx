@@ -28,6 +28,25 @@
  * `aria-describedby`. Load, save-success and every failure are each announced
  * with an icon + text as well.
  *
+ * COLOR TOKENS — COBRA-NATIVE ONLY, AND MEASURED (gate-1 finding WR-001).
+ * The indicator originally used `warning.main` / `warning.dark`. `cobraTheme`
+ * never defines `palette.warning`, so those resolved to STOCK MUI (#ed6c02 /
+ * #e65100) — a default-MUI palette leak onto a COBRA surface, and at 3.79:1 on
+ * `background.paper` a real WCAG 2.1 AA failure for this ~14px `body2` copy.
+ * The COBRA-native replacements are measured against both staff backgrounds:
+ *
+ *   notifications.warningText #6F4E37 -> 7.44:1 on #ffffff, 7.01:1 on #f8f8f8
+ *   notifications.successText #008000 -> 5.14:1 on #ffffff, 4.84:1 on #f8f8f8
+ *
+ * Both clear the 4.5:1 AA floor for normal-size text on either background.
+ * NOTE the border deliberately reuses these SAME `*Text` tokens rather than the
+ * `notifications.warning` / `notifications.success` pair: those two are pale
+ * FILL tints (#F9F9BE / #AEFBB8, cf. `HomePage.tsx` using them as `bgcolor`)
+ * and would render a 1.09:1 / 1.21:1 border — invisible, silently erasing the
+ * outline of the one block on this page that must be unmissable. Do not "fix"
+ * them back to the tints without also giving the block a matching background,
+ * and if you do, re-measure: #008000 on #AEFBB8 is only 4.23:1 and FAILS AA.
+ *
  * WHAT THE FLAG DOES — AND DELIBERATELY DOES NOT DO. It changes evaluation
  * eligibility and nothing else: channels, engine and telemetry all behave
  * exactly as in real conduct, because a rehearsal that behaves differently is
@@ -122,9 +141,9 @@ function PracticeModeIndicator({ state }: PracticeModeIndicatorProps) {
         mt: 1.5,
         padding: '10px 12px',
         border: '1px solid',
-        borderColor: practice ? 'warning.main' : 'success.main',
+        borderColor: practice ? 'notifications.warningText' : 'notifications.successText',
         borderRadius: 1,
-        color: practice ? 'warning.dark' : 'success.dark',
+        color: practice ? 'notifications.warningText' : 'notifications.successText',
       }}
     >
       <Box component="span" sx={{ mt: '2px' }}>
