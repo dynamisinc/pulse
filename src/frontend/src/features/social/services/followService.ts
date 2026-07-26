@@ -17,7 +17,9 @@
  *     actor from the session; the wire body carries no actor field).
  *     IDEMPOTENT: following an already-followed id, or unfollowing a
  *     non-edge, both succeed — neither is an error the client needs to
- *     handle specially. Refused server-side for a read-only session
+ *     handle specially, but both come back `changed: false`, which a caller
+ *     moving a follower COUNT must respect (see `FollowWriteResult`). Refused
+ *     server-side for a read-only session
  *     (COR-015) — this module's callers (`useFollow`) additionally guard on
  *     the client so a read-only/no-persona session never issues the request
  *     at all.
@@ -124,16 +126,31 @@ const followersMockAdapter: AxiosAdapter = config => {
 const USE_MOCK_FOLLOW = USE_MOCK_DATA
 
 /**
- * The wire shape of a follow/unfollow write response — the server's
- * `FollowStateResponseDto` (`FollowEndpoints.cs`): the caller-observable state
- * of ONE edge after the call. `scenarioTime` is omitted here (only present on
- * a live state CHANGE, COR-053) — this module never reads it, only
- * `following`.
+ * The caller-observable outcome of ONE follow/unfollow write — the server's
+ * `FollowStateResponseDto` (`FollowEndpoints.cs`) minus the fields no client
+ * reads. `scenarioTime` is deliberately omitted (only present on a live state
+ * CHANGE, COR-053), as is the echoed `personaId` (the caller already knows
+ * which target it wrote).
+ *
+ * BOTH fields matter, and they are not the same question (SG-001):
+ *  - `following` — the state of the edge AFTER the call. Authoritative; never
+ *    inferred from "the call didn't throw".
+ *  - `changed` — whether THIS call is what put it there. `false` means the
+ *    write was an idempotent repeat (following an already-followed account,
+ *    unfollowing a non-edge): the server recorded nothing new, emitted no
+ *    XC-004 event, and the target's follower total did NOT move. A caller that
+ *    adjusts a count by ±1 must key that adjustment on this flag, not on its
+ *    own optimistic assumption that a change occurred.
  */
-interface FollowStateResponse {
-  readonly personaId: string
+export interface FollowWriteResult {
+  /** Whether the viewer follows the target AFTER this call — the server's own value. */
   readonly following: boolean
+  /** Whether this call CHANGED the edge (false = idempotent repeat; no count movement). */
   readonly changed: boolean
+}
+
+interface FollowStateResponse extends FollowWriteResult {
+  readonly personaId: string
 }
 
 function isFollowStateResponse(data: unknown): data is FollowStateResponse {
@@ -148,12 +165,13 @@ function isFollowStateResponse(data: unknown): data is FollowStateResponse {
  * server contract. Callers (`useFollow`) are responsible for the client-side
  * read-only/no-persona guard; this function issues the request unconditionally.
  *
- * Returns the server's AUTHORITATIVE `following` value (SG-001) — never
- * assumed to be `true` just because the call didn't throw — so a caller that
- * settles its own optimistic state on this return value self-corrects a
- * client/server divergence instead of trusting its own guess.
+ * Returns the server's AUTHORITATIVE {@link FollowWriteResult} (SG-001) —
+ * never assumed to be `{ following: true, changed: true }` just because the
+ * call didn't throw — so a caller that settles its own optimistic state on
+ * this return value self-corrects a client/server divergence instead of
+ * trusting its own guess.
  */
-export async function followPersona(personaId: string): Promise<boolean> {
+export async function followPersona(personaId: string): Promise<FollowWriteResult> {
   const response = await api.post(
     `/personas/${personaId}/follow`,
     undefined,
@@ -162,16 +180,17 @@ export async function followPersona(personaId: string): Promise<boolean> {
   if (!isFollowStateResponse(response.data)) {
     throw new Error('followPersona: response was not a well-formed follow-state envelope')
   }
-  return response.data.following
+  const { following, changed } = response.data
+  return { following, changed }
 }
 
 /**
  * Unfollows `personaId` as the caller's session-bound persona. Idempotent —
  * unfollowing a non-edge succeeds silently, matching the server contract.
- * Returns the server's authoritative `following` value (SG-001) — see
+ * Returns the server's authoritative {@link FollowWriteResult} (SG-001) — see
  * `followPersona`.
  */
-export async function unfollowPersona(personaId: string): Promise<boolean> {
+export async function unfollowPersona(personaId: string): Promise<FollowWriteResult> {
   const response = await api.delete(
     `/personas/${personaId}/follow`,
     USE_MOCK_FOLLOW ? { adapter: unfollowMockAdapter } : undefined,
@@ -179,7 +198,8 @@ export async function unfollowPersona(personaId: string): Promise<boolean> {
   if (!isFollowStateResponse(response.data)) {
     throw new Error('unfollowPersona: response was not a well-formed follow-state envelope')
   }
-  return response.data.following
+  const { following, changed } = response.data
+  return { following, changed }
 }
 
 /**

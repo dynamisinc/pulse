@@ -24,11 +24,15 @@
  *    count bumped) when the server never recorded the edge. On a RESOLVED
  *    request (SG-001), this hook does NOT simply trust its own optimistic
  *    guess — it settles `isFollowing`/`followerCount` on the server's
- *    AUTHORITATIVE `following` value (`FollowStateResponseDto.following`,
- *    returned by both `followPersona`/`unfollowPersona`), so a client/server
- *    divergence (e.g. a stale double-tap racing another tab/session) never
- *    leaves the button showing a state the server disagrees with — it
- *    self-corrects instead of asserting the optimistic guess was right. While
+ *    AUTHORITATIVE `FollowWriteResult` (`FollowStateResponseDto`'s `following`
+ *    AND `changed`, returned by both `followPersona`/`unfollowPersona`), so a
+ *    client/server divergence (e.g. a stale double-tap racing another
+ *    tab/session) never leaves the button showing a state the server disagrees
+ *    with — it self-corrects instead of asserting the optimistic guess was
+ *    right. The COUNT specifically moves only when the server reports
+ *    `changed: true`: an idempotent repeat (a follow the server already had an
+ *    edge for) settles the count back to where it started rather than
+ *    inventing a follower nobody gained. While
  *    a toggle is in flight (`pending`), a second `toggleFollow()` call is a
  *    no-op — this avoids two overlapping optimistic mutations racing each
  *    other's rollback.
@@ -165,18 +169,30 @@ export function useFollow(options: UseFollowOptions): UseFollowResult {
     const write = nextFollowing ? followPersona(personaId) : unfollowPersona(personaId)
 
     write
-      .then(serverFollowing => {
+      .then(({ following: serverFollowing, changed }) => {
         if (requestTokenRef.current !== token) return
-        // SG-001: settle on the server's AUTHORITATIVE value rather than
+        // SG-001: settle on the server's AUTHORITATIVE values rather than
         // trusting the optimistic guess was right. In the ordinary case
-        // `serverFollowing === nextFollowing` and this is a same-value
-        // re-set (no visible change); on a genuine divergence it corrects
-        // both the toggle state and the count derived from it, still
-        // computed off the PRE-toggle count since the server has no count to
-        // return.
+        // `serverFollowing === nextFollowing` and `changed` is true, so this
+        // is a same-value re-set (no visible change); on a genuine divergence
+        // it corrects both the toggle state and the count derived from it,
+        // still computed off the PRE-toggle count since the server returns no
+        // count of its own.
         setIsFollowing(serverFollowing)
+        // `changed === false` is an IDEMPOTENT REPEAT — the server recorded
+        // nothing, so the target's follower total did not move and the count
+        // must return to exactly what it was. Without this branch the settle
+        // step re-applies `previousCount ± 1` off the optimistic ASSUMPTION
+        // that a change occurred, phantom-ing a follower onto (or off) a
+        // profile that never gained (or lost) one. Keying the ±1 on the
+        // server's own flag makes that structurally impossible rather than
+        // merely unreachable-if-the-seed-is-right.
         setFollowerCount(
-          serverFollowing ? previousCount + 1 : Math.max(0, previousCount - 1),
+          !changed
+            ? previousCount
+            : serverFollowing
+              ? previousCount + 1
+              : Math.max(0, previousCount - 1),
         )
         setPending(false)
       })

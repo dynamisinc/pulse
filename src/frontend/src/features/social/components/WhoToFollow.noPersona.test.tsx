@@ -9,8 +9,13 @@
  * the sibling specs.
  */
 import { render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/core/auth'
+// Imported from the STORE, not from the (mocked) `followService` barrel above:
+// the suggestion mock adapter now reads this shared graph directly to exclude
+// already-followed accounts BEFORE applying `?limit=` (WR-001), so the seeded
+// default edges would otherwise trim rows this spec is counting.
+import { resetMockFollowEdges } from '../services/followEdgeStore'
 import { WhoToFollow } from './WhoToFollow'
 
 const NO_PERSONA_SESSION: Session = {
@@ -32,6 +37,12 @@ vi.mock('../services/followService', () => ({
   unfollowPersona: vi.fn(),
   resolveFollowing: vi.fn().mockResolvedValue([]),
 }))
+
+beforeEach(() => {
+  // A genuinely empty mock follow graph, so the row count below is about the
+  // self-exclusion rule and nothing else.
+  resetMockFollowEdges()
+})
 
 afterEach(() => {
   vi.clearAllMocks()

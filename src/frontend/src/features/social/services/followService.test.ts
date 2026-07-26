@@ -38,8 +38,16 @@ describe('followPersona / unfollowPersona / resolveFollowing (shipped mock path)
   })
 
   it('is idempotent: following twice does not throw and does not duplicate the edge', async () => {
-    await followPersona('persona-fairhavenwater')
-    await expect(followPersona('persona-fairhavenwater')).resolves.toBe(true)
+    // The FIRST write changes the edge; the second reports `changed: false`, which
+    // is what stops `useFollow` bumping the follower count a second time (SG-001).
+    await expect(followPersona('persona-fairhavenwater')).resolves.toEqual({
+      following: true,
+      changed: true,
+    })
+    await expect(followPersona('persona-fairhavenwater')).resolves.toEqual({
+      following: true,
+      changed: false,
+    })
 
     const following = await resolveFollowing('persona-dreyes_fh')
     expect(following.filter(id => id === 'persona-fairhavenwater')).toHaveLength(1)
@@ -54,7 +62,10 @@ describe('followPersona / unfollowPersona / resolveFollowing (shipped mock path)
   })
 
   it('is idempotent: unfollowing a non-edge does not throw', async () => {
-    await expect(unfollowPersona('persona-never-followed')).resolves.toBe(false)
+    await expect(unfollowPersona('persona-never-followed')).resolves.toEqual({
+      following: false,
+      changed: false,
+    })
   })
 
   it('resolveFollowers reflects the same edge from the followed side', async () => {
@@ -132,24 +143,53 @@ describe('followPersona / unfollowPersona (boundary-mocked wire contract)', () =
   // `FollowStateResponseDto` (`personaId`/`following`/`changed`) for BOTH the
   // state-changing and idempotent-repeat case — never a bare 204/undefined
   // body (SG-001/SG-002 fold). These bodies mirror that envelope exactly.
-  it('POSTs /personas/{id}/follow with no client-supplied actor in the body, and returns the server\'s `following`', async () => {
+  it('POSTs /personas/{id}/follow with no client-supplied actor in the body, and returns the server\'s state', async () => {
     const spy = vi.spyOn(api, 'post').mockResolvedValue(
       apiBody({ personaId: 'persona-x', following: true, changed: true }),
     )
-    await expect(followPersona('persona-x')).resolves.toBe(true)
+    await expect(followPersona('persona-x')).resolves.toEqual({ following: true, changed: true })
     expect(spy).toHaveBeenCalledWith('/personas/persona-x/follow', undefined, expect.anything())
   })
 
-  it('DELETEs /personas/{id}/follow, and returns the server\'s `following`', async () => {
+  it('DELETEs /personas/{id}/follow, and returns the server\'s state', async () => {
     const spy = vi.spyOn(api, 'delete').mockResolvedValue(
       apiBody({ personaId: 'persona-x', following: false, changed: true }),
     )
-    await expect(unfollowPersona('persona-x')).resolves.toBe(false)
+    await expect(unfollowPersona('persona-x')).resolves.toEqual({
+      following: false,
+      changed: true,
+    })
     expect(spy).toHaveBeenCalledWith('/personas/persona-x/follow', expect.anything())
+  })
+
+  // `changed` is RELAYED, not inferred (SG-001): an idempotent repeat comes back
+  // `200 { following: true, changed: false }`, and `useFollow` keys its follower
+  // ±1 on that flag. A service that dropped the field would put the hook back to
+  // assuming its own optimistic guess was a real state change.
+  it('relays `changed: false` from an idempotent repeat rather than discarding it', async () => {
+    vi.spyOn(api, 'post').mockResolvedValue(
+      apiBody({ personaId: 'persona-x', following: true, changed: false }),
+    )
+    await expect(followPersona('persona-x')).resolves.toEqual({ following: true, changed: false })
+  })
+
+  it('relays `changed: false` from unfollowing a non-edge', async () => {
+    vi.spyOn(api, 'delete').mockResolvedValue(
+      apiBody({ personaId: 'persona-x', following: false, changed: false }),
+    )
+    await expect(unfollowPersona('persona-x')).resolves.toEqual({
+      following: false,
+      changed: false,
+    })
   })
 
   it('fails closed when followPersona gets a body with no `following` boolean', async () => {
     vi.spyOn(api, 'post').mockResolvedValue(apiBody({ personaId: 'persona-x' }))
+    await expect(followPersona('persona-x')).rejects.toThrow()
+  })
+
+  it('fails closed when the body carries `following` but no `changed` flag', async () => {
+    vi.spyOn(api, 'post').mockResolvedValue(apiBody({ personaId: 'persona-x', following: true }))
     await expect(followPersona('persona-x')).rejects.toThrow()
   })
 

@@ -48,20 +48,23 @@
  * platform itself never vouches for, nor warns against, any entry here.
  *
  * EXCLUSIONS ARE APPLIED TWICE, AND THAT IS DELIBERATE. As of backend story
- * 08 the SERVER already excludes the viewer's own persona and everything the
- * viewer already follows (it resolves the viewer from the session, never from
- * a client field), so this module relays a list those rules have already been
- * applied to. `useWhoToFollow` re-applies both anyway: they are cheap set
- * operations, they keep the module correct against the mock adapter below
- * (which is viewer-agnostic), and they mean a just-completed follow write
- * disappears from the rendered list immediately rather than at the next
- * fetch. Neither layer is a ranking — see the note above.
+ * 08 the SERVER excludes the viewer's own persona and everything the viewer
+ * already follows (it resolves the viewer from the session, never from a
+ * client field) and only THEN applies `limit`, so a capped read always yields
+ * `limit` renderable rows. The mock adapter below now does the same thing in
+ * the same order (WR-001) — see its own note. `useWhoToFollow` re-applies both
+ * exclusions anyway: they are cheap set operations, and they mean a
+ * just-completed follow write disappears from the rendered list immediately
+ * rather than at the next fetch. Because both layers now exclude BEFORE the
+ * cap, the second pass is a no-op on a freshly fetched list rather than a
+ * silent row-count reducer. Neither layer is a ranking — see the note above.
  */
 
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { personaIdForHandle } from '@/features/personas'
+import { MOCK_VIEWER_PERSONA_ID, mockFollowedSet } from './followEdgeStore'
 
 /**
  * MOCK SCAFFOLD default suggestion order (dev/test/UAT-no-backend only) — a
@@ -95,13 +98,29 @@ const MOCK_SUGGESTED_FOLLOW_IDS: readonly string[] = [
  * typed against an envelope, two disconnected follow stores, a `204` mock for
  * a `200` endpoint), and a mock that ignored `limit` while the server applied
  * it would be the next one.
+ *
+ * VIEWER-AWARE, AND IT EXCLUDES *BEFORE* IT CAPS (WR-001). This adapter used
+ * to be viewer-agnostic: it sliced the raw seed order first and left both
+ * exclusions to `useWhoToFollow`, which re-applied them AFTER the cap. Mock
+ * and live therefore disagreed the moment the viewer followed one of the first
+ * `limit` suggestions — the server (`SuggestionService.BuildSuggestionQuery`)
+ * excludes self + already-followed and only then `Take(limit)`, so live keeps
+ * rendering `limit` rows while mock rendered `limit - 1`, then `limit - 2`,
+ * then none. They coincided only by accident of where the seeded follow edges
+ * happened to sit in the fixture order. So the mock reads the SAME shared
+ * `followEdgeStore` that `followService`'s own adapters read and write (there
+ * is exactly one mock follow graph, by design — the WR-004 fold), applies both
+ * exclusions, and slices what is left. Mirroring the server's ORDER OF
+ * OPERATIONS is the contract here, not just its filter set.
  */
 const mockAdapter: AxiosAdapter = config => {
   const limit = limitFromUrl(config.url)
+  const alreadyFollowing = mockFollowedSet(MOCK_VIEWER_PERSONA_ID)
+  const eligible = MOCK_SUGGESTED_FOLLOW_IDS.filter(
+    id => id !== MOCK_VIEWER_PERSONA_ID && !alreadyFollowing.has(id),
+  )
   return Promise.resolve({
-    data: limit === undefined
-      ? MOCK_SUGGESTED_FOLLOW_IDS
-      : MOCK_SUGGESTED_FOLLOW_IDS.slice(0, limit),
+    data: limit === undefined ? eligible : eligible.slice(0, limit),
     status: 200,
     statusText: 'OK',
     headers: {},
@@ -133,10 +152,10 @@ function isStringArray(data: unknown): data is string[] {
  * `limit` is a server-applied CAP, not a ranking hint: the server returns the
  * first `limit` entries of the SAME order it would otherwise return in full
  * (`profiles-social-graph/08`), so a capped read is a strict prefix of an
- * uncapped one. Omitted → the whole eligible set. The server also applies the
- * self / already-followed exclusions the caller applies again locally, so a
- * cap never silently costs a renderable row to an entry the client would have
- * dropped anyway.
+ * uncapped one. Omitted → the whole eligible set. Both transports — the live
+ * server and the mock adapter above — apply the self / already-followed
+ * exclusions BEFORE the cap, so a cap never silently costs a renderable row to
+ * an entry the caller would have dropped anyway.
  */
 export async function resolveSuggestedFollowIds(limit?: number): Promise<string[]> {
   const response = await api.get<string[]>(

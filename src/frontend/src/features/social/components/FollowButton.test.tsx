@@ -25,6 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SessionProvider } from '@/core/auth'
 import { FollowButton } from './FollowButton'
 import { followPersona, unfollowPersona } from '../services/followService'
+import type { FollowWriteResult } from '../services/followService'
 
 vi.mock('../services/followService', () => ({
   followPersona: vi.fn(),
@@ -36,10 +37,11 @@ function withSession(children: ReactNode) {
 }
 
 beforeEach(() => {
-  // Resolves with the server's authoritative `following` value (SG-001) —
-  // `true` for a follow, `false` for an unfollow.
-  vi.mocked(followPersona).mockResolvedValue(true)
-  vi.mocked(unfollowPersona).mockResolvedValue(false)
+  // Resolves with the server's authoritative envelope (SG-001) — `following`
+  // `true` for a follow / `false` for an unfollow, with `changed: true` because
+  // each write really moves the edge.
+  vi.mocked(followPersona).mockResolvedValue({ following: true, changed: true })
+  vi.mocked(unfollowPersona).mockResolvedValue({ following: false, changed: true })
 })
 
 afterEach(() => {
@@ -107,7 +109,9 @@ describe('FollowButton — toggle + accessible state (SOC-051, NFR-001)', () => 
   it('marks the button aria-busy + disabled while the write is pending', async () => {
     let releaseWrite: (() => void) | undefined
     vi.mocked(followPersona).mockImplementation(
-      () => new Promise<boolean>(resolve => { releaseWrite = () => resolve(true) }),
+      () => new Promise<FollowWriteResult>(resolve => {
+        releaseWrite = () => resolve({ following: true, changed: true })
+      }),
     )
 
     withSession(
