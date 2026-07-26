@@ -40,7 +40,8 @@ This story makes story 04 real rather than mock-only.
       archetype-derived value — story 06 closed that machine-readable impersonator tell on the
       participant wire and this story does not reopen it.
 - [x] **`limit` supported** (the mount uses `limit={3}`), and threaded from the client so the wire
-      carries only the rows that will be rendered. **Partially delivered — see the note in As-built 4.**
+      carries only the rows that will be rendered — **all three hops, reaching production**:
+      `<WhoToFollow limit={3}>` → `useWhoToFollow(limit)` → `?limit=3`. See As-built 4.
 - [x] **Fails closed on the boundary that is one** — unresolved exercise scope `401`; a session bound
       to *another* exercise `403`. A caller with **no** persona binding is **served** the
       un-personalized in-scope list (`200`), not refused — resolved by the coordinator, reasoning
@@ -50,8 +51,8 @@ This story makes story 04 real rather than mock-only.
 
 ## Out of Scope
 The `<WhoToFollow>` module UI (story 04 — already built; the only frontend files this story touches are
-`services/whoToFollowService.ts` and `hooks/useWhoToFollow.ts`, for the `limit` thread, plus their
-tests). The E7 CTL-021 write path that lets a controller add/remove/reorder
+`services/whoToFollowService.ts`, `hooks/useWhoToFollow.ts` and the one-line `limit` hand-off in
+`components/WhoToFollow.tsx`, for the `limit` thread, plus their tests). The E7 CTL-021 write path that lets a controller add/remove/reorder
 suggestions live (`world-steering/01`, Not Started) — this story only reads. The portal placement
 (E3, Phase 3). Follow mechanics themselves (story 07). Flipping `VITE_USE_MOCK_DATA` off (orchestrator-owned).
 
@@ -87,29 +88,32 @@ seam-freeze wave.
    non-integer, is a `400` — never silently ignored, which would serve *more* rows than the caller
    asked for and hide the typo. A capped response is a strict **prefix** of the uncapped one.
 
-   **Client threading — DONE for two of three hops; the third is blocked and NOT delivered.**
-   `resolveSuggestedFollowIds(limit?)` now puts `?limit=N` on the wire and `useWhoToFollow(limit?)`
-   forwards it (both with tests, and the **mock adapter honours the same parameter** — it parses
-   `?limit=` back out of the URL the live path sends, so a `?limit=` vs `?count=` mismatch fails in
-   mock too; mock/live divergence is this feature's most productive defect class).
+   **Client threading — ALL THREE HOPS DONE; the cap is reached in production.**
+   `resolveSuggestedFollowIds(limit?)` puts `?limit=N` on the wire, `useWhoToFollow(limit?)` forwards
+   it, and `WhoToFollow.tsx` passes its `limit` prop straight into the hook — so the mounted
+   `<WhoToFollow limit={3}>` in `SocialChannel` really does send `?limit=3` and the whole cast is no
+   longer fetched to render three rows. (An earlier revision of this file recorded the third hop as
+   outstanding, with the parameter "unused in production and the fetch still uncapped". That was true
+   when written and is **no longer true**; the one-line change landed in `WhoToFollow.tsx`, which keeps
+   its own display slice as a belt-and-braces bound on what it renders.) The **mock adapter honours the
+   same parameter** — it parses `?limit=` back out of the URL the live path sends, so a `?limit=` vs
+   `?count=` mismatch fails in mock too; mock/live divergence is this feature's most productive defect
+   class.
 
-   **The last hop is one line in `WhoToFollow.tsx`, which the change was scoped out of.** The cap is
-   a *component prop* (`<WhoToFollow limit={3}>` at `SocialChannel`), and the component calls
-   `useWhoToFollow()` with no argument, slicing after resolution:
+   **The exclusion/cap ORDER is part of the contract (WR-001).** The server excludes self +
+   already-followed and only then `Take(limit)`, so a capped read always carries `limit` renderable
+   rows. The mock adapter originally capped FIRST and left both exclusions to `useWhoToFollow`, which
+   re-applies them after the fetch — so the moment a participant followed one of the first three
+   suggestions and the module remounted, mock rendered two rows, then one, then none, while live
+   rendered three throughout. The adapter is now viewer-aware (it reads the shared `followEdgeStore`
+   the follow mock already writes) and excludes before it slices. Pinned by
+   `whoToFollowService.test.ts`'s WR-001 block and `useWhoToFollow.mockParity.test.ts`.
 
-   ```tsx
-   // WhoToFollow.tsx:94 — as it stands
-   const { suggestions, loading, error } = useWhoToFollow()
-   // what closes the loop
-   const { suggestions, loading, error } = useWhoToFollow(limit)
-   ```
-
-   Until that lands the parameter is **unused in production and the fetch is still uncapped** — the
-   plumbing is real and tested, but it is not yet reached, and this story must not be read as having
-   delivered the saving. (One behavioural consequence to weigh when making that change: the hook skips
-   ids `usePersonas()` cannot resolve, so a server-side cap of 3 renders fewer than 3 rows if one of
-   the three is unresolvable, where an uncapped fetch would backfill. Harmless at Phase-1 scale, but
-   it is a real difference, not a pure optimization.)
+   One residual behavioural note, unchanged: the hook skips ids `usePersonas()` cannot resolve, so a
+   server-side cap of 3 would render fewer than 3 rows if one of the three were unresolvable, where an
+   uncapped fetch would backfill. In practice the suggestion set is a strict subset of the persona-read
+   id set from the same exercise-scoped cast (As-built 5 pins the id shape), so an unresolvable id
+   would itself be a bug rather than a case to design around.
 5. **`Guid.ToString()` runs in C#, never in the LINQ projection.** SQL Server renders a
    `uniqueidentifier` in UPPERCASE, so translating the conversion into the query would return ids that
    no longer string-match the lowercase ids `GET /api/personas` emits — `useWhoToFollow` would silently
@@ -201,10 +205,19 @@ the scope or the viewer's persona.
 Frontend (vitest), for the client half of the same AC:
 - `whoToFollowService.test.ts` — "caps the shipped mock path to a strict PREFIX of the uncapped order",
   "honours the cap in MOCK mode too, so mock and live cannot disagree", "returns the whole eligible set
-  when no cap is given", "puts the cap on the wire as ?limit=N, the key the server reads", "sends no
-  query string at all when no cap is given"
+  when no cap is given", plus the **WR-001** block: "still returns `limit` ids after the viewer follows
+  one of the first suggestions", "holds for every one of the first `limit` suggestions in turn, never
+  draining the module", "drops a followed account from the UNCAPPED read too, without reordering the
+  rest", "restores the suggestion once the viewer unfollows it"
+- `whoToFollowService.live.test.ts` — the LIVE branch (`USE_MOCK_DATA = false`): "puts the cap on the
+  wire as ?limit=N — the key the server reads", "GETs /personas/suggestions with NO axios config —
+  never the mock adapter", "sends no query string at all when no cap is given". The mock-mode file's
+  own "wire contract" block cannot cover this: it runs with `USE_MOCK_DATA` true, so its
+  `expect.anything()` config matcher was asserting the mock call shape.
 - `useWhoToFollow.test.ts` — "passes `limit` through to the read, so the SERVER caps the wire", "sends
   no cap when none is given — the whole eligible set, exactly as before", "re-reads when the cap changes"
+- `useWhoToFollow.mockParity.test.ts` — against the SHIPPED seams: a capped read still yields `limit`
+  rows after the viewer follows the top suggestion and the module remounts (the third hop, end to end)
 
 **Cross-exercise isolation (AC6, always-Critical)**
 - `SuggestionEndpointTests.Suggestions_NeverContainAnotherExercisesPersona_AndTheRowsProvablyExist` [docker]

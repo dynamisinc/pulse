@@ -8,12 +8,30 @@
  *     verified and unverified accounts (no filter by verification status);
  *   - the BOUNDARY-mocked path (mirrors `followService.test.ts`) asserts the
  *     exact wire contract — `GET /personas/suggestions` — and that a
- *     malformed body fails closed.
+ *     malformed body fails closed;
+ *   - the mock adapter EXCLUDES BEFORE IT CAPS, exactly as the server does
+ *     (WR-001) — see that describe's own note for why this is the divergence
+ *     that mattered.
+ *
+ * The LIVE branch of the same wire contract (`USE_MOCK_DATA = false`, the real
+ * request shape and config) lives in the sibling `whoToFollowService.live.test.ts`
+ * — `vi.mock('@/core/config/mockData', ...)` is hoisted to the whole module, so
+ * it cannot share a file with these mock-mode specs.
+ *
+ * Every spec here starts from a genuinely EMPTY mock follow graph
+ * (`resetMockFollowEdges()`), so the assertions below are about the seeded
+ * suggestion order itself rather than about which accounts the store happens to
+ * pre-follow for the viewer.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/core/services/api'
 import { personaIdForHandle } from '@/features/personas'
+import { followPersona, unfollowPersona, resetMockFollowEdges } from './followService'
 import { resolveSuggestedFollowIds } from './whoToFollowService'
+
+beforeEach(() => {
+  resetMockFollowEdges()
+})
 
 /** Casts an arbitrary body into the shape `api.get`'s mock return expects. */
 function apiBody(data: unknown): Awaited<ReturnType<typeof api.get>> {
@@ -68,6 +86,64 @@ describe('resolveSuggestedFollowIds — the server-applied `limit` cap (backend 
   it('returns the whole eligible set when no cap is given', async () => {
     const all = await resolveSuggestedFollowIds()
     expect(all.length).toBeGreaterThan(3)
+  })
+})
+
+describe('the mock adapter excludes already-followed accounts BEFORE it caps (WR-001)', () => {
+  // THE POINT OF THIS BLOCK. The server excludes self + already-followed and
+  // only THEN `Take(limit)`, so a live `?limit=3` always yields three
+  // renderable rows. The mock used to slice the raw seed order first and leave
+  // the exclusions to `useWhoToFollow`, which re-applied them AFTER the cap —
+  // so following one of the first three suggestions made the module render 2
+  // rows, then 1, then 0, where live kept rendering 3. The two agreed only by
+  // accident of where the seeded follow edges sat in the fixture order.
+
+  it('still returns `limit` ids after the viewer follows one of the first suggestions', async () => {
+    const before = await resolveSuggestedFollowIds(3)
+    expect(before).toHaveLength(3)
+
+    const justFollowed = before[0]
+    if (justFollowed === undefined) throw new Error('expected a first suggestion to follow')
+    await followPersona(justFollowed)
+
+    const after = await resolveSuggestedFollowIds(3)
+    expect(after).toHaveLength(3)
+    expect(after).not.toContain(justFollowed)
+  })
+
+  it('holds for every one of the first `limit` suggestions in turn, never draining the module', async () => {
+    // Follows the CURRENT top suggestion three times over — the exact sequence
+    // a participant produces by tapping Follow on the first row repeatedly.
+    for (let round = 0; round < 3; round += 1) {
+      const rows = await resolveSuggestedFollowIds(3)
+      expect(rows).toHaveLength(3)
+      const top = rows[0]
+      if (top === undefined) throw new Error('expected a suggestion to follow')
+      await followPersona(top)
+    }
+
+    expect(await resolveSuggestedFollowIds(3)).toHaveLength(3)
+  })
+
+  it('drops a followed account from the UNCAPPED read too, without reordering the rest', async () => {
+    const all = await resolveSuggestedFollowIds()
+    const followed = personaIdForHandle('FairhavenWaterUpd')
+    await followPersona(followed)
+
+    const after = await resolveSuggestedFollowIds()
+    expect(after).not.toContain(followed)
+    expect(after).toEqual(all.filter(id => id !== followed))
+  })
+
+  it('restores the suggestion once the viewer unfollows it — the store is the single source', async () => {
+    const all = await resolveSuggestedFollowIds()
+    const followed = personaIdForHandle('FulcoEM')
+
+    await followPersona(followed)
+    expect(await resolveSuggestedFollowIds()).not.toContain(followed)
+
+    await unfollowPersona(followed)
+    expect(await resolveSuggestedFollowIds()).toEqual(all)
   })
 })
 

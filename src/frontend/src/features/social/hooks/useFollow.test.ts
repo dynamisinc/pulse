@@ -10,7 +10,9 @@
  *   - no client-side telemetry is emitted — the server is the sole XC-004
  *     emitter for a follow/unfollow state change;
  *   - a second `toggleFollow()` call while a write is in flight is a no-op
- *     (prevents two overlapping optimistic mutations racing each other).
+ *     (prevents two overlapping optimistic mutations racing each other);
+ *   - an IDEMPOTENT write (`changed: false`) settles the follower count back to
+ *     where it started instead of phantom-ing a ±1 (SG-001).
  *
  * (The observer/no-persona "control absent" ACs — COR-015/D1-011 — live in
  * the sibling `useFollow.readonly.test.ts` / `useFollow.noPersona.test.ts`,
@@ -30,6 +32,7 @@ import { SessionProvider } from '@/core/auth'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { useFollow } from './useFollow'
 import { followPersona, unfollowPersona } from '../services/followService'
+import type { FollowWriteResult } from '../services/followService'
 
 vi.mock('../services/followService', () => ({
   followPersona: vi.fn(),
@@ -42,12 +45,14 @@ function wrapper({ children }: { children: ReactNode }) {
 
 beforeEach(() => {
   resetTelemetryBuffer()
-  // Resolves with the server's authoritative `following` value (SG-001) —
-  // `true` for a follow, `false` for an unfollow — matching the optimistic
-  // guess in every test below (the reconciliation-on-divergence path has its
-  // own coverage in `useFollow.rollback.test.ts`'s retry case).
-  vi.mocked(followPersona).mockResolvedValue(true)
-  vi.mocked(unfollowPersona).mockResolvedValue(false)
+  // Resolves with the server's authoritative envelope (SG-001) — `following`
+  // `true` for a follow / `false` for an unfollow, `changed: true` because the
+  // write really moved the edge — matching the optimistic guess in every test
+  // below. (The reconciliation-on-divergence path has its own coverage in
+  // `useFollow.rollback.test.ts`'s retry case; the idempotent
+  // `changed: false` path has its own describe at the bottom of this file.)
+  vi.mocked(followPersona).mockResolvedValue({ following: true, changed: true })
+  vi.mocked(unfollowPersona).mockResolvedValue({ following: false, changed: true })
 })
 
 afterEach(() => {
@@ -138,7 +143,9 @@ describe('useFollow — follow/unfollow + optimistic count (SOC-051)', () => {
   it('ignores a second toggleFollow() call while the first write is still pending', async () => {
     let releaseWrite: (() => void) | undefined
     vi.mocked(followPersona).mockImplementation(
-      () => new Promise<boolean>(resolve => { releaseWrite = () => resolve(true) }),
+      () => new Promise<FollowWriteResult>(resolve => {
+        releaseWrite = () => resolve({ following: true, changed: true })
+      }),
     )
 
     const { result } = renderHook(
@@ -162,6 +169,86 @@ describe('useFollow — follow/unfollow + optimistic count (SOC-051)', () => {
       await Promise.resolve()
     })
     await waitFor(() => expect(result.current.pending).toBe(false))
+  })
+})
+
+describe('useFollow — an IDEMPOTENT write never moves the count (SG-001)', () => {
+  // The server answers a repeat follow with `{ following: true, changed: false }`:
+  // the edge already existed, nothing was recorded, no XC-004 event fired, and the
+  // target's follower total did NOT move. The seeded count already includes that
+  // edge, so re-applying the optimistic +1 at settle time would show a follower
+  // the profile never gained. Keying the ±1 on the server's own `changed` flag is
+  // what makes that structurally impossible rather than seed-dependent.
+
+  it('settles the count back to the seed when the server reports changed: false', async () => {
+    vi.mocked(followPersona).mockResolvedValue({ following: true, changed: false })
+
+    const { result } = renderHook(
+      () => useFollow({ personaId: 'persona-fairhavenwater', initialFollowerCount: 120 }),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.canFollow).toBe(true))
+
+    act(() => result.current.toggleFollow())
+    // The optimistic bump is still correct to show — the client cannot know yet.
+    expect(result.current.followerCount).toBe(121)
+
+    await waitFor(() => expect(result.current.pending).toBe(false))
+    // ...and it is taken back once the server says it changed nothing.
+    expect(result.current.followerCount).toBe(120)
+    // The BUTTON still shows Following: the edge does exist, it just wasn't this
+    // call that made it. State and count answer different questions.
+    expect(result.current.isFollowing).toBe(true)
+  })
+
+  it('settles the count back to the seed on an idempotent UNFOLLOW too', async () => {
+    vi.mocked(unfollowPersona).mockResolvedValue({ following: false, changed: false })
+
+    const { result } = renderHook(
+      () => useFollow({
+        personaId: 'persona-fairhavenwater',
+        initialFollowerCount: 120,
+        initiallyFollowing: true,
+      }),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.canFollow).toBe(true))
+
+    act(() => result.current.toggleFollow())
+    expect(result.current.followerCount).toBe(119)
+
+    await waitFor(() => expect(result.current.pending).toBe(false))
+    expect(result.current.followerCount).toBe(120)
+    expect(result.current.isFollowing).toBe(false)
+  })
+
+  it('a follow whose repeat is idempotent leaves the count stable across BOTH taps', async () => {
+    // Tap 1 genuinely follows (+1). Tap 2 (after an unfollow that the server had
+    // already applied elsewhere, say) comes back idempotent — the count must not
+    // drift a second time. Two writes, exactly one count movement.
+    vi.mocked(followPersona)
+      .mockResolvedValueOnce({ following: true, changed: true })
+      .mockResolvedValue({ following: true, changed: false })
+    vi.mocked(unfollowPersona).mockResolvedValue({ following: false, changed: true })
+
+    const { result } = renderHook(
+      () => useFollow({ personaId: 'persona-x', initialFollowerCount: 10 }),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.canFollow).toBe(true))
+
+    act(() => result.current.toggleFollow())
+    await waitFor(() => expect(result.current.pending).toBe(false))
+    expect(result.current.followerCount).toBe(11)
+
+    act(() => result.current.toggleFollow()) // unfollow, changed: true
+    await waitFor(() => expect(result.current.pending).toBe(false))
+    expect(result.current.followerCount).toBe(10)
+
+    act(() => result.current.toggleFollow()) // follow again, changed: false
+    await waitFor(() => expect(result.current.pending).toBe(false))
+    expect(result.current.followerCount).toBe(10)
+    expect(result.current.isFollowing).toBe(true)
   })
 })
 

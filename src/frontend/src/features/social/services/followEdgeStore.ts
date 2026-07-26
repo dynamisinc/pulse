@@ -39,8 +39,14 @@
  * touching anyone else's edges.
  *
  * NEVER imported by a shipped read path directly — always through
- * `followService`'s or `feedService`'s own exported functions (mirrors
- * `postStore`'s own caveat).
+ * `followService`'s, `feedService`'s or `whoToFollowService`'s own exported
+ * functions (mirrors `postStore`'s own caveat). Those three modules' MOCK
+ * ADAPTERS are this store's only readers: `whoToFollowService`'s joined them
+ * in the WR-001 fold, so its suggestion mock can exclude the viewer's own
+ * persona and everything they already follow BEFORE applying `?limit=` —
+ * exactly the order `SuggestionService` uses server-side. A fourth mock that
+ * needs follow state belongs here too, not in a private copy: the whole reason
+ * this module exists is that two private copies once drifted.
  */
 
 // Imported from the LEAF module (`personas/types`) rather than the

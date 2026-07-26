@@ -16,11 +16,11 @@
  *    run in parallel, mirroring `useFeed`'s posts+personas convergence.
  *  - Forwarding an optional `limit` to the read so the SERVER caps the wire
  *    (backend story 08) instead of the whole cast being fetched and sliced
- *    away. NOTE: `<WhoToFollow limit={n}>` still applies its own display slice
- *    and does NOT yet pass its prop here — that one-line hop lives in
- *    `WhoToFollow.tsx`, outside this change's permitted file set. Until it
- *    lands, this parameter is unused in production and the fetch stays
- *    uncapped, exactly as before.
+ *    away. This IS reached in production: `<WhoToFollow limit={n}>` passes its
+ *    prop straight through (`WhoToFollow.tsx`), so the mounted `limit={3}` in
+ *    `SocialChannel` puts `?limit=3` on the wire — the cap is no longer
+ *    plumbing that nothing calls. The component keeps its own display slice as
+ *    a belt-and-braces bound on what it renders.
  *  - THE TWO EXCLUSIONS (neither is a ranking — both are
  *    "would this row even make sense"):
  *      1. never suggest the viewer's OWN persona (a session with no bound
@@ -32,6 +32,12 @@
  *    verified-first bias. The SOC-052 impersonator is excluded ONLY if one of
  *    the two rules above applies to it (never because it is unverified) —
  *    D1-R1/D1-008.
+ *    BOTH exclusions also run in the READ, before any `limit` cap — server-side
+ *    live (`SuggestionService`) and in the mock adapter (WR-001) — so this pass
+ *    is normally a no-op that costs no rows. Its remaining job is the WINDOW
+ *    between a follow write and the next fetch: a just-followed account
+ *    disappears from the rendered list immediately instead of lingering until
+ *    the module re-reads.
  *  - An id the suggestion list names but `usePersonas()` cannot resolve is
  *    SKIPPED, never crashes the render (mirrors `assembleFeedView`'s
  *    missing-author guard).
@@ -68,9 +74,10 @@ export interface UseWhoToFollowResult {
  * (`GET /api/personas/suggestions?limit=N`, backend story 08) so the wire
  * carries only the rows the caller can render, instead of the whole cast
  * being fetched and thrown away. It is not a ranking hint: the server returns
- * a strict PREFIX of the same order it would return uncapped, and the two
- * local exclusions below still run on top. Omitted → the whole eligible set,
- * which is exactly today's behaviour.
+ * a strict PREFIX of the same order it would return uncapped — computed AFTER
+ * the self / already-followed exclusions, so `limit` rows arrive that `limit`
+ * rows can render, and the two local exclusions below drop none of them.
+ * Omitted → the whole eligible set.
  *
  * @param limit Optional server-side cap on the number of suggestions fetched.
  */
