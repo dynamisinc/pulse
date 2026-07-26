@@ -91,7 +91,17 @@ export interface WhoToFollowProps {
  * impersonator's legitimate, unflagged presence.
  */
 export function WhoToFollow({ limit }: WhoToFollowProps) {
-  const { suggestions, loading, error } = useWhoToFollow()
+  // The limit goes to the SERVER (`?limit=`), not just the slice below — otherwise the
+  // whole exercise cast is fetched to display three rows, and the parameter story 08
+  // built and tested stays unreached in production ("merged green but never called" is
+  // the failure mode this feature keeps hitting).
+  //
+  // Safe to cap server-side here: `useWhoToFollow` drops any id `usePersonas()` can't
+  // resolve, so in principle a capped fetch could render fewer rows than an uncapped one
+  // that backfills. In practice it can't — story 08 pins the suggestion set as a strict
+  // SUBSET of the persona-read id set, from the same exercise-scoped cast, so an
+  // unresolvable id would itself be a bug rather than a case to design around.
+  const { suggestions, loading, error } = useWhoToFollow(limit)
 
   const rows = useMemo(
     () => (limit !== undefined ? suggestions.slice(0, limit) : suggestions),
