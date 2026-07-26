@@ -45,14 +45,20 @@ public static class ExerciseConfigurationExtensions
     /// A contributing story (02 chrome; 03 shell-variant + overlay-state) MUST override from its OWN
     /// <c>Add*()</c> extension with
     /// <c>services.Replace(ServiceDescriptor.Scoped&lt;IChromeConfigProjection, RealChromeConfigProjection&gt;())</c>.
-    /// <c>Replace</c> is order-independent and unambiguous; a bare <c>AddScoped</c> is NOT an override.
+    /// <c>Replace</c> is mandatory for two reasons that both survive scrutiny: it is order-independent (proven
+    /// by <c>..._WinsEvenWhenItRunsBeforeTheDefault</c>), and it leaves a SINGLE descriptor, so
+    /// <c>IEnumerable&lt;T&gt;</c> resolution never sees a stale default alongside the real implementation.
     /// </para>
     /// <para>
-    /// <b>The silent failure this prevents.</b> A contributor that uses <c>AddScoped</c> ships green — its
-    /// unit tests exercise the projection class directly and pass — while the constant default still wins at
-    /// runtime, so every exercise serves identical chrome. Testing the projection class in isolation cannot
-    /// catch it: each contributing story must resolve the interface from a FULLY COMPOSED provider (the real
-    /// <c>Add*()</c> calls, in the orchestrator's order) and assert the contributed implementation comes back.
+    /// <b>The silent failure this prevents — and it is NOT the one you might expect.</b> A contributor using
+    /// a bare <c>AddScoped</c> actually still wins: it appends a second descriptor and
+    /// <c>GetRequiredService&lt;T&gt;</c> returns the LAST one. The real trap is a contributor that copies
+    /// THIS file's own <c>TryAddScoped</c> idiom — the default is already registered, so the <c>TryAdd</c> is
+    /// a silent no-op, nothing raises, and the constant default keeps serving while every exercise shows
+    /// identical chrome. Pinned by
+    /// <c>ExerciseConfigurationProjectionRegistrationTests.ContributedProjection_RegisteredWithTryAdd_IsSilentlyIgnored_WhichIsWhyReplaceIsMandatory</c>.
+    /// Testing the projection class in isolation cannot catch it: each contributing story must resolve the
+    /// interface from a FULLY COMPOSED provider and assert the contributed implementation comes back.
     /// </para>
     /// <para>
     /// Everything is Scoped, matching the request-scoped <c>PulseDbContext</c> / <c>IExerciseContext</c> unit

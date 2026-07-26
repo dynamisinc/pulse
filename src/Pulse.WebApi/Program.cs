@@ -75,12 +75,14 @@ builder.Services.AddSessions(builder.Configuration);
 // participant-shell config GETs mapped by MapParticipantShellEndpoints() below now resolve
 // ParticipantShellConfigService, which only this call registers — omit it and those previously-working
 // routes fail on an unresolvable handler dependency and blank the participant shell (the #310/#317
-// composition-root failure mode). Must follow AddStaffIdentity: the staff settings endpoints reuse the
-// staff-session authorization filter. It also TryAdd()s the constant-preserving defaults for the three
-// wave-3 projection seams (IChromeConfigProjection / IShellVariantProjection / IOverlayStateProjection),
-// so any later contributor Add*() — stories 02/03/04 — must come AFTER this line and use
-// services.Replace(), never TryAdd (a TryAdd against an existing registration is a silent no-op that
-// leaves the constant serving). Guarded by ExerciseConfiguration/CompositionRootWiringTests.
+// composition-root failure mode). Placed after AddStaffIdentity for readability — the staff settings
+// endpoints reuse the staff-session authorization filter, which resolves from HttpContext.RequestServices
+// at request time, so there is no DI ordering dependency. It also TryAdd()s the constant-preserving
+// defaults for the three wave-3 projection seams (IChromeConfigProjection / IShellVariantProjection /
+// IOverlayStateProjection). A contributor — stories 02/03/04 — MUST override with services.Replace(),
+// which works from either side of this line. Never TryAdd: against an already-registered default that is
+// a silent no-op leaving the constant serving. (A bare AddScoped would in fact still win, last-descriptor;
+// the trap is copying THIS line's TryAdd idiom.) Guarded by ExerciseConfiguration/CompositionRootWiringTests.
 builder.Services.AddExerciseConfiguration();
 
 // Participant login methods (Phase B2 Wave 3). AddParticipantAccounts (identity-auth-roles/02) registers the

@@ -360,17 +360,20 @@ public sealed class ExerciseShellConfigSource
 /// — a fail-safe FLOOR that is present only if nobody has contributed a real one. A contributing story MUST
 /// register its implementation with
 /// <c>services.Replace(ServiceDescriptor.Scoped&lt;IChromeConfigProjection, RealChromeConfigProjection&gt;())</c>
-/// from its OWN <c>Add*()</c> extension. <c>Replace</c> is order-independent and unambiguous; a bare
-/// <c>AddScoped</c> is NOT an override — it stacks a second descriptor and lets registration order decide
-/// silently.
+/// from its OWN <c>Add*()</c> extension. <c>Replace</c> is mandatory because it is order-independent AND
+/// leaves a single descriptor, so <c>IEnumerable&lt;T&gt;</c> resolution never sees a stale default beside
+/// the real implementation.
 /// </para>
 /// <para>
-/// <b>The failure this prevents ships green.</b> A contributor that uses <c>AddScoped</c> passes its own unit
-/// tests (they exercise the projection class directly) while the constant default still wins at runtime, so
-/// <c>/api/chrome-config</c> serves identical banners for every exercise. Testing the projection class in
-/// isolation CANNOT catch this — the contributing story must resolve this interface from a fully composed
-/// service provider (its real <c>Add*()</c> calls, in the orchestrator's order) and assert the CONTRIBUTED
-/// implementation comes back and produces per-exercise output end to end.
+/// <b>The failure this prevents ships green — and it is NOT the obvious one.</b> A bare <c>AddScoped</c>
+/// would in fact still win (it appends a descriptor and <c>GetRequiredService</c> returns the LAST). The
+/// real trap is a contributor that copies 01b's own <c>TryAddScoped</c> idiom: the default is already
+/// registered, the <c>TryAdd</c> is a silent no-op, nothing raises, and <c>/api/chrome-config</c> keeps
+/// serving identical banners for every exercise while the contributor's own unit tests pass (they exercise
+/// the projection class directly). Testing the projection class in isolation CANNOT catch this — the
+/// contributing story must resolve this interface from a fully composed service provider and assert the
+/// CONTRIBUTED implementation comes back and produces per-exercise output end to end. Pinned by
+/// <c>ExerciseConfigurationProjectionRegistrationTests.ContributedProjection_RegisteredWithTryAdd_IsSilentlyIgnored_WhichIsWhyReplaceIsMandatory</c>.
 /// </para>
 /// <para>
 /// The response body is a FROZEN wire shape (<c>ParticipantShellDtos.cs</c>): fill it, never reshape it.
