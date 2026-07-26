@@ -134,9 +134,63 @@ telemetry only.
 Everything it ships lives under `Features/ExerciseConfiguration/Lifecycle/`: the state machine, the two
 projection implementations (registered with `services.Replace(...)` — see implementation.md's
 projection-override contract), and the `UseExerciseLifecycleGating()` middleware the orchestrator wires
-into `Program.cs`. It adds no `Map*` and **edits no other slice's endpoint file**. Do not read
+into `Program.cs`. It **edits no other slice's endpoint file**. Do not read
 `statePillConfig.ts`'s `scheduled ≡ staged` alias as a lifecycle mapping — the authoritative legacy→new
 mapping is implementation.md's table.
+
+> **Correction (as built).** This paragraph previously read "It adds no `Map*`". That was wrong and
+> contradicted both implementation.md (whose file list for this story includes `LifecycleEndpoints.cs`) and
+> AC2, which requires an HTTP surface that can return **409** for a disallowed transition. The story ships its
+> own `MapExerciseLifecycleEndpoints()` in its **own** folder — `GET /api/staff/exercise-lifecycle` and
+> `POST /api/staff/exercise-lifecycle/transition`, both staff-gated by the shared
+> `EngineCockpitStaffAuthorizationFilter` and taking **no** exercise id in any form. It still adds nothing to
+> 01b's `ExerciseConfigurationExtensions.cs` and maps nothing on any participant route.
+
+### Lifecycle → shell-variant mapping (as built)
+
+| State | `ShellStateResponse.variant` | Why |
+|---|---|---|
+| `build` | `preview` | only staff reach it (participants are refused upstream); they are previewing a world under construction |
+| `staged` | `readOnly` | the ambient world is browsable pre-StartEx, but the interactive/live shell is a Live thing |
+| `live` | `full` | the interactive shell — the only state that gets it |
+| `paused` | `readOnly` | the holding page covers the shell; nothing beneath it may be authored |
+| `completed` / `archived` | `readOnly` | the run is over; a staff reader sees a frozen world |
+| anything unrecognized | `readOnly` | fail closed, the same direction the frontend's own default already uses |
+
+`kiosk` is never produced by the lifecycle — it is an unattended-display concern, not a lifecycle one.
+
+### Overlay reconciliation with CTL-023, as built (integration hazard 1)
+
+This story adds **no second pause mechanism**: it writes no overlay state, owns no overlay store and pushes
+nothing over SignalR. It reads a one-method seam, `ISteeringOverlaySource`, whose shipped default
+(`NoSteeringOverlaySource`) reports "no steering overlay is active", and joins it with the lifecycle's own
+contribution in one pure function, `LifecycleOverlayComposer.Compose`. The three rules:
+
+1. **A non-pause steering overlay (`broadcast` / `endex`) wins outright.** Those are authored,
+   message-bearing controller actions the lifecycle cannot express; hiding a Break Fiction broadcast behind a
+   holding page is a safety failure.
+2. **Two pauses become ONE pause, joined field by field.** `state` is `pause` if *either* side asks for it —
+   so a CTL-023 Resume does **not** lift a COR-032 lifecycle Pause, and ending the lifecycle Pause does not
+   lift a still-held Freeze (a naive "steering wins" rule gets both backwards). `register`:
+   `out-of-fiction` dominates `in-fiction`, which is world-steering's own stated safety direction (its
+   `CoerceRegister` fails closed to out-of-fiction). `message`: the steering message when it carries one,
+   else the lifecycle's. The join is commutative and idempotent, so the answer never depends on which
+   subsystem wrote first.
+3. **Neither active → the shipped Phase-1 constant** (`none` / `in-fiction` / empty), byte for byte.
+
+**The merge is a one-file adapter:** register an `ISteeringOverlaySource` that projects
+`OverlayStateService.Get(exerciseId)` onto `OverlayContribution`, with
+`services.Replace(ServiceDescriptor.Singleton<ISteeringOverlaySource, WorldSteeringOverlaySource>())`.
+Nothing else in this slice changes, and the rules above become the reconciled behaviour of both features.
+World-steering's `OverlayStateWire` and this slice's `LifecycleOverlayWire` are the same string constants
+(not a second mechanism) — collapse onto whichever home survives.
+
+**Where "configurable" actually lands.** COR-032 says Paused shows "a configurable holding page (in-fiction
+or out-of-fiction, **CTL-023**)" — i.e. the requirement itself points the register at CTL-023, which is the
+seam above. There is no per-exercise holding-page column on `Exercise` (01a authored none, and this story
+authors no migration), and holding-page **content authoring** is out of scope, so the lifecycle contributes
+`out-of-fiction` with an **empty** message and the participant shell renders its own static copy — exactly
+what world-steering/08 does.
 
 ### The `/api/overlay-state` collision is known, accepted and yours to reconcile
 The unmerged `feature/world-steering-wave2` umbrella rewrites the `/api/overlay-state` handler in
@@ -193,3 +247,29 @@ shipped here.
 - Telemetry: a transition emits exactly one v0 envelope with from/to states and the acting human.
 - Overlay composition: a COR-032 `Paused` state and a CTL-023 Freeze produce **one** coherent overlay
   state, not two competing ones.
+
+### Shipped tests (`src/Pulse.WebApi.Tests/Features/ExerciseConfiguration/Lifecycle/`)
+
+Pure suites (plain `[Fact]`/`[Theory]`, **outside `MsSqlCollection`** so they run Docker-less);
+SQL-backed suites are `[RequiresDockerFact]` / `[RequiresDockerTheory]` inside `MsSqlCollection`.
+
+| AC | Test |
+|---|---|
+| AC1 | `ExerciseLifecycleStateMachineTests.All_IsExactlyTheSixAuthoritativeCor032Literals_InOrder` · `.TryParse_NeverEmitsACoinedOrCasedVariant` · `.TryParse_MapsTheLegacyVocabulary_PerTheAuthoritativeTable` · `.TryParse_RejectsAnUnknownLiteral` · `ExerciseLifecycleServiceTests.TransitionAsync_AllowedTransition_PersistsTheNewStateOnTheStatusColumn` (no parallel column) · `.TransitionAsync_ALegacyRow_TransitionsAsItsCanonicalEquivalentAndPersistsTheNewVocabulary` · `ExerciseLifecycleEndpointsTests.Transition_WithALegacyTargetLiteral_PersistsTheCanonicalSpelling` |
+| AC2 | `ExerciseLifecycleStateMachineTests.IsTransitionAllowed_AllowsTheCor032Chain` · `.IsTransitionAllowed_RefusesEverythingOffTheChain` · `.IsTransitionAllowed_RefusesASelfTransition` · `.AllowedTransitionsFrom_Archived_IsEmpty_AndArchivedIsTerminal` · `.IsTransitionAllowed_TreatsALegacyRowAsItsCanonicalEquivalent` · `.AllowedTransitionsFrom_AnUnknownState_IsEmpty` · `ExerciseLifecycleEndpointsTests.Transition_Disallowed_Returns409AndChangesNothing` · `.Transition_Allowed_Returns200AndPersistsTheNewState` · `.Transition_WithANonVocabularyTarget_Returns400` · `.GetLifecycle_ReturnsTheStateItsAllowedTransitionsAndItsBehaviourHooks` · `ExerciseLifecycleServiceTests.TransitionAsync_DisallowedTransition_IsRefusedAndChangesNothing` · `.TransitionAsync_UnknownTargetLiteral_IsInvalidAndChangesNothing` · `.TransitionAsync_ARowWithAnUnknownStoredStatus_IsRefused` |
+| AC3 | `ExerciseLifecycleGatingTests.InBuildCompletedOrArchived_TheParticipantFeedIsNotServed` (**names `/api/feed` and asserts the seeded post body is absent**) · `.InLive_TheSameFeedServesTheSeededPost` (the control that makes the refusal meaningful) · `.InArchived_EveryCoveredGetRouteIsRefused` · `.InArchived_TheThreadReadIsRefused` · `.InArchived_ThePostWriteIsRefusedBeforeTheHandlerRuns` · `.InStagedLiveOrPaused_TheParticipantSurfaceIsServed` · `.ALegacyRow_IsGatedByItsMappedState` · `.AnUnknownStatusLiteral_FailsClosed` · `ExerciseLifecycleGatedRoutesTests.Paths_AreExactlyTheCoveredSetImplementationMdNames` · `.IsGated_CoversEveryParticipantWorldRoute` · `.IsGated_MatchesWholeSegmentsNotStringPrefixes` · `ExerciseLifecycleStateMachineTests.IsParticipantAccessible_MatchesCor032` · `.IsParticipantAccessible_FailsClosedOnAnUnknownState` · `.IsParticipantAccessible_FollowsTheLegacyMapping` |
+| AC4 | `ExerciseLifecycleGatingTests.AStaffSession_IsExemptFromTheGate` · `.TheStaffExemption_DoesNotDoubleAsAnAuthorizationGate` · `.ThePreAuthAllowlistIsNeverGated` · `.WithAnUnresolvedScope_TheGatePassesThroughToTheEndpointsOwn401` · `ExerciseLifecycleGatedRoutesTests.IsGated_NeverTouchesTheAuthStaffOpsOrHealthSurface` |
+| AC5 | `ExerciseLifecycleRegistrationTests.AddExerciseLifecycle_ReplacesBothProjectionDefaults_InTheOrchestratorsOrder` · `.ContributedProjections_ResolveFromAFullyComposedProvider` · `.ContributedProjections_WinEvenWhenAddExerciseLifecycleRunsBeforeTheDefaults` · `.HadTheProjectionsBeenContributedWithTryAdd_TheConstantsWouldSilentlyKeepServing` · `.AddExerciseLifecycle_CalledTwice_StillLeavesOneDescriptorPerProjection` · `.AddExerciseLifecycle_RegistersTheLifecycleServiceAtScopedLifetime` · `ExerciseLifecycleCompositionTests.ShellState_IsDrivenByTheLifecycle_EndToEnd` · `.ShellState_ForABuildExercise_IsPreview_ProvingReplaceBeatsTheConstantDefault` |
+| AC6 | `LifecycleProjectionTests.OverlayProjection_Paused_ServesTheHoldingPage` · `.ShellVariantProjection_MapsEachLifecycleStateOntoItsVariant` · `.ShellVariantProjection_OnlyEverEmitsAFrozenVariantLiteral` · `.ShellVariantProjection_FailsClosedToReadOnly_OnAnUnknownStatus` · `.OverlayProjection_WithoutPauseOrFreeze_IsTheShippedPhase1Constant` · `ExerciseLifecycleCompositionTests.OverlayState_ForAPausedExercise_ServesTheHoldingPage_EndToEnd` · `.OverlayState_ForALiveExercise_IsTheShippedConstant_EndToEnd` · `.ShellState_KeepsTheFrozenSingleFieldShape` |
+| AC7 | `ExerciseLifecycleStateMachineTests.BehaviourOf_Staged_OpensParticipantAccessButHoldsTheClockAndScenarioContent` · `.BehaviourOf_Live_IsTheOnlyStateThatRunsTheClockAndFiresScenarioContent` · `.BehaviourOf_TheClosedStates_RunNothingAndAdmitNobody` · `.BehaviourOf_Paused_ServesParticipantsButAdvancesNothing` · `.BehaviourOf_AnUnknownState_IsTheFullyClosedSet` · `ExerciseLifecycleServiceTests.GetAsync_ExposesTheStateItsAllowedTransitionsAndItsBehaviourHooks` |
+| AC8 | `ExerciseLifecycleServiceTests.TransitionAsync_EmitsExactlyOneV0TelemetryEnvelopeWithTheFromAndToStates` · `.TransitionAsync_StampsThePersistedScenarioInstant_RatherThanTheServerClock` (and the "emits nothing" half of `.TransitionAsync_DisallowedTransition_IsRefusedAndChangesNothing`) |
+| AC9 | `ExerciseLifecycleServiceTests.TheScopeIsTheOnlyExerciseSelector_AServiceBoundToAneverTouchesB` · `.WithAnUnresolvedScope_ReadAndTransitionBothFailClosed` · `.GetAsync_WithNoExerciseRowForTheResolvedScope_IsNotFound` · `ExerciseLifecycleEndpointsTests.ACrossExerciseTransitionAttempt_Is403AndMovesNeitherExercise` · `.AClientSuppliedExerciseId_IsNeverAScopeSelector` · `.WithoutAStaffSession_BothRoutesAre401` · `.WithAnUnresolvedScope_TheReadIs401` · `ExerciseLifecycleGatingTests.TheGateReadsTheResolvedScopeOnly_ANamedOtherExerciseChangesNothing` |
+| Overlay composition (hazard 1) | `LifecycleProjectionTests.OverlayComposition_LifecyclePauseAndFreeze_ProduceOneCoherentOverlay` · `.OverlayComposition_FreezeResumedWhileLifecycleStillPaused_KeepsTheHoldingPage` · `.OverlayComposition_LifecycleResumedWhileFreezeStillHeld_KeepsTheFreeze` · `.OverlayComposition_BroadcastDuringALifecyclePause_WinsOutright` · `.OverlayComposition_FreezeAlone_ShowsTheFreeze` · `.OverlayComposition_IsCommutativeAcrossTheTwoContributions` · `.NoSteeringOverlaySource_NeverReportsAnActiveOverlay` · `ExerciseLifecycleRegistrationTests.SteeringOverlaySource_DefaultsToTheFailClosedFloor_AndIsReplaceableByWorldSteering` · `ExerciseLifecycleCompositionTests.AContributedSteeringOverlaySource_ComposesWithTheLifecyclePause_EndToEnd` |
+
+**Not shipped as an automated test (documented gap):** the frontend runtime-guard *contract* regression in
+the bullet list above. This story is backend-only and owns no frontend file; `isExerciseStatus`'s widened
+superset and `statePillConfig.ts`'s exhaustive `Record` are story 01a's, and their guard tests shipped with
+it. The two backend halves of that contract *are* pinned here —
+`ExerciseLifecycleCompositionTests.ShellState_KeepsTheFrozenSingleFieldShape` and
+`OverlayState_ForAPausedExercise_ServesTheHoldingPage_EndToEnd` assert the frozen keys — but nothing here
+drives a frontend hook.
