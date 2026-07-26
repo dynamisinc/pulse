@@ -175,6 +175,32 @@ public static class ExerciseLifecycleStates
         && canonical is Staged or Live or Paused;
 
     /// <summary>
+    /// <b>The overlay-endpoint carve-out (Tier-2 human ruling, decision 2).</b> Whether
+    /// <c>GET /api/overlay-state</c> — and ONLY that route — is served in <paramref name="state"/>: every
+    /// participant-accessible state, plus <c>completed</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>paused</c> was already carved out of the refusal set for exactly this reason: an overlay cannot
+    /// render if the endpoint that carries it is refused. <c>completed</c> has the identical need —
+    /// <c>endex</c> is a first-class literal in the frozen <c>OverlayStateResponse</c> union and COR-054's
+    /// whole point is a participant-visible end-of-exercise overlay, so a <c>live → completed</c> transition
+    /// that started 403ing this endpoint meant EndEx could never display.
+    /// </para>
+    /// <para>
+    /// <b>Scope discipline:</b> this reopens the overlay endpoint alone. <c>/api/feed</c> and every other
+    /// covered participant route stay refused in <c>completed</c> — the run is over and its content is not
+    /// browsable. <c>build</c> and <c>archived</c> remain FULLY closed, so AC3's letter still holds for those
+    /// two, and an unrecognized literal still fails closed.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">A canonical or legacy lifecycle literal.</param>
+    /// <returns><c>true</c> when the overlay endpoint may be served.</returns>
+    public static bool IsOverlayStateServed(string? state) =>
+        IsParticipantAccessible(state)
+        || (TryParse(state, out var canonical) && canonical is Completed);
+
+    /// <summary>
     /// The per-state behaviour hooks (AC7) other subsystems subscribe to instead of each keeping its own copy
     /// of the lifecycle. <c>exercise-build-golive</c> reads the transitions; <c>exercise-clock</c> reads
     /// <see cref="ExerciseLifecycleBehaviour.ClockRuns"/>; E8 reads

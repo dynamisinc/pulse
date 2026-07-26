@@ -3,10 +3,16 @@ namespace Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using System;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Identity.Sessions;
+using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Xunit;
 
@@ -118,6 +124,48 @@ public sealed class ExerciseLifecycleGatingTests
         written.Should().Be(0, "the gate short-circuits ahead of the ingest service — nothing partial is written");
     }
 
+    /// <summary>
+    /// <b>Tier-2 human ruling, decision 2.</b> <c>completed</c> is carved out of the refusal set for
+    /// <c>/api/overlay-state</c> ONLY: an overlay cannot render if the endpoint that carries it is refused, and
+    /// <c>endex</c> is a first-class literal in the frozen <c>OverlayStateResponse</c> union (COR-054). As
+    /// originally built, <c>live → completed</c> made this endpoint start 403ing and EndEx could never display.
+    /// The feed stays refused in the same state — the carve-out is the overlay endpoint, not the run's content.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task InCompleted_TheOverlayEndpointIsServedWhileTheFeedStaysRefused()
+    {
+        var exerciseId = await SeedAsync("completed", withPost: true);
+        await using var host = await StartAsync(exerciseId);
+
+        var overlay = await host.Client.GetAsync(new Uri("/api/overlay-state", UriKind.Relative));
+        overlay.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "COR-054's end-of-exercise overlay is participant-visible — a 403 here makes EndEx undisplayable");
+
+        var feed = await host.Client.GetAsync(new Uri("/api/feed", UriKind.Relative));
+        feed.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden, "the carve-out is scoped to the overlay endpoint, not to the feed");
+        (await feed.Content.ReadAsStringAsync()).Should().NotContain(
+            SeededPostBody, "a completed run's content is still not browsable");
+    }
+
+    /// <summary>
+    /// Decision 2's boundary: the carve-out is <c>completed</c> alone. <c>build</c> and <c>archived</c> stay
+    /// FULLY closed, so AC3's letter still holds for those two — there is no EndEx to show in either.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("build")]
+    [InlineData("archived")]
+    [InlineData("running")]
+    public async Task InBuildOrArchived_EvenTheOverlayEndpointIsRefused(string state)
+    {
+        var exerciseId = await SeedAsync(state, withPost: false);
+        await using var host = await StartAsync(exerciseId);
+
+        (await host.Client.GetAsync(new Uri("/api/overlay-state", UriKind.Relative))).StatusCode
+            .Should().Be(HttpStatusCode.Forbidden, "'{0}' has no overlay a participant may see", state);
+    }
+
     /// <summary>AC3: Staged, Live and Paused are served. Paused in particular — the holding page must render.</summary>
     [RequiresDockerTheory]
     [InlineData("staged")]
@@ -188,6 +236,41 @@ public sealed class ExerciseLifecycleGatingTests
             .Should().Be(HttpStatusCode.OK, "the gate asks 'is this a staff session', not 'is this staff authorized'");
     }
 
+    /// <summary>
+    /// <b>AC4's subtlest claim, named directly (reviewer S-005):</b> a COR-015 shared read-only
+    /// (<c>readonly</c>-KIND) session lands on the PARTICIPANT side of the staff exemption. It is a view-only
+    /// observer of the fiction, not a staff console, so a build-state exercise refuses it exactly as it refuses
+    /// a participant.
+    /// </summary>
+    /// <remarks>
+    /// Driven through the REAL <see cref="CurrentStaffSessionAccessor"/> over real session rows rather than the
+    /// stub, and paired with a live <c>staff</c>-kind session on the same host — otherwise a mis-wired accessor
+    /// would make the refusal vacuous (everything would be gated). The staff control proves the exemption is
+    /// genuinely reachable on this host and that the read-only kind is what excludes the observer from it.
+    /// </remarks>
+    [RequiresDockerFact]
+    public async Task ASharedReadOnlySession_IsGatedLikeAParticipant_NotExemptAsStaff()
+    {
+        var exerciseId = await SeedAsync("build", withPost: true);
+        var readOnlyToken = await SeedSessionAsync(exerciseId, kind: "readonly", staffUserId: null);
+        var staffToken = await SeedSessionAsync(exerciseId, kind: "staff", staffUserId: Guid.NewGuid());
+
+        await using var host = await StartAsync(exerciseId, configureServices: UseTheRealStaffSessionAccessor);
+
+        var observer = await host.Client.SendAsync(FeedRequestWith(readOnlyToken));
+        observer.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            "a COR-015 shared observer is a participant-world viewer — the staff exemption is for staff KINDS only");
+        (await observer.Content.ReadAsStringAsync()).Should().NotContain(
+            SeededPostBody, "the observer must not be handed a build-state world's posts");
+
+        var staff = await host.Client.SendAsync(FeedRequestWith(staffToken));
+        staff.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "the control: the same host DOES exempt a live staff-kind session, so the refusal above is the KIND, " +
+            "not a mis-wired accessor gating everyone");
+    }
+
     /// <summary>AC4: an un-listed route (the pre-auth allowlist stand-in) is untouched in every state.</summary>
     [RequiresDockerTheory]
     [InlineData("build")]
@@ -236,6 +319,21 @@ public sealed class ExerciseLifecycleGatingTests
             "a client-supplied exercise id is never a scope selector (COR-001) — it cannot unlock another world");
     }
 
+    /// <summary>Swaps the stubbed staff-session accessor for the REAL token-backed one (see the S-005 test).</summary>
+    private static void UseTheRealStaffSessionAccessor(IServiceCollection services)
+    {
+        services.AddHttpContextAccessor();
+        services.RemoveAll<ICurrentStaffSessionAccessor>();
+        services.AddScoped<ICurrentStaffSessionAccessor, CurrentStaffSessionAccessor>();
+    }
+
+    private static HttpRequestMessage FeedRequestWith(string rawToken)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, new Uri("/api/feed", UriKind.Relative));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", rawToken);
+        return request;
+    }
+
     private static object NewPostBody() => new
     {
         authorPersonaId = Guid.NewGuid().ToString(),
@@ -261,10 +359,38 @@ public sealed class ExerciseLifecycleGatingTests
         return exerciseId;
     }
 
+    /// <summary>Seeds a live session row of the given kind and returns the RAW token to present.</summary>
+    private async Task<string> SeedSessionAsync(Guid exerciseId, string kind, Guid? staffUserId)
+    {
+        var rawToken = SessionTokens.Generate();
+        var now = DateTimeOffset.UtcNow;
+
+        await using var context = _fixture.CreateContext();
+        context.Sessions.Add(new Session
+        {
+            Id = Guid.NewGuid(),
+            TokenHash = SessionTokens.Hash(rawToken),
+            Kind = kind,
+            ExerciseId = exerciseId,
+            PrincipalId = (staffUserId ?? Guid.NewGuid()).ToString(),
+            StaffUserId = staffUserId,
+            Role = staffUserId is null ? "participant" : "controller",
+            ActingHumanId = $"human-{Guid.NewGuid()}",
+            IsReadOnly = staffUserId is null,
+            IssuedAt = now,
+            ExpiresAt = now.AddHours(1),
+        });
+
+        await context.SaveChangesAsync();
+
+        return rawToken;
+    }
+
     private Task<ExerciseLifecycleTestHost> StartAsync(
         Guid? currentExerciseId,
         bool authenticatedStaff = false,
-        bool seedStaffAssignment = true)
+        bool seedStaffAssignment = true,
+        Action<IServiceCollection>? configureServices = null)
     {
         _fixture.ConnectionString.Should().NotBeNull(
             "the Docker-gated MsSql fixture must have started and captured its connection string before these tests run");
@@ -273,6 +399,7 @@ public sealed class ExerciseLifecycleGatingTests
             _fixture.ConnectionString!,
             currentExerciseId,
             authenticatedStaff,
-            seedStaffAssignment: seedStaffAssignment);
+            seedStaffAssignment: seedStaffAssignment,
+            configureServices: configureServices);
     }
 }

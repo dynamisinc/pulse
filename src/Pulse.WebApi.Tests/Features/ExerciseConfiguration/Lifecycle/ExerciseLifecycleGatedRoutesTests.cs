@@ -71,6 +71,20 @@ public sealed class ExerciseLifecycleGatedRoutesTests
             "{0} must never be gated — gating it would lock staff out of a Build-state exercise they are configuring", path);
 
     /// <summary>
+    /// Decision 2: the <c>completed</c> carve-out is recognized on the overlay route ALONE, and by segment —
+    /// so it can never widen to a prefix-similar path.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/overlay-state", true)]
+    [InlineData("/API/OVERLAY-STATE", true)]
+    [InlineData("/api/overlay-state-history", false)]
+    [InlineData("/api/shell-state", false)]
+    [InlineData("/api/feed", false)]
+    public void IsOverlayState_IsTheOverlayRouteAlone(string path, bool expected) =>
+        ExerciseLifecycleGatedRoutes.IsOverlayState(new PathString(path)).Should().Be(
+            expected, "only /api/overlay-state carries the completed-state carve-out (decision 2)");
+
+    /// <summary>
     /// Matching is by path SEGMENT, so a route that merely shares a prefix string is not swept in — and a
     /// genuine sub-route of a covered path is.
     /// </summary>

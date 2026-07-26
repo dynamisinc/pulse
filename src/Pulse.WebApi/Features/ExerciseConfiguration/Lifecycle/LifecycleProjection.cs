@@ -60,13 +60,20 @@ public static class LifecycleOverlayWire
 /// lifecycle's own contribution and the CTL-023 steering contribution so the composer joins like with like.
 /// </summary>
 /// <param name="State">A <see cref="LifecycleOverlayWire"/> state literal.</param>
-/// <param name="Register">A <see cref="LifecycleOverlayWire"/> register literal.</param>
+/// <param name="Register">
+/// A <see cref="LifecycleOverlayWire"/> register literal, or <c>null</c> when this contributor does NOT choose
+/// one. <b>Tier-2 human ruling (decision 3):</b> the lifecycle is an UNSPECIFIED register — COR-032 says the
+/// holding page is "configurable (in-fiction or out-of-fiction, CTL-023)", so the register is CTL-023's to
+/// author. A contributor that hardcodes one takes that choice away; see
+/// <see cref="LifecycleOverlayComposer.Compose"/> for how an unspecified register composes.
+/// </param>
 /// <param name="Message">The overlay message; empty when there is no authored copy.</param>
-public sealed record OverlayContribution(string State, string Register, string Message)
+public sealed record OverlayContribution(string State, string? Register, string Message)
 {
     /// <summary>The "no overlay" contribution — the fail-closed identity of the composition.</summary>
+    /// <remarks>Inactive, and authors no register: an absent overlay has no register to have an opinion about.</remarks>
     public static OverlayContribution None { get; } =
-        new(LifecycleOverlayWire.None, LifecycleOverlayWire.InFiction, string.Empty);
+        new(LifecycleOverlayWire.None, Register: null, string.Empty);
 
     /// <summary>Whether this contribution is actually asking for an overlay.</summary>
     public bool IsActive => !string.Equals(State, LifecycleOverlayWire.None, StringComparison.Ordinal);
@@ -144,15 +151,22 @@ public sealed class NoSteeringOverlaySource : ISteeringOverlaySource
 ///   lifecycle-Paused exercise leaves the holding page up (the world is still administratively paused), and
 ///   ending the lifecycle Pause during a live Freeze leaves the Freeze page up. A naive "steering wins" rule
 ///   gets both of those backwards; this one cannot.</item>
-///   <item><b>Register:</b> <c>out-of-fiction</c> dominates <c>in-fiction</c>. This is world-steering's own
-///   stated safety direction (its <c>CoerceRegister</c> fails closed to out-of-fiction): an out-of-fiction
-///   notice is safe when the fiction is already broken, whereas wrongly staying in-fiction HIDES a real stop
-///   from participants.</item>
+///   <item><b>Register (Tier-2 human ruling, decision 3):</b> a register is composed only from the sides that
+///   actually CHOSE one. Between two explicit choices, <c>out-of-fiction</c> dominates <c>in-fiction</c> —
+///   world-steering's own stated safety direction (its <c>CoerceRegister</c> fails closed to out-of-fiction):
+///   an out-of-fiction notice is safe when the fiction is already broken, whereas wrongly staying in-fiction
+///   HIDES a real stop from participants. A single explicit choice simply stands, and when NEITHER side chose
+///   one the composer falls back to <c>out-of-fiction</c> — so the fail-closed default survives when nothing
+///   speaks, while CTL-023 can still choose <c>in-fiction</c> as COR-032 requires. (The lifecycle deliberately
+///   chooses nothing; had it kept hardcoding <c>out-of-fiction</c>, domination would have made an in-fiction
+///   holding page unreachable by construction and a COR-032 pause would break fiction by default — a D0 §4
+///   cost.)</item>
 ///   <item><b>Message:</b> the steering message when it carries one, else the lifecycle's. The live
 ///   controller action is the more specific, more recent copy.</item>
 /// </list>
-/// The join is commutative and idempotent, so the composed result never depends on which condition was
-/// observed first — which matters because the two are written by different subsystems at different times.
+/// The join is idempotent, and commutative <b>over the reachable domain</b> — see the commutativity note on
+/// <see cref="Compose"/> — so the composed result never depends on which condition was observed first, which
+/// matters because the two are written by different subsystems at different times.
 /// </item>
 /// <item>
 /// <b>Neither active → <c>none</c>/<c>in-fiction</c>/empty</b>, byte-identical to the shipped Phase-1
@@ -174,20 +188,35 @@ public static class LifecycleOverlayComposer
     /// every other state asks for nothing.
     /// </summary>
     /// <remarks>
-    /// The lifecycle's register is <c>out-of-fiction</c>: an exercise-lifecycle Pause is an administrative
-    /// stop of the whole run (not an in-fiction event), and out-of-fiction is the conservative direction — see
-    /// the register rule above. A CTL-023 Freeze that chose <c>in-fiction</c> does not soften it, by rule 2.
+    /// <b>The lifecycle authors NO register</b> (<c>null</c>) — a Tier-2 human ruling (decision 3). COR-032
+    /// itself says the holding page is "configurable (in-fiction or out-of-fiction, <b>CTL-023</b>)", so the
+    /// register belongs to the controller, not to the state machine. Hardcoding <c>out-of-fiction</c> here
+    /// combined with rule 2's domination made in-fiction UNREACHABLE by construction, forcing every COR-032
+    /// pause to break fiction. With nothing chosen on either side the composer still falls back to
+    /// <c>out-of-fiction</c>, so the fail-closed default is unchanged when CTL-023 is silent.
     /// </remarks>
     /// <param name="state">A canonical or legacy lifecycle literal.</param>
-    /// <returns>The lifecycle contribution.</returns>
+    /// <returns>The lifecycle contribution — <c>none</c>, or an unspecified-register <c>pause</c>.</returns>
     public static OverlayContribution FromLifecycle(string? state) =>
         ExerciseLifecycleStates.TryParse(state, out var canonical)
         && string.Equals(canonical, ExerciseLifecycleStates.Paused, StringComparison.Ordinal)
-            ? new OverlayContribution(LifecycleOverlayWire.Pause, LifecycleOverlayWire.OutOfFiction, string.Empty)
+            ? new OverlayContribution(LifecycleOverlayWire.Pause, Register: null, string.Empty)
             : OverlayContribution.None;
 
     /// <summary>Joins the two contributions into the single frozen <see cref="OverlayStateResponse"/>.</summary>
-    /// <param name="lifecycle">The COR-032 lifecycle contribution.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>Commutativity is domain-limited — do not read it as a general law.</b> The join IS commutative over
+    /// the reachable domain, because <see cref="FromLifecycle"/> can only ever yield <c>none</c> or an
+    /// unspecified-register <c>pause</c>: swapping those two arguments cannot change the answer (the register
+    /// join is symmetric, and the message rule is a no-op against the lifecycle's always-empty message). It is
+    /// <b>not</b> commutative in general: <c>Compose(none, broadcast)</c> is a <c>broadcast</c> while
+    /// <c>Compose(broadcast, none)</c> is a <c>pause</c>, because rule 1 is a deliberate STEERING-SIDE
+    /// privilege — only an authored controller overlay may outrank a holding page. Callers must therefore keep
+    /// passing the lifecycle contribution first.
+    /// </para>
+    /// </remarks>
+    /// <param name="lifecycle">The COR-032 lifecycle contribution (<c>none</c> or <c>pause</c>).</param>
     /// <param name="steering">The live CTL-023 contribution, or <c>null</c> when none.</param>
     /// <returns>One composed overlay state.</returns>
     public static OverlayStateResponse Compose(OverlayContribution lifecycle, OverlayContribution? steering)
@@ -199,7 +228,7 @@ public static class LifecycleOverlayComposer
         // Rule 1 — a non-pause steering overlay (broadcast / endex) wins outright.
         if (live is not null && !string.Equals(live.State, LifecycleOverlayWire.Pause, StringComparison.Ordinal))
         {
-            return Response(live.State, live.Register, live.Message);
+            return Response(live.State, ComposeRegister(null, live.Register), live.Message);
         }
 
         var lifecyclePausing = lifecycle.IsActive;
@@ -209,20 +238,57 @@ public static class LifecycleOverlayComposer
             return Response(LifecycleOverlayWire.None, LifecycleOverlayWire.InFiction, string.Empty);
         }
 
-        // Rule 2 — one pause, joined field by field.
-        var outOfFiction =
-            (lifecyclePausing && IsOutOfFiction(lifecycle.Register)) ||
-            (live is not null && IsOutOfFiction(live.Register));
+        // Rule 2 — one pause, joined field by field. Only an ACTIVE side's register is an authored choice.
+        var register = ComposeRegister(
+            lifecyclePausing ? lifecycle.Register : null,
+            live?.Register);
 
         var message = live is not null && !string.IsNullOrEmpty(live.Message)
             ? live.Message
             : lifecycle.Message;
 
-        return Response(
-            LifecycleOverlayWire.Pause,
-            outOfFiction ? LifecycleOverlayWire.OutOfFiction : LifecycleOverlayWire.InFiction,
-            message);
+        return Response(LifecycleOverlayWire.Pause, register, message);
     }
+
+    /// <summary>
+    /// The register join (decision 3): domination applies only BETWEEN TWO EXPLICIT CHOICES; a lone choice
+    /// stands; and <c>out-of-fiction</c> is the floor when neither side chose one.
+    /// </summary>
+    private static string ComposeRegister(string? lifecycleRegister, string? steeringRegister)
+    {
+        // Nobody authored a register — the fail-closed default (the lifecycle-pause-alone case).
+        if (lifecycleRegister is null && steeringRegister is null)
+        {
+            return LifecycleOverlayWire.OutOfFiction;
+        }
+
+        // Exactly one side chose: its choice stands, so CTL-023 can hold an in-fiction holding page through a
+        // concurrent COR-032 pause — which is what COR-032 asks for ("configurable ... CTL-023").
+        if (lifecycleRegister is null)
+        {
+            return CoerceRegister(steeringRegister!);
+        }
+
+        if (steeringRegister is null)
+        {
+            return CoerceRegister(lifecycleRegister);
+        }
+
+        // Both chose: out-of-fiction dominates — wrongly staying in-fiction HIDES a real stop.
+        return IsOutOfFiction(CoerceRegister(lifecycleRegister)) || IsOutOfFiction(CoerceRegister(steeringRegister))
+            ? LifecycleOverlayWire.OutOfFiction
+            : LifecycleOverlayWire.InFiction;
+    }
+
+    /// <summary>
+    /// Fail-closed normalization of an authored register: anything that is not exactly <c>in-fiction</c> reads
+    /// as <c>out-of-fiction</c> (world-steering's own <c>CoerceRegister</c> direction), so a coined literal can
+    /// never reach the frozen wire union.
+    /// </summary>
+    private static string CoerceRegister(string register) =>
+        string.Equals(register, LifecycleOverlayWire.InFiction, StringComparison.Ordinal)
+            ? LifecycleOverlayWire.InFiction
+            : LifecycleOverlayWire.OutOfFiction;
 
     private static bool IsOutOfFiction(string register) =>
         string.Equals(register, LifecycleOverlayWire.OutOfFiction, StringComparison.Ordinal);
@@ -253,9 +319,16 @@ public static class LifecycleOverlayComposer
 /// <list type="bullet">
 ///   <item><c>build</c> → <c>preview</c>: only staff reach it (participants are refused upstream), and what
 ///   they are doing is previewing a world under construction.</item>
-///   <item><c>staged</c> → <c>readOnly</c>: the ambient world is browsable before StartEx, but the clock has
-///   not started and the interactive/live shell is a Live thing.</item>
-///   <item><c>live</c> → <c>full</c>: the interactive shell — the only state that gets it.</item>
+///   <item><c>staged</c> → <c>full</c> (<b>Tier-2 human ruling, decision 1</c> — DO NOT "tidy" this back to
+///   <c>readOnly</c>): <c>readOnly</c> is not a cosmetic downgrade. <c>mountContract.ts</c>'s
+///   <c>affordancesAvailable(variant) =&gt; variant === 'full'</c> gates the realtime feed stream
+///   (<c>Feed.tsx</c>: <c>useFeedStream({ enabled: affordances })</c>), the "▲ N new posts" pill and the
+///   composer — so <c>readOnly</c> shipped Staged as a frozen snapshot with no error, during precisely the
+///   pre-StartEx familiarization window Staged exists for. It also contradicted this story's own AC7 hooks,
+///   where <c>staged</c> declares <c>AmbientWorldRuns = true</c> and <c>ParticipantWritesAccepted = true</c>.
+///   The hooks were right; the projection was the half that disagreed.</item>
+///   <item><c>live</c> → <c>full</c>: the interactive shell. Staged shares it (above); Live is what the clock
+///   and scenario content add, and neither is a shell-variant concern.</item>
 ///   <item><c>paused</c> → <c>readOnly</c>: the holding page covers the shell; nothing beneath it may be
 ///   authored.</item>
 ///   <item><c>completed</c> / <c>archived</c> → <c>readOnly</c>: the run is over; a staff reader sees a
@@ -280,7 +353,11 @@ public sealed class LifecycleShellVariantProjection : IShellVariantProjection
         return canonical switch
         {
             ExerciseLifecycleStates.Build => ShellVariants.Preview,
-            ExerciseLifecycleStates.Live => ShellVariants.Full,
+
+            // Staged shares Live's variant on purpose (decision 1): 'full' is the only variant
+            // affordancesAvailable() grants, and Staged's ambient world is meant to stream and be posted into.
+            ExerciseLifecycleStates.Staged or ExerciseLifecycleStates.Live => ShellVariants.Full,
+
             _ => ShellVariants.ReadOnly,
         };
     }

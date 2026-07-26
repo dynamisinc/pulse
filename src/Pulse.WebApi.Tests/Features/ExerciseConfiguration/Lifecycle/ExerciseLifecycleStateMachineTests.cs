@@ -157,6 +157,31 @@ public sealed class ExerciseLifecycleStateMachineTests
         ExerciseLifecycleStates.IsParticipantAccessible(state).Should().BeFalse(
             "a typo in the status column must blank the participant world, never open an unknown one");
 
+    /// <summary>
+    /// <b>Decision 2:</b> the overlay endpoint answers in every participant-accessible state PLUS
+    /// <c>completed</c> (COR-054's EndEx overlay must be displayable). <c>build</c>, <c>archived</c> and
+    /// anything unrecognized stay closed even to it.
+    /// </summary>
+    [Theory]
+    [InlineData("staged", true)]
+    [InlineData("live", true)]
+    [InlineData("paused", true)]
+    [InlineData("completed", true)]
+    [InlineData("complete", true)]
+    [InlineData("build", false)]
+    [InlineData("archived", false)]
+    [InlineData("running", false)]
+    [InlineData(null, false)]
+    public void IsOverlayStateServed_AddsCompletedToTheParticipantAccessibleStates(string? state, bool served) =>
+        ExerciseLifecycleStates.IsOverlayStateServed(state).Should().Be(
+            served, "an overlay cannot render if the endpoint that carries it is refused (decision 2)");
+
+    /// <summary>The carve-out is the OVERLAY endpoint's alone — it does not reopen participant access.</summary>
+    [Fact]
+    public void IsOverlayStateServed_DoesNotWidenParticipantAccess() =>
+        ExerciseLifecycleStates.IsParticipantAccessible("completed").Should().BeFalse(
+            "completed still serves no feed, thread, persona or shell-config read — only /api/overlay-state");
+
     /// <summary>A legacy row's accessibility follows its canonical mapping, not its spelling.</summary>
     [Theory]
     [InlineData("active", true)]

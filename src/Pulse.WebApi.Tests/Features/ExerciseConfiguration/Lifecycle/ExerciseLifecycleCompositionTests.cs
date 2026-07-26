@@ -37,7 +37,7 @@ public sealed class ExerciseLifecycleCompositionTests
     /// </summary>
     [RequiresDockerTheory]
     [InlineData("live", "full")]
-    [InlineData("staged", "readOnly")]
+    [InlineData("staged", "full")]
     [InlineData("paused", "readOnly")]
     public async Task ShellState_IsDrivenByTheLifecycle_EndToEnd(string state, string expectedVariant)
     {
@@ -115,8 +115,33 @@ public sealed class ExerciseLifecycleCompositionTests
 
         root.GetProperty("state").GetString().Should().Be("pause", "one composed overlay, never two competing ones");
         root.GetProperty("register").GetString().Should().Be(
-            "out-of-fiction", "out-of-fiction dominates — staying in-fiction would hide a real stop");
+            "in-fiction",
+            "decision 3: CTL-023 chose the register and the lifecycle authors none, so the controller's " +
+            "in-fiction holding page survives a concurrent COR-032 pause (COR-032 requires it to be reachable)");
         root.GetProperty("message").GetString().Should().Be(InFictionFreezeSource.FreezeMessage);
+    }
+
+    /// <summary>
+    /// <b>Decision 2, end to end:</b> a <c>completed</c> exercise still SERVES <c>/api/overlay-state</c> — the
+    /// only way COR-054's participant-visible EndEx overlay can ever render — while <c>/api/feed</c> stays
+    /// refused in that same state.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task OverlayState_ForACompletedExercise_IsStillServed_SoEndExCanRender()
+    {
+        var exerciseId = await SeedAsync("completed");
+        await using var host = await StartAsync(exerciseId);
+
+        var root = await GetJsonAsync(host, "/api/overlay-state");
+
+        root.EnumerateObject().Should().HaveCount(
+            3, "the frozen OverlayStateResponse shape is what EndEx will be carried on");
+        root.GetProperty("state").GetString().Should().Be(
+            "none", "this story writes no endex overlay (COR-054 is exercise-clock's) — it only keeps the door open");
+
+        (await host.Client.GetAsync(new Uri("/api/feed", UriKind.Relative))).StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            "the carve-out is the overlay endpoint ALONE — a completed run's content is not browsable");
     }
 
     /// <summary>The frozen shell-state shape is filled, never reshaped.</summary>

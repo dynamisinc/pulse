@@ -28,14 +28,25 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// archived exercise merely because someone mapped a different verb on it.
 /// </para>
 /// <para>
-/// <b>Known NOT covered:</b> the SignalR hub <c>/hubs/exercise</c>. implementation.md's covered set does not
-/// name it and this story does not widen its own scope; nothing publishes into a Build/Completed/Archived
-/// exercise, so the hub has nothing to fan out — but a deliberate decision to gate the hub belongs to a story,
-/// not to a builder.
+/// <b>Known NOT covered — a named RISK, not an assurance:</b> the SignalR hub <c>/hubs/exercise</c>.
+/// implementation.md's covered set does not name it and this story does not widen its own scope, so the hub
+/// is un-gated: a connection to a <c>build</c> / <c>completed</c> / <c>archived</c> exercise's group is
+/// accepted and would receive anything fanned out to it. "Nothing publishes into a closed exercise" is an
+/// ASSUMPTION, not an invariant — nothing consumes
+/// <see cref="ExerciseLifecycleBehaviour.ScenarioContentFires"/> today, and the engine reaction loop does not
+/// deregister an exercise on <c>completed</c>. Closing the hub is a deliberate decision that belongs to a
+/// story, not to a builder.
 /// </para>
 /// </remarks>
 public static class ExerciseLifecycleGatedRoutes
 {
+    /// <summary>
+    /// <c>/api/overlay-state</c> — a covered route that carries ONE state-specific carve-out (decision 2): it
+    /// is also served in <c>completed</c>, because that is the only way COR-054's EndEx overlay can render.
+    /// See <see cref="ExerciseLifecycleStates.IsOverlayStateServed"/>.
+    /// </summary>
+    public const string OverlayStatePath = "/api/overlay-state";
+
     /// <summary>The gated participant-world path prefixes, in the order implementation.md lists them.</summary>
     public static IReadOnlyList<string> Paths { get; } =
     [
@@ -51,7 +62,7 @@ public static class ExerciseLifecycleGatedRoutes
         "/api/brand-tokens",
         "/api/channel-nav-config",
         "/api/alerts",
-        "/api/overlay-state",
+        OverlayStatePath,
     ];
 
     /// <summary>Whether <paramref name="path"/> is a participant-world route this gate covers.</summary>
@@ -69,6 +80,16 @@ public static class ExerciseLifecycleGatedRoutes
 
         return false;
     }
+
+    /// <summary>
+    /// Whether <paramref name="path"/> is the participant overlay endpoint, which carries the decision-2
+    /// <c>completed</c> carve-out. Segment-matched like <see cref="IsGated"/>, so it can never widen the
+    /// carve-out to a merely prefix-similar route.
+    /// </summary>
+    /// <param name="path">The request path.</param>
+    /// <returns><c>true</c> when the path is the overlay-state route.</returns>
+    public static bool IsOverlayState(PathString path) =>
+        path.StartsWithSegments(OverlayStatePath, StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -76,7 +97,10 @@ public static class ExerciseLifecycleGatedRoutes
 /// the participant surface is NOT SERVED: every route in
 /// <see cref="ExerciseLifecycleGatedRoutes"/> short-circuits with <c>403 Forbidden</c> before its handler
 /// runs. <c>staged</c> and <c>live</c> are the participant-accessible states; <c>paused</c> is served too,
-/// because that is the only way the holding page can render (AC6).
+/// because that is the only way the holding page can render (AC6). <c>completed</c> is served for
+/// <c>/api/overlay-state</c> ALONE — the same "an overlay cannot render if its endpoint is refused" reasoning,
+/// applied to COR-054's EndEx overlay (Tier-2 human ruling, decision 2). <c>build</c> and <c>archived</c> stay
+/// fully closed.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -169,7 +193,14 @@ public sealed partial class ExerciseLifecycleGatingMiddleware
 
         // An unresolved scope is the endpoints' own fail-closed 401, not this gate's 403 (see remarks).
         var state = await lifecycle.GetCurrentStateAsync(context.RequestAborted);
-        if (state is null || ExerciseLifecycleStates.IsParticipantAccessible(state))
+
+        // The overlay endpoint answers in one extra state — 'completed' — so COR-054's EndEx overlay can
+        // render (decision 2). Every other covered route still sees the plain participant-access rule.
+        var served = ExerciseLifecycleGatedRoutes.IsOverlayState(context.Request.Path)
+            ? ExerciseLifecycleStates.IsOverlayStateServed(state)
+            : ExerciseLifecycleStates.IsParticipantAccessible(state);
+
+        if (state is null || served)
         {
             await _next(context);
             return;

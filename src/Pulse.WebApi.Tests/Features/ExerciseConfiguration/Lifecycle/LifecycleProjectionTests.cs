@@ -24,7 +24,7 @@ public sealed class LifecycleProjectionTests
     /// <summary>AC6: the lifecycle decides the shell variant, on the unchanged frozen shape.</summary>
     [Theory]
     [InlineData("build", "preview")]
-    [InlineData("staged", "readOnly")]
+    [InlineData("staged", "full")]
     [InlineData("live", "full")]
     [InlineData("paused", "readOnly")]
     [InlineData("completed", "readOnly")]
@@ -34,6 +34,30 @@ public sealed class LifecycleProjectionTests
         var response = await new LifecycleShellVariantProjection().ProjectAsync(SourceIn(status));
 
         response.Variant.Should().Be(expected, "the lifecycle dictates the variant (COR-032 / AC6)");
+    }
+
+    /// <summary>
+    /// <b>Tier-2 human ruling, decision 1 — pinned so nobody "tidies" Staged back to <c>readOnly</c>.</b>
+    /// <c>readOnly</c> is not a cosmetic downgrade: <c>mountContract.ts</c>'s
+    /// <c>affordancesAvailable(variant) =&gt; variant === 'full'</c> is what gates the realtime feed stream
+    /// (<c>Feed.tsx</c>: <c>useFeedStream({ enabled: affordances })</c>), the "▲ N new posts" pill and the
+    /// composer — so a <c>readOnly</c> Staged is a frozen snapshot with no error, during the very pre-StartEx
+    /// familiarization window COR-032 gives Staged for. It also has to agree with this story's own AC7 hooks,
+    /// asserted here alongside it.
+    /// </summary>
+    [Fact]
+    public void ShellVariantProjection_Staged_IsFull_BecauseAffordancesAreGatedOnFullAlone()
+    {
+        LifecycleShellVariantProjection.VariantFor("staged").Should().Be(
+            ShellVariants.Full,
+            "affordancesAvailable() grants the feed stream, the new-posts pill and authoring to 'full' ALONE — " +
+            "any other variant silently ships Staged as a dead snapshot (decision 1)");
+
+        var staged = ExerciseLifecycleStates.BehaviourOf("staged");
+        staged.AmbientWorldRuns.Should().BeTrue(
+            "the variant must agree with AC7: a Staged world whose ambient content runs needs a live stream to show it");
+        staged.ParticipantWritesAccepted.Should().BeTrue(
+            "and a Staged world that accepts participant writes needs the composer the 'full' variant carries");
     }
 
     /// <summary>Every emitted variant is inside the frozen client union — a coined value blanks the shell.</summary>
@@ -64,8 +88,25 @@ public sealed class LifecycleProjectionTests
             .ProjectAsync(SourceIn("paused"));
 
         response.State.Should().Be("pause");
-        response.Register.Should().Be("out-of-fiction");
+        response.Register.Should().Be(
+            "out-of-fiction",
+            "with NEITHER side authoring a register the composer falls back to the fail-closed floor (decision 3)");
         response.Message.Should().BeEmpty("holding-page CONTENT authoring is out of scope for this story");
+    }
+
+    /// <summary>
+    /// <b>Tier-2 human ruling, decision 3.</b> The lifecycle contributes an UNSPECIFIED register: COR-032 says
+    /// the holding page is "configurable (in-fiction or out-of-fiction, CTL-023)", so the choice is CTL-023's.
+    /// Hardcoding <c>out-of-fiction</c> here made in-fiction unreachable by construction once rule 2's
+    /// domination applied.
+    /// </summary>
+    [Fact]
+    public void OverlayComposition_TheLifecycleAuthorsNoRegister()
+    {
+        LifecycleOverlayComposer.FromLifecycle("paused").Register.Should().BeNull(
+            "the register is CTL-023's to author (COR-032) — the lifecycle only says 'a pause is in effect'");
+        LifecycleOverlayComposer.FromLifecycle("live").Should().Be(
+            OverlayContribution.None, "no other state contributes an overlay at all");
     }
 
     /// <summary>A non-paused exercise with no steering overlay is byte-identical to the shipped constant.</summary>
@@ -103,7 +144,7 @@ public sealed class LifecycleProjectionTests
 
     /// <summary>
     /// The composition's load-bearing case: a lifecycle Pause AND a CTL-023 Freeze produce exactly ONE
-    /// <c>pause</c> overlay, in the more-revealing register.
+    /// <c>pause</c> overlay, carrying the controller's authored register and copy.
     /// </summary>
     [Fact]
     public async Task OverlayComposition_LifecyclePauseAndFreeze_ProduceOneCoherentOverlay()
@@ -114,10 +155,60 @@ public sealed class LifecycleProjectionTests
 
         response.State.Should().Be("pause", "two pauses compose into one pause, never two competing overlays");
         response.Register.Should().Be(
-            "out-of-fiction",
-            "out-of-fiction dominates: staying in-fiction would HIDE a real stop from participants");
+            "in-fiction",
+            "only CTL-023 authored a register, so its choice stands (decision 3) — the lifecycle authors none");
         response.Message.Should().Be("Standby.", "the live controller action carries the more specific copy");
     }
+
+    /// <summary>
+    /// <b>Decision 3, the case the ruling exists for:</b> a controller-authored <c>in-fiction</c> register
+    /// SURVIVES a concurrent COR-032 lifecycle pause. Under the old rule the lifecycle's hardcoded
+    /// <c>out-of-fiction</c> dominated permanently, so COR-032's "configurable in-fiction or out-of-fiction"
+    /// was unreachable and every lifecycle pause broke fiction (a D0 §4 cost).
+    /// </summary>
+    [Fact]
+    public void OverlayComposition_ASteeringChosenInFictionRegister_SurvivesAConcurrentLifecyclePause()
+    {
+        var composed = LifecycleOverlayComposer.Compose(
+            LifecycleOverlayComposer.FromLifecycle("paused"),
+            new OverlayContribution("pause", "in-fiction", "We'll be right back."));
+
+        composed.State.Should().Be("pause");
+        composed.Register.Should().Be(
+            "in-fiction",
+            "CTL-023 chooses the register (COR-032); the lifecycle contributes no competing choice to dominate it");
+    }
+
+    /// <summary>
+    /// Domination is preserved where it belongs: BETWEEN TWO EXPLICIT CHOICES. An out-of-fiction contribution
+    /// still wins over an in-fiction one, because wrongly staying in-fiction hides a real stop.
+    /// </summary>
+    [Theory]
+    [InlineData("out-of-fiction", "in-fiction")]
+    [InlineData("in-fiction", "out-of-fiction")]
+    [InlineData("coined-nonsense", "in-fiction")]
+    public void OverlayComposition_OutOfFictionDominates_BetweenTwoExplicitlyChosenRegisters(
+        string first,
+        string second)
+    {
+        var composed = LifecycleOverlayComposer.Compose(
+            new OverlayContribution("pause", first, string.Empty),
+            new OverlayContribution("pause", second, string.Empty));
+
+        composed.Register.Should().Be(
+            "out-of-fiction",
+            "when both sides chose, the more-revealing register wins — and a coined literal coerces to it too");
+    }
+
+    /// <summary>The fail-closed floor: when NOBODY authored a register, the composed pause is out-of-fiction.</summary>
+    [Fact]
+    public void OverlayComposition_WithNoAuthoredRegisterOnEitherSide_FallsBackToOutOfFiction() =>
+        LifecycleOverlayComposer.Compose(
+                LifecycleOverlayComposer.FromLifecycle("paused"),
+                new OverlayContribution("pause", Register: null, string.Empty))
+            .Register.Should().Be(
+                "out-of-fiction",
+                "the fail-closed default is preserved for the case where nothing else speaks (decision 3)");
 
     /// <summary>
     /// The regression a naive "steering wins" rule ships: a controller Resume must NOT lift a COR-032
@@ -158,18 +249,47 @@ public sealed class LifecycleProjectionTests
         response.Message.Should().Be("CONTROLLER: evacuate the building.");
     }
 
-    /// <summary>The join is order-independent — neither subsystem's write order can change the answer.</summary>
-    [Fact]
-    public void OverlayComposition_IsCommutativeAcrossTheTwoContributions()
+    /// <summary>
+    /// The join is order-independent OVER THE REACHABLE DOMAIN — <see cref="LifecycleOverlayComposer.FromLifecycle"/>
+    /// yields only <c>none</c> or an unspecified-register <c>pause</c>, and neither subsystem's write order can
+    /// change the answer for those. (Reviewer S-001: the claim is domain-limited, not general — see the
+    /// companion test below.)
+    /// </summary>
+    [Theory]
+    [InlineData("paused", "pause", "in-fiction")]
+    [InlineData("paused", "none", "in-fiction")]
+    [InlineData("live", "pause", "out-of-fiction")]
+    [InlineData("live", "none", "in-fiction")]
+    public void OverlayComposition_IsCommutativeAcrossTheTwoContributions(
+        string lifecycleState,
+        string steeringState,
+        string steeringRegister)
     {
-        var lifecyclePause = LifecycleOverlayComposer.FromLifecycle("paused");
-        var freeze = new OverlayContribution("pause", "in-fiction", string.Empty);
+        var lifecycle = LifecycleOverlayComposer.FromLifecycle(lifecycleState);
+        var steering = new OverlayContribution(steeringState, steeringRegister, string.Empty);
 
-        var oneWay = LifecycleOverlayComposer.Compose(lifecyclePause, freeze);
-        var otherWay = LifecycleOverlayComposer.Compose(
-            new OverlayContribution(freeze.State, freeze.Register, freeze.Message), lifecyclePause);
+        var oneWay = LifecycleOverlayComposer.Compose(lifecycle, steering);
+        var otherWay = LifecycleOverlayComposer.Compose(steering, lifecycle);
 
         otherWay.Should().BeEquivalentTo(oneWay, "the composed overlay must not depend on which side was observed first");
+    }
+
+    /// <summary>
+    /// <b>Reviewer S-001, pinned rather than over-claimed:</b> the join is NOT commutative in general, and the
+    /// asymmetry is deliberate — rule 1 is a STEERING-SIDE privilege. Only an authored controller overlay may
+    /// outrank a holding page, so callers must keep passing the lifecycle contribution first.
+    /// </summary>
+    [Fact]
+    public void OverlayComposition_IsNotCommutativeInGeneral_BecauseRule1IsASteeringSidePrivilege()
+    {
+        var broadcast = new OverlayContribution("broadcast", "out-of-fiction", "CONTROLLER: evacuate.");
+
+        LifecycleOverlayComposer.Compose(OverlayContribution.None, broadcast).State.Should().Be(
+            "broadcast", "a controller broadcast on the STEERING side wins outright (rule 1)");
+        LifecycleOverlayComposer.Compose(broadcast, OverlayContribution.None).State.Should().Be(
+            "pause",
+            "the same contribution on the LIFECYCLE side does not — the lifecycle can only ever say 'paused', " +
+            "so this argument order is unreachable and the commutativity claim is limited to that domain");
     }
 
     /// <summary>The fail-closed floor never invents an overlay nobody triggered.</summary>
