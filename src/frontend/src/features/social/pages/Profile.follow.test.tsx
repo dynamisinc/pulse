@@ -268,8 +268,13 @@ describe('Profile — header follower count tracks the follow button (CR-003, SO
     fireEvent.click(button)
     expect(header).toHaveTextContent(`${magnitude + 1} Followers`) // optimistic
 
+    // The button's aria-pressed and the HEADER count settle in two different renders:
+    // rollback flips the button's own state, then `onFollowerCountChange` lifts the
+    // corrected count into <Profile>. Gating only on aria-pressed and asserting the
+    // header synchronously samples the intermediate frame — it passes when the machine
+    // is idle and fails under a loaded parallel run. Wait on the assertion that matters.
     await waitFor(() => expect(button).toHaveAttribute('aria-pressed', 'false'))
-    expect(header).toHaveTextContent(`${magnitude} Followers`)
+    await waitFor(() => expect(header).toHaveTextContent(`${magnitude} Followers`))
   })
 
   it('keeps the header count visible under a read-only shell variant (D1-011)', async () => {
