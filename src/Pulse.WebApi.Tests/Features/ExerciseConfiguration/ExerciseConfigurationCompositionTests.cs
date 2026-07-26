@@ -1,10 +1,8 @@
 namespace Pulse.WebApi.Tests.Features.ExerciseConfiguration;
 
 using System;
-using System.Linq;
 using System.Net;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,10 +13,10 @@ using Pulse.WebApi.Tests.Data;
 using Xunit;
 
 /// <summary>
-/// Composition-root guard for <see cref="ExerciseConfigurationExtensions.AddExerciseConfiguration"/> and,
-/// above all, for the PROJECTION-OVERRIDE CONTRACT wave 3's three-way fan-out rests on: 01b ships
-/// constant-preserving defaults with <c>TryAddScoped</c>, and stories 02/03 contribute real projections from
-/// their own files with <c>services.Replace(...)</c>.
+/// The END-TO-END half of the guard over the PROJECTION-OVERRIDE CONTRACT wave 3's three-way fan-out rests
+/// on: 01b ships constant-preserving defaults with <c>TryAddScoped</c>, and stories 02/03 contribute real
+/// projections from their own files with <c>services.Replace(...)</c>. Every test here drives the REAL HTTP
+/// endpoint through a composed host against real SQL Server.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,119 +24,30 @@ using Xunit;
 /// against ships green: a contributor whose projection class is correct, and whose own unit tests pass,
 /// registers it with an idiom that loses to the already-present default — and at runtime every exercise
 /// silently serves the shipped constant. Exercising the projection class in isolation cannot catch that.
-/// These tests resolve the interface from a fully composed provider (and, for the end-to-end case, drive the
-/// real HTTP endpoint) so the registration idiom itself is under test.
+/// These tests drive the real HTTP endpoint over a fully composed provider so the registration idiom itself
+/// is under test.
+/// </para>
+/// <para>
+/// <b>The split (and why it matters to a Docker-less box).</b> The pure-DI assertions — the ones that need no
+/// database at all — live in the sibling <see cref="ExerciseConfigurationProjectionRegistrationTests"/>,
+/// OUTSIDE <see cref="MsSqlCollection"/>, so they run everywhere. Only the genuinely SQL-touching cases
+/// belong here, and each is gated with <c>[RequiresDockerFact]</c> so it SKIPS cleanly (never hard-fails)
+/// where Docker and <c>PULSE_TEST_SQL_CONNECTION</c> are both absent. Keep that line: a plain
+/// <see cref="FactAttribute"/> in this class constructs the container fixture regardless and turns a
+/// Docker-less run red.
 /// </para>
 /// </remarks>
 [Collection(MsSqlCollection.Name)]
 public sealed class ExerciseConfigurationCompositionTests
 {
-    private const string ContributedTopText = "CONTRIBUTED TOP BANNER";
-    private const string ContributedBottomText = "CONTRIBUTED BOTTOM BANNER";
+    private const string ContributedTopText = ContributedChromeProjection.TopText;
+    private const string ContributedBottomText = ContributedChromeProjection.BottomText;
 
     private readonly MsSqlContainerFixture _fixture;
 
     public ExerciseConfigurationCompositionTests(MsSqlContainerFixture fixture)
     {
         _fixture = fixture;
-    }
-
-    [Fact]
-    public void AddExerciseConfiguration_RegistersTheSlicesServicesAtScopedLifetime()
-    {
-        var services = new ServiceCollection();
-
-        services.AddExerciseConfiguration();
-
-        services.Should().Contain(
-            d => d.ServiceType == typeof(ExerciseSettingsService) && d.Lifetime == ServiceLifetime.Scoped,
-            "the settings service shares the request-scoped PulseDbContext unit of work");
-        services.Should().Contain(
-            d => d.ServiceType == typeof(ParticipantShellConfigService) && d.Lifetime == ServiceLifetime.Scoped,
-            "the shell-config service shares the request-scoped PulseDbContext unit of work");
-    }
-
-    [Fact]
-    public void AddExerciseConfiguration_RegistersEachProjectionDefaultExactlyOnce_AsTheConstantPreservingFloor()
-    {
-        var services = new ServiceCollection();
-
-        services.AddExerciseConfiguration();
-
-        services.Where(d => d.ServiceType == typeof(IChromeConfigProjection)).Should().ContainSingle()
-            .Which.ImplementationType.Should().Be(typeof(ConstantChromeConfigProjection));
-        services.Where(d => d.ServiceType == typeof(IShellVariantProjection)).Should().ContainSingle()
-            .Which.ImplementationType.Should().Be(typeof(ConstantShellVariantProjection));
-        services.Where(d => d.ServiceType == typeof(IOverlayStateProjection)).Should().ContainSingle()
-            .Which.ImplementationType.Should().Be(typeof(ConstantOverlayStateProjection));
-    }
-
-    [Fact]
-    public void AddExerciseConfiguration_CalledTwice_StillRegistersOneProjectionDescriptor()
-    {
-        // TryAdd (not Add) is what makes the default a FLOOR rather than a stack: a duplicated composition
-        // call cannot produce two descriptors whose order silently decides which one wins.
-        var services = new ServiceCollection();
-
-        services.AddExerciseConfiguration();
-        services.AddExerciseConfiguration();
-
-        services.Count(d => d.ServiceType == typeof(IChromeConfigProjection)).Should().Be(1);
-        services.Count(d => d.ServiceType == typeof(IShellVariantProjection)).Should().Be(1);
-        services.Count(d => d.ServiceType == typeof(IOverlayStateProjection)).Should().Be(1);
-    }
-
-    [Fact]
-    public void ContributedProjection_RegisteredWithReplace_WinsOverTheDefault_InTheOrchestratorsOrder()
-    {
-        // The orchestrator's declared order: 01b's AddExerciseConfiguration() first, the contributor after.
-        var services = new ServiceCollection();
-        services.AddExerciseConfiguration();
-        services.Replace(ServiceDescriptor.Scoped<IChromeConfigProjection, ContributedChromeProjection>());
-
-        using var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-
-        scope.ServiceProvider.GetRequiredService<IChromeConfigProjection>()
-            .Should().BeOfType<ContributedChromeProjection>(
-                "Replace swaps the descriptor, so the contributed projection is the one the runtime resolves");
-        services.Count(d => d.ServiceType == typeof(IChromeConfigProjection)).Should().Be(
-            1, "Replace swaps the descriptor rather than stacking a second one");
-    }
-
-    [Fact]
-    public void ContributedProjection_RegisteredWithReplace_WinsEvenWhenItRunsBeforeTheDefault()
-    {
-        // Replace is ORDER-INDEPENDENT: it swaps the descriptor whether or not the default is registered yet,
-        // and the subsequent TryAdd sees a registration already present and stands down.
-        var services = new ServiceCollection();
-        services.Replace(ServiceDescriptor.Scoped<IChromeConfigProjection, ContributedChromeProjection>());
-        services.AddExerciseConfiguration();
-
-        using var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-
-        scope.ServiceProvider.GetRequiredService<IChromeConfigProjection>()
-            .Should().BeOfType<ContributedChromeProjection>(
-                "a contributor must not have to depend on the orchestrator's call order to win");
-    }
-
-    [Fact]
-    public void ContributedProjection_RegisteredWithTryAdd_IsSilentlyIgnored_WhichIsWhyReplaceIsMandatory()
-    {
-        // THE trap this contract exists to close. A contributor that copies 01b's own TryAdd idiom loses:
-        // the default is already present, so TryAdd stands down, no error is raised anywhere, the
-        // contributor's own unit tests still pass — and every exercise serves the constant at runtime.
-        var services = new ServiceCollection();
-        services.AddExerciseConfiguration();
-        services.TryAddScoped<IChromeConfigProjection, ContributedChromeProjection>();
-
-        using var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-
-        scope.ServiceProvider.GetRequiredService<IChromeConfigProjection>()
-            .Should().BeOfType<ConstantChromeConfigProjection>(
-                "TryAdd is NOT an override — this is the silent failure the Replace rule prevents");
     }
 
     [RequiresDockerFact]
@@ -226,52 +135,5 @@ public sealed class ExerciseConfigurationCompositionTests
             "the Docker-gated MsSql fixture must have started and captured its connection string before these tests run");
         return ExerciseConfigurationTestHost.StartAsync(
             _fixture.ConnectionString!, exerciseId, configureContributor: configureContributor);
-    }
-
-    /// <summary>Stands in for story 02's <c>ChromeConfigProjection</c> — per-exercise, not a constant.</summary>
-    private sealed class ContributedChromeProjection : IChromeConfigProjection
-    {
-        public Task<ChromeConfigResponse> ProjectAsync(ExerciseShellConfigSource source, CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(source);
-
-            return Task.FromResult(new ChromeConfigResponse
-            {
-                Enabled = source.ComplianceChromeEnabled,
-                Top = new ChromeBannerConfig { Text = ContributedTopText, Fg = "#ffffff", Bg = "#000000" },
-                Bottom = new ChromeBannerConfig
-                {
-                    Text = $"{ContributedBottomText} {source.ExerciseId}",
-                    Fg = "#ffffff",
-                    Bg = "#000000",
-                },
-            });
-        }
-    }
-
-    /// <summary>Stands in for story 03's shell-variant projection.</summary>
-    private sealed class ContributedShellVariantProjection : IShellVariantProjection
-    {
-        public Task<ShellStateResponse> ProjectAsync(ExerciseShellConfigSource source, CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(source);
-            return Task.FromResult(new ShellStateResponse { Variant = "readOnly" });
-        }
-    }
-
-    /// <summary>Stands in for story 03's overlay-state projection.</summary>
-    private sealed class ContributedOverlayStateProjection : IOverlayStateProjection
-    {
-        public Task<OverlayStateResponse> ProjectAsync(ExerciseShellConfigSource source, CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(source);
-
-            return Task.FromResult(new OverlayStateResponse
-            {
-                State = "pause",
-                Register = "out-of-fiction",
-                Message = $"paused {source.ExerciseId}",
-            });
-        }
     }
 }
