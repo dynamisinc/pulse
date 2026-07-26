@@ -132,6 +132,47 @@ public sealed class ExerciseSettingsFieldRulesTests
         error.Should().NotBeNullOrWhiteSpace();
     }
 
+    // ---- schedule instants (WR-004) --------------------------------------------------------------
+
+    [Fact]
+    public void TryNormalizeInstant_AnOffsetlessInstant_IsReadAsUtc_NotTheHostsLocalZone()
+    {
+        // WR-004. An ISO-8601 instant with no 'Z' and no offset used to bind to whatever zone the SERVER
+        // ran in, so the same request stored a different instant on a non-UTC host. Asserted against the
+        // fixed UTC interpretation — never against a local-time expression — so the assertion means the same
+        // thing on every machine and in CI.
+        var ok = ExerciseSettingsFieldRules.TryNormalizeInstant(
+            "2026-03-01T13:00:00", "scheduledStartAt", out var instant, out var error);
+
+        ok.Should().BeTrue(error);
+        instant.Should().NotBeNull();
+        instant!.Value.UtcDateTime.Should().Be(
+            new DateTime(2026, 3, 1, 13, 0, 0, DateTimeKind.Utc),
+            "an offsetless instant means 13:00 UTC regardless of the host's zone — ScheduledStartAt feeds "
+            + "exercise-clock and story 03's lifecycle gating, where a silently shifted instant is a "
+            + "scenario-time defect, not a display quirk");
+        instant.Value.Offset.Should().Be(TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void TryNormalizeInstant_AnExplicitOffset_KeepsTheInstant_AndNormalizesItToUtc()
+    {
+        // The machine-independent half of the WR-004 guard: this one distinguishes AssumeUniversal |
+        // AdjustToUniversal from the old RoundtripKind on EVERY host, including a UTC dev box (where the
+        // offsetless case above is necessarily indistinguishable). RoundtripKind would preserve the -05:00
+        // offset; the shipped style normalizes to the equivalent UTC instant.
+        var ok = ExerciseSettingsFieldRules.TryNormalizeInstant(
+            "2026-03-01T08:00:00-05:00", "scheduledStartAt", out var instant, out var error);
+
+        ok.Should().BeTrue(error);
+        instant.Should().NotBeNull();
+        instant!.Value.Offset.Should().Be(
+            TimeSpan.Zero, "the column stores one canonical representation — the UTC instant");
+        instant.Value.UtcDateTime.Should().Be(
+            new DateTime(2026, 3, 1, 13, 0, 0, DateTimeKind.Utc),
+            "normalizing the offset must not move the instant the planner actually meant");
+    }
+
     // ---- locale ----------------------------------------------------------------------------------
 
     [Theory]

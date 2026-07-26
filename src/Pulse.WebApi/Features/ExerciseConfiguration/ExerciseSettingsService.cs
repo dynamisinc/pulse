@@ -263,9 +263,26 @@ public static partial class ExerciseSettingsFieldRules
     /// <summary>Parses an OPTIONAL ISO-8601 instant; an absent/blank value clears the setting.</summary>
     /// <param name="raw">The raw instant from the request body.</param>
     /// <param name="field">The wire field name, used in the failure message.</param>
-    /// <param name="instant">The parsed instant, or <c>null</c> to clear it.</param>
+    /// <param name="instant">The parsed instant, normalized to UTC, or <c>null</c> to clear it.</param>
     /// <param name="error">A human-readable reason on failure.</param>
     /// <returns><c>true</c> when the instant is valid or absent.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>An offsetless instant is UTC, never the host's local zone (WR-004).</b> The parse style is
+    /// <see cref="DateTimeStyles.AssumeUniversal"/> | <see cref="DateTimeStyles.AdjustToUniversal"/>:
+    /// <c>"2026-03-01T13:00:00"</c> — an ISO-8601 string carrying no <c>Z</c> and no offset — is read as
+    /// 13:00 UTC. With the previous <c>RoundtripKind</c> style it bound to whatever zone the SERVER happened
+    /// to run in, so the same request stored a different instant on a non-UTC host than on a UTC one. The
+    /// shipped editor always appends <c>Z</c> and App Service runs UTC, so the divergence was unreachable
+    /// from the UI — but any other API client could hit it, and <c>ScheduledStartAt</c> is consumed by
+    /// <c>exercise-clock</c> and story 03's lifecycle gating, where a silently shifted instant is a
+    /// scenario-time defect rather than a display quirk.
+    /// </para>
+    /// <para>
+    /// An instant that DOES carry an offset keeps its meaning exactly and is merely normalized to the
+    /// equivalent UTC instant (<c>AdjustToUniversal</c>), so the column stores one canonical representation.
+    /// </para>
+    /// </remarks>
     public static bool TryNormalizeInstant(string? raw, string field, out DateTimeOffset? instant, [NotNullWhen(false)] out string? error)
     {
         ArgumentNullException.ThrowIfNull(field);
@@ -282,7 +299,7 @@ public static partial class ExerciseSettingsFieldRules
         if (!DateTimeOffset.TryParse(
                 trimmed,
                 CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
                 out var parsed))
         {
             error = $"{field} must be an ISO-8601 instant (e.g. '2026-03-01T13:00:00Z').";
