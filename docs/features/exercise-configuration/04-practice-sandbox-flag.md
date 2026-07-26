@@ -46,12 +46,77 @@ belongs to the account-import contract and would collide with the other wave-3 b
 lands in the `Features/ExerciseConfiguration/` slice story 01b creates. No schema work here. See
 implementation.md (story 04).
 
+**Composition root (orchestrator-owned — two lines, no builder edits `Program.cs`).** This slice exports its
+own pair from `Features/ExerciseConfiguration/PracticeMode/PracticeModeExtensions.cs`:
+`builder.Services.AddPracticeMode();` (after `AddPulsePersistence` / `AddExerciseScoping` /
+`AddStaffIdentity`, and by convention after `AddExerciseConfiguration()`) and
+`app.MapPracticeModeEndpoints();`. No middleware ordering constraint. **The wiring is required, not
+optional:** `IEvaluationEligibility` has no fail-safe default registered anywhere else, deliberately — a
+missing registration must be a loud DI failure, never a silent "everything is eligible" that leaks rehearsal
+data into an AAR. The frontend panel mounts with one line, `<PracticeModePanel />`, in
+`ExerciseSettingsPage.tsx` (plus the barrel/README lines).
+
 ## Dependencies
 Story 01 (settings slice + the flag column in its migration). Consumed later by E10 export
 (Phase 4). Supports the load rehearsal (COR-042).
 
 ## Tests
-- Integration: the flag persists per exercise and defaults off.
-- Unit: the evaluation-eligibility seam returns false for a flagged exercise, true otherwise (the
-  contract E10 will filter on).
-- Component: the staff indicator conveys practice mode with icon + text, not color alone.
+
+**Backend** — `src/Pulse.WebApi.Tests/Features/ExerciseConfiguration/PracticeMode/`
+
+`PracticeModeEndpointsTests` (real SQL, `[RequiresDockerFact]`, `MsSqlCollection`):
+- `Get_ExerciseThatWasNeverFlagged_ReportsPracticeModeOff_AndEvaluationEligible` (AC1, AC2)
+- `Put_FlaggingTheExercise_PersistsAndSurvivesAReload_AndTurnsOffEvaluationEligibility` (AC1, AC2)
+- `Put_ClearingTheFlag_RestoresEvaluationEligibility` (AC1, AC2)
+- `Put_WithoutIsPracticeMode_Returns400_AndLeavesTheFlagUnchanged` (AC1)
+- `Put_MissingBody_Returns400` (AC1)
+- `Get_NoStaffSession_Returns401_FailClosed` (AC5)
+- `Get_StaffNotAssignedToTheResolvedExercise_Returns403_FailClosed` (AC5)
+- `Get_UnresolvedScope_Returns401_FailClosed` (AC5)
+- `Put_NoStaffSession_Returns401_AndWritesNothing` (AC5)
+- `Put_InExerciseA_NeverFlagsExerciseB_EvenWhenTheBodyNamesIt` (AC5 — cross-exercise write, fails closed)
+- `Get_InExerciseA_NeverReportsExerciseBsFlag` (AC5 — cross-exercise read)
+- `FlaggingPracticeMode_LeavesEveryParticipantShellConfigByteIdentical_AndMentionsItNowhere` (AC3, AC5)
+- `Put_ThatFlipsTheFlag_EmitsExactlyOnePracticeModeTelemetryEvent` (AC3 — one XC-004 audit event, the flag
+  changes no other telemetry)
+- `Put_ThatChangesNothing_PersistsNothingAndEmitsNoTelemetry` (AC3)
+
+`EvaluationEligibilitySeamTests` (real SQL; the seam resolved from a fully composed, running host):
+- `Verdict_ForAnExerciseThatWasNeverFlagged_IsEligible` (AC1, AC2, AC6)
+- `Verdict_ForAFlaggedExercise_IsNotEligible_AndSaysWhy` (AC2, AC6)
+- `Verdict_WithNoResolvedScope_IsNotEligible_FailingClosed` (AC2, AC5)
+- `Verdict_ForAScopeWithNoExerciseRow_IsNotEligible_FailingClosed` (AC2)
+- `Verdict_IsReadLive_SoFlaggingAnExerciseTakesEffectImmediately` (AC2)
+- `Verdict_InExerciseA_IsUnaffectedByExerciseBsFlag` (AC5)
+
+`PracticeModeRegistrationTests` (pure DI, plain `[Fact]`, deliberately OUTSIDE `MsSqlCollection`):
+- `AddPracticeMode_RegistersTheSeamAndTheServiceAtScopedLifetime` (AC6)
+- `AddPracticeMode_RegistersThisStorysEligibilityImplementation_NotSomeOtherRule` (AC6)
+- `AddPracticeMode_CalledTwice_StillLeavesASingleEligibilityDescriptor` (AC6)
+- `AddPracticeMode_WinsOverAPreExistingEligibilityRegistration_RegardlessOfOrder` (AC6)
+- `ComposedProvider_ResolvesTheSeamAndTheService_InTheOrchestratorsOrder` (AC6)
+- `ComposedProvider_ResolvesTheSeamPerScope_NeverAsASingleton` (AC6)
+
+**Frontend** — `src/frontend/src/features/planner/`
+
+`PracticeModePanel.test.tsx`:
+- `states REAL CONDUCT with an icon and text for an exercise that was never flagged` (AC4)
+- `states PRACTICE / SANDBOX with a DIFFERENT icon and DIFFERENT text when flagged` (AC4)
+- `says the excluded-from-exports consequence in words when flagged` (AC4)
+- `renders the server eligibility verdict rather than re-deriving it from the flag` (AC2, AC4)
+- `announces loading in a status region while the flag is in flight` (AC4)
+- `reports a load failure with an icon and text, not color alone` (AC4)
+- `sends the explicit boolean and nothing else` / `clears the flag with an explicit false` (AC1)
+- `re-renders from the SERVER response after a save` (AC1, AC2)
+- `keeps the save button disabled until the planner actually changes the flag` (AC1)
+- `reports a save failure with an icon and text, and leaves the stored state showing` (AC4)
+
+`practiceModeService.test.ts`:
+- `reads the staff route with NO exercise parameter (the scope is server-resolved)` (AC5)
+- `PUTs only the flag — the body names no exercise` (AC5)
+- `returns the server verdict verbatim for a flagged exercise` (AC2)
+- `clears the flag with an explicit false, never by omitting it` (AC1)
+- `fails closed on a malformed body …` / `fails closed on an empty body` /
+  `fails closed on a malformed write response` (AC5 — a malformed body never renders as "not a rehearsal")
+- `translates a 401/403/404 into a PracticeModeError carrying the status`,
+  `reports a network failure with no status`, `surfaces the server reason from a 400 …` (AC5)
