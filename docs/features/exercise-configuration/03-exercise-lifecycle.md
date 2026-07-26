@@ -125,23 +125,24 @@ today, per-exercise data after this story — **same wire shapes, no consumer ch
       then the exercise comes from the server-resolved scope and never a client parameter; a
       cross-exercise transition attempt returns 403/404 and extends the standing isolation suite.
 
-### ⚠ Why this is **In Progress**, not Complete — the wiring has not landed
+### ⚠ Why this is **In Progress**, not Complete — the wiring has LANDED; the umbrella has not merged
 
-Every AC above is built and proven against a host composed *exactly* as the orchestrator will compose it
-(`ExerciseLifecycleTestHost`), but **none of the three composition-root lines is in `Program.cs` yet** —
-`Program.cs` is orchestrator-owned and this branch adds nothing to it (`W-001` is the merger's guard, and a
-guard written here would be red until the merge). Until those lines land, the following ACs are **inert at
-runtime**, however green their tests are:
+Every AC above was built and proven against a host composed *exactly* as the orchestrator would compose it
+(`ExerciseLifecycleTestHost`), while **none of the three composition-root lines was in `Program.cs`** —
+`Program.cs` is orchestrator-owned and this story's branch adds nothing to it (`W-001` was the merger's
+guard, and a guard written here would have been red until the merge). Those three lines have since landed
+(`cc83766`), so the ACs below are no longer inert at runtime:
 
-| Wiring line the orchestrator adds | ACs it activates |
-|---|---|
-| `builder.Services.AddExerciseLifecycle();` | AC5, AC6 (the two `Replace`d projections; without it 01b's constants keep serving) |
-| `app.UseExerciseLifecycleGating();` — **after** `UseExerciseResolution()` and `UseSessionAuthentication()` | AC3, AC4 (unwired, the gate refuses nothing at all) |
-| `app.MapExerciseLifecycleEndpoints();` | the HTTP halves of AC2 (the 409), AC8 and AC9 (the staff read/transition pair is 404 until mapped) |
+| Wiring line (now in `Program.cs`) | ACs it activates | Standing guard |
+|---|---|---|
+| `builder.Services.AddExerciseLifecycle();` | AC5, AC6 (the two `Replace`d projections; without it 01b's constants keep serving) | `CompositionRootWiringTests.ProgramCs_CallsAddExerciseLifecycle_SoTheShellProjectionsAreLifecycleDrivenNotConstant` |
+| `app.UseExerciseLifecycleGating();` — **after** `UseExerciseResolution()` and `UseSessionAuthentication()` | AC3, AC4 (unwired, the gate refuses nothing at all) | `LifecycleGatingPipelineOrderTests` (a real-SQL 403 that only passes if the call sits after resolution + session) |
+| `app.MapExerciseLifecycleEndpoints();` | the HTTP halves of AC2 (the 409), AC8 and AC9 (the staff read/transition pair is 404 until mapped) | `CompositionRootWiringTests.ProgramCs_MapsTheStaffExerciseLifecycleRoutesExactlyOnce` |
 
-This is the exact failure mode recorded for the bootstrap endpoint (a slice merged fully green with its
-`Add*`/`Map*` never called): **grep the composition root after merge.** The story flips to Complete when the
-wiring is in `Program.cs`, not before.
+This was the exact failure mode recorded for the bootstrap endpoint (a slice merged fully green with its
+`Add*`/`Map*` never called); **`W-001` is therefore closed.** The one gate still shut is the
+`feature/exercise-configuration` umbrella itself: it is **unmerged**, so nothing here is on `main` or in
+UAT. The story flips to **Complete** when that PR lands, by whoever lands it — not before.
 
 ## Out of Scope
 The gated go-live/StartEx actions themselves (exercise-build-golive COR-043); the clock (exercise-clock
@@ -208,12 +209,23 @@ Proven by `OverlayComposition_ASteeringChosenInFictionRegister_SurvivesAConcurre
 `OverlayComposition_OutOfFictionDominates_BetweenTwoExplicitlyChosenRegisters`.
 
 **Deliberately NOT changed here** (recorded so a later reader does not read the omissions as oversights):
-`W-001` (a composition-root guard for the three wiring lines) is the **merger's**, and would be red on this
-branch; `W-004` (participant writes accepted during `paused`) is **CTL-023's job** — hazard 1 forbids a second
-write-refusal mechanism in this slice, and it is a named merge obligation; `W-006` (`/hubs/exercise` un-gated)
-keeps its scope discipline, but its code comment was changed from an assurance to a **named risk** — "nothing
-publishes into a build/completed/archived exercise" is an *assumption*, not an invariant (nothing consumes
+`W-001` (a composition-root guard for the three wiring lines) was the **merger's**, and would have been red on
+this branch — **it has since been done**, see the wiring table above; `W-004` (participant writes accepted
+during `paused`) is **CTL-023's job** — hazard 1 forbids a second write-refusal mechanism in this slice, and it
+is a named merge obligation; `W-006` (`/hubs/exercise` un-gated) keeps its scope discipline, but its code
+comment was changed from an assurance to a **named risk** — "nothing publishes into a
+build/completed/archived exercise" is an *assumption*, not an invariant (nothing consumes
 `ScenarioContentFires`, and the reaction loop does not deregister on `completed`).
+
+> **Wave-3 Gate 2 re-checked `W-006` against the tree and the assumption is not merely unproven — it is
+> currently false.** `ExerciseLifecycleBehaviour` has **zero consumers** anywhere in `src/` outside this
+> slice and its own tests (`ScenarioContentFires` / `AmbientWorldRuns` are declared and unread), and
+> `Features/EngineRuntime/ReactionLoopHost.cs` contains no lifecycle or status check at all. So after EndEx
+> a participant who reloads is correctly refused by `/api/feed`, while a participant **holding an open
+> `/hubs/exercise` connection keeps receiving engine posts** — and at EndEx the open-tab population is the
+> one that matters. Escalated to `feature.md` → open question **(d)**; it needs an owner and an explicit
+> accept-or-hold decision **before anyone drives an EndEx in UAT**. Not fixed here: gating the hub is
+> outside this story's exported middleware seam and would be a new decision, not a defect fix.
 
 ### Lifecycle → shell-variant mapping (as built, **amended by human decision 1**)
 

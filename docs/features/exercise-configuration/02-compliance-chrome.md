@@ -1,6 +1,12 @@
 # Story: Compliance chrome — per-exercise config
 
-**Feature:** Exercise configuration  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Exercise configuration  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+*(The slice is **built, wired and green** — `Features/ExerciseConfiguration/Chrome/*`,
+`ChromeConfigProjection`, the `ComplianceChromeGuard`, `ComplianceChromePanel` and ~1,400 lines of
+passing tests, Gate 1 clean. `AddComplianceChromeConfig()` / `MapComplianceChromeEndpoints()` are in
+`Program.cs` and `<ComplianceChromePanel />` is mounted in `ExerciseSettingsPage`, all three guarded.
+It stays In Progress because the `feature/exercise-configuration` umbrella is **unmerged** — see "Why
+this is In Progress, not Complete" below.)*
 **Requirements:** COR-031 (XC-003, NFR-008)  ·  **Design decisions:** R-006 (banner presentation deferred to D7); D7 SHELL-CONTRACT §1 / D7-008 (chrome-off is legal)  ·  **Issue:** #68
 
 ## Context
@@ -27,34 +33,81 @@ in-content watermarks off** (COR-031, XC-003, NFR-008).
 > respec them here, and do not restyle the shipped component.
 
 ## Acceptance Criteria
-- [ ] Given a planner with a staff session, when they edit the compliance-chrome config (enabled,
+- [x] Given a planner with a staff session, when they edit the compliance-chrome config (enabled,
       top/bottom banner text + fg/bg colors) and save, then it persists on that exercise and is
       unchanged for every other exercise.
-- [ ] Given a saved chrome config, when a participant calls `GET /api/chrome-config`, then the response
+      *(`ChromeSettingsEndpointsTests` against real SQL, plus the panel's round-trip tests. The staff
+      routes are live — `MapComplianceChromeEndpoints()` is in `Program.cs` and pinned by
+      `CompositionRootWiringTests.ProgramCs_MapsTheStaffChromeSettingsRoutesExactlyOnce`.)*
+- [x] Given a saved chrome config, when a participant calls `GET /api/chrome-config`, then the response
       carries that exercise's values in the **existing frozen `ChromeConfigResponse` shape**
       (`{ enabled, top{text,fg,bg}, bottom{text,fg,bg} }`) — the constant is gone, the DTO is unchanged,
       and `chromeConfig.ts`'s `isChromeConfig` guard and `ComplianceChrome.tsx` need no change.
-- [ ] **NFR-008 guard, server-side:** given an exercise whose in-content watermark is off, when a
+      *(`ChromeConfigCompositionTests` end to end, incl. the frozen-key-count test; the frontend half is
+      `chromeConfigWireContract.test.tsx`, which drives the shipped `useChromeConfig()` through a mocked
+      adapter and proves the private guard accepts the per-exercise body. No file in
+      `participant-shell` changed.)*
+- [x] **NFR-008 guard, server-side:** given an exercise whose in-content watermark is off, when a
       planner attempts to disable compliance chrome (or vice versa), then the write is rejected with a
       400 and an explanatory message — chrome and watermark are never both off, and the rule holds
       regardless of what the client sends.
-- [ ] **Content security (NFR-004):** given banner text is free text rendered on every participant
+      *(`ComplianceChromeGuardTests` — the invariant truth table both ways — plus the four `Put_…`
+      endpoint cases and the read-side `ChromeConfig_WithAStoredRowThatHasBothMarkingsOff_ServesEnabledTrue_NFR008`.
+      The client refusal in `ComplianceChromePanel` is a convenience, not the enforcement.)*
+- [x] **Content security (NFR-004):** given banner text is free text rendered on every participant
       channel, when it is saved, then it is length-bounded and sanitized server-side **through the
       shipped `Features/Social/PostSanitizer.cs`**; a stored `<script>` in a banner never executes in a
       participant session. **Strip, never entity-encode** — an `HtmlEncoder` here ships banner text
       reading `UNCLASSIFIED &#47;&#47; EXERCISE` on every participant channel.
-- [ ] **The override actually resolves (projection-override contract):** given a fully composed service
+      *(`ChromeSettingsDtos.cs` calls `PostSanitizer.Sanitize` at the one write boundary — no second
+      sanitizer; pinned end to end by `Put_MarkupInBannerText_IsStrippedNotEncoded_AllTheWayToTheParticipantSurface`.)*
+- [x] **The override actually resolves (projection-override contract):** given a fully composed service
       provider wired in the orchestrator's order, when `IChromeConfigProjection` is resolved, then the
       **contributed** implementation comes back — registered via `services.Replace(...)`, **never
       `TryAddScoped`, which against 01b's already-present default is a silent no-op that leaves the
       constant serving** — and `/api/chrome-config` returns per-exercise banners end to end. A test of
       the projection class in isolation does not satisfy this AC.
-- [ ] **Isolation (XC-001/002, COR-001):** given a chrome-config read, when it is served, then the
+      *(`ChromeProjectionRegistrationTests` (order-independence + single-descriptor) and
+      `ChromeConfigCompositionTests` (end to end, with the "without story 02 wired" negative control).
+      Since the wiring landed this is additionally asserted against the **real** `Program.cs` host by
+      `CompositionRootWiringTests.ProgramCs_CallsAddComplianceChromeConfig_SoChromeIsPerExerciseAndNotTheConstant`.)*
+- [x] **Isolation (XC-001/002, COR-001):** given a chrome-config read, when it is served, then the
       exercise comes from the server-resolved scope (`IExerciseContext`), never a client parameter; a
       cross-exercise chrome read/write returns 403/404.
-- [ ] Given chrome is enabled, when it renders, then its state is not conveyed by color alone (NFR-001)
+      *(The two cross-exercise cases both verbs, the 401/403 fail-closed set, and — on the client side —
+      `chromeSettingsService.test.ts`'s "requests the staff chrome route and NEVER names an exercise".)*
+- [x] Given chrome is enabled, when it renders, then its state is not conveyed by color alone (NFR-001)
       and it remains framing outside the fiction — no change to the shipped component's markup is
       required to satisfy this.
+      *(Satisfied as written: this story changed nothing in `ComplianceChrome.tsx`, and the staff-side
+      panel signals every state with icon + text and binds the NFR-008 message with `aria-describedby`.
+      **Bound honestly:** the participant-render half is `participant-shell/01`'s (Complete, #185); what
+      is proven here is that this story's config can never drive that component into a color-only or
+      both-markings-off state.)*
+
+### Why this is **In Progress**, not Complete — and what each AC depended on
+
+Two different gates, and only one of them is still shut:
+
+**1. The orchestrator wiring — LANDED.** Every AC above was first proven against a host composed
+exactly as the orchestrator would compose it (`ChromeTestHost`), while `Program.cs` — orchestrator-owned,
+never edited by this story's builder — still called neither extension. That made ACs 1, 2, 5 and 6 green
+in test and **inert at runtime**. The three lines landed in `cc83766` (backend + panel mount) and
+`eb49fe5` (the panel-mount guard):
+
+| Wiring line | ACs it activates | Standing guard |
+|---|---|---|
+| `builder.Services.AddComplianceChromeConfig();` | AC5 (and AC2's per-exercise half — without it 01b's `ConstantChromeConfigProjection` keeps serving one identical banner set to every exercise, silently) | `CompositionRootWiringTests.ProgramCs_CallsAddComplianceChromeConfig_SoChromeIsPerExerciseAndNotTheConstant` |
+| `app.MapComplianceChromeEndpoints();` | AC1, AC3, AC4, AC6 (the staff read/write pair is 404 until mapped, so nothing can be persisted or rejected) | `CompositionRootWiringTests.ProgramCs_MapsTheStaffChromeSettingsRoutesExactlyOnce` |
+| `<ComplianceChromePanel />` in `ExerciseSettingsPage.tsx` (+ the barrel export) | the planner-visible half of AC1 and AC7 | `ExerciseSettingsPage.test.tsx` → "mounts the compliance-chrome panel (story 02)" and "renders every panel INSIDE the page main landmark, exactly once each" |
+
+This is the failure mode recorded for the bootstrap endpoint (#310 → #317): a slice merges fully green
+with its `Add*`/`Map*` never called. It is closed here, and the three tests above turn red if any line is
+deleted.
+
+**2. The umbrella merge — OPEN, and the only reason this is not Complete.** The whole feature branch
+`feature/exercise-configuration` is unmerged; nothing here is on `main` and nothing is deployed to UAT.
+`Complete` is claimed after the umbrella PR lands, by whoever lands it — not before.
 
 ## Out of Scope
 **Building or restyling the banner component** (`participant-shell/01`, shipped; presentation owned by
@@ -77,9 +130,11 @@ client-contract types local to `services/chromeSettingsService.ts`** — do not 
 `features/planner/types.ts`, which the other wave-3 builder would also touch. Story 05 (participant exercise identity) may later add a
 chrome **content** requirement here. See implementation.md (story 02).
 
-> **Orchestrator wiring required at merge (two lines + one JSX line).** Nothing in this story edits
-> `Program.cs`, `ExerciseSettingsPage.tsx` or the planner barrel, so until the orchestrator wires them the
-> slice is inert — `/api/chrome-config` keeps serving 01b's constant and the panel is unmounted:
+> **Orchestrator wiring — required at merge, and now LANDED (two lines + one JSX line).** Nothing in this
+> story edits `Program.cs`, `ExerciseSettingsPage.tsx` or the planner barrel; until the orchestrator wired
+> them the slice was inert — `/api/chrome-config` kept serving 01b's constant and the panel was unmounted.
+> All three are now in the tree (`cc83766`, `eb49fe5`) and guarded (see "Why this is In Progress, not
+> Complete"):
 > - `builder.Services.AddComplianceChromeConfig();` — from
 >   `Features/ExerciseConfiguration/Chrome/ChromeExtensions.cs`, conventionally **after**
 >   `AddExerciseConfiguration()` (`Replace` makes it order-independent, but keep the convention).
@@ -145,6 +200,16 @@ classes are `[RequiresDockerFact]`, the pure ones plain `[Fact]`/`[Theory]` OUTS
 | `ChromeSettingsEndpointsTests.Get_NoStaffSession_Returns401_FailClosed` / `Put_NoStaffSession_Returns401_AndWritesNothing` / `Get_UnresolvedScope_Returns401_FailClosed` | AC6 |
 | `ChromeSettingsEndpointsTests.Put_EmitsExactlyOneChromeUpdatedTelemetryEvent_ListingTheChangedFields` (+ the no-op and rejected-write twins) | XC-004 |
 
+Composition root — `src/Pulse.WebApi.Tests/Features/ExerciseConfiguration/CompositionRootWiringTests.cs`
+(01b's file; these two rows are story 02's and went green when the wiring landed — they boot the **real**
+`Program` host with no test-service override, so they are the only place a missing `Program.cs` line is
+observable):
+
+| Test | AC |
+|---|---|
+| `CompositionRootWiringTests.ProgramCs_CallsAddComplianceChromeConfig_SoChromeIsPerExerciseAndNotTheConstant` | AC2, AC5 (the runtime half — the seam resolves either way, so without this line nothing raises and the constant silently keeps serving) |
+| `CompositionRootWiringTests.ProgramCs_MapsTheStaffChromeSettingsRoutesExactlyOnce` | AC1, AC3, AC4, AC6 (both verbs, once each) |
+
 Frontend — `src/frontend/src/features/planner/` (38 tests):
 
 | Test | AC |
@@ -156,3 +221,4 @@ Frontend — `src/frontend/src/features/planner/` (38 tests):
 | `ComplianceChromePanel.test.tsx` — "refuses to submit when both markings are turned off, and explains why"; "binds the NFR-008 message to the switches with `aria-describedby`"; "allows chrome-off on its own"; "allows watermark-off on its own" | AC3, AC7 |
 | `ComplianceChromePanel.test.tsx` — "submits EVERY managed field when only one changed"; "sends null for a field the planner cleared"; "re-renders from the SERVER response, not from local form state" | AC1 |
 | `ComplianceChromePanel.test.tsx` — "shows a NOT-CONFIGURED banner field as EMPTY, never as the shipped constant"; "rejects a malformed colour with a message bound to that field" | AC1, AC7 |
+| `pages/ExerciseSettingsPage.test.tsx` — "mounts the compliance-chrome panel (story 02)"; "renders every panel INSIDE the page main landmark, exactly once each" (the mount guard, added in `eb49fe5`) | AC1, AC7 (the panel is reachable at all) |

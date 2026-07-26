@@ -1,10 +1,10 @@
 # Story: Practice/sandbox flag
 
 **Feature:** Exercise configuration  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
-*(The slice is **built and green** — service, endpoints, the `IEvaluationEligibility` seam and the
-COBRA panel all ship with their tests. It stays In Progress because it is **inert in a running app**
-until the orchestrator lands the three mount lines in "Wiring dependency" below; the flip to Complete
-belongs to whoever lands them.)*
+*(The slice is **built, wired and green** — service, endpoints, the `IEvaluationEligibility` seam and the
+COBRA panel all ship with their tests, and the three mount lines in "Wiring dependency" below have since
+landed. It stays In Progress because the `feature/exercise-configuration` umbrella is **unmerged**; the
+flip to Complete belongs to whoever lands that PR.)*
 **Requirements:** COR-033  ·  **Design decisions:** none  ·  **Issue:** #70
 
 ## Context
@@ -50,21 +50,27 @@ tested read seam E10 will filter on — not the export filtering itself.
       genuinely wired, not just that the service class works in isolation (a slice can merge fully green
       with its composition-root wiring never executed).
       *(`ComposedProvider_ResolvesTheSeamAndTheService_InTheOrchestratorsOrder` builds exactly that
-      provider, so the AC as written holds. **It does not yet assert the real `Program.cs`** — the
-      composition-root guard for `AddPracticeMode()` is tracked separately as gate-1 finding W-003 and
-      lands with the wiring.)*
+      provider, so the AC as written holds. It is now **also** asserted against the real `Program.cs` by
+      `CompositionRootWiringTests.ProgramCs_CallsAddPracticeMode_SoTheEvaluationEligibilitySeamExistsAtAll`,
+      which closes gate-1 finding W-003.)*
 
-### Wiring dependency (orchestrator-owned — why this is In Progress, not Complete)
-Everything above is built and tested, but **nothing in this story is reachable in a running app yet**.
-Three lines, none of them a builder's to write:
+### Wiring dependency (orchestrator-owned — LANDED) and why this is still In Progress
+Everything above was built and tested while **nothing in this story was reachable in a running app**.
+Three lines, none of them a builder's to write — all three are now in the tree (`cc83766`, `eb49fe5`):
 
-1. `builder.Services.AddPracticeMode();` in `Program.cs` (after `AddExerciseConfiguration()`);
-2. `app.MapPracticeModeEndpoints();` in `Program.cs`;
-3. `<PracticeModePanel />` in `pages/ExerciseSettingsPage.tsx` (plus the barrel + README lines).
+| Wiring line | ACs it makes observable | Standing guard |
+|---|---|---|
+| `builder.Services.AddPracticeMode();` in `Program.cs` (after `AddExerciseConfiguration()`) | AC2, AC6 (`IEvaluationEligibility` has no fallback registration anywhere, so a missing call is a loud `GetRequiredService` throw, never a silent "everything is eligible") | `CompositionRootWiringTests.ProgramCs_CallsAddPracticeMode_SoTheEvaluationEligibilitySeamExistsAtAll` |
+| `app.MapPracticeModeEndpoints();` in `Program.cs` | AC1, AC5 (the staff read/write pair is 404 until mapped) | `CompositionRootWiringTests.ProgramCs_MapsTheStaffPracticeModeRoutesExactlyOncePerVerb` |
+| `<PracticeModePanel />` in `pages/ExerciseSettingsPage.tsx` (plus the barrel + README lines) | AC4 (no staff surface renders the indicator until it is mounted) | `pages/ExerciseSettingsPage.test.tsx` → "mounts the practice/sandbox panel (story 04)" |
 
-ACs 1, 2, 4, 5 and 6 are satisfied by this slice's code and tests; they become **observable in a
-deployed app** only once those land. AC 3 holds regardless. Verified absent at the time of writing:
-`Program.cs` calls neither extension, and the page/barrel carry the mount only as a comment.
+ACs 1, 2, 4, 5 and 6 are satisfied by this slice's code and tests and are now **observable in a running
+app**; AC 3 always held regardless. **Gate-1 finding `W-003`** (a composition-root guard for
+`AddPracticeMode()`) is closed by the first row above — the earlier note under AC6 that it "does not yet
+assert the real `Program.cs`" is superseded.
+
+**What keeps this In Progress:** the `feature/exercise-configuration` umbrella is **unmerged** — nothing
+here is on `main` or deployed to UAT. `Complete` is claimed after that PR lands.
 
 ## Out of Scope
 The evaluation export itself and its filtering (E10, Phase 4 — this story only publishes the seam); the

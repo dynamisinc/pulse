@@ -189,19 +189,24 @@ service provider (the slice's real `Add*()` calls, in the orchestrator's order) 
 
 ## Wave Plan (DAG-ready)
 
-> **Status: waves 1 and 2 are done.** Slices **01a** and **01b** are built, merged to the
-> `feature/exercise-configuration` umbrella, wired into `Program.cs` and green. Story 01's file `Status:`
-> stays **In Progress** — AC3's channel-enablement route-gating clause is unmet by design and unowned
-> (feature.md open question **c**). **Wave 3 (02, 03, 04) is the next dispatch.** What wave 3 inherits is
-> tabulated in `feature.md` → "What waves 1 and 2 actually shipped".
+> **Status: all three waves are done.** Slices **01a**, **01b** and stories **02**, **03**, **04** are
+> built, merged to the `feature/exercise-configuration` umbrella, wired into `Program.cs` (and, for the two
+> panels, mounted in `ExerciseSettingsPage`) and green; final Gate 2 came back clean. What each wave shipped
+> is tabulated in `feature.md` → "What waves 1 and 2 actually shipped" / "What wave 3 actually shipped".
+>
+> **Every story file still reads `In Progress`, on purpose.** The umbrella is **unmerged** — nothing is on
+> `main` or in UAT — so `Complete` is not claimable yet; it belongs to whoever lands the umbrella PR.
+> Story 01 additionally keeps AC3 unticked on its own merits: the channel-enablement route-gating clause is
+> unmet by design and unowned (feature.md open question **c**). **No further dispatch is outstanding** —
+> story 05 is a requirements decision and was never in this plan.
 
 | Story | Stack | Files it owns | Depends-on | Can-run-with | Wave | Effort |
 |-------|-------|---------------|------------|--------------|------|--------|
 | **01a** Settings schema + vocabulary widening ✅ *shipped* | **fullstack** | `Data/Entities/Exercise.cs`; `Data/PulseDbContext.cs` (`Exercise` block); `Data/Migrations/<ts>_ExerciseConfiguration.*` + snapshot; `Features/Ops/Bootstrap/BootstrapService.cs` (seed literal); `Features/ExerciseResolution/ExerciseScopeDto.cs` (pass-through/doc); `core/exerciseContext/exerciseContextResolver.ts` (additive guard widening); **`features/staffShell/components/statePillConfig.ts` + `StaffHeader.test.tsx`** (the exhaustive `Record<ExerciseStatus, StatePillConfig>` gains a key per new literal — see hazard 1) | — (main; `exercise-isolation` 01/08 merged) | **nothing** — sole migration author this feature | 1 | M |
 | **01b** Settings API + shell-config service + staff editor ✅ *shipped* | **fullstack** | `Features/ExerciseConfiguration/{ExerciseSettingsDtos,ExerciseSettingsService,ExerciseSettingsEndpoints,ParticipantShellConfigService,ExerciseConfigurationExtensions}.cs` (incl. the three projection interfaces + constant-preserving defaults); `Features/ParticipantShell/ParticipantShellEndpoints.cs` (refactor); `features/planner/{pages/ExerciseSettingsPage.tsx,components/ExerciseSettingsPanel.tsx,hooks/useExerciseSettings.ts,services/exerciseSettingsService.ts}` | 01a | — (solo: owns the serialized endpoints file) | 2 | L |
-| **02** Compliance chrome config + NFR-008 guard | **fullstack** | `Features/ExerciseConfiguration/Chrome/*` (incl. its **own** `AddComplianceChromeConfig()` **and** `MapComplianceChromeEndpoints()` in `ChromeExtensions.cs` — never a line inside 01b's `ExerciseConfigurationExtensions.cs`); `features/planner/{components/ComplianceChromePanel.tsx,hooks/useChromeSettings.ts,services/chromeSettingsService.ts}` | 01a, 01b (**both shipped**); `participant-shell/01` (merged) | 03, 04 | 3 | M |
-| **03** Lifecycle **[Tier-2 — signed off]** | backend | `Features/ExerciseConfiguration/Lifecycle/*` — **including the `UseExerciseLifecycleGating()` middleware** it exports for the orchestrator to wire (see "The participant-gating seam") | 01a, 01b (**both shipped**); `exercise-isolation/04` (#47, **Complete** — the session-kind seam the gating middleware reads). **`exercise-isolation/06` (#49) is NOT a blocking edge** — the cycle is split below, and 03 consumes only the `archived` state it defines itself | 02, 04 | 3 | L |
-| **04** Practice/sandbox flag | **fullstack** | `Features/ExerciseConfiguration/PracticeMode/*` (incl. its **own** `AddPracticeMode()` **and** `MapPracticeModeEndpoints()` in `PracticeModeExtensions.cs` — never a line inside 01b's `ExerciseConfigurationExtensions.cs`); `features/planner/{components/PracticeModePanel.tsx,hooks/usePracticeMode.ts,services/practiceModeService.ts}` | 01a, 01b (**both shipped**) | 02, 03 | 3 | S |
+| **02** Compliance chrome config + NFR-008 guard ✅ *shipped* | **fullstack** | `Features/ExerciseConfiguration/Chrome/*` (incl. its **own** `AddComplianceChromeConfig()` **and** `MapComplianceChromeEndpoints()` in `ChromeExtensions.cs` — never a line inside 01b's `ExerciseConfigurationExtensions.cs`); `features/planner/{components/ComplianceChromePanel.tsx,hooks/useChromeSettings.ts,services/chromeSettingsService.ts}` | 01a, 01b (**both shipped**); `participant-shell/01` (merged) | 03, 04 | 3 | M |
+| **03** Lifecycle **[Tier-2 — signed off]** ✅ *shipped* | backend | `Features/ExerciseConfiguration/Lifecycle/*` — **including the `UseExerciseLifecycleGating()` middleware** it exports for the orchestrator to wire (see "The participant-gating seam") | 01a, 01b (**both shipped**); `exercise-isolation/04` (#47, **Complete** — the session-kind seam the gating middleware reads). **`exercise-isolation/06` (#49) is NOT a blocking edge** — the cycle is split below, and 03 consumes only the `archived` state it defines itself | 02, 04 | 3 | L |
+| **04** Practice/sandbox flag ✅ *shipped* | **fullstack** | `Features/ExerciseConfiguration/PracticeMode/*` (incl. its **own** `AddPracticeMode()` **and** `MapPracticeModeEndpoints()` in `PracticeModeExtensions.cs` — never a line inside 01b's `ExerciseConfigurationExtensions.cs`); `features/planner/{components/PracticeModePanel.tsx,hooks/usePracticeMode.ts,services/practiceModeService.ts}` | 01a, 01b (**both shipped**) | 02, 03 | 3 | S |
 | **05** Participant exercise identity | *none* | — | — | — | **excluded — no code, not dispatched** | — |
 
 **Why the waves are shaped this way**
@@ -271,10 +276,10 @@ cannot meet one.
 
 | Seam | File(s) | Rule |
 |------|---------|------|
-| Backend composition root | `src/Pulse.WebApi/Program.cs` | **01b's two lines are wired** (`builder.Services.AddExerciseConfiguration()` + `app.MapExerciseConfigurationEndpoints()`), guarded by `Features/ExerciseConfiguration/CompositionRootWiringTests` — three tests that boot the real host with no override and go red if either line is removed. Each wave-3 story exports its **own** pair from its **own** extensions file — 02 `AddComplianceChromeConfig()` / `MapComplianceChromeEndpoints()`, 03 `AddExerciseLifecycle()` (+ `UseExerciseLifecycleGating()`), 04 `AddPracticeMode()` / `MapPracticeModeEndpoints()` — and **must not add a call inside 01b's `ExerciseConfigurationExtensions.cs`**: that file is 01b's, and two wave-3 builders routing their `Map*` through it is the one way this fan-out collides. No builder edits `Program.cs`; the orchestrator wires the one-line calls serially between waves. Note `world-steering-wave2` also edits this file. |
+| Backend composition root | `src/Pulse.WebApi/Program.cs` | **All of it is wired.** 01b's two lines (`AddExerciseConfiguration()` + `MapExerciseConfigurationEndpoints()`) and, since `cc83766`, wave 3's: `AddComplianceChromeConfig()` / `MapComplianceChromeEndpoints()` (02), `AddExerciseLifecycle()` / `UseExerciseLifecycleGating()` / `MapExerciseLifecycleEndpoints()` (03), `AddPracticeMode()` / `MapPracticeModeEndpoints()` (04). Guarded by `Features/ExerciseConfiguration/CompositionRootWiringTests` — **nine** tests that boot the real host with no override and go red if any line is removed — plus `LifecycleGatingPipelineOrderTests` for the `Use…` call's position. Gate-1 findings **W-001** and **W-003** are closed by these. Each story exports its **own** pair from its **own** extensions file and **never adds a call inside 01b's `ExerciseConfigurationExtensions.cs`**: that file is 01b's, and two wave-3 builders routing their `Map*` through it was the one way this fan-out could collide. No builder edited `Program.cs`; the orchestrator wired the one-line calls serially between waves. Note `world-steering-wave2` also edits this file. |
 | Frontend route table | `src/frontend/src/App.tsx` (+ `features/app-shell/createRoleAwareRoutes`) | **Now mounted:** `PlannerWorkspaceRoute` fills `staffSurfaces.planner` (the slot was empty, so planner sessions failed closed to `/login`). Still orchestrator-owned — no builder branch edits the route table. |
 | Planner barrel | `src/frontend/src/features/planner/index.ts` | Every story here adds an export line to the same barrel (it currently exports `AccountImport`, `ExerciseSettingsPage`, `ExerciseSettingsPanel`, `useExerciseSettings`, …). Orchestrator-owned: one edit per wave, after the wave's branches merge. |
-| Planner settings page composition | `features/planner/pages/ExerciseSettingsPage.tsx` | **Created by 01b and on disk**, already carrying the two commented wave-3 mount slots. It deliberately holds no state, no data fetching and no cross-panel coordination. From wave 3 on it is a **composition point**: 02 and 04 export self-contained panels (`ComplianceChromePanel`, `PracticeModePanel`) — each owning its own hook, service, query and states, so nothing needs a prop threaded through the page — and the orchestrator adds the one-line mount. Two wave-3 builders never edit this file. |
+| Planner settings page composition | `features/planner/pages/ExerciseSettingsPage.tsx` | **Created by 01b; both wave-3 mounts are now in place** (`cc83766`) — `<ComplianceChromePanel />` (02) and `<PracticeModePanel />` (04), one JSX line each, added by the orchestrator. It still holds no state, no data fetching and no cross-panel coordination: 02 and 04 export self-contained panels, each owning its own hook, service, query and states, so nothing needs a prop threaded through the page. **Guarded** by `pages/ExerciseSettingsPage.test.tsx` (`eb49fe5`): one test per panel plus a "every panel inside the `main` landmark, exactly once each" check, so a dropped or duplicated mount is a red test rather than a silently missing panel. Two wave-3 builders never edited this file. |
 | Planner README | `src/frontend/src/features/planner/README.md` | The shipped README documents **every file in the surface in one table**, so each story would append to it. Orchestrator-owned: one edit per wave, alongside the barrel. |
 | Backend pipeline | `src/Pulse.WebApi/Program.cs` (middleware ordering) | Story 03 exports `UseExerciseLifecycleGating()`; the orchestrator inserts the single `app.Use…()` call **after** `UseExerciseResolution()` and the session middleware, so a scope and a session kind are resolved before gating decides. No builder edits the pipeline. |
 
@@ -308,6 +313,17 @@ it is today — the `identity-auth-roles/02` account-import contract — and no 
      **every** `ExerciseStatus` key survives: a dropped key means that status renders as a dot with no
      text label — color-only, an NFR-001 break — and TypeScript will only catch it if the `Record` stays
      exhaustive.
+   - **A second, semantic collision on the same file — the pause pill is single-slot (wave-3 Gate 2,
+     WR-003).** `StaffHeader.tsx` resolves its pill as `stateOverride ?? STATE_PILL_CONFIG[status]`, so a
+     world-steering override **always** wins, and `statePillConfig.ts`'s `paused` deliberately reuses the
+     same amber every CTL-023 pause tier uses. An exercise that is *both* COR-032 `paused` and CTL-023
+     world-frozen therefore renders "WORLD FROZEN" alone: the controller cannot tell a lifecycle pause is
+     also in effect, and lifting the Freeze silently reveals a state they were never shown. **Bounded and
+     not blocking:** staff world only, presentation only (nothing keys off the pill), and the *backend*
+     composer already joins the two correctly — a CTL-023 Resume does not lift a COR-032 Pause (rule 2 in
+     `03-exercise-lifecycle.md`). It cannot bite until world-steering merges. **At merge, decide** whether
+     the pill needs a two-signal treatment (compound label or a second marker — and never color alone,
+     NFR-001) and which feature owns it. Recorded as `feature.md` open question **(f)**.
 2. **Migration serialization.** One migration author per feature (01a) — and 01a's scope now includes the
    `Status` vocabulary change, so nothing is left for a later wave to migrate. Pin `dotnet-ef` to the
    runtime version and never scaffold with `--no-build`, or the snapshot is rewritten against a stale
