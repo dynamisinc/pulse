@@ -29,9 +29,30 @@
  *
  *   displayed follower count = audience magnitude + real edges
  *
- * Phase-1 note: the seeded `Persona.followerCount` IS the audience magnitude
- * (band-derived at seed time, `personas/seedCast.ts`) — it is NOT a total that
- * already includes edges. Pass it as `magnitude`, never as the whole count.
+ * ── WHICH PERSONA FIELD IS THE MAGNITUDE (read this before calling) ─────────
+ * `Persona.audienceMagnitude` IS the magnitude — pass THAT as `magnitude`.
+ *
+ * `Persona.followerCount` is the COMPOSED, already-displayed total: since
+ * profiles-social-graph backend story 07 the server returns
+ * `followerCount = audienceMagnitude + inbound follow edges`, and
+ * `personas/seedCast.ts` seeds the mock cast the same way (a freshly seeded
+ * instance has zero edges, so the two numbers merely HAPPEN to be equal there —
+ * that coincidence is not the contract). Passing `followerCount` as
+ * `magnitude` alongside a `followEdges` term therefore counts the real edges
+ * TWICE (`magnitude + edges + edges`).
+ *
+ * An earlier revision of this header said the opposite ("the seeded
+ * `Persona.followerCount` IS the audience magnitude… pass it as `magnitude`,
+ * never as the whole count"). That was true before story 07 and is now false;
+ * it is corrected here because this module is the designated cross-epic source
+ * of the formula, so a wrong instruction here propagates into E8/E10.
+ *
+ *   ✅  audienceReach({ magnitude: persona.audienceMagnitude ?? 0, followEdges })
+ *   ❌  audienceReach({ magnitude: persona.followerCount, followEdges })
+ *
+ * `audienceMagnitude` is typed optional only for the literal-construction
+ * reason `personas/types.ts` documents — every real read path (live API and
+ * seeded mock alike) always populates it.
  *
  * ── PURITY ──────────────────────────────────────────────────────────────────
  * No React, no I/O, no clock (COR-053: elapsed time is passed in as SCENARIO
@@ -142,8 +163,11 @@ export const AUDIENCE_REACH_MODEL = Object.freeze({
 export interface AudienceReachInput {
   /**
    * The author's audience magnitude (SOC-054) — the E1 band-derived simulated
-   * audience, i.e. Phase-1's `Persona.followerCount`. NOT a total that already
-   * includes follow edges.
+   * audience. Read it from `Persona.audienceMagnitude`, NEVER from
+   * `Persona.followerCount`: since backend story 07 `followerCount` is the
+   * COMPOSED total (`audienceMagnitude + inbound follow edges`), so passing it
+   * here alongside `followEdges` counts the real edges twice. See the module
+   * header's "WHICH PERSONA FIELD IS THE MAGNITUDE" note.
    */
   readonly magnitude: number
   /** Real follow edges into the author (story 02's graph). Defaults to 0. */
@@ -259,7 +283,9 @@ function clampCount(value: number): number {
  * `Number.MAX_SAFE_INTEGER`, so a profile can never render `NaN` or `Infinity`
  * followers.
  *
- * @param magnitude   the account's audience magnitude (Phase 1: `Persona.followerCount`)
+ * @param magnitude   the account's audience magnitude — `Persona.audienceMagnitude`,
+ *                    NOT `Persona.followerCount` (which is already this sum;
+ *                    see the module header)
  * @param followEdges the count of REAL follow edges (story 02); defaults to 0
  */
 export function displayedFollowerCount(magnitude: number, followEdges = 0): number {

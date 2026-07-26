@@ -29,8 +29,14 @@ ADP-004) are defined as functions of magnitude — the formula lives here and is
       sub-linear amplification, fail-closed inputs), `:202-237` (velocity scales with magnitude and
       intensity; velocity is provably the initial slope of the accrual curve), `:239-293`
       (scenario-time accrual, COR-053) and `:295-362` (frozen contract, model version, totality).
-      Magnitude itself is the E1 band-derived `Persona.followerCount` (`personas/seedCast.ts`);
+      Magnitude itself is the E1 band-derived **`Persona.audienceMagnitude`** (`personas/seedCast.ts`);
       "evolving with activity" is an E8 concern that consumes this module, not a change to it.
+      *(WR-004 correction, Gate 2: this line — and `services/audience.ts`'s own header/JSDoc — used to
+      name `Persona.followerCount` as the magnitude. That was true before backend story 07 and is now
+      FALSE: the server composes `followerCount = audienceMagnitude + inbound follow edges`, so an E8
+      or E10 consumer passing `followerCount` as `magnitude` alongside a `followEdges` term computes
+      `magnitude + edges + edges`. `audience.ts` is the designated cross-epic source of the formula,
+      so it now states this explicitly with a ✅/❌ pair.)*
 - [ ] Counts are exercise-scoped (COR-001). — **deferred to the integration pass** (see below); the
       unit layer has nothing to scope, since neither module queries.
 
