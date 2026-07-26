@@ -77,6 +77,19 @@ client-contract types local to `services/chromeSettingsService.ts`** — do not 
 `features/planner/types.ts`, which the other wave-3 builder would also touch. Story 05 (participant exercise identity) may later add a
 chrome **content** requirement here. See implementation.md (story 02).
 
+> **Orchestrator wiring required at merge (two lines + one JSX line).** Nothing in this story edits
+> `Program.cs`, `ExerciseSettingsPage.tsx` or the planner barrel, so until the orchestrator wires them the
+> slice is inert — `/api/chrome-config` keeps serving 01b's constant and the panel is unmounted:
+> - `builder.Services.AddComplianceChromeConfig();` — from
+>   `Features/ExerciseConfiguration/Chrome/ChromeExtensions.cs`, conventionally **after**
+>   `AddExerciseConfiguration()` (`Replace` makes it order-independent, but keep the convention).
+> - `app.MapComplianceChromeEndpoints();` — mounts `GET/PUT /api/staff/chrome-settings` only; the
+>   participant `/api/chrome-config` route stays where it is, on `MapParticipantShellEndpoints()`.
+> - `<ComplianceChromePanel />` in `ExerciseSettingsPage.tsx`'s wave-3 slot, plus the barrel export. The
+>   panel is self-contained and takes **no props**.
+>
+> No middleware-ordering constraint is introduced.
+
 ## Dependencies
 Story 01 (the settings slice, the constants→service refactor of the shell-config endpoints, and — in its
 single migration — **both** the chrome-config column **and the per-exercise watermark on/off column**,
@@ -93,3 +106,53 @@ so this story's NFR-008 guard reads real per-exercise state rather than a consta
   contract), not just in isolation.
 - Guard: disabling chrome while the watermark is off is rejected server-side (and the reverse).
 - Sanitization: a `<script>` payload in banner text is neutralized end to end.
+
+### Shipped test linkage
+
+Backend — `src/Pulse.WebApi.Tests/Features/ExerciseConfiguration/Chrome/` (58 tests; the SQL-touching
+classes are `[RequiresDockerFact]`, the pure ones plain `[Fact]`/`[Theory]` OUTSIDE `MsSqlCollection`):
+
+| Test | AC |
+|---|---|
+| `ChromeSettingsEndpointsTests.Put_PersistsTheChromeBlock_AndTheParticipantEndpointServesIt` | AC1, AC2 |
+| `ChromeSettingsEndpointsTests.Put_InOneExercise_LeavesEveryOtherExercisesChromeUnchanged` | AC1, AC6 |
+| `ChromeSettingsEndpointsTests.Put_ClearingABannerField_FallsBackToTheShippedConstantRatherThanServingBlank` | AC1, AC2 |
+| `ChromeSettingsEndpointsTests.Get_ResolvedExercise_ReturnsTheChromeBlock_WithUnconfiguredFieldsNull` | AC1 |
+| `ChromeConfigCompositionTests.ChromeConfig_WithStory02Wired_ServesTheResolvedExercisesOwnBanners_EndToEnd` | AC2, AC5 |
+| `ChromeConfigCompositionTests.ChromeConfig_WithoutStory02Wired_StillServesTheShippedConstant` (negative control) | AC5 |
+| `ChromeConfigCompositionTests.ChromeConfig_ForTwoExercises_ServesEachItsOwnBanners_AndNeverTheOthers` | AC2, AC6 |
+| `ChromeConfigCompositionTests.ChromeConfig_KeepsTheFrozenWireShape_ExactlyThreeKeysAndThreePerBanner` | AC2 |
+| `ChromeConfigCompositionTests.ChromeConfig_ForAnUnconfiguredExercise_IsUnchangedFromThePreStory02Constants` | AC2 |
+| `ChromeConfigCompositionTests.ChromeConfig_WithAnUnresolvedScope_Returns401_FailClosed` | AC6 |
+| `ChromeConfigCompositionTests.ChromeConfig_WithChromeOffAndTheWatermarkOn_ServesEnabledFalse` | AC3, AC7 |
+| `ChromeConfigCompositionTests.ChromeConfig_WithAStoredRowThatHasBothMarkingsOff_ServesEnabledTrue_NFR008` | AC3 |
+| `ChromeConfigProjectionTests.*` (9 tests: per-exercise output, two exercises differ, constant fallback, blank-column fallback, chrome-off, both-off, frozen slots) | AC2, AC3 |
+| `ComplianceChromeGuardTests.*` (5 tests / 11 cases: the invariant truth table both ways) | AC3 |
+| `ChromeSettingsEndpointsTests.Put_DisablingChromeWhileTheWatermarkIsAlreadyOff_Returns400_AndWritesNothing` | AC3 |
+| `ChromeSettingsEndpointsTests.Put_DisablingTheWatermarkWhileChromeIsOff_Returns400_TheGuardIsMutual` | AC3 |
+| `ChromeSettingsEndpointsTests.Put_TurningChromeOffWhileTheWatermarkStaysOn_IsAccepted` | AC3 |
+| `ChromeSettingsEndpointsTests.Put_OmittingASwitch_Returns400_RatherThanDefaultingOneOff` | AC3 |
+| `ChromeSettingsEndpointsTests.Put_MarkupInBannerText_IsStrippedNotEncoded_AllTheWayToTheParticipantSurface` | AC4 |
+| `ChromeSettingsEndpointsTests.Put_AllMarkupBannerText_Returns400_RatherThanStoringABlankMarking` | AC4 |
+| `ChromeSettingsEndpointsTests.Put_OverLengthBannerText_Returns400` / `Put_MalformedColor_Returns400_AndWritesNothing` | AC4 |
+| `ChromeProjectionRegistrationTests.ChromeProjection_WinsOverTheConstantDefault_InTheOrchestratorsOrder` | AC5 |
+| `ChromeProjectionRegistrationTests.ChromeProjection_WinsEvenWhenItRunsBeforeTheDefault` | AC5 |
+| `ChromeProjectionRegistrationTests.ChromeProjection_LeavesExactlyOneDescriptor_SoIEnumerableResolutionNeverSeesAStaleDefault` | AC5 |
+| `ChromeProjectionRegistrationTests.ResolvedChromeProjection_ProducesPerExerciseOutput_NotTheConstant` | AC5 |
+| `ChromeSettingsEndpointsTests.Get_InExerciseA_NeverReturnsExerciseBsChrome` | AC6 |
+| `ChromeSettingsEndpointsTests.Put_InExerciseA_NeverTouchesExerciseB_EvenWhenTheBodyNamesIt` | AC6 |
+| `ChromeSettingsEndpointsTests.Get_StaffNotAssignedToTheResolvedExercise_Returns403_FailClosed` (+ the `Put_` twin) | AC6 |
+| `ChromeSettingsEndpointsTests.Get_NoStaffSession_Returns401_FailClosed` / `Put_NoStaffSession_Returns401_AndWritesNothing` / `Get_UnresolvedScope_Returns401_FailClosed` | AC6 |
+| `ChromeSettingsEndpointsTests.Put_EmitsExactlyOneChromeUpdatedTelemetryEvent_ListingTheChangedFields` (+ the no-op and rejected-write twins) | XC-004 |
+
+Frontend — `src/frontend/src/features/planner/` (38 tests):
+
+| Test | AC |
+|---|---|
+| `chromeConfigWireContract.test.tsx` — "the shipped `useChromeConfig()` accepts the per-exercise body unchanged" | AC2 |
+| `chromeConfigWireContract.test.tsx` — "accepts a chrome-OFF body", "requests the frozen route and never sends the exercise as a parameter", "a RESHAPED body … falls back to the default" (negative control) | AC2, AC6 |
+| `chromeSettingsService.test.ts` — `violatesWatermarkInvariant` truth table; "surfaces the server 400 reason verbatim — the NFR-008 rejection reaches the planner" | AC3 |
+| `chromeSettingsService.test.ts` — "requests the staff chrome route and NEVER names an exercise"; fail-closed body-guard cases | AC1, AC6 |
+| `ComplianceChromePanel.test.tsx` — "refuses to submit when both markings are turned off, and explains why"; "binds the NFR-008 message to the switches with `aria-describedby`"; "allows chrome-off on its own"; "allows watermark-off on its own" | AC3, AC7 |
+| `ComplianceChromePanel.test.tsx` — "submits EVERY managed field when only one changed"; "sends null for a field the planner cleared"; "re-renders from the SERVER response, not from local form state" | AC1 |
+| `ComplianceChromePanel.test.tsx` — "shows a NOT-CONFIGURED banner field as EMPTY, never as the shipped constant"; "rejects a malformed colour with a message bound to that field" | AC1, AC7 |
