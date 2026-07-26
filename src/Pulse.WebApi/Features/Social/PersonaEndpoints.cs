@@ -6,6 +6,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Social.Follows;
+using Pulse.WebApi.Features.Social.Suggestions;
 
 /// <summary>
 /// Registers and maps the persona read API (XC-005, COR-003, story <c>social-api/04</c>) — the production
@@ -30,6 +31,10 @@ public static class PersonaEndpoints
         // profiles-social-graph/07: the follow graph is composed into the persona surface (its routes hang off
         // /api/personas/{id}) rather than asking for a separate Program.cs line the orchestrator owns.
         services.AddSocialFollowGraph();
+
+        // profiles-social-graph/08: the "Who to follow" suggestion read, composed the same way (its route is
+        // /api/personas/suggestions). TryAdd-based, so it may safely re-register the follow-graph services.
+        services.AddSocialSuggestions();
 
         return services;
     }
@@ -99,6 +104,10 @@ public static class PersonaEndpoints
         // from here because they are routes ON the persona resource and this Map* is already reached from the
         // orchestrator-owned Program.cs — a slice whose wiring is never executed is dead at 404 (#310→#317).
         endpoints.MapSocialFollowEndpoints();
+
+        // profiles-social-graph/08: GET /api/personas/suggestions, mapped from here for the same reason — a
+        // literal segment on the persona resource, reached through wiring Program.cs already executes.
+        endpoints.MapSocialSuggestionEndpoints();
 
         return endpoints;
     }
