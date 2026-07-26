@@ -84,3 +84,13 @@ export type { AudienceReachInput, AudienceReachResult } from './services/audienc
 // The follower list: real follow edges + "…and ~N others" — never fabricated rows.
 export { FollowerList } from './components/FollowerList'
 export type { FollowerListProps, FollowerEdge } from './components/FollowerList'
+
+// --- profiles-social-graph/04: "Who to follow" — no authority chrome, ever ---
+// The E7 CTL-021 controller lever that adjusts suggestions LIVE is Not Started
+// and out of scope here (see WhoToFollow.tsx's module header): this is the
+// planner-seeded read half only.
+export { WhoToFollow } from './components/WhoToFollow'
+export type { WhoToFollowProps } from './components/WhoToFollow'
+export { useWhoToFollow } from './hooks/useWhoToFollow'
+export type { UseWhoToFollowResult } from './hooks/useWhoToFollow'
+export { resolveSuggestedFollowIds } from './services/whoToFollowService'
