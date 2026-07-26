@@ -112,3 +112,43 @@
 .viewProfileLink:focus-visible {
   background: var(--sc-hover);
 }
+
+/*
+ * All Posts / Following tablist (SOC-080/SOC-081). Visual idiom mirrors
+ * `HashtagFeed.module.css`'s Latest/Top tabs so the two feed switchers in the
+ * channel read as one control language.
+ */
+.feedTabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--sc-line);
+}
+
+.feedTab {
+  flex: 1 1 auto;
+  padding: 12px 8px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--sc-ink-muted);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.feedTab:hover,
+.feedTab:focus-visible {
+  background: var(--sc-hover);
+}
+
+/*
+ * The selected tab: accent color + heavier weight + an underline bar — three
+ * cues, so the selection is NEVER conveyed by color alone (NFR-001);
+ * `aria-selected` in the TSX carries the same state to assistive tech.
+ */
+.feedTabActive {
+  border-bottom-color: var(--sc-accent);
+  color: var(--sc-accent);
+  font-weight: 800;
+}

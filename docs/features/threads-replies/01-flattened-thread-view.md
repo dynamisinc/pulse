@@ -35,10 +35,12 @@ Reply composition (posts composer, SOC-001); reply counts on feed cards (story 0
   assertions); the pre-existing suite was updated to wrap a `<ShellContextProvider>` (previously
   implicit/undeclared) so `useShellContext()` doesn't throw outside a shell mount. Same gap was fixed
   on `Profile` in the same pass (`profiles-social-graph/01`).
-- **SUG-001 (cross-reference).** `SocialChannel`'s detail-to-detail focus gap
-  (`hashtags-trending/01`'s Deferred note) includes the `ThreadView.onHashtagOpen` → hashtag-feed
-  transition, since that view swap doesn't pass through `feed` state. No change needed in this story;
-  noted here for discoverability from the ThreadView side.
+- **SUG-001 (cross-reference) — RESOLVED (#88).** `SocialChannel`'s detail-to-detail focus gap
+  (`hashtags-trending/01`'s Deferred note) included the `ThreadView.onHashtagOpen` → hashtag-feed
+  transition, since that view swap doesn't pass through `feed` state. The profiles-social-graph final
+  integration pass widened `SocialChannel`'s view-swap effect to move focus into the newly-shown detail
+  region on detail→detail transitions too, which covers this one; `ThreadView` itself needed no change
+  (it additionally gained an `onOpenProfile` pass-through for author tap-through in the same pass).
 
 ## Technical Notes
 Participant world. Reuses `<PostCard>` (posts/02) for every post here — ancestors, focused, and every

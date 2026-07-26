@@ -25,12 +25,13 @@ Trending computation (story 02); search UI (feeds-discovery SOC-082).
   `onHashtagOpen` threaded to them, so tapping a second hashtag while already inside a hashtag feed is
   a no-op rather than re-pointing the feed at the new tag. Tracked as a follow-up polish pass on
   `HashtagFeed.tsx`.
-- **SUG-001.** `SocialChannel`'s local view-state focus management (see its module header) only moves
-  focus on a feed↔detail transition; a **detail-to-detail** swap — concretely, tapping a hashtag from
-  inside an open `ThreadView` (`onHashtagOpen` → the hashtag view) or opening a post's thread from
-  inside the hashtag feed (`onOpenThread`) — does not reposition focus into the newly-shown region
-  (NFR-001). Tracked as a `SocialChannel.tsx` follow-up; also noted in `threads-replies/01`'s Deferred
-  note for the ThreadView side of the same transition.
+- **SUG-001 — RESOLVED (#88, profiles-social-graph final integration pass).** `SocialChannel`'s
+  view-swap effect now moves focus into the newly-shown detail region on ANY transition that opens or
+  **replaces** one — feed→detail *and* detail→detail (hashtag tap from an open `ThreadView`, thread
+  open from inside the hashtag feed, author tap from either) — and still returns it to the feed region
+  on close (NFR-001). Verified in `SocialChannel.authorTapThrough.test.tsx`. Resolution note lives in
+  `profiles-social-graph/01`, whose author tap-through created the third direction of the same
+  transition.
 
 ## Technical Notes
 Participant world. Hashtag parse in the post render; hashtag-feed route reuses feed rendering. See

@@ -92,6 +92,14 @@ export interface ThreadViewProps {
   /** Opens the tapped hashtag's feed (SOC-040); the shell channel supplies
    * it. Omitted in isolation — hashtags stay inert links. */
   readonly onHashtagOpen?: (tag: string) => void
+  /**
+   * Opens the tapped AUTHOR's profile (SOC-050); the shell channel supplies
+   * it, and threads it to EVERY card here — ancestors, the focused post, and
+   * each visible reply — so the tap-through works from inside an open thread,
+   * not only from the feed. Omitted in isolation — the author identity stays
+   * inert text (no focusable no-op, WR-002).
+   */
+  readonly onOpenProfile?: (personaId: string) => void
 }
 
 interface ThreadCardProps {
@@ -100,6 +108,7 @@ interface ThreadCardProps {
    * whether `<PostCard>` renders the interactive action row at all. */
   readonly variant: CardVariant
   readonly onHashtagOpen?: (tag: string) => void
+  readonly onOpenProfile?: (personaId: string) => void
 }
 
 /**
@@ -108,7 +117,7 @@ interface ThreadCardProps {
  * memoized: unlike the feed's burst surface, a thread's post set is small and
  * static once resolved, so the `React.memo` guarantee isn't needed here.
  */
-function ThreadCard({ view, variant, onHashtagOpen }: ThreadCardProps) {
+function ThreadCard({ view, variant, onHashtagOpen, onOpenProfile }: ThreadCardProps) {
   const reaction = useReaction({ postId: view.id, initialLikeCount: view.counts.like })
   const amplify = useAmplify({ postId: view.id })
   const [quoting, setQuoting] = useState(false)
@@ -133,6 +142,7 @@ function ThreadCard({ view, variant, onHashtagOpen }: ThreadCardProps) {
         onRepost={amplify.canAmplify ? amplify.doRepost : undefined}
         onQuote={amplify.canAmplify ? () => setQuoting(true) : undefined}
         onHashtagOpen={onHashtagOpen}
+        onOpenProfile={onOpenProfile}
       />
       {quoting && (
         <QuoteComposer
@@ -166,7 +176,7 @@ function toPostView(
   }
 }
 
-export function ThreadView({ focusedPostId, onHashtagOpen }: ThreadViewProps) {
+export function ThreadView({ focusedPostId, onHashtagOpen, onOpenProfile }: ThreadViewProps) {
   const { ancestors, focused, replies, loading, error } = useThread(focusedPostId)
   const { personas } = usePersonas()
   const session = useSession()
@@ -234,6 +244,7 @@ export function ThreadView({ focusedPostId, onHashtagOpen }: ThreadViewProps) {
               view={view}
               variant={cardVariant}
               onHashtagOpen={onHashtagOpen}
+              onOpenProfile={onOpenProfile}
             />
           )
           : null
@@ -241,7 +252,12 @@ export function ThreadView({ focusedPostId, onHashtagOpen }: ThreadViewProps) {
 
       {focusedView && (
         <div className={styles.focusedWrap} data-testid="thread-focused">
-          <ThreadCard view={focusedView} variant={cardVariant} onHashtagOpen={onHashtagOpen} />
+          <ThreadCard
+            view={focusedView}
+            variant={cardVariant}
+            onHashtagOpen={onHashtagOpen}
+            onOpenProfile={onOpenProfile}
+          />
         </div>
       )}
 
@@ -252,6 +268,7 @@ export function ThreadView({ focusedPostId, onHashtagOpen }: ThreadViewProps) {
           personaMap={personaMap}
           variant={cardVariant}
           onHashtagOpen={onHashtagOpen}
+          onOpenProfile={onOpenProfile}
         />
       ))}
     </section>
@@ -264,13 +281,20 @@ interface ThreadReplyProps {
   /** WR-003: threaded through to the reply's `ThreadCard` (COR-015/D1-011). */
   readonly variant: CardVariant
   readonly onHashtagOpen?: (tag: string) => void
+  readonly onOpenProfile?: (personaId: string) => void
 }
 
 /** One reply row: the "Replying to @handle" label, then either the reply's
  * `<PostCard>` (via `ThreadCard`, wired with its own like/repost/quote state)
  * or - if it was taken down (SOC-005/D1-009) - the interim in-thread
  * tombstone (which never gets that wiring — there is nothing to react to). */
-function ThreadReply({ reply, personaMap, variant, onHashtagOpen }: ThreadReplyProps) {
+function ThreadReply({
+  reply,
+  personaMap,
+  variant,
+  onHashtagOpen,
+  onOpenProfile,
+}: ThreadReplyProps) {
   const repliedToAuthor = personaMap.get(reply.replyToPersonaId)
   const view = toPostView(reply, personaMap)
 
@@ -286,7 +310,14 @@ function ThreadReply({ reply, personaMap, variant, onHashtagOpen }: ThreadReplyP
           This post is unavailable.
         </div>
       ) : (
-        view && <ThreadCard view={view} variant={variant} onHashtagOpen={onHashtagOpen} />
+        view && (
+          <ThreadCard
+            view={view}
+            variant={variant}
+            onHashtagOpen={onHashtagOpen}
+            onOpenProfile={onOpenProfile}
+          />
+        )
       )}
     </div>
   )
