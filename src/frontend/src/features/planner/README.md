@@ -118,6 +118,11 @@ the route table.
   the page still holds no state, no fetching and no cross-panel coordination. They
   inherit `ExerciseSettingsPage`'s envelope: the COBRA `ThemeProvider` from
   `StaffShellFrame` and the app's `QueryClientProvider`.
+  **The mounts are guarded** by `pages/ExerciseSettingsPage.test.tsx`, which asserts
+  each panel by its own `h2` heading and section landmark. Without it a deleted mount
+  line ships green — the panel suites render their panels directly and
+  `App.integration.test.tsx` only covers the page's route composition, not its
+  contents. Add a panel to the stack, add it to that guard.
 - **`AccountImport` is exported but NOT mounted anywhere.** It is reachable only by
   importing it from this barrel; no route, page or panel renders it today, so a
   planner has no way to reach the CSV import in the running app. This is a known
