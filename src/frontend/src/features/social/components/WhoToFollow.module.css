@@ -1,0 +1,169 @@
+/*
+ * features/social/components/WhoToFollow.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the "Who to follow" module (profiles-social-graph/04;
+ * SOC-053, D1-R1). CSS Module — every class is locally scoped, nothing leaks
+ * a global name, and this file carries NO COBRA/MUI dependency (participant
+ * world, Pulse skin).
+ *
+ * Theming mirrors the sibling social modules (`./FollowerList.module.css`,
+ * `../theme/social.module.css`) so the module reads as part of the same feed/
+ * profile frame it appears in: `.whoToFollow` declares the light-mode palette
+ * as CSS custom properties and rules read `var(--wtf-*)`. Dark mode has the
+ * same TWO independent triggers — the OS `prefers-color-scheme: dark` media
+ * query AND a host-set `[data-theme="dark"]` on the root or any ancestor —
+ * neither dependent on a React theme provider. Values mirror
+ * `../theme/tokens.ts`'s LIGHT/DARK_PALETTE; keep them in sync by hand.
+ *
+ * The heading ("Who to follow") carries no decoration implying rank or
+ * authority (D1-R1) — it is plain, bold text, nothing else. Every row's
+ * follow control is `<FollowButton>`'s own styling (`FollowButton.module.css`)
+ * — this file only lays the row out, it never overrides that control's look.
+ */
+
+.whoToFollow {
+  /* Light-mode palette (default) — mirrors tokens.ts LIGHT_PALETTE. */
+  --wtf-bg: #fff;
+  --wtf-line: #e5e8ea;
+  --wtf-ink: #0e1518;
+  --wtf-ink-muted: #61707a;
+  --wtf-hover: rgba(14, 21, 24, .045);
+
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 600px;
+  /* Left-anchored (D1-013) — no auto side margins. */
+  margin: 0;
+  background: var(--wtf-bg);
+  color: var(--wtf-ink);
+  font-family: 'Figtree', system-ui, sans-serif;
+  text-align: left;
+}
+
+/* OS-level dark mode (no host override). */
+@media (prefers-color-scheme: dark) {
+  .whoToFollow {
+    --wtf-bg: #0c1116;
+    --wtf-line: #233039;
+    --wtf-ink: #e9eef1;
+    --wtf-ink-muted: #8aa0ac;
+    --wtf-hover: rgba(255, 255, 255, .05);
+  }
+}
+
+/* Host-forced dark mode — `data-theme="dark"` on the root OR an ancestor. */
+:global([data-theme='dark']) .whoToFollow,
+.whoToFollow:global([data-theme='dark']) {
+  --wtf-bg: #0c1116;
+  --wtf-line: #233039;
+  --wtf-ink: #e9eef1;
+  --wtf-ink-muted: #8aa0ac;
+  --wtf-hover: rgba(255, 255, 255, .05);
+}
+
+/* --------------------------------------------------------------------------
+ * Heading — plain text, no authority/rank chrome (D1-R1)
+ * ------------------------------------------------------------------------ */
+
+.heading {
+  margin: 0;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--wtf-line);
+  color: var(--wtf-ink);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+/* --------------------------------------------------------------------------
+ * Suggestion rows — identity + follow action, nothing else
+ * ------------------------------------------------------------------------ */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--wtf-line);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row:hover {
+  background: var(--wtf-hover);
+}
+
+.identity {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nameRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.displayName {
+  overflow: hidden;
+  color: var(--wtf-ink);
+  font-size: 15px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.verifiedMark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.handle {
+  color: var(--wtf-ink-muted);
+  font-size: 14px;
+}
+
+.bio {
+  margin-top: 2px;
+  overflow-wrap: break-word;
+  color: var(--wtf-ink);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.action {
+  flex: none;
+  display: flex;
+  align-items: center;
+  /* Aligns the follow control with the first identity line regardless of
+     how tall the bio/name wrap grows the row. */
+  align-self: flex-start;
+  margin-top: 1px;
+}
+
+/* --------------------------------------------------------------------------
+ * Loading / error / empty states — calm, in-fiction, never alarmist
+ * ------------------------------------------------------------------------ */
+
+.state {
+  margin: 0;
+  padding: 32px 16px;
+  color: var(--wtf-ink-muted);
+  font-size: 15px;
+  text-align: center;
+}
