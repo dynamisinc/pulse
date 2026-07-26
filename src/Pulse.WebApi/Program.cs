@@ -3,6 +3,7 @@ using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -69,6 +70,18 @@ builder.Services.AddExerciseResolution();
 // named policies under the single app.UseRateLimiter() below.
 builder.Services.AddStaffIdentity(builder.Configuration);
 builder.Services.AddSessions(builder.Configuration);
+
+// Per-exercise configuration (E1 exercise-configuration, story 01b). REQUIRED, not optional: the six
+// participant-shell config GETs mapped by MapParticipantShellEndpoints() below now resolve
+// ParticipantShellConfigService, which only this call registers — omit it and those previously-working
+// routes fail on an unresolvable handler dependency and blank the participant shell (the #310/#317
+// composition-root failure mode). Must follow AddStaffIdentity: the staff settings endpoints reuse the
+// staff-session authorization filter. It also TryAdd()s the constant-preserving defaults for the three
+// wave-3 projection seams (IChromeConfigProjection / IShellVariantProjection / IOverlayStateProjection),
+// so any later contributor Add*() — stories 02/03/04 — must come AFTER this line and use
+// services.Replace(), never TryAdd (a TryAdd against an existing registration is a silent no-op that
+// leaves the constant serving). Guarded by ExerciseConfiguration/CompositionRootWiringTests.
+builder.Services.AddExerciseConfiguration();
 
 // Participant login methods (Phase B2 Wave 3). AddParticipantAccounts (identity-auth-roles/02) registers the
 // participant credential-login + staff account-provisioning services + the "participant-login" rate-limiter
@@ -212,10 +225,17 @@ app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
 // (shell-state, chrome-config, brand-tokens, channel-nav-config, alerts, overlay-state). Fixes the UAT
 // bug where these 404'd with mock data OFF: the shell-state 404 forced the fail-closed readOnly variant,
 // which disabled the realtime feed stream + "new posts" pill so the participant feed never updated live.
-// Fixed Phase-1 config; scope comes only from the resolved IExerciseContext (COR-001), fail-closed 401 on
-// an unresolved scope. GET reads a read-only/observer session must still receive — NOT under
-// DenyReadOnlySessions().
+// Story 01b replaced the fixed Phase-1 constants with PER-EXERCISE config read through
+// ParticipantShellConfigService (registered by AddExerciseConfiguration above) behind the SAME frozen
+// wire shapes, so no frontend consumer or runtime type-guard changed. Scope comes only from the resolved
+// IExerciseContext (COR-001), fail-closed 401 on an unresolved scope. GET reads a read-only/observer
+// session must still receive — NOT under DenyReadOnlySessions().
 app.MapParticipantShellEndpoints();
+
+// Staff per-exercise settings (E1 exercise-configuration, story 01b): GET/PUT /api/staff/exercise-settings.
+// Staff-gated (XC-002) and exercise-scoped from the server-resolved scope — the route takes no exercise id
+// in any form, so there is no IDOR surface. The other half of the required line-pair above.
+app.MapExerciseConfigurationEndpoints();
 
 // Identity + exercise-resolution endpoints (Phase B2 Waves 1–3). Scope comes only from the resolved
 // IExerciseContext (COR-001); /exercise-context and /session read the resolved scope, never a client
