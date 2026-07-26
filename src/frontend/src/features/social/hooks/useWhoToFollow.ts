@@ -14,7 +14,14 @@
  *    (`resolveSuggestedFollowIds`) and, when the session has a bound persona,
  *    that persona's real follow edges (`followService.resolveFollowing`) —
  *    run in parallel, mirroring `useFeed`'s posts+personas convergence.
- *  - THE TWO EXCLUSIONS THIS STORY OWNS (neither is a ranking — both are
+ *  - Forwarding an optional `limit` to the read so the SERVER caps the wire
+ *    (backend story 08) instead of the whole cast being fetched and sliced
+ *    away. NOTE: `<WhoToFollow limit={n}>` still applies its own display slice
+ *    and does NOT yet pass its prop here — that one-line hop lives in
+ *    `WhoToFollow.tsx`, outside this change's permitted file set. Until it
+ *    lands, this parameter is unused in production and the fetch stays
+ *    uncapped, exactly as before.
+ *  - THE TWO EXCLUSIONS (neither is a ranking — both are
  *    "would this row even make sense"):
  *      1. never suggest the viewer's OWN persona (a session with no bound
  *         persona, e.g. observer mode, excludes nothing on this basis);
@@ -56,8 +63,18 @@ export interface UseWhoToFollowResult {
  * Resolves the "Who to follow" suggestion set for the current session. See
  * the module header for the full contract; `<WhoToFollow>` is its only
  * intended consumer.
+ *
+ * `limit` is forwarded to the read as a SERVER-applied cap
+ * (`GET /api/personas/suggestions?limit=N`, backend story 08) so the wire
+ * carries only the rows the caller can render, instead of the whole cast
+ * being fetched and thrown away. It is not a ranking hint: the server returns
+ * a strict PREFIX of the same order it would return uncapped, and the two
+ * local exclusions below still run on top. Omitted → the whole eligible set,
+ * which is exactly today's behaviour.
+ *
+ * @param limit Optional server-side cap on the number of suggestions fetched.
  */
-export function useWhoToFollow(): UseWhoToFollowResult {
+export function useWhoToFollow(limit?: number): UseWhoToFollowResult {
   const session = useSession()
   const { personas, loading: personasLoading, error: personasError } = usePersonas()
 
@@ -78,7 +95,7 @@ export function useWhoToFollow(): UseWhoToFollowResult {
       ? resolveFollowing(viewerPersonaId)
       : Promise.resolve<string[]>([])
 
-    Promise.all([resolveSuggestedFollowIds(), followingRead])
+    Promise.all([resolveSuggestedFollowIds(limit), followingRead])
       .then(([ids, following]) => {
         if (cancelled) return
         setSuggestedIds(ids)
@@ -98,7 +115,7 @@ export function useWhoToFollow(): UseWhoToFollowResult {
     return () => {
       cancelled = true
     }
-  }, [viewerPersonaId])
+  }, [viewerPersonaId, limit])
 
   const suggestions = useMemo(() => {
     const personaById = new Map<string, Persona>(personas.map(p => [p.id, p]))

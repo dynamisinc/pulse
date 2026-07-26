@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Follows;
+using Pulse.WebApi.Features.Social.Suggestions;
 
 /// <summary>
 /// Composition-root guard (plain <see cref="FactAttribute"/>, no Docker): boots the real
@@ -77,6 +78,27 @@ public sealed class CompositionRootWiringTests
             "the persona read composes the follow counts, so it must still resolve with its new dependency");
         scope.ServiceProvider.GetRequiredService<PostReadService>().Should().NotBeNull(
             "the feed read gained the Following scope's dependencies and must still resolve");
+    }
+
+    [Fact]
+    public void ProgramCs_MapsTheSuggestionsRouteExactlyOnce_AndResolvesItsServices()
+    {
+        // profiles-social-graph/08 AC8. GET /api/personas/suggestions is composed into PersonaEndpoints' own
+        // already-wired Add*/Map* (its route is a literal segment on the persona resource), so this assertion
+        // is what PROVES the composition actually executes on the real host. The story exists precisely because
+        // the frontend called a route that was never mapped — shipping the fix behind dead wiring would leave
+        // participants staring at the same permanent error panel (CR-001, #310→#317).
+        using var factory = new WiringProbeFactory();
+
+        var dataSource = factory.Services.GetRequiredService<EndpointDataSource>();
+
+        CountRoutes(dataSource, "GET", "/api/personas/suggestions").Should().Be(
+            1, "GET /api/personas/suggestions must be reachable through Program.cs exactly once");
+
+        using var scope = factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<SuggestionService>().Should().NotBeNull(
+            "AddSocialSuggestions must be reached from Program.cs (via AddSocialPersonaRead) — the route "
+            + "existing is not enough, an unregistered dependency 500s on the first request");
     }
 
     private static int CountRoutes(EndpointDataSource dataSource, string method, string rawText)
