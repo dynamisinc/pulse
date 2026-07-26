@@ -12,7 +12,7 @@
 
 | Story | Approach | Key files (owns) | Exports (that others import) |
 |-------|----------|-------------------|-------------------------------|
-| 01 Persona cast seed | An idempotent write path over the existing `Persona` `DbSet` (no migration): given an `exerciseId`, ensure a fixed six-persona starter cast exists (by `(ExerciseId, Handle)`), reusing existing rows on re-run. Because this ops seam has no per-request `IExerciseContext`, idempotency reads use `IgnoreQueryFilters()` + an explicit `ExerciseId` predicate (`BootstrapService`'s own documented pattern). Pairs each persisted row with a real `PersonaDossier` from a small internal catalog. | `Pulse.WebApi/Features/Ops/EngineContentSeed/PersonaCastSeeder.cs` (+ xUnit) | `PersonaCastSeeder.SeedAsync(Guid, CancellationToken) -> IReadOnlyList<SeededPersona>` (`SeededPersona` pairs `Persona.Id` + `PersonaDossier`) — story 03 assembles these into `EnginePersona`s |
+| 01 Persona cast seed | An idempotent write path over the existing `Persona` `DbSet` (no migration): given an `exerciseId`, ensure a fixed starter cast exists (by `(ExerciseId, Handle)`), reusing existing rows on re-run. **As originally shipped: six personas, no impersonator.** **Superseded (`profiles-social-graph/06`, #369): the same file's catalog now seeds nine, including the SOC-052 impersonation pair, gated engine-side by `Persona.Castable`** — see that story. Because this ops seam has no per-request `IExerciseContext`, idempotency reads use `IgnoreQueryFilters()` + an explicit `ExerciseId` predicate (`BootstrapService`'s own documented pattern). Pairs each persisted row with a real `PersonaDossier` from a small internal catalog. | `Pulse.WebApi/Features/Ops/EngineContentSeed/PersonaCastSeeder.cs` (+ xUnit) | `PersonaCastSeeder.SeedAsync(Guid, CancellationToken) -> IReadOnlyList<SeededPersona>` (`SeededPersona` pairs `Persona.Id` + `PersonaDossier`) — story 03 assembles these into `EnginePersona`s |
 | 02 Starter storyline factory | A pure static factory (no DI, no I/O) that calls the already-built `Storyline.Create(...)` / `.Seed(0)` with the Fairhaven-arc constants (title/expectation/curve/hashtags) and a citizens-first `ParticipatingPersonas` order built from the handles it is given. `responseWindowMinutes` is caller-tunable (default 3 — demo-tuned, since scenario minutes run 1:1 with wall-clock). | `Pulse.WebApi/Features/Ops/EngineContentSeed/StarterStorylineFactory.cs` (+ xUnit) | `StarterStorylineFactory.Build(Guid exerciseId, IReadOnlyList<string> personaHandles, StarterStorylineOptions? options) -> Storyline` |
 | 03 Loop-registration seed endpoint | A secret-gated ops endpoint (`POST /api/ops/seed-engine-content`), modeled file-for-file on `Features/Ops/Bootstrap/*`: resolve the exercise by hostname (never create one) → call 01 → call 02 with 01's handles → resolve `Autonomy` from the **shared** `EngineAutonomyRegistry.GetOrCreate(exerciseId)` (not a detached instance — the load-bearing correctness point) → build one `ReactionLoopRegistration` → `IReactionLoopRegistry.Register(...)` → emit one `engine.content_seeded` XC-004 event. | `Pulse.WebApi/Features/Ops/EngineContentSeed/{EngineContentSeedEndpoints.cs, EngineContentSeedOptions.cs, EngineContentSeedService.cs, EngineContentSeedDtos.cs}` (+ xUnit, incl. one `RequiresDockerFact` end-to-end test) | The `AddEngineContentSeed(config)` / `MapEngineContentSeedEndpoints()` composition-root pair |
 
@@ -106,12 +106,16 @@ a provider).
   multiplier exists anywhere in the codebase today), so a realistic 20-minute window means a 20-real-
   minute wait before the first review-queue item appears — poor for a "watch it happen" demo/pilot.
   Tunable per call via the request body if a slower, more "realistic" run is wanted.
-- **(g) [DECIDED] Bad-actor/impersonator personas excluded from the Phase-1 seed.** No scenario
-  "enable bad actors" toggle is wired anywhere yet (`persona-voice-engine`'s bad-actor gating exists as
-  a pure domain service not currently invoked by `ReactionLoopDriver`); seeding a `Troll`/`Bot`-type
-  persona with no toggle to disable it would ship content the platform cannot turn off. Flag as a
-  `persona-management` + `world-steering` follow-up once a real toggle exists.
+- **(g) [SUPERSEDED] Bad-actor/impersonator personas excluded from the Phase-1 seed.** Originally: no
+  scenario "enable bad actors" toggle was wired anywhere, so seeding a `Troll`/`Bot`-type persona with
+  no way to disable it would ship content the platform cannot turn off — flagged as a
+  `persona-management` + `world-steering` follow-up. **`profiles-social-graph/06` (#369) answered this
+  differently: it seeds the SOC-052 lookalike and a low-credibility outlet as rows (`Castable =
+  false`), so participants can browse them for training purposes while the engine's eligible cast and
+  storyline participation stay filtered to `Castable` personas only.** The toggle now exists as a
+  column; a live UI/surface to flip it per-scenario is still the `persona-management` +
+  `world-steering` follow-up.
 
 All seven are flagged in `feature.md`/each story's Context for confirmation before building; none blocks
-authoring the stories, but (b)/(c)/(g) in particular change what "done" looks like for a demo audience
-and are worth a explicit thumbs-up before a builder starts.
+authoring the stories, but (b)/(c) in particular change what "done" looks like for a demo audience and
+are worth an explicit thumbs-up before a builder starts. (g) is resolved as described above.

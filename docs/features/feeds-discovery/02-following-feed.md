@@ -1,6 +1,8 @@
 # Story: Following feed
 
-**Feature:** Feeds & discovery  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Built (data layer + guard); tab UI is an integration pass
+**Feature:** Feeds & discovery  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Complete except AC2b
+(the SOC-081 citizen-role default — deliberately deferred, see AC2b) and AC4 (real-time pill,
+deferred to story 04's own follow-up)
 **Requirements:** SOC-081 (COR-015)  ·  **Design decisions:** none  ·  **Issue:** #121
 
 ## Context
@@ -10,37 +12,51 @@ empty). The gap between "official message sent" and "what a citizen who didn't f
 is the teaching moment (SOC-081).
 
 ## Acceptance Criteria
-- [x] The Following feed shows posts from accounts the user follows (profiles SOC-051), chronological,
-      exercise-scoped (COR-001), scenario time (COR-053). *(`<Feed scope="following">` — extends story
-      01's `useFeed`/`feedService` with a `FeedScope` param rather than forking a second feed; live mode
-      sends `GET /api/feed?scope=following`, the backend's documented follow-graph seam
-      (`profiles-social-graph/07`, #370) does ALL the filtering server-side — no client-composed second
-      round trip. An empty follow set resolves an empty array, rendered as an honest, Following-specific
-      empty state — never a silent fallback to the unfiltered feed.)*
-- [x] It is the default for citizen-role participants with named accounts; **read-only sessions default
-      to All Posts** (COR-015), never the empty Following feed. *(The COR-015 guard is built INTO
-      `<Feed>` itself — defensively, mirroring `useReaction`'s `canReact` predicate exactly: a
-      `scope="following"` request is served as `'all'` whenever the session is read-only or has no bound
-      persona, regardless of what the caller asked for. What remains is which tab a citizen-role session
-      lands on BY DEFAULT when the tab UI mounts — that selection lives in the orchestrator's integration
-      pass, see Technical Notes.)*
-- [x] All Posts / Following are tabs with an accent underline (D1); switching preserves scroll per feed.
-      *(Built by the profiles-social-graph final integration pass, #88 — not by this story, which was
-      scoped not to touch `SocialChannel`. The channel now renders a WAI-ARIA tablist above the feed
-      (`role="tablist"`/`role="tab"`/`aria-selected` + roving tabindex; accent underline **plus** weight
-      and colour, never colour alone — NFR-001) and mounts the two scopes as SEPARATE `<Feed>`
-      instances exactly as Technical Notes recommends: the Following instance mounts on first switch and
-      both stay mounted (the inactive one `hidden`) thereafter, so each keeps its own frozen baseline,
-      its own one-shot mount `view` telemetry, and its own rendered scroll state across a switch. The
-      switch is ABSENT for a read-only/no-persona session — see the note under AC2. Covered by
+- [x] **AC1.** The Following feed shows posts from accounts the user follows (profiles SOC-051),
+      chronological, exercise-scoped (COR-001), scenario time (COR-053). *(`<Feed scope="following">`
+      — extends story 01's `useFeed`/`feedService` with a `FeedScope` param rather than forking a
+      second feed; live mode sends `GET /api/feed?scope=following`, the backend's documented
+      follow-graph seam (`profiles-social-graph/07`, #370) does ALL the filtering server-side — no
+      client-composed second round trip. An empty follow set resolves an empty array, rendered as an
+      honest, Following-specific empty state — never a silent fallback to the unfiltered feed.)*
+- [x] **AC2a — the COR-015 half.** Read-only sessions default to All Posts (COR-015), never the empty
+      Following feed. *(The COR-015 guard is built INTO `<Feed>`/`useFeed` itself — defensively,
+      mirroring `useReaction`'s `canReact` predicate exactly: a `scope="following"` request is served
+      as `'all'` whenever the session is read-only or has no bound persona, regardless of what the
+      caller asked for. Verified by `SocialChannel.feedSwitch.test.tsx`/`.noPersona.test.tsx` and
+      `pages/Feed.followingReadOnlyDefault.test.tsx`: the tablist is absent entirely, and a
+      `scope="following"` mount still resolves the full All Posts set for such a session.)*
+- [ ] **AC2b — UNTICKED, the SOC-081 half is not delivered.** "Following is the default for
+      citizen-role participants with named accounts" is **not** what the integrated build does: as
+      landed (`SocialChannel.tsx`'s `feedTab` state), **every** session — citizen-role or not — lands
+      on the **All Posts** tab by default (`useState<FeedTabId>('all')`), confirmed by
+      `SocialChannel.feedSwitch.test.tsx`'s own assertion "renders a tablist with All Posts selected by
+      default". Only AC2a (read-only → All Posts, never empty Following) is true.
+      **Recorded as a deliberate deferral, not an oversight:** a newly-onboarded participant follows
+      nobody at exercise start, so defaulting a citizen-role session straight to an empty Following
+      feed would be a worse first experience than the unfiltered feed with real content — and *when*
+      to flip a citizen-role default (immediately vs. after their first follow, say) is a real UX
+      decision this integration pass correctly declined to make unilaterally. Tracked as a follow-up
+      to be picked up on its own pass, not silently claimed here.
+- [x] **AC3.** All Posts / Following are tabs with an accent underline (D1); switching preserves scroll
+      per feed. *(Built by the profiles-social-graph final integration pass, #88 — not by this story,
+      which was scoped not to touch `SocialChannel`. The channel now renders a WAI-ARIA tablist above
+      the feed (`role="tablist"`/`role="tab"`/`aria-selected` + roving tabindex; accent underline
+      **plus** weight and colour, never colour alone — NFR-001) and mounts the two scopes as SEPARATE
+      `<Feed>` instances exactly as Technical Notes recommends: the Following instance mounts on first
+      switch and both stay mounted (the inactive one `hidden`) thereafter, so each keeps its own frozen
+      baseline, its own one-shot mount `view` telemetry, and its own rendered scroll state across a
+      switch. The switch is ABSENT for a read-only/no-persona session — see AC2a. Covered by
       `SocialChannel.feedSwitch.test.tsx` + `SocialChannel.feedSwitch.noPersona.test.tsx`.)*
-- [ ] Real-time updates arrive per story 04 (pill). **Deliberately disabled** under `scope="following"`:
-      story 04's stream (`useFeedStream`/`postStore`) is not follow-aware — it buffers every arrival
-      regardless of author — so wiring it in would show a pill counting posts from unfollowed accounts
-      under the Following label, a worse bug than no pill. Stays this story's Out of Scope item; story
-      04's own follow-up is where the stream becomes scope-aware.
+- [ ] **AC4.** Real-time updates arrive per story 04 (pill). **Deliberately disabled** under
+      `scope="following"`: story 04's stream (`useFeedStream`/`postStore`) is not follow-aware — it
+      buffers every arrival regardless of author — so wiring it in would show a pill counting posts
+      from unfollowed accounts under the Following label, a worse bug than no pill. Stays this story's
+      Out of Scope item; story 04's own follow-up is where the stream becomes scope-aware.
 
 ## Deferred (tracked follow-ups)
+- **AC2b — the SOC-081 citizen-role default.** Not delivered; see AC2b above for the rationale. This
+  is real, undone scope, tracked for a future pass — not merely a residual of an otherwise-done AC.
 - **RESOLVED — tab UI (AC3).** Delivered by the profiles-social-graph final integration pass (#88); see
   AC3. One precise residual: keeping both instances mounted preserves each feed's own DOM/scroll state,
   which is what per-feed scroll preservation needs, but the channel does not (yet) save/restore the
@@ -50,6 +66,13 @@ is the teaching moment (SOC-081).
   concern.
 - **Follow-aware real-time (AC4).** `useFeedStream`'s source has no per-post author filter; making the
   Following scope's pill correct is story 04's follow-up, not this story's.
+- **The already-open Following feed does not pick up a new follow until remount.** `useFeed` freezes
+  its resolved post set on mount per scope (the module's own "frozen baseline" design — see
+  `hooks/useFeed.ts`), so following a NEW account while the Following tab is already open and mounted
+  will not show that account's posts until the tab is remounted (switch away and back, or a reload).
+  This is **correct per the frozen-stream decision** (SOC-083/D1-005's "never live-insert into the
+  reading stream" applies to composition changes too, not just new posts) — recorded here as a known,
+  intentional behavior, not a bug.
 - **RESOLVED — mock-mode "who does the session follow" (WR-004 fold, Gate-1 #88/#121).** This
   section previously said profiles-social-graph story 02 (the follow/unfollow write path,
   `useFollow`/`followService.ts`) was "a parallel, not-yet-merged build" and that `feedService.ts`'s

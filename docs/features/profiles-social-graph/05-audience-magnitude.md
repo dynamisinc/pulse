@@ -1,6 +1,7 @@
 # Story: Audience magnitude & follower affordance
 
-**Feature:** Profiles & social graph  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Profiles & social graph  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Complete except
+AC4 — the exercise-scope assertion has no test yet; see AC4 and "AC4 status" below.
 **Requirements:** SOC-054  ·  **Design decisions:** D1-012  ·  **Issue:** #113
 
 ## Context
@@ -12,16 +13,26 @@ ADP-004) are defined as functions of magnitude — the formula lives here and is
 
 ## Acceptance Criteria
 - [x] A profile's displayed follower **count** = audience magnitude (magnitude-formatted, e.g. "48.2K")
-      + real edges. — **unit layer only.** `displayedFollowerCount()` +
-      `formatMagnitude()` in `services/audience.ts`; covered by
-      `services/audience.test.ts:38-62` (the sum, disjoint populations, the optional-edge case) and
-      `:64-107` (the "48.2K" form and its boundaries). The *profile* rendering of that count is
-      deferred — see below.
+      + real edges. *(Unit layer: `displayedFollowerCount()` + `formatMagnitude()` in
+      `services/audience.ts`; covered by `services/audience.test.ts:38-62` (the sum, disjoint
+      populations, the optional-edge case) and `:64-107` (the "48.2K" form and its boundaries).
+      **Now also wired and rendered:** `pages/Profile.tsx` renders
+      `formatMagnitude(persona.followerCount)` in the header (`persona.followerCount` is the
+      **server-composed** count — magnitude + real inbound edges — per backend story 07/#370, so no
+      separate frontend composition is needed at this call site). Covered by
+      `pages/Profile.test.tsx:97-119` ("renders banner, avatar, name, handle, bio and follower
+      counts" — asserts the rendered text equals `formatMagnitude(persona.followerCount)`, not the
+      raw integer).)*
 - [x] Expanding Followers lists the **real edges**, then an italic **"…and ~48.2K others"** — never a
-      fabricated scrollable list (D1-012). — `components/FollowerList.tsx`; covered by
+      fabricated scrollable list (D1-012). *(Unit layer: `components/FollowerList.tsx`; covered by
       `components/FollowerList.test.tsx:57-88` (edges then the affordance, in document order) and
       `:90-142` (the hard rule: row count === `edges.length` from magnitude 0 → 1.5M; no list at all
-      when there are zero real edges). The *expand* interaction is deferred — see below.
+      when there are zero real edges). **Now also wired:** `Profile.tsx`'s Followers control (a
+      `<button>` around the follower count, `aria-expanded`) toggles a collapsed/expanded
+      `<FollowerList>`, resolving real edges via `resolveFollowers(personaId)` and passing
+      `magnitude={persona.audienceMagnitude ?? 0}`. Covered by
+      `pages/Profile.test.tsx:122-151` ("Profile — Followers expand (story 05, D1-012 + XC-004)" —
+      collapsed by default, expands on click, `aria-expanded` toggles).)*
 - [x] Audience magnitude is defined (band from E1 COR-020/SOC-054, evolving with activity) and this
       story owns the **reach/velocity formula** consumed by E8 (ADP-004) and E10 (EVL-012). —
       `audienceReach()` + the frozen `AUDIENCE_REACH_MODEL` (stamped `modelVersion: 'v0'`, #371) in
@@ -29,36 +40,42 @@ ADP-004) are defined as functions of magnitude — the formula lives here and is
       sub-linear amplification, fail-closed inputs), `:202-237` (velocity scales with magnitude and
       intensity; velocity is provably the initial slope of the accrual curve), `:239-293`
       (scenario-time accrual, COR-053) and `:295-362` (frozen contract, model version, totality).
-      Magnitude itself is the E1 band-derived **`Persona.audienceMagnitude`** (`personas/seedCast.ts`);
-      "evolving with activity" is an E8 concern that consumes this module, not a change to it.
+      Magnitude itself is the E1 band-derived **`Persona.audienceMagnitude`** — backend-persisted
+      (story 06/#369) in live mode, and composed the same way by the mock adapter, so the two modes
+      agree; "evolving with activity" is an E8 concern that consumes this module, not a change to it.
       *(WR-004 correction, Gate 2: this line — and `services/audience.ts`'s own header/JSDoc — used to
       name `Persona.followerCount` as the magnitude. That was true before backend story 07 and is now
       FALSE: the server composes `followerCount = audienceMagnitude + inbound follow edges`, so an E8
       or E10 consumer passing `followerCount` as `magnitude` alongside a `followEdges` term computes
       `magnitude + edges + edges`. `audience.ts` is the designated cross-epic source of the formula,
       so it now states this explicitly with a ✅/❌ pair.)*
-- [ ] Counts are exercise-scoped (COR-001). — **deferred to the integration pass** (see below); the
-      unit layer has nothing to scope, since neither module queries.
+- [ ] Counts are exercise-scoped (COR-001). **UNTICKED — no test covers this yet.** `Profile.tsx`
+      resolves follower ids against the already exercise-scoped `usePersonas()` cast, so it is
+      structurally scoped, but no test feeds it a foreign-exercise id and asserts it is dropped.
+      Do not tick this box until that test exists.
 
-## Deferred to the integration pass
-The unit layer is built, reviewed (Gate 1 clean) and green, but **this story is not Complete**: it
-owns two components that nothing mounts yet. `Profile.tsx` and `SocialChannel.tsx` are
-orchestrator-owned, so the following land in the integration pass, not here:
+## AC4 status (exercise-scope) — genuinely open, not a formality
+`Profile.tsx`'s `followerEdges` (the list `<FollowerList>` renders) is computed by resolving
+`resolveFollowers(personaId)`'s returned ids against `usePersonas()`'s already exercise-scoped cast —
+`personas.find(p => p.id === id)`, dropping any id the cast doesn't contain. **Structurally**, this
+means a foreign-exercise id could never render (the cast it's matched against has none), but **no test
+actually exercises that** — `pages/Profile.test.tsx` never feeds `resolveFollowers` a foreign-exercise
+id and asserts it is dropped. Backend-side, story 07's `FollowGraphIsolationTests` (extending
+`exercise-isolation/07`) do cover this at the API layer (a cross-exercise follow edge is rejected and
+never appears in either exercise's follow graph) — but that is the backend's own AC6, not a test of
+*this* frontend composition. **What would close this AC:** a `Profile.test.tsx` case that stubs
+`resolveFollowers` to return an id absent from the exercise-scoped `personas` fixture and asserts it
+is silently dropped from the rendered `<FollowerList>` (never rendered as a placeholder row). Leaving
+this unticked until that test exists, per this story's own review discipline (WR-005's precedent
+below — do not claim a behavior closed before there is a test pinning it).
 
-- **(a) Profile wiring.** `Profile.tsx` still renders the raw `persona.followerCount`
-  (`toLocaleString`) rather than `formatMagnitude(displayedFollowerCount(magnitude, edges))`, and
-  there is no Followers **expand** entry point mounting `<FollowerList>`. Until that lands, AC1 and
-  AC2 are satisfied at the unit layer only — no participant sees either.
-- **(b) The AC4 exercise-scope test.** Vacuous today: `audience.ts` fetches nothing and
-  `<FollowerList>` renders the edges it is handed. `FollowerEdge` deliberately carries `exerciseId`
-  so the assertion ("every rendered edge belongs to the active exercise") is *expressible* the
-  moment the Followers view is wired to a real read (COR-001/XC-001).
-- **(c) WR-005 — telemetry on expand (XC-004).** When the integration pass mounts `<FollowerList>`
-  behind a toggle, that toggle **MUST** emit an XC-004 event on expand; otherwise "the participant
-  went looking at who follows this account" is invisible in the AAR — a real evaluator signal about
-  how a participant assessed a source's credibility. `<FollowerList>` stays **presentational**: the
-  emit belongs at the toggle that owns the interaction, not inside a component that only renders
-  rows it was handed.
+## Deferred (small residuals, not integration gaps — the integration pass itself has landed)
+- **WR-005 — telemetry on expand (XC-004) — RESOLVED.** `Profile.tsx`'s `toggleFollowers` emits
+  exactly one XC-004 `view` event on OPEN (never on collapse), target `` `${persona.id}:followers` ``.
+  Covered by `pages/Profile.test.tsx:122-151` (asserts the event count increments by exactly 1 on
+  expand and does not increment again on collapse). `<FollowerList>` itself stays presentational, as
+  designed — the emit lives at the toggle, not the component.
+- **AC4 (exercise-scope test)** — see above; the one remaining open item in this story.
 
 ## Out of Scope
 The E10 reach metric UI (E10); E8 amplification behavior (E8 ADP-004); the follow action (story 02).
@@ -101,5 +118,8 @@ E1 audience-magnitude band (COR-020); story 02 (real edges). Shared by E8 (ADP-0
   affordance, the never-fabricate rule at four magnitudes, honest empty states, and the a11y
   contract (labelled region, real list, the affordance announced, kept OUT of the list so the item
   count never lies, and its accessible name spelling out the approximation).
-- **Not yet covered (integration pass):** the profile-rendered count, the Followers expand
-  interaction, the AC4 exercise-scope assertion, and WR-005's XC-004 emit on expand.
+- `src/frontend/src/features/social/pages/Profile.test.tsx` — the profile-rendered magnitude-formatted
+  count (`:97-119`), the Followers expand interaction + its exactly-once XC-004 emit on open,
+  none-on-collapse (`:122-151`).
+- **Not yet covered (still open):** the AC4 exercise-scope assertion — see "AC4 status" above for
+  exactly what test would close it.
