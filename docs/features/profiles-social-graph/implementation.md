@@ -98,9 +98,28 @@ Build `Profile.tsx` and its unit/RTL tests standalone in Wave 1 (rendered direct
 personaId/route param, no live tap-through yet); the `SocialChannel.tsx` "open profile" wiring is a
 Wave-2 orchestrator pass alongside hashtag-feed navigation.
 
-**Landed (Wave-S3.1 integration, commit `9d935b8`):** a "View my profile" entry point is wired into
-`SocialChannel.tsx` and verified end-to-end (`SocialChannel.navigation.test.tsx`) — stories 01 and 03
-are Complete. **WR-003 — RESOLVED (#88).** `Profile` (and `ThreadView`, `threads-replies/01`) now
+**Landed (final integration pass, #88).** The seam above is now fully wired, and the remaining
+channel-composition work for this feature is done:
+- **Author tap-through (SOC-050).** A typed optional `onOpenProfile?: (personaId: string) => void` is
+  threaded `SocialChannel` → `<Feed>` / `<ThreadView>` / `<HashtagFeed>` → `<PostCard>` — the same
+  optional-callback shape `onOpenThread`/`onHashtagOpen` use (no event delegation, no `data-`-attribute
+  scraping, no `any`), and a `useCallback` at the channel so `<Feed>`'s memoized rows still bail out
+  under burst (NFR-002/SOC-071). `<PostCard>` renders it as a transparent overlay `<button>` scoped to
+  the author identity box, stacked (`z-index: 2`) above the card's own body-open overlay (`z-index: 1`)
+  — the pattern already shipping for `.openTarget`/the hashtag anchors, so the two controls stay
+  SIBLINGS (WR-001) and the identity text + verified seal stay outside any interactive ancestor
+  (SOC-052). Unwired ⇒ no button at all (WR-002).
+- **`<WhoToFollow>` (story 04) is mounted** in the channel's feed region — a sibling of the feed, never
+  inside a `<PostCard>` — capped to the first three suggestions. It hides with the feed region, so it
+  is absent from the thread/hashtag/profile views.
+- **All Posts ↔ Following tablist** (feeds-discovery/02 AC3) — see that story for the details; absent
+  entirely for a read-only/no-persona session (COR-015's rule itself stays in `useFeed`).
+- **SUG-001 focus gap closed** — the view-swap effect now repositions focus on detail→detail
+  transitions too. See story 01's Deferred section.
+
+**Landed earlier (Wave-S3.1 integration, commit `9d935b8`):** a "View my profile" entry point is wired
+into `SocialChannel.tsx` and verified end-to-end (`SocialChannel.navigation.test.tsx`) — stories 01 and
+03 are Complete. **WR-003 — RESOLVED (#88).** `Profile` (and `ThreadView`, `threads-replies/01`) now
 thread the shell's read-only `variant` through to every `<PostCard>` they render — an observer/
 read-only session sees the action controls genuinely absent (D1-011), not present-and-inert. See
 story 01's Deferred section for the full resolution note.

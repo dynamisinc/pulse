@@ -24,9 +24,16 @@ is the teaching moment (SOC-081).
       persona, regardless of what the caller asked for. What remains is which tab a citizen-role session
       lands on BY DEFAULT when the tab UI mounts — that selection lives in the orchestrator's integration
       pass, see Technical Notes.)*
-- [ ] All Posts / Following are tabs with an accent underline (D1); switching preserves scroll per feed.
-      **Not built by this story** — deliberately left to the integration pass that owns `SocialChannel`
-      (this story was scoped not to touch it). See Technical Notes for the exact mount point/props.
+- [x] All Posts / Following are tabs with an accent underline (D1); switching preserves scroll per feed.
+      *(Built by the profiles-social-graph final integration pass, #88 — not by this story, which was
+      scoped not to touch `SocialChannel`. The channel now renders a WAI-ARIA tablist above the feed
+      (`role="tablist"`/`role="tab"`/`aria-selected` + roving tabindex; accent underline **plus** weight
+      and colour, never colour alone — NFR-001) and mounts the two scopes as SEPARATE `<Feed>`
+      instances exactly as Technical Notes recommends: the Following instance mounts on first switch and
+      both stay mounted (the inactive one `hidden`) thereafter, so each keeps its own frozen baseline,
+      its own one-shot mount `view` telemetry, and its own rendered scroll state across a switch. The
+      switch is ABSENT for a read-only/no-persona session — see the note under AC2. Covered by
+      `SocialChannel.feedSwitch.test.tsx` + `SocialChannel.feedSwitch.noPersona.test.tsx`.)*
 - [ ] Real-time updates arrive per story 04 (pill). **Deliberately disabled** under `scope="following"`:
       story 04's stream (`useFeedStream`/`postStore`) is not follow-aware — it buffers every arrival
       regardless of author — so wiring it in would show a pill counting posts from unfollowed accounts
@@ -34,8 +41,13 @@ is the teaching moment (SOC-081).
       04's own follow-up is where the stream becomes scope-aware.
 
 ## Deferred (tracked follow-ups)
-- **Tab UI + per-feed scroll preservation (AC3).** Needs the integration pass wiring both scopes into
-  `SocialChannel` (see Technical Notes for the mount point this story exposes).
+- **RESOLVED — tab UI (AC3).** Delivered by the profiles-social-graph final integration pass (#88); see
+  AC3. One precise residual: keeping both instances mounted preserves each feed's own DOM/scroll state,
+  which is what per-feed scroll preservation needs, but the channel does not (yet) save/restore the
+  WINDOW scroll offset across a switch — with a single page-level scroller the viewport offset is
+  shared, so a switch between feeds of very different heights can still land clamped. Explicit
+  per-tab scroll-offset restore is a small follow-up polish on `SocialChannel.tsx`, not a data-layer
+  concern.
 - **Follow-aware real-time (AC4).** `useFeedStream`'s source has no per-post author filter; making the
   Following scope's pill correct is story 04's follow-up, not this story's.
 - **RESOLVED — mock-mode "who does the session follow" (WR-004 fold, Gate-1 #88/#121).** This

@@ -80,20 +80,39 @@ export interface HashtagFeedProps {
   /** Opens a post's flattened thread; the shell channel supplies it at
    * integration (Wave 2). Omitted in isolation — the feed still renders. */
   readonly onOpenThread?: (id: string) => void
+  /**
+   * Opens the tapped AUTHOR's profile (SOC-050); the shell channel supplies
+   * it, so the author tap-through works from inside a hashtag feed too, not
+   * only from the main feed. Omitted in isolation — the author identity stays
+   * inert text (no focusable no-op, WR-002).
+   */
+  readonly onOpenProfile?: (personaId: string) => void
 }
 
 interface HashtagRowProps {
   post: PostView
   variant: CardVariant
   onOpenThread?: (id: string) => void
+  onOpenProfile?: (personaId: string) => void
 }
 
 /** A single row, memoized so an unchanged post skips re-render (NFR-002/
  * SOC-071) — props are a referentially-stable `PostView` + primitives. */
-const HashtagRow = memo(function HashtagRow({ post, variant, onOpenThread }: HashtagRowProps) {
+const HashtagRow = memo(function HashtagRow({
+  post,
+  variant,
+  onOpenThread,
+  onOpenProfile,
+}: HashtagRowProps) {
   return (
     <li className={styles.row}>
-      <PostCard post={post} variant={variant} onOpen={onOpenThread} onReply={onOpenThread} />
+      <PostCard
+        post={post}
+        variant={variant}
+        onOpen={onOpenThread}
+        onReply={onOpenThread}
+        onOpenProfile={onOpenProfile}
+      />
     </li>
   )
 })
@@ -104,7 +123,7 @@ function engagementScore(post: PostView): number {
   return reply + repost + like + (share ?? 0)
 }
 
-export function HashtagFeed({ tag, onOpenThread }: HashtagFeedProps) {
+export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedProps) {
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
   const { variant } = useShellContext()
@@ -190,7 +209,13 @@ export function HashtagFeed({ tag, onOpenThread }: HashtagFeedProps) {
         aria-label={`#${tag}, ${tab === 'top' ? 'Top' : 'Latest'}`}
       >
         {shown.map(post => (
-          <HashtagRow key={post.id} post={post} variant={cardVariant} onOpenThread={onOpenThread} />
+          <HashtagRow
+            key={post.id}
+            post={post}
+            variant={cardVariant}
+            onOpenThread={onOpenThread}
+            onOpenProfile={onOpenProfile}
+          />
         ))}
       </ul>
 

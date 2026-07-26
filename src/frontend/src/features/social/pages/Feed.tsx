@@ -112,6 +112,13 @@
  * None of this touches the row's memoization: `FeedRow`'s OWN internal hook
  * state doesn't affect whether `React.memo` bails out on unchanged
  * `post`/`variant`/`onOpenThread`/`onHashtagOpen` props (NFR-002/SOC-071).
+ *
+ * AUTHOR TAP-THROUGH (profiles-social-graph integration, SOC-050):
+ * `onOpenProfile` threads straight through to each `<PostCard>`'s author
+ * target exactly like `onHashtagOpen` — one more optional, referentially
+ * stable callback the shell channel supplies (it MUST be a `useCallback`
+ * there, or every row re-renders on each channel render and the burst
+ * guarantee is lost). Omitted ⇒ the author identity renders as inert text.
  */
 
 import { memo, useCallback, useMemo, useState, useEffect, useRef } from 'react'
@@ -188,6 +195,10 @@ interface FeedRowProps {
   /** Opens the tapped hashtag's feed; supplied by the shell channel
    * (Wave-S3.1). Omitted in isolation — hashtags stay inert links. */
   onHashtagOpen?: (tag: string) => void
+  /** Opens the tapped AUTHOR's profile (SOC-050); supplied by the shell
+   * channel. Stable identity (a `useCallback`) for the same memo reason as
+   * `onOpenThread`. Omitted in isolation — the author identity stays inert. */
+  onOpenProfile?: (personaId: string) => void
 }
 
 /**
@@ -203,6 +214,7 @@ const FeedRow = memo(function FeedRow({
   variant,
   onOpenThread,
   onHashtagOpen,
+  onOpenProfile,
 }: FeedRowProps) {
   const reaction = useReaction({ postId: post.id, initialLikeCount: post.counts.like })
   const amplify = useAmplify({ postId: post.id })
@@ -234,6 +246,7 @@ const FeedRow = memo(function FeedRow({
         onRepost={amplify.canAmplify ? amplify.doRepost : undefined}
         onQuote={amplify.canAmplify ? () => setQuoting(true) : undefined}
         onHashtagOpen={onHashtagOpen}
+        onOpenProfile={onOpenProfile}
       />
       {quoting && (
         <QuoteComposer
@@ -261,9 +274,18 @@ export interface FeedProps {
   /** Opens the tapped hashtag's feed (SOC-040); the shell channel supplies
    * it. Omitted in isolation — hashtags stay inert links. */
   readonly onHashtagOpen?: (tag: string) => void
+  /** Opens the tapped author's profile (SOC-050); the shell channel supplies
+   * it. Omitted in isolation — the author identity renders as inert text
+   * (no focusable no-op — WR-002). */
+  readonly onOpenProfile?: (personaId: string) => void
 }
 
-export function Feed({ scope = 'all', onOpenThread, onHashtagOpen }: FeedProps = {}) {
+export function Feed({
+  scope = 'all',
+  onOpenThread,
+  onHashtagOpen,
+  onOpenProfile,
+}: FeedProps = {}) {
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
   const { variant } = useShellContext()
@@ -409,6 +431,7 @@ export function Feed({ scope = 'all', onOpenThread, onHashtagOpen }: FeedProps =
             variant={cardVariant}
             onOpenThread={onOpenThread}
             onHashtagOpen={onHashtagOpen}
+            onOpenProfile={onOpenProfile}
           />
         ))}
       </ul>
