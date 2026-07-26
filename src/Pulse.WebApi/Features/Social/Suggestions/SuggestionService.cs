@@ -88,7 +88,8 @@ public sealed class SuggestionService
     public async Task<SuggestionResult> GetSuggestionsAsync(int? limit, CancellationToken cancellationToken = default)
     {
         // 1. Scope comes ONLY from IExerciseContext, and an unset/Guid.Empty scope fails closed (COR-001) —
-        //    never a default or unscoped set.
+        //    never a default or unscoped set. THIS is the fail-closed boundary; the viewer identity below is
+        //    not one, and must not be treated as one.
         var scope = _exerciseContext.CurrentExerciseId;
         if (scope is null || scope.Value == Guid.Empty)
         {
@@ -100,28 +101,37 @@ public sealed class SuggestionService
             return SuggestionResult.Invalid("limit must be a positive integer when supplied.");
         }
 
-        // 2. The VIEWER is the caller's session-bound persona, never a client-supplied id. With none there is
-        //    nobody to compute "already follows" / "is yourself" against, so this fails closed rather than
-        //    serving a viewer-agnostic set that would suggest the caller follow themselves.
+        // 2. The VIEWER is the caller's session-bound persona, never a client-supplied id.
         var sessionPersona = await _sessionPersonaAccessor.GetCurrentSessionPersonaAsync(cancellationToken);
-        if (sessionPersona is null)
-        {
-            return SuggestionResult.NoSessionPersona();
-        }
 
         // 3. Defense in depth (COR-001): a session bound to a DIFFERENT exercise than the one resolved for this
-        //    request must never be served this exercise's content. Refuse rather than reconcile.
-        if (sessionPersona.ExerciseId != scope.Value)
+        //    request must never be served this exercise's content. Refuse rather than reconcile. (Distinct from
+        //    the unbound case below: this caller HAS an identity, and it belongs somewhere else.)
+        if (sessionPersona is not null && sessionPersona.ExerciseId != scope.Value)
         {
-            return SuggestionResult.NoSessionPersona();
+            return SuggestionResult.ForeignSessionPersona();
         }
 
-        // 4. The exclusion set: the caller's REAL outbound edges, read through story 07's scoped seam. Excluded
-        //    SERVER-side — the client used to filter these itself, which both shipped rows it would never
-        //    render and raced its own follow writes (a just-followed account could reappear as a suggestion).
-        var alreadyFollowing = await _followService.GetFollowingAsync(sessionPersona.PersonaId, cancellationToken);
+        // 4. AN UNBOUND VIEWER IS SERVED, NOT REFUSED (resolved by the coordinator; see
+        //    docs/features/profiles-social-graph/08-suggestions-api.md). A participant whose session carries no
+        //    persona binding yet still reaches the participant shell and the mounted module, and refusing here
+        //    would hand exactly that population the permanent "Suggestions aren't available right now." panel
+        //    this story exists to remove — CR-001 again, merely narrowed. So they get the un-personalized list:
+        //    still exercise-scoped from IExerciseContext (the isolation boundary is untouched), simply with the
+        //    two viewer-relative exclusions not applying, because there is no viewer to exclude against. The
+        //    frontend already encodes this contract (WhoToFollow.noPersona.test.tsx asserts the module renders
+        //    rows for such a session), and nothing here is more exposed than GET /api/personas, which already
+        //    serves the whole in-scope cast to the same caller.
+        var viewerPersonaId = sessionPersona?.PersonaId;
+        var alreadyFollowing = viewerPersonaId is { } viewer
 
-        var ids = await BuildSuggestionQuery(sessionPersona.PersonaId, alreadyFollowing, limit)
+            // The exclusion set: the caller's REAL outbound edges, read through story 07's scoped seam. Excluded
+            // SERVER-side — the client used to filter these itself, which both shipped rows it would never
+            // render and raced its own follow writes (a just-followed account could reappear as a suggestion).
+            ? await _followService.GetFollowingAsync(viewer, cancellationToken)
+            : [];
+
+        var ids = await BuildSuggestionQuery(viewerPersonaId, alreadyFollowing, limit)
             .ToListAsync(cancellationToken);
 
         // Guid.ToString() runs HERE, in C#, deliberately: SQL Server renders a uniqueidentifier in UPPERCASE,
@@ -151,15 +161,23 @@ public sealed class SuggestionService
     /// the platform never adds a second one by ordering around it (D1-008).
     /// </para>
     /// </remarks>
-    /// <param name="viewerPersonaId">The caller's own persona — never suggested to itself.</param>
-    /// <param name="alreadyFollowing">The caller's existing outbound edges — never re-suggested.</param>
+    /// <param name="viewerPersonaId">
+    /// The caller's own persona — never suggested to itself. <c>null</c> for an UNBOUND viewer, whose list has
+    /// no "self" to exclude; the exercise scope still applies either way (it comes from the query filter, not
+    /// from this parameter).
+    /// </param>
+    /// <param name="alreadyFollowing">The caller's existing outbound edges — never re-suggested. Empty for an unbound viewer.</param>
     /// <param name="limit">The optional display cap.</param>
     /// <returns>The composed, still-unexecuted query.</returns>
     private IQueryable<Guid> BuildSuggestionQuery(
-        Guid viewerPersonaId,
+        Guid? viewerPersonaId,
         IReadOnlyList<Guid> alreadyFollowing,
         int? limit)
     {
+        // Guid.Empty is not a real persona id (the write-guard guarantees no row carries it), so an unbound
+        // viewer's predicate below excludes nothing rather than needing a second query shape.
+        var viewer = viewerPersonaId ?? Guid.Empty;
+
         // Materialized as an array so the exclusion translates to a parameterized SQL IN rather than depending
         // on how EF handles an arbitrary IReadOnlyList closure.
         var excluded = alreadyFollowing as Guid[] ?? [.. alreadyFollowing];
@@ -168,7 +186,7 @@ public sealed class SuggestionService
         // here would duplicate the guarantee in a place a future edit could get wrong.
         var query = _dbContext.Personas
             .AsNoTracking()
-            .Where(persona => persona.Id != viewerPersonaId)
+            .Where(persona => persona.Id != viewer)
             .Where(persona => !excluded.Contains(persona.Id))
 
             // Deterministic and stable, NOT a ranking — see the type-level remarks. Handle is unique per
@@ -190,8 +208,12 @@ public enum SuggestionOutcome
     /// <summary>No exercise scope was resolved for the request — fail closed (the endpoint returns 401).</summary>
     ScopeUnresolved,
 
-    /// <summary>The caller has no session-bound persona in this exercise to suggest FOR (the endpoint returns 403).</summary>
-    NoSessionPersona,
+    /// <summary>
+    /// The caller's session is bound to a DIFFERENT exercise than the one resolved for this request (the
+    /// endpoint returns 403). Note what this is NOT: a caller with no persona binding at all is served the
+    /// un-personalized in-scope list, not refused — see <see cref="SuggestionService.GetSuggestionsAsync"/>.
+    /// </summary>
+    ForeignSessionPersona,
 
     /// <summary>The request failed validation (the endpoint returns 400).</summary>
     Invalid,
@@ -233,10 +255,10 @@ public sealed class SuggestionResult
     public static SuggestionResult ScopeUnresolved() =>
         new(SuggestionOutcome.ScopeUnresolved, Array.Empty<string>(), null);
 
-    /// <summary>The fail-closed result for a caller with no session-bound persona in this scope.</summary>
-    /// <returns>A <see cref="SuggestionOutcome.NoSessionPersona"/> result.</returns>
-    public static SuggestionResult NoSessionPersona() =>
-        new(SuggestionOutcome.NoSessionPersona, Array.Empty<string>(), null);
+    /// <summary>The fail-closed result for a caller whose session belongs to another exercise.</summary>
+    /// <returns>A <see cref="SuggestionOutcome.ForeignSessionPersona"/> result.</returns>
+    public static SuggestionResult ForeignSessionPersona() =>
+        new(SuggestionOutcome.ForeignSessionPersona, Array.Empty<string>(), null);
 
     /// <summary>A rejected request.</summary>
     /// <param name="validationError">The human-readable reason.</param>

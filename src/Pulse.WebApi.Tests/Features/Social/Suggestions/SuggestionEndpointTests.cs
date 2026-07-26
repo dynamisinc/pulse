@@ -307,7 +307,8 @@ public class SuggestionEndpointTests
 
         response.StatusCode.Should().BeOneOf(
             [HttpStatusCode.Forbidden, HttpStatusCode.Unauthorized],
-            "a cross-exercise session must fail closed");
+            "a cross-exercise session must fail closed — an identity that belongs somewhere ELSE is refused, "
+            + "which is a different case from having no identity at all (that one is served)");
 
         var body = await response.Content.ReadAsStringAsync();
         foreach (var idInA in worldA.AllPersonaIds)
@@ -335,25 +336,64 @@ public class SuggestionEndpointTests
     }
 
     [RequiresDockerFact]
-    public async Task NoSessionPersona_Returns403_RatherThanADefaultOrUnscopedSet()
+    public async Task UnboundViewer_IsServedTheUnpersonalizedList_NotRefused()
     {
+        // Coordinator-resolved (see the story's "Open decision"): a participant whose session carries no
+        // persona binding still reaches the participant shell and the mounted module. Refusing would hand that
+        // population the same permanent "Suggestions aren't available right now." panel CR-001 exists to remove.
+        // The isolation boundary is untouched — only the two VIEWER-relative exclusions stop applying, because
+        // there is no viewer to exclude against.
         var world = await SeedWorldAsync();
 
         await using var host = CreateHost();
         using var client = host.CreateClientFor(world.Host, bearerToken: null);
 
-        var response = await client.GetAsync(new Uri(SuggestionsPath, UriKind.Relative));
+        var ids = await ReadSuggestionsAsync(client);
 
-        response.StatusCode.Should().Be(
-            HttpStatusCode.Forbidden,
-            "with no session-bound persona there is nobody to compute 'yourself'/'already followed' against, "
-            + "so the read fails closed instead of serving a viewer-agnostic set");
+        ids.Should().Equal(
+            [
+                world.Alpha.ToString(),
+                world.Lookalike.ToString(),
+                world.Viewer.ToString(),
+                world.Delta.ToString(),
+                world.Echo.ToString(),
+            ],
+            "an unbound viewer gets the WHOLE in-scope cast in the same order — nothing is excluded 'as self', "
+            + "and nothing is exposed that GET /api/personas does not already serve the same caller");
+    }
 
-        var body = await response.Content.ReadAsStringAsync();
-        foreach (var id in world.AllPersonaIds)
+    [RequiresDockerFact]
+    public async Task UnboundViewer_IsStillExerciseScoped_NeverAnotherExercisesCast()
+    {
+        // The half of the unbound path that IS a hard boundary: dropping the viewer exclusions must not have
+        // dropped the scope with them.
+        var worldA = await SeedWorldAsync();
+        var worldB = await SeedWorldAsync();
+
+        await using (var verify = _fixture.CreateContext())
         {
-            body.Should().NotContain(id.ToString(), "a refusal carries no cast data at all");
+            (await verify.Personas.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == worldB.Exercise))
+                .Should().Be(worldB.CastSize, "exercise B's cast must exist for this test to mean anything");
         }
+
+        await using var host = CreateHost();
+        using var client = host.CreateClientFor(worldA.Host, bearerToken: null);
+
+        var response = await client.GetAsync(new Uri(SuggestionsPath, UriKind.Relative));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+
+        foreach (var idInB in worldB.AllPersonaIds)
+        {
+            body.Should().NotContain(
+                idInB.ToString(),
+                "scope comes from IExerciseContext and the central query filter, NOT from the viewer identity "
+                + "— an anonymous caller is scoped exactly as a bound one is (COR-001)");
+        }
+
+        using var document = JsonDocument.Parse(body);
+        document.RootElement.GetArrayLength().Should().Be(
+            worldA.CastSize, "and the SIZE must not leak another exercise's cast size either");
     }
 
     // ---------------------------------------------------------------------------------------------

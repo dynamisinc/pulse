@@ -47,13 +47,15 @@
  * planner (and later a controller, via CTL-021) is entitled to make. The
  * platform itself never vouches for, nor warns against, any entry here.
  *
- * EXCLUSIONS ARE THE CALLER'S JOB, NOT THIS MODULE'S. This seam returns the
- * full planner-seeded list as-is, with no notion of "who is asking". Never
- * suggesting the viewer's own persona, and never suggesting an account
- * already followed, are `useWhoToFollow`'s responsibility (using the
- * viewer's session + `followService.resolveFollowing`) — mirroring how
- * `feedService.resolveFeed` stays scope-agnostic and lets its caller apply
- * session-specific rules on top.
+ * EXCLUSIONS ARE APPLIED TWICE, AND THAT IS DELIBERATE. As of backend story
+ * 08 the SERVER already excludes the viewer's own persona and everything the
+ * viewer already follows (it resolves the viewer from the session, never from
+ * a client field), so this module relays a list those rules have already been
+ * applied to. `useWhoToFollow` re-applies both anyway: they are cheap set
+ * operations, they keep the module correct against the mock adapter below
+ * (which is viewer-agnostic), and they mean a just-completed follow write
+ * disappears from the rendered list immediately rather than at the next
+ * fetch. Neither layer is a ranking — see the note above.
  */
 
 import type { AxiosAdapter } from 'axios'
@@ -84,14 +86,34 @@ const MOCK_SUGGESTED_FOLLOW_IDS: readonly string[] = [
  * Short-circuits the network with the mock suggestion order, while still
  * exercising the shared axios client's real request pipeline (interceptors
  * included) exactly as a live call would.
+ *
+ * It parses `?limit=` back out of `config.url` — the very string the live path
+ * sends — rather than closing over the argument, so a client/server key
+ * mismatch (`?limit=` vs `?count=`) fails HERE too instead of only against a
+ * real backend. Honouring the cap in mock is not cosmetic: mock/live
+ * divergence is this feature's most productive defect class (a bare array
+ * typed against an envelope, two disconnected follow stores, a `204` mock for
+ * a `200` endpoint), and a mock that ignored `limit` while the server applied
+ * it would be the next one.
  */
-const mockAdapter: AxiosAdapter = config => Promise.resolve({
-  data: MOCK_SUGGESTED_FOLLOW_IDS,
-  status: 200,
-  statusText: 'OK',
-  headers: {},
-  config,
-})
+const mockAdapter: AxiosAdapter = config => {
+  const limit = limitFromUrl(config.url)
+  return Promise.resolve({
+    data: limit === undefined
+      ? MOCK_SUGGESTED_FOLLOW_IDS
+      : MOCK_SUGGESTED_FOLLOW_IDS.slice(0, limit),
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config,
+  })
+}
+
+/** Reads the `limit` query parameter back out of a request path, if present. */
+function limitFromUrl(url: string | undefined): number | undefined {
+  const raw = url?.match(/[?&]limit=(\d+)/)?.[1]
+  return raw === undefined ? undefined : Number(raw)
+}
 
 /** Single env-guarded mock/live flip point (mirrors the rest of this feature). */
 const USE_MOCK_SUGGESTIONS = USE_MOCK_DATA
@@ -107,10 +129,18 @@ function isStringArray(data: unknown): data is string[] {
  * closed (throws) on a malformed body, mirroring
  * `resolveFollowing`/`resolveFollowers` — never silently substitutes an
  * empty/default suggestion list.
+ *
+ * `limit` is a server-applied CAP, not a ranking hint: the server returns the
+ * first `limit` entries of the SAME order it would otherwise return in full
+ * (`profiles-social-graph/08`), so a capped read is a strict prefix of an
+ * uncapped one. Omitted → the whole eligible set. The server also applies the
+ * self / already-followed exclusions the caller applies again locally, so a
+ * cap never silently costs a renderable row to an entry the client would have
+ * dropped anyway.
  */
-export async function resolveSuggestedFollowIds(): Promise<string[]> {
+export async function resolveSuggestedFollowIds(limit?: number): Promise<string[]> {
   const response = await api.get<string[]>(
-    '/personas/suggestions',
+    limit === undefined ? '/personas/suggestions' : `/personas/suggestions?limit=${limit}`,
     USE_MOCK_SUGGESTIONS ? { adapter: mockAdapter } : undefined,
   )
   if (!isStringArray(response.data)) {

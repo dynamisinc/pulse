@@ -39,15 +39,19 @@ This story makes story 04 real rather than mock-only.
 - [x] **XC-002 / SOC-052 wire shape.** Ids only. No `personaType`, no `castable`, no `verified`, no
       archetype-derived value — story 06 closed that machine-readable impersonator tell on the
       participant wire and this story does not reopen it.
-- [x] **`limit` supported** (the mount uses `limit={3}`).
-- [x] **Fails closed** — unresolved scope `401`, no session persona `403`; never an unscoped or
-      default set behind a `200`.
+- [x] **`limit` supported** (the mount uses `limit={3}`), and threaded from the client so the wire
+      carries only the rows that will be rendered. **Partially delivered — see the note in As-built 4.**
+- [x] **Fails closed on the boundary that is one** — unresolved exercise scope `401`; a session bound
+      to *another* exercise `403`. A caller with **no** persona binding is **served** the
+      un-personalized in-scope list (`200`), not refused — resolved by the coordinator, reasoning
+      recorded below.
 - [x] **Composition-root wiring verified through the real `WebApplicationFactory<Program>`** — route
       mapped exactly once AND its services resolve.
 
 ## Out of Scope
-The `<WhoToFollow>` module UI and `useWhoToFollow` (story 04 — already built; **no frontend file is
-touched by this story**). The E7 CTL-021 write path that lets a controller add/remove/reorder
+The `<WhoToFollow>` module UI (story 04 — already built; the only frontend files this story touches are
+`services/whoToFollowService.ts` and `hooks/useWhoToFollow.ts`, for the `limit` thread, plus their
+tests). The E7 CTL-021 write path that lets a controller add/remove/reorder
 suggestions live (`world-steering/01`, Not Started) — this story only reads. The portal placement
 (E3, Phase 3). Follow mechanics themselves (story 07). Flipping `VITE_USE_MOCK_DATA` off (orchestrator-owned).
 
@@ -81,10 +85,31 @@ seam-freeze wave.
    as "the set 04-who-to-follow needs"), rather than a second parallel edge query.
 4. **`limit` is an optional query parameter** (`?limit=3`), validated: a value below 1, or a
    non-integer, is a `400` — never silently ignored, which would serve *more* rows than the caller
-   asked for and hide the typo. **Note for the orchestrator:** the frozen client does **not** send it
-   today (`<WhoToFollow limit={3}>` is a display cap applied client-side after resolution, and
-   `resolveSuggestedFollowIds()` takes no argument). The server-side cap is therefore available and
-   tested but currently unused; wiring it is a one-line frontend change nobody needs to make urgently.
+   asked for and hide the typo. A capped response is a strict **prefix** of the uncapped one.
+
+   **Client threading — DONE for two of three hops; the third is blocked and NOT delivered.**
+   `resolveSuggestedFollowIds(limit?)` now puts `?limit=N` on the wire and `useWhoToFollow(limit?)`
+   forwards it (both with tests, and the **mock adapter honours the same parameter** — it parses
+   `?limit=` back out of the URL the live path sends, so a `?limit=` vs `?count=` mismatch fails in
+   mock too; mock/live divergence is this feature's most productive defect class).
+
+   **The last hop is one line in `WhoToFollow.tsx`, which the change was scoped out of.** The cap is
+   a *component prop* (`<WhoToFollow limit={3}>` at `SocialChannel`), and the component calls
+   `useWhoToFollow()` with no argument, slicing after resolution:
+
+   ```tsx
+   // WhoToFollow.tsx:94 — as it stands
+   const { suggestions, loading, error } = useWhoToFollow()
+   // what closes the loop
+   const { suggestions, loading, error } = useWhoToFollow(limit)
+   ```
+
+   Until that lands the parameter is **unused in production and the fetch is still uncapped** — the
+   plumbing is real and tested, but it is not yet reached, and this story must not be read as having
+   delivered the saving. (One behavioural consequence to weigh when making that change: the hook skips
+   ids `usePersonas()` cannot resolve, so a server-side cap of 3 renders fewer than 3 rows if one of
+   the three is unresolvable, where an uncapped fetch would backfill. Harmless at Phase-1 scale, but
+   it is a real difference, not a pure optimization.)
 5. **`Guid.ToString()` runs in C#, never in the LINQ projection.** SQL Server renders a
    `uniqueidentifier` in UPPERCASE, so translating the conversion into the query would return ids that
    no longer string-match the lowercase ids `GET /api/personas` emits — `useWhoToFollow` would silently
@@ -110,16 +135,29 @@ only way to mix them would be to mock one seam and not the other, which no code 
 end-to-end by the id-shape test above (a live suggestion set is a strict subset of the live
 `GET /api/personas` id set, lowercase for lowercase).
 
-### Open decision for the orchestrator (flagged, not silently resolved)
-A caller with **no session-bound persona** gets `403`, per this story's AC. That is right for a
-scope/identity guarantee, but it has a product consequence worth a deliberate call: the *frontend*
-renders the module for a no-persona session (`WhoToFollow.noPersona.test.tsx` asserts rows still
-appear, with the Follow control absent), so in live mode such a session will see the "Suggestions
-aren't available right now." panel. Who is affected: **only** sessions with no `PersonaId` — a
-participant not yet bound to a persona, and staff sessions. Read-only/observer participant sessions
-**do** carry a persona binding and are unaffected. If the platform later wants an unbound viewer to
-see the un-personalized list, the change is one branch in `SuggestionService` (serve the in-scope
-order with no viewer exclusions) plus its test — it is not a redesign.
+### The unbound viewer — RESOLVED (coordinator decision, folded in the second commit)
+The first build refused a caller with **no session-bound persona** (`403`). That is now a **`200`
+carrying the un-personalized in-scope list**, and the reasoning is worth keeping because the two cases
+look alike and are not:
+
+- **What was wrong with the refusal.** `SocialChannel` mounts only on the participant shell, so staff
+  never reach this module — but a **participant not yet bound to a persona does**, and refusing handed
+  exactly that population the permanent "Suggestions aren't available right now." panel *this story
+  exists to remove*. It was CR-001 again, merely narrowed to a smaller group.
+- **What is actually protected here.** The exercise scope, and only the exercise scope. It still comes
+  from `IExerciseContext` + the central query filter and is **unchanged** — an unbound caller is
+  scoped exactly as a bound one is (pinned by
+  `UnboundViewer_IsStillExerciseScoped_NeverAnotherExercisesCast`). What lapses is the two
+  *viewer-relative* exclusions, which cannot apply because there is no viewer to exclude against.
+  Nothing is exposed that `GET /api/personas` does not already serve the same caller.
+- **The frontend already encoded this contract.** `WhoToFollow.noPersona.test.tsx` asserts the module
+  renders its rows for a no-persona session (with the Follow control absent, D1-011). The `403` made
+  live disagree with a contract the client had already frozen.
+- **Still refused, and deliberately distinct:** a session bound to a **different** exercise than the
+  request resolved to (`SuggestionOutcome.ForeignSessionPersona` → `403`). An identity that belongs
+  somewhere else is not the same as no identity, and the enum member is named so the next reader
+  cannot collapse them. The `401` on an unresolved exercise scope is untouched — that one *is* a
+  fail-closed boundary.
 
 ## Dependencies
 `social-api/04` (`GET /api/personas` — the read the client resolves these ids against); story 07
@@ -160,16 +198,26 @@ the scope or the viewer's persona.
 - `SuggestionEndpointTests.Limit_LargerThanTheCast_ReturnsTheWholeEligibleSet_NotAnError` [docker]
 - `SuggestionEndpointTests.Limit_ThatIsNotAPositiveInteger_Is400_NeverSilentlyIgnored` [docker]
 
+Frontend (vitest), for the client half of the same AC:
+- `whoToFollowService.test.ts` — "caps the shipped mock path to a strict PREFIX of the uncapped order",
+  "honours the cap in MOCK mode too, so mock and live cannot disagree", "returns the whole eligible set
+  when no cap is given", "puts the cap on the wire as ?limit=N, the key the server reads", "sends no
+  query string at all when no cap is given"
+- `useWhoToFollow.test.ts` — "passes `limit` through to the read, so the SERVER caps the wire", "sends
+  no cap when none is given — the whole eligible set, exactly as before", "re-reads when the cap changes"
+
 **Cross-exercise isolation (AC6, always-Critical)**
 - `SuggestionEndpointTests.Suggestions_NeverContainAnotherExercisesPersona_AndTheRowsProvablyExist` [docker]
   — asserts exercise B's cast exists via `IgnoreQueryFilters` first, then that none of its ids appear in
   A's body and that the response LENGTH does not leak B's cast size
 - `SuggestionEndpointTests.ASessionFromAnotherExercise_IsRefused_RatherThanServedThisExercisesCast` [docker]
 
-**Fail-closed (AC9)**
+**Fail-closed, and the unbound viewer who is NOT refused (AC9)**
 - `SuggestionEndpointTests.UnresolvedScope_Returns401_NotAnEmptyOk` [docker]
-- `SuggestionEndpointTests.NoSessionPersona_Returns403_RatherThanADefaultOrUnscopedSet` [docker] — also
-  asserts the refusal body carries no cast data
+- `SuggestionEndpointTests.UnboundViewer_IsServedTheUnpersonalizedList_NotRefused` [docker] — the whole
+  in-scope cast, in the same order, with neither viewer-relative exclusion applied
+- `SuggestionEndpointTests.UnboundViewer_IsStillExerciseScoped_NeverAnotherExercisesCast` [docker] — the
+  half of that path that IS a hard boundary: dropping the viewer exclusions must not drop the scope
 
 **Composition-root wiring (AC10, regression class)**
 - `Features/Social/CompositionRootWiringTests.ProgramCs_MapsTheSuggestionsRouteExactlyOnce_AndResolvesItsServices`

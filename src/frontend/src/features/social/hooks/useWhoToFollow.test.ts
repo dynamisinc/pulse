@@ -139,6 +139,39 @@ describe('useWhoToFollow — the two exclusions this story owns (never a ranking
   })
 })
 
+describe('useWhoToFollow — forwards the server-applied cap (backend story 08)', () => {
+  it('passes `limit` through to the read, so the SERVER caps the wire', async () => {
+    vi.mocked(resolveSuggestedFollowIds).mockResolvedValue([personaIdForHandle('FulcoEM')])
+
+    const { result } = renderHook(() => useWhoToFollow(3), { wrapper })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(resolveSuggestedFollowIds).toHaveBeenCalledWith(3)
+  })
+
+  it('sends no cap when none is given — the whole eligible set, exactly as before', async () => {
+    vi.mocked(resolveSuggestedFollowIds).mockResolvedValue([personaIdForHandle('FulcoEM')])
+
+    const { result } = renderHook(() => useWhoToFollow(), { wrapper })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(resolveSuggestedFollowIds).toHaveBeenCalledWith(undefined)
+  })
+
+  it('re-reads when the cap changes', async () => {
+    vi.mocked(resolveSuggestedFollowIds).mockResolvedValue([personaIdForHandle('FulcoEM')])
+
+    const { result, rerender } = renderHook(({ cap }: { cap: number }) => useWhoToFollow(cap), {
+      wrapper,
+      initialProps: { cap: 3 },
+    })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    rerender({ cap: 5 })
+    await waitFor(() => expect(resolveSuggestedFollowIds).toHaveBeenCalledWith(5))
+  })
+})
+
 describe('useWhoToFollow — fails closed on error', () => {
   it('surfaces the suggestion read rejection with an empty suggestion list', async () => {
     vi.mocked(resolveSuggestedFollowIds).mockRejectedValue(new Error('suggestions unavailable'))

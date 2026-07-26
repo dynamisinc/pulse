@@ -48,6 +48,29 @@ describe('resolveSuggestedFollowIds (shipped mock path) — planner-seeded order
   })
 })
 
+describe('resolveSuggestedFollowIds — the server-applied `limit` cap (backend story 08)', () => {
+  it('caps the shipped mock path to a strict PREFIX of the uncapped order', async () => {
+    const all = await resolveSuggestedFollowIds()
+    const capped = await resolveSuggestedFollowIds(3)
+
+    expect(capped).toHaveLength(3)
+    expect(capped).toEqual(all.slice(0, 3))
+  })
+
+  it('honours the cap in MOCK mode too, so mock and live cannot disagree', async () => {
+    // The mock adapter parses `?limit=` back out of the very URL the live path
+    // sends. A client/server key mismatch (`?limit=` vs `?count=`) therefore
+    // fails here, not only against a real backend — this feature's most
+    // productive defect class is exactly that divergence.
+    expect(await resolveSuggestedFollowIds(1)).toHaveLength(1)
+  })
+
+  it('returns the whole eligible set when no cap is given', async () => {
+    const all = await resolveSuggestedFollowIds()
+    expect(all.length).toBeGreaterThan(3)
+  })
+})
+
 describe('resolveSuggestedFollowIds (boundary-mocked wire contract)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -59,6 +82,20 @@ describe('resolveSuggestedFollowIds (boundary-mocked wire contract)', () => {
 
     expect(spy).toHaveBeenCalledWith('/personas/suggestions', expect.anything())
     expect(ids).toEqual(['persona-a', 'persona-b'])
+  })
+
+  it('puts the cap on the wire as ?limit=N, the key the server reads', async () => {
+    const spy = vi.spyOn(api, 'get').mockResolvedValue(apiBody(['persona-a']))
+    await resolveSuggestedFollowIds(3)
+
+    expect(spy).toHaveBeenCalledWith('/personas/suggestions?limit=3', expect.anything())
+  })
+
+  it('sends no query string at all when no cap is given', async () => {
+    const spy = vi.spyOn(api, 'get').mockResolvedValue(apiBody(['persona-a']))
+    await resolveSuggestedFollowIds()
+
+    expect(spy).toHaveBeenCalledWith('/personas/suggestions', expect.anything())
   })
 
   it('fails closed when the body is not a string array', async () => {

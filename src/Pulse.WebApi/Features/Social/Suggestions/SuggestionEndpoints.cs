@@ -92,7 +92,10 @@ public static class SuggestionEndpoints
     /// <param name="request">The current request — read ONLY for the optional <c>limit</c>; scope never comes from it.</param>
     /// <param name="suggestionService">The suggestion read service.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>200 with the ordered id array, or 400/401/403 per the fail-closed outcomes.</returns>
+    /// <returns>
+    /// 200 with the ordered id array — including for a viewer with no persona binding, who gets the
+    /// un-personalized in-scope list — or 400/401/403 per the fail-closed outcomes.
+    /// </returns>
     private static async Task<IResult> GetSuggestionsAsync(
         HttpRequest request,
         SuggestionService suggestionService,
@@ -111,11 +114,12 @@ public static class SuggestionEndpoints
             SuggestionOutcome.Resolved => Results.Ok(result.PersonaIds),
 
             // Fail closed — no exercise resolved for this request (COR-001). Never an empty 200, which the
-            // module would render as "there is nobody to suggest" rather than "you are not scoped".
+            // module would render as "there is nobody to suggest" rather than "you are not scoped". This is the
+            // ONE fail-closed boundary here; an unbound viewer is served (see SuggestionService step 4).
             SuggestionOutcome.ScopeUnresolved => Results.Unauthorized(),
 
-            // Scoped, but with no persona to compute "yourself" / "already followed" against.
-            SuggestionOutcome.NoSessionPersona => Results.StatusCode(StatusCodes.Status403Forbidden),
+            // The caller's session belongs to a DIFFERENT exercise than this request resolved to.
+            SuggestionOutcome.ForeignSessionPersona => Results.StatusCode(StatusCodes.Status403Forbidden),
 
             SuggestionOutcome.Invalid => Results.BadRequest(result.ValidationError),
 
