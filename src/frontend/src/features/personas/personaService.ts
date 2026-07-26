@@ -32,7 +32,9 @@
  *
  * PRECEDENT — neither read takes a client `exerciseId` param: query isolation
  * is server-side (COR-001); the session already binds the exercise. The mock
- * resolves the ONE exercise's cast.
+ * resolves the ONE exercise's cast, and composes `followerCount` from the live
+ * mock follow-edge store on every request rather than serving the frozen
+ * seed-time number (WR-005 — see `withMockFollowEdges`).
  *
  * `usePersonaTemplates()` exposes the org-library templates (NOT
  * exercise-scoped, story 01). Staff/data world — no UI, no COBRA.
@@ -42,6 +44,11 @@ import { useEffect, useState } from 'react'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
+// MOCK-SCAFFOLD-ONLY dependency (WR-005 — see `withMockFollowEdges` below). It
+// is consumed exclusively inside the `USE_MOCK_PERSONAS` adapters, mirroring
+// the LIVE path where the server (`GetEdgeCountsAsync`, backend story 07)
+// composes the same number; no shipped/live read path in this module touches it.
+import { mockFollowerIdsOf } from '@/features/social/services/followEdgeStore'
 import { PERSONA_TEMPLATES } from './personaTemplates'
 import { FAIRHAVEN_BASELINE } from './casts'
 import { seedCast } from './seedCast'
@@ -117,12 +124,42 @@ export function toParticipantPersona(persona: Persona): Persona {
 }
 
 /**
+ * MOCK ONLY (WR-005, #88/#121) — recomposes `followerCount` at READ time the
+ * way the live server does: `audienceMagnitude + real inbound follow edges`
+ * (backend story 07's `GetEdgeCountsAsync`).
+ *
+ * WHY. `SEEDED_PERSONAS` is computed ONCE at module load, and the mock
+ * follow/unfollow write only mutates `followEdgeStore`'s edge set — so before
+ * this, a mock-mode follow moved the button to "Following" while the target's
+ * `persona.followerCount` never budged, not even across a reload. Live mode
+ * recomposed on every read. That is exactly the mock-says-one-thing/
+ * live-says-another divergence this feature keeps having to design against
+ * (and `VITE_USE_MOCK_DATA=true` is UAT's own setting, so the wrong half is
+ * the one that gets demoed). Composing here makes the two modes agree.
+ *
+ * `audienceMagnitude` is the RAW magnitude and is passed through untouched —
+ * only the composed total moves (see `services/audience.ts`'s "WHICH PERSONA
+ * FIELD IS THE MAGNITUDE" note). A seeded instance always carries it; the
+ * `??` fallback covers only a hypothetical fixture that predates the field.
+ */
+function withMockFollowEdges<T extends Persona>(persona: T): T {
+  const magnitude = persona.audienceMagnitude ?? persona.followerCount
+  return {
+    ...persona,
+    followerCount: magnitude + mockFollowerIdsOf(persona.id).length,
+    audienceMagnitude: magnitude,
+  }
+}
+
+/**
  * Short-circuits the network with the PARTICIPANT projection of the seeded
  * cast — the mock is honest about the world split, so a dev/UAT participant
- * surface never receives a `personaType` over the wire either.
+ * surface never receives a `personaType` over the wire either. Composed per
+ * REQUEST (not at module load) so a follow made during the session is
+ * reflected on the next read, exactly like live (see `withMockFollowEdges`).
  */
 const participantMockAdapter: AxiosAdapter = config => Promise.resolve({
-  data: SEEDED_PERSONAS.map(toParticipantPersona),
+  data: SEEDED_PERSONAS.map(persona => toParticipantPersona(withMockFollowEdges(persona))),
   status: 200,
   statusText: 'OK',
   headers: {},
@@ -131,7 +168,7 @@ const participantMockAdapter: AxiosAdapter = config => Promise.resolve({
 
 /** Short-circuits the network with the STAFF projection (archetype included). */
 const staffMockAdapter: AxiosAdapter = config => Promise.resolve({
-  data: SEEDED_PERSONAS,
+  data: SEEDED_PERSONAS.map(withMockFollowEdges),
   status: 200,
   statusText: 'OK',
   headers: {},

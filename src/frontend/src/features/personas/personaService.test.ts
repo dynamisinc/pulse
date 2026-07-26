@@ -13,10 +13,20 @@
  * halves — the participant read never carries the archetype tell (not even
  * when the wire body does), and the staff read FAILS CLOSED rather than hand
  * back personas whose `personaType` is `undefined`.
+ *
+ * The final block covers WR-005 (#88/#121): the mock adapter composes
+ * `followerCount` from the LIVE mock follow-edge store on every request, the
+ * way the live server composes it, instead of serving the frozen seed-time
+ * number `SEEDED_PERSONAS` computed once at module load.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { api } from '@/core/services/api'
+import {
+  followPersona,
+  unfollowPersona,
+  resetMockFollowEdges,
+} from '@/features/social/services/followService'
 import {
   resolvePersonas,
   resolveStaffPersonas,
@@ -226,6 +236,71 @@ describe('personaById', () => {
 
   it('returns undefined for an unknown id', () => {
     expect(personaById('persona-nobody')).toBeUndefined()
+  })
+})
+
+describe('mock adapter — follower count composed from the live edge store (WR-005)', () => {
+  /** NANO-band citizen: a sub-1,000 seed count, so a ±1 is unambiguous. */
+  const TARGET_ID = 'persona-tbrandt41'
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    resetMockFollowEdges()
+  })
+
+  afterEach(() => {
+    resetMockFollowEdges()
+  })
+
+  /** The seed-time magnitude, guarded rather than `!`-asserted. */
+  function seededMagnitude(): number {
+    const persona = personaById(TARGET_ID)
+    if (!persona) throw new Error(`expected seeded persona fixture: ${TARGET_ID}`)
+    return persona.audienceMagnitude ?? persona.followerCount
+  }
+
+  /** The participant-projection read of `TARGET_ID`, guarded. */
+  async function readTarget() {
+    const persona = (await resolvePersonas()).find(p => p.id === TARGET_ID)
+    if (!persona) throw new Error(`expected ${TARGET_ID} in the resolved cast`)
+    return persona
+  }
+
+  it('recomposes followerCount as a mock follow lands and is undone', async () => {
+    // Before WR-005 this number was frozen for the whole page session (and
+    // across a reload): `SEEDED_PERSONAS` is computed once at module load, and
+    // the mock follow write only mutates `followEdgeStore`. Live mode
+    // recomposed on every read (`GetEdgeCountsAsync`), so the two modes
+    // disagreed — and `VITE_USE_MOCK_DATA=true` is UAT's own setting, i.e. the
+    // frozen half was the one being demoed.
+    const magnitude = seededMagnitude()
+    expect(await readTarget()).toMatchObject({ followerCount: magnitude })
+
+    await followPersona(TARGET_ID)
+    expect(await readTarget()).toMatchObject({ followerCount: magnitude + 1 })
+
+    await unfollowPersona(TARGET_ID)
+    expect(await readTarget()).toMatchObject({ followerCount: magnitude })
+  })
+
+  it('leaves audienceMagnitude RAW — only the composed total moves', async () => {
+    // `audienceMagnitude` is carried separately precisely so nothing recomposes
+    // it and double-counts the edges (see `social/services/audience.ts`).
+    const magnitude = seededMagnitude()
+    await followPersona(TARGET_ID)
+
+    const persona = await readTarget()
+    expect(persona.audienceMagnitude).toBe(magnitude)
+    expect(persona.followerCount).toBe(magnitude + 1)
+  })
+
+  it('composes the STAFF projection the same way', async () => {
+    const magnitude = seededMagnitude()
+    await followPersona(TARGET_ID)
+
+    const persona = (await resolveStaffPersonas()).find(p => p.id === TARGET_ID)
+    expect(persona?.followerCount).toBe(magnitude + 1)
+    expect(persona?.audienceMagnitude).toBe(magnitude)
   })
 })
 

@@ -1,8 +1,8 @@
 # Story: Follow / unfollow
 
-**Feature:** Profiles & social graph  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Built (hook +
-write path + guard); wiring into `<Profile>`'s header is a parallel integration pass — see
-"Not yet wired" below
+**Feature:** Profiles & social graph  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Complete
+(hook + write path + guard + the `<Profile>` header integration, incl. the Gate-2 CR-002/CR-003
+fold — see "Integration pass" below)
 **Requirements:** SOC-051 (COR-001, COR-015)  ·  **Design decisions:** none  ·  **Issue:** #110
 
 ## Context
@@ -12,7 +12,17 @@ story's frontend calls is `profiles-social-graph/07-follow-graph-api.md` (#370, 
 
 ## Acceptance Criteria
 - [x] A participant can follow/unfollow any account in their exercise (COR-001); the follow button
-      reflects state. *(`<FollowButton>` (`components/FollowButton.tsx`) + `useFollow()`
+      reflects state. **This half was NOT true until the Gate-2 CR-002 fold** — `useFollow` seeded
+      `isFollowing` from `initiallyFollowing = false` and nothing in shipped code ever passed that
+      prop, so on the profile of an account the viewer already followed the button read "Follow" /
+      `aria-pressed="false"`, and tapping it ran the optimistic `+1` against the server's idempotent
+      `{ following: true, changed: false }` (no edge, no telemetry) and settled on `previousCount + 1`
+      — the client displaying a follower gain that never happened. `<Profile>` now resolves the
+      viewer's following set (`resolveFollowing(session.personaId)`, the same directed read
+      `useWhoToFollow` uses) and passes `initiallyFollowing`; the control is WITHHELD until that
+      resolves (`useFollow` seeds once, so a late prop could not correct it) and keyed on the resolved
+      value, so no frame ever paints the wrong state. *(`<FollowButton>`
+      (`components/FollowButton.tsx`) + `useFollow()`
       (`hooks/useFollow.ts`): an optimistic toggle that settles `isFollowing`/`followerCount` on the
       server's AUTHORITATIVE `following` value once the write resolves — SG-001 fold, Gate-1
       #88/#121 — rather than trusting the optimistic guess was right, so a client/server divergence
@@ -53,25 +63,44 @@ story's frontend calls is `profiles-social-graph/07-follow-graph-api.md` (#370, 
       `hooks/useFollow.readonly.test.ts` / `hooks/useFollow.noPersona.test.ts` /
       `components/FollowButton.readonly.test.tsx` / `components/FollowButton.noPersona.test.tsx`.)*
 
-## Not yet wired (why Status isn't Complete)
-`<FollowButton>` is built and tested standalone (mirrors `<FollowerList>`'s own build order). It is
-**not yet mounted inside `<Profile>`'s header** — that integration (rendering the button beside a
-profile's follower/following counts, keeping a header-level count display in sync via
-`onFollowerCountChange`, see SG-003 below) is a parallel pass over `pages/Profile.tsx` this story does
-not own. **Do not flip this Status to Complete until that pass lands and is verified** — this story's
-own scope (the hook + write path + control, all standalone-tested) is done; the wiring is not.
+## Integration pass (landed — Gate-2 CR-002 / CR-003 fold)
+`<FollowButton>` was built and tested standalone first (mirroring `<FollowerList>`'s build order) and
+mounted into `<Profile>`'s header in a later pass. That mount was initially **prop-less**, which is
+what Gate 2 caught: the control rendered, but neither of the two props that make it truthful in a
+host was passed. Both are now wired in `pages/Profile.tsx`:
+
+- **CR-002 — `initiallyFollowing`.** Resolved from `resolveFollowing(session.personaId)` (skipped
+  entirely for a read-only / personaless session and on the viewer's own profile, where the control is
+  absent anyway; fails closed to "not following"). Because `useFollow` seeds `isFollowing` ONCE via
+  `useState`, a late-arriving value could never be picked up — so the control is **withheld** until
+  the read settles rather than mounted in a placeholder state, and is keyed on
+  `` `${persona.id}:${viewerFollows}` `` so any later change remounts it instead of keeping a stale
+  seed. Re-pointing the page at a different persona re-arms the gate in the same render-phase reset
+  that already re-collapses the follower list.
+- **CR-003 — `onFollowerCountChange`.** The header used to render
+  `formatMagnitude(persona.followerCount)` off an object that never changes, so after a follow the
+  button read "Following" while the header sat still. It now tracks the button's own optimistic ±1.
+  Invisible for mid/large-band personas (`formatMagnitude` truncates a ±1 away) — which is exactly why
+  no test caught it — and plainly visible for the seeded nano-band accounts, which render as exact
+  integers below 1,000. `Profile.follow.test.tsx` pins it at the **nano** band for that reason.
+- **SG-003 (honoured):** `<FollowButton>`'s count-sync effect depends on the callback's IDENTITY, so
+  `<Profile>` passes a stable `useCallback` rather than an inline arrow, which would re-fire that
+  effect on every render of the page.
 
 ## Deferred (tracked follow-ups)
-- **`<Profile>` integration** — see "Not yet wired" above.
-- **SG-003 (fold, this pass):** `<FollowButton>`'s `onFollowerCountChange` effect depends on the
-  callback's IDENTITY; the component's own doc comment now tells a host to `useCallback` it (a stable
-  dependency) rather than pass an inline arrow, since the component itself cannot defend against an
-  unstable prop identity without silently dropping legitimate rapid-fire count changes. Relevant once
-  the `<Profile>` integration above lands and actually passes this prop.
+- **`<WhoToFollow>`'s own `<FollowButton>` mount** (`components/WhoToFollow.tsx`) still passes neither
+  prop. It is a *suggestion* list that by construction excludes accounts the viewer already follows
+  (`useWhoToFollow`), so the CR-002 wrong-seed case cannot arise there today, and it renders no
+  separate follower count for CR-003 to desync from. Revisit if either invariant changes.
+- **Shell variant vs session read-only.** The Follow control is removed by the SESSION's `isReadOnly`
+  (`useFollow().canFollow`), not by the shell mount variant — so a `variant: 'readOnly'` shell with a
+  writable session still renders it, unlike the `<PostCard>` affordances WR-003 threads. Flagged, not
+  changed: D1-011's absent-control rule is written against the observer SESSION, and re-deciding the
+  shell-variant contract is a separate call.
 
 ## Out of Scope
 Magnitude display (story 05); the Following feed itself (feeds-discovery); suggested follows
-(story 04); wiring the control into `<Profile>` (parallel integration pass, see "Not yet wired").
+(story 04).
 
 ## Technical Notes
 Participant world. `hooks/useFollow.ts` (the optimistic state machine: toggle, rollback-on-reject,
@@ -88,6 +117,15 @@ reader follows anyone. `resetMockFollowEdges()` (test-only) does NOT restore tha
 it clears the graph to genuinely empty, the clean slate the rest of the suite (including
 `04-who-to-follow`'s suggestion-exclusion specs) already depends on; a spec that wants the seeded
 default back on purpose calls `feedService.setMockFollowingForTests(undefined)` instead.
+
+**Mock follower COUNTS, WR-005 fold (Gate 2).** `SEEDED_PERSONAS` is computed once at module load and
+the mock follow write only mutates `followEdgeStore`, so in mock mode a target's
+`persona.followerCount` never moved — not even across a reload — while live recomposes from
+`GetEdgeCountsAsync` on every read. `personaService.ts`'s mock adapters (both projections) now compose
+`followerCount = audienceMagnitude + mockFollowerIdsOf(id).length` per REQUEST, so the two modes agree;
+`audienceMagnitude` is passed through raw so nothing double-counts the edges. That import is
+mock-scaffold-only, and `followEdgeStore` takes `personaIdForHandle` from the leaf `personas/types`
+rather than the barrel to keep the module graph acyclic.
 
 **Wire contract, SG-001/SG-002 fold.** The real endpoint (`FollowEndpoints.cs`'s `MapResult`) returns
 `200` + `FollowStateResponseDto` (`personaId`/`following`/`changed`) for BOTH the state-changing and
@@ -121,3 +159,14 @@ reads this story's write path calls).
 - Component (RTL) — `components/FollowButton.test.tsx` / `FollowButton.readonly.test.tsx` /
   `FollowButton.noPersona.test.tsx`: renders the correct label/icon/`aria-pressed` per state, absent
   for observer/no-persona sessions.
+- Integration (RTL) — `pages/Profile.follow.test.tsx` (the CR-002/CR-003 pins, driving the REAL mock
+  edge store end to end rather than stubbing the write): the button reads "Following" on an
+  already-followed account **with no wrong-state frame** (a `MutationObserver` records every committed
+  `data-following` value, so a "Follow" → "Following" flip fails — a `findBy` assertion only samples
+  the end state and would pass against the bug); tapping an already-followed NANO-band account
+  unfollows instead of showing the phantom `+1`; the HEADER count moves 568 → 569 on a follow and
+  rolls back on a rejected write; follow state does not carry across a re-point to a different
+  persona. All five fail against the pre-fold code.
+- Adapter (unit) — `features/personas/personaService.test.ts` (WR-005): the mock read recomposes
+  `followerCount` as a follow lands and is undone, on both projections, leaving `audienceMagnitude`
+  raw.

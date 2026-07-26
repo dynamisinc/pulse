@@ -53,6 +53,20 @@
  * (story 02). Follower magnitude BANDING is story 05; this story renders the raw
  * `followerCount`.
  *
+ * FOLLOW CONTROL (story 02 integration, SOC-051 — CR-002/CR-003):
+ *  - The viewer's own follow state is RESOLVED here (`resolveFollowing(session
+ *    .personaId)`, the same directed read `useWhoToFollow` uses) and handed to
+ *    `<FollowButton>` as `initiallyFollowing`. `useFollow` seeds `isFollowing`
+ *    ONCE, so the control is WITHHELD until that resolves rather than mounted
+ *    with a placeholder — no frame ever paints the wrong state, and the button
+ *    is additionally keyed on the resolved value so a later change remounts it
+ *    instead of silently keeping a stale seed.
+ *  - The header's follower figure is kept in step with the button's own
+ *    optimistic ±1 via `onFollowerCountChange` (a STABLE `useCallback` —
+ *    SG-003: that effect depends on the callback's identity). Without it the
+ *    header sat frozen on `persona.followerCount` while the button read
+ *    "Following".
+ *
  * READ-ONLY VARIANT (WR-003, COR-015/D1-011): the shell mount variant is read
  * via `useShellContext()`, exactly like `<Feed>` — `affordancesAvailable(variant)`
  * decides `cardVariant` (`'full'` | `'readOnly'`), threaded into every
@@ -62,7 +76,9 @@
  * stay fully visible; only the interactive reply/repost/like affordances go.
  */
 
-import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent,
+} from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCalendarDay } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
@@ -75,7 +91,7 @@ import {
 } from '@/features/social'
 import { usePersonas } from '@/features/personas'
 import { FollowButton } from '../components/FollowButton'
-import { resolveFollowers } from '../services/followService'
+import { resolveFollowers, resolveFollowing } from '../services/followService'
 import {
   useShellContext,
   affordancesAvailable,
@@ -209,6 +225,23 @@ export function Profile({ personaId }: ProfileProps) {
   const [followersOpen, setFollowersOpen] = useState(false)
   const [followerIds, setFollowerIds] = useState<readonly string[]>([])
 
+  // --- Follow state + header count (story 02 integration) ---------------------------
+  // CR-002. `undefined` is a THIRD state — "not resolved yet" — deliberately distinct
+  // from `false`. `useFollow` seeds `isFollowing` ONCE via `useState`, so seeding it
+  // with a placeholder `false` and correcting it afterwards would leave the button
+  // reading "Follow"/`aria-pressed="false"` on an account the viewer already follows.
+  // That is not merely cosmetic: tapping it runs the optimistic `+1` path, the server
+  // answers the idempotent `{ following: true, changed: false }` (no edge written, no
+  // telemetry), and `useFollow` then SETTLES on `previousCount + 1` — the client
+  // showing a follower gain that never happened.
+  const [viewerFollows, setViewerFollows] = useState<boolean | undefined>(undefined)
+  // CR-003: the header's own follower count, kept in step with <FollowButton>'s
+  // optimistic ±1 through the `onFollowerCountChange` escape hatch that component
+  // documents for exactly this host. `undefined` until the button reports its seed;
+  // the persona's own count is the fallback until then (and for sessions where the
+  // control is absent entirely, where the two are equal anyway).
+  const [headerFollowerCount, setHeaderFollowerCount] = useState<number | undefined>(undefined)
+
   // Re-collapse when the page is re-pointed at a DIFFERENT persona (profile-to-profile
   // navigation reuses this mounted page), so persona A's follower list can never be
   // shown under persona B's header.
@@ -217,6 +250,10 @@ export function Profile({ personaId }: ProfileProps) {
     setTrackedPersonaId(personaId)
     setFollowersOpen(false)
     setFollowerIds([])
+    // Re-arm the follow gate too: persona B must never inherit persona A's resolved
+    // follow state or adjusted count, not even for a single frame.
+    setViewerFollows(undefined)
+    setHeaderFollowerCount(undefined)
   }
 
   useEffect(() => {
@@ -229,6 +266,35 @@ export function Profile({ personaId }: ProfileProps) {
       .catch(() => { if (!cancelled) setFollowerIds([]) })
     return () => { cancelled = true }
   }, [followersOpen, personaId])
+
+  // CR-002: resolve whether the VIEWER already follows this account, so <FollowButton>
+  // is seeded with the PERSISTED state instead of the hardcoded `false` default nothing
+  // was overriding. Same directed read `useWhoToFollow` already uses (COR-001: it takes
+  // no client `exerciseId` — the session binds the exercise).
+  const viewerPersonaId = session.personaId
+  useEffect(() => {
+    // The control is absent for these sessions anyway (`useFollow().canFollow` is false
+    // for read-only, for no bound persona, and on the viewer's OWN profile), so answer
+    // locally rather than issue a request whose answer is never rendered.
+    if (session.isReadOnly || viewerPersonaId === undefined || viewerPersonaId === personaId) {
+      setViewerFollows(false)
+      return
+    }
+    let cancelled = false
+    resolveFollowing(viewerPersonaId)
+      .then(ids => { if (!cancelled) setViewerFollows(ids.includes(personaId)) })
+      // Fail closed to "not following": a failed read must never assert a follow
+      // relationship the viewer may not have.
+      .catch(() => { if (!cancelled) setViewerFollows(false) })
+    return () => { cancelled = true }
+  }, [viewerPersonaId, personaId, session.isReadOnly])
+
+  // SG-003: <FollowButton>'s count-sync effect depends on this callback's IDENTITY, so
+  // it MUST be a stable reference — an inline arrow would re-fire that effect on every
+  // render of this page. The setter is stable, so the dep list is genuinely empty.
+  const handleFollowerCountChange = useCallback((count: number) => {
+    setHeaderFollowerCount(count)
+  }, [])
 
   // The real edges, resolved against the already exercise-scoped cast (COR-001) — an id
   // the cast doesn't contain is dropped rather than rendered as a placeholder row.
@@ -286,7 +352,13 @@ export function Profile({ personaId }: ProfileProps) {
   // magnitude, carried separately precisely so nothing recomposes it and double-counts —
   // `audienceReach()` takes the two apart. Magnitude-formatted ("48.2K"), never a raw
   // integer, and `formatMagnitude` truncates so a count is never overstated.
-  const followerCount = formatMagnitude(persona.followerCount)
+  //
+  // CR-003: once <FollowButton> has reported a count, THAT is the live figure — the
+  // persona object never changes, so reading `persona.followerCount` here left the
+  // header frozen while the button said "Following". Invisible for mid/large-band
+  // personas (`formatMagnitude` truncates a ±1 away), plainly visible for the seeded
+  // nano-band accounts, which render as exact integers below 1,000.
+  const followerCount = formatMagnitude(headerFollowerCount ?? persona.followerCount)
   // Real outbound edges from the follow graph (story 07). Falls back to 0 only for a
   // fixture that predates the field; the live API and the seeded mock both always send it.
   const followingCount = formatMagnitude(persona.followingCount ?? 0)
@@ -380,14 +452,28 @@ export function Profile({ personaId }: ProfileProps) {
 
         {/* D1-011: the Follow control is ABSENT for observer/read-only and no-persona
             sessions, and on the viewer's OWN profile (the server 400s a self-follow) —
-            `useFollow`'s `canFollow` owns all three, and FollowButton renders null. */}
+            `useFollow`'s `canFollow` owns all three, and FollowButton renders null.
+
+            CR-002 — NO FLASH OF THE WRONG STATE. The control is WITHHELD until
+            `viewerFollows` resolves, rather than mounted with a placeholder `false`
+            that a late `initiallyFollowing` could never correct (`useFollow` seeds
+            `isFollowing` once). So the button's very first painted frame already
+            carries the persisted state; there is no "Follow" -> "Following" flip to
+            see. The key then pins that guarantee for good: any future change to the
+            resolved value remounts the control instead of leaving a stale seed behind
+            (`useFollow` re-points itself on a `personaId` change, but NOT on an
+            `initiallyFollowing` change — the key covers precisely that gap). */}
         <div className={styles.followAction}>
-          <FollowButton
-            key={persona.id}
-            personaId={persona.id}
-            displayName={persona.displayName}
-            initialFollowerCount={persona.followerCount}
-          />
+          {viewerFollows !== undefined && (
+            <FollowButton
+              key={`${persona.id}:${viewerFollows}`}
+              personaId={persona.id}
+              displayName={persona.displayName}
+              initialFollowerCount={persona.followerCount}
+              initiallyFollowing={viewerFollows}
+              onFollowerCountChange={handleFollowerCountChange}
+            />
+          )}
         </div>
       </div>
 

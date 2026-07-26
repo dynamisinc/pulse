@@ -43,7 +43,15 @@
  * `postStore`'s own caveat).
  */
 
-import { personaIdForHandle } from '@/features/personas'
+// Imported from the LEAF module (`personas/types`) rather than the
+// `@/features/personas` barrel on purpose: `personaService.ts`'s mock adapter
+// now reads THIS store back (WR-005 — composing the mock `followerCount` the
+// way the live server composes it), and going through the barrel would close
+// the loop `personas/index -> personaService -> followEdgeStore ->
+// personas/index`. `personas/types.ts` imports nothing, so this edge keeps the
+// module graph acyclic. `personaIdForHandle` is a pure id helper — no cast, no
+// service, no seeding.
+import { personaIdForHandle } from '@/features/personas/types'
 
 /**
  * The Wave-1 mock session's bound persona (`core/auth/sessionResolver.ts`'s
