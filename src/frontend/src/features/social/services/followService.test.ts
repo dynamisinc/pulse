@@ -69,30 +69,48 @@ describe('resolveFollowing / resolveFollowers (boundary-mocked wire contract)', 
     vi.restoreAllMocks()
   })
 
-  it('GETs /personas/{id}/following and returns the id array', async () => {
-    const spy = vi.spyOn(api, 'get').mockResolvedValue(apiBody(['persona-a', 'persona-b']))
+  // The server returns an ENVELOPE (`FollowListResponseDto`: personaId/personaIds/count),
+  // NOT a bare array. These bodies mirror the real one exactly — an earlier revision of
+  // this suite asserted a bare array and, worse, asserted that an object body must FAIL,
+  // which is precisely what the live server sends. That certified the bug: the parse threw
+  // on 100% of live calls while every test stayed green against a bare-array mock.
+  it('GETs /personas/{id}/following and returns the ids from the envelope', async () => {
+    const spy = vi.spyOn(api, 'get').mockResolvedValue(
+      apiBody({ personaId: 'persona-x', personaIds: ['persona-a', 'persona-b'], count: 2 }),
+    )
     const ids = await resolveFollowing('persona-x')
 
     expect(spy).toHaveBeenCalledWith('/personas/persona-x/following', expect.anything())
     expect(ids).toEqual(['persona-a', 'persona-b'])
   })
 
-  it('GETs /personas/{id}/followers and returns the id array', async () => {
-    const spy = vi.spyOn(api, 'get').mockResolvedValue(apiBody(['persona-c']))
+  it('GETs /personas/{id}/followers and returns the ids from the envelope', async () => {
+    const spy = vi.spyOn(api, 'get').mockResolvedValue(
+      apiBody({ personaId: 'persona-x', personaIds: ['persona-c'], count: 1 }),
+    )
     const ids = await resolveFollowers('persona-x')
 
     expect(spy).toHaveBeenCalledWith('/personas/persona-x/followers', expect.anything())
     expect(ids).toEqual(['persona-c'])
   })
 
-  it('fails closed when resolveFollowing gets a non-id-array body', async () => {
-    vi.spyOn(api, 'get').mockResolvedValue(apiBody({ nope: true }))
+  it('fails closed when resolveFollowing gets a body with no personaIds array', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(apiBody({ personaId: 'persona-x', count: 0 }))
     await expect(resolveFollowing('persona-x')).rejects.toThrow()
   })
 
-  it('fails closed when resolveFollowers gets a body containing a non-string element', async () => {
-    vi.spyOn(api, 'get').mockResolvedValue(apiBody(['persona-a', 42]))
+  it('fails closed when resolveFollowers gets a personaIds containing a non-string', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(
+      apiBody({ personaId: 'persona-x', personaIds: ['persona-a', 42], count: 2 }),
+    )
     await expect(resolveFollowers('persona-x')).rejects.toThrow()
+  })
+
+  // A BARE ARRAY is the shape that used to be accepted. It must now fail closed, so a
+  // regression to the old contract cannot pass silently.
+  it('fails closed on a bare array — the pre-fix shape the live server never sends', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(apiBody(['persona-a', 'persona-b']))
+    await expect(resolveFollowing('persona-x')).rejects.toThrow()
   })
 
   it('propagates a request failure rather than substituting an empty list', async () => {
