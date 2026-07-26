@@ -162,26 +162,46 @@ exist in this codebase — `AddStaffIdentity` deliberately `TryAdd`s a fail-clos
 | Role | Registration | Rule |
 |---|---|---|
 | **01b's defaults** (`IChromeConfigProjection`, `IShellVariantProjection`, `IOverlayStateProjection`) | `services.TryAddScoped<IX, ConstantX>()` | Fail-safe floor: present iff nobody has contributed a real one. Never `AddScoped` — that would stack a second registration and let last-wins order decide silently. |
-| **Contributors** (02 chrome, 03 shell-variant + overlay-state) | `services.Replace(ServiceDescriptor.Scoped<IX, RealX>())` | `Replace` is order-independent and unambiguous: it swaps the descriptor whether or not the default is already registered. Do **not** use bare `AddScoped` to "override". |
-| **Orchestrator** (`Program.cs`) | contributor `Add*()` calls go **after** `AddExerciseConfiguration()` | Belt-and-braces: with `TryAdd` + `Replace` the order is already safe, but keeping it consistent means a future contributor that gets the idiom wrong still resolves correctly. |
+| **Contributors** (02 chrome, 03 shell-variant + overlay-state) | `services.Replace(ServiceDescriptor.Scoped<IX, RealX>())` | `Replace` is order-independent and unambiguous: it swaps the descriptor whether or not the default is already registered, and leaves exactly one descriptor behind. |
+| **Orchestrator** (`Program.cs`) | contributor `Add*()` calls are **conventionally placed after** `AddExerciseConfiguration()` | A convention, **not a correctness requirement**: `Replace` wins from either side (pinned by `..._WinsEvenWhenItRunsBeforeTheDefault`). Ordering only decides the outcome for the mistaken `TryAdd` idiom below — where *before* would accidentally work and *after* silently fails — so a consistent order makes that mistake less likely to reach production undetected in one direction. It is not a substitute for using `Replace`. |
 
-**The failure this prevents** (silent, ships green): 01b `TryAdd`s the constant default, story 02
-registers its real projection with `AddScoped`, story 02's unit tests pass because they exercise the
-projection class directly — and at runtime the constant default still wins, so `/api/chrome-config`
-serves identical banners for every exercise. **Testing the projection class in isolation cannot catch
-this.** Hence the DI-resolution AC on stories 02, 03 and 04: resolve the interface from a fully
-composed service provider (the slice's real `Add*()` calls, in the orchestrator's order) and assert the
+**The failure this prevents** (silent, ships green) — **it is the `TryAdd` copy, not `AddScoped`:** a
+contributor reads 01b's own registration, copies its `TryAddScoped` idiom, and loses. The default is
+already registered, so `TryAdd` is a **no-op**; no error is raised anywhere; the contributor's own unit
+tests pass because they exercise the projection class directly — and at runtime the constant default
+still serves, so `/api/chrome-config` returns identical banners for every exercise. Pinned by
+`ExerciseConfigurationProjectionRegistrationTests.ContributedProjection_RegisteredWithTryAdd_IsSilentlyIgnored_WhichIsWhyReplaceIsMandatory`.
+
+> **A bare `AddScoped` is not the trap** (corrected at the wave-2 Gate-2 review — the earlier text here
+> named it, wrongly). With `TryAddScoped` registered first, a later `AddScoped` **appends** a second
+> descriptor and `GetRequiredService<T>` returns the **last** one, so the contributor wins; if the
+> contributor's `AddScoped` runs first, 01b's `TryAdd` sees a registration present and stands down, so
+> the contributor wins again. `AddScoped` is still **not** the mandated idiom — it leaves a stale second
+> descriptor behind, which changes `IEnumerable<IX>` resolution and makes "which one is live" depend on
+> ordering rather than on the descriptor set — but a wave-3 builder or reviewer hunting the silent
+> failure should be hunting a `TryAdd`, not an `Add`.
+
+**`Replace` remains mandatory** for both reasons above: it is the only idiom that is order-independent
+*and* leaves a single descriptor. Hence the DI-resolution AC on stories 02, 03 and 04 (04's is on its
+own `IEvaluationEligibility` seam, not a shell projection): resolve the interface from a fully composed
+service provider (the slice's real `Add*()` calls, in the orchestrator's order) and assert the
 **contributed** implementation comes back and produces per-exercise output end to end.
 
 ## Wave Plan (DAG-ready)
 
+> **Status: waves 1 and 2 are done.** Slices **01a** and **01b** are built, merged to the
+> `feature/exercise-configuration` umbrella, wired into `Program.cs` and green. Story 01's file `Status:`
+> stays **In Progress** — AC3's channel-enablement route-gating clause is unmet by design and unowned
+> (feature.md open question **c**). **Wave 3 (02, 03, 04) is the next dispatch.** What wave 3 inherits is
+> tabulated in `feature.md` → "What waves 1 and 2 actually shipped".
+
 | Story | Stack | Files it owns | Depends-on | Can-run-with | Wave | Effort |
 |-------|-------|---------------|------------|--------------|------|--------|
 | **01a** Settings schema + vocabulary widening ✅ *shipped* | **fullstack** | `Data/Entities/Exercise.cs`; `Data/PulseDbContext.cs` (`Exercise` block); `Data/Migrations/<ts>_ExerciseConfiguration.*` + snapshot; `Features/Ops/Bootstrap/BootstrapService.cs` (seed literal); `Features/ExerciseResolution/ExerciseScopeDto.cs` (pass-through/doc); `core/exerciseContext/exerciseContextResolver.ts` (additive guard widening); **`features/staffShell/components/statePillConfig.ts` + `StaffHeader.test.tsx`** (the exhaustive `Record<ExerciseStatus, StatePillConfig>` gains a key per new literal — see hazard 1) | — (main; `exercise-isolation` 01/08 merged) | **nothing** — sole migration author this feature | 1 | M |
-| **01b** Settings API + shell-config service + staff editor | **fullstack** | `Features/ExerciseConfiguration/{ExerciseSettingsDtos,ExerciseSettingsService,ExerciseSettingsEndpoints,ParticipantShellConfigService,ExerciseConfigurationExtensions}.cs` (incl. the three projection interfaces + constant-preserving defaults); `Features/ParticipantShell/ParticipantShellEndpoints.cs` (refactor); `features/planner/{pages/ExerciseSettingsPage.tsx,components/ExerciseSettingsPanel.tsx,hooks/useExerciseSettings.ts,services/exerciseSettingsService.ts}` | 01a | — (solo: owns the serialized endpoints file) | 2 | L |
-| **02** Compliance chrome config + NFR-008 guard | **fullstack** | `Features/ExerciseConfiguration/Chrome/*`; `features/planner/{components/ComplianceChromePanel.tsx,hooks/useChromeSettings.ts,services/chromeSettingsService.ts}` | 01a, 01b; `participant-shell/01` (merged) | 03, 04 | 3 | M |
-| **03** Lifecycle **[Tier-2 — signed off]** | backend | `Features/ExerciseConfiguration/Lifecycle/*` — **including the `UseExerciseLifecycleGating()` middleware** it exports for the orchestrator to wire (see "The participant-gating seam") | 01a (the vocabulary), 01b (the projection seam), **`exercise-isolation/06` (#49, Not Started — see the split below)** | 02, 04 | 3 | L |
-| **04** Practice/sandbox flag | **fullstack** | `Features/ExerciseConfiguration/PracticeMode/*`; `features/planner/{components/PracticeModePanel.tsx,hooks/usePracticeMode.ts,services/practiceModeService.ts}` | 01a, 01b | 02, 03 | 3 | S |
+| **01b** Settings API + shell-config service + staff editor ✅ *shipped* | **fullstack** | `Features/ExerciseConfiguration/{ExerciseSettingsDtos,ExerciseSettingsService,ExerciseSettingsEndpoints,ParticipantShellConfigService,ExerciseConfigurationExtensions}.cs` (incl. the three projection interfaces + constant-preserving defaults); `Features/ParticipantShell/ParticipantShellEndpoints.cs` (refactor); `features/planner/{pages/ExerciseSettingsPage.tsx,components/ExerciseSettingsPanel.tsx,hooks/useExerciseSettings.ts,services/exerciseSettingsService.ts}` | 01a | — (solo: owns the serialized endpoints file) | 2 | L |
+| **02** Compliance chrome config + NFR-008 guard | **fullstack** | `Features/ExerciseConfiguration/Chrome/*` (incl. its **own** `AddComplianceChromeConfig()` **and** `MapComplianceChromeEndpoints()` in `ChromeExtensions.cs` — never a line inside 01b's `ExerciseConfigurationExtensions.cs`); `features/planner/{components/ComplianceChromePanel.tsx,hooks/useChromeSettings.ts,services/chromeSettingsService.ts}` | 01a, 01b (**both shipped**); `participant-shell/01` (merged) | 03, 04 | 3 | M |
+| **03** Lifecycle **[Tier-2 — signed off]** | backend | `Features/ExerciseConfiguration/Lifecycle/*` — **including the `UseExerciseLifecycleGating()` middleware** it exports for the orchestrator to wire (see "The participant-gating seam") | 01a, 01b (**both shipped**); `exercise-isolation/04` (#47, **Complete** — the session-kind seam the gating middleware reads). **`exercise-isolation/06` (#49) is NOT a blocking edge** — the cycle is split below, and 03 consumes only the `archived` state it defines itself | 02, 04 | 3 | L |
+| **04** Practice/sandbox flag | **fullstack** | `Features/ExerciseConfiguration/PracticeMode/*` (incl. its **own** `AddPracticeMode()` **and** `MapPracticeModeEndpoints()` in `PracticeModeExtensions.cs` — never a line inside 01b's `ExerciseConfigurationExtensions.cs`); `features/planner/{components/PracticeModePanel.tsx,hooks/usePracticeMode.ts,services/practiceModeService.ts}` | 01a, 01b (**both shipped**) | 02, 03 | 3 | S |
 | **05** Participant exercise identity | *none* | — | — | — | **excluded — no code, not dispatched** | — |
 
 **Why the waves are shaped this way**
@@ -194,9 +214,15 @@ composed service provider (the slice's real `Add*()` calls, in the orchestrator'
   by 01 (brand tokens, channel nav), 02 (chrome) and 03 (shell state, overlay state). It is a
   **serialized file owned solely by 01b**, which refactors all six handlers from constants onto
   `ParticipantShellConfigService` and publishes the three per-concern projection interfaces.
-- **Wave 3 fans out three ways.** 02, 03 and 04 own disjoint backend sub-folders and disjoint planner
-  components, and each contributes its projection as an implementation registered by its **own**
-  `Add*()` — so none of them re-opens `ParticipantShellEndpoints.cs` or `ParticipantShellConfigService.cs`.
+- **Wave 3 fans out three ways.** 02, 03 and 04 own disjoint backend sub-folders (`Chrome/`,
+  `Lifecycle/`, `PracticeMode/`) and disjoint planner components, and each contributes its projection as
+  an implementation registered by its **own** `Add*()` in its **own** extensions file — so none of them
+  re-opens `ParticipantShellEndpoints.cs`, `ParticipantShellConfigService.cs` or
+  `ExerciseConfigurationExtensions.cs`. Re-checked against what wave 2 actually shipped: all three
+  projection interfaces and the `ExerciseShellConfigSource` read model exist with 02's and 03's inputs
+  already populated; every column 02/03/04 need is on `Exercise`; and 01b's `PUT /api/staff/exercise-settings`
+  touches **none** of the chrome, watermark or practice columns, so 02 and 04 own those write paths
+  outright with no competing writer and no way to bypass 02's NFR-008 guard.
 - **Story 03 moved from wave 4 to wave 3** under the two human decisions: its schema dependency is gone
   (01a carries the vocabulary) and its Tier-2 gate is cleared. The two things that had kept it late no
   longer do — the `ParticipantShellConfigService.cs` contention with 02 is dissolved by the projection
@@ -245,10 +271,10 @@ cannot meet one.
 
 | Seam | File(s) | Rule |
 |------|---------|------|
-| Backend composition root | `src/Pulse.WebApi/Program.cs` | Each story exports its own registration — 01b `AddExerciseConfiguration()` / `MapExerciseConfigurationEndpoints()`, 02 `AddComplianceChromeConfig()`, 03 `AddExerciseLifecycle()`, 04 `AddPracticeMode()` (each registering its own projection implementation over 01b's default). No builder edits `Program.cs`; the orchestrator wires the one-line calls serially between waves. Note `world-steering-wave2` also edits this file. |
-| Frontend route table | `src/frontend/src/App.tsx` (+ `features/app-shell/createRoleAwareRoutes`) | The staff planner settings route is mounted by the orchestrator after wave 2 merges. No builder branch edits the route table. |
-| Planner barrel | `src/frontend/src/features/planner/index.ts` | Every story here adds an export line to the same barrel. Orchestrator-owned: one edit per wave, after the wave's branches merge. |
-| Planner settings page composition | `features/planner/pages/ExerciseSettingsPage.tsx` | Created by 01b. From wave 3 on it is a **composition point**: 02 and 04 export self-contained panels (`ComplianceChromePanel`, `PracticeModePanel`) and the orchestrator adds the one-line mount — so two wave-3 builders never edit the same page file. |
+| Backend composition root | `src/Pulse.WebApi/Program.cs` | **01b's two lines are wired** (`builder.Services.AddExerciseConfiguration()` + `app.MapExerciseConfigurationEndpoints()`), guarded by `Features/ExerciseConfiguration/CompositionRootWiringTests` — three tests that boot the real host with no override and go red if either line is removed. Each wave-3 story exports its **own** pair from its **own** extensions file — 02 `AddComplianceChromeConfig()` / `MapComplianceChromeEndpoints()`, 03 `AddExerciseLifecycle()` (+ `UseExerciseLifecycleGating()`), 04 `AddPracticeMode()` / `MapPracticeModeEndpoints()` — and **must not add a call inside 01b's `ExerciseConfigurationExtensions.cs`**: that file is 01b's, and two wave-3 builders routing their `Map*` through it is the one way this fan-out collides. No builder edits `Program.cs`; the orchestrator wires the one-line calls serially between waves. Note `world-steering-wave2` also edits this file. |
+| Frontend route table | `src/frontend/src/App.tsx` (+ `features/app-shell/createRoleAwareRoutes`) | **Now mounted:** `PlannerWorkspaceRoute` fills `staffSurfaces.planner` (the slot was empty, so planner sessions failed closed to `/login`). Still orchestrator-owned — no builder branch edits the route table. |
+| Planner barrel | `src/frontend/src/features/planner/index.ts` | Every story here adds an export line to the same barrel (it currently exports `AccountImport`, `ExerciseSettingsPage`, `ExerciseSettingsPanel`, `useExerciseSettings`, …). Orchestrator-owned: one edit per wave, after the wave's branches merge. |
+| Planner settings page composition | `features/planner/pages/ExerciseSettingsPage.tsx` | **Created by 01b and on disk**, already carrying the two commented wave-3 mount slots. It deliberately holds no state, no data fetching and no cross-panel coordination. From wave 3 on it is a **composition point**: 02 and 04 export self-contained panels (`ComplianceChromePanel`, `PracticeModePanel`) — each owning its own hook, service, query and states, so nothing needs a prop threaded through the page — and the orchestrator adds the one-line mount. Two wave-3 builders never edit this file. |
 | Planner README | `src/frontend/src/features/planner/README.md` | The shipped README documents **every file in the surface in one table**, so each story would append to it. Orchestrator-owned: one edit per wave, alongside the barrel. |
 | Backend pipeline | `src/Pulse.WebApi/Program.cs` (middleware ordering) | Story 03 exports `UseExerciseLifecycleGating()`; the orchestrator inserts the single `app.Use…()` call **after** `UseExerciseResolution()` and the session middleware, so a scope and a session kind are resolved before gating decides. No builder edits the pipeline. |
 

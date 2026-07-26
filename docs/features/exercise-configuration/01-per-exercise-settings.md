@@ -210,17 +210,29 @@ The staff editor's own tests are the frontend half of 01b and are listed in the 
 | `ExerciseSettingsFieldRulesTests.TryNormalize_*` / `ParseStored_*` / `Format_RoundTripsThroughParseStored` / `TryNormalizeColor_*` / `TryNormalizeLocale_*` | AC7 (the strict parser over a column with no DB-level integrity) |
 | `ExerciseSettingsFieldRulesTests.UpdateExerciseSettingsRequest_CarriesNoExerciseIdProperty_SoAClientCannotAimAWriteElsewhere` | AC5 (structural, not merely enforced) |
 | `ExerciseSettingsFieldRulesTests.ExerciseSettingsDto_SerializesTheDocumentedCamelCaseWireKeys` / `_CarriesNoStaffOnlyOrParticipantHiddenState` | AC1, AC2 (XC-002 — no story-02/04 state leaks onto this shape) |
-| `ExerciseConfigurationCompositionTests.ContributedProjection_RegisteredWithReplace_ReachesTheRealEndpoint_EndToEnd` / `ContributedShellVariantAndOverlayProjections_ReachTheirRealEndpoints_EndToEnd` / `_WinsOverTheDefault_InTheOrchestratorsOrder` / `_WinsEvenWhenItRunsBeforeTheDefault` / `ContributedProjection_RegisteredWithTryAdd_IsSilentlyIgnored_WhichIsWhyReplaceIsMandatory` / `WithoutAContributor_ChromeConfig_ServesTheShippedConstants_EndToEnd` / `AddExerciseConfiguration_*` | AC2 + implementation.md "The projection-override contract" (the wave-3 seam) |
+| `ExerciseConfigurationProjectionRegistrationTests.AddExerciseConfiguration_RegistersTheSlicesServicesAtScopedLifetime` / `_RegistersEachProjectionDefaultExactlyOnce_AsTheConstantPreservingFloor` / `_CalledTwice_StillRegistersOneProjectionDescriptor` / `ContributedProjection_RegisteredWithReplace_WinsOverTheDefault_InTheOrchestratorsOrder` / `_WinsEvenWhenItRunsBeforeTheDefault` / `ContributedProjection_RegisteredWithTryAdd_IsSilentlyIgnored_WhichIsWhyReplaceIsMandatory` | AC2 + implementation.md "The projection-override contract" (the **DI half** of the wave-3 seam) |
+| `ExerciseConfigurationCompositionTests.WithoutAContributor_ChromeConfig_ServesTheShippedConstants_EndToEnd` / `ContributedProjection_RegisteredWithReplace_ReachesTheRealEndpoint_EndToEnd` / `ContributedShellVariantAndOverlayProjections_ReachTheirRealEndpoints_EndToEnd` | AC2 + the projection-override contract (the **end-to-end half** — a contributed projection reaching the real HTTP response) |
 | `ExerciseSettingsEndpointsTests.Put_EmitsExactlyOneSettingsUpdatedTelemetryEvent_ListingTheChangedFields` / `Put_ThatChangesNothing_PersistsNothingAndEmitsNoTelemetry` / `ExerciseSettingsServiceTests.UpdateAsync_PersistsTheMutationAndItsTelemetryEventInExactlyOneSaveChanges` | XC-004 (one event per meaningful action, same unit of work) |
 | `ExerciseSettingsFieldRulesTests.TryNormalizeInstant_AnOffsetlessInstant_IsReadAsUtc_NotTheHostsLocalZone` / `_AnExplicitOffset_KeepsTheInstant_AndNormalizesItToUtc` | AC1 (WR-004 — the schedule stores the instant the caller meant, not one shifted by the host's zone), AC4 |
 | `CompositionRootWiringTests.ProgramCs_CallsAddExerciseConfiguration_SoTheParticipantShellHandlersCanResolveTheirService` / `_SoTheThreeWave3ProjectionSeamsHaveTheirDefaults` / `ProgramCs_MapsTheStaffExerciseSettingsRoutesExactlyOnce` | AC1, AC2 (the composition-root wiring the six converted participant reads and the staff editor both depend on) — see the note below |
 
-> **These three are RED by design until the orchestrator wires `Program.cs`.** They boot the real
-> `Program` host with NO test-service override and assert the slice is registered and mapped there.
-> Every other Program-booted host in the suite (`SocialApiWebApplicationFactory`) now calls
-> `AddExerciseConfiguration()` itself, so this file is the only place a missing composition-root line is
-> observable — which is the whole point (login #310 → #317). They go green with the wiring, and no
-> other test changes.
+> **These three were RED by design until the orchestrator wired `Program.cs` — that wiring has now
+> landed and they are GREEN.** They boot the real `Program` host with NO test-service override and
+> assert the slice is registered and mapped there. Every other Program-booted host in the suite
+> (`SocialApiWebApplicationFactory`) calls `AddExerciseConfiguration()` itself, so this file is the only
+> place a missing composition-root line is observable — which is the whole point (login #310 → #317).
+> **They are now a standing regression guard:** deleting either `builder.Services.AddExerciseConfiguration()`
+> or `app.MapExerciseConfigurationEndpoints()` from `Program.cs` turns them red.
+
+> **The projection guards live in TWO classes — cite the right one.** The six pure-DI tests were moved
+> out of `ExerciseConfigurationCompositionTests` into
+> **`ExerciseConfigurationProjectionRegistrationTests`** (test *names* unchanged; only the class moved),
+> because they are bare `ServiceCollection` assertions that touch no database and were hard-failing on a
+> Docker-less host inside the SQL collection fixture. `ExerciseConfigurationCompositionTests` keeps the
+> three genuinely end-to-end cases, gated `[RequiresDockerFact]` so they skip cleanly. A wave-3
+> contributor writing its own DI-resolution AC test should copy the **ProjectionRegistration** shape
+> (plain `[Fact]`, no fixture) for the registration half, and the **Composition** shape for the
+> real-endpoint half.
 
 ### Shipped in slice 01b — frontend (staff editor)
 

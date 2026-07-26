@@ -45,9 +45,10 @@ in-content watermarks off** (COR-031, XC-003, NFR-008).
       reading `UNCLASSIFIED &#47;&#47; EXERCISE` on every participant channel.
 - [ ] **The override actually resolves (projection-override contract):** given a fully composed service
       provider wired in the orchestrator's order, when `IChromeConfigProjection` is resolved, then the
-      **contributed** implementation comes back (registered via `services.Replace(...)`, not a bare
-      `AddScoped`) and `/api/chrome-config` returns per-exercise banners end to end — a test of the
-      projection class in isolation does not satisfy this AC.
+      **contributed** implementation comes back — registered via `services.Replace(...)`, **never
+      `TryAddScoped`, which against 01b's already-present default is a silent no-op that leaves the
+      constant serving** — and `/api/chrome-config` returns per-exercise banners end to end. A test of
+      the projection class in isolation does not satisfy this AC.
 - [ ] **Isolation (XC-001/002, COR-001):** given a chrome-config read, when it is served, then the
       exercise comes from the server-resolved scope (`IExerciseContext`), never a client parameter; a
       cross-exercise chrome read/write returns 403/404.

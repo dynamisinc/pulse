@@ -101,8 +101,10 @@ today, per-exercise data after this story — **same wire shapes, no consumer ch
       pre-auth allowlist (`/api/exercise-context`, login) is never gated.
 - [ ] **The overrides actually resolve (projection-override contract):** given a fully composed service
       provider wired in the orchestrator's order, when `IShellVariantProjection` and
-      `IOverlayStateProjection` are resolved, then this story's implementations come back (registered via
-      `services.Replace(...)`) and drive `/api/shell-state` and `/api/overlay-state` end to end.
+      `IOverlayStateProjection` are resolved, then this story's implementations come back — registered
+      via `services.Replace(...)`, **never `TryAddScoped`, which against 01b's already-present default is
+      a silent no-op that leaves the constant serving** — and drive `/api/shell-state` and
+      `/api/overlay-state` end to end.
 - [ ] Given the exercise is **Paused**, when a participant's shell resolves, then `GET /api/overlay-state`
       returns the configurable holding page (`state: pause` with the configured `register` and
       `message`) in the **unchanged frozen `OverlayStateResponse` shape**, and `GET /api/shell-state`
@@ -154,10 +156,13 @@ time** rather than sequence around it. Two things follow for this story's builde
 See implementation.md → "Integration hazards" and (story 03).
 
 ## Dependencies
-Story 01a (the widened `Status` vocabulary + the single migration) and 01b (the settings slice and the
-constants→service refactor of the shell-config endpoints); `exercise-isolation/04` (participant route
-guard); `world-steering` Wave 2's overlay-state write path — **a merge-time reconciliation, not a
-scheduling blocker** (decision recorded above). Consumed by exercise-build-golive (transitions),
+Story 01a and 01b — **both shipped, merged and wired** (the widened `Status` vocabulary, the single
+migration, the settings slice, the constants→projection refactor of the shell-config endpoints, and the
+`IShellVariantProjection` / `IOverlayStateProjection` seams with their constant-preserving defaults, all
+on disk); `exercise-isolation/04` (#47, **Complete** — the participant route guard and the session-kind
+seam the gating middleware reads to leave staff/evaluator sessions alone); `world-steering` Wave 2's
+overlay-state write path — **a merge-time reconciliation, not a scheduling blocker** (decision recorded
+above). Consumed by exercise-build-golive (transitions),
 exercise-clock (Live starts the clock), E8 (dormant until Live).
 
 ### `exercise-isolation/06` (#49) is a **mutual** dependency — here is the split
