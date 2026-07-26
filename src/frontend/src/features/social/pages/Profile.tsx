@@ -70,8 +70,12 @@ import { useSession } from '@/core/auth'
 import { scenarioNow, useScenarioTime } from '@/core/clock'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import { buildAndEmit } from '@/core/telemetry'
-import { PostCard, VerifiedMark, Avatar, type PostView } from '@/features/social'
+import {
+  PostCard, VerifiedMark, Avatar, FollowerList, formatMagnitude, type PostView,
+} from '@/features/social'
 import { usePersonas } from '@/features/personas'
+import { FollowButton } from '../components/FollowButton'
+import { resolveFollowers } from '../services/followService'
 import {
   useShellContext,
   affordancesAvailable,
@@ -199,6 +203,61 @@ export function Profile({ personaId }: ProfileProps) {
     })
   }, [persona, exerciseId, timeZone, session.accountId])
 
+  // --- Followers expand (story 05, D1-012) ------------------------------------------
+  // Collapsed by default; resolving the real edges is deferred until the participant
+  // actually asks for them, so an ordinary profile view costs no extra request.
+  const [followersOpen, setFollowersOpen] = useState(false)
+  const [followerIds, setFollowerIds] = useState<readonly string[]>([])
+
+  // Re-collapse when the page is re-pointed at a DIFFERENT persona (profile-to-profile
+  // navigation reuses this mounted page), so persona A's follower list can never be
+  // shown under persona B's header.
+  const [trackedPersonaId, setTrackedPersonaId] = useState(personaId)
+  if (trackedPersonaId !== personaId) {
+    setTrackedPersonaId(personaId)
+    setFollowersOpen(false)
+    setFollowerIds([])
+  }
+
+  useEffect(() => {
+    if (!followersOpen) return
+    let cancelled = false
+    resolveFollowers(personaId)
+      .then(ids => { if (!cancelled) setFollowerIds(ids) })
+      // Fail quietly to "no real edges": the magnitude line still renders honestly, and
+      // a failed edge read must never fabricate rows (D1-012).
+      .catch(() => { if (!cancelled) setFollowerIds([]) })
+    return () => { cancelled = true }
+  }, [followersOpen, personaId])
+
+  // The real edges, resolved against the already exercise-scoped cast (COR-001) — an id
+  // the cast doesn't contain is dropped rather than rendered as a placeholder row.
+  const followerEdges = useMemo(
+    () => followerIds
+      .map(id => personas.find(p => p.id === id))
+      .filter((p): p is NonNullable<typeof p> => p !== undefined),
+    [followerIds, personas],
+  )
+
+  // XC-004 (WR-005 from story 05's review): expanding Followers is a participant view
+  // action and must not be silent in the AAR. Emitted on OPEN only — collapsing is not a
+  // view — and `<FollowerList>` itself stays presentational.
+  const toggleFollowers = () => {
+    const opening = !followersOpen
+    setFollowersOpen(opening)
+    if (!opening || !persona) return
+    buildAndEmit({
+      exerciseId,
+      eventType: 'view',
+      channel: 'social',
+      actor: { kind: 'participant', participantId: session.accountId },
+      wallClockTime: wallClockNowIso(),
+      scenarioTime: scenarioNow().toISOString(),
+      timeZone,
+      target: { entityType: 'profile', entityId: `${persona.id}:followers` },
+    })
+  }
+
   // Loading gate: wait for the cast before deciding "not found".
   if (personasLoading && !persona) {
     return (
@@ -221,10 +280,16 @@ export function Profile({ personaId }: ProfileProps) {
   }
 
   const joinedLabel = format(persona.joinedAt, { format: 'dateline' })
-  const followerCount = persona.followerCount.toLocaleString('en-US')
-  // No outbound follow edges are seeded yet (the follow graph is story 02); the
-  // neutral default is 0 following. Rendered raw — magnitude banding is story 05.
-  const followingCount = (0).toLocaleString('en-US')
+
+  // SOC-054 (story 05): the DISPLAYED follower count is magnitude + real edges, already
+  // composed server-side into `followerCount` (story 07). `audienceMagnitude` is the raw
+  // magnitude, carried separately precisely so nothing recomposes it and double-counts —
+  // `audienceReach()` takes the two apart. Magnitude-formatted ("48.2K"), never a raw
+  // integer, and `formatMagnitude` truncates so a count is never overstated.
+  const followerCount = formatMagnitude(persona.followerCount)
+  // Real outbound edges from the follow graph (story 07). Falls back to 0 only for a
+  // fixture that predates the field; the live API and the seeded mock both always send it.
+  const followingCount = formatMagnitude(persona.followingCount ?? 0)
 
   const postsByTab: Record<ProfileTabId, readonly PostView[]> = {
     posts: authoredPosts,
@@ -298,11 +363,39 @@ export function Profile({ personaId }: ProfileProps) {
           <span className={styles.stat} data-testid="following-count">
             <span className={styles.statValue}>{followingCount}</span> Following
           </span>
-          <span className={styles.stat} data-testid="follower-count">
+          {/* Followers is a BUTTON because it expands the D1-012 follower list. Counts
+              stay visible to every session including observers (D1-011 removes action
+              affordances, not information). */}
+          <button
+            type="button"
+            className={`${styles.stat} ${styles.statButton}`}
+            data-testid="follower-count"
+            aria-expanded={followersOpen}
+            aria-controls="profile-followers"
+            onClick={toggleFollowers}
+          >
             <span className={styles.statValue}>{followerCount}</span> Followers
-          </span>
+          </button>
+        </div>
+
+        {/* D1-011: the Follow control is ABSENT for observer/read-only and no-persona
+            sessions, and on the viewer's OWN profile (the server 400s a self-follow) —
+            `useFollow`'s `canFollow` owns all three, and FollowButton renders null. */}
+        <div className={styles.followAction}>
+          <FollowButton
+            key={persona.id}
+            personaId={persona.id}
+            displayName={persona.displayName}
+            initialFollowerCount={persona.followerCount}
+          />
         </div>
       </div>
+
+      {followersOpen && (
+        <div id="profile-followers" data-testid="profile-followers">
+          <FollowerList edges={followerEdges} magnitude={persona.audienceMagnitude ?? 0} />
+        </div>
+      )}
 
       <div className={styles.tabs} role="tablist" aria-label="Profile timeline">
         {PROFILE_TABS.map(tab => {
