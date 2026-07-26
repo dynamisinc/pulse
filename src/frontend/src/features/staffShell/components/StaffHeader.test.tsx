@@ -10,8 +10,11 @@
  *  - the state pill carries BOTH a dot AND a text label (NFR-001, never
  *    color-only), correctly mapped for every `ExerciseStatus`;
  *  - the Preview-as button reflects/toggles via `previewActive` /
- *    `onTogglePreview` only (story 04 supplies the real behavior) and is
- *    keyboard-operable;
+ *    `onTogglePreview` only (story 04 supplies the real behavior), is
+ *    keyboard-operable, and is HANDLER-GATED — a surface that wires no
+ *    `onTogglePreview` renders no preview control at all, rather than a
+ *    focusable, keyboard-reachable button whose click does nothing (WR-003:
+ *    a dead control is indistinguishable from a broken feature);
  *  - the scenario clock and wall clock are independently SOURCED (WAVE0-
  *    REVIEW precedent 18: pinned by divergent system-vs-scenario clocks, not
  *    a bare `Date.now` spy) — proves the header never substitutes wall-clock
@@ -98,7 +101,9 @@ afterEach(() => {
 
 describe('StaffHeader — renders every required region (AC1)', () => {
   it('renders the brand lockup, identity badge, dual clock pair, state pill, FOUO tag, presence, and preview button', () => {
-    render(<StaffHeader surfaceName="Controller Console" />)
+    // The preview control is HANDLER-GATED (see the header describe below), so
+    // a render that expects it must wire the handler that gives it a behavior.
+    render(<StaffHeader surfaceName="Controller Console" onTogglePreview={vi.fn()} />)
 
     const lockup = screen.getByTestId('staff-header-lockup')
     expect(within(lockup).getByText('PULSE')).toBeInTheDocument()
@@ -221,14 +226,16 @@ describe('StaffHeader — exercise state pill (NFR-001: never color-only)', () =
 
 describe('StaffHeader — Preview-as button is driven entirely by props (story 04 out of scope)', () => {
   it('reflects previewActive=false: unpressed, "Preview as participant" label', () => {
-    render(<StaffHeader surfaceName="Controller Console" previewActive={false} />)
+    render(
+      <StaffHeader surfaceName="Controller Console" previewActive={false} onTogglePreview={vi.fn()} />,
+    )
 
     const button = screen.getByRole('button', { name: /preview as participant/i })
     expect(button).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('reflects previewActive=true: pressed, "Exit preview" label', () => {
-    render(<StaffHeader surfaceName="Controller Console" previewActive />)
+    render(<StaffHeader surfaceName="Controller Console" previewActive onTogglePreview={vi.fn()} />)
 
     const button = screen.getByRole('button', { name: /exit preview/i })
     expect(button).toHaveAttribute('aria-pressed', 'true')
@@ -250,13 +257,38 @@ describe('StaffHeader — Preview-as button is driven entirely by props (story 0
     expect(onTogglePreview).toHaveBeenCalledTimes(1)
   })
 
-  it('does not throw when clicked with no onTogglePreview handler supplied (the prop is optional)', async () => {
-    const user = userEvent.setup()
-    render(<StaffHeader surfaceName="Controller Console" previewActive={false} />)
+  it('renders NO preview control at all when no onTogglePreview handler is supplied (WR-003)', () => {
+    // The old contract shipped the button regardless and merely proved the
+    // click was a safe no-op. That is exactly the defect: on a surface with no
+    // preview capability (the planner workspace; the controller console today)
+    // it left a focusable, keyboard-reachable button that answers nothing, so
+    // a staff user cannot tell "not available here" from "broken". The control
+    // must now be ABSENT — not present-and-inert.
+    render(<StaffHeader surfaceName="Exercise Settings" previewActive={false} />)
 
-    await expect(
-      user.click(screen.getByRole('button', { name: /preview as participant/i })),
-    ).resolves.not.toThrow()
+    expect(screen.queryByTestId('staff-header-preview-toggle')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /preview as participant/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /exit preview/i })).not.toBeInTheDocument()
+
+    // The rest of the header still rendered — this is a gated control, not a
+    // header that failed to mount.
+    expect(screen.getByTestId('staff-header-lockup')).toBeInTheDocument()
+    expect(screen.getByTestId('staff-header-sign-out')).toBeInTheDocument()
+  })
+
+  it('renders the preview control, focusable and functional, as soon as a handler IS supplied', async () => {
+    const user = userEvent.setup()
+    const onTogglePreview = vi.fn()
+    render(<StaffHeader surfaceName="Evaluator Dashboard" onTogglePreview={onTogglePreview} />)
+
+    const button = screen.getByTestId('staff-header-preview-toggle')
+    expect(button).toBeInTheDocument()
+
+    button.focus()
+    expect(document.activeElement).toBe(button)
+
+    await user.click(button)
+    expect(onTogglePreview).toHaveBeenCalledTimes(1)
   })
 
   it('is keyboard-operable: reachable by Tab and activatable with Enter', async () => {
