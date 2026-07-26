@@ -42,8 +42,12 @@ function wrapper({ children }: { children: ReactNode }) {
 
 beforeEach(() => {
   resetTelemetryBuffer()
-  vi.mocked(followPersona).mockResolvedValue(undefined)
-  vi.mocked(unfollowPersona).mockResolvedValue(undefined)
+  // Resolves with the server's authoritative `following` value (SG-001) —
+  // `true` for a follow, `false` for an unfollow — matching the optimistic
+  // guess in every test below (the reconciliation-on-divergence path has its
+  // own coverage in `useFollow.rollback.test.ts`'s retry case).
+  vi.mocked(followPersona).mockResolvedValue(true)
+  vi.mocked(unfollowPersona).mockResolvedValue(false)
 })
 
 afterEach(() => {
@@ -134,7 +138,7 @@ describe('useFollow — follow/unfollow + optimistic count (SOC-051)', () => {
   it('ignores a second toggleFollow() call while the first write is still pending', async () => {
     let releaseWrite: (() => void) | undefined
     vi.mocked(followPersona).mockImplementation(
-      () => new Promise<void>(resolve => { releaseWrite = resolve }),
+      () => new Promise<boolean>(resolve => { releaseWrite = () => resolve(true) }),
     )
 
     const { result } = renderHook(

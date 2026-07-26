@@ -83,8 +83,9 @@ describe('useFollow — optimistic rollback on a failed write', () => {
     await waitFor(() => expect(result.current.pending).toBe(false))
     expect(result.current.isFollowing).toBe(false)
 
-    // A second attempt, now succeeding, must still be possible.
-    vi.mocked(followPersona).mockResolvedValueOnce(undefined)
+    // A second attempt, now succeeding, must still be possible. Resolves with
+    // the server's authoritative `following: true` (SG-001).
+    vi.mocked(followPersona).mockResolvedValueOnce(true)
     act(() => result.current.toggleFollow())
     await waitFor(() => expect(result.current.pending).toBe(false))
     expect(result.current.isFollowing).toBe(true)

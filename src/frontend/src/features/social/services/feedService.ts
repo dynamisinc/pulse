@@ -76,8 +76,14 @@ import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { toParticipantView, type Post } from '@/features/social'
 import type { PostView } from '@/features/social'
-import { personaIdForHandle, type Persona } from '@/features/personas'
+import type { Persona } from '@/features/personas'
 import { postStore } from './postStore'
+import {
+  DEFAULT_MOCK_FOLLOWED_PERSONA_IDS,
+  MOCK_VIEWER_PERSONA_ID,
+  mockFollowedSet,
+  setMockFollowedSetForTests,
+} from './followEdgeStore'
 
 /** The feed's scope (story 02, SOC-081): the unfiltered firehose, or narrowed
  * to posts by the caller's followed accounts. Kept a closed union deliberately
@@ -87,38 +93,32 @@ import { postStore } from './postStore'
 export type FeedScope = 'all' | 'following'
 
 /**
- * MOCK-ONLY (dev/test) stand-in for "who the current mock session's persona
- * follows". There is no frontend follow store yet in this worktree — the
- * write path (profiles-social-graph story 02, `useFollow`/`followService.ts`)
- * is a parallel, not-yet-merged build — so this fixed set is what gives the
- * mock adapter's Following scope something honest, non-fabricated to filter
- * TO rather than fabricating post content: it narrows the same seeded
- * Fairhaven posts (`postStore`/`listPosts`) to a believable subset, it never
- * invents new posts. Every author id here is a REAL seeded persona/post
- * author (`postService.ts`'s `SEEDED_POSTS`).
+ * MOCK-ONLY (dev/test) "who the current mock session's persona follows", for
+ * the Following-scope mock filter below. Reads `followEdgeStore.ts`'s SHARED
+ * edge set — the SAME store `followService.ts`'s follow/unfollow mock write
+ * path mutates (WR-004 fold, Gate-1 #88/#121). Before this fix, this module
+ * kept its OWN frozen literal set here, entirely disconnected from
+ * `followService`'s mock edges: under `VITE_USE_MOCK_DATA=true` (UAT's own
+ * setting) following an account moved the write into `followService`'s map,
+ * but this filter kept reading the unrelated frozen set, so the follow never
+ * moved a single post into the Following feed — the feature looked built and
+ * did nothing where it would actually be demoed. Now there is exactly ONE
+ * mock follow store; following/unfollowing an account in mock mode moves
+ * posts in and out of this feed for real.
  *
- * This is intentionally a Wave-boundary placeholder (mirrors `postStore.ts`'s
- * own "Wave-1 minimal slice" precedent): once the mock follow store lands,
- * the mock adapter below should read from IT instead, so following/unfollowing
- * an account in mock mode actually moves posts in and out of this feed. Until
- * then, `setMockFollowingForTests` is the only sanctioned way to vary it
- * (test-only — no production code calls it).
- */
-const DEFAULT_MOCK_FOLLOWED_PERSONA_IDS: readonly string[] = [
-  personaIdForHandle('FairhavenWater'),
-  personaIdForHandle('kwardFH'),
-]
-
-let mockFollowedPersonaIds = new Set<string>(DEFAULT_MOCK_FOLLOWED_PERSONA_IDS)
-
-/**
- * TEST-ONLY escape hatch overriding the mock adapter's Following-scope filter
- * set (see the constant above). Passing `undefined` restores the default mock
- * set. Never called from non-test code — the real filtering, in live mode, is
- * entirely server-side (COR-001).
+ * The store seeds the viewer persona already following
+ * `DEFAULT_MOCK_FOLLOWED_PERSONA_IDS` — two REAL seeded accounts
+ * (`postService.ts`'s `SEEDED_POSTS` authors), never fabricated ones — so the
+ * feed has believable content before the reader follows anyone.
+ * `setMockFollowingForTests` remains the sanctioned test-only override
+ * (test code needs to force a DIFFERENT, including empty, follow set without
+ * touching the real `followService` mock adapters' own state machinery).
  */
 export function setMockFollowingForTests(personaIds: readonly string[] | undefined): void {
-  mockFollowedPersonaIds = new Set(personaIds ?? DEFAULT_MOCK_FOLLOWED_PERSONA_IDS)
+  setMockFollowedSetForTests(
+    MOCK_VIEWER_PERSONA_ID,
+    personaIds ?? DEFAULT_MOCK_FOLLOWED_PERSONA_IDS,
+  )
 }
 
 /**
@@ -131,16 +131,18 @@ export function setMockFollowingForTests(personaIds: readonly string[] | undefin
  * subscription, surfaces live without a re-fetch of the seeded baseline.
  *
  * Following scope (story 02): reads `config.params.scope` — the SAME query
- * param a live call carries — and filters to `mockFollowedPersonaIds` when it
- * is `'following'`. An empty filtered result is returned as an empty array,
- * never substituted with the unfiltered set (mirrors the real backend's
- * documented empty-follow-set behavior).
+ * param a live call carries — and filters to the viewer's followed set from
+ * `followEdgeStore.ts` (the SAME store `followService.ts`'s follow/unfollow
+ * mock writes mutate — WR-004 fold) when it is `'following'`. An empty
+ * filtered result is returned as an empty array, never substituted with the
+ * unfiltered set (mirrors the real backend's documented empty-follow-set
+ * behavior).
  */
 const mockAdapter: AxiosAdapter = config => {
   const params = config.params as { scope?: FeedScope } | undefined
   const all = postStore.getPosts()
   const data = params?.scope === 'following'
-    ? all.filter(post => mockFollowedPersonaIds.has(post.authorPersonaId))
+    ? all.filter(post => mockFollowedSet(MOCK_VIEWER_PERSONA_ID).has(post.authorPersonaId))
     : all
 
   return Promise.resolve({

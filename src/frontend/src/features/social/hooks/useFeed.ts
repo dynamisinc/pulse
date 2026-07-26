@@ -22,14 +22,28 @@
  * SCOPE (story 02, SOC-081): `useFeed(scope)` defaults to `'all'` — every
  * existing call site (`useFeed()`) is unaffected. Passing `'following'` re-runs
  * the same load effect against the SAME seam with a different `scope`, so
- * switching scopes is just a re-fetch, not a second code path. THIS HOOK DOES
- * NOT DECIDE which scope to request — the COR-015 "read-only/no-persona
- * sessions default to All Posts" guard belongs to the caller (`<Feed>`),
- * because only the caller has the session; this hook trusts whatever `scope`
- * it is given and freezes THAT baseline (see below). An empty result for
- * `'following'` (no follow edges) resolves as an empty `posts` array with
- * `loading: false, error: undefined` — the honest "nothing to show" state, not
- * a fallback to `'all'`.
+ * switching scopes is just a re-fetch, not a second code path.
+ *
+ * COR-015 IS ENFORCED IN THIS HOOK, NOT ONLY IN THE CALLER (WR-005 fold,
+ * Gate-1 #88/#121). An earlier revision left the "read-only/no-persona
+ * sessions default to All Posts" guard entirely to `<Feed>` and DOCUMENTED
+ * that as making a future integration mistake unable to violate the rule —
+ * which wasn't true: this hook is exported from the feature barrel
+ * (`features/social/index.ts`), so a future component could call
+ * `useFeed('following')` directly, skip `<Feed>` (and its guard) entirely,
+ * and serve an observer/no-persona session the empty Following feed. The
+ * guard now lives HERE too, reading the session itself — the SAME
+ * `!isReadOnly && personaId !== undefined` predicate `<Feed>` and
+ * `useReaction`'s `canReact` both use — so `'following'` degrades to `'all'`
+ * for such a session regardless of which component asked for it. `<Feed>`
+ * still computes its OWN `effectiveScope` for its labeling/telemetry
+ * (`feedEntityId`, the empty-state copy) — passing an already-resolved
+ * `'all'` through this hook's guard a second time is a no-op, so existing
+ * behavior is unchanged; only a caller that bypasses `<Feed>` sees a
+ * difference, and the difference is that the rule now actually holds. An
+ * empty result for a genuinely-honored `'following'` (no follow edges)
+ * resolves as an empty `posts` array with `loading: false, error: undefined`
+ * — the honest "nothing to show" state, not a fallback to `'all'`.
  *
  * THE BASELINE IS WHATEVER `resolveFeed()` RETURNS (UAT fix — the prior build
  * discarded the resolved value and re-read `postStore.getPosts()` instead,
@@ -69,6 +83,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
+import { useSession } from '@/core/auth'
 import { usePersonas } from '@/features/personas'
 import type { PostView, Post } from '@/features/social'
 import { resolveFeed, assembleFeedView, type FeedScope } from '../services/feedService'
@@ -85,8 +100,11 @@ export interface UseFeedResult {
 /**
  * Resolves a feed for a component: raw posts (for `scope`, default `'all'`) +
  * the persona cast, converged into the `PostView[]` `<Feed>` renders. See the
- * module header — the caller decides `scope`, this hook only fetches +
- * converges it.
+ * module header — `<Feed>` still decides which scope to REQUEST (and owns the
+ * labeling/telemetry that follows from it), but this hook enforces the
+ * COR-015 "read-only/no-persona sessions never get 'following'" rule itself
+ * too (WR-005 fold), so it cannot be sidestepped by a caller that skips
+ * `<Feed>`.
  */
 export function useFeed(scope: FeedScope = 'all'): UseFeedResult {
   const [rawPosts, setRawPosts] = useState<readonly Post[]>([])
@@ -94,11 +112,20 @@ export function useFeed(scope: FeedScope = 'all'): UseFeedResult {
   const [postsError, setPostsError] = useState<unknown>(undefined)
 
   const { personas, loading: personasLoading, error: personasError } = usePersonas()
+  const session = useSession()
+
+  // COR-015 (WR-005 fold): the SAME `!isReadOnly && personaId !== undefined`
+  // predicate `<Feed>` and `useReaction`'s `canReact` use, applied here too —
+  // a read-only/no-persona session's requested `'following'` degrades to
+  // `'all'` regardless of which component asked. Re-applying it to an
+  // ALREADY-resolved `'all'` (the normal `<Feed>` call path) is a no-op.
+  const canUseFollowing = !session.isReadOnly && session.personaId !== undefined
+  const effectiveScope: FeedScope = scope === 'following' && !canUseFollowing ? 'all' : scope
 
   useEffect(() => {
     let cancelled = false
     setPostsLoading(true)
-    resolveFeed(scope)
+    resolveFeed(effectiveScope)
       .then(posts => {
         if (cancelled) return
         // Freeze the baseline at exactly what `resolveFeed()` resolved with —
@@ -121,11 +148,14 @@ export function useFeed(scope: FeedScope = 'all'): UseFeedResult {
     return () => {
       cancelled = true
     }
-    // Re-resolves (and re-freezes a fresh baseline) whenever `scope` changes —
-    // switching All Posts <-> Following is a re-fetch against the same seam,
-    // not a mount-once concern (story 01's original effect only ever ran once
-    // because `scope` was fixed at `'all'`).
-  }, [scope])
+    // Re-resolves (and re-freezes a fresh baseline) whenever the EFFECTIVE
+    // scope changes — switching All Posts <-> Following is a re-fetch against
+    // the same seam, not a mount-once concern (story 01's original effect
+    // only ever ran once because `scope` was fixed at `'all'`). Depending on
+    // `effectiveScope` (not the raw `scope` prop) means a session transition
+    // that flips `canUseFollowing` (rare — a session doesn't change read-only
+    // mid-mount in practice) still re-resolves correctly.
+  }, [effectiveScope])
 
   const posts = useMemo(
     () => assembleFeedView(rawPosts, personas),

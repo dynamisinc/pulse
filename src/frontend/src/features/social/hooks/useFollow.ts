@@ -21,10 +21,17 @@
  *    `unfollowPersona` for the target. On a REJECTED request it rolls back
  *    both `isFollowing` and `followerCount` to their pre-toggle values — a
  *    failed write must never leave the button showing "Following" (or the
- *    count bumped) when the server never recorded the edge. While a toggle is
- *    in flight (`pending`), a second `toggleFollow()` call is a no-op — this
- *    avoids two overlapping optimistic mutations racing each other's
- *    rollback.
+ *    count bumped) when the server never recorded the edge. On a RESOLVED
+ *    request (SG-001), this hook does NOT simply trust its own optimistic
+ *    guess — it settles `isFollowing`/`followerCount` on the server's
+ *    AUTHORITATIVE `following` value (`FollowStateResponseDto.following`,
+ *    returned by both `followPersona`/`unfollowPersona`), so a client/server
+ *    divergence (e.g. a stale double-tap racing another tab/session) never
+ *    leaves the button showing a state the server disagrees with — it
+ *    self-corrects instead of asserting the optimistic guess was right. While
+ *    a toggle is in flight (`pending`), a second `toggleFollow()` call is a
+ *    no-op — this avoids two overlapping optimistic mutations racing each
+ *    other's rollback.
  *  - `canFollow` / `isReadOnly`: the render gate `<FollowButton>` consumes so
  *    the control is genuinely ABSENT (not disabled) in an observer/read-only
  *    session (COR-015/D1-011) or when the session has no bound persona to
@@ -158,8 +165,19 @@ export function useFollow(options: UseFollowOptions): UseFollowResult {
     const write = nextFollowing ? followPersona(personaId) : unfollowPersona(personaId)
 
     write
-      .then(() => {
+      .then(serverFollowing => {
         if (requestTokenRef.current !== token) return
+        // SG-001: settle on the server's AUTHORITATIVE value rather than
+        // trusting the optimistic guess was right. In the ordinary case
+        // `serverFollowing === nextFollowing` and this is a same-value
+        // re-set (no visible change); on a genuine divergence it corrects
+        // both the toggle state and the count derived from it, still
+        // computed off the PRE-toggle count since the server has no count to
+        // return.
+        setIsFollowing(serverFollowing)
+        setFollowerCount(
+          serverFollowing ? previousCount + 1 : Math.max(0, previousCount - 1),
+        )
         setPending(false)
       })
       .catch(() => {

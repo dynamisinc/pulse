@@ -38,13 +38,25 @@ is the teaching moment (SOC-081).
   `SocialChannel` (see Technical Notes for the mount point this story exposes).
 - **Follow-aware real-time (AC4).** `useFeedStream`'s source has no per-post author filter; making the
   Following scope's pill correct is story 04's follow-up, not this story's.
-- **Mock-mode "who does the session follow".** There is no frontend follow store in this worktree yet
-  (profiles-social-graph story 02's write path, `useFollow`/`followService.ts`, is a parallel,
-  not-yet-merged build) — `feedService.ts`'s mock adapter filters against a small fixed placeholder set
-  (`DEFAULT_MOCK_FOLLOWED_PERSONA_IDS`) documented as a Wave-boundary stand-in, with a test-only override
-  (`setMockFollowingForTests`). Once the real mock follow store lands, the mock adapter should read from
-  it instead, so following/unfollowing an account in mock mode actually moves posts into/out of this feed.
-  Live mode is unaffected by this — the real filtering is entirely server-side.
+- **RESOLVED — mock-mode "who does the session follow" (WR-004 fold, Gate-1 #88/#121).** This
+  section previously said profiles-social-graph story 02 (the follow/unfollow write path,
+  `useFollow`/`followService.ts`) was "a parallel, not-yet-merged build" and that `feedService.ts`'s
+  mock adapter filtered against its own frozen placeholder set until that write path landed. **Both
+  premises are now stale: story 02 is merged, and merging it exposed the real gap** — its mock follow
+  edges (`followService.ts`'s own `MOCK_EDGES`) and this story's mock Following-scope filter
+  (`feedService.ts`'s `DEFAULT_MOCK_FOLLOWED_PERSONA_IDS` / `mockFollowedPersonaIds`) were two
+  DISCONNECTED stores, so following an account through the mock write path moved nothing into the
+  mock Following feed — exactly the gap `VITE_USE_MOCK_DATA=true` (UAT's own setting) would have hit.
+  Fixed in this same pass: both mock adapters now read/write ONE shared store,
+  `services/followEdgeStore.ts`, seeded on first load with the same two default accounts this story
+  always used (so a fresh dev/UAT session's feed still has content before the reader follows
+  anyone), and the round trip is pinned by `services/followFeedRoundTrip.test.ts` (follow → the
+  account's posts appear in `resolveFeed('following')`; unfollow → they disappear). Note the store's
+  test-only `resetMockFollowEdges()` clears to an EMPTY graph, not back to that seeded default — the
+  clean slate the rest of the suite (e.g. `04-who-to-follow`'s suggestion-exclusion specs) already
+  depends on; `setMockFollowingForTests` remains the sanctioned override for a spec that wants the
+  seeded default (or any other explicit set) back on purpose. Live mode was never affected — the
+  real filtering is entirely server-side.
 
 ## Out of Scope
 The follow mechanic (profiles SOC-051); All Posts (story 01); real-time pill (story 04); the tab UI /
@@ -69,16 +81,21 @@ Participant world. Extends `<Feed>`/`useFeed`/`feedService` (story 01) with a `F
   (for AC3's per-feed scroll preservation) its own scroll position to restore on tab switch.
 
 ## Dependencies
-profiles-social-graph (follow edges — story 07/#370, backend built + wired, under review as of this
-story's build); story 01 (feed infra); COR-015 (read-only default).
+profiles-social-graph (follow edges — story 07/#370, backend, Complete); story 01 (feed infra);
+COR-015 (read-only default).
 
 ## Tests
 - Service (unit) — `services/feedService.test.ts` (`resolveFeed('following')` mock-adapter filtering) +
   `services/feedService.following.live.test.ts` (LIVE mode: `?scope=following` request shape, the
   no-argument/`'all'` byte-identical request, empty-array resolution, and a rejection — e.g. the
-  documented unknown-scope 400 — propagates rather than substituting a default feed).
+  documented unknown-scope 400 — propagates rather than substituting a default feed) +
+  `services/followFeedRoundTrip.test.ts` (WR-004 fold: follow via `followService` moves posts into
+  `resolveFeed('following')`; unfollow removes them again).
 - Hook (RTL) — `hooks/useFeed.following.test.ts`: filters to the mock following set; an empty follow set
   resolves an empty, non-error `posts` array; re-resolves on a `scope` change across a re-render.
+  `hooks/useFeed.readonlyGuard.test.ts` (WR-005 fold): the COR-015 "read-only/no-persona sessions never
+  get 'following'" guard is enforced INSIDE `useFeed` itself, not only in `<Feed>` — pinned by calling
+  the hook directly (no `<Feed>` in the tree) with a read-only and a no-persona session.
 - Component (RTL) — `pages/Feed.following.test.tsx`: renders only followed accounts; an empty follow set
   shows the honest Following-specific empty copy (never the All Posts copy, never any post card, never
   a fallback); the live "new posts" pill never appears under this scope, even after a live arrival.

@@ -30,10 +30,13 @@
  *     emit here would double-count every toggle.
  *
  * MOCK ADAPTERS (dev/test/UAT-no-backend only). Follow state is genuinely
- * mutable (unlike the read-only `SEEDED_PERSONAS` cast), so the mock keeps a
- * small in-memory edge set — `followerId -> Set<followedId>` — rather than a
- * canned static response. The Wave-1 mock session has exactly one bound
- * persona (`persona-dreyes_fh`, `core/auth/sessionResolver.ts`), so
+ * mutable (unlike the read-only `SEEDED_PERSONAS` cast), so the mock reads
+ * and writes `followEdgeStore.ts`'s shared in-memory edge set — the SAME
+ * store `feedService.ts`'s Following-scope mock filter reads (WR-004 fold,
+ * #88/#121: the two used to be disconnected stores, so a follow never moved
+ * a post into the Following feed under `VITE_USE_MOCK_DATA=true`, UAT's own
+ * setting). The Wave-1 mock session has exactly one bound persona
+ * (`MOCK_VIEWER_PERSONA_ID`, `core/auth/sessionResolver.ts`), so
  * follow/unfollow always act as that fixed follower in mock mode — this
  * mirrors the real contract (the server, never the client, resolves the
  * acting persona from the session).
@@ -42,37 +45,15 @@
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
+import {
+  MOCK_VIEWER_PERSONA_ID,
+  mockFollowedSet,
+  mockFollowerIdsOf,
+  resetMockFollowEdges,
+} from './followEdgeStore'
 
-/**
- * The Wave-1 mock session's bound persona (`core/auth/sessionResolver.ts`'s
- * `MOCK_SESSION_BASE.personaId`). Follow/unfollow act as this persona ONLY in
- * mock mode — mirrors the live contract, where the server (never the client)
- * resolves the acting persona from the session.
- */
-const MOCK_VIEWER_PERSONA_ID = 'persona-dreyes_fh'
-
-/**
- * MOCK SCAFFOLD state: real follow edges, `followerId -> Set<followedId>`.
- * Module-level so it persists across calls within one page session (an
- * in-memory stand-in for the backend's `Follow` table) but resets on reload —
- * fine for dev/test/UAT-no-backend, never imported by a shipped read path
- * directly (mirrors `personaService.SEEDED_PERSONAS`'s own caveat).
- */
-const MOCK_EDGES = new Map<string, Set<string>>()
-
-function mockFollowedSet(followerId: string): Set<string> {
-  let set = MOCK_EDGES.get(followerId)
-  if (!set) {
-    set = new Set<string>()
-    MOCK_EDGES.set(followerId, set)
-  }
-  return set
-}
-
-/** Resets the mock follow-edge state. Test-only (mirrors `resetTelemetryBuffer`). */
-export function resetMockFollowEdges(): void {
-  MOCK_EDGES.clear()
-}
+/** Test-only reset, re-exported for `followService.test.ts` (mirrors `resetTelemetryBuffer`). */
+export { resetMockFollowEdges }
 
 /** Pulls `{id}` out of a `/personas/{id}/<suffix>` request path. */
 function extractPersonaId(url: string | undefined, suffix: string): string | undefined {
@@ -81,20 +62,43 @@ function extractPersonaId(url: string | undefined, suffix: string): string | und
   return match?.[1]
 }
 
+/**
+ * Builds the server's `FollowStateResponseDto` envelope (`personaId`/
+ * `following`/`changed`) so the mock and the live 200 body parse identically —
+ * the real endpoint (`FollowEndpoints.cs`'s `MapResult`) returns `200` +
+ * this body for BOTH the state-changing and the idempotent-repeat case, never
+ * a bare `204`. An earlier mock revision returned `204`/`undefined`, which
+ * would have thrown the moment a caller started parsing the real envelope
+ * (SG-001/SG-002 fold) while staying green here — this shape is now the same
+ * one `resolveFollowing`/`resolveFollowers`'s `FollowListResponseDto` mock
+ * already committed to.
+ */
+function mockFollowStateBody(personaId: string, following: boolean, changed: boolean) {
+  return { personaId, following, changed }
+}
+
 const followMockAdapter: AxiosAdapter = config => {
   const personaId = extractPersonaId(config.url, 'follow')
+  let changed = false
   if (personaId !== undefined) {
-    mockFollowedSet(MOCK_VIEWER_PERSONA_ID).add(personaId)
+    const set = mockFollowedSet(MOCK_VIEWER_PERSONA_ID)
+    changed = !set.has(personaId)
+    set.add(personaId)
   }
-  return Promise.resolve({ data: undefined, status: 204, statusText: 'No Content', headers: {}, config })
+  const data = mockFollowStateBody(personaId ?? '', true, changed)
+  return Promise.resolve({ data, status: 200, statusText: 'OK', headers: {}, config })
 }
 
 const unfollowMockAdapter: AxiosAdapter = config => {
   const personaId = extractPersonaId(config.url, 'follow')
+  let changed = false
   if (personaId !== undefined) {
-    mockFollowedSet(MOCK_VIEWER_PERSONA_ID).delete(personaId)
+    const set = mockFollowedSet(MOCK_VIEWER_PERSONA_ID)
+    changed = set.has(personaId)
+    set.delete(personaId)
   }
-  return Promise.resolve({ data: undefined, status: 204, statusText: 'No Content', headers: {}, config })
+  const data = mockFollowStateBody(personaId ?? '', false, changed)
+  return Promise.resolve({ data, status: 200, statusText: 'OK', headers: {}, config })
 }
 
 /** Builds the server's `FollowListResponseDto` envelope so mock and live parse identically. */
@@ -111,12 +115,7 @@ const followingMockAdapter: AxiosAdapter = config => {
 
 const followersMockAdapter: AxiosAdapter = config => {
   const personaId = extractPersonaId(config.url, 'followers')
-  const ids: string[] = []
-  if (personaId !== undefined) {
-    for (const [followerId, followedIds] of MOCK_EDGES) {
-      if (followedIds.has(personaId)) ids.push(followerId)
-    }
-  }
+  const ids = personaId !== undefined ? mockFollowerIdsOf(personaId) : []
   const data = mockFollowListBody(personaId ?? '', ids)
   return Promise.resolve({ data, status: 200, statusText: 'OK', headers: {}, config })
 }
@@ -125,28 +124,62 @@ const followersMockAdapter: AxiosAdapter = config => {
 const USE_MOCK_FOLLOW = USE_MOCK_DATA
 
 /**
+ * The wire shape of a follow/unfollow write response — the server's
+ * `FollowStateResponseDto` (`FollowEndpoints.cs`): the caller-observable state
+ * of ONE edge after the call. `scenarioTime` is omitted here (only present on
+ * a live state CHANGE, COR-053) — this module never reads it, only
+ * `following`.
+ */
+interface FollowStateResponse {
+  readonly personaId: string
+  readonly following: boolean
+  readonly changed: boolean
+}
+
+function isFollowStateResponse(data: unknown): data is FollowStateResponse {
+  if (!data || typeof data !== 'object') return false
+  const body = data as FollowStateResponse
+  return typeof body.following === 'boolean' && typeof body.changed === 'boolean'
+}
+
+/**
  * Follows `personaId` as the caller's session-bound persona. Idempotent —
  * following an already-followed id succeeds silently (no error), matching the
  * server contract. Callers (`useFollow`) are responsible for the client-side
  * read-only/no-persona guard; this function issues the request unconditionally.
+ *
+ * Returns the server's AUTHORITATIVE `following` value (SG-001) — never
+ * assumed to be `true` just because the call didn't throw — so a caller that
+ * settles its own optimistic state on this return value self-corrects a
+ * client/server divergence instead of trusting its own guess.
  */
-export async function followPersona(personaId: string): Promise<void> {
-  await api.post(
+export async function followPersona(personaId: string): Promise<boolean> {
+  const response = await api.post(
     `/personas/${personaId}/follow`,
     undefined,
     USE_MOCK_FOLLOW ? { adapter: followMockAdapter } : undefined,
   )
+  if (!isFollowStateResponse(response.data)) {
+    throw new Error('followPersona: response was not a well-formed follow-state envelope')
+  }
+  return response.data.following
 }
 
 /**
  * Unfollows `personaId` as the caller's session-bound persona. Idempotent —
  * unfollowing a non-edge succeeds silently, matching the server contract.
+ * Returns the server's authoritative `following` value (SG-001) — see
+ * `followPersona`.
  */
-export async function unfollowPersona(personaId: string): Promise<void> {
-  await api.delete(
+export async function unfollowPersona(personaId: string): Promise<boolean> {
+  const response = await api.delete(
     `/personas/${personaId}/follow`,
     USE_MOCK_FOLLOW ? { adapter: unfollowMockAdapter } : undefined,
   )
+  if (!isFollowStateResponse(response.data)) {
+    throw new Error('unfollowPersona: response was not a well-formed follow-state envelope')
+  }
+  return response.data.following
 }
 
 /**

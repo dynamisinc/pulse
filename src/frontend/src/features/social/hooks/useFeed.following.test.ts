@@ -11,13 +11,36 @@
  *  - `useFeed()` with no argument is unaffected (default `'all'`, covered
  *    already by the sibling `useFeed.test.ts` — this file only adds the
  *    scope-switch + following coverage).
+ *
+ * `@/core/auth` is mocked to a fixed, non-read-only, persona-bound session
+ * (WR-005 fold): `useFeed` now applies its own COR-015 guard reading the
+ * session, so a genuinely-honored `'following'` request needs a session for
+ * which `canUseFollowing` is true — this file's own `useFeed.readonlyGuard.
+ * test.ts` sibling covers the DEGRADED case. `useSession()` throws outside a
+ * provider; a synchronous mock is the same convention `useFollow.*.test.ts`
+ * uses for this hook family.
  */
 import { renderHook, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Session } from '@/core/auth'
 import { personaIdForHandle } from '@/features/personas'
 import { setMockFollowingForTests, type FeedScope } from '../services/feedService'
 import { postStore } from '../services/postStore'
 import { useFeed } from './useFeed'
+
+const MOCK_SESSION: Session = {
+  exerciseId: 'ex-mock-0001',
+  accountId: 'acct-dreyes',
+  role: 'participant',
+  personaId: 'persona-dreyes_fh',
+  actingHumanId: 'human-dreyes',
+  isReadOnly: false,
+  expiresAt: '2999-01-01T00:00:00.000Z',
+}
+
+vi.mock('@/core/auth', () => ({
+  useSession: () => MOCK_SESSION,
+}))
 
 afterEach(() => {
   postStore.resetForTests()
