@@ -30,7 +30,7 @@
  * a rejected mock POST can't race worker teardown; `api.get` (and its mock
  * adapters for the provider/persona/feed reads) is left intact.
  */
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
@@ -51,6 +51,7 @@ import {
   ShellContextProvider,
   type ShellVariant,
 } from '@/features/participant-shell/mountContract'
+import { formatMagnitude } from '../services/audience'
 import { Profile } from './Profile'
 
 const MOCK_TIME_ZONE = 'America/New_York'
@@ -109,9 +110,45 @@ describe('Profile — identity hero (SOC-050)', () => {
     if (!persona) throw new Error('expected seeded persona fixture')
     if (persona.bio) expect(within(hero).getByText(persona.bio)).toBeInTheDocument()
 
-    const expectedFollowers = persona.followerCount.toLocaleString('en-US')
+    // SOC-054 / story 05 AC1: the count is MAGNITUDE-FORMATTED ("50.2K"), not the raw
+    // locale integer story 01 originally rendered. `formatMagnitude` truncates, so a
+    // displayed count is never overstated.
+    const expectedFollowers = formatMagnitude(persona.followerCount)
     expect(within(screen.getByTestId('follower-count')).getByText(expectedFollowers)).toBeInTheDocument()
     expect(screen.getByTestId('following-count')).toBeInTheDocument()
+  })
+})
+
+describe('Profile — Followers expand (story 05, D1-012 + XC-004)', () => {
+  it('is collapsed by default, expands the follower list, and emits exactly one view event', async () => {
+    renderProfile(FW_ID)
+    await screen.findByTestId('profile-identity')
+
+    expect(screen.queryByTestId('profile-followers')).toBeNull()
+
+    const toggle = screen.getByTestId('follower-count')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    const before = getEmittedTelemetryEvents()
+      .filter(e => e.target?.entityId === `${FW_ID}:followers`).length
+
+    await act(async () => { toggle.click() })
+
+    expect(await screen.findByTestId('profile-followers')).toBeInTheDocument()
+    expect(screen.getByTestId('follower-count')).toHaveAttribute('aria-expanded', 'true')
+
+    // XC-004: expanding Followers is a participant view action and must not be silent
+    // in the AAR (story 05 review, WR-005).
+    const after = getEmittedTelemetryEvents()
+      .filter(e => e.target?.entityId === `${FW_ID}:followers`).length
+    expect(after).toBe(before + 1)
+
+    // Collapsing is not a view — it must not emit again.
+    await act(async () => { screen.getByTestId('follower-count').click() })
+    expect(screen.queryByTestId('profile-followers')).toBeNull()
+    expect(
+      getEmittedTelemetryEvents().filter(e => e.target?.entityId === `${FW_ID}:followers`).length,
+    ).toBe(before + 1)
   })
 })
 

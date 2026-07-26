@@ -180,6 +180,33 @@
   font-weight: 700;
 }
 
+/* The Followers stat is a real button (it expands the D1-012 follower list) but must
+   read as the plain text stat beside it — reset the UA button chrome, keep the
+   affordance in the pointer + focus ring rather than a box. */
+.statButton {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.statButton:hover .statValue,
+.statButton:focus-visible .statValue {
+  text-decoration: underline;
+}
+
+.statButton:focus-visible {
+  outline: 2px solid var(--pulse-ac);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.followAction {
+  margin-top: 14px;
+}
+
 /* --------------------------------------------------------------------------
  * Tabs (Posts / Posts & replies / Media / Likes)
  * ------------------------------------------------------------------------ */
