@@ -29,6 +29,21 @@
  * coalesces — see `NewPostsPill`); the posts themselves stay inert in a ref
  * until the reader taps. The pill's own display caps the number to `99+`.
  *
+ * SCOPE FILTERING — THE OPTIONAL `admit` PREDICATE (feeds-discovery/08, #91).
+ * A source is deliberately author-agnostic: it delivers EVERY arrival in the
+ * exercise. A Following-scoped mount must not count posts by accounts the
+ * reader does not follow, so the caller may pass `admit(post) => boolean`,
+ * applied at the moment a post is OFFERED to the buffer:
+ *   - a post the predicate rejects is never buffered, never counted, and never
+ *     recorded in the dedup id set — it is as if it had never arrived, so the
+ *     pill's number and what `loadBuffered()` hands back always agree exactly
+ *     (a "3 new posts" pill drains to exactly 3 posts);
+ *   - omitting `admit` admits EVERYTHING — the All Posts path is byte-identical
+ *     to the pre-filter behaviour (no predicate, no extra call, no new state).
+ * The filter is applied HERE rather than at drain time on purpose: filtering on
+ * drain would let the count promise posts the drain then throws away, which is
+ * the dishonest-pill bug this option exists to prevent.
+ *
  * DISABLED = INERT (D1-011, COR-015). In an observer / read-only session the
  * caller passes `enabled: false`; the hook then NEVER starts the source,
  * subscribes to nothing, keeps `newCount` at 0, and `loadBuffered()` returns
@@ -72,6 +87,24 @@ export interface UseFeedStreamOptions {
    * an effect dependency, so a new value each render would re-subscribe.
    */
   readonly source?: FeedStreamSource
+  /**
+   * Optional arrival filter (feeds-discovery/08). Called with each post the
+   * source delivers; `false` drops it entirely — not buffered, not counted, not
+   * remembered (see the module header). OMITTED ⇒ every arrival is admitted.
+   *
+   * MUST be a stable reference across renders, for the same reason `source`
+   * must: it is an effect dependency, so a new value each render would
+   * unsubscribe/re-subscribe (and, on the live transport, tear down and restart
+   * the shared-connection subscription) on every render. Build it with a
+   * `useCallback` whose own dependencies are stable — a predicate that reads its
+   * changing data out of a ref (as `<Feed>` does with the viewer's followed set)
+   * stays stable forever AND stays current, so a mid-session change to what the
+   * predicate admits costs no re-subscribe at all. Changing its identity does
+   * NOT clear the buffer: posts already admitted under the previous predicate
+   * remain buffered and counted, which keeps the count honest about what was
+   * actually accepted.
+   */
+  readonly admit?: (post: ParticipantPostView) => boolean
 }
 
 export interface UseFeedStreamResult {
@@ -94,6 +127,7 @@ export interface UseFeedStreamResult {
 export function useFeedStream({
   enabled,
   source = defaultFeedStreamSource,
+  admit,
 }: UseFeedStreamOptions): UseFeedStreamResult {
   // The buffer + its id-set live in refs: buffered posts are NOT render state
   // (only their count is), so admitting one must not force a full re-render of
@@ -118,6 +152,13 @@ export function useFeedStream({
     }
 
     const unsubscribe = source.subscribe(post => {
+      // Scope filter (feeds-discovery/08) FIRST, before the dedup set and the
+      // buffer: a rejected post leaves no trace at all, so it can never inflate
+      // the count the reader is shown, and a post that only becomes admissible
+      // later (e.g. the reader follows its author, then it is re-delivered) is
+      // not blocked by a stale dedup entry.
+      if (admit !== undefined && !admit(post)) return
+
       // Guard against a post the source somehow re-delivers (the transports
       // already dedup; this keeps the buffer's own invariant regardless).
       if (bufferedIdsRef.current.has(post.id)) return
@@ -149,7 +190,7 @@ export function useFeedStream({
       unsubscribe()
       source.stop()
     }
-  }, [enabled, source])
+  }, [enabled, source, admit])
 
   const loadBuffered = useCallback((): ParticipantPostView[] => {
     // Drain newest-first: the buffer is filled in arrival order, and new posts

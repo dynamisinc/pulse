@@ -40,14 +40,32 @@
  * component only guarantees it CAN be mounted with `scope="following"` and
  * behaves correctly when it is.
  *
- * THE LIVE "NEW POSTS" PILL IS DISABLED UNDER `scope="following"` (deliberate,
- * not an oversight): `useFeedStream`/`postStore`'s live source is NOT
- * follow-aware — it streams every arrival regardless of author (story 04's own
- * scope). Wiring it into a Following-scoped mount would show a pill counting
- * arrivals from accounts the reader does NOT follow, under the Following
- * label — a worse bug than no pill. Real-time for Following stays this
- * story's Out of Scope item ("real-time pill (story 04)"); story 04's own
- * follow-up is where the stream itself becomes scope-aware.
+ * THE LIVE "NEW POSTS" PILL IS FOLLOW-AWARE UNDER `scope="following"`
+ * (feeds-discovery/08, #91 — supersedes the interim "pill disabled under
+ * Following" build). The stream SOURCE is deliberately author-agnostic: it
+ * delivers every arrival in the exercise. An earlier pass therefore switched
+ * the stream off entirely for a Following mount, on the reasoning that a pill
+ * counting posts from accounts the reader does not follow is worse than no
+ * pill — true, but it left the Following feed permanently frozen with no
+ * indication that anything was arriving at all: one dishonest state traded for
+ * another. The fix is to filter, not to disable: this page now passes
+ * `useFeedStream` an `admit` predicate that accepts an arrival only when its
+ * `authorPersonaId` is in the VIEWER's followed set (`useFollowedSet`, resolved
+ * through `followService.resolveFollowing` for the session's own persona — the
+ * same server-authoritative seam, and in mock mode the same shared edge store,
+ * that the Following baseline itself filters on, so the pill and the feed can
+ * never disagree about who is followed). A rejected arrival is never buffered
+ * and never counted, so the pill's number always drains to exactly that many
+ * visible posts. Under `scope="all"` NO predicate is passed at all — the All
+ * Posts path is byte-identical to before.
+ *
+ * A FOLLOW MADE MID-SESSION takes effect on the NEXT arrival, with no remount:
+ * `useFollowedSet` re-reads the follow graph on every successful follow/unfollow
+ * write (`followService.subscribeFollowChanges`), and its predicate keeps a
+ * stable identity across that refresh, so the stream is never re-subscribed
+ * (see that hook's header). Note this changes what ARRIVES from here on — the
+ * already-frozen baseline still does not retroactively gain that account's
+ * older posts (story 02's recorded, intentional frozen-baseline behaviour).
  *
  * VARIANT (COR-015 / D1-011): the shell mount variant is read via
  * `useShellContext()`; each card gets `variant = affordancesAvailable(variant)
@@ -136,6 +154,7 @@ import {
 import { compareNewestFirst, type FeedScope } from '../services/feedService'
 import { useFeed } from '../hooks/useFeed'
 import { useFeedStream } from '../hooks/useFeedStream'
+import { useFollowedSet } from '../hooks/useFollowedSet'
 import { useReaction } from '../hooks/useReaction'
 import { useAmplify } from '../hooks/useAmplify'
 import { NewPostsPill } from '../components/NewPostsPill'
@@ -310,12 +329,29 @@ export function Feed({
   const affordances = affordancesAvailable(variant)
   const cardVariant: CardVariant = affordances ? 'full' : 'readOnly'
 
-  // Real-time buffer behind the pill. Disabled (and the pill hidden) for an
-  // observer/read-only session (D1-011) — nothing streams there — AND for the
-  // Following scope (module header: the stream isn't follow-aware yet, story
-  // 04's own follow-up).
-  const streamEnabled = affordances && !isFollowing
-  const { newCount, loadBuffered } = useFeedStream({ enabled: streamEnabled })
+  // The viewer's followed set — resolved ONLY for a Following mount. An All
+  // Posts mount passes `undefined`, so it issues no follow-graph request and
+  // behaves exactly as it did before this seam existed. `session.personaId` is
+  // always defined when `isFollowing` holds (the COR-015 guard above).
+  const { isFollowed } = useFollowedSet(isFollowing ? session.personaId : undefined)
+
+  // The Following scope's arrival filter (module header). Stable identity —
+  // `isFollowed` is stable for the component's life, so this predicate never
+  // re-subscribes the stream, not even when the reader follows someone.
+  const admitFollowedAuthors = useCallback(
+    (post: ParticipantPostView) => isFollowed(post.authorPersonaId),
+    [isFollowed],
+  )
+
+  // Real-time buffer behind the pill. Disabled (and the pill hidden) ONLY for an
+  // observer/read-only session (D1-011) — nothing streams there. The Following
+  // scope streams too, narrowed by `admit`; All Posts passes no predicate at all
+  // (the conditional spread keeps that call byte-identical to story 04's).
+  const streamEnabled = affordances
+  const { newCount, loadBuffered } = useFeedStream({
+    enabled: streamEnabled,
+    ...(isFollowing ? { admit: admitFollowedAuthors } : {}),
+  })
 
   // Posts the reader has LOADED from the pill — prepended above the frozen
   // baseline, newest-first, accumulated across taps. Untouched until a tap.
@@ -413,11 +449,12 @@ export function Feed({
 
       {/* Sticky "▲ N new posts" pill (feeds-discovery/04). Its own polite live
           region announces the count. HIDDEN entirely for an observer/read-only
-          session (D1-011) AND for the Following scope (module header — the
-          stream isn't follow-aware yet) — `streamEnabled` covers both. For an
-          enabled mount it appears at feed-mount (count 0, empty region), so
-          the polite region is present before the first arrival changes it
-          (reliable AT announcement). */}
+          session (D1-011) — the one thing `streamEnabled` now gates. Under
+          Following it IS shown, counting only arrivals from followed accounts
+          (feeds-discovery/08 — see the module header). For an enabled mount it
+          appears at feed-mount (count 0, empty region), so the polite region is
+          present before the first arrival changes it (reliable AT
+          announcement). */}
       {streamEnabled && <NewPostsPill count={newCount} onLoad={handleLoadNew} />}
 
       {/* aria-live region: it now changes ONLY when the reader taps the pill
