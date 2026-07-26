@@ -39,7 +39,7 @@ describe('followPersona / unfollowPersona / resolveFollowing (shipped mock path)
 
   it('is idempotent: following twice does not throw and does not duplicate the edge', async () => {
     await followPersona('persona-fairhavenwater')
-    await expect(followPersona('persona-fairhavenwater')).resolves.toBeUndefined()
+    await expect(followPersona('persona-fairhavenwater')).resolves.toBe(true)
 
     const following = await resolveFollowing('persona-dreyes_fh')
     expect(following.filter(id => id === 'persona-fairhavenwater')).toHaveLength(1)
@@ -54,7 +54,7 @@ describe('followPersona / unfollowPersona / resolveFollowing (shipped mock path)
   })
 
   it('is idempotent: unfollowing a non-edge does not throw', async () => {
-    await expect(unfollowPersona('persona-never-followed')).resolves.toBeUndefined()
+    await expect(unfollowPersona('persona-never-followed')).resolves.toBe(false)
   })
 
   it('resolveFollowers reflects the same edge from the followed side', async () => {
@@ -128,16 +128,34 @@ describe('followPersona / unfollowPersona (boundary-mocked wire contract)', () =
     vi.restoreAllMocks()
   })
 
-  it('POSTs /personas/{id}/follow with no client-supplied actor in the body', async () => {
-    const spy = vi.spyOn(api, 'post').mockResolvedValue(apiBody(undefined))
-    await followPersona('persona-x')
+  // The server (`FollowEndpoints.cs`'s `MapResult`) returns 200 +
+  // `FollowStateResponseDto` (`personaId`/`following`/`changed`) for BOTH the
+  // state-changing and idempotent-repeat case — never a bare 204/undefined
+  // body (SG-001/SG-002 fold). These bodies mirror that envelope exactly.
+  it('POSTs /personas/{id}/follow with no client-supplied actor in the body, and returns the server\'s `following`', async () => {
+    const spy = vi.spyOn(api, 'post').mockResolvedValue(
+      apiBody({ personaId: 'persona-x', following: true, changed: true }),
+    )
+    await expect(followPersona('persona-x')).resolves.toBe(true)
     expect(spy).toHaveBeenCalledWith('/personas/persona-x/follow', undefined, expect.anything())
   })
 
-  it('DELETEs /personas/{id}/follow', async () => {
-    const spy = vi.spyOn(api, 'delete').mockResolvedValue(apiBody(undefined))
-    await unfollowPersona('persona-x')
+  it('DELETEs /personas/{id}/follow, and returns the server\'s `following`', async () => {
+    const spy = vi.spyOn(api, 'delete').mockResolvedValue(
+      apiBody({ personaId: 'persona-x', following: false, changed: true }),
+    )
+    await expect(unfollowPersona('persona-x')).resolves.toBe(false)
     expect(spy).toHaveBeenCalledWith('/personas/persona-x/follow', expect.anything())
+  })
+
+  it('fails closed when followPersona gets a body with no `following` boolean', async () => {
+    vi.spyOn(api, 'post').mockResolvedValue(apiBody({ personaId: 'persona-x' }))
+    await expect(followPersona('persona-x')).rejects.toThrow()
+  })
+
+  it('fails closed when unfollowPersona gets a bare 204/undefined body (the pre-fix shape)', async () => {
+    vi.spyOn(api, 'delete').mockResolvedValue(apiBody(undefined))
+    await expect(unfollowPersona('persona-x')).rejects.toThrow()
   })
 
   it('propagates a follow request failure rather than swallowing it', async () => {

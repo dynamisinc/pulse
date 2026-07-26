@@ -36,8 +36,10 @@ function withSession(children: ReactNode) {
 }
 
 beforeEach(() => {
-  vi.mocked(followPersona).mockResolvedValue(undefined)
-  vi.mocked(unfollowPersona).mockResolvedValue(undefined)
+  // Resolves with the server's authoritative `following` value (SG-001) —
+  // `true` for a follow, `false` for an unfollow.
+  vi.mocked(followPersona).mockResolvedValue(true)
+  vi.mocked(unfollowPersona).mockResolvedValue(false)
 })
 
 afterEach(() => {
@@ -105,7 +107,7 @@ describe('FollowButton — toggle + accessible state (SOC-051, NFR-001)', () => 
   it('marks the button aria-busy + disabled while the write is pending', async () => {
     let releaseWrite: (() => void) | undefined
     vi.mocked(followPersona).mockImplementation(
-      () => new Promise<void>(resolve => { releaseWrite = resolve }),
+      () => new Promise<boolean>(resolve => { releaseWrite = () => resolve(true) }),
     )
 
     withSession(

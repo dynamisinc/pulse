@@ -47,6 +47,14 @@
  * profile header, owned by story 01) can stay in sync with this control's
  * own optimistic count without lifting the whole `useFollow()` state up.
  * Omit it and this component works standalone exactly as tested here.
+ *
+ * SG-003: the effect above depends on `onFollowerCountChange`'s IDENTITY (it
+ * is in the dependency array), so a host that passes an inline arrow function
+ * re-fires it on every render of the host, not just when the count actually
+ * changes. Hosts should wrap the callback in `useCallback` (a stable
+ * dependency, e.g. `useCallback(count => setFollowerCount(count), [])`) —
+ * this component cannot itself defend against an unstable prop identity
+ * without silently dropping legitimate rapid-fire count changes.
  */
 
 import { useEffect } from 'react'
