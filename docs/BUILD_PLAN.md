@@ -329,7 +329,81 @@ area; barrel exports added.
 
 ---
 
-## Controller features operational (post-UAT audit, 2026-07-25) ⬜
+## Controller features operational (post-UAT audit, 2026-07-25) 🔧  · 5 of 6 built + Gate-2 clean; #354 open
+
+> **BUILD SESSION 2026-07-27 — STATE. Read this before resuming.**
+>
+> Five of six stories are **built, Gate-1 clean, merged to their umbrella, and Gate-2 clean**. None is
+> `Complete`: every story's DoD requires *verified in UAT*, which needs a deploy and is Tom's step.
+> **No umbrella→`main` PR has been opened** — deliberately left for Tom, since Track A is TIER-2.
+>
+> | Umbrella | Stories | Gate-2 | Backend | Frontend |
+> |---|---|---|---|---|
+> | `feature/engine-runtime-golive` | #349 | ✅ clean | 389 + 682 | n/a |
+> | `feature/world-steering-wave2` | #350, #351, #352 | ✅ clean | 389 + 829 | 158 files / 1408 |
+> | `feature/autonomy-safety-admin` | #353 | ✅ clean | 389 + 755 | n/a |
+>
+> All suites 0-skipped (real SQL via `PULSE_TEST_SQL_CONNECTION` → LocalDB), 0 build warnings.
+>
+> **⛔ #354 `autonomy-safety/06-engine-settings-panel` is NOT clean — do not merge it.** Branch
+> `build/autonomy-safety/06-engine-settings-panel` (`bf864b6`) carries **2 open Criticals**. Three
+> rewrites of its optimistic-update reconciliation produced **six** Criticals, all one root cause:
+> *the model orders responses by issuance but applies them on landing, so a late response overwrites
+> newer truth*. **Tom's decision: drop the optimistic model — disable the control while the POST is
+> outstanding, then apply the authoritative `EngineSettingsDto` from the response** (all three
+> endpoints return the full DTO, so no follow-up read). Delete the per-field sequence trackers, the
+> confirmed-vs-optimistic split, and `withFieldFrom`/`withSharedFieldsFrom` — the goal is that the bug
+> class becomes *unrepresentable*, not better-guarded. **Keep** the `modeSettledCount` fix (the
+> kill-switch refetch must fire after the POST settles) and the queued-not-dropped invalidation. Also
+> open on that branch: the persona-draft store is not cleared on explicit Esc/X despite the story doc
+> claiming it is, and its test is tautological (`resetForTests()` then assert empty). The rewrite was
+> **not started** — that worktree is clean. Record the AC3/AC4 deviation and rationale in the story.
+>
+> **The build stopped on an org monthly spend limit**, which killed the two in-flight builders. #351's
+> register selector was finished by the orchestrator from the partial work on disk (one broken test
+> mock fixed; gates re-run green) — see `26c4a61`.
+>
+> **Composition root is wired and mechanically guarded** (`85d12db`, `46a40e2`):
+> `AddPauseTierSteering()`/`MapPauseTierSteering()`, `AddPauseParticipantOverlay()` (no `Map*`),
+> `AddStorylineSteering()`/`MapStorylineSteering()`, plus `SteeringCompositionRootWiringTests` — boots
+> the real `WebApplicationFactory<Program>`, asserts the five routes map exactly once, that the resolved
+> `IPauseOverlayPublisher` is **not** #350's no-op, and that exactly **one** `IReactionLoopRegistry`
+> exists. Verified to *bite*: commenting out either `Add*` fails it. #353 needed no `Program.cs` change
+> (its routes ride the already-mapped `/api/engine` group) — verified, not assumed.
+>
+> **⚠ Merge-order note for `main`:** both `feature/world-steering-wave2` and
+> `feature/autonomy-safety-admin` edit `ReactionLoopHost.cs`. The hunks are ~100 lines apart in
+> different classes (a `ShouldStartClock` extraction vs. the tier-policy override at the
+> `IntentComposer` call site), so a three-way merge should apply both. The residual is **semantic**:
+> #353 adds a *required* ctor parameter to `ReactionLoopDriver`, so whichever merges second must rebuild
+> and confirm `AddReactionLoopHost` registers `EngineTierPolicyRegistry`.
+>
+> **⚠ UAT preconditions, in order:**
+> 1. **Confirm the deployed staff assignment's role is `controller`** *in the same deploy* that carries
+>    #353. It closed #297 by gating every mutating `/api/engine` route on that role — so a `planner`/
+>    `evaluator` assignment makes the whole cockpit read-only, including the kill switch, and will read
+>    as a regression.
+> 2. **The `Program.cs` wiring and the `USE_MOCK_DATA` → false flip must land together.**
+>    `<EscalationDial />` and `<PausePill />` are already mounted, so flipping mock first shows the new
+>    "no live storyline" / unavailable states.
+> 3. Every App Service restart de-registers the loop — re-seed via `POST /api/ops/seed-engine-content`.
+> 4. Track A's provisioning deploy (`deployAi = true`) is safe **pre**-signature and itself restarts the
+>    App Service. Order is provision → verify in Azure → sign §8 → flip traffic, because §8 evidence (i)
+>    is only confirmable after the deploy.
+>
+> **Tom's two decisions this session:** (a) the §2 governance attestations are explicit params the §8
+> signer types, not values derived from `deployAi` — so `GenerationGovernance.Validate` stays an
+> independent gate rather than a restatement of `deployAi`; all three booleans are `false` on disk and
+> set together in one reviewed commit. (b) #353 emits server-side telemetry
+> (`engine.autonomy_default_changed` / `engine.tier_policy_changed`), diverging from the legacy
+> swamped-mode/kill-switch/restore trio, for an audit record that survives a process restart.
+>
+> **Open follow-ups (none blocking):** SG-201 suppress overlay publishes whose participant-visible
+> snapshot is unchanged (a timing side channel, no content exposure); `Storyline.TargetIntensity` is now
+> written cross-thread as a non-atomic `int?` (first such mutation of `Storyline`); story 08's AC5/UAT
+> script still need the selector reflected; `implementation.md`'s Wave-Plan footprints for rows 07/08 are
+> stale (stories 07 and 08 grew beyond their declared files — all additive, verified per-commit).
+
 
 The three controller capabilities Tom reported non-functional in UAT — tiered pause, the escalation
 dial, and the AI inject engine. **All three were already marked `Status: Complete` with CLOSED
@@ -344,24 +418,24 @@ Four **parallel tracks**; only 08 waits on 07. Composition-root wiring is an orc
 serial step per the #310→#317 lesson (a fully-green slice merged with its `Program.cs` wiring never
 executed, leaving the endpoint dead at 404).
 
-- ⬜ **Track A — `engine-runtime/05-live-provider-uat-golive`** (#349, TIER-2, backend/infra).
+- 🔧 **Track A — `engine-runtime/05-live-provider-uat-golive`** (#349, TIER-2, backend/infra) — built, Gate-2 clean, merged to `feature/engine-runtime-golive`. AC1–AC5(evidence)/AC7 met; **AC6 blocked on Tom's §8 signature** (no Azure contact was made: no `az login`, no deploy, not even a what-if).
   `deployAi = true` for UAT, give the App Service a `SystemAssigned` identity (it has **none** today)
   and wire `backendPrincipalId`, stage `Generation:*` from bicep outputs verbatim. Standing up the
   endpoint is **decoupled from routing traffic to it** via a separate toggle — only the latter is
   gated on the `PROVIDER-GOVERNANCE.md` §8 signature, which is Tom's, not a builder's. Independent of
   B/C/D; can start immediately. Provider Azure OpenAI in-tenant; **UAT only** (CI + prod stay `Fake`).
-- ⬜ **Track B — `world-steering/07-pause-server-authoritative`** (#350, the keystone) → **`08-pause-participant-overlay`** (#351).
+- 🔧 **Track B — `world-steering/07-pause-server-authoritative`** (#350) → **`08-pause-participant-overlay`** (#351) — both built, Gate-1 clean, merged, Gate-2 clean. 07 needed two fold passes (2 Criticals: Freeze silently no-op'd on an unstarted clock — the default state of a fresh process — and ENGINE PAUSED could outlive a failed kill-switch POST). 08 needed one (a re-GET with no ordering guard could rewind the stale-push cutoff; its test fake didn't emit `Connected`, so the suite couldn't see it). Freeze now starts the clock, freezes it, **verifies** via `IsFrozen`, and returns 409 recording *no* tier if it cannot.
   07: server-authoritative tier state + `POST /api/steering/pause-tier`; Freeze drives
   `ExerciseClockService.Freeze/Unfreeze` so the loop genuinely halts; ENGINE PAUSED routed to the
   existing autonomy kill-switch/restore path (**frontend-only**, so 07 never touches
   `EngineReviewEndpoints.cs` — keeps it file-disjoint from Track D); injects tier honestly disabled.
   08: overlay write path + SignalR push so participants see the holding page. 08 edits the *shared*
   `ParticipantShellEndpoints.cs` (`overlay-state` currently returns a constant) — coordination point.
-- ⬜ **Track C — `world-steering/09-escalation-dial-live`** (#352). Endpoint pair onto the live
+- 🔧 **Track C — `world-steering/09-escalation-dial-live`** (#352) — built, Gate-1 clean after two fold passes, merged, Gate-2 clean. 2 Criticals: a rejected POST left the dial announcing the change, and `LIVE_LOADING_DEFAULTS` rendered a fabricated calm world (`intensity 0 / Dormant`) indistinguishable from real data once a restart cleared the registry. **Correction to this plan's earlier claim:** `TargetFollow.Modulate` is *not* unwired — `DecideStage` → `IntentComposer.Compose` already calls it, so a live target also shapes burst direction/count. Story 09 adds no call site, but the UAT expectation is wider than stated. Endpoint pair onto the live
   registry storyline; dial reads real intensity + phase; help/explanation UX folded in.
   `Storyline.Tick` **already** branches to `IntensityModel.TickTowardTarget`, so no engine/tick code
   is needed. `TargetFollow.Modulate` stays out of scope and unwired — do not assume it is covered.
-- ⬜ **Track D — `autonomy-safety/05-engine-settings-api`** (#353) → **`06-engine-settings-panel`** (#354).
+- 🔧 **Track D — `autonomy-safety/05-engine-settings-api`** (#353, closes #297) — built, Gate-1 clean, merged, Gate-2 clean; Delayed-auto is now reachable and proven end-to-end (a burst counts down instead of queuing). ⛔ **`06-engine-settings-panel`** (#354) — **NOT clean, not merged**, 2 open Criticals; see the session note above for Tom's approved rewrite.
   05 exposes the built-but-unreachable `SetExerciseDefault`, which is **what makes delayed-auto exist
   at all** (`EngineAutonomyState.Create` pins every exercise at `Suggest`, and the 3 existing
   endpoints only apply/lift *clamps*), plus a runtime tier lever and a settings read; folds in and
