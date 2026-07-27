@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -102,6 +103,13 @@ public sealed class ExerciseLifecycleTestHost : IAsyncDisposable
         builder.Services.AddScoped<StaffAssignmentService>();
         builder.Services.RemoveAll<ICurrentStaffSessionAccessor>();
         builder.Services.AddScoped<ICurrentStaffSessionAccessor>(_ => accessor);
+
+        // The native per-exercise clock. Program.cs registers this BEFORE the social services, and this host
+        // must mirror that: the social read surface reaches FollowService (profiles-social-graph, #372), whose
+        // constructor takes IExerciseClock. Without it the endpoints below build fine and then throw
+        // "Unable to resolve service for type 'IExerciseClock'" at REQUEST time — which is how this host
+        // stayed green on its own branch and went red only once #372 and this feature met on main.
+        builder.Services.AddExerciseClock();
 
         // The real participant read/write surface (only the SignalR fan-out is stubbed).
         builder.Services.AddSocialFeedRead();
