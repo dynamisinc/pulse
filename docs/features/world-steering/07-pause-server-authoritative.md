@@ -1,6 +1,6 @@
 # Story: Server-authoritative pause tier (Freeze genuinely halts the engine; Engine-paused unifies with the kill switch)
 
-**Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Progress — built, Gate-1 clean, merged to its umbrella, Gate-2 clean (2026-07-27). NOT Complete: this story's DoD requires verified-in-UAT.
 **Requirements:** CTL-023, COR-001, COR-050/052, XC-002, XC-004  ·  **Design decisions:** D5-014/1.3 (see story 03)  ·  **Issue:** #350
 
 > **Definition of done includes verified-in-UAT, not just unit-green.** Stories 02/03 shipped

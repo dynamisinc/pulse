@@ -1,6 +1,6 @@
 # Story: Escalation dial live — real storyline, real target-chase, and the missing explanatory UX
 
-**Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Progress — built, Gate-1 clean, merged to its umbrella, Gate-2 clean (2026-07-27). NOT Complete: this story's DoD requires verified-in-UAT.
 **Requirements:** CTL-022 (ADP-010), COR-001, XC-002, XC-004, NFR-001  ·  **Design decisions:** D5-014/2.2 (see story 02)  ·  **Issue:** #352
 
 > **Definition of done includes verified-in-UAT, not just unit-green.** As with stories 07/08: not
