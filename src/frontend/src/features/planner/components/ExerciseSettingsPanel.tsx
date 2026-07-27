@@ -51,7 +51,7 @@
  * formats the instants, so its projection is the truth about what was stored.
  *
  * ACCESSIBILITY (NFR-001, WCAG 2.1 AA):
- *  - Every input is a real labelled control. Field errors are programmatically
+ *  - Every input is a real labeled control. Field errors are programmatically
  *    associated with their field — MUI wires `aria-describedby` to the helper
  *    text from the field's `id`, and `error` sets `aria-invalid` — so the error
  *    is never conveyed by color alone.
@@ -68,17 +68,74 @@
  * anywhere, so stored markup can never execute in the console.
  *
  * SCENARIO TIME (COR-053): not applicable. This is the staff world; the two
- * schedule fields are absolute planning instants, edited and labelled
+ * schedule fields are absolute planning instants, edited and labeled
  * explicitly in UTC so a staff planner is never guessing which clock a stored
  * instant belongs to.
+ *
+ * ============================================================================
+ * THREE SECTIONS, **ONE FORM** — THE THING TO NOT BREAK
+ * ============================================================================
+ * `ExerciseSettingsPage` presents this editor as three entries in its left
+ * section nav — Identity & schedule / Channels / Theming & outlets — and passes
+ * the selected one in as `section`. That is a VIEW SWITCH, not three forms:
+ *
+ *   - ONE `ExerciseSettingsPanel` is mounted, whichever section is selected, so
+ *     there is ONE `ExerciseSettingsFormValues` object, ONE save and ONE revert.
+ *     Mounting a second instance per section would give each its own state and
+ *     each save would clear the other two sections' fields (rule 1 above).
+ *   - The unselected sections' inputs are NOT RENDERED, and that is safe only
+ *     because the values live in React state, never in the DOM: `toUpdate()`
+ *     reads `values`, so an off-screen field is still submitted, unchanged.
+ *     Never rewrite this to read a field off the DOM at submit time.
+ *   - The save / revert footer renders in ALL THREE sections (it is outside the
+ *     per-section blocks), so a planner never has to hunt for the section that
+ *     happens to own the button. It is a `PanelSaveBar`, PINNED to the bottom of
+ *     the page's scrolling content pane: with one save covering three sections,
+ *     a commit button that can scroll out of reach is a safety problem, not a
+ *     cosmetic one.
+ *
+ * ============================================================================
+ * LAYOUT: COLUMNS, BECAUSE HEIGHT IS THE SCARCE RESOURCE
+ * ============================================================================
+ * Every section here used to stack its fields in ONE column, and measured in a
+ * real browser at 1440x900 (work area 844px) two of the three overflowed —
+ * theming, ten fields tall, by ~170px. A planner had to SCROLL A FULL-REPLACE
+ * FORM to reach the button that commits it.
+ *
+ * Fields now flow into columns via `FieldGrid`, which picks the column count
+ * from the width available and collapses to one column when there is none. The
+ * three groupings, and why their column floors differ:
+ *   - identity (270px) — three free-text fields with long helper text;
+ *   - time and schedule (240px) — short, known-format values (an IANA id, two
+ *     instants), so they read fine three-up;
+ *   - theming (190px) — the brand name keeps the full row, the four colors
+ *     share the one below it;
+ *   - outlet names (220px) — no helper text, so the narrowest floor of the four,
+ *     but not narrower: the labels ("Press Room outlet name") must not clip.
+ *
+ * NOTHING WAS SHRUNK TO MAKE THIS FIT: no fixed heights, no reduced font sizes,
+ * no controls below the COBRA `size="small"` norm. The height came out of the
+ * width that was already there, plus this panel's own outer padding, which
+ * duplicated the padding the page's content pane already supplies.
+ *
+ * Two callbacks report upward so the PAGE's nav can show what this form knows
+ * and the page itself stays free of form state:
+ *   - `onStatusChange` — whether the form is dirty, and which sections hold a
+ *     validation error, so the nav can mark them (icon + text, never color
+ *     alone) and warn about unsaved edits before the planner walks away.
+ *   - `onRequestSection` — after a blocked save whose errors are all in sections
+ *     that are NOT on screen, this asks the page to move to the first offending
+ *     one. Without it a client-side error could be invisible: the server reports
+ *     only the FIRST failure, so client validation is what makes a multi-section
+ *     problem discoverable at all.
+ * Both are optional: the panel is fully usable (and testable) standalone.
  */
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   Box,
   Checkbox,
   CircularProgress,
-  Divider,
   FormControl,
   FormControlLabel,
   FormGroup,
@@ -92,11 +149,19 @@ import {
   faCircleCheck,
   faFloppyDisk,
   faRotateLeft,
-  faSliders,
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import { CobraPrimaryButton, CobraSecondaryButton, CobraTextField } from '@/theme/styledComponents'
 import CobraStyles from '@/theme/CobraStyles'
+import { FieldGrid } from './FieldGrid'
+import { PanelSaveBar } from './PanelSaveBar'
+import {
+  CLEAN_EXERCISE_SETTINGS_STATUS,
+  EXERCISE_SETTINGS_SECTION_META,
+  EXERCISE_SETTINGS_SECTION_ORDER,
+  type ExerciseSettingsSectionId,
+  type ExerciseSettingsStatus,
+} from '../exerciseSettingsSections'
 import { useExerciseSettings, useSaveExerciseSettings } from '../hooks/useExerciseSettings'
 import {
   HEX_COLOR_PATTERN,
@@ -144,6 +209,39 @@ interface ExerciseSettingsFormValues {
 type FieldErrors = Partial<Record<keyof ExerciseSettingsFormValues, string>>
 
 /**
+ * Which section each field is edited in. REQUIRED for every key of
+ * `ExerciseSettingsFormValues`, so adding a field without deciding where it
+ * lives is a COMPILE ERROR — a field with no section could fail validation in a
+ * place the nav can never point at.
+ */
+const FIELD_SECTIONS: Readonly<
+  Record<keyof ExerciseSettingsFormValues, ExerciseSettingsSectionId>
+> = {
+  name: 'identity',
+  worldName: 'identity',
+  locale: 'identity',
+  timeZone: 'identity',
+  scheduledStartAt: 'identity',
+  scheduledEndAt: 'identity',
+  enabledChannelIds: 'channels',
+  brandName: 'theming',
+  brandPrimary: 'theming',
+  brandAccent: 'theming',
+  brandSurface: 'theming',
+  brandOnSurface: 'theming',
+  outletNames: 'theming',
+}
+
+/** The sections holding at least one of these errors, in nav order. */
+function sectionsWithErrors(errors: FieldErrors): readonly ExerciseSettingsSectionId[] {
+  const hit = new Set<ExerciseSettingsSectionId>()
+  for (const field of Object.keys(errors) as (keyof ExerciseSettingsFormValues)[]) {
+    hit.add(FIELD_SECTIONS[field])
+  }
+  return EXERCISE_SETTINGS_SECTION_ORDER.filter(section => hit.has(section))
+}
+
+/**
  * Renders a stored ISO instant as a UTC `datetime-local` value.
  *
  * An unparseable stored value is passed through verbatim rather than dropped —
@@ -178,7 +276,7 @@ function fromText(value: string): string | null {
 /**
  * Seeds the form from the server's settings.
  *
- * `outletNames` gets a field for every catalogued channel AND for every extra
+ * `outletNames` gets a field for every cataloged channel AND for every extra
  * key the server already stores, so a full replace can never drop an entry this
  * editor did not know how to render.
  */
@@ -241,7 +339,24 @@ function toUpdate(values: ExerciseSettingsFormValues): ExerciseSettingsUpdate {
   }
 }
 
-/** True when `zone` is an IANA id this runtime recognises (a Windows id throws). */
+/**
+ * True when saving now would send something OTHER than what the server already
+ * holds — i.e. there are unsaved changes.
+ *
+ * It compares the two REQUEST BODIES rather than the raw form values, so a
+ * whitespace-only edit that `toUpdate()` trims away is correctly "not dirty":
+ * the question this answers is "would the planner lose anything?", and they
+ * cannot lose what would never have been sent. Both bodies are built by the same
+ * function from objects seeded the same way, so their key order matches and a
+ * JSON comparison is sound. `enabledChannels` is compared IN ORDER: re-checking
+ * the same channels in a different order reads as dirty, which errs toward
+ * warning — the safe direction for an unsaved-changes prompt.
+ */
+function isDirty(values: ExerciseSettingsFormValues, settings: ExerciseSettings): boolean {
+  return JSON.stringify(toUpdate(values)) !== JSON.stringify(toUpdate(toFormValues(settings)))
+}
+
+/** True when `zone` is an IANA id this runtime recognizes (a Windows id throws). */
 function isIanaZone(zone: string): boolean {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: zone })
@@ -258,7 +373,7 @@ function colorError(value: string, label: string): string | undefined {
   if (trimmed.length > MAX_COLOR_LENGTH) return `${label} must be ${MAX_COLOR_LENGTH} characters or fewer.`
   return HEX_COLOR_PATTERN.test(trimmed)
     ? undefined
-    : `${label} must be a CSS hex color, for example #2b5f75.`
+    : `${label} must be a hex color, for example #2b5f75.`
 }
 
 /** A max-length field error, or `undefined`. */
@@ -294,7 +409,8 @@ function validate(values: ExerciseSettingsFormValues): FieldErrors {
     errors.timeZone = `The time zone must be ${MAX_TIME_ZONE_LENGTH} characters or fewer.`
   } else if (!isIanaZone(zone)) {
     errors.timeZone =
-      'Enter an IANA time zone, for example America/New_York. Windows zone ids are not accepted.'
+      'Enter an IANA time zone, for example America/New_York. A name like Eastern Standard Time '
+      + 'will not work.'
   }
 
   const start = values.scheduledStartAt.trim()
@@ -317,7 +433,7 @@ function validate(values: ExerciseSettingsFormValues): FieldErrors {
 
   if (values.enabledChannelIds.length === 0) {
     errors.enabledChannelIds =
-      'Enable at least one channel. An exercise with no channels would leave participants with nothing to see.'
+      'Turn on at least one channel. With all of them off, participants have nothing to see.'
   }
 
   const brandNameError = lengthError(values.brandName, MAX_BRAND_NAME_LENGTH, 'The brand name')
@@ -342,13 +458,18 @@ function validate(values: ExerciseSettingsFormValues): FieldErrors {
   return errors
 }
 
-/** Maps a thrown settings error to clear, status-aware staff-facing copy. */
-function friendlyErrorMessage(error: ExerciseSettingsError, verb: 'load' | 'save'): string {
+/**
+ * Maps a thrown settings error to clear, status-aware staff-facing copy.
+ *
+ * `verb` is the PAST PARTICIPLE ('loaded' / 'saved'), not the infinitive: the
+ * previous `${verb}ed` produced "could not be saveed" on every failed save.
+ */
+function friendlyErrorMessage(error: ExerciseSettingsError, verb: 'loaded' | 'saved'): string {
   switch (error.status) {
     case 400:
       return error.serverMessage
         ? `These settings were not saved: ${error.serverMessage}`
-        : 'These settings were rejected. Nothing was saved — check the fields and try again.'
+        : 'These settings were rejected and nothing was saved. Check the fields and try again.'
     case 401:
       return 'Your staff session is not active. Sign in to the console and try again.'
     case 403:
@@ -357,8 +478,8 @@ function friendlyErrorMessage(error: ExerciseSettingsError, verb: 'load' | 'save
       return 'This exercise no longer exists. Pick another exercise and try again.'
     default:
       return error.status === undefined
-        ? `Could not reach the server, so the settings could not be ${verb}ed. Check your connection and try again.`
-        : (error.serverMessage ?? `The settings could not be ${verb}ed. Please try again.`)
+        ? `Pulse could not be reached, so the settings were not ${verb}. Check your connection and try again.`
+        : (error.serverMessage ?? `The settings were not ${verb}. Try again.`)
   }
 }
 
@@ -402,9 +523,18 @@ function SectionHeading({ text }: { text: string }) {
 
 interface ExerciseSettingsFormProps {
   readonly settings: ExerciseSettings
+  /** The section on screen. A VIEW switch — the state below is shared by all three. */
+  readonly section: ExerciseSettingsSectionId
+  readonly onStatusChange?: (status: ExerciseSettingsStatus) => void
+  readonly onRequestSection?: (section: ExerciseSettingsSectionId) => void
 }
 
-function ExerciseSettingsForm({ settings }: ExerciseSettingsFormProps) {
+function ExerciseSettingsForm({
+  settings,
+  section,
+  onStatusChange,
+  onRequestSection,
+}: ExerciseSettingsFormProps) {
   const save = useSaveExerciseSettings()
 
   // Re-sync from the SERVER's settings whenever a new projection arrives — the
@@ -446,8 +576,18 @@ function ExerciseSettingsForm({ settings }: ExerciseSettingsFormProps) {
     event.preventDefault()
     const found = validate(values)
     setErrors(found)
-    if (Object.keys(found).length > 0) return
-    // ONE call, ONE complete body — every managed field, every time.
+    const failing = sectionsWithErrors(found)
+    const firstFailing = failing[0]
+    if (firstFailing !== undefined) {
+      // A field in a section that is NOT on screen just blocked the save. Say so
+      // where the planner is looking: move them to the first offending section
+      // (the nav marks all of them). Silently refusing to save with the reason
+      // one click away is the failure this exists to prevent.
+      if (!failing.includes(section)) onRequestSection?.(firstFailing)
+      return
+    }
+    // ONE call, ONE complete body — every managed field from every section,
+    // every time, whether or not it is currently rendered.
     save.mutate(toUpdate(values))
   }
 
@@ -463,6 +603,26 @@ function ExerciseSettingsForm({ settings }: ExerciseSettingsFormProps) {
     key => !settings.channels.some(channel => channel.id === key),
   )
 
+  // ---------------------------------------------------------------------
+  // Report upward so the page's nav can mark what only this form knows.
+  // ---------------------------------------------------------------------
+  const dirty = isDirty(values, settings)
+  const failingSections = useMemo(() => sectionsWithErrors(errors), [errors])
+
+  useEffect(() => {
+    onStatusChange?.({ dirty, sectionsWithErrors: failingSections })
+  }, [dirty, failingSections, onStatusChange])
+
+  // If this form goes away (a reload that fails, say), the nav must not keep
+  // warning about unsaved changes that no longer have anywhere to live. The ref
+  // keeps this effect mount-scoped: re-running it on every status change would
+  // emit a spurious clean status between renders.
+  const notifyStatus = useRef(onStatusChange)
+  useEffect(() => {
+    notifyStatus.current = onStatusChange
+  }, [onStatusChange])
+  useEffect(() => () => notifyStatus.current?.(CLEAN_EXERCISE_SETTINGS_STATUS), [])
+
   /** Shared props for every text field: label, bounded length, and an
    *  `id` so MUI binds the helper text with `aria-describedby`. */
   const textFieldProps = (field: keyof ExerciseSettingsFormValues, hint: string) => ({
@@ -476,244 +636,307 @@ function ExerciseSettingsForm({ settings }: ExerciseSettingsFormProps) {
 
   return (
     <Box component="form" onSubmit={handleSubmit} noValidate data-testid="exercise-settings-form">
-      <SectionHeading text="Identity" />
-      <Stack sx={{ gap: CobraStyles.Spacing.FormFields }}>
-        <CobraTextField
-          {...textFieldProps('name', 'Staff-facing internal name for this run. Participants never see it.')}
-          label="Exercise name"
-          required
-          value={values.name}
-          onChange={event => setField('name', event.target.value)}
-          slotProps={{ htmlInput: { maxLength: MAX_NAME_LENGTH } }}
-        />
-        <CobraTextField
-          {...textFieldProps(
-            'worldName',
-            'Participant-visible name of the simulated world. Leave empty to keep the shipped default.',
-          )}
-          label="World name"
-          value={values.worldName}
-          onChange={event => setField('worldName', event.target.value)}
-          slotProps={{ htmlInput: { maxLength: MAX_WORLD_NAME_LENGTH } }}
-        />
-        <CobraTextField
-          {...textFieldProps('locale', 'BCP-47 tag, for example en-US. Leave empty to keep the shipped default.')}
-          label="Locale"
-          value={values.locale}
-          onChange={event => setField('locale', event.target.value)}
-          slotProps={{ htmlInput: { maxLength: MAX_LOCALE_LENGTH } }}
-        />
-      </Stack>
-
-      <SectionHeading text="Time and schedule" />
-      <Stack sx={{ gap: CobraStyles.Spacing.FormFields }}>
-        <CobraTextField
-          {...textFieldProps(
-            'timeZone',
-            'One IANA zone per exercise, for example America/New_York. Every participant timestamp renders in it.',
-          )}
-          label="Time zone"
-          required
-          value={values.timeZone}
-          onChange={event => setField('timeZone', event.target.value)}
-          slotProps={{ htmlInput: { maxLength: MAX_TIME_ZONE_LENGTH } }}
-        />
-        <Stack direction="row" sx={{ gap: CobraStyles.Spacing.FormFields, flexWrap: 'wrap' }}>
-          <CobraTextField
-            {...textFieldProps('scheduledStartAt', 'Absolute instant, entered in UTC. Leave empty if unscheduled.')}
-            label="Scheduled start (UTC)"
-            type="datetime-local"
-            value={values.scheduledStartAt}
-            onChange={event => setField('scheduledStartAt', event.target.value)}
-            slotProps={{ inputLabel: { shrink: true }, htmlInput: { step: 1 } }}
-            sx={{ flex: '1 1 220px' }}
-          />
-          <CobraTextField
-            {...textFieldProps('scheduledEndAt', 'Absolute instant, entered in UTC. Must not precede the start.')}
-            label="Scheduled end (UTC)"
-            type="datetime-local"
-            value={values.scheduledEndAt}
-            onChange={event => setField('scheduledEndAt', event.target.value)}
-            slotProps={{ inputLabel: { shrink: true }, htmlInput: { step: 1 } }}
-            sx={{ flex: '1 1 220px' }}
-          />
-        </Stack>
-      </Stack>
-
-      <SectionHeading text="Channels" />
-      <FormControl
-        component="fieldset"
-        variant="standard"
-        disabled={disabled}
-        error={Boolean(errors.enabledChannelIds)}
-        aria-describedby="exercise-settings-channels-help"
-        data-testid="exercise-settings-channels"
-      >
-        <FormLabel component="legend">Enabled channels</FormLabel>
-        <FormGroup>
-          {/* Rendered from the server's CLOSED catalog — no channel id is
-              hardcoded here; an invented id would be a 400. */}
-          {settings.channels.map(channel => (
-            <FormControlLabel
-              key={channel.id}
-              control={
-                <Checkbox
-                  checked={values.enabledChannelIds.includes(channel.id)}
-                  onChange={event => toggleChannel(channel.id, event.target.checked)}
-                  slotProps={{ input: { 'aria-describedby': 'exercise-settings-channels-help' } }}
-                />
-              }
-              /* The server's own label — this is the ACCESSIBLE NAME each
-                 checkbox is found by, so nothing here depends on a client-side
-                 id list. */
-              label={channel.label}
+      {/*
+        ONLY THE SELECTED SECTION IS RENDERED. Safe because every value lives in
+        `values` (React state), not in these inputs: `toUpdate()` below sends the
+        whole body regardless of what is on screen. See the module header.
+      */}
+      {section === 'identity' ? (
+        <>
+          <SectionHeading text="Identity" />
+          {/*
+            Multi-column, so a six-field section fits a desktop work area
+            without scrolling a full-replace form. `FieldGrid` decides the
+            column count from the pane's width and collapses to one column when
+            there is no room — see its module header.
+          */}
+          <FieldGrid minColumnWidth={270}>
+            <CobraTextField
+              {...textFieldProps('name', 'The name your planning team uses. Participants never see it.')}
+              label="Exercise name"
+              required
+              value={values.name}
+              onChange={event => setField('name', event.target.value)}
+              slotProps={{ htmlInput: { maxLength: MAX_NAME_LENGTH } }}
             />
-          ))}
-        </FormGroup>
-        <FormHelperText id="exercise-settings-channels-help">
-          {errors.enabledChannelIds ??
-            'A disabled channel is catalogued but never served to participants.'}
-        </FormHelperText>
-      </FormControl>
+            <CobraTextField
+              {...textFieldProps(
+                'worldName',
+                'The place participants think they are in, for example Metro Atlanta. Leave it '
+                + 'blank and they see the standard name.',
+              )}
+              label="World name"
+              value={values.worldName}
+              onChange={event => setField('worldName', event.target.value)}
+              slotProps={{ htmlInput: { maxLength: MAX_WORLD_NAME_LENGTH } }}
+            />
+            <CobraTextField
+              {...textFieldProps(
+                'locale',
+                'How dates and numbers are written for participants. Use a BCP-47 tag, for '
+                + 'example en-US. Blank uses the standard format.',
+              )}
+              label="Locale"
+              value={values.locale}
+              onChange={event => setField('locale', event.target.value)}
+              slotProps={{ htmlInput: { maxLength: MAX_LOCALE_LENGTH } }}
+            />
+          </FieldGrid>
 
-      <SectionHeading text="Theming" />
-      <Stack sx={{ gap: CobraStyles.Spacing.FormFields }}>
-        <CobraTextField
-          {...textFieldProps(
-            'brandName',
-            'Participant-visible brand name. Leave empty to keep the shipped default brand.',
-          )}
-          label="Brand name"
-          value={values.brandName}
-          onChange={event => setField('brandName', event.target.value)}
-          slotProps={{ htmlInput: { maxLength: MAX_BRAND_NAME_LENGTH } }}
-        />
-        <Stack direction="row" sx={{ gap: CobraStyles.Spacing.FormFields, flexWrap: 'wrap' }}>
-          <CobraTextField
-            {...textFieldProps('brandPrimary', 'Hex, for example #2b5f75. Empty keeps the default.')}
-            label="Primary color"
-            value={values.brandPrimary}
-            onChange={event => setField('brandPrimary', event.target.value)}
-            sx={{ flex: '1 1 180px' }}
-          />
-          <CobraTextField
-            {...textFieldProps('brandAccent', 'Hex. Empty keeps the default.')}
-            label="Accent color"
-            value={values.brandAccent}
-            onChange={event => setField('brandAccent', event.target.value)}
-            sx={{ flex: '1 1 180px' }}
-          />
-        </Stack>
-        <Stack direction="row" sx={{ gap: CobraStyles.Spacing.FormFields, flexWrap: 'wrap' }}>
-          <CobraTextField
-            {...textFieldProps('brandSurface', 'Hex. Empty keeps the default.')}
-            label="Surface color"
-            value={values.brandSurface}
-            onChange={event => setField('brandSurface', event.target.value)}
-            sx={{ flex: '1 1 180px' }}
-          />
-          <CobraTextField
-            {...textFieldProps('brandOnSurface', 'Hex. Empty keeps the default.')}
-            label="On-surface color"
-            value={values.brandOnSurface}
-            onChange={event => setField('brandOnSurface', event.target.value)}
-            sx={{ flex: '1 1 180px' }}
-          />
-        </Stack>
-      </Stack>
-
-      <SectionHeading text="Outlet names" />
-      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
-        Per-outlet display names. Leave one empty to keep that outlet&rsquo;s shipped default name.
-      </Typography>
-      <Stack sx={{ gap: CobraStyles.Spacing.FormFields }}>
-        {settings.channels.map(channel => (
-          <CobraTextField
-            key={channel.id}
-            id={`exercise-settings-outlet-${channel.id}`}
-            label={`${channel.label} outlet name`}
-            value={values.outletNames[channel.id] ?? ''}
-            onChange={event => setOutletName(channel.id, event.target.value)}
-            disabled={disabled}
-            fullWidth
-            size="small"
-            slotProps={{ htmlInput: { maxLength: MAX_OUTLET_NAME_LENGTH } }}
-          />
-        ))}
-        {/* Keys the server already stores that fall outside the catalog: shown
-            so a FULL REPLACE never silently drops them. */}
-        {extraOutletKeys.map(key => (
-          <CobraTextField
-            key={key}
-            id={`exercise-settings-outlet-${key}`}
-            label={`${key} outlet name`}
-            value={values.outletNames[key] ?? ''}
-            onChange={event => setOutletName(key, event.target.value)}
-            disabled={disabled}
-            fullWidth
-            size="small"
-            slotProps={{ htmlInput: { maxLength: MAX_OUTLET_NAME_LENGTH } }}
-          />
-        ))}
-        {errors.outletNames ? (
-          <SettingsAlert message={errors.outletNames} testId="exercise-settings-outlet-error" />
-        ) : null}
-      </Stack>
-
-      <Divider sx={{ mt: 3 }} />
-
-      <Stack
-        direction="row"
-        sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1.5, mt: 2 }}
-      >
-        <CobraPrimaryButton
-          type="submit"
-          disabled={disabled}
-          startIcon={
-            save.isPending
-              ? <CircularProgress size={16} color="inherit" />
-              : <FontAwesomeIcon icon={faFloppyDisk} />
-          }
-        >
-          {save.isPending ? 'Saving…' : 'Save settings'}
-        </CobraPrimaryButton>
-        <CobraSecondaryButton
-          type="button"
-          onClick={handleRevert}
-          disabled={disabled}
-          startIcon={<FontAwesomeIcon icon={faRotateLeft} />}
-        >
-          Revert changes
-        </CobraSecondaryButton>
-      </Stack>
-
-      {hasClientErrors ? (
-        <SettingsAlert
-          message="Some settings need attention before they can be saved. Nothing has been sent to the server."
-          testId="exercise-settings-client-error"
-        />
+          <SectionHeading text="Time and schedule" />
+          {/* A slightly narrower floor than identity: these three are short,
+              known-format values (an IANA id and two instants), so they read
+              fine three-up where a free-text name would not. */}
+          <FieldGrid minColumnWidth={240}>
+            <CobraTextField
+              {...textFieldProps(
+                'timeZone',
+                'One zone for the whole exercise, for example America/New_York. Participants read '
+                + 'every date and time in it, so the wrong zone puts every post hours out.',
+              )}
+              label="Time zone"
+              required
+              value={values.timeZone}
+              onChange={event => setField('timeZone', event.target.value)}
+              slotProps={{ htmlInput: { maxLength: MAX_TIME_ZONE_LENGTH } }}
+            />
+            <CobraTextField
+              {...textFieldProps(
+                'scheduledStartAt',
+                'Planned StartEx, in UTC. Leave it blank if the date is not fixed yet.',
+              )}
+              label="Scheduled start (UTC)"
+              type="datetime-local"
+              value={values.scheduledStartAt}
+              onChange={event => setField('scheduledStartAt', event.target.value)}
+              slotProps={{ inputLabel: { shrink: true }, htmlInput: { step: 1 } }}
+            />
+            <CobraTextField
+              {...textFieldProps(
+                'scheduledEndAt',
+                'Planned EndEx, in UTC. It cannot be earlier than the start.',
+              )}
+              label="Scheduled end (UTC)"
+              type="datetime-local"
+              value={values.scheduledEndAt}
+              onChange={event => setField('scheduledEndAt', event.target.value)}
+              slotProps={{ inputLabel: { shrink: true }, htmlInput: { step: 1 } }}
+            />
+          </FieldGrid>
+        </>
       ) : null}
 
-      {save.isError ? (
-        <SettingsAlert
-          message={friendlyErrorMessage(save.error, 'save')}
-          testId="exercise-settings-save-error"
-        />
+      {section === 'channels' ? (
+        <FormControl
+          component="fieldset"
+          variant="standard"
+          disabled={disabled}
+          error={Boolean(errors.enabledChannelIds)}
+          aria-describedby="exercise-settings-channels-help"
+          data-testid="exercise-settings-channels"
+          sx={{ mt: 1 }}
+        >
+          <FormLabel component="legend">Enabled channels</FormLabel>
+          <FormGroup>
+            {/* Rendered from the server's CLOSED catalog — no channel id is
+                hardcoded here; an invented id would be a 400. */}
+            {settings.channels.map(channel => (
+              <FormControlLabel
+                key={channel.id}
+                control={
+                  <Checkbox
+                    checked={values.enabledChannelIds.includes(channel.id)}
+                    onChange={event => toggleChannel(channel.id, event.target.checked)}
+                    slotProps={{ input: { 'aria-describedby': 'exercise-settings-channels-help' } }}
+                  />
+                }
+                /* The server's own label — this is the ACCESSIBLE NAME each
+                   checkbox is found by, so nothing here depends on a client-side
+                   id list. */
+                label={channel.label}
+              />
+            ))}
+          </FormGroup>
+          <FormHelperText id="exercise-settings-channels-help">
+            {errors.enabledChannelIds ??
+              'Turn a channel off and participants cannot reach it. Nothing posted to it gets to '
+                + 'them.'}
+          </FormHelperText>
+        </FormControl>
       ) : null}
 
-      {save.isSuccess ? (
-        <Stack
-          role="status"
-          direction="row"
-          data-testid="exercise-settings-saved"
-          sx={{ alignItems: 'center', gap: 1, color: 'success.main', mt: 1.5 }}
-        >
-          <FontAwesomeIcon icon={faCircleCheck} aria-hidden />
-          <Typography variant="body2">
-            Settings saved. The fields below now show what the server stored.
+      {section === 'theming' ? (
+        <>
+          <SectionHeading text="Theming" />
+          {/*
+            The brand name keeps the full row (`gridColumn: '1 / -1'`) — it is
+            free text and the one field here that benefits from the width — and
+            the four colors share the row below it. Ten fields in one column is
+            what made this the worst-scrolling section of the five.
+          */}
+          <FieldGrid minColumnWidth={190}>
+            <CobraTextField
+              {...textFieldProps(
+                'brandName',
+                'The brand participants see across every channel. Leave it blank to use the '
+                + 'standard brand.',
+              )}
+              label="Brand name"
+              value={values.brandName}
+              onChange={event => setField('brandName', event.target.value)}
+              slotProps={{ htmlInput: { maxLength: MAX_BRAND_NAME_LENGTH } }}
+              sx={{ gridColumn: '1 / -1' }}
+            />
+            <CobraTextField
+              {...textFieldProps(
+                'brandPrimary',
+                'Main brand color. Hex, for example #2b5f75. Blank uses the standard color.',
+              )}
+              label="Primary color"
+              value={values.brandPrimary}
+              onChange={event => setField('brandPrimary', event.target.value)}
+            />
+            <CobraTextField
+              {...textFieldProps(
+                'brandAccent',
+                'Buttons and links. Hex, for example #c05621. Blank uses the standard color.',
+              )}
+              label="Accent color"
+              value={values.brandAccent}
+              onChange={event => setField('brandAccent', event.target.value)}
+            />
+            <CobraTextField
+              {...textFieldProps(
+                'brandSurface',
+                'Page background. Hex, for example #f7f7f5. Blank uses the standard color.',
+              )}
+              label="Surface color"
+              value={values.brandSurface}
+              onChange={event => setField('brandSurface', event.target.value)}
+            />
+            <CobraTextField
+              {...textFieldProps(
+                'brandOnSurface',
+                'Text on that background. Hex, for example #1c1c1c. Blank uses the standard color.',
+              )}
+              label="On-surface color"
+              value={values.brandOnSurface}
+              onChange={event => setField('brandOnSurface', event.target.value)}
+            />
+          </FieldGrid>
+
+          <SectionHeading text="Outlet names" />
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
+            What participants see each outlet called. Leave one blank to use its standard name.
           </Typography>
-        </Stack>
+          {/* No helper text and short labels, so these tolerate the narrowest
+              floor of the three grids — five outlets land in two rows. */}
+          <FieldGrid minColumnWidth={220}>
+            {settings.channels.map(channel => (
+              <CobraTextField
+                key={channel.id}
+                id={`exercise-settings-outlet-${channel.id}`}
+                label={`${channel.label} outlet name`}
+                value={values.outletNames[channel.id] ?? ''}
+                onChange={event => setOutletName(channel.id, event.target.value)}
+                disabled={disabled}
+                fullWidth
+                size="small"
+                slotProps={{ htmlInput: { maxLength: MAX_OUTLET_NAME_LENGTH } }}
+              />
+            ))}
+            {/* Keys the server already stores that fall outside the catalog: shown
+                so a FULL REPLACE never silently drops them. */}
+            {extraOutletKeys.map(key => (
+              <CobraTextField
+                key={key}
+                id={`exercise-settings-outlet-${key}`}
+                label={`${key} outlet name`}
+                value={values.outletNames[key] ?? ''}
+                onChange={event => setOutletName(key, event.target.value)}
+                disabled={disabled}
+                fullWidth
+                size="small"
+                slotProps={{ htmlInput: { maxLength: MAX_OUTLET_NAME_LENGTH } }}
+              />
+            ))}
+            {errors.outletNames ? (
+              // Spans the row: a validation message that shared a row with a
+              // field would read as belonging to that one field.
+              <Box sx={{ gridColumn: '1 / -1' }}>
+                <SettingsAlert message={errors.outletNames} testId="exercise-settings-outlet-error" />
+              </Box>
+            ) : null}
+          </FieldGrid>
+        </>
       ) : null}
+
+      {/*
+        THE SHARED FOOTER. Rendered in ALL THREE sections, because there is only
+        one form: whichever section a planner is looking at, Save sends the whole
+        body and Revert restores the whole body. `PanelSaveBar` PINS it to the
+        bottom of the scrolling content pane, so the one commit point for all
+        three sections can never scroll out of reach (see its module header).
+      */}
+      <PanelSaveBar>
+        <Stack
+          direction="row"
+          sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1.5, mt: 2 }}
+        >
+          <CobraPrimaryButton
+            type="submit"
+            disabled={disabled}
+            startIcon={
+              save.isPending
+                ? <CircularProgress size={16} color="inherit" />
+                : <FontAwesomeIcon icon={faFloppyDisk} />
+            }
+          >
+            {save.isPending ? 'Saving…' : 'Save settings'}
+          </CobraPrimaryButton>
+          <CobraSecondaryButton
+            type="button"
+            onClick={handleRevert}
+            disabled={disabled}
+            startIcon={<FontAwesomeIcon icon={faRotateLeft} />}
+          >
+            Revert changes
+          </CobraSecondaryButton>
+        </Stack>
+
+        {/* Pinned WITH the buttons: an alert that says nothing was sent is of
+            no use scrolled off below the button that refused to send. */}
+        {hasClientErrors ? (
+          <SettingsAlert
+            message={
+              'Nothing was saved. Fix the marked fields, then save again. Sections to check: '
+              + `${failingSections.map(id => EXERCISE_SETTINGS_SECTION_META[id].label).join(', ')}.`
+            }
+            testId="exercise-settings-client-error"
+          />
+        ) : null}
+
+        {save.isError ? (
+          <SettingsAlert
+            message={friendlyErrorMessage(save.error, 'saved')}
+            testId="exercise-settings-save-error"
+          />
+        ) : null}
+
+        {save.isSuccess ? (
+          <Stack
+            role="status"
+            direction="row"
+            data-testid="exercise-settings-saved"
+            sx={{ alignItems: 'center', gap: 1, color: 'success.main', mt: 1.5 }}
+          >
+            <FontAwesomeIcon icon={faCircleCheck} aria-hidden />
+            <Typography variant="body2">
+              Settings saved. All three sections now show the stored values.
+            </Typography>
+          </Stack>
+        ) : null}
+      </PanelSaveBar>
     </Box>
   )
 }
@@ -722,32 +945,64 @@ function ExerciseSettingsForm({ settings }: ExerciseSettingsFormProps) {
 // The panel (query states + the form)
 // ---------------------------------------------------------------------------
 
+interface ExerciseSettingsPanelProps {
+  /**
+   * Which of the three settings sections to show. A VIEW switch over one shared
+   * form — mount ONE panel and change this prop; never mount one panel per
+   * section (see the module header).
+   */
+  readonly section: ExerciseSettingsSectionId
+  /** Reports dirty state + which sections hold validation errors, for the page's nav. */
+  readonly onStatusChange?: (status: ExerciseSettingsStatus) => void
+  /** Asks the page to show a section — used when a blocked save's errors are all off-screen. */
+  readonly onRequestSection?: (section: ExerciseSettingsSectionId) => void
+}
+
 /**
  * The per-exercise settings panel. Self-contained COBRA staff surface: it loads
- * the resolved exercise's COR-030 settings, renders them for editing, and
- * full-replaces them on save. Mounted by `ExerciseSettingsPage`.
+ * the resolved exercise's COR-030 settings, renders ONE section of them for
+ * editing, and full-replaces ALL of them on save. Mounted once by
+ * `ExerciseSettingsPage`, which drives `section` from its left nav.
  */
-export function ExerciseSettingsPanel() {
+export function ExerciseSettingsPanel({
+  section,
+  onStatusChange,
+  onRequestSection,
+}: ExerciseSettingsPanelProps) {
   const settingsQuery = useExerciseSettings()
+  const meta = EXERCISE_SETTINGS_SECTION_META[section]
 
   return (
     <Box
       component="section"
       aria-labelledby="exercise-settings-heading"
       data-testid="exercise-settings-panel"
-      sx={{ padding: CobraStyles.Padding.MainWindow, maxWidth: 860 }}
+      sx={{
+        // NO top/side padding: the page already insets the content pane by
+        // `CobraStyles.Padding.MainWindow`, and a second copy of it here cost
+        // 18px of the height this section has to fit in and 36px of the width
+        // its field grids get to divide into columns. The bottom padding stays
+        // — it is the breathing room under the pinned save bar, which is sized
+        // to swallow exactly this much (see `PanelSaveBar`).
+        paddingBottom: CobraStyles.Padding.MainWindow,
+        maxWidth: 860,
+      }}
     >
       <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 0.5 }}>
-        <FontAwesomeIcon icon={faSliders} aria-hidden />
+        <FontAwesomeIcon icon={meta.icon} aria-hidden />
         <Typography id="exercise-settings-heading" variant="h6" component="h2" sx={{ fontWeight: 700 }}>
-          Exercise settings
+          {meta.label}
         </Typography>
       </Stack>
 
       <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
-        The settings that define this world. Saving replaces the whole block, so every field
-        below is sent together. An empty field means &ldquo;not configured&rdquo; — that setting
-        falls back to the shipped default rather than being stored.
+        {meta.description}
+      </Typography>
+
+      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
+        Identity &amp; schedule, Channels and Theming &amp; outlets share one Save. Saving writes
+        all three, including the fields you never opened, so check them before you save. A field
+        left blank is not stored: participants get the standard value for it.
       </Typography>
 
       {settingsQuery.isPending ? (
@@ -764,12 +1019,19 @@ export function ExerciseSettingsPanel() {
 
       {settingsQuery.isError ? (
         <SettingsAlert
-          message={friendlyErrorMessage(settingsQuery.error, 'load')}
+          message={friendlyErrorMessage(settingsQuery.error, 'loaded')}
           testId="exercise-settings-load-error"
         />
       ) : null}
 
-      {settingsQuery.isSuccess ? <ExerciseSettingsForm settings={settingsQuery.data} /> : null}
+      {settingsQuery.isSuccess ? (
+        <ExerciseSettingsForm
+          settings={settingsQuery.data}
+          section={section}
+          onStatusChange={onStatusChange}
+          onRequestSection={onRequestSection}
+        />
+      ) : null}
     </Box>
   )
 }

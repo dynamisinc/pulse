@@ -9,7 +9,7 @@
  * and `@/core/services/api` is never touched — no real axios sink, no Vitest
  * worker-teardown footgun.
  *
- * The centrepiece is NFR-001: a rehearsal must never be mistaken for real
+ * The centerpiece is NFR-001: a rehearsal must never be mistaken for real
  * conduct, so the indicator is asserted to carry an ICON **and** TEXT that
  * differ between the two states — never color alone.
  *

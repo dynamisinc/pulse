@@ -22,7 +22,7 @@
  *  - The result region is an `aria-live="polite"` status region so a screen
  *    reader announces the outcome after an upload; validation / server errors
  *    are `role="alert"`.
- *  - The file picker is a real, labelled `<input type="file">` triggered by the
+ *  - The file picker is a real, labeled `<input type="file">` triggered by the
  *    visible COBRA button (the repo's `Composer.tsx` ref + hidden-input
  *    pattern), so it is keyboard- and screen-reader-operable.
  *

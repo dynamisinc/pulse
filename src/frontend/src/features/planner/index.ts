@@ -14,10 +14,21 @@ export { useAccountImport } from './hooks/useAccountImport'
 
 // E1 exercise-configuration, story 01b — the per-exercise settings editor (COR-030).
 // `ExerciseSettingsPage` is the surface App.tsx mounts as the PLANNER staff surface;
-// it is a composition point, and wave 3's two panels are now mounted into it (see
-// below) as well as exported here.
+// it is a composition point (a left section nav + content pane), and wave 3's two
+// panels are sections of it (see below) as well as exported here.
+// `ExerciseSettingsPanel` takes a `section` prop: its three sections are VIEWS over
+// ONE form with ONE save, because the settings `PUT` is a FULL REPLACE. Mount it
+// ONCE and change the prop — never one panel per section.
 export { ExerciseSettingsPage } from './pages/ExerciseSettingsPage'
 export { ExerciseSettingsPanel } from './components/ExerciseSettingsPanel'
+export {
+  EXERCISE_SETTINGS_SECTION_META,
+  EXERCISE_SETTINGS_SECTION_ORDER,
+} from './exerciseSettingsSections'
+export type {
+  ExerciseSettingsSectionId,
+  ExerciseSettingsStatus,
+} from './exerciseSettingsSections'
 export { useExerciseSettings } from './hooks/useExerciseSettings'
 
 // E1 exercise-configuration, story 02 — the COR-031 compliance-chrome panel + the

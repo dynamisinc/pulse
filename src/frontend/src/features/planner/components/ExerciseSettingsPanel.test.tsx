@@ -9,14 +9,30 @@
  * panel through a controlled seam and `@/core/services/api` is never touched —
  * no real axios sink, no Vitest worker-teardown footgun.
  *
- * The centrepiece is the FULL-REPLACE round trip: `PUT` is a replace, not a
+ * The centerpiece is the FULL-REPLACE round trip: `PUT` is a replace, not a
  * patch, so editing ONE field must still submit every other field unchanged.
  * A regression there silently clears settings a planner never touched, which is
  * this story's most likely defect — hence the whole-body `toEqual` assertion
  * rather than a `toMatchObject` on the field under test.
  *
+ * ============================================================================
+ * WHY EVERY RENDER NAMES A SECTION
+ * ============================================================================
+ * The panel now shows ONE of three sections at a time (`section` prop), driven
+ * by `ExerciseSettingsPage`'s left nav — three VIEWS over one form, never three
+ * forms. So these tests render the section that owns the field under test, and
+ * `show(...)` switches sections the way the page does (a prop change on the same
+ * mounted panel — remounting would be a different component with different
+ * state, and would not be testing what ships).
+ *
+ * That makes the full-replace guard STRONGER than it was when everything was on
+ * screen at once: a save issued from `identity` must still submit the theming
+ * and channel fields, which are not rendered at all. If `toUpdate()` ever starts
+ * reading the DOM instead of state, these tests go red.
+ *
  * Rendered inside the COBRA `ThemeProvider` (this is a STAFF surface — COBRA is
- * correct here) + a React Query client, exactly as `App.tsx` will mount it.
+ * correct here) + a React Query client, exactly as `ExerciseSettingsPage` mounts
+ * it.
  */
 import type { ReactNode } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -25,6 +41,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from '@mui/material/styles'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { cobraTheme } from '@/theme/cobraTheme'
+import {
+  EXERCISE_SETTINGS_SECTION_META,
+  type ExerciseSettingsSectionId,
+  type ExerciseSettingsStatus,
+} from '../exerciseSettingsSections'
 import { ExerciseSettingsPanel } from './ExerciseSettingsPanel'
 import {
   ExerciseSettingsError,
@@ -87,7 +108,19 @@ const UNTOUCHED_BODY = {
   outletNames: { news: 'WXYZ 9 News' },
 }
 
-function renderPanel() {
+interface RenderOptions {
+  readonly section?: ExerciseSettingsSectionId
+  readonly onStatusChange?: (status: ExerciseSettingsStatus) => void
+  readonly onRequestSection?: (section: ExerciseSettingsSectionId) => void
+}
+
+/**
+ * Renders the panel on one section, and hands back `show()` — a PROP CHANGE on
+ * the same mounted panel, which is exactly how the page switches sections. Form
+ * state therefore survives the switch, here as in the app.
+ */
+function renderPanel(options: RenderOptions = {}) {
+  const { section = 'identity', onStatusChange, onRequestSection } = options
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   })
@@ -98,13 +131,33 @@ function renderPanel() {
       </QueryClientProvider>
     )
   }
-  return render(<ExerciseSettingsPanel />, { wrapper: Wrapper })
+  const view = render(
+    <ExerciseSettingsPanel
+      section={section}
+      onStatusChange={onStatusChange}
+      onRequestSection={onRequestSection}
+    />,
+    { wrapper: Wrapper },
+  )
+  return {
+    ...view,
+    show(next: ExerciseSettingsSectionId) {
+      view.rerender(
+        <ExerciseSettingsPanel
+          section={next}
+          onStatusChange={onStatusChange}
+          onRequestSection={onRequestSection}
+        />,
+      )
+    },
+  }
 }
 
 /** Waits for the loaded form. */
-async function renderLoadedPanel() {
-  renderPanel()
+async function renderLoadedPanel(options: RenderOptions = {}) {
+  const view = renderPanel(options)
   await screen.findByTestId('exercise-settings-form')
+  return view
 }
 
 /** The single body the panel submitted (fails loudly if it never submitted). */
@@ -122,6 +175,13 @@ function describedByText(input: HTMLElement): string {
     .map(part => document.getElementById(part)?.textContent ?? '')
     .join(' ')
 }
+
+/** The save button — the shared footer control, present in every section. */
+function saveButton(): HTMLElement {
+  return screen.getByRole('button', { name: /save settings/i })
+}
+
+const ALL_SECTIONS: readonly ExerciseSettingsSectionId[] = ['identity', 'channels', 'theming']
 
 beforeEach(() => {
   mockGet.mockReset()
@@ -169,43 +229,101 @@ describe('ExerciseSettingsPanel — load states', () => {
 
 // ---------------------------------------------------------------------------
 
+describe('ExerciseSettingsPanel — sections are VIEWS over one form', () => {
+  it.each(ALL_SECTIONS)('heads the %s section with its own h2, matching the nav label', async section => {
+    await renderLoadedPanel({ section })
+
+    expect(
+      screen.getByRole('heading', {
+        level: 2,
+        name: EXERCISE_SETTINGS_SECTION_META[section].label,
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it.each(ALL_SECTIONS)('offers Save and Revert in the %s section (one footer, all three)', async section => {
+    await renderLoadedPanel({ section })
+
+    expect(saveButton()).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /revert changes/i })).toBeInTheDocument()
+  })
+
+  it('renders the fields of the selected section only', async () => {
+    const { show } = await renderLoadedPanel({ section: 'identity' })
+
+    expect(screen.getByLabelText('World name')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Accent color')).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'Social' })).not.toBeInTheDocument()
+
+    show('theming')
+    expect(screen.getByLabelText('Accent color')).toBeInTheDocument()
+    expect(screen.queryByLabelText('World name')).not.toBeInTheDocument()
+
+    show('channels')
+    expect(screen.getByRole('checkbox', { name: 'Social' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Accent color')).not.toBeInTheDocument()
+  })
+
+  it('keeps an edit made in one section when another is shown and returned to', async () => {
+    // The page relies on this: switching sections must never quietly drop work.
+    const user = userEvent.setup()
+    const { show } = await renderLoadedPanel({ section: 'identity' })
+
+    const worldName = screen.getByLabelText('World name')
+    await user.clear(worldName)
+    await user.type(worldName, 'Savannah Metro')
+
+    show('theming')
+    show('identity')
+
+    expect(screen.getByLabelText('World name')).toHaveValue('Savannah Metro')
+  })
+})
+
+// ---------------------------------------------------------------------------
+
 describe('ExerciseSettingsPanel — "not configured" renders EMPTY, never the shipped constant', () => {
-  it.each([
-    'Locale',
-    'Brand name',
-    'Accent color',
-    'Surface color',
-    'On-surface color',
-  ])('shows an empty "%s" field when the server sent null', async label => {
-    await renderLoadedPanel()
+  it.each<[ExerciseSettingsSectionId, string]>([
+    ['identity', 'Locale'],
+    ['theming', 'Brand name'],
+    ['theming', 'Accent color'],
+    ['theming', 'Surface color'],
+    ['theming', 'On-surface color'],
+  ])('shows an empty "%s / %s" field when the server sent null', async (section, label) => {
+    await renderLoadedPanel({ section })
 
     expect(screen.getByLabelText(label)).toHaveValue('')
   })
 
   it('shows an empty scheduled end when the exercise is unscheduled', async () => {
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
     expect(screen.getByLabelText(/scheduled end/i)).toHaveValue('')
   })
 
   it('never pre-fills a participant fallback constant into an unconfigured field', async () => {
-    await renderLoadedPanel()
+    const { show } = await renderLoadedPanel({ section: 'identity' })
 
     // The shipped participant defaults (features/participant-shell/brandTokens.ts).
     // Pre-filling one and saving would turn a fallback into stored configuration.
-    for (const fallback of ['Sample Exercise Network', '#d97706', '#ffffff', '#1c1c1c']) {
-      expect(screen.queryByDisplayValue(fallback)).not.toBeInTheDocument()
+    // Checked in EVERY section, since any of them could render a brand field.
+    for (const section of ALL_SECTIONS) {
+      show(section)
+      for (const fallback of ['Sample Exercise Network', '#d97706', '#ffffff', '#1c1c1c']) {
+        expect(screen.queryByDisplayValue(fallback)).not.toBeInTheDocument()
+      }
     }
   })
 
   it('sends null — not an invented value — for a field left empty', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
     expect(submittedBody().locale).toBeNull()
+    // `brandName` is edited in a section that is NOT on screen — and still sent.
     expect(submittedBody().brandName).toBeNull()
   })
 })
@@ -213,8 +331,8 @@ describe('ExerciseSettingsPanel — "not configured" renders EMPTY, never the sh
 // ---------------------------------------------------------------------------
 
 describe('ExerciseSettingsPanel — the channel catalog comes from the response', () => {
-  it('renders one checkbox per catalogued channel, checked per the effective flags', async () => {
-    await renderLoadedPanel()
+  it('renders one checkbox per cataloged channel, checked per the effective flags', async () => {
+    await renderLoadedPanel({ section: 'channels' })
 
     for (const channel of SETTINGS.channels) {
       const checkbox = screen.getByRole('checkbox', { name: channel.label })
@@ -237,7 +355,7 @@ describe('ExerciseSettingsPanel — the channel catalog comes from the response'
       ],
       outletNames: {},
     })
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'channels' })
 
     expect(screen.getAllByRole('checkbox')).toHaveLength(2)
     expect(screen.getByRole('checkbox', { name: 'Wire Service' })).toBeChecked()
@@ -247,10 +365,10 @@ describe('ExerciseSettingsPanel — the channel catalog comes from the response'
 
   it('submits the checked catalog ids, never an invented one', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'channels' })
 
     await user.click(screen.getByRole('checkbox', { name: 'News' }))
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
     expect(submittedBody().enabledChannels).toEqual(['social', 'news'])
@@ -258,55 +376,80 @@ describe('ExerciseSettingsPanel — the channel catalog comes from the response'
 
   it('blocks a save that would enable no channels at all (an empty list is a 400)', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'channels' })
 
     await user.click(screen.getByRole('checkbox', { name: 'Social' }))
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     expect(mockUpdate).not.toHaveBeenCalled()
     const group = screen.getByTestId('exercise-settings-channels')
-    expect(within(group).getByText(/enable at least one channel/i)).toBeInTheDocument()
+    expect(within(group).getByText(/turn on at least one channel/i)).toBeInTheDocument()
     // The message is bound to the group, not just painted red.
     const helpId = group.getAttribute('aria-describedby') ?? ''
-    expect(document.getElementById(helpId)).toHaveTextContent(/enable at least one channel/i)
+    expect(document.getElementById(helpId)).toHaveTextContent(/turn on at least one channel/i)
   })
 })
 
 // ---------------------------------------------------------------------------
 
 describe('ExerciseSettingsPanel — the FULL-REPLACE round trip', () => {
-  it('submits every managed field, unchanged, when nothing has been edited', async () => {
-    const user = userEvent.setup()
-    await renderLoadedPanel()
+  it.each(ALL_SECTIONS)(
+    'submits every managed field, unchanged, from the %s section — including the fields it does not render',
+    async section => {
+      // THE regression guard for the sectioned layout: whichever slice of the
+      // form is on screen, the body is complete. An omitted field CLEARS it.
+      const user = userEvent.setup()
+      await renderLoadedPanel({ section })
 
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+      await user.click(saveButton())
 
-    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
-    expect(submittedBody()).toEqual(UNTOUCHED_BODY)
-  })
+      await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
+      expect(submittedBody()).toEqual(UNTOUCHED_BODY)
+    },
+  )
 
   it('editing ONE field does not clear the others (PUT is a replace, not a patch)', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
     const worldName = screen.getByLabelText('World name')
     await user.clear(worldName)
     await user.type(worldName, 'Savannah Metro')
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
     // The whole body, not just the edited field — this is the regression guard.
     expect(submittedBody()).toEqual({ ...UNTOUCHED_BODY, worldName: 'Savannah Metro' })
   })
 
+  it('carries edits made in one section into a save issued from another', async () => {
+    const user = userEvent.setup()
+    const { show } = await renderLoadedPanel({ section: 'theming' })
+
+    await user.type(screen.getByLabelText('Accent color'), '#123456')
+
+    show('identity')
+    const name = screen.getByLabelText(/^exercise name/i)
+    await user.clear(name)
+    await user.type(name, 'Savannah CIE 2026')
+    await user.click(saveButton())
+
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
+    expect(submittedBody()).toEqual({
+      ...UNTOUCHED_BODY,
+      name: 'Savannah CIE 2026',
+      brandAccent: '#123456',
+    })
+  })
+
   it('keeps the brand, schedule, channels and outlet names when only the name changes', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
     const name = screen.getByLabelText(/^exercise name/i)
     await user.clear(name)
     await user.type(name, 'Savannah CIE 2026')
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
     const body = submittedBody()
@@ -324,12 +467,12 @@ describe('ExerciseSettingsPanel — the FULL-REPLACE round trip', () => {
       outletNames: { news: 'WXYZ 9 News', wire: 'Peachtree Wire' },
     })
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'theming' })
 
     // The unknown key is rendered (so it is visible AND survives a replace).
     expect(screen.getByLabelText('wire outlet name')).toHaveValue('Peachtree Wire')
 
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
     expect(submittedBody().outletNames).toEqual({
@@ -340,10 +483,10 @@ describe('ExerciseSettingsPanel — the FULL-REPLACE round trip', () => {
 
   it('clears a setting only when the planner actually empties its field', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
     await user.clear(screen.getByLabelText('World name'))
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
     expect(submittedBody().worldName).toBeNull()
@@ -352,29 +495,32 @@ describe('ExerciseSettingsPanel — the FULL-REPLACE round trip', () => {
 
   it('re-renders from the SERVER RESPONSE after a save, not from local form state', async () => {
     // The server sanitizes free text (NFR-004) and re-projects: what comes back
-    // is the truth about what was stored.
+    // is the truth about what was stored — in every section, not just the one on
+    // screen when the save was issued.
     mockUpdate.mockResolvedValue({
       ...SETTINGS,
       worldName: 'Savannah Metro',
       brandName: 'alert(1)',
     })
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    const { show } = await renderLoadedPanel({ section: 'theming' })
 
     const brandName = screen.getByLabelText('Brand name')
     await user.type(brandName, '<script>alert(1)</script>')
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     await screen.findByTestId('exercise-settings-saved')
     expect(screen.getByLabelText('Brand name')).toHaveValue('alert(1)')
+
+    show('identity')
     expect(screen.getByLabelText('World name')).toHaveValue('Savannah Metro')
   })
 
   it('announces a successful save in a status region (icon + text)', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     const saved = await screen.findByTestId('exercise-settings-saved')
     expect(saved).toHaveAttribute('role', 'status')
@@ -382,17 +528,122 @@ describe('ExerciseSettingsPanel — the FULL-REPLACE round trip', () => {
     expect(saved.querySelector('svg[data-icon="circle-check"]')).not.toBeNull()
   })
 
-  it('reverts every edited field back to the server state', async () => {
+  it('reverts every edited field back to the server state, across all sections', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    const { show } = await renderLoadedPanel({ section: 'theming' })
 
+    await user.type(screen.getByLabelText('Accent color'), '#123456')
+
+    show('identity')
     const worldName = screen.getByLabelText('World name')
     await user.clear(worldName)
     await user.type(worldName, 'Not saved')
+
+    // ONE revert, from ONE section, restores the WHOLE form.
     await user.click(screen.getByRole('button', { name: /revert changes/i }))
 
     expect(screen.getByLabelText('World name')).toHaveValue('Metro Atlanta')
+    show('theming')
+    expect(screen.getByLabelText('Accent color')).toHaveValue('')
     expect(mockUpdate).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('ExerciseSettingsPanel — reporting up to the page nav', () => {
+  it('reports clean and error-free once the settings load', async () => {
+    const onStatusChange = vi.fn<(status: ExerciseSettingsStatus) => void>()
+    await renderLoadedPanel({ onStatusChange })
+
+    await waitFor(() => expect(onStatusChange).toHaveBeenCalled())
+    expect(onStatusChange).toHaveBeenLastCalledWith({ dirty: false, sectionsWithErrors: [] })
+  })
+
+  it('reports dirty as soon as an edit would change what the server holds', async () => {
+    const onStatusChange = vi.fn<(status: ExerciseSettingsStatus) => void>()
+    const user = userEvent.setup()
+    await renderLoadedPanel({ onStatusChange })
+
+    await user.type(screen.getByLabelText('World name'), '!')
+
+    await waitFor(() =>
+      expect(onStatusChange).toHaveBeenLastCalledWith({ dirty: true, sectionsWithErrors: [] }),
+    )
+  })
+
+  it('reports clean again after a revert', async () => {
+    const onStatusChange = vi.fn<(status: ExerciseSettingsStatus) => void>()
+    const user = userEvent.setup()
+    await renderLoadedPanel({ onStatusChange })
+
+    await user.type(screen.getByLabelText('World name'), '!')
+    await user.click(screen.getByRole('button', { name: /revert changes/i }))
+
+    await waitFor(() =>
+      expect(onStatusChange).toHaveBeenLastCalledWith({ dirty: false, sectionsWithErrors: [] }),
+    )
+  })
+
+  it('names EVERY section holding a validation error, in nav order', async () => {
+    // Without this the page nav could not mark a section the planner cannot see,
+    // and the server only ever reports its FIRST failure.
+    const onStatusChange = vi.fn<(status: ExerciseSettingsStatus) => void>()
+    const user = userEvent.setup()
+    const { show } = await renderLoadedPanel({ section: 'identity', onStatusChange })
+
+    await user.clear(screen.getByLabelText(/^exercise name/i))
+    show('theming')
+    await user.type(screen.getByLabelText('Accent color'), 'burnt orange')
+    show('channels')
+    await user.click(screen.getByRole('checkbox', { name: 'Social' }))
+
+    await user.click(saveButton())
+
+    await waitFor(() =>
+      expect(onStatusChange).toHaveBeenLastCalledWith({
+        dirty: true,
+        sectionsWithErrors: ['identity', 'channels', 'theming'],
+      }),
+    )
+    expect(mockUpdate).not.toHaveBeenCalled()
+  })
+
+  it('asks the page for the first offending section when the error is OFF SCREEN', async () => {
+    const onRequestSection = vi.fn<(section: ExerciseSettingsSectionId) => void>()
+    const user = userEvent.setup()
+    const { show } = await renderLoadedPanel({ section: 'identity', onRequestSection })
+
+    await user.clear(screen.getByLabelText(/^exercise name/i))
+    show('theming')
+    await user.click(saveButton())
+
+    expect(onRequestSection).toHaveBeenCalledWith('identity')
+    expect(mockUpdate).not.toHaveBeenCalled()
+  })
+
+  it('does NOT move the planner when the error is already on screen', async () => {
+    const onRequestSection = vi.fn<(section: ExerciseSettingsSectionId) => void>()
+    const user = userEvent.setup()
+    await renderLoadedPanel({ section: 'identity', onRequestSection })
+
+    await user.clear(screen.getByLabelText(/^exercise name/i))
+    await user.click(saveButton())
+
+    expect(onRequestSection).not.toHaveBeenCalled()
+    expect(mockUpdate).not.toHaveBeenCalled()
+  })
+
+  it('names the offending sections in the blocked-save alert, not just in the nav', async () => {
+    const user = userEvent.setup()
+    await renderLoadedPanel({ section: 'identity' })
+
+    await user.clear(screen.getByLabelText(/^exercise name/i))
+    await user.click(saveButton())
+
+    expect(screen.getByTestId('exercise-settings-client-error')).toHaveTextContent(
+      /identity & schedule/i,
+    )
   })
 })
 
@@ -406,9 +657,9 @@ describe('ExerciseSettingsPanel — server rejection (400: nothing was persisted
       new ExerciseSettingsError('Bad Request', { status: 400, serverMessage: reason }),
     )
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     const alert = await screen.findByTestId('exercise-settings-save-error')
     expect(alert).toHaveAttribute('role', 'alert')
@@ -423,12 +674,12 @@ describe('ExerciseSettingsPanel — server rejection (400: nothing was persisted
       new ExerciseSettingsError('Bad Request', { status: 400, serverMessage: 'nope' }),
     )
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
     const worldName = screen.getByLabelText('World name')
     await user.clear(worldName)
     await user.type(worldName, 'Savannah Metro')
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     await screen.findByTestId('exercise-settings-save-error')
     expect(screen.getByLabelText('World name')).toHaveValue('Savannah Metro')
@@ -437,37 +688,44 @@ describe('ExerciseSettingsPanel — server rejection (400: nothing was persisted
   it('reports a network failure distinctly from a rejection', async () => {
     mockUpdate.mockRejectedValue(new ExerciseSettingsError('Network Error'))
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     const alert = await screen.findByTestId('exercise-settings-save-error')
-    expect(alert).toHaveTextContent(/could not reach the server/i)
+    // A transport failure reads differently from a rejection, and says so
+    // without naming "the server" at a planner.
+    expect(alert).toHaveTextContent(/pulse could not be reached/i)
+    expect(alert).toHaveTextContent(/were not saved/i)
   })
 })
 
 // ---------------------------------------------------------------------------
 
 describe('ExerciseSettingsPanel — accessibility (NFR-001)', () => {
-  it('gives every control a real label', async () => {
-    await renderLoadedPanel()
+  it.each<[ExerciseSettingsSectionId, (RegExp | string)[]]>([
+    ['identity', [/^exercise name/i, 'World name', 'Locale', /^time zone/i, /scheduled start/i, /scheduled end/i]],
+    ['theming', ['Brand name', 'Primary color', 'Accent color', 'Surface color', 'On-surface color', 'News outlet name']],
+  ])('gives every control in the %s section a real label', async (section, labels) => {
+    await renderLoadedPanel({ section })
 
-    for (const label of [
-      /^exercise name/i, 'World name', 'Locale', /^time zone/i,
-      /scheduled start/i, /scheduled end/i, 'Brand name', 'Primary color',
-      'Accent color', 'Surface color', 'On-surface color', 'News outlet name',
-    ]) {
+    for (const label of labels) {
       expect(screen.getByLabelText(label)).toBeInTheDocument()
     }
+  })
+
+  it('gives the channel checkboxes a labeled group', async () => {
+    await renderLoadedPanel({ section: 'channels' })
+
     expect(screen.getByRole('group', { name: /enabled channels/i })).toBeInTheDocument()
   })
 
   it('associates a required-field error with its field (aria-invalid + aria-describedby)', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
     await user.clear(screen.getByLabelText(/^exercise name/i))
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     const name = screen.getByLabelText(/^exercise name/i)
     expect(name).toHaveAttribute('aria-invalid', 'true')
@@ -477,12 +735,12 @@ describe('ExerciseSettingsPanel — accessibility (NFR-001)', () => {
 
   it('associates the IANA time-zone error with the time-zone field, and blocks the write', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
     const zone = screen.getByLabelText(/^time zone/i)
     await user.clear(zone)
     await user.type(zone, 'Eastern Standard Time')
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     expect(zone).toHaveAttribute('aria-invalid', 'true')
     expect(describedByText(zone)).toMatch(/iana time zone/i)
@@ -491,40 +749,42 @@ describe('ExerciseSettingsPanel — accessibility (NFR-001)', () => {
 
   it('associates a malformed-color error with its own field', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'theming' })
 
     const accent = screen.getByLabelText('Accent color')
     await user.type(accent, 'burnt orange')
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     expect(accent).toHaveAttribute('aria-invalid', 'true')
-    expect(describedByText(accent)).toMatch(/css hex color/i)
+    expect(describedByText(accent)).toMatch(/hex color/i)
     // A different field must NOT be flagged — errors are per-field, not global.
     expect(screen.getByLabelText('Primary color')).toHaveAttribute('aria-invalid', 'false')
     expect(mockUpdate).not.toHaveBeenCalled()
   })
 
-  it('announces that a blocked save never reached the server', async () => {
+  it('announces that a blocked save stored nothing', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
     await user.clear(screen.getByLabelText(/^exercise name/i))
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     const alert = screen.getByTestId('exercise-settings-client-error')
     expect(alert).toHaveAttribute('role', 'alert')
-    expect(alert).toHaveTextContent(/nothing has been sent to the server/i)
+    // The planner is told the write did not happen, and what to do next.
+    expect(alert).toHaveTextContent(/nothing was saved/i)
+    expect(alert).toHaveTextContent(/then save again/i)
   })
 
   it('rejects an end date that precedes the start, on the end field', async () => {
     const user = userEvent.setup()
-    await renderLoadedPanel()
+    await renderLoadedPanel({ section: 'identity' })
 
     const end = screen.getByLabelText(/scheduled end/i)
     // `fireEvent` rather than `user.type`: a `datetime-local` input rejects the
     // partial values a per-keystroke type would produce.
     fireEvent.change(end, { target: { value: '2026-02-01T09:00:00' } })
-    await user.click(screen.getByRole('button', { name: /save settings/i }))
+    await user.click(saveButton())
 
     expect(describedByText(end)).toMatch(/must not come before the start/i)
     expect(mockUpdate).not.toHaveBeenCalled()

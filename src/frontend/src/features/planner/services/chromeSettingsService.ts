@@ -251,7 +251,7 @@ function toChromeError(error: unknown): ChromeSettingsError {
 
 /**
  * The canned chrome config the mock serves. DELIBERATELY PART-CONFIGURED: the
- * bottom banner and every colour are `null`, so the "a `null` field renders
+ * bottom banner and every color are `null`, so the "a `null` field renders
  * EMPTY, never the shipped participant constant" rule is exercised the moment
  * anyone opens the editor on mock data.
  *

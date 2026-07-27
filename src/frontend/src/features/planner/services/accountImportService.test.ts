@@ -12,7 +12,7 @@
  * crash Vitest worker teardown.
  *
  * `axios` itself is NOT mocked — the error-translation tests construct real
- * `AxiosError`s so `axios.isAxiosError` (used inside the service) recognises
+ * `AxiosError`s so `axios.isAxiosError` (used inside the service) recognizes
  * them, exactly as a live 401/400 would arrive.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'

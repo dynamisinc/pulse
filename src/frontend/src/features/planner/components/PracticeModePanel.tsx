@@ -24,7 +24,7 @@
  * prevent, so the state is carried by a FontAwesome ICON **and** a text label —
  * the color is decoration on top of both, never the signal itself. The indicator
  * is a `role="status"` region so a screen reader is told when the state changes,
- * and the checkbox is a real labelled control whose helper text is bound with
+ * and the checkbox is a real labeled control whose helper text is bound with
  * `aria-describedby`. Load, save-success and every failure are each announced
  * with an icon + text as well.
  *
@@ -82,7 +82,7 @@ function friendlyErrorMessage(error: PracticeModeError, verb: 'loaded' | 'saved'
     case 400:
       return error.serverMessage
         ? `Practice mode was not changed: ${error.serverMessage}`
-        : 'That change was rejected. Nothing was saved — try again.'
+        : 'That change was rejected and nothing was saved. Try again.'
     case 401:
       return 'Your staff session is not active. Sign in to the console and try again.'
     case 403:
@@ -91,8 +91,8 @@ function friendlyErrorMessage(error: PracticeModeError, verb: 'loaded' | 'saved'
       return 'This exercise no longer exists. Pick another exercise and try again.'
     default:
       return error.status === undefined
-        ? `Could not reach the server, so practice mode could not be ${verb}. Check your connection and try again.`
-        : (error.serverMessage ?? `Practice mode could not be ${verb}. Please try again.`)
+        ? `Pulse could not be reached, so practice mode was not ${verb}. Check your connection and try again.`
+        : (error.serverMessage ?? `Practice mode was not ${verb}. Try again.`)
   }
 }
 
@@ -114,7 +114,7 @@ function PracticeAlert({ message, testId }: { message: string; testId: string })
 }
 
 // ---------------------------------------------------------------------------
-// The indicator — the NFR-001 centrepiece
+// The indicator — the NFR-001 centerpiece
 // ---------------------------------------------------------------------------
 
 interface PracticeModeIndicatorProps {
@@ -209,8 +209,9 @@ function PracticeModeControl({ state }: PracticeModeControlProps) {
         label="Run this exercise as practice / sandbox"
       />
       <FormHelperText id="practice-mode-help">
-        A practice run behaves exactly like real conduct — the same channels, the same engine, the
-        same telemetry. The only difference is that its data is left out of evaluation exports.
+        A practice run works exactly like real conduct: the same channels, the same injects, the
+        same controller tools. The one difference is that nothing from it reaches evaluation
+        exports.
       </FormHelperText>
 
       <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1.5, mt: 2 }}>
@@ -244,7 +245,7 @@ function PracticeModeControl({ state }: PracticeModeControlProps) {
         >
           <FontAwesomeIcon icon={faCircleCheck} aria-hidden />
           <Typography variant="body2">
-            Saved. The state above is what the server stored.
+            Saved. The state above is what is now stored for this exercise.
           </Typography>
         </Stack>
       ) : null}
@@ -270,7 +271,12 @@ export function PracticeModePanel() {
       component="section"
       aria-labelledby="practice-mode-heading"
       data-testid="practice-mode-panel"
-      sx={{ padding: CobraStyles.Padding.MainWindow, maxWidth: 860 }}
+      sx={{
+        // See `ExerciseSettingsPanel`: the page's content pane already supplies
+        // the outer padding, so only the bottom breathing room is kept here.
+        paddingBottom: CobraStyles.Padding.MainWindow,
+        maxWidth: 860,
+      }}
     >
       <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 0.5 }}>
         <FontAwesomeIcon icon={faFlask} aria-hidden />
@@ -280,8 +286,9 @@ export function PracticeModePanel() {
       </Stack>
 
       <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
-        Mark this exercise as a rehearsal — a load test or a controller dry-run — so its data is
-        kept out of evaluation exports. Participants see no difference.
+        Mark this exercise as a rehearsal, such as a controller dry run or a load test. Rehearsal
+        data stays out of evaluation exports and out of the after-action report. Participants see
+        no difference.
       </Typography>
 
       {practiceQuery.isPending ? (

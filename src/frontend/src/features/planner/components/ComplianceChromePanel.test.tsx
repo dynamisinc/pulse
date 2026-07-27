@@ -10,9 +10,9 @@
  * and `@/core/services/api` is never touched — no real axios sink, no Vitest
  * worker-teardown footgun.
  *
- * Two centrepieces:
+ * Two centerpieces:
  *  - the NFR-008 mutual guard reaching the planner as a FIELD-ASSOCIATED,
- *    icon-and-text message (never colour-only), with nothing sent to the server;
+ *    icon-and-text message (never color-only), with nothing sent to the server;
  *  - the FULL-REPLACE round trip: `PUT` is a replace, not a patch, so editing
  *    ONE field must still submit every other field unchanged — hence the
  *    whole-body `toEqual` assertion rather than a `toMatchObject`.
@@ -46,7 +46,7 @@ const mockUpdate = vi.mocked(updateChromeSettings)
 
 /**
  * A PART-CONFIGURED exercise — the interesting case. Every bottom-banner field
- * and both top colours are `null` ("not configured"), so the participant world
+ * and both top colors are `null` ("not configured"), so the participant world
  * falls back to a shipped constant for each. The editor must show those EMPTY.
  */
 const SETTINGS: ChromeSettings = {
@@ -128,7 +128,7 @@ describe('ComplianceChromePanel — load states', () => {
     expect(loading).toHaveTextContent(/loading compliance chrome/i)
   })
 
-  it('reports a 403 load failure in an alert region, with text and not colour alone', async () => {
+  it('reports a 403 load failure in an alert region, with text and not color alone', async () => {
     mockGet.mockRejectedValue(new ChromeSettingsError('nope', { status: 403 }))
     renderPanel()
 
@@ -155,8 +155,8 @@ describe('ComplianceChromePanel — rendering the loaded config', () => {
     // TRAINING ENVIRONMENT — …'. Pre-filling it here and saving would turn a
     // fallback into stored configuration.
     expect(screen.getByLabelText('Bottom banner text')).toHaveValue('')
-    expect(screen.getByLabelText('Top banner text colour')).toHaveValue('')
-    expect(screen.getByLabelText('Top banner background colour')).toHaveValue('')
+    expect(screen.getByLabelText('Top banner text color')).toHaveValue('')
+    expect(screen.getByLabelText('Top banner background color')).toHaveValue('')
   })
 
   it('shows a configured banner field with its stored value', async () => {
@@ -187,12 +187,14 @@ describe('ComplianceChromePanel — NFR-008 mutual guard', () => {
 
     expect(mockUpdate).not.toHaveBeenCalled()
 
-    const help = screen.getByText(/must not both be off/i)
-    expect(help).toHaveTextContent(/NFR-008/)
+    // The message states the CONSEQUENCE a conductor can act on, not the rule id
+    // (the server's own wording still comes through verbatim — see below).
+    const help = screen.getByText(/turn on at least one marking/i)
+    expect(help).toHaveTextContent(/indistinguishable from a real incident/i)
     expect(screen.getByTestId('compliance-chrome-client-error')).toHaveAttribute('role', 'alert')
   })
 
-  it('binds the NFR-008 message to the switches with aria-describedby (never colour-only)', async () => {
+  it('binds the NFR-008 message to the switches with aria-describedby (never color-only)', async () => {
     const user = userEvent.setup()
     await renderLoadedPanel()
 
@@ -201,7 +203,7 @@ describe('ComplianceChromePanel — NFR-008 mutual guard', () => {
     await user.click(screen.getByRole('button', { name: /save compliance chrome/i }))
 
     const chromeSwitch = screen.getByRole('checkbox', { name: /compliance chrome banners/i })
-    expect(describedByText(chromeSwitch)).toMatch(/must not both be off/i)
+    expect(describedByText(chromeSwitch)).toMatch(/turn on at least one marking/i)
   })
 
   it('allows chrome-off on its own — a legal per-exercise state (D7-008)', async () => {
@@ -312,25 +314,25 @@ describe('ComplianceChromePanel — the full-replace round trip', () => {
 })
 
 describe('ComplianceChromePanel — field validation (NFR-001 association)', () => {
-  it('rejects a malformed colour with a message bound to that field', async () => {
+  it('rejects a malformed color with a message bound to that field', async () => {
     const user = userEvent.setup()
     await renderLoadedPanel()
 
-    await user.type(screen.getByLabelText('Top banner background colour'), 'javascript:alert(1)')
+    await user.type(screen.getByLabelText('Top banner background color'), 'javascript:alert(1)')
     await user.click(screen.getByRole('button', { name: /save compliance chrome/i }))
 
     expect(mockUpdate).not.toHaveBeenCalled()
 
-    const field = screen.getByLabelText('Top banner background colour')
+    const field = screen.getByLabelText('Top banner background color')
     expect(field).toHaveAttribute('aria-invalid', 'true')
-    expect(describedByText(field)).toMatch(/hex colour/i)
+    expect(describedByText(field)).toMatch(/hex color/i)
   })
 
-  it('accepts a valid hex colour', async () => {
+  it('accepts a valid hex color', async () => {
     const user = userEvent.setup()
     await renderLoadedPanel()
 
-    await user.type(screen.getByLabelText('Top banner background colour'), '#2e6b2e')
+    await user.type(screen.getByLabelText('Top banner background color'), '#2e6b2e')
     await user.click(screen.getByRole('button', { name: /save compliance chrome/i }))
 
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
@@ -339,7 +341,7 @@ describe('ComplianceChromePanel — field validation (NFR-001 association)', () 
 })
 
 describe('ComplianceChromePanel — two worlds', () => {
-  it('is a labelled staff section with a heading and no participant branding', async () => {
+  it('is a labeled staff section with a heading and no participant branding', async () => {
     await renderLoadedPanel()
 
     const panel = screen.getByTestId('compliance-chrome-panel')

@@ -2,36 +2,60 @@
  * features/planner/pages/ExerciseSettingsPage.test.tsx
  * ---------------------------------------------------------------------------
  * THE MOUNT GUARD for the exercise-settings composition point (feature:
- * exercise-configuration; #41). It asserts one thing only: that the page
- * actually RENDERS each panel it is supposed to compose.
+ * exercise-configuration; #41). It asserts one thing only: that every section
+ * the page is supposed to compose is REACHABLE and actually RENDERS.
  *
  * ============================================================================
  * WHY THIS FILE EXISTS — "built, tested, and inert"
  * ============================================================================
  * `ComplianceChromePanel.test.tsx` and `PracticeModePanel.test.tsx` render their
  * panels DIRECTLY, so they pass whether or not this page mounts them. Delete a
- * `<PracticeModePanel />` line and every panel suite stays green, the build
- * type-checks, lint is clean — and a planner simply has no way to reach the
- * control in the running app. That is the same failure class the backend
- * composition-root guards close (`CompositionRootWiringTests`), on the other
- * side of the stack, and this feature was already bitten by it once: all three
- * wave-3 slices merged fully green with `Program.cs` calling none of their
- * extensions. `App.integration.test.tsx` covers the page's ROUTE composition —
- * that it is reachable — but never looks at its contents, so nothing else in the
- * suite can see a missing mount.
+ * `<PracticeModePanel />` line — or just its entry in the page's `SECTIONS`
+ * registry — and every panel suite stays green, the build type-checks, lint is
+ * clean, and a planner simply has no way to reach the control in the running
+ * app. That is the same failure class the backend composition-root guards close
+ * (`CompositionRootWiringTests`), on the other side of the stack, and this
+ * feature was already bitten by it once: all three wave-3 slices merged fully
+ * green with `Program.cs` calling none of their extensions.
+ * `App.integration.test.tsx` covers the page's ROUTE composition — that it is
+ * reachable — but never looks at its contents, so nothing else in the suite can
+ * see a missing mount.
+ *
+ * ============================================================================
+ * WHAT CHANGED WITH THE SECTION NAV — AND WHAT DID NOT
+ * ============================================================================
+ * The page was a single scroll of three stacked panels, so the guard could
+ * assert all three headings at once. It is now a left nav + content pane, and
+ * an UNSELECTED section is `hidden` — deliberately out of the accessibility
+ * tree, which is exactly why `getByRole` (which ignores hidden subtrees) stops
+ * finding it. The old "all three h2s, exactly once each" assertion would fail
+ * for a legitimate reason, so it is replaced — NOT weakened. The guard now
+ * asserts, per section:
+ *
+ *   1. the section has a nav item (so it can be reached at all), and
+ *   2. selecting it renders that section's OWN content.
+ *
+ * Both halves must hold: a section with a nav entry and no content is as broken
+ * as content with no way to reach it, and each half fails a different deletion.
  *
  * ============================================================================
  * HOW IT ASSERTS — by what only the real panel renders
  * ============================================================================
- * Each panel is found by its OWN `<h2>` heading and by the labelled `region`
- * landmark that heading names (each panel is a `<section aria-labelledby>`).
- * Deliberately NOT by `data-testid`: a testid is trivially satisfiable by a stub
- * or a placeholder, and a guard that a stand-in can pass is not a guard. The
- * heading text is also the panel's real accessible name, so this doubles as a
- * check that the page keeps its NFR-001 "one h1, a section per panel" structure.
+ * Each section's content is found by its OWN `<h2>` heading and by the labeled
+ * `region` landmark that heading names (each panel is a `<section
+ * aria-labelledby>`). Deliberately NOT by `data-testid`: a testid is trivially
+ * satisfiable by a stub or a placeholder, and a guard that a stand-in can pass
+ * is not a guard. The heading text is also the panel's real accessible name, so
+ * this doubles as a check that the page keeps its NFR-001 "one h1, a section per
+ * panel" structure.
+ *
+ * Nav items ARE addressed by testid in one place only — the mutation-proof
+ * "every section has a nav item" check needs a stable handle per id — but every
+ * assertion about what a nav item *is* goes through its accessible name and
+ * `aria-current`.
  *
  * ============================================================================
- * SCOPE — MOUNTING ONLY. NOT PANEL BEHAVIOUR.
+ * SCOPE — COMPOSITION ONLY. NOT PANEL BEHAVIOR.
  * ============================================================================
  * The three data seams are mocked at the SERVICE layer, exactly as the panel
  * suites mock them, so `@/core/services/api` is never touched (no real axios
@@ -39,21 +63,27 @@
  * NEVER SETTLES, which leaves every panel in its `isPending` branch: the heading
  * and the section landmark render unconditionally, so the mount is fully
  * observable while nothing here depends on a DTO fixture. That keeps this a fast
- * mount guard that cannot rot when a panel's wire contract changes — the panels'
- * own suites own their loaded, error and save behaviour, and this file must not
- * grow into a second copy of them.
+ * composition guard that cannot rot when a panel's wire contract changes — the
+ * panels' own suites own their loaded, error and save behavior, and this file
+ * must not grow into a second copy of them.
+ *
+ * The one exception is the unsaved-changes and hidden-section-error behavior:
+ * that is the PAGE's own logic (it lives in the nav, not in a panel), so those
+ * tests load the settings seam for real and are grouped separately below.
  *
  * TWO WORLDS — STAFF (D0 §2). Rendered inside the COBRA `ThemeProvider` and a
  * React Query client, the same envelope `StaffShellFrame` + `App.tsx` give it.
  */
 import type { ReactNode } from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from '@mui/material/styles'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseSettingsPage } from './ExerciseSettingsPage'
-import { getExerciseSettings } from '../services/exerciseSettingsService'
+import { PANEL_SAVE_BAR_SCROLL_PADDING_PX } from '../components/PanelSaveBar'
+import { getExerciseSettings, type ExerciseSettings } from '../services/exerciseSettingsService'
 import { getChromeSettings } from '../services/chromeSettingsService'
 import { getPracticeMode } from '../services/practiceModeService'
 
@@ -80,12 +110,40 @@ function pendingForever<T>(): Promise<T> {
   return new Promise<T>(() => {})
 }
 
-/** The `<h2>` heading each panel renders — the thing only that panel puts on the page. */
-const PANEL_HEADINGS = {
-  settings: 'Exercise settings',
-  chrome: 'Compliance chrome',
-  practice: 'Practice / sandbox',
-} as const
+/**
+ * Every section the page must compose: its nav-item testid, the name of the nav
+ * item a planner clicks, and the `<h2>` / region name only the real content
+ * renders. Deleting an entry from the page's `SECTIONS` registry, or deleting a
+ * panel mount, fails against this table.
+ */
+const SECTIONS = [
+  { id: 'identity', nav: 'Identity & schedule', heading: 'Identity & schedule' },
+  { id: 'channels', nav: 'Channels', heading: 'Channels' },
+  { id: 'theming', nav: 'Theming & outlets', heading: 'Theming & outlets' },
+  { id: 'chrome', nav: 'Compliance chrome', heading: 'Compliance chrome' },
+  { id: 'practice', nav: 'Practice / sandbox', heading: 'Practice / sandbox' },
+] as const
+
+/** A part-configured exercise, for the page-owned tests that need a loaded form. */
+const SETTINGS: ExerciseSettings = {
+  exerciseId: '6f0a1c52-9d4b-4f3a-8a01-2c7d9e5b1a44',
+  name: 'Atlanta CIE 2026',
+  worldName: 'Metro Atlanta',
+  locale: null,
+  timeZone: 'America/New_York',
+  scheduledStartAt: '2026-03-01T13:00:00.0000000+00:00',
+  scheduledEndAt: null,
+  channels: [
+    { id: 'social', label: 'Social', enabled: true },
+    { id: 'news', label: 'News', enabled: false },
+  ],
+  brandName: null,
+  brandPrimary: '#2b5f75',
+  brandAccent: null,
+  brandSurface: null,
+  brandOnSurface: null,
+  outletNames: {},
+}
 
 function renderPage() {
   const queryClient = new QueryClient({
@@ -101,6 +159,11 @@ function renderPage() {
   return render(<ExerciseSettingsPage />, { wrapper: Wrapper })
 }
 
+/** The page's section nav — a real `<nav>` with an accessible name. */
+function nav(): HTMLElement {
+  return screen.getByRole('navigation', { name: /exercise configuration sections/i })
+}
+
 beforeEach(() => {
   vi.mocked(getExerciseSettings).mockReset().mockImplementation(pendingForever)
   vi.mocked(getChromeSettings).mockReset().mockImplementation(pendingForever)
@@ -108,61 +171,263 @@ beforeEach(() => {
 })
 
 describe('ExerciseSettingsPage — composition-point mount guard', () => {
-  it('mounts the compliance-chrome panel (story 02)', () => {
+  it.each(SECTIONS)('offers a nav item for the $id section', ({ id, nav: name }) => {
     renderPage()
+
+    // Present in the nav landmark (not merely somewhere on the page)...
+    const item = screen.getByTestId(`exercise-config-nav-${id}`)
+    expect(nav()).toContainElement(item)
+    // ...and reachable by the accessible name a planner actually reads.
+    expect(within(nav()).getByRole('button', { name })).toBe(item)
+  })
+
+  it.each(SECTIONS)('renders the $id section’s own content when it is selected', async ({ id, heading }) => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByTestId(`exercise-config-nav-${id}`))
 
     // The panel's own h2 — not a testid a stub could satisfy.
-    expect(
-      screen.getByRole('heading', { level: 2, name: PANEL_HEADINGS.chrome }),
-    ).toBeInTheDocument()
-
+    expect(screen.getByRole('heading', { level: 2, name: heading })).toBeInTheDocument()
     // ...and the section landmark that heading names, which the panel owns.
-    expect(screen.getByRole('region', { name: PANEL_HEADINGS.chrome })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: heading })).toBeInTheDocument()
   })
 
-  it('mounts the practice/sandbox panel (story 04)', () => {
+  it('lands on a real section on arrival, with no clicking required', () => {
+    // A page whose content pane starts empty is a broken page, however good the
+    // nav is.
     renderPage()
 
-    expect(
-      screen.getByRole('heading', { level: 2, name: PANEL_HEADINGS.practice }),
-    ).toBeInTheDocument()
-
-    expect(screen.getByRole('region', { name: PANEL_HEADINGS.practice })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Identity & schedule' })).toBeInTheDocument()
+    expect(screen.getByTestId('exercise-config-nav-identity')).toHaveAttribute('aria-current', 'page')
   })
 
-  it('still mounts the exercise-settings panel (story 01b)', () => {
-    // The pre-existing mount is guarded too: wave 3 added panels beside it, and a
-    // composition point that quietly loses its ORIGINAL panel fails just as silently.
+  it('shows exactly one section at a time', async () => {
+    const user = userEvent.setup()
     renderPage()
 
-    expect(
-      screen.getByRole('heading', { level: 2, name: PANEL_HEADINGS.settings }),
-    ).toBeInTheDocument()
+    await user.click(screen.getByTestId('exercise-config-nav-practice'))
 
-    expect(screen.getByRole('region', { name: PANEL_HEADINGS.settings })).toBeInTheDocument()
+    // Exactly one h2 is in the accessibility tree: the selected section's. A
+    // duplicated mount line, or a section that failed to hide, fails here.
+    const headings = screen.getAllByRole('heading', { level: 2 })
+    expect(headings).toHaveLength(1)
+    expect(headings[0]).toHaveTextContent('Practice / sandbox')
   })
 
-  it('renders every panel INSIDE the page main landmark, exactly once each', () => {
+  it('keeps every section inside the page root', async () => {
+    const user = userEvent.setup()
     renderPage()
-
-    // Inside the <main>: a panel rendered somewhere else on the page would not be
-    // in the work area the staff shell scrolls, and "exactly once" catches a
-    // duplicated mount line as surely as a missing one.
     const page = screen.getByTestId('exercise-settings-page')
 
-    for (const heading of Object.values(PANEL_HEADINGS)) {
-      expect(within(page).getAllByRole('heading', { level: 2, name: heading })).toHaveLength(1)
+    for (const section of SECTIONS) {
+      await user.click(screen.getByTestId(`exercise-config-nav-${section.id}`))
+      // A panel rendered outside the page root would not be in the work area the
+      // staff shell scrolls.
+      expect(
+        within(page).getAllByRole('heading', { level: 2, name: section.heading }),
+      ).toHaveLength(1)
     }
   })
 
-  it('keeps the page a single main landmark with exactly one h1', () => {
-    // NFR-001: the panels are h2 sections under ONE page h1. A panel that started
-    // rendering its own h1 — or a second page title — would break the heading
-    // outline a screen-reader user navigates by.
+  it('contributes NO main landmark of its own, and exactly one h1', () => {
+    // NFR-001 / #382. This page is WORK-AREA CONTENT: the staff shell's work
+    // area is the composed page's `<main>`, so a `component="main"` here nests a
+    // second one and gives a screen-reader user two "main" destinations for one
+    // page. Asserted here as "none at all", because standalone that is the only
+    // honest statement — the assertion that the RUNNING app has exactly one
+    // lives in `App.integration.test.tsx`, against the real staff shell.
     renderPage()
 
-    expect(screen.getAllByRole('main')).toHaveLength(1)
+    expect(screen.queryByRole('main')).not.toBeInTheDocument()
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Exercise configuration')
+  })
+})
+
+/**
+ * The sticky shell. jsdom does NO LAYOUT, so nothing here can assert that the
+ * page fits in 844px — that was established by measuring the real thing at
+ * 1440x900 and 1280x800. What jsdom resolves faithfully is the CSS declaration,
+ * and the declarations below are the ones that decide WHICH ELEMENT SCROLLS.
+ * Getting that wrong is exactly the regression this describe block exists for:
+ * the page used to carry `overflow-y: auto` itself, which is what scrolled the
+ * heading and the section nav away.
+ */
+describe('ExerciseSettingsPage — the content pane owns the scroll', () => {
+  /**
+   * Every declaration Emotion emitted for this element, one rule per line, each
+   * line prefixed with the media condition it applies under (`''` for none) and
+   * whitespace-normalized so an assertion can be written the way the source is.
+   */
+  function cssFor(element: HTMLElement): string {
+    const emotionClass = [...element.classList].find(name => name.startsWith('css-'))
+    if (emotionClass === undefined) return ''
+    const rules: string[] = []
+    const collect = (list: CSSRuleList, condition: string) => {
+      for (const rule of list) {
+        if (rule instanceof CSSMediaRule) collect(rule.cssRules, `@media ${rule.conditionText}`)
+        else if (rule.cssText.includes(`.${emotionClass}`)) rules.push(`${condition} ${rule.cssText}`)
+      }
+    }
+    for (const sheet of document.styleSheets) collect(sheet.cssRules, '')
+    return rules.join('\n').replace(/:\s+/g, ':').replace(/\s+/g, ' ')
+  }
+
+  /**
+   * Desktop-first: the sticky shell is the `lg`-and-up layout. Read from the
+   * COBRA theme rather than hardcoded — COBRA moves `lg` off the MUI default.
+   */
+  const DESKTOP = `@media \\(min-width:${cobraTheme.breakpoints.values.lg}px\\)`
+
+  it('does not scroll the page itself — the pane does', () => {
+    renderPage()
+
+    // The page is a fixed-height flex column that HIDES its own overflow, so
+    // there is no second, outer scrollbar beside the pane's. (Before the sticky
+    // shell this element carried `overflow-y: auto` and scrolled the heading
+    // and the nav away with everything else.)
+    expect(cssFor(screen.getByTestId('exercise-settings-page')))
+      .toMatch(new RegExp(`${DESKTOP}[^\\n]*overflow:hidden`))
+    // ...and the pane is the one scrollport.
+    expect(cssFor(screen.getByTestId('exercise-config-content')))
+      .toMatch(new RegExp(`${DESKTOP}[^\\n]*overflow-y:auto`))
+  })
+
+  it('keeps the heading and the nav out of that scrollport', () => {
+    renderPage()
+
+    const pane = screen.getByTestId('exercise-config-content')
+    // Nothing that must stay put may live inside the element that scrolls.
+    expect(pane).not.toContainElement(screen.getByRole('heading', { level: 1 }))
+    expect(pane).not.toContainElement(screen.getByTestId('exercise-config-nav'))
+  })
+
+  it('reserves room at the bottom of the pane for the pinned save bar (NFR-001)', () => {
+    renderPage()
+
+    // Without this a field tabbed to near the end of a form is scrolled to
+    // UNDERNEATH the save bar — measured at 70px of overlap with it removed.
+    expect(cssFor(screen.getByTestId('exercise-config-content')))
+      .toContain(`scroll-padding-bottom:${PANEL_SAVE_BAR_SCROLL_PADDING_PX}px`)
+  })
+})
+
+describe('ExerciseSettingsPage — section nav accessibility (NFR-001)', () => {
+  it('marks only the selected section with aria-current', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByTestId('exercise-config-nav-chrome'))
+
+    expect(screen.getByTestId('exercise-config-nav-chrome')).toHaveAttribute('aria-current', 'page')
+    for (const section of SECTIONS) {
+      if (section.id === 'chrome') continue
+      expect(screen.getByTestId(`exercise-config-nav-${section.id}`)).not.toHaveAttribute(
+        'aria-current',
+      )
+    }
+  })
+
+  it('moves focus to the content pane so a keyboard user lands on what they chose', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByTestId('exercise-config-nav-practice'))
+
+    const content = screen.getByTestId('exercise-config-content')
+    await waitFor(() => expect(content).toHaveFocus())
+    expect(content).toHaveAttribute('aria-label', 'Practice / sandbox settings')
+  })
+
+  it('does not steal focus on first render', () => {
+    renderPage()
+
+    // Focus belongs to the document until the planner asks for a section; yanking
+    // it on mount would drop a screen-reader user past the page heading.
+    expect(screen.getByTestId('exercise-config-content')).not.toHaveFocus()
+  })
+
+  it('is operable from the keyboard alone', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    // Real <button>s in a real <nav>: Tab reaches them, Enter activates them —
+    // no roving tabindex, no arrow-key contract half-implemented.
+    const chrome = screen.getByTestId('exercise-config-nav-chrome')
+    chrome.focus()
+    expect(chrome).toHaveFocus()
+    await user.keyboard('{Enter}')
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Compliance chrome' })).toBeInTheDocument()
+  })
+})
+
+describe('ExerciseSettingsPage — unsaved changes and off-screen validation', () => {
+  beforeEach(() => {
+    vi.mocked(getExerciseSettings).mockReset().mockResolvedValue(SETTINGS)
+  })
+
+  it('says nothing about unsaved changes while the settings form is clean', async () => {
+    renderPage()
+    await screen.findByTestId('exercise-settings-form')
+
+    expect(screen.queryByTestId('exercise-settings-unsaved-notice')).not.toBeInTheDocument()
+  })
+
+  it('warns — icon and words — once the shared settings form is dirty', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByTestId('exercise-settings-form')
+
+    await user.type(screen.getByLabelText('World name'), '!')
+
+    const notice = await screen.findByTestId('exercise-settings-unsaved-notice')
+    expect(notice).toHaveAttribute('role', 'status')
+    expect(notice).toHaveTextContent(/you have unsaved changes/i)
+    expect(notice.querySelector('svg')).not.toBeNull()
+  })
+
+  it('keeps the edit, and says where it is, when the planner moves to another form', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByTestId('exercise-settings-form')
+    await user.type(screen.getByLabelText('World name'), '!')
+
+    // Practice mode is a DIFFERENT form with a different save — this is the move
+    // that could abandon an edit, so the notice must say it did not.
+    await user.click(screen.getByTestId('exercise-config-nav-practice'))
+
+    const notice = screen.getByTestId('exercise-settings-unsaved-notice')
+    expect(notice).toHaveTextContent(/nothing was lost/i)
+    expect(notice).toHaveTextContent(/identity & schedule/i)
+
+    // ...and the way back restores the edit rather than a fresh form.
+    await user.click(screen.getByRole('button', { name: /back to identity & schedule/i }))
+    expect(screen.getByLabelText('World name')).toHaveValue('Metro Atlanta!')
+  })
+
+  it('marks a section in the nav whose field blocked a save from another section', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByTestId('exercise-settings-form')
+
+    // Break a CHANNELS field, walk away to theming, then save from there.
+    await user.click(screen.getByTestId('exercise-config-nav-channels'))
+    await user.click(screen.getByRole('checkbox', { name: 'Social' }))
+    await user.click(screen.getByTestId('exercise-config-nav-theming'))
+    await user.click(screen.getByRole('button', { name: /save settings/i }))
+
+    // The nav says which section needs attention, in words as well as color...
+    const marker = await screen.findByTestId('exercise-config-nav-error-channels')
+    expect(marker).toHaveTextContent(/needs attention/i)
+    expect(marker.querySelector('svg[data-icon="triangle-exclamation"]')).not.toBeNull()
+
+    // ...and the planner has been taken there, so the error is not off-screen.
+    expect(screen.getByRole('heading', { level: 2, name: 'Channels' })).toBeInTheDocument()
+    expect(screen.getByTestId('exercise-config-nav-channels')).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
   })
 })
