@@ -12,6 +12,13 @@
  *  - the whole control is keyboard-operable — Tab/Enter/Space to open, pick a
  *    tier, and confirm; Escape dismisses.
  *
+ * Story 08 (participant pause overlay) adds the PARTICIPANT PAUSE PAGE selector
+ * beside the tier radios: both options render with their consequence copy, the
+ * store's current value is the checked one, a click and a keyboard Space both
+ * write through `setOverlayRegister`, and the Freeze confirm step restates which
+ * page participants will get. AC5 depends on this selector existing — without it
+ * the register was always the store default and `in-fiction` was unreachable.
+ *
  * `usePauseState` is mocked at the module boundary (mirrors
  * `SwampedModeToggle.test.tsx`'s hook-mock precedent) so each test drives the
  * component's rendering + interactions directly and deterministically.
@@ -340,6 +347,112 @@ describe('PausePill — overlay register is not rendered by this control', () =>
     renderWithTheme(<PausePill />)
 
     expect(screen.queryByTestId('overlay-layer')).not.toBeInTheDocument()
+    // With the popover CLOSED nothing quotes the participant copy either. (Open, the
+    // story-08 selector deliberately QUOTES it as staff copy so a controller can see
+    // the consequence of the choice — that is a label, never a rendered pause page.)
     expect(screen.queryByText(/EXERCISE PAUSED/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('PausePill — participant pause page selector (story 08; AC1/AC5, NFR-001)', () => {
+  it('renders both options with their consequence copy, not register jargon', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running'))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    const group = screen.getByTestId('pause-register-group')
+    expect(group).toHaveTextContent('PARTICIPANT PAUSE PAGE')
+    expect(group).toHaveTextContent('What participants see while the world is frozen')
+    expect(group).toHaveTextContent('EXERCISE PAUSED')
+    expect(group).toHaveTextContent("We'll be right back")
+    expect(group).toHaveTextContent('Breaks the fiction on purpose')
+    expect(group).toHaveTextContent('Keeps participants in the scenario')
+  })
+
+  it('checks the option the shared store currently holds — the selection is state, not colour', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running', { overlayRegister: 'in-fiction' }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    const inFiction = within(screen.getByTestId('pause-register-option-in-fiction')).getByRole('radio')
+    const outOfFiction = within(
+      screen.getByTestId('pause-register-option-out-of-fiction'),
+    ).getByRole('radio')
+    expect(inFiction).toBeChecked()
+    expect(outOfFiction).not.toBeChecked()
+  })
+
+  it('defaults to out-of-fiction — the conservative choice', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running'))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    expect(
+      within(screen.getByTestId('pause-register-option-out-of-fiction')).getByRole('radio'),
+    ).toBeChecked()
+  })
+
+  it('writes a click through to setOverlayRegister — the ONE store, no second path', async () => {
+    const user = userEvent.setup()
+    const setOverlayRegister = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { setOverlayRegister }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+    await user.click(
+      within(screen.getByTestId('pause-register-option-in-fiction')).getByRole('radio'),
+    )
+
+    expect(setOverlayRegister).toHaveBeenCalledWith('in-fiction')
+  })
+
+  it('is operable by keyboard alone — Space on the focused option selects it (NFR-001)', async () => {
+    const user = userEvent.setup()
+    const setOverlayRegister = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { setOverlayRegister }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    const inFiction = within(screen.getByTestId('pause-register-option-in-fiction')).getByRole('radio')
+    inFiction.focus()
+    expect(inFiction).toHaveFocus()
+
+    await user.keyboard(' ')
+
+    expect(setOverlayRegister).toHaveBeenCalledWith('in-fiction')
+  })
+
+  it('the Freeze confirm step restates which page participants will get', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running', { overlayRegister: 'in-fiction' }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+    const freezeRadio = within(screen.getByTestId('pause-tier-option-freeze')).getByRole('radio')
+    await user.click(freezeRadio)
+    await user.click(screen.getByTestId('pause-apply'))
+
+    expect(screen.getByTestId('pause-freeze-confirm-register')).toHaveTextContent(
+      "They will see: In fiction — \"We'll be right back\"",
+    )
+  })
+
+  it('the selector is not shown during the Freeze confirm step (one decision at a time)', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running'))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+    await user.click(within(screen.getByTestId('pause-tier-option-freeze')).getByRole('radio'))
+    await user.click(screen.getByTestId('pause-apply'))
+
+    expect(screen.queryByTestId('pause-register-group')).not.toBeInTheDocument()
   })
 })

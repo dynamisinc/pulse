@@ -31,6 +31,23 @@
  * because participants notice a world freeze. This is a confirm-step guard, NOT
  * a Director role-gate (that pattern belongs to Break Fiction, story 04).
  *
+ * THE PARTICIPANT PAUSE PAGE (world-steering story 08; D7-004). Beside the tier
+ * radios, a two-option selector chooses WHICH holding page a Freeze shows
+ * participants — the one participant-visible training-design choice this control
+ * carries, so it is labelled by its CONSEQUENCE, not by the internal register
+ * jargon:
+ *   - **out of fiction** ("EXERCISE PAUSED") — names the exercise; breaks the
+ *     fiction on purpose. The DEFAULT, because it is the safe choice when the
+ *     fiction is already broken.
+ *   - **in fiction** ("We'll be right back") — reads like an ordinary outage and
+ *     keeps participants inside the scenario.
+ * It writes through `usePauseState().setOverlayRegister` — the shared ambient
+ * store — and there is deliberately NO second path: the live pause-tier POST
+ * sends whatever the store holds, and the backend's overlay publisher pushes
+ * that register to the participant shell. Selection is conveyed by TEXT (the
+ * radio's own checked state + its consequence copy), never colour (NFR-001), and
+ * the Freeze confirm step restates which page participants will get.
+ *
  * FULLY KEYBOARD-OPERABLE (NFR-001). The pill is a button (Enter/Space); the
  * popover traps focus; the radios are arrow/Tab navigable; every action is a
  * button; Escape dismisses the popover and the confirm step.
@@ -41,10 +58,12 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faBan,
   faCirclePause,
+  faMasksTheater,
   faPause,
   faPlay,
   faSnowflake,
   faTriangleExclamation,
+  faUserSlash,
 } from '@fortawesome/free-solid-svg-icons'
 import {
   Box,
@@ -56,7 +75,7 @@ import {
   Typography,
 } from '@mui/material'
 import { CobraLinkButton, CobraPrimaryButton, CobraSecondaryButton } from '@/theme/styledComponents'
-import { usePauseState, type PauseTier } from '../../hooks/usePauseState'
+import { usePauseState, type OverlayRegister, type PauseTier } from '../../hooks/usePauseState'
 
 /** D5 dark operator-chrome tokens (matches `SwampedModeToggle`). Staff-only. */
 const chrome = {
@@ -101,6 +120,40 @@ const TIER_OPTIONS: readonly TierOption[] = [
 const DEFAULT_CHOICE: PauseChoice =
   TIER_OPTIONS.find(option => !option.disabledReason)?.value ?? 'engine'
 
+/**
+ * One participant-pause-page option (story 08). `label` names the CONSEQUENCE and
+ * quotes the copy participants actually read; `hint` explains the training
+ * intent. Both are text — the selection is never conveyed by colour (NFR-001).
+ */
+interface RegisterOption {
+  readonly value: OverlayRegister
+  readonly label: string
+  readonly hint: string
+  readonly icon: typeof faMasksTheater
+}
+
+/**
+ * Out of fiction FIRST because it is the default and the conservative choice: an
+ * explicit "EXERCISE PAUSED" is safe when the fiction is already broken, whereas
+ * wrongly staying in fiction hides a real stop from participants.
+ */
+const DEFAULT_REGISTER_OPTION: RegisterOption = {
+  value: 'out-of-fiction',
+  label: 'Out of fiction — "EXERCISE PAUSED"',
+  hint: 'Names the exercise. Breaks the fiction on purpose.',
+  icon: faUserSlash,
+}
+
+const REGISTER_OPTIONS: readonly RegisterOption[] = [
+  DEFAULT_REGISTER_OPTION,
+  {
+    value: 'in-fiction',
+    label: "In fiction — \"We'll be right back\"",
+    hint: 'Reads like an ordinary outage. Keeps participants in the scenario.',
+    icon: faMasksTheater,
+  },
+]
+
 /** The dot colour for each tier — decorative reinforcement of the label text. */
 const TIER_DOT: Readonly<Record<PauseTier, string>> = {
   running: chrome.running,
@@ -115,7 +168,13 @@ const TIER_DOT: Readonly<Record<PauseTier, string>> = {
  * popover (three radio tiers, guarded Freeze confirm, Resume while paused).
  */
 export function PausePill() {
-  const { tier, label, isPaused, setTier, resume } = usePauseState()
+  const { tier, label, isPaused, overlayRegister, setTier, resume, setOverlayRegister } =
+    usePauseState()
+
+  // The selected participant pause page, restated on the Freeze confirm step so the
+  // guarded action names exactly what participants will see.
+  const selectedRegister =
+    REGISTER_OPTIONS.find(option => option.value === overlayRegister) ?? DEFAULT_REGISTER_OPTION
 
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
   const open = Boolean(anchorEl)
@@ -251,6 +310,14 @@ export function PausePill() {
                 Everything stops and the scenario clock halts. Participants will see the pause
                 page — this is a deliberate, visible safety stop.
               </Typography>
+              {/* Story 08: name the page participants will actually get, so the
+                  guarded step states the participant-visible consequence. */}
+              <Typography
+                data-testid="pause-freeze-confirm-register"
+                sx={{ fontSize: 11.5, color: chrome.ink, lineHeight: 1.4 }}
+              >
+                {`They will see: ${selectedRegister.label}`}
+              </Typography>
               <Stack direction="row" sx={{ gap: 1, justifyContent: 'flex-end' }}>
                 <CobraSecondaryButton
                   data-testid="pause-freeze-back"
@@ -350,6 +417,66 @@ export function PausePill() {
                   />
                 ))}
               </RadioGroup>
+
+              {/* Story 08 — the participant pause page. Writes straight through to
+                  the shared pause store (no local copy, no second path): the live
+                  pause-tier POST sends whatever the store holds. */}
+              <Box
+                data-testid="pause-register-group"
+                sx={{ borderTop: `1px solid ${chrome.line}`, pt: 1 }}
+              >
+                <Typography
+                  sx={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    letterSpacing: '0.05em',
+                    color: chrome.inkFaint,
+                  }}
+                >
+                  PARTICIPANT PAUSE PAGE
+                </Typography>
+                <Typography sx={{ fontSize: 10.5, color: chrome.inkFaint, mb: 0.25 }}>
+                  What participants see while the world is frozen
+                </Typography>
+
+                <RadioGroup
+                  aria-label="Participant pause page"
+                  value={overlayRegister}
+                  onChange={event => setOverlayRegister(event.target.value as OverlayRegister)}
+                >
+                  {REGISTER_OPTIONS.map(option => (
+                    <FormControlLabel
+                      key={option.value}
+                      value={option.value}
+                      data-testid={`pause-register-option-${option.value}`}
+                      control={<Radio size="small" sx={{ color: chrome.inkMuted, py: 0.4 }} />}
+                      label={
+                        <Stack sx={{ py: 0.2 }}>
+                          <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
+                            <FontAwesomeIcon
+                              icon={option.icon}
+                              aria-hidden="true"
+                              style={{ fontSize: 10, color: chrome.inkMuted }}
+                            />
+                            <Typography
+                              component="span"
+                              sx={{ fontSize: 12.5, fontWeight: 700, color: chrome.ink }}
+                            >
+                              {option.label}
+                            </Typography>
+                          </Stack>
+                          {/* NFR-001: the consequence is TEXT inside the radio's own
+                              accessible name — never colour, never icon-only. */}
+                          <Typography component="span" sx={{ fontSize: 10.5, color: chrome.inkFaint }}>
+                            {option.hint}
+                          </Typography>
+                        </Stack>
+                      }
+                      sx={{ alignItems: 'flex-start', ml: 0, mr: 0 }}
+                    />
+                  ))}
+                </RadioGroup>
+              </Box>
 
               <Stack direction="row" sx={{ gap: 1, justifyContent: 'flex-end', alignItems: 'center' }}>
                 <CobraLinkButton data-testid="pause-cancel" onClick={closePopover}>
