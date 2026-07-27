@@ -19,22 +19,73 @@
  * measurement in a real browser; see the story notes.
  */
 
+import { ThemeProvider } from '@mui/material/styles'
 import { render, screen } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { describe, expect, it } from 'vitest'
+import cobraTheme from '@/theme/cobraTheme'
 import { PANEL_SAVE_BAR_SCROLL_PADDING_PX, PanelSaveBar } from './PanelSaveBar'
 
+/**
+ * The bar only ever mounts inside COBRA, and COBRA moves `lg` off the MUI
+ * default (1024, not 1200). Rendering bare would resolve this component's
+ * responsive values against the DEFAULT breakpoints, so a breakpoint assertion
+ * would pass against a number the running app never uses.
+ */
+function renderBar(children: ReactNode) {
+  return render(
+    <ThemeProvider theme={cobraTheme}>
+      <PanelSaveBar>{children}</PanelSaveBar>
+    </ThemeProvider>,
+  )
+}
+
+/**
+ * Every declaration Emotion emitted for this element, one rule per line, each
+ * prefixed with the media condition it applies under (`''` for none). jsdom
+ * does no layout and applies no media query, so a responsive value has to be
+ * read out of the stylesheet rather than off `getComputedStyle`.
+ */
+function cssFor(element: HTMLElement): string {
+  const emotionClass = [...element.classList].find(name => name.startsWith('css-'))
+  if (emotionClass === undefined) return ''
+  const rules: string[] = []
+  const collect = (list: CSSRuleList, condition: string) => {
+    for (const rule of list) {
+      if (rule instanceof CSSMediaRule) collect(rule.cssRules, `@media ${rule.conditionText}`)
+      else if (rule.cssText.includes(`.${emotionClass}`)) rules.push(`${condition} ${rule.cssText}`)
+    }
+  }
+  for (const sheet of document.styleSheets) collect(sheet.cssRules, '')
+  return rules.join('\n').replace(/:\s+/g, ':').replace(/\s+/g, ' ')
+}
+
+/** Read from the COBRA theme: COBRA moves `lg` off the MUI default (1024, not 1200). */
+const DESKTOP = `@media \\(min-width:${cobraTheme.breakpoints.values.lg}px\\)`
+
 describe('PanelSaveBar — the commit point cannot scroll out of reach', () => {
-  it('sticks to the bottom of the scrolling pane', () => {
-    render(<PanelSaveBar><button type="submit">Save settings</button></PanelSaveBar>)
+  it('sticks to the bottom of the pane ONLY where the pane is the scrollport', () => {
+    renderBar(<button type="submit">Save settings</button>)
 
     const bar = screen.getByTestId('panel-save-bar')
-    const style = getComputedStyle(bar)
-    expect(style.position).toBe('sticky')
-    expect(style.bottom).toBe('0px')
+    const css = cssFor(bar)
+
+    // At `lg`+ the content pane scrolls, its `scroll-padding-bottom` reserves
+    // room for this bar, and sticking is what keeps the commit point reachable.
+    expect(css).toMatch(new RegExp(`${DESKTOP}[^\\n]*position:sticky`))
+    expect(getComputedStyle(bar).bottom).toBe('0px')
+
+    // Below `lg` the page is in flow and the real scrolling ancestor is the
+    // STAFF SHELL work area, not the pane. Sticking there would pin the bar
+    // against a scrollport that reserves no room for it, scrolling a focused
+    // field underneath the buttons — the precise hazard this bar exists to
+    // prevent (Copilot review, PR #383). jsdom applies no media query, so the
+    // base declaration is what `getComputedStyle` reports.
+    expect(getComputedStyle(bar).position).toBe('static')
   })
 
   it('is opaque, so scrolled fields pass behind it instead of through it', () => {
-    render(<PanelSaveBar><button type="submit">Save settings</button></PanelSaveBar>)
+    renderBar(<button type="submit">Save settings</button>)
 
     const style = getComputedStyle(screen.getByTestId('panel-save-bar'))
     // A transparent sticky bar is worse than no sticky bar: the buttons and the
@@ -47,11 +98,11 @@ describe('PanelSaveBar — the commit point cannot scroll out of reach', () => {
   })
 
   it('renders the buttons and their messages as its own children, in order', () => {
-    render(
-      <PanelSaveBar>
+    renderBar(
+      <>
         <button type="submit">Save settings</button>
         <p role="alert">Nothing has been sent to the server.</p>
-      </PanelSaveBar>,
+      </>,
     )
 
     const bar = screen.getByTestId('panel-save-bar')

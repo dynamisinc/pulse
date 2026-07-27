@@ -83,7 +83,22 @@ export function PanelSaveBar({ children }: PanelSaveBarProps) {
     <Box
       data-testid="panel-save-bar"
       sx={{
-        position: 'sticky',
+        // Sticky ONLY where the content pane is the scrollport, i.e. `lg`+.
+        //
+        // Below `lg` the page reverts to flow and the real scrolling ancestor is
+        // StaffShellFrame's work area (`overflow: auto` on the shell's own
+        // element). A sticky bar would then pin against THAT, while the
+        // `scroll-padding-bottom` reserved for it sits on the content pane,
+        // which is no longer scrolling and so contributes nothing. The result
+        // is the exact failure this bar exists to prevent: a field tabbed to
+        // near the end of a form scrolled to underneath the buttons.
+        //
+        // Fixing it by reaching into the shell's work area was the alternative,
+        // and it is worse: the planner feature does not own that element, and
+        // styling another feature's scrollport from here is how layout bugs
+        // become cross-feature. In flow the bar simply follows the last field,
+        // which is what the stacked page did and is perfectly usable narrow.
+        position: { xs: 'static', lg: 'sticky' },
         bottom: 0,
         // Above the fields it overlays; below MUI's modals/menus (1300+).
         zIndex: 2,
