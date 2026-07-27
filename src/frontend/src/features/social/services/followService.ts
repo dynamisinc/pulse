@@ -42,6 +42,23 @@
  * follow/unfollow always act as that fixed follower in mock mode — this
  * mirrors the real contract (the server, never the client, resolves the
  * acting persona from the session).
+ *
+ * FOLLOW-CHANGE NOTIFICATION (`subscribeFollowChanges`, feeds-discovery/08 #91).
+ * A consumer that CACHES the viewer's followed set needs to know when that set
+ * moved, or it silently serves a stale graph for the rest of the session. The
+ * live Following feed stream is the first such consumer: it filters arrivals by
+ * the viewer's followed ids, so an account followed mid-session must start being
+ * admitted without a remount. Every follow/unfollow in the app funnels through
+ * the two writes below (`useFollow` is their only caller), so this module is the
+ * one place that can observe the change in BOTH mock and live mode — a
+ * mock-store subscription would only ever fire in mock mode, and polling would
+ * be both slower and noisier. Listeners are notified after a write RESOLVES (any
+ * successful write, including an idempotent `changed: false` repeat — that case
+ * is precisely when the client's cached set may be the thing that is stale), and
+ * never after a rejected one. The notification carries NO payload: it says "your
+ * cached follow graph may be out of date", and the listener re-reads through the
+ * normal `resolveFollowing` seam (server-authoritative, COR-001 — no client
+ * `exerciseId`, no client-side reconstruction of the graph from write results).
  */
 
 import type { AxiosAdapter } from 'axios'
@@ -125,6 +142,38 @@ const followersMockAdapter: AxiosAdapter = config => {
 /** Single env-guarded mock/live flip point (mirrors `personaService.ts`). */
 const USE_MOCK_FOLLOW = USE_MOCK_DATA
 
+/** Notified (no payload) whenever a follow/unfollow write succeeds — see the module header. */
+export type FollowChangeListener = () => void
+
+const followChangeListeners = new Set<FollowChangeListener>()
+
+/**
+ * Registers `listener` to be called after every successful follow/unfollow
+ * write anywhere in the app. Returns an IDEMPOTENT unsubscribe (calling it
+ * twice is safe, mirroring `realtimeFeed.subscribe`). The listener is a
+ * "re-read your cached follow graph" signal, not a diff: it carries no payload,
+ * because the authoritative set lives on the server and is read back through
+ * `resolveFollowing`.
+ */
+export function subscribeFollowChanges(listener: FollowChangeListener): () => void {
+  followChangeListeners.add(listener)
+  let active = true
+  return () => {
+    if (!active) return
+    active = false
+    followChangeListeners.delete(listener)
+  }
+}
+
+/**
+ * Fans the "follow graph moved" signal out. Iterates a COPY so a listener that
+ * unsubscribes (or subscribes) while being notified cannot mutate the set being
+ * iterated mid-loop.
+ */
+function notifyFollowChanged(): void {
+  for (const listener of [...followChangeListeners]) listener()
+}
+
 /**
  * The caller-observable outcome of ONE follow/unfollow write — the server's
  * `FollowStateResponseDto` (`FollowEndpoints.cs`) minus the fields no client
@@ -181,6 +230,9 @@ export async function followPersona(personaId: string): Promise<FollowWriteResul
     throw new Error('followPersona: response was not a well-formed follow-state envelope')
   }
   const { following, changed } = response.data
+  // The viewer's follow graph may have moved — tell anyone caching it to re-read
+  // (feeds-discovery/08). After the parse, so a malformed body notifies nobody.
+  notifyFollowChanged()
   return { following, changed }
 }
 
@@ -199,6 +251,8 @@ export async function unfollowPersona(personaId: string): Promise<FollowWriteRes
     throw new Error('unfollowPersona: response was not a well-formed follow-state envelope')
   }
   const { following, changed } = response.data
+  // See `followPersona` — an unfollow moves the graph the same way.
+  notifyFollowChanged()
   return { following, changed }
 }
 

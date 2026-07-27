@@ -1,8 +1,7 @@
 # Story: Following feed
 
 **Feature:** Feeds & discovery  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Complete except AC2b
-(the SOC-081 citizen-role default — deliberately deferred, see AC2b) and AC4 (real-time pill,
-deferred to story 04's own follow-up)
+(the SOC-081 citizen-role default — deliberately deferred, see AC2b)
 **Requirements:** SOC-081 (COR-015)  ·  **Design decisions:** none  ·  **Issue:** #121
 
 ## Context
@@ -48,11 +47,26 @@ is the teaching moment (SOC-081).
       baseline, its own one-shot mount `view` telemetry, and its own rendered scroll state across a
       switch. The switch is ABSENT for a read-only/no-persona session — see AC2a. Covered by
       `SocialChannel.feedSwitch.test.tsx` + `SocialChannel.feedSwitch.noPersona.test.tsx`.)*
-- [ ] **AC4.** Real-time updates arrive per story 04 (pill). **Deliberately disabled** under
-      `scope="following"`: story 04's stream (`useFeedStream`/`postStore`) is not follow-aware — it
-      buffers every arrival regardless of author — so wiring it in would show a pill counting posts
-      from unfollowed accounts under the Following label, a worse bug than no pill. Stays this story's
-      Out of Scope item; story 04's own follow-up is where the stream becomes scope-aware.
+- [x] **AC4.** Real-time updates arrive per story 04 (pill) — **now follow-aware, delivered on a
+      later pass** (`build/feeds-discovery/08-follow-aware-stream`, #91). The earlier build
+      **disabled** the stream under `scope="following"` because the source is author-agnostic and a
+      Following-labelled pill counting unfollowed accounts would be a lie. Live manual testing showed
+      what that traded it for: a Following feed that never moved and never said so — the reader had no
+      way to know anything had arrived short of a full reload. **The fix is to filter, not to
+      disable.** `useFeedStream` now takes an optional `admit(post) => boolean`, applied at the moment
+      a post is offered to the buffer: a rejected arrival is never buffered, never counted, and never
+      recorded in the dedup id set, so the pill's number always drains to exactly that many visible
+      posts. `<Feed scope="following">` passes a predicate admitting only posts whose
+      `authorPersonaId` is in the VIEWER's followed set (`hooks/useFollowedSet.ts` →
+      `followService.resolveFollowing(session.personaId)` — the same server-authoritative seam, and in
+      mock mode the same shared `followEdgeStore`, that the Following baseline itself filters on, so
+      the pill and the feed can never disagree about who is followed). `<Feed scope="all">` passes NO
+      predicate at all — the All Posts path is unchanged. Observer/read-only sessions still get no
+      pill and an inert stream (D1-011): `streamEnabled` now gates on the shell variant alone.
+      A follow made MID-SESSION takes effect on that account's next arrival with no remount —
+      `useFollowedSet` re-reads the graph on every successful follow/unfollow write
+      (`followService.subscribeFollowChanges`) while keeping its predicate's identity stable, so the
+      stream is never torn down and re-subscribed for a filter change.
 
 ## Deferred (tracked follow-ups)
 - **AC2b — the SOC-081 citizen-role default.** Not delivered; see AC2b above for the rationale. This
@@ -64,15 +78,27 @@ is the teaching moment (SOC-081).
   shared, so a switch between feeds of very different heights can still land clamped. Explicit
   per-tab scroll-offset restore is a small follow-up polish on `SocialChannel.tsx`, not a data-layer
   concern.
-- **Follow-aware real-time (AC4).** `useFeedStream`'s source has no per-post author filter; making the
-  Following scope's pill correct is story 04's follow-up, not this story's.
-- **The already-open Following feed does not pick up a new follow until remount.** `useFeed` freezes
-  its resolved post set on mount per scope (the module's own "frozen baseline" design — see
-  `hooks/useFeed.ts`), so following a NEW account while the Following tab is already open and mounted
-  will not show that account's posts until the tab is remounted (switch away and back, or a reload).
-  This is **correct per the frozen-stream decision** (SOC-083/D1-005's "never live-insert into the
-  reading stream" applies to composition changes too, not just new posts) — recorded here as a known,
-  intentional behavior, not a bug.
+- **RESOLVED — follow-aware real-time (AC4)** (#91, `build/feeds-discovery/08-follow-aware-stream`).
+  This section previously said the Following scope's pill was story 04's follow-up because
+  `useFeedStream`'s source has no per-post author filter. The filter now lives one layer up, in the
+  hook rather than the source: an optional `admit` predicate applied as a post is offered to the
+  buffer, so the transport stays author-agnostic (and COR-001-clean — no client-side scope parameter
+  was added to `start()`/`subscribe()`) while the Following mount only ever counts posts it can
+  actually show. See AC4 above for the full shape.
+  **How much of story 04 this covers:** the *Following case* of SOC-083/D1-005 — buffered, no
+  auto-insert, honest count, observer-hidden — and nothing else. Story 04 also owns the transport half
+  (shared SignalR connection + polling fallback, NFR-003), which this pass did not touch: the filter
+  is applied to whatever the existing source delivers, in both mock and live mode. Story 04's own
+  status is unchanged by this work.
+- **The already-open Following feed still does not gain a newly-followed account's OLDER posts.**
+  Narrowed by the AC4 work above, not resolved: `useFeed` freezes its resolved post set on mount per
+  scope (the module's own "frozen baseline" design — see `hooks/useFeed.ts`), so following a new
+  account while the Following tab is open does not backfill that account's already-published posts
+  until the tab is remounted (switch away and back, or a reload). What DOES now work is everything
+  from that moment forward: their next post is admitted by the live stream and surfaces on the pill.
+  The remaining backfill gap is **correct per the frozen-stream decision** (SOC-083/D1-005's "never
+  live-insert into the reading stream" applies to composition changes too, not just new posts) —
+  recorded here as known, intentional behavior, not a bug.
 - **RESOLVED — mock-mode "who does the session follow" (WR-004 fold, Gate-1 #88/#121).** This
   section previously said profiles-social-graph story 02 (the follow/unfollow write path,
   `useFollow`/`followService.ts`) was "a parallel, not-yet-merged build" and that `feedService.ts`'s
@@ -94,8 +120,9 @@ is the teaching moment (SOC-081).
   real filtering is entirely server-side.
 
 ## Out of Scope
-The follow mechanic (profiles SOC-051); All Posts (story 01); real-time pill (story 04); the tab UI /
-`SocialChannel` wiring (integration pass, not this story).
+The follow mechanic (profiles SOC-051); All Posts (story 01); the real-time pill's own transport and
+buffering machinery (story 04 — this story only supplies the follow filter it is fed, see AC4); the
+tab UI / `SocialChannel` wiring (integration pass, not this story).
 
 ## Technical Notes
 Participant world. Extends `<Feed>`/`useFeed`/`feedService` (story 01) with a `FeedScope = 'all' |
@@ -133,7 +160,22 @@ COR-015 (read-only default).
   the hook directly (no `<Feed>` in the tree) with a read-only and a no-persona session.
 - Component (RTL) — `pages/Feed.following.test.tsx`: renders only followed accounts; an empty follow set
   shows the honest Following-specific empty copy (never the All Posts copy, never any post card, never
-  a fallback); the live "new posts" pill never appears under this scope, even after a live arrival.
+  a fallback) and admits no live arrival either (every author is unfollowed, so the pill stays absent).
+- Component (RTL) — `pages/Feed.followingStream.test.tsx` (AC4): an arrival from a FOLLOWED account
+  increments the pill and tapping it shows that post at the top; an arrival from an UNFOLLOWED account
+  is never counted and never shown; a mixed burst's count matches the drain exactly (3 arrive, 2
+  admitted, 2 rendered); a follow made mid-session admits that account's NEXT arrival without a
+  remount (and does not resurrect the pre-follow one, which was never buffered); a
+  `readOnly`/`preview` mount still gets no pill at all (D1-011).
+- Hook (RTL) — `hooks/useFeedStream.test.ts` (AC4): omitting `admit` admits everything (the All Posts
+  path is unchanged); a rejected arrival is neither counted nor buffered nor dedup-recorded; the count
+  always equals the drain; a stable predicate causes no re-subscribe, and a changed one re-subscribes
+  without clearing the buffer. `hooks/useFollowedSet.test.ts`: resolves through `resolveFollowing`,
+  refreshes on a mid-session follow while keeping a STABLE predicate identity, issues no request with
+  no viewer persona, and fails CLOSED on a rejected read.
+- Service (unit) — `services/followService.test.ts` (AC4): `subscribeFollowChanges` notifies after a
+  successful follow AND unfollow (including an idempotent `changed: false` repeat — precisely when a
+  cached set may be the stale thing), never after a failed write, and stops on unsubscribe.
 - Component (RTL) — `pages/Feed.followingReadOnlyDefault.test.tsx`: a read-only session (persona still
   bound) AND a session with no bound persona each get the FULL All Posts set — never the
   filtered/empty Following feed — when mounted with `scope="following"`; the mount-view telemetry

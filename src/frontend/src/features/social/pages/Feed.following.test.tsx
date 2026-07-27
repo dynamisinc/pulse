@@ -10,10 +10,13 @@
  *  - only posts from the mock following set render;
  *  - an EMPTY follow set renders an honest, Following-specific empty state —
  *    never the All Posts empty copy, and never any All-Posts-only post;
- *  - the live "new posts" pill never appears under this scope (the stream
- *    isn't follow-aware yet — module header) even after a live arrival.
+ *  - with an EMPTY follow set the live pill still never appears, because every
+ *    arrival is by definition unfollowed (feeds-discovery/08 made the stream
+ *    follow-aware rather than disabled; this file keeps the empty-set corner of
+ *    that honest, and `Feed.followingStream.test.tsx` owns the full suite —
+ *    followed arrivals count, unfollowed ones don't, mid-session follows apply).
  */
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
@@ -86,11 +89,11 @@ describe('Feed scope="following" — honest empty state, never an All Posts fall
   })
 })
 
-describe('Feed scope="following" — the live pill is inert under this scope', () => {
-  it('never shows the "new posts" pill, even after a live arrival', async () => {
-    setMockFollowingForTests([personaIdForHandle('FairhavenWater')])
+describe('Feed scope="following" — an EMPTY follow set admits nothing (feeds-discovery/08)', () => {
+  it('never shows the "new posts" pill, because every arrival is by an unfollowed account', async () => {
+    setMockFollowingForTests([])
     renderFollowingFeed()
-    await screen.findAllByTestId('post-card')
+    await screen.findByText(/no posts from accounts you follow yet/i)
 
     expect(screen.queryByTestId('new-posts-pill')).toBeNull()
 
@@ -98,6 +101,10 @@ describe('Feed scope="following" — the live pill is inert under this scope', (
       postStore.appendPost(buildLivePost())
     })
 
-    expect(screen.queryByTestId('new-posts-pill')).toBeNull()
+    // The stream now RUNS under this scope, but its `admit` predicate rejects
+    // every author — so the pill stays absent and no post appears. An empty
+    // follow set must never let the firehose in under the Following label.
+    await waitFor(() => expect(screen.queryByTestId('new-posts-pill')).toBeNull())
+    expect(screen.queryAllByTestId('post-card')).toHaveLength(0)
   })
 })

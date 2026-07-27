@@ -31,6 +31,14 @@ Participant world. A buffer + pill over the feed; SignalR-fed with polling fallb
 approach with notification aggregation. See implementation.md (story 04). **If the product later wants
 idle-auto-scroll, log it as an amendment to D1-005 first.**
 
+**Later extension (not a change to this story's ACs or status).** `useFeedStream` now accepts an
+optional `admit(post) => boolean` predicate, added by the follow-aware-stream pass (#91, see
+`02-following-feed.md` AC4) so a Following-scoped mount counts only arrivals it can actually show. It
+is applied where a post is offered to the buffer; omitting it admits everything, so every consumer
+built against this story is unaffected. The transport half this story owns — the shared SignalR
+connection and its polling fallback (NFR-003) — was deliberately untouched by that pass: the filter
+sits above the source, and `start()`/`subscribe()` still take no scope argument (COR-001).
+
 ## Dependencies
 stories 01/02 (feeds); the SignalR real-time host; notifications (shared burst strategy). Realizes
 SOC-071/NFR-002 legibility.
