@@ -12,7 +12,7 @@
  *    same string. One table, imported by both, makes drift impossible rather
  *    than merely unlikely.
  *
- * IT HOLDS NO STATE AND NO BEHAVIOUR — labels, icons, copy and the nav order.
+ * IT HOLDS NO STATE AND NO BEHAVIOR — labels, icons, copy and the nav order.
  * The form state lives in `ExerciseSettingsPanel`; which section is selected
  * lives in `ExerciseSettingsPage`.
  *
@@ -59,21 +59,22 @@ export const EXERCISE_SETTINGS_SECTION_META: Readonly<
     label: 'Identity & schedule',
     icon: faIdCard,
     description:
-      'What this exercise is called — internally and in-fiction — and the single time zone and '
-      + 'scheduled window every participant timestamp is rendered against.',
+      'What your team calls this exercise, what participants see it called, and when it runs. '
+      + 'Every date and time participants read uses the time zone set here.',
   },
   channels: {
     label: 'Channels',
     icon: faTowerBroadcast,
     description:
-      'Which channels this exercise serves. A disabled channel is catalogued but never reaches '
-      + 'participants.',
+      'The channels participants can use in this exercise. Turn one off and it leaves their '
+      + 'world: no feed, no injects, nothing to react to.',
   },
   theming: {
     label: 'Theming & outlets',
     icon: faPalette,
     description:
-      'The brand the participant world is skinned from, and the display name each outlet carries.',
+      'How the participant world looks and what each outlet is called. These are the names and '
+      + 'colors participants read on screen.',
   },
 }
 

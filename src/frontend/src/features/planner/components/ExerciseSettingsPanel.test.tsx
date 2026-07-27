@@ -9,7 +9,7 @@
  * panel through a controlled seam and `@/core/services/api` is never touched —
  * no real axios sink, no Vitest worker-teardown footgun.
  *
- * The centrepiece is the FULL-REPLACE round trip: `PUT` is a replace, not a
+ * The centerpiece is the FULL-REPLACE round trip: `PUT` is a replace, not a
  * patch, so editing ONE field must still submit every other field unchanged.
  * A regression there silently clears settings a planner never touched, which is
  * this story's most likely defect — hence the whole-body `toEqual` assertion
@@ -331,7 +331,7 @@ describe('ExerciseSettingsPanel — "not configured" renders EMPTY, never the sh
 // ---------------------------------------------------------------------------
 
 describe('ExerciseSettingsPanel — the channel catalog comes from the response', () => {
-  it('renders one checkbox per catalogued channel, checked per the effective flags', async () => {
+  it('renders one checkbox per cataloged channel, checked per the effective flags', async () => {
     await renderLoadedPanel({ section: 'channels' })
 
     for (const channel of SETTINGS.channels) {
@@ -383,10 +383,10 @@ describe('ExerciseSettingsPanel — the channel catalog comes from the response'
 
     expect(mockUpdate).not.toHaveBeenCalled()
     const group = screen.getByTestId('exercise-settings-channels')
-    expect(within(group).getByText(/enable at least one channel/i)).toBeInTheDocument()
+    expect(within(group).getByText(/turn on at least one channel/i)).toBeInTheDocument()
     // The message is bound to the group, not just painted red.
     const helpId = group.getAttribute('aria-describedby') ?? ''
-    expect(document.getElementById(helpId)).toHaveTextContent(/enable at least one channel/i)
+    expect(document.getElementById(helpId)).toHaveTextContent(/turn on at least one channel/i)
   })
 })
 
@@ -693,7 +693,10 @@ describe('ExerciseSettingsPanel — server rejection (400: nothing was persisted
     await user.click(saveButton())
 
     const alert = await screen.findByTestId('exercise-settings-save-error')
-    expect(alert).toHaveTextContent(/could not reach the server/i)
+    // A transport failure reads differently from a rejection, and says so
+    // without naming "the server" at a planner.
+    expect(alert).toHaveTextContent(/pulse could not be reached/i)
+    expect(alert).toHaveTextContent(/were not saved/i)
   })
 })
 
@@ -711,7 +714,7 @@ describe('ExerciseSettingsPanel — accessibility (NFR-001)', () => {
     }
   })
 
-  it('gives the channel checkboxes a labelled group', async () => {
+  it('gives the channel checkboxes a labeled group', async () => {
     await renderLoadedPanel({ section: 'channels' })
 
     expect(screen.getByRole('group', { name: /enabled channels/i })).toBeInTheDocument()
@@ -753,13 +756,13 @@ describe('ExerciseSettingsPanel — accessibility (NFR-001)', () => {
     await user.click(saveButton())
 
     expect(accent).toHaveAttribute('aria-invalid', 'true')
-    expect(describedByText(accent)).toMatch(/css hex color/i)
+    expect(describedByText(accent)).toMatch(/hex color/i)
     // A different field must NOT be flagged — errors are per-field, not global.
     expect(screen.getByLabelText('Primary color')).toHaveAttribute('aria-invalid', 'false')
     expect(mockUpdate).not.toHaveBeenCalled()
   })
 
-  it('announces that a blocked save never reached the server', async () => {
+  it('announces that a blocked save stored nothing', async () => {
     const user = userEvent.setup()
     await renderLoadedPanel({ section: 'identity' })
 
@@ -768,7 +771,9 @@ describe('ExerciseSettingsPanel — accessibility (NFR-001)', () => {
 
     const alert = screen.getByTestId('exercise-settings-client-error')
     expect(alert).toHaveAttribute('role', 'alert')
-    expect(alert).toHaveTextContent(/nothing has been sent to the server/i)
+    // The planner is told the write did not happen, and what to do next.
+    expect(alert).toHaveTextContent(/nothing was saved/i)
+    expect(alert).toHaveTextContent(/then save again/i)
   })
 
   it('rejects an end date that precedes the start, on the end field', async () => {

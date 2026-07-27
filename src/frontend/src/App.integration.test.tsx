@@ -39,6 +39,11 @@
  *    `ExerciseSettingsPanel` beneath it are both asserted, so swapping the
  *    mounted surface (for another staff page, or for a participant element)
  *    fails here;
+ *  - the COMPOSED surface has exactly ONE `<main>` landmark, the shell's work
+ *    area, with the planner page inside it (#382). The page's own suite renders
+ *    it standalone and so is structurally blind to a nested landmark; this file
+ *    is the only place the composition is observable, which is why the guard
+ *    lives here rather than there;
  *  - it stays inside the staff world — no participant compliance chrome, no
  *    brand skin;
  *  - it wires NO preview handler, so (post-WR-003) it ships no preview control
@@ -197,6 +202,29 @@ describe('PlannerWorkspaceRoute — Integration B wiring (exercise-configuration
     // renders the editable form, so this is the shipped page, not a shell.
     expect(await screen.findByTestId('exercise-settings-form')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: /exercise name/i })).toBeInTheDocument()
+  })
+
+  it('exposes exactly ONE main landmark — the shell work area — and one h1 (#382)', async () => {
+    // THE COMPOSED assertion, deliberately not a standalone one. `StaffShellFrame`
+    // renders the work area as `<main>`, and `ExerciseSettingsPage` used to render
+    // `component="main"` too, so the surface a planner actually loads carried TWO
+    // nested `main` landmarks: invalid HTML, and two "main" destinations for one
+    // page in a screen reader's landmark list. The page's own suite can only see
+    // the page, so it could (and did) stay green while the running app was wrong;
+    // this is the one place the nesting is observable.
+    renderPlannerRoute()
+
+    await screen.findByTestId('staff-header')
+
+    const landmarks = screen.getAllByRole('main')
+    expect(landmarks).toHaveLength(1)
+    // ...and the one that survives is the SHELL's, with the planner page inside
+    // it — not the page having won and the shell's having gone missing.
+    expect(landmarks[0]).toBe(screen.getByTestId('staff-shell-work-area'))
+    expect(landmarks[0]).toContainElement(screen.getByTestId('exercise-settings-page'))
+
+    // One h1 for the composed page, so the heading outline still has a single root.
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
   })
 
   it('stays in the staff world: no participant compliance chrome, no preview control', async () => {

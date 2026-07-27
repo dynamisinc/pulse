@@ -5,7 +5,7 @@
  * story 02 — "Compliance chrome: per-exercise config + NFR-008 guard";
  * COR-031 / XC-003 / NFR-008; issue #41 / story #68). A planner turns the
  * classification banners on or off for this exercise and sets their copy and
- * colours, plus the in-content EXERCISE watermark switch the NFR-008 mutual
+ * colors, plus the in-content EXERCISE watermark switch the NFR-008 mutual
  * guard is evaluated against.
  *
  * TWO WORLDS — this is the STAFF world (D0 §2 / CLAUDE.md). COBRA look via
@@ -66,14 +66,14 @@
  * BANNER PRESENTATION IS FROZEN (R-006 / D7). This panel edits the CONFIG; the
  * banners themselves are `features/participant-shell/ComplianceChrome.tsx`
  * (shipped, a different Complete feature). Nothing here renders or restyles
- * them, and the colour fields are plain text inputs — no preview swatch that
+ * them, and the color fields are plain text inputs — no preview swatch that
  * would imply a presentation this story does not own.
  *
  * ACCESSIBILITY (NFR-001, WCAG 2.1 AA):
- *  - Every input is a real labelled control. Field errors are programmatically
+ *  - Every input is a real labeled control. Field errors are programmatically
  *    associated with their field — MUI wires `aria-describedby` to the helper
  *    text from the field's `id`, and `error` sets `aria-invalid` — so an error
- *    is never conveyed by colour alone.
+ *    is never conveyed by color alone.
  *  - The two markings switches are a `fieldset`/`legend` whose NFR-008 message
  *    is bound with `aria-describedby`.
  *  - The load state and the save outcome reach assistive tech: `role="status"`
@@ -144,10 +144,16 @@ interface ChromeFormValues {
 /** Per-field validation messages, keyed by the form field they belong to. */
 type FieldErrors = Partial<Record<keyof ChromeFormValues, string>>
 
-/** The NFR-008 message the panel shows before the server would say the same. */
+/**
+ * The NFR-008 message the panel shows before the server would say the same.
+ *
+ * Stated as the CONSEQUENCE, in a conductor's terms, rather than as the rule id:
+ * the reader is running an exercise, not reading the requirements register (the
+ * module header above carries NFR-008 for engineers).
+ */
 const BOTH_OFF_MESSAGE =
-  'Compliance chrome and the in-content EXERCISE watermark must not both be off (NFR-008). '
-  + 'Turn one of them on: an exercise always carries at least one exercise marking.'
+  'Turn on at least one marking. With the banners and the watermark both off, a screenshot from '
+  + 'this exercise is indistinguishable from a real incident.'
 
 /** `null` (not configured) renders as an EMPTY box — never as the fallback. */
 function toText(value: string | null): string {
@@ -194,7 +200,7 @@ function toUpdate(values: ChromeFormValues): ChromeSettingsUpdate {
   }
 }
 
-/** A hex-colour field error, or `undefined`. Blank is valid (clears the colour). */
+/** A hex-color field error, or `undefined`. Blank is valid (clears the color). */
 function colorError(value: string, label: string): string | undefined {
   const trimmed = value.trim()
   if (trimmed.length === 0) return undefined
@@ -203,7 +209,7 @@ function colorError(value: string, label: string): string | undefined {
   }
   return CHROME_HEX_COLOR_PATTERN.test(trimmed)
     ? undefined
-    : `${label} must be a CSS hex colour, for example #2e6b2e.`
+    : `${label} must be a hex color, for example #2e6b2e.`
 }
 
 /** A banner-text field error, or `undefined`. Blank is valid (keeps the default). */
@@ -222,7 +228,7 @@ function validate(values: ChromeFormValues): FieldErrors {
   const errors: FieldErrors = {}
 
   // NFR-008 first: whether the exercise keeps a marking at all outranks whether
-  // a colour parses. Reported against the chrome switch, which is the control
+  // a color parses. Reported against the chrome switch, which is the control
   // the planner most likely just changed.
   if (violatesWatermarkInvariant(values.chromeEnabled, values.watermarkEnabled)) {
     errors.chromeEnabled = BOTH_OFF_MESSAGE
@@ -233,25 +239,30 @@ function validate(values: ChromeFormValues): FieldErrors {
   const bottomText = bannerTextError(values.bottomText, 'The bottom banner text')
   if (bottomText) errors.bottomText = bottomText
 
-  const topFg = colorError(values.topFg, 'The top banner text colour')
+  const topFg = colorError(values.topFg, 'The top banner text color')
   if (topFg) errors.topFg = topFg
-  const topBg = colorError(values.topBg, 'The top banner background colour')
+  const topBg = colorError(values.topBg, 'The top banner background color')
   if (topBg) errors.topBg = topBg
-  const bottomFg = colorError(values.bottomFg, 'The bottom banner text colour')
+  const bottomFg = colorError(values.bottomFg, 'The bottom banner text color')
   if (bottomFg) errors.bottomFg = bottomFg
-  const bottomBg = colorError(values.bottomBg, 'The bottom banner background colour')
+  const bottomBg = colorError(values.bottomBg, 'The bottom banner background color')
   if (bottomBg) errors.bottomBg = bottomBg
 
   return errors
 }
 
-/** Maps a thrown chrome error to clear, status-aware staff-facing copy. */
-function friendlyErrorMessage(error: ChromeSettingsError, verb: 'load' | 'save'): string {
+/**
+ * Maps a thrown chrome error to clear, status-aware staff-facing copy.
+ *
+ * `verb` is the PAST PARTICIPLE ('loaded' / 'saved'), not the infinitive: the
+ * previous `${verb}ed` produced "could not be saveed" on every failed save.
+ */
+function friendlyErrorMessage(error: ChromeSettingsError, verb: 'loaded' | 'saved'): string {
   switch (error.status) {
     case 400:
       return error.serverMessage
-        ? `This compliance chrome was not saved: ${error.serverMessage}`
-        : 'This compliance chrome was rejected. Nothing was saved — check the fields and try again.'
+        ? `These banner settings were not saved: ${error.serverMessage}`
+        : 'These banner settings were rejected and nothing was saved. Check the fields and try again.'
     case 401:
       return 'Your staff session is not active. Sign in to the console and try again.'
     case 403:
@@ -260,8 +271,8 @@ function friendlyErrorMessage(error: ChromeSettingsError, verb: 'load' | 'save')
       return 'This exercise no longer exists. Pick another exercise and try again.'
     default:
       return error.status === undefined
-        ? `Could not reach the server, so the compliance chrome could not be ${verb}ed. Check your connection and try again.`
-        : (error.serverMessage ?? `The compliance chrome could not be ${verb}ed. Please try again.`)
+        ? `Pulse could not be reached, so the compliance chrome was not ${verb}. Check your connection and try again.`
+        : (error.serverMessage ?? `The compliance chrome was not ${verb}. Try again.`)
   }
 }
 
@@ -269,7 +280,7 @@ function friendlyErrorMessage(error: ChromeSettingsError, verb: 'load' | 'save')
 // Presentational helpers
 // ---------------------------------------------------------------------------
 
-/** A `role="alert"` block pairing an icon with a message (never colour-only). */
+/** A `role="alert"` block pairing an icon with a message (never color-only). */
 function ChromeAlert({ message, testId }: { message: string; testId: string }) {
   return (
     <Stack
@@ -403,7 +414,8 @@ function ComplianceChromeForm({ settings }: ComplianceChromeFormProps) {
         </FormGroup>
         <FormHelperText id="compliance-chrome-markings-help">
           {errors.chromeEnabled ??
-            'Either marking may be turned off on its own, but never both: every exercise carries at least one exercise marking.'}
+            'You can turn one marking off, but not both. Every exercise has to carry at least one '
+              + 'EXERCISE marking.'}
         </FormHelperText>
       </FormControl>
 
@@ -422,7 +434,8 @@ function ComplianceChromeForm({ settings }: ComplianceChromeFormProps) {
             <CobraTextField
               {...textFieldProps(
                 'topText',
-                'Classification or exercise marking shown above every channel. Leave empty to keep the shipped default.',
+                'Runs across the top of every participant screen. Leave it blank to use the '
+                + 'standard wording.',
               )}
               label="Top banner text"
               value={values.topText}
@@ -430,14 +443,22 @@ function ComplianceChromeForm({ settings }: ComplianceChromeFormProps) {
               slotProps={{ htmlInput: { maxLength: MAX_BANNER_TEXT_LENGTH } }}
             />
             <CobraTextField
-              {...textFieldProps('topFg', 'Hex, for example #eaf5e6. Empty keeps the default.')}
-              label="Top banner text colour"
+              {...textFieldProps(
+                'topFg',
+                'Color of the banner wording. Hex, for example #eaf5e6. Blank uses the standard '
+                + 'color.',
+              )}
+              label="Top banner text color"
               value={values.topFg}
               onChange={event => setField('topFg', event.target.value)}
             />
             <CobraTextField
-              {...textFieldProps('topBg', 'Hex, for example #2e6b2e. Empty keeps the default.')}
-              label="Top banner background colour"
+              {...textFieldProps(
+                'topBg',
+                'Color of the band behind it. Hex, for example #2e6b2e. Blank uses the standard '
+                + 'color.',
+              )}
+              label="Top banner background color"
               value={values.topBg}
               onChange={event => setField('topBg', event.target.value)}
             />
@@ -450,7 +471,8 @@ function ComplianceChromeForm({ settings }: ComplianceChromeFormProps) {
             <CobraTextField
               {...textFieldProps(
                 'bottomText',
-                'Marking shown below every channel. Leave empty to keep the shipped default.',
+                'Runs across the bottom of every participant screen. Leave it blank to use the '
+                + 'standard wording.',
               )}
               label="Bottom banner text"
               value={values.bottomText}
@@ -458,14 +480,22 @@ function ComplianceChromeForm({ settings }: ComplianceChromeFormProps) {
               slotProps={{ htmlInput: { maxLength: MAX_BANNER_TEXT_LENGTH } }}
             />
             <CobraTextField
-              {...textFieldProps('bottomFg', 'Hex. Empty keeps the default.')}
-              label="Bottom banner text colour"
+              {...textFieldProps(
+                'bottomFg',
+                'Color of the banner wording. Hex, for example #eaf5e6. Blank uses the standard '
+                + 'color.',
+              )}
+              label="Bottom banner text color"
               value={values.bottomFg}
               onChange={event => setField('bottomFg', event.target.value)}
             />
             <CobraTextField
-              {...textFieldProps('bottomBg', 'Hex. Empty keeps the default.')}
-              label="Bottom banner background colour"
+              {...textFieldProps(
+                'bottomBg',
+                'Color of the band behind it. Hex, for example #2e6b2e. Blank uses the standard '
+                + 'color.',
+              )}
+              label="Bottom banner background color"
               value={values.bottomBg}
               onChange={event => setField('bottomBg', event.target.value)}
             />
@@ -501,14 +531,14 @@ function ComplianceChromeForm({ settings }: ComplianceChromeFormProps) {
 
         {hasClientErrors ? (
           <ChromeAlert
-            message="This compliance chrome needs attention before it can be saved. Nothing has been sent to the server."
+            message="Nothing was saved. Fix the marked fields, then save again."
             testId="compliance-chrome-client-error"
           />
         ) : null}
 
         {save.isError ? (
           <ChromeAlert
-            message={friendlyErrorMessage(save.error, 'save')}
+            message={friendlyErrorMessage(save.error, 'saved')}
             testId="compliance-chrome-save-error"
           />
         ) : null}
@@ -522,7 +552,7 @@ function ComplianceChromeForm({ settings }: ComplianceChromeFormProps) {
           >
             <FontAwesomeIcon icon={faCircleCheck} aria-hidden />
             <Typography variant="body2">
-              Compliance chrome saved. The fields above now show what the server stored.
+              Compliance chrome saved. The fields above now show the stored values.
             </Typography>
           </Stack>
         ) : null}
@@ -570,10 +600,9 @@ export function ComplianceChromePanel() {
       </Stack>
 
       <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
-        The classification and exercise markings that frame every participant channel. Saving
-        replaces the whole block, so every field below is sent together. An empty field means
-        &ldquo;not configured&rdquo; — that banner falls back to the shipped default rather than
-        being stored.
+        The EXERCISE markings that top and tail every participant screen, so nobody mistakes
+        exercise traffic for a real incident. One Save covers every field below. A field left blank
+        is not stored: that banner keeps its standard wording.
       </Typography>
 
       {chromeQuery.isPending ? (
@@ -590,7 +619,7 @@ export function ComplianceChromePanel() {
 
       {chromeQuery.isError ? (
         <ChromeAlert
-          message={friendlyErrorMessage(chromeQuery.error, 'load')}
+          message={friendlyErrorMessage(chromeQuery.error, 'loaded')}
           testId="compliance-chrome-load-error"
         />
       ) : null}

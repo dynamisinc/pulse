@@ -41,7 +41,7 @@
  * ============================================================================
  * HOW IT ASSERTS — by what only the real panel renders
  * ============================================================================
- * Each section's content is found by its OWN `<h2>` heading and by the labelled
+ * Each section's content is found by its OWN `<h2>` heading and by the labeled
  * `region` landmark that heading names (each panel is a `<section
  * aria-labelledby>`). Deliberately NOT by `data-testid`: a testid is trivially
  * satisfiable by a stub or a placeholder, and a guard that a stand-in can pass
@@ -55,7 +55,7 @@
  * `aria-current`.
  *
  * ============================================================================
- * SCOPE — COMPOSITION ONLY. NOT PANEL BEHAVIOUR.
+ * SCOPE — COMPOSITION ONLY. NOT PANEL BEHAVIOR.
  * ============================================================================
  * The three data seams are mocked at the SERVICE layer, exactly as the panel
  * suites mock them, so `@/core/services/api` is never touched (no real axios
@@ -64,10 +64,10 @@
  * and the section landmark render unconditionally, so the mount is fully
  * observable while nothing here depends on a DTO fixture. That keeps this a fast
  * composition guard that cannot rot when a panel's wire contract changes — the
- * panels' own suites own their loaded, error and save behaviour, and this file
+ * panels' own suites own their loaded, error and save behavior, and this file
  * must not grow into a second copy of them.
  *
- * The one exception is the unsaved-changes and hidden-section-error behaviour:
+ * The one exception is the unsaved-changes and hidden-section-error behavior:
  * that is the PAGE's own logic (it lives in the nav, not in a panel), so those
  * tests load the settings seam for real and are grouped separately below.
  *
@@ -215,14 +215,14 @@ describe('ExerciseSettingsPage — composition-point mount guard', () => {
     expect(headings[0]).toHaveTextContent('Practice / sandbox')
   })
 
-  it('keeps every section inside the page main landmark', async () => {
+  it('keeps every section inside the page root', async () => {
     const user = userEvent.setup()
     renderPage()
     const page = screen.getByTestId('exercise-settings-page')
 
     for (const section of SECTIONS) {
       await user.click(screen.getByTestId(`exercise-config-nav-${section.id}`))
-      // A panel rendered outside the <main> would not be in the work area the
+      // A panel rendered outside the page root would not be in the work area the
       // staff shell scrolls.
       expect(
         within(page).getAllByRole('heading', { level: 2, name: section.heading }),
@@ -230,13 +230,16 @@ describe('ExerciseSettingsPage — composition-point mount guard', () => {
     }
   })
 
-  it('keeps the page a single main landmark with exactly one h1', () => {
-    // NFR-001: the panels are h2 sections under ONE page h1. A panel that started
-    // rendering its own h1 — or a second page title — would break the heading
-    // outline a screen-reader user navigates by.
+  it('contributes NO main landmark of its own, and exactly one h1', () => {
+    // NFR-001 / #382. This page is WORK-AREA CONTENT: the staff shell's work
+    // area is the composed page's `<main>`, so a `component="main"` here nests a
+    // second one and gives a screen-reader user two "main" destinations for one
+    // page. Asserted here as "none at all", because standalone that is the only
+    // honest statement — the assertion that the RUNNING app has exactly one
+    // lives in `App.integration.test.tsx`, against the real staff shell.
     renderPage()
 
-    expect(screen.getAllByRole('main')).toHaveLength(1)
+    expect(screen.queryByRole('main')).not.toBeInTheDocument()
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Exercise configuration')
   })
@@ -255,7 +258,7 @@ describe('ExerciseSettingsPage — the content pane owns the scroll', () => {
   /**
    * Every declaration Emotion emitted for this element, one rule per line, each
    * line prefixed with the media condition it applies under (`''` for none) and
-   * whitespace-normalised so an assertion can be written the way the source is.
+   * whitespace-normalized so an assertion can be written the way the source is.
    */
   function cssFor(element: HTMLElement): string {
     const emotionClass = [...element.classList].find(name => name.startsWith('css-'))
@@ -381,7 +384,7 @@ describe('ExerciseSettingsPage — unsaved changes and off-screen validation', (
 
     const notice = await screen.findByTestId('exercise-settings-unsaved-notice')
     expect(notice).toHaveAttribute('role', 'status')
-    expect(notice).toHaveTextContent(/unsaved exercise settings/i)
+    expect(notice).toHaveTextContent(/you have unsaved changes/i)
     expect(notice.querySelector('svg')).not.toBeNull()
   })
 
@@ -396,7 +399,7 @@ describe('ExerciseSettingsPage — unsaved changes and off-screen validation', (
     await user.click(screen.getByTestId('exercise-config-nav-practice'))
 
     const notice = screen.getByTestId('exercise-settings-unsaved-notice')
-    expect(notice).toHaveTextContent(/nothing was discarded/i)
+    expect(notice).toHaveTextContent(/nothing was lost/i)
     expect(notice).toHaveTextContent(/identity & schedule/i)
 
     // ...and the way back restores the edit rather than a fresh form.
@@ -415,7 +418,7 @@ describe('ExerciseSettingsPage — unsaved changes and off-screen validation', (
     await user.click(screen.getByTestId('exercise-config-nav-theming'))
     await user.click(screen.getByRole('button', { name: /save settings/i }))
 
-    // The nav says which section needs attention, in words as well as colour...
+    // The nav says which section needs attention, in words as well as color...
     const marker = await screen.findByTestId('exercise-config-nav-error-channels')
     expect(marker).toHaveTextContent(/needs attention/i)
     expect(marker.querySelector('svg[data-icon="triangle-exclamation"]')).not.toBeNull()

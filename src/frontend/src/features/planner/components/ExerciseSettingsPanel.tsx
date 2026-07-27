@@ -51,7 +51,7 @@
  * formats the instants, so its projection is the truth about what was stored.
  *
  * ACCESSIBILITY (NFR-001, WCAG 2.1 AA):
- *  - Every input is a real labelled control. Field errors are programmatically
+ *  - Every input is a real labeled control. Field errors are programmatically
  *    associated with their field — MUI wires `aria-describedby` to the helper
  *    text from the field's `id`, and `error` sets `aria-invalid` — so the error
  *    is never conveyed by color alone.
@@ -68,7 +68,7 @@
  * anywhere, so stored markup can never execute in the console.
  *
  * SCENARIO TIME (COR-053): not applicable. This is the staff world; the two
- * schedule fields are absolute planning instants, edited and labelled
+ * schedule fields are absolute planning instants, edited and labeled
  * explicitly in UTC so a staff planner is never guessing which clock a stored
  * instant belongs to.
  *
@@ -108,7 +108,7 @@
  *   - identity (270px) — three free-text fields with long helper text;
  *   - time and schedule (240px) — short, known-format values (an IANA id, two
  *     instants), so they read fine three-up;
- *   - theming (190px) — the brand name keeps the full row, the four colours
+ *   - theming (190px) — the brand name keeps the full row, the four colors
  *     share the one below it;
  *   - outlet names (220px) — no helper text, so the narrowest floor of the four,
  *     but not narrower: the labels ("Press Room outlet name") must not clip.
@@ -121,7 +121,7 @@
  * Two callbacks report upward so the PAGE's nav can show what this form knows
  * and the page itself stays free of form state:
  *   - `onStatusChange` — whether the form is dirty, and which sections hold a
- *     validation error, so the nav can mark them (icon + text, never colour
+ *     validation error, so the nav can mark them (icon + text, never color
  *     alone) and warn about unsaved edits before the planner walks away.
  *   - `onRequestSection` — after a blocked save whose errors are all in sections
  *     that are NOT on screen, this asks the page to move to the first offending
@@ -276,7 +276,7 @@ function fromText(value: string): string | null {
 /**
  * Seeds the form from the server's settings.
  *
- * `outletNames` gets a field for every catalogued channel AND for every extra
+ * `outletNames` gets a field for every cataloged channel AND for every extra
  * key the server already stores, so a full replace can never drop an entry this
  * editor did not know how to render.
  */
@@ -356,7 +356,7 @@ function isDirty(values: ExerciseSettingsFormValues, settings: ExerciseSettings)
   return JSON.stringify(toUpdate(values)) !== JSON.stringify(toUpdate(toFormValues(settings)))
 }
 
-/** True when `zone` is an IANA id this runtime recognises (a Windows id throws). */
+/** True when `zone` is an IANA id this runtime recognizes (a Windows id throws). */
 function isIanaZone(zone: string): boolean {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: zone })
@@ -373,7 +373,7 @@ function colorError(value: string, label: string): string | undefined {
   if (trimmed.length > MAX_COLOR_LENGTH) return `${label} must be ${MAX_COLOR_LENGTH} characters or fewer.`
   return HEX_COLOR_PATTERN.test(trimmed)
     ? undefined
-    : `${label} must be a CSS hex color, for example #2b5f75.`
+    : `${label} must be a hex color, for example #2b5f75.`
 }
 
 /** A max-length field error, or `undefined`. */
@@ -409,7 +409,8 @@ function validate(values: ExerciseSettingsFormValues): FieldErrors {
     errors.timeZone = `The time zone must be ${MAX_TIME_ZONE_LENGTH} characters or fewer.`
   } else if (!isIanaZone(zone)) {
     errors.timeZone =
-      'Enter an IANA time zone, for example America/New_York. Windows zone ids are not accepted.'
+      'Enter an IANA time zone, for example America/New_York. A name like Eastern Standard Time '
+      + 'will not work.'
   }
 
   const start = values.scheduledStartAt.trim()
@@ -432,7 +433,7 @@ function validate(values: ExerciseSettingsFormValues): FieldErrors {
 
   if (values.enabledChannelIds.length === 0) {
     errors.enabledChannelIds =
-      'Enable at least one channel. An exercise with no channels would leave participants with nothing to see.'
+      'Turn on at least one channel. With all of them off, participants have nothing to see.'
   }
 
   const brandNameError = lengthError(values.brandName, MAX_BRAND_NAME_LENGTH, 'The brand name')
@@ -457,13 +458,18 @@ function validate(values: ExerciseSettingsFormValues): FieldErrors {
   return errors
 }
 
-/** Maps a thrown settings error to clear, status-aware staff-facing copy. */
-function friendlyErrorMessage(error: ExerciseSettingsError, verb: 'load' | 'save'): string {
+/**
+ * Maps a thrown settings error to clear, status-aware staff-facing copy.
+ *
+ * `verb` is the PAST PARTICIPLE ('loaded' / 'saved'), not the infinitive: the
+ * previous `${verb}ed` produced "could not be saveed" on every failed save.
+ */
+function friendlyErrorMessage(error: ExerciseSettingsError, verb: 'loaded' | 'saved'): string {
   switch (error.status) {
     case 400:
       return error.serverMessage
         ? `These settings were not saved: ${error.serverMessage}`
-        : 'These settings were rejected. Nothing was saved — check the fields and try again.'
+        : 'These settings were rejected and nothing was saved. Check the fields and try again.'
     case 401:
       return 'Your staff session is not active. Sign in to the console and try again.'
     case 403:
@@ -472,8 +478,8 @@ function friendlyErrorMessage(error: ExerciseSettingsError, verb: 'load' | 'save
       return 'This exercise no longer exists. Pick another exercise and try again.'
     default:
       return error.status === undefined
-        ? `Could not reach the server, so the settings could not be ${verb}ed. Check your connection and try again.`
-        : (error.serverMessage ?? `The settings could not be ${verb}ed. Please try again.`)
+        ? `Pulse could not be reached, so the settings were not ${verb}. Check your connection and try again.`
+        : (error.serverMessage ?? `The settings were not ${verb}. Try again.`)
   }
 }
 
@@ -646,7 +652,7 @@ function ExerciseSettingsForm({
           */}
           <FieldGrid minColumnWidth={270}>
             <CobraTextField
-              {...textFieldProps('name', 'Staff-facing internal name for this run. Participants never see it.')}
+              {...textFieldProps('name', 'The name your planning team uses. Participants never see it.')}
               label="Exercise name"
               required
               value={values.name}
@@ -656,7 +662,8 @@ function ExerciseSettingsForm({
             <CobraTextField
               {...textFieldProps(
                 'worldName',
-                'Participant-visible name of the simulated world. Leave empty to keep the shipped default.',
+                'The place participants think they are in, for example Metro Atlanta. Leave it '
+                + 'blank and they see the standard name.',
               )}
               label="World name"
               value={values.worldName}
@@ -664,7 +671,11 @@ function ExerciseSettingsForm({
               slotProps={{ htmlInput: { maxLength: MAX_WORLD_NAME_LENGTH } }}
             />
             <CobraTextField
-              {...textFieldProps('locale', 'BCP-47 tag, for example en-US. Leave empty to keep the shipped default.')}
+              {...textFieldProps(
+                'locale',
+                'How dates and numbers are written for participants. Use a BCP-47 tag, for '
+                + 'example en-US. Blank uses the standard format.',
+              )}
               label="Locale"
               value={values.locale}
               onChange={event => setField('locale', event.target.value)}
@@ -680,7 +691,8 @@ function ExerciseSettingsForm({
             <CobraTextField
               {...textFieldProps(
                 'timeZone',
-                'One IANA zone per exercise, for example America/New_York. Every participant timestamp renders in it.',
+                'One zone for the whole exercise, for example America/New_York. Participants read '
+                + 'every date and time in it, so the wrong zone puts every post hours out.',
               )}
               label="Time zone"
               required
@@ -689,7 +701,10 @@ function ExerciseSettingsForm({
               slotProps={{ htmlInput: { maxLength: MAX_TIME_ZONE_LENGTH } }}
             />
             <CobraTextField
-              {...textFieldProps('scheduledStartAt', 'Absolute instant, entered in UTC. Leave empty if unscheduled.')}
+              {...textFieldProps(
+                'scheduledStartAt',
+                'Planned StartEx, in UTC. Leave it blank if the date is not fixed yet.',
+              )}
               label="Scheduled start (UTC)"
               type="datetime-local"
               value={values.scheduledStartAt}
@@ -697,7 +712,10 @@ function ExerciseSettingsForm({
               slotProps={{ inputLabel: { shrink: true }, htmlInput: { step: 1 } }}
             />
             <CobraTextField
-              {...textFieldProps('scheduledEndAt', 'Absolute instant, entered in UTC. Must not precede the start.')}
+              {...textFieldProps(
+                'scheduledEndAt',
+                'Planned EndEx, in UTC. It cannot be earlier than the start.',
+              )}
               label="Scheduled end (UTC)"
               type="datetime-local"
               value={values.scheduledEndAt}
@@ -741,7 +759,8 @@ function ExerciseSettingsForm({
           </FormGroup>
           <FormHelperText id="exercise-settings-channels-help">
             {errors.enabledChannelIds ??
-              'A disabled channel is catalogued but never served to participants.'}
+              'Turn a channel off and participants cannot reach it. Nothing posted to it gets to '
+                + 'them.'}
           </FormHelperText>
         </FormControl>
       ) : null}
@@ -752,14 +771,15 @@ function ExerciseSettingsForm({
           {/*
             The brand name keeps the full row (`gridColumn: '1 / -1'`) — it is
             free text and the one field here that benefits from the width — and
-            the four colours share the row below it. Ten fields in one column is
+            the four colors share the row below it. Ten fields in one column is
             what made this the worst-scrolling section of the five.
           */}
           <FieldGrid minColumnWidth={190}>
             <CobraTextField
               {...textFieldProps(
                 'brandName',
-                'Participant-visible brand name. Leave empty to keep the shipped default brand.',
+                'The brand participants see across every channel. Leave it blank to use the '
+                + 'standard brand.',
               )}
               label="Brand name"
               value={values.brandName}
@@ -768,25 +788,37 @@ function ExerciseSettingsForm({
               sx={{ gridColumn: '1 / -1' }}
             />
             <CobraTextField
-              {...textFieldProps('brandPrimary', 'Hex, for example #2b5f75. Empty keeps the default.')}
+              {...textFieldProps(
+                'brandPrimary',
+                'Main brand color. Hex, for example #2b5f75. Blank uses the standard color.',
+              )}
               label="Primary color"
               value={values.brandPrimary}
               onChange={event => setField('brandPrimary', event.target.value)}
             />
             <CobraTextField
-              {...textFieldProps('brandAccent', 'Hex. Empty keeps the default.')}
+              {...textFieldProps(
+                'brandAccent',
+                'Buttons and links. Hex, for example #c05621. Blank uses the standard color.',
+              )}
               label="Accent color"
               value={values.brandAccent}
               onChange={event => setField('brandAccent', event.target.value)}
             />
             <CobraTextField
-              {...textFieldProps('brandSurface', 'Hex. Empty keeps the default.')}
+              {...textFieldProps(
+                'brandSurface',
+                'Page background. Hex, for example #f7f7f5. Blank uses the standard color.',
+              )}
               label="Surface color"
               value={values.brandSurface}
               onChange={event => setField('brandSurface', event.target.value)}
             />
             <CobraTextField
-              {...textFieldProps('brandOnSurface', 'Hex. Empty keeps the default.')}
+              {...textFieldProps(
+                'brandOnSurface',
+                'Text on that background. Hex, for example #1c1c1c. Blank uses the standard color.',
+              )}
               label="On-surface color"
               value={values.brandOnSurface}
               onChange={event => setField('brandOnSurface', event.target.value)}
@@ -795,8 +827,7 @@ function ExerciseSettingsForm({
 
           <SectionHeading text="Outlet names" />
           <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
-            Per-outlet display names. Leave one empty to keep that outlet&rsquo;s shipped default
-            name.
+            What participants see each outlet called. Leave one blank to use its standard name.
           </Typography>
           {/* No helper text and short labels, so these tolerate the narrowest
               floor of the three grids — five outlets land in two rows. */}
@@ -878,8 +909,8 @@ function ExerciseSettingsForm({
         {hasClientErrors ? (
           <SettingsAlert
             message={
-              'Some settings need attention before they can be saved. Nothing has been sent to the '
-              + `server. Check: ${failingSections.map(id => EXERCISE_SETTINGS_SECTION_META[id].label).join(', ')}.`
+              'Nothing was saved. Fix the marked fields, then save again. Sections to check: '
+              + `${failingSections.map(id => EXERCISE_SETTINGS_SECTION_META[id].label).join(', ')}.`
             }
             testId="exercise-settings-client-error"
           />
@@ -887,7 +918,7 @@ function ExerciseSettingsForm({
 
         {save.isError ? (
           <SettingsAlert
-            message={friendlyErrorMessage(save.error, 'save')}
+            message={friendlyErrorMessage(save.error, 'saved')}
             testId="exercise-settings-save-error"
           />
         ) : null}
@@ -901,7 +932,7 @@ function ExerciseSettingsForm({
           >
             <FontAwesomeIcon icon={faCircleCheck} aria-hidden />
             <Typography variant="body2">
-              Settings saved. Every section now shows what the server stored.
+              Settings saved. All three sections now show the stored values.
             </Typography>
           </Stack>
         ) : null}
@@ -969,10 +1000,9 @@ export function ExerciseSettingsPanel({
       </Typography>
 
       <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
-        Identity &amp; schedule, Channels and Theming &amp; outlets are one form: saving replaces
-        the whole block, so every field in all three is sent together — including the ones not on
-        screen. An empty field means &ldquo;not configured&rdquo; — that setting falls back to the
-        shipped default rather than being stored.
+        Identity &amp; schedule, Channels and Theming &amp; outlets share one Save. Saving writes
+        all three, including the fields you never opened, so check them before you save. A field
+        left blank is not stored: participants get the standard value for it.
       </Typography>
 
       {settingsQuery.isPending ? (
@@ -989,7 +1019,7 @@ export function ExerciseSettingsPanel({
 
       {settingsQuery.isError ? (
         <SettingsAlert
-          message={friendlyErrorMessage(settingsQuery.error, 'load')}
+          message={friendlyErrorMessage(settingsQuery.error, 'loaded')}
           testId="exercise-settings-load-error"
         />
       ) : null}

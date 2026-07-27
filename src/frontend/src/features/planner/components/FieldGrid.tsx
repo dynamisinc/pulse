@@ -6,13 +6,13 @@
  *
  * TWO WORLDS — STAFF (D0 §2 / CLAUDE.md). It renders inside the COBRA
  * `ThemeProvider` the staff shell mounts, uses `CobraStyles` for its gap, and
- * carries no colour of its own. Never used on a participant path.
+ * carries no color of its own. Never used on a participant path.
  *
  * ============================================================================
  * WHY IT EXISTS: THE SECTIONS WERE SCROLLING
  * ============================================================================
  * Every settings section used to stack its fields in ONE column, so a section
- * with ten fields (theming: a brand name, four colours and five outlet names)
+ * with ten fields (theming: a brand name, four colors and five outlet names)
  * was ~1000px tall in an 844px work area — a planner had to scroll a
  * FULL-REPLACE form to reach its save button. Desktop-first staff surfaces have
  * horizontal room to spare and were not using it.
@@ -39,7 +39,7 @@
  *    lets the single remaining track shrink with the container.
  *
  * A field that must keep the full width of the row (a brand name above its
- * colours, say) asks for it itself with `sx={{ gridColumn: '1 / -1' }}` — the
+ * colors, say) asks for it itself with `sx={{ gridColumn: '1 / -1' }}` — the
  * grid does not special-case its children.
  *
  * ACCESSIBILITY (NFR-001). CSS Grid does not reorder anything: the DOM order is

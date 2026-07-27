@@ -10,11 +10,11 @@
  * who has edited theming would have to go hunting for the button that commits
  * identity, channels and theming together — the change that was supposed to make
  * the page safer would have made it more dangerous. `position: sticky` is
- * therefore behaviour here, and it is asserted like behaviour.
+ * therefore behavior here, and it is asserted like behavior.
  *
  * jsdom does no layout, so this asserts the DECLARATIONS that produce the
- * behaviour (which jsdom resolves faithfully) plus the DOM contract. The
- * behaviour itself — the bar staying flush with the bottom of the pane while it
+ * behavior (which jsdom resolves faithfully) plus the DOM contract. The
+ * behavior itself — the bar staying flush with the bottom of the pane while it
  * scrolls, and no focused field ever landing behind it — was verified by
  * measurement in a real browser; see the story notes.
  */

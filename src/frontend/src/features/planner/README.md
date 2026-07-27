@@ -95,7 +95,7 @@ See `src/Pulse.WebApi/Features/ExerciseConfiguration/`.
 ## Story 02 — Compliance chrome: per-exercise config + NFR-008 guard (COR-031 / XC-003 / NFR-008, feature: exercise-configuration)
 
 The **compliance-chrome editor**: a planner turns the classification banners on or
-off for this exercise, sets their copy and colours, and flips the in-content
+off for this exercise, sets their copy and colors, and flips the in-content
 EXERCISE watermark the NFR-008 mutual guard is evaluated against.
 
 | File | Role |
@@ -123,7 +123,7 @@ and never pollutes the AAR.
 
 | File | Role |
 |------|------|
-| `components/PracticeModePanel.tsx` | The COBRA practice-mode control, **mounted into `ExerciseSettingsPage`**. Self-contained: no props, own query/mutation/states. The state indicator is **never colour-only** (NFR-001): a FontAwesome icon **and** a text label carry it, inside a `role="status"` region, using measured COBRA-native tokens (`notifications.warningText` / `successText`) — not stock-MUI `warning.*`, which `cobraTheme` never defines and which failed AA at 3.79:1. `evaluationEligible` is rendered from the **server's** verdict, never re-derived client-side. |
+| `components/PracticeModePanel.tsx` | The COBRA practice-mode control, **mounted into `ExerciseSettingsPage`**. Self-contained: no props, own query/mutation/states. The state indicator is **never color-only** (NFR-001): a FontAwesome icon **and** a text label carry it, inside a `role="status"` region, using measured COBRA-native tokens (`notifications.warningText` / `successText`) — not stock-MUI `warning.*`, which `cobraTheme` never defines and which failed AA at 3.79:1. `evaluationEligible` is rendered from the **server's** verdict, never re-derived client-side. |
 | `hooks/usePracticeMode.ts` | React Query 5 `usePracticeMode()` (query) + `useSetPracticeMode()` (mutation). Exports `PRACTICE_MODE_QUERY_KEY`; again **no exercise id** in the key. |
 | `services/practiceModeService.ts` | The data seam. Shared axios client, one env-guarded mock flip point, fail-closed validation, transport-agnostic `PracticeModeError`. Owns its client-contract types (`PracticeModeState`, `PracticeModeUpdate`) locally rather than in `types.ts`. |
 

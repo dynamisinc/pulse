@@ -34,7 +34,7 @@
  * At `lg` and up the page is a FIXED-HEIGHT FLEX COLUMN, not a document that
  * scrolls:
  *
- *   ┌ main (height:100%, overflow:hidden) ────────────────────────────┐
+ *   ┌ page root (height:100%, overflow:hidden) ───────────────────────┐
  *   │  h1 + intro + divider           flexShrink:0 — never scrolls    │
  *   │ ┌ row (flex:1 1 auto, minHeight:0) ────────────────────────────┐│
  *   │ │  nav (fixed width, pinned) │ CONTENT PANE (overflow-y:auto)  ││
@@ -90,7 +90,7 @@
  * -----------------------------------------------
  * It holds NO data fetching and NO state belonging to a panel: chrome and
  * practice remain entirely self-contained, and anything that looks like chrome
- * configuration or practice-mode behaviour belongs in those panels, never here.
+ * configuration or practice-mode behavior belongs in those panels, never here.
  *
  * The ONE DELIBERATE EXCEPTION, introduced with this layout: the page holds
  * which section is selected, and mirrors two facts the SHARED SETTINGS FORM
@@ -121,24 +121,27 @@
  *
  * VALIDATION IN A SECTION YOU CANNOT SEE. A blocked save marks every offending
  * section in the nav (FontAwesome icon + the words "Needs attention" — never
- * colour alone) and moves the planner to the first one if the problem is not on
+ * color alone) and moves the planner to the first one if the problem is not on
  * their screen. The server reports only its FIRST failure, so this client-side
  * pass is what makes a multi-section problem discoverable at all.
  *
- * ACCESSIBILITY (NFR-001, WCAG 2.1 AA). The pattern is NAVIGATION + a labelled
+ * ACCESSIBILITY (NFR-001, WCAG 2.1 AA). The pattern is NAVIGATION + a labeled
  * REGION, implemented completely — not a half-built tablist:
  *  - a real `<nav>` with an accessible name, holding a `<ul>` of real `<button>`
  *    elements: each is natively tabbable and Enter/Space-operable, so there is
  *    no roving tabindex to get wrong;
  *  - the selected one is marked `aria-current="page"` — programmatic, not just a
- *    background colour;
+ *    background color;
  *  - the content pane is a named `region` with `tabIndex={-1}`; choosing a
  *    section moves focus there, so a keyboard or screen-reader user lands on the
  *    content they asked for instead of the top of the document. Focus moves only
  *    on a real selection, never on first render;
  *  - unselected sections are `hidden`, so they are out of the accessibility tree
  *    entirely — no phantom headings, no focus traps in invisible forms;
- *  - one `<main>`, one `h1`; each section's own heading stays an `h2`;
+ *  - this page renders NO `<main>` of its own. The staff shell's work area is
+ *    the composed page's one `main` landmark, and a second, nested one here
+ *    gave a screen-reader user two "main" destinations for one page (#382).
+ *    The page owns the single `h1`; each section's own heading stays an `h2`;
  *  - COBRA has NO `palette.warning` (it falls through to stock MUI and fails AA
  *    at ~3.8:1), so the status/error text here uses `notifications.warningText`
  *    (#6F4E37, 7.4:1 on white) and `notifications.errorText` (#b22222, 6.7:1 on
@@ -285,7 +288,7 @@ interface SectionNavItemProps {
  * A real `<button>` (via MUI's unstyled `ButtonBase`) rather than a COBRA button
  * component: there is no `CobraNavItem`, and a `CobraPrimaryButton` per row
  * would read as five call-to-actions. Same precedent as the panels' raw MUI
- * `Checkbox`. Every colour below is a COBRA palette token, so it stays inside
+ * `Checkbox`. Every color below is a COBRA palette token, so it stays inside
  * the staff look.
  */
 function SectionNavItem({ section, selected, hasError, onSelect }: SectionNavItemProps) {
@@ -324,7 +327,7 @@ function SectionNavItem({ section, selected, hasError, onSelect }: SectionNavIte
           {section.label}
         </Typography>
         {hasError ? (
-          // Icon + WORDS. The colour is decoration on top of both, never the
+          // Icon + WORDS. The color is decoration on top of both, never the
           // signal itself (NFR-001).
           <Typography
             variant="caption"
@@ -421,7 +424,13 @@ export function ExerciseSettingsPage() {
 
   return (
     <Box
-      component="main"
+      // NO `component="main"`. The staff shell (`StaffShellFrame`) already
+      // renders the work area as the page's ONE `<main>`, and this page is
+      // mounted inside it, so declaring another here nested two `main`
+      // landmarks and gave a screen-reader user two "main" destinations for one
+      // page (#382). `EvaluatorDashboardPage` is the precedent: work-area
+      // content owns no landmark of its own. The composed guard lives in
+      // `App.integration.test.tsx`.
       data-testid="exercise-settings-page"
       sx={{
         // THE STICKY SHELL (see the module header). A fixed-height flex column
@@ -455,9 +464,9 @@ export function ExerciseSettingsPage() {
         </Stack>
 
         <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5, maxWidth: 860 }}>
-          Everything that configures this exercise. Changes apply to the exercise your console is
-          currently working in — the server decides which one that is, so nothing here can reach
-          another exercise.
+          Set up the exercise you are signed in to: what it is called, when it runs, which channels
+          participants get, and how their world looks. You cannot change another exercise from
+          here.
         </Typography>
 
         <Divider sx={{ mt: 2 }} />
@@ -538,7 +547,7 @@ export function ExerciseSettingsPage() {
             page — the settings form stays mounted — but a planner must be told
             that edits are outstanding, and told where to go to deal with them.
             `role="status"` announces it politely; the icon + words carry the
-            state, the colour only decorates it.
+            state, the color only decorates it.
           */}
           {settingsStatus.dirty ? (
             <Stack
@@ -560,10 +569,10 @@ export function ExerciseSettingsPage() {
                 </Box>
                 <Typography variant="body2">
                   {unsavedAwayFromForm
-                    ? 'Unsaved exercise settings. Nothing was discarded — your edits are still '
-                      + `waiting in ${EXERCISE_SETTINGS_SECTION_META[lastSettingsSection].label}.`
-                    : 'Unsaved exercise settings. Use Save settings or Revert changes below — '
-                      + 'they cover all three settings sections at once.'}
+                    ? 'You have unsaved changes. Nothing was lost. Your edits are still waiting in '
+                      + `${EXERCISE_SETTINGS_SECTION_META[lastSettingsSection].label}.`
+                    : 'You have unsaved changes. Save settings and Revert changes below both cover '
+                      + 'all three settings sections at once.'}
                 </Typography>
               </Stack>
               {unsavedAwayFromForm ? (

@@ -11,7 +11,7 @@
  * sink, so a rejection can never crash Vitest worker teardown.
  *
  * `axios` itself is NOT mocked — the error-translation tests build real
- * `AxiosError`s so `axios.isAxiosError` (used inside the seam) recognises them,
+ * `AxiosError`s so `axios.isAxiosError` (used inside the seam) recognizes them,
  * exactly as a live 400/401/403 would arrive.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
