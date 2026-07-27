@@ -1,6 +1,6 @@
 # Story: Engine settings API (autonomy default + tier policy, runtime-settable)
 
-**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress — built, Gate-1 clean, merged to its umbrella, Gate-2 clean (2026-07-27). NOT Complete: this story's DoD requires verified-in-UAT. UAT precondition: confirm the deployed staff assignment's role is `controller` first (#297).
 **Requirements:** ADP §2.3 (v1 subset), ADP-025/NFR-005 (governed tier boundary)  ·  **Design decisions:** none  ·  **Issue:** #353
 
 ## Context
