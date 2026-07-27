@@ -82,6 +82,7 @@ import { ThemeProvider } from '@mui/material/styles'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseSettingsPage } from './ExerciseSettingsPage'
+import { PANEL_SAVE_BAR_SCROLL_PADDING_PX } from '../components/PanelSaveBar'
 import { getExerciseSettings, type ExerciseSettings } from '../services/exerciseSettingsService'
 import { getChromeSettings } from '../services/chromeSettingsService'
 import { getPracticeMode } from '../services/practiceModeService'
@@ -238,6 +239,74 @@ describe('ExerciseSettingsPage — composition-point mount guard', () => {
     expect(screen.getAllByRole('main')).toHaveLength(1)
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Exercise configuration')
+  })
+})
+
+/**
+ * The sticky shell. jsdom does NO LAYOUT, so nothing here can assert that the
+ * page fits in 844px — that was established by measuring the real thing at
+ * 1440x900 and 1280x800. What jsdom resolves faithfully is the CSS declaration,
+ * and the declarations below are the ones that decide WHICH ELEMENT SCROLLS.
+ * Getting that wrong is exactly the regression this describe block exists for:
+ * the page used to carry `overflow-y: auto` itself, which is what scrolled the
+ * heading and the section nav away.
+ */
+describe('ExerciseSettingsPage — the content pane owns the scroll', () => {
+  /**
+   * Every declaration Emotion emitted for this element, one rule per line, each
+   * line prefixed with the media condition it applies under (`''` for none) and
+   * whitespace-normalised so an assertion can be written the way the source is.
+   */
+  function cssFor(element: HTMLElement): string {
+    const emotionClass = [...element.classList].find(name => name.startsWith('css-'))
+    if (emotionClass === undefined) return ''
+    const rules: string[] = []
+    const collect = (list: CSSRuleList, condition: string) => {
+      for (const rule of list) {
+        if (rule instanceof CSSMediaRule) collect(rule.cssRules, `@media ${rule.conditionText}`)
+        else if (rule.cssText.includes(`.${emotionClass}`)) rules.push(`${condition} ${rule.cssText}`)
+      }
+    }
+    for (const sheet of document.styleSheets) collect(sheet.cssRules, '')
+    return rules.join('\n').replace(/:\s+/g, ':').replace(/\s+/g, ' ')
+  }
+
+  /**
+   * Desktop-first: the sticky shell is the `lg`-and-up layout. Read from the
+   * COBRA theme rather than hardcoded — COBRA moves `lg` off the MUI default.
+   */
+  const DESKTOP = `@media \\(min-width:${cobraTheme.breakpoints.values.lg}px\\)`
+
+  it('does not scroll the page itself — the pane does', () => {
+    renderPage()
+
+    // The page is a fixed-height flex column that HIDES its own overflow, so
+    // there is no second, outer scrollbar beside the pane's. (Before the sticky
+    // shell this element carried `overflow-y: auto` and scrolled the heading
+    // and the nav away with everything else.)
+    expect(cssFor(screen.getByTestId('exercise-settings-page')))
+      .toMatch(new RegExp(`${DESKTOP}[^\\n]*overflow:hidden`))
+    // ...and the pane is the one scrollport.
+    expect(cssFor(screen.getByTestId('exercise-config-content')))
+      .toMatch(new RegExp(`${DESKTOP}[^\\n]*overflow-y:auto`))
+  })
+
+  it('keeps the heading and the nav out of that scrollport', () => {
+    renderPage()
+
+    const pane = screen.getByTestId('exercise-config-content')
+    // Nothing that must stay put may live inside the element that scrolls.
+    expect(pane).not.toContainElement(screen.getByRole('heading', { level: 1 }))
+    expect(pane).not.toContainElement(screen.getByTestId('exercise-config-nav'))
+  })
+
+  it('reserves room at the bottom of the pane for the pinned save bar (NFR-001)', () => {
+    renderPage()
+
+    // Without this a field tabbed to near the end of a form is scrolled to
+    // UNDERNEATH the save bar — measured at 70px of overlap with it removed.
+    expect(cssFor(screen.getByTestId('exercise-config-content')))
+      .toContain(`scroll-padding-bottom:${PANEL_SAVE_BAR_SCROLL_PADDING_PX}px`)
   })
 })
 

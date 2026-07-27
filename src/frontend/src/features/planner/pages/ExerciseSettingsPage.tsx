@@ -29,6 +29,48 @@
  *   5. Practice / sandbox   ─  its own form, its own save (story 04)
  *
  * ============================================================================
+ * THE STICKY SHELL: WHAT MOVES AND WHAT DOES NOT
+ * ============================================================================
+ * At `lg` and up the page is a FIXED-HEIGHT FLEX COLUMN, not a document that
+ * scrolls:
+ *
+ *   ┌ main (height:100%, overflow:hidden) ────────────────────────────┐
+ *   │  h1 + intro + divider           flexShrink:0 — never scrolls    │
+ *   │ ┌ row (flex:1 1 auto, minHeight:0) ────────────────────────────┐│
+ *   │ │  nav (fixed width, pinned) │ CONTENT PANE (overflow-y:auto)  ││
+ *   │ └──────────────────────────────────────────────────────────────┘│
+ *   └─────────────────────────────────────────────────────────────────┘
+ *
+ * The page used to carry `overflow-y: auto` itself, so a section taller than
+ * the work area scrolled the title and the section nav away with it. Now the
+ * ONE scrollport is the content pane: whatever a section cannot fit scrolls
+ * there, under a heading and a nav that hold still, and no second outer
+ * scrollbar appears beside it. `minHeight: 0` on the row and the pane is what
+ * makes that work at all — a flex item defaults to `min-height: auto` and
+ * refuses to shrink below its content, which would push the page taller
+ * instead of scrolling the pane.
+ *
+ * Below `lg` it reverts to ordinary document flow (`height: auto`,
+ * `overflow: visible`) and the staff shell's work area scrolls the page as a
+ * whole: pinning a wrapped nav row on a narrow screen would eat the little
+ * height there is.
+ *
+ * HEIGHT IS THE SCARCE RESOURCE, AND IT IS SPENT ON FIELDS. The sections were
+ * measured in a real browser (1440x900, work area 844px) and three of the five
+ * overflowed — theming worst, by ~170px. The fix was NOT to shrink anything:
+ * the panels lay their fields out in a responsive grid (`FieldGrid`) instead of
+ * one column, and the panels' redundant inner padding — the page already insets
+ * the pane — was dropped. Fonts, control sizes and COBRA spacing are untouched.
+ * Re-measure before adding a field: at 1280x800 the tightest sections have
+ * ~16px of headroom left.
+ *
+ * WHATEVER SCROLLS, THE COMMIT POINT DOES NOT. Because sections 1–3 share ONE
+ * full-replace save, a save button that can scroll out of reach would make this
+ * page MORE dangerous, not less — so each panel's footer is a `PanelSaveBar`,
+ * pinned to the bottom of the pane, and the pane reserves
+ * `scroll-padding-bottom` so a focused field is never scrolled to underneath it.
+ *
+ * ============================================================================
  * THIS PAGE IS STILL A COMPOSITION POINT — KEEP IT THAT WAY
  * ============================================================================
  * Per `docs/features/exercise-configuration/implementation.md` → "Integration
@@ -103,6 +145,14 @@
  *    white). The `notifications.warning` / `success` tokens are pale FILL tints
  *    and are unusable as text or borders.
  *
+ *  - the sticky shell must not hide what a keyboard user is on. The pinned save
+ *    bar overlays the bottom of the scrollport, so the pane sets
+ *    `scroll-padding-bottom` from `PANEL_SAVE_BAR_SCROLL_PADDING_PX` — the room
+ *    the browser keeps clear when it scrolls a focused control into view. With
+ *    it removed, focusing the outlet-name fields put them 70px BEHIND the bar
+ *    (measured). The heading block cannot hide anything: it is outside the
+ *    scrollport rather than floating over it.
+ *
  * DESKTOP-FIRST, not desktop-only: below `lg` the nav becomes a wrapping
  * horizontal row above the content rather than a squeezed column.
  *
@@ -136,6 +186,7 @@ import {
 import { ExerciseSettingsPanel } from '../components/ExerciseSettingsPanel'
 import { ComplianceChromePanel } from '../components/ComplianceChromePanel'
 import { PracticeModePanel } from '../components/PracticeModePanel'
+import { PANEL_SAVE_BAR_SCROLL_PADDING_PX } from '../components/PanelSaveBar'
 
 // ---------------------------------------------------------------------------
 // The section registry
@@ -372,26 +423,59 @@ export function ExerciseSettingsPage() {
     <Box
       component="main"
       data-testid="exercise-settings-page"
-      sx={{ padding: CobraStyles.Padding.MainWindow, height: '100%', overflowY: 'auto' }}
+      sx={{
+        // THE STICKY SHELL (see the module header). A fixed-height flex column
+        // at `lg`+: the title block and the nav hold still and the content pane
+        // owns the scroll. Below `lg` the page reverts to ordinary document
+        // flow and scrolls as a whole, because pinning a wrapped nav row on a
+        // narrow screen would eat the little height there is.
+        height: { xs: 'auto', lg: '100%' },
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        // No second, outer scrollbar: at `lg`+ the ONE scrollport on this page
+        // is the content pane below.
+        overflow: { xs: 'visible', lg: 'hidden' },
+        paddingTop: CobraStyles.Padding.MainWindow,
+        paddingLeft: CobraStyles.Padding.MainWindow,
+        paddingRight: CobraStyles.Padding.MainWindow,
+        // The pane supplies its own bottom padding INSIDE its scrollport, so
+        // the last field can reach the bottom edge instead of stopping short.
+        paddingBottom: { xs: CobraStyles.Padding.MainWindow, lg: 0 },
+      }}
     >
-      <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
-        <FontAwesomeIcon icon={faGears} aria-hidden />
-        <Typography variant="h5" component="h1" sx={{ fontWeight: 700 }}>
-          Exercise configuration
+      {/* PINNED: the page title and what this page is. `flexShrink: 0` keeps it
+          at its natural height however tall the section below is. */}
+      <Box sx={{ flexShrink: 0 }}>
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
+          <FontAwesomeIcon icon={faGears} aria-hidden />
+          <Typography variant="h5" component="h1" sx={{ fontWeight: 700 }}>
+            Exercise configuration
+          </Typography>
+        </Stack>
+
+        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5, maxWidth: 860 }}>
+          Everything that configures this exercise. Changes apply to the exercise your console is
+          currently working in — the server decides which one that is, so nothing here can reach
+          another exercise.
         </Typography>
-      </Stack>
 
-      <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5, maxWidth: 860 }}>
-        Everything that configures this exercise. Changes apply to the exercise your console is
-        currently working in — the server decides which one that is, so nothing here can reach
-        another exercise.
-      </Typography>
-
-      <Divider sx={{ mt: 2 }} />
+        <Divider sx={{ mt: 2 }} />
+      </Box>
 
       <Stack
         direction={{ xs: 'column', lg: 'row' }}
-        sx={{ gap: CobraStyles.Spacing.DashboardWidgets, mt: 2, alignItems: 'flex-start' }}
+        sx={{
+          gap: CobraStyles.Spacing.DashboardWidgets,
+          mt: 2,
+          alignItems: 'stretch',
+          // The row takes the height the title block left over, and `minHeight:
+          // 0` is what lets its children actually scroll instead of stretching
+          // the page (a flex item's default `min-height: auto` refuses to
+          // shrink below its content).
+          flex: { lg: '1 1 auto' },
+          minHeight: 0,
+        }}
       >
         <Box
           component="nav"
@@ -400,8 +484,22 @@ export function ExerciseSettingsPage() {
           sx={{
             width: { xs: '100%', lg: 260 },
             flexShrink: 0,
-            position: { lg: 'sticky' },
-            top: { lg: 0 },
+            // PINNED, not sticky: the nav is a flex sibling of the pane inside
+            // a row that does not scroll, so it simply stays where it is. It
+            // takes its own scrollbar only in the pathological case of a nav
+            // taller than the work area (many sections on a short screen) —
+            // never the page's.
+            minHeight: 0,
+            overflowY: { xs: 'visible', lg: 'auto' },
+            paddingBottom: { lg: CobraStyles.Padding.MainWindow },
+            // A non-visible `overflow` CLIPS ink overflow, and a nav item's
+            // focus ring is ink overflow: `outline` 2px at `outlineOffset` 2px
+            // needs 4px of room outside the item or the ring is shaved off
+            // (NFR-001 wants it visible). The negative margin gives that room
+            // back without moving the nav off the page's own left inset.
+            paddingLeft: '4px',
+            paddingRight: '4px',
+            marginLeft: { lg: '-4px' },
           }}
         >
           <Box
@@ -488,7 +586,30 @@ export function ExerciseSettingsPage() {
           role="region"
           aria-label={`${activeSection.label} settings`}
           data-testid="exercise-config-content"
-          sx={{ flexGrow: 1, minWidth: 0, '&:focus-visible': { outline: 'none' } }}
+          sx={{
+            flexGrow: 1,
+            minWidth: 0,
+            // THE ONE SCROLLPORT on this page at `lg`+. Whatever a section
+            // cannot fit scrolls HERE, under a title and a nav that hold still.
+            minHeight: 0,
+            overflowY: { xs: 'visible', lg: 'auto' },
+            // No bottom padding of its own: each panel already carries
+            // `CobraStyles.Padding.MainWindow`, and the pinned save bar is
+            // sized to swallow exactly that, so the bar ends flush with the
+            // bottom of the scrollport instead of floating above a gap.
+            // Room for a focus ring on the leftmost controls, which an
+            // `overflow` scrollport would otherwise clip.
+            paddingLeft: '2px',
+            // KEYBOARD SAFETY (NFR-001). The panel's save bar is pinned to the
+            // bottom of this scrollport, so a field tabbed to near the end of a
+            // form could be scrolled to underneath it. `scroll-padding-bottom`
+            // is what the browser keeps clear when it scrolls a focused control
+            // into view; the constant lives with the bar so the two cannot
+            // drift apart.
+            scrollPaddingBottom: `${PANEL_SAVE_BAR_SCROLL_PADDING_PX}px`,
+            scrollPaddingTop: '8px',
+            '&:focus-visible': { outline: 'none' },
+          }}
         >
           {/*
             ONE settings panel for sections 1–3 — see the module header. It is

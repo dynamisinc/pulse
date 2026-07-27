@@ -270,7 +270,12 @@ export function PracticeModePanel() {
       component="section"
       aria-labelledby="practice-mode-heading"
       data-testid="practice-mode-panel"
-      sx={{ padding: CobraStyles.Padding.MainWindow, maxWidth: 860 }}
+      sx={{
+        // See `ExerciseSettingsPanel`: the page's content pane already supplies
+        // the outer padding, so only the bottom breathing room is kept here.
+        paddingBottom: CobraStyles.Padding.MainWindow,
+        maxWidth: 860,
+      }}
     >
       <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 0.5 }}>
         <FontAwesomeIcon icon={faFlask} aria-hidden />

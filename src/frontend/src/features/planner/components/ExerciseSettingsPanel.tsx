@@ -89,7 +89,34 @@
  *     Never rewrite this to read a field off the DOM at submit time.
  *   - The save / revert footer renders in ALL THREE sections (it is outside the
  *     per-section blocks), so a planner never has to hunt for the section that
- *     happens to own the button.
+ *     happens to own the button. It is a `PanelSaveBar`, PINNED to the bottom of
+ *     the page's scrolling content pane: with one save covering three sections,
+ *     a commit button that can scroll out of reach is a safety problem, not a
+ *     cosmetic one.
+ *
+ * ============================================================================
+ * LAYOUT: COLUMNS, BECAUSE HEIGHT IS THE SCARCE RESOURCE
+ * ============================================================================
+ * Every section here used to stack its fields in ONE column, and measured in a
+ * real browser at 1440x900 (work area 844px) two of the three overflowed —
+ * theming, ten fields tall, by ~170px. A planner had to SCROLL A FULL-REPLACE
+ * FORM to reach the button that commits it.
+ *
+ * Fields now flow into columns via `FieldGrid`, which picks the column count
+ * from the width available and collapses to one column when there is none. The
+ * three groupings, and why their column floors differ:
+ *   - identity (270px) — three free-text fields with long helper text;
+ *   - time and schedule (240px) — short, known-format values (an IANA id, two
+ *     instants), so they read fine three-up;
+ *   - theming (190px) — the brand name keeps the full row, the four colours
+ *     share the one below it;
+ *   - outlet names (220px) — no helper text, so the narrowest floor of the four,
+ *     but not narrower: the labels ("Press Room outlet name") must not clip.
+ *
+ * NOTHING WAS SHRUNK TO MAKE THIS FIT: no fixed heights, no reduced font sizes,
+ * no controls below the COBRA `size="small"` norm. The height came out of the
+ * width that was already there, plus this panel's own outer padding, which
+ * duplicated the padding the page's content pane already supplies.
  *
  * Two callbacks report upward so the PAGE's nav can show what this form knows
  * and the page itself stays free of form state:
@@ -109,7 +136,6 @@ import {
   Box,
   Checkbox,
   CircularProgress,
-  Divider,
   FormControl,
   FormControlLabel,
   FormGroup,
@@ -127,6 +153,8 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { CobraPrimaryButton, CobraSecondaryButton, CobraTextField } from '@/theme/styledComponents'
 import CobraStyles from '@/theme/CobraStyles'
+import { FieldGrid } from './FieldGrid'
+import { PanelSaveBar } from './PanelSaveBar'
 import {
   CLEAN_EXERCISE_SETTINGS_STATUS,
   EXERCISE_SETTINGS_SECTION_META,
@@ -610,7 +638,13 @@ function ExerciseSettingsForm({
       {section === 'identity' ? (
         <>
           <SectionHeading text="Identity" />
-          <Stack sx={{ gap: CobraStyles.Spacing.FormFields }}>
+          {/*
+            Multi-column, so a six-field section fits a desktop work area
+            without scrolling a full-replace form. `FieldGrid` decides the
+            column count from the pane's width and collapses to one column when
+            there is no room — see its module header.
+          */}
+          <FieldGrid minColumnWidth={270}>
             <CobraTextField
               {...textFieldProps('name', 'Staff-facing internal name for this run. Participants never see it.')}
               label="Exercise name"
@@ -636,10 +670,13 @@ function ExerciseSettingsForm({
               onChange={event => setField('locale', event.target.value)}
               slotProps={{ htmlInput: { maxLength: MAX_LOCALE_LENGTH } }}
             />
-          </Stack>
+          </FieldGrid>
 
           <SectionHeading text="Time and schedule" />
-          <Stack sx={{ gap: CobraStyles.Spacing.FormFields }}>
+          {/* A slightly narrower floor than identity: these three are short,
+              known-format values (an IANA id and two instants), so they read
+              fine three-up where a free-text name would not. */}
+          <FieldGrid minColumnWidth={240}>
             <CobraTextField
               {...textFieldProps(
                 'timeZone',
@@ -651,27 +688,23 @@ function ExerciseSettingsForm({
               onChange={event => setField('timeZone', event.target.value)}
               slotProps={{ htmlInput: { maxLength: MAX_TIME_ZONE_LENGTH } }}
             />
-            <Stack direction="row" sx={{ gap: CobraStyles.Spacing.FormFields, flexWrap: 'wrap' }}>
-              <CobraTextField
-                {...textFieldProps('scheduledStartAt', 'Absolute instant, entered in UTC. Leave empty if unscheduled.')}
-                label="Scheduled start (UTC)"
-                type="datetime-local"
-                value={values.scheduledStartAt}
-                onChange={event => setField('scheduledStartAt', event.target.value)}
-                slotProps={{ inputLabel: { shrink: true }, htmlInput: { step: 1 } }}
-                sx={{ flex: '1 1 220px' }}
-              />
-              <CobraTextField
-                {...textFieldProps('scheduledEndAt', 'Absolute instant, entered in UTC. Must not precede the start.')}
-                label="Scheduled end (UTC)"
-                type="datetime-local"
-                value={values.scheduledEndAt}
-                onChange={event => setField('scheduledEndAt', event.target.value)}
-                slotProps={{ inputLabel: { shrink: true }, htmlInput: { step: 1 } }}
-                sx={{ flex: '1 1 220px' }}
-              />
-            </Stack>
-          </Stack>
+            <CobraTextField
+              {...textFieldProps('scheduledStartAt', 'Absolute instant, entered in UTC. Leave empty if unscheduled.')}
+              label="Scheduled start (UTC)"
+              type="datetime-local"
+              value={values.scheduledStartAt}
+              onChange={event => setField('scheduledStartAt', event.target.value)}
+              slotProps={{ inputLabel: { shrink: true }, htmlInput: { step: 1 } }}
+            />
+            <CobraTextField
+              {...textFieldProps('scheduledEndAt', 'Absolute instant, entered in UTC. Must not precede the start.')}
+              label="Scheduled end (UTC)"
+              type="datetime-local"
+              value={values.scheduledEndAt}
+              onChange={event => setField('scheduledEndAt', event.target.value)}
+              slotProps={{ inputLabel: { shrink: true }, htmlInput: { step: 1 } }}
+            />
+          </FieldGrid>
         </>
       ) : null}
 
@@ -716,7 +749,13 @@ function ExerciseSettingsForm({
       {section === 'theming' ? (
         <>
           <SectionHeading text="Theming" />
-          <Stack sx={{ gap: CobraStyles.Spacing.FormFields }}>
+          {/*
+            The brand name keeps the full row (`gridColumn: '1 / -1'`) — it is
+            free text and the one field here that benefits from the width — and
+            the four colours share the row below it. Ten fields in one column is
+            what made this the worst-scrolling section of the five.
+          */}
+          <FieldGrid minColumnWidth={190}>
             <CobraTextField
               {...textFieldProps(
                 'brandName',
@@ -726,47 +765,42 @@ function ExerciseSettingsForm({
               value={values.brandName}
               onChange={event => setField('brandName', event.target.value)}
               slotProps={{ htmlInput: { maxLength: MAX_BRAND_NAME_LENGTH } }}
+              sx={{ gridColumn: '1 / -1' }}
             />
-            <Stack direction="row" sx={{ gap: CobraStyles.Spacing.FormFields, flexWrap: 'wrap' }}>
-              <CobraTextField
-                {...textFieldProps('brandPrimary', 'Hex, for example #2b5f75. Empty keeps the default.')}
-                label="Primary color"
-                value={values.brandPrimary}
-                onChange={event => setField('brandPrimary', event.target.value)}
-                sx={{ flex: '1 1 180px' }}
-              />
-              <CobraTextField
-                {...textFieldProps('brandAccent', 'Hex. Empty keeps the default.')}
-                label="Accent color"
-                value={values.brandAccent}
-                onChange={event => setField('brandAccent', event.target.value)}
-                sx={{ flex: '1 1 180px' }}
-              />
-            </Stack>
-            <Stack direction="row" sx={{ gap: CobraStyles.Spacing.FormFields, flexWrap: 'wrap' }}>
-              <CobraTextField
-                {...textFieldProps('brandSurface', 'Hex. Empty keeps the default.')}
-                label="Surface color"
-                value={values.brandSurface}
-                onChange={event => setField('brandSurface', event.target.value)}
-                sx={{ flex: '1 1 180px' }}
-              />
-              <CobraTextField
-                {...textFieldProps('brandOnSurface', 'Hex. Empty keeps the default.')}
-                label="On-surface color"
-                value={values.brandOnSurface}
-                onChange={event => setField('brandOnSurface', event.target.value)}
-                sx={{ flex: '1 1 180px' }}
-              />
-            </Stack>
-          </Stack>
+            <CobraTextField
+              {...textFieldProps('brandPrimary', 'Hex, for example #2b5f75. Empty keeps the default.')}
+              label="Primary color"
+              value={values.brandPrimary}
+              onChange={event => setField('brandPrimary', event.target.value)}
+            />
+            <CobraTextField
+              {...textFieldProps('brandAccent', 'Hex. Empty keeps the default.')}
+              label="Accent color"
+              value={values.brandAccent}
+              onChange={event => setField('brandAccent', event.target.value)}
+            />
+            <CobraTextField
+              {...textFieldProps('brandSurface', 'Hex. Empty keeps the default.')}
+              label="Surface color"
+              value={values.brandSurface}
+              onChange={event => setField('brandSurface', event.target.value)}
+            />
+            <CobraTextField
+              {...textFieldProps('brandOnSurface', 'Hex. Empty keeps the default.')}
+              label="On-surface color"
+              value={values.brandOnSurface}
+              onChange={event => setField('brandOnSurface', event.target.value)}
+            />
+          </FieldGrid>
 
           <SectionHeading text="Outlet names" />
           <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
             Per-outlet display names. Leave one empty to keep that outlet&rsquo;s shipped default
             name.
           </Typography>
-          <Stack sx={{ gap: CobraStyles.Spacing.FormFields }}>
+          {/* No helper text and short labels, so these tolerate the narrowest
+              floor of the three grids — five outlets land in two rows. */}
+          <FieldGrid minColumnWidth={220}>
             {settings.channels.map(channel => (
               <CobraTextField
                 key={channel.id}
@@ -796,74 +830,82 @@ function ExerciseSettingsForm({
               />
             ))}
             {errors.outletNames ? (
-              <SettingsAlert message={errors.outletNames} testId="exercise-settings-outlet-error" />
+              // Spans the row: a validation message that shared a row with a
+              // field would read as belonging to that one field.
+              <Box sx={{ gridColumn: '1 / -1' }}>
+                <SettingsAlert message={errors.outletNames} testId="exercise-settings-outlet-error" />
+              </Box>
             ) : null}
-          </Stack>
+          </FieldGrid>
         </>
       ) : null}
 
       {/*
         THE SHARED FOOTER. Rendered in ALL THREE sections, because there is only
         one form: whichever section a planner is looking at, Save sends the whole
-        body and Revert restores the whole body.
+        body and Revert restores the whole body. `PanelSaveBar` PINS it to the
+        bottom of the scrolling content pane, so the one commit point for all
+        three sections can never scroll out of reach (see its module header).
       */}
-      <Divider sx={{ mt: 3 }} />
-
-      <Stack
-        direction="row"
-        sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1.5, mt: 2 }}
-      >
-        <CobraPrimaryButton
-          type="submit"
-          disabled={disabled}
-          startIcon={
-            save.isPending
-              ? <CircularProgress size={16} color="inherit" />
-              : <FontAwesomeIcon icon={faFloppyDisk} />
-          }
-        >
-          {save.isPending ? 'Saving…' : 'Save settings'}
-        </CobraPrimaryButton>
-        <CobraSecondaryButton
-          type="button"
-          onClick={handleRevert}
-          disabled={disabled}
-          startIcon={<FontAwesomeIcon icon={faRotateLeft} />}
-        >
-          Revert changes
-        </CobraSecondaryButton>
-      </Stack>
-
-      {hasClientErrors ? (
-        <SettingsAlert
-          message={
-            'Some settings need attention before they can be saved. Nothing has been sent to the '
-            + `server. Check: ${failingSections.map(id => EXERCISE_SETTINGS_SECTION_META[id].label).join(', ')}.`
-          }
-          testId="exercise-settings-client-error"
-        />
-      ) : null}
-
-      {save.isError ? (
-        <SettingsAlert
-          message={friendlyErrorMessage(save.error, 'save')}
-          testId="exercise-settings-save-error"
-        />
-      ) : null}
-
-      {save.isSuccess ? (
+      <PanelSaveBar>
         <Stack
-          role="status"
           direction="row"
-          data-testid="exercise-settings-saved"
-          sx={{ alignItems: 'center', gap: 1, color: 'success.main', mt: 1.5 }}
+          sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1.5, mt: 2 }}
         >
-          <FontAwesomeIcon icon={faCircleCheck} aria-hidden />
-          <Typography variant="body2">
-            Settings saved. Every section now shows what the server stored.
-          </Typography>
+          <CobraPrimaryButton
+            type="submit"
+            disabled={disabled}
+            startIcon={
+              save.isPending
+                ? <CircularProgress size={16} color="inherit" />
+                : <FontAwesomeIcon icon={faFloppyDisk} />
+            }
+          >
+            {save.isPending ? 'Saving…' : 'Save settings'}
+          </CobraPrimaryButton>
+          <CobraSecondaryButton
+            type="button"
+            onClick={handleRevert}
+            disabled={disabled}
+            startIcon={<FontAwesomeIcon icon={faRotateLeft} />}
+          >
+            Revert changes
+          </CobraSecondaryButton>
         </Stack>
-      ) : null}
+
+        {/* Pinned WITH the buttons: an alert that says nothing was sent is of
+            no use scrolled off below the button that refused to send. */}
+        {hasClientErrors ? (
+          <SettingsAlert
+            message={
+              'Some settings need attention before they can be saved. Nothing has been sent to the '
+              + `server. Check: ${failingSections.map(id => EXERCISE_SETTINGS_SECTION_META[id].label).join(', ')}.`
+            }
+            testId="exercise-settings-client-error"
+          />
+        ) : null}
+
+        {save.isError ? (
+          <SettingsAlert
+            message={friendlyErrorMessage(save.error, 'save')}
+            testId="exercise-settings-save-error"
+          />
+        ) : null}
+
+        {save.isSuccess ? (
+          <Stack
+            role="status"
+            direction="row"
+            data-testid="exercise-settings-saved"
+            sx={{ alignItems: 'center', gap: 1, color: 'success.main', mt: 1.5 }}
+          >
+            <FontAwesomeIcon icon={faCircleCheck} aria-hidden />
+            <Typography variant="body2">
+              Settings saved. Every section now shows what the server stored.
+            </Typography>
+          </Stack>
+        ) : null}
+      </PanelSaveBar>
     </Box>
   )
 }
@@ -904,7 +946,16 @@ export function ExerciseSettingsPanel({
       component="section"
       aria-labelledby="exercise-settings-heading"
       data-testid="exercise-settings-panel"
-      sx={{ padding: CobraStyles.Padding.MainWindow, maxWidth: 860 }}
+      sx={{
+        // NO top/side padding: the page already insets the content pane by
+        // `CobraStyles.Padding.MainWindow`, and a second copy of it here cost
+        // 18px of the height this section has to fit in and 36px of the width
+        // its field grids get to divide into columns. The bottom padding stays
+        // — it is the breathing room under the pinned save bar, which is sized
+        // to swallow exactly this much (see `PanelSaveBar`).
+        paddingBottom: CobraStyles.Padding.MainWindow,
+        maxWidth: 860,
+      }}
     >
       <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 0.5 }}>
         <FontAwesomeIcon icon={meta.icon} aria-hidden />

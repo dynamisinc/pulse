@@ -22,6 +22,8 @@ names).
 | `exerciseSettingsSections.ts` | The section vocabulary shared by the page's nav and the settings panel's `h2`: ids, nav order, label + icon + blurb, and the `ExerciseSettingsStatus` the form reports up. One table, so the item a planner clicks and the heading they land on cannot drift apart. |
 | `components/ExerciseSettingsPanel.tsx` | The COBRA settings editor itself: loads the settings, renders **one section at a time** (`section` prop), and full-replaces **all of them** on save. `PUT` is a **full replace, not a patch**, so the form submits every managed field on every save — including fields in sections that are not rendered, because the values live in React state, never in the DOM (enforced structurally — see that file's header, rule 1). Re-renders from the server's response, never from local form state. |
 | `hooks/useExerciseSettings.ts` | React Query 5 `useExerciseSettings()` (query) + `useSaveExerciseSettings()` (mutation, seeds the query cache with the server's re-projection). Exports `EXERCISE_SETTINGS_QUERY_KEY`; the key carries **no exercise id** — scope is server-resolved (COR-001). |
+| `components/FieldGrid.tsx` | The one responsive field-layout primitive the panels use: `repeat(auto-fit, minmax(min(100%, N), 1fr))`. Fits as many columns as the pane can hold at the caller's floor and collapses to one column when it cannot hold two — the `min(100%, …)` guard is what makes it collapse rather than overflow. |
+| `components/PanelSaveBar.tsx` | A panel's save/revert footer, **pinned** (`position: sticky; bottom: 0`) to the bottom of the page's scrolling content pane, with the save outcome riding in the same block. Exports `PANEL_SAVE_BAR_SCROLL_PADDING_PX`, which the pane uses as `scroll-padding-bottom` so a focused field is never scrolled to underneath the bar. |
 | `services/exerciseSettingsService.ts` | The data seam. Shared axios client, one env-guarded mock flip point (`USE_MOCK_SETTINGS = USE_MOCK_DATA`), fail-closed response validation, transport-agnostic `ExerciseSettingsError`. Owns the client contract types (`ExerciseSettings`, `ExerciseSettingsUpdate`) and the field-bound constants the panel validates against. |
 
 ### Layout: left section nav + content pane (and why sections 1–3 share a form)
@@ -56,6 +58,30 @@ endpoints and their own saves. Sections 1–3 are **not** three forms:
   `palette.warning`, so status/error text uses `notifications.warningText` /
   `notifications.errorText` — never the pale `notifications.warning` / `success` fill
   tints, which are unusable as text or borders.
+
+#### The sticky shell, and why the sections stopped scrolling
+
+At `lg`+ the page is a fixed-height flex column: the `h1` + intro are pinned, the nav
+is pinned beside the content, and the **content pane is the one scrollport**
+(`overflow-y: auto`; the page itself is `overflow: hidden`, so there is no second
+outer scrollbar). Below `lg` it reverts to document flow and the staff shell's work
+area scrolls the page as a whole. `minHeight: 0` on the row and the pane is
+load-bearing — a flex item's default `min-height: auto` refuses to shrink below its
+content and would push the page taller instead of scrolling the pane.
+
+Sections were **measured in a browser** (1440x900 → 844px of work area). Three of the
+five overflowed: Identity +50, Theming +171, Compliance chrome +48. The fix was
+layout, not compression — fields flow into columns (`FieldGrid`) instead of one, the
+two compliance banners sit side by side, and each panel's redundant outer padding was
+dropped (the pane already insets it). No fixed heights, no reduced font sizes, no
+controls below the COBRA `size="small"` norm. After: every section fits at both
+1440x900 (≥116px headroom) and 1280x800 (≥16px) — **re-measure before adding a
+field.**
+
+Whatever scrolls, the commit point does not: with one save covering sections 1–3, each
+panel's footer is a `PanelSaveBar` pinned to the bottom of the pane, and the pane
+reserves `scroll-padding-bottom` so a focused field is never scrolled to behind it
+(without that reservation the outlet-name fields landed 70px behind the bar).
 
 ### Backend contract consumed
 

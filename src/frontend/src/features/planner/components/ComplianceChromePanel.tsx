@@ -43,6 +43,26 @@
  *    stored configuration, so `null` maps to `''` — never to the fallback — and
  *    an empty box maps back to `null`.
  *
+ * ============================================================================
+ * LAYOUT: THE TWO BANNERS ARE A PAIR, SO THEY SIT AS ONE
+ * ============================================================================
+ * Stacked one above the other, this section was ~50px taller than the staff
+ * work area at 1440x900 and had to scroll. The top and bottom banners carry
+ * IDENTICAL field sets, so they now sit side by side in a `FieldGrid`: it halves
+ * the height and puts the two values a planner is choosing between on screen
+ * together. Below the width that holds both, the grid collapses them back into
+ * one column.
+ *
+ * The duplicate `h3` above the markings fieldset is gone with it — it said
+ * "Exercise markings" immediately above a `legend` saying "Exercise markings",
+ * which cost 50px to say the same thing twice, on screen and to a screen
+ * reader. The legend is the group's real accessible name (the shipped
+ * "Enabled channels" group has never had a heading either).
+ *
+ * The save/revert footer is a `PanelSaveBar`, pinned to the bottom of the page's
+ * scrolling content pane so this panel's own save stays as reachable as the
+ * shared settings one.
+ *
  * BANNER PRESENTATION IS FROZEN (R-006 / D7). This panel edits the CONFIG; the
  * banners themselves are `features/participant-shell/ComplianceChrome.tsx`
  * (shipped, a different Complete feature). Nothing here renders or restyles
@@ -74,7 +94,6 @@ import {
   Box,
   Checkbox,
   CircularProgress,
-  Divider,
   FormControl,
   FormControlLabel,
   FormGroup,
@@ -93,6 +112,8 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { CobraPrimaryButton, CobraSecondaryButton, CobraTextField } from '@/theme/styledComponents'
 import CobraStyles from '@/theme/CobraStyles'
+import { FieldGrid } from './FieldGrid'
+import { PanelSaveBar } from './PanelSaveBar'
 import { useChromeSettings, useSaveChromeSettings } from '../hooks/useChromeSettings'
 import {
   CHROME_HEX_COLOR_PATTERN,
@@ -339,7 +360,15 @@ function ComplianceChromeForm({ settings }: ComplianceChromeFormProps) {
 
   return (
     <Box component="form" onSubmit={handleSubmit} noValidate data-testid="compliance-chrome-form">
-      <SectionHeading text="Exercise markings" />
+      {/*
+        No `SectionHeading` above this group: the `legend` below already says
+        "Exercise markings", and an `h3` carrying the identical string
+        immediately above it was 50px of height spent saying the same thing
+        twice — to a screen reader as well as on screen. The fieldset's legend
+        is the group's real accessible name, which is why the shipped
+        "Enabled channels" group in `ExerciseSettingsPanel` has never had a
+        heading either.
+      */}
       <FormControl
         component="fieldset"
         variant="standard"
@@ -347,6 +376,7 @@ function ComplianceChromeForm({ settings }: ComplianceChromeFormProps) {
         error={Boolean(errors.chromeEnabled)}
         aria-describedby="compliance-chrome-markings-help"
         data-testid="compliance-chrome-markings"
+        sx={{ mt: 1 }}
       >
         <FormLabel component="legend">Exercise markings</FormLabel>
         <FormGroup>
@@ -377,117 +407,126 @@ function ComplianceChromeForm({ settings }: ComplianceChromeFormProps) {
         </FormHelperText>
       </FormControl>
 
-      <SectionHeading text="Top banner" />
-      <Stack sx={{ gap: CobraStyles.Spacing.FormFields }}>
-        <CobraTextField
-          {...textFieldProps(
-            'topText',
-            'Classification or exercise marking shown above every channel. Leave empty to keep the shipped default.',
-          )}
-          label="Top banner text"
-          value={values.topText}
-          onChange={event => setField('topText', event.target.value)}
-          slotProps={{ htmlInput: { maxLength: MAX_BANNER_TEXT_LENGTH } }}
-        />
-        <Stack direction="row" sx={{ gap: CobraStyles.Spacing.FormFields, flexWrap: 'wrap' }}>
-          <CobraTextField
-            {...textFieldProps('topFg', 'Hex, for example #eaf5e6. Empty keeps the default.')}
-            label="Top banner text colour"
-            value={values.topFg}
-            onChange={event => setField('topFg', event.target.value)}
-            sx={{ flex: '1 1 180px' }}
-          />
-          <CobraTextField
-            {...textFieldProps('topBg', 'Hex, for example #2e6b2e. Empty keeps the default.')}
-            label="Top banner background colour"
-            value={values.topBg}
-            onChange={event => setField('topBg', event.target.value)}
-            sx={{ flex: '1 1 180px' }}
-          />
+      {/*
+        THE TWO BANNERS SIT SIDE BY SIDE. They carry IDENTICAL field sets (text
+        / foreground / background), so pairing them halves the height of the
+        section AND puts the two values a planner is choosing between — the top
+        marking and the bottom one — on screen together. Stacked, this section
+        overflowed a desktop work area by ~50px. `FieldGrid` collapses the pair
+        back into one column when the pane is too narrow to hold both.
+      */}
+      <FieldGrid minColumnWidth={320}>
+        <Box>
+          <SectionHeading text="Top banner" />
+          <Stack sx={{ gap: CobraStyles.Spacing.FormFields }}>
+            <CobraTextField
+              {...textFieldProps(
+                'topText',
+                'Classification or exercise marking shown above every channel. Leave empty to keep the shipped default.',
+              )}
+              label="Top banner text"
+              value={values.topText}
+              onChange={event => setField('topText', event.target.value)}
+              slotProps={{ htmlInput: { maxLength: MAX_BANNER_TEXT_LENGTH } }}
+            />
+            <CobraTextField
+              {...textFieldProps('topFg', 'Hex, for example #eaf5e6. Empty keeps the default.')}
+              label="Top banner text colour"
+              value={values.topFg}
+              onChange={event => setField('topFg', event.target.value)}
+            />
+            <CobraTextField
+              {...textFieldProps('topBg', 'Hex, for example #2e6b2e. Empty keeps the default.')}
+              label="Top banner background colour"
+              value={values.topBg}
+              onChange={event => setField('topBg', event.target.value)}
+            />
+          </Stack>
+        </Box>
+
+        <Box>
+          <SectionHeading text="Bottom banner" />
+          <Stack sx={{ gap: CobraStyles.Spacing.FormFields }}>
+            <CobraTextField
+              {...textFieldProps(
+                'bottomText',
+                'Marking shown below every channel. Leave empty to keep the shipped default.',
+              )}
+              label="Bottom banner text"
+              value={values.bottomText}
+              onChange={event => setField('bottomText', event.target.value)}
+              slotProps={{ htmlInput: { maxLength: MAX_BANNER_TEXT_LENGTH } }}
+            />
+            <CobraTextField
+              {...textFieldProps('bottomFg', 'Hex. Empty keeps the default.')}
+              label="Bottom banner text colour"
+              value={values.bottomFg}
+              onChange={event => setField('bottomFg', event.target.value)}
+            />
+            <CobraTextField
+              {...textFieldProps('bottomBg', 'Hex. Empty keeps the default.')}
+              label="Bottom banner background colour"
+              value={values.bottomBg}
+              onChange={event => setField('bottomBg', event.target.value)}
+            />
+          </Stack>
+        </Box>
+      </FieldGrid>
+
+      {/* Pinned to the bottom of the scrolling content pane — see
+          `PanelSaveBar`. This panel has its own save; it must stay as reachable
+          as the shared settings one. */}
+      <PanelSaveBar>
+        <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1.5, mt: 2 }}>
+          <CobraPrimaryButton
+            type="submit"
+            disabled={disabled}
+            startIcon={
+              save.isPending
+                ? <CircularProgress size={16} color="inherit" />
+                : <FontAwesomeIcon icon={faFloppyDisk} />
+            }
+          >
+            {save.isPending ? 'Saving…' : 'Save compliance chrome'}
+          </CobraPrimaryButton>
+          <CobraSecondaryButton
+            type="button"
+            onClick={handleRevert}
+            disabled={disabled}
+            startIcon={<FontAwesomeIcon icon={faRotateLeft} />}
+          >
+            Revert changes
+          </CobraSecondaryButton>
         </Stack>
-      </Stack>
 
-      <SectionHeading text="Bottom banner" />
-      <Stack sx={{ gap: CobraStyles.Spacing.FormFields }}>
-        <CobraTextField
-          {...textFieldProps(
-            'bottomText',
-            'Marking shown below every channel. Leave empty to keep the shipped default.',
-          )}
-          label="Bottom banner text"
-          value={values.bottomText}
-          onChange={event => setField('bottomText', event.target.value)}
-          slotProps={{ htmlInput: { maxLength: MAX_BANNER_TEXT_LENGTH } }}
-        />
-        <Stack direction="row" sx={{ gap: CobraStyles.Spacing.FormFields, flexWrap: 'wrap' }}>
-          <CobraTextField
-            {...textFieldProps('bottomFg', 'Hex. Empty keeps the default.')}
-            label="Bottom banner text colour"
-            value={values.bottomFg}
-            onChange={event => setField('bottomFg', event.target.value)}
-            sx={{ flex: '1 1 180px' }}
+        {hasClientErrors ? (
+          <ChromeAlert
+            message="This compliance chrome needs attention before it can be saved. Nothing has been sent to the server."
+            testId="compliance-chrome-client-error"
           />
-          <CobraTextField
-            {...textFieldProps('bottomBg', 'Hex. Empty keeps the default.')}
-            label="Bottom banner background colour"
-            value={values.bottomBg}
-            onChange={event => setField('bottomBg', event.target.value)}
-            sx={{ flex: '1 1 180px' }}
+        ) : null}
+
+        {save.isError ? (
+          <ChromeAlert
+            message={friendlyErrorMessage(save.error, 'save')}
+            testId="compliance-chrome-save-error"
           />
-        </Stack>
-      </Stack>
+        ) : null}
 
-      <Divider sx={{ mt: 3 }} />
-
-      <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1.5, mt: 2 }}>
-        <CobraPrimaryButton
-          type="submit"
-          disabled={disabled}
-          startIcon={
-            save.isPending
-              ? <CircularProgress size={16} color="inherit" />
-              : <FontAwesomeIcon icon={faFloppyDisk} />
-          }
-        >
-          {save.isPending ? 'Saving…' : 'Save compliance chrome'}
-        </CobraPrimaryButton>
-        <CobraSecondaryButton
-          type="button"
-          onClick={handleRevert}
-          disabled={disabled}
-          startIcon={<FontAwesomeIcon icon={faRotateLeft} />}
-        >
-          Revert changes
-        </CobraSecondaryButton>
-      </Stack>
-
-      {hasClientErrors ? (
-        <ChromeAlert
-          message="This compliance chrome needs attention before it can be saved. Nothing has been sent to the server."
-          testId="compliance-chrome-client-error"
-        />
-      ) : null}
-
-      {save.isError ? (
-        <ChromeAlert
-          message={friendlyErrorMessage(save.error, 'save')}
-          testId="compliance-chrome-save-error"
-        />
-      ) : null}
-
-      {save.isSuccess ? (
-        <Stack
-          role="status"
-          direction="row"
-          data-testid="compliance-chrome-saved"
-          sx={{ alignItems: 'center', gap: 1, color: 'success.main', mt: 1.5 }}
-        >
-          <FontAwesomeIcon icon={faCircleCheck} aria-hidden />
-          <Typography variant="body2">
-            Compliance chrome saved. The fields below now show what the server stored.
-          </Typography>
-        </Stack>
-      ) : null}
+        {save.isSuccess ? (
+          <Stack
+            role="status"
+            direction="row"
+            data-testid="compliance-chrome-saved"
+            sx={{ alignItems: 'center', gap: 1, color: 'success.main', mt: 1.5 }}
+          >
+            <FontAwesomeIcon icon={faCircleCheck} aria-hidden />
+            <Typography variant="body2">
+              Compliance chrome saved. The fields above now show what the server stored.
+            </Typography>
+          </Stack>
+        ) : null}
+      </PanelSaveBar>
     </Box>
   )
 }
@@ -510,7 +549,13 @@ export function ComplianceChromePanel() {
       component="section"
       aria-labelledby="compliance-chrome-heading"
       data-testid="compliance-chrome-panel"
-      sx={{ padding: CobraStyles.Padding.MainWindow, maxWidth: 860 }}
+      sx={{
+        // See `ExerciseSettingsPanel`: the page's content pane already supplies
+        // the outer padding; only the bottom is kept, as the room the pinned
+        // save bar swallows.
+        paddingBottom: CobraStyles.Padding.MainWindow,
+        maxWidth: 860,
+      }}
     >
       <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 0.5 }}>
         <FontAwesomeIcon icon={faShieldHalved} aria-hidden />
