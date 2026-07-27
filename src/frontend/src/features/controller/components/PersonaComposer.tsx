@@ -48,7 +48,11 @@ import { useComposeAsPersona } from '../hooks/useComposeAsPersona'
 import styles from './PersonaComposer.module.css'
 
 export interface PersonaComposerProps {
-  /** The persona to post AS (persona-operation/02 input — never imported). */
+  /** The persona to post AS (persona-operation/02 input — never imported).
+   * Typed on the narrower, two-world-common `Persona`: the composer renders
+   * name/handle/avatar/verified and never the staff-only `personaType`, so it
+   * declares the fields it actually reads. `useActivePersona()` hands it a
+   * `StaffPersona`, which is assignable. */
   activePersona: Persona
   /** The operating controller behind the persona (COR-018; console-shell/01). */
   actingHumanId: string

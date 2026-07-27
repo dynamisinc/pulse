@@ -20,9 +20,14 @@ import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { PersonaPicker } from './PersonaPicker'
 import { ActivePersonaProvider } from '../hooks/useActivePersona'
-import type { Persona } from '@/features/personas'
+import type { StaffPersona } from '@/features/personas'
 
-function buildPersona(overrides: Partial<Persona> & Pick<Persona, 'id' | 'displayName' | 'handle' | 'personaType'>): Persona {
+// STAFF fixtures: the picker filters on `personaType`, which lives only on
+// the staff projection (`StaffPersona`) — SOC-052/D1-008.
+function buildPersona(
+  overrides: Partial<StaffPersona> &
+  Pick<StaffPersona, 'id' | 'displayName' | 'handle' | 'personaType'>,
+): StaffPersona {
   return {
     exerciseId: 'ex-mock-0001',
     templateId: `tmpl-${overrides.id}`,
@@ -50,7 +55,7 @@ const SECOND_PERSONA = buildPersona({
   personaType: 'citizen',
 })
 
-const TWO_PERSONAS: readonly Persona[] = [FIRST_PERSONA, SECOND_PERSONA]
+const TWO_PERSONAS: readonly StaffPersona[] = [FIRST_PERSONA, SECOND_PERSONA]
 
 function renderPicker(props: Partial<Parameters<typeof PersonaPicker>[0]> = {}) {
   const onSelect = vi.fn()

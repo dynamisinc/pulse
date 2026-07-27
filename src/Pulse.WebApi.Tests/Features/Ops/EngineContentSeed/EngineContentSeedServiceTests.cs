@@ -9,6 +9,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data;
@@ -79,7 +80,8 @@ public sealed class EngineContentSeedServiceTests
             new PersonaCastSeeder(db),
             registry,
             autonomy,
-            timeProvider ?? TimeProvider.System);
+            timeProvider ?? TimeProvider.System,
+            NullLogger<EngineContentSeedService>.Instance);
 
     // ---- Resolve / seed / register --------------------------------------------------------------
 
@@ -102,7 +104,7 @@ public sealed class EngineContentSeedServiceTests
     }
 
     [RequiresDockerFact]
-    public async Task Seed_ResolvesExistingExercise_SeedsSixPersonas_AndRegistersTheLoop()
+    public async Task Seed_ResolvesExistingExercise_SeedsNinePersonas_AndRegistersTheLoop()
     {
         var hostname = UniqueHostname();
         var exerciseId = await InsertExerciseAsync(hostname);
@@ -114,14 +116,46 @@ public sealed class EngineContentSeedServiceTests
 
         result.Outcome.Should().Be(EngineContentSeedOutcome.Provisioned);
         result.ExerciseId.Should().Be(exerciseId, "the loop is registered for the resolved exercise (COR-001)");
-        result.PersonasCreated.Should().Be(6);
+        result.PersonasCreated.Should().Be(9);
         result.PersonasReused.Should().Be(0);
 
         registry.Active.Should().ContainSingle().Which.ExerciseId.Should().Be(exerciseId);
 
         await using var verify = _fixture.CreateContext();
         (await verify.Personas.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == exerciseId)).Should().Be(
-            6, "story 01's cast is seeded for the resolved exercise");
+            9, "story 01's cast is seeded for the resolved exercise");
+    }
+
+    [RequiresDockerFact]
+    public async Task Seed_EligibleCast_ExcludesTheNonCastablePersonas_TheEngineCannotVoiceTheImpersonator()
+    {
+        // profiles-social-graph/06: all nine personas are seeded as ROWS, but the SOC-052 lookalike and the
+        // low-credibility outlet ship Castable = false, so the reaction loop's eligible cast (and the
+        // storyline's participating personas) must contain neither — the engine literally cannot generate as
+        // them until a scenario opts in. This is the real gate replacing an ordering-only mitigation.
+        var hostname = UniqueHostname();
+        var exerciseId = await InsertExerciseAsync(hostname);
+        var registry = new ReactionLoopRegistry();
+
+        await using var db = _fixture.CreateContext();
+        var service = BuildService(db, registry, new EngineAutonomyRegistry());
+        await service.SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret);
+
+        var registration = registry.Active.Single(r => r.ExerciseId == exerciseId);
+
+        registration.PersonasByHandle.Keys.Should().NotContain(
+            ["FairhavenWaterUpd", "TheScoopHQ"],
+            "a non-castable persona must never reach the engine's eligible cast");
+        registration.PersonasByHandle.Should().HaveCount(
+            7, "the seven castable personas remain available to the loop");
+        registration.Storylines.Single().ParticipatingPersonas.Should().NotContain(
+            ["FairhavenWaterUpd", "TheScoopHQ"],
+            "the starter storyline is built from the castable handles only");
+
+        await using var verify = _fixture.CreateContext();
+        (await verify.Personas.IgnoreQueryFilters()
+            .CountAsync(p => p.ExerciseId == exerciseId && !p.Castable)).Should().Be(
+            2, "both accounts still EXIST as rows — participants must be able to browse the lookalike (SOC-052)");
     }
 
     [RequiresDockerFact]
@@ -156,15 +190,18 @@ public sealed class EngineContentSeedServiceTests
         {
             var first = BuildService(db1, registry, autonomyRegistry);
             (await first.SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret))
-                .PersonasCreated.Should().Be(6);
+                .PersonasCreated.Should().Be(9);
         }
 
         await using (var db2 = _fixture.CreateContext())
         {
             var second = BuildService(db2, registry, autonomyRegistry);
             var result = await second.SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret);
-            result.PersonasReused.Should().Be(6, "the second seed reuses story 01's rows (idempotent)");
+            result.PersonasReused.Should().Be(9, "the second seed reuses story 01's rows (idempotent)");
             result.PersonasCreated.Should().Be(0);
+            result.PersonasBackfilled.Should().Be(
+                0, "an ordinary re-seed of correctly-authored rows mutates nothing — the counts stay quiet (S-B)");
+            result.PersonasCastableClosed.Should().Be(0, "no gate needed closing");
         }
 
         registry.Active.Where(r => r.ExerciseId == exerciseId).Should().ContainSingle(
@@ -172,7 +209,7 @@ public sealed class EngineContentSeedServiceTests
 
         await using var verify = _fixture.CreateContext();
         (await verify.Personas.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == exerciseId)).Should().Be(
-            6, "re-running the seed creates zero additional persona rows (AC4)");
+            9, "re-running the seed creates zero additional persona rows (AC4)");
     }
 
     [RequiresDockerFact]
@@ -199,8 +236,86 @@ public sealed class EngineContentSeedServiceTests
         evt.Target!.EntityId.Should().Be(exerciseId.ToString());
 
         using var payload = JsonDocument.Parse(evt.Payload!);
-        payload.RootElement.GetProperty("personasCreated").GetInt32().Should().Be(6);
+        payload.RootElement.GetProperty("personasCreated").GetInt32().Should().Be(9);
+        payload.RootElement.GetProperty("personasBackfilled").GetInt32().Should().Be(
+            0, "a fresh seed mutates no existing row — but the key is always present in the audit payload (S-B)");
+        payload.RootElement.GetProperty("personasCastableClosed").GetInt32().Should().Be(0);
         payload.RootElement.GetProperty("storylineTitle").GetString().Should().Be("Water main contamination fears");
+    }
+
+    [RequiresDockerFact]
+    public async Task Seed_OverAnUnmigratedLookingCast_ReportsBackfillAndGateClosure_InTheResponseAndTheAuditEvent()
+    {
+        // S-B: the two mutations the seeder may make to EXISTING rows must be visible in the seed's own
+        // output. Before this, a re-seed that rewrote five columns on six rows reported a flat "6 reused" —
+        // which is exactly why CR-001 (the inverted SOC-052 join dates) went unnoticed for a whole review
+        // cycle. Here: one row carrying only the schema defaults (backfill) and one wrongly-castable
+        // impersonator row (gate closure).
+        var hostname = UniqueHostname();
+        var exerciseId = await InsertExerciseAsync(hostname);
+        var registry = new ReactionLoopRegistry();
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Personas.Add(new Persona
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exerciseId,
+                DisplayName = "Fulton County EM",
+                Handle = "FulcoEM",
+                Kind = "org",
+                Verified = true,
+
+                // Exactly what the PersonaPresentationFields migration leaves on a pre-existing row.
+                AudienceMagnitude = 0,
+                JoinedAt = Persona.DefaultJoinedAt,
+            });
+            seed.Personas.Add(new Persona
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exerciseId,
+                DisplayName = "Fairhaven Water Update",
+                Handle = "FairhavenWaterUpd",
+                Kind = "org",
+                Verified = false,
+                PersonaType = "bad-actor",
+                AudienceBand = "nano",
+                AudienceMagnitude = PersonaCastSeeder.DeriveAudienceMagnitude("nano", "FairhavenWaterUpd"),
+                JoinedAt = PersonaCastSeeder.DeriveJoinedAt("bad-actor", "FairhavenWaterUpd"),
+                Castable = true, // the intermediate build's column default — a wrongly-open gate
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var db = _fixture.CreateContext();
+        var service = BuildService(db, registry, new EngineAutonomyRegistry());
+        var result = await service.SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret);
+
+        result.PersonasReused.Should().Be(2, "both pre-existing rows are reused, not duplicated");
+        result.PersonasCreated.Should().Be(7, "the remaining catalog handles are created");
+        result.PersonasBackfilled.Should().Be(
+            1, "the row carrying only the schema defaults was rewritten — reported, never silent (S-B)");
+        result.PersonasCastableClosed.Should().Be(
+            1, "closing an existing row's engine-casting gate changes what the engine may do; it is reported");
+
+        // The operator-facing response carries the counts AND says so in plain language.
+        var response = EngineContentSeedResponseDto.From(result);
+        response.PersonasBackfilled.Should().Be(1);
+        response.PersonasCastableClosed.Should().Be(1);
+        response.Note.Should().Contain(
+            "MODIFIED EXISTING ROWS", "an operator reading the response should not have to diff counts to notice");
+
+        // …and so does the durable XC-004 audit trail.
+        await using var verify = _fixture.CreateContext();
+        var evt = await verify.TelemetryEvents
+            .IgnoreQueryFilters()
+            .SingleAsync(e => e.ExerciseId == exerciseId && e.EventType == "engine.content_seeded");
+
+        using var payload = JsonDocument.Parse(evt.Payload!);
+        payload.RootElement.GetProperty("personasBackfilled").GetInt32().Should().Be(1);
+        payload.RootElement.GetProperty("personasCastableClosed").GetInt32().Should().Be(1);
+        payload.RootElement.GetProperty("personasReused").GetInt32().Should().Be(
+            2, "the backfilled/closed counts are SUBSETS of reused, not additions to it");
     }
 
     [RequiresDockerFact]

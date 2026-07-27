@@ -21,10 +21,12 @@ import type { ReactNode } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
-import { personaIdForHandle, type Persona } from '@/features/personas'
+import { personaIdForHandle, type StaffPersona } from '@/features/personas'
 import { PersonaContextPanel } from './PersonaContextPanel'
 
-function buildPersona(overrides: Partial<Persona> = {}): Persona {
+// STAFF fixture: the panel renders the `personaType`-derived category chip,
+// which only the staff projection carries (SOC-052/D1-008).
+function buildPersona(overrides: Partial<StaffPersona> = {}): StaffPersona {
   return {
     id: personaIdForHandle('FairhavenWater'),
     exerciseId: 'ex-mock-0001',

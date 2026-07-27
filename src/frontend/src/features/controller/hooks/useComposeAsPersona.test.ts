@@ -25,7 +25,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
-import type { Persona } from '@/features/personas'
+import type { StaffPersona } from '@/features/personas'
 import type { Post } from '@/features/social'
 import { useComposeAsPersona } from './useComposeAsPersona'
 
@@ -61,7 +61,9 @@ function scope(): ExerciseScope {
   }
 }
 
-const ACTIVE_PERSONA: Persona = {
+// STAFF fixture (the console's active persona is a `StaffPersona`); the hook
+// itself declares only the narrower `Persona` it actually reads.
+const ACTIVE_PERSONA: StaffPersona = {
   id: 'persona-fairhavenwater',
   exerciseId: 'ex-live-0001',
   templateId: 'tmpl-fairhaven-water',

@@ -158,6 +158,57 @@
   min-width: 0;
 }
 
+/*
+ * The author identity group (display name + verified mark + handle). Mirrors
+ * `.header`'s own flex/baseline/wrap settings so grouping the three changes no
+ * visual layout — it exists to give the author tap-through overlay
+ * (`.authorTarget`) a positioning box of exactly the identity's extent.
+ */
+.author {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+/*
+ * The author tap-through overlay (profiles-social-graph integration, SOC-050,
+ * NFR-001). The SAME stretched-link pattern as `.openTarget`, scoped to the
+ * identity group instead of the whole card body, and rendered ONLY when
+ * `onOpenProfile` is wired (`PostCard.tsx`). `z-index: 2` puts it ABOVE the
+ * card's `.openTarget` (z-index 1) — the same tier the hashtag anchors use —
+ * so an author tap opens the profile while every other part of the body still
+ * opens the thread. It is a hit target only: fully transparent, never a
+ * visible layer, and never an ancestor of the name/seal/handle it covers.
+ */
+.authorTarget {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+
+.authorTarget:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 2px;
+}
+
+/* Hover/keyboard affordance — the overlay is invisible, so the underline on
+ * the name it covers is what tells a reader the identity is tappable. The
+ * selectors only match when the overlay exists, so an unwired card renders
+ * with no affordance at all (WR-002). */
+.authorTarget:hover ~ .name,
+.authorTarget:focus-visible ~ .name {
+  text-decoration: underline;
+}
+
 .name {
   max-width: 100%;
   overflow: hidden;

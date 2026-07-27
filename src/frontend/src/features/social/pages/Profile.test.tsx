@@ -20,12 +20,17 @@
  *    personaId (no unmount) re-emits exactly once, while a re-render on the
  *    SAME id does not;
  *  - an unknown persona fails gracefully in-fiction (no crash, no COBRA).
+ *  - WR-003 (COR-015/D1-011): under a read-only/observer shell variant, every
+ *    <PostCard> this page renders has its action controls ABSENT (not
+ *    disabled) — counts and content stay visible; under the default 'full'
+ *    variant the controls are present. Mirrors `Feed.actions.test.tsx`'s
+ *    assertions.
  *
  * `api.post` (the telemetry sink's fire-and-forget send) is spied to resolve so
  * a rejected mock POST can't race worker teardown; `api.get` (and its mock
  * adapters for the provider/persona/feed reads) is left intact.
  */
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
@@ -42,6 +47,11 @@ import {
 } from '@/core/telemetry'
 import { api } from '@/core/services/api'
 import { personaById } from '@/features/personas'
+import {
+  ShellContextProvider,
+  type ShellVariant,
+} from '@/features/participant-shell/mountContract'
+import { formatMagnitude } from '../services/audience'
 import { Profile } from './Profile'
 
 const MOCK_TIME_ZONE = 'America/New_York'
@@ -54,12 +64,18 @@ function fixedClock(instant: Date): IExerciseClock {
   return { scenarioNow: () => instant }
 }
 
-/** Renders <Profile> through the real provider stack for a given persona. */
-function renderProfile(personaId: string) {
+/** Renders <Profile> through the real provider stack for a given persona, at
+ * a given shell variant (defaults to 'full' — every existing assertion in
+ * this suite was written against the full/interactive variant). */
+function renderProfile(personaId: string, variant: ShellVariant = 'full') {
   return render(
     <ExerciseContextProvider>
       <SessionProvider>
-        <Profile personaId={personaId} />
+        <ShellContextProvider
+          value={{ variant, scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+        >
+          <Profile personaId={personaId} />
+        </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,
   )
@@ -94,9 +110,45 @@ describe('Profile — identity hero (SOC-050)', () => {
     if (!persona) throw new Error('expected seeded persona fixture')
     if (persona.bio) expect(within(hero).getByText(persona.bio)).toBeInTheDocument()
 
-    const expectedFollowers = persona.followerCount.toLocaleString('en-US')
+    // SOC-054 / story 05 AC1: the count is MAGNITUDE-FORMATTED ("50.2K"), not the raw
+    // locale integer story 01 originally rendered. `formatMagnitude` truncates, so a
+    // displayed count is never overstated.
+    const expectedFollowers = formatMagnitude(persona.followerCount)
     expect(within(screen.getByTestId('follower-count')).getByText(expectedFollowers)).toBeInTheDocument()
     expect(screen.getByTestId('following-count')).toBeInTheDocument()
+  })
+})
+
+describe('Profile — Followers expand (story 05, D1-012 + XC-004)', () => {
+  it('is collapsed by default, expands the follower list, and emits exactly one view event', async () => {
+    renderProfile(FW_ID)
+    await screen.findByTestId('profile-identity')
+
+    expect(screen.queryByTestId('profile-followers')).toBeNull()
+
+    const toggle = screen.getByTestId('follower-count')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    const before = getEmittedTelemetryEvents()
+      .filter(e => e.target?.entityId === `${FW_ID}:followers`).length
+
+    await act(async () => { toggle.click() })
+
+    expect(await screen.findByTestId('profile-followers')).toBeInTheDocument()
+    expect(screen.getByTestId('follower-count')).toHaveAttribute('aria-expanded', 'true')
+
+    // XC-004: expanding Followers is a participant view action and must not be silent
+    // in the AAR (story 05 review, WR-005).
+    const after = getEmittedTelemetryEvents()
+      .filter(e => e.target?.entityId === `${FW_ID}:followers`).length
+    expect(after).toBe(before + 1)
+
+    // Collapsing is not a view — it must not emit again.
+    await act(async () => { screen.getByTestId('follower-count').click() })
+    expect(screen.queryByTestId('profile-followers')).toBeNull()
+    expect(
+      getEmittedTelemetryEvents().filter(e => e.target?.entityId === `${FW_ID}:followers`).length,
+    ).toBe(before + 1)
   })
 })
 
@@ -223,7 +275,11 @@ describe('Profile — telemetry (XC-004)', () => {
     utils.rerender(
       <ExerciseContextProvider>
         <SessionProvider>
-          <Profile personaId={TBRANDT_ID} />
+          <ShellContextProvider
+            value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+          >
+            <Profile personaId={TBRANDT_ID} />
+          </ShellContextProvider>
         </SessionProvider>
       </ExerciseContextProvider>,
     )
@@ -249,7 +305,11 @@ describe('Profile — telemetry (XC-004)', () => {
     utils.rerender(
       <ExerciseContextProvider>
         <SessionProvider>
-          <Profile personaId={FW_ID} />
+          <ShellContextProvider
+            value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+          >
+            <Profile personaId={FW_ID} />
+          </ShellContextProvider>
         </SessionProvider>
       </ExerciseContextProvider>,
     )
@@ -263,5 +323,34 @@ describe('Profile — unknown persona', () => {
     renderProfile('persona-does-not-exist')
     expect(await screen.findByText('This account doesn’t exist.')).toBeInTheDocument()
     expect(getEmittedTelemetryEvents().filter(e => e.eventType === 'view')).toHaveLength(0)
+  })
+})
+
+describe('Profile — read-only shell variant (WR-003, COR-015/D1-011)', () => {
+  it('renders NO action controls on the profile’s post cards under a read-only (observer) session', async () => {
+    renderProfile(FW_ID, 'readOnly')
+    await screen.findByRole('heading', { name: 'Fairhaven Water Utility' })
+
+    const actionsRegions = await screen.findAllByTestId('post-actions')
+    expect(actionsRegions.length).toBeGreaterThan(0)
+    for (const region of actionsRegions) {
+      expect(within(region).queryAllByRole('button')).toHaveLength(0)
+    }
+
+    // Counts/content stay fully visible — only the affordances go (never a
+    // data leak, just absent controls).
+    const cards = await screen.findAllByTestId('post-card')
+    expect(cards.length).toBeGreaterThan(0)
+  })
+
+  it('renders the interactive action controls on the profile’s post cards under the full variant', async () => {
+    renderProfile(FW_ID, 'full')
+    await screen.findByRole('heading', { name: 'Fairhaven Water Utility' })
+
+    const actionsRegions = await screen.findAllByTestId('post-actions')
+    expect(actionsRegions.length).toBeGreaterThan(0)
+    for (const region of actionsRegions) {
+      expect(within(region).queryAllByRole('button').length).toBeGreaterThan(0)
+    }
   })
 })

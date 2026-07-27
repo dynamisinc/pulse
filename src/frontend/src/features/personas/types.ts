@@ -14,6 +14,29 @@
  * shapes here are locked; do not add/rename fields without checking those
  * consumers.
  *
+ * FOLLOW-GRAPH COUNT FIELDS (profiles-social-graph/02 + backend story 07,
+ * SOC-051/SOC-054): `followerCount` is the DISPLAYED count (magnitude + real
+ * inbound follow edges); `followingCount` is the real outbound-edge count;
+ * `audienceMagnitude` is the raw SOC-054 simulated-crowd number
+ * `followerCount` is composed from. All three now ride the wire
+ * (`GET /api/personas`) on BOTH world shapes — they carry no archetype tell,
+ * unlike `personaType`.
+ *
+ * `followingCount`/`audienceMagnitude` are declared OPTIONAL here for ONE
+ * reason ONLY — avoiding a churn edit to the ~15 files (several owned by
+ * parallel builders: `PersonaPicker`, `PersonaContextPanel`,
+ * `PersonaComposer`, and their tests) that construct `Persona`/`StaffPersona`
+ * object literals and would otherwise need updating the moment these fields
+ * became required. It is NOT because either value is ever genuinely absent
+ * in practice: the live backend (story 07) always returns both, and the
+ * Wave-1 mock cast (`seedCast.ts`) populates both on every seeded instance
+ * too (see that module's "MOCK/LIVE PARITY" note) — `followerCount ===
+ * audienceMagnitude` and `followingCount === 0` for a freshly seeded
+ * instance is an asserted invariant (`seedCast.test.ts`). **Promote both to
+ * required once the parallel literal-construction sites have caught up** —
+ * until then, do not write a defensive "what if this is undefined" branch
+ * expecting it to ever actually trigger from a real read path; it can't.
+ *
  * Design decisions consumed downstream (not rendered here — this module is
  * pure data/logic, no UI, no COBRA):
  * - R-004 (avatar treatment): `kind` distinguishes human (duotone silhouette)
@@ -28,19 +51,62 @@
  * Instance ids are STABLE and DETERMINISTIC (`personaIdForHandle`) precisely
  * so sibling stories (e.g. posts/03 authoring fixture posts) can reference an
  * author id without importing this feature's seeded fixture array.
+ *
+ * TWO INSTANCE SHAPES, DELIBERATELY SEPARATE (SOC-052 / D1-008; mirrors the
+ * XC-002 `Post` / `ParticipantPostView` split in
+ * `@/features/social/types/post.ts`):
+ *
+ *   - `Persona` — the ONLY shape a participant surface may ever receive. It
+ *     has NO `personaType` field: not hidden, not optional, structurally
+ *     ABSENT, so a participant surface cannot even compile a read of
+ *     `persona.personaType`. This is the whole point — `personaType` is a
+ *     machine-readable tell that would identify the `bad-actor` impersonator
+ *     without reference to the verified seal, and SOC-052/D1-008 require that
+ *     ABSENCE OF THE VERIFIED MARK be the only signal a participant gets.
+ *
+ *   - `StaffPersona` — the participant shape WIDENED by exactly that one
+ *     field, for the staff world (persona picker/type filter, the composer's
+ *     "POSTING AS {category}" chip). Mirrors the backend's
+ *     `PersonaResponseDto` / `StaffPersonaResponseDto` split: `GET
+ *     /api/personas` projects the staff DTO only for a live staff-kind
+ *     session, and the participant DTO for everyone else (anonymous /
+ *     participant / read-only / expired).
+ *
+ * `personaType` is deliberately NOT optional on either shape. An optional
+ * field would weaken staff typing and let a missing value fail SILENTLY at
+ * runtime (an unlabeled category chip, a type filter that matches nothing)
+ * instead of loudly at compile time / at the read seam. See
+ * `personaService.resolveStaffPersonas` for the runtime half of that guard.
  */
 
 /** The seven persona archetypes (COR-020). Drives default styling, the
  * verification default (`verificationDefaultFor`), and — later — the E8
- * engine's behavior profile. */
-export type PersonaType =
-  | 'news-outlet'
-  | 'agency'
-  | 'weather-scientific'
-  | 'citizen'
-  | 'influencer'
-  | 'business'
-  | 'bad-actor'
+ * engine's behavior profile.
+ *
+ * Declared as a `const` tuple so the union and the runtime vocabulary
+ * (`isPersonaType`, used by the staff read seam's validator) can never drift
+ * apart — an 8th archetype is added in exactly one place. */
+export const PERSONA_TYPES = [
+  'news-outlet',
+  'agency',
+  'weather-scientific',
+  'citizen',
+  'influencer',
+  'business',
+  'bad-actor',
+] as const
+
+export type PersonaType = typeof PERSONA_TYPES[number]
+
+/**
+ * Runtime membership test for the `PersonaType` vocabulary. Used by the STAFF
+ * read seam to reject a body whose `personaType` is missing or out of
+ * vocabulary, rather than let an `undefined` flow into the console's type
+ * filter / category chip (where it would silently mis-render).
+ */
+export function isPersonaType(value: unknown): value is PersonaType {
+  return typeof value === 'string' && (PERSONA_TYPES as readonly string[]).includes(value)
+}
 
 /** Human (individual) vs org/institutional account. Governs the R-004 avatar
  * treatment (duotone silhouette vs monogram) — never inferred from
@@ -77,9 +143,16 @@ export interface PersonaTemplate {
 
 /**
  * An exercise-scoped persona INSTANCE, produced by `seedCast` (story 02,
- * COR-021). Carries believable derived state (`followerCount`, `joinedAt`)
- * that a template does not and cannot have, since it depends on which
- * exercise + cast it was seeded into.
+ * COR-021), in the PARTICIPANT projection. Carries believable derived state
+ * (`followerCount`, `joinedAt`) that a template does not and cannot have,
+ * since it depends on which exercise + cast it was seeded into.
+ *
+ * Deliberately has NO `personaType` field — that key does not exist on this
+ * type at all (SOC-052/D1-008; see the module header). A participant may only
+ * ever infer an account's trustworthiness from the presence/absence of the
+ * verified mark, never from a machine-readable archetype label.
+ * `personaService.toParticipantPersona` is the sole sanctioned way to narrow a
+ * `StaffPersona` down to this shape.
  */
 export interface Persona {
   readonly id: string
@@ -88,16 +161,50 @@ export interface Persona {
   readonly displayName: string
   readonly handle: string
   readonly kind: PersonaKind
-  readonly personaType: PersonaType
   readonly verified: boolean
   readonly avatarColor: string
   readonly initials: string
   readonly bio?: string
   readonly audienceBand: AudienceBand
-  /** Derived from `audienceBand` at seed time (COR-021, SOC-054) — never authored directly. */
+  /** Derived from `audienceBand` at seed time (COR-021, SOC-054) — never authored directly.
+   * This is the DISPLAYED count (magnitude + real inbound follow edges, backend story 07). */
   readonly followerCount: number
+  /**
+   * The real outbound follow-edge count (profiles-social-graph/02+07,
+   * SOC-051) — how many accounts THIS persona follows. Optional: see the
+   * module header's "FOLLOW-GRAPH COUNT FIELDS" note. Absence means "not yet
+   * known", never zero.
+   */
+  readonly followingCount?: number
+  /**
+   * The raw SOC-054 audience-magnitude number `followerCount` is composed
+   * from (profiles-social-graph/05's `audienceReach()`/`FollowerList` consume
+   * this once story 05 wires it live). Optional: see the module header's
+   * "FOLLOW-GRAPH COUNT FIELDS" note. Absence means "not yet known", never
+   * zero.
+   */
+  readonly audienceMagnitude?: number
   /** Scenario ISO instant PREDATING the exercise (rendered later via COR-053; never wall-clock). */
   readonly joinedAt: string
+}
+
+/**
+ * The STAFF projection of a persona instance: `Persona` widened by exactly
+ * one field, `personaType`. Served only to a live staff-kind session (the
+ * backend's `StaffPersonaResponseDto`); resolved only through
+ * `personaService.resolveStaffPersonas()` / `useStaffPersonas()`.
+ *
+ * Because it EXTENDS `Persona`, a `StaffPersona` is freely usable anywhere a
+ * `Persona` is expected — a staff component that reads only the common fields
+ * (name/handle/avatar/verified) should keep declaring `Persona` and say so;
+ * only components that actually read the archetype take `StaffPersona`.
+ *
+ * NEVER hand one of these to a participant surface as-is — narrow it through
+ * `toParticipantPersona` first.
+ */
+export interface StaffPersona extends Persona {
+  /** The archetype (COR-020). STAFF-ONLY (SOC-052/D1-008) — never participant-visible. */
+  readonly personaType: PersonaType
 }
 
 /**

@@ -29,13 +29,34 @@
  * lets `resolveFeed`'s real `isPost` validation run for real. `usePersonas`
  * stays real too (routed through the same mocked `api.get`, with a `/personas`
  * fixture below) so the feed convergence resolves an author.
+ *
+ * `@/core/auth` is mocked to a fixed, non-read-only, persona-bound session
+ * (WR-005 fold): `useFeed` now reads the session itself for its own COR-015
+ * guard. A synchronous mock (rather than the real `SessionProvider`, which
+ * would itself call `/session` through the very `api.get` stub this file
+ * replaces) keeps every existing synchronous/timing assertion below intact.
  */
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Session } from '@/core/auth'
 import { personaIdForHandle } from '@/features/personas'
 import type { Post } from '@/features/social'
 import { postStore } from '../services/postStore'
 import { useFeed } from './useFeed'
+
+const MOCK_SESSION: Session = {
+  exerciseId: 'ex-mock-0001',
+  accountId: 'acct-dreyes',
+  role: 'participant',
+  personaId: 'persona-dreyes_fh',
+  actingHumanId: 'human-dreyes',
+  isReadOnly: false,
+  expiresAt: '2999-01-01T00:00:00.000Z',
+}
+
+vi.mock('@/core/auth', () => ({
+  useSession: () => MOCK_SESSION,
+}))
 
 const getMock = vi.fn()
 

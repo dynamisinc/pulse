@@ -9,10 +9,10 @@
  *    per category (never color-only — the label text itself is the signal).
  */
 import { describe, expect, it } from 'vitest'
-import { PERSONA_TEMPLATES, type Persona, type PersonaType } from '@/features/personas'
+import { PERSONA_TEMPLATES, type PersonaType, type StaffPersona } from '@/features/personas'
 import { audienceBandLabel, categoryChipLabel, resolveVoiceNotes } from './personaVoice'
 
-function buildPersona(overrides: Partial<Persona> = {}): Persona {
+function buildPersona(overrides: Partial<StaffPersona> = {}): StaffPersona {
   return {
     id: 'persona-test-author',
     exerciseId: 'ex-mock-0001',

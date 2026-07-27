@@ -122,15 +122,26 @@ decision list below. The operational answer for Phase-1 is: re-call
 `POST /api/ops/seed-engine-content` after any restart (the same runbook step that already re-runs
 `POST /api/ops/bootstrap-exercise` if needed).
 
-**Bad-actor / impersonator personas — excluded this pass.** The shipped frontend org-library mock
-(`personaTemplates.ts`) includes a SOC-052 impersonation-training pair (`@FairhavenWater` verified vs.
-`@FairhavenWaterUpd` unverified lookalike) and a low-credibility "influencer" persona. This feature's
-starter cast deliberately **excludes** the impersonator and influencer/troll-type personas: seeding a
-`Troll`/`Bot`-type persona into an active storyline without a real scenario "enable bad actors" toggle
-(not built anywhere yet — `persona-voice-engine`'s bad-actor gating exists as a pure domain service but
-is not currently invoked by `ReactionLoopDriver`) would be seeding content the platform has no way to
-turn off. Flagged as a `persona-management` + `world-steering` follow-up once that toggle exists, not
-built here.
+**Bad-actor / impersonator personas — SUPERSEDED, now seeded with a real toggle.** This section
+previously said the starter cast deliberately excluded the SOC-052 impersonation pair and the
+low-credibility "influencer" persona because the platform had no way to turn a bad-actor voice off.
+**That is no longer true.** `profiles-social-graph/06-persona-presentation-fields-api.md` (#369,
+Complete) extended this feature's own `PersonaCastSeeder.Catalog` (the exact file story 01 owns) from
+six to **nine** personas, adding `@FairhavenWaterUpd` (the unverified SOC-052 lookalike of
+`@FairhavenWater`) and `@TheScoopHQ` (a low-credibility "influencer"-type outlet), plus `@dreyes_fh`
+(an ordinary unverified resident) — the live-seeded cast now matches the frontend mock's nine-persona
+catalog handle-for-handle.
+
+The "no way to turn it off" concern is answered, not ignored: both new bad-actor/low-credibility rows
+are seeded with **`Persona.Castable = false`** (`Data/Entities/Persona.cs`). The rows exist — a
+participant can browse the lookalike's profile (the SOC-052 training material, `profiles-social-graph/03`)
+and a controller can see it in the cast — but `EngineContentSeedService` filters non-`Castable` personas
+out of the reaction loop's eligible cast and the starter storyline's participating personas, so the
+engine cannot voice them until a scenario explicitly opts in. `Castable` is server-side only, projected
+onto **no** DTO (participant or staff) — see story 06 for why. **`Castable` is the toggle's STORAGE
+only; the UI/surface to flip it live for a running scenario is still unbuilt** — that remains a
+`persona-management` + `world-steering` follow-up, same as before, just no longer blocked on "there's
+no column to flip."
 
 **Naming disambiguation (like `login`'s COR-030 note).** "Persona seeding" here is narrower than
 `persona-management/02`'s COR-021 ("Casts & one-action seeding with derived state"): that story is the

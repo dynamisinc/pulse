@@ -34,6 +34,7 @@ sentiment SVG block, the `engineOff` dashed-card branch). Pre-design brief:
 | 03 | Reach & sentiment with dial overlay | EVL-012, EVL-014 | D6-008, D6-009 | Not Started | — |
 | 04 | Pre-E8 graceful degradation | EVL-015 | D6-011 | Not Started | — |
 | 05 | Misinformation spread tree | EVL-013 | none (deferred — metrics-v2 design pass) | Not Started · deferred: design pass pending | — |
+| 06 | Reach model: definition workshop, exercise-scoped config + admin surface | EVL-012, SOC-054, ADP-004 | none | Not Started | #371 |
 
 ## Dependencies
 `evaluation-timeline` (the event stream and dial/jump data every metric here is computed or
@@ -41,6 +42,13 @@ overlaid from); `world-steering` (E7) for the escalation dial (CTL-022) and off-
 (CTL-026) sources; E8 for the engine sentiment signal (ADP-012) — absent pre-E8 (story 04);
 `exercise-configuration` for the pre-E8/engine-enabled flag; the Cadence boundary (E10 §1 — Pulse
 computes the metric, Cadence scores the human) bounds every story here.
+
+**Story 06 note:** the reach/velocity formula module itself (`audienceReach()`,
+`AUDIENCE_REACH_MODEL`) already exists and lives in the E2 `profiles-social-graph` feature (story 05,
+`src/frontend/src/features/social/services/audience.ts`) — E10 (this feature, via story 03's Reach &
+Traction panel) **consumes** that single source for EVL-012, it does not own or fork it. Story 06
+governs the coefficients' ratification, versioning, and admin surfacing; it does not relocate the
+module.
 
 ## Design notes
 Staff, chart-forward, calmer and lower-density than the D5 controller console per the D6 brief ("an

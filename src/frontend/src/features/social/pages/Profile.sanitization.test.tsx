@@ -26,6 +26,7 @@ import { SessionProvider } from '@/core/auth'
 import { resetTelemetryBuffer } from '@/core/telemetry'
 import { api } from '@/core/services/api'
 import type { Persona, UsePersonasResult } from '@/features/personas'
+import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import type { UseFeedResult } from '../hooks/useFeed'
 import { Profile } from './Profile'
 
@@ -39,7 +40,6 @@ const MALICIOUS_PERSONA: Persona = {
   displayName: `Innocent Name ${IMG_PAYLOAD}`,
   handle: 'xsshero',
   kind: 'human',
-  personaType: 'citizen',
   verified: false,
   avatarColor: '#334455',
   initials: 'IX',
@@ -77,7 +77,11 @@ function renderProfile() {
   return render(
     <ExerciseContextProvider>
       <SessionProvider>
-        <Profile personaId={MALICIOUS_PERSONA.id} />
+        <ShellContextProvider
+          value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+        >
+          <Profile personaId={MALICIOUS_PERSONA.id} />
+        </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,
   )

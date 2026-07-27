@@ -13,9 +13,13 @@
  *  - mounting emits exactly one XC-004 'view' telemetry event, carrying the
  *    bound session's participantId and a thread target.
  *
- * Renders through the REAL `ExerciseContextProvider` + `SessionProvider`
- * (mirrors `PostCard.test.tsx`'s pattern) with a fixed exercise clock for
- * deterministic scenario-relative rendering.
+ * Renders through the REAL `ExerciseContextProvider` + `SessionProvider` +
+ * `ShellContextProvider` (mirrors `PostCard.test.tsx`'s / `Feed.test.tsx`'s
+ * pattern) with a fixed exercise clock for deterministic scenario-relative
+ * rendering. Also covers WR-003 (COR-015/D1-011): under a read-only/observer
+ * shell variant, every `<PostCard>` this component renders (ancestors,
+ * focused post, replies) has its action controls ABSENT — mirrors
+ * `Feed.actions.test.tsx`'s assertions.
  */
 import { StrictMode } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
@@ -26,17 +30,28 @@ import { resetExerciseClock, setExerciseClock, type IExerciseClock } from '@/cor
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { api } from '@/core/services/api'
 import { personaIdForHandle } from '@/features/personas'
+import {
+  ShellContextProvider,
+  type ShellVariant,
+} from '@/features/participant-shell/mountContract'
 import { ThreadView } from './ThreadView'
 
 function fixedClock(instant: Date): IExerciseClock {
   return { scenarioNow: () => instant }
 }
 
-async function renderThread(focusedPostId: string) {
+/** Renders <ThreadView> through the real provider stack at a given shell
+ * variant (defaults to 'full' — every pre-existing assertion in this suite
+ * was written against the full/interactive variant). */
+async function renderThread(focusedPostId: string, variant: ShellVariant = 'full') {
   const utils = render(
     <ExerciseContextProvider>
       <SessionProvider>
-        <ThreadView focusedPostId={focusedPostId} />
+        <ShellContextProvider
+          value={{ variant, scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+        >
+          <ThreadView focusedPostId={focusedPostId} />
+        </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,
   )
@@ -148,7 +163,11 @@ describe('ThreadView — thread-open telemetry (XC-004)', () => {
       <StrictMode>
         <ExerciseContextProvider>
           <SessionProvider>
-            <ThreadView focusedPostId={focusedPostId} />
+            <ShellContextProvider
+              value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+            >
+              <ThreadView focusedPostId={focusedPostId} />
+            </ShellContextProvider>
           </SessionProvider>
         </ExerciseContextProvider>
       </StrictMode>
@@ -241,5 +260,32 @@ describe('ThreadView — accessible thread landmark (NFR-001)', () => {
     await renderThread('post-seed-mvega-question')
 
     expect(screen.getByRole('region', { name: 'Thread' })).toBeInTheDocument()
+  })
+})
+
+describe('ThreadView — read-only shell variant (WR-003, COR-015/D1-011)', () => {
+  it('renders NO action controls on any post in the thread under a read-only (observer) session', async () => {
+    await renderThread('post-seed-mvega-question', 'readOnly')
+
+    const thread = screen.getByTestId('thread-view')
+    const actionsRegions = within(thread).getAllByTestId('post-actions')
+    expect(actionsRegions.length).toBeGreaterThan(0)
+    for (const region of actionsRegions) {
+      expect(within(region).queryAllByRole('button')).toHaveLength(0)
+    }
+
+    // Content/counts stay fully visible — only the affordances go.
+    expect(within(thread).getAllByTestId('post-card').length).toBeGreaterThan(0)
+  })
+
+  it('renders the interactive action controls on every post in the thread under the full variant', async () => {
+    await renderThread('post-seed-mvega-question', 'full')
+
+    const thread = screen.getByTestId('thread-view')
+    const actionsRegions = within(thread).getAllByTestId('post-actions')
+    expect(actionsRegions.length).toBeGreaterThan(0)
+    for (const region of actionsRegions) {
+      expect(within(region).queryAllByRole('button').length).toBeGreaterThan(0)
+    }
   })
 })

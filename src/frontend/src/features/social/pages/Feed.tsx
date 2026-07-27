@@ -1,20 +1,53 @@
 /**
  * features/social/pages/Feed.tsx
  * ---------------------------------------------------------------------------
- * The All Posts feed — the PILOT participant landing surface (feature:
- * feeds-discovery, story 01; SOC-080, COR-001/015, COR-053, XC-004,
- * NFR-001/002, SOC-071). Participant world (Pulse Social skin): plain semantic
- * elements + a scoped CSS Module — NO COBRA, NO themed MUI, FontAwesome-only if
- * icons are ever needed here.
+ * The All Posts / Following feed — the PILOT participant landing surface
+ * (feature: feeds-discovery, story 01 "All Posts" + story 02 "Following";
+ * SOC-080, SOC-081, COR-001/015, COR-053, XC-004, NFR-001/002, SOC-071).
+ * Participant world (Pulse Social skin): plain semantic elements + a scoped
+ * CSS Module — NO COBRA, NO themed MUI, FontAwesome-only if icons are ever
+ * needed here.
  *
  * WHAT IT DOES
- *  - Renders the exercise's public posts, newest-first, each via the keystone
- *    `<PostCard>` (`@/features/social`). The chronological convergence
- *    (post → participant-safe view → resolved author → `PostView`, sorted) is
- *    owned by `useFeed()`/`feedService` — this page is the presentation layer.
- *  - It is the DEFAULT landing feed: All Posts is the only feed in S2 (no
- *    Following/For-You/PIO tabs — out of scope), so mounting it IS the default;
- *    a read-only session lands here too.
+ *  - Renders posts, newest-first, each via the keystone `<PostCard>`
+ *    (`@/features/social`). The chronological convergence (post →
+ *    participant-safe view → resolved author → `PostView`, sorted) is owned by
+ *    `useFeed()`/`feedService` — this page is the presentation layer.
+ *  - It is the DEFAULT landing feed: mounted with no `scope` prop (or
+ *    `scope="all"`) it is byte-identical to story 01's All Posts feed. A
+ *    `scope="following"` mount renders the SAME component narrowed to posts by
+ *    accounts the caller's persona follows (SOC-081) — story 02 extends this
+ *    page/hook/service rather than forking a second feed implementation.
+ *
+ * SCOPE + COR-015 (story 02). `scope` defaults to `'all'`. Requesting
+ * `'following'` is only honored for a session that COULD meaningfully have one
+ * — a bound persona, not read-only (the SAME `!isReadOnly && personaId !==
+ * undefined` predicate `useReaction`'s `canReact` uses). For a read-only /
+ * no-persona session the EFFECTIVE scope is forced back to `'all'` regardless
+ * of what was requested — "read-only sessions default to All Posts, never the
+ * empty Following feed" (COR-015) is enforced HERE, defensively, so a future
+ * integration mistake (e.g. a tab component that doesn't itself gate on
+ * session state) cannot violate it. An honest, in-fiction, non-fallback empty
+ * state renders when `'following'` genuinely resolves zero posts (an empty
+ * follow set) — this is NOT the same message as the All Posts empty state, so
+ * a reader is never left wondering whether the whole feed is broken versus
+ * "you haven't followed anyone / no posts from who you follow yet".
+ *
+ * NOT WIRED INTO TABS HERE (out of scope, AC3 "All Posts / Following are
+ * tabs..."): that UI (the shell channel's tab switcher, plus per-feed scroll
+ * preservation across a switch) is an orchestrator-owned integration pass —
+ * see this module's own header note in the story's implementation doc. This
+ * component only guarantees it CAN be mounted with `scope="following"` and
+ * behaves correctly when it is.
+ *
+ * THE LIVE "NEW POSTS" PILL IS DISABLED UNDER `scope="following"` (deliberate,
+ * not an oversight): `useFeedStream`/`postStore`'s live source is NOT
+ * follow-aware — it streams every arrival regardless of author (story 04's own
+ * scope). Wiring it into a Following-scoped mount would show a pill counting
+ * arrivals from accounts the reader does NOT follow, under the Following
+ * label — a worse bug than no pill. Real-time for Following stays this
+ * story's Out of Scope item ("real-time pill (story 04)"); story 04's own
+ * follow-up is where the stream itself becomes scope-aware.
  *
  * VARIANT (COR-015 / D1-011): the shell mount variant is read via
  * `useShellContext()`; each card gets `variant = affordancesAvailable(variant)
@@ -79,6 +112,13 @@
  * None of this touches the row's memoization: `FeedRow`'s OWN internal hook
  * state doesn't affect whether `React.memo` bails out on unchanged
  * `post`/`variant`/`onOpenThread`/`onHashtagOpen` props (NFR-002/SOC-071).
+ *
+ * AUTHOR TAP-THROUGH (profiles-social-graph integration, SOC-050):
+ * `onOpenProfile` threads straight through to each `<PostCard>`'s author
+ * target exactly like `onHashtagOpen` — one more optional, referentially
+ * stable callback the shell channel supplies (it MUST be a `useCallback`
+ * there, or every row re-renders on each channel render and the burst
+ * guarantee is lost). Omitted ⇒ the author identity renders as inert text.
  */
 
 import { memo, useCallback, useMemo, useState, useEffect, useRef } from 'react'
@@ -93,7 +133,7 @@ import {
   useShellContext,
   affordancesAvailable,
 } from '@/features/participant-shell/mountContract'
-import { compareNewestFirst } from '../services/feedService'
+import { compareNewestFirst, type FeedScope } from '../services/feedService'
 import { useFeed } from '../hooks/useFeed'
 import { useFeedStream } from '../hooks/useFeedStream'
 import { useReaction } from '../hooks/useReaction'
@@ -155,6 +195,10 @@ interface FeedRowProps {
   /** Opens the tapped hashtag's feed; supplied by the shell channel
    * (Wave-S3.1). Omitted in isolation — hashtags stay inert links. */
   onHashtagOpen?: (tag: string) => void
+  /** Opens the tapped AUTHOR's profile (SOC-050); supplied by the shell
+   * channel. Stable identity (a `useCallback`) for the same memo reason as
+   * `onOpenThread`. Omitted in isolation — the author identity stays inert. */
+  onOpenProfile?: (personaId: string) => void
 }
 
 /**
@@ -170,6 +214,7 @@ const FeedRow = memo(function FeedRow({
   variant,
   onOpenThread,
   onHashtagOpen,
+  onOpenProfile,
 }: FeedRowProps) {
   const reaction = useReaction({ postId: post.id, initialLikeCount: post.counts.like })
   const amplify = useAmplify({ postId: post.id })
@@ -201,6 +246,7 @@ const FeedRow = memo(function FeedRow({
         onRepost={amplify.canAmplify ? amplify.doRepost : undefined}
         onQuote={amplify.canAmplify ? () => setQuoting(true) : undefined}
         onHashtagOpen={onHashtagOpen}
+        onOpenProfile={onOpenProfile}
       />
       {quoting && (
         <QuoteComposer
@@ -214,6 +260,13 @@ const FeedRow = memo(function FeedRow({
 })
 
 export interface FeedProps {
+  /**
+   * Which feed to render (story 02, SOC-081). Defaults to `'all'` — omitting
+   * this prop is byte-identical to story 01's All Posts feed. `'following'`
+   * narrows to posts by accounts the caller's persona follows, subject to the
+   * COR-015 read-only/no-persona guard below (see the module header).
+   */
+  readonly scope?: FeedScope
   /** Opens a post's flattened thread; the shell channel (`SocialChannel`)
    * supplies it. Omitted in isolation — the feed still renders, just without
    * thread navigation. */
@@ -221,13 +274,35 @@ export interface FeedProps {
   /** Opens the tapped hashtag's feed (SOC-040); the shell channel supplies
    * it. Omitted in isolation — hashtags stay inert links. */
   readonly onHashtagOpen?: (tag: string) => void
+  /** Opens the tapped author's profile (SOC-050); the shell channel supplies
+   * it. Omitted in isolation — the author identity renders as inert text
+   * (no focusable no-op — WR-002). */
+  readonly onOpenProfile?: (personaId: string) => void
 }
 
-export function Feed({ onOpenThread, onHashtagOpen }: FeedProps = {}) {
+export function Feed({
+  scope = 'all',
+  onOpenThread,
+  onHashtagOpen,
+  onOpenProfile,
+}: FeedProps = {}) {
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
   const { variant } = useShellContext()
-  const { posts, loading, error } = useFeed()
+
+  // COR-015: a Following request is only honored for a session that could
+  // meaningfully have a follow set — a bound persona, not read-only. Mirrors
+  // `useReaction`'s `canReact` predicate exactly. A read-only/no-persona
+  // session gets 'all' regardless of the requested `scope` — enforced HERE so
+  // a future caller mistake (e.g. a tab bar that forgets to gate itself)
+  // cannot serve the empty Following feed to an observer.
+  const canUseFollowing = !session.isReadOnly && session.personaId !== undefined
+  const effectiveScope: FeedScope = scope === 'following' && !canUseFollowing ? 'all' : scope
+  const isFollowing = effectiveScope === 'following'
+  // Shared across both telemetry emits below, so the two can never drift.
+  const feedEntityId = isFollowing ? 'following-feed' : 'all-posts'
+
+  const { posts, loading, error } = useFeed(effectiveScope)
   // Author cast for resolving buffered posts on load (the frozen baseline is
   // already resolved inside useFeed — this is only for the pill's arrivals).
   const { personas } = usePersonas()
@@ -236,8 +311,11 @@ export function Feed({ onOpenThread, onHashtagOpen }: FeedProps = {}) {
   const cardVariant: CardVariant = affordances ? 'full' : 'readOnly'
 
   // Real-time buffer behind the pill. Disabled (and the pill hidden) for an
-  // observer/read-only session (D1-011) — nothing streams there.
-  const { newCount, loadBuffered } = useFeedStream({ enabled: affordances })
+  // observer/read-only session (D1-011) — nothing streams there — AND for the
+  // Following scope (module header: the stream isn't follow-aware yet, story
+  // 04's own follow-up).
+  const streamEnabled = affordances && !isFollowing
+  const { newCount, loadBuffered } = useFeedStream({ enabled: streamEnabled })
 
   // Posts the reader has LOADED from the pill — prepended above the frozen
   // baseline, newest-first, accumulated across taps. Untouched until a tap.
@@ -301,10 +379,12 @@ export function Feed({ onOpenThread, onHashtagOpen }: FeedProps = {}) {
       wallClockTime: wallClockNowIso(),
       scenarioTime: scenarioNow().toISOString(),
       timeZone,
-      target: { entityType: 'feed', entityId: 'all-posts' },
+      target: { entityType: 'feed', entityId: feedEntityId },
       payload: { newPostsLoaded: resolved.length },
     })
-  }, [loadBuffered, personaById, renderedIds, exerciseId, timeZone, session.accountId])
+  }, [
+    loadBuffered, personaById, renderedIds, exerciseId, timeZone, session.accountId, feedEntityId,
+  ])
 
   // XC-004: one 'view' event on first mount. The ref guard makes it emit-once
   // across re-renders and a StrictMode double-effect-invoke (the ref survives
@@ -321,23 +401,24 @@ export function Feed({ onOpenThread, onHashtagOpen }: FeedProps = {}) {
       wallClockTime: wallClockNowIso(),
       scenarioTime: scenarioNow().toISOString(),
       timeZone,
-      target: { entityType: 'feed', entityId: 'all-posts' },
+      target: { entityType: 'feed', entityId: feedEntityId },
     })
-  }, [exerciseId, timeZone, session.accountId])
+  }, [exerciseId, timeZone, session.accountId, feedEntityId])
 
   const displayViews = liveViews.length > 0 ? [...liveViews, ...posts] : posts
 
   return (
     <section ref={sectionRef} className={styles.feed} aria-labelledby="feed-heading">
-      <h1 id="feed-heading" className={styles.srOnly}>Home</h1>
+      <h1 id="feed-heading" className={styles.srOnly}>{isFollowing ? 'Following' : 'Home'}</h1>
 
       {/* Sticky "▲ N new posts" pill (feeds-discovery/04). Its own polite live
           region announces the count. HIDDEN entirely for an observer/read-only
-          session (D1-011) — the stream is also disabled there, so there is
-          nothing to buffer or announce. For a full session it mounts at
-          feed-mount (count 0, empty region), so the polite region is present
-          before the first arrival changes it (reliable AT announcement). */}
-      {affordances && <NewPostsPill count={newCount} onLoad={handleLoadNew} />}
+          session (D1-011) AND for the Following scope (module header — the
+          stream isn't follow-aware yet) — `streamEnabled` covers both. For an
+          enabled mount it appears at feed-mount (count 0, empty region), so
+          the polite region is present before the first arrival changes it
+          (reliable AT announcement). */}
+      {streamEnabled && <NewPostsPill count={newCount} onLoad={handleLoadNew} />}
 
       {/* aria-live region: it now changes ONLY when the reader taps the pill
           (a user-initiated load), never on its own — the initial render is not
@@ -350,6 +431,7 @@ export function Feed({ onOpenThread, onHashtagOpen }: FeedProps = {}) {
             variant={cardVariant}
             onOpenThread={onOpenThread}
             onHashtagOpen={onHashtagOpen}
+            onOpenProfile={onOpenProfile}
           />
         ))}
       </ul>
@@ -360,8 +442,15 @@ export function Feed({ onOpenThread, onHashtagOpen }: FeedProps = {}) {
       {!loading && error !== undefined && posts.length === 0 && (
         <p className={styles.state} role="status">Posts aren’t available right now.</p>
       )}
+      {/* The Following empty state is DELIBERATELY different copy from the All
+          Posts one (SOC-081) — an honest "nothing from who you follow yet",
+          never the same "No posts yet." wording that would read as if the
+          whole feed were broken/empty, and NEVER a silent fallback to
+          rendering the All Posts content instead. */}
       {!loading && error === undefined && posts.length === 0 && (
-        <p className={styles.state}>No posts yet.</p>
+        <p className={styles.state}>
+          {isFollowing ? 'No posts from accounts you follow yet.' : 'No posts yet.'}
+        </p>
       )}
     </section>
   )

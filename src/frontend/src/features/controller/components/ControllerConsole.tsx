@@ -153,6 +153,10 @@ export function ControllerConsole(
   // `escalating` flag is a pass-through the shell renders as a red pulse ON TOP
   // of that text — left `false` here until a later story wires an attention
   // source (e.g. queued persona posts). The badge is omitted while empty.
+  // The PARTICIPANT read is deliberate here: this badge needs only a COUNT,
+  // never `personaType`, so it declares the narrower contract both worlds
+  // share (`usePersonas`) rather than the staff-only projection. Anything that
+  // reads the archetype must use `useStaffPersonas()` (SOC-052/D1-008).
   const { personas } = usePersonas()
   const personaCount = personas.length
 

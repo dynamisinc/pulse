@@ -3,7 +3,11 @@
  * ---------------------------------------------------------------------------
  * One-action cast seeding (feature: persona-management, story 02; COR-021).
  * `seedCast` instantiates every template in a cast into an exercise-scoped
- * `Persona` with believable DERIVED STATE a template cannot carry:
+ * `StaffPersona` — the FULL instance, including the staff-only `personaType`
+ * (seeding is a staff/planner action, and the archetype is what drives
+ * `deriveJoinedAt` below). Narrowing to the participant `Persona` projection
+ * happens at the READ seam (`personaService.toParticipantPersona`), never
+ * here — with believable DERIVED STATE a template cannot carry:
  *   - `followerCount` — derived from the template's `audienceBand` (SOC-054)
  *     with a deterministic per-handle jitter (so counts vary but tests are
  *     stable — no Math.random);
@@ -19,10 +23,33 @@
  * pre-exercise epoch constant — it is authored scenario data, never a read of
  * the wall clock. (This module is not a participant surface, but it still never
  * reads `Date.now()`; the value is a deterministic scenario instant.)
+ *
+ * MOCK/LIVE PARITY (profiles-social-graph/02+07): a seeded instance ALSO
+ * populates `audienceMagnitude` and `followingCount` — not just
+ * `followerCount` — even though `types.ts` declares both optional. The live
+ * backend (story 07) composes `followerCount = audienceMagnitude + real
+ * inbound edges` and separately reports the raw `audienceMagnitude`; anything
+ * that reads magnitude directly (`audienceReach()`, `displayedFollowerCount()`
+ * — profiles-social-graph/05) needs THAT number, not the already-composed
+ * `followerCount`. A freshly seeded instance has zero real follow edges, so
+ * its `audienceMagnitude` is exactly `deriveFollowerCount`'s output (the same
+ * number `followerCount` used to mean, pre-story-07) and `followingCount` is
+ * `0` — the honest seed-time value, not a placeholder. Leaving either
+ * `undefined` here would make the MOCK path (`USE_MOCK_DATA`, true in UAT)
+ * silently diverge from the live path on every magnitude-dependent surface —
+ * exactly the mock-says-one-thing/live-says-another shape that motivated
+ * this feature's own bug report — and a divergence only visible in UAT, never
+ * in the test suite, since every seedCast test runs mock-shaped by
+ * construction.
  */
 
 import type { Cast } from './casts'
-import { personaIdForHandle, type AudienceBand, type Persona, type PersonaTemplate } from './types'
+import {
+  personaIdForHandle,
+  type AudienceBand,
+  type PersonaTemplate,
+  type StaffPersona,
+} from './types'
 
 /** Approximate follower floor per audience-magnitude band (SOC-054). */
 const BAND_BASE: Record<AudienceBand, number> = {
@@ -81,14 +108,14 @@ export function seedCast(
   cast: Cast,
   exerciseId: string,
   templates: readonly PersonaTemplate[],
-): Persona[] {
+): StaffPersona[] {
   const byId = new Map(templates.map(t => [t.id, t]))
 
   return cast.templateIds.flatMap(templateId => {
     const template = byId.get(templateId)
     if (!template) return []
 
-    const persona: Persona = {
+    const persona: StaffPersona = {
       id: personaIdForHandle(template.handle),
       exerciseId,
       templateId: template.id,
@@ -101,7 +128,12 @@ export function seedCast(
       initials: template.initials,
       bio: template.bio,
       audienceBand: template.audienceBand,
+      // A freshly seeded instance has NO real follow edges yet, so the
+      // composed displayed count (magnitude + real edges) is just the
+      // magnitude itself — see the module header's "MOCK/LIVE PARITY" note.
       followerCount: deriveFollowerCount(template.audienceBand, template.handle),
+      audienceMagnitude: deriveFollowerCount(template.audienceBand, template.handle),
+      followingCount: 0,
       joinedAt: deriveJoinedAt(template),
     }
     return [persona]

@@ -23,11 +23,32 @@
  * arguably the MORE faithful live-mode test anyway: it exercises
  * `resolveFeed`'s own `isPost` validation and `assembleFeedView`'s real
  * author-resolution convergence, not a bypassed stand-in for either.
+ *
+ * `@/core/auth` is mocked to a fixed, non-read-only, persona-bound session
+ * (WR-005 fold): `useFeed` now reads the session itself for its own COR-015
+ * guard. A synchronous mock (rather than the real `SessionProvider`, which
+ * would itself call `/session` through the very `api.get` stub this file
+ * replaces) keeps the existing fixtures/timing intact.
  */
 import { renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Session } from '@/core/auth'
 import type { Persona } from '@/features/personas'
 import { useFeed } from './useFeed'
+
+const MOCK_SESSION: Session = {
+  exerciseId: 'ex-live-0001',
+  accountId: 'acct-dreyes',
+  role: 'participant',
+  personaId: 'persona-dreyes_fh',
+  actingHumanId: 'human-dreyes',
+  isReadOnly: false,
+  expiresAt: '2999-01-01T00:00:00.000Z',
+}
+
+vi.mock('@/core/auth', () => ({
+  useSession: () => MOCK_SESSION,
+}))
 
 const getMock = vi.fn()
 
@@ -35,7 +56,11 @@ vi.mock('@/core/services/api', () => ({
   api: { get: (...args: unknown[]) => getMock(...args) },
 }))
 
-/** A single fixture author, shaped like a live `GET /api/personas` response. */
+/**
+ * A single fixture author, shaped like a live `GET /api/personas` response in
+ * the PARTICIPANT projection — no `personaType` (SOC-052/D1-008): the feed is
+ * a participant surface, so the archetype tell is structurally absent here.
+ */
 const API_PERSONA: Persona = {
   id: 'persona-fairhavenwater',
   exerciseId: 'ex-live-0001',
@@ -43,7 +68,6 @@ const API_PERSONA: Persona = {
   displayName: 'Fairhaven Water',
   handle: 'FairhavenWater',
   kind: 'org',
-  personaType: 'agency',
   verified: true,
   avatarColor: '#19647e',
   initials: 'FW',

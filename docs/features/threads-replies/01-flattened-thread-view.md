@@ -25,16 +25,22 @@ Reply composition (posts composer, SOC-001); reply counts on feed cards (story 0
 (rejected).
 
 ## Deferred (tracked follow-ups, Gate-2 — recorded here during the Wave-S3.1 close-out, not new work)
-- **WR-003.** `ThreadView` doesn't thread the shell's read-only `variant` down to the `<PostCard>`s it
-  renders (ancestors/focused/replies), so an observer session sees present-but-inert action controls
-  instead of D1-011's "controls absent" — the handlers are simply unwired (gated no-ops), not a data
-  leak. Same gap on `Profile` (`profiles-social-graph/01`, tracked there too). Follow-up: thread
-  `variant`/`affordancesAvailable()` from `useShellContext()` into each `<PostCard>` call here,
-  mirroring `<Feed>`'s existing wiring.
-- **SUG-001 (cross-reference).** `SocialChannel`'s detail-to-detail focus gap
-  (`hashtags-trending/01`'s Deferred note) includes the `ThreadView.onHashtagOpen` → hashtag-feed
-  transition, since that view swap doesn't pass through `feed` state. No change needed in this story;
-  noted here for discoverability from the ThreadView side.
+- **WR-003 — RESOLVED (#88).** `ThreadView` now reads the shell's mount variant via
+  `useShellContext()`/`affordancesAvailable()` and threads the resulting `'full'` | `'readOnly'`
+  `variant` through to every `<PostCard>` it renders — via its internal `ThreadCard` wrapper for
+  ancestors, the focused post, and every visible reply. This mirrors `<Feed>`'s existing pattern
+  exactly (same local `CardVariant` shape), so an observer/read-only session now sees the controls
+  genuinely ABSENT (not disabled), matching D1-011. Counts and post content remain fully visible.
+  Covered by new cases in `ThreadView.test.tsx` (mirroring `Feed.actions.test.tsx`'s read-only
+  assertions); the pre-existing suite was updated to wrap a `<ShellContextProvider>` (previously
+  implicit/undeclared) so `useShellContext()` doesn't throw outside a shell mount. Same gap was fixed
+  on `Profile` in the same pass (`profiles-social-graph/01`).
+- **SUG-001 (cross-reference) — RESOLVED (#88).** `SocialChannel`'s detail-to-detail focus gap
+  (`hashtags-trending/01`'s Deferred note) included the `ThreadView.onHashtagOpen` → hashtag-feed
+  transition, since that view swap doesn't pass through `feed` state. The profiles-social-graph final
+  integration pass widened `SocialChannel`'s view-swap effect to move focus into the newly-shown detail
+  region on detail→detail transitions too, which covers this one; `ThreadView` itself needed no change
+  (it additionally gained an `onOpenProfile` pass-through for author tap-through in the same pass).
 
 ## Technical Notes
 Participant world. Reuses `<PostCard>` (posts/02) for every post here — ancestors, focused, and every

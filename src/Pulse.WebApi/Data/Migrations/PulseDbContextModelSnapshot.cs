@@ -168,11 +168,65 @@ namespace Pulse.WebApi.Data.Migrations
                     b.ToTable("Exercises");
                 });
 
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.Follow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedScenarioTime")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("CreatedWallClock")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("ExerciseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("FolloweePersonaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("FollowerPersonaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExerciseId");
+
+                    b.HasIndex("ExerciseId", "FolloweePersonaId");
+
+                    b.HasIndex("ExerciseId", "FollowerPersonaId", "FolloweePersonaId")
+                        .IsUnique();
+
+                    b.ToTable("Follows");
+                });
+
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.Persona", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AudienceBand")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)")
+                        .HasDefaultValue("nano");
+
+                    b.Property<int>("AudienceMagnitude")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("Bio")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<bool>("Castable")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<string>("DisplayName")
                         .IsRequired()
@@ -186,12 +240,24 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<DateTimeOffset>("JoinedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetimeoffset")
+                        .HasDefaultValue(new DateTimeOffset(new DateTime(2026, 6, 15, 12, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)));
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid?>("PersonaTemplateId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PersonaType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)")
+                        .HasDefaultValue("citizen");
 
                     b.Property<bool>("Verified")
                         .HasColumnType("bit");

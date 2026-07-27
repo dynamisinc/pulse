@@ -1,14 +1,15 @@
 /**
  * features/social/services/feedService.ts
  * ---------------------------------------------------------------------------
- * The All Posts feed read seam + the participant-safe convergence
- * (feature: feeds-discovery, story 01 — "All Posts feed"; SOC-080, COR-001,
- * COR-053, XC-002, NFR-002/SOC-071, NFR-003). Participant world (Pulse Social
- * skin) — pure model/service module, no UI, no COBRA.
+ * The All Posts / Following feed read seam + the participant-safe convergence
+ * (feature: feeds-discovery, story 01 "All Posts feed" + story 02 "Following
+ * feed"; SOC-080, SOC-081, COR-001, COR-015, COR-053, XC-002, NFR-002/SOC-071,
+ * NFR-003). Participant world (Pulse Social skin) — pure model/service module,
+ * no UI, no COBRA.
  *
  * Two responsibilities, kept apart so each is swappable/testable on its own:
  *
- *   - `resolveFeed()`      The READ seam. Routed through the shared axios
+ *   - `resolveFeed(scope?)` The READ seam. Routed through the shared axios
  *                          client (`@/core/services/api`) with a dev/mock
  *                          adapter, mirroring `personaService.resolvePersonas`
  *                          exactly: today the adapter short-circuits to
@@ -22,6 +23,26 @@
  *                          `exerciseId` param — query isolation is server-side
  *                          (COR-001); the session already binds the exercise.
  *
+ *                          STORY 02 (SOC-081): `scope` is `'all'` (default) or
+ *                          `'following'`. Live mode sends `?scope=following`
+ *                          straight through to `GET /api/feed` — the SAME
+ *                          single-endpoint contract story 01 already calls,
+ *                          just parameterized (see
+ *                          `docs/features/profiles-social-graph/07-follow-graph-api.md`).
+ *                          The backend does ALL the filtering (posts by
+ *                          personas the caller's session-bound persona
+ *                          follows) — there is deliberately NO second,
+ *                          client-composed round trip here (fetch the follow
+ *                          list, then filter the full feed). An empty follow
+ *                          set resolves an empty 200 array; an unresolvable/
+ *                          unknown scope value is a 400 the caller's `error`
+ *                          state surfaces (never a silent fallback to the
+ *                          unfiltered feed). Calling `resolveFeed()` with NO
+ *                          argument (every existing All Posts caller) sends
+ *                          the EXACT SAME request as before this story — no
+ *                          `scope` param is added for the default case, so
+ *                          that path stays byte-identical.
+ *
  *   - `assembleFeedView()` The CONVERGENCE this story owns (see
  *                          docs/features/feeds-discovery/01). Pure function:
  *                          narrows each `Post` to its participant-safe view via
@@ -32,6 +53,9 @@
  *                          presentational `PostView` `<PostCard>` renders. A
  *                          post whose author persona is absent is SKIPPED (never
  *                          crashes the feed). Sorted newest-first — see below.
+ *                          Scope-agnostic: it converges whatever `Post[]`
+ *                          `resolveFeed()` resolved with, All Posts or
+ *                          Following alike.
  *
  * ORDERING — newest-first (reverse-chronological). The D1 feed prototype places
  * the burst "▲ N new posts" pill (aria-live=polite) ABOVE the stream and new
@@ -47,13 +71,55 @@
  * dropped over the list later without reshaping this data flow.
  */
 
-import type { AxiosAdapter } from 'axios'
+import type { AxiosAdapter, AxiosRequestConfig } from 'axios'
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { toParticipantView, type Post } from '@/features/social'
 import type { PostView } from '@/features/social'
 import type { Persona } from '@/features/personas'
 import { postStore } from './postStore'
+import {
+  DEFAULT_MOCK_FOLLOWED_PERSONA_IDS,
+  MOCK_VIEWER_PERSONA_ID,
+  mockFollowedSet,
+  setMockFollowedSetForTests,
+} from './followEdgeStore'
+
+/** The feed's scope (story 02, SOC-081): the unfiltered firehose, or narrowed
+ * to posts by the caller's followed accounts. Kept a closed union deliberately
+ * — the frontend can only ever request a value the backend recognizes, so a
+ * typo can never even be EXPRESSED, let alone silently serve the wrong feed
+ * under the wrong label. */
+export type FeedScope = 'all' | 'following'
+
+/**
+ * MOCK-ONLY (dev/test) "who the current mock session's persona follows", for
+ * the Following-scope mock filter below. Reads `followEdgeStore.ts`'s SHARED
+ * edge set — the SAME store `followService.ts`'s follow/unfollow mock write
+ * path mutates (WR-004 fold, Gate-1 #88/#121). Before this fix, this module
+ * kept its OWN frozen literal set here, entirely disconnected from
+ * `followService`'s mock edges: under `VITE_USE_MOCK_DATA=true` (UAT's own
+ * setting) following an account moved the write into `followService`'s map,
+ * but this filter kept reading the unrelated frozen set, so the follow never
+ * moved a single post into the Following feed — the feature looked built and
+ * did nothing where it would actually be demoed. Now there is exactly ONE
+ * mock follow store; following/unfollowing an account in mock mode moves
+ * posts in and out of this feed for real.
+ *
+ * The store seeds the viewer persona already following
+ * `DEFAULT_MOCK_FOLLOWED_PERSONA_IDS` — two REAL seeded accounts
+ * (`postService.ts`'s `SEEDED_POSTS` authors), never fabricated ones — so the
+ * feed has believable content before the reader follows anyone.
+ * `setMockFollowingForTests` remains the sanctioned test-only override
+ * (test code needs to force a DIFFERENT, including empty, follow set without
+ * touching the real `followService` mock adapters' own state machinery).
+ */
+export function setMockFollowingForTests(personaIds: readonly string[] | undefined): void {
+  setMockFollowedSetForTests(
+    MOCK_VIEWER_PERSONA_ID,
+    personaIds ?? DEFAULT_MOCK_FOLLOWED_PERSONA_IDS,
+  )
+}
 
 /**
  * Short-circuits the network with the current post set, while still exercising
@@ -63,14 +129,30 @@ import { postStore } from './postStore'
  * `listPosts()` — rather than calling `listPosts()` directly, so a post appended
  * after mount is included on the next resolve and, via `useFeed`'s store
  * subscription, surfaces live without a re-fetch of the seeded baseline.
+ *
+ * Following scope (story 02): reads `config.params.scope` — the SAME query
+ * param a live call carries — and filters to the viewer's followed set from
+ * `followEdgeStore.ts` (the SAME store `followService.ts`'s follow/unfollow
+ * mock writes mutate — WR-004 fold) when it is `'following'`. An empty
+ * filtered result is returned as an empty array, never substituted with the
+ * unfiltered set (mirrors the real backend's documented empty-follow-set
+ * behavior).
  */
-const mockAdapter: AxiosAdapter = config => Promise.resolve({
-  data: postStore.getPosts(),
-  status: 200,
-  statusText: 'OK',
-  headers: {},
-  config,
-})
+const mockAdapter: AxiosAdapter = config => {
+  const params = config.params as { scope?: FeedScope } | undefined
+  const all = postStore.getPosts()
+  const data = params?.scope === 'following'
+    ? all.filter(post => mockFollowedSet(MOCK_VIEWER_PERSONA_ID).has(post.authorPersonaId))
+    : all
+
+  return Promise.resolve({
+    data,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config,
+  })
+}
 
 /** Single env-guarded mock/live flip point (WAVE0-REVIEW 15). */
 const USE_MOCK_FEED = USE_MOCK_DATA
@@ -95,16 +177,26 @@ function isPostArray(data: unknown): data is Post[] {
 }
 
 /**
- * Resolves the current exercise's public posts (the All Posts firehose).
- * Throws on request failure or a malformed body (fail-closed — no default/empty
- * feed is silently substituted, COR-001). Returns the FULL `Post` model; the
- * XC-002 narrowing to a participant-safe view happens in `assembleFeedView`.
+ * Resolves the current exercise's posts for the given `scope` (default `'all'`
+ * — the unfiltered firehose). Throws on request failure or a malformed body
+ * (fail-closed — no default/empty feed is silently substituted, COR-001).
+ * Returns the FULL `Post` model; the XC-002 narrowing to a participant-safe
+ * view happens in `assembleFeedView`.
+ *
+ * `scope: 'following'` sends `?scope=following` (SOC-081) — the backend
+ * resolves the caller's session-bound persona's follow set and filters
+ * server-side; an empty follow set resolves an empty array, never a fallback
+ * to the unfiltered feed. Calling this with NO argument (every story-01
+ * caller) builds the EXACT SAME request as before this story — no `params`
+ * key at all — so the All Posts path is byte-identical.
  */
-export async function resolveFeed(): Promise<Post[]> {
-  const response = await api.get<Post[]>(
-    '/feed',
-    USE_MOCK_FEED ? { adapter: mockAdapter } : undefined,
-  )
+export async function resolveFeed(scope: FeedScope = 'all'): Promise<Post[]> {
+  const params = scope === 'following' ? { scope } : undefined
+  const requestConfig: AxiosRequestConfig | undefined = USE_MOCK_FEED
+    ? { adapter: mockAdapter, ...(params !== undefined ? { params } : {}) }
+    : params !== undefined ? { params } : undefined
+
+  const response = await api.get<Post[]>('/feed', requestConfig)
   if (!isPostArray(response.data)) {
     throw new Error('resolveFeed: resolution returned a malformed post set')
   }

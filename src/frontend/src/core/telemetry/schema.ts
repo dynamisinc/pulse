@@ -270,6 +270,11 @@ export type TelemetryEventV0 = z.infer<typeof telemetryEventV0Schema>
  * types (`engine.observed` / `decided` / `generated` / `reviewed` /
  * `published` / `measured`, `storyline.state_changed`, and the reserved
  * `rumor.*` family) on top of this same list.
+ *
+ * `unfollow` was added by `profiles-social-graph/07` (the follow-graph
+ * backend), which emits `follow` / `unfollow` as distinct server-side event
+ * types. It is listed here so an AAR/evaluator consumer that filters on this
+ * vocabulary counts unfollows instead of silently dropping them.
  */
 export const KNOWN_TELEMETRY_EVENT_TYPES = [
   'post',
@@ -283,6 +288,7 @@ export const KNOWN_TELEMETRY_EVENT_TYPES = [
   'login',
   'logout',
   'follow',
+  'unfollow',
   'view',
   'search',
   'steering_action',
