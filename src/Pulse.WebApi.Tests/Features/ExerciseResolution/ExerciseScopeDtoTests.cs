@@ -40,11 +40,20 @@ public class ExerciseScopeDtoTests
             "no list, no picker, no admin/simulation-status field (COR-004, XC-002)");
     }
 
+    // The TRANSITIONAL SUPERSET (exercise-configuration story 01a, Option B — Tier-2 signed off): the six
+    // COR-032 literals plus the legacy four, which stay valid through the transition. Every one of these must
+    // pass through FromExercise verbatim, and every one is accepted by the widened frontend isExerciseStatus
+    // guard — that pairing is what makes UAT's independent frontend/backend deploys safe in either order.
     [Theory]
+    [InlineData("build")]
+    [InlineData("staged")]
+    [InlineData("live")]
+    [InlineData("paused")]
+    [InlineData("completed")]
+    [InlineData("archived")]
     [InlineData("scheduled")]
     [InlineData("active")]
     [InlineData("complete")]
-    [InlineData("archived")]
     public void Status_SerializesAsTheLowercaseExerciseStatusString(string status)
     {
         var dto = ExerciseScopeDto.FromExercise(NewExercise(status: status));
@@ -54,6 +63,27 @@ public class ExerciseScopeDtoTests
 
         document.RootElement.GetProperty("status").GetString().Should().Be(
             status, "status must serialize as the raw lowercase ExerciseStatus vocabulary string with no case mapping");
+    }
+
+    /// <summary>
+    /// Story exercise-configuration/01a: the vocabulary widened, the SHAPE did not. A COR-032 status flowing
+    /// through still serializes to exactly the frozen four camelCase keys — a builder who "improves" this DTO
+    /// breaks a fail-closed client guard and blanks the participant shell in UAT rather than raising a type
+    /// error (integration hazard 4).
+    /// </summary>
+    [Fact]
+    public void Serialized_KeepsTheFrozenFourKeys_WhenACor032StatusFlowsThrough()
+    {
+        var dto = ExerciseScopeDto.FromExercise(NewExercise(status: "paused"));
+
+        var json = JsonSerializer.Serialize(dto);
+        using var document = JsonDocument.Parse(json);
+
+        document.RootElement.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
+            ["exerciseId", "exerciseName", "timeZone", "status"],
+            "widening the status VOCABULARY must not add, remove or rename a field on the frozen wire shape");
+        document.RootElement.GetProperty("status").GetString().Should().Be(
+            "paused", "FromExercise passes the stored status through verbatim — no mapping, projection or default");
     }
 
     [Fact]

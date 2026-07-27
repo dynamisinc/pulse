@@ -52,6 +52,7 @@ import { ShellLayout } from './features/participant-shell/ShellLayout'
 import { ParticipantLandingGuard } from '@/features/participant-shell'
 import { SocialChannel } from './features/social'
 import { ControllerConsoleRoute } from './features/controller'
+import { ExerciseSettingsPage } from '@/features/planner'
 import { ExerciseSwitcherSlot } from '@/features/staff'
 import { createRoleAwareRoutes } from './features/app-shell'
 
@@ -105,6 +106,34 @@ export const EvaluatorDashboardRoute = () => (
   </ExerciseContextProvider>
 )
 
+/**
+ * The PLANNER staff surface (E1 exercise-configuration, story 01b). Until now
+ * `staffSurfaces.planner` was deliberately omitted, so a planner session fell
+ * through to the fail-closed redirect in `RoleAwareEntry`; story 01b ships the
+ * first planner surface, so the slot is filled here — the orchestrator-owned
+ * route-table edit named in the feature's implementation.md "Integration seams".
+ *
+ * Staff world: `StaffShellFrame` applies COBRA inside its own theme boundary, so
+ * this is never reachable from a participant path. No `PreviewProvider` — the
+ * preview-as-participant stage belongs to the conduct surfaces (controller /
+ * evaluator); a planner configuring the world has no scenario moment to preview
+ * yet, so the header's preview control is simply not wired here (its props are
+ * optional). `ExerciseSettingsPage` is a composition point: wave 3 mounts
+ * `ComplianceChromePanel` (story 02) and `PracticeModePanel` (story 04) into it.
+ */
+export const PlannerWorkspaceRoute = () => (
+  <ExerciseContextProvider>
+    <ToolstripProvider>
+      <StaffShellFrame
+        header={<StaffHeader surfaceName="Exercise Settings" />}
+        toolstrip={<Toolstrip />}
+      >
+        <ExerciseSettingsPage />
+      </StaffShellFrame>
+    </ToolstripProvider>
+  </ExerciseContextProvider>
+)
+
 // Role-aware route table (app-shell/01). Replaces the five flat routes: the
 // catch-all mounts RoleAwareEntry (behind hoisted Session/ExerciseContext
 // providers) and routes on the resolved role. The concrete cross-world leaves —
@@ -125,7 +154,9 @@ const router = createBrowserRouter(
     staffSurfaces: {
       controller: <ControllerConsoleRoute />,
       evaluator: <EvaluatorDashboardRoute />,
-      // planner: no Phase-1 staff surface — omitted, so a planner session fails closed.
+      // planner: the exercise-settings workspace (exercise-configuration/01b). Was
+      // omitted (planner sessions failed closed to login) until this surface shipped.
+      planner: <PlannerWorkspaceRoute />,
     },
     participantGuard: ParticipantLandingGuard,
     // Visibility-gated: the switcher only appears above the staff console when

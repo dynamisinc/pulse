@@ -1,9 +1,25 @@
 /**
  * App.integration.test.tsx
  * ---------------------------------------------------------------------------
- * Integration-B wiring test for the staff shell's Evaluator Dashboard route
- * (`EvaluatorDashboardRoute`, exported from `App.tsx`). The individual pieces
- * are unit-tested in their own stories; this proves they are WIRED together:
+ * Integration-B wiring tests for the staff route compositions `App.tsx` owns —
+ * the Evaluator Dashboard (`EvaluatorDashboardRoute`) and the planner's
+ * Exercise Settings workspace (`PlannerWorkspaceRoute`) — plus the ROUTE TABLE
+ * those surfaces are handed to. The individual pieces are unit-tested in their
+ * own stories; this file proves they are WIRED together, in the composition
+ * root, exactly as they ship.
+ *
+ * WHY THE ROUTE-TABLE CASE EXISTS (WR-003 on the exercise-configuration
+ * umbrella, #41). `RoleAwareEntry` fails a staff role with no built surface
+ * closed — a planner whose `staffSurfaces.planner` slot is missing is redirected
+ * to `/login`, forever, with no error anywhere. `RoleAwareEntry.test.tsx` covers
+ * that MECHANISM with its own injected surface map, so it is blind to the real
+ * table in `App.tsx`: deleting `planner:` from `staffSurfaces` used to leave the
+ * whole suite green while planners silently lost their surface. The last
+ * describe below closes that hole by asserting on the arguments `App.tsx`
+ * actually hands `createRoleAwareRoutes` at module load — see the spy note on
+ * the `vi.mock` factory.
+ *
+ * Evaluator Dashboard — proves:
  *
  *  - the evaluator surface renders inside the real `StaffShellFrame` (navy
  *    header + the shared toolstrip), not the old stub;
@@ -16,30 +32,74 @@
  *    preview stage, and suppresses the shell-global admin flyout so it can
  *    never sit above the preview stage; exiting restores the work area.
  *
+ * Planner workspace (exercise-configuration, story 01b) — proves:
+ *  - the planner surface renders inside the real `StaffShellFrame` (staff
+ *    header naming "Exercise Settings" + the shared toolstrip), NOT a stub and
+ *    NOT some other surface: the real `ExerciseSettingsPage` AND the live
+ *    `ExerciseSettingsPanel` beneath it are both asserted, so swapping the
+ *    mounted surface (for another staff page, or for a participant element)
+ *    fails here;
+ *  - it stays inside the staff world — no participant compliance chrome, no
+ *    brand skin;
+ *  - it wires NO preview handler, so (post-WR-003) it ships no preview control
+ *    at all rather than a dead one.
+ *
  * `ExerciseContextProvider` resolves its mock scope asynchronously (it renders
  * nothing until resolved), so the first assertion waits via `findBy*`.
  *
- * `StaffHeader` (mounted inside `EvaluatorDashboardRoute`) calls `useNavigate()`
+ * `StaffHeader` (mounted inside both route compositions) calls `useNavigate()`
  * for its sign-out control (feature: login, story 04) — wrapped in a real
  * `MemoryRouter` here so this genuinely un-mocked integration path still renders.
  */
+import { isValidElement, type ReactElement } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query'
-import { describe, expect, it } from 'vitest'
-import { EvaluatorDashboardRoute } from './App'
+import { describe, expect, it, vi } from 'vitest'
+import type { RoleAwareEntryProps, StaffSurfaceRole } from './features/app-shell'
+import { EvaluatorDashboardRoute, PlannerWorkspaceRoute } from './App'
 
-function renderRoute() {
-  // A dedicated client so React Query state never leaks between test cases.
+/**
+ * Captures the surface map `App.tsx` hands `createRoleAwareRoutes` at module
+ * load. A PASS-THROUGH spy: the factory returns the real implementation (via
+ * `importOriginal`), so the route table this file's other cases render against
+ * is the genuine one — the only added behavior is recording the argument. It is
+ * a plain object rather than a `vi.fn()` record so a future `clearMocks` can
+ * never quietly erase the evidence (the call happens once, at import time,
+ * before any `beforeEach` runs).
+ */
+const routeTable = vi.hoisted(() => ({
+  surfaces: undefined as unknown,
+}))
+
+vi.mock('./features/app-shell', async importOriginal => {
+  const actual = await importOriginal<typeof import('./features/app-shell')>()
+  return {
+    ...actual,
+    createRoleAwareRoutes: (surfaces: RoleAwareEntryProps) => {
+      routeTable.surfaces = surfaces
+      return actual.createRoleAwareRoutes(surfaces)
+    },
+  }
+})
+
+/** A dedicated client per render so React Query state never leaks between cases. */
+function renderInStaffWorld(surface: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <MemoryRouter>
-      <QueryClientProvider client={client}>
-        <EvaluatorDashboardRoute />
-      </QueryClientProvider>
+      <QueryClientProvider client={client}>{surface}</QueryClientProvider>
     </MemoryRouter>,
   )
+}
+
+function renderRoute() {
+  return renderInStaffWorld(<EvaluatorDashboardRoute />)
+}
+
+function renderPlannerRoute() {
+  return renderInStaffWorld(<PlannerWorkspaceRoute />)
 }
 
 describe('EvaluatorDashboardRoute — Integration B wiring', () => {
@@ -111,5 +171,101 @@ describe('EvaluatorDashboardRoute — Integration B wiring', () => {
     // Login-triage rows render (the mock roster) — proves the flyout is live,
     // not an empty shell.
     expect(within(flyout).getAllByRole('listitem').length).toBeGreaterThan(0)
+  })
+})
+
+describe('PlannerWorkspaceRoute — Integration B wiring (exercise-configuration/01b)', () => {
+  it('renders the exercise-settings surface inside the real staff frame', async () => {
+    renderPlannerRoute()
+
+    // Exercise context resolves async; the navy staff header appearing proves
+    // the frame mounted.
+    expect(await screen.findByTestId('staff-header')).toBeInTheDocument()
+    expect(screen.getByTestId('staff-shell-header')).toHaveTextContent('Exercise Settings')
+    // The shared toolstrip is mounted (the frame's toolstrip slot is wired).
+    expect(screen.getByTestId('staff-shell-toolstrip')).toBeInTheDocument()
+
+    // The work area is the REAL planner page, not a placeholder and not another
+    // surface: its landmark, its h1, and the live settings panel below it.
+    expect(screen.getByTestId('exercise-settings-page')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { level: 1, name: /exercise configuration/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('exercise-settings-panel')).toBeInTheDocument()
+
+    // The panel is genuinely live — it loads through its own service seam and
+    // renders the editable form, so this is the shipped page, not a shell.
+    expect(await screen.findByTestId('exercise-settings-form')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /exercise name/i })).toBeInTheDocument()
+  })
+
+  it('stays in the staff world: no participant compliance chrome, no preview control', async () => {
+    renderPlannerRoute()
+
+    await screen.findByTestId('staff-header')
+
+    // Participant-world chrome belongs to the participant shell; a staff
+    // surface must never render it (D0 §2 two-worlds).
+    expect(screen.queryByTestId('pulse-compliance-chrome-top')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('pulse-compliance-chrome-bottom')).not.toBeInTheDocument()
+
+    // The planner wires no preview handler (a planner configuring the world has
+    // no scenario moment to preview), so the handler-gated control is absent —
+    // not present-and-inert (WR-003).
+    expect(screen.queryByTestId('staff-header-preview-toggle')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('preview-as-participant')).not.toBeInTheDocument()
+  })
+})
+
+describe('App route table — the staff surface map handed to createRoleAwareRoutes', () => {
+  /** The captured argument, narrowed once for every case below. */
+  function capturedSurfaces(): RoleAwareEntryProps {
+    const captured = routeTable.surfaces
+    if (captured === undefined || typeof captured !== 'object') {
+      throw new Error('App.tsx never called createRoleAwareRoutes — the route table is not wired.')
+    }
+    return captured as RoleAwareEntryProps
+  }
+
+  it('fills every staff role that has a built surface — including planner', () => {
+    const { staffSurfaces } = capturedSurfaces()
+
+    // Named individually (not a loop over a list this test owns) so deleting a
+    // slot from App.tsx fails HERE, loudly, instead of silently shrinking a
+    // list and leaving that role's staff redirected to /login forever.
+    expect(staffSurfaces.controller).toBeDefined()
+    expect(staffSurfaces.evaluator).toBeDefined()
+    expect(staffSurfaces.planner).toBeDefined()
+  })
+
+  it('maps the planner slot to PlannerWorkspaceRoute, not to some other element', () => {
+    const planner = capturedSurfaces().staffSurfaces.planner
+
+    // Identity, not just presence: swapping the planner surface for another
+    // staff page — or for a participant element — fails here too.
+    expect(isValidElement(planner)).toBe(true)
+    expect(isValidElement(planner) ? planner.type : undefined).toBe(PlannerWorkspaceRoute)
+  })
+
+  it('mounts a surface for each of the three staff roles RoleAwareEntry can route', () => {
+    const { staffSurfaces } = capturedSurfaces()
+
+    // `StaffSurfaceRole` is the union RoleAwareEntry branches on; a role added
+    // to it later shows up here as an unfilled slot rather than as a silent
+    // fail-closed redirect discovered in UAT.
+    const roles: StaffSurfaceRole[] = ['controller', 'evaluator', 'planner']
+    for (const role of roles) {
+      expect(staffSurfaces[role]).toBeDefined()
+    }
+  })
+
+  it('wires the participant surface and both composed guards alongside them', () => {
+    const surfaces = capturedSurfaces()
+
+    // The staff table is only half the entry contract — assert the rest is
+    // still wired so this case cannot pass on a half-built table.
+    expect(surfaces.participantSurface).toBeDefined()
+    expect(surfaces.participantGuard).toBeDefined()
+    expect(surfaces.staffSwitcher).toBeDefined()
   })
 })

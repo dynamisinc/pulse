@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Social;
 
@@ -44,15 +45,32 @@ public class ParticipantShellEndpointsTests
         _fixture = fixture;
     }
 
+    /// <summary>
+    /// <c>/api/shell-state</c> serves the interactive <c>full</c> variant for a participant-accessible world.
+    /// </summary>
+    /// <remarks>
+    /// <b>This test seeds a <c>live</c> exercise row; it used to seed nothing.</b> When it was written,
+    /// <c>IShellVariantProjection</c> was 01b's <c>ConstantShellVariantProjection</c> and every resolved scope
+    /// answered <c>full</c> regardless of the database. Wiring exercise-configuration story 03 into
+    /// <c>Program.cs</c> Replace()s that with <c>LifecycleShellVariantProjection</c>, so the variant is now
+    /// COR-032's lifecycle state — and a scope whose exercise ROW DOES NOT EXIST resolves to
+    /// <c>ExerciseShellConfigSource.Unconfigured</c>, whose <c>Status</c> is <c>build</c>, which correctly
+    /// projects to <c>preview</c>. Seeding the row restores this test's actual premise ("a participant-facing,
+    /// participant-accessible exercise") rather than weakening its assertion: the point being pinned is still
+    /// that <c>full</c> — the only variant <c>mountContract.ts</c>'s <c>affordancesAvailable()</c> grants — is
+    /// what a live world serves.
+    /// </remarks>
     [RequiresDockerFact]
     public async Task ShellState_ResolvedScope_Returns200_WithVariantFull()
     {
-        var root = await GetOkRootAsync("/api/shell-state");
+        var exerciseId = await SeedLiveExerciseAsync();
+
+        var root = await GetOkRootAsync("/api/shell-state", exerciseId);
 
         root.GetProperty("variant").GetString().Should().Be(
             "full",
-            "a resolved participant shell must get the interactive 'full' variant — the value that re-enables "
-            + "the realtime feed stream + 'new posts' pill (the UAT feed-not-updating fix)");
+            "a resolved participant shell on a LIVE exercise must get the interactive 'full' variant — the "
+            + "value that re-enables the realtime feed stream + 'new posts' pill (the UAT feed-not-updating fix)");
     }
 
     [RequiresDockerFact]
@@ -159,15 +177,40 @@ public class ParticipantShellEndpointsTests
         channel.GetProperty("enabled").GetBoolean().Should().Be(enabled);
     }
 
-    private async Task<JsonElement> GetOkRootAsync(string route)
+    /// <summary>
+    /// Seeds an exercise in the <c>live</c> lifecycle state with every config column left <c>null</c> (i.e.
+    /// "not configured"), so the projections still serve the shipped Phase-1 constants while the exercise is
+    /// genuinely participant-accessible.
+    /// </summary>
+    private async Task<Guid> SeedLiveExerciseAsync()
     {
-        var (root, _) = await GetOkRootAndBodyAsync(route);
+        _fixture.ConnectionString.Should().NotBeNull(
+            "the Docker-gated MsSql fixture must have started and captured its connection string before these tests run");
+
+        var exerciseId = Guid.NewGuid();
+
+        await using var context = _fixture.CreateContext();
+        context.Exercises.Add(new Exercise
+        {
+            Id = exerciseId,
+            Name = "Participant shell contract exercise",
+            TimeZone = "UTC",
+            Status = "live",
+        });
+        await context.SaveChangesAsync();
+
+        return exerciseId;
+    }
+
+    private async Task<JsonElement> GetOkRootAsync(string route, Guid? exerciseId = null)
+    {
+        var (root, _) = await GetOkRootAndBodyAsync(route, exerciseId);
         return root;
     }
 
-    private async Task<(JsonElement Root, string Body)> GetOkRootAndBodyAsync(string route)
+    private async Task<(JsonElement Root, string Body)> GetOkRootAndBodyAsync(string route, Guid? exerciseId = null)
     {
-        await using var factory = CreateFactory(exerciseId: Guid.NewGuid());
+        await using var factory = CreateFactory(exerciseId ?? Guid.NewGuid());
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(new Uri(route, UriKind.Relative));

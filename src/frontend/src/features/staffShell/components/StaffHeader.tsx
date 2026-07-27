@@ -42,7 +42,17 @@
  *      `onTogglePreview`. This story renders the control only; the preview
  *      behavior itself (staging the participant shell, moment picker) is
  *      story 04 and is deliberately NOT built here, so this component has no
- *      dependency on it.
+ *      dependency on it. RENDERED ONLY WHEN `onTogglePreview` IS SUPPLIED:
+ *      preview is a capability of the CONDUCT surfaces (evaluator today,
+ *      controller when it wires the toggle), not of every staff surface — a
+ *      planner configuring the world has no scenario moment to preview. With no
+ *      handler the control would still be a real, focusable, keyboard-reachable
+ *      `<button>` whose click does nothing, i.e. a dead control a staff user
+ *      cannot distinguish from a broken feature (NFR-001: every control a
+ *      keyboard reaches must do something). So the surface that owns the
+ *      behavior opts IN by passing the handler; surfaces that do not simply
+ *      never render it. Gate here, once, rather than in each route — that is
+ *      the correct semantics for all three staff surfaces at the same time.
  *   8. Sign-out control (feature: login, story 04 — "Wire real login routes +
  *      logout"; COR-012). STYLING NUANCE: the story calls for "COBRA
  *      `styledComponents`, never a bare MUI button" — this header does NOT
@@ -85,9 +95,21 @@ export const STAFF_CLASSIFICATION = 'UNCLASSIFIED // FOUO'
 export interface StaffHeaderProps {
   /** The staff surface mounting this header, e.g. "Controller Console". */
   surfaceName: string
-  /** Whether "Preview as participant" is currently active. Defaults to `false`. */
+  /**
+   * Whether "Preview as participant" is currently active. Defaults to `false`.
+   * Only meaningful alongside `onTogglePreview` (the control is not rendered
+   * without it).
+   */
   previewActive?: boolean
-  /** Invoked when the Preview-as button is activated. Story 04 supplies the real handler. */
+  /**
+   * Invoked when the Preview-as button is activated. Story 04 supplies the real
+   * handler.
+   *
+   * SUPPLYING THIS IS WHAT RENDERS THE CONTROL — a surface with no preview
+   * capability (the planner workspace; the controller console today) omits it
+   * and gets no button, instead of a keyboard-reachable button that does
+   * nothing. See module header point 7.
+   */
   onTogglePreview?: () => void
   /**
    * Overrides the exercise-state pill's config (label + navy-safe accent), e.g.
@@ -387,35 +409,40 @@ export function StaffHeader({
       </Stack>
 
       {/* 7. Preview-as-participant button — behavior is story 04's; renders
-          the control only, driven entirely by props (COR-041). */}
-      <Box
-        component="button"
-        type="button"
-        data-testid="staff-header-preview-toggle"
-        aria-pressed={previewActive}
-        onClick={onTogglePreview}
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 0.875,
-          background: previewActive ? 'rgba(255, 255, 255, 0.16)' : 'transparent',
-          border: previewActive ? '1px solid rgba(255, 255, 255, 0.55)' : '1px solid rgba(255, 255, 255, 0.35)',
-          borderRadius: '999px',
-          color: staffShellTokens.header.textMuted,
-          font: '600 12px ui-sans-serif, system-ui, sans-serif',
-          px: 1.75,
-          py: 0.875,
-          cursor: 'pointer',
-          whiteSpace: 'nowrap',
-          flex: 'none',
-          '&:hover': {
-            background: 'rgba(255, 255, 255, 0.12)',
-          },
-        }}
-      >
-        <FontAwesomeIcon icon={previewActive ? faEyeSlash : faEye} size="sm" />
-        {previewActive ? 'Exit preview' : 'Preview as participant'}
-      </Box>
+          the control only, driven entirely by props (COR-041). HANDLER-GATED:
+          a surface that wires no `onTogglePreview` (the planner workspace, and
+          the controller console until it wires one) ships NO button at all
+          rather than a focusable dead control — see module header point 7. */}
+      {onTogglePreview !== undefined && (
+        <Box
+          component="button"
+          type="button"
+          data-testid="staff-header-preview-toggle"
+          aria-pressed={previewActive}
+          onClick={onTogglePreview}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.875,
+            background: previewActive ? 'rgba(255, 255, 255, 0.16)' : 'transparent',
+            border: previewActive ? '1px solid rgba(255, 255, 255, 0.55)' : '1px solid rgba(255, 255, 255, 0.35)',
+            borderRadius: '999px',
+            color: staffShellTokens.header.textMuted,
+            font: '600 12px ui-sans-serif, system-ui, sans-serif',
+            px: 1.75,
+            py: 0.875,
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            flex: 'none',
+            '&:hover': {
+              background: 'rgba(255, 255, 255, 0.12)',
+            },
+          }}
+        >
+          <FontAwesomeIcon icon={previewActive ? faEyeSlash : faEye} size="sm" />
+          {previewActive ? 'Exit preview' : 'Preview as participant'}
+        </Box>
+      )}
 
       {/* 8. Sign-out control — see module header point 8 for the styling
           nuance (this idiom IS the COBRA staff look for header controls). */}

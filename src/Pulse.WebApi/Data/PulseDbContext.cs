@@ -124,8 +124,53 @@ public class PulseDbContext : DbContext
             // Required-with-default so the migration adds them NOT NULL to the existing table and the frozen
             // ExerciseScope wire fields are never null.
             entity.Property(e => e.TimeZone).IsRequired().HasDefaultValue("UTC");
-            entity.Property(e => e.Status).IsRequired().HasDefaultValue("scheduled");
+
+            // COR-032 vocabulary (Option B, Tier-2 signed off — exercise-configuration story 01a): the
+            // authoritative literals are build | staged | live | paused | completed | archived. The default
+            // moves scheduled → build ("created and never configured" is staff-only content development).
+            // NO CHECK constraint: the legacy four (scheduled | active | complete | archived) stay VALID
+            // through the transition on purpose — the frontend guard accepts the transitional superset, which
+            // is what makes UAT's independent frontend/backend deploys safe (isExerciseStatus fails closed).
+            entity.Property(e => e.Status).IsRequired().HasDefaultValue("build");
             // CurrentScenarioTime is nullable by its C# type (B2 placeholder) — no extra config.
+
+            // ---------------------------------------------------------------------------------------
+            // Exercise-configuration story 01a — the feature's ONE migration. COR-030 settings, the COR-031
+            // chrome config, the NFR-008 watermark switch and the COR-033 practice flag are all authored
+            // here so stories 01b/02/03/04 add behaviour only. Every free-text/color column is bounded
+            // (nvarchar(n), not nvarchar(max)) — the schema half of the NFR-004 length bound story 01b
+            // enforces on write; the opaque OutletNamesJson blob is the one deliberate exception.
+            // NULLABLE by design: null = "not configured", so the projection keeps serving the shipped
+            // Phase-1 constant and no existing row changes behaviour when the migration lands.
+            //
+            // ISOLATION WARNING (always-Critical, COR-001/XC-002). Exercise is the SCOPE, not an
+            // IExerciseScoped entity, so the central read-side query filter applied at the bottom of this
+            // method DOES NOT COVER THIS TABLE — a settings query here is unfiltered and can return another
+            // exercise's row. Take the exercise from IExerciseContext (or the server-held staff
+            // active-exercise selection), NEVER from a client-supplied id/body/route/query value.
+            // ---------------------------------------------------------------------------------------
+            entity.Property(e => e.WorldName).HasMaxLength(200);
+            entity.Property(e => e.Locale).HasMaxLength(35);           // BCP-47 tags are far shorter in practice.
+            entity.Property(e => e.EnabledChannels).HasMaxLength(256); // comma-separated channel-catalog ids.
+            entity.Property(e => e.BrandName).HasMaxLength(200);
+            entity.Property(e => e.BrandPrimary).HasMaxLength(32);
+            entity.Property(e => e.BrandAccent).HasMaxLength(32);
+            entity.Property(e => e.BrandSurface).HasMaxLength(32);
+            entity.Property(e => e.BrandOnSurface).HasMaxLength(32);
+            entity.Property(e => e.OutletNamesJson).HasColumnType("nvarchar(max)");
+
+            entity.Property(e => e.ChromeTopText).HasMaxLength(512);
+            entity.Property(e => e.ChromeTopFg).HasMaxLength(32);
+            entity.Property(e => e.ChromeTopBg).HasMaxLength(32);
+            entity.Property(e => e.ChromeBottomText).HasMaxLength(512);
+            entity.Property(e => e.ChromeBottomFg).HasMaxLength(32);
+            entity.Property(e => e.ChromeBottomBg).HasMaxLength(32);
+
+            // Non-nullable switches with SAFE defaults: chrome + watermark ON (NFR-008 is never both-off,
+            // and this matches the shipped chrome constant), practice OFF (never-flagged = real conduct).
+            entity.Property(e => e.ComplianceChromeEnabled).IsRequired().HasDefaultValue(true);
+            entity.Property(e => e.WatermarkEnabled).IsRequired().HasDefaultValue(true);
+            entity.Property(e => e.IsPracticeMode).IsRequired().HasDefaultValue(false);
         });
 
         modelBuilder.Entity<PersonaTemplate>(entity =>
