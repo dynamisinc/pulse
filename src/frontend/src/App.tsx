@@ -118,8 +118,10 @@ export const EvaluatorDashboardRoute = () => (
  * preview-as-participant stage belongs to the conduct surfaces (controller /
  * evaluator); a planner configuring the world has no scenario moment to preview
  * yet, so the header's preview control is simply not wired here (its props are
- * optional). `ExerciseSettingsPage` is a composition point: wave 3 mounts
- * `ComplianceChromePanel` (story 02) and `PracticeModePanel` (story 04) into it.
+ * optional). `ExerciseSettingsPage` is a composition point — a left section nav
+ * over a content pane, one registry entry per section: wave 3's
+ * `ComplianceChromePanel` (story 02) and `PracticeModePanel` (story 04) are two
+ * of its five sections.
  */
 export const PlannerWorkspaceRoute = () => (
   <ExerciseContextProvider>
