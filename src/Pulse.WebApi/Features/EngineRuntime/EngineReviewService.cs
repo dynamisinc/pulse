@@ -76,6 +76,9 @@ public sealed partial class EngineReviewService
     private readonly IEngineReviewBroadcaster _broadcaster;
     private readonly EngineAutonomyRegistry _autonomy;
     private readonly EngineTierPolicyRegistry _tierPolicy;
+    /// <summary><see cref="IGenerationProvider.Name"/> of the offline provider, which ignores tier bindings.</summary>
+    private const string FakeProviderName = "Fake";
+
     private readonly IGenerationProvider _generationProvider;
     private readonly GenerationOptions _generationOptions;
     private readonly ILogger<EngineReviewService> _logger;
@@ -688,7 +691,24 @@ public sealed partial class EngineReviewService
     {
         tierKey = string.Empty;
 
-        if (!TierPolicyModes.TryGetForcedTier(mode, out var forced) || _generationOptions.Tiers.Count == 0)
+        if (!TierPolicyModes.TryGetForcedTier(mode, out var forced))
+        {
+            return false;
+        }
+
+        // Skip ONLY when there is genuinely nothing to validate against: no tier bindings configured AND the
+        // offline provider active. Both conjuncts are load-bearing (Copilot review, PR #385):
+        //   - `Tiers.Count == 0` alone was too permissive -- a REAL provider with no bindings is precisely the
+        //     misconfiguration this check exists to catch. It would return 200, record the override, then throw
+        //     inside every subsequent tick, stalling generation with only a log line: the same "a controller
+        //     action that appears to work and quietly breaks the engine" failure this validation prevents.
+        //   - provider-is-Fake alone was too permissive in the other direction -- Fake is the CI/local default,
+        //     so it would disable the check in every environment that actually runs the tests, leaving the rule
+        //     unexercised. (Confirmed empirically: it made the two rejection tests pass with Ok.)
+        // With the conjunction, configured tiers are always validated whatever the provider, and the offline
+        // no-config case stays free.
+        if (_generationOptions.Tiers.Count == 0
+            && string.Equals(_generationProvider.Name, FakeProviderName, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }

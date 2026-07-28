@@ -238,7 +238,7 @@ app.MapEngineContentSeedEndpoints();       // #327 POST /api/ops/seed-engine-con
 // the safety-critical cockpit. Requires AddStaffIdentity (above) to precede AddEngineReview — it does.
 // #297/#353: within that group the MUTATING routes carry an additional EngineCockpitControllerRoleFilter
 // (StaffAssignment.Role == "controller"), so an assigned evaluator/planner can WATCH via the two GETs but
-// cannot steer — including the kill switch. AddEngineReview must also follow AddEngineGeneration (line 34):
+// cannot steer — including the kill switch. AddEngineReview must also follow AddEngineGeneration (above):
 // GET /api/engine/settings resolves IGenerationProvider + IOptions<GenerationOptions>. It does.
 app.MapEngineRuntime();   // #285 reaction-loop host runtime surface
 app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + swamped-mode + kill-switch

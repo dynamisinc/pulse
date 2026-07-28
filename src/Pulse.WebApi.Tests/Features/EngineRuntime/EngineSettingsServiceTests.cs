@@ -213,6 +213,53 @@ public sealed class EngineSettingsServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task SetTierPolicy_WithNoTiersConfigured_IsRejected_ForAREALProvider_ButAllowed_ForFake()
+    {
+        // Copilot review, PR #385. The skip must require BOTH "no tier bindings" AND "the offline provider".
+        // Keyed on empty Tiers alone, a REAL provider with no bindings accepts the override, then throws on
+        // every subsequent tick inside the loop's catch — generation stalls with only a log line, which is the
+        // failure this validation exists to prevent. Keyed on provider-alone it would be disabled in CI (where
+        // Fake is the default) and the rule would go unexercised.
+        var liveExercise = Guid.NewGuid();
+        await using var live = Build(
+            liveExercise,
+            new GenerationOptions(),                       // nothing bound
+            generationProvider: new StubLiveGenerationProvider());
+
+        var rejected = await live.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+
+        rejected.Outcome.Should().Be(
+            EngineReviewOutcome.Invalid,
+            "a real provider with no tier bindings is the misconfiguration this check is for");
+        live.TierPolicy.GetMode(liveExercise).Should().Be(
+            TierPolicyMode.Auto, "an unservable tier must never be recorded");
+
+        // Same empty config, offline provider: nothing to validate against, so it stays permitted.
+        var fakeExercise = Guid.NewGuid();
+        await using var offline = Build(fakeExercise, new GenerationOptions());
+
+        var allowed = await offline.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+
+        allowed.Outcome.Should().Be(
+            EngineReviewOutcome.Ok,
+            "FakeGenerationProvider ignores tiers, so CI/local must keep working with no bindings configured");
+        offline.TierPolicy.GetMode(fakeExercise).Should().Be(TierPolicyMode.Ambient);
+    }
+
+    /// <summary>A non-Fake <see cref="IGenerationProvider"/>: only its Name matters to the tier-binding rule.</summary>
+    private sealed class StubLiveGenerationProvider : IGenerationProvider
+    {
+        public string Name => "AzureOpenAI";
+
+        public GenerationGovernance Governance => GenerationGovernance.InProcess;
+
+        public Task<GenerationResult> GenerateAsync(
+            GenerationRequest request,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("never invoked — this stub exists only to report a non-Fake Name");
+    }
+
+    [RequiresDockerFact]
     public async Task SetTierPolicy_ForATierBoundWithAnEmptyDeployment_IsAlsoRejected400()
     {
         var exerciseId = Guid.NewGuid();
@@ -540,7 +587,8 @@ public sealed class EngineSettingsServiceTests
         Guid? currentExerciseId,
         GenerationOptions? generationOptions = null,
         EngineAutonomyRegistry? autonomy = null,
-        EngineTierPolicyRegistry? tierPolicy = null)
+        EngineTierPolicyRegistry? tierPolicy = null,
+        IGenerationProvider? generationProvider = null)
     {
         var context = new ExerciseContext { CurrentExerciseId = currentExerciseId };
         var db = _fixture.CreateContext(context);
@@ -563,7 +611,7 @@ public sealed class EngineSettingsServiceTests
             Mock.Of<IEngineReviewBroadcaster>(),
             registry,
             tiers,
-            new FakeGenerationProvider(),
+            generationProvider ?? new FakeGenerationProvider(),
             Options.Create(generationOptions ?? new GenerationOptions()),
             NullLogger<EngineReviewService>.Instance);
 

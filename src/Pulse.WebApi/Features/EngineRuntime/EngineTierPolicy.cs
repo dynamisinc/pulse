@@ -156,17 +156,31 @@ public sealed class EngineTierPolicyRegistry
     {
         EnsureScoped(exerciseId);
 
-        var previous = GetMode(exerciseId);
+        // Read-then-write would let two concurrent controller requests both report the SAME `previous`,
+        // putting a from->to pair in the XC-004 audit that no single transition ever made (Copilot review,
+        // PR #385). Each branch below returns the value it actually displaced, atomically, so the audit
+        // record always describes a transition that really happened.
         if (mode == TierPolicyMode.Auto)
         {
-            _modes.TryRemove(exerciseId, out _);
-        }
-        else
-        {
-            _modes[exerciseId] = mode;
+            return _modes.TryRemove(exerciseId, out var removed) ? removed : TierPolicyMode.Auto;
         }
 
-        return previous;
+        // AddOrUpdate's updateValueFactory can run more than once under contention, so it must not be the
+        // place the displaced value is captured. Loop on the compare-and-swap primitives instead.
+        while (true)
+        {
+            if (_modes.TryGetValue(exerciseId, out var existing))
+            {
+                if (existing == mode || _modes.TryUpdate(exerciseId, mode, existing))
+                {
+                    return existing;
+                }
+            }
+            else if (_modes.TryAdd(exerciseId, mode))
+            {
+                return TierPolicyMode.Auto;   // absence IS Auto
+            }
+        }
     }
 
     /// <summary>
