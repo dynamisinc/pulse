@@ -467,11 +467,15 @@ output aiClaudeEndpoint string = (deployAi && deployClaude) ? ai.outputs.claudeE
 // 'AzureOpenAI' = live, egressing traffic (only when the Tier-2-gated generationProviderLive is set).
 // Surfaced as an output so every Deploy Infrastructure run states it in the job summary (NFR-005 audit).
 output generationProvider string = generationProvider
-// The EFFECTIVE attested governance posture (§2 / NFR-005) — exactly the values emitted as the
+// The two HUMAN-ASSERTED governance clauses (§2 / NFR-005) plus residency, exactly as emitted to the
 // Generation__Governance__* app settings. Surfaced so a post-deploy audit can read what the deployed app
-// actually asserts from the Deploy Infrastructure job summary, without diffing the parameter file. All
-// false/empty until the §8 signer sets the attestation params (they are human assertions, not derived
-// from deployAi).
+// asserts from the Deploy Infrastructure job summary, without diffing the parameter file. Both booleans
+// are false until the §8 signer sets the attestation params (they are human assertions, deliberately not
+// derived from deployAi).
+// DELIBERATELY NOT a full mirror: Generation__Governance__Retention is omitted because 'Retained' lives
+// only as a webapp.bicep param default. Restating that literal here would create a second source of truth
+// that can silently drift from the module — the same hazard the customSubDomain fix closed. Read retention
+// from the deployed app settings (or webapp.bicep) rather than from this output (Copilot review, PR #387).
 output generationAttestedPosture object = {
   tenantBounded: deployAi && generationTenantBounded
   noTraining: deployAi && generationNoTrainingAttested

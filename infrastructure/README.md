@@ -229,7 +229,10 @@ against Azure *after* they have been applied. Only steps 4–5 are gated on the 
    derived from `deployAi`, so flipping `generationProviderLive` on its own leaves a live provider with
    `false` attestations and **fails startup by design**
    (`GenerationConfigurationException` — that is the fail-closed backstop working, not a bug).
-   Re-deploy: it changes exactly one app setting (`Generation__Provider`); the job summary's
+   Re-deploy: that signing commit changes **three** app settings — `Generation__Provider`
+   `Fake`→`AzureOpenAI` plus the two `Generation__Governance__*` attestations `false`→`true`.
+   (Flipping `generationProviderLive` *alone* would be the single-setting change, and it is exactly
+   what the fail-closed backstop rejects at startup.) The job summary's
    `generationProvider` output states which provider the deployed app resolves, and
    `generationAttestedPosture` states the effective attested posture. The App Service restarts on the app-setting change, which **de-registers
    the in-memory reaction loop** — re-call `POST /api/ops/seed-engine-content` to re-register it (engine

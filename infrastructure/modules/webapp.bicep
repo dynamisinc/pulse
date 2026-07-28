@@ -109,9 +109,13 @@ var staffAccountSettings = flatten(map(staffAccounts, (account, i) => [
   }
 ]))
 
-// The E8 Generation:* block (engine-runtime/05). Emitted UNCONDITIONALLY and with a fixed shape, so
-// flipping the live-traffic toggle changes exactly ONE app-setting value — Generation__Provider — and
-// an ARM diff of a go-live is a single, auditable line. When no governed endpoint is provisioned
+// The E8 Generation:* block (engine-runtime/05). Emitted UNCONDITIONALLY and with a fixed shape, so a
+// go-live is a SMALL, fully auditable ARM diff rather than a restructuring: flipping
+// generationProviderLive alone moves exactly one value (Generation__Provider), and the real signing
+// commit moves THREE — Provider plus the two Generation__Governance__* attestations, which the §8 signer
+// sets in that same commit (they are human assertions, deliberately not derived from deployAi, so the
+// startup gate stays an independent check). Provider alone would be rejected at startup by design.
+// When no governed endpoint is provisioned
 // (deployAi = false) the endpoint/tier values are empty and the attestations are false, which is the
 // honest representation of "nothing to attest": Provider stays Fake (compliant by construction, no
 // egress), and a real provider configured against this posture would be rejected at startup by
