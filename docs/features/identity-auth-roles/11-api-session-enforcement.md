@@ -129,6 +129,15 @@ bootstrap secret **is** their credential — the identical rationale the audit a
 10. `POST /api/ops/seed-engine-content`
 11. `POST /api/ops/bind-participant-persona`
 
+**As built (2026-07-28):** the route table is now **53** endpoints, not 40 — `feature/exercise-configuration`
+(#374) and `feature/profiles-social-graph` (#372) merged between this story being written and being built,
+adding 13 routes (`/api/personas/suggestions`, the four follow-graph routes, and eight `/api/staff/*`
+settings/lifecycle routes). Re-validated against a live `EndpointDataSource` dump: **all 13 are correctly
+gated and none needs pre-auth, so the allowlist is unchanged at 11.** That the number moved twice during one
+story is exactly why the allowlist is enforced against the live route table by test
+(`DefaultDenySessionGateTests.EveryMappedEndpoint_IsEitherGated_OrOnTheElevenRouteAllowlist`) rather than by
+a count in a document.
+
 Everything else default-denies, **including both hub endpoints**. (The audit's first draft of this
 story said the allowlist was 5 and that `POST /api/auth/logout` "already requires a live session" —
 that is **false as built**; the audit itself probed it and got 204 with no session. That earlier
