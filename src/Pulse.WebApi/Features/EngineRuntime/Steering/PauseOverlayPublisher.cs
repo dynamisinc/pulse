@@ -76,6 +76,23 @@ public delegate PauseTier PauseTierReader(Guid exerciseId);
 /// records the causal action exactly once, and a second event for the same transition would corrupt the audit
 /// trail rather than enrich it.
 /// </para>
+/// <para>
+/// <b>The overlay-precedence ruling is enforced HERE TOO, not only on the GET (Gate-1 CR-001).</b> This push is
+/// the SECOND participant channel: an already-connected tab renders it with no refresh, and nothing disconnects
+/// hub clients when an exercise reaches EndEx (<c>ExerciseLifecycleGatingMiddleware</c> names "nothing publishes
+/// into a closed exercise" an ASSUMPTION, not an invariant). So a Freeze published after
+/// <c>live → completed</c> would put the in-fiction holding page over a permanently ended exercise while that
+/// same tab's re-GET said <c>none</c> — two channels disagreeing about one state on one screen. A Freeze is
+/// therefore gated by the SAME predicate the read side uses
+/// (<see cref="SteeringOverlayPrecedence.PauseIsParticipantVisibleIn"/>): one rule, one place, so the open
+/// <c>staged</c> question resolves in a single line for both channels.
+/// </para>
+/// <para>
+/// <b>Only ADDING an overlay is gated; CLEARING is always published.</b> A Resume never consults the lifecycle.
+/// Gating it would strand a holding page on a tab that legitimately received a Freeze push while the exercise was
+/// still running and then saw it end — the clear is the only thing that can rescue that tab, so it must always go
+/// out. Suppression is asymmetric on purpose, and in the safe direction.
+/// </para>
 /// </remarks>
 public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
 {
@@ -88,27 +105,36 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
     private readonly IHubContext<ExerciseRealtimeHub> _hubContext;
     private readonly OverlayStateService _overlayState;
     private readonly PauseTierReader _tierReader;
+    private readonly ExerciseLifecycleStatusReader _lifecycleStatusReader;
     private readonly ILogger<PauseOverlayPublisher> _logger;
 
-    /// <summary>Creates the publisher over the shared exercise hub, the overlay store, and the tier reader.</summary>
+    /// <summary>Creates the publisher over the shared exercise hub, the overlay store, and the two readers.</summary>
     /// <param name="hubContext">The context for the SHARED <see cref="ExerciseRealtimeHub"/> (no second hub).</param>
     /// <param name="overlayState">The per-exercise overlay store <c>GET /api/overlay-state</c> reads.</param>
     /// <param name="tierReader">Reads the authoritative pause tier (and breaks the registry DI cycle).</param>
-    /// <param name="logger">Logs a swallowed publish failure — never silent.</param>
+    /// <param name="lifecycleStatusReader">
+    /// Reads the exercise's COR-032 lifecycle status, so the ruling is enforced on this PUSH channel and not only
+    /// on the GET (CR-001). A delegate rather than an injected scope factory, mirroring
+    /// <paramref name="tierReader"/> — which is also what keeps this constructor free of any persistence type.
+    /// </param>
+    /// <param name="logger">Logs a swallowed publish failure, and a suppressed publish — never silent.</param>
     public PauseOverlayPublisher(
         IHubContext<ExerciseRealtimeHub> hubContext,
         OverlayStateService overlayState,
         PauseTierReader tierReader,
+        ExerciseLifecycleStatusReader lifecycleStatusReader,
         ILogger<PauseOverlayPublisher> logger)
     {
         ArgumentNullException.ThrowIfNull(hubContext);
         ArgumentNullException.ThrowIfNull(overlayState);
         ArgumentNullException.ThrowIfNull(tierReader);
+        ArgumentNullException.ThrowIfNull(lifecycleStatusReader);
         ArgumentNullException.ThrowIfNull(logger);
 
         _hubContext = hubContext;
         _overlayState = overlayState;
         _tierReader = tierReader;
+        _lifecycleStatusReader = lifecycleStatusReader;
         _logger = logger;
     }
 
@@ -139,6 +165,27 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
             var sequence = _overlayState.NextSequence(exerciseId);
             var tier = _tierReader(exerciseId);
             authoritativeTier = tier;
+
+            // CR-001: a Freeze may only become participant-visible in a genuinely RUNNING exercise. Consulted
+            // BEFORE the store write, so a suppressed Freeze leaves no trace on either channel — the store is what
+            // the GET serves and what a reconnect heals to, so writing 'pause' here and relying on the read gate to
+            // hide it would recreate exactly the two-sources-of-truth split this fix closes. A CLEARING publish is
+            // never gated (see the type's remarks): it is the only thing that can rescue a tab which received a
+            // legitimate Freeze push before the lifecycle moved on.
+            if (tier == PauseTier.Freeze)
+            {
+                var lifecycleStatus = await _lifecycleStatusReader(exerciseId, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (!SteeringOverlayPrecedence.PauseIsParticipantVisibleIn(lifecycleStatus))
+                {
+                    // The tier and the clock freeze ALREADY stand and are untouched — only the participant-facing
+                    // overlay is withheld. Logged, because a controller who froze a non-running world will see no
+                    // participant effect and that must be explicable from the logs.
+                    LogOverlayPublishSuppressed(exerciseId, lifecycleStatus ?? "(no exercise row)");
+                    return;
+                }
+            }
 
             // The controller's SELECTED register decides which holding page participants see (AC1/AC5) — the
             // registry already coerced it to a contract literal, and this re-coercion is the last line of defence
@@ -177,6 +224,18 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
         Level = LogLevel.Warning,
         Message = "A pause-overlay publish named no exercise; nothing was written or broadcast (COR-001 fail-closed).")]
     private partial void LogUnscopedPublishIgnored();
+
+    /// <summary>
+    /// Source-generated notice that the overlay-precedence ruling withheld a Freeze from participants (CA1848).
+    /// Information, not a warning: this is the ruling working as designed, and it is the ONLY visible trace of a
+    /// Freeze that produced no participant effect.
+    /// </summary>
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "A Freeze on exercise {ExerciseId} was NOT made participant-visible: its lifecycle state " +
+                  "{LifecycleStatus} is not a running world (overlay precedence: endex > pre-start > pause > " +
+                  "none). The pause tier and its clock effect STAND; only the participant overlay was withheld.")]
+    private partial void LogOverlayPublishSuppressed(Guid exerciseId, string lifecycleStatus);
 
     /// <summary>Source-generated best-effort push-failure warning (CA1848).</summary>
     [LoggerMessage(

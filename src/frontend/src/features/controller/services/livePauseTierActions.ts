@@ -49,6 +49,16 @@
  * VERIFIES the returned state against what it optimistically rendered and
  * reverts on a mismatch.
  *
+ * A REFUSAL IS LOUD, NOT SILENT (Gate-1 WR-003). The server refuses a Freeze
+ * outright when the exercise is not in a running lifecycle state — pre-start
+ * (`build`/`staged`) or past EndEx (`completed`/`archived`) — recording no tier,
+ * touching no clock and publishing no overlay. It answers `409` with
+ * `{ outcome, reason }`, which `asPauseTierRefusal` narrows into a
+ * `PauseTierRefusedError` so the console can tell the controller WHY their Freeze
+ * did not take instead of appearing to do nothing. A Freeze that silently no-ops
+ * is the exact "control asserts a state the server never applied" defect this
+ * feature exists to eliminate.
+ *
  * NO TELEMETRY HERE (XC-004). The ONE `steering_action` event per transition is
  * emitted by `usePauseState` in BOTH modes (unchanged shape from story 03) and
  * is deliberately not duplicated by this live path or by the backend.
@@ -56,6 +66,55 @@
 
 import { api } from '@/core/services/api'
 import type { OverlayRegister, PauseTier } from '../hooks/usePauseState'
+
+/**
+ * A pause-tier change the server REFUSED outright (`409`), carrying the reason to
+ * show the controller. Two kinds today (world-steering story 08 / Gate-1 WR-003):
+ *   - `not-applicable-in-lifecycle-state` — a Freeze outside a running world
+ *     (pre-start, or past EndEx);
+ *   - `clock-unavailable` — the scenario clock could not be reached (CR-001).
+ *
+ * A refusal is a PROMISE from the server that NOTHING was recorded — no tier, no
+ * clock effect, no participant overlay. That is what lets the caller revert
+ * directly instead of re-GETing to discover what happened (which is what it must
+ * do for an ambiguous failure, where the request may have been applied and only
+ * its response lost).
+ */
+export class PauseTierRefusedError extends Error {
+  /** The machine-readable refusal kind — branch on this, never on the prose. */
+  readonly outcome: string
+
+  /** The server's plain, controller-readable reason. Rendered as TEXT (NFR-001). */
+  readonly reason: string
+
+  constructor(outcome: string, reason: string) {
+    super(reason)
+    this.name = 'PauseTierRefusedError'
+    this.outcome = outcome
+    this.reason = reason
+  }
+}
+
+/**
+ * Narrows an axios rejection to a definitive server REFUSAL. Only a `409` whose
+ * body carries both fields qualifies: anything else (a 502 with no body, a
+ * network drop, a 409 from an older build) stays ambiguous and must go down the
+ * caller's re-GET-and-reconcile path rather than being treated as "nothing
+ * happened" — guessing that would put WORLD FROZEN back over a ticking engine.
+ */
+export function asPauseTierRefusal(error: unknown): PauseTierRefusedError | null {
+  if (error instanceof PauseTierRefusedError) return error
+
+  const wrapped = error as { response?: { status?: unknown; data?: unknown } } | undefined
+  const response = wrapped?.response
+  if (response?.status !== 409) return null
+
+  const body = response.data as { outcome?: unknown; reason?: unknown } | undefined
+  if (typeof body?.outcome !== 'string' || typeof body.reason !== 'string') return null
+  if (body.outcome.length === 0 || body.reason.length === 0) return null
+
+  return new PauseTierRefusedError(body.outcome, body.reason)
+}
 
 /** The pause-tier request context — no client `exerciseId` (COR-001). */
 export interface PauseTierActionContext {

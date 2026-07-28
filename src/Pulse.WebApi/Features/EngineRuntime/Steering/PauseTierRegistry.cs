@@ -78,12 +78,47 @@ public enum PauseTierOutcome
     /// console must never be told a Freeze took when the world kept moving (CR-001).
     /// </summary>
     ClockUnavailable = 2,
+
+    /// <summary>
+    /// The FREEZE was refused because the exercise is not in a running lifecycle state — pre-start
+    /// (<c>build</c>/<c>staged</c>) or past EndEx (<c>completed</c>/<c>archived</c>). Nothing was recorded: no
+    /// tier, no clock effect, no overlay publish (Tom's ruling, Gate-1 WR-003).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the whole transition is refused rather than just the overlay.</b> Suppressing only the
+    /// participant overlay left a half-applied state — tier <c>freeze</c> plus a frozen clock plus no participant
+    /// signal — which is worse than either clean outcome, and in <c>staged</c> it also STARTED a scenario clock
+    /// COR-032 says must not run. Refusing outright means the world is untouched and the controller is TOLD, which
+    /// is the whole point: a Freeze that silently does nothing is the "control asserts a state the server never
+    /// applied" defect this feature exists to eliminate.
+    /// </para>
+    /// <para>
+    /// <b>Produced by <c>PauseTierEndpoints</c>, not by this registry</b> — deliberately, because the check needs
+    /// the exercise's lifecycle state, which the endpoint already reads from the <c>Exercise</c> row for the clock
+    /// start (so the refusal costs no extra query), and because refusing BEFORE
+    /// <see cref="PauseTierRegistry.SetTierAsync"/> is what guarantees the clock is never even started. The
+    /// endpoint maps it — like every refusal — to a <c>409</c> carrying <c>PauseTierRefusalDto</c>, whose
+    /// <c>outcome</c> token is derived from THIS enum member's name. A future caller may equally return it from
+    /// the registry: the endpoint's switch has an explicit arm for it, so it cannot fall through to a <c>500</c>
+    /// (which would send the console down the AMBIGUOUS re-GET path instead of the direct revert).
+    /// </para>
+    /// </remarks>
+    NotApplicableInLifecycleState = 3,
 }
 
 /// <summary>The result of a pause-tier change — the outcome plus the transition when one actually happened.</summary>
 /// <param name="Outcome">Whether the tier was applied, unchanged, or refused.</param>
-/// <param name="Transition">The completed transition, or <c>null</c> for <see cref="PauseTierOutcome.Unchanged"/>/<see cref="PauseTierOutcome.ClockUnavailable"/>.</param>
-public sealed record PauseTierResult(PauseTierOutcome Outcome, PauseTierTransition? Transition);
+/// <param name="Transition">The completed transition, or <c>null</c> for <see cref="PauseTierOutcome.Unchanged"/> and every refusal.</param>
+/// <param name="Reason">
+/// A plain, controller-readable explanation of a REFUSAL, or <c>null</c> when the transition was applied or
+/// unchanged. Surfaced verbatim on the <c>409</c> body so the console can tell a controller WHY their Freeze did
+/// not take — never staff-internal jargon and never a bare status code (NFR-001: the console renders it as text).
+/// </param>
+public sealed record PauseTierResult(
+    PauseTierOutcome Outcome,
+    PauseTierTransition? Transition,
+    string? Reason = null);
 
 /// <summary>
 /// The server-authoritative tiered-pause registry (feature: world-steering, story 07; CTL-023, COR-001,
