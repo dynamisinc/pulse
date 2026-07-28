@@ -352,8 +352,9 @@ function applyOverlayRegister(register: OverlayRegister): void {
  * successful later Freeze would be its own kind of lie.
  */
 function setRefusal(refusal: PauseRefusal | null): void {
+  // Reference equality covers the no-op cases, INCLUDING null -> null (the common
+  // "clear on the next action when there was nothing to clear" path).
   if (storeState.refusal === refusal) return
-  if (storeState.refusal === null && refusal === null) return
   storeState = { ...storeState, refusal }
   emitStoreChange()
 }

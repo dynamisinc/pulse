@@ -90,6 +90,16 @@ unilaterally.
 **ELIMINATED by Tom's WR-003 ruling below** — the transition is now refused outright, so no half-applied state
 can exist.
 
+(d) **The one remaining path to "a participant sees a pause state after ENDEX" — a NEVER-RECONNECTING tab
+(Gate-1 WR-005).** A tab that legitimately received a Freeze push while the exercise was running, and then never
+reconnects and never refreshes, keeps rendering the holding page after `live → completed`. Both of this story's
+channels are now correct — the push is gated and the GET is gated — but `main`'s lifecycle overlay changes are
+**pull-only**: nothing pushes an overlay update over SignalR from the lifecycle side, so an EndEx transition
+cannot reach an already-rendered tab. The participant's next GET (a refresh, or any hub reconnect, which re-GETs)
+heals it immediately. Not a regression from this story and `'endex'` remains out of scope; closing it properly
+means the lifecycle transition publishing over the hub, which is a new seam and its own story. Follow-up raised
+by the orchestrator.
+
 ## Tom's follow-on rulings (2026-07-28, Gate-1)
 
 **WR-003 — a Freeze outside a running world is REFUSED, loudly; `staged` stays pre-start.** Suppressing only the
@@ -344,9 +354,11 @@ states) and once end to end over the real controller POST → participant GET wi
 | running + not frozen | `none` (byte-identical to the shipped constant) | `.Running_WithNothingFrozen_ServesNone_ByteIdenticalToTheShippedConstant` | `.Get_InARunningWorldWithNoFreeze_ServesNone` |
 
 WR-003 refusal, additionally: `PauseTierEndpointsTests.Post_FreezeInAnArchivedWorld_IsRefused_AndRecordsNothing`,
-`.Post_ANonFreezeTierInANonRunningWorld_IsStillApplied` (only Freeze is gated). Console:
-`usePauseState.test.tsx` "SURFACES the reason when the server refuses a Freeze outside a running world", "does NOT
-re-GET on a definitive refusal", "clears the refusal notice on the controller's NEXT action", "clears the refusal
+`.Post_ANonFreezeTierInANonRunningWorld_IsStillApplied_AndRECORDED` (only Freeze is gated — and asserts the tier
+was genuinely recorded, not merely un-refused), `.Post_ResumeInANonRunningWorld_IsStillApplied` (a pause can always
+be stood down). Console: `usePauseState.test.tsx` "SURFACES the reason when the server refuses a Freeze outside a
+running world", "does NOT re-GET on a definitive refusal", "SURFACES a parseable clock-unavailable 409 and reverts
+DIRECTLY (its shape changed too)", "clears the refusal notice on the controller's NEXT action", "clears the refusal
 notice when the controller dismisses it", "reverts a Freeze the server REFUSED (an UNPARSEABLE 409), after ASKING
 what is true"; `PausePill.test.tsx` "shows the server's reason as TEXT, never colour alone", "is ANNOUNCED without
 stealing focus (role=status, aria-live=polite)", "dismisses from the KEYBOARD through a real button", "still shows
@@ -369,7 +381,7 @@ Supporting: `SteeringPauseOverlayProjectionTests.LifecyclePaused_KeepsTheCor032H
 `.TerminalOrUnrecognizedStates_SuppressTheFreeze_FailingClosed` (incl. `archived` and a bogus literal),
 `.TheLegacyActiveLiteral_IsStillARunningWorld_SoAFreezeReachesParticipants`,
 `.ANonContractRegisterInTheStore_IsCoercedOnTheReadPath`,
-`.SteeringPauseAppliesIn_IsTrueOnlyWhereScenarioTimeActuallyAdvances` (the gate, one row per state);
+`.PauseIsParticipantVisibleIn_IsTrueOnlyWhereScenarioTimeActuallyAdvances` (the gate, one row per state);
 `PauseTierEndpointsTests.Get_InALifecyclePausedWorld_StillServesTheCor032HoldingPage`.
 
 Isolation (COR-001, always-Critical) — `SteeringPauseOverlayProjectionTests.ExerciseB_NeverSeesExerciseAsFreeze`,

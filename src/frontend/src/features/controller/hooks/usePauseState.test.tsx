@@ -703,6 +703,34 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
     expect(result.current.tier).toBe('running')
   })
 
+  it('SURFACES a parseable clock-unavailable 409 and reverts DIRECTLY (its shape changed too)', async () => {
+    // The CR-001 clock refusal moved onto the same {outcome, reason} body as the
+    // lifecycle one, which also moved it from the ask-don't-guess path to the
+    // DIRECT-revert path. Sound (no tier is recorded either way) but a behaviour
+    // change, and this is the real production shape — so it gets its own test
+    // rather than riding on the unparseable-409 case above.
+    const reason = 'The exercise scenario clock could not be reached, so the pause tier was not applied.'
+    mockedSetPauseTier.mockRejectedValue({
+      response: { status: 409, data: { outcome: 'clock-unavailable', reason } },
+    })
+    const { result } = renderHook(() => usePauseState())
+    await act(async () => {
+      await flushMicrotasks()
+    })
+    mockedFetchPauseTier.mockClear()
+
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+
+    // The whole thesis: never render WORLD FROZEN over a world that is still moving.
+    expect(result.current.tier).toBe('running')
+    expect(result.current.isFrozen).toBe(false)
+    expect(result.current.refusal).toEqual({ tier: 'freeze', outcome: 'clock-unavailable', reason })
+    expect(mockedFetchPauseTier).not.toHaveBeenCalled()
+  })
+
   it('clears the refusal notice on the controller’s NEXT action', async () => {
     mockedSetPauseTier.mockRejectedValueOnce(lifecycleRefusal('Freeze is not applicable — completed.'))
     const { result } = renderHook(() => usePauseState())

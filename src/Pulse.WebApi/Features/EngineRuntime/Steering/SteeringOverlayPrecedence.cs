@@ -21,8 +21,16 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 /// consumers call THIS method and neither owns a copy of it.
 /// </para>
 /// <para>
-/// <b>Change the ruling here and both channels follow.</b> Whether <c>staged</c> should count as freezable is an
-/// open question for Tom (Gate-1 WR-003) — it is one line, in this method, and no consumer needs touching.
+/// <b>THREE call sites, one rule.</b> Besides the two participant channels, <c>PauseTierEndpoints</c> reads this
+/// same predicate to REFUSE a Freeze transition outright (Tom's WR-003 ruling, 2026-07-28): outside a running
+/// world nothing is recorded — no tier, no clock start or freeze, no publish — and the controller is told why.
+/// Suppressing only the overlay was not enough; it left tier <c>freeze</c> plus a frozen clock plus no
+/// participant signal, and in <c>staged</c> it started a scenario clock COR-032 says must not run.
+/// </para>
+/// <para>
+/// <b><c>staged</c> is SETTLED as pre-start</b> (Tom, 2026-07-28 — not an open question; do not "tidy" it back).
+/// StartEx has not happened there, so the scenario clock does not run and a Freeze stops nothing. Should that ever
+/// be revisited, it is one line in this one method and every call site follows without edit.
 /// </para>
 /// </remarks>
 public static class SteeringOverlayPrecedence
@@ -52,9 +60,11 @@ public static class SteeringOverlayPrecedence
     ///   <see cref="ExerciseLifecycleBehaviour.Closed"/>, inventing no overlay.</item>
     /// </list>
     /// <para>
-    /// <b>This gates ADDING a participant overlay only, never REMOVING one.</b> A clearing publish (Resume) is
-    /// deliberately never gated — see <see cref="PauseOverlayPublisher"/>. Suppressing a clear would strand a
-    /// holding page on a tab that had already received a legitimate Freeze push before the lifecycle moved.
+    /// <b>This gates the FREEZE direction only, never a clear.</b> A clearing publish (Resume) is deliberately
+    /// never gated — see <see cref="PauseOverlayPublisher"/> — and neither is any non-Freeze tier at the endpoint.
+    /// Suppressing a clear would strand a holding page on a tab that had already received a legitimate Freeze push
+    /// before the lifecycle moved; refusing every tier would lock a controller out of the console over a lifecycle
+    /// state that has nothing to do with those tiers.
     /// </para>
     /// </remarks>
     /// <param name="lifecycleStatus">A canonical or legacy COR-032 lifecycle literal.</param>

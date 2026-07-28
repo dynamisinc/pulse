@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Features.EngineRuntime.Steering;
 
 using System.Linq;
+using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
@@ -154,7 +155,10 @@ public static class PauseTierEndpoints
         if (tier == PauseTier.Freeze
             && !SteeringOverlayPrecedence.PauseIsParticipantVisibleIn(exercise.LifecycleStatus))
         {
-            return Results.Conflict(PauseTierRefusalDto.NotApplicableInLifecycleState(exercise.LifecycleStatus));
+            return RefusalResult(new PauseTierResult(
+                PauseTierOutcome.NotApplicableInLifecycleState,
+                Transition: null,
+                PauseTierRefusalDto.LifecycleReasonFor(exercise.LifecycleStatus)));
         }
 
         var clockStart = exercise.ClockStart;
@@ -175,15 +179,26 @@ public static class PauseTierEndpoints
             PauseTierOutcome.Applied or PauseTierOutcome.Unchanged =>
                 Results.Ok(PauseTierStateDto.From(registry, scope.Value)),
 
-            // The tier was NOT recorded because its clock effect could not be applied. Fail closed with a 409 so
-            // the console's guarded revert fires — never a 200 claiming a pause the world never felt (CR-001).
-            // Carried on the SAME refusal body shape as the lifecycle refusal above, so the console has exactly
-            // one 409 parser and both refusals can be shown to the controller as text rather than a status code.
-            PauseTierOutcome.ClockUnavailable => Results.Conflict(PauseTierRefusalDto.ClockUnavailable()),
+            // Every REFUSAL — whichever layer produced it — is a 409 carrying the same {outcome, reason} body, so
+            // the console's guarded revert fires and it has exactly one 409 parser. Never a 200 claiming a pause
+            // the world never felt (CR-001), and never a 500, which would send the client down the AMBIGUOUS
+            // re-GET path instead of the direct revert a refusal entitles it to.
+            PauseTierOutcome.ClockUnavailable or PauseTierOutcome.NotApplicableInLifecycleState =>
+                RefusalResult(result),
 
             _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
         };
     }
+
+    /// <summary>
+    /// Maps a REFUSED <see cref="PauseTierResult"/> onto its <c>409</c>. One place, so a refusal produced by the
+    /// registry and one produced by this endpoint are indistinguishable on the wire — and so a newly-added refusal
+    /// outcome cannot silently fall through to the <c>500</c> arm above.
+    /// </summary>
+    /// <param name="result">The refused result, carrying its outcome and reason.</param>
+    /// <returns>The <c>409</c> with the shared refusal body.</returns>
+    private static IResult RefusalResult(PauseTierResult result) =>
+        Results.Conflict(PauseTierRefusalDto.From(result));
 
     /// <summary>
     /// Resolves — in ONE read of the <see cref="Exercise"/> row — both the scenario start/time zone a
@@ -330,8 +345,21 @@ public sealed class PauseTierRequest
 /// second branch for no gain.
 /// </para>
 /// <para>
-/// <b>A refusal means NOTHING was recorded</b> — no tier, no clock effect, no overlay publish. That is the
-/// contract the console relies on to revert directly rather than re-GETing to find out what happened.
+/// <b>Every refusal means NO TIER WAS RECORDED and NO OVERLAY WAS PUBLISHED</b> — that is the common guarantee,
+/// and it is what entitles the console to revert directly rather than re-GET to find out what happened.
+/// </para>
+/// <para>
+/// <b>The CLOCK guarantee differs by refusal, and the difference is deliberate:</b>
+/// <list type="bullet">
+///   <item><see cref="PauseTierOutcome.NotApplicableInLifecycleState"/> — the world is <b>wholly untouched</b>.
+///   The check runs at this endpoint BEFORE the registry is called at all, so the scenario clock is never
+///   started and never frozen. (Not starting it is half the point: in <c>staged</c>, COR-032 says the clock must
+///   not run.)</item>
+///   <item><see cref="PauseTierOutcome.ClockUnavailable"/> — the clock <b>may have been started</b> before the
+///   freeze failed; <c>PauseTierRegistry.CompensateFailedFreeze</c> documents that path. No tier is recorded and
+///   no overlay is published, so nothing a participant or the console can observe claims a pause — but this is
+///   not the same as "nothing happened", and a reader must not generalize the stronger guarantee above onto it.</item>
+/// </list>
 /// </para>
 /// <para>
 /// <b>Staff-only (XC-002).</b> The reason names the exercise's lifecycle state, which is staff vocabulary; it
@@ -349,16 +377,79 @@ public sealed class PauseTierRefusalDto
     public required string Reason { get; init; }
 
     /// <summary>
-    /// The WR-003 refusal: a Freeze outside a running world. Names the exercise's lifecycle state so the
+    /// Projects a REFUSED <see cref="PauseTierResult"/> onto the wire body, deriving <see cref="Outcome"/> from
+    /// the <see cref="PauseTierOutcome"/> itself — so the enum is the single source of the wire token and a new
+    /// refusal outcome cannot ship with a hand-copied string that drifts from its name.
+    /// </summary>
+    /// <param name="result">The refused result. Its <see cref="PauseTierResult.Reason"/> is used when present.</param>
+    /// <returns>The refusal body.</returns>
+    /// <exception cref="ArgumentException">When <paramref name="result"/> is not a refusal.</exception>
+    public static PauseTierRefusalDto From(PauseTierResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        return result.Outcome switch
+        {
+            PauseTierOutcome.NotApplicableInLifecycleState => new PauseTierRefusalDto
+            {
+                Outcome = WireOutcomeFor(result.Outcome),
+                Reason = result.Reason ?? LifecycleReasonFor(null),
+            },
+
+            PauseTierOutcome.ClockUnavailable => new PauseTierRefusalDto
+            {
+                Outcome = WireOutcomeFor(result.Outcome),
+                Reason = result.Reason
+                    ?? "The exercise scenario clock could not be reached, so the pause tier was not applied.",
+            },
+
+            _ => throw new ArgumentException(
+                $"{result.Outcome} is not a refusal and has no 409 body.", nameof(result)),
+        };
+    }
+
+    /// <summary>
+    /// The kebab-case wire token for a refusal outcome, derived from the enum name so the two can never drift
+    /// (<c>NotApplicableInLifecycleState</c> → <c>not-applicable-in-lifecycle-state</c>).
+    /// </summary>
+    /// <param name="outcome">The refusal outcome.</param>
+    /// <returns>The wire token the console branches on.</returns>
+    public static string WireOutcomeFor(PauseTierOutcome outcome)
+    {
+        var name = outcome.ToString();
+        var builder = new StringBuilder(name.Length + 8);
+
+        for (var index = 0; index < name.Length; index++)
+        {
+            if (char.IsUpper(name[index]))
+            {
+                if (index > 0)
+                {
+                    builder.Append('-');
+                }
+
+                builder.Append(char.ToLowerInvariant(name[index]));
+            }
+            else
+            {
+                builder.Append(name[index]);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// The WR-003 refusal's reason: a Freeze outside a running world. Names the exercise's lifecycle state so the
     /// controller can act on it ("transition to Live first"), rather than being told only that something failed.
     /// </summary>
     /// <param name="lifecycleStatus">The exercise's stored lifecycle literal, or <c>null</c> when there is no row.</param>
-    /// <returns>The refusal body.</returns>
-    public static PauseTierRefusalDto NotApplicableInLifecycleState(string? lifecycleStatus)
+    /// <returns>The controller-readable reason.</returns>
+    public static string LifecycleReasonFor(string? lifecycleStatus)
     {
         var canonical = ExerciseLifecycleStates.TryParse(lifecycleStatus, out var parsed) ? parsed : null;
 
-        var reason = canonical switch
+        return canonical switch
         {
             ExerciseLifecycleStates.Build or ExerciseLifecycleStates.Staged =>
                 $"Freeze is not applicable before StartEx — this exercise is {canonical}. "
@@ -378,21 +469,7 @@ public sealed class PauseTierRefusalDto
             // already administratively held and a controller Freeze adds nothing a participant could notice.
             _ => $"Freeze is not applicable — this exercise is {canonical}, not running.",
         };
-
-        return new PauseTierRefusalDto
-        {
-            Outcome = "not-applicable-in-lifecycle-state",
-            Reason = reason,
-        };
     }
-
-    /// <summary>The CR-001 clock refusal: the scenario clock could not be reached, so no tier was recorded.</summary>
-    /// <returns>The refusal body.</returns>
-    public static PauseTierRefusalDto ClockUnavailable() => new()
-    {
-        Outcome = "clock-unavailable",
-        Reason = "The exercise scenario clock could not be reached, so the pause tier was not applied.",
-    };
 }
 
 /// <summary>

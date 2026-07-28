@@ -562,21 +562,51 @@ public sealed class PauseTierEndpointsTests
     /// is about making a participant-visible world stop, not about locking the console.
     /// </summary>
     [RequiresDockerTheory]
-    [InlineData("running")]
-    [InlineData("engine")]
-    public async Task Post_ANonFreezeTierInANonRunningWorld_IsStillApplied(string tier)
+    [InlineData("completed")]
+    [InlineData("staged")]
+    [InlineData("archived")]
+    public async Task Post_ANonFreezeTierInANonRunningWorld_IsStillApplied_AndRECORDED(string lifecycleState)
     {
+        // 'engine' specifically, because it is a REAL transition off the 'running' default — a 'running' POST
+        // would be Unchanged and return 200 without ever approaching the gate, so it could not tell an applied
+        // tier from an un-refused no-op.
         var exerciseId = Guid.NewGuid();
-        await using var host = await StartHostAsync(exerciseId, exerciseStatus: "completed");
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: lifecycleState);
 
         var response = await host.Client.PostAsJsonAsync(
             new Uri("/api/steering/pause-tier", UriKind.Relative),
-            new { tier, actingHumanId = "human-controller-01" });
+            new { tier = "engine", actingHumanId = "human-controller-01" });
 
         response.StatusCode.Should().Be(
             HttpStatusCode.OK,
             "the WR-003 refusal is scoped to the Freeze transition alone — refusing everything would lock a "
             + "controller out of the console over a lifecycle state that has nothing to do with these tiers");
+        (await ReadStateAsync(response)).Tier.Should().Be("engine");
+        host.Registry.GetTier(exerciseId).Should().Be(
+            PauseTier.Engine,
+            "and it was genuinely RECORDED, not merely un-refused — the difference a 200 alone cannot show");
+    }
+
+    /// <summary>Resume is never refused either, in any lifecycle state — the clear direction is always allowed.</summary>
+    [RequiresDockerTheory]
+    [InlineData("completed")]
+    [InlineData("staged")]
+    public async Task Post_ResumeInANonRunningWorld_IsStillApplied(string lifecycleState)
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: lifecycleState);
+        await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "engine", actingHumanId = "human-controller-01" });
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "running", actingHumanId = "human-controller-01" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Registry.GetTier(exerciseId).Should().Be(
+            PauseTier.Running,
+            "a controller must always be able to stand a pause DOWN, whatever state the exercise is in");
     }
 
     /// <summary>

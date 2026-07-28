@@ -76,6 +76,10 @@ public sealed class SteeringPauseOverlayProjectionTests
             "pre-start outranks pause: before StartEx the clock does not run (COR-032), so there is nothing for a "
             + "Freeze to stop and nothing to tell participants about");
         frozen.Should().BeEquivalentTo(unfrozen, "the Freeze is a no-op in a pre-start world");
+        store.Get(exerciseId).State.Should().Be(
+            "pause",
+            "and the suppression is the PRECEDENCE closing the door, not an empty store — without this the cell "
+            + "would still pass if a refactor stopped the store being written at all");
     }
 
     /// <summary>
@@ -165,6 +169,8 @@ public sealed class SteeringPauseOverlayProjectionTests
             "none",
             "BehaviourOf() reports the fully-closed set for a terminal or unknown state, so the pause store is "
             + "never consulted — the fail-closed direction");
+        store.Get(exerciseId).State.Should().Be(
+            "pause", "and the zero is the PRECEDENCE closing the door, not an empty store");
     }
 
     /// <summary>

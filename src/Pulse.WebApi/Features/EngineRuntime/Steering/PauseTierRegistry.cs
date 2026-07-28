@@ -85,12 +85,24 @@ public enum PauseTierOutcome
     /// tier, no clock effect, no overlay publish (Tom's ruling, Gate-1 WR-003).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>Why the whole transition is refused rather than just the overlay.</b> Suppressing only the
     /// participant overlay left a half-applied state — tier <c>freeze</c> plus a frozen clock plus no participant
     /// signal — which is worse than either clean outcome, and in <c>staged</c> it also STARTED a scenario clock
     /// COR-032 says must not run. Refusing outright means the world is untouched and the controller is TOLD, which
     /// is the whole point: a Freeze that silently does nothing is the "control asserts a state the server never
     /// applied" defect this feature exists to eliminate.
+    /// </para>
+    /// <para>
+    /// <b>Produced by <c>PauseTierEndpoints</c>, not by this registry</b> — deliberately, because the check needs
+    /// the exercise's lifecycle state, which the endpoint already reads from the <c>Exercise</c> row for the clock
+    /// start (so the refusal costs no extra query), and because refusing BEFORE
+    /// <see cref="PauseTierRegistry.SetTierAsync"/> is what guarantees the clock is never even started. The
+    /// endpoint maps it — like every refusal — to a <c>409</c> carrying <c>PauseTierRefusalDto</c>, whose
+    /// <c>outcome</c> token is derived from THIS enum member's name. A future caller may equally return it from
+    /// the registry: the endpoint's switch has an explicit arm for it, so it cannot fall through to a <c>500</c>
+    /// (which would send the console down the AMBIGUOUS re-GET path instead of the direct revert).
+    /// </para>
     /// </remarks>
     NotApplicableInLifecycleState = 3,
 }
