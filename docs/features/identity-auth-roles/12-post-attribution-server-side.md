@@ -1,6 +1,6 @@
 # Story: `POST /api/posts` derives identity server-side, never from the body
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-018 (with COR-001, NFR-009 implicated)  ·  **Design decisions:** none  ·  **Issue:** #366
 **Stack:** backend  ·  **Review:** Tier-2 (auth surface + attribution — always-Critical class)
 
@@ -32,7 +32,38 @@ COR-018 (`docs/01-platform-core-isolation.md`): attribution to individual humans
 shared/organization accounts is evaluation-critical; `actingHumanId` must never be blank and must
 never be a self-reported claim from an untrusted body.
 
-### Decided this session — the session-identity blocker (do not re-open)
+### ⚠️ Two corrections made at build time (2026-07-28) — these supersede the section below
+
+**1. No new accessor was added. `ICurrentSessionPersonaAccessor` already existed.** The section below calls for a
+new `ICurrentSessionAccessor`. It had already been built under a different name by `profiles-social-graph`
+(#372), which merged *after* this story was written:
+`Features/Social/Follows/CurrentSessionPersonaAccessor.cs` exposes exactly the needed facts —
+`SessionId`/`PersonaId`/`Kind`/`ExerciseId`/`ActingHumanId` — in the same endpoint-time token-re-resolution
+shape, is `TryAdd`-registered, and is already consumed by `PostReadService`, `SuggestionService` and
+`FollowService`. Adding another would have made a **fourth** parallel session-lookup seam, which is precisely
+what this story's own Out of Scope warns against. The staff arm reuses B2's `ICurrentStaffSessionAccessor`.
+**Net new session-lookup seams in this story: zero.**
+
+**2. Attribution is resolved at the ENDPOINT, not inside `PostIngestService`.** The Technical Notes below imply
+the funnel derives identity. It cannot: `IngestAsync` has **two** callers — this HTTP boundary, and the
+engine's in-process `EnginePublishService.cs:116`, which has no HTTP request and therefore no session at all.
+Requiring a session inside the funnel would have broken engine publishing *and* the review-cockpit
+approve/edit/batch/auto-send paths that route through it. So `PostAttributionResolver` runs at the HTTP
+boundary — the only place an untrusted body exists — and hands a `PostAttribution` to the funnel as a required
+parameter, which makes the trust boundary visible in the signature. A regression test asserts the engine's
+session-less path still publishes.
+
+**Also settled at build time, where this story's own text was contradictory.** A Tests bullet below asked for a
+participant post to *persist* as `origin: participant` "even when the body names `origin: engine`", while the
+ACs require a privileged origin from a non-staff session to be **refused**. Resolved by distinguishing what the
+body claims: a divergent **persona** or `actingHumanId` is silently ignored (a stale client is a bug, not an
+attack → 201 with the session's own values); a privileged **origin** is refused (403 — silently downgrading it
+would let the attempt succeed as an ordinary post and leave no trace it was made); an **absent** origin is not
+a claim at all (→ 201 as participant). A staff session is additionally held to
+`origin: controller-as-persona` only — `engine`/`inject` are in-process provenances no HTTP caller can possess,
+and `participant` would make an operator's write indistinguishable from a trainee's in the evaluation record.
+
+### Decided this session — the session-identity blocker (superseded by correction 1 above)
 
 `AuthenticatedSession` (`ISessionAuthenticator.cs:30-43`) — the type `SessionAuthenticationMiddleware`
 resolves per request — carries only `SessionId`/`ExerciseId`/`Kind`/`StaffUserId`. It has no
@@ -56,19 +87,19 @@ attempted in this story** (see Out of Scope).
 ## Acceptance Criteria
 
 ### Participant sessions post only as their own bound persona (COR-018)
-- [ ] Given a live **participant** session, when that session's account posts, then
+- [x] Given a live **participant** session, when that session's account posts, then
       `authorPersonaId` is taken from `ICurrentSessionAccessor`'s resolved `PersonaId` (backed by
       `Account.PersonaId`/`Session.PersonaId`) — **never** from `CreatePostRequest.AuthorPersonaId`
       — and a client-supplied `authorPersonaId` in the body is ignored for that session kind.
       `origin` is forced to `participant` regardless of any body value.
-- [ ] Given a live participant session, when it posts, then the persisted and telemetered
+- [x] Given a live participant session, when it posts, then the persisted and telemetered
       `actingHumanId` is populated from the authenticated identity behind the session — **never**
       returned or stored as an empty string (`PostIngestService.cs:139`'s
       `request.ActingHumanId ?? string.Empty` is exactly the bug this AC removes for a
       participant-origin post).
 
 ### Staff sessions operating a persona are attributed to the operator, not the body
-- [ ] Given a live **staff** session operating a persona (`origin: controller-as-persona`), when
+- [x] Given a live **staff** session operating a persona (`origin: controller-as-persona`), when
       it posts, then `actingHumanId` is derived from the staff session's own identity
       (`ICurrentSessionAccessor`'s `StaffUserId` or its resolved human identity) — never trusted as
       free client-supplied text — while `authorPersonaId` stays body-supplied (the console picks
@@ -76,18 +107,18 @@ attempted in this story** (see Out of Scope).
       choice).
 
 ### Non-participant origins are unreachable from a non-staff session
-- [ ] Given a live session that is **not** staff-kind (participant or read-only), when the
+- [x] Given a live session that is **not** staff-kind (participant or read-only), when the
       request's `origin` is `controller-as-persona`, `engine`, or `inject`, then the request is
       rejected (400/403) — a participant or read-only session can never reach a non-`participant`
       origin. (Per story 11's default-deny gate, a request with no session at all cannot reach this
       endpoint in the first place, so that case is covered upstream, not here.)
 
 ### Cross-cutting
-- [ ] **Isolation (XC-001/COR-001):** the session-derived `authorPersonaId` must belong to the
+- [x] **Isolation (XC-001/COR-001):** the session-derived `authorPersonaId` must belong to the
       session's own bound exercise — a participant session cannot post as a persona from another
       exercise even if it somehow names one (defense-in-depth over the persona lookup; the primary
       isolation guarantee is the session's own exercise scope, unchanged by this story).
-- [ ] **Telemetry (XC-004):** the `post` event's `actor.actingHumanId`
+- [x] **Telemetry (XC-004):** the `post` event's `actor.actingHumanId`
       (`PostIngestService.cs:168-180`) is populated from the same session-derived value as the
       persisted `Post.ActingHumanId` — one source of truth, not two independently-trusted paths.
 
@@ -132,13 +163,47 @@ all). `identity-auth-roles/03` (`Session.PersonaId`/`ActingHumanId`, the data th
 follows). `social-api` (`PostWriteEndpoints`, `PostIngestService` — the files this story edits).
 
 ## Tests
-- A participant session's post persists with the session's own `authorPersonaId`/
-  `origin: 'participant'` regardless of a divergent body value; `actingHumanId` is never empty.
-- A staff session operating a persona: `actingHumanId` is the staff identity, not a
-  client-supplied string; `authorPersonaId` is the body-supplied persona choice.
-- A participant or read-only session cannot reach `origin: controller-as-persona | engine | inject`
-  (400/403).
-- A session-derived `authorPersonaId` belonging to another exercise is rejected (isolation
-  defense-in-depth).
-- The persisted `Post.ActingHumanId` and the telemetered `TelemetryEvent.Actor.ActingHumanId`
-  agree (single source of truth).
+
+All suites drive the REAL `Program` host with REAL seeded sessions and REAL bearer tokens against real SQL
+(`[RequiresDockerFact]`) — the harness change this story forced, since attribution now resolves from the
+presented token and a principal-only shim would prove nothing about it.
+
+`PostWriteEndpointTests` (`src/Pulse.WebApi.Tests/Features/Social/PostWriteEndpointTests.cs`):
+- `ParticipantSession_PostsAsItsOwnSessionPersona_IgnoringADivergentBodyPersonaAndActingHuman` (AC1) —
+  the body names another real in-exercise persona and a self-reported `actingHumanId`; both are ignored.
+- `ParticipantSession_OmittingOriginEntirely_StillPostsAsParticipant` (AC1) — an absent origin is not a
+  claim, so it is derived rather than refused.
+- `HappyPath_ParticipantOrigin_Returns201_AndStampsServerScope_EvenWithDifferentBodyExerciseId` (AC1) —
+  scope + wall clock stay server-stamped.
+- `StaffSession_ControllerAsPersona_AttributesTheStaffIdentity_AndKeepsTheBodyPersonaChoice` (AC2) —
+  `actingHumanId` is the staff session's own identity and provably NOT the client-supplied string;
+  `authorPersonaId` stays the console's body-supplied choice.
+- `StaffSession_WithNoActingHumanIdInTheBody_StillAttributesTheStaffIdentity` (AC2) — the field is no
+  longer client-supplied, so it can no longer be omitted.
+- `ParticipantSession_ClaimingAPrivilegedOrigin_Returns403_AndPersistsNothing` (AC3) —
+  `controller-as-persona` / `engine` / `inject` all refused, nothing persisted.
+- `StaffSession_ClaimingANonControllerOrigin_Returns400_AndPersistsNothing` (AC3, tightened) —
+  `engine` / `inject` are in-process-only provenances no HTTP caller can claim, and `participant` is not
+  a staff origin.
+- `StaffSession_NamingAnotherExercisesPersona_IsRejected_AndPersistsNothing` (AC isolation) — the one
+  remaining client-supplied identity field is resolved through an explicit in-exercise predicate;
+  asserted with `IgnoreQueryFilters` in both exercises.
+- `ParticipantPost_LandsOnlyInItsOwnExercise_AndIsInvisibleToAnother` (AC isolation) — the standing
+  cross-exercise read-back, fail-closed.
+- `LiveSessionWithNoPersonaBinding_AndNotStaff_Returns403_AndPersistsNothing`,
+  `SessionWithNoActingHumanAttribution_Returns403_AndPersistsNothing` (COR-018) — the fail-closed
+  identity doors; storing `""` is the exact bug removed.
+- `UnresolvedExerciseScope_FailsClosed_Returns401_AndNeverPersistsOrBroadcasts` (COR-001) — reached
+  through the real pipeline via a staff session bound to the `Guid.Empty` sentinel.
+- `SuccessfulIngest_EmitsExactlyOneTelemetryEvent_MatchingV0Envelope`,
+  `PersistedActingHumanId_AndTheTelemetryActors_Agree_ForBothParticipantAndStaff` (AC telemetry) — the
+  persisted `Post.ActingHumanId` and the event's `Actor.ActingHumanId` are projected from ONE
+  server-derived value.
+
+`PostIngestServiceAttributionTests` (`src/Pulse.WebApi.Tests/Features/Social/PostIngestServiceAttributionTests.cs`)
+— the in-process half: the funnel does NOT require a session (the engine has no HTTP request), so its
+own union / attribution / inject-id guards are asserted directly, including that an empty acting human is
+null-OMITTED on the telemetry actor (off the locked v0 envelope) rather than emitted as `""`.
+
+`EnginePublishServiceTests.PublishBurst_IngestsThroughB1_WithEngineOrigin_ScopedToTheBurstExercise` —
+extended as the regression guard that the engine's session-less publish path still works.

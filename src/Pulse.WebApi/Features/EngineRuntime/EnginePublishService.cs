@@ -106,14 +106,27 @@ public sealed class EnginePublishService : IEnginePublishService
 
             var request = new CreatePostRequest
             {
-                AuthorPersonaId = post.PersonaId.ToString(),
                 Text = post.Text,
                 ScenarioTime = post.ScenarioTime,
                 TimeZone = burst.TimeZone,
-                Origin = "engine",
             };
 
-            var result = await ingestService.IngestAsync(request, cancellationToken);
+            // Attribution is stated explicitly by this TRUSTED in-process caller (identity-auth-roles/12): the
+            // ingest funnel no longer reads persona/origin/actingHumanId from the request body, and there is no
+            // HTTP session here to derive them from — the reaction loop is a BackgroundService. The persona and
+            // the exercise come from the burst, which is server-authoritative in exactly the same way the scope
+            // established above is. actingHumanId is EMPTY because an engine post has no human behind it by
+            // definition — which is why ingest null-omits it on the telemetry actor (the locked v0 envelope
+            // types actor.actingHumanId as z.string().min(1).optional()) and why the HTTP path, where a human
+            // always exists, refuses an empty one instead (COR-018).
+            var attribution = new PostAttribution
+            {
+                AuthorPersonaId = post.PersonaId,
+                Origin = "engine",
+                ActingHumanId = string.Empty,
+            };
+
+            var result = await ingestService.IngestAsync(request, attribution, cancellationToken);
 
             switch (result.Outcome)
             {

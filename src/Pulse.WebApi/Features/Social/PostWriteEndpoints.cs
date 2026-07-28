@@ -6,7 +6,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Social.Follows;
 
 /// <summary>
 /// The <c>POST /api/posts</c> ingest endpoint — the HTTP face of <see cref="PostIngestService"/>'s blessed
@@ -17,16 +19,34 @@ using Pulse.WebApi.Data.Entities;
 public static class PostWriteEndpoints
 {
     /// <summary>
-    /// Registers the post-write funnel (<see cref="PostIngestService"/>) with a Scoped lifetime, matching the
-    /// <c>PulseDbContext</c> unit of work it writes through. <see cref="PostSanitizer"/> is a pure static helper
+    /// Registers the post-write funnel (<see cref="PostIngestService"/>) and the server-side attribution
+    /// resolver (<see cref="PostAttributionResolver"/>) with a Scoped lifetime, matching the
+    /// <c>PulseDbContext</c> unit of work they run through. <see cref="PostSanitizer"/> is a pure static helper
     /// and needs no registration.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The resolver's participant arm needs <c>ICurrentSessionPersonaAccessor</c>, which
+    /// <c>FollowEndpoints.AddSocialFollowGraph()</c> also contributes. It is <c>TryAdd</c>ed here so this slice
+    /// stands on its own rather than silently depending on the persona/follow slice having been registered
+    /// first — a dependency that would hold in <c>Program.cs</c> (which wires both) and fail at REQUEST time in
+    /// any host that wires only this one. <c>TryAdd</c> makes the two registrations idempotent in either order.
+    /// The staff arm's <c>ICurrentStaffSessionAccessor</c> is deliberately NOT registered here: the identity
+    /// slice owns it (<c>AddStaffIdentity</c>'s fail-closed default, <c>Replace</c>d by <c>AddSessions</c> with
+    /// the real one), and a Social slice contributing its own would be a second opinion about who is staff.
+    /// </para>
+    /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <returns>The same collection, for chaining.</returns>
     public static IServiceCollection AddSocialPostWrite(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        // Both accessors read the CURRENT request's bearer token, exactly as CurrentStaffSessionAccessor does.
+        services.AddHttpContextAccessor();
+        services.TryAddScoped<ICurrentSessionPersonaAccessor, CurrentSessionPersonaAccessor>();
+
+        services.AddScoped<PostAttributionResolver>();
         services.AddScoped<PostIngestService>();
 
         return services;
@@ -49,29 +69,37 @@ public static class PostWriteEndpoints
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Role is proxied by <c>origin</c> until Phase B2 auth lands.</b> There is no caller-role identity yet,
-    /// so the response branch keys off the post's <c>origin</c>: a participant composer only ever sends
-    /// <c>origin:'participant'</c>, so that value stands in for "participant-authenticated caller" and gets the
-    /// unconditional XC-002 projection (<see cref="ParticipantPostDto"/> — no provenance). Every other origin
-    /// (controller-as-persona / engine / inject) is a staff-side write and gets <see cref="StaffPostDto"/>,
-    /// which carries <c>origin</c>/<c>actingHumanId</c> because the console's
-    /// <c>originConsoleLabel(lastPublished)</c> (<c>PersonaComposer.tsx:150-157</c>) reads them off its OWN
-    /// controller-as-persona write. Echoing a caller's own supplied provenance back to that same caller is not
-    /// an XC-002 cross-actor leak — it inherits the pre-auth client-trust model today's client-side
-    /// <c>createPost</c> already has; Phase B2 hardens <c>origin</c> authenticity.
+    /// <b>Role is derived from <c>origin</c>, and <c>origin</c> is now server-derived
+    /// (<c>identity-auth-roles/12</c>).</b> This branch used to be a documented pre-auth compromise: there was
+    /// no caller-role identity, so the response shape keyed off the <c>origin</c> the CLIENT sent, and echoing a
+    /// caller's own claimed provenance back to that same caller was defensible only because the whole endpoint
+    /// already trusted the body. That hardening is this story. <see cref="PostAttributionResolver"/> resolves
+    /// <c>origin</c> from the caller's persisted session before ingest runs — <c>participant</c> is reachable
+    /// ONLY from a non-staff session and <c>controller-as-persona</c> ONLY from a live staff session — so the
+    /// branch below is now sound rather than merely tolerable: a <c>participant</c>-origin post is a
+    /// participant's own write and gets the unconditional XC-002 projection
+    /// (<see cref="ParticipantPostDto"/> — no provenance), and every other origin is provably a STAFF write, so
+    /// <see cref="StaffPostDto"/>'s provenance (<c>origin</c>/<c>actingHumanId</c>, which the console's
+    /// <c>originConsoleLabel(lastPublished)</c> at <c>PersonaComposer.tsx:150-157</c> reads) goes only to the
+    /// staff caller reading its OWN write. A participant can no longer reach the staff shape by claiming a staff
+    /// origin, which is what made the old arrangement a compromise.
     /// </para>
     /// <para>
-    /// Fail-closed scoping: an unresolved exercise scope yields <see cref="StatusCodes.Status401Unauthorized"/>
-    /// (never a default/empty-200/unscoped result); a validation failure yields
-    /// <see cref="StatusCodes.Status400BadRequest"/>.
+    /// Fail-closed identity and scoping, in that order: an unresolved exercise scope or an unestablished
+    /// identity yields <see cref="StatusCodes.Status401Unauthorized"/> /
+    /// <see cref="StatusCodes.Status403Forbidden"/> (never a default/empty-200/unscoped result); a validation
+    /// failure yields <see cref="StatusCodes.Status400BadRequest"/>. An anonymous caller never arrives here at
+    /// all — story 11's default-deny fallback policy answers it in <c>AuthorizationMiddleware</c>.
     /// </para>
     /// </remarks>
     /// <param name="request">The create-post body (any <c>exerciseId</c> in it is ignored for scoping).</param>
+    /// <param name="attributionResolver">Derives who is really posting from the caller's session (COR-018).</param>
     /// <param name="ingestService">The ingest funnel.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>201 with the role-appropriate DTO, 400 on invalid input, or 401 on an unresolved scope.</returns>
+    /// <returns>201 with the role-appropriate DTO, 400 on invalid input, 401/403 on an unestablished identity.</returns>
     private static async Task<IResult> CreatePostAsync(
         CreatePostRequest? request,
+        PostAttributionResolver attributionResolver,
         PostIngestService ingestService,
         CancellationToken cancellationToken)
     {
@@ -80,12 +108,33 @@ public static class PostWriteEndpoints
             return Results.BadRequest("A JSON post body is required.");
         }
 
-        var result = await ingestService.IngestAsync(request, cancellationToken);
+        // Identity FIRST: nothing about this request is written until the server has established who is posting.
+        var attribution = await attributionResolver.ResolveAsync(request, cancellationToken);
+        if (attribution.Attribution is not { } resolved)
+        {
+            return attribution.RejectionStatusCode switch
+            {
+                // A body-field failure tells the caller what to fix.
+                StatusCodes.Status400BadRequest => Results.BadRequest(attribution.RejectionReason),
+
+                // Same fail-closed 401 the funnel's own unresolved-scope door returns, written the same way so
+                // the two are indistinguishable to a client.
+                StatusCodes.Status401Unauthorized => Results.Unauthorized(),
+
+                // An IDENTITY rejection carries no body: the reason names which check the caller tripped, which
+                // is useful to a prober and to nobody else. Matches FollowEndpoints' bare 403.
+                _ => Results.StatusCode(attribution.RejectionStatusCode),
+            };
+        }
+
+        var result = await ingestService.IngestAsync(request, resolved, cancellationToken);
 
         switch (result.Outcome)
         {
             case PostIngestOutcome.ScopeUnresolved:
-                // Fail closed — no exercise resolved for this request (per-request scope is Phase B2).
+                // Fail closed — no exercise resolved for this request. Unreachable in practice now (the resolver
+                // above already refuses an unresolved scope with the same 401), kept because the funnel's own
+                // fail-closed door is not this endpoint's to remove.
                 return Results.Unauthorized();
 
             case PostIngestOutcome.Invalid:
@@ -109,12 +158,28 @@ public static class PostWriteEndpoints
 /// concern (a 400), never a deserialization failure. Any <c>exerciseId</c> a caller includes is deliberately
 /// absent here — it is NEVER trusted for scoping (COR-001); the server stamps the resolved scope.
 /// </summary>
+/// <remarks>
+/// <b>Three fields survive on the wire but are no longer believed (<c>identity-auth-roles/12</c>).</b>
+/// <see cref="AuthorPersonaId"/>, <see cref="ActingHumanId"/> and <see cref="Origin"/> are kept because the
+/// frozen frontend <c>CreatePostInput</c> still sends them, but <see cref="PostAttributionResolver"/> derives all
+/// three from the caller's session: only the staff console's <see cref="AuthorPersonaId"/> is still read, and
+/// <see cref="Origin"/> is read only so a claim the caller cannot hold can be REFUSED. Nothing here reaches
+/// <c>PostIngestService</c> as attribution.
+/// </remarks>
 public sealed class CreatePostRequest
 {
-    /// <summary>The authoring persona INSTANCE id — must parse to a non-empty GUID.</summary>
+    /// <summary>
+    /// The authoring persona INSTANCE id. Honored ONLY for a staff session operating a persona (the console's
+    /// persona choice — must parse to a non-empty GUID that exists in the resolved exercise); IGNORED for a
+    /// participant session, whose author is its own session-bound persona.
+    /// </summary>
     public string? AuthorPersonaId { get; init; }
 
-    /// <summary>The individual human behind the account (COR-018) — required when <see cref="Origin"/> is <c>controller-as-persona</c>.</summary>
+    /// <summary>
+    /// The individual human behind the account (COR-018). <b>Never trusted:</b> the server derives it from the
+    /// session (the participant's own identity, or the operating staff user's id). Retained only because the
+    /// frozen client still sends it.
+    /// </summary>
     public string? ActingHumanId { get; init; }
 
     /// <summary>The raw post text; sanitized server-side (NFR-004) before persistence.</summary>
@@ -126,7 +191,12 @@ public sealed class CreatePostRequest
     /// <summary>The exercise IANA time zone (XC-008) — part of the XC-004 envelope; required.</summary>
     public string? TimeZone { get; init; }
 
-    /// <summary>The <c>PostOrigin</c> union value (full union accepted).</summary>
+    /// <summary>
+    /// The <c>PostOrigin</c> union value the caller CLAIMS. Not the post's provenance — the server derives that
+    /// from the session kind. Read only to refuse a claim the caller cannot hold: <c>engine</c> / <c>inject</c>
+    /// are in-process-only and unreachable over HTTP by anyone, and a non-staff session naming any privileged
+    /// origin is refused (403) rather than quietly downgraded.
+    /// </summary>
     public string? Origin { get; init; }
 
     /// <summary>The MSEL inject id — required when <see cref="Origin"/> is <c>inject</c>; null otherwise.</summary>

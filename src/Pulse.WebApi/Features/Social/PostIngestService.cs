@@ -17,14 +17,28 @@ using Pulse.WebApi.Features.Realtime;
 /// <para>
 /// <b>Scope is server-authoritative (COR-001).</b> The owning exercise is read ONLY from the injected
 /// <see cref="IExerciseContext"/> — never from anything in the request body. An <c>exerciseId</c> present in
-/// the body is ignored for scoping; the resolved scope is stamped unconditionally. If no scope is resolved
-/// (per-request population is Phase B2), ingest FAILS CLOSED with
-/// <see cref="PostIngestOutcome.ScopeUnresolved"/> and nothing is written.
+/// the body is ignored for scoping; the resolved scope is stamped unconditionally. If no scope is resolved,
+/// ingest FAILS CLOSED with <see cref="PostIngestOutcome.ScopeUnresolved"/> and nothing is written.
+/// </para>
+/// <para>
+/// <b>Attribution is server-authoritative too (COR-018, <c>identity-auth-roles/12</c>).</b> Scope was already;
+/// as of that story <c>authorPersonaId</c>, <c>origin</c> and <c>actingHumanId</c> are as well. They arrive as a
+/// <see cref="PostAttribution"/> parameter and are NEVER read from <see cref="CreatePostRequest"/> — the DTO's
+/// corresponding fields are inert on this path. Each caller answers "who is really posting" before calling:
+/// the HTTP boundary derives it from the caller's persisted session
+/// (<see cref="PostAttributionResolver"/>), and the engine's in-process publish funnel states it directly
+/// (<c>EnginePublishService.cs:116</c> — there is no HTTP session behind the reaction loop). This service
+/// therefore does NOT require a session: doing so would break the engine and the review-cockpit paths that
+/// funnel through it. What it still does is re-validate the stated attribution, which is the defense-in-depth
+/// that keeps an in-process caller honest.
 /// </para>
 /// <para>
 /// Accepts the full <c>PostOrigin</c> union (<c>participant</c> / <c>controller-as-persona</c> / <c>engine</c>
-/// / <c>inject</c>) even though only the first two have a real caller this phase — Phase B3's engine and Phase
-/// 4's inject-fire are documented to reuse this funnel verbatim, so the accepted values are NOT narrowed.
+/// / <c>inject</c>) because all four have a real caller: the first two over HTTP, <c>engine</c> from the
+/// reaction loop, and <c>inject</c> from Phase 4's MSEL fire, which reuses this funnel verbatim. Which of them
+/// an HTTP caller may CLAIM is a narrower question, answered upstream by
+/// <see cref="PostAttributionResolver"/> (only <c>participant</c> and <c>controller-as-persona</c> are
+/// reachable over HTTP at all).
 /// </para>
 /// </remarks>
 public sealed class PostIngestService
@@ -65,16 +79,29 @@ public sealed class PostIngestService
     /// wall-clock, persists the post together with its single XC-004 telemetry event in ONE unit of work, then
     /// broadcasts the participant-safe projection. Returns a result the endpoint maps to an HTTP status.
     /// </summary>
-    /// <param name="request">The create-post request. Any <c>exerciseId</c> it carries is ignored for scoping.</param>
+    /// <param name="request">
+    /// The create-post request — read ONLY for <c>text</c> / <c>scenarioTime</c> / <c>timeZone</c> /
+    /// <c>injectId</c> / <c>media</c>. Any <c>exerciseId</c> it carries is ignored for scoping, and its
+    /// <c>authorPersonaId</c> / <c>origin</c> / <c>actingHumanId</c> are ignored entirely in favour of
+    /// <paramref name="attribution"/>.
+    /// </param>
+    /// <param name="attribution">
+    /// Who is really posting, established by the caller (COR-018): session-derived at the HTTP boundary,
+    /// stated directly by a trusted in-process caller. Never body-derived.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// <see cref="PostIngestOutcome.ScopeUnresolved"/> when no exercise scope is resolved (fail closed),
     /// <see cref="PostIngestOutcome.Invalid"/> when the request fails validation, or
     /// <see cref="PostIngestOutcome.Created"/> carrying the persisted post.
     /// </returns>
-    public async Task<PostIngestResult> IngestAsync(CreatePostRequest request, CancellationToken cancellationToken = default)
+    public async Task<PostIngestResult> IngestAsync(
+        CreatePostRequest request,
+        PostAttribution attribution,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(attribution);
 
         // 1. Scope comes ONLY from IExerciseContext (COR-001). Fail closed on an unresolved scope: a null (or
         //    empty-sentinel) scope is a closed door — 401/403 at the endpoint, never a default/unscoped write.
@@ -86,16 +113,19 @@ public sealed class PostIngestService
 
         var exerciseId = scope.Value;
 
-        // 2. Validate (400 on any failure). origin ∈ union; authorPersonaId parses to Guid; conditional
-        //    attribution (COR-018) and inject id; scenarioTime parses as ISO; the envelope's required fields.
-        if (request.Origin is null || !AllowedOrigins.Contains(request.Origin))
+        // 2. Validate (400 on any failure). The three attribution facts are validated against the SERVER-derived
+        //    PostAttribution, not the body — for an HTTP caller PostAttributionResolver has already refused
+        //    anything worse, so these checks are the defense-in-depth that keeps an IN-PROCESS caller (the
+        //    engine burst, Phase 4's inject fire) from writing an unattributed or off-union row.
+        if (!AllowedOrigins.Contains(attribution.Origin))
         {
             return PostIngestResult.Invalid("origin must be one of participant, controller-as-persona, engine, inject.");
         }
 
-        var origin = request.Origin;
+        var origin = attribution.Origin;
+        var authorPersonaId = attribution.AuthorPersonaId;
 
-        if (!Guid.TryParse(request.AuthorPersonaId, out var authorPersonaId) || authorPersonaId == Guid.Empty)
+        if (authorPersonaId == Guid.Empty)
         {
             return PostIngestResult.Invalid("authorPersonaId must be a non-empty GUID.");
         }
@@ -111,9 +141,11 @@ public sealed class PostIngestService
         }
 
         if (string.Equals(origin, "controller-as-persona", StringComparison.Ordinal)
-            && string.IsNullOrEmpty(request.ActingHumanId))
+            && string.IsNullOrEmpty(attribution.ActingHumanId))
         {
-            // COR-018: the operating controller behind the shared persona MUST be attributed.
+            // COR-018: the operating controller behind the shared persona MUST be attributed. Unreachable from
+            // HTTP (the resolver stamps the staff user's own id, so it is never empty) — this now guards an
+            // in-process caller that states a human-bearing origin without naming the human.
             return PostIngestResult.Invalid("actingHumanId is required when origin is 'controller-as-persona' (COR-018).");
         }
 
@@ -135,20 +167,25 @@ public sealed class PostIngestService
         // 3. Sanitize server-side (NFR-004) — strip, never encode.
         var body = PostSanitizer.Sanitize(request.Text);
 
-        // actingHumanId is stored for every origin (the Post column is NOT NULL — COR-018 telemetry/staff-only).
-        var actingHumanId = request.ActingHumanId ?? string.Empty;
+        // ONE source of truth for the acting human: the server-derived attribution. The persisted column and the
+        // telemetry actor below are both projected from this single local — never from two independently-trusted
+        // paths — which is what makes "the post and its event agree" a property of the code rather than a habit.
+        // It is stored for every origin (the Post column is NOT NULL — COR-018 telemetry/staff-only).
+        var actingHumanId = attribution.ActingHumanId;
         // The telemetry actor's actingHumanId is null-omitted when absent: the locked v0 envelope types
         // actor.actingHumanId as z.string().min(1).optional() — an empty string is OFF-ENVELOPE (rejected by
-        // the telemetry/02 sink and the E10 v0 validators). Null-omit exactly the way injectId is below.
-        var telemetryActingHumanId = string.IsNullOrEmpty(request.ActingHumanId) ? null : request.ActingHumanId;
+        // the telemetry/02 sink and the E10 v0 validators). Only a non-human origin (engine / inject) reaches
+        // this branch now; every HTTP origin carries a real human. Null-omit exactly the way injectId is below.
+        var telemetryActingHumanId = string.IsNullOrEmpty(actingHumanId) ? null : actingHumanId;
         var injectId = string.IsNullOrEmpty(request.InjectId) ? null : request.InjectId;
 
         // One server clock read shared by the persisted ingest instant and the telemetry timestamps.
         var now = DateTimeOffset.UtcNow;
 
         // 4. Build the post. ExerciseId is STAMPED from the resolved scope (never the client body); CreatedWallClock
-        //    is the SERVER clock (never client). CreatedScenarioTime is client-supplied this phase (COR-050 backend
-        //    clock is B3). Provenance columns are staff/telemetry-only — never projected onto a participant response.
+        //    is the SERVER clock (never client); the three provenance columns come from the server-derived
+        //    attribution (never the client body). CreatedScenarioTime is client-supplied this phase (COR-050 backend
+        //    clock is B3). Provenance is staff/telemetry-only — never projected onto a participant response.
         var post = new Post
         {
             Id = Guid.NewGuid(),
