@@ -114,8 +114,11 @@ public class SessionPrincipalTests
     [InlineData(SessionPrincipal.ExerciseIdClaimType, "not-a-guid")]
     [InlineData(SessionPrincipal.ExerciseIdClaimType, "00000000-0000-0000-0000-000000000000")]
     [InlineData(SessionPrincipal.SessionKindClaimType, "")]
+    [InlineData(SessionPrincipal.SessionKindClaimType, "   ")]
     [InlineData(SessionPrincipal.PrincipalIdClaimType, "")]
+    [InlineData(SessionPrincipal.PrincipalIdClaimType, "   ")]
     [InlineData(SessionPrincipal.ActingHumanIdClaimType, "")]
+    [InlineData(SessionPrincipal.ActingHumanIdClaimType, "   ")]
     public void Read_WithAnyRequiredClaimUnusable_IsNull(string claimType, string value)
     {
         // Guid.Empty is called out explicitly: it is the fail-closed sentinel the exercise-scope write-guard

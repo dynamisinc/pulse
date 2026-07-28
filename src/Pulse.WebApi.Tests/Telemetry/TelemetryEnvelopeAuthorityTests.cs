@@ -46,13 +46,20 @@ public class TelemetryEnvelopeAuthorityTests
             + "source, so a future client that stops sending it changes nothing");
     }
 
-    [Fact]
-    public void AbsentBodyExerciseId_IsNotRejectedHere_AndStillResolves()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void AbsentBodyExerciseId_IsNotRejectedHere_AndStillResolves(string? absent)
     {
         // A missing exerciseId is a v0 SHAPE error, reported by TelemetryEventRequest.Validate() alongside every
         // other shape error. Rejecting it here too would produce a misleading "disagrees with your session"
         // message for a caller that simply sent an incomplete envelope.
-        var request = Envelope(exerciseId: null);
+        //
+        // Assigned AFTER construction on purpose: the Envelope() helper's `?? SessionExercise` default cannot
+        // express "absent", so passing null through it would silently test the AGREEING case instead and leave the
+        // IsNullOrEmpty branch uncovered.
+        var request = Envelope();
+        request.ExerciseId = absent;
 
         var result = TelemetryEnvelopeAuthority.Apply(request, Participant(), SessionExercise);
 
@@ -213,39 +220,102 @@ public class TelemetryEnvelopeAuthorityTests
     }
 
     [Fact]
-    public void ParticipantIdClaimedByAReadOnlySession_IsDropped_ButItsSessionIdStillCountsReach()
+    public void AReadOnlyObserversViewEvent_IsCorrectedToASystemActor_NotRefused()
     {
+        // THE WIRE SHAPE, not a convenient one: every shipped view emitter hardcodes
+        // `actor: { kind: 'participant', participantId: session.accountId }` with NO read-only branch
+        // (Feed.tsx:378/:400, HashtagFeed.tsx:160, Profile.tsx:214/:319, ThreadView.tsx:210), and a shared observer
+        // reaches all of those. Refusing the claim would silently delete view/reach telemetry for the largest
+        // cohort in an exercise — mockSink swallows the 403 into one generic log line — and COR-015 requires that
+        // reach be counted precisely for this "hundred passive participants" case. The correction is the same one
+        // SharedReadOnlyLoginService already applies to the telemetry IT writes for this session.
         var request = Envelope(actor: new ActorRequest
         {
-            Kind = "system",
+            Kind = "participant",
             ParticipantId = "account-of-a-trainee",
         });
 
         var result = TelemetryEnvelopeAuthority.Apply(request, ReadOnly(), SessionExercise);
 
-        result.IsResolved.Should().BeTrue();
-        request.Actor!.ParticipantId.Should().BeNull();
+        result.IsResolved.Should().BeTrue("an observer's view must still be recorded (COR-015)");
+        request.Actor!.Kind.Should().Be("system", "there is no participant, so the actor has no personal identity");
+        request.Actor.ParticipantId.Should().BeNull("and the claimed trainee account is dropped, not stored");
         request.Actor.SessionId.Should().Be(
             CallerSessionId.ToString(),
-            "COR-015 counts a shared read-only observer's reach by session, which is exactly why dropping its "
-            + "participantId does not make its view events unrepresentable");
+            "COR-015 counts a shared observer's reach by session — which is what makes dropping participantId "
+            + "safe rather than lossy, and what satisfies the view-event conditional rule");
     }
 
     [Theory]
     [InlineData("staff")]
-    [InlineData("readonly")]
     [InlineData("some-future-kind-nobody-has-invented-yet")]
     public void ActorKindParticipant_FromANonParticipantSession_IsRejectedWith403(string sessionKind)
     {
         // The audit's confirmed forgery. Refused rather than corrected: there is no participant to substitute, and
-        // an operator's (or observer's) event that reads as a trainee's is the COR-018 harm itself. Matched by a
-        // POSITIVE test on the session kind, so an unrecognised future kind fails closed too.
+        // an operator's event that reads as a trainee's is the COR-018 harm itself. Matched by a POSITIVE test on
+        // the session kind, so an unrecognised future kind fails closed too — `readonly` is the ONE exception, and
+        // deliberately not in this list (see the test above); an unknown kind gets no such benefit, because
+        // nothing tells us whether it is observer-like or operator-like.
         var request = Envelope(actor: new ActorRequest { Kind = "participant", ParticipantId = "p-1" });
 
         var result = TelemetryEnvelopeAuthority.Apply(request, Identity(kind: sessionKind), SessionExercise);
 
         result.IsResolved.Should().BeFalse();
         result.RejectionStatusCode.Should().Be(StatusCodes.Status403Forbidden);
+    }
+
+    // ==========================================================================================
+    // Provenance: only a staff session may claim a privileged `origin`.
+    // ==========================================================================================
+
+    [Theory]
+    [InlineData("engine")]
+    [InlineData("controller-as-persona")]
+    [InlineData("inject")]
+    public void PrivilegedOrigin_ClaimedByANonStaffSession_IsRejectedWith403(string origin)
+    {
+        // Same forgery class as actor.kind, and the same harm: the evaluator surfaces render 'engine' /
+        // 'controller-as-persona' as machine- or operator-generated, so a trainee stating either writes fabricated
+        // provenance into the evaluation record — how the audit's exploit 1 dressed an injected post up as
+        // engine-generated content.
+        var request = Envelope();
+        request.Origin = origin;
+        request.InjectId = origin == "inject" ? "043" : null;
+
+        var result = TelemetryEnvelopeAuthority.Apply(request, Participant(), SessionExercise);
+
+        result.IsResolved.Should().BeFalse();
+        result.RejectionStatusCode.Should().Be(StatusCodes.Status403Forbidden);
+    }
+
+    [Theory]
+    [InlineData("engine")]
+    [InlineData("controller-as-persona")]
+    public void PrivilegedOrigin_ClaimedByAStaffSession_IsAccepted(string origin)
+    {
+        // Every shipped controller emitter states one of these (useEngineControl.ts, useSwampedMode.ts,
+        // useDraftTimer.ts, reviewActions.ts, composeService.ts) — refusing them would break the console.
+        var request = Envelope();
+        request.Origin = origin;
+
+        var result = TelemetryEnvelopeAuthority.Apply(request, Staff(), SessionExercise);
+
+        result.IsResolved.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("participant")]
+    public void ParticipantOrAbsentOrigin_IsAlwaysAccepted(string? origin)
+    {
+        // What the participant surfaces actually send: 'participant' from the write hooks, nothing at all from the
+        // view emitters. A caller that omits the field is not claiming anything.
+        var request = Envelope();
+        request.Origin = origin;
+
+        var result = TelemetryEnvelopeAuthority.Apply(request, Participant(), SessionExercise);
+
+        result.IsResolved.Should().BeTrue();
     }
 
     [Theory]

@@ -182,12 +182,18 @@ public class TelemetryIngestTests
         // The v0 conditional-requiredness rules are still enforced server-side (defense in depth, #356) for every
         // field the server is NOT the authority on: injectId is the MSEL inject's own identity, which no session
         // can supply, so an origin of 'inject' without one stays a 400.
+        //
+        // Driven from a STAFF session deliberately: a non-staff session claiming 'inject' is refused with 403 by
+        // the provenance rule BEFORE validation runs, so a participant caller could never demonstrate that the
+        // conditional rule is still live. The actor is 'system' for the same reason — a staff session claiming
+        // 'participant' is refused first too, and either 403 would mask what this test is actually about.
         var eventId = Guid.NewGuid().ToString();
         var exerciseId = Guid.NewGuid();
         var envelope = ValidEnvelope(eventId, exerciseId.ToString());
         envelope["origin"] = "inject";
+        envelope["actor"] = new Dictionary<string, object?> { ["kind"] = "system" };
 
-        await using var factory = CreateFactory(exerciseId);
+        await using var factory = CreateFactory(exerciseId, kind: "staff");
         using var client = factory.CreateClient();
 
         var response = await client.PostAsync(TelemetryUri, JsonContent(envelope));
@@ -336,6 +342,59 @@ public class TelemetryIngestTests
         };
 
         await using var factory = CreateFactory(exerciseId, personaId: Guid.NewGuid());
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync(TelemetryUri, JsonContent(envelope));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await AssertNotPersisted(eventId);
+    }
+
+    [RequiresDockerFact]
+    public async Task ReadOnlyObserversViewEvent_IsStoredWithASystemActor_AndItsSessionAsTheReachKey()
+    {
+        // COR-015 end to end, on the exact wire shape a shared observer sends. Feed.tsx / HashtagFeed.tsx /
+        // Profile.tsx / ThreadView.tsx all emit `actor: { kind: 'participant', participantId: session.accountId }`
+        // for a view with no read-only branch, and a shared observer reaches every one of them. Refusing that claim
+        // would delete the largest cohort's reach data silently (mockSink swallows the rejection), so the observer's
+        // event is CORRECTED to the system-actor attribution SharedReadOnlyLoginService already uses — and the
+        // stamped sessionId is what satisfies the view-event conditional rule that used to need participantId.
+        var eventId = Guid.NewGuid().ToString();
+        var exerciseId = Guid.NewGuid();
+        var envelope = ValidEnvelope(eventId, exerciseId.ToString());
+        envelope["eventType"] = "view";
+        envelope["actor"] = new Dictionary<string, object?>
+        {
+            ["kind"] = "participant",
+            ["participantId"] = "account-of-a-trainee",
+        };
+
+        await using var factory = CreateFactory(exerciseId, kind: "readonly");
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync(TelemetryUri, JsonContent(envelope));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, "an observer's view must still be recorded");
+
+        await using var readContext = _fixture.CreateContext();
+        var stored = await readContext.TelemetryEvents.IgnoreQueryFilters().SingleAsync(e => e.EventId == eventId);
+
+        stored.Actor.Kind.Should().Be("system");
+        stored.Actor.ParticipantId.Should().BeNull();
+        stored.Actor.SessionId.Should().Be(TelemetryWebApplicationFactory.SessionId.ToString());
+    }
+
+    [RequiresDockerFact]
+    public async Task PrivilegedOrigin_ClaimedByAParticipantSession_Returns403_AndPersistsNothing()
+    {
+        // Fabricated provenance: the evaluator surfaces render an 'engine' event as machine-generated, so a trainee
+        // stating it would be writing engine-attributed activity into the evaluation record.
+        var eventId = Guid.NewGuid().ToString();
+        var exerciseId = Guid.NewGuid();
+        var envelope = ValidEnvelope(eventId, exerciseId.ToString());
+        envelope["origin"] = "engine";
+
+        await using var factory = CreateFactory(exerciseId);
         using var client = factory.CreateClient();
 
         var response = await client.PostAsync(TelemetryUri, JsonContent(envelope));

@@ -109,12 +109,46 @@ claiming `actor.kind: 'participant'`, which is the one claim that makes an opera
 indistinguishable from a trainee's in the evaluation record (COR-018). `actor.role` is likewise left
 caller-stated: a display/filter string, not an attribution or authorization input, and no AC covers it.
 
+**4a. But a READ-ONLY observer's `actor.kind: 'participant'` is CORRECTED, not refused (COR-015).** The Tier-2
+review's Critical, and it was right. Every shipped view emitter hardcodes
+`actor: { kind: 'participant', participantId: session.accountId }` with no read-only branch
+(`Feed.tsx:378`/`:400`, `HashtagFeed.tsx:160`, `Profile.tsx:214`/`:319`, `ThreadView.tsx:210`), and a shared
+observer reaches every one of those surfaces. A blanket 403 would have silently deleted view/reach telemetry for
+the largest cohort in an exercise — `mockSink` swallows the rejection into one generic log line — against a
+COR-015 requirement that exists precisely for the "hundred passive participants" case. Unlike a staff session's
+claim, this one *is* correctable, and the correction is not invented: `SharedReadOnlyLoginService` already stamps
+`actor.kind: 'system'` on the telemetry **it** writes for the very same session, with the session id as the reach
+key. Fixing the six emitters instead was rejected on principle — making the SPA self-report its own privilege
+level correctly is the "frontend as the security boundary" posture that caused #359. An unknown future session
+kind gets no such benefit and still 403s: nothing tells us whether it is observer-like or operator-like.
+
 **5. Scope rejects; actor identity overwrites.** Deliberately asymmetric, and consistent with story 12. A
 body `exerciseId` that disagrees is a 400 (the settled decision above). The actor's *identity fields* are
 overwritten silently, exactly as `PostAttributionResolver`'s staff arm does: the server does not trust the body
 for them at all, so refusing the write over a disagreement would break a legitimate console — which sends
 whatever identity string it holds — for no security gain. Only a claim that cannot be *corrected* (there is no
 participant to substitute for a staff session; no persona to substitute for an unbound one) is refused.
+
+**5a. `origin` is policed too, though no AC named it.** Folded in from the Tier-2 review (WR-002). A non-staff
+session may only state `origin: 'participant'`, or omit it; a privileged origin is refused with 403. This is the
+same forgery class the ACs cover for `actor.kind` and the same harm — the evaluator surfaces render `engine` /
+`controller-as-persona` events as machine- or operator-generated, so a trainee stating either writes fabricated
+provenance into the evaluation record, exactly how the audit's exploit 1 dressed an injected post up as
+engine-generated content. Verified safe against every shipped emitter first: only `features/controller/**` states
+a privileged origin (`useEngineControl`, `useSwampedMode`, `useDraftTimer`, `reviewActions`, `composeService`),
+and participant surfaces state `participant` or nothing. `actor.role` was left alone by contrast — a display/filter
+string with no attribution or authorization meaning.
+
+**5b. `actor.personaId` is verified but never COMPLETED, and a staff session's choice is not cast-validated.**
+Asymmetric with `participantId` on purpose. `participantId` is unambiguous (a participant session has exactly one
+account), so an omitted one is stamped; *which persona an event concerns* is the emitter's knowledge, so
+completing it would be guessing rather than stamping. And a staff session's persona choice is deliberately not
+checked against the exercise cast: that would be a `Personas` query **per event** on the burst-rate path, which is
+the cost this whole design exists to avoid. The residual is bounded and non-disclosing — the row's `ExerciseId` is
+still the session's, so a bogus value is a dangling reference inside the caller's own exercise, never a
+cross-exercise read. (`PostAttributionResolver` validates the equivalent choice on `POST /api/posts`, where one
+query per post is affordable; it does **not** run on this path, and the code comment that implied otherwise has
+been corrected.)
 
 **6. The FK on `TelemetryEvent.ExerciseId` was considered and deliberately NOT added.** No `IExerciseScoped`
 entity in this model has one — there is not a single `HasOne`/`WithMany` to `Exercise` in `PulseDbContext`;
@@ -170,10 +204,17 @@ principal, so nothing needed wiring at the composition root.
   `AuthenticatedSession` gains `PrincipalId` / `ActingHumanId` (both `required`, so no resolver or test double
   can silently default them) and `PersonaId`; `SessionPrincipal` projects them as three new claims and gains
   the fail-closed `Read` reader plus the `SessionIdentity` it returns.
-- Tests: `Telemetry/TelemetryEnvelopeAuthorityTests.cs` (27, host-free), `Features/Identity/Sessions/
+- Tests: `Telemetry/TelemetryEnvelopeAuthorityTests.cs` (host-free), `Features/Identity/Sessions/
   SessionPrincipalTests.cs` (the new fail-closed boundary, including a foreign `authenticationType` carrying
   identical claim types), and `Telemetry/TelemetryIngestTests.cs` extended with the end-to-end persisted
-  assertions. Suite: **1482 passing / 0 skipped** (from 1424 on `main`).
+  assertions. Suite: **1494 passing / 0 skipped** (from 1424 on `main`).
+
+**Tier-2 review folded** (1 Critical, 3 Warnings, 3 Suggestions — all addressed): the read-only Critical
+(Decision 4a), the `origin` gap (5a), the misleading persona-validation comment (5b), one genuinely
+non-discriminating test of my own (the "absent `exerciseId`" case was passing the session's own id through a
+helper default, so the branch had no coverage at all), `IsNullOrWhiteSpace` on the required claims, and two doc
+wording corrections. The review also confirmed independently that `Program.cs`, the model snapshot, and the three
+endpoint-time accessors are untouched.
 
 **Why this needs story 11's `FallbackPolicy` specifically, not just "any" session requirement:**
 `TelemetryController` is an MVC controller (`[ApiController]`, self-registered via
@@ -196,7 +237,10 @@ reads).
 
 ## Tests
 - A live session's telemetry write is stamped with the session's own `exerciseId`, ignoring an
-  agreeing or absent body value.
+  agreeing body value. *(An ABSENT one is not "ignored" at the endpoint level — it still 400s at
+  `Validate()` as a v0 shape error, which `MissingExerciseId_Returns400_AndPersistsNothing`
+  asserts. The authority pass itself defers rather than rejecting, so the caller gets the shape
+  error and not a misleading "disagrees with your session".)*
 - A live session's telemetry write with a **disagreeing** body `exerciseId` is rejected (400), not
   persisted, not silently corrected.
 - A telemetry write with no live session is rejected (401) — the MVC-controller proof point for

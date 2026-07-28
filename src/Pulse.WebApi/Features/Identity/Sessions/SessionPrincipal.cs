@@ -117,9 +117,11 @@ public static class SessionPrincipal
             || !Guid.TryParse(identity.FindFirst(ExerciseIdClaimType)?.Value, out var exerciseId)
             || sessionId == Guid.Empty
             || exerciseId == Guid.Empty
-            || string.IsNullOrEmpty(kind)
-            || string.IsNullOrEmpty(principalId)
-            || string.IsNullOrEmpty(actingHumanId))
+            // Whitespace, not just empty: a blank-but-present kind/principal/human would yield an identity that
+            // stamps an unattributable telemetry row, which is the outcome this whole boundary exists to prevent.
+            || string.IsNullOrWhiteSpace(kind)
+            || string.IsNullOrWhiteSpace(principalId)
+            || string.IsNullOrWhiteSpace(actingHumanId))
         {
             return null;
         }

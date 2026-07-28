@@ -44,6 +44,15 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// authorization or attribution input, and no acceptance criterion covers it.
 /// </para>
 /// <para>
+/// <b>Read-only observers are corrected, not refused (COR-015).</b> The one place a claim is rewritten rather
+/// than either stamped or refused. Every shipped view emitter hardcodes <c>actor.kind: 'participant'</c> with no
+/// read-only branch, and a shared observer's session is kind <c>readonly</c> — so refusing that claim would
+/// silently delete view/reach telemetry for the largest cohort in an exercise (the client's sink swallows the
+/// rejection). The claim IS correctable for this kind, and the correction is not invented: it is the same
+/// <c>actor.kind: 'system'</c> + session-id-as-reach-key attribution <c>SharedReadOnlyLoginService</c> already
+/// stamps on the telemetry it writes for the very same session.
+/// </para>
+/// <para>
 /// <b>Why a static over a claims-read, not a DI service over a token lookup.</b> Every fact here is already on
 /// <c>HttpContext.User</c>, written once per request by <see cref="SessionAuthenticationMiddleware"/> from the
 /// session row <see cref="ISessionAuthenticator"/> loaded. Telemetry is a burst-rate path (SOC-071:
@@ -63,12 +72,28 @@ public static class TelemetryEnvelopeAuthority
     /// <summary>
     /// The <c>Session.Kind</c> of a staff console. Staff is the one kind allowed to name a persona OTHER than
     /// its own session binding (E7 persona-operation lets a controller act AS a cast persona), so the
-    /// persona-ownership check below does not apply to it.
+    /// persona-ownership check below does not apply to it — and the one kind whose events legitimately carry a
+    /// privileged <c>origin</c>.
     /// </summary>
     private const string StaffSessionKind = "staff";
 
+    /// <summary>
+    /// The <c>Session.Kind</c> of a shared view-only observer (COR-015/COR-016) — see
+    /// <c>SharedReadOnlyLoginService</c>, which mints it.
+    /// </summary>
+    private const string ReadOnlySessionKind = "readonly";
+
     /// <summary>The v0 <c>actor.kind</c> asserting "a trainee, acting as themselves".</summary>
     private const string ParticipantActorKind = "participant";
+
+    /// <summary>
+    /// The v0 <c>actor.kind</c> for an actor with no personal identity — what a read-only observer's events are
+    /// attributed to, matching what <c>SharedReadOnlyLoginService</c> already stamps on the telemetry IT writes.
+    /// </summary>
+    private const string SystemActorKind = "system";
+
+    /// <summary>The only <c>origin</c> a non-staff HTTP caller may state (an absent origin is always fine).</summary>
+    private const string ParticipantOrigin = "participant";
 
     /// <summary>
     /// Stamps <paramref name="request"/>'s scope and actor identity from <paramref name="identity"/>, or rejects
@@ -117,31 +142,70 @@ public static class TelemetryEnvelopeAuthority
                 "The envelope's exerciseId disagrees with the session's own exercise scope.");
         }
 
+        var isStaffSession = string.Equals(identity.Kind, StaffSessionKind, StringComparison.Ordinal);
+
+        // Provenance (`origin`) is the same forgery class as the actor's identity: the evaluator surfaces render
+        // 'engine' / 'controller-as-persona' events as machine- or operator-generated, so a trainee who could
+        // state either would be writing fabricated provenance into the evaluation record — exactly how the audit's
+        // exploit 1 dressed an injected post up as engine-generated content. Only a staff session may state a
+        // privileged origin; every shipped emitter agrees (features/controller/** states 'engine' /
+        // 'controller-as-persona', participant surfaces state 'participant' or omit it). Refused, not rewritten:
+        // a claimed provenance the caller cannot hold has no correct value to substitute.
+        if (request.Origin is not null
+            && !isStaffSession
+            && !string.Equals(request.Origin, ParticipantOrigin, StringComparison.Ordinal))
+        {
+            return TelemetryAuthorityResolution.Rejected(
+                StatusCodes.Status403Forbidden,
+                "A non-staff session may only emit telemetry with origin 'participant'.");
+        }
+
         // An absent actor block is likewise a shape error Validate() reports; there is nothing to stamp onto.
         if (request.Actor is { } actor)
         {
             var isParticipantSession = string.Equals(
                 identity.Kind, ParticipantSessionKind, StringComparison.Ordinal);
 
-            // THE audit's forged claim. A staff / read-only / any-future-kind session asserting it is a trainee
-            // acting as themselves is the one actor claim that makes an operator's (or an observer's) event
-            // indistinguishable from a trainee's in the evaluation record (COR-018). It cannot be "corrected" —
-            // there is no participant to substitute — so it is refused.
+            // THE audit's forged claim: a session that is not a trainee asserting it is one, which is what makes
+            // an operator's event indistinguishable from a trainee's in the evaluation record (COR-018).
             if (string.Equals(actor.Kind, ParticipantActorKind, StringComparison.Ordinal) && !isParticipantSession)
             {
-                return TelemetryAuthorityResolution.Rejected(
-                    StatusCodes.Status403Forbidden,
-                    "Only a participant session may emit an actor.kind of 'participant'.");
+                // A READ-ONLY observer's claim is CORRECTABLE, and correcting it is required rather than merely
+                // kind: COR-015 counts a shared observer's views/reach without per-user provisioning ("the hundred
+                // passive participants"), and every shipped view emitter hardcodes kind 'participant'
+                // (Feed/HashtagFeed/Profile/ThreadView) with no read-only branch. Refusing would silently delete
+                // the largest cohort's reach data — mockSink swallows the rejection into one generic log line — so
+                // the observer's events are attributed the way SharedReadOnlyLoginService already attributes the
+                // telemetry IT writes for the same session: actor.kind 'system', reach counted by the stamped
+                // sessionId below. Making the SPA self-report its own privilege level correctly is precisely the
+                // "frontend as the security boundary" posture #359 was caused by.
+                if (!string.Equals(identity.Kind, ReadOnlySessionKind, StringComparison.Ordinal))
+                {
+                    return TelemetryAuthorityResolution.Rejected(
+                        StatusCodes.Status403Forbidden,
+                        "Only a participant session may emit an actor.kind of 'participant'.");
+                }
+
+                actor.Kind = SystemActorKind;
             }
 
             // Persona ownership, for every kind EXCEPT staff. A non-staff caller may only report the persona its
             // own session is bound to; naming another cast member's persona would attribute an action to a
-            // trainee who never took it. Staff is excluded because operating a persona it is not bound to is the
-            // legitimate E7 case (and PostAttributionResolver already owns validating that choice on the write
-            // path); an absent value is always fine.
+            // trainee who never took it. An absent value is always fine — and is deliberately NOT completed from
+            // the session binding the way participantId is: participantId is unambiguous (a participant session
+            // has exactly one account), whereas WHICH persona an event concerns is the emitter's knowledge, so
+            // inventing one would be guessing rather than stamping.
+            //
+            // Staff is excluded because operating a persona it is not bound to is the legitimate E7 case. That
+            // choice is deliberately NOT validated against the exercise's cast here: doing so would mean a
+            // Personas query PER EVENT on the burst-rate path, which is the cost this whole design avoids (see
+            // the class remarks). The residual is bounded and non-disclosing — the row's ExerciseId is still the
+            // session's, so a bogus value is a dangling reference inside the caller's own exercise, never a
+            // cross-exercise read. PostAttributionResolver validates the equivalent choice on POST /api/posts,
+            // where one query per post is affordable; it does NOT run on this path.
             var claimedPersona = actor.PersonaId;
             if (!string.IsNullOrEmpty(claimedPersona)
-                && !string.Equals(identity.Kind, StaffSessionKind, StringComparison.Ordinal)
+                && !isStaffSession
                 && !(Guid.TryParse(claimedPersona, out var parsedPersona)
                     && identity.PersonaId is { } boundPersona
                     && parsedPersona == boundPersona))
