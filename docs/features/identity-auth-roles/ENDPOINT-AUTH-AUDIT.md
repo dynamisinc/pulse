@@ -3,9 +3,33 @@
 > **✅ The 12 open routes and both hub endpoints are CLOSED** by story
 > [`11-api-session-enforcement.md`](11-api-session-enforcement.md) (#361, PR #384) — a default-deny
 > `AuthorizationOptions.FallbackPolicy` at the composition root with an 11-route opt-out list, enforced
-> against the live `EndpointDataSource` by test. Stories 12 (#366), 13 (#362) and 14 (#367) remain: server-side
-> attribution, telemetry scope authority, and the exhaustive anonymous-401 sweep. **This file stays as
+> against the live `EndpointDataSource` by test. **Exploit 1's body-trust half is closed** by story 12
+> (#366, PR #388), and **exploit 2 is closed** by story 13 (#362) — see the note below. Story 14 (#367),
+> the exhaustive anonymous-401 sweep, remains. **This file stays as
 > written — it is the evidence, not a status board.**
+
+> **Annotation — exploit 2 (telemetry forgery) is closed; two of this audit's own open items are answered
+> (2026-07-28, story 13 / #362).** Recorded here because both concern rows written below; the rows themselves
+> are left exactly as audited.
+> - **The Wave 2 "blocker to resolve first" is resolved at the level this audit identified it.**
+>   `AuthenticatedSession` now carries `PrincipalId`, `ActingHumanId` and `PersonaId`, projected onto
+>   `HttpContext.User` by `SessionPrincipal` and read back by `SessionPrincipal.Read`. This deliberately did
+>   **not** add a fourth session-lookup seam (the audit's own warning): the facts come from the session row
+>   `ISessionAuthenticator` already loads once per request, so stamping them costs **zero** additional queries —
+>   which matters because telemetry is the burst-rate path (SOC-071), where a per-event token→session lookup
+>   would be a self-inflicted load multiplier. The three endpoint-time accessors
+>   (`ICurrentStaffSessionAccessor` / `ICurrentSessionPersonaAccessor` / `IReadOnlySessionProbe`) are untouched,
+>   and consolidating them remains the follow-up story 12 flagged.
+> - **The "Consider: an FK on `TelemetryEvent.ExerciseId`" row is answered: deliberately NOT added.** The audit
+>   was right that none exists — but **no `IExerciseScoped` entity in this model has one.** There is not a single
+>   `HasOne`/`WithMany` to `Exercise` in `PulseDbContext`; house style is a plain, required, indexed `ExerciseId`
+>   column guarded by the central read-side query filter plus the write-time scope guard. A lone FK on this one
+>   table would be a one-off deviation, and it would have to be `NoAction` anyway (a cascade would delete
+>   evaluation data on exercise deletion, which is worse than the gap). Orphan rows are now **exactly 0** in UAT
+>   (verified after deleting the `deadbeef-…` row this audit's own exploit created), and an orphan is now
+>   structurally unreachable through this endpoint: the route is session-gated (story 11) and the scope is
+>   stamped from a session whose exercise is a real row. If an FK is wanted, it belongs to a **model-wide**
+>   convention change, not to this story.
 
 > **Superseded by the four-story split + inventory corrections (2026-07-25, same day).** The
 > single story this document scoped (`11-api-session-enforcement.md`, #361) is now **four** stories per

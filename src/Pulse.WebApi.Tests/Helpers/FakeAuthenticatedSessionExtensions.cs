@@ -41,11 +41,19 @@ public static class FakeAuthenticatedSessionExtensions
     /// <param name="builder">The test host builder.</param>
     /// <param name="exerciseId">The session's bound exercise. <c>null</c> presents an UNRESOLVED session (no principal), which is the "anonymous" case.</param>
     /// <param name="kind">The session kind — <c>participant</c> (default) / <c>staff</c> / <c>readonly</c>.</param>
+    /// <param name="sessionId">The presented session's id. Defaults to a fresh one; supply it when a test asserts a server-stamped <c>actor.sessionId</c>.</param>
+    /// <param name="principalId">The session's <c>PrincipalId</c> — a participant session's account id, and the stamped <c>actor.participantId</c> (identity-auth-roles/13).</param>
+    /// <param name="actingHumanId">The individual human behind the session (COR-018) — the stamped <c>actor.actingHumanId</c>.</param>
+    /// <param name="personaId">The session's persona binding, or <c>null</c> for a session with none.</param>
     /// <returns>The same builder, for chaining.</returns>
     public static IWebHostBuilder UseFakeAuthenticatedSession(
         this IWebHostBuilder builder,
         Guid? exerciseId,
-        string kind = "participant")
+        string kind = "participant",
+        Guid? sessionId = null,
+        string? principalId = null,
+        string? actingHumanId = null,
+        Guid? personaId = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
@@ -55,11 +63,18 @@ public static class FakeAuthenticatedSessionExtensions
             return builder;
         }
 
+        // PrincipalId / ActingHumanId are `required` on AuthenticatedSession because the persisted Session always
+        // carries both (identity-auth-roles/13). Defaulted here to distinctive non-empty values rather than left
+        // blank: a shim that presented an unattributable session would make an attribution assertion pass while
+        // attributing nothing — the failure mode #359's whole suite had.
         var session = new AuthenticatedSession
         {
-            SessionId = Guid.NewGuid(),
+            SessionId = sessionId ?? Guid.NewGuid(),
             ExerciseId = exerciseId.Value,
             Kind = kind,
+            PrincipalId = principalId ?? $"fake-principal-{Guid.NewGuid():N}",
+            ActingHumanId = actingHumanId ?? $"fake-human-{Guid.NewGuid():N}",
+            PersonaId = personaId,
         };
 
         return builder.ConfigureTestServices(services =>
