@@ -1,5 +1,6 @@
 namespace Pulse.WebApi.Features.Identity.Sessions;
 
+using System.Linq;
 using System.Security.Claims;
 
 /// <summary>
@@ -43,6 +44,15 @@ public static class SessionPrincipal
     /// <summary>Claim type carrying the bound <c>StaffUser</c> id; absent for participant / read-only sessions.</summary>
     public const string StaffUserIdClaimType = "pulse:staff-user-id";
 
+    /// <summary>Claim type carrying the session's <c>PrincipalId</c> (identity-auth-roles/13).</summary>
+    public const string PrincipalIdClaimType = "pulse:principal-id";
+
+    /// <summary>Claim type carrying the individual human behind the session (COR-018, identity-auth-roles/13).</summary>
+    public const string ActingHumanIdClaimType = "pulse:acting-human-id";
+
+    /// <summary>Claim type carrying the session's persona binding; absent for a session with none.</summary>
+    public const string PersonaIdClaimType = "pulse:persona-id";
+
     /// <summary>
     /// Builds the authenticated principal for a live session. Callers must only invoke this for a session
     /// <see cref="ISessionAuthenticator"/> has already resolved as live — this method performs no validation of
@@ -54,11 +64,13 @@ public static class SessionPrincipal
     {
         ArgumentNullException.ThrowIfNull(session);
 
-        var claims = new List<Claim>(4)
+        var claims = new List<Claim>(7)
         {
             new(SessionIdClaimType, session.SessionId.ToString()),
             new(SessionKindClaimType, session.Kind),
             new(ExerciseIdClaimType, session.ExerciseId.ToString()),
+            new(PrincipalIdClaimType, session.PrincipalId),
+            new(ActingHumanIdClaimType, session.ActingHumanId),
         };
 
         if (session.StaffUserId is { } staffUserId)
@@ -66,6 +78,104 @@ public static class SessionPrincipal
             claims.Add(new Claim(StaffUserIdClaimType, staffUserId.ToString()));
         }
 
+        if (session.PersonaId is { } personaId)
+        {
+            claims.Add(new Claim(PersonaIdClaimType, personaId.ToString()));
+        }
+
         return new ClaimsPrincipal(new ClaimsIdentity(claims, AuthenticationType));
     }
+
+    /// <summary>
+    /// Reads the session identity back off a principal this class created, or <c>null</c> when the principal is
+    /// not an authenticated Pulse session — so a consumer never hand-parses claim strings and can never mistake
+    /// an anonymous request for an identified one (identity-auth-roles/13).
+    /// </summary>
+    /// <remarks>
+    /// FAILS CLOSED. A principal with no authenticated identity, a non-<see cref="AuthenticationType"/> identity,
+    /// or a missing/unparseable required claim yields <c>null</c> — never a partially-populated identity, because
+    /// a caller that believed a half-empty identity would stamp a telemetry row it could not attribute.
+    /// </remarks>
+    /// <param name="principal">The current request's <c>HttpContext.User</c>.</param>
+    /// <returns>The session identity, or <c>null</c>.</returns>
+    public static SessionIdentity? Read(ClaimsPrincipal? principal)
+    {
+        var identity = principal?.Identities.FirstOrDefault(
+            candidate => candidate.IsAuthenticated
+                && string.Equals(candidate.AuthenticationType, AuthenticationType, StringComparison.Ordinal));
+
+        if (identity is null)
+        {
+            return null;
+        }
+
+        var kind = identity.FindFirst(SessionKindClaimType)?.Value;
+        var principalId = identity.FindFirst(PrincipalIdClaimType)?.Value;
+        var actingHumanId = identity.FindFirst(ActingHumanIdClaimType)?.Value;
+
+        if (!Guid.TryParse(identity.FindFirst(SessionIdClaimType)?.Value, out var sessionId)
+            || !Guid.TryParse(identity.FindFirst(ExerciseIdClaimType)?.Value, out var exerciseId)
+            || sessionId == Guid.Empty
+            || exerciseId == Guid.Empty
+            // Whitespace, not just empty: a blank-but-present kind/principal/human would yield an identity that
+            // stamps an unattributable telemetry row, which is the outcome this whole boundary exists to prevent.
+            || string.IsNullOrWhiteSpace(kind)
+            || string.IsNullOrWhiteSpace(principalId)
+            || string.IsNullOrWhiteSpace(actingHumanId))
+        {
+            return null;
+        }
+
+        return new SessionIdentity
+        {
+            SessionId = sessionId,
+            ExerciseId = exerciseId,
+            Kind = kind,
+            PrincipalId = principalId,
+            ActingHumanId = actingHumanId,
+            StaffUserId = ParseOptionalGuid(identity.FindFirst(StaffUserIdClaimType)?.Value),
+            PersonaId = ParseOptionalGuid(identity.FindFirst(PersonaIdClaimType)?.Value),
+        };
+    }
+
+    /// <summary>Parses an optional Guid claim value; <c>null</c> for an absent, unparseable or empty value.</summary>
+    private static Guid? ParseOptionalGuid(string? value)
+        => Guid.TryParse(value, out var parsed) && parsed != Guid.Empty ? parsed : null;
+}
+
+/// <summary>
+/// The current request's session identity, read back off <c>HttpContext.User</c> by
+/// <see cref="SessionPrincipal.Read"/>. The server-authoritative answer to "who is this request", used by
+/// <c>POST /api/telemetry</c> to stamp an event's scope and actor instead of believing the envelope
+/// (identity-auth-roles/13, #362).
+/// </summary>
+/// <remarks>
+/// Shape-identical to the resolved half of <see cref="AuthenticatedSession"/> and deliberately a SEPARATE type:
+/// <see cref="AuthenticatedSession"/> is what a resolver PRODUCES (and may be constructed by a test double),
+/// while this is what a consumer READS from an already-authenticated request. Nothing here is ever serialized to
+/// a client — <see cref="ActingHumanId"/> in particular is telemetry-only attribution (COR-018), never projected
+/// onto a participant-facing response (XC-002).
+/// </remarks>
+public sealed class SessionIdentity
+{
+    /// <summary>The persisted <c>Session.Id</c>.</summary>
+    public required Guid SessionId { get; init; }
+
+    /// <summary>The session's bound exercise (COR-001/COR-012).</summary>
+    public required Guid ExerciseId { get; init; }
+
+    /// <summary>The session kind — <c>participant</c> / <c>staff</c> / <c>readonly</c>.</summary>
+    public required string Kind { get; init; }
+
+    /// <summary>The session's <c>PrincipalId</c> — a participant session's <c>Account</c> id.</summary>
+    public required string PrincipalId { get; init; }
+
+    /// <summary>The individual human behind the session (COR-018).</summary>
+    public required string ActingHumanId { get; init; }
+
+    /// <summary>The bound <c>StaffUser</c> id, or <c>null</c> for a non-staff session.</summary>
+    public Guid? StaffUserId { get; init; }
+
+    /// <summary>The session's persona binding, or <c>null</c> for a session with none.</summary>
+    public Guid? PersonaId { get; init; }
 }
