@@ -173,7 +173,10 @@ public static class TelemetryEnvelopeAuthority
         // participant paths also call — postService.ts and amplify.ts pass their `input.origin` straight through.
         // So the guarantee rests on the CALLERS of createPost/repost/quotePost, not on a folder boundary: a future
         // participant-reachable caller passing a non-'participant' origin gets a 403 the client's sink swallows.
-        if (request.Origin is not null
+        // Null/empty/whitespace is treated as ABSENT, not as an attempt: an empty origin is a v0 SHAPE error
+        // (it is not in the closed union), and it must surface as Validate()'s 400 rather than as an
+        // authorization failure that masks the client bug. Same principle as the body exerciseId below.
+        if (!string.IsNullOrWhiteSpace(request.Origin)
             && !isStaffSession
             && !string.Equals(request.Origin, ParticipantOrigin, StringComparison.Ordinal))
         {

@@ -310,10 +310,16 @@ public class TelemetryEnvelopeAuthorityTests
     [Theory]
     [InlineData(null)]
     [InlineData("participant")]
+    [InlineData("")]
+    [InlineData("   ")]
     public void ParticipantOrAbsentOrigin_IsAlwaysAccepted(string? origin)
     {
         // What the participant surfaces actually send: 'participant' from the write hooks, nothing at all from the
         // view emitters. A caller that omits the field is not claiming anything.
+        //
+        // Empty/whitespace counts as ABSENT here on purpose: it is a v0 shape error (not in the closed union), so
+        // it must reach Validate()'s 400 rather than be reported as a privileged-origin 403 that masks the client
+        // bug. Same principle the absent-exerciseId theory above asserts.
         var request = Envelope();
         request.Origin = origin;
 
