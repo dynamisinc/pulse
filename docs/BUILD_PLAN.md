@@ -398,6 +398,28 @@ area; barrel exports added.
 > (`engine.autonomy_default_changed` / `engine.tier_policy_changed`), diverging from the legacy
 > swamped-mode/kill-switch/restore trio, for an audit record that survives a process restart.
 >
+> **⛔ PR #386 IS BLOCKED — and the reason is architectural.** `main` advanced past this umbrella's base
+> (exercise-configuration, profiles-social-graph, planner-settings-nav) and now serves
+> `GET /api/overlay-state` through an **`IOverlayStateProjection`** seam implemented by `LifecycleProjection`
+> — overlay state derived from the exercise lifecycle. Story 08 had *replaced* that handler with its own
+> pause-driven read. Two complementary claimants, one slot.
+>
+> **Tom's ruling (2026-07-27): lifecycle wins — `endex` > `pre-start` > `pause` > `none`.** Lifecycle answers
+> "is this exercise live at all"; pause is a control within a live exercise, and ENDEX must be terminal.
+>
+> **Implementation shape (NOT yet built):** the pause state becomes an `IOverlayStateProjection` contributor
+> that composes the lifecycle projection — consult lifecycle, and only on `none` consult the pause store —
+> registered via `services.Replace(...)` after both, per `main`'s contributor convention. **Story 08 then
+> stops editing `ParticipantShellEndpoints.cs` altogether**, which deletes the one shared-file coordination
+> point *and* the `RequestServices.GetService` workaround and its silent-degradation trade-off. The pause
+> write path, push, register plumbing and client guards are all already built and Gate-2 clean — only the
+> read-side composition changes. The other conflict (`Program.cs`) is trivial: both sides added usings and
+> wiring lines.
+>
+> **PRs open:** #385 (autonomy, MERGEABLE, CI green) · #386 (world-steering, CONFLICTING — above) ·
+> #387 (golive, MERGEABLE, CI green). Copilot reviewed all three; its findings are folded (see the
+> `fold Copilot review` commits). Recommendation: **merge #385 and #387 now; #386 waits.**
+>
 > **Open follow-ups (none blocking):** SG-201 suppress overlay publishes whose participant-visible
 > snapshot is unchanged (a timing side channel, no content exposure); `Storyline.TargetIntensity` is now
 > written cross-thread as a non-atomic `int?` (first such mutation of `Storyline`); story 08's AC5/UAT

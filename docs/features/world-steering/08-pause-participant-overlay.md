@@ -8,6 +8,36 @@
 > and a controller tab open against the same exercise — Freeze in the controller tab must show the
 > holding page in the participant tab **without a manual refresh**, and Resume must clear it live.
 
+## DECISION — overlay precedence vs. the exercise lifecycle (Tom, 2026-07-27)
+
+`main` has since landed a competing claimant for the single overlay slot: `ParticipantShellConfigService`
+resolves `GET /api/overlay-state` through an **`IOverlayStateProjection`** seam implemented by
+`LifecycleProjection`, so overlay state is derived from the exercise lifecycle (COR-032 pre-start, COR-054
+ENDEX). This story instead **replaced that handler** to read its own pause-driven `OverlayStateService`.
+
+**Ruling: lifecycle wins. One ordered chain — `endex` > `pre-start` > `pause` > `none`.**
+
+Rationale: the lifecycle answers *"is this exercise live at all"*; pause is a control **within** a live
+exercise. ENDEX in particular must be terminal — rendering the in-fiction "We'll be right back" after an
+exercise has permanently ended would be an outright lie to participants. Pause still wins whenever the
+exercise is actually running, which is the only time a Freeze means anything.
+
+**Design consequence — this story gets SMALLER, not bigger.** The pause state becomes an
+`IOverlayStateProjection` **contributor** that composes the lifecycle projection rather than bypassing the
+seam: consult lifecycle first, and only when it yields `none` consult the pause store. Registered with
+`services.Replace(...)` after both, per `main`'s documented contributor convention.
+
+Two things fall out of that:
+- **This story stops editing `ParticipantShellEndpoints.cs` entirely.** The one shared-file edit — the
+  coordination point flagged throughout, sitting among five unrelated config GETs — simply disappears, and
+  with it the `RequestServices.GetService` workaround and its silent-degradation trade-off.
+- The `'endex'` state this story explicitly put out of scope as "a separate exercise-lifecycle concern" is
+  now `main`'s, correctly, and composes above pause rather than being ignored.
+
+**Status: not yet implemented.** The pause write path, the SignalR push, the register plumbing and the
+client guards are all built and Gate-2 clean; only the read-side composition changes. PR #386 is blocked
+until it lands.
+
 ## Context
 `participant-shell`'s `OverlayLayer` (story 05, Complete) and `GET /api/overlay-state`
 (added in commit cf9ecf7 as part of the six shell-config UAT endpoints) both already exist and
