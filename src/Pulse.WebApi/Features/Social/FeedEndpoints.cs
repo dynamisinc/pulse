@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Features.Social.Follows;
 
 /// <summary>
 /// The All Posts feed read endpoint (<c>GET /api/feed</c>, SOC-080) plus the DI registration its handler
@@ -16,6 +17,12 @@ using Pulse.WebApi.Data;
 /// </summary>
 public static class FeedEndpoints
 {
+    /// <summary>The default <c>?scope=</c> value — the All Posts feed (SOC-080). Also what an omitted parameter means.</summary>
+    private const string AllFeedScope = "all";
+
+    /// <summary>The <c>?scope=</c> value selecting the SOC-081 Following feed.</summary>
+    private const string FollowingFeedScope = "following";
+
     /// <summary>
     /// Registers the participant read path (<see cref="PostReadService"/>) with a Scoped lifetime — matching
     /// the request-scoped <see cref="PulseDbContext"/> and <see cref="IExerciseContext"/> it depends on. Both
@@ -30,6 +37,11 @@ public static class FeedEndpoints
 
         services.AddScoped<PostReadService>();
 
+        // profiles-social-graph/07: the Following scope filters authors by the caller's follow graph, so the
+        // read path depends on the follow services. The registration is idempotent (TryAdd), so calling it
+        // here AND from AddSocialPersonaRead is safe and neither slice can be wired without its dependency.
+        services.AddSocialFollowGraph();
+
         return services;
     }
 
@@ -39,6 +51,15 @@ public static class FeedEndpoints
     /// <see cref="IExerciseContext"/> (COR-001), never a client parameter; an unresolved scope FAILS CLOSED
     /// with <c>401 Unauthorized</c> rather than a default, empty-but-200, or unscoped result.
     /// </summary>
+    /// <remarks>
+    /// <b>Feed scoping (<c>profiles-social-graph/07</c>, consumed by <c>feeds-discovery/02</c>).</b> The
+    /// optional <c>?scope=</c> query parameter selects the channel: <c>all</c> (the default, and what an
+    /// omitted parameter means) is the All Posts feed; <c>following</c> is the SOC-081 Following feed —
+    /// posts authored by personas the caller's session-bound persona follows. Parameterizing THIS endpoint
+    /// rather than adding a second one lets the Following feed be a query-string toggle instead of a second
+    /// integration. An unrecognized value is a <c>400</c>, never a silent fall-back to the unfiltered feed:
+    /// a typo must not hand a participant the All Posts set while the UI labels it "Following".
+    /// </remarks>
     /// <param name="endpoints">The route builder to map onto.</param>
     /// <returns>The same route builder, for chaining.</returns>
     public static IEndpointRouteBuilder MapSocialFeedEndpoints(this IEndpointRouteBuilder endpoints)
@@ -46,6 +67,7 @@ public static class FeedEndpoints
         ArgumentNullException.ThrowIfNull(endpoints);
 
         endpoints.MapGet("/api/feed", async (
+            string? scope,
             IExerciseContext exerciseContext,
             PostReadService readService,
             CancellationToken cancellationToken) =>
@@ -57,8 +79,17 @@ public static class FeedEndpoints
                 return Results.Unauthorized();
             }
 
-            var feed = await readService.GetFeedAsync(cancellationToken);
-            return Results.Ok(feed);
+            if (string.IsNullOrEmpty(scope) || string.Equals(scope, AllFeedScope, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Ok(await readService.GetFeedAsync(cancellationToken));
+            }
+
+            if (string.Equals(scope, FollowingFeedScope, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Ok(await readService.GetFollowingFeedAsync(cancellationToken));
+            }
+
+            return Results.BadRequest($"scope must be '{AllFeedScope}' or '{FollowingFeedScope}'.");
         });
 
         return endpoints;

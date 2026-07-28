@@ -22,7 +22,10 @@ describe('resolveExerciseContext (default mock adapter)', () => {
       exerciseId: 'ex-mock-0001',
       exerciseName: 'Coastal Surge (Mock Exercise)',
       timeZone: 'America/New_York',
-      status: 'active',
+      // Story 01a: the canned mock carries a COR-032 literal, so this — the one
+      // test that runs what the app actually executes on the mock path — proves
+      // the widened guard accepts the new vocabulary end to end.
+      status: 'live',
     })
   })
 })

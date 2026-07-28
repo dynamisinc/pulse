@@ -21,19 +21,28 @@ Follow button behavior (story 02); verification rules (story 03); magnitude math
 follows (story 04).
 
 ## Deferred (tracked follow-ups, Gate-2)
-- **WR-003.** `Profile` doesn't thread the shell's read-only `variant` down to the `<PostCard>`s it
-  renders in each tab, so an observer session sees present-but-inert action controls (like/repost/
-  quote) instead of D1-011's "controls absent" — the click handlers are simply unwired (gated no-ops),
-  not a data leak, but it is a visual/AC gap against D1-011. Same gap on `ThreadView` (pre-existing,
-  `threads-replies/01`) — tracked there too. Follow-up: thread `variant`/`affordancesAvailable()` from
-  `useShellContext()` through `Profile`/`ThreadView` into each `<PostCard>` call, mirroring how `<Feed>`
-  already does it (`Feed.actions.test.tsx` confirms `<Feed>` alone gets this right today).
-- **SUG-001.** `SocialChannel`'s focus management only moves focus on a feed↔detail transition (see its
-  module header); a future detail-to-detail path that lands on `Profile` (e.g. an author-name tap from
-  inside an open thread or hashtag feed, not yet built — `SocialChannel.tsx`'s own comment defers this
-  trigger) would inherit the same "focus not repositioned" gap already tracked in
-  `hashtags-trending/01`. No action needed until that trigger exists; noted here so it isn't
-  rediscovered cold.
+- **WR-003 — RESOLVED (#88).** `Profile` and `ThreadView` (`threads-replies/01`) now read the shell's
+  mount variant via `useShellContext()`/`affordancesAvailable()` and thread the resulting `'full'` |
+  `'readOnly'` `variant` through to every `<PostCard>` they render — `Profile` via `ProfilePostList`
+  across all four tabs, `ThreadView` via its internal `ThreadCard` wrapper for ancestors, the focused
+  post, and every visible reply. This mirrors `<Feed>`'s existing pattern exactly (same local
+  `CardVariant` shape), so an observer/read-only session now sees the controls genuinely ABSENT (not
+  disabled) on all three surfaces, matching D1-011. Counts and post content remain fully visible.
+  Covered by new cases in `Profile.test.tsx` and `ThreadView.test.tsx` (mirroring
+  `Feed.actions.test.tsx`'s read-only assertions); the pre-existing suites for both were updated to
+  wrap a `<ShellContextProvider>` (previously implicit/undeclared) so `useShellContext()` doesn't
+  throw outside a shell mount.
+- **SUG-001 — RESOLVED (#88, final integration pass).** The detail-to-detail path this entry
+  anticipated now exists: an author tap-through (`onOpenProfile`, threaded `SocialChannel` → `<Feed>` /
+  `<ThreadView>` / `<HashtagFeed>` → `<PostCard>`) opens an author's profile from inside an already-open
+  thread or hashtag feed. `SocialChannel`'s view-swap effect was widened in the same pass: it now moves
+  focus into the newly-shown detail region on ANY transition that opens **or replaces** one
+  (feed→detail *and* detail→detail), and still returns focus to the feed region on close — so focus is
+  never stranded on a control the swap just unmounted (NFR-001). Verified end-to-end in
+  `SocialChannel.authorTapThrough.test.tsx` (thread → profile and hashtag feed → profile both assert
+  `social-profile-region` has focus). The same fix closes the cross-referenced entries in
+  `hashtags-trending/01` and `threads-replies/01`, which describe the other directions of the same
+  transition (thread → hashtag feed, hashtag feed → thread).
 
 ## Technical Notes
 Participant world. Reuses `<PostCard>` for the tabs. Accent-tinted banner uses `--pulse-ac`. See
@@ -60,3 +69,9 @@ posts (PostCard); scenario-time (COR-053); persona/participant model.
 - Component (RTL) — `SocialChannel.navigation.test.tsx` ("profile reachability"): "View my profile"
   opens the session's own persona profile in-channel and "Back to feed" returns — end-to-end
   reachability proof alongside AC4 (participant-world styled, in-channel, no COBRA/default MUI).
+- Component (RTL) — `components/PostCard.authorTarget.test.tsx` (#88): the author tap-through target —
+  accessible name, author persona id, keyboard activation, never nested in (nor shadowing) the card's
+  body-open overlay, and absent entirely when `onOpenProfile` isn't wired (WR-002).
+- Component (RTL) — `SocialChannel.authorTapThrough.test.tsx` (#88): tapping an author opens THAT
+  author's profile from the feed, from an open thread, and from a hashtag feed; the card's thread-open
+  still works; focus lands in the newly-opened detail region on a detail→detail swap (SUG-001).

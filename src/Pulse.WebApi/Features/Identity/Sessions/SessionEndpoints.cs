@@ -123,10 +123,20 @@ public static class SessionEndpoints
 
         endpoints.MapGet("/api/session", GetSessionAsync)
             .RequireRateLimiting(SessionRateLimitPolicy);
+        // PRE-AUTH (identity-auth-roles/11, PreAuthAllowlist): self-gating — the REFRESH token, read from the
+        // request body, IS the credential, and the expired access token by definition no longer authenticates.
         endpoints.MapPost("/api/auth/refresh", RefreshAsync)
-            .RequireRateLimiting(SessionRateLimitPolicy);
+            .RequireRateLimiting(SessionRateLimitPolicy)
+            .AllowAnonymousPreAuth();
+
+        // PRE-AUTH (identity-auth-roles/11, PreAuthAllowlist): deliberately a no-op 204 with no session. A
+        // client whose token already expired must still be able to complete logout idempotently — 401-ing it
+        // would strand the SPA on a dead session with no clean way to clear local state. It invalidates
+        // nothing when there is nothing to invalidate and discloses nothing either way. GET /api/session
+        // above stays gated.
         endpoints.MapPost("/api/auth/logout", LogoutAsync)
-            .RequireRateLimiting(SessionRateLimitPolicy);
+            .RequireRateLimiting(SessionRateLimitPolicy)
+            .AllowAnonymousPreAuth();
 
         return endpoints;
     }

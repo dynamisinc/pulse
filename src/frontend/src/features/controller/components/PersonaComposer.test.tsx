@@ -28,7 +28,7 @@ import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock, type IExerciseClock } from '@/core/clock'
 import { resetTelemetryBuffer } from '@/core/telemetry'
-import type { Persona } from '@/features/personas'
+import type { StaffPersona } from '@/features/personas'
 import type { Post } from '@/features/social'
 import { PersonaComposer } from './PersonaComposer'
 
@@ -36,7 +36,9 @@ function fixedClock(instant: Date): IExerciseClock {
   return { scenarioNow: () => instant }
 }
 
-const ACTIVE_PERSONA: Persona = {
+// STAFF fixture (the console's active persona is a `StaffPersona`); the
+// composer itself declares only the narrower `Persona` it actually reads.
+const ACTIVE_PERSONA: StaffPersona = {
   id: 'persona-fairhavenwater',
   exerciseId: 'ex-mock-0001',
   templateId: 'tmpl-fairhaven-water',
@@ -166,7 +168,7 @@ describe('PersonaComposer — identity + scenario time (R-001/R-004, COR-053)', 
   })
 
   it('does not render the verified seal for an unverified persona (SOC-052)', async () => {
-    const unverifiedPersona: Persona = { ...ACTIVE_PERSONA, verified: false }
+    const unverifiedPersona: StaffPersona = { ...ACTIVE_PERSONA, verified: false }
     await renderComposer(
       <PersonaComposer
         activePersona={unverifiedPersona}

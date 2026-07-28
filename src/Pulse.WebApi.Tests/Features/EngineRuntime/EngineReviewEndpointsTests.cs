@@ -17,6 +17,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.Core.Core.Extensions;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
@@ -531,6 +532,11 @@ public sealed class EngineReviewEndpointsTests
             builder.Services.AddSignalR();
             builder.Services.AddEngineRuntimeSeams();
             builder.Services.AddExerciseClock();
+
+            // The generation core (Fake by config default): AddEngineReview's service now also reads the active
+            // IGenerationProvider.Name + IOptions<GenerationOptions> for GET /api/engine/settings, so the same
+            // AddEngineGeneration-before-AddEngineReview order Program.cs uses is required here too.
+            builder.Services.AddEngineGeneration(builder.Configuration);
             builder.Services.AddEngineReview();
 
             // B2's staff-identity dependency the cockpit authorization filter reuses (the orchestrator wires

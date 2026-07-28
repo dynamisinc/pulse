@@ -17,43 +17,62 @@ independently shippable slices.
 
 ## Acceptance Criteria
 
-- [ ] **Given** a participant navigates to `/login` (see story 04 for the route wiring), **when** the
+- [x] **Given** a participant navigates to `/login` (see story 04 for the route wiring), **when** the
       page renders, **then** it shows a named-account form (handle + password) as the primary path and a
       clearly separated "have a shared exercise code instead?" toggle/tab that swaps to the shared-code
       form (a single password field) — both on the same page, matching the two backend entry points.
-- [ ] **Given** valid handle+password for an `Account` in the host-resolved exercise, **when** submitted
+      Verified: `ParticipantSignInPage.tsx`'s `toggleGroup` (mode `'named'` default, `'shared'` toggle),
+      each rendering its own `<form>` conditionally on `mode`.
+- [x] **Given** valid handle+password for an `Account` in the host-resolved exercise, **when** submitted
       to `POST /api/auth/login`, **then** the returned `{ token, refreshToken?, session }` envelope is
       handed to `tokenStore` (story 01) and the app navigates to `/` (the role-aware entry then lands the
       participant on their default surface per `app-shell/01` — this story does not re-decide that
       landing route).
-- [ ] **Given** a valid shared exercise password, **when** submitted to `POST /api/auth/shared`, **then**
+      Verified: `signInWithPassword()` (`participantSignInService.ts`) posts to `/auth/login`;
+      `completeSignIn()` calls `setTokens()` then `navigate('/')`.
+- [x] **Given** a valid shared exercise password, **when** submitted to `POST /api/auth/shared`, **then**
       the same token-store + redirect-to-`/` flow runs, landing on a read-only session (`isReadOnly:
       true` on the returned session — this story does not need to special-case that; `app-shell/01`
       already routes a read-only participant the same as any other participant).
-- [ ] **Given** a rejected credential (`401` from either endpoint), **when** the response arrives,
+      Verified: `signInWithSharedCode()` posts to `/auth/shared` through the identical `completeSignIn()`
+      path; the envelope's `session` is passed through untyped, exactly as the story says it should be.
+- [x] **Given** a rejected credential (`401` from either endpoint), **when** the response arrives,
       **then** the form shows one generic message ("That handle/password wasn't recognized." /
       "That exercise code wasn't recognized.") — never distinguishing "wrong password" from "no such
       handle" (anti-enumeration, NFR-009) — and the password field is cleared, not the handle field.
-- [ ] **Given** the page can resolve the host's exercise (`GET /api/exercise-context`, already
+      Verified: `isUnauthorizedSignInError()` branches on HTTP `status === 401` only (never
+      `serverMessage`); `handleNamedSubmit`/`handleSharedSubmit` clear only `password`/`sharedPassword`,
+      never `username`.
+- [x] **Given** the page can resolve the host's exercise (`GET /api/exercise-context`, already
       pre-auth-safe per `exercise-isolation/08`), **when** it resolves, **then** the page shows the
       exercise's participant-visible name as a light branding touch (e.g. a heading — "Sign in to
       {exerciseName}"); when it does **not** resolve (unknown host), the page still renders a working,
       generically-branded form rather than blocking on the exercise lookup.
+      Verified: `useResolvedExerciseName()` (`useQuery(..., { retry: false })`) leaves `data` `undefined`
+      on error/loading; the heading falls back to plain `"Sign in"`; the forms render unconditionally
+      either way.
 
 ### Cross-cutting
 
-- [ ] **No-enterprise-look (D0 §2):** this is a participant surface. No COBRA import, no
+- [x] **No-enterprise-look (D0 §2):** this is a participant surface. No COBRA import, no
       `@/theme/styledComponents`, no bare default-MUI look. It mounts its own light theme scope (see
       Technical Notes) — never the COBRA `ThemeProvider`.
-- [ ] **Accessibility (NFR-001):** both forms are real `<form>`s with labelled inputs (`<label>`/
+      Verified: the page imports no `@mui/material`/`@/theme/*` at all — plain semantic HTML + its own
+      `ParticipantSignInPage.module.css`.
+- [x] **Accessibility (NFR-001):** both forms are real `<form>`s with labelled inputs (`<label>`/
       `aria-label`, never placeholder-only labels); the tab/toggle between the two login kinds is
       keyboard-operable (reachable by Tab, a real button or ARIA tab pattern, not a `div onClick`); the
       error message is `role="alert"` and pairs an icon with text, never color alone; a submit-in-flight
       state is `aria-live="polite"` (mirrors `ExerciseSwitcher`'s existing loading/error pattern).
-- [ ] **Content security (NFR-004):** the handle/password/shared-code inputs are sent as-is to the
+      Verified: `<label htmlFor>` pairs on every input; the toggle is a real `<button type="button"
+      aria-pressed>` pair; the alert is `role="alert"` pairing `faTriangleExclamation` with text; the
+      in-flight state is `role="status" aria-live="polite"`.
+- [x] **Content security (NFR-004):** the handle/password/shared-code inputs are sent as-is to the
       backend (which owns sanitization/hashing) — this page never renders anything back from the request
       body via `dangerouslySetInnerHTML`, and the exercise name (from `/exercise-context`) is rendered as
       a plain React text node (escaped by construction).
+      Verified: no `dangerouslySetInnerHTML` anywhere in the file; `{exerciseName}` is a plain JSX text
+      interpolation.
 
 ## Out of Scope
 

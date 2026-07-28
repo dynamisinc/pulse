@@ -113,6 +113,29 @@ dotnet test pulse.slnx -c Release -s eval/live-provider.runsettings \
 
 Record the measured output back into `MEASURED-RESULTS.md` / `PROVIDER-COMPARISON.md` so the estimates lock.
 
+### When to re-run (the triggers that invalidate §8 evidence (iv))
+
+Re-run this pass — and refresh the §8 evidence — whenever the deployed configuration drifts from what
+was measured on 2026-07-18:
+
+- **Model *version* drift (the one that moves on its own).** `ai.bicep` sets
+  `versionUpgradeOption: 'OnceNewDefaultVersionAvailable'` on both deployments, so the Ambient
+  deployment can auto-upgrade off the measured `gpt-5.4-mini` `2026-03-17` build without any repo
+  change. Evidence (iv) is therefore strong on the deployment name and model *id*, and only
+  **point-in-time** on the version. Before signing (and periodically after), check the live version and
+  re-run if it has moved:
+  ```bash
+  az cognitiveservices account deployment show -n aif-pulse-uat -g rg-pulse-uat-centralus \
+    --deployment-name ambient --query "properties.model.{name:name, version:version}" -o json
+  # Expect version 2026-03-17 (the measured build). A different version = re-run §6 before relying on (iv).
+  ```
+  Pin `ambientModelVersion` / `standardModelVersion` (or set `versionUpgradeOption: 'NoAutoUpgrade'`) if
+  a deployment must stay bit-identical to a measured run.
+- **Endpoint, api-version, deployment/model id, or SKU/residency changes** — any edit to the
+  `Generation:*` values or `ai.bicep`'s model params.
+- **Prompt/guard changes** in the assembly or `ContentGuard`/`InjectionRedTeam` path (ADP-024 — a
+  regression blocks release).
+
 ## 7. Out of scope (per the story)
 
 Azure Gov / StateRAMP endpoints (NFR-006 roadmap; commercial Azure at launch); Auto mode (v1.1);
@@ -121,11 +144,87 @@ default (Azure OpenAI in-tenant is the v1 default; Claude is the per-deployment 
 
 ## 8. Sign-off
 
+> **Status: UNSIGNED — this is the hard stop.** `engine-runtime/05` has prepared everything below and
+> deliberately stopped here. Evidence is compiled and linked so signing is a **one-step human action**;
+> nothing in the repo ticks a box. Until the boxes below are ticked and signer + date entered,
+> `generationProviderLive` stays `false` and the UAT App Service resolves `Generation:Provider = Fake`.
+
+**Environment requested:** `uat` (`app-pulse-api-uat-dynamis` → `aif-pulse-uat`,
+`rg-pulse-uat-centralus`). CI and production are **not** in scope and stay on `Fake`.
+**Posture requested:** Ambient tier (`gpt-5.4-mini`, via the temporary Standard→Ambient config alias),
+**suggest-only** autonomy — every AI draft needs a human approve before it can reach participants
+(it is also the only posture reachable today; the runtime Suggest→Delayed-auto lever is
+`autonomy-safety/05`, #353).
+
+### Evidence (compiled by `engine-runtime/05` — verify, don't take on trust)
+
+| # | Item | Evidence | Where to verify |
+|---|---|---|---|
+| i | **Governance contract** (§2) — tenant-bounded, contractual no-training, documented `DataZoneStandard` residency, retention explicitly `Retained` (ZDR is the target, blocked on the per-subscription abuse-monitoring approval) | **Authored in IaC; pending the `deployAi = true` deploy — see "Deploy ordering" below.** `aif-pulse-uat` is a single-tenant Cognitive Services account with `disableLocalAuth: true` (**no API key exists**) and model deployments on the `DataZoneStandard` SKU in `centralus`. The keyless-identity half is **newly authored and not yet applied**: `webapp.bicep` had **no** `identity` block before `engine-runtime/05` and `deployAi` was `false`, so the 2026-07-18 measured run authenticated as a **developer `az login`** (`AzureCliCredential`) — exactly the gap this story closes. Once deployed, the App Service reaches the account keylessly via its own system-assigned identity holding `Cognitive Services OpenAI User`, with no developer credential in the runtime path | §2 of this doc; `infrastructure/modules/ai.bicep` (`disableLocalAuth`, `modelSkuName`, the role assignments); `infrastructure/modules/webapp.bicep` (`identity`, `principalId` output); `infrastructure/main.bicep` (`backendPrincipalId`, the `Generation:*` locals). **Then verify against Azure** with the commands under "Deploy ordering" |
+| ii | **Fail-closed gate green in CI** (§3) — a real provider without a complete governance posture throws `GenerationConfigurationException` at startup, in any environment including UAT; `Fake` stays the committed CI/prod default | `ProviderLiveConfigTests` (5 tests, `Pulse.WebApi.Tests`) + `AddEngineGenerationTests` (`Pulse.Core.Tests`) — unmodified by story 05 and green in the story's Gate-0 run. `CommittedAppsettings_KeepsFakeProvider_SoCiNeverEgresses` pins the committed default; `GovernedExample_WithGovernanceKeyUnset_FailsClosedAtStartup` pins the throw | `dotnet test pulse.slnx` on the story branch / the CI run for its PR |
+| iii | **Measured p95 within the degraded-mode threshold** (§5, NFR-003) — **Standard 2655 ms**, **Ambient 1983 ms** against a **10 s** per-attempt trip threshold (Ambient, the tier being flipped live, sits at **20 %** of the threshold) | `MEASURED-RESULTS.md` (run 2026-07-18, `aif-pulse-uat`, keyless, 5 iterations/tier, 4-persona bursts). `ProviderLiveConfigTests.GovernedExample_TripThreshold_IsTunedToMeasuredP95_AndFlagsIfApproaching` re-asserts it every CI run and **fails** if a future p95 climbs past 70 % of the threshold rather than silently accepting it | [`../engine-generation-infra/MEASURED-RESULTS.md`](../engine-generation-infra/MEASURED-RESULTS.md); §5 above |
+| iv | **`InjectionRedTeam` green against the live provider** (§6, ADP-024) — **10/10** live bursts guard-clean on **both** tiers, and 10/10 on the voice-diversity gate (ADP-021), including `gpt-5.4-mini` | The 2026-07-18 out-of-CI live pass (`LiveInjectionRedTeamTests` + `MeasuredCostLatencyTests` via `eval/live-provider.runsettings`, `PULSE_LIVE_FOUNDRY=1`). Re-run per §6 **if the UAT config drifts from what was measured** — the config staged for this go-live is the same endpoint, api-version, and Ambient deployment/model id that were measured. **Caveat: the model *version* is not pinned** (`versionUpgradeOption: 'OnceNewDefaultVersionAvailable'`), so this is point-in-time on the version — check it per §6's re-run triggers before signing | `MEASURED-RESULTS.md` findings 1 + 4; §6 → "When to re-run" for the version check + re-run command |
+
+### Deploy ordering — evidence (i) is only confirmable AFTER a deploy, and BEFORE signing
+
+`engine-runtime/05` authored the IaC and ran **no** deployment. So the order is:
+
+1. **Deploy the provisioning half first** (`deployAi = true`, `generationProviderLive` still `false`):
+   run **Deploy Infrastructure** — start with `what_if: true` (see the README prerequisite about the
+   service principal needing role-assignment write). This is safe: it creates the account, the App
+   Service identity, and the role assignment, and routes **no** traffic (`Generation__Provider` stays
+   `Fake`).
+2. **Confirm evidence (i) against Azure** — the identity exists and actually holds the data-plane role:
+   ```bash
+   RG=rg-pulse-uat-centralus
+   ACCOUNT_ID=$(az cognitiveservices account show -n aif-pulse-uat -g $RG --query id -o tsv)
+   # The App Service's system-assigned principal (also emitted as the webAppPrincipalId template output):
+   PRINCIPAL_ID=$(az webapp identity show -n app-pulse-api-uat-dynamis -g $RG --query principalId -o tsv)
+   az role assignment list --assignee "$PRINCIPAL_ID" --scope "$ACCOUNT_ID" \
+     -o table --query "[].{role:roleDefinitionName, scope:scope}"
+   # Expect: Cognitive Services OpenAI User at the account scope. Also confirm keyless + residency:
+   az cognitiveservices account show -n aif-pulse-uat -g $RG \
+     --query "{localAuthDisabled:properties.disableLocalAuth, location:location}" -o json
+   ```
+3. **Only then sign §8** — the boxes below assert an observed posture, not an authored intent.
+4. **Then flip the live-traffic gate** (next paragraph).
+
+**What signing actually authorizes** — three parameters in `infrastructure/parameters/uat.bicepparam`,
+set together in **one atomic reviewed commit**. All three are `false` on disk today; the signature is what
+turns them on, so the human assertion lands *with* the go-live rather than somewhere upstream of it:
+
+| Parameter | On disk today | Signing sets it to | What it means |
+|---|---|---|---|
+| `generationProviderLive` | `false` | `true` | Route traffic: `Generation__Provider` `Fake` → `AzureOpenAI`. The only app setting the flip changes. |
+| `generationTenantBounded` | `false` | `true` | **The signer's §2 assertion** (evidence i): single-tenant, keyless, no shared/public inference. Not derived from `deployAi` — a human types it. |
+| `generationNoTrainingAttested` | `false` | `true` | **The signer's §2 assertion** (evidence i): contractual no-training terms cover this endpoint. |
+
+**Do not pre-type the attestations ahead of the signature.** All three moving together is what makes the
+fail-closed backstop real: because the attestations are **not** computed from `deployAi`,
+`GenerationGovernance.Validate` is an independent startup gate, so a stray flip of
+`generationProviderLive` **alone** throws `GenerationConfigurationException` at startup instead of
+egressing unattested (§3). Setting the attestations early would disarm precisely that protection for this
+environment. Both also default to `false` in `main.bicep`, so any other environment's parameter file that
+omits them asserts nothing.
+
+Leaving them `false` costs nothing today: with `generationProviderLive = false` the App Service resolves
+`Generation:Provider = Fake`, and `AddEngineGeneration` takes the `FakeGenerationProvider` branch — the
+governance gate is only reached for a real, egressing provider, and `Fake`'s in-process posture is
+compliant by construction.
+
+Everything else (`Endpoint`, the tier deployment/model pairs, residency, retention) is already staged and
+unchanged by the flip; step 1 above has by then provisioned the endpoint and the role assignment
+**without** routing any traffic. See `infrastructure/README.md` → "`Generation:*` app settings and the live-traffic gate" for the
+runbook, including the post-flip `POST /api/ops/seed-engine-content` re-registration (an app-setting
+change restarts the App Service, and engine loop state is process-memory this phase) and the standing
+cost note (~$0.61/exercise-hour on Ambient while a storyline is active — flip it back off after the
+verification pass).
+
 | | |
 |---|---|
-| Governance contract reviewed (§2) | ☐ |
-| Fail-closed gate verified (§3 — `ProviderLiveConfigTests` green in CI) | ☐ |
-| Measured p95 within the degraded-mode threshold (§5) | ☐ |
-| `InjectionRedTeam` green against the live provider (§6) | ☐ |
-| Approved to flip `Generation:Provider` off `Fake` for `<environment>` | ☐ |
+| Governance contract reviewed (§2 — evidence i) | ☐ |
+| Fail-closed gate verified (§3 — `ProviderLiveConfigTests` green in CI, evidence ii) | ☐ |
+| Measured p95 within the degraded-mode threshold (§5 — evidence iii) | ☐ |
+| `InjectionRedTeam` green against the live provider (§6 — evidence iv) | ☐ |
+| Approved to flip `Generation:Provider` off `Fake` for `<environment>` — requested: **`uat`**, Ambient tier, suggest-only | ☐ |
 | Signer / date | |

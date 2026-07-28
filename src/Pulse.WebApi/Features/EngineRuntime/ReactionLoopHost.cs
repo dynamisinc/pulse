@@ -325,6 +325,7 @@ public sealed class ReactionLoopDriver
     private readonly IEngineTelemetryEmitter _telemetryEmitter;
     private readonly IExerciseClock _exerciseClock;
     private readonly TimeProvider _timeProvider;
+    private readonly EngineTierPolicyRegistry _tierPolicy;
     private readonly DecideStage _decideStage = new();
     private readonly ConcurrentDictionary<Guid, ExerciseTickState> _tickStates = new();
 
@@ -334,24 +335,28 @@ public sealed class ReactionLoopDriver
     /// <param name="telemetryEmitter">Builds the observe/decide/generate XC-004 events.</param>
     /// <param name="exerciseClock">The native scenario clock (for the scenario instant on the envelope).</param>
     /// <param name="timeProvider">The server wall-clock source for the telemetry envelope (never client input).</param>
+    /// <param name="tierPolicy">The per-exercise model-tier-policy override a controller may set at runtime (story 05).</param>
     public ReactionLoopDriver(
         GenerateStage generateStage,
         MeasureStage measureStage,
         IEngineTelemetryEmitter telemetryEmitter,
         IExerciseClock exerciseClock,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        EngineTierPolicyRegistry tierPolicy)
     {
         ArgumentNullException.ThrowIfNull(generateStage);
         ArgumentNullException.ThrowIfNull(measureStage);
         ArgumentNullException.ThrowIfNull(telemetryEmitter);
         ArgumentNullException.ThrowIfNull(exerciseClock);
         ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(tierPolicy);
 
         _generateStage = generateStage;
         _measureStage = measureStage;
         _telemetryEmitter = telemetryEmitter;
         _exerciseClock = exerciseClock;
         _timeProvider = timeProvider;
+        _tierPolicy = tierPolicy;
     }
 
     /// <summary>
@@ -445,9 +450,16 @@ public sealed class ReactionLoopDriver
 
             pendingEvents.Add(BuildDecidedEvent(context, intent, tickState.PostsThisMinute));
 
+            // The per-exercise model-tier override (story 05), applied at the decide stage's own call site —
+            // immediately after IntentComposer.Compose (via DecideStage) returned this intent and before the
+            // generate request is built. TierPolicyMode.Auto resolves to intent.Tier unchanged, restoring the
+            // purpose-based static map (IntentComposer.TierFor) as the decision. This is a READ of shared
+            // process state, so a controller's choice is live for this very burst — no redeploy, no restart.
+            var tier = _tierPolicy.ResolveTier(registration.ExerciseId, intent.Tier);
+
             var draftId = Guid.NewGuid();
             var generateResult = await _generateStage
-                .GenerateAsync(BuildGenerateRequest(registration, storyline, intent), cancellationToken)
+                .GenerateAsync(BuildGenerateRequest(registration, storyline, intent, tier), cancellationToken)
                 .ConfigureAwait(false);
 
             pendingEvents.Add(BuildGeneratedEvent(context, storyline, draftId, generateResult));
@@ -551,16 +563,24 @@ public sealed class ReactionLoopDriver
     }
 
     /// <summary>Builds the generate-stage request from a decided intent (storyline brief + eligible cast + tier).</summary>
+    /// <param name="registration">The exercise loop being ticked.</param>
+    /// <param name="storyline">The storyline the burst voices.</param>
+    /// <param name="intent">The decided generation intent.</param>
+    /// <param name="tier">
+    /// The tier to generate at: <paramref name="intent"/>'s own tier, unless the exercise has a controller-set
+    /// tier-policy override (story 05), in which case that wins.
+    /// </param>
     private static GenerateStageRequest BuildGenerateRequest(
         ReactionLoopRegistration registration,
         Storyline storyline,
-        GenerationIntent intent) => new()
+        GenerationIntent intent,
+        GenerationTier tier) => new()
         {
             ExerciseId = registration.ExerciseId,
             ExerciseBrief = registration.ExerciseBrief,
             Storyline = storyline.ToBrief(),
             Personas = intent.Personas,
-            Tier = intent.Tier,
+            Tier = tier,
         };
 
     /// <summary>Builds the one review item for an accepted burst (Suggest → queued; Delayed-auto → counting down).</summary>

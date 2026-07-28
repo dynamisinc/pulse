@@ -20,6 +20,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Helpers;
 
 /// <summary>
 /// Integration tests for <c>POST /api/posts</c> (story <c>social-api/02-post-write-api</c>, #271).
@@ -404,6 +405,15 @@ public sealed class PostWriteWebApplicationFactory : WebApplicationFactory<Progr
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        // identity-auth-roles/11: POST /api/posts now requires a LIVE session, not merely a resolved scope —
+        // an unauthenticated caller could previously inject a post as any persona with an attacker-chosen
+        // origin (#359, exploit 1). These tests are about sanitization, stamping, provenance projection and
+        // the broadcast seam, so they present a live session for the same exercise the scope is faked as.
+        // Server-side derivation of authorPersonaId/origin/actingHumanId is story 12 (#366).
+        builder.UseFakeAuthenticatedSession(_currentExerciseId);
+
         // ConfigureTestServices runs after Program.cs's own registrations, so these RemoveAll+Add
         // overrides reliably win — in particular the FakeFeedBroadcaster replaces Program's real
         // SignalRFeedBroadcaster so tests can assert the broadcast fan-out without a live SignalR hub.

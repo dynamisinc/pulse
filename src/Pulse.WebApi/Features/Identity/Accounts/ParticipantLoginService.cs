@@ -38,6 +38,9 @@ public sealed class ParticipantLoginService
 {
     private const string ParticipantSessionKind = "participant";
     private const string ParticipantActorKind = "participant";
+
+    /// <summary>The v0 actor kind for an identity-less (failed) attempt — see <see cref="BuildLoginTelemetry"/> (#356).</summary>
+    private const string SystemActorKind = "system";
     private const string SystemChannel = "system";
     private const string LoginEventType = "login";
     private const string AttemptedHandleTargetType = "accountHandle";
@@ -181,10 +184,21 @@ public sealed class ParticipantLoginService
 
     /// <summary>
     /// Builds one XC-004 participant-login event against the locked v0 envelope: <c>channel: 'system'</c>, event
-    /// type <c>login</c>, <c>actor.kind: 'participant'</c>. On success <c>participantId</c> = the account id; on
-    /// failure it is null-omitted (identity-less) and <c>target</c> carries the sanitized attempted handle. All
-    /// off-envelope empty strings are null-omitted (the v0 schema types optional ids as <c>min(1).optional()</c>).
+    /// type <c>login</c>. On SUCCESS the actor is the participant (<c>actor.kind: 'participant'</c> +
+    /// <c>participantId</c> = the account id); on FAILURE no account was resolved, so the actor is the SYSTEM
+    /// recording an identity-less attempt (<c>actor.kind: 'system'</c>) and <c>target</c> carries the sanitized
+    /// attempted handle instead. All off-envelope empty strings are null-omitted (the v0 schema types optional
+    /// ids as <c>min(1).optional()</c>).
     /// </summary>
+    /// <remarks>
+    /// The actor kind is DERIVED from whether an identity was resolved, never hardcoded (#356). The v0 envelope
+    /// conditionally requires <c>actor.participantId</c> whenever <c>actor.kind</c> is <c>'participant'</c>
+    /// (<c>telemetryEventV0Schema.superRefine</c> / <see cref="TelemetryEnvelopeRules"/>), so claiming the
+    /// participant kind for an attempt that resolved NO participant emits a row the <c>POST /api/telemetry</c>
+    /// ingest mirror rejects with a 400 — and which the <c>PulseDbContext</c> write-guard now blocks outright.
+    /// <c>'system'</c> is the correct kind for an identity-less auth attempt and matches what the sibling
+    /// <c>StaffLoginService</c> and <c>SharedReadOnlyLoginService</c> already stamp.
+    /// </remarks>
     private static TelemetryEvent BuildLoginTelemetry(
         Guid exerciseId,
         string? participantId,
@@ -201,7 +215,9 @@ public sealed class ParticipantLoginService
         Channel = SystemChannel,
         Actor = new TelemetryActor
         {
-            Kind = ParticipantActorKind,
+            // Derived, not hardcoded: an identity-less (failed) attempt is a SYSTEM actor, because the v0
+            // envelope requires participantId whenever kind is 'participant' (#356).
+            Kind = string.IsNullOrEmpty(participantId) ? SystemActorKind : ParticipantActorKind,
             ParticipantId = string.IsNullOrEmpty(participantId) ? null : participantId,
         },
         WallClockTime = now,

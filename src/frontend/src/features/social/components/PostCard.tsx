@@ -85,6 +85,28 @@
  *    was a focusable no-op, which this avoids by never making it focusable
  *    at all when there is nothing for it to do.
  *
+ * AUTHOR TAP-THROUGH (profiles-social-graph integration, SOC-050) —
+ * `onOpenProfile`. The author identity (display name + verified mark +
+ * handle) sits in its own `.author` group, and when — and ONLY when — a
+ * handler is supplied, a SECOND transparent overlay `<button>` fills that
+ * group's box: the SAME "stretched-link" pattern `.openTarget` already uses
+ * for the card body, lifted above it (`z-index: 2`, the tier the hashtag
+ * anchors already occupy) so an author tap reaches the author target and a
+ * tap anywhere else in the body still reaches `.openTarget`. Consequences
+ * that made this the right shape rather than "wrap the name in a `<button>`":
+ *  - NO interactive element ever nests inside another (WR-001) — the two
+ *    overlays are SIBLINGS in different boxes, exactly like the hashtag
+ *    anchors;
+ *  - the identity text and the verified seal stay OUTSIDE any interactive
+ *    ancestor, so the trust signal is never swallowed into a control's
+ *    accessible name (SOC-052/D1-008) — the seal keeps its own
+ *    `role="img"`/`<title>`, and the button carries an explicit
+ *    `aria-label="View {displayName}'s profile"`;
+ *  - the card's own thread-open target is NOT shadowed: the author overlay
+ *    covers only the identity group, never the whole card.
+ * Omitted ⇒ no button at all (WR-002: never a focusable no-op) and the header
+ * renders byte-identical to before.
+ *
  * World: participant (Pulse skin). No COBRA, no themed MUI — plain semantic
  * elements + the scoped `social.module.css` CSS Module (tokens read from CSS
  * custom properties; see that file's header for the theming model).
@@ -194,6 +216,14 @@ export interface PostCardProps {
    * no-op.
    */
   onHashtagOpen?: (tag: string) => void
+  /**
+   * Fires with the AUTHOR's persona id when the author identity (display name
+   * + verified mark + handle) is activated (SOC-050). Optional — omit it and
+   * the header renders exactly as before: plain text, no overlay button, no
+   * focusable no-op (WR-002). See the module header for why this is a second
+   * overlay rather than a `<button>` wrapped around the name.
+   */
+  onOpenProfile?: (personaId: string) => void
 }
 
 interface ActionSpec {
@@ -318,6 +348,7 @@ export function PostCard({
   onRepost,
   onQuote,
   onHashtagOpen,
+  onOpenProfile,
 }: PostCardProps) {
   const { timeZone } = useExerciseContext()
   const { format } = useScenarioTime(timeZone)
@@ -353,6 +384,18 @@ export function PostCard({
     onQuote?.(post.id)
   }
 
+  /**
+   * The author overlay's activation (SOC-050). It is a real `<button>` that is
+   * NOT a descendant of `.openTarget`, so the card's open handler could never
+   * fire from it by bubbling anyway — `stopPropagation` matches the hashtag
+   * anchors' belt-and-braces guarantee, so the invariant survives any future
+   * restructuring that makes an ancestor clickable again.
+   */
+  const handleOpenProfile = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onOpenProfile?.(post.author.id)
+  }
+
   return (
     <article className={styles.postCard} data-testid="post-card" data-post-id={post.id}>
       <div className={styles.avatarWrap}>
@@ -378,13 +421,31 @@ export function PostCard({
             />
           )}
           <header className={styles.header}>
-            <span className={styles.name}>{post.author.displayName}</span>
-            {post.author.verified && (
-              <span className={styles.verifiedMark}>
-                <VerifiedMark />
-              </span>
-            )}
-            <span className={styles.handle}>{`@${post.author.handle}`}</span>
+            {/*
+              The author identity group. Its contents are NON-interactive; when
+              `onOpenProfile` is supplied the transparent `.authorTarget`
+              overlay below becomes the tap target for this box only (see the
+              module header — sibling overlays, never nested interactives).
+            */}
+            <span className={styles.author}>
+              {onOpenProfile && (
+                <button
+                  type="button"
+                  className={styles.authorTarget}
+                  data-testid="post-author-target"
+                  data-persona-id={post.author.id}
+                  aria-label={`View ${post.author.displayName}'s profile`}
+                  onClick={handleOpenProfile}
+                />
+              )}
+              <span className={styles.name}>{post.author.displayName}</span>
+              {post.author.verified && (
+                <span className={styles.verifiedMark}>
+                  <VerifiedMark />
+                </span>
+              )}
+              <span className={styles.handle}>{`@${post.author.handle}`}</span>
+            </span>
             <span className={styles.dot} aria-hidden="true">·</span>
             <time className={styles.time} dateTime={post.scenarioTime} title={absoluteTime}>
               {relativeTime}

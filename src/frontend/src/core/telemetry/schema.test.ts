@@ -173,9 +173,10 @@ describe('telemetryEventV0Schema', () => {
     }
   })
 
-  it('covers all 14 documented Phase-1 event types', () => {
+  it('covers all 15 documented Phase-1 event types', () => {
     // Guards against someone silently trimming the documented vocabulary.
-    expect(KNOWN_TELEMETRY_EVENT_TYPES).toHaveLength(14)
+    // 15 since profiles-social-graph/07 added `unfollow` alongside `follow`.
+    expect(KNOWN_TELEMETRY_EVENT_TYPES).toHaveLength(15)
   })
 
   // ---------------------------------------------------------------------

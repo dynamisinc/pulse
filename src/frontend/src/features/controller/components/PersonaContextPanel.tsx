@@ -38,13 +38,16 @@ import { faClockRotateLeft, faIdBadge, faQuoteLeft, faUsers } from '@fortawesome
 import { useExerciseContext } from '@/core/exerciseContext'
 import { formatScenarioTime } from '@/core/clock'
 import { listPosts, type Post } from '@/features/social'
-import type { Persona } from '@/features/personas'
+import type { Persona, StaffPersona } from '@/features/personas'
 import { audienceBandLabel, categoryChipLabel, resolveVoiceNotes } from '../services/personaVoice'
 
 export interface PersonaContextPanelProps {
   /** The active persona to show context for (input, not import — supplied
-   * by `persona-operation/02`'s `useActivePersona()` at integration). */
-  readonly persona: Persona
+   * by `persona-operation/02`'s `useActivePersona()` at integration). STAFF
+   * projection: this panel renders the `personaType`-derived category chip,
+   * and that field exists only on `StaffPersona` (SOC-052/D1-008), so a
+   * participant-shaped `Persona` cannot be passed here. */
+  readonly persona: StaffPersona
   /** Max recent posts to show. Defaults to 3 — enough in-voice grounding
    * without turning the panel into a feed. */
   readonly maxRecents?: number
@@ -66,6 +69,8 @@ const SECTION_LABEL_SX = {
  * controller never sees another exercise's history for a same-template
  * persona. Newest-first, capped at `maxRecents`.
  */
+// Typed on the narrower `Persona`: this helper reads only the two-world
+// COMMON fields (`exerciseId`/`id`), and a `StaffPersona` is assignable to it.
 function recentPostsFor(persona: Persona, maxRecents: number): Post[] {
   return listPosts()
     .filter(post => post.exerciseId === persona.exerciseId && post.authorPersonaId === persona.id)

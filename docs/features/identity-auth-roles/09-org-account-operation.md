@@ -10,6 +10,30 @@ records the individual human** in telemetry (per-human attribution is evaluation
 participant-facing account switcher appears in posting UIs; full JIC workflow is Phase 3, but
 attribution + post-as-org ship in Phase 1 (COR-018, XC-004).
 
+## Relationship to `identity-auth-roles/10` (read before touching AC1)
+
+`10-participant-persona-binding.md` (#342, Complete) delivers a **narrow slice** of AC1 below — the
+**provisioning-time, single-persona, ops-endpoint** half: binding exactly one persona to one
+participant account, either at bootstrap time or via a secret-gated ops endpoint
+(`POST /api/ops/bind-participant-persona`) run by an operator against a deployment secret. That is
+**not** the "live staff action" this AC also describes — there is no staff-console control for it, only
+an ops/runbook surface behind `X-Bootstrap-Secret`, unreachable from any staff or participant session.
+
+This story (09) still owns everything AC1 does not cover, plus AC2–AC4 in full:
+- **Granting multiple org personas** to one participant (story 10 binds exactly one `Account.PersonaId`;
+  there is no multi-persona grant model here).
+- **The live staff action path** — a real staff-console-driven grant, gated by role/session, not a
+  deployment secret.
+- **AC2 — per-human attribution behind a shared handle.** Story 10 binds *who a participant's account
+  posts as*; it does nothing about multiple humans sharing **one** org account or about recording which
+  human acted behind that shared handle.
+- **AC3 — concurrent multi-human operation** of one org account.
+- **AC4 — the participant-facing account switcher** in posting UIs. Story 10 has no UI; the composer
+  either shows (bound) or stays absent (unbound) — there is no switching between personas.
+
+Status stays **Not Started** — story 10 does not advance this story's ACs as written below; it only
+narrows how much of AC1 remains to build.
+
 ## Acceptance Criteria
 - [ ] A participant can be granted operation of one or more org personas (setup or live staff action).
 - [ ] When a human posts/replies/DMs behind a shared org handle, telemetry records the **individual

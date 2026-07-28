@@ -21,6 +21,11 @@
 | 07 Credential lifecycle **[Tier-2]** | **backend** | Rotation w/ grace, immediate revoke (kills all read-only sessions), brute-force lockout, per-IP rate limit; staff-only + logged. | `Features/Identity/` shared-cred lifecycle slice (`SharedCredentialLifecycleEndpoints`, rotation/lockout logic, `AddSharedCredentialLifecycle()`) | `/api/staff/shared-credential/rotate`, `/revoke` |
 | 08 Participant admin | *deferred (out of B2)* | COR-017 — staff login-triage panel. Not authored this slice. | — | — |
 | 09 Org-account operation | *deferred (out of B2)* | COR-018 — post-as-org + per-human attribution. Not authored this slice. | — | — |
+| 10 Participant persona binding **[Tier-2]** | **backend** | Provisioning-time half of COR-018's AC1 (see story 09's boundary note). Extends `login/05`'s bootstrap slice additively — a persona-reference field on the participant sub-request, plus a new secret-gated rebind endpoint for an already-provisioned account. Relocated in from `login/07` (#342) after `login` closed at six stories. | `src/Pulse.WebApi/Features/Ops/Bootstrap/` (edits: `BootstrapDtos.cs`, `BootstrapService.cs`, `BootstrapEndpoints.cs`; new: `OpsPersonaResolver.cs`, `ParticipantPersonaBindingService.cs`, `ParticipantPersonaBindingDtos.cs`) | `POST /api/ops/bind-participant-persona`; the extended `bootstrap-exercise` participant sub-request persona binding; `OpsPersonaResolver` (the ops-context isolation seam — see Reuse map) |
+| 11 Default-deny gate + allowlist + hub **[Tier-2, #359, #361]** | backend + frontend | Closes Wave 1 of the unbuilt half of COR-012: an ASP.NET native `FallbackPolicy` (chosen over an `IEndpointFilter` — the latter cannot gate the MVC telemetry controller or the SignalR hub) requiring a live session on every mapped endpoint except the 11-route pre-auth allowlist; `SessionAuthenticationMiddleware` additionally populates `HttpContext.User`; a paired frontend fix so the hub keeps working (`accessTokenFactory` + `?access_token=` support). Touches `Program.cs` directly (not a normal parallel wave — see the Integration seam note below). | `src/Pulse.WebApi/Program.cs`; new `IAuthorizationMiddlewareResultHandler` (`Features/Identity/Sessions/`); `SessionAuthenticationMiddleware.cs` (additive); `SessionTokenExtractor.cs` (`?access_token=` read); `ReadOnlySessionWriteFilter.cs` (doc fix only); `core/realtime/connection.ts` (`accessTokenFactory`) | The default-deny gate (every endpoint requires a live session from this point forward, uniformly across minimal APIs/MVC/SignalR) |
+| 12 `POST /api/posts` attribution **[Tier-2, #359, #366]** | backend | Server-side `authorPersonaId`/`origin`/`actingHumanId` derivation from the session (never the client body) — closes the attribution half of the #359 exploit. Introduces the one new session-identity accessor the rest of this wave reuses. | `Features/Identity/Sessions/CurrentSessionAccessor.cs` (new); `Features/Social/PostWriteEndpoints.cs` + `PostIngestService.cs` | `ICurrentSessionAccessor` (consumed by story 13) |
+| 13 `POST /api/telemetry` scope authority **[Tier-2, #362]** | backend | Server-stamps `exerciseId` + actor identity from the session (reusing story 12's accessor); rejects (400) a disagreeing client-supplied `exerciseId` rather than silently overwriting it; no pre-auth carve-out (verified: no legitimately pre-auth emitter exists). | `Telemetry/TelemetryController.cs` | — |
+| 14 Anonymous-access regression suite **[Tier-2, #367]** | backend (tests) | `EndpointDataSource`-enumerated sweep (never a hand-maintained route list) asserting every non-allowlisted route 401s with no credential, the hub aborts an unauthenticated connection, and `/api/staff/*`+`/api/engine/*` are unchanged. Verifies 11+12+13 together. | `Pulse.WebApi.Tests/Features/Identity/Sessions/AnonymousAccessRegressionTests.cs` (new) | — |
 
 ## Reuse map
 <Name B0's real seams — build on them, do not recreate.>
@@ -65,6 +70,26 @@
 - **Consumed by:** `app-shell/01` (live session/role + StaffAssignment), `exercise-isolation/04`
   (participant guard), `exercise-isolation/05` (switcher), E2 SOC-006 (account switcher), E7 (attribution).
 
+### `OpsPersonaResolver` — the isolation seam for ops endpoints (story 10)
+
+`Features/Ops/Bootstrap/OpsPersonaResolver.cs` is where the exercise-isolation rule for **ops-surface**
+persona lookups lives, and any future ops endpoint that resolves a persona should call it rather than
+reinvent the pattern. The reason it exists as its own class: ops endpoints (`bootstrap-exercise`,
+`seed-engine-content`, `bind-participant-persona`) run with **no ambient exercise scope** — there is no
+session/exercise-scope middleware in front of them, only the `X-Bootstrap-Secret` header gate — so the
+injected `PulseDbContext` sits on the fail-closed `Guid.Empty` central filter. Every scoped read through
+`OpsPersonaResolver` therefore uses `IgnoreQueryFilters()` **plus** an explicit `ExerciseId` predicate;
+dropping either half either resolves nothing (filter left in place) or resolves across every exercise's
+cast (predicate dropped) — COR-001 violated either way.
+
+**Do not copy `EngineReviewService.ResolvePersonaHandlesAsync` for this purpose.** That resolver is
+correct for its own caller because it runs *inside* an authenticated, session-scoped request where
+`PulseDbContext`'s central filter is already correctly populated — it relies on that filter rather than
+predicating explicitly. Reused from an ops context (no scope populated) it would resolve **nothing**, or,
+if a scope happens to be stale/wrong, **the wrong exercise's persona** — exactly the bug this story exists
+to prevent. `OpsPersonaResolver` and `EngineReviewService`'s resolver are not interchangeable; they solve
+the same lookup under two different scope regimes.
+
 ### The `ExerciseContext.CurrentExerciseId` precedence model (the crux — one seam, three populators)
 `ExerciseContext.CurrentExerciseId` is a single Scoped, settable value written by three populators, in
 this precedence:
@@ -104,14 +129,36 @@ then on. The only cross-exercise object in the model is this access record, by d
 | 07 Credential lifecycle **[Tier-2]** | backend | `Features/Identity/` shared-cred lifecycle slice | 06 | 04; `app-shell/01`; `exercise-isolation/04`+`05` | 4 | M |
 | 08 Participant admin | *deferred* | — | — | — | — | — |
 | 09 Org-account operation | *deferred* | — | — | — | — | — |
+| 10 Participant persona binding **[Tier-2]** | backend | `Features/Ops/Bootstrap/*` (edits) + `OpsPersonaResolver.cs`, `ParticipantPersonaBindingService.cs`, `ParticipantPersonaBindingDtos.cs` (new) | `login/05` (the bootstrap slice it extends, merged); `engine-content-seed` (the persona cast) | — | 5 (post-B2, relocated in Complete from `login/07`, #342) | M |
+| 11 Default-deny gate + allowlist + hub **[Tier-2, #359, #361]** | backend + frontend | `Program.cs` (direct edit — see note below); new `IAuthorizationMiddlewareResultHandler`; `SessionAuthenticationMiddleware.cs`; `SessionTokenExtractor.cs`; `ReadOnlySessionWriteFilter.cs` (doc only); `core/realtime/connection.ts` | 03, 05, 06, `exercise-isolation/08`, `social-api` (all merged) | — (serial; owns `Program.cs`) | 6 | L |
+| 12 `POST /api/posts` attribution **[Tier-2, #359, #366]** | backend | `Features/Identity/Sessions/CurrentSessionAccessor.cs` (new); `Features/Social/PostWriteEndpoints.cs`+`PostIngestService.cs` | 11 (needs a live-session-required endpoint to build the identity read against) | — | 7 | M |
+| 13 `POST /api/telemetry` scope authority **[Tier-2, #362]** | backend | `Telemetry/TelemetryController.cs` | 11 (the `FallbackPolicy` gate — an MVC controller needs it, not an `IEndpointFilter`); 12 (reuses `ICurrentSessionAccessor` — no third parallel accessor) | — | 8 | M |
+| 14 Anonymous-access regression suite **[Tier-2, #367]** | backend | `Pulse.WebApi.Tests/Features/Identity/Sessions/AnonymousAccessRegressionTests.cs` (new) | 11, 12, 13 (asserts all three land) | — | 9 | S–M |
 
 File-disjointness within a wave: each B2 backend story owns its own slice folder under
 `Features/Identity/*` (distinct files) and its own `PulseDbContext` `OnModelCreating`/migration addition;
 `Program.cs` is orchestrator-owned (below), so no two stories collide there.
 
+**Story 10** sits outside the B2 wave numbering (it was built and shipped later, under `login`, then
+relocated here) — its own files live under `Features/Ops/Bootstrap/*`, disjoint from every
+`Features/Identity/*` slice above, so it never collided with B2's waves in practice.
+
+**Story 11 is the one exception to the orchestrator-owned rule, and stories 12-14 are strictly serial
+after it.** Story 11 edits `Program.cs` itself (the `FallbackPolicy` default-deny wrapper) rather than
+exporting a single `Add*()`/`Map*()` line for the orchestrator to wire, so it **cannot fan out in
+parallel with any other `Program.cs`-touching change** and is scheduled after every prior wave has
+merged. What was one story's internal 3-sub-wave split (gate+allowlist+hub → `POST /api/posts`
+attribution → regression suite) is now four separate story files, run strictly in **11 → 12 → 13 → 14**
+order: 12 needs 11's live-session-required endpoint before its attribution logic has anything to
+derive from; 13 needs both 11 (an MVC controller needs the `FallbackPolicy` specifically — an
+`IEndpointFilter` never runs for it) and 12 (reuses its `ICurrentSessionAccessor` rather than a third
+parallel accessor); 14 verifies all three together. None of the four can run concurrently with each
+other or with any other `Program.cs`-touching work.
+
 ### Integration seams (orchestrator-owned — never a wave story)
 
 | Seam | File(s) | Rule |
 |------|---------|------|
-| Backend composition root | `src/Pulse.WebApi/Program.cs` | Each story exports its own `Add*()`/`Map*()`/auth-scheme registration; the orchestrator wires the one-line calls **and the middleware ordering** serially between waves. Critical ordering: `app.UseExerciseResolution()` (exercise-isolation/08) → the **auth/session** middleware (story 03) → `MapControllers()`/endpoint maps — so the session's scope write takes precedence over the host's (the precedence model above). |
+| Backend composition root | `src/Pulse.WebApi/Program.cs` | Each story exports its own `Add*()`/`Map*()`/auth-scheme registration; the orchestrator wires the one-line calls **and the middleware ordering** serially between waves. Critical ordering: `app.UseExerciseResolution()` (exercise-isolation/08) → the **auth/session** middleware (story 03) → `app.UseAuthorization()` (story 11's `FallbackPolicy`, called explicitly immediately after the auth/session middleware — see story 11's own note on why an implicit auto-inserted `UseAuthorization()` would break this) → `MapControllers()`/endpoint maps — so the session's scope write takes precedence over the host's, and the default-deny policy sees a populated `HttpContext.User` before it evaluates. |
 | Frontend mock→live flip | `core/auth/sessionResolver.ts` (`USE_MOCK_SESSION`) | Story 03 flips this single point live once `/api/session` is Gate-2 clean; a serial, orchestrator-owned integration edit. `session.tsx`/`useSession()` consumers need no change (the `Session` shape is unchanged). |
+| Frontend realtime credential | `core/realtime/connection.ts` (`accessTokenFactory`) | Story 11's paired frontend fix — the hub connection stops sending no credential and starts attaching the live session token. Ships in the same story/PR as the backend gate, not split across two merges (a split would leave the live feed dead in between). |

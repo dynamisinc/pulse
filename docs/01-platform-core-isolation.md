@@ -125,5 +125,11 @@ Channel functionality (E2–E6), posting as personas (E7), automated persona beh
 
 1. ~~Identity federation~~ **Resolved:** hybrid model per COR-014/COR-015 (federated staff, named active participants, shared read-only credential; Entra/SSO future).
 2. ~~Realism theater on login/signup~~ **Resolved (adversarial review C9):** omit at launch, normatively — fake sign-up buttons are a phishing-pattern optic on a government training site (COR-011).
-3. Persona handle uniqueness: per-exercise only (recommended) or org-global?
+3. ~~Persona handle uniqueness: per-exercise only (recommended) or org-global?~~ **Resolved: per-exercise
+   only** (the recommended option). Enforced in the database by `IX_Personas_ExerciseId_Handle` — a unique
+   index on `(ExerciseId, Handle)`, case-insensitive under the `SQL_Latin1_General_CP1_CI_AS` collation, so
+   `mvega_fh` and `MVega_FH` collide within one exercise while two *different* exercises may each run a
+   `@FulcoEM`. Org-global was rejected: it would make a second exercise's cast unseedable from the shared
+   library and would leak one exercise's naming into another's world, against COR-001. See
+   `docs/features/backend-host/03-persona-handle-uniqueness.md`.
 4. Multi-time-zone exercises (statewide/hurricane with mutual-aid players across zones): single exercise time zone (XC-008) is a known constraint, accepted for launch; revisit with multi-region demand. (Review A13.)

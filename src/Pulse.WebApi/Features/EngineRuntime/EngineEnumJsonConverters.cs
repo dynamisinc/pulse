@@ -79,6 +79,37 @@ public sealed class AutonomyLevelJsonConverter : MappedEnumJsonConverter<Autonom
 }
 
 /// <summary>
+/// Serializes an OPTIONAL <see cref="AutonomyLevel"/> as the same frozen kebab literals, with <c>null</c>
+/// written as JSON <c>null</c> — the wire shape for "there is no effective level because generation is fully
+/// stopped" (see <see cref="EngineAutonomyStateDto.EffectiveLevel"/>). Explicit rather than relying on the
+/// serializer to wrap <see cref="AutonomyLevelJsonConverter"/> for a nullable property, keeping the same
+/// pinned-by-name discipline as the rest of this file.
+/// </summary>
+public sealed class NullableAutonomyLevelJsonConverter : JsonConverter<AutonomyLevel?>
+{
+    private static readonly AutonomyLevelJsonConverter Inner = new();
+
+    /// <inheritdoc />
+    public override AutonomyLevel? Read(ref Utf8JsonReader reader, System.Type typeToConvert, JsonSerializerOptions options) =>
+        reader.TokenType == JsonTokenType.Null ? null : Inner.Read(ref reader, typeof(AutonomyLevel), options);
+
+    /// <inheritdoc />
+    public override void Write(Utf8JsonWriter writer, AutonomyLevel? value, JsonSerializerOptions options)
+    {
+        System.ArgumentNullException.ThrowIfNull(writer);
+
+        if (value is { } level)
+        {
+            Inner.Write(writer, level, options);
+        }
+        else
+        {
+            writer.WriteNullValue();
+        }
+    }
+}
+
+/// <summary>
 /// Serializes <see cref="DraftDisposition"/> as the frozen kebab literals
 /// <c>queued</c> / <c>counting-down</c> / <c>held</c> / <c>published</c> / <c>vetoed</c>
 /// (<c>reviewContracts.ts</c> <c>DraftDisposition</c>).

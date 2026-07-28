@@ -59,6 +59,24 @@ describe('seedCast — one-action seeding with derived state (COR-021)', () => {
   it('is deterministic — seeding the same cast twice yields identical instances', () => {
     expect(seed()).toEqual(seed())
   })
+
+  // profiles-social-graph/02 (#110), mock/live parity: a freshly seeded
+  // instance has no real follow edges, so `followerCount` (the composed,
+  // displayed count) must equal `audienceMagnitude` (the raw SOC-054 number)
+  // exactly, and `followingCount` must be the honest zero — never
+  // `undefined`. This is what keeps the mock path (USE_MOCK_DATA, true in
+  // UAT) from silently diverging from the live backend's composed-count
+  // formula on every magnitude-dependent surface (audienceReach(),
+  // displayedFollowerCount()).
+  it('keeps followerCount/audienceMagnitude/followingCount in parity with the live formula (no real edges yet)', () => {
+    const personas = seed()
+    for (const p of personas) {
+      expect(p.audienceMagnitude).toBeDefined()
+      expect(p.followingCount).toBeDefined()
+      expect(p.followerCount).toBe(p.audienceMagnitude)
+      expect(p.followingCount).toBe(0)
+    }
+  })
 })
 
 describe('SOC-052 impersonation pair', () => {

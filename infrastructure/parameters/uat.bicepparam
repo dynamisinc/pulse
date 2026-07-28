@@ -29,9 +29,52 @@ param deployCommunication = false
 // Standard_S1 for real exercise load (Free_F1 caps at 20 connections / 20k msgs/day).
 param deploySignalR = false
 
-// Flip to true to stand up the E8 Azure AI Foundry endpoint + model deployments (independent of the
-// backend). Needed for the story-06 measured cost/latency pass. See infrastructure/README.md.
-param deployAi = false
+// --- E8 engine generation provider (engine-runtime/05, NFR-005 / ADP-025) ----
+// deployAi = true stands up aif-pulse-uat (Cognitive Services / AIServices) with the `standard`
+// (gpt-5.4) and `ambient` (gpt-5.4-mini) model deployments, keyless (disableLocalAuth), and grants the
+// App Service's system-assigned identity "Cognitive Services OpenAI User" on it. This is PROVISIONING
+// ONLY: with generationProviderLive = false below, the App Service still resolves
+// Generation:Provider = Fake, so no application code can reach the endpoint and NOTHING egresses.
+// Idempotent — re-running the deploy neither fails nor duplicates the deployments.
+param deployAi = true
+
+// ⚠ THE LIVE-TRAFFIC GATE (TIER-2, NFR-005 / ADP-025). Deliberately SEPARATE from deployAi: flipping
+// this — and only this — points the engine's generate stage at the live governed model
+// (Generation:Provider = AzureOpenAI), i.e. real LLM egress of world/persona content.
+//
+// DO NOT set this true until docs/features/engine-runtime/PROVIDER-GOVERNANCE.md §8 is SIGNED (all five
+// boxes ticked, signer + date entered) for this environment. §8 carries the four evidence items
+// (governance contract, fail-closed gate green in CI, measured p95 vs the 10s degraded-mode threshold,
+// InjectionRedTeam 10/10 live). The startup gate (GenerationGovernance.Validate) is the mechanical
+// backstop; this toggle is the contractual one. Both must hold.
+//
+// Cost, once live: ~$0.61/exercise-hour at the measured Ambient rate while a storyline is active
+// (MEASURED-RESULTS.md). Cheap, not free — flip it back to false after a verification pass rather than
+// leaving it on indefinitely.
+param generationProviderLive = false
+
+// The two §2 governance attestations, asserted HERE BY A HUMAN — deliberately not derived from deployAi,
+// so GenerationGovernance.Validate remains an independent startup gate that can actually fire rather than
+// a restatement of "did we deploy the account".
+//
+// LEFT FALSE until PROVIDER-GOVERNANCE.md §8 is signed: the signer sets these to true in the SAME
+// reviewed commit as generationProviderLive. Nothing is attested yet. Until then, a stray flip of
+// generationProviderLive alone fails startup by design (GenerationConfigurationException) instead of
+// egressing unattested content — pre-typing them here would disarm exactly that backstop.
+//
+// The justification for setting them TRUE at signing time (not a claim that they are true now) is
+// §8 evidence item (i):
+//   - TenantBounded:      aif-pulse-uat is a single-tenant Cognitive Services account with
+//                         disableLocalAuth (keyless Entra only, no API key exists) and no
+//                         shared/public inference.
+//   - NoTrainingAttested: Azure OpenAI Service does not use customer prompts/completions to train
+//                         models (Microsoft product terms).
+// Both also default to FALSE in main.bicep, so any other/future environment parameter file that omits
+// them asserts nothing (fail closed). Harmless today: with generationProviderLive = false the App Service
+// resolves Generation:Provider = Fake, whose in-process posture is compliant by construction and never
+// runs the governance gate.
+param generationTenantBounded = false
+param generationNoTrainingAttested = false
 
 // Flip to true (with deployAi) to also deploy the Claude-on-Foundry tiers for the E8 provider
 // comparison. Requires a Claude-eligible subscription; the Anthropic Marketplace offer is auto-accepted
@@ -57,9 +100,9 @@ param frontendUrl = 'https://pulse-uat.cobrasoftware.com'
 // hardening pass, but NOT required for B1 go-live.
 param sqlAdminLogin = 'sqladmin'
 param sqlAdminPassword = readEnvironmentVariable('SQL_ADMIN_PASSWORD', '')
-param sqlEntraAdminLogin = 'tbull@dynamis.com'
-// TODO (optional, hardening): set the Entra object id for tbull@dynamis.com to enable the AAD admin:
-//   param sqlEntraAdminObjectId = '<az ad user show --id tbull@dynamis.com --query id -o tsv>'
+// Entra admin — note the tenant UPN is @dynamiscobra.com (tenantDefaultDomain), not @dynamis.com.
+param sqlEntraAdminLogin = 'tbull@dynamiscobra.com'
+param sqlEntraAdminObjectId = '2b210ee5-c558-4eef-92ce-79186cae6595'
 
 // --- Secrets — sourced from environment variables (set in CI from GitHub secrets)
 param jwtSecretKey = readEnvironmentVariable('JWT_SECRET_KEY', '')

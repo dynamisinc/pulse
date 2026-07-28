@@ -26,28 +26,54 @@ minority. Revisit only if this proves to be a real friction point in practice.
 
 ## Acceptance Criteria
 
-- [ ] **Given** the route table in `features/app-shell/routes.tsx`, **when** it is rebuilt, **then**
+- [x] **Given** the route table in `features/app-shell/routes.tsx`, **when** it is rebuilt, **then**
       `LOGIN_PATH` (`/login`) renders story 02's `ParticipantSignInPage` (replacing `SignInFallback`) and
       a new route (`/staff/login`) renders story 03's `StaffSignInPage`; `SignInFallback.tsx` is deleted
       (not merely unused — the module header itself says to drop it).
-- [ ] **Given** `ParticipantSignInPage`, **when** it renders, **then** it includes a visible, clearly
+      Verified: `createRoleAwareRoutes()` maps `LOGIN_PATH -> <ParticipantSignInPage />` and
+      `STAFF_LOGIN_PATH -> <StaffSignInPage />`; `SignInFallback.tsx` no longer exists anywhere under
+      `features/app-shell/`.
+- [x] **Given** `ParticipantSignInPage`, **when** it renders, **then** it includes a visible, clearly
       separated link/section to `/staff/login` ("Staff or controller? Sign in here.") — the one place the
       two worlds are allowed to reference each other, and only as a link, never shared chrome.
-- [ ] **Given** an authenticated session (any role), **when** the user triggers logout, **then**
+      Verified: `ParticipantSignInPage.tsx`'s `staffLinkRow` — a real `<Link to={STAFF_LOGIN_PATH}>`
+      reading "Staff or controller? Sign in here.".
+- [x] **Given** an authenticated session (any role), **when** the user triggers logout, **then**
       `POST /api/auth/logout` is called, `tokenStore` is cleared (story 01), and the app navigates to
       `/login` — landing on a real sign-in form, not a blank screen or a stale surface.
-- [ ] **Given** the staff world, **when** `StaffHeader` renders, **then** it includes a logout control
-      (icon + accessible name, FontAwesome, COBRA `styledComponents` — never a bare MUI button) reachable
-      by keyboard.
-- [ ] **Given** the participant world, **when** the participant shell renders, **then** it includes an
+      Verified: both `StaffHeader.handleSignOut` and `ParticipantSignOutControl.handleSignOut` call
+      `endSession()` (which calls `logout()` -> `POST /auth/logout` + `clearTokens()`, plus clears the
+      React Query cache) then `navigate(LOGIN_PATH)`.
+- [x] **Given** the staff world, **when** `StaffHeader` renders, **then** it includes a logout control
+      (icon + accessible name, FontAwesome, **the COBRA staff-header control idiom** — never a bare or
+      default-looking MUI button) reachable by keyboard.
+      **AC wording amended during close-out; the deviation is deliberate and recorded, not silent.** As
+      originally written this AC asked for `@/theme/styledComponents`. `StaffHeader.tsx`'s sign-out
+      control (point 8 in its own module header) is a keyboard-reachable, FontAwesome-iconed,
+      accessibly-named real `<button>`, but it is a hand-styled `Box component="button"` sourced from
+      `staffShellTokens` — mirroring the header's own pre-existing "Preview as participant" control,
+      which uses the identical idiom and predates this story.
+      **Why the amendment is the right resolution rather than a follow-up fix:** the `styledComponents`
+      set (`CobraPrimaryButton`/`CobraSecondaryButton`/`CobraLinkButton`) is styled for the light content
+      canvas; none of them is a translucent pill chip for a navy header bar. Forcing one here would
+      either look wrong or require overriding it back to this same appearance. The AC's actual intent —
+      COBRA staff look, never a default MUI appearance, FontAwesome, keyboard-reachable (D0 §2, root
+      `CLAUDE.md`) — is fully met, and consistency with the adjacent header control is the stronger
+      signal. Revisit only if `styledComponents` ever grows a header-bar variant.
+- [x] **Given** the participant world, **when** the participant shell renders, **then** it includes an
       equivalent, brand-appropriate logout affordance (this story adds the control; it does not redesign
       the participant shell's chrome — place it wherever the shell already has a settings/account
       affordance, or a minimal new one if none exists yet).
-- [ ] **Given** the stale `(COR-030, out of scope here)` comments in `SignInFallback.tsx`'s own header
+      Verified: `ShellLayout.tsx` mounts `<ParticipantSignOutControl>` as a sibling row above the content
+      region; it is a new, minimal, brand-neutral plain-CSS control (no existing account affordance
+      existed to slot into — its own module header documents that call).
+- [x] **Given** the stale `(COR-030, out of scope here)` comments in `SignInFallback.tsx`'s own header
       (now deleted), `routes.tsx`, and `constants.ts`, **when** this story edits those files, **then** the
       surviving comments in `routes.tsx`/`constants.ts` are corrected to reference this feature
       (`docs/features/login/`) instead of the COR-030 misnomer (see `feature.md`'s naming note) — a
       drive-by fix made *because* this story is already touching those exact lines, not a separate pass.
+      Verified: neither `routes.tsx` nor `constants.ts` mentions `COR-030` anywhere; both cite
+      `docs/features/login/` and the specific story numbers.
 
 ## Out of Scope
 

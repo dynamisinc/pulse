@@ -42,6 +42,17 @@
  * anything but React's own render, keeping the "⌘K → persona → composer"
  * path well under the 3-second budget.
  *
+ * ## Why `StaffPersona`, not `Persona`
+ * The active persona flows picker -> this state -> the persona-context panel,
+ * which renders the D5-014/2.4 "POSTING AS {category}" chip off
+ * `personaType`. That field exists ONLY on the staff projection
+ * (`StaffPersona`; the participant `Persona` structurally omits it —
+ * SOC-052/D1-008). Holding the narrower shape here would force the panel to
+ * cast, so the whole staff chain is typed on `StaffPersona` and the
+ * participant shape simply does not compile into it. Consumers that need only
+ * the common fields (e.g. the composer) still declare `Persona` — a
+ * `StaffPersona` is assignable to it.
+ *
  * World: staff (COBRA console). No UI, no COBRA components here — pure
  * state/logic; `../components/PersonaPicker.tsx` is the chrome.
  */
@@ -55,20 +66,20 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { Persona } from '@/features/personas'
+import type { StaffPersona } from '@/features/personas'
 
 /** Most-recently-used cap (Wave 1: a small, glanceable list — not a full history). */
 const MAX_RECENT_PERSONAS = 8
 
 export interface ActivePersonaContextValue {
   /** The persona the controller is currently operating as, or `null` before any selection. */
-  activePersona: Persona | null
+  activePersona: StaffPersona | null
   /** Persona ids, most-recently-selected first (deduped, capped at {@link MAX_RECENT_PERSONAS}). */
   recentPersonaIds: readonly string[]
   /** Pinned persona ids (insertion order; unordered by the story's own semantics). */
   pinnedPersonaIds: readonly string[]
   /** Sets `persona` as active and records it as the most recent selection. */
-  selectPersona: (persona: Persona) => void
+  selectPersona: (persona: StaffPersona) => void
   /** Pins `personaId` if unpinned, unpins it if already pinned. */
   togglePinned: (personaId: string) => void
   /** Whether `personaId` is currently pinned. */
@@ -87,11 +98,11 @@ export interface ActivePersonaProviderProps {
  * frame; a remount (e.g. a new exercise) resets all three by construction.
  */
 export function ActivePersonaProvider({ children }: ActivePersonaProviderProps) {
-  const [activePersona, setActivePersona] = useState<Persona | null>(null)
+  const [activePersona, setActivePersona] = useState<StaffPersona | null>(null)
   const [recentPersonaIds, setRecentPersonaIds] = useState<readonly string[]>([])
   const [pinnedPersonaIds, setPinnedPersonaIds] = useState<readonly string[]>([])
 
-  const selectPersona = useCallback((persona: Persona) => {
+  const selectPersona = useCallback((persona: StaffPersona) => {
     setActivePersona(persona)
     setRecentPersonaIds(prev => {
       const withoutThisPersona = prev.filter(id => id !== persona.id)

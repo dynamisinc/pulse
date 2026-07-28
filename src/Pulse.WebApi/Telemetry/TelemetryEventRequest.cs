@@ -176,36 +176,19 @@ public sealed class TelemetryEventRequest
         }
 
         // Conditional requiredness — mirrors telemetryEventV0Schema.superRefine (XC-004 / COR-018 / COR-015).
-        if (Actor is not null)
-        {
-            if (Actor.Kind == "participant" && string.IsNullOrEmpty(Actor.ParticipantId))
-            {
-                errors.Add("actor.participantId is required when actor.kind is 'participant'.");
-            }
-
-            if (Actor.Kind == "persona" && string.IsNullOrEmpty(Actor.PersonaId))
-            {
-                errors.Add("actor.personaId is required when actor.kind is 'persona'.");
-            }
-
-            if (Origin == "controller-as-persona" && string.IsNullOrEmpty(Actor.ActingHumanId))
-            {
-                errors.Add("actor.actingHumanId is required when origin is 'controller-as-persona' (COR-018).");
-            }
-
-            // View reach is participant/session-scoped (COR-015), regardless of actor.kind.
-            if ((EventType == "view" || EventType == "article_view")
-                && string.IsNullOrEmpty(Actor.ParticipantId)
-                && string.IsNullOrEmpty(Actor.SessionId))
-            {
-                errors.Add("a view event requires actor.participantId or actor.sessionId for reach counting (COR-015).");
-            }
-        }
-
-        if (Origin == "inject" && string.IsNullOrEmpty(InjectId))
-        {
-            errors.Add("injectId is required when origin is 'inject'.");
-        }
+        // Delegated to TelemetryEnvelopeRules so this ingest mirror and the PulseDbContext write-guard (which
+        // covers the services that add TelemetryEvent rows directly, #356) enforce ONE implementation of the
+        // rules rather than two that can drift.
+        errors.AddRange(TelemetryEnvelopeRules.Validate(new TelemetryAttributionFacts(
+            ActorPresent: Actor is not null,
+            ActorKind: Actor?.Kind,
+            ParticipantId: Actor?.ParticipantId,
+            PersonaId: Actor?.PersonaId,
+            ActingHumanId: Actor?.ActingHumanId,
+            SessionId: Actor?.SessionId,
+            EventType: EventType,
+            Origin: Origin,
+            InjectId: InjectId)));
 
         return errors;
     }

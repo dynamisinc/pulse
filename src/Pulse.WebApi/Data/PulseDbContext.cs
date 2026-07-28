@@ -75,6 +75,9 @@ public class PulseDbContext : DbContext
     /// <summary>Posts authored within a single exercise run.</summary>
     public DbSet<Post> Posts => Set<Post>();
 
+    /// <summary>The REAL follow graph — directed persona→persona edges within a single exercise run (SOC-051).</summary>
+    public DbSet<Follow> Follows => Set<Follow>();
+
     /// <summary>The durable telemetry event store (XC-004).</summary>
     public DbSet<TelemetryEvent> TelemetryEvents => Set<TelemetryEvent>();
 
@@ -121,8 +124,53 @@ public class PulseDbContext : DbContext
             // Required-with-default so the migration adds them NOT NULL to the existing table and the frozen
             // ExerciseScope wire fields are never null.
             entity.Property(e => e.TimeZone).IsRequired().HasDefaultValue("UTC");
-            entity.Property(e => e.Status).IsRequired().HasDefaultValue("scheduled");
+
+            // COR-032 vocabulary (Option B, Tier-2 signed off — exercise-configuration story 01a): the
+            // authoritative literals are build | staged | live | paused | completed | archived. The default
+            // moves scheduled → build ("created and never configured" is staff-only content development).
+            // NO CHECK constraint: the legacy four (scheduled | active | complete | archived) stay VALID
+            // through the transition on purpose — the frontend guard accepts the transitional superset, which
+            // is what makes UAT's independent frontend/backend deploys safe (isExerciseStatus fails closed).
+            entity.Property(e => e.Status).IsRequired().HasDefaultValue("build");
             // CurrentScenarioTime is nullable by its C# type (B2 placeholder) — no extra config.
+
+            // ---------------------------------------------------------------------------------------
+            // Exercise-configuration story 01a — the feature's ONE migration. COR-030 settings, the COR-031
+            // chrome config, the NFR-008 watermark switch and the COR-033 practice flag are all authored
+            // here so stories 01b/02/03/04 add behaviour only. Every free-text/color column is bounded
+            // (nvarchar(n), not nvarchar(max)) — the schema half of the NFR-004 length bound story 01b
+            // enforces on write; the opaque OutletNamesJson blob is the one deliberate exception.
+            // NULLABLE by design: null = "not configured", so the projection keeps serving the shipped
+            // Phase-1 constant and no existing row changes behaviour when the migration lands.
+            //
+            // ISOLATION WARNING (always-Critical, COR-001/XC-002). Exercise is the SCOPE, not an
+            // IExerciseScoped entity, so the central read-side query filter applied at the bottom of this
+            // method DOES NOT COVER THIS TABLE — a settings query here is unfiltered and can return another
+            // exercise's row. Take the exercise from IExerciseContext (or the server-held staff
+            // active-exercise selection), NEVER from a client-supplied id/body/route/query value.
+            // ---------------------------------------------------------------------------------------
+            entity.Property(e => e.WorldName).HasMaxLength(200);
+            entity.Property(e => e.Locale).HasMaxLength(35);           // BCP-47 tags are far shorter in practice.
+            entity.Property(e => e.EnabledChannels).HasMaxLength(256); // comma-separated channel-catalog ids.
+            entity.Property(e => e.BrandName).HasMaxLength(200);
+            entity.Property(e => e.BrandPrimary).HasMaxLength(32);
+            entity.Property(e => e.BrandAccent).HasMaxLength(32);
+            entity.Property(e => e.BrandSurface).HasMaxLength(32);
+            entity.Property(e => e.BrandOnSurface).HasMaxLength(32);
+            entity.Property(e => e.OutletNamesJson).HasColumnType("nvarchar(max)");
+
+            entity.Property(e => e.ChromeTopText).HasMaxLength(512);
+            entity.Property(e => e.ChromeTopFg).HasMaxLength(32);
+            entity.Property(e => e.ChromeTopBg).HasMaxLength(32);
+            entity.Property(e => e.ChromeBottomText).HasMaxLength(512);
+            entity.Property(e => e.ChromeBottomFg).HasMaxLength(32);
+            entity.Property(e => e.ChromeBottomBg).HasMaxLength(32);
+
+            // Non-nullable switches with SAFE defaults: chrome + watermark ON (NFR-008 is never both-off,
+            // and this matches the shipped chrome constant), practice OFF (never-flagged = real conduct).
+            entity.Property(e => e.ComplianceChromeEnabled).IsRequired().HasDefaultValue(true);
+            entity.Property(e => e.WatermarkEnabled).IsRequired().HasDefaultValue(true);
+            entity.Property(e => e.IsPracticeMode).IsRequired().HasDefaultValue(false);
         });
 
         modelBuilder.Entity<PersonaTemplate>(entity =>
@@ -136,6 +184,48 @@ public class PulseDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.ExerciseId).IsRequired();
             entity.HasIndex(e => e.ExerciseId);
+
+            // Handle uniqueness PER EXERCISE, never globally (docs/01-platform-core-isolation.md §7 Q3,
+            // resolved in favour of the recommended per-exercise scope; see backend-host/03). Two different
+            // exercises may each run a "@FulcoEM" — that is the point of an isolated world — but within ONE
+            // exercise a handle identifies exactly one persona, which PersonaCastSeeder's idempotency read and
+            // every by-handle resolver already assume. Same shape as Account.Username above.
+            //
+            // Case-insensitivity comes from the model-wide SQL_Latin1_General_CP1_CI_AS collation set above:
+            // the index key comparison uses the column's collation, so "mvega_fh" and "MVega_FH" COLLIDE
+            // rather than coexisting — consistent with the OrdinalIgnoreCase matching the seeder does in
+            // memory and with the CI `==`/`Contains` the resolvers do on the server.
+            //
+            // The MaxLength is load-bearing, not cosmetic: nvarchar(max) is not index-key eligible in SQL
+            // Server, so the migration narrows this column to make the index possible at all.
+            entity.Property(e => e.Handle).HasMaxLength(256);
+            entity.HasIndex(e => new { e.ExerciseId, e.Handle }).IsUnique();
+
+            // profiles-social-graph/06 presentation fields (COR-020/COR-021/SOC-054). Bounded lengths (the
+            // two union-valued columns are short, closed vocabularies); Bio is optional free text.
+            entity.Property(e => e.Bio).HasMaxLength(Persona.MaxBioLength);
+
+            // Server-side engine-casting gate (never projected to a participant DTO — see the entity's doc).
+            // Required-with-default TRUE so every pre-existing row stays castable exactly as it was.
+            //
+            // HasSentinel(true) is LOAD-BEARING, not decoration: with a store default configured, EF omits a
+            // property from the INSERT when its value equals the sentinel and lets the database default win.
+            // The sentinel would otherwise be the CLR default (false) — so seeding a deliberately
+            // NON-castable persona (the SOC-052 lookalike) would silently insert Castable = TRUE and hand the
+            // engine the very voice this gate exists to withhold. Pinning the sentinel to `true` inverts that:
+            // `true` rides the database default, `false` is always written explicitly.
+            entity.Property(e => e.Castable).IsRequired().HasDefaultValue(true).HasSentinel(true);
+
+            // Required-WITH-DEFAULT, the same shape Exercise.TimeZone/Status use above: the migration adds
+            // these NOT NULL to a table that already holds seeded rows, so the default backfills a
+            // contract-VALID value ("citizen"/"nano"/the fixed pre-exercise scenario epoch) instead of an
+            // empty string or a 0001-01-01 sentinel that would reach a participant surface.
+            entity.Property(e => e.PersonaType).IsRequired().HasMaxLength(32)
+                .HasDefaultValue(Persona.DefaultPersonaType);
+            entity.Property(e => e.AudienceBand).IsRequired().HasMaxLength(16)
+                .HasDefaultValue(Persona.DefaultAudienceBand);
+            entity.Property(e => e.AudienceMagnitude).IsRequired().HasDefaultValue(0);
+            entity.Property(e => e.JoinedAt).IsRequired().HasDefaultValue(Persona.DefaultJoinedAt);
         });
 
         modelBuilder.Entity<Post>(entity =>
@@ -148,6 +238,27 @@ public class PulseDbContext : DbContext
             // Provenance columns (Origin / ActingHumanId / CreatedWallClock — NOT NULL; InjectId — NULL)
             // likewise derive their nullability from their C# types (required / value type vs. string?), so
             // they need no explicit config either.
+        });
+
+        modelBuilder.Entity<Follow>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // IExerciseScoped: required scope + the standard scoped lookup index (house style — Persona/Post).
+            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.HasIndex(e => e.ExerciseId);
+
+            // ONE edge per (exercise, follower, followee) — the database is the last word on the idempotency
+            // POST /api/personas/{id}/follow promises: a duplicate follow can only ever be the same row, even
+            // under a concurrent double-submit that beats the service's existence check. Scope leads the key so
+            // the same ordered persona pair in two exercises is two distinct, non-colliding edges (COR-001).
+            entity.HasIndex(e => new { e.ExerciseId, e.FollowerPersonaId, e.FolloweePersonaId })
+                .IsUnique();
+
+            // The inbound direction ("who follows persona X", and the displayed-follower-count aggregate) is
+            // the read the profile surface performs per persona; the unique index above only serves the
+            // outbound (follower-leading) direction.
+            entity.HasIndex(e => new { e.ExerciseId, e.FolloweePersonaId });
         });
 
         modelBuilder.Entity<TelemetryEvent>(entity =>
@@ -294,6 +405,7 @@ public class PulseDbContext : DbContext
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         GuardExerciseScope();
+        GuardTelemetryEnvelope();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
@@ -301,6 +413,7 @@ public class PulseDbContext : DbContext
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         GuardExerciseScope();
+        GuardTelemetryEnvelope();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
@@ -326,6 +439,44 @@ public class PulseDbContext : DbContext
                 throw new ExerciseScopeViolationException(
                     $"Refusing to persist {entry.Entity.GetType().Name} with a default (empty) ExerciseId " +
                     "(COR-001/XC-001 write-time isolation guard).");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fail-closed write-time telemetry-envelope guard (XC-004, #356). Scans every tracked
+    /// <see cref="TelemetryEvent"/> being added or modified against the LOCKED v0 envelope's
+    /// conditional-requiredness rules (<see cref="TelemetryEnvelopeRules"/>) and THROWS
+    /// <see cref="TelemetryEnvelopeViolationException"/> — before <c>base.SaveChanges</c> runs, so nothing
+    /// reaches the database.
+    /// </summary>
+    /// <remarks>
+    /// Applied CENTRALLY here, for the same reason the exercise-scope guard and the read-side query filter
+    /// are: <c>POST /api/telemetry</c> already re-enforces every conditional rule server-side, but the
+    /// identity/engine services add <see cref="TelemetryEvent"/> rows DIRECTLY to the context, and were on
+    /// the honour system for those rules. One of them wasn't honouring them (#356 — a failed participant
+    /// login persisted <c>actor.kind: 'participant'</c> with no <c>participantId</c>, a shape the ingest
+    /// endpoint rejects with a 400). A guard here makes the class of bug unrepresentable instead of fixing
+    /// one instance of it, and a newly-added emitter is covered automatically.
+    /// </remarks>
+    private void GuardTelemetryEnvelope()
+    {
+        foreach (var entry in ChangeTracker.Entries<TelemetryEvent>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified))
+            {
+                continue;
+            }
+
+            var violations = TelemetryEnvelopeRules.Validate(
+                TelemetryAttributionFacts.FromEntity(entry.Entity));
+
+            if (violations.Count > 0)
+            {
+                throw new TelemetryEnvelopeViolationException(
+                    $"Refusing to persist telemetry event '{entry.Entity.EventType}' " +
+                    $"(eventId {entry.Entity.EventId}): {string.Join(" ", violations)} " +
+                    "(XC-004 write-time envelope guard).");
             }
         }
     }

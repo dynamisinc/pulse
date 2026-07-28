@@ -63,7 +63,9 @@ The full E1 entity set (`Organization`, `ParticipantAccount`, `StaffAssignment`,
 any HTTP endpoint or controller that reads or writes these tables (the feed/post read-write APIs belong to
 a parallel Phase-B0/B1 feature being authored separately; the telemetry ingest endpoint is
 `telemetry/02-telemetry-sink-backend`); handle-uniqueness enforcement on `Persona`/`PersonaTemplate` (open
-question, `docs/01-platform-core-isolation.md` §7 Q3 — per-exercise vs org-global is still undecided);
+question at the time, `docs/01-platform-core-isolation.md` §7 Q3 — per-exercise vs org-global was still
+undecided; **since resolved as per-exercise and enforced on `Persona` by story 03**, the follow-up this
+deferral made necessary — `PersonaTemplate` remains unconstrained);
 seed data or Cast-library instantiation (COR-021, a later content-authoring story); Cadence's `ScenarioDay`
 semantics or any exercise-clock field beyond the bare `Exercise` anchor row (`exercise-clock`'s own future
 backend story).

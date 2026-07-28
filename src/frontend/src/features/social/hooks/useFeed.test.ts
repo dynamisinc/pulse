@@ -18,13 +18,34 @@
  * `usePersonas` and `resolveFeed` both run through the shipped mock adapters
  * (USE_MOCK_DATA on in test), so no providers are needed — the seeded Fairhaven
  * cast resolves and the appended author (an existing seeded persona) is present.
+ *
+ * `@/core/auth` is mocked to a fixed, non-read-only, persona-bound session
+ * (WR-005 fold): `useFeed` now reads the session itself for its own COR-015
+ * guard, and `useSession()` throws outside a provider — a synchronous mock
+ * sidesteps that with no timing/router complexity, matching the sibling
+ * `useFollow.*.test.ts` convention for the same hook family.
  */
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Session } from '@/core/auth'
 import { personaIdForHandle } from '@/features/personas'
 import type { Post } from '@/features/social'
 import { postStore } from '../services/postStore'
 import { useFeed } from './useFeed'
+
+const MOCK_SESSION: Session = {
+  exerciseId: 'ex-mock-0001',
+  accountId: 'acct-dreyes',
+  role: 'participant',
+  personaId: 'persona-dreyes_fh',
+  actingHumanId: 'human-dreyes',
+  isReadOnly: false,
+  expiresAt: '2999-01-01T00:00:00.000Z',
+}
+
+vi.mock('@/core/auth', () => ({
+  useSession: () => MOCK_SESSION,
+}))
 
 function buildPost(overrides: Partial<Post> = {}): Post {
   return {

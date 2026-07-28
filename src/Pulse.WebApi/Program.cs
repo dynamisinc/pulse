@@ -4,6 +4,10 @@ using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
+using Pulse.WebApi.Features.ExerciseConfiguration;
+using Pulse.WebApi.Features.ExerciseConfiguration.Chrome;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
+using Pulse.WebApi.Features.ExerciseConfiguration.PracticeMode;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -70,6 +74,44 @@ builder.Services.AddExerciseResolution();
 // named policies under the single app.UseRateLimiter() below.
 builder.Services.AddStaffIdentity(builder.Configuration);
 builder.Services.AddSessions(builder.Configuration);
+
+// Per-exercise configuration (E1 exercise-configuration, story 01b). REQUIRED, not optional: the six
+// participant-shell config GETs mapped by MapParticipantShellEndpoints() below now resolve
+// ParticipantShellConfigService, which only this call registers — omit it and those previously-working
+// routes fail on an unresolvable handler dependency and blank the participant shell (the #310/#317
+// composition-root failure mode). Placed after AddStaffIdentity for readability — the staff settings
+// endpoints reuse the staff-session authorization filter, which resolves from HttpContext.RequestServices
+// at request time, so there is no DI ordering dependency. It also TryAdd()s the constant-preserving
+// defaults for the three wave-3 projection seams (IChromeConfigProjection / IShellVariantProjection /
+// IOverlayStateProjection). A contributor — stories 02/03/04 — MUST override with services.Replace(),
+// which works from either side of this line. Never TryAdd: against an already-registered default that is
+// a silent no-op leaving the constant serving. (A bare AddScoped would in fact still win, last-descriptor;
+// the trap is copying THIS line's TryAdd idiom.) Guarded by ExerciseConfiguration/CompositionRootWiringTests.
+builder.Services.AddExerciseConfiguration();
+
+// E1 exercise-configuration WAVE 3 — the three contributor slices, each shipping its own Add*/Map* pair from
+// its own extensions file (no builder edits this one). All three override an AddExerciseConfiguration()
+// TryAdd()ed default with services.Replace(), which is ORDER-INDEPENDENT — so listing them after the line
+// above is this feature's CONVENTION for readability, not a correctness requirement. (The convention exists
+// so the mistaken TryAdd idiom can never appear to work: a TryAdd here would silently stand down and leave
+// 01b's constant serving.) Practice mode is the one seam with NO fail-safe default anywhere — deliberately,
+// so a missing AddPracticeMode() is a loud GetRequiredService throw rather than a silent "everything is
+// eligible" that would leak rehearsal data into an AAR. Guarded by
+// ExerciseConfiguration/CompositionRootWiringTests.
+builder.Services.AddComplianceChromeConfig();   // story 02 — per-exercise COR-031 chrome + the NFR-008 guard
+builder.Services.AddPracticeMode();             // story 04 — COR-033 practice flag + IEvaluationEligibility
+builder.Services.AddExerciseLifecycle();        // story 03 — COR-032 state machine + shell/overlay projections
+
+// Default-deny session gate (identity-auth-roles/11, #361 — the fix for #359) — orchestrator-wired.
+// Registers a RequireAuthenticatedUser FALLBACK policy plus the result handler that writes the 401/403 and
+// emits the XC-004 access.rejected audit event. Before this, every endpoint asked only "is an exercise scope
+// resolved" — a COR-001 isolation question that UseExerciseResolution answers for an ANONYMOUS caller from
+// the bare Host header — so 12 routes and the SignalR hub were reachable with no credential at all. The
+// fallback policy applies to every endpoint that declares no authorization metadata of its own: minimal
+// APIs, MVC controllers (POST /api/telemetry) and hub endpoints alike, which an IEndpointFilter could not
+// have covered. The ONLY exceptions are the eleven routes in PreAuthAllowlist, each marked
+// .AllowAnonymousPreAuth() at its own mapping call site.
+builder.Services.AddSessionAuthorization();
 
 // Participant login methods (Phase B2 Wave 3). AddParticipantAccounts (identity-auth-roles/02) registers the
 // participant credential-login + staff account-provisioning services + the "participant-login" rate-limiter
@@ -195,6 +237,38 @@ app.UseWhen(
 // host-after-session inverts precedence (shows the wrong exercise) — keep it exactly here.
 app.UseSessionAuthentication();
 
+// Default-deny authorization (identity-auth-roles/11) — MUST be called EXPLICITLY, and MUST sit exactly here:
+// immediately after UseSessionAuthentication, which is what populates HttpContext.User for a live session.
+// WebApplication auto-inserts UseAuthorization() ahead of ALL user middleware when it is never called
+// explicitly; that placement would evaluate the fallback policy before the principal exists. The failure would
+// be SILENT and nastier than a total outage: the eleven allowlisted routes keep working (IAllowAnonymous
+// short-circuits the middleware wherever it sits), so login still succeeds — and then every authenticated call
+// after it 401s. Calling it here is load-bearing, not stylistic — the same class of ordering constraint as
+// host-resolution-before-session-authentication above. From this line on, an endpoint is reachable without a
+// live session ONLY if it carries .AllowAnonymousPreAuth() (PreAuthAllowlist).
+//
+// It runs BEFORE UseExerciseLifecycleGating() below, deliberately. Both middlewares document "immediately
+// after the session scope is final", and both constraints hold with authorization first — this one reads
+// HttpContext.User and writes no scope, so the lifecycle gate still sees the same resolved scope it would
+// have. Ordering them the other way would answer an UNAUTHENTICATED request to a participant route with the
+// lifecycle gate's 403, disclosing the exercise's lifecycle state to a caller who has not proven it may know
+// anything at all. Default-deny is the outermost gate; "may this caller have any data" is answered before
+// "is this world currently being served".
+app.UseAuthorization();
+
+// COR-032 participant lifecycle gating (exercise-configuration story 03) — in build/completed/archived the
+// participant-world routes are NOT SERVED (403); staff sessions and every un-listed route pass through.
+// ORDER IS LOAD-BEARING, and this is the ONLY middleware-ordering constraint wave 3 introduces: it MUST run
+// AFTER both UseExerciseResolution() (host → provisional scope) and UseSessionAuthentication() (session
+// scope, higher precedence) above, because it decides from the RESOLVED scope. Wired any earlier it reads an
+// unset scope on every request, finds no lifecycle to check, and passes everything through — a SILENT, TOTAL
+// no-op: a gate that looks wired, breaks no test, and lets /api/feed hand a participant an archived world's
+// posts. It sits before UseRateLimiter() only because that is where "immediately after the scope is final"
+// falls; the limiter's policies are per-endpoint, so no gated route's behaviour depends on that adjacency.
+// The mis-ordering itself is caught by ExerciseConfiguration/LifecycleGatingPipelineOrderTests' real-SQL 403
+// probe, the only test that can see it (a slice-composed host fixes its own scope, so it cannot).
+app.UseExerciseLifecycleGating();
+
 // Rate limiting (identity-auth-roles/05 staff-login + /03 session-endpoints policies). NOTE (Gate-1,
 // tracked for /security-review before the umbrella→main PR): the staff-login limiter partitions on
 // Connection.RemoteIpAddress, which behind the Azure App Service reverse proxy is the platform proxy's
@@ -208,8 +282,14 @@ app.UseRateLimiter();
 // Liveness — no checks run (Predicate false), so it stays free of any DB/dependency coupling: the host
 // is "up" regardless of database reachability (story 01 AC). Readiness (/health/ready) runs every
 // registered check, including story 02's DbContext check, for deploy/orchestration probes.
-app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false });
-app.MapHealthChecks("/health/ready");
+// PRE-AUTH (identity-auth-roles/11, PreAuthAllowlist): platform liveness/readiness probes present no
+// credential by construction, and a probe that 401s reads as an unhealthy instance to the orchestrator.
+app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymousPreAuth();
+app.MapHealthChecks("/health/ready").AllowAnonymousPreAuth();
+
+// Attribute-routed controllers. POST /api/telemetry is the only one today, and it inherits the default-deny
+// fallback policy above — the surface a minimal-API endpoint filter could never have gated (identity-auth-
+// roles/11 decision 1). Server-side authority over its exerciseId/actor claims is story 13 (#362).
 app.MapControllers();
 
 // Social API endpoints + realtime hub (Phase B1) — the orchestrator-owned endpoint mappings paired with the
@@ -232,10 +312,26 @@ app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
 // (shell-state, chrome-config, brand-tokens, channel-nav-config, alerts, overlay-state). Fixes the UAT
 // bug where these 404'd with mock data OFF: the shell-state 404 forced the fail-closed readOnly variant,
 // which disabled the realtime feed stream + "new posts" pill so the participant feed never updated live.
-// Fixed Phase-1 config; scope comes only from the resolved IExerciseContext (COR-001), fail-closed 401 on
-// an unresolved scope. GET reads a read-only/observer session must still receive — NOT under
-// DenyReadOnlySessions().
+// Story 01b replaced the fixed Phase-1 constants with PER-EXERCISE config read through
+// ParticipantShellConfigService (registered by AddExerciseConfiguration above) behind the SAME frozen
+// wire shapes, so no frontend consumer or runtime type-guard changed. Scope comes only from the resolved
+// IExerciseContext (COR-001), fail-closed 401 on an unresolved scope. GET reads a read-only/observer
+// session must still receive — NOT under DenyReadOnlySessions().
 app.MapParticipantShellEndpoints();
+
+// Staff per-exercise settings (E1 exercise-configuration, story 01b): GET/PUT /api/staff/exercise-settings.
+// Staff-gated (XC-002) and exercise-scoped from the server-resolved scope — the route takes no exercise id
+// in any form, so there is no IDOR surface. The other half of the required line-pair above.
+app.MapExerciseConfigurationEndpoints();
+
+// E1 exercise-configuration WAVE 3 staff surfaces — the endpoint half of the three DI lines above. All three
+// are staff-gated (XC-002) and take the exercise from the server-resolved scope alone: no route, query or
+// body carries an exercise id, so none of them has an IDOR surface. None of them maps a PARTICIPANT route —
+// /api/chrome-config, /api/shell-state and /api/overlay-state stay on MapParticipantShellEndpoints() above;
+// wave 3 only changed what backs them (the Replace()d projections).
+app.MapComplianceChromeEndpoints();     // story 02 — GET/PUT /api/staff/chrome-settings
+app.MapPracticeModeEndpoints();         // story 04 — GET/PUT /api/staff/practice-mode
+app.MapExerciseLifecycleEndpoints();    // story 03 — GET /api/staff/exercise-lifecycle, POST .../transition
 
 // Identity + exercise-resolution endpoints (Phase B2 Waves 1–3). Scope comes only from the resolved
 // IExerciseContext (COR-001); /exercise-context and /session read the resolved scope, never a client
@@ -256,8 +352,13 @@ app.MapEngineContentSeedEndpoints();       // #327 POST /api/ops/seed-engine-con
 // (wired inside MapEngineReview): a live STAFF session is required (401 otherwise) AND it must be assigned
 // to the resolved exercise (403 NotAssigned, COR-005) — so a participant/read-only session cannot drive
 // the safety-critical cockpit. Requires AddStaffIdentity (above) to precede AddEngineReview — it does.
+// #297/#353: within that group the MUTATING routes carry an additional EngineCockpitControllerRoleFilter
+// (StaffAssignment.Role == "controller"), so an assigned evaluator/planner can WATCH via the two GETs but
+// cannot steer — including the kill switch. AddEngineReview must also follow AddEngineGeneration (above):
+// GET /api/engine/settings resolves IGenerationProvider + IOptions<GenerationOptions>. It does.
 app.MapEngineRuntime();   // #285 reaction-loop host runtime surface
 app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + swamped-mode + kill-switch
+                          // #353 + GET /api/engine/settings, POST settings/{autonomy-default,tier-policy}
 
 // World-steering endpoints (Wave 2) — same COR-001 discipline as the cockpit above: scope comes only from the
 // resolved IExerciseContext, never a client exerciseId, and both groups reuse EngineCockpitStaffAuthorizationFilter

@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Features.Social;
 
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Features.Social.Follows;
 
 /// <summary>
 /// The participant read path behind <c>GET /api/feed</c> and <c>GET /api/threads/{postId}</c> (SOC-080,
@@ -22,17 +23,29 @@ public sealed class PostReadService
 {
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
+    private readonly ICurrentSessionPersonaAccessor _sessionPersonaAccessor;
+    private readonly FollowService _followService;
 
-    /// <summary>Creates the service over the request-scoped persistence context and exercise scope.</summary>
+    /// <summary>Creates the service over the request-scoped persistence context, exercise scope, and follow graph.</summary>
     /// <param name="dbContext">The persistence context whose global query filter scopes every read.</param>
     /// <param name="exerciseContext">The resolved exercise scope, read for a defense-in-depth fail-closed guard.</param>
-    public PostReadService(PulseDbContext dbContext, IExerciseContext exerciseContext)
+    /// <param name="sessionPersonaAccessor">Resolves the caller's session-bound persona for the Following scope.</param>
+    /// <param name="followService">The follow graph the Following scope filters authors by.</param>
+    public PostReadService(
+        PulseDbContext dbContext,
+        IExerciseContext exerciseContext,
+        ICurrentSessionPersonaAccessor sessionPersonaAccessor,
+        FollowService followService)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
+        ArgumentNullException.ThrowIfNull(sessionPersonaAccessor);
+        ArgumentNullException.ThrowIfNull(followService);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
+        _sessionPersonaAccessor = sessionPersonaAccessor;
+        _followService = followService;
     }
 
     /// <summary>
@@ -58,6 +71,58 @@ public sealed class PostReadService
         var posts = await _dbContext.Posts
             .AsNoTracking()
             .Where(post => post.DeletedAt == null)
+            .OrderByDescending(post => post.CreatedScenarioTime)
+            .ToListAsync(cancellationToken);
+
+        return posts.Select(ParticipantPostDto.FromPost).ToArray();
+    }
+
+    /// <summary>
+    /// Reads the FOLLOWING-scoped feed (SOC-081, <c>feeds-discovery/02</c>): the in-scope, non-soft-deleted
+    /// posts authored by personas the caller's session-bound persona actually follows, newest scenario time
+    /// first, each narrowed to the participant-safe <see cref="ParticipantPostDto"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>An empty follow set yields an EMPTY feed — never the All-Posts fallback.</b> A caller who follows
+    /// nobody (or whose session carries no persona at all) gets an empty list, not the unfiltered feed: a
+    /// silent widening would be indistinguishable from the All Posts channel and would misrepresent the
+    /// participant's own graph. The same is true of an unresolved scope, where the endpoint refuses first
+    /// anyway.
+    /// </para>
+    /// <para>
+    /// Exercise isolation is unchanged: the author filter is composed ON TOP of the central query filter
+    /// (COR-001), and the followed-id set itself comes from the same scoped <c>Follows</c> read — so a followed
+    /// persona from another exercise cannot exist to widen this result.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The in-scope posts authored by followed personas, newest scenario time first.</returns>
+    public async Task<IReadOnlyList<ParticipantPostDto>> GetFollowingFeedAsync(CancellationToken cancellationToken)
+    {
+        if (_exerciseContext.CurrentExerciseId is null)
+        {
+            return Array.Empty<ParticipantPostDto>();
+        }
+
+        var sessionPersona = await _sessionPersonaAccessor.GetCurrentSessionPersonaAsync(cancellationToken);
+        if (sessionPersona is null)
+        {
+            // No session-bound persona → no follow graph of one's own → an honest empty feed.
+            return Array.Empty<ParticipantPostDto>();
+        }
+
+        var followedPersonaIds = await _followService.GetFollowingAsync(sessionPersona.PersonaId, cancellationToken);
+        if (followedPersonaIds.Count == 0)
+        {
+            return Array.Empty<ParticipantPostDto>();
+        }
+
+        var followedSet = followedPersonaIds.ToArray();
+
+        var posts = await _dbContext.Posts
+            .AsNoTracking()
+            .Where(post => post.DeletedAt == null && followedSet.Contains(post.AuthorPersonaId))
             .OrderByDescending(post => post.CreatedScenarioTime)
             .ToListAsync(cancellationToken);
 

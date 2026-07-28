@@ -140,7 +140,10 @@ public sealed class ParticipantLoginServiceTests
         var events = await ReadLoginEventsAsync(exercise.Id);
         events.Should().ContainSingle("a failed login still emits one XC-004 login event");
         events[0].Payload.Should().Contain("failure");
-        events[0].Actor.Kind.Should().Be("participant");
+        events[0].Actor.Kind.Should().Be(
+            "system",
+            "an identity-less attempt is a SYSTEM actor: the v0 envelope conditionally requires participantId "
+            + "whenever kind is 'participant', so claiming that kind here would be off-envelope (#356)");
         events[0].Actor.ParticipantId.Should().BeNull("a failed login carries NO session identity");
         var target = events[0].Target;
         target.Should().NotBeNull("the failure event points at the attempted handle");

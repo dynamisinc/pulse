@@ -14,8 +14,11 @@ avatar pick — created live in the active exercise and immediately selectable t
       and nothing else is required to start posting.
 - [ ] On save, the new persona exists in the **active exercise** (COR-001/003), appears in the
       picker, and can be set active and posted from immediately (story 01).
-- [ ] Handle validation enforces per-exercise uniqueness (open question 3 default: per-exercise) and
-      surfaces a clear, keyboard-accessible error (NFR-001).
+- [ ] Handle validation enforces per-exercise uniqueness (§7 Q3, **resolved**: per-exercise,
+      case-insensitive — so `MVega_FH` collides with an existing `mvega_fh` and the message must say so) and
+      surfaces a clear, keyboard-accessible error (NFR-001). The database already refuses the duplicate
+      (`IX_Personas_ExerciseId_Handle`, `backend-host/03`); this AC is about catching it before the write so
+      the controller sees a friendly error, not a 500.
 - [ ] The create action is captured in telemetry/audit as a controller action (XC-004) and is never
       visible to participants (XC-002).
 - [ ] The whole path is achievable in ≤60s for a practiced controller (COR-022) — minimal fields, no

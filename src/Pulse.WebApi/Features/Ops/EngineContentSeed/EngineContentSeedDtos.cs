@@ -54,6 +54,24 @@ public sealed class EngineContentSeedResponseDto
     [JsonPropertyName("personasReused")]
     public required int PersonasReused { get; init; }
 
+    /// <summary>
+    /// How many of the REUSED rows had their presentation columns (bio / archetype / band / magnitude /
+    /// join instant) rewritten because they carried only the migration's defaults. A SUBSET of
+    /// <see cref="PersonasReused"/>, not an addition to it. Surfaced so the one mutation the seeder is
+    /// allowed to make to an existing row is visible to the operator running the seed — a re-seed that
+    /// rewrote six rows now says so instead of reporting a flat "6 reused".
+    /// </summary>
+    [JsonPropertyName("personasBackfilled")]
+    public required int PersonasBackfilled { get; init; }
+
+    /// <summary>
+    /// How many of the REUSED rows had their engine-casting gate CLOSED to match the catalog (also a subset
+    /// of <see cref="PersonasReused"/>). Non-zero means the seeder changed what the ENGINE may do with an
+    /// existing persona — never a silent change.
+    /// </summary>
+    [JsonPropertyName("personasCastableClosed")]
+    public required int PersonasCastableClosed { get; init; }
+
     /// <summary>The freshly-built starter storyline's id (in-memory only — not persisted this phase).</summary>
     [JsonPropertyName("storylineId")]
     public required string StorylineId { get; init; }
@@ -89,6 +107,8 @@ public sealed class EngineContentSeedResponseDto
                 "A provisioned seed result must carry a hostname."),
             PersonasCreated = result.PersonasCreated,
             PersonasReused = result.PersonasReused,
+            PersonasBackfilled = result.PersonasBackfilled,
+            PersonasCastableClosed = result.PersonasCastableClosed,
             StorylineId = (result.StorylineId ?? throw new InvalidOperationException(
                 "A provisioned seed result must carry a storyline id.")).ToString(),
             StorylineTitle = result.StorylineTitle ?? string.Empty,
@@ -96,7 +116,39 @@ public sealed class EngineContentSeedResponseDto
             Note = "The reaction loop was registered (or its registration replaced). The starter storyline is "
                 + "in-memory and rebuilt fresh at scenario minute 0 on every seed, so a re-run resets any "
                 + "intensity/phase progress accrued since the last seed; persona rows are reused, never "
-                + "duplicated. Re-call this endpoint after a host restart (the in-memory registry is emptied).",
+                + "duplicated. Re-call this endpoint after a host restart (the in-memory registry is emptied)."
+                + MutationNote(result),
         };
+    }
+
+    /// <summary>
+    /// Appends a plain-language sentence to <see cref="Note"/> when this seed MUTATED existing rows, so an
+    /// operator reading the response sees it without having to compare counts (Gate-1 S-B). Empty when the
+    /// run only created and/or reused rows untouched — the ordinary case stays quiet.
+    /// </summary>
+    /// <param name="result">The provisioned seed result.</param>
+    /// <returns>The extra sentence(s), or an empty string.</returns>
+    private static string MutationNote(EngineContentSeedResult result)
+    {
+        if (result.PersonasBackfilled == 0 && result.PersonasCastableClosed == 0)
+        {
+            return string.Empty;
+        }
+
+        var note = " THIS RUN ALSO MODIFIED EXISTING ROWS:";
+        if (result.PersonasBackfilled > 0)
+        {
+            note += $" {result.PersonasBackfilled} persona(s) carried only the schema defaults for the "
+                + "presentation columns (bio / archetype / audience band / magnitude / join instant) and were "
+                + "backfilled with their authored values — rows with authored data were left untouched.";
+        }
+
+        if (result.PersonasCastableClosed > 0)
+        {
+            note += $" {result.PersonasCastableClosed} persona(s) had their engine-casting gate CLOSED to "
+                + "match the catalog, so the engine can no longer voice them.";
+        }
+
+        return note;
     }
 }

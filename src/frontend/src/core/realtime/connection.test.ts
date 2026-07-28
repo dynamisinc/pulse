@@ -13,8 +13,13 @@
  * documented test seam — with a hand-rolled fake `HubConnection`, never a real
  * WebSocket and never a `vi.mock('@microsoft/signalr')` of the whole package.
  */
-import { describe, expect, it } from 'vitest'
-import { createRealtimeConnection, HubConnectionState } from './connection'
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  createRealtimeConnection,
+  HubConnectionState,
+  sessionAccessTokenFactory,
+} from './connection'
+import { clearTokens, setTokens } from '@/core/auth/tokenStore'
 
 type Handler = (...args: unknown[]) => void
 
@@ -97,6 +102,37 @@ function buildFake() {
   })
   return { fake, connection, getBuildCallCount: () => buildCallCount }
 }
+
+describe('sessionAccessTokenFactory — the hub credential (identity-auth-roles/11)', () => {
+  afterEach(() => {
+    clearTokens()
+  })
+
+  it('supplies the stored access token', () => {
+    // Before story 11 the hub connected with NO credential and the server accepted it — an
+    // unauthenticated client received live PostReceived frames (#359). Both hub endpoints are now
+    // gated, so the connection has to present the session token or the participant feed goes dark.
+    setTokens({ token: 'session-token-abc' })
+
+    expect(sessionAccessTokenFactory()).toBe('session-token-abc')
+  })
+
+  it('reads the store on EVERY call, so a rotated token is picked up on reconnect', () => {
+    // SignalR calls the factory again on each negotiate/reconnect. Capturing the token once would
+    // pin the connection to a token the silent refresh has already rotated away.
+    setTokens({ token: 'first' })
+    expect(sessionAccessTokenFactory()).toBe('first')
+
+    setTokens({ token: 'rotated' })
+    expect(sessionAccessTokenFactory()).toBe('rotated')
+  })
+
+  it('returns an empty string when nothing is stored, so the connection fails closed', () => {
+    clearTokens()
+
+    expect(sessionAccessTokenFactory()).toBe('')
+  })
+})
 
 describe('createRealtimeConnection — one shared connection, many handlers', () => {
   it('builds the underlying HubConnection lazily, and only ONCE across multiple subscribe calls', () => {
