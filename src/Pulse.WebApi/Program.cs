@@ -332,8 +332,13 @@ app.MapEngineContentSeedEndpoints();       // #327 POST /api/ops/seed-engine-con
 // (wired inside MapEngineReview): a live STAFF session is required (401 otherwise) AND it must be assigned
 // to the resolved exercise (403 NotAssigned, COR-005) — so a participant/read-only session cannot drive
 // the safety-critical cockpit. Requires AddStaffIdentity (above) to precede AddEngineReview — it does.
+// #297/#353: within that group the MUTATING routes carry an additional EngineCockpitControllerRoleFilter
+// (StaffAssignment.Role == "controller"), so an assigned evaluator/planner can WATCH via the two GETs but
+// cannot steer — including the kill switch. AddEngineReview must also follow AddEngineGeneration (above):
+// GET /api/engine/settings resolves IGenerationProvider + IOptions<GenerationOptions>. It does.
 app.MapEngineRuntime();   // #285 reaction-loop host runtime surface
 app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + swamped-mode + kill-switch
+                          // #353 + GET /api/engine/settings, POST settings/{autonomy-default,tier-policy}
 
 app.Run();
 

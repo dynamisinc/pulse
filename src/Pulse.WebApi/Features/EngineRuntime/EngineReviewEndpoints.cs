@@ -16,7 +16,8 @@ using Pulse.Core.Features.Generation.Services;
 /// <summary>
 /// The controller review-cockpit API (story 02) on <c>/api/engine</c>: the exercise-scoped queue GET plus the
 /// approve / edit / veto / re-roll / batch-approve review actions and the swamped-mode + kill-switch + restore
-/// autonomy controls. Minimal-API extension methods (the <c>Add*</c>/<c>Map*</c> convention) — the orchestrator wires
+/// autonomy controls, plus the engine-settings GET + the autonomy-default / tier-policy POSTs (autonomy-safety
+/// story 05). Minimal-API extension methods (the <c>Add*</c>/<c>Map*</c> convention) — the orchestrator wires
 /// the single <see cref="AddEngineReview"/> / <see cref="MapEngineReview"/> pair into <c>Program.cs</c> AFTER
 /// this story is Gate-2 clean (paired with the mock→live flip of <c>useReviewQueue</c>, a SEPARATE step); no
 /// builder edits <c>Program.cs</c>.
@@ -36,9 +37,15 @@ public static class EngineReviewEndpoints
     /// <see cref="EngineReviewTickHost"/> (hosted), and the host-wide degraded-mode
     /// <see cref="EngineAutonomyProviderHealthListener"/> — which REPLACES the generation core's no-op
     /// <see cref="IProviderHealthListener"/> so a provider circuit trip clamps every active exercise to Suggest
-    /// (§3.5). The replace is deterministic because the orchestrator wires this AFTER
-    /// <c>AddEngineGeneration</c>.
+    /// (§3.5) — and the per-exercise <see cref="EngineTierPolicyRegistry"/> (Singleton, TryAdd — shared with
+    /// <c>AddReactionLoopHost</c>).
     /// </summary>
+    /// <remarks>
+    /// <b>Wire this AFTER <c>AddEngineGeneration</c>.</b> Two things depend on that order: the
+    /// <see cref="IProviderHealthListener"/> replacement above, and <see cref="EngineReviewService"/>'s
+    /// <see cref="IGenerationProvider"/> + <c>IOptions&lt;GenerationOptions&gt;</c> dependencies, which
+    /// <c>GET /api/engine/settings</c> reads (read-only — nothing here ever mutates governed generation config).
+    /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <returns>The same collection, for chaining.</returns>
     public static IServiceCollection AddEngineReview(this IServiceCollection services)
@@ -48,6 +55,11 @@ public static class EngineReviewEndpoints
         services.AddScoped<EngineReviewService>();
         services.AddScoped<IEngineReviewBroadcaster, EngineReviewBroadcaster>();
         services.AddSingleton<EngineAutonomyRegistry>();
+
+        // The per-exercise model-tier-policy store (story 05). TryAdd so this and AddReactionLoopHost converge on
+        // ONE singleton whichever is wired first — the load-bearing shared-instance point: the settings POST and
+        // the loop's per-burst read MUST see the same dictionary or a tier choice would never reach generation.
+        services.TryAddSingleton<EngineTierPolicyRegistry>();
 
         // The degraded-mode bridge (NFR-003 / ADP-042): replace the generation core's no-op listener so a
         // provider circuit trip fans DegradeToSuggest out to every active exercise (only ever LOWERS, §8.2).
@@ -74,15 +86,28 @@ public static class EngineReviewEndpoints
             .MapGroup(string.Empty)
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>();
 
+        // #297: every MUTATING cockpit route additionally requires the caller's StaffAssignment.Role to be
+        // 'controller' (EngineCockpitControllerRoleFilter — a SIBLING of the staff filter above, composed with it,
+        // never a second auth mechanism). An evaluator/planner assigned to the exercise may WATCH the cockpit
+        // (both GETs below stay on the read-only group) but may not steer it: no approve/veto/re-roll, no kill
+        // switch, no settings change. The sub-group carries an EMPTY prefix so route templates are unchanged.
+        var steering = cockpit
+            .MapGroup(string.Empty)
+            .AddEndpointFilter<EngineCockpitControllerRoleFilter>();
+
         cockpit.MapGet("/api/engine/review-queue", GetQueueAsync);
-        cockpit.MapPost("/api/engine/review/{draftId:guid}/approve", ApproveAsync);
-        cockpit.MapPost("/api/engine/review/{draftId:guid}/edit", EditAsync);
-        cockpit.MapPost("/api/engine/review/{draftId:guid}/veto", VetoAsync);
-        cockpit.MapPost("/api/engine/review/{draftId:guid}/re-roll", ReRollAsync);
-        cockpit.MapPost("/api/engine/review/batch-approve", BatchApproveAsync);
-        cockpit.MapPost("/api/engine/autonomy/swamped-mode", SetSwampedModeAsync);
-        cockpit.MapPost("/api/engine/autonomy/kill-switch", EngageKillSwitchAsync);
-        cockpit.MapPost("/api/engine/autonomy/restore", RestoreAsync);
+        cockpit.MapGet("/api/engine/settings", GetSettingsAsync);
+
+        steering.MapPost("/api/engine/review/{draftId:guid}/approve", ApproveAsync);
+        steering.MapPost("/api/engine/review/{draftId:guid}/edit", EditAsync);
+        steering.MapPost("/api/engine/review/{draftId:guid}/veto", VetoAsync);
+        steering.MapPost("/api/engine/review/{draftId:guid}/re-roll", ReRollAsync);
+        steering.MapPost("/api/engine/review/batch-approve", BatchApproveAsync);
+        steering.MapPost("/api/engine/autonomy/swamped-mode", SetSwampedModeAsync);
+        steering.MapPost("/api/engine/autonomy/kill-switch", EngageKillSwitchAsync);
+        steering.MapPost("/api/engine/autonomy/restore", RestoreAsync);
+        steering.MapPost("/api/engine/settings/autonomy-default", SetAutonomyDefaultAsync);
+        steering.MapPost("/api/engine/settings/tier-policy", SetTierPolicyAsync);
 
         return endpoints;
     }
@@ -256,6 +281,66 @@ public static class EngineReviewEndpoints
         return MapAutonomy(result);
     }
 
+    /// <summary>
+    /// <c>GET /api/engine/settings</c> — the read-only "what is this exercise's engine actually running" view:
+    /// active provider, the governed <c>Generation:Tiers:*</c> mapping (informational), the exercise's autonomy
+    /// default + safety clamp, and its tier-policy mode. Open to ANY assigned staff caller (an evaluator may
+    /// watch); fails closed with <c>401</c> on an unresolved scope (COR-001).
+    /// </summary>
+    private static async Task<IResult> GetSettingsAsync(EngineReviewService service, CancellationToken cancellationToken)
+    {
+        var result = await service.GetSettingsAsync(cancellationToken);
+        return MapSettings(result);
+    }
+
+    /// <summary>
+    /// <c>POST /api/engine/settings/autonomy-default</c> — sets the exercise's DEFAULT autonomy level
+    /// (<c>suggest</c> / <c>delayed-auto</c>) on the SHARED autonomy state the loop reads, live for the next
+    /// burst. Controller-role only. <c>auto</c> (v1.1) and any unknown literal are rejected <c>400</c>; a change
+    /// never lifts an active safety clamp (§8.2).
+    /// </summary>
+    private static async Task<IResult> SetAutonomyDefaultAsync(
+        EngineAutonomyDefaultRequest? request,
+        EngineReviewService service,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return Results.BadRequest("A JSON autonomy-default body is required.");
+        }
+
+        var result = await service.SetExerciseAutonomyDefaultAsync(request.Level, request.ToInput(), cancellationToken);
+        return MapSettings(result);
+    }
+
+    /// <summary>
+    /// <c>POST /api/engine/settings/tier-policy</c> — sets the exercise's model-tier policy mode
+    /// (<c>standard</c> / <c>ambient</c> / <c>auto</c>, where <c>auto</c> clears the override). Controller-role
+    /// only. Never sets which deployment/model a tier resolves to (that stays governed config, NFR-005).
+    /// </summary>
+    private static async Task<IResult> SetTierPolicyAsync(
+        EngineTierPolicyRequest? request,
+        EngineReviewService service,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return Results.BadRequest("A JSON tier-policy body is required.");
+        }
+
+        var result = await service.SetTierPolicyModeAsync(request.Mode, request.ToInput(), cancellationToken);
+        return MapSettings(result);
+    }
+
+    /// <summary>Maps an engine-settings result to its HTTP status (fail closed).</summary>
+    private static IResult MapSettings(EngineSettingsResult result) => result.Outcome switch
+    {
+        EngineReviewOutcome.Ok => Results.Ok(result.Settings),
+        EngineReviewOutcome.ScopeUnresolved => Results.Unauthorized(),
+        EngineReviewOutcome.Invalid => Results.BadRequest(result.ValidationError),
+        _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
+    };
+
     /// <summary>Maps a single-action result to its HTTP status (fail closed).</summary>
     private static IResult MapAction(EngineReviewActionResult result) => result.Outcome switch
     {
@@ -341,6 +426,48 @@ public sealed class EngineSwampedModeRequest
     /// <summary>Projects the request to the service input (swamped mode needs no telemetry zone).</summary>
     /// <returns>The action input.</returns>
     public EngineReviewActionInput ToInput() => new(ActingHumanId, null);
+}
+
+/// <summary>
+/// The autonomy-default request body (autonomy-safety story 05) — the acting human (COR-018) plus the requested
+/// level literal. Carries NO <c>exerciseId</c>: scope is server-authoritative from
+/// <see cref="Pulse.WebApi.Data.IExerciseContext"/> (COR-001), and a client-supplied one would be ignored.
+/// Every field is nullable so a missing one is a validation <c>400</c>, never a deserialization failure.
+/// </summary>
+public sealed class EngineAutonomyDefaultRequest
+{
+    /// <summary>The controller behind the shared account (COR-018) — required.</summary>
+    public string? ActingHumanId { get; init; }
+
+    /// <summary>The requested exercise default level — <c>suggest</c> or <c>delayed-auto</c> (<c>auto</c> is v1.1 and rejected 400).</summary>
+    public string? Level { get; init; }
+
+    /// <summary>The exercise IANA time zone for the XC-004 envelope (XC-008) — optional; defaults to <c>UTC</c>.</summary>
+    public string? TimeZone { get; init; }
+
+    /// <summary>Projects the request to the service input.</summary>
+    /// <returns>The action input.</returns>
+    public EngineReviewActionInput ToInput() => new(ActingHumanId, TimeZone);
+}
+
+/// <summary>
+/// The tier-policy request body (autonomy-safety story 05) — the acting human (COR-018) plus the requested mode.
+/// The concrete deployment/model a tier resolves to is deliberately NOT expressible here (NFR-005 / ADP-025).
+/// </summary>
+public sealed class EngineTierPolicyRequest
+{
+    /// <summary>The controller behind the shared account (COR-018) — required.</summary>
+    public string? ActingHumanId { get; init; }
+
+    /// <summary>The requested tier-policy mode — <c>standard</c>, <c>ambient</c>, or <c>auto</c> (clears the override).</summary>
+    public string? Mode { get; init; }
+
+    /// <summary>The exercise IANA time zone for the XC-004 envelope (XC-008) — optional; defaults to <c>UTC</c>.</summary>
+    public string? TimeZone { get; init; }
+
+    /// <summary>Projects the request to the service input.</summary>
+    /// <returns>The action input.</returns>
+    public EngineReviewActionInput ToInput() => new(ActingHumanId, TimeZone);
 }
 
 /// <summary>The kill-switch request body — the acting human (COR-018) plus the drop mode.</summary>

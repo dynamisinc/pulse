@@ -8,8 +8,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Pulse.Core.Features.Autonomy.Models;
+using Pulse.Core.Features.Generation.Models;
+using Pulse.Core.Features.Generation.Services;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
@@ -672,7 +676,11 @@ public sealed class EngineReviewServiceTests
             new EngineTelemetryEmitter(),
             publisher.Object,
             broadcaster.Object,
-            registry);
+            registry,
+            new EngineTierPolicyRegistry(),
+            new FakeGenerationProvider(),
+            Options.Create(new GenerationOptions()),
+            NullLogger<EngineReviewService>.Instance);
 
         return new Harness(service, db, published, registry, time);
     }
