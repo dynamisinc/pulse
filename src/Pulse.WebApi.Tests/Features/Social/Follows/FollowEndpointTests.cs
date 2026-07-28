@@ -135,8 +135,40 @@ public class FollowEndpointTests
     }
 
     [RequiresDockerFact]
-    public async Task AnonymousCaller_WithNoSessionPersona_IsRefused_AndWritesNothing()
+    public async Task SessionWithNoPersonaBinding_IsRefused_AndWritesNothing()
     {
+        // Was written as an ANONYMOUS caller, because before identity-auth-roles/11's gate "no session" and
+        // "a session carrying no persona" were indistinguishable at this endpoint — both simply had no follower
+        // to write. They are different callers, and this test is about the second one, so it now presents a
+        // LIVE session with PersonaId: null. 403 is right here: the caller is authenticated, but there is
+        // nobody to follow AS. The anonymous case is a 401 and is covered separately, below.
+        var world = await SeedWorldAsync();
+        var unboundToken = $"unbound-{Guid.NewGuid():N}";
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Sessions.Add(FollowTestHost.NewSession(unboundToken, world.Exercise, personaId: null));
+            await seed.SaveChangesAsync();
+        }
+
+        await using var host = CreateHost();
+        using var client = host.CreateClientFor(world.Host, unboundToken);
+
+        var response = await client.PostAsync(FollowUri(world.Followee), content: null);
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            "the FOLLOWER is the caller's session-bound persona — a session with no binding has nobody to "
+            + "follow AS, so the write fails closed rather than guessing an identity");
+        (await CountEdgesAsync(world.Exercise, world.Follower, world.Followee)).Should().Be(0);
+    }
+
+    [RequiresDockerFact]
+    public async Task AnonymousCaller_IsRejectedByTheGate_With401_AndWritesNothing()
+    {
+        // identity-auth-roles/11: a caller presenting NO credential gets 401 from the default-deny gate before
+        // the handler runs — not the handler's own 403, which would wrongly imply "we know who you are and you
+        // may not do this". Distinct from the persona-less-session case above.
         var world = await SeedWorldAsync();
 
         await using var host = CreateHost();
@@ -145,9 +177,9 @@ public class FollowEndpointTests
         var response = await client.PostAsync(FollowUri(world.Followee), content: null);
 
         response.StatusCode.Should().Be(
-            HttpStatusCode.Forbidden,
-            "the FOLLOWER is the caller's session-bound persona — with no session there is nobody to follow AS, "
-            + "so the write fails closed rather than guessing an identity");
+            HttpStatusCode.Unauthorized,
+            "no credential presented is an AUTHENTICATION failure (401), answered before the endpoint's own "
+            + "identity logic is reached");
         (await CountEdgesAsync(world.Exercise, world.Follower, world.Followee)).Should().Be(0);
     }
 

@@ -60,4 +60,79 @@ public class SessionTokenExtractorTests
             .Should().BeFalse("an empty bearer value is not a token");
         token.Should().BeEmpty();
     }
+
+    // -----------------------------------------------------------------------------------------------------
+    // identity-auth-roles/11 — the SignalR query-string exception, and its confinement to the hub path.
+    // -----------------------------------------------------------------------------------------------------
+
+    private static HttpRequest RequestWith(string path, string? authorization = null, string? accessToken = null)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = path;
+        if (authorization is not null)
+        {
+            context.Request.Headers.Authorization = authorization;
+        }
+
+        if (accessToken is not null)
+        {
+            context.Request.QueryString = QueryString.Create("access_token", accessToken);
+        }
+
+        return context.Request;
+    }
+
+    [Theory]
+    [InlineData("/hubs/exercise")]
+    [InlineData("/hubs/exercise/negotiate")]
+    [InlineData("/HUBS/exercise")]
+    public void TryGetSessionToken_AcceptsTheAccessTokenQueryParameter_OnAHubPath(string path)
+    {
+        // A browser cannot set an Authorization header on a WebSocket upgrade, so the SignalR client sends
+        // ?access_token=. Without this the gate would refuse every legitimate live-feed connection.
+        SessionTokenExtractor.TryGetSessionToken(RequestWith(path, accessToken: "HUBTOKEN"), out var token)
+            .Should().BeTrue();
+        token.Should().Be("HUBTOKEN");
+    }
+
+    [Theory]
+    [InlineData("/api/feed")]
+    [InlineData("/api/posts")]
+    [InlineData("/hubsomething")]
+    public void TryGetSessionToken_RejectsTheAccessTokenQueryParameter_OffTheHubPath(string path)
+    {
+        // A token in a URL leaks through proxy logs, browser history and Referer. It is honored ONLY on the
+        // transports that cannot avoid it — never on a REST route, and never on a path that merely shares a
+        // character prefix with /hubs.
+        SessionTokenExtractor.TryGetSessionToken(RequestWith(path, accessToken: "LEAKED"), out var token)
+            .Should().BeFalse();
+        token.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TryGetSessionToken_PrefersTheHeader_WhenBothArePresent()
+    {
+        SessionTokenExtractor.TryGetSessionToken(
+            RequestWith("/hubs/exercise", authorization: "Bearer HEADERTOKEN", accessToken: "QUERYTOKEN"),
+            out var token).Should().BeTrue();
+        token.Should().Be("HEADERTOKEN", "a properly delivered credential always wins over the URL fallback");
+    }
+
+    [Fact]
+    public void TryGetSessionToken_EmptyQueryValueOnAHubPath_FailsClosed()
+    {
+        // The frontend's accessTokenFactory returns '' when nothing is stored — that must read as "no
+        // credential" (401), never as an empty token that some later lookup treats as present.
+        SessionTokenExtractor.TryGetSessionToken(RequestWith("/hubs/exercise", accessToken: "   "), out var token)
+            .Should().BeFalse();
+        token.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TryGetSessionToken_FallsBackToTheHeader_OnAnyPath()
+    {
+        SessionTokenExtractor.TryGetSessionToken(RequestWith("/api/feed", authorization: "Bearer ABC123"), out var token)
+            .Should().BeTrue("the header path is unchanged for every route");
+        token.Should().Be("ABC123");
+    }
 }

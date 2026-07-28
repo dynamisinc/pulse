@@ -32,6 +32,7 @@
 
 import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr'
 import type { HubConnection } from '@microsoft/signalr'
+import { getAccessToken } from '@/core/auth/tokenStore'
 
 export { HubConnectionState } from '@microsoft/signalr'
 
@@ -95,10 +96,46 @@ function resolveHubUrl(): string {
   return `${origin}${HUB_PATH}`
 }
 
-/** The default live `HubConnection`: auto-reconnecting, warning-level logging. */
+/**
+ * Supplies the session token SignalR presents on every negotiate and on every
+ * reconnect attempt (feature: identity-auth-roles, story 11).
+ *
+ * Reads `tokenStore` PER CALL, never a value captured once, so a token rotated
+ * by the shared axios client's silent refresh (`core/services/api.ts`) is
+ * picked up on the next (re)connect without rebuilding the connection.
+ *
+ * Returns `''` when nothing is stored — the documented "no credential" signal.
+ * The connection then fails closed against the server's default-deny gate (401)
+ * rather than silently attaching an empty credential the server might treat as
+ * present.
+ */
+export function sessionAccessTokenFactory(): string {
+  return getAccessToken() ?? ''
+}
+
+/**
+ * The default live `HubConnection`: authenticated, auto-reconnecting,
+ * warning-level logging.
+ *
+ * CREDENTIALS (feature: identity-auth-roles, story 11; COR-012). The hub used
+ * to connect with no credential at all, and the server used to accept that —
+ * an unauthenticated client could negotiate, join the exercise group, and
+ * receive live `PostReceived` frames (#359). Both hub endpoints now sit behind
+ * the API's default-deny session gate, so the connection MUST present the
+ * session token.
+ *
+ * The token comes from {@link sessionAccessTokenFactory}, which reads the same
+ * dependency-free `tokenStore` leaf the axios client does — so this module
+ * gains no coupling to React context or `sessionResolver`.
+ *
+ * The client sends the token as an `Authorization` header where it can
+ * (negotiate, long polling) and as `?access_token=` where a browser cannot set
+ * headers (WebSocket upgrade, SSE); the server accepts the query form under
+ * `/hubs` only.
+ */
 function createDefaultHubConnection(hubUrl: string): HubConnection {
   return new HubConnectionBuilder()
-    .withUrl(hubUrl)
+    .withUrl(hubUrl, { accessTokenFactory: sessionAccessTokenFactory })
     .withAutomaticReconnect()
     .configureLogging(LogLevel.Warning)
     .build()

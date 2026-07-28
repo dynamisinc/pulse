@@ -1,5 +1,12 @@
 # Endpoint authentication audit — evidence + scope of work
 
+> **✅ The 12 open routes and both hub endpoints are CLOSED** by story
+> [`11-api-session-enforcement.md`](11-api-session-enforcement.md) (#361, PR #384) — a default-deny
+> `AuthorizationOptions.FallbackPolicy` at the composition root with an 11-route opt-out list, enforced
+> against the live `EndpointDataSource` by test. Stories 12 (#366), 13 (#362) and 14 (#367) remain: server-side
+> attribution, telemetry scope authority, and the exhaustive anonymous-401 sweep. **This file stays as
+> written — it is the evidence, not a status board.**
+
 > **Superseded by the four-story split + inventory corrections (2026-07-25, same day).** The
 > single story this document scoped (`11-api-session-enforcement.md`, #361) is now **four** stories per
 > the one-story-per-file convention — do not re-derive the scope-of-work waves below as three sub-waves

@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.ExerciseConfiguration;
+using Pulse.WebApi.Tests.Helpers;
 
 /// <summary>
 /// The shared test host for story <c>social-api/01-feed-read-api</c> (#270): <c>GET /api/feed</c> and
@@ -45,6 +46,11 @@ public sealed class SocialApiWebApplicationFactory : WebApplicationFactory<Progr
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
+
+        // identity-auth-roles/11: these routes now require a LIVE session, not merely a resolved scope. Present
+        // one for the same exercise the scope is faked as — the symmetric half of the same fiction. A test that
+        // passes exerciseId: null stays anonymous, which is the fail-closed case those tests assert.
+        builder.UseFakeAuthenticatedSession(_exerciseId);
 
         builder.ConfigureTestServices(services =>
         {

@@ -101,6 +101,17 @@ builder.Services.AddComplianceChromeConfig();   // story 02 — per-exercise COR
 builder.Services.AddPracticeMode();             // story 04 — COR-033 practice flag + IEvaluationEligibility
 builder.Services.AddExerciseLifecycle();        // story 03 — COR-032 state machine + shell/overlay projections
 
+// Default-deny session gate (identity-auth-roles/11, #361 — the fix for #359) — orchestrator-wired.
+// Registers a RequireAuthenticatedUser FALLBACK policy plus the result handler that writes the 401/403 and
+// emits the XC-004 access.rejected audit event. Before this, every endpoint asked only "is an exercise scope
+// resolved" — a COR-001 isolation question that UseExerciseResolution answers for an ANONYMOUS caller from
+// the bare Host header — so 12 routes and the SignalR hub were reachable with no credential at all. The
+// fallback policy applies to every endpoint that declares no authorization metadata of its own: minimal
+// APIs, MVC controllers (POST /api/telemetry) and hub endpoints alike, which an IEndpointFilter could not
+// have covered. The ONLY exceptions are the eleven routes in PreAuthAllowlist, each marked
+// .AllowAnonymousPreAuth() at its own mapping call site.
+builder.Services.AddSessionAuthorization();
+
 // Participant login methods (Phase B2 Wave 3). AddParticipantAccounts (identity-auth-roles/02) registers the
 // participant credential-login + staff account-provisioning services + the "participant-login" rate-limiter
 // policy. AddSharedReadOnly (identity-auth-roles/06) registers the shared view-only login + the read-only
@@ -206,6 +217,25 @@ app.UseWhen(
 // host-after-session inverts precedence (shows the wrong exercise) — keep it exactly here.
 app.UseSessionAuthentication();
 
+// Default-deny authorization (identity-auth-roles/11) — MUST be called EXPLICITLY, and MUST sit exactly here:
+// immediately after UseSessionAuthentication, which is what populates HttpContext.User for a live session.
+// WebApplication auto-inserts UseAuthorization() ahead of ALL user middleware when it is never called
+// explicitly; that placement would evaluate the fallback policy before the principal exists. The failure would
+// be SILENT and nastier than a total outage: the eleven allowlisted routes keep working (IAllowAnonymous
+// short-circuits the middleware wherever it sits), so login still succeeds — and then every authenticated call
+// after it 401s. Calling it here is load-bearing, not stylistic — the same class of ordering constraint as
+// host-resolution-before-session-authentication above. From this line on, an endpoint is reachable without a
+// live session ONLY if it carries .AllowAnonymousPreAuth() (PreAuthAllowlist).
+//
+// It runs BEFORE UseExerciseLifecycleGating() below, deliberately. Both middlewares document "immediately
+// after the session scope is final", and both constraints hold with authorization first — this one reads
+// HttpContext.User and writes no scope, so the lifecycle gate still sees the same resolved scope it would
+// have. Ordering them the other way would answer an UNAUTHENTICATED request to a participant route with the
+// lifecycle gate's 403, disclosing the exercise's lifecycle state to a caller who has not proven it may know
+// anything at all. Default-deny is the outermost gate; "may this caller have any data" is answered before
+// "is this world currently being served".
+app.UseAuthorization();
+
 // COR-032 participant lifecycle gating (exercise-configuration story 03) — in build/completed/archived the
 // participant-world routes are NOT SERVED (403); staff sessions and every un-listed route pass through.
 // ORDER IS LOAD-BEARING, and this is the ONLY middleware-ordering constraint wave 3 introduces: it MUST run
@@ -232,8 +262,14 @@ app.UseRateLimiter();
 // Liveness — no checks run (Predicate false), so it stays free of any DB/dependency coupling: the host
 // is "up" regardless of database reachability (story 01 AC). Readiness (/health/ready) runs every
 // registered check, including story 02's DbContext check, for deploy/orchestration probes.
-app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false });
-app.MapHealthChecks("/health/ready");
+// PRE-AUTH (identity-auth-roles/11, PreAuthAllowlist): platform liveness/readiness probes present no
+// credential by construction, and a probe that 401s reads as an unhealthy instance to the orchestrator.
+app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymousPreAuth();
+app.MapHealthChecks("/health/ready").AllowAnonymousPreAuth();
+
+// Attribute-routed controllers. POST /api/telemetry is the only one today, and it inherits the default-deny
+// fallback policy above — the surface a minimal-API endpoint filter could never have gated (identity-auth-
+// roles/11 decision 1). Server-side authority over its exerciseId/actor claims is story 13 (#362).
 app.MapControllers();
 
 // Social API endpoints + realtime hub (Phase B1) — the orchestrator-owned endpoint mappings paired with the

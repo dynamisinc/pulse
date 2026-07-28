@@ -8,9 +8,11 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Helpers;
 
 /// <summary>
 /// Integration tests for <c>POST /api/telemetry</c> (story <c>telemetry/02</c>, #274). Boots the real host
@@ -246,6 +248,19 @@ public sealed class TelemetryWebApplicationFactory : WebApplicationFactory<Progr
     public TelemetryWebApplicationFactory(string connectionString)
     {
         Environment.SetEnvironmentVariable(ConnectionStringEnvVar, connectionString);
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        // identity-auth-roles/11: POST /api/telemetry is an MVC controller and now inherits the default-deny
+        // fallback policy — an unauthenticated caller could previously store an event against ANY exercise id
+        // it named, including one that does not exist (#362). These tests are about envelope validation, dedup
+        // and persistence, so they present a live session. The session's exercise is deliberately unrelated to
+        // the body's `exerciseId` here: story 13 (#362) is what makes the server stamp the scope from the
+        // session and reject a disagreeing body value, and it will tighten these tests accordingly.
+        builder.UseFakeAuthenticatedSession(Guid.NewGuid());
     }
 
     protected override void Dispose(bool disposing)

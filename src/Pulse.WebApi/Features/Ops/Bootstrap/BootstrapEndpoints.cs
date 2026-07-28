@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Providers;
+using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 
 /// <summary>
@@ -136,13 +137,23 @@ public static class BootstrapEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        // PRE-AUTH (identity-auth-roles/11, PreAuthAllowlist) — and load-bearing, not a convenience. The
+        // X-Bootstrap-Secret IS this endpoint's credential (exactly as the refresh token is
+        // /api/auth/refresh's), and the default-deny AuthorizationMiddleware runs BEFORE the handler's secret
+        // check. Bootstrap by definition runs against an empty database with no session to present, so
+        // without this mark the gate would 401 a legitimate secret-bearing call and break the go-live
+        // runbook. The secret gate below is unchanged and remains the only real authorization here.
         endpoints.MapPost("/api/ops/bootstrap-exercise", BootstrapAsync)
-            .RequireRateLimiting(BootstrapRateLimitPolicy);
+            .RequireRateLimiting(BootstrapRateLimitPolicy)
+            .AllowAnonymousPreAuth();
 
         // Story identity-auth-roles/10 — mapped in the EXISTING extension so the already-wired Program.cs call reaches it with
         // no new composition-root edit (see the class remarks).
+        // PRE-AUTH (identity-auth-roles/11, PreAuthAllowlist): same X-Bootstrap-Secret credential and the same
+        // reasoning as the seed endpoint above.
         endpoints.MapPost("/api/ops/bind-participant-persona", BindParticipantPersonaAsync)
-            .RequireRateLimiting(BindParticipantPersonaRateLimitPolicy);
+            .RequireRateLimiting(BindParticipantPersonaRateLimitPolicy)
+            .AllowAnonymousPreAuth();
 
         return endpoints;
     }

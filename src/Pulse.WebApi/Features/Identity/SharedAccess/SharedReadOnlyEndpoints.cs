@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Pulse.WebApi.Features.Identity.Sessions;
 
 /// <summary>
 /// The shared read-only slice HTTP surface + composition-root seams (story 06, COR-015 / NFR-009):
@@ -92,8 +93,11 @@ public static class SharedReadOnlyEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        // PRE-AUTH (identity-auth-roles/11, PreAuthAllowlist): establishes the view-only session, so it cannot
+        // require one; fails closed on its own behind the shared-login rate-limiter + brute-force lockout.
         endpoints.MapPost("/api/auth/shared", SharedLoginAsync)
-            .RequireRateLimiting(SharedLoginRateLimitPolicy);
+            .RequireRateLimiting(SharedLoginRateLimitPolicy)
+            .AllowAnonymousPreAuth();
 
         return endpoints;
     }

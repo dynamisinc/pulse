@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Features.Identity.Sessions;
 
 /// <summary>
 /// Serves the FROZEN resolver contract <c>GET /api/exercise-context</c> (exercise-isolation/08) — the
@@ -30,7 +31,11 @@ public static class ExerciseContextEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        endpoints.MapGet("/api/exercise-context", GetExerciseContextAsync);
+        // PRE-AUTH (identity-auth-roles/11, PreAuthAllowlist): the login pages need a resolved exercise scope
+        // BEFORE a session exists — that is this endpoint's entire purpose (exercise-isolation/08). It reads
+        // only the frozen public ExerciseScope, never exercise content.
+        endpoints.MapGet("/api/exercise-context", GetExerciseContextAsync)
+            .AllowAnonymousPreAuth();
 
         return endpoints;
     }

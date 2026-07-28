@@ -19,6 +19,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Helpers;
 
 /// <summary>
 /// Integration tests for <c>GET /api/personas</c> (story <c>social-api/04</c>, #273). Boots the real host
@@ -523,6 +524,13 @@ public sealed class PersonaWebApplicationFactory : WebApplicationFactory<Program
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
+
+        // identity-auth-roles/11: GET /api/personas now requires a LIVE session — the full roster (every
+        // persona id, the ids the post-injection exploit used) was readable with no credential at all (#359).
+        // These tests are about exercise-scoped instance reads and the XC-002 response shape, so they present
+        // a live session for the same exercise the scope is faked as. The exerciseId: null case stays
+        // anonymous, which is the fail-closed case it asserts.
+        builder.UseFakeAuthenticatedSession(_exerciseId);
 
         if (_exerciseId is { } exerciseId)
         {

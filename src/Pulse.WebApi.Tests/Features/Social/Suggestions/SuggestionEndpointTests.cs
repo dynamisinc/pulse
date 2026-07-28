@@ -343,10 +343,16 @@ public class SuggestionEndpointTests
         // population the same permanent "Suggestions aren't available right now." panel CR-001 exists to remove.
         // The isolation boundary is untouched — only the two VIEWER-relative exclusions stop applying, because
         // there is no viewer to exclude against.
+        //
+        // identity-auth-roles/11: this was written as an ANONYMOUS request, because before the default-deny
+        // gate "a session with no persona binding" and "no session at all" were indistinguishable here. They
+        // are different callers and this test is about the first, so it now presents a LIVE session with
+        // PersonaId: null. An anonymous caller gets 401 and is covered by the gate's own suite (#361/#367).
         var world = await SeedWorldAsync();
+        var unboundToken = await SeedUnboundSessionAsync(world.Exercise);
 
         await using var host = CreateHost();
-        using var client = host.CreateClientFor(world.Host, bearerToken: null);
+        using var client = host.CreateClientFor(world.Host, unboundToken);
 
         var ids = await ReadSuggestionsAsync(client);
 
@@ -376,8 +382,10 @@ public class SuggestionEndpointTests
                 .Should().Be(worldB.CastSize, "exercise B's cast must exist for this test to mean anything");
         }
 
+        var unboundToken = await SeedUnboundSessionAsync(worldA.Exercise);
+
         await using var host = CreateHost();
-        using var client = host.CreateClientFor(worldA.Host, bearerToken: null);
+        using var client = host.CreateClientFor(worldA.Host, unboundToken);
 
         var response = await client.GetAsync(new Uri(SuggestionsPath, UriKind.Relative));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -388,7 +396,7 @@ public class SuggestionEndpointTests
             body.Should().NotContain(
                 idInB.ToString(),
                 "scope comes from IExerciseContext and the central query filter, NOT from the viewer identity "
-                + "— an anonymous caller is scoped exactly as a bound one is (COR-001)");
+                + "— a persona-less session is scoped exactly as a bound one is (COR-001)");
         }
 
         using var document = JsonDocument.Parse(body);
@@ -427,6 +435,24 @@ public class SuggestionEndpointTests
         return document.RootElement.EnumerateArray()
             .Select(element => element.GetProperty("id").GetString()!)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Seeds a live participant session bound to <paramref name="exerciseId"/> that carries NO persona binding
+    /// — the "unbound viewer" this story's open decision resolved in favour of serving. Distinct from an
+    /// anonymous request, which identity-auth-roles/11's gate answers with 401.
+    /// </summary>
+    /// <param name="exerciseId">The exercise the session is bound to (a participant session is host-bound).</param>
+    /// <returns>The raw token to present.</returns>
+    private async Task<string> SeedUnboundSessionAsync(Guid exerciseId)
+    {
+        var token = $"unbound-token-{Guid.NewGuid():N}";
+
+        await using var seed = _fixture.CreateContext();
+        seed.Sessions.Add(FollowTestHost.NewSession(token, exerciseId, personaId: null));
+        await seed.SaveChangesAsync();
+
+        return token;
     }
 
     /// <summary>
