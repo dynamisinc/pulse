@@ -1,6 +1,6 @@
 # Story: `POST /api/posts` derives identity server-side, never from the body
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-018 (with COR-001, NFR-009 implicated)  ·  **Design decisions:** none  ·  **Issue:** #366
 **Stack:** backend  ·  **Review:** Tier-2 (auth surface + attribution — always-Critical class)
 
