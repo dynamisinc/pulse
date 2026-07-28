@@ -101,6 +101,10 @@ builder.Services.AddExerciseConfiguration();
 builder.Services.AddComplianceChromeConfig();   // story 02 — per-exercise COR-031 chrome + the NFR-008 guard
 builder.Services.AddPracticeMode();             // story 04 — COR-033 practice flag + IEvaluationEligibility
 builder.Services.AddExerciseLifecycle();        // story 03 — COR-032 state machine + shell/overlay projections
+// ⚠ The order-independence note above stops being true one line further down: world-steering #351
+// (AddPauseParticipantOverlay, below) Replace()s the SAME IOverlayStateProjection this line does, to decorate
+// it. Between two Replace()s of one seam, last writer wins — so #351 MUST stay below this line. See the
+// ⚠ block at that call site; the constraint is asserted by SteeringCompositionRootWiringTests.
 
 // Default-deny session gate (identity-auth-roles/11, #361 — the fix for #359) — orchestrator-wired.
 // Registers a RequireAuthenticatedUser FALLBACK policy plus the result handler that writes the 401/403 and
@@ -183,7 +187,19 @@ builder.Services.AddEngineContentSeed(builder.Configuration);
 // GET/POST pair that reaches the live Storyline objects the reaction loop ticks off IReactionLoopRegistry —
 // no EF entity, so it converges on AddReactionLoopHost's registry via TryAdd.
 builder.Services.AddPauseTierSteering();        // #350 POST/GET /api/steering/pause-tier
-builder.Services.AddPauseParticipantOverlay();  // #351 REPLACES the #350 no-op overlay publisher
+// ⚠ ORDER IS LOAD-BEARING HERE — this is the ONE exception to the Replace-is-order-independent note on
+// AddExerciseConfiguration above. That note holds against a TryAdd()ed FLOOR; it does NOT hold between two
+// contributors that both Replace() the SAME seam, where last-writer-wins. AddExerciseLifecycle() (above)
+// and AddPauseParticipantOverlay() (next line) both Replace(IOverlayStateProjection): #351 contributes a
+// DECORATOR that wraps the lifecycle projection so a Freeze is only participant-visible inside a running
+// world (Tom's precedence ruling — endex > pre-start > pause > none). Reversed, the decorator is silently
+// EVICTED: the host still builds, resolves, throws nothing and logs nothing, and Freeze goes invisible to
+// participants again. Verified silent by experiment, and caught by
+// SteeringCompositionRootWiringTests.ProgramCs_ResolvesTheSteeringPauseOverlayProjection_NotTheLifecycleProjectionAlone.
+// The publisher swap on the same line (#351 over #350's no-op) IS order-independent — that one is a TryAdd
+// floor. Two different guarantees on one line; don't generalize either.
+builder.Services.AddPauseParticipantOverlay();  // #351 REPLACES #350's no-op publisher AND decorates the
+                                                //      lifecycle overlay projection (MUST follow #103)
 builder.Services.AddStorylineSteering();        // #352 storyline target GET/POST
 
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
