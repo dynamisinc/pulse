@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Pulse.WebApi.Features.Identity.Sessions;
 
 /// <summary>
 /// The account slice HTTP surface + composition-root seams (story 02, COR-011): the participant credential login
@@ -83,8 +84,12 @@ public static class AccountEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        // PRE-AUTH (identity-auth-roles/11, PreAuthAllowlist): this endpoint ESTABLISHES the session, so it
+        // cannot require one. It fails closed on its own with anti-enumeration 401s behind the
+        // participant-login rate-limiter. /api/staff/accounts[/import] below stay gated.
         endpoints.MapPost("/api/auth/login", ParticipantLoginAsync)
-            .RequireRateLimiting(ParticipantLoginRateLimitPolicy);
+            .RequireRateLimiting(ParticipantLoginRateLimitPolicy)
+            .AllowAnonymousPreAuth();
         endpoints.MapPost("/api/staff/accounts", CreateAccountAsync);
 
         // The CSV upload is multipart/form-data (field name "file"). DisableAntiforgery: this is a bearer-token

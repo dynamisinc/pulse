@@ -22,6 +22,17 @@ using Pulse.WebApi.Features.ExerciseResolution;
 /// absent scope is a closed door, never a default or an unscoped join.
 /// </para>
 /// <para>
+/// <b>A live session is required to reach this hub at all (identity-auth-roles/11).</b> Host-derived group
+/// membership answers "WHICH exercise" (COR-001) and was always correct; it never answered "MAY this caller
+/// connect". It could not — an unauthenticated client provably negotiated, handshook, joined the group and
+/// received a live <c>PostReceived</c> frame (#359, exploit 3). Both hub endpoints (the connection and its
+/// <c>/negotiate</c> sibling) now inherit the default-deny fallback policy, so
+/// <see cref="OnConnectedAsync"/> is not reached without a live session — the abort below stays as
+/// defense-in-depth for the resolved-session-but-unresolved-host case. Because a browser cannot set an
+/// <c>Authorization</c> header on a WebSocket upgrade, the SignalR client supplies its token as
+/// <c>?access_token=</c>, which <c>SessionTokenExtractor</c> accepts under <c>/hubs</c> only.
+/// </para>
+/// <para>
 /// <b>Why the host-resolved <c>HttpContext</c>, not the injected <see cref="IExerciseContext"/>.</b> SignalR
 /// dispatches <see cref="OnConnectedAsync"/> in its OWN per-invocation DI scope — NOT the connection's
 /// HTTP-request scope where <c>UseExerciseResolution</c> populated the scoped

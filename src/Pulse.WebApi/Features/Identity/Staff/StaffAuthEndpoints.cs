@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.Identity.Providers;
+using Pulse.WebApi.Features.Identity.Sessions;
 
 /// <summary>
 /// The staff-identity slice HTTP surface (story 05): <c>POST /api/auth/staff/login</c>,
@@ -80,8 +81,12 @@ public static class StaffAuthEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        // PRE-AUTH (identity-auth-roles/11, PreAuthAllowlist): establishes the staff session, so it cannot
+        // require one; anti-enumeration 401/403s behind the staff-login rate-limiter. The two staff endpoints
+        // below stay gated (they already fail closed via ICurrentStaffSessionAccessor, unchanged).
         endpoints.MapPost("/api/auth/staff/login", StaffLoginAsync)
-            .RequireRateLimiting(StaffLoginRateLimitPolicy);
+            .RequireRateLimiting(StaffLoginRateLimitPolicy)
+            .AllowAnonymousPreAuth();
         endpoints.MapGet("/api/staff/assignments", GetAssignmentsAsync);
         endpoints.MapPost("/api/staff/active-exercise", SetActiveExerciseAsync);
 

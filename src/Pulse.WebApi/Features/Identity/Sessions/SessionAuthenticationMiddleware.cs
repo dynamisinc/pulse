@@ -11,9 +11,22 @@ using Pulse.WebApi.Features.ExerciseResolution;
 /// <see cref="ISessionAuthenticator"/>, which uses its own throwaway DI scope), and — with PRECEDENCE over the
 /// host middleware's earlier write — sets the request scope to the session's bound exercise. An absent or
 /// invalid/expired/revoked token leaves whatever host resolution set (fail closed: the endpoint then 401s and
-/// scoped reads see host-only / zero rows).
+/// scoped reads see host-only / zero rows). On the live-session path it ALSO assigns
+/// <c>HttpContext.User</c> (see <see cref="SessionPrincipal"/>) — the input the default-deny fallback policy
+/// (identity-auth-roles/11) evaluates.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>The gate's single input (identity-auth-roles/11).</b> Before that story, "is a scope resolved" was the
+/// only question any endpoint asked — and <c>ExerciseResolutionMiddleware</c> answers it for an anonymous
+/// caller from the bare <c>Host</c> header, so every endpoint was reachable with no credential (#359). The fix
+/// is not in this middleware's own logic, which was correct: it is that this middleware now publishes the
+/// authenticated principal, and <c>app.UseAuthorization()</c> — wired IMMEDIATELY AFTER
+/// <c>app.UseSessionAuthentication()</c> — turns "no live session" into a 401 before any endpoint runs. That
+/// ordering is load-bearing: <c>WebApplication</c> auto-inserts <c>UseAuthorization()</c> ahead of ALL user
+/// middleware when it is never called explicitly, which would evaluate the policy before this middleware has
+/// run and 401 every request, allowlisted ones included.
+/// </para>
 /// <para>
 /// <b>Precedence (session &gt; host &gt; unset), realized purely by ORDER.</b> This middleware MUST run AFTER
 /// <c>UseExerciseResolution()</c> (exercise-isolation/08) so the session's write is the last one to land, and
@@ -70,7 +83,7 @@ public sealed partial class SessionAuthenticationMiddleware
         ArgumentNullException.ThrowIfNull(authenticator);
         ArgumentNullException.ThrowIfNull(exerciseContext);
 
-        if (!SessionTokenExtractor.TryGetBearerToken(context.Request, out var rawToken))
+        if (!SessionTokenExtractor.TryGetSessionToken(context.Request, out var rawToken))
         {
             // Anonymous / pre-auth request (login endpoints, the first /exercise-context): no token to honor.
             // The host's provisional scope (if any) stands; scope stays unset otherwise (fail closed).
@@ -99,6 +112,15 @@ public sealed partial class SessionAuthenticationMiddleware
                 return; // Short-circuit — the scope is NOT set and the pipeline does not continue.
             }
         }
+
+        // The default-deny gate's single input (identity-auth-roles/11, COR-012). ADDITIVE: assigning the
+        // principal changes nothing about the scope precedence below, and every pre-existing consumer of this
+        // middleware is untouched. AuthorizationMiddleware — wired immediately after this middleware in
+        // Program.cs — reads HttpContext.User to evaluate the RequireAuthenticatedUser fallback policy, so a
+        // request that reaches here WITHOUT a live session stays anonymous and is rejected before any
+        // handler, controller action, or hub method runs. Setting this only on the live-session path is the
+        // whole guarantee: an absent, unknown, expired or revoked token returned above, principal unset.
+        context.User = SessionPrincipal.Create(authenticated);
 
         // Precedence: overwrite the host's provisional write with the session's bound exercise. The settable
         // seam is the concrete ExerciseContext; the DbContext-facing IExerciseContext stays get-only.

@@ -17,6 +17,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
+using Pulse.WebApi.Tests.Helpers;
 
 /// <summary>
 /// The real-time-transport, end-to-end extension of the standing cross-exercise isolation suite
@@ -272,6 +273,13 @@ public class ExerciseRealtimeHubIsolationTests
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             ArgumentNullException.ThrowIfNull(builder);
+
+            // identity-auth-roles/11: both hub endpoints (/hubs/exercise and its /negotiate sibling) now sit
+            // behind the default-deny session gate — an unauthenticated client used to negotiate, join the
+            // group and receive a live frame (#359, exploit 3). These isolation tests are about WHICH group a
+            // connection joins, not whether it may connect, so present a live session for the same exercise
+            // the host resolves to. The unresolved-host case stays anonymous, which is what it asserts.
+            builder.UseFakeAuthenticatedSession(_hostResolvedExerciseId);
 
             builder.ConfigureTestServices(services =>
             {

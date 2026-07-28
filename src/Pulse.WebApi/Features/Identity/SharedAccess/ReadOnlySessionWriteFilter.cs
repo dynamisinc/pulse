@@ -20,9 +20,20 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// <b>Fail closed, server-authoritative.</b> The filter trusts nothing from the client about read-only-ness: it
 /// resolves the presented token to the persisted <see cref="Data.Entities.Session"/> row and reads
 /// <c>IsReadOnly</c> off the SERVER-issued session. It denies BEFORE the handler runs, so no partial mutation
-/// can occur. A request that presents no session (or an expired/absent one) is NOT denied here — such a request
-/// is unauthenticated and the write endpoint's own fail-closed scope check (an unresolved
-/// <see cref="IExerciseContext"/> → 401) handles it; this filter's single job is the read-only-session denial.
+/// can occur. A request that presents no session (or an expired/absent one) is NOT denied here — this filter's
+/// single job is the read-only-session denial.
+/// </para>
+/// <para>
+/// <b>Where the absent-session case IS denied (corrected, identity-auth-roles/11).</b> This comment used to
+/// claim the unauthenticated case was "handled by the write endpoint's own fail-closed scope check (an
+/// unresolved <see cref="IExerciseContext"/> → 401)". That was <b>false as built</b> and is the heart of #359:
+/// the endpoint's check was scope-only, and <c>ExerciseResolutionMiddleware</c> resolves a perfectly usable
+/// scope for an anonymous caller from the bare <c>Host</c> header — so an absent session sailed straight
+/// through this filter AND through the handler, and <c>POST /api/posts</c> accepted an unauthenticated write.
+/// It is now true, but for a different reason: the default-deny fallback policy runs in
+/// <c>AuthorizationMiddleware</c>, STRICTLY AHEAD of every endpoint filter, so a request with no live session
+/// is rejected with 401 before this filter is ever constructed. This filter's behavior is deliberately
+/// unchanged — the gap was never in it.
 /// </para>
 /// <para>
 /// <b>Composition (orchestrator-owned).</b> This story does not edit any other slice's files or

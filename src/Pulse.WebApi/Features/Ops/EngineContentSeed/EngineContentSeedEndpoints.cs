@@ -12,6 +12,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Ops.Bootstrap;
 
 /// <summary>
@@ -114,8 +115,13 @@ public static class EngineContentSeedEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        // PRE-AUTH (identity-auth-roles/11, PreAuthAllowlist): the X-Bootstrap-Secret IS this endpoint's
+        // credential and the default-deny AuthorizationMiddleware runs BEFORE the handler's secret check —
+        // without this mark the gate would 401 a legitimate secret-bearing seed call (which carries no
+        // session) and break the go-live runbook. The secret gate itself is unchanged.
         endpoints.MapPost("/api/ops/seed-engine-content", SeedAsync)
-            .RequireRateLimiting(EngineSeedRateLimitPolicy);
+            .RequireRateLimiting(EngineSeedRateLimitPolicy)
+            .AllowAnonymousPreAuth();
 
         return endpoints;
     }
