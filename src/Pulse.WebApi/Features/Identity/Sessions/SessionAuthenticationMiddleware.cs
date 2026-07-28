@@ -25,7 +25,8 @@ using Pulse.WebApi.Features.ExerciseResolution;
 /// <c>app.UseSessionAuthentication()</c> — turns "no live session" into a 401 before any endpoint runs. That
 /// ordering is load-bearing: <c>WebApplication</c> auto-inserts <c>UseAuthorization()</c> ahead of ALL user
 /// middleware when it is never called explicitly, which would evaluate the policy before this middleware has
-/// run and 401 every request, allowlisted ones included.
+/// run. The resulting failure is SILENT, not total — the pre-auth allowlist keeps working, so login succeeds
+/// and then every authenticated call after it 401s.
 /// </para>
 /// <para>
 /// <b>Precedence (session &gt; host &gt; unset), realized purely by ORDER.</b> This middleware MUST run AFTER

@@ -438,15 +438,11 @@ public class SuggestionEndpointTests
     }
 
     /// <summary>
-    /// Seeds one self-contained exercise: a provisioned host, a five-persona cast whose handles give a KNOWN
-    /// deterministic order, and a live participant session bound to the viewer persona (whose handle sorts in
-    /// the middle of the cast, so the self-exclusion is observable rather than an ordering artifact).
-    /// </summary>
-    /// <summary>
     /// Seeds a live participant session bound to <paramref name="exerciseId"/> that carries NO persona binding
     /// — the "unbound viewer" this story's open decision resolved in favour of serving. Distinct from an
     /// anonymous request, which identity-auth-roles/11's gate answers with 401.
     /// </summary>
+    /// <param name="exerciseId">The exercise the session is bound to (a participant session is host-bound).</param>
     /// <returns>The raw token to present.</returns>
     private async Task<string> SeedUnboundSessionAsync(Guid exerciseId)
     {
@@ -459,6 +455,11 @@ public class SuggestionEndpointTests
         return token;
     }
 
+    /// <summary>
+    /// Seeds one self-contained exercise: a provisioned host, a five-persona cast whose handles give a KNOWN
+    /// deterministic order, and a live participant session bound to the viewer persona (whose handle sorts in
+    /// the middle of the cast, so the self-exclusion is observable rather than an ordering artifact).
+    /// </summary>
     private async Task<SeededWorld> SeedWorldAsync()
     {
         var exerciseId = Guid.NewGuid();

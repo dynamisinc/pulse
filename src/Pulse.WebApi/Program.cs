@@ -220,10 +220,12 @@ app.UseSessionAuthentication();
 // Default-deny authorization (identity-auth-roles/11) — MUST be called EXPLICITLY, and MUST sit exactly here:
 // immediately after UseSessionAuthentication, which is what populates HttpContext.User for a live session.
 // WebApplication auto-inserts UseAuthorization() ahead of ALL user middleware when it is never called
-// explicitly; that placement would evaluate the fallback policy before the principal exists and 401 every
-// request, allowlisted ones included. Calling it here is load-bearing, not stylistic — the same class of
-// ordering constraint as host-resolution-before-session-authentication above. From this line on, an endpoint
-// is reachable without a live session ONLY if it carries .AllowAnonymousPreAuth() (PreAuthAllowlist).
+// explicitly; that placement would evaluate the fallback policy before the principal exists. The failure would
+// be SILENT and nastier than a total outage: the eleven allowlisted routes keep working (IAllowAnonymous
+// short-circuits the middleware wherever it sits), so login still succeeds — and then every authenticated call
+// after it 401s. Calling it here is load-bearing, not stylistic — the same class of ordering constraint as
+// host-resolution-before-session-authentication above. From this line on, an endpoint is reachable without a
+// live session ONLY if it carries .AllowAnonymousPreAuth() (PreAuthAllowlist).
 //
 // It runs BEFORE UseExerciseLifecycleGating() below, deliberately. Both middlewares document "immediately
 // after the session scope is final", and both constraints hold with authorization first — this one reads

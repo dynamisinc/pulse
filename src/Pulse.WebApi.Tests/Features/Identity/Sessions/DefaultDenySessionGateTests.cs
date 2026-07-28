@@ -4,6 +4,8 @@ using System;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
@@ -12,12 +14,14 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Sessions;
+using Pulse.WebApi.Features.Realtime;
 
 /// <summary>
 /// Story identity-auth-roles/11 (#361) — the default-deny session gate that closes #359. Boots the REAL
@@ -40,6 +44,10 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// </remarks>
 public sealed class DefaultDenySessionGateTests
 {
+    /// <summary>The one raw token <see cref="GateProbeFactory"/> resolves to a live session when asked to.</summary>
+    private const string AcceptedToken = "gate-probe-live-session-token";
+
+
     /// <summary>
     /// Routes proven open to an unauthenticated caller on 2026-07-25 (ENDPOINT-AUTH-AUDIT.md). Every one must
     /// now 401. <c>POST /api/telemetry</c> is here deliberately: it is an MVC controller, the surface a
@@ -141,6 +149,77 @@ public sealed class DefaultDenySessionGateTests
     }
 
     [Fact]
+    public async Task HubConnection_PresentingItsTokenAsAccessTokenQueryParameter_ConnectsAndJoinsItsGroup()
+    {
+        // The seam a mistake here is INVISIBLE locally and fatal in UAT: a dark participant live feed with a
+        // fully green suite. Gating the hub without this passing means the story shipped a regression, and the
+        // whole reason the frontend accessTokenFactory ships in the same story is that the two halves have to
+        // land together. A browser cannot set an Authorization header on a WebSocket upgrade, so the ONLY way a
+        // real participant reaches this hub is the query parameter — nothing else exercises that path
+        // end-to-end through the real Program pipeline.
+        using var factory = new GateProbeFactory(AcceptedToken);
+        var server = factory.Server;
+
+        await using var connection = new HubConnectionBuilder()
+            .WithUrl(
+                new Uri(server.BaseAddress, "hubs/exercise"),
+                options =>
+                {
+                    options.HttpMessageHandlerFactory = _ => server.CreateHandler();
+                    options.Transports = HttpTransportType.LongPolling;
+                    options.AccessTokenProvider = () => Task.FromResult<string?>(AcceptedToken);
+                })
+            .Build();
+
+        var received = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        connection.On<JsonElement>("PostReceived", payload =>
+            received.TrySetResult(payload.GetProperty("id").GetString()));
+
+        await connection.StartAsync();
+
+        connection.State.Should().Be(
+            HubConnectionState.Connected,
+            "a live session's token, delivered the only way a browser WebSocket can deliver it, must satisfy "
+            + "the gate — otherwise the participant live feed is dark in UAT while every test stays green");
+
+        // Connected is not enough: OnConnectedAsync must also have joined exercise:{hostResolvedExerciseId},
+        // or the connection is open and receives nothing.
+        var hubContext = factory.Services.GetRequiredService<IHubContext<ExerciseRealtimeHub>>();
+        await hubContext.Clients
+            .Group($"exercise:{GateProbeFactory.ResolvedExerciseId}")
+            .SendAsync("PostReceived", new { id = "post-under-test" });
+
+        var completed = await Task.WhenAny(received.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        completed.Should().BeSameAs(received.Task, "the connection must have joined its exercise's group");
+        (await received.Task).Should().Be("post-under-test");
+    }
+
+    [Fact]
+    public async Task HubConnection_PresentingAnUnknownTokenAsAccessTokenQueryParameter_IsStillRefused()
+    {
+        // The other half of the query-string path: accepting the parameter must not mean accepting anything
+        // that arrives in it. An unresolvable token authenticates nothing, so the principal is never set.
+        using var factory = new GateProbeFactory(AcceptedToken);
+        var server = factory.Server;
+
+        await using var connection = new HubConnectionBuilder()
+            .WithUrl(
+                new Uri(server.BaseAddress, "hubs/exercise"),
+                options =>
+                {
+                    options.HttpMessageHandlerFactory = _ => server.CreateHandler();
+                    options.Transports = HttpTransportType.LongPolling;
+                    options.AccessTokenProvider = () => Task.FromResult<string?>("not-a-real-token");
+                })
+            .Build();
+
+        var start = async () => await connection.StartAsync();
+
+        await start.Should().ThrowAsync<Exception>("an unknown token resolves no session, so the gate refuses");
+        connection.State.Should().Be(HubConnectionState.Disconnected);
+    }
+
+    [Fact]
     public void FallbackPolicy_RequiresAnAuthenticatedUser()
     {
         // The gate is default-DENY: the posture must come from the fallback policy (which applies wherever an
@@ -177,6 +256,75 @@ public sealed class DefaultDenySessionGateTests
             PreAuthAllowlist.Routes,
             "the set of endpoints marked .AllowAnonymousPreAuth() must be exactly PreAuthAllowlist — no "
             + "un-listed opt-out, and no listed route left unmarked");
+
+        // The same invariant read through the fail-closed helper, which requires EVERY declared method of a
+        // multi-method endpoint to be listed (All, not Any) — so a MapMethods(["GET","POST"], ...) with only
+        // GET allowlisted is treated as gated rather than as an opt-out.
+        endpoints.Where(PreAuthAllowlist.Contains)
+            .SelectMany(PreAuthAllowlist.KeysFor)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            .Should().BeEquivalentTo(anonymous, "PreAuthAllowlist.Contains and the runtime marks must agree");
+    }
+
+    [Fact]
+    public void NoEndpoint_CarriesItsOwnAuthorizationMetadata_WhichWouldOptOutOfTheFallbackPolicy()
+    {
+        // The gap the invariant above cannot see. A FallbackPolicy applies ONLY where an endpoint declares no
+        // IAuthorizeData of its own, so a future `.RequireAuthorization("SomePolicy")` — or, worse, a
+        // permissive `RequireAssertion(_ => true)` — silently removes that endpoint from the default-deny
+        // posture while carrying no IAllowAnonymous, leaving the allowlist assertion green. There is zero such
+        // metadata in the codebase today; this makes introducing any a deliberate, failing-build decision
+        // rather than an invisible one.
+        using var factory = new GateProbeFactory();
+
+        var endpoints = factory.Services.GetRequiredService<EndpointDataSource>()
+            .Endpoints.OfType<RouteEndpoint>()
+            .ToList();
+
+        endpoints.Should().AllSatisfy(endpoint =>
+            endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Should().BeEmpty(
+                "{0} declares its own authorization metadata, so it does NOT inherit the default-deny "
+                + "fallback policy. If that is intended, the policy must be at least as strong as "
+                + "RequireAuthenticatedUser and this test updated to say so explicitly",
+                endpoint.RoutePattern.RawText));
+    }
+
+    [Theory]
+    [InlineData("GET", "/api/does-not-exist-at-all")]      // matched no endpoint at all
+    [InlineData("GET", "/api/feed/nope/deeper")]           // ditto, deeper path
+    [InlineData("DELETE", "/api/feed")]                    // matched only ASP.NET's 405 sentinel
+    [InlineData("XPROBE9", "/api/feed")]                   // an invented method token — Kestrel accepts any
+    public async Task RequestMatchingNoRouteEndpoint_IsNotAnsweredByTheGate(string method, string route)
+    {
+        // The gate does not gate what this host does not serve. A fallback policy IS evaluated for a request
+        // that matched no endpoint (and for the 405 sentinel, which is an Endpoint but not a RouteEndpoint), so
+        // without the guard in AccessRejectionResultHandler these would all answer 401 — with two consequences:
+        //   * every frontend call to a route the backend does not serve becomes a 401, which drives the shared
+        //     axios interceptor into its one-shot silent refresh; for a session with no refresh token (the
+        //     shared read-only login's envelope may omit one) that path CLEARS the stored tokens and logs a
+        //     read-only observer out mid-exercise;
+        //   * the rejection telemetry becomes unbounded — the sentinel has no route pattern to coalesce on and
+        //     the method is caller-supplied, so `curl -X M1 … -X M2 …` would write a durable row per request
+        //     into the AAR table from a caller with no credential.
+        //
+        // The assertion is deliberately about WHO ANSWERED, not the final status. On a host with a reachable
+        // database these are 404/405; here the host is fed a dead connection string, so the request continues
+        // past the gate into UseExerciseLifecycleGating()'s scope lookup and surfaces 500 — which is itself the
+        // proof that the request was NOT short-circuited by the gate. (That downstream DB work for an unmatched
+        // path is pre-existing main behaviour, not something this story introduces.)
+        using var factory = new GateProbeFactory();
+        using var client = factory.CreateClient();
+
+        using var request = new HttpRequestMessage(new HttpMethod(method), route);
+        using var response = await client.SendAsync(request);
+
+        response.Headers.WwwAuthenticate.Should().BeEmpty(
+            "{0} {1} matched no RouteEndpoint, so the gate must not have answered it — the challenge header is "
+            + "the discriminator, and only the gate writes it",
+            method,
+            route);
+        response.StatusCode.Should().NotBe(
+            HttpStatusCode.Unauthorized, "and it must not have been converted into an authorization failure");
     }
 
     [Fact]
@@ -203,13 +351,26 @@ public sealed class DefaultDenySessionGateTests
     /// </summary>
     private sealed class GateProbeFactory : WebApplicationFactory<Program>
     {
-        private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
-        private static readonly Guid ResolvedExerciseId = Guid.Parse("aaaaaaaa-0000-4000-8000-00000000000a");
+        internal static readonly Guid ResolvedExerciseId = Guid.Parse("aaaaaaaa-0000-4000-8000-00000000000a");
 
-        public GateProbeFactory()
-            => Environment.SetEnvironmentVariable(
+        private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
+
+        private readonly string? _acceptedToken;
+
+        /// <param name="acceptedToken">
+        /// When supplied, <see cref="ISessionAuthenticator"/> is stubbed to resolve EXACTLY this raw token to a
+        /// live participant session bound to <see cref="ResolvedExerciseId"/>, and nothing else. Stubbing the
+        /// authenticator (rather than seeding a row) keeps these plain <c>[Fact]</c>s off the database while
+        /// still driving the REAL middleware, the REAL token extraction and the REAL gate — the token→session
+        /// lookup itself is covered by the session slice's own suites.
+        /// </param>
+        public GateProbeFactory(string? acceptedToken = null)
+        {
+            _acceptedToken = acceptedToken;
+            Environment.SetEnvironmentVariable(
                 ConnectionStringEnvVar,
                 "Server=nonexistent;Database=pulse;Trusted_Connection=False;");
+        }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -218,6 +379,12 @@ public sealed class DefaultDenySessionGateTests
             builder.ConfigureTestServices(services =>
             {
                 services.AddSingleton<IHostExerciseResolver>(new AlwaysResolvingHostResolver(ResolvedExerciseId));
+
+                if (_acceptedToken is not null)
+                {
+                    services.AddScoped<ISessionAuthenticator>(
+                        _ => new SingleTokenSessionAuthenticator(_acceptedToken, ResolvedExerciseId));
+                }
             });
         }
 
@@ -226,6 +393,34 @@ public sealed class DefaultDenySessionGateTests
             base.Dispose(disposing);
             Environment.SetEnvironmentVariable(ConnectionStringEnvVar, null);
         }
+    }
+
+    /// <summary>
+    /// Resolves one known raw token to a live <c>participant</c> session bound to a fixed exercise; every other
+    /// token resolves to <c>null</c> (fail closed), exactly as the real authenticator does for an unknown,
+    /// expired or revoked token.
+    /// </summary>
+    private sealed class SingleTokenSessionAuthenticator : ISessionAuthenticator
+    {
+        private readonly string _acceptedToken;
+        private readonly Guid _exerciseId;
+
+        public SingleTokenSessionAuthenticator(string acceptedToken, Guid exerciseId)
+        {
+            _acceptedToken = acceptedToken;
+            _exerciseId = exerciseId;
+        }
+
+        public Task<AuthenticatedSession?> AuthenticateAsync(string rawToken, CancellationToken cancellationToken)
+            => Task.FromResult(
+                string.Equals(rawToken, _acceptedToken, StringComparison.Ordinal)
+                    ? new AuthenticatedSession
+                    {
+                        SessionId = Guid.NewGuid(),
+                        ExerciseId = _exerciseId,
+                        Kind = "participant",
+                    }
+                    : null);
     }
 
     /// <summary>Resolves every host to one fixed exercise, with no database access.</summary>

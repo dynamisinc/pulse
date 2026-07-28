@@ -79,7 +79,11 @@ public sealed class LifecycleGatingPipelineOrderTests
             + "app.UseSessionAuthentication() in Program.cs, so the gate read an unset scope and passed the "
             + "request through — a gate that looks wired and enforces nothing, while /api/feed hands a "
             + "participant an archived world's posts. A 401 means either the host never resolved to an exercise "
-            + "or the seeded session was not honored (identity-auth-roles/11's gate answering first)");
+            + "or the seeded session was not honored (identity-auth-roles/11's gate answering first). NOTE: "
+            + "since this test presents a participant session, a BROKEN host resolution now yields the session "
+            + "middleware's host-binding 403 — the same code the lifecycle gate produces — so this assertion "
+            + "alone could pass for the wrong reason. The PAIR is the guard: its live-exercise companion would "
+            + "then see 403 instead of 200. Never delete one without the other");
     }
 
     /// <summary>

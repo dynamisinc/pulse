@@ -21,9 +21,14 @@ using Pulse.WebApi.Features.ExerciseResolution;
 /// would make the audit trail its own denial-of-service vector: the login-failure events this mirrors sit
 /// behind a per-IP limiter, and the gate does not. At most one event is written per
 /// (exercise, method, route pattern, status) per <see cref="CoalesceWindow"/>, which bounds a flood of any
-/// size to roughly one row per route per minute while still recording that the route was probed. The key uses
-/// the ROUTE PATTERN, never the raw path, so a parameterised route cannot inflate either the tracking
-/// dictionary or the telemetry table.
+/// size to roughly one row per route per minute while still recording that the route was probed.
+/// </para>
+/// <para>
+/// <b>EVERY dimension of that key is bounded, deliberately.</b> Coalescing bounds nothing if any component is
+/// caller-controlled: the key uses the ROUTE PATTERN, never the raw path (a parameterised route would inflate
+/// both the tracking dictionary and the telemetry table), and the method is collapsed to a fixed set by
+/// <see cref="NormalizeMethod"/> because it is verbatim caller input. <see cref="AccessRejectionResultHandler"/>
+/// additionally never calls in for a request that matched no <see cref="RouteEndpoint"/> at all.
 /// </para>
 /// <para>
 /// <b>Scope comes from the request, never the caller.</b> The event is stamped with the resolved
@@ -88,8 +93,9 @@ public sealed partial class AccessRejectionTelemetry
             }
 
             var route = RoutePatternOf(context);
+            var method = NormalizeMethod(context.Request.Method);
             var now = DateTimeOffset.UtcNow;
-            var key = $"{exerciseId.Value}|{context.Request.Method}|{route}|{statusCode}";
+            var key = $"{exerciseId.Value}|{method}|{route}|{statusCode}";
             if (!ShouldEmit(key, now))
             {
                 return;
@@ -109,7 +115,7 @@ public sealed partial class AccessRejectionTelemetry
 
             dbContext.TelemetryEvents.Add(BuildRejectionTelemetry(
                 exerciseId.Value,
-                $"{context.Request.Method} {route}",
+                $"{method} {route}",
                 statusCode,
                 now,
                 exercise.CurrentScenarioTime ?? now,
@@ -157,6 +163,23 @@ public sealed partial class AccessRejectionTelemetry
         => context.GetEndpoint() is RouteEndpoint routeEndpoint
             ? routeEndpoint.RoutePattern.RawText ?? "(unnamed route)"
             : "(unmatched route)";
+
+    /// <summary>
+    /// Collapses the request method to a bounded set. EVERY dimension of the coalescing key must be bounded or
+    /// coalescing does not bound anything: the method is verbatim caller input (Kestrel accepts any RFC token),
+    /// and an endpoint that declares no method constraint — the SignalR hub, for one — will happily match an
+    /// invented one. Without this, <c>curl -X M1 … -X M2 …</c> against a gated route walks past the window and
+    /// writes a row per request into the AAR telemetry table.
+    /// </summary>
+    private static string NormalizeMethod(string method) =>
+        HttpMethods.IsGet(method) ? HttpMethods.Get
+        : HttpMethods.IsPost(method) ? HttpMethods.Post
+        : HttpMethods.IsPut(method) ? HttpMethods.Put
+        : HttpMethods.IsDelete(method) ? HttpMethods.Delete
+        : HttpMethods.IsPatch(method) ? HttpMethods.Patch
+        : HttpMethods.IsHead(method) ? HttpMethods.Head
+        : HttpMethods.IsOptions(method) ? HttpMethods.Options
+        : "OTHER";
 
     /// <summary>
     /// Builds the locked v0 envelope for a rejection: <c>actor.kind: 'system'</c> with NO participant/persona/

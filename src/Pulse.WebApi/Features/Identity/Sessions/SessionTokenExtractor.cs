@@ -19,6 +19,15 @@ using Microsoft.AspNetCore.Http;
 /// stays confined to the transports that cannot avoid it; every REST route remains header-only, and
 /// <see cref="TryGetBearerToken"/> is unchanged for callers that must never accept the query form.
 /// </para>
+/// <para>
+/// <b>Trap for the first hub METHOD that needs the caller's identity.</b> The endpoint-time session consumers —
+/// <c>CurrentStaffSessionAccessor</c>, <c>ReadOnlySessionProbe</c>, <c>SessionService</c> — all call
+/// <see cref="TryGetBearerToken"/>, which is correct for REST but returns <c>false</c> for a browser WebSocket
+/// (whose token arrived only in the query string). A hub method that consulted one of them would therefore see
+/// "no session" and fail closed with a confusing 403 on a perfectly authenticated connection. Such a consumer
+/// must either read <see cref="TryGetSessionToken"/> or take its identity from the connection's
+/// <c>HttpContext.User</c>, which <see cref="SessionAuthenticationMiddleware"/> populated on the way in.
+/// </para>
 /// </remarks>
 public static class SessionTokenExtractor
 {

@@ -171,7 +171,7 @@ See `docs/features/identity-auth-roles/feature.md` and `implementation.md`'s
 ## Acceptance Criteria
 
 ### Default-deny posture (the composition-root fix)
-- [ ] Given the composition root today grants access to any endpoint whose scope resolves (session
+- [x] Given the composition root today grants access to any endpoint whose scope resolves (session
       *or* anonymous host), when this story lands, then `builder.Services.AddAuthorization(o =>
       o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())` is
       registered, `app.UseAuthorization()` is called explicitly immediately after
@@ -180,18 +180,18 @@ See `docs/features/identity-auth-roles/feature.md` and `implementation.md`'s
       session — so the default for every mapped endpoint (minimal API, MVC controller, SignalR
       hub) becomes "no live session → 401", expressed as one composition-root mechanism, never a
       per-endpoint opt-in check.
-- [ ] Given the fallback policy, when a policy failure occurs, then a custom
+- [x] Given the fallback policy, when a policy failure occurs, then a custom
       `IAuthorizationMiddlewareResultHandler` maps a Challenge outcome to 401 and a Forbid outcome
       to 403 (no default challenge scheme is registered, so the default handler's behavior is not
       relied upon) and emits the XC-004 telemetry event below.
-- [ ] Given an allowlisted endpoint, when it is mapped, then it carries an explicit, commented
+- [x] Given an allowlisted endpoint, when it is mapped, then it carries an explicit, commented
       `.AllowAnonymous()` (or the MVC/hub equivalent) at its own mapping call site — never reachable
       by omission.
 
 ### The pre-auth allowlist is exactly 11 routes
-- [ ] The allowlist is exactly the 11 routes enumerated in Context — no more, no fewer. Anonymous,
+- [x] The allowlist is exactly the 11 routes enumerated in Context — no more, no fewer. Anonymous,
       host-resolved scope (`ExerciseResolutionMiddleware`) is consumable **only** by this list.
-- [ ] Given any other mapped endpoint — `GET /api/feed`, `GET /api/threads/{postId}`,
+- [x] Given any other mapped endpoint — `GET /api/feed`, `GET /api/threads/{postId}`,
       `GET /api/personas`, `POST /api/posts`, the six participant-shell config reads
       (`/api/shell-state`, `/api/chrome-config`, `/api/brand-tokens`, `/api/channel-nav-config`,
       `/api/alerts`, `/api/overlay-state`), `POST /api/telemetry`, the `/api/staff/*` and
@@ -200,26 +200,26 @@ See `docs/features/identity-auth-roles/feature.md` and `implementation.md`'s
       hub connection is aborted before `OnConnectedAsync` joins any group) before any
       handler/hub method runs, regardless of whether the `Host` header would otherwise resolve a
       scope.
-- [ ] Given the `/api/staff/*` and `/api/engine/*` endpoints, which already fail closed on "no live
+- [x] Given the `/api/staff/*` and `/api/engine/*` endpoints, which already fail closed on "no live
       session" via `ICurrentStaffSessionAccessor` / `EngineCockpitStaffAuthorizationFilter`, when
       the new default-deny wrapper lands, then their existing 401/403 semantics are unchanged —
       this is a consistency/defense-in-depth pass over them, not a rewrite (verified by story 14).
-- [ ] Given `POST /api/auth/logout` (allowlisted), when it is called with no live session, then it
+- [x] Given `POST /api/auth/logout` (allowlisted), when it is called with no live session, then it
       still returns 204 (unchanged, deliberate — Decision 4).
 
 ### The SignalR hub is gated, with its paired frontend fix
-- [ ] Given an unauthenticated client, when it attempts to connect to `/hubs/exercise`, then the
+- [x] Given an unauthenticated client, when it attempts to connect to `/hubs/exercise`, then the
       connection is refused by the fallback policy before `ExerciseRealtimeHub.OnConnectedAsync`
       ever runs (a stronger guarantee than the hub's own existing empty-scope abort, which still
       stands as defense-in-depth).
-- [ ] Given a live participant/staff/read-only session, when the frontend opens the shared
+- [x] Given a live participant/staff/read-only session, when the frontend opens the shared
       `realtimeConnection` (`core/realtime/connection.ts`), then it is built with an
       `accessTokenFactory` supplying the session's bearer token, and `SessionTokenExtractor` accepts
       that token from the `?access_token=` query parameter on the hub path (and only the hub path)
       in addition to the `Authorization` header.
 
 ### Absent session is fail-closed at the gate, not merely "not read-only"
-- [ ] Given the new default-deny gate runs in `AuthorizationMiddleware` ahead of every endpoint
+- [x] Given the new default-deny gate runs in `AuthorizationMiddleware` ahead of every endpoint
       filter, when a request with no live session reaches a sim-write endpoint, then it is rejected
       by the fallback policy before `ReadOnlySessionWriteFilter` ever runs; the filter's own doc
       comment (`ReadOnlySessionWriteFilter.cs:24-28`) is corrected to state that an absent session
@@ -227,12 +227,12 @@ See `docs/features/identity-auth-roles/feature.md` and `implementation.md`'s
       (which was never true) — no behavior change to the filter itself.
 
 ### Cross-cutting
-- [ ] **Isolation (XC-001/COR-001):** a session is the authenticated anchor of the exercise scope;
+- [x] **Isolation (XC-001/COR-001):** a session is the authenticated anchor of the exercise scope;
       an anonymous, host-resolved scope is no longer sufficient to reach any participant-facing
       read/write. Extends the standing isolation suite (`exercise-isolation/07`) with the
       no-credential-at-all case across the enumerated route list, distinct from the existing
       cross-exercise (A-session-reads-B) cases those stories already cover.
-- [ ] **Telemetry (XC-004):** a rejected unauthenticated attempt against a non-allowlisted endpoint
+- [x] **Telemetry (XC-004):** a rejected unauthenticated attempt against a non-allowlisted endpoint
       emits an XC-004 event (additive vocabulary, `access.rejected`) — wall + scenario time (the
       exercise's stored scenario time, the B2 placeholder story 03 documents), `actor.kind:
       'system'`, no `personaId`/`actingHumanId` (there is no authenticated identity to attribute
@@ -240,6 +240,27 @@ See `docs/features/identity-auth-roles/feature.md` and `implementation.md`'s
       `outcome: 'failure'` pattern the login endpoints already use (`ParticipantLoginService`'s
       `BuildLoginTelemetry`/`FailureOutcomePayload`). Sized to avoid becoming its own DoS vector (no
       larger a write than the login-failure event already is; rate-limiting itself is Out of Scope).
+
+### As-built behaviour worth recording (discovered in review, PR #384)
+
+- **The gate answers only for a matched `RouteEndpoint`.** A fallback policy is evaluated even when routing
+  matched nothing, so an unknown path (and ASP.NET's 405 sentinel, which is an `Endpoint` but not a
+  `RouteEndpoint`) would otherwise have become 401 instead of 404/405. Two reasons that is wrong, both real:
+  every frontend call to a route the backend does not serve would drive the shared axios interceptor's
+  one-shot silent refresh — and for a session with **no** refresh token (the shared read-only login's
+  envelope may omit one) that path *clears* the stored tokens, logging a read-only observer out mid-exercise;
+  and the rejection telemetry becomes unbounded, because an unmatched request has no route pattern to
+  coalesce on. `AccessRejectionResultHandler` therefore passes any non-`RouteEndpoint` request straight
+  through. It costs the gate no coverage — all 53 real endpoints are `RouteEndpoint`s.
+- **`WWW-Authenticate: Bearer` on the gate's 401 is load-bearing, not decoration.** It is RFC 6750-correct,
+  and it is the only thing that distinguishes "the gate refused you" from "the handler ran and refused you" —
+  `POST /api/auth/refresh` is allowlisted yet still 401s a request carrying no refresh token, so without a
+  discriminator "the allowlist still works" could not be asserted behaviourally at all.
+- **Every dimension of the `access.rejected` coalescing key must be bounded.** The route *pattern* was; the
+  HTTP method was not (Kestrel accepts any RFC token, and an endpoint declaring no method constraint — the
+  hub — matches an invented one), so `curl -X M1 … -X M2 …` walked past the window and wrote a durable row
+  per request into the AAR table from a caller with no credential. `NormalizeMethod` collapses it to a fixed
+  set.
 
 ## Out of Scope
 `POST /api/posts` server-side attribution (COR-018) — story

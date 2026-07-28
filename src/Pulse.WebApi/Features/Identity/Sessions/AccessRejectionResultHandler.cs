@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Identity.Sessions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 
 /// <summary>
 /// Turns a default-deny policy failure into the wire result (identity-auth-roles/11): <c>401</c> when the
@@ -59,6 +60,25 @@ public sealed partial class AccessRejectionResultHandler : IAuthorizationMiddlew
         ArgumentNullException.ThrowIfNull(authorizeResult);
 
         if (authorizeResult.Succeeded)
+        {
+            await next(context);
+            return;
+        }
+
+        // Do not gate what this host does not serve. A fallback policy is evaluated even when routing matched
+        // NOTHING (an unknown path) or matched only ASP.NET's method-mismatch sentinel — neither of which is a
+        // RouteEndpoint, and neither of which can serve a byte of data. Turning those into 401 would:
+        //   * hand the SPA's shared axios interceptor a 401 for every call to a route the backend does not
+        //     serve, which drives its one-shot silent refresh — and for a session with no refresh token (the
+        //     shared read-only login's envelope may omit one) that path CLEARS the stored tokens, logging a
+        //     read-only observer out mid-exercise. Pulse has shipped "frontend seam, no backend route" twice
+        //     (#310/#317, the participant-shell 404s), so this is a live hazard, not a hypothetical one;
+        //   * make the rejection telemetry below unbounded — an unmatched request has no route pattern to key
+        //     coalescing on, and the HTTP method is caller-supplied (Kestrel accepts any RFC token).
+        // Letting these through is safe: the remaining pipeline (lifecycle gating, rate limiter, endpoints)
+        // terminates in routing's own 404/405. No handler runs, and every one of the 53 real endpoints —
+        // minimal API, MVC controller and hub alike — IS a RouteEndpoint, so gate coverage is unchanged.
+        if (context.GetEndpoint() is not RouteEndpoint)
         {
             await next(context);
             return;

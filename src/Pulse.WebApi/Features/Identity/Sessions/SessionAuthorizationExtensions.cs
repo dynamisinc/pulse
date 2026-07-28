@@ -44,8 +44,10 @@ using Microsoft.Extensions.DependencyInjection;
 ///   <item><description>DI: <c>builder.Services.AddSessionAuthorization()</c>.</description></item>
 ///   <item><description>Pipeline: <c>app.UseAuthorization()</c> MUST be called EXPLICITLY, immediately after
 ///   <c>app.UseSessionAuthentication()</c>. <c>WebApplication</c> auto-inserts it ahead of all user middleware
-///   when it is never called explicitly, which would evaluate the policy before the principal exists and 401
-///   every request — allowlisted ones included.</description></item>
+///   when it is never called explicitly, which would evaluate the policy before the principal exists. That
+///   failure is SILENT rather than total: the allowlisted routes keep working (<c>IAllowAnonymous</c>
+///   short-circuits the middleware wherever it sits), so login succeeds and then every authenticated call
+///   after it 401s.</description></item>
 ///   <item><description>Each of <see cref="PreAuthAllowlist"/>'s eleven routes carries
 ///   <see cref="AllowAnonymousPreAuth{TBuilder}"/> at its own mapping call site.</description></item>
 /// </list>
