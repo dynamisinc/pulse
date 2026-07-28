@@ -269,10 +269,13 @@ public class TelemetryEnvelopeAuthorityTests
     // ==========================================================================================
 
     [Theory]
-    [InlineData("engine")]
-    [InlineData("controller-as-persona")]
-    [InlineData("inject")]
-    public void PrivilegedOrigin_ClaimedByANonStaffSession_IsRejectedWith403(string origin)
+    [InlineData("participant", "engine")]
+    [InlineData("participant", "controller-as-persona")]
+    [InlineData("participant", "inject")]
+    [InlineData("readonly", "engine")]
+    [InlineData("readonly", "inject")]
+    [InlineData("some-future-kind-nobody-has-invented-yet", "engine")]
+    public void PrivilegedOrigin_ClaimedByANonStaffSession_IsRejectedWith403(string sessionKind, string origin)
     {
         // Same forgery class as actor.kind, and the same harm: the evaluator surfaces render 'engine' /
         // 'controller-as-persona' as machine- or operator-generated, so a trainee stating either writes fabricated
@@ -282,7 +285,7 @@ public class TelemetryEnvelopeAuthorityTests
         request.Origin = origin;
         request.InjectId = origin == "inject" ? "043" : null;
 
-        var result = TelemetryEnvelopeAuthority.Apply(request, Participant(), SessionExercise);
+        var result = TelemetryEnvelopeAuthority.Apply(request, Identity(kind: sessionKind), SessionExercise);
 
         result.IsResolved.Should().BeFalse();
         result.RejectionStatusCode.Should().Be(StatusCodes.Status403Forbidden);
@@ -291,6 +294,7 @@ public class TelemetryEnvelopeAuthorityTests
     [Theory]
     [InlineData("engine")]
     [InlineData("controller-as-persona")]
+    [InlineData("inject")]
     public void PrivilegedOrigin_ClaimedByAStaffSession_IsAccepted(string origin)
     {
         // Every shipped controller emitter states one of these (useEngineControl.ts, useSwampedMode.ts,
@@ -316,6 +320,41 @@ public class TelemetryEnvelopeAuthorityTests
         var result = TelemetryEnvelopeAuthority.Apply(request, Participant(), SessionExercise);
 
         result.IsResolved.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("participant")]
+    [InlineData("readonly")]
+    [InlineData("some-future-kind-nobody-has-invented-yet")]
+    public void ActorKindEngine_FromANonStaffSession_IsRejectedWith403(string sessionKind)
+    {
+        // The sibling of the privileged-origin rule, refused on the same evidence standard: every actor.kind
+        // 'engine' literal in the frontend is under features/controller/** or features/staffShell/**, so no
+        // participant-reachable emitter states it — and allowing it would let a trainee write MACHINE-attributed
+        // activity into the evaluation record, the identical forgery class.
+        var request = Envelope(actor: new ActorRequest { Kind = "engine" });
+
+        var result = TelemetryEnvelopeAuthority.Apply(request, Identity(kind: sessionKind), SessionExercise);
+
+        result.IsResolved.Should().BeFalse();
+        result.RejectionStatusCode.Should().Be(StatusCodes.Status403Forbidden);
+    }
+
+    [Theory]
+    [InlineData("participant")]
+    [InlineData("readonly")]
+    [InlineData("staff")]
+    public void ActorKindSystem_IsAcceptedFromEverySessionKind(string sessionKind)
+    {
+        // 'system' is deliberately NOT refused alongside 'engine': it is the neutral "this actor has no personal
+        // identity" kind rather than a claim to be something privileged, it is what the read-only correction
+        // produces, and it is what the identity slice's own server-side emitters use for an identity-less event.
+        var request = Envelope(actor: new ActorRequest { Kind = "system" });
+
+        var result = TelemetryEnvelopeAuthority.Apply(request, Identity(kind: sessionKind), SessionExercise);
+
+        result.IsResolved.Should().BeTrue();
+        request.Actor!.Kind.Should().Be("system");
     }
 
     [Theory]

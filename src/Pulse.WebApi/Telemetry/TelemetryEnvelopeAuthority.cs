@@ -49,8 +49,18 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// read-only branch, and a shared observer's session is kind <c>readonly</c> — so refusing that claim would
 /// silently delete view/reach telemetry for the largest cohort in an exercise (the client's sink swallows the
 /// rejection). The claim IS correctable for this kind, and the correction is not invented: it is the same
-/// <c>actor.kind: 'system'</c> + session-id-as-reach-key attribution <c>SharedReadOnlyLoginService</c> already
-/// stamps on the telemetry it writes for the very same session.
+/// <c>actor.kind: 'system'</c> attribution <c>SharedReadOnlyLoginService</c> already stamps on the telemetry it
+/// writes for the very same session.
+/// </para>
+/// <para>
+/// <b>The reach key differs from that login event's, and here is the correlation path.</b> Precision an AAR/E10
+/// reach query will take literally: <c>SharedReadOnlyLoginService</c> puts its freshly-generated EPHEMERAL
+/// identity in the login event's <c>actor.sessionId</c> (it has no <c>Session</c> row yet), whereas this stamps
+/// the persisted <c>Session.Id</c>. So one observer's login row and view rows carry DIFFERENT
+/// <c>actor.sessionId</c> values, and a distinct-observer count over <c>actor.sessionId</c> spanning both event
+/// types would double-count. They are 1:1 and joinable: that ephemeral identity is the session's
+/// <c>PrincipalId</c> AND <c>ActingHumanId</c>, so the login event's <c>actor.sessionId</c> equals the view rows'
+/// <c>actor.actingHumanId</c>. Reach counted over view events alone is unaffected.
 /// </para>
 /// <para>
 /// <b>Why a static over a claims-read, not a DI service over a token lookup.</b> Every fact here is already on
@@ -91,6 +101,13 @@ public static class TelemetryEnvelopeAuthority
     /// attributed to, matching what <c>SharedReadOnlyLoginService</c> already stamps on the telemetry IT writes.
     /// </summary>
     private const string SystemActorKind = "system";
+
+    /// <summary>
+    /// The v0 <c>actor.kind</c> asserting "the generation engine did this" — a machine provenance no non-staff
+    /// HTTP caller may claim, for the same reason it may not claim <see cref="ParticipantOrigin"/>'s privileged
+    /// siblings.
+    /// </summary>
+    private const string EngineActorKind = "engine";
 
     /// <summary>The only <c>origin</c> a non-staff HTTP caller may state (an absent origin is always fine).</summary>
     private const string ParticipantOrigin = "participant";
@@ -148,9 +165,14 @@ public static class TelemetryEnvelopeAuthority
         // 'engine' / 'controller-as-persona' events as machine- or operator-generated, so a trainee who could
         // state either would be writing fabricated provenance into the evaluation record — exactly how the audit's
         // exploit 1 dressed an injected post up as engine-generated content. Only a staff session may state a
-        // privileged origin; every shipped emitter agrees (features/controller/** states 'engine' /
-        // 'controller-as-persona', participant surfaces state 'participant' or omit it). Refused, not rewritten:
-        // a claimed provenance the caller cannot hold has no correct value to substitute.
+        // privileged origin; every shipped emitter agrees. Refused, not rewritten: a claimed provenance the caller
+        // cannot hold has no correct value to substitute.
+        //
+        // Note WHERE that "every shipped emitter agrees" guarantee actually lives. The literal privileged values
+        // are all under features/controller/**, but the envelope FIELD is written by two shared services that
+        // participant paths also call — postService.ts and amplify.ts pass their `input.origin` straight through.
+        // So the guarantee rests on the CALLERS of createPost/repost/quotePost, not on a folder boundary: a future
+        // participant-reachable caller passing a non-'participant' origin gets a 403 the client's sink swallows.
         if (request.Origin is not null
             && !isStaffSession
             && !string.Equals(request.Origin, ParticipantOrigin, StringComparison.Ordinal))
@@ -187,6 +209,24 @@ public static class TelemetryEnvelopeAuthority
                 }
 
                 actor.Kind = SystemActorKind;
+            }
+
+            // The sibling of the origin rule above, and refused on the same evidence standard: no
+            // participant-reachable emitter states actor.kind 'engine' (every 'engine' literal in the frontend is
+            // under features/controller/** or features/staffShell/**), so refusing it breaks nothing shipped —
+            // while allowing it would let a trainee write MACHINE-attributed activity into the evaluation record,
+            // the identical forgery class. Not correctable: there is no engine to substitute.
+            //
+            // 'system' is deliberately NOT refused alongside it. It is the neutral "this actor has no personal
+            // identity" kind rather than a claim to be something privileged, it is what the read-only correction
+            // above produces, and it is what the identity slice's own server-side emitters use for an
+            // identity-less event (SharedReadOnlyLoginService, ParticipantLoginService's failed-login event).
+            // Refusing it would refuse the honest answer.
+            if (string.Equals(actor.Kind, EngineActorKind, StringComparison.Ordinal) && !isStaffSession)
+            {
+                return TelemetryAuthorityResolution.Rejected(
+                    StatusCodes.Status403Forbidden,
+                    "Only a staff session may emit an actor.kind of 'engine'.");
             }
 
             // Persona ownership, for every kind EXCEPT staff. A non-staff caller may only report the persona its

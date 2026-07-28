@@ -139,6 +139,17 @@ a privileged origin (`useEngineControl`, `useSwampedMode`, `useDraftTimer`, `rev
 and participant surfaces state `participant` or nothing. `actor.role` was left alone by contrast — a display/filter
 string with no attribution or authorization meaning.
 
+**5c. `actor.kind: 'engine'` is refused from a non-staff session; `'system'` is not.** Folded from the
+follow-up review (WR-005), which correctly called the original asymmetry an oversight rather than a decision:
+having just policed `origin: 'engine'`, leaving `actor.kind: 'engine'` body-trusted left the identical
+machine-attribution forgery open by a different field. Refused on the same evidence standard — every `'engine'`
+literal in the frontend is under `features/controller/**` or `features/staffShell/**`, so no participant-reachable
+emitter states it. `'system'` is deliberately left alone: it is the neutral "this actor has no personal identity"
+kind rather than a claim to be something privileged, it is what the read-only correction (4a) *produces*, and it
+is what the identity slice's own server-side emitters use for an identity-less event
+(`SharedReadOnlyLoginService`, `ParticipantLoginService`'s failed-login event). Refusing it would refuse the
+honest answer.
+
 **5b. `actor.personaId` is verified but never COMPLETED, and a staff session's choice is not cast-validated.**
 Asymmetric with `participantId` on purpose. `participantId` is unambiguous (a participant session has exactly one
 account), so an omitted one is stamped; *which persona an event concerns* is the emitter's knowledge, so
@@ -209,12 +220,26 @@ principal, so nothing needed wiring at the composition root.
   identical claim types), and `Telemetry/TelemetryIngestTests.cs` extended with the end-to-end persisted
   assertions. Suite: **1494 passing / 0 skipped** (from 1424 on `main`).
 
-**Tier-2 review folded** (1 Critical, 3 Warnings, 3 Suggestions — all addressed): the read-only Critical
+**Tier-2 review folded, in two passes.** Pass 1 (1 Critical, 3 Warnings, 3 Suggestions): the read-only Critical
 (Decision 4a), the `origin` gap (5a), the misleading persona-validation comment (5b), one genuinely
 non-discriminating test of my own (the "absent `exerciseId`" case was passing the session's own id through a
 helper default, so the branch had no coverage at all), `IsNullOrWhiteSpace` on the required claims, and two doc
-wording corrections. The review also confirmed independently that `Program.cs`, the model snapshot, and the three
-endpoint-time accessors are untouched.
+wording corrections. Pass 2 verified the fold, returned **clean**, and raised two more warnings, both folded: the
+`actor.kind: 'engine'` sibling gap (5c) and an imprecise precedent claim about the read-only reach key — the
+correction's `actor.kind` half matches `SharedReadOnlyLoginService` exactly, but its login event puts the
+*ephemeral identity* in `actor.sessionId` (no `Session` row exists yet) where this stamps the persisted
+`Session.Id`, so a distinct-observer count spanning both event types would double-count. The join is now documented
+at the call site: that ephemeral identity is the session's `PrincipalId` **and** `ActingHumanId`, so the login
+event's `actor.sessionId` equals the view rows' `actor.actingHumanId`.
+
+Both passes confirmed independently that `Program.cs`, the model snapshot, and the three endpoint-time accessors
+are untouched, and pass 2 empirically proved the previously-dead branch is now covered (it deleted the guard and
+watched two tests fail).
+
+**Residual, not a defect — a dev-only mock/live divergence worth knowing before someone bisects it.** In mock mode
+the emitters carry `exerciseId: 'ex-mock-0001'` and `personaId: 'persona-dreyes_fh'`; neither parses as a `Guid`,
+so a mock-mode envelope pointed at a real backend now 400s/403s where it used to 202, and `mockSink` swallows it
+into one counted drop. UAT runs with mock off, so this is dev noise — but it is the documented divergence class.
 
 **Why this needs story 11's `FallbackPolicy` specifically, not just "any" session requirement:**
 `TelemetryController` is an MVC controller (`[ApiController]`, self-registered via
