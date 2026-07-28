@@ -61,6 +61,10 @@ function stub(tier: PauseTier, overrides: Partial<PauseState> = {}): PauseState 
     setTier: vi.fn(),
     resume: vi.fn(),
     setOverlayRegister: vi.fn(),
+    // No server refusal by default (WR-003) — the notice is absent unless a test
+    // asks for it, so every pre-existing expectation here is unchanged.
+    refusal: null,
+    dismissRefusal: vi.fn(),
     ...overrides,
   }
 }
@@ -454,5 +458,63 @@ describe('PausePill — participant pause page selector (story 08; AC1/AC5, NFR-
     await user.click(screen.getByTestId('pause-apply'))
 
     expect(screen.queryByTestId('pause-register-group')).not.toBeInTheDocument()
+  })
+})
+
+describe('PausePill — a REFUSED Freeze is announced, not silently reverted (WR-003, NFR-001)', () => {
+  const refusal = {
+    tier: 'freeze' as const,
+    outcome: 'not-applicable-in-lifecycle-state',
+    reason:
+      'Freeze is not applicable before StartEx — this exercise is staged. ' +
+      'Take the exercise Live first; there is no running world to freeze.',
+  }
+
+  it('renders no refusal notice when there is nothing to report', () => {
+    mockedUsePauseState.mockReturnValue(stub('running'))
+    renderWithTheme(<PausePill />)
+
+    expect(screen.queryByTestId('pause-refusal')).not.toBeInTheDocument()
+  })
+
+  it("shows the server's reason as TEXT, never colour alone", () => {
+    mockedUsePauseState.mockReturnValue(stub('running', { refusal }))
+    renderWithTheme(<PausePill />)
+
+    const notice = screen.getByTestId('pause-refusal')
+    expect(notice).toHaveTextContent('WORLD FROZEN NOT APPLIED')
+    expect(notice).toHaveTextContent('this exercise is staged')
+    expect(notice).toHaveTextContent('Take the exercise Live first')
+  })
+
+  it('is ANNOUNCED without stealing focus (role=status, aria-live=polite)', () => {
+    mockedUsePauseState.mockReturnValue(stub('running', { refusal }))
+    renderWithTheme(<PausePill />)
+
+    const notice = screen.getByRole('status')
+    expect(notice).toHaveAttribute('aria-live', 'polite')
+    expect(notice).toHaveAttribute('data-testid', 'pause-refusal')
+    expect(document.body).toHaveFocus()
+  })
+
+  it('dismisses from the KEYBOARD through a real button', async () => {
+    const user = userEvent.setup()
+    const dismissRefusal = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { refusal, dismissRefusal }))
+    renderWithTheme(<PausePill />)
+
+    const dismiss = screen.getByRole('button', { name: /dismiss the refused pause notice/i })
+    dismiss.focus()
+    await user.keyboard('{Enter}')
+
+    expect(dismissRefusal).toHaveBeenCalledTimes(1)
+  })
+
+  it('still shows the honest RUNNING pill beneath the notice — never WORLD FROZEN', () => {
+    mockedUsePauseState.mockReturnValue(stub('running', { refusal }))
+    renderWithTheme(<PausePill />)
+
+    expect(screen.getByTestId('pause-pill')).toHaveTextContent('RUNNING')
+    expect(screen.getByTestId('pause-pill')).not.toHaveTextContent('WORLD FROZEN')
   })
 })

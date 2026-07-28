@@ -73,10 +73,20 @@ vi.mock('@/core/config/mockData', () => ({
 
 // The live pause-tier POST/GET and the shipped kill-switch POST are mocked
 // wholesale — never a real network call.
-vi.mock('../services/livePauseTierActions', () => ({
-  setPauseTier: vi.fn(),
-  fetchPauseTier: vi.fn(),
-}))
+// `asPauseTierRefusal` is deliberately the REAL implementation: it is the pure
+// narrowing that decides "definitive refusal" vs "ambiguous failure", and stubbing
+// it would let these tests pass while the hook mis-classified a real 409 body.
+vi.mock('../services/livePauseTierActions', async () => {
+  const actual =
+    await vi.importActual<typeof import('../services/livePauseTierActions')>(
+      '../services/livePauseTierActions',
+    )
+  return {
+    ...actual,
+    setPauseTier: vi.fn(),
+    fetchPauseTier: vi.fn(),
+  }
+})
 vi.mock('../engine/services/liveEngineControlActions', () => ({
   setMode: vi.fn().mockResolvedValue(undefined),
 }))
@@ -622,7 +632,10 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
     expect(result.current.label).toBe('RUNNING')
   })
 
-  it('reverts a Freeze the server REFUSED (the 409 rejection path), after ASKING what is true', async () => {
+  it('reverts a Freeze the server REFUSED (an UNPARSEABLE 409), after ASKING what is true', async () => {
+    // A bare Error carries no `response.data`, so it is NOT a narrowable refusal —
+    // an older backend, or a proxy-generated 409. It must stay on the ambiguous
+    // ask-don't-guess path rather than being assumed to mean "nothing happened".
     mockedSetPauseTier.mockRejectedValue(new Error('Request failed with status code 409'))
     mockedFetchPauseTier.mockResolvedValue(serverState('running', false))
     const { result } = renderHook(() => usePauseState())
@@ -635,6 +648,94 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
     expect(mockedFetchPauseTier).toHaveBeenCalled()
     expect(result.current.tier).toBe('running')
     expect(result.current.isFrozen).toBe(false)
+    expect(result.current.refusal).toBeNull()
+  })
+
+  // ---- WR-003: a Freeze the server refuses OUTRIGHT is announced, not silent ----
+
+  /** The axios-shaped 409 the backend's `PauseTierRefusalDto` produces. */
+  function lifecycleRefusal(reason: string) {
+    return {
+      response: {
+        status: 409,
+        data: { outcome: 'not-applicable-in-lifecycle-state', reason },
+      },
+    }
+  }
+
+  it('SURFACES the reason when the server refuses a Freeze outside a running world', async () => {
+    const reason =
+      'Freeze is not applicable before StartEx — this exercise is staged. Take the exercise Live first;'
+    mockedSetPauseTier.mockRejectedValue(lifecycleRefusal(reason))
+    const { result } = renderHook(() => usePauseState())
+
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+
+    expect(result.current.tier).toBe('running')
+    expect(result.current.isFrozen).toBe(false)
+    expect(result.current.refusal).toEqual({
+      tier: 'freeze',
+      outcome: 'not-applicable-in-lifecycle-state',
+      reason,
+    })
+  })
+
+  it('does NOT re-GET on a definitive refusal — the server promised it recorded nothing', async () => {
+    mockedSetPauseTier.mockRejectedValue(lifecycleRefusal('Freeze is not applicable — this exercise is build.'))
+    const { result } = renderHook(() => usePauseState())
+
+    // Cleared AFTER mount, so the once-per-runtime resync GET is not miscounted as
+    // a reconcile read — the distinction under test is what the FAILURE path does.
+    await act(async () => {
+      await flushMicrotasks()
+    })
+    mockedFetchPauseTier.mockClear()
+
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+
+    expect(mockedFetchPauseTier).not.toHaveBeenCalled()
+    expect(result.current.tier).toBe('running')
+  })
+
+  it('clears the refusal notice on the controller’s NEXT action', async () => {
+    mockedSetPauseTier.mockRejectedValueOnce(lifecycleRefusal('Freeze is not applicable — completed.'))
+    const { result } = renderHook(() => usePauseState())
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+    expect(result.current.refusal).not.toBeNull()
+
+    mockedSetPauseTier.mockResolvedValueOnce(serverState('engine', false))
+    await act(async () => {
+      result.current.setTier('engine')
+      await flushMicrotasks()
+    })
+
+    expect(result.current.refusal).toBeNull()
+    expect(result.current.tier).toBe('engine')
+  })
+
+  it('clears the refusal notice when the controller dismisses it', async () => {
+    mockedSetPauseTier.mockRejectedValue(lifecycleRefusal('Freeze is not applicable — archived.'))
+    const { result } = renderHook(() => usePauseState())
+    await act(async () => {
+      result.current.setTier('freeze')
+      await flushMicrotasks()
+    })
+    expect(result.current.refusal).not.toBeNull()
+
+    act(() => {
+      result.current.dismissRefusal()
+    })
+
+    expect(result.current.refusal).toBeNull()
   })
 
   // ---- WR-101: a failed POST must not be GUESSED at ----

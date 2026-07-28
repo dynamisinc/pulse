@@ -18,7 +18,7 @@ using Xunit;
 /// Unit tests for the REAL <see cref="IPauseOverlayPublisher"/> (world-steering/08; CTL-023, COR-001, XC-001,
 /// XC-002, XC-004). Docker-free (<see cref="FactAttribute"/>): the only collaborators are
 /// <see cref="IHubContext{THub}"/> (mocked, exactly as <c>EngineReviewBroadcasterTests</c> does), the in-memory
-/// overlay store, and the tier-reader delegate.
+/// overlay store, and the two reader delegates.
 ///
 /// <para>Proves: a Freeze writes the pause overlay AND pushes <c>OverlayStateChanged</c> to the OWNING exercise's
 /// group only (never another's — the always-Critical property); a Resume clears it; the payload is the
@@ -26,6 +26,12 @@ using Xunit;
 /// <c>transition.To</c> — decides what participants see; a hub failure is swallowed so a freeze that already
 /// stands is never undone (WR-004); and no telemetry is emitted (story 07's <c>steering_action</c> stays the
 /// single audit record).</para>
+///
+/// <para><b>And (Gate-1 CR-001) that the overlay-precedence ruling gates this PUSH channel, not only the GET.</b>
+/// Every suppressed cell asserts the hub received NOTHING — the mirror of the cross-exercise assertion — because a
+/// green read-side suite proved nothing about the channel that reaches an already-connected tab with no refresh.
+/// The gate is <see cref="SteeringOverlayPrecedence.PauseIsParticipantVisibleIn"/>, the SAME predicate
+/// <see cref="SteeringPauseOverlayProjection"/> reads.</para>
 /// </summary>
 public sealed class PauseOverlayPublisherTests
 {
@@ -264,6 +270,121 @@ public sealed class PauseOverlayPublisherTests
         await act.Should().ThrowAsync<ArgumentNullException>();
     }
 
+    // ---- CR-001: the overlay-precedence ruling gates the PUSH channel too ----------------------
+    //
+    // The mirror of PublishAsync_TargetsOnlyTheOwningExercisesGroup_NeverAnothers: what matters in a suppressed
+    // cell is that the hub received NOTHING. Gating only GET /api/overlay-state left this channel wide open — an
+    // already-connected tab is never disconnected when an exercise ends, so a Freeze after EndEx pushed the
+    // in-fiction holding page onto a permanently ended exercise with no refresh required.
+
+    /// <summary>
+    /// <b>ENDEX suppressed.</b> A Freeze in a <c>completed</c> exercise writes nothing and pushes nothing, so no
+    /// connected participant can be shown "We'll be right back" over a permanently ended exercise (COR-054).
+    /// </summary>
+    [Fact]
+    public async Task PublishAsync_FreezeAfterEndEx_WritesNothingAndPushesNothing()
+    {
+        var exerciseId = Guid.NewGuid();
+        var harness = new Harness(tier: PauseTier.Freeze, lifecycleStatus: "completed");
+
+        await harness.Publisher.PublishAsync(Transition(exerciseId, PauseTier.Running, PauseTier.Freeze));
+
+        harness.GroupsPushed.Should().BeEmpty(
+            "CR-001: nothing may be broadcast into a world that has reached EndEx — a tab joined to "
+            + "exercise-{id} before the transition is never disconnected, so a push WOULD render the holding page "
+            + "over a finished exercise with no refresh");
+        harness.OverlayState.Get(exerciseId).State.Should().Be(
+            "none",
+            "and the store is left untouched, so the GET and the push cannot disagree about the same state on the "
+            + "same screen — writing 'pause' and relying on the read gate would recreate that split");
+    }
+
+    /// <summary>
+    /// <b>Pre-start suppressed.</b> Worse than ENDEX in one way: in <c>staged</c> participants are legitimately
+    /// connected (<c>ParticipantAccessOpen = true</c>), so an ungated push reaches a live audience.
+    /// </summary>
+    [Theory]
+    [InlineData("build")]
+    [InlineData("staged")]
+    public async Task PublishAsync_FreezeBeforeStartEx_WritesNothingAndPushesNothing(string preStartState)
+    {
+        var exerciseId = Guid.NewGuid();
+        var harness = new Harness(tier: PauseTier.Freeze, lifecycleStatus: preStartState);
+
+        await harness.Publisher.PublishAsync(Transition(exerciseId, PauseTier.Running, PauseTier.Freeze));
+
+        harness.GroupsPushed.Should().BeEmpty(
+            "pre-start outranks pause, and in 'staged' participants ARE connected — an ungated push would show a "
+            + "holding page while that same tab's re-GET said 'none'");
+        harness.OverlayState.Get(exerciseId).State.Should().Be("none");
+    }
+
+    /// <summary>
+    /// A terminal <c>archived</c> world, and an UNRECOGNIZED / missing status, both fail closed — a typo in the
+    /// <c>Status</c> column, or a deleted exercise row, can never broadcast a holding page.
+    /// </summary>
+    [Theory]
+    [InlineData("archived")]
+    [InlineData("sideways")]
+    [InlineData(null)]
+    public async Task PublishAsync_FreezeInATerminalOrUnreadableWorld_PushesNothing_FailingClosed(string? status)
+    {
+        var exerciseId = Guid.NewGuid();
+        var harness = new Harness(tier: PauseTier.Freeze, lifecycleStatus: status!);
+
+        await harness.Publisher.PublishAsync(Transition(exerciseId, PauseTier.Running, PauseTier.Freeze));
+
+        harness.GroupsPushed.Should().BeEmpty(
+            "an unknown state (and a missing exercise row, which reads null) is NOT a running world — the "
+            + "fail-closed direction never invents a participant overlay");
+    }
+
+    /// <summary>
+    /// The positive control for all of the above: the SAME publish in a RUNNING world does push, to that
+    /// exercise's group alone, carrying the controller's selected register. Without this the suppression tests
+    /// could all pass on a publisher that never pushed at all.
+    /// </summary>
+    [Fact]
+    public async Task PublishAsync_FreezeInARunningWorld_StillPushesToThatExercisesGroup_WithTheSelectedRegister()
+    {
+        var exerciseId = Guid.NewGuid();
+        var harness = new Harness(tier: PauseTier.Freeze, lifecycleStatus: "live");
+
+        await harness.Publisher.PublishAsync(
+            new PauseTierTransition(exerciseId, PauseTier.Running, PauseTier.Freeze, StaffActingHumanId, "in-fiction"));
+
+        var pushes = harness.PushesTo($"exercise:{exerciseId}");
+        pushes.Should().ContainSingle().Which.State.Should().Be(
+            "pause", "a live world's Freeze IS participant-visible — this is the cell story 08 exists for");
+        pushes[0].Register.Should().Be("in-fiction", "AC5: the controller's selection rides the push");
+        harness.OverlayState.Get(exerciseId).State.Should().Be("pause");
+    }
+
+    /// <summary>
+    /// <b>A CLEAR is never gated.</b> Deliberately asymmetric: a tab that received a legitimate Freeze push while
+    /// the exercise was still running, and then saw it end, can ONLY be rescued by the clearing push — so Resume
+    /// publishes in every lifecycle state, and does not even consult the lifecycle.
+    /// </summary>
+    [Theory]
+    [InlineData("completed")]
+    [InlineData("archived")]
+    [InlineData("staged")]
+    public async Task PublishAsync_ResumeIsNeverSuppressed_SoAStrandedHoldingPageCanAlwaysBeCleared(string status)
+    {
+        var exerciseId = Guid.NewGuid();
+        var harness = new Harness(tier: PauseTier.Running, lifecycleStatus: status);
+
+        await harness.Publisher.PublishAsync(Transition(exerciseId, PauseTier.Freeze, PauseTier.Running));
+
+        harness.PushesTo($"exercise:{exerciseId}").Should().ContainSingle()
+            .Which.State.Should().Be(
+                "none",
+                "suppressing a clear would STRAND a holding page on a tab that was legitimately frozen before the "
+                + "lifecycle moved — the gate withholds only the ADDING of an overlay");
+        harness.LifecycleReads.Should().Be(
+            0, "and the clear path does not even read the lifecycle — there is no state in which it should not run");
+    }
+
     // ---- AC7 (XC-004): no competing/duplicate telemetry from the overlay write path ------------
 
     [Fact]
@@ -297,9 +418,10 @@ public sealed class PauseOverlayPublisherTests
     {
         private readonly List<(string Group, object? Payload)> _sends = [];
 
-        public Harness(PauseTier tier, bool hubThrows = false)
+        public Harness(PauseTier tier, bool hubThrows = false, string lifecycleStatus = "live")
         {
             Tier = tier;
+            LifecycleStatus = lifecycleStatus;
 
             var clients = new Mock<IHubClients>();
             clients.Setup(hubClients => hubClients.Group(It.IsAny<string>())).Returns((string group) =>
@@ -332,10 +454,24 @@ public sealed class PauseOverlayPublisherTests
                 hubContext.Object,
                 OverlayState,
                 exerciseId => Tier,
+                (exerciseId, cancellationToken) =>
+                {
+                    LifecycleReads++;
+                    return Task.FromResult<string?>(LifecycleStatus);
+                },
                 NullLogger<PauseOverlayPublisher>.Instance);
         }
 
         public PauseTier Tier { get; set; }
+
+        /// <summary>
+        /// The exercise's COR-032 lifecycle state the publisher's precedence gate reads (CR-001). Defaults to
+        /// <c>live</c> — a RUNNING world — so every pre-existing test in this suite keeps its original meaning.
+        /// </summary>
+        public string? LifecycleStatus { get; set; }
+
+        /// <summary>How many times the lifecycle was consulted — proves a CLEAR is never gated on it.</summary>
+        public int LifecycleReads { get; private set; }
 
         public OverlayStateService OverlayState { get; }
 

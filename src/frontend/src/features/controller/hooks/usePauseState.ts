@@ -158,6 +158,21 @@
  * TRANSITION, so changing the selection WHILE already frozen does not re-push —
  * participants keep the register that was selected when the Freeze landed until
  * the next transition.
+ *
+ * ## A REFUSED Freeze is announced, not silently reverted (Gate-1 WR-003)
+ * The server refuses a Freeze OUTRIGHT when the exercise is not in a running
+ * lifecycle state — pre-start (`build`/`staged`) or past EndEx
+ * (`completed`/`archived`) — recording no tier, touching no clock and publishing
+ * no participant overlay. It answers `409` with a plain reason, which lands here
+ * as `refusal` (cleared by the controller's next action or `dismissRefusal()`).
+ * `<PausePill>` renders it as TEXT beside the pill (NFR-001: never colour alone,
+ * keyboard-reachable, announced via `role="status"`).
+ *
+ * This is the one failure path that is NOT ambiguous, and it is handled
+ * differently on purpose: a refusal is the server's promise that it recorded
+ * nothing, so the console reverts DIRECTLY. Every other failure still goes down
+ * the ask-don't-guess path (re-GET, adopt, revert only if that fails too), because
+ * a lost response may sit over a change that WAS applied.
  */
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
@@ -176,6 +191,7 @@ import {
 } from '../engine/hooks/useEngineControl'
 import { pausableExerciseClock } from '../services/pausableExerciseClock'
 import {
+  asPauseTierRefusal,
   fetchPauseTier,
   setPauseTier,
   type PauseTierServerState,
@@ -202,6 +218,21 @@ export const PAUSE_TIER_LABELS: Readonly<Record<PauseTier, PauseLabel>> = {
   freeze: 'WORLD FROZEN',
 }
 
+/**
+ * A pause-tier change the SERVER REFUSED, held so the console can tell the
+ * controller why (Gate-1 WR-003). Cleared by the next tier change or by an
+ * explicit dismiss — never auto-hidden on a timer, because a controller who
+ * looked away must still be able to find out why the world did not freeze.
+ */
+export interface PauseRefusal {
+  /** The tier that was refused (today always `'freeze'`). */
+  readonly tier: PauseTier
+  /** The machine-readable refusal kind from the server. */
+  readonly outcome: string
+  /** The server's plain reason — rendered as TEXT, never colour alone (NFR-001). */
+  readonly reason: string
+}
+
 /** What `usePauseState()` exposes to the console + the header pill. */
 export interface PauseState {
   /** The active tier. */
@@ -223,6 +254,15 @@ export interface PauseState {
   readonly resume: () => void
   /** Sets the overlay register the deferred participant-shell trigger will read. */
   readonly setOverlayRegister: (register: OverlayRegister) => void
+  /**
+   * The last tier change the server REFUSED, or `null`. Non-null means the console
+   * has already backed out its optimistic flip and the controller must be TOLD why
+   * (WR-003) — a Freeze that silently does nothing is the defect this feature
+   * exists to eliminate.
+   */
+  readonly refusal: PauseRefusal | null
+  /** Dismisses the current refusal notice (the controller has read it). */
+  readonly dismissRefusal: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +272,8 @@ export interface PauseState {
 interface PauseStoreState {
   readonly tier: PauseTier
   readonly overlayRegister: OverlayRegister
+  /** The last server refusal to surface, or `null`. Ambient like the tier itself. */
+  readonly refusal: PauseRefusal | null
 }
 
 /** A completed tier transition, returned so the hook can emit telemetry with context. */
@@ -250,7 +292,11 @@ export interface PauseTransition {
  */
 export type PauseTierOutcomeTag = 'applied' | 'reverted'
 
-let storeState: PauseStoreState = { tier: 'running', overlayRegister: 'out-of-fiction' }
+let storeState: PauseStoreState = {
+  tier: 'running',
+  overlayRegister: 'out-of-fiction',
+  refusal: null,
+}
 const storeListeners = new Set<() => void>()
 
 function emitStoreChange(): void {
@@ -297,6 +343,18 @@ function applyTier(next: PauseTier): PauseTransition | null {
 function applyOverlayRegister(register: OverlayRegister): void {
   if (storeState.overlayRegister === register) return
   storeState = { ...storeState, overlayRegister: register }
+  emitStoreChange()
+}
+
+/**
+ * Records (or clears) the server's refusal of a tier change. A controller's own
+ * next action clears it — a stale "Freeze was refused" notice sitting over a
+ * successful later Freeze would be its own kind of lie.
+ */
+function setRefusal(refusal: PauseRefusal | null): void {
+  if (storeState.refusal === refusal) return
+  if (storeState.refusal === null && refusal === null) return
+  storeState = { ...storeState, refusal }
   emitStoreChange()
 }
 
@@ -412,7 +470,7 @@ let controllerActed = false
  */
 export function resetPauseStateForTest(): void {
   if (storeState.tier === 'freeze') pausableExerciseClock.resume()
-  storeState = { tier: 'running', overlayRegister: 'out-of-fiction' }
+  storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
   resyncStarted = false
   controllerActed = false
   engineModeBeforePause = null
@@ -516,12 +574,32 @@ export function usePauseState(): PauseState {
     [settleFromServer, revertLocally],
   )
 
+  /**
+   * The server REFUSED this change outright (a `409` naming why): it recorded
+   * nothing, so — unlike an ambiguous failure — there is nothing to ask about.
+   * Back the optimistic flip out directly and SURFACE the reason, so the
+   * controller learns why the world did not freeze rather than watching a control
+   * quietly snap back (WR-003).
+   */
+  const handleRefusal = useCallback(
+    (transition: PauseTransition, sequence: number, outcome: string, reason: string) => {
+      if (!isLatest(sequence)) return
+      revertLocally(transition, sequence)
+      setRefusal({ tier: transition.to, outcome, reason })
+    },
+    [revertLocally],
+  )
+
   const setTier = useCallback(
     (next: PauseTier) => {
       const applied = applyTierSequenced(next)
       if (!applied) return
       const { transition, sequence } = applied
       controllerActed = true
+
+      // A new controller action clears any prior refusal notice — it described an
+      // older attempt and must never sit over a newer, successful one.
+      setRefusal(null)
 
       // ONE steering_action per APPLIED transition, in BOTH modes, shape unchanged
       // from story 03 — logged BEFORE any POST so the attempted change is on the
@@ -572,7 +650,19 @@ export function usePauseState(): PauseState {
           // directly rather than spending another round trip.
           if (!serverAppliedIt) settleFromServer(server, sequence)
         })
-        .catch(() => reconcileAfterFailure(transition, sequence))
+        .catch((error: unknown) => {
+          // A definitive REFUSAL (409 + reason) is not an ambiguous failure: the
+          // server promises it recorded nothing, so revert directly and TELL the
+          // controller why. Anything else stays ambiguous — the request may have
+          // been applied and only its response lost — and goes down the
+          // ask-don't-guess path.
+          const refusal = asPauseTierRefusal(error)
+          if (refusal) {
+            handleRefusal(transition, sequence, refusal.outcome, refusal.reason)
+            return
+          }
+          reconcileAfterFailure(transition, sequence)
+        })
     },
     [
       emitTierChange,
@@ -581,6 +671,7 @@ export function usePauseState(): PauseState {
       revertLocally,
       settleFromServer,
       reconcileAfterFailure,
+      handleRefusal,
       actingHumanId,
       timeZone,
     ],
@@ -637,6 +728,10 @@ export function usePauseState(): PauseState {
     applyOverlayRegister(register)
   }, [])
 
+  const dismissRefusal = useCallback(() => {
+    setRefusal(null)
+  }, [])
+
   return useMemo<PauseState>(
     () => ({
       tier: state.tier,
@@ -647,7 +742,17 @@ export function usePauseState(): PauseState {
       setTier,
       resume,
       setOverlayRegister,
+      refusal: state.refusal,
+      dismissRefusal,
     }),
-    [state.tier, state.overlayRegister, setTier, resume, setOverlayRegister],
+    [
+      state.tier,
+      state.overlayRegister,
+      state.refusal,
+      setTier,
+      resume,
+      setOverlayRegister,
+      dismissRefusal,
+    ],
   )
 }

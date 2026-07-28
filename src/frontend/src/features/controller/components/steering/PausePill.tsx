@@ -48,6 +48,15 @@
  * radio's own checked state + its consequence copy), never colour (NFR-001), and
  * the Freeze confirm step restates which page participants will get.
  *
+ * A REFUSED FREEZE IS ANNOUNCED (world-steering story 08, Gate-1 WR-003). The
+ * server refuses a Freeze outright when the exercise is not in a running
+ * lifecycle state (pre-start, or past EndEx), recording nothing. This control then
+ * renders the server's plain reason beside the pill in a `role="status"` /
+ * `aria-live="polite"` region — TEXT next to a non-colour icon, with a real
+ * keyboard-reachable Dismiss — rather than letting the pill quietly snap back. It
+ * mirrors how the disabled `injects` tier carries its honest inline reason: per
+ * NFR-001 the explanation is never colour alone and never a bare status code.
+ *
  * FULLY KEYBOARD-OPERABLE (NFR-001). The pill is a button (Enter/Space); the
  * popover traps focus; the radios are arrow/Tab navigable; every action is a
  * button; Escape dismisses the popover and the confirm step.
@@ -75,7 +84,12 @@ import {
   Typography,
 } from '@mui/material'
 import { CobraLinkButton, CobraPrimaryButton, CobraSecondaryButton } from '@/theme/styledComponents'
-import { usePauseState, type OverlayRegister, type PauseTier } from '../../hooks/usePauseState'
+import {
+  PAUSE_TIER_LABELS,
+  usePauseState,
+  type OverlayRegister,
+  type PauseTier,
+} from '../../hooks/usePauseState'
 
 /** D5 dark operator-chrome tokens (matches `SwampedModeToggle`). Staff-only. */
 const chrome = {
@@ -168,8 +182,17 @@ const TIER_DOT: Readonly<Record<PauseTier, string>> = {
  * popover (three radio tiers, guarded Freeze confirm, Resume while paused).
  */
 export function PausePill() {
-  const { tier, label, isPaused, overlayRegister, setTier, resume, setOverlayRegister } =
-    usePauseState()
+  const {
+    tier,
+    label,
+    isPaused,
+    overlayRegister,
+    setTier,
+    resume,
+    setOverlayRegister,
+    refusal,
+    dismissRefusal,
+  } = usePauseState()
 
   // The selected participant pause page, restated on the Freeze confirm step so the
   // guarded action names exactly what participants will see.
@@ -267,6 +290,63 @@ export function PausePill() {
           {label}
         </Typography>
       </Box>
+
+      {/*
+        THE SERVER REFUSED THE CHANGE (world-steering story 08, Gate-1 WR-003).
+        A Freeze outside a running world is refused outright server-side — nothing
+        recorded, no clock touched, no participant overlay — so the console has
+        already backed its optimistic flip out. Announcing WHY is the whole point:
+        a control that silently snaps back is the same "asserts a state the server
+        never applied" defect from the other direction.
+
+        NFR-001: the reason is TEXT beside a non-colour icon (never colour alone),
+        the region is `role="status"` + `aria-live="polite"` so it is ANNOUNCED
+        without stealing focus, and Dismiss is a real keyboard-reachable button.
+        It persists until the controller's next action or an explicit dismiss —
+        never a timer, which would hide it from anyone who looked away.
+      */}
+      {refusal && (
+        <Box
+          role="status"
+          aria-live="polite"
+          data-testid="pause-refusal"
+          sx={{
+            display: 'inline-flex',
+            alignItems: 'flex-start',
+            gap: 0.75,
+            maxWidth: 380,
+            ml: 1,
+            px: 1,
+            py: 0.5,
+            fontFamily: "'Figtree', system-ui, sans-serif",
+            color: chrome.ink,
+            bgcolor: chrome.card,
+            border: `1px solid ${chrome.amber}`,
+            borderRadius: '6px',
+          }}
+        >
+          <FontAwesomeIcon
+            icon={faTriangleExclamation}
+            aria-hidden="true"
+            style={{ fontSize: 11, marginTop: 3, flexShrink: 0 }}
+          />
+          <Box sx={{ minWidth: 0 }}>
+            <Typography sx={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.04em' }}>
+              {`${PAUSE_TIER_LABELS[refusal.tier]} NOT APPLIED`}
+            </Typography>
+            <Typography sx={{ fontSize: 11, color: chrome.inkMuted, mt: 0.25 }}>
+              {refusal.reason}
+            </Typography>
+          </Box>
+          <CobraLinkButton
+            onClick={dismissRefusal}
+            aria-label="Dismiss the refused pause notice"
+            sx={{ fontSize: 11, flexShrink: 0 }}
+          >
+            Dismiss
+          </CobraLinkButton>
+        </Box>
+      )}
 
       <Popover
         open={open}

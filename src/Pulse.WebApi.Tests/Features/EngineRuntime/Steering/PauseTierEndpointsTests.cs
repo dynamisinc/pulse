@@ -22,9 +22,12 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
+using Pulse.WebApi.Features.ExerciseConfiguration;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Xunit;
 
@@ -459,6 +462,180 @@ public sealed class PauseTierEndpointsTests
             "none", "COR-001: exercise B's participants must never receive exercise A's Freeze");
     }
 
+    // ---- the OVERLAY PRECEDENCE MATRIX, end to end (Tom's ruling, 2026-07-27) -------------------
+    //
+    // endex > pre-start > pause > none. The lifecycle answers "is this exercise live at all"; a Freeze is a
+    // control WITHIN a live exercise. Each cell drives the REAL controller POST and reads the REAL participant
+    // GET, so what is asserted is what a participant's shell would actually receive.
+
+    /// <summary>
+    /// <b>ENDEX + Freeze → the whole transition is REFUSED, loudly (Tom's ruling, WR-003).</b> Nothing is
+    /// recorded: no tier, no clock effect, no overlay on either participant channel — and the console is told why,
+    /// rather than getting a 200 for a Freeze that did nothing.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task Post_FreezeAfterEndEx_IsRefusedWithAReason_AndRecordsNothing()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: "completed");
+        var beforeAnyFreeze = await host.ReadOverlayStateAsync();
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01", overlayRegister = "in-fiction" });
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Conflict,
+            "COR-054: ENDEX is terminal, so a Freeze does not apply — and a 200 here would be the console "
+            + "asserting a state the server never applied, the exact defect this feature exists to eliminate");
+
+        var refusal = await ReadRefusalAsync(response);
+        refusal.Outcome.Should().Be("not-applicable-in-lifecycle-state");
+        refusal.Reason.Should().Contain(
+            "completed", "the reason must NAME the lifecycle state so the controller can act on it (NFR-001: text)");
+
+        // Nothing recorded, on any channel.
+        host.Registry.GetTier(exerciseId).Should().Be(
+            PauseTier.Running, "a refused Freeze records NO tier, so a later GET cannot resurrect it");
+        host.Clock.IsFrozen(exerciseId).Should().BeFalse("and the scenario clock is never touched");
+        host.OverlayState.Get(exerciseId).State.Should().Be(
+            "none",
+            "no overlay is written — which is also the proof no SignalR push went out, since the publisher writes "
+            + "the store immediately before it broadcasts");
+        (await host.ReadOverlayStateAsync()).Should().BeEquivalentTo(
+            beforeAnyFreeze, "and the participant read is byte-identical to before the attempt");
+    }
+
+    /// <summary>
+    /// <b>Pre-start + Freeze → REFUSED (WR-003).</b> Before StartEx the scenario clock does not run (COR-032), so
+    /// refusing also avoids STARTING a clock that state says must not run — which suppressing only the overlay did.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("build")]
+    [InlineData("staged")]
+    public async Task Post_FreezeBeforeStartEx_IsRefusedWithAReason_AndNeverStartsTheClock(string preStartState)
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: preStartState);
+        var beforeAnyFreeze = await host.ReadOverlayStateAsync();
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01", overlayRegister = "out-of-fiction" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var refusal = await ReadRefusalAsync(response);
+        refusal.Outcome.Should().Be("not-applicable-in-lifecycle-state");
+        refusal.Reason.Should().Contain(preStartState, "the reason names the state the controller must move past");
+        refusal.Reason.Should().Contain(
+            "StartEx", "and says what to do about it — 'take the exercise Live first'");
+
+        host.Registry.GetTier(exerciseId).Should().Be(PauseTier.Running, "no tier recorded");
+        host.Clock.IsRunning(exerciseId).Should().BeFalse(
+            "COR-032: the scenario clock must not run before StartEx — refusing outright is what stops the "
+            + "start-then-freeze path from creating one");
+        host.Clock.IsFrozen(exerciseId).Should().BeFalse();
+        host.OverlayState.Get(exerciseId).State.Should().Be("none", "and no overlay is written or pushed");
+        (await host.ReadOverlayStateAsync()).Should().BeEquivalentTo(beforeAnyFreeze);
+    }
+
+    /// <summary>An <c>archived</c> world is terminal too — same refusal, nothing recorded.</summary>
+    [RequiresDockerFact]
+    public async Task Post_FreezeInAnArchivedWorld_IsRefused_AndRecordsNothing()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: "archived");
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReadRefusalAsync(response)).Reason.Should().Contain("archived");
+        host.Registry.GetTier(exerciseId).Should().Be(PauseTier.Running);
+        host.Clock.IsFrozen(exerciseId).Should().BeFalse();
+        host.OverlayState.Get(exerciseId).State.Should().Be("none");
+    }
+
+    /// <summary>
+    /// <b>Only FREEZE is gated.</b> Resume and the other tiers are unaffected in any lifecycle state — the ruling
+    /// is about making a participant-visible world stop, not about locking the console.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("running")]
+    [InlineData("engine")]
+    public async Task Post_ANonFreezeTierInANonRunningWorld_IsStillApplied(string tier)
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: "completed");
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier, actingHumanId = "human-controller-01" });
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "the WR-003 refusal is scoped to the Freeze transition alone — refusing everything would lock a "
+            + "controller out of the console over a lifecycle state that has nothing to do with these tiers");
+    }
+
+    /// <summary>
+    /// <b>Running + frozen → pause, in the controller's selected register.</b> The cell story 08 exists for
+    /// (D5-014/1.3: Freeze is guarded specifically BECAUSE participants notice it).
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("in-fiction")]
+    [InlineData("out-of-fiction")]
+    public async Task Post_FreezeInARunningWorld_ShowsTheParticipantThePausePage_InTheSelectedRegister(
+        string selected)
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: "live");
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01", overlayRegister = selected });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var overlay = await host.ReadOverlayStateAsync();
+        overlay.State.Should().Be("pause", "a live world's Freeze IS participant-visible (CTL-023)");
+        overlay.Register.Should().Be(selected, "AC5: the controller's selection reaches the participant's shell");
+    }
+
+    /// <summary>
+    /// <b>Running + NOT frozen → none.</b> A live exercise nobody froze is byte-identical to the shipped Phase-1
+    /// constant — the contribution never invents an overlay.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task Get_InARunningWorldWithNoFreeze_ServesNone()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: "live");
+
+        var overlay = await host.ReadOverlayStateAsync();
+
+        overlay.State.Should().Be("none");
+        overlay.Register.Should().Be("in-fiction", "the shipped cleared shape");
+    }
+
+    /// <summary>
+    /// The COR-032 lifecycle holding page still reaches participants through this composed read — the pause
+    /// contribution DECORATES the lifecycle projection and can never suppress its answer.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task Get_InALifecyclePausedWorld_StillServesTheCor032HoldingPage()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: "paused");
+
+        var overlay = await host.ReadOverlayStateAsync();
+
+        overlay.State.Should().Be(
+            "pause",
+            "world-steering contributes to this read, it does not own it — a COR-032 paused exercise must keep "
+            + "rendering its holding page with no controller Freeze involved at all");
+    }
+
     // ---- composition: story 08's swap of the no-op overlay publisher default --------------------
 
     [RequiresDockerFact]
@@ -481,12 +658,18 @@ public sealed class PauseTierEndpointsTests
         Guid? currentExerciseId,
         bool authenticatedStaff = true,
         Guid? assignedExerciseId = null,
-        IExerciseClock? clockOverride = null)
+        IExerciseClock? clockOverride = null,
+        string exerciseStatus = "active")
     {
         _fixture.ConnectionString.Should().NotBeNull(
             "the Docker-gated MsSql fixture must have started and captured its connection string before these tests run");
         return await PauseTierTestHost.StartAsync(
-            _fixture.ConnectionString!, currentExerciseId, authenticatedStaff, assignedExerciseId, clockOverride);
+            _fixture.ConnectionString!,
+            currentExerciseId,
+            authenticatedStaff,
+            assignedExerciseId,
+            clockOverride,
+            exerciseStatus);
     }
 
     /// <summary>
@@ -518,6 +701,19 @@ public sealed class PauseTierEndpointsTests
 
         public bool IsRunning(Guid exerciseId) => true;
     }
+
+    /// <summary>Reads the staff-only <c>409</c> refusal body (WR-003) — the machine outcome plus the reason.</summary>
+    private static async Task<PauseRefusalWire> ReadRefusalAsync(HttpResponseMessage response)
+    {
+        var json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        return new PauseRefusalWire(
+            doc.RootElement.GetProperty("outcome").GetString(),
+            doc.RootElement.GetProperty("reason").GetString() ?? string.Empty);
+    }
+
+    /// <summary>The refused-transition wire body: a machine-readable outcome plus controller-readable prose.</summary>
+    private sealed record PauseRefusalWire(string? Outcome, string Reason);
 
     private static async Task<PauseTierWireState> ReadStateAsync(HttpResponseMessage response)
     {
@@ -595,7 +791,8 @@ public sealed class PauseTierEndpointsTests
             Guid? currentExerciseId,
             bool authenticatedStaff = true,
             Guid? assignedExerciseId = null,
-            IExerciseClock? clockOverride = null)
+            IExerciseClock? clockOverride = null,
+            string exerciseStatus = "active")
         {
             // The staff caller the REUSED cockpit authorization filter gates on. A default host is an
             // authenticated staff user ASSIGNED to the resolved exercise; the denial tests flip these knobs.
@@ -606,7 +803,7 @@ public sealed class PauseTierEndpointsTests
 
             if (authenticatedStaff && (assignedExerciseId ?? currentExerciseId) is { } assignExercise)
             {
-                await SeedStaffAssignmentAsync(connectionString, staffUserId, assignExercise);
+                await SeedStaffAssignmentAsync(connectionString, staffUserId, assignExercise, exerciseStatus);
             }
 
             var builder = WebApplication.CreateBuilder();
@@ -618,9 +815,18 @@ public sealed class PauseTierEndpointsTests
             builder.Services.AddExerciseClock();
             builder.Services.AddPauseTierSteering();
 
-            // Story 08: the REAL participant-overlay publisher replaces story 07's no-op default, plus the shared
-            // hub's IHubContext it pushes through (AddSignalR — no second hub). Wired exactly as Program.cs will
-            // be, so a Freeze POST here follows the same path to the participant read as it does in production.
+            // The participant read GET /api/overlay-state resolves ParticipantShellConfigService (01b) and, behind
+            // it, the IOverlayStateProjection seam AddExerciseLifecycle() contributes to. Both are REQUIRED for the
+            // POST -> participant-GET chain below to run at all, and their order matters: story 08's Replace must
+            // come after AddExerciseLifecycle()'s, or the pause contribution is silently evicted (see
+            // AddPauseParticipantOverlay's ordering note). This mirrors Program.cs.
+            builder.Services.AddExerciseConfiguration();
+            builder.Services.AddExerciseLifecycle();
+
+            // Story 08: the REAL participant-overlay publisher replaces story 07's no-op default, the shared hub's
+            // IHubContext it pushes through (AddSignalR — no second hub), and the read-side pause contribution to
+            // the overlay seam. Wired exactly as Program.cs is, so a Freeze POST here follows the same path to the
+            // participant read as it does in production.
             builder.Services.AddSignalR();
             builder.Services.AddPauseParticipantOverlay();
 
@@ -663,7 +869,15 @@ public sealed class PauseTierEndpointsTests
         /// (via <see cref="StaffAssignmentService.GetAssignmentsAsync"/>). Both are unscoped entities, so the
         /// write-guard needs no resolved exercise scope here.
         /// </summary>
-        private static async Task SeedStaffAssignmentAsync(string connectionString, Guid staffUserId, Guid exerciseId)
+        /// <remarks>
+        /// The exercise's <c>Status</c> is now load-bearing for the PARTICIPANT read: the contributed
+        /// <c>SteeringPauseOverlayProjection</c> only lets a Freeze reach participants in a RUNNING world (Tom's
+        /// ruling: <c>endex</c> &gt; <c>pre-start</c> &gt; <c>pause</c> &gt; <c>none</c>). The default stays the
+        /// legacy <c>active</c> literal this host has always seeded — it folds onto canonical <c>live</c>, so every
+        /// pre-existing test is unaffected — and the precedence tests pass the other states explicitly.
+        /// </remarks>
+        private static async Task SeedStaffAssignmentAsync(
+            string connectionString, Guid staffUserId, Guid exerciseId, string exerciseStatus)
         {
             var options = new DbContextOptionsBuilder<PulseDbContext>()
                 .UseSqlServer(connectionString)
@@ -675,7 +889,7 @@ public sealed class PauseTierEndpointsTests
                 Id = exerciseId,
                 Name = "Pause Tier Test Exercise",
                 TimeZone = "UTC",
-                Status = "active",
+                Status = exerciseStatus,
             });
             context.StaffAssignments.Add(new StaffAssignment
             {

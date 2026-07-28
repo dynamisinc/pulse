@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 
 /// <summary>
 /// The SERVER-AUTHORITATIVE tiered-pause API (feature: world-steering, story 07; CTL-023, COR-001, COR-050/052,
@@ -136,9 +137,27 @@ public static class PauseTierEndpoints
         }
 
         // Where to start a clock the reaction loop has not started yet, so a Freeze before the engine's first
-        // tick still genuinely halts the exercise (CR-001). Server-authoritative: read from the exercise row.
+        // tick still genuinely halts the exercise (CR-001). Server-authoritative: read from the exercise row —
+        // which is also where the exercise's COR-032 lifecycle state comes from, so the refusal below costs no
+        // extra query.
         var logger = loggerFactory.CreateLogger(typeof(PauseTierEndpoints).FullName!);
-        var clockStart = await ResolveClockStartAsync(dbContext, scope.Value, logger, cancellationToken);
+        var exercise = await ResolveExerciseSteeringStateAsync(dbContext, scope.Value, logger, cancellationToken);
+
+        // WR-003 (Tom's ruling): a FREEZE outside a running world is REFUSED OUTRIGHT and LOUDLY — nothing is
+        // recorded, the clock is never started or frozen, no overlay is published, and the console is told why.
+        // Only Freeze is gated (Resume and the other tiers are unaffected), and the gate is the ONE shared
+        // predicate the participant read and the overlay push both use, so the ruling cannot fork.
+        //
+        // Refusing the whole transition rather than only the overlay is the point: suppressing just the overlay
+        // left tier=freeze + a frozen clock + no participant signal — a half-applied state, and in `staged` it
+        // started a scenario clock COR-032 says must not run.
+        if (tier == PauseTier.Freeze
+            && !SteeringOverlayPrecedence.PauseIsParticipantVisibleIn(exercise.LifecycleStatus))
+        {
+            return Results.Conflict(PauseTierRefusalDto.NotApplicableInLifecycleState(exercise.LifecycleStatus));
+        }
+
+        var clockStart = exercise.ClockStart;
 
         // The overlay register is passed through as the controller's PRESENTATION selection and is validated
         // (coerced to 'out-of-fiction' unless it is exactly 'in-fiction') inside SetTierAsync — see
@@ -158,18 +177,20 @@ public static class PauseTierEndpoints
 
             // The tier was NOT recorded because its clock effect could not be applied. Fail closed with a 409 so
             // the console's guarded revert fires — never a 200 claiming a pause the world never felt (CR-001).
-            PauseTierOutcome.ClockUnavailable => Results.Conflict(
-                "The exercise scenario clock could not be reached, so the pause tier was not applied."),
+            // Carried on the SAME refusal body shape as the lifecycle refusal above, so the console has exactly
+            // one 409 parser and both refusals can be shown to the controller as text rather than a status code.
+            PauseTierOutcome.ClockUnavailable => Results.Conflict(PauseTierRefusalDto.ClockUnavailable()),
 
             _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
         };
     }
 
     /// <summary>
-    /// Resolves the scenario start + time zone a never-started clock should be started at, from the
-    /// <see cref="Exercise"/> row (server-authoritative, never client input — in particular NOT
-    /// <see cref="PauseTierRequest.TimeZone"/>). Returns <c>null</c> when the exercise row is missing — a Freeze
-    /// then fails closed.
+    /// Resolves — in ONE read of the <see cref="Exercise"/> row — both the scenario start/time zone a
+    /// never-started clock should be started at AND the exercise's COR-032 lifecycle status the WR-003 Freeze
+    /// refusal turns on. Server-authoritative, never client input (in particular NOT
+    /// <see cref="PauseTierRequest.TimeZone"/>). A missing row yields a <c>null</c> clock start (a Freeze then
+    /// fails closed) and a <c>null</c> status (which the lifecycle gate also refuses).
     ///
     /// <para><b>Start point.</b> <see cref="Exercise.CurrentScenarioTime"/> when configured, otherwise ONE server
     /// wall-clock read. Note this is NOT identical to <c>EngineContentSeedService</c>, which uses its
@@ -185,7 +206,7 @@ public static class PauseTierEndpoints
     /// <c>now</c> — the two must be reconciled when the native scenario clock lands (B3 follow-up), not left to
     /// ordering.</para>
     /// </summary>
-    private static async Task<PauseClockStart?> ResolveClockStartAsync(
+    private static async Task<ExerciseSteeringState> ResolveExerciseSteeringStateAsync(
         PulseDbContext dbContext,
         Guid exerciseId,
         ILogger logger,
@@ -196,12 +217,12 @@ public static class PauseTierEndpoints
         var row = await dbContext.Exercises
             .AsNoTracking()
             .Where(exercise => exercise.Id == exerciseId)
-            .Select(exercise => new { exercise.CurrentScenarioTime, exercise.TimeZone })
+            .Select(exercise => new { exercise.CurrentScenarioTime, exercise.TimeZone, exercise.Status })
             .SingleOrDefaultAsync(cancellationToken);
 
         if (row is null)
         {
-            return null;
+            return new ExerciseSteeringState(null, null);
         }
 
         // An unrecognised IANA id must not block a safety action — the zone only affects how the scenario
@@ -218,8 +239,19 @@ public static class PauseTierEndpoints
             LogTimeZoneFallback(logger, row.TimeZone, exerciseId, ex);
         }
 
-        return new PauseClockStart(row.CurrentScenarioTime ?? DateTimeOffset.UtcNow, timeZone);
+        return new ExerciseSteeringState(
+            new PauseClockStart(row.CurrentScenarioTime ?? DateTimeOffset.UtcNow, timeZone),
+            row.Status);
     }
+
+    /// <summary>
+    /// The two server-authoritative facts a pause-tier POST needs off the <see cref="Exercise"/> row, read
+    /// together in one query: where to start a cold scenario clock, and the COR-032 lifecycle state the WR-003
+    /// Freeze refusal turns on. Both <c>null</c> when the exercise row does not exist.
+    /// </summary>
+    /// <param name="ClockStart">The scenario start + time zone, or <c>null</c> when there is no exercise row.</param>
+    /// <param name="LifecycleStatus">The raw stored lifecycle literal, or <c>null</c> when there is no exercise row.</param>
+    private sealed record ExerciseSteeringState(PauseClockStart? ClockStart, string? LifecycleStatus);
 
     /// <summary>
     /// Source-generated warning for the UTC time-zone fallback (CA1848: no per-call allocation).
@@ -283,6 +315,84 @@ public sealed class PauseTierRequest
     /// </summary>
     [JsonPropertyName("timeZone")]
     public string? TimeZone { get; init; }
+}
+
+/// <summary>
+/// The staff-only <c>409</c> body for a REFUSED pause-tier change (WR-003) — a machine-readable
+/// <see cref="Outcome"/> plus a plain <see cref="Reason"/> the console shows the controller as TEXT.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why <c>409 Conflict</c> and not <c>422</c>.</b> The request is well-formed and the controller is
+/// authorized; it conflicts with the exercise's CURRENT STATE — which is what 409 means, and it is already the
+/// status the sibling clock refusal uses. It also matters behaviourally: the console's guarded-revert machinery
+/// hangs off a REJECTED promise, so reusing 409 keeps one client path for both refusals instead of adding a
+/// second branch for no gain.
+/// </para>
+/// <para>
+/// <b>A refusal means NOTHING was recorded</b> — no tier, no clock effect, no overlay publish. That is the
+/// contract the console relies on to revert directly rather than re-GETing to find out what happened.
+/// </para>
+/// <para>
+/// <b>Staff-only (XC-002).</b> The reason names the exercise's lifecycle state, which is staff vocabulary; it
+/// travels only on this staff-gated route and never onto a participant surface.
+/// </para>
+/// </remarks>
+public sealed class PauseTierRefusalDto
+{
+    /// <summary>The machine-readable refusal kind — the console branches on this, never on the prose.</summary>
+    [JsonPropertyName("outcome")]
+    public required string Outcome { get; init; }
+
+    /// <summary>A plain, controller-readable explanation, rendered as text by the console (NFR-001).</summary>
+    [JsonPropertyName("reason")]
+    public required string Reason { get; init; }
+
+    /// <summary>
+    /// The WR-003 refusal: a Freeze outside a running world. Names the exercise's lifecycle state so the
+    /// controller can act on it ("transition to Live first"), rather than being told only that something failed.
+    /// </summary>
+    /// <param name="lifecycleStatus">The exercise's stored lifecycle literal, or <c>null</c> when there is no row.</param>
+    /// <returns>The refusal body.</returns>
+    public static PauseTierRefusalDto NotApplicableInLifecycleState(string? lifecycleStatus)
+    {
+        var canonical = ExerciseLifecycleStates.TryParse(lifecycleStatus, out var parsed) ? parsed : null;
+
+        var reason = canonical switch
+        {
+            ExerciseLifecycleStates.Build or ExerciseLifecycleStates.Staged =>
+                $"Freeze is not applicable before StartEx — this exercise is {canonical}. "
+                + "Take the exercise Live first; there is no running world to freeze.",
+
+            ExerciseLifecycleStates.Completed or ExerciseLifecycleStates.Archived =>
+                $"Freeze is not applicable after EndEx — this exercise is {canonical}. The run is over.",
+
+            null when lifecycleStatus is null =>
+                "Freeze is not applicable — no exercise record was found for this session's exercise.",
+
+            null =>
+                $"Freeze is not applicable — this exercise's state '{lifecycleStatus}' is not recognised, "
+                + "so it is not treated as a running world.",
+
+            // Every remaining canonical state is either running (never refused) or 'paused' — where the world is
+            // already administratively held and a controller Freeze adds nothing a participant could notice.
+            _ => $"Freeze is not applicable — this exercise is {canonical}, not running.",
+        };
+
+        return new PauseTierRefusalDto
+        {
+            Outcome = "not-applicable-in-lifecycle-state",
+            Reason = reason,
+        };
+    }
+
+    /// <summary>The CR-001 clock refusal: the scenario clock could not be reached, so no tier was recorded.</summary>
+    /// <returns>The refusal body.</returns>
+    public static PauseTierRefusalDto ClockUnavailable() => new()
+    {
+        Outcome = "clock-unavailable",
+        Reason = "The exercise scenario clock could not be reached, so the pause tier was not applied.",
+    };
 }
 
 /// <summary>

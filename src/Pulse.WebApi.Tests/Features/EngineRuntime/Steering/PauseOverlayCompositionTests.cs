@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Xunit;
@@ -158,10 +159,38 @@ public sealed class PauseOverlayCompositionTests
     }
 
     /// <summary>
+    /// <c>AddPauseParticipantOverlay()</c> must register the <see cref="ExerciseLifecycleStatusReader"/> the
+    /// publisher's CR-001 precedence gate reads. Without it the publisher is unconstructible — and this is the only
+    /// Docker-free place that says so, since the real reader's behaviour needs a database.
+    /// </summary>
+    [Fact]
+    public void AddPauseParticipantOverlay_RegistersTheLifecycleStatusReaderThePrecedenceGateNeeds()
+    {
+        var services = new ServiceCollection();
+
+        services.AddPauseParticipantOverlay();
+
+        services.Should().Contain(
+            descriptor => descriptor.ServiceType == typeof(ExerciseLifecycleStatusReader)
+                && descriptor.Lifetime == ServiceLifetime.Singleton,
+            "the singleton publisher reaches request-scoped persistence through this delegate — a missing "
+            + "registration would make every Freeze throw rather than publish");
+    }
+
+    /// <summary>
     /// A provider wired exactly as <c>Program.cs</c> will be: SignalR (the shared <c>ExerciseRealtimeHub</c>'s
     /// <c>IHubContext</c> source — this feature adds no second hub), the shipped exercise clock, story 07's
     /// pause-tier steering, then this story's overlay swap.
     /// </summary>
+    /// <remarks>
+    /// The <see cref="ExerciseLifecycleStatusReader"/> is REPLACED with a fixed "running world" stub. The real one
+    /// registered by <c>AddPauseParticipantOverlay()</c> opens a scope and reads <c>PulseDbContext</c>, which this
+    /// deliberately database-free provider has never registered — so the genuine reader would throw, the
+    /// publisher's own <c>catch</c> would swallow it, and these tests would silently assert nothing. Its
+    /// REGISTRATION is asserted just above; its BEHAVIOUR (and the whole precedence matrix through it) is proven
+    /// against real SQL in <see cref="PauseTierEndpointsTests"/> and unit-level in
+    /// <see cref="PauseOverlayPublisherTests"/>.
+    /// </remarks>
     private static ServiceProvider BuildProvider()
     {
         var services = new ServiceCollection();
@@ -170,6 +199,9 @@ public sealed class PauseOverlayCompositionTests
         services.AddExerciseClock();
         services.AddPauseTierSteering();
         services.AddPauseParticipantOverlay();
+
+        services.Replace(ServiceDescriptor.Singleton<ExerciseLifecycleStatusReader>(
+            _ => (exerciseId, cancellationToken) => Task.FromResult<string?>("live")));
 
         return services.BuildServiceProvider(validateScopes: true);
     }
