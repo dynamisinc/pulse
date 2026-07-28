@@ -45,6 +45,9 @@ public sealed class PostAttributionResolver
     /// <summary>The <c>Session.Kind</c> that means a staff human is operating the console (COR-018).</summary>
     private const string StaffSessionKind = "staff";
 
+    /// <summary>The <c>Session.Kind</c> of a trainee posting as their own bound persona.</summary>
+    private const string ParticipantSessionKind = "participant";
+
     /// <summary>The <c>PostOrigin</c> value for a participant acting as their own account.</summary>
     private const string ParticipantOrigin = "participant";
 
@@ -115,9 +118,16 @@ public sealed class PostAttributionResolver
             return await ResolveForStaffAsync(request, staffSession, exerciseId, cancellationToken);
         }
 
-        // B. A live non-staff session carrying a persona binding — the participant composer.
+        // B. A live PARTICIPANT session carrying a persona binding — the participant composer.
+        //
+        // Matched by a POSITIVE allowlist on the kind, not by "not staff". `Session.Kind` is a free string with
+        // no database check constraint, so classifying by negation would silently attribute ANY future kind that
+        // carries a persona binding — an observer/evaluator/exercise-control session, or the org-account path
+        // deferred to story 09 — as a trainee's own write. That is exactly the harm the staff arm above refuses
+        // `participant` to prevent: an operator's write must never be indistinguishable from a trainee's in the
+        // evaluation record (COR-018). An unrecognised kind therefore falls through to C's 403 and fails closed.
         var sessionPersona = await _sessionPersonaAccessor.GetCurrentSessionPersonaAsync(cancellationToken);
-        if (sessionPersona is not null && !IsStaffKind(sessionPersona.Kind))
+        if (sessionPersona is not null && IsParticipantKind(sessionPersona.Kind))
         {
             return ResolveForParticipant(request, sessionPersona, exerciseId);
         }
@@ -258,11 +268,14 @@ public sealed class PostAttributionResolver
         });
     }
 
-    /// <summary>Whether a persisted <c>Session.Kind</c> is the staff kind.</summary>
+    /// <summary>
+    /// Whether a persisted <c>Session.Kind</c> is the PARTICIPANT kind — the only non-staff kind allowed to post
+    /// as its own bound persona. Deliberately an equality test rather than "not staff": see the call site.
+    /// </summary>
     /// <param name="sessionKind">The verbatim session kind.</param>
-    /// <returns><c>true</c> for a <c>staff</c>-kind session.</returns>
-    private static bool IsStaffKind(string sessionKind) =>
-        string.Equals(sessionKind, StaffSessionKind, StringComparison.Ordinal);
+    /// <returns><c>true</c> only for a <c>participant</c>-kind session.</returns>
+    private static bool IsParticipantKind(string sessionKind) =>
+        string.Equals(sessionKind, ParticipantSessionKind, StringComparison.Ordinal);
 }
 
 /// <summary>
