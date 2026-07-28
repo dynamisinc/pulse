@@ -93,11 +93,27 @@ public sealed class EnginePublishServiceTests
         post.Origin.Should().Be("engine");
         post.AuthorPersonaId.Should().Be(personaId);
 
+        // identity-auth-roles/12 regression guard. That story made attribution server-derived for the HTTP path
+        // and moved persona/origin/actingHumanId out of the request body into an explicit PostAttribution
+        // parameter. This host registers NO IHttpContextAccessor, NO session accessor and no session row at all —
+        // so the fact that this publishes at all is the proof that the change did not push a session requirement
+        // down into PostIngestService and break the reaction loop (which has no HTTP request to carry one).
+        post.ActingHumanId.Should().BeEmpty(
+            "an engine post has no human behind it by definition — the empty string is correct HERE and refused "
+            + "on the HTTP path, where a human always exists (COR-018)");
+
         // Exactly one engine.published telemetry event for the post, in scope.
         var published_events = await readContext.TelemetryEvents
             .Where(e => e.EventType == EngineEventTypes.Published && e.Target!.EntityId == published.PostId!.Value.ToString())
             .ToListAsync();
         published_events.Should().ContainSingle().Which.Origin.Should().Be("engine");
+
+        // The ingest funnel's own 'post' event null-OMITS the empty acting human rather than emitting "" — the
+        // locked v0 envelope types actor.actingHumanId as z.string().min(1).optional().
+        var postEvent = await readContext.TelemetryEvents
+            .SingleAsync(e => e.EventType == "post" && e.Target!.EntityId == published.PostId!.Value.ToString());
+        postEvent.Actor.ActingHumanId.Should().BeNull();
+        postEvent.Actor.PersonaId.Should().Be(personaId.ToString());
     }
 
     [RequiresDockerFact]

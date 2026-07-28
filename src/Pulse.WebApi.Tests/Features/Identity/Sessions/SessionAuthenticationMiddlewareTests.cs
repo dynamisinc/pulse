@@ -164,6 +164,11 @@ public class SessionAuthenticationMiddlewareTests
         ExerciseId = exerciseId,
         Kind = kind,
         StaffUserId = kind == "staff" ? Guid.NewGuid() : null,
+
+        // identity-auth-roles/13: the persisted Session always carries both, so a stub that left them blank
+        // would be presenting a session shape the real authenticator cannot produce.
+        PrincipalId = $"principal-{Guid.NewGuid():N}",
+        ActingHumanId = $"human-{Guid.NewGuid():N}",
     };
 
     private sealed class StubAuthenticator : ISessionAuthenticator

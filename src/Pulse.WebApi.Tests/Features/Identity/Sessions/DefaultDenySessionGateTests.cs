@@ -419,6 +419,8 @@ public sealed class DefaultDenySessionGateTests
                         SessionId = Guid.NewGuid(),
                         ExerciseId = _exerciseId,
                         Kind = "participant",
+                        PrincipalId = "gate-probe-principal",
+                        ActingHumanId = "gate-probe-human",
                     }
                     : null);
     }

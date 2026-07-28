@@ -79,6 +79,12 @@ public sealed partial class SessionAuthenticator : ISessionAuthenticator
                 ExerciseId = session.ExerciseId,
                 Kind = session.Kind,
                 StaffUserId = session.StaffUserId,
+
+                // identity-auth-roles/13 (#362): the attribution facts POST /api/telemetry stamps instead of
+                // believing. Read from the row this lookup already loaded — no extra query on a burst path.
+                PrincipalId = session.PrincipalId,
+                ActingHumanId = session.ActingHumanId,
+                PersonaId = session.PersonaId,
             };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
