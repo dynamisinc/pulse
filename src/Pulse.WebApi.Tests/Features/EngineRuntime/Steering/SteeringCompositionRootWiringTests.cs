@@ -384,6 +384,12 @@ public sealed class SteeringCompositionRootWiringTests
                         SessionId = Guid.NewGuid(),
                         ExerciseId = _exerciseId,
                         Kind = "participant",
+                        // Required since identity-auth-roles/13 (#362) made the telemetry envelope's actor
+                        // server-authoritative. Values are arbitrary here — this probe only needs a session
+                        // that AUTHENTICATES, so the default-deny fallback hands off to the endpoint rather
+                        // than 401ing before the wiring under test is reached.
+                        PrincipalId = "steering-wiring-probe-principal",
+                        ActingHumanId = "steering-wiring-probe-human",
                     }
                     : null);
     }
