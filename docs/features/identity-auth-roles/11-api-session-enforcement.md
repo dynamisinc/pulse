@@ -1,6 +1,6 @@
 # Story: Default-deny session gate + pre-auth allowlist + SignalR hub (Wave 1)
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-012  ·  **Design decisions:** none  ·  **Issue:** #361
 **Stack:** backend + frontend  ·  **Review:** Tier-2 (auth surface + the isolation seam; always-Critical class)
 
