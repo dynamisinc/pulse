@@ -3,6 +3,8 @@ namespace Pulse.WebApi.Features.Social;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
+// Not dead: this resolves the <see cref="ReadOnlySessionWriteFilter"/> reference in the remarks below. Doc
+// warnings are off in this project, so removing it would break that cref SILENTLY rather than at build time.
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Social.Follows;
@@ -42,10 +44,13 @@ using Pulse.WebApi.Features.Social.Follows;
 /// </remarks>
 public sealed class PostAttributionResolver
 {
-    /// <summary>The <c>Session.Kind</c> that means a staff human is operating the console (COR-018).</summary>
-    private const string StaffSessionKind = "staff";
-
-    /// <summary>The <c>Session.Kind</c> of a trainee posting as their own bound persona.</summary>
+    /// <summary>
+    /// The <c>Session.Kind</c> of a trainee posting as their own bound persona — the ONLY non-staff kind this
+    /// resolver will attribute a post to. There is deliberately no <c>staff</c> counterpart constant: staff-ness
+    /// is established by <see cref="ICurrentStaffSessionAccessor"/> (which already requires
+    /// <c>Kind == "staff"</c> AND a bound <c>StaffUser</c>), never by comparing the kind string here. A second
+    /// opinion about who counts as staff is exactly the kind of drift that produces an authorization gap.
+    /// </summary>
     private const string ParticipantSessionKind = "participant";
 
     /// <summary>The <c>PostOrigin</c> value for a participant acting as their own account.</summary>
