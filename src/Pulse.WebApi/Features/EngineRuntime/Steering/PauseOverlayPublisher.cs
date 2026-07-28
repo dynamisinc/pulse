@@ -14,7 +14,8 @@ using Pulse.WebApi.Features.Realtime;
 /// resolves the registry LAZILY, at publish time, when the registry singleton already exists (see
 /// <see cref="PauseOverlayServiceCollectionExtensions.AddPauseParticipantOverlay"/>). Also the seam a unit test
 /// substitutes to prove the publisher trusts the registry rather than a possibly-stale
-/// <c>transition.To</c>.
+/// the AUTHORITATIVE tier read from the registry (falling back to <c>transition.To</c> only if the
+/// failure preceded that read).
 /// </summary>
 /// <param name="exerciseId">The server-resolved exercise (COR-001).</param>
 /// <returns>The exercise's currently-recorded pause tier.</returns>
@@ -126,11 +127,18 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
             return;
         }
 
+        // Declared OUTSIDE the try so the failure log can name the AUTHORITATIVE tier rather than
+        // transition.To. This publisher exists precisely because transition.To can be stale under out-of-order
+        // publishes, so logging it on failure would misreport exactly the scenario the design defends against
+        // (Copilot review, PR #386). Null means "we failed before the registry read".
+        PauseTier? authoritativeTier = null;
+
         try
         {
             // The ticket comes FIRST, so the last-invoked publish holds the highest one (see the remarks).
             var sequence = _overlayState.NextSequence(exerciseId);
             var tier = _tierReader(exerciseId);
+            authoritativeTier = tier;
 
             // The controller's SELECTED register decides which holding page participants see (AC1/AC5) — the
             // registry already coerced it to a contract literal, and this re-coercion is the last line of defence
@@ -160,7 +168,7 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
             // WR-004: the tier + clock freeze ALREADY stand. Swallowing keeps a transport blip from reverting a
             // safety action the world has felt — but it is logged loudly, because participants may not have been
             // told (their next reconnect re-GETs the store, which is the recovery path).
-            LogOverlayPushFailed(ex, exerciseId, transition.To);
+            LogOverlayPushFailed(ex, exerciseId, authoritativeTier ?? transition.To);
         }
     }
 

@@ -131,8 +131,11 @@ builder.Services.AddEngineContentSeed(builder.Configuration);
 // and VERIFIES it took, so a tier is only ever recorded against a genuinely frozen clock. It TryAdds a no-op
 // IPauseOverlayPublisher. AddPauseParticipantOverlay (#351) then REPLACES that no-op (RemoveAll + AddSingleton)
 // with the real publisher, which writes OverlayStateService and pushes OverlayStateChanged over the B1
-// ExerciseRealtimeHub (no second hub) — so it MUST run after AddPauseTierSteering, and needs
-// AddSocialRealtimeHub (above) for IHubContext. Without this line GET /api/overlay-state silently serves the
+// ExerciseRealtimeHub (no second hub). The swap is ORDER-INDEPENDENT by construction — #350 TryAdds its
+// default and #351 does RemoveAll + AddSingleton, so either order converges on the real publisher (both
+// directions are asserted by tests). It is listed after #350 as a readability CONVENTION, not a
+// correctness requirement (Copilot review, PR #386). It does genuinely need AddSocialRealtimeHub (above)
+// for IHubContext. Without this line GET /api/overlay-state silently serves the
 // pre-story `none` constant and a Freeze is invisible to participants (it now logs a warning once, and
 // CompositionRootWiringTests asserts the real publisher resolves). AddStorylineSteering (#352) registers the
 // GET/POST pair that reaches the live Storyline objects the reaction loop ticks off IReactionLoopRegistry —
