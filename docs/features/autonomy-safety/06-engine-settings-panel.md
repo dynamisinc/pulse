@@ -1,6 +1,6 @@
 # Story: Engine settings panel (console admin surface)
 
-**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress — built, Gate-1 + Gate-2 clean, **merged to `main`** (2026-07-29). NOT Complete: this story's DoD requires verified-in-UAT, which is outstanding. (PR #399, superseding #398 — the optimistic model was dropped by Tom's decision; see the Build notes.)
 **Requirements:** ADP §2.3 (v1 subset)  ·  **Design decisions:** none  ·  **Issue:** #354
 
 ## Context
