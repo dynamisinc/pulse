@@ -1,12 +1,153 @@
 # Story: Freeze is participant-visible — overlay-state write path + SignalR push
 
-**Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Progress — built, Gate-1 clean, merged to its umbrella, Gate-2 clean (2026-07-27). NOT Complete: this story's DoD requires verified-in-UAT.
 **Requirements:** CTL-023, COR-001, XC-001, XC-002  ·  **Design decisions:** D5-014/1.3, D7-004 (pause page → `participant-shell`)  ·  **Issue:** #351
 
 > **Definition of done includes verified-in-UAT, not just unit-green.** As with story 07: this is
 > not Complete on green tests alone. It must be confirmed live, mock off, with a participant tab
 > and a controller tab open against the same exercise — Freeze in the controller tab must show the
 > holding page in the participant tab **without a manual refresh**, and Resume must clear it live.
+
+## DECISION — overlay precedence vs. the exercise lifecycle (Tom, 2026-07-27)
+
+`main` has since landed a competing claimant for the single overlay slot: `ParticipantShellConfigService`
+resolves `GET /api/overlay-state` through an **`IOverlayStateProjection`** seam implemented by
+`LifecycleProjection`, so overlay state is derived from the exercise lifecycle (COR-032 pre-start, COR-054
+ENDEX). This story instead **replaced that handler** to read its own pause-driven `OverlayStateService`.
+
+**Ruling: lifecycle wins. One ordered chain — `endex` > `pre-start` > `pause` > `none`.**
+
+Rationale: the lifecycle answers *"is this exercise live at all"*; pause is a control **within** a live
+exercise. ENDEX in particular must be terminal — rendering the in-fiction "We'll be right back" after an
+exercise has permanently ended would be an outright lie to participants. Pause still wins whenever the
+exercise is actually running, which is the only time a Freeze means anything.
+
+**Design consequence — this story gets SMALLER, not bigger.** The pause state becomes an
+`IOverlayStateProjection` **contributor** that composes the lifecycle projection rather than bypassing the
+seam: consult lifecycle first, and only when it yields `none` consult the pause store. Registered with
+`services.Replace(...)` after both, per `main`'s documented contributor convention.
+
+Two things fall out of that:
+- **This story stops editing `ParticipantShellEndpoints.cs` entirely.** The one shared-file edit — the
+  coordination point flagged throughout, sitting among five unrelated config GETs — simply disappears, and
+  with it the `RequestServices.GetService` workaround and its silent-degradation trade-off.
+- The `'endex'` state this story explicitly put out of scope as "a separate exercise-lifecycle concern" is
+  now `main`'s, correctly, and composes above pause rather than being ignored.
+
+**Status: BUILT (2026-07-28).** The pause write path, the SignalR push, the register plumbing and the client
+guards were already Gate-2 clean; only the read-side composition changed. As built:
+
+- `Features/EngineRuntime/Steering/SteeringOverlayPrecedence.cs` — **the ruling, in ONE place**, because this
+  story has TWO participant channels. `PauseIsParticipantVisibleIn(status)` is COR-032's own behaviour hook, not
+  a new vocabulary: `ExerciseLifecycleStates.BehaviourOf(status).ClockRuns`. That is `live` (and legacy `active`)
+  only, so `build`/`staged` are pre-start, `completed`/`archived` are terminal, and an unrecognized status —
+  including a missing `Exercise` row and the `Unconfigured` fallback — fails closed. Changing the open `staged`
+  question is one line here and both channels follow.
+- `Features/EngineRuntime/Steering/SteeringPauseOverlayProjection.cs` — the PULL channel: an
+  `IOverlayStateProjection` that DECORATES `LifecycleOverlayStateProjection` (injected as the concrete type, so
+  the interface can never resolve back into itself). Lifecycle first and its answer is final; only on `none`
+  **and** a running world is `OverlayStateService` consulted, and then only a `pause` state is served (the state
+  is allowlisted, symmetrically with the register coercion).
+- `PauseOverlayPublisher` — the PUSH channel, **also gated (Gate-1 CR-001)**. Gating only the GET was no fix:
+  nothing disconnects hub clients at EndEx (`ExerciseLifecycleGatingMiddleware` calls "nothing publishes into a
+  closed exercise" an assumption, not an invariant), so a Freeze after `live → completed` pushed the in-fiction
+  holding page onto a permanently ended exercise with no refresh, while that same tab's re-GET said `none`. A
+  suppressed Freeze now writes **nothing** and pushes **nothing**; the tier and clock freeze still stand. It
+  reads the status through an `ExerciseLifecycleStatusReader` delegate (the `PauseTierReader` idiom), which opens
+  its own scope — so the singleton takes no captive dependency and its constructor still names no persistence
+  type, keeping AC7's assertion honest.
+- **Clearing is never gated**, deliberately asymmetric: a Resume publishes in every lifecycle state, because it
+  is the only thing that can rescue a tab which was legitimately frozen before the exercise ended.
+- Registered from this story's existing `AddPauseParticipantOverlay()`, so **no `Program.cs` edit is
+  required**: that call already sits after `AddExerciseLifecycle()`. ⚠ That order is now **load-bearing**
+  (two contributors `Replace` the same seam, so the last one wins) and is asserted against the real host.
+- `ParticipantShellEndpoints.cs` is byte-identical to `main`. The `RequestServices.GetService` workaround and
+  its silent-degradation trade-off are gone with it.
+- `ISteeringOverlaySource` is deliberately LEFT at its `NoSteeringOverlaySource` floor. It looks like the
+  intended merge seam, but `LifecycleOverlayComposer`'s rule 2 makes the composed state a `pause` if *either*
+  side asks, and the source is never told the lifecycle status — so a frozen world that later reached EndEx
+  would compose to `pause` and show the holding page after ENDEX. Pinned by a test so nobody "finishes the
+  merge".
+
+**Accepted consequences:**
+
+(a) In lifecycle `paused` the composed lifecycle register stands, so a controller's `in-fiction` selection does
+not override its fail-closed `out-of-fiction` — the safe direction, since an out-of-fiction notice cannot HIDE a
+real stop.
+
+(b) **`sequence` is no longer on the GET body, and this one fails OPEN in a narrow window (Gate-1 WR-002).** The
+frozen `OverlayStateResponse` is three fields and two of `main`'s own tests assert exactly three, so the store's
+additive `sequence` is not projected. The client's guards mostly cover it: its generation+watermark check drops a
+superseded GET body *whole* before it can re-base anything, so an in-flight GET overtaken by a push is not the
+problem. The residual is real, though: **after an ACCEPTED sequence-less GET the client's stale-push cutoff is 0**,
+so a late out-of-order push #5 arriving after #6 was already applied is now accepted, showing a spurious holding
+page over a world the controller has already resumed. It heals on the next transition or reconnect, so it is not
+*stuck* — but it fails open on precisely this story's subject. Putting `sequence` back on `main`'s DTO is the real
+fix and is with the orchestrator/Tom as a contract question; this story does not change `main`'s wire shape
+unilaterally.
+
+(c) ~~Residual, `staged` only: a half-applied Freeze (tier + frozen clock, no participant overlay).~~
+**ELIMINATED by Tom's WR-003 ruling below** — the transition is now refused outright, so no half-applied state
+can exist.
+
+(d) **The one remaining path to "a participant sees a pause state after ENDEX" — a NEVER-RECONNECTING tab
+(Gate-1 WR-005).** A tab that legitimately received a Freeze push while the exercise was running, and then never
+reconnects and never refreshes, keeps rendering the holding page after `live → completed`. Both of this story's
+channels are now correct — the push is gated and the GET is gated — but `main`'s lifecycle overlay changes are
+**pull-only**: nothing pushes an overlay update over SignalR from the lifecycle side, so an EndEx transition
+cannot reach an already-rendered tab. Not a regression from this story and `'endex'` remains out of scope; closing
+it properly means the lifecycle transition publishing over the hub, which is a new seam and its own story
+(follow-up raised by the orchestrator, #390).
+
+**The mitigation, stated precisely (Gate-2 WR-001 — the earlier wording was wrong for two states).** "A refresh,
+or any hub reconnect, which re-GETs" heals the stranded page **only where the overlay route is still served**:
+
+- **`completed` — holds.** `ExerciseLifecycleState.IsOverlayStateServed` carves `completed` out of the refusal set
+  for exactly this reason, so the re-GET returns `200` with the authoritative state and the tab clears (or shows
+  `endex`, once that write path exists).
+- **`archived` (and `build`, and any unrecognised literal) — did NOT hold before this fix.**
+  `IsOverlayStateServed` is `staged | live | paused | completed`, so the re-GET is refused **`403`** by
+  `ExerciseLifecycleGatingMiddleware`. `refetchLive`'s bare `catch {}` swallowed that and kept the previous
+  snapshot, so a tab frozen while `live` and still connected at `archived` re-rendered the holding page on every
+  reconnect — clearable only by a full reload.
+- **Fixed on the client (this branch), not by widening the gate.** `refetchLive` now treats a **`403` as
+  definitive**: the lifecycle gate refuses this route only where the world is closed to participants, which is
+  never a pause, so the overlay is CLEARED. `401` (unresolved scope), `5xx`, a malformed body and network failures
+  all stay **fail-closed** — previous snapshot retained, next reconnect resyncs — and the clear never rewinds the
+  stale-push cutoff. That closes most of #390 with no new push seam; the never-reconnecting tab (above) still
+  needs one.
+
+## Tom's follow-on rulings (2026-07-28, Gate-1)
+
+**WR-003 — a Freeze outside a running world is REFUSED, loudly; `staged` stays pre-start.** Suppressing only the
+participant overlay was not enough: it left tier=`freeze` plus a frozen clock plus no participant signal — a
+half-applied state worse than either clean outcome, which in `staged` also started a scenario clock COR-032 says
+must not run. So `POST /api/steering/pause-tier` now **refuses the whole transition**: nothing recorded, no clock
+started or frozen, no overlay on either channel, and the controller is TOLD.
+
+- **Only the Freeze transition is gated.** Resume and the other tiers apply in every lifecycle state — the ruling
+  is about making a participant-visible world stop, not about locking the console.
+- **`409 Conflict`** with a `{ outcome, reason }` body. 409 because the request is well-formed and authorized and
+  conflicts with the exercise's *current state* — and because the console's guarded-revert machinery already hangs
+  off a rejected promise, so both refusals share one client path. The sibling `clock-unavailable` refusal was moved
+  onto the same body shape so the console has exactly one 409 parser and both reasons are showable.
+- **The gate is the ONE shared predicate** (`SteeringOverlayPrecedence.PauseIsParticipantVisibleIn`), so the
+  endpoint refusal, the participant read and the overlay push cannot disagree. The publish-path gate stays as
+  defence in depth.
+- **Console:** `usePauseState` exposes `refusal: { tier, outcome, reason } | null` + `dismissRefusal()`, and
+  `<PausePill>` renders it beside the pill as TEXT next to a non-colour icon in a `role="status"` /
+  `aria-live="polite"` region with a real keyboard-reachable Dismiss (NFR-001) — mirroring how the disabled
+  `injects` tier carries its honest inline reason. It persists until the controller's next action or an explicit
+  dismiss, never a timer. A definitive refusal reverts **directly** (the server promised it recorded nothing);
+  every other failure still takes the ask-don't-guess re-GET path, and an *unparseable* 409 counts as ambiguous.
+
+**WR-002 — the `sequence` window is accepted.** `main`'s `OverlayStateResponse` stays a three-field contract; the
+narrow fail-open window described in (b) above is documented rather than fixed here.
+
+**⚠ UAT precondition this creates:** a Freeze only applies — and is only participant-visible — when the exercise's
+`Status` is `live` (or legacy `active`). The UAT exercise must be transitioned past StartEx before the two-tab
+check. Unlike before, a controller who tries it too early now gets a clear on-screen reason instead of a Freeze
+that silently does nothing.
 
 ## Context
 `participant-shell`'s `OverlayLayer` (story 05, Complete) and `GET /api/overlay-state`
@@ -78,10 +219,11 @@ mirrors `EngineReviewBroadcaster` field-for-field (same hub context, same group 
 second hub). Registers the real publisher by REMOVING story 07's `NullPauseOverlayPublisher`
 registration (`services.RemoveAll<IPauseOverlayPublisher>(); services.AddSingleton<...>();`),
 mirroring `EngineReviewEndpoints.AddEngineReview`'s existing `IProviderHealthListener` swap. This
-story also makes **one edit** to the existing, shared `ParticipantShellEndpoints.cs`: the
-`GET /api/overlay-state` handler swaps its static `OverlayState` field read for a call into the
-new `OverlayStateService` — coordinate this edit if `participant-shell` has concurrent work on
-that file (it currently owns five other unrelated config GETs in the same file). **Frontend:**
+story ~~also makes **one edit** to the existing, shared `ParticipantShellEndpoints.cs`~~ — **superseded by the
+DECISION above.** The read side is instead a contributed `IOverlayStateProjection`
+(`SteeringPauseOverlayProjection`) that composes `main`'s lifecycle projection behind the UNCHANGED handler, so
+this story edits neither `ParticipantShellEndpoints.cs` nor `Program.cs` and the shared-file coordination point
+is gone. **Frontend:**
 adds the live branch to `overlayState.ts` (owned today by `participant-shell`, but that module's
 own header already names this feature as the documented future owner of exactly this wiring) —
 mirrors `liveReviewStore.ts`'s `ensureStarted()`/`subscribe`/`reconcile`/`resetForTests` shape,
@@ -99,6 +241,23 @@ shipped `participant-shell` `OverlayLayer.tsx`/`overlayState.ts`/`types.ts` (sto
 extended, not rebuilt. The orchestrator-owned `Program.cs` wiring (the new `Add*`/`Map*` pair plus
 the `RemoveAll<IPauseOverlayPublisher>` swap) lands as a serial step after Gate-2 — same #310→#317
 caution as story 07.
+
+## Follow-ups recorded during build
+
+- **A register change WHILE already frozen does not re-push (accepted, not a defect of this story).**
+  The register rides a tier TRANSITION: `usePauseState`'s `setOverlayRegister` only updates the
+  console's local selection, and the selection is sent with the next pause-tier POST. So a
+  controller who freezes in `out-of-fiction` and then flips the toggle to `in-fiction` sees no
+  change on the participant tab until the next transition (Resume, or a re-Freeze). This is outside
+  AC1, which is transition-scoped ("*when* the pause-tier transition lands"), and outside AC5, which
+  is about the register the controller selected *for that Freeze*. **A UAT tester who flips the
+  register mid-Freeze and sees nothing should file it against a follow-up story, not this one.**
+  Making it live needs either a register-only POST + publish, or the console re-POSTing the current
+  tier on a register change — both un-specced here. Noted in `usePauseState.ts`'s module header.
+- **`OverlayStateService` is in-memory (a singleton), like `PauseTierRegistry`/`ExerciseClockService`.**
+  An App Service restart clears overlay state; the participant's next reconnect re-GETs and heals to
+  `'none'` (never a stuck holding page), and the client re-bases its sequence cutoff on that GET so
+  the restarted host's re-numbered pushes are still accepted.
 
 ## Tests
 - Unit (backend): `OverlayStateService` reflects Freeze/Resume transitions correctly, keyed
@@ -119,3 +278,152 @@ caution as story 07.
   the holding page in the selected register with no manual refresh; Resume; confirm it clears
   live; refresh the participant tab mid-Freeze and confirm it still shows the holding page
   (GET-seeds-on-reconnect).
+
+### AC ↔ test linkage (as built)
+
+Backend (`src/Pulse.WebApi.Tests/Features/EngineRuntime/Steering/`):
+- AC1 — `OverlayStateServiceTests.Apply_Pause_ThenGet_ReflectsTheHoldingPageState`,
+  `OverlayStateServiceTests.Apply_EitherRegister_IsStoredVerbatim`,
+  `PauseOverlayPublisherTests.PublishAsync_Freeze_WritesThePauseOverlay_AndPushesToTheExercisesGroup`,
+  `PauseOverlayCompositionTests.AFreezeThroughTheWiredRegistry_WritesTheParticipantOverlay_PerExercise`,
+  `OverlayStateEndpointTests.Get_AfterAFreeze_ReturnsTheLiveHoldingPageState_NotTheStaticConstant`.
+- AC1 (the SELECTED register, plumbed end to end) — the console's `overlayRegister` now rides the
+  pause-tier POST (`PauseTierRequest.OverlayRegister` → `PauseTierTransition.OverlayRegister` →
+  `PauseOverlayPublisher`), validated server-side and coerced to `out-of-fiction` unless it is
+  exactly `in-fiction`:
+  `PauseTierEndpointsTests.Post_FreezeWithInFictionSelected_MakesTheParticipantGetReportInFiction`,
+  `.Post_FreezeWithOutOfFictionSelected_MakesTheParticipantGetReportOutOfFiction`,
+  `.Post_FreezeWithAnInvalidOrMissingRegister_CoercesToOutOfFiction_AndStillFreezes`,
+  `.Post_Resume_ClearsTheParticipantOverlay`, `.Post_FreezeInExerciseA_LeavesExerciseBsParticipantOverlayCleared`
+  (full HTTP: controller POST → registry → real publisher → participant `GET /api/overlay-state`);
+  `OverlayStateEndpointTests.Get_AfterAFreezeThroughTheWiredRegistry_ReportsTheSelectedRegister`,
+  `.Get_AfterAFreezeWithAnInvalidRegister_ReportsOutOfFiction`,
+  `.Get_AfterAResumeThroughTheWiredRegistry_ClearsToNoneInFiction`,
+  `.Get_AsExerciseB_NeverSeesAFreezeAppliedToExerciseAThroughTheRegistry`;
+  `PauseTierRegistryTests.SetTierAsync_CarriesTheSelectedOverlayRegister_ToThePublisher`,
+  `.SetTierAsync_AnInvalidOrMissingOverlayRegister_CoercesToOutOfFiction`,
+  `.SetTierAsync_AnInvalidOverlayRegister_StillAppliesTheFreeze`;
+  `PauseOverlayPublisherTests.PublishAsync_Freeze_UsesTheRegisterTheControllerSelected`,
+  `.PublishAsync_Freeze_WithANonContractRegister_FallsBackToOutOfFiction`; and console-side
+  `usePauseState.test.tsx` "sends the SELECTED overlay register with the Freeze POST",
+  "sends the register selection as of the moment of the POST, never a stale one",
+  `livePauseTierActions.test.ts` "POSTs the tier + acting human + time zone + overlay register…",
+  "POSTs the in-fiction register when that is the console selection".
+- AC2 — `PauseOverlayPublisherTests.PublishAsync_Freeze_WritesThePauseOverlay_AndPushesToTheExercisesGroup`,
+  `PauseOverlayPublisherTests.PublishAsync_DerivesTheGroupName_ExactlyAsTheHubJoinsIt`.
+- AC3 — `PauseOverlayPublisherTests.PublishAsync_Resume_ClearsTheOverlay_AndPushesTheClearedState`,
+  `OverlayStateEndpointTests.Get_AfterAResume_ReturnsTheClearedStateAgain`,
+  `OverlayStateServiceTests.Apply_None_AfterAPause_ClearsTheOverlay`.
+- AC4 — `OverlayStateEndpointTests.Get_AfterAFreeze_ReturnsTheLiveHoldingPageState_NotTheStaticConstant`
+  (+ `Get_BeforeAnyFreeze_ReturnsTheClearedNoneState`,
+  `Get_WhenTheOverlaySliceIsNotWired_TheLifecycleProjectionStillServes_AndPauseIsSimplyAbsent`).
+- AC6 — `OverlayStateServiceTests.Apply_IsKeyedPerExercise_AFreezeInANeverTouchesB`,
+  `OverlayStateServiceTests.Get_EmptyScope_ReadsTheClearedState_NeverAnExercisesOverlay`,
+  `PauseOverlayPublisherTests.PublishAsync_TargetsOnlyTheOwningExercisesGroup_NeverAnothers`,
+  `OverlayStateEndpointTests.Get_ParticipantInExerciseB_NeverSeesExerciseAsFreeze`,
+  `OverlayStateEndpointTests.Get_UnresolvedScope_Returns401_NeverAnEmptyButOk200`.
+- AC7 (XC-004) — `PauseOverlayPublisherTests.PauseOverlayWritePath_TakesNoTelemetryOrPersistenceDependency`.
+- XC-002 — `PauseOverlayPublisherTests.PublishAsync_PayloadIsTheParticipantProjection_WithNoStaffFieldAtAll`,
+  `PauseOverlayPublisherTests.ParticipantOverlayStateDto_ExposesNoStaffProperty`,
+  `OverlayStateEndpointTests.Get_ResponseCarriesOnlyParticipantSafeKeys`.
+- Composition (the #310→#317 lesson) — `PauseOverlayCompositionTests.ResolvedPauseOverlayPublisher_IsTheRealImplementation_NotTheNoOpDefault`,
+  `.AddPauseParticipantOverlay_AfterStory07_ReplacesTheNoOpDefault`,
+  `.AddPauseParticipantOverlay_BeforeStory07_StillWins`,
+  `.ResolvingThePauseTierRegistry_DoesNotDeadlockOnTheOverlayPublisherCycle`.
+- Out-of-order publishes (story-07 review SG-206) —
+  `OverlayStateServiceTests.Apply_AnOlderSequence_DoesNotOverwriteANewerState`,
+  `PauseOverlayPublisherTests.PublishAsync_ReadsTheAuthoritativeTier_NotTheTransitionsPossiblyStaleTarget`,
+  `PauseOverlayPublisherTests.PublishAsync_BroadcastsTheStoresCurrentState_NotTheStateItTriedToWrite`.
+- WR-004 — `PauseOverlayPublisherTests.PublishAsync_WhenTheHubThrows_SwallowsTheFailure_SoTheFreezeStands`.
+
+Frontend (`src/frontend/src/features/participant-shell/components/OverlayLayer/`):
+- AC2 — `OverlayLayer.live.test.tsx` "renders nothing until a Freeze arrives, then shows the
+  out-of-fiction holding page live", `overlayState.live.test.ts` "reconciles a Freeze push …".
+- AC3 — `OverlayLayer.live.test.tsx` "clears the holding page when the Resume push arrives",
+  `overlayState.live.test.ts` "reconciles a Resume push back to \"none\"".
+- AC4 — `overlayState.live.test.ts` "seeds a mid-Freeze holding page from the GET…",
+  "re-GETs the authoritative state on every (re)connect", "treats the re-GET as ground truth…",
+  `OverlayLayer.live.test.tsx` "shows the holding page from the SEEDING GET alone…".
+- AC5 — `OverlayLayer.live.test.tsx` "renders the in-fiction register's copy…" (against an
+  UNMODIFIED `OverlayLayer.tsx`), `overlayState.live.test.ts` "carries the in-fiction register
+  verbatim".
+- Defensive validation / ordering — `overlayState.live.test.ts` "drops a malformed push payload…",
+  "drops a STALE push…", "keeps the previous snapshot when the GET fails…", and the Gate-1 CR-001/SG-002
+  guards: "drops a SUPERSEDED seed GET body that resolves last, keeping the newer truth", "drops a GET
+  body that a push overtook while it was in flight", "drops a push with no sequence", "still accepts a
+  sequence-less GET body — the pre-wiring fallback shape".
+- Gate-2 WR-001, the stranded holding page in `archived`/`build` — `overlayState.live.test.ts`
+  "CLEARS a stranded holding page when the re-GET is refused 403 (the world is closed)",
+  "KEEPS the holding page on a 401, a 5xx, or a network failure (fail closed)",
+  "does not rewind the stale-push cutoff when it clears on a 403".
+- Composition, story-07 standalone (WR-001) —
+  `PauseOverlayCompositionTests.AddPauseTierSteering_Alone_StillResolvesAWorkingNoOpPublisher`.
+- Participant-payload hygiene (SG-001) —
+  `OverlayStateServiceTests.NextSequence_IsCountedPerExercise_NeverLeakingAnotherExercisesActivity`.
+
+### Overlay precedence — the DECISION's test matrix (added 2026-07-28)
+
+Every cell is proven twice: once pure (`SteeringPauseOverlayProjectionTests`, plain `[Fact]`, all six lifecycle
+states) and once end to end over the real controller POST → participant GET with real SQL
+(`PauseTierEndpointsTests`).
+
+| Cell | Result | Pure test | End-to-end test |
+|---|---|---|---|
+| ENDEX (`completed`) + Freeze | **refused 409**; lifecycle overlay untouched, never `pause` | `.Endex_WithTheWorldFrozen_ServesTheLifecyclesTerminalAnswer_NeverThePauseHoldingPage` | `.Post_FreezeAfterEndEx_IsRefusedWithAReason_AndRecordsNothing` |
+| pre-start (`build` / `staged`) + Freeze | **refused 409**; clock never started, never `pause` | `.PreStart_WithTheWorldFrozen_ServesTheLifecyclesAnswer_NeverPause` | `.Post_FreezeBeforeStartEx_IsRefusedWithAReason_AndNeverStartsTheClock` |
+| running (`live`) + frozen | `pause`, in the controller's selected register | `.Running_WithTheWorldFrozen_ServesPause_InTheControllersSelectedRegister` | `.Post_FreezeInARunningWorld_ShowsTheParticipantThePausePage_InTheSelectedRegister` |
+| running + not frozen | `none` (byte-identical to the shipped constant) | `.Running_WithNothingFrozen_ServesNone_ByteIdenticalToTheShippedConstant` | `.Get_InARunningWorldWithNoFreeze_ServesNone` |
+
+WR-003 refusal, additionally: `PauseTierEndpointsTests.Post_FreezeInAnArchivedWorld_IsRefused_AndRecordsNothing`,
+`.Post_ANonFreezeTierInANonRunningWorld_IsStillApplied_AndRECORDED` (only Freeze is gated — and asserts the tier
+was genuinely recorded, not merely un-refused), `.Post_ResumeInANonRunningWorld_IsStillApplied` (a pause can always
+be stood down). Console: `usePauseState.test.tsx` "SURFACES the reason when the server refuses a Freeze outside a
+running world", "does NOT re-GET on a definitive refusal", "SURFACES a parseable clock-unavailable 409 and reverts
+DIRECTLY (its shape changed too)", "clears the refusal notice on the controller's NEXT action", "clears the refusal
+notice when the controller dismisses it", "reverts a Freeze the server REFUSED (an UNPARSEABLE 409), after ASKING
+what is true"; `PausePill.test.tsx` "shows the server's reason as TEXT, never colour alone", "is ANNOUNCED without
+stealing focus (role=status, aria-live=polite)", "dismisses from the KEYBOARD through a real button", "still shows
+the honest RUNNING pill beneath the notice", "renders no refusal notice when there is nothing to report".
+
+**The PUSH channel, per suppressed cell (Gate-1 CR-001) — every one asserts the hub received NOTHING**
+(`PauseOverlayPublisherTests`): `.PublishAsync_FreezeAfterEndEx_WritesNothingAndPushesNothing`,
+`.PublishAsync_FreezeBeforeStartEx_WritesNothingAndPushesNothing` (`build`, `staged`),
+`.PublishAsync_FreezeInATerminalOrUnreadableWorld_PushesNothing_FailingClosed` (`archived`, a bogus literal, and a
+missing row), with the positive control
+`.PublishAsync_FreezeInARunningWorld_StillPushesToThatExercisesGroup_WithTheSelectedRegister` (so the suppression
+tests cannot pass on a publisher that never pushes) and
+`.PublishAsync_ResumeIsNeverSuppressed_SoAStrandedHoldingPageCanAlwaysBeCleared` (which also asserts the clear path
+never even reads the lifecycle). Registration: `PauseOverlayCompositionTests.AddPauseParticipantOverlay_RegistersTheLifecycleStatusReaderThePrecedenceGateNeeds`.
+
+Story-04 forward collision (Gate-1 SG-003) —
+`SteeringPauseOverlayProjectionTests.ABroadcastStateInTheStore_IsNotYetReachable_AndIsTheDocumentedStory04Collision`.
+
+Supporting: `SteeringPauseOverlayProjectionTests.LifecyclePaused_KeepsTheCor032HoldingPage_WhetherOrNotAControllerAlsoFroze`,
+`.TerminalOrUnrecognizedStates_SuppressTheFreeze_FailingClosed` (incl. `archived` and a bogus literal),
+`.TheLegacyActiveLiteral_IsStillARunningWorld_SoAFreezeReachesParticipants`,
+`.ANonContractRegisterInTheStore_IsCoercedOnTheReadPath`,
+`.PauseIsParticipantVisibleIn_IsTrueOnlyWhereScenarioTimeActuallyAdvances` (the gate, one row per state);
+`PauseTierEndpointsTests.Get_InALifecyclePausedWorld_StillServesTheCor032HoldingPage`.
+
+Isolation (COR-001, always-Critical) — `SteeringPauseOverlayProjectionTests.ExerciseB_NeverSeesExerciseAsFreeze`,
+`.TheEmptyScope_ReadsTheClearedOverlay_NeverAnExercisesFreeze`, plus the unchanged endpoint-level
+`OverlayStateEndpointTests.Get_ParticipantInExerciseB_NeverSeesExerciseAsFreeze` /
+`.Get_AsExerciseB_NeverSeesAFreezeAppliedToExerciseAThroughTheRegistry` (each asserting the store DOES hold A's
+freeze, so the zero is the scope closing the door).
+
+XC-002 — `OverlayStateEndpointTests.Get_ResponseCarriesOnlyParticipantSafeKeys` (exactly
+`state`/`register`/`message`; no `actingHumanId`, no `exerciseId`, no `tier`),
+`SteeringPauseOverlayProjectionTests.TheServedBody_IsTheFrozenThreeFieldShape`.
+
+Composition (the ordering trap) —
+`SteeringCompositionRootWiringTests.ProgramCs_ResolvesTheSteeringPauseOverlayProjection_NotTheLifecycleProjectionAlone`
+(the real `Program.cs` host, the only place a reversed `Add*` order is visible),
+`.ProgramCs_LeavesTheSteeringOverlaySourceAtItsNoOpFloor_ByDesign`, and
+`ExerciseConfiguration/CompositionRootWiringTests.ProgramCs_CallsAddExerciseLifecycle_...` (updated to expect the
+decorator, still asserting it is not 01b's constant).
+
+Default-deny gate integration (identity-auth-roles/11, #361) —
+`SteeringCompositionRootWiringTests.SteeringRoute_WithNoCredential_IsRefusedByTheDefaultDenyGate_BeforeTheEndpointFilter`
+(all four `/api/steering/*` routes),
+`.SteeringRoute_WithALiveParticipantSession_ReachesTheStaffFilter_NotTheGate`,
+`.OverlayStateRoute_IsGated_ButCarriesNoStaffOnlyAuthorizationMetadata`.

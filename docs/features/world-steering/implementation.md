@@ -150,6 +150,36 @@
   this feature as the future owner of the trigger) — no longer deferred as of this pass, but
   `OverlayLayer.tsx` itself needs no code change, only its data source.
 
+## Wave-2 footprint corrections (as built, 2026-07-27)
+
+The Wave-Plan rows below under-state what stories 07 and 08 actually touched. Every extra file was
+verified additive / behaviour-preserving per-commit at Gate-2, but the rows are the reuse map a future
+wave reads, so the truth is recorded here rather than left to a `git log`:
+
+- **Story 07** additionally extended: `Pulse.WebApi/Features/EngineRuntime/ReactionLoopHost.cs` (extracted
+  a `ShouldStartClock` predicate that `EnsureClockStarted` now calls — the verbatim `!IsRunning &&
+  !IsFrozen` condition, pulled out so the pause suite asserts the loop's *own* rule instead of
+  re-implementing it); `features/controller/engine/hooks/useEngineControl.ts` (an optional
+  `SetEngineModeOptions.onRejected` plus `engineControlStore.adoptServerMode` — both purely additive, so
+  the shipped #337 kill-switch/restore callers are untouched); and
+  `features/controller/components/steering/PausePill.tsx` (the injects tier ships disabled with a text
+  reason).
+- **Story 08** additionally touched, with orchestrator authorisation once 07 had merged: `PauseTierEndpoints.cs`,
+  `PauseTierRegistry.cs`, `features/controller/hooks/usePauseState.ts`,
+  `features/controller/services/livePauseTierActions.ts` — plumbing the overlay register end to end. The
+  publisher had been hardcoding `'out-of-fiction'`, so the controller's register choice did nothing. A
+  later Gate-2 finding (WR-201) showed the *console* had no selector either, so `PausePill.tsx` gained a
+  two-option toggle. Row 08's `RealOverlayPublisher.cs (name indicative)` placeholder resolved to three
+  files: `PauseOverlayPublisher.cs`, `PauseOverlayServiceCollectionExtensions.cs`,
+  `ParticipantOverlayStateDto.cs`.
+- **Integration seam (orchestrator)** also added
+  `Pulse.WebApi.Tests/Features/EngineRuntime/Steering/SteeringCompositionRootWiringTests.cs` — the
+  `WebApplicationFactory<Program>` guard that makes the #310→#317 lesson mechanical.
+- **Correction to a stated premise:** these stories' notes said `TargetFollow.Modulate` "stays unwired".
+  It is already live — `DecideStage.Decide` falls back to `IntentComposer.Compose`, which calls
+  `Modulate`. Story 09 adds no call site, but a live target therefore also shapes burst direction/count,
+  not only the measure-stage intensity chase.
+
 ## Wave Plan (DAG-ready)
 
 | Story | Files it owns | Depends-on | Can-run-with | Wave | Effort |

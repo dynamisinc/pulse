@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.Chrome;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
@@ -223,10 +224,21 @@ public sealed class CompositionRootWiringTests
             .Should().BeOfType<LifecycleShellVariantProjection>(
                 "AddExerciseLifecycle() Replace()s 01b's ConstantShellVariantProjection — without that line "
                 + "/api/shell-state answers 'full' for a paused or archived world and nothing raises");
+        // The overlay seam is the ONE projection with a second contributor: world-steering/08's
+        // SteeringPauseOverlayProjection DECORATES the lifecycle projection (Tom's ruling 2026-07-27,
+        // endex > pre-start > pause > none), so the real host resolves the decorator and the lifecycle projection
+        // is its injected inner. Asserting the concrete decorator here keeps this test's actual subject — "the
+        // overlay read is not 01b's ConstantOverlayStateProjection" — while the lifecycle's own end-to-end
+        // behaviour through the composed read is proven by ExerciseLifecycleCompositionTests and by
+        // PauseTierEndpointsTests.Get_InALifecyclePausedWorld_StillServesTheCor032HoldingPage.
         provider.GetRequiredService<IOverlayStateProjection>()
-            .Should().BeOfType<LifecycleOverlayStateProjection>(
-                "AddExerciseLifecycle() Replace()s 01b's ConstantOverlayStateProjection — without that line "
-                + "a paused exercise can never render its COR-032 holding page");
+            .Should().BeOfType<SteeringPauseOverlayProjection>(
+                "the overlay seam must resolve to the world-steering decorator, which is constructed OVER "
+                + "LifecycleOverlayStateProjection — so this type coming back is what proves neither 01b's "
+                + "ConstantOverlayStateProjection nor a bare lifecycle projection is serving. That the lifecycle "
+                + "still drives the answer through it is asserted behaviourally by "
+                + "ExerciseLifecycleCompositionTests and by "
+                + "PauseTierEndpointsTests.Get_InALifecyclePausedWorld_StillServesTheCor032HoldingPage");
 
         provider.GetService<ExerciseLifecycleService>().Should().NotBeNull(
             "both the staff lifecycle endpoints AND the gating middleware resolve this service at request "

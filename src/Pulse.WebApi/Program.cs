@@ -3,6 +3,7 @@ using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.Chrome;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
@@ -100,6 +101,10 @@ builder.Services.AddExerciseConfiguration();
 builder.Services.AddComplianceChromeConfig();   // story 02 — per-exercise COR-031 chrome + the NFR-008 guard
 builder.Services.AddPracticeMode();             // story 04 — COR-033 practice flag + IEvaluationEligibility
 builder.Services.AddExerciseLifecycle();        // story 03 — COR-032 state machine + shell/overlay projections
+// ⚠ The order-independence note above stops being true one line further down: world-steering #351
+// (AddPauseParticipantOverlay, below) Replace()s the SAME IOverlayStateProjection this line does, to decorate
+// it. Between two Replace()s of one seam, last writer wins — so #351 MUST stay below this line. See the
+// ⚠ block at that call site; the constraint is asserted by SteeringCompositionRootWiringTests.
 
 // Default-deny session gate (identity-auth-roles/11, #361 — the fix for #359) — orchestrator-wired.
 // Registers a RequireAuthenticatedUser FALLBACK policy plus the result handler that writes the 401/403 and
@@ -165,6 +170,37 @@ builder.Services.AddEngineReview();        // #286 review queue API + autonomy/s
 // reuses Authentication:Bootstrap:Secret (same X-Bootstrap-Secret header) — no new secret/infra; fails
 // closed to 404 when unconfigured. No middleware/ordering constraint (same as MapBootstrapEndpoints).
 builder.Services.AddEngineContentSeed(builder.Configuration);
+
+// World steering — Wave 2 (feature/world-steering-wave2), orchestrator-wired. AddPauseTierSteering (#350)
+// registers the per-exercise PauseTierRegistry + the pause-tier endpoints; entering the `freeze` tier calls
+// the ALREADY-BUILT IExerciseClock.Freeze (started first from the Exercise row if the loop has never ticked)
+// and VERIFIES it took, so a tier is only ever recorded against a genuinely frozen clock. It TryAdds a no-op
+// IPauseOverlayPublisher. AddPauseParticipantOverlay (#351) then REPLACES that no-op (RemoveAll + AddSingleton)
+// with the real publisher, which writes OverlayStateService and pushes OverlayStateChanged over the B1
+// ExerciseRealtimeHub (no second hub). The swap is ORDER-INDEPENDENT by construction — #350 TryAdds its
+// default and #351 does RemoveAll + AddSingleton, so either order converges on the real publisher (both
+// directions are asserted by tests). It is listed after #350 as a readability CONVENTION, not a
+// correctness requirement (Copilot review, PR #386). It does genuinely need AddSocialRealtimeHub (above)
+// for IHubContext. Without this line GET /api/overlay-state silently serves the
+// pre-story `none` constant and a Freeze is invisible to participants (it now logs a warning once, and
+// CompositionRootWiringTests asserts the real publisher resolves). AddStorylineSteering (#352) registers the
+// GET/POST pair that reaches the live Storyline objects the reaction loop ticks off IReactionLoopRegistry —
+// no EF entity, so it converges on AddReactionLoopHost's registry via TryAdd.
+builder.Services.AddPauseTierSteering();        // #350 POST/GET /api/steering/pause-tier
+// ⚠ ORDER IS LOAD-BEARING HERE — this is the ONE exception to the Replace-is-order-independent note on
+// AddExerciseConfiguration above. That note holds against a TryAdd()ed FLOOR; it does NOT hold between two
+// contributors that both Replace() the SAME seam, where last-writer-wins. AddExerciseLifecycle() (above)
+// and AddPauseParticipantOverlay() (next line) both Replace(IOverlayStateProjection): #351 contributes a
+// DECORATOR that wraps the lifecycle projection so a Freeze is only participant-visible inside a running
+// world (Tom's precedence ruling — endex > pre-start > pause > none). Reversed, the decorator is silently
+// EVICTED: the host still builds, resolves, throws nothing and logs nothing, and Freeze goes invisible to
+// participants again. Verified silent by experiment, and caught by
+// SteeringCompositionRootWiringTests.ProgramCs_ResolvesTheSteeringPauseOverlayProjection_NotTheLifecycleProjectionAlone.
+// The publisher swap on the same line (#351 over #350's no-op) IS order-independent — that one is a TryAdd
+// floor. Two different guarantees on one line; don't generalize either.
+builder.Services.AddPauseParticipantOverlay();  // #351 REPLACES #350's no-op publisher AND decorates the
+                                                //      lifecycle overlay projection (MUST follow #103)
+builder.Services.AddStorylineSteering();        // #352 storyline target GET/POST
 
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
@@ -339,6 +375,22 @@ app.MapEngineContentSeedEndpoints();       // #327 POST /api/ops/seed-engine-con
 app.MapEngineRuntime();   // #285 reaction-loop host runtime surface
 app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + swamped-mode + kill-switch
                           // #353 + GET /api/engine/settings, POST settings/{autonomy-default,tier-policy}
+
+// World-steering endpoints (Wave 2) — same COR-001 discipline as the cockpit above: scope comes only from the
+// resolved IExerciseContext, never a client exerciseId, and both groups reuse EngineCockpitStaffAuthorizationFilter
+// unmodified (401 unauthenticated/unscoped, 403 not-assigned).
+// #297/#353, same two-tier shape as the /api/engine block above: within each group the MUTATING routes carry an
+// additional EngineCockpitControllerRoleFilter, so an assigned evaluator or planner may WATCH via the two GETs
+// but cannot steer — freezing the world and re-aiming the escalation are both more participant-visible than the
+// kill switch #297 was filed to protect. This was NOT true when #350/#352 were written (they predate that
+// decision) and the gap survived because the drift guard in EngineSettingsEndpointsTests filtered on
+// /api/engine alone; it now derives from /api/engine AND /api/steering, so a new ungated mutating steering
+// route reds the build.
+// #351 maps NO route of its own: participants read through participant-shell's already-mapped
+// GET /api/overlay-state and the push rides the already-mapped /hubs/exercise, so it is service-registration
+// only (above).
+app.MapPauseTierSteering();   // #350 pause tier (Freeze reaches the real clock)
+app.MapStorylineSteering();   // #352 storyline actual/target read + target set
 
 app.Run();
 

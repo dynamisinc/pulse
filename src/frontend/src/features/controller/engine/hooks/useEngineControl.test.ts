@@ -300,6 +300,55 @@ describe('useEngineControl — live mode (UAT engine-pause fix; USE_MOCK_DATA=fa
     expect(autonomyEvents()).toHaveLength(0)
   })
 
+  it('invokes the optional onRejected callback after reverting, so a composing caller can undo coupled state', async () => {
+    // world-steering/07: `usePauseState` uses this to drop its ENGINE PAUSED tier
+    // when the kill-switch POST fails — the two surfaces must never disagree.
+    mockedLiveSetMode.mockRejectedValue(new Error('network down'))
+    const onRejected = vi.fn()
+    const { result } = renderHook(() => useEngineControl())
+
+    await act(async () => {
+      result.current.setMode('stop', { onRejected })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.mode).toBe('live')
+    expect(onRejected).toHaveBeenCalledTimes(1)
+  })
+
+  it('never invokes onRejected when the live POST succeeds', async () => {
+    mockedLiveSetMode.mockResolvedValue(undefined)
+    const onRejected = vi.fn()
+    const { result } = renderHook(() => useEngineControl())
+
+    await act(async () => {
+      result.current.setMode('stop', { onRejected })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.mode).toBe('stop')
+    expect(onRejected).not.toHaveBeenCalled()
+  })
+
+  it('a throwing onRejected can never break the kill switch\'s own revert', async () => {
+    mockedLiveSetMode.mockRejectedValue(new Error('network down'))
+    const { result } = renderHook(() => useEngineControl())
+
+    await act(async () => {
+      result.current.setMode('stop', {
+        onRejected: () => {
+          throw new Error('composing caller exploded')
+        },
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.mode).toBe('live')
+  })
+
   // -----------------------------------------------------------------------
   // `modeSettledCount` (autonomy-safety story 06) — the settle SIGNAL
   // `<EngineControlBar>` watches (instead of racing the optimistic `mode`
@@ -356,5 +405,39 @@ describe('useEngineControl — live mode (UAT engine-pause fix; USE_MOCK_DATA=fa
     })
 
     expect(result.current.modeSettledCount).toBe(2)
+  })
+})
+
+describe('engineControlStore.adoptServerMode — a SILENT local adopt (no telemetry, no POST)', () => {
+  it('reflects a server-reported mode locally without emitting an autonomy event or POSTing', () => {
+    // world-steering/07 WR-002: a resync learns the engine is already stopped
+    // because ANOTHER human stopped it. Emitting engine.autonomy_changed here
+    // would attribute a safety action to whoever happens to be watching this
+    // console (COR-018/XC-004 accuracy); re-POSTing would echo a command nobody
+    // issued.
+    const { result } = renderHook(() => useEngineControl())
+
+    act(() => engineControlStore.adoptServerMode('ex-mock-0001', 'stop'))
+
+    expect(result.current.mode).toBe('stop')
+    expect(engineControlStore.getSnapshot('ex-mock-0001').mode).toBe('stop')
+    expect(autonomyEvents()).toHaveLength(0)
+    expect(mockedLiveSetMode).not.toHaveBeenCalled()
+  })
+
+  it('is a no-op when the adopted mode already matches', () => {
+    const { result } = renderHook(() => useEngineControl())
+
+    act(() => engineControlStore.adoptServerMode('ex-mock-0001', 'live'))
+
+    expect(result.current.mode).toBe('live')
+    expect(autonomyEvents()).toHaveLength(0)
+  })
+
+  it('adopts per exercise — never leaking into another exercise (COR-001)', () => {
+    engineControlStore.adoptServerMode('ex-alpha', 'stop')
+
+    expect(engineControlStore.getSnapshot('ex-alpha').mode).toBe('stop')
+    expect(engineControlStore.getSnapshot('ex-bravo').mode).toBe('live')
   })
 })

@@ -12,6 +12,13 @@
  *  - the whole control is keyboard-operable — Tab/Enter/Space to open, pick a
  *    tier, and confirm; Escape dismisses.
  *
+ * Story 08 (participant pause overlay) adds the PARTICIPANT PAUSE PAGE selector
+ * beside the tier radios: both options render with their consequence copy, the
+ * store's current value is the checked one, a click and a keyboard Space both
+ * write through `setOverlayRegister`, and the Freeze confirm step restates which
+ * page participants will get. AC5 depends on this selector existing — without it
+ * the register was always the store default and `in-fiction` was unreachable.
+ *
  * `usePauseState` is mocked at the module boundary (mirrors
  * `SwampedModeToggle.test.tsx`'s hook-mock precedent) so each test drives the
  * component's rendering + interactions directly and deterministically.
@@ -54,6 +61,10 @@ function stub(tier: PauseTier, overrides: Partial<PauseState> = {}): PauseState 
     setTier: vi.fn(),
     resume: vi.fn(),
     setOverlayRegister: vi.fn(),
+    // No server refusal by default (WR-003) — the notice is absent unless a test
+    // asks for it, so every pre-existing expectation here is unchanged.
+    refusal: null,
+    dismissRefusal: vi.fn(),
     ...overrides,
   }
 }
@@ -110,17 +121,17 @@ describe('PausePill — the pause popover', () => {
     expect(screen.getByTestId('pause-apply')).toHaveTextContent('Pause')
   })
 
-  it('selecting Pause injects and applying calls setTier("injects") immediately (no confirm step)', async () => {
+  it('selecting Pause engine and applying calls setTier("engine") immediately (no confirm step)', async () => {
     const user = userEvent.setup()
     const setTier = vi.fn()
     mockedUsePauseState.mockReturnValue(stub('running', { setTier }))
     renderWithTheme(<PausePill />)
 
     await user.click(screen.getByTestId('pause-pill'))
-    await user.click(screen.getByTestId('pause-tier-option-injects'))
+    await user.click(screen.getByTestId('pause-tier-option-engine'))
     await user.click(screen.getByTestId('pause-apply'))
 
-    expect(setTier).toHaveBeenCalledWith('injects')
+    expect(setTier).toHaveBeenCalledWith('engine')
     expect(setTier).toHaveBeenCalledTimes(1)
     expect(screen.queryByTestId('pause-freeze-confirm')).not.toBeInTheDocument()
   })
@@ -146,6 +157,85 @@ describe('PausePill — the pause popover', () => {
 
     await user.click(screen.getByTestId('pause-pill'))
     expect(screen.queryByTestId('pause-resume')).not.toBeInTheDocument()
+  })
+})
+
+describe('PausePill — Pause injects ships DISABLED and INERT (story 07)', () => {
+  it('renders the tier but disables its radio (CTL-023 three-tier shape preserved)', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running'))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    const injects = screen.getByTestId('pause-tier-option-injects')
+    expect(injects).toBeInTheDocument()
+    expect(injects.querySelector('input')).toBeDisabled()
+  })
+
+  it('communicates its reason as TEXT in the accessible name + description, not colour alone (NFR-001)', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running'))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    // The reason is readable text on the surface...
+    expect(screen.getByTestId('pause-tier-reason-injects')).toHaveTextContent(
+      /Unavailable — No inject queue yet/,
+    )
+    // ...it is part of the radio's accessible NAME (the label wraps it)...
+    expect(screen.getByRole('radio', { name: /No inject queue yet/i })).toBeInTheDocument()
+    // ...and it is wired as the radio's accessible DESCRIPTION.
+    expect(screen.getByTestId('pause-tier-option-injects').querySelector('input')).toHaveAttribute(
+      'aria-describedby',
+      'pause-tier-reason-injects',
+    )
+  })
+
+  it('takes NO action — clicking it never selects it and no setTier("injects") ever reaches the store', async () => {
+    const user = userEvent.setup()
+    const setTier = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { setTier }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+    await user.click(screen.getByTestId('pause-tier-option-injects'))
+
+    // The radio never takes the selection, so the visible choice (and anything
+    // Pause could apply) is never the injects tier.
+    expect(screen.getByTestId('pause-tier-option-injects').querySelector('input')).not.toBeChecked()
+
+    await user.click(screen.getByTestId('pause-apply'))
+    expect(setTier).not.toHaveBeenCalledWith('injects')
+  })
+
+  it('pre-selects the first SELECTABLE tier when running, so Pause is never a no-op by default', async () => {
+    const user = userEvent.setup()
+    const setTier = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { setTier }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+    await user.click(screen.getByTestId('pause-apply'))
+
+    expect(setTier).toHaveBeenCalledWith('engine')
+  })
+
+  it('keyboard activation cannot select it either (a disabled radio is unfocusable)', async () => {
+    const user = userEvent.setup()
+    const setTier = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { setTier }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    const injectsRadio = screen.getByTestId('pause-tier-option-injects').querySelector('input')
+    injectsRadio?.focus()
+    await user.keyboard(' ')
+
+    expect(injectsRadio).not.toBeChecked()
+    expect(setTier).not.toHaveBeenCalledWith('injects')
   })
 })
 
@@ -261,6 +351,170 @@ describe('PausePill — overlay register is not rendered by this control', () =>
     renderWithTheme(<PausePill />)
 
     expect(screen.queryByTestId('overlay-layer')).not.toBeInTheDocument()
+    // With the popover CLOSED nothing quotes the participant copy either. (Open, the
+    // story-08 selector deliberately QUOTES it as staff copy so a controller can see
+    // the consequence of the choice — that is a label, never a rendered pause page.)
     expect(screen.queryByText(/EXERCISE PAUSED/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('PausePill — participant pause page selector (story 08; AC1/AC5, NFR-001)', () => {
+  it('renders both options with their consequence copy, not register jargon', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running'))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    const group = screen.getByTestId('pause-register-group')
+    expect(group).toHaveTextContent('PARTICIPANT PAUSE PAGE')
+    expect(group).toHaveTextContent('What participants see while the world is frozen')
+    expect(group).toHaveTextContent('EXERCISE PAUSED')
+    expect(group).toHaveTextContent("We'll be right back")
+    expect(group).toHaveTextContent('Breaks the fiction on purpose')
+    expect(group).toHaveTextContent('Keeps participants in the scenario')
+  })
+
+  it('checks the option the shared store currently holds — the selection is state, not colour', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running', { overlayRegister: 'in-fiction' }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    const inFiction = within(screen.getByTestId('pause-register-option-in-fiction')).getByRole('radio')
+    const outOfFiction = within(
+      screen.getByTestId('pause-register-option-out-of-fiction'),
+    ).getByRole('radio')
+    expect(inFiction).toBeChecked()
+    expect(outOfFiction).not.toBeChecked()
+  })
+
+  it('defaults to out-of-fiction — the conservative choice', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running'))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    expect(
+      within(screen.getByTestId('pause-register-option-out-of-fiction')).getByRole('radio'),
+    ).toBeChecked()
+  })
+
+  it('writes a click through to setOverlayRegister — the ONE store, no second path', async () => {
+    const user = userEvent.setup()
+    const setOverlayRegister = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { setOverlayRegister }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+    await user.click(
+      within(screen.getByTestId('pause-register-option-in-fiction')).getByRole('radio'),
+    )
+
+    expect(setOverlayRegister).toHaveBeenCalledWith('in-fiction')
+  })
+
+  it('is operable by keyboard alone — Space on the focused option selects it (NFR-001)', async () => {
+    const user = userEvent.setup()
+    const setOverlayRegister = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { setOverlayRegister }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+
+    const inFiction = within(screen.getByTestId('pause-register-option-in-fiction')).getByRole('radio')
+    inFiction.focus()
+    expect(inFiction).toHaveFocus()
+
+    await user.keyboard(' ')
+
+    expect(setOverlayRegister).toHaveBeenCalledWith('in-fiction')
+  })
+
+  it('the Freeze confirm step restates which page participants will get', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running', { overlayRegister: 'in-fiction' }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+    const freezeRadio = within(screen.getByTestId('pause-tier-option-freeze')).getByRole('radio')
+    await user.click(freezeRadio)
+    await user.click(screen.getByTestId('pause-apply'))
+
+    expect(screen.getByTestId('pause-freeze-confirm-register')).toHaveTextContent(
+      "They will see: In fiction — \"We'll be right back\"",
+    )
+  })
+
+  it('the selector is not shown during the Freeze confirm step (one decision at a time)', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('running'))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+    await user.click(within(screen.getByTestId('pause-tier-option-freeze')).getByRole('radio'))
+    await user.click(screen.getByTestId('pause-apply'))
+
+    expect(screen.queryByTestId('pause-register-group')).not.toBeInTheDocument()
+  })
+})
+
+describe('PausePill — a REFUSED Freeze is announced, not silently reverted (WR-003, NFR-001)', () => {
+  const refusal = {
+    tier: 'freeze' as const,
+    outcome: 'not-applicable-in-lifecycle-state',
+    reason:
+      'Freeze is not applicable before StartEx — this exercise is staged. ' +
+      'Take the exercise Live first; there is no running world to freeze.',
+  }
+
+  it('renders no refusal notice when there is nothing to report', () => {
+    mockedUsePauseState.mockReturnValue(stub('running'))
+    renderWithTheme(<PausePill />)
+
+    expect(screen.queryByTestId('pause-refusal')).not.toBeInTheDocument()
+  })
+
+  it("shows the server's reason as TEXT, never colour alone", () => {
+    mockedUsePauseState.mockReturnValue(stub('running', { refusal }))
+    renderWithTheme(<PausePill />)
+
+    const notice = screen.getByTestId('pause-refusal')
+    expect(notice).toHaveTextContent('WORLD FROZEN NOT APPLIED')
+    expect(notice).toHaveTextContent('this exercise is staged')
+    expect(notice).toHaveTextContent('Take the exercise Live first')
+  })
+
+  it('is ANNOUNCED without stealing focus (role=status, aria-live=polite)', () => {
+    mockedUsePauseState.mockReturnValue(stub('running', { refusal }))
+    renderWithTheme(<PausePill />)
+
+    const notice = screen.getByRole('status')
+    expect(notice).toHaveAttribute('aria-live', 'polite')
+    expect(notice).toHaveAttribute('data-testid', 'pause-refusal')
+    expect(document.body).toHaveFocus()
+  })
+
+  it('dismisses from the KEYBOARD through a real button', async () => {
+    const user = userEvent.setup()
+    const dismissRefusal = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { refusal, dismissRefusal }))
+    renderWithTheme(<PausePill />)
+
+    const dismiss = screen.getByRole('button', { name: /dismiss the refused pause notice/i })
+    dismiss.focus()
+    await user.keyboard('{Enter}')
+
+    expect(dismissRefusal).toHaveBeenCalledTimes(1)
+  })
+
+  it('still shows the honest RUNNING pill beneath the notice — never WORLD FROZEN', () => {
+    mockedUsePauseState.mockReturnValue(stub('running', { refusal }))
+    renderWithTheme(<PausePill />)
+
+    expect(screen.getByTestId('pause-pill')).toHaveTextContent('RUNNING')
+    expect(screen.getByTestId('pause-pill')).not.toHaveTextContent('WORLD FROZEN')
   })
 })
