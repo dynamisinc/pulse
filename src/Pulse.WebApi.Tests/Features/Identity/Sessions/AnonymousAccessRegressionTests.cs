@@ -67,10 +67,16 @@ public sealed class AnonymousAccessRegressionTests
 {
     /// <summary>
     /// The three engine review routes the audit inferred rather than probed ("behavior inferred from the shared
-    /// MapGroup filter"). Named explicitly so the inference becomes an assertion — the sweep covers them anyway
-    /// via enumeration, and this list only guarantees the enumeration really reached them.
+    /// MapGroup filter"). Named explicitly so the inference becomes an assertion — the sweeps cover them anyway via
+    /// enumeration, and this list only guarantees the enumeration really reached them.
     /// </summary>
-    public static TheoryData<string> PreviouslyUnprobedEngineRoutes() =>
+    /// <remarks>
+    /// A COVERAGE guard, not an exemption: like the pattern list in
+    /// <see cref="TheEnumerationCoversTheRoutesTheAuditProvedOpen"/>, it can only ever make the sweep stricter. The
+    /// suite's one hand-maintained EXEMPTION — the only list that can excuse a route from an assertion — is
+    /// <see cref="BodyValidatedBeforeIdentity"/>.
+    /// </remarks>
+    private static readonly string[] PreviouslyUnprobedEngineRoutes =
     [
         "/api/engine/review/{draftId:guid}/edit",
         "/api/engine/review/{draftId:guid}/re-roll",
@@ -130,6 +136,16 @@ public sealed class AnonymousAccessRegressionTests
 
         var probes = AllowlistedProbes(factory).ToList();
 
+        // Not self-referential, and that is the point. `HaveCount(PreAuthAllowlist.Routes.Count)` alone would pass
+        // for ANY allowlist, however large — and story 11's marks-equal-allowlist invariant is self-referential the
+        // same way, so a route added to the allowlist AND marked .AllowAnonymousPreAuth() would be invisible to
+        // every test in both suites. The literal pins it: GROWING the pre-auth allowlist must fail a test and force
+        // a decision, not merely appear in a diff and hope a human notices (AC4).
+        PreAuthAllowlist.Routes.Should().HaveCount(
+            11,
+            "the pre-auth allowlist is the one deliberately hand-maintained opt-out in the whole gate; a new entry "
+            + "is a security decision and must be made explicitly here as well as there");
+
         probes.Should().HaveCount(
             PreAuthAllowlist.Routes.Count,
             "every allowlisted route must actually be mapped by the host — an allowlist entry naming a route "
@@ -164,6 +180,12 @@ public sealed class AnonymousAccessRegressionTests
         [
             "/api/feed",
             "/api/personas",
+
+            // The only parameterized route in the table with NO route constraint, so the only one that takes
+            // Concretize's "probe" fallback — pinned deliberately, since it is the pattern most likely to stop
+            // matching its endpoint (and therefore to be silently unprobed) after a refactor.
+            "/api/threads/{postId}",
+
             "/api/shell-state",
             "/api/chrome-config",
             "/api/brand-tokens",
@@ -175,6 +197,12 @@ public sealed class AnonymousAccessRegressionTests
             "/hubs/exercise",
             "/hubs/exercise/negotiate",
         ]);
+
+        // The three engine review routes the audit INFERRED rather than probed ("behavior inferred from the shared
+        // MapGroup filter"). Asserted here rather than in their own theory so the whole coverage guard costs ONE
+        // host build: a refactor that moved them out of the group, or dropped them from the route table, could
+        // otherwise make the sweeps pass by simply never visiting them.
+        patterns.Should().Contain(PreviouslyUnprobedEngineRoutes);
     }
 
     // ==========================================================================================
@@ -196,30 +224,12 @@ public sealed class AnonymousAccessRegressionTests
         response.Headers.WwwAuthenticate.Should().NotBeEmpty();
     }
 
-    [Fact]
-    public async Task AnUnauthenticatedHubConnection_IsRefused_AndJoinsNoGroup()
-    {
-        // Complements the negotiate probe with the client's own view: a real HubConnection presenting nothing must
-        // never reach OnConnectedAsync, so it can never have joined exercise:{id}. The hub's own empty-scope abort
-        // could not have caught the original exploit — the host resolved the scope perfectly well.
-        using var factory = new AnonymousProbeFactory();
-        var server = factory.Server;
-
-        await using var connection = new HubConnectionBuilder()
-            .WithUrl(
-                new Uri(server.BaseAddress, "hubs/exercise"),
-                options =>
-                {
-                    options.HttpMessageHandlerFactory = _ => server.CreateHandler();
-                    options.Transports = HttpTransportType.LongPolling;
-                })
-            .Build();
-
-        var start = async () => await connection.StartAsync();
-
-        await start.Should().ThrowAsync<Exception>();
-        connection.State.Should().Be(HubConnectionState.Disconnected);
-    }
+    // The SignalR-client view of the same refusal — a real HubConnection presenting nothing must never reach
+    // OnConnectedAsync, so it can never have joined exercise:{id} — is
+    // DefaultDenySessionGateTests.UnauthenticatedHubConnection_IsRefused_AndJoinsNoGroup. Deliberately NOT
+    // duplicated here: the /negotiate probe above is what story 11's suite genuinely lacks (it asserts that
+    // endpoint's METADATA only), and a second identical connection test would add coverage of nothing while
+    // doubling the maintenance surface.
 
     // ==========================================================================================
     // The staff / engine surfaces — gated before this feature existed, and STILL gated by their own filters.
@@ -231,13 +241,7 @@ public sealed class AnonymousAccessRegressionTests
         using var factory = new AnonymousProbeFactory();
         using var client = factory.CreateClient();
 
-        var probes = GatedProbes(factory)
-            .Where(probe => probe.Pattern.StartsWith("/api/staff/", StringComparison.OrdinalIgnoreCase)
-                || probe.Pattern.StartsWith("/api/engine/", StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        probes.Should().HaveCountGreaterThan(
-            10, "the staff + engine surface is a dozen-odd routes; a near-empty result means enumeration broke");
+        var probes = StaffAndEngineProbes(factory);
 
         using var scope = new AssertionScope();
         foreach (var probe in probes)
@@ -246,21 +250,12 @@ public sealed class AnonymousAccessRegressionTests
             using var response = await client.SendAsync(request);
 
             response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "{0} {1}", probe.Method, probe.Pattern);
+            response.Headers.WwwAuthenticate.Should().NotBeEmpty(
+                "{0} {1} must be refused by the gate before its own filter has to care — the challenge header is "
+                + "the discriminator throughout this file",
+                probe.Method,
+                probe.Pattern);
         }
-    }
-
-    [Theory]
-    [MemberData(nameof(PreviouslyUnprobedEngineRoutes))]
-    public void TheThreeEngineRoutesTheAuditOnlyINFERRED_AreActuallyMapped_AndGated(string pattern)
-    {
-        // The audit read these three off the shared MapGroup filter rather than probing them. The sweep above
-        // covers them behaviourally; this asserts the enumeration genuinely contains them, so a future refactor
-        // that moved them out of the group (or dropped them from the route table) could not make the sweep pass by
-        // simply not visiting them.
-        using var factory = new AnonymousProbeFactory();
-
-        GatedProbes(factory).Select(probe => probe.Pattern)
-            .Should().Contain(pattern, "an inferred-gated route must be an enumerated-and-probed one");
     }
 
     [Fact]
@@ -280,10 +275,20 @@ public sealed class AnonymousAccessRegressionTests
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new("Bearer", AcceptedToken);
 
-        var probes = GatedProbes(factory)
-            .Where(probe => probe.Pattern.StartsWith("/api/staff/", StringComparison.OrdinalIgnoreCase)
-                || probe.Pattern.StartsWith("/api/engine/", StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        // POSITIVE CONTROL, and not optional. Everything below asserts that a request was REFUSED, so the whole
+        // test would pass just as well if the session were never accepted at all and something upstream refused
+        // everything. A gated NON-staff route proves the session is genuinely live and past the gate: /api/feed
+        // must not answer 401, and must carry no challenge. (It 500s here — the host's connection string is
+        // deliberately dead — which is itself proof the request reached the handler.)
+        using (var control = await client.GetAsync("/api/feed"))
+        {
+            control.StatusCode.Should().NotBe(
+                HttpStatusCode.Unauthorized,
+                "the probe session must actually be live, or every assertion below passes for the wrong reason");
+            control.Headers.WwwAuthenticate.Should().BeEmpty("and it must actually be past the gate");
+        }
+
+        var probes = StaffAndEngineProbes(factory);
 
         probes.Select(probe => probe.Pattern).Should().Contain(
             BodyValidatedBeforeIdentity,
@@ -307,7 +312,7 @@ public sealed class AnonymousAccessRegressionTests
                 probe.Method,
                 probe.Pattern);
 
-            if (BodyValidatedBeforeIdentity.Contains(probe.Pattern))
+            if (BodyValidatedBeforeIdentity.Contains(probe.Pattern, StringComparer.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -390,6 +395,32 @@ public sealed class AnonymousAccessRegressionTests
     /// <summary>Every mapped route that IS on the pre-auth allowlist, as a callable probe.</summary>
     private static IEnumerable<RouteProbe> AllowlistedProbes(AnonymousProbeFactory factory) =>
         Probes(factory, allowlisted: true);
+
+    /// <summary>
+    /// The gated <c>/api/staff/*</c> and <c>/api/engine/*</c> probes, with a per-prefix non-emptiness guard.
+    /// </summary>
+    /// <remarks>
+    /// Asserted per PREFIX, not as one total: a single "more than N routes" check on the combined set would still
+    /// pass after losing the entire staff surface, because the engine surface alone clears it. Non-emptiness rather
+    /// than an exact count so that adding a staff or engine route is not a failing test for no reason —
+    /// <see cref="TheEnumerationCoversTheRoutesTheAuditProvedOpen"/> is what pins specific patterns.
+    /// </remarks>
+    /// <param name="factory">The running host whose route table is read.</param>
+    /// <returns>The staff and engine probes.</returns>
+    private static List<RouteProbe> StaffAndEngineProbes(AnonymousProbeFactory factory)
+    {
+        var probes = GatedProbes(factory).ToList();
+
+        var staff = probes.Where(probe => probe.Pattern.StartsWith("/api/staff/", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var engine = probes.Where(probe => probe.Pattern.StartsWith("/api/engine/", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        staff.Should().NotBeEmpty("the /api/staff/* surface must be enumerated, not silently absent");
+        engine.Should().NotBeEmpty("the /api/engine/* surface must be enumerated, not silently absent");
+
+        return [.. staff, .. engine];
+    }
 
     /// <summary>
     /// Turns the live <see cref="EndpointDataSource"/> into callable probes — one per (route, declared method)
@@ -545,7 +576,16 @@ public sealed class AnonymousAccessRegressionTests
                     {
                         SessionId = Guid.NewGuid(),
                         ExerciseId = _exerciseId,
-                        Kind = "participant",
+
+                        // NOT "participant", and the choice is load-bearing. A participant session is HOST-BOUND:
+                        // SessionAuthenticationMiddleware short-circuits with a bare 403 — no WWW-Authenticate,
+                        // before UseAuthorization — whenever the host-resolved exercise is absent. That 403 would
+                        // satisfy BOTH assertions in the live-session sweep (a 403 with no challenge) while the
+                        // endpoint, its filter, and the entire authorization decision stayed unreachable, which is
+                        // precisely the vacuity that sweep exists to prevent. `readonly` is a genuine non-staff
+                        // kind and is not host-bound, so a refusal there can only have been authored by the
+                        // endpoint's own check.
+                        Kind = "readonly",
                         PrincipalId = "anonymous-sweep-principal",
                         ActingHumanId = "anonymous-sweep-human",
                     }

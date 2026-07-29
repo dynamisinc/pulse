@@ -41,8 +41,11 @@ central design point is enumeration, not a fixed list (below).
 - [x] The allowlist itself is the **only** hand-maintained artifact in this suite — expressed as a
       single, explicitly reviewed constant (ideally the same one story 11's `.AllowAnonymous()`
       marks reference, so the two cannot drift apart) — and extending it is a deliberate, visible
-      diff, never an accidental new opt-out. *(`PreAuthAllowlist`, unchanged by this story. The one
-      other hand-maintained list is a single-entry, self-policing exception — see Decision 3.)*
+      diff, never an accidental new opt-out. *(`PreAuthAllowlist`, unchanged by this story, and now
+      pinned to 11 by literal so that GROWING it fails a test rather than merely appearing in a diff
+      — see Decision 5. The suite's one other hand-maintained **exemption** — the only list that can
+      excuse a route from an assertion — is a single, self-policing entry (Decision 3); the remaining
+      hand-typed lists are **coverage guards**, which can only ever make the sweep stricter.)*
 
 ### The hub and the staff/engine surfaces
 - [x] Given an unauthenticated client, when it attempts to connect to `/hubs/exercise`, then the
@@ -91,9 +94,37 @@ authorization filter never executes — and the test would look green while prov
   and the exception is self-policing: every listed route must still be mapped, and every route **not** listed must
   return a real 401/403, so a future endpoint acquiring this shape fails the suite and forces a decision.
 
-**4. The guard was verified to bite, not assumed to.** The `FallbackPolicy` was temporarily replaced with a
-permissive `RequireAssertion(_ => true)`: **4 of the 10 tests failed**, and the file was restored. A sweep that
-cannot fail is a sweep that proves nothing, and this one had to be shown to fail for the right reason.
+**4. The guards were verified to bite, not assumed to.** A sweep that cannot fail is a sweep that proves nothing.
+Nine neuters were applied to production code and reverted, and the suite had to fail for the *right* reason each
+time. The load-bearing ones:
+
+| Neuter | Caught by |
+|---|---|
+| `FallbackPolicy` → permissive `RequireAssertion(_ => true)` | the anonymous sweep, the staff/engine sweep, and the `/negotiate` probe |
+| Delete `.AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>()` | the live-session sweep **only** — reporting `GET /api/engine/settings` returning **200** to a non-staff session |
+| Add an allowlist entry with no matching `.AllowAnonymousPreAuth()` mark | the allowlist sweep + the coverage guard |
+| Remove one `.AllowAnonymousPreAuth()` mark | the allowlist sweep |
+| Break `Concretize` (`:guid` → a non-Guid) | the anonymous sweep (404 + **no** challenge — a mis-concretized probe cannot pass silently) |
+| Drop the multipart branch from `ProbeBody` | the live-session sweep (415 at binding on `/api/staff/accounts/import`) |
+| Point the probe at a token the authenticator does not resolve | the live-session sweep's **positive control** |
+
+The second row is Decision 2 proved rather than argued: with the engine filter gone, **every anonymous probe still
+passed**, and only the live-session test failed.
+
+**5. Two vacuity holes the Tier-2 review found in this suite, both closed.**
+- **The live-session sweep was itself vacuous for the reason it exists.** The probe session was `participant` —
+  and a participant session is **host-bound**, so `SessionAuthenticationMiddleware` short-circuits with a bare 403
+  (no challenge, before `UseAuthorization`) whenever the host-resolved exercise is absent. That 403 satisfied *both*
+  assertions while the endpoint, its filter and the whole authorization decision stayed unreachable. Proven: adding
+  `/api/staff` to `Program.cs`'s `UseExerciseResolution` exclusion left all tests green. Fixed by switching the
+  probe to `readonly` — a genuine non-staff kind that is **not** host-bound, so a refusal there can only have been
+  authored by the endpoint's own check — plus a **positive control** (a gated non-staff route must NOT 401 for this
+  session), since every other assertion in that test asserts a refusal and would pass just as well if the session
+  were never accepted at all.
+- **Nothing pinned the allowlist's SIZE.** `HaveCount(PreAuthAllowlist.Routes.Count)` is self-referential, and
+  story 11's marks-equal-allowlist invariant is self-referential the same way — so a route added to the allowlist
+  **and** marked would have been invisible to every test in both suites, leaving AC4 resting on human diff review.
+  Now pinned to the literal 11.
 
 ## Out of Scope
 Fixing any newly-discovered gap beyond what stories 11/12/13 already close — a genuinely new
@@ -128,10 +159,12 @@ LocalDB (`[RequiresDockerFact]` tests included). This suite adds to that count; 
 it or introduce a new skip.
 
 > **As built.** The baseline had moved a long way by the time this landed: **1506** on `main` after story 13
-> (#392), **1516** with this suite's 10 tests, 0 skipped, `[RequiresDockerFact]` suites executing against LocalDB.
+> (#392), **1512** with this suite's 6 tests, 0 skipped, `[RequiresDockerFact]` suites executing against LocalDB.
 > One file, test-project only: `Pulse.WebApi.Tests/Features/Identity/Sessions/AnonymousAccessRegressionTests.cs`.
-> No production code changed — which is the honest outcome for a regression-suite story, and the reason the two
-> findings it surfaced went to #393 rather than into this diff.
+> No production code changed — which is the honest outcome for a regression-suite story, and the reason the
+> finding it surfaced went to **#393** rather than into this diff. (Six tests rather than ten: the Tier-2 review
+> identified one as a line-for-line duplicate of story 11's hub-connection test, and three single-assertion theory
+> cases were folded into the coverage guard so the whole guard costs one host build instead of four.)
 
 Cross-reference `implementation.md`'s per-story tech notes and Wave Plan — this story is scheduled
 after 11, 12, and 13 have all merged, since it asserts their combined behavior.
