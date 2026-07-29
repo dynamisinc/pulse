@@ -69,6 +69,22 @@
  *
  * DEFAULT: `mode: 'live'`, `degraded: false` (healthy) — matches D5 §2
  * "ENGINE · LIVE" as the default header state.
+ *
+ * `modeSettledCount` (autonomy-safety story 06). A monotonic counter bumped in
+ * BOTH the `.then` and `.catch` of the live kill-switch/restore POST — i.e.
+ * once the request SETTLES, never on the synchronous optimistic flip above
+ * it. `<EngineControlBar>` watches this (not raw `mode`) to decide when to
+ * refetch `useEngineSettings()`'s snapshot: the optimistic flip and the POST
+ * are issued in the same call, so a watcher keyed on `mode` fires a settings
+ * GET while the kill-switch POST is still in-flight — a race the GET is
+ * heavily favoured to win (one filter vs. the POST's mutation + validation +
+ * a telemetry write), which is worse than no refetch at all: it applies a
+ * pre-trip snapshot as authoritative and nothing ever corrects it, since
+ * neither `mode` nor `degraded` changes again. `modeSettledCount` is a pure
+ * signal — it carries no information itself, every consumer must still read
+ * `mode`/`degraded`/`effective` for the actual state; it exists ONLY to say
+ * "a live request just concluded, whatever it was". Untouched in mock mode
+ * (there is no live POST to settle).
  */
 
 import { useCallback, useSyncExternalStore } from 'react'
@@ -100,12 +116,18 @@ interface EngineControlState {
   readonly mode: EngineMode
   readonly degraded: boolean
   readonly degradedReason: string | null
+  /**
+   * Bumped once per live kill-switch/restore POST SETTLING (success or
+   * failure). See module header.
+   */
+  readonly modeSettledCount: number
 }
 
 const DEFAULT_STATE: EngineControlState = {
   mode: DEFAULT_MODE,
   degraded: false,
   degradedReason: null,
+  modeSettledCount: 0,
 }
 
 /** `exerciseId -> state`. Absent = the default (healthy, Live). */
@@ -180,6 +202,13 @@ export interface UseEngineControlResult {
   readonly degrade: (reason: string) => void
   /** Explicitly lifts the degraded clamp (never automatic), logged. No-op if already healthy. */
   readonly restore: () => void
+  /**
+   * Bumped once per live kill-switch/restore POST SETTLING — a pure signal,
+   * never itself the state; watch it (not raw `mode`) to know when a settings
+   * refetch is safe to fire without racing the POST. Never changes in mock
+   * mode.
+   */
+  readonly modeSettledCount: number
 }
 
 /**
@@ -240,18 +269,33 @@ export function useEngineControl(): UseEngineControlResult {
       // exercise resumes at its Suggest base — safe (more restrained than
       // shown), but not reconciled. Reconciling needs the frontend/backend
       // autonomy-model alignment tracked separately.
-      liveSetMode(mode, { actingHumanId: identity.actingHumanId, timeZone }).catch(() => {
-        // Revert ONLY the mode, and only if OUR optimistic mode is still the
-        // live one — a newer setMode supersedes us and owns the mode, so a
-        // stale rejection must not clobber it (rapid re-toggle safety). Merge
-        // over the CURRENT snapshot rather than restoring the whole `current`,
-        // so an in-flight `degrade()`/`restore()` (which changes `degraded`,
-        // not `mode`) is preserved instead of being wiped by the revert.
-        const live = getSnapshot(exerciseId)
-        if (live.mode === next.mode) {
-          setFor(exerciseId, { ...live, mode: current.mode })
-        }
-      })
+      liveSetMode(mode, { actingHumanId: identity.actingHumanId, timeZone })
+        .then(() => {
+          // Settled successfully. Bump the settle signal (autonomy-safety
+          // story 06) so `<EngineControlBar>`'s engine-settings refetch fires
+          // AFTER the POST has actually concluded, not on this function's
+          // earlier synchronous optimistic flip.
+          const settled = getSnapshot(exerciseId)
+          setFor(exerciseId, { ...settled, modeSettledCount: settled.modeSettledCount + 1 })
+        })
+        .catch(() => {
+          // Revert ONLY the mode, and only if OUR optimistic mode is still the
+          // live one — a newer setMode supersedes us and owns the mode, so a
+          // stale rejection must not clobber it (rapid re-toggle safety). Merge
+          // over the CURRENT snapshot rather than restoring the whole `current`,
+          // so an in-flight `degrade()`/`restore()` (which changes `degraded`,
+          // not `mode`) is preserved instead of being wiped by the revert.
+          const live = getSnapshot(exerciseId)
+          const revertedMode = live.mode === next.mode ? current.mode : live.mode
+          // Bumped unconditionally — even a stale/superseded rejection means A
+          // live request just settled, which is still a valid moment to
+          // refetch engine settings.
+          setFor(exerciseId, {
+            ...live,
+            mode: revertedMode,
+            modeSettledCount: live.modeSettledCount + 1,
+          })
+        })
     },
     [exerciseId, emit, identity.actingHumanId, timeZone],
   )
@@ -287,5 +331,6 @@ export function useEngineControl(): UseEngineControlResult {
     setMode,
     degrade,
     restore,
+    modeSettledCount: state.modeSettledCount,
   }
 }
