@@ -26,6 +26,7 @@ using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Publishing;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
@@ -38,6 +39,12 @@ using Xunit;
 /// routes exist on the already-mapped <c>/api/engine</c> group, the frozen wire shape story 06 builds against,
 /// the fail-closed 401/400 cases, and — the #297 gate — that a non-controller assigned staff session is
 /// rejected 403 on EVERY mutating route while both GETs stay open for observation.
+///
+/// <para>The host also maps the world-steering slices (<c>MapPauseTierSteering</c> +
+/// <c>MapStorylineSteering</c>), because the drift guard
+/// (<see cref="EveryMutatingStaffSteeringRouteInTheRealRouteTable_IsCoveredByTheRoleGateTests"/>) now derives
+/// its surface from <c>/api/engine</c> AND <c>/api/steering</c> — the prefix it originally missed, which is how
+/// two ungated world-freezing mutations shipped past #297's signed ruling.</para>
 /// </summary>
 [Collection(MsSqlCollection.Name)]
 public sealed class EngineSettingsEndpointsTests
@@ -49,7 +56,12 @@ public sealed class EngineSettingsEndpointsTests
         _fixture = fixture;
     }
 
-    /// <summary>Every MUTATING cockpit route, with a body that would otherwise be accepted — the #297 gate surface.</summary>
+    /// <summary>
+    /// Every MUTATING staff-steering route the #297 gate must cover — the whole <c>/api/engine</c> cockpit AND the
+    /// <c>/api/steering</c> world-steering surface, which the drift guard below now also derives from the real
+    /// route table. Each carries a body that would otherwise be accepted, so a <c>403</c> can only come from the
+    /// role gate.
+    /// </summary>
     private static IReadOnlyList<(string Route, object Body)> MutatingRoutes(Guid draftId) =>
     [
         ($"/api/engine/review/{draftId}/approve", new { actingHumanId = "c-1", timeZone = "UTC" }),
@@ -62,6 +74,11 @@ public sealed class EngineSettingsEndpointsTests
         ("/api/engine/autonomy/restore", new { actingHumanId = "c-1", timeZone = "UTC" }),
         ("/api/engine/settings/autonomy-default", new { actingHumanId = "c-1", level = "delayed-auto" }),
         ("/api/engine/settings/tier-policy", new { actingHumanId = "c-1", mode = "ambient" }),
+
+        // world-steering (#350/#352): freezing the world and re-aiming the escalation are MORE
+        // participant-visible than the kill switch above, so they carry the same controller-only gate.
+        ("/api/steering/pause-tier", new { tier = "engine", actingHumanId = "c-1", timeZone = "UTC" }),
+        ("/api/steering/storylines/primary/target", new { target = 50 }),
     ];
 
     [RequiresDockerFact]
@@ -318,12 +335,18 @@ public sealed class EngineSettingsEndpointsTests
     // ---- #297: the controller-role gate -----------------------------------------------------------
 
     [RequiresDockerFact]
-    public async Task EveryMutatingEngineRouteInTheRealRouteTable_IsCoveredByTheRoleGateTests()
+    public async Task EveryMutatingStaffSteeringRouteInTheRealRouteTable_IsCoveredByTheRoleGateTests()
     {
         // WR-001 drift guard: the gate-completeness tests above loop a HARDCODED list, and route→group
         // assignment is manual — a future story writing cockpit.MapPost("/api/engine/...") would get no role
         // gate AND no failing test (exactly the omission #297 was filed about). So derive the mutating
-        // /api/engine surface from the REAL EndpointDataSource and require every route to be covered.
+        // surface from the REAL EndpointDataSource and require every route to be covered.
+        //
+        // WIDENED to /api/steering as well (Gate-2, world-steering role gate). The original guard matched only
+        // "/api/engine", which is EXACTLY why the world-steering POSTs — freeze the scenario clock for every
+        // participant, re-aim the exercise's escalation — were invisible to it and shipped with the staff gate
+        // alone, reversing #297's signed ruling. Both staff-steering prefixes are covered now, so a future
+        // ungated mutating route under either one reds the build.
         await using var host = await StartHostAsync(Guid.NewGuid());
         var draftId = Guid.NewGuid();
         var covered = MutatingRoutes(draftId).Select(r => r.Route).ToList();
@@ -331,7 +354,8 @@ public sealed class EngineSettingsEndpointsTests
         var discovered = host.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .OfType<RouteEndpoint>()
             .Where(e => e.RoutePattern.RawText is { } raw
-                && raw.StartsWith("/api/engine", StringComparison.OrdinalIgnoreCase))
+                && (raw.StartsWith("/api/engine", StringComparison.OrdinalIgnoreCase)
+                    || raw.StartsWith("/api/steering", StringComparison.OrdinalIgnoreCase)))
             .Where(e => (e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [])
                 .Any(m => !string.Equals(m, "GET", StringComparison.OrdinalIgnoreCase)
                     && !string.Equals(m, "HEAD", StringComparison.OrdinalIgnoreCase)
@@ -341,6 +365,17 @@ public sealed class EngineSettingsEndpointsTests
             .ToList();
 
         discovered.Should().NotBeEmpty("the cockpit's mutating routes must be discoverable, or this guard proves nothing");
+
+        // Both prefixes must really be present on this host, or widening the filter would prove nothing about the
+        // half that is missing — the precise way this gap survived the first time.
+        discovered.Should().Contain(
+            template => template.StartsWith("/api/engine", StringComparison.OrdinalIgnoreCase),
+            "the /api/engine cockpit mutations must be in the discovered set");
+        discovered.Should().Contain(
+            template => template.StartsWith("/api/steering", StringComparison.OrdinalIgnoreCase),
+            "the /api/steering world-steering mutations must be in the discovered set — this host maps them "
+            + "(MapPauseTierSteering + MapStorylineSteering) exactly as Program.cs does, so the widened guard has "
+            + "something to check");
 
         // The matcher must discriminate, or every assertion below would pass vacuously.
         MatchesTemplate("/api/engine/review/{draftId:guid}/approve", $"/api/engine/review/{draftId}/approve")
@@ -552,6 +587,12 @@ public sealed class EngineSettingsEndpointsTests
             builder.Services.AddExerciseClock();
             builder.Services.AddEngineReview();
 
+            // The world-steering slices, wired exactly as Program.cs wires them. They are here for ONE reason:
+            // the drift guard derives its covered surface from this host's real route table, so /api/steering has
+            // to be ON it or widening the guard to that prefix would silently check nothing.
+            builder.Services.AddPauseTierSteering();
+            builder.Services.AddStorylineSteering();
+
             builder.Services.AddScoped<StaffAssignmentService>();
             builder.Services.RemoveAll<ICurrentStaffSessionAccessor>();
             builder.Services.AddScoped<ICurrentStaffSessionAccessor>(_ => accessor);
@@ -563,6 +604,8 @@ public sealed class EngineSettingsEndpointsTests
 
             var app = builder.Build();
             app.MapEngineReview();
+            app.MapPauseTierSteering();
+            app.MapStorylineSteering();
             await app.StartAsync();
 
             return new SettingsTestHost(app, publisher);

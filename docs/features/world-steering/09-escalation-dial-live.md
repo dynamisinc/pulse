@@ -178,6 +178,14 @@ lands as a serial step after Gate-2, same #310→#317 caution as the other two s
   it on unmount'`.
 - **Gate-1 W-008** (the dial names what it is steering) — `EscalationDial.test.tsx`'s `'names what
   it is steering (Gate-1 W-008)'` describe block.
+- **Gate-2 #297 role gate** (only an assigned `controller` may set a target; the read stays open) —
+  `StorylineSteeringEndpointsTests.SetTarget_FromAnAssignedNonControllerStaffSession_Returns403_AndNeverMutates`
+  (theory: `evaluator`, `planner`),
+  `.SetTarget_FromAnAssignedControllerStaffSession_StillSetsTheTarget_NotABlanketDeny` (the positive
+  control), `.GetStoryline_FromAnAssignedNonControllerStaffSession_Returns200_SoTheyCanWatch` (theory:
+  `evaluator`, `planner`), and the widened drift guard
+  `EngineSettingsEndpointsTests.EveryMutatingStaffSteeringRouteInTheRealRouteTable_IsCoveredByTheRoleGateTests`
+  (it filtered on `/api/engine` only, which is exactly why this route shipped ungated).
 - Regression: `USE_MOCK_DATA=true` — story 02's existing test suite passes unchanged.
 - **Manual/UAT (required for Complete):** with mock off, set a target above current intensity on an
   Escalating storyline in the console; observe (via repeated GET or a page refresh) that actual

@@ -57,6 +57,15 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 /// never that exercise's data.
 /// </para>
 /// <para>
+/// <b>Only a CONTROLLER may steer (#297, autonomy-safety story 05's signed Tier-2 ruling).</b> The
+/// <c>POST .../target</c> additionally sits behind the SHIPPED, unmodified
+/// <see cref="EngineCockpitControllerRoleFilter"/>, composed with the staff gate above exactly as
+/// <c>EngineReviewEndpoints</c> composes them — so an assigned <c>planner</c>/<c>evaluator</c> gets <c>403</c>
+/// rather than being able to re-aim the exercise's escalation (which, per the <c>TargetFollow.Modulate</c>
+/// correction below, also reshapes burst direction and count). The <c>GET</c> deliberately stays on the
+/// staff-only group: "an evaluator may watch; only a controller may steer."
+/// </para>
+/// <para>
 /// <b>The "which storyline" gap this story closes pragmatically (a deliberate, narrow design call — flag for
 /// review).</b> The Stories toolstrip flyout / storyline board (D5-016/017) that would let a controller pick
 /// among several storylines is Out of Scope here (same as story 02) and not yet built, so the dial has no UI
@@ -104,7 +113,8 @@ public static class StorylineSteeringEndpoints
     /// <summary>
     /// Maps the escalation-dial live endpoints under <c>/api/steering/storylines</c>. Both sit behind the
     /// SAME <see cref="EngineCockpitStaffAuthorizationFilter"/> the review cockpit uses (COR-005/COR-001),
-    /// applied once to the group.
+    /// applied once to the group; the target <c>POST</c> additionally sits behind the #297
+    /// <see cref="EngineCockpitControllerRoleFilter"/>.
     /// </summary>
     /// <param name="endpoints">The route builder to map onto.</param>
     /// <returns>The same route builder, for chaining.</returns>
@@ -116,8 +126,15 @@ public static class StorylineSteeringEndpoints
             .MapGroup(string.Empty)
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>();
 
+        // #297: the MUTATING route additionally requires a 'controller' StaffAssignment.Role — the same sibling
+        // filter, composed the same way EngineReviewEndpoints composes it, on a nested EMPTY-prefix sub-group so
+        // the route templates are unchanged. The GET stays on the read-only group (an evaluator may watch).
+        var controllerOnly = steering
+            .MapGroup(string.Empty)
+            .AddEndpointFilter<EngineCockpitControllerRoleFilter>();
+
         steering.MapGet("/api/steering/storylines/{storylineId}", GetStorylineAsync);
-        steering.MapPost("/api/steering/storylines/{storylineId}/target", SetStorylineTargetAsync);
+        controllerOnly.MapPost("/api/steering/storylines/{storylineId}/target", SetStorylineTargetAsync);
 
         return endpoints;
     }
@@ -141,7 +158,8 @@ public static class StorylineSteeringEndpoints
     /// <c>POST /api/steering/storylines/{storylineId}/target</c> — sets (or, with a <c>null</c>/omitted
     /// <c>target</c>, clears) the controller's dial target on the SAME in-memory <see cref="Storyline"/> the
     /// loop ticks, then returns the updated actual/target/phase so the dial's optimistic local update
-    /// reconciles against this authoritative response.
+    /// reconciles against this authoritative response. Controller-role only (#297; an assigned planner/evaluator
+    /// is refused <c>403</c> by the filter before this handler runs).
     /// </summary>
     private static async Task<IResult> SetStorylineTargetAsync(
         string storylineId,

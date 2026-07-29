@@ -95,10 +95,27 @@ can exist.
 reconnects and never refreshes, keeps rendering the holding page after `live → completed`. Both of this story's
 channels are now correct — the push is gated and the GET is gated — but `main`'s lifecycle overlay changes are
 **pull-only**: nothing pushes an overlay update over SignalR from the lifecycle side, so an EndEx transition
-cannot reach an already-rendered tab. The participant's next GET (a refresh, or any hub reconnect, which re-GETs)
-heals it immediately. Not a regression from this story and `'endex'` remains out of scope; closing it properly
-means the lifecycle transition publishing over the hub, which is a new seam and its own story. Follow-up raised
-by the orchestrator.
+cannot reach an already-rendered tab. Not a regression from this story and `'endex'` remains out of scope; closing
+it properly means the lifecycle transition publishing over the hub, which is a new seam and its own story
+(follow-up raised by the orchestrator, #390).
+
+**The mitigation, stated precisely (Gate-2 WR-001 — the earlier wording was wrong for two states).** "A refresh,
+or any hub reconnect, which re-GETs" heals the stranded page **only where the overlay route is still served**:
+
+- **`completed` — holds.** `ExerciseLifecycleState.IsOverlayStateServed` carves `completed` out of the refusal set
+  for exactly this reason, so the re-GET returns `200` with the authoritative state and the tab clears (or shows
+  `endex`, once that write path exists).
+- **`archived` (and `build`, and any unrecognised literal) — did NOT hold before this fix.**
+  `IsOverlayStateServed` is `staged | live | paused | completed`, so the re-GET is refused **`403`** by
+  `ExerciseLifecycleGatingMiddleware`. `refetchLive`'s bare `catch {}` swallowed that and kept the previous
+  snapshot, so a tab frozen while `live` and still connected at `archived` re-rendered the holding page on every
+  reconnect — clearable only by a full reload.
+- **Fixed on the client (this branch), not by widening the gate.** `refetchLive` now treats a **`403` as
+  definitive**: the lifecycle gate refuses this route only where the world is closed to participants, which is
+  never a pause, so the overlay is CLEARED. `401` (unresolved scope), `5xx`, a malformed body and network failures
+  all stay **fail-closed** — previous snapshot retained, next reconnect resyncs — and the clear never rewinds the
+  stale-push cutoff. That closes most of #390 with no new push seam; the never-reconnecting tab (above) still
+  needs one.
 
 ## Tom's follow-on rulings (2026-07-28, Gate-1)
 
@@ -335,6 +352,10 @@ Frontend (`src/frontend/src/features/participant-shell/components/OverlayLayer/`
   guards: "drops a SUPERSEDED seed GET body that resolves last, keeping the newer truth", "drops a GET
   body that a push overtook while it was in flight", "drops a push with no sequence", "still accepts a
   sequence-less GET body — the pre-wiring fallback shape".
+- Gate-2 WR-001, the stranded holding page in `archived`/`build` — `overlayState.live.test.ts`
+  "CLEARS a stranded holding page when the re-GET is refused 403 (the world is closed)",
+  "KEEPS the holding page on a 401, a 5xx, or a network failure (fail closed)",
+  "does not rewind the stale-push cutoff when it clears on a 403".
 - Composition, story-07 standalone (WR-001) —
   `PauseOverlayCompositionTests.AddPauseTierSteering_Alone_StillResolvesAWorkingNoOpPublisher`.
 - Participant-payload hygiene (SG-001) —

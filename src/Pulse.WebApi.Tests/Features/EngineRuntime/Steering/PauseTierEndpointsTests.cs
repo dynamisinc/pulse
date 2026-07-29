@@ -666,6 +666,76 @@ public sealed class PauseTierEndpointsTests
             + "rendering its holding page with no controller Freeze involved at all");
     }
 
+    // ---- #297: only a CONTROLLER may steer; an assigned evaluator/planner may only WATCH -------
+
+    /// <summary>
+    /// The Gate-2 gap this closes: an assigned <c>planner</c>/<c>evaluator</c> passed the staff gate and could
+    /// FREEZE the world — halt the scenario clock, stop the reaction loop, and push the holding page to every
+    /// participant. #297's signed ruling ("only an assigned controller may steer the engine") governs this route
+    /// too, so the POST is refused <c>403</c> and the world is left completely untouched.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("evaluator")]
+    [InlineData("planner")]
+    public async Task Post_FromAnAssignedNonControllerStaffSession_Returns403_AndNeverFreezes(string role)
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: "live", assignedRole: role);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-evaluator-01" });
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            $"an assigned {role} may WATCH the pause tier but never steer it — freezing the world is more "
+            + "participant-visible than the kill switch #297 was filed to protect");
+        host.Clock.IsFrozen(exerciseId).Should().BeFalse("the role gate rejects before the clock is ever touched");
+        host.Registry.GetTier(exerciseId).Should().Be(
+            PauseTier.Running, "no tier was recorded behind the closed door");
+        (await host.ReadOverlayStateAsync()).State.Should().Be(
+            "none", "no participant ever saw a holding page from the refused Freeze");
+    }
+
+    /// <summary>
+    /// The POSITIVE control for the gate above: without it, a filter that rejected EVERY caller would pass. The
+    /// same Freeze an evaluator/planner is refused still succeeds for an assigned controller.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task Post_FromAnAssignedControllerStaffSession_StillFreezes_TheGateIsNotABlanketDeny()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: "live", assignedRole: "controller");
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01" });
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.OK, "an assigned controller is exactly who #297 says MAY steer the engine");
+        (await ReadStateAsync(response)).ClockFrozen.Should().BeTrue("the Freeze really was applied");
+    }
+
+    /// <summary>
+    /// #297's other half: "an evaluator may watch." The resync <c>GET</c> stays on the staff-only group, so an
+    /// assigned non-controller still reads the tier — gating it would have blinded the evaluator console.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("evaluator")]
+    [InlineData("planner")]
+    public async Task Get_FromAnAssignedNonControllerStaffSession_Returns200_SoTheyCanWatch(string role)
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: "live", assignedRole: role);
+
+        var response = await host.Client.GetAsync(new Uri("/api/steering/pause-tier", UriKind.Relative));
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            $"an assigned {role} may WATCH the pause tier — only the mutation is controller-only (#297)");
+        (await ReadStateAsync(response)).Tier.Should().Be("running", "the read is the honest server baseline");
+    }
+
     // ---- composition: story 08's swap of the no-op overlay publisher default --------------------
 
     [RequiresDockerFact]
@@ -689,7 +759,8 @@ public sealed class PauseTierEndpointsTests
         bool authenticatedStaff = true,
         Guid? assignedExerciseId = null,
         IExerciseClock? clockOverride = null,
-        string exerciseStatus = "active")
+        string exerciseStatus = "active",
+        string assignedRole = "controller")
     {
         _fixture.ConnectionString.Should().NotBeNull(
             "the Docker-gated MsSql fixture must have started and captured its connection string before these tests run");
@@ -699,7 +770,8 @@ public sealed class PauseTierEndpointsTests
             authenticatedStaff,
             assignedExerciseId,
             clockOverride,
-            exerciseStatus);
+            exerciseStatus,
+            assignedRole);
     }
 
     /// <summary>
@@ -822,7 +894,8 @@ public sealed class PauseTierEndpointsTests
             bool authenticatedStaff = true,
             Guid? assignedExerciseId = null,
             IExerciseClock? clockOverride = null,
-            string exerciseStatus = "active")
+            string exerciseStatus = "active",
+            string assignedRole = "controller")
         {
             // The staff caller the REUSED cockpit authorization filter gates on. A default host is an
             // authenticated staff user ASSIGNED to the resolved exercise; the denial tests flip these knobs.
@@ -833,7 +906,8 @@ public sealed class PauseTierEndpointsTests
 
             if (authenticatedStaff && (assignedExerciseId ?? currentExerciseId) is { } assignExercise)
             {
-                await SeedStaffAssignmentAsync(connectionString, staffUserId, assignExercise, exerciseStatus);
+                await SeedStaffAssignmentAsync(
+                    connectionString, staffUserId, assignExercise, exerciseStatus, assignedRole);
             }
 
             var builder = WebApplication.CreateBuilder();
@@ -905,9 +979,14 @@ public sealed class PauseTierEndpointsTests
         /// ruling: <c>endex</c> &gt; <c>pre-start</c> &gt; <c>pause</c> &gt; <c>none</c>). The default stays the
         /// legacy <c>active</c> literal this host has always seeded — it folds onto canonical <c>live</c>, so every
         /// pre-existing test is unaffected — and the precedence tests pass the other states explicitly.
+        /// <para>
+        /// The assignment's <c>Role</c> is likewise load-bearing since the #297 controller-role gate landed on the
+        /// POST: it defaults to <c>controller</c> (what every pre-existing test assumes), and the role-gate tests
+        /// pass <c>evaluator</c>/<c>planner</c> explicitly.
+        /// </para>
         /// </remarks>
         private static async Task SeedStaffAssignmentAsync(
-            string connectionString, Guid staffUserId, Guid exerciseId, string exerciseStatus)
+            string connectionString, Guid staffUserId, Guid exerciseId, string exerciseStatus, string assignedRole)
         {
             var options = new DbContextOptionsBuilder<PulseDbContext>()
                 .UseSqlServer(connectionString)
@@ -926,7 +1005,7 @@ public sealed class PauseTierEndpointsTests
                 Id = Guid.NewGuid(),
                 StaffUserId = staffUserId,
                 ExerciseId = exerciseId,
-                Role = "controller",
+                Role = assignedRole,
                 CreatedAt = DateTimeOffset.UtcNow,
             });
             await context.SaveChangesAsync();

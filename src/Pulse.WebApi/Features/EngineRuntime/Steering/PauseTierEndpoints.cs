@@ -34,6 +34,15 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 /// the resolved exercise → <c>403</c>. This slice invents no authorization of its own. The response projection
 /// carries only the tier + whether the clock is frozen: no participant content, no provenance.</para>
 ///
+/// <para><b>Only a CONTROLLER may steer (#297, autonomy-safety story 05's signed Tier-2 ruling).</b> The
+/// <c>POST</c> additionally sits behind the SHIPPED, unmodified
+/// <see cref="EngineCockpitControllerRoleFilter"/> — composed with the staff gate above, exactly as
+/// <c>EngineReviewEndpoints</c> composes them — so an assigned <c>planner</c>/<c>evaluator</c> gets <c>403</c>
+/// on every pause-tier change. Freezing the world halts the scenario clock and the reaction loop and pushes the
+/// holding page to EVERY participant, so it is strictly MORE disruptive than the kill switch that ruling was
+/// filed to protect. The <c>GET</c> deliberately stays on the staff-only group: "an evaluator may watch; only a
+/// controller may steer."</para>
+///
 /// <para><b>Scope is server-resolved (COR-001).</b> The exercise comes ONLY from
 /// <see cref="IExerciseContext.CurrentExerciseId"/> and fails closed (<c>401</c>) when unresolved — never a
 /// default/empty <c>200</c>. The request body carries NO <c>exerciseId</c> (mirroring
@@ -65,7 +74,10 @@ public static class PauseTierEndpoints
         return services;
     }
 
-    /// <summary>Maps the tiered-pause endpoints under <c>/api/steering</c>, behind the staff cockpit gate.</summary>
+    /// <summary>
+    /// Maps the tiered-pause endpoints under <c>/api/steering</c>: the resync <c>GET</c> behind the staff cockpit
+    /// gate, and the <c>POST</c> behind that gate PLUS the #297 controller-role gate.
+    /// </summary>
     /// <param name="endpoints">The route builder to map onto.</param>
     /// <returns>The same route builder, for chaining.</returns>
     public static IEndpointRouteBuilder MapPauseTierSteering(this IEndpointRouteBuilder endpoints)
@@ -78,8 +90,17 @@ public static class PauseTierEndpoints
             .MapGroup(string.Empty)
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>();
 
+        // #297: the MUTATING route additionally requires the caller's StaffAssignment.Role to be 'controller'
+        // (EngineCockpitControllerRoleFilter — a SIBLING of the staff filter above, composed with it, never a
+        // second auth mechanism). Mirrors EngineReviewEndpoints' shape field-for-field, including the EMPTY-prefix
+        // sub-group so route templates are unchanged. An assigned evaluator/planner may WATCH the pause tier (the
+        // GET stays on the read-only group) but may not freeze the world.
+        var controllerOnly = steering
+            .MapGroup(string.Empty)
+            .AddEndpointFilter<EngineCockpitControllerRoleFilter>();
+
         steering.MapGet("/api/steering/pause-tier", GetPauseTier);
-        steering.MapPost("/api/steering/pause-tier", SetPauseTierAsync);
+        controllerOnly.MapPost("/api/steering/pause-tier", SetPauseTierAsync);
 
         return endpoints;
     }
@@ -101,7 +122,9 @@ public static class PauseTierEndpoints
 
     /// <summary>
     /// <c>POST /api/steering/pause-tier</c> — records the tier for the resolved exercise and, on the Freeze
-    /// transition, starts (if needed) then freezes/unfreezes that exercise's scenario clock. Idempotent:
+    /// transition, starts (if needed) then freezes/unfreezes that exercise's scenario clock. Controller-role only
+    /// (#297; an assigned planner/evaluator is refused <c>403</c> by the filter before this handler runs).
+    /// Idempotent:
     /// re-selecting the active tier returns the same <c>200</c> state without touching the clock or publishing an
     /// overlay change. A Freeze whose clock effect could not be applied records nothing and returns <c>409</c>, so
     /// the console reverts instead of claiming a pause the world never felt (CR-001). The <c>200</c> body always
