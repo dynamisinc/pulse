@@ -1,6 +1,6 @@
 # Story: Freeze is participant-visible — overlay-state write path + SignalR push
 
-**Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Progress — built, Gate-1 clean, merged to its umbrella, Gate-2 clean (2026-07-27). NOT Complete: this story's DoD requires verified-in-UAT.
+**Feature:** World steering  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Progress — built, Gate-1 + Gate-2 clean, **merged to `main`** (2026-07-29). NOT Complete: this story's DoD requires verified-in-UAT, which is outstanding. (PR #386)
 **Requirements:** CTL-023, COR-001, XC-001, XC-002  ·  **Design decisions:** D5-014/1.3, D7-004 (pause page → `participant-shell`)  ·  **Issue:** #351
 
 > **Definition of done includes verified-in-UAT, not just unit-green.** As with story 07: this is

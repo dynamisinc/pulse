@@ -329,131 +329,60 @@ area; barrel exports added.
 
 ---
 
-## Controller features operational (post-UAT audit, 2026-07-25) 🔧  · 5 of 6 built + Gate-2 clean; #354 open
+## Controller features operational (post-UAT audit, 2026-07-25) 🔧  · all 6 on `main`; UAT verification outstanding
 
-> **BUILD SESSION 2026-07-27 — STATE. Read this before resuming.**
+> **ALL SIX STORIES ARE ON `main` (2026-07-29).** #349 + #353 via PRs #387/#385; #350/#351/#352 via
+> #386; #354 via #399. Every one Gate-1 + Gate-2 clean, CI-green, Copilot-reviewed with findings folded.
 >
-> Five of six stories are **built, Gate-1 clean, merged to their umbrella, and Gate-2 clean**. None is
-> `Complete`: every story's DoD requires *verified in UAT*, which needs a deploy and is Tom's step.
-> **No umbrella→`main` PR has been opened** — deliberately left for Tom, since Track A is TIER-2.
+> **NONE is Complete, and that is the point of this wave.** Every story's DoD requires *verified in UAT*.
+> The code is deployed and reachable; the observed round trips have not been done.
 >
-> | Umbrella | Stories | Gate-2 | Backend | Frontend |
-> |---|---|---|---|---|
-> | `feature/engine-runtime-golive` | #349 | ✅ clean | 389 + 682 | n/a |
-> | `feature/world-steering-wave2` | #350, #351, #352 | ✅ clean | 389 + 829 | 158 files / 1408 |
-> | `feature/autonomy-safety-admin` | #353 | ✅ clean | 389 + 755 | n/a |
+> ### UAT state, measured 2026-07-29 (not assumed)
+> - Exercise **"Pulse UAT Pilot"** `a72df119…`, status **`live`** — so a Freeze applies rather than being refused.
+> - Staff assignment role **`controller`** — confirmed via `GET /api/staff/assignments`. This was the
+>   precondition that would otherwise have made the whole cockpit read-only after #353's #297 gate.
+> - `VITE_USE_MOCK_DATA = false` in the `uat` GitHub environment — **UAT runs on real data**, not mock.
+> - Engine loop **registered and ticking**: re-seeded onto storyline "Water main contamination fears"
+>   `0bf3235d…`, which has since advanced on its own from `intensity 0 / Seeded` to `intensity 95 / Peak`.
+>   Being in `Peak` matters — the dial's target-chase only runs in `Escalating`/`Peak`.
+> - **All seven new endpoints answer 401, none 404** — the `#310→#317` check, passed in the deployed app:
+>   `{GET,POST} /api/steering/pause-tier`, `GET /api/steering/storylines/{id}`,
+>   `POST /api/steering/storylines/{id}/target`, `GET /api/overlay-state`, `GET /api/engine/settings`,
+>   `POST /api/engine/settings/autonomy-default`. Three features previously shipped `Complete` and were
+>   dead at 404 in exactly this position.
+> - `GET /api/engine/settings` serves real state: `provider: Fake`, `exerciseDefault: suggest`,
+>   `effective: suggest`, `tierPolicyMode: auto`, `inMemoryState: true`. `Fake` confirms Track A has **not**
+>   gone live, as intended pending the §8 signature.
 >
-> All suites 0-skipped (real SQL via `PULSE_TEST_SQL_CONNECTION` → LocalDB), 0 build warnings.
+> ### What remains — the observed round trips
+> 1. **Freeze visibly stops the loop** (no new review items / `engine.*` while frozen); Resume restarts from
+>    the same scenario minute (COR-050).
+> 2. **A participant tab shows the holding page with no refresh**, in the controller's selected register, and
+>    clears on Resume. Refresh mid-Freeze must still hold it (GET-seeds-on-reconnect).
+> 3. **A dial target moves actual intensity** over subsequent ticks. The storyline is in `Peak` at 95, so a
+>    target below current is the demonstrative case.
+> 4. **Suggest → Delayed-auto** makes a live burst count down instead of queuing.
+> 5. **Track A's live AI round trip** — blocked on the `PROVIDER-GOVERNANCE.md` §8 signature. Order is
+>    provision → verify in Azure → sign → flip; §8 evidence (i) is only confirmable post-deploy.
 >
-> **⛔ #354 `autonomy-safety/06-engine-settings-panel` is NOT clean — do not merge it.** Branch
-> `build/autonomy-safety/06-engine-settings-panel` (`bf864b6`) carries **2 open Criticals**. Three
-> rewrites of its optimistic-update reconciliation produced **six** Criticals, all one root cause:
-> *the model orders responses by issuance but applies them on landing, so a late response overwrites
-> newer truth*. **Tom's decision: drop the optimistic model — disable the control while the POST is
-> outstanding, then apply the authoritative `EngineSettingsDto` from the response** (all three
-> endpoints return the full DTO, so no follow-up read). Delete the per-field sequence trackers, the
-> confirmed-vs-optimistic split, and `withFieldFrom`/`withSharedFieldsFrom` — the goal is that the bug
-> class becomes *unrepresentable*, not better-guarded. **Keep** the `modeSettledCount` fix (the
-> kill-switch refetch must fire after the POST settles) and the queued-not-dropped invalidation. Also
-> open on that branch: the persona-draft store is not cleared on explicit Esc/X despite the story doc
-> claiming it is, and its test is tautological (`resetForTests()` then assert empty). The rewrite was
-> **not started** — that worktree is clean. Record the AC3/AC4 deviation and rationale in the story.
+> ### Operational notes that will otherwise look like bugs
+> - **Every backend deploy restarts the App Service and de-registers the in-memory loop** — re-seed via
+>   `POST /api/ops/seed-engine-content` (body needs `{"hostname": "<the API host the exercise is bound to>"}`).
+>   A frontend-only deploy does **not** restart it; the registration above survived #399's deploy.
+> - **A Freeze outside a running world is refused (409 + reason), by design** — not a no-op. In `staged` it
+>   would otherwise start a scenario clock COR-032 forbids.
+> - A tab that received a legitimate Freeze while `live` and never reconnects can stay on the holding page
+>   after EndEx (lifecycle overlay is pull-only on `main`) — issue #390; any refresh heals it.
 >
-> **The build stopped on an org monthly spend limit**, which killed the two in-flight builders. #351's
-> register selector was finished by the orchestrator from the partial work on disk (one broken test
-> mock fixed; gates re-run green) — see `26c4a61`.
+> ### The wave's own lesson, recorded
+> **Nine Criticals were found, every one the same class: a surface asserting a state the server never
+> applied.** Not one was caught by a test suite — all came from independent review, several only on
+> *re-review after a fix*. **Three tests were found passing for the wrong reason** (two tautological, one
+> vacuous behind a swallowed exception), and **one guard checked an empty route table**. Two merges were
+> textually clean but did not compile. The habits that worked: mutation-test every new guard (break it, watch
+> it fail, restore), and cross-check a suite's collected file count against `find` before trusting a green run
+> (see #391 — a run reported `186 passed (186)` against 207 files on disk).
 >
-> **Composition root is wired and mechanically guarded** (`85d12db`, `46a40e2`):
-> `AddPauseTierSteering()`/`MapPauseTierSteering()`, `AddPauseParticipantOverlay()` (no `Map*`),
-> `AddStorylineSteering()`/`MapStorylineSteering()`, plus `SteeringCompositionRootWiringTests` — boots
-> the real `WebApplicationFactory<Program>`, asserts the five routes map exactly once, that the resolved
-> `IPauseOverlayPublisher` is **not** #350's no-op, and that exactly **one** `IReactionLoopRegistry`
-> exists. Verified to *bite*: commenting out either `Add*` fails it. #353 needed no `Program.cs` change
-> (its routes ride the already-mapped `/api/engine` group) — verified, not assumed.
->
-> **⚠ Merge-order note for `main`:** both `feature/world-steering-wave2` and
-> `feature/autonomy-safety-admin` edit `ReactionLoopHost.cs`. The hunks are ~100 lines apart in
-> different classes (a `ShouldStartClock` extraction vs. the tier-policy override at the
-> `IntentComposer` call site), so a three-way merge should apply both. The residual is **semantic**:
-> #353 adds a *required* ctor parameter to `ReactionLoopDriver`, so whichever merges second must rebuild
-> and confirm `AddReactionLoopHost` registers `EngineTierPolicyRegistry`.
->
-> **⚠ UAT preconditions, in order:**
-> 1. **Confirm the deployed staff assignment's role is `controller`** *in the same deploy* that carries
->    #353. It closed #297 by gating every mutating `/api/engine` route on that role — so a `planner`/
->    `evaluator` assignment makes the whole cockpit read-only, including the kill switch, and will read
->    as a regression.
-> 2. **The `Program.cs` wiring and the `USE_MOCK_DATA` → false flip must land together.**
->    `<EscalationDial />` and `<PausePill />` are already mounted, so flipping mock first shows the new
->    "no live storyline" / unavailable states.
-> 3. Every App Service restart de-registers the loop — re-seed via `POST /api/ops/seed-engine-content`.
-> 4. Track A's provisioning deploy (`deployAi = true`) is safe **pre**-signature and itself restarts the
->    App Service. Order is provision → verify in Azure → sign §8 → flip traffic, because §8 evidence (i)
->    is only confirmable after the deploy.
->
-> **Tom's two decisions this session:** (a) the §2 governance attestations are explicit params the §8
-> signer types, not values derived from `deployAi` — so `GenerationGovernance.Validate` stays an
-> independent gate rather than a restatement of `deployAi`; all three booleans are `false` on disk and
-> set together in one reviewed commit. (b) #353 emits server-side telemetry
-> (`engine.autonomy_default_changed` / `engine.tier_policy_changed`), diverging from the legacy
-> swamped-mode/kill-switch/restore trio, for an audit record that survives a process restart.
->
-> **PR #386 UNBLOCKED and CI-green (2026-07-29).** The architectural collision is resolved. `main` had
-> landed an `IOverlayStateProjection` seam (lifecycle-driven overlay: COR-032 pre-start, COR-054 ENDEX)
-> that competed with story 08's pause-driven overlay for the single overlay slot.
->
-> **Tom's ruling: lifecycle wins — `endex` > `pre-start` > `pause` > `none`.** Implemented as a
-> `SteeringPauseOverlayProjection` **decorator** over `main`'s lifecycle projection: consult lifecycle, and
-> only on `none` consult the pause store. **Story 08 no longer touches `ParticipantShellEndpoints.cs` at
-> all** (byte-identical to `main`), which deleted the shared-file coordination point *and* the
-> `RequestServices.GetService` workaround and its silent-degradation trade-off.
->
-> Four further Criticals were found and fixed after that, in three separate review rounds:
-> 1. **The ruling was enforced on the GET only — the SignalR push bypassed it**, so a participant saw the
->    holding page after ENDEX. Provable from the builder's own green test. The rule now lives in one place
->    (`SteeringOverlayPrecedence`) with **three** call sites: endpoint refusal, participant read, publish gate.
-> 2. Per Tom, a Freeze outside a running world is now **refused outright (409 + reason)** rather than
->    silently no-op'd — which also eliminated a half-applied `tier=freeze` + frozen-clock state and stops
->    `staged` starting a scenario clock COR-032 forbids.
-> 3. **The steering mutations were not role-gated.** #350/#352 predate #297/#353, so an assigned
->    *evaluator* or *planner* could freeze the world and re-aim the escalation — more disruptive than the
->    kill switch #297 was filed to protect. Both POSTs now carry `EngineCockpitControllerRoleFilter`; both
->    GETs stay open ("an evaluator may watch"). It survived because #353's drift guard filtered on
->    `/api/engine` alone — now widened to `/api/steering` too, and its host had to be wired for the
->    widening to check anything at all.
-> 4. `ISteeringOverlaySource` — `main`'s own documented "one-file adapter" seam — was **declined**, verified:
->    the lifecycle composer joins with "pause if EITHER side asks" and is never told the lifecycle status, so
->    that seam would have shown the holding page after EndEx. Pinned by a test so nobody "finishes the merge".
->
-> **The ordering is load-bearing and silent.** `AddExerciseLifecycle()` and `AddPauseParticipantOverlay()`
-> both `Replace(IOverlayStateProjection)`; reversed, the decorator is evicted with no throw and no log, and
-> Freeze goes invisible again. `Program.cs` now flags it at both ends and
-> `SteeringCompositionRootWiringTests` catches it — verified by reordering.
->
-> **Gates:** 0 warnings; **389 + 1722** backend, 0 skipped (real SQL); frontend green in CI (3m37s).
-> **CI all four checks pass, `MERGEABLE | CLEAN`; Copilot reviewed 51/51 files with no new comments.**
-> Awaiting Tom's merge.
->
-> **Two semantic merge breaks happened in this wave, both invisible to git** — #353's required
-> `ReactionLoopDriver` ctor parameter, and identity-auth-roles/13's required `AuthenticatedSession` members.
-> A clean `git merge-tree` says nothing about whether the result compiles; always rebuild after a re-merge.
->
-> **Open follow-ups (none blocking):** SG-201 suppress overlay publishes whose participant-visible
-> snapshot is unchanged (a timing side channel, no content exposure); `Storyline.TargetIntensity` is now
-> written cross-thread as a non-atomic `int?` (first such mutation of `Storyline`); story 08's AC5/UAT
-> script still need the selector reflected; `implementation.md`'s Wave-Plan footprints for rows 07/08 are
-> stale (stories 07 and 08 grew beyond their declared files — all additive, verified per-commit).
-
-
-The three controller capabilities Tom reported non-functional in UAT — tiered pause, the escalation
-dial, and the AI inject engine. **All three were already marked `Status: Complete` with CLOSED
-issues.** All three were real code that nothing ever consumed: `usePauseState` never called an API;
-the escalation dial read an in-memory `storylineMock`; the live provider shipped behind
-`Generation:Provider = Fake` and `deployAi = false` with an unsigned Tier-2 sign-off. The shared root
-cause is that **"Complete" had come to mean unit-green, not working**, so every story below carries
-*verified in UAT* in its definition of done — a real AI-authored post reaching a participant feed, a
-Freeze that actually stops the loop, a dial move the engine actually follows.
-
 Four **parallel tracks**; only 08 waits on 07. Composition-root wiring is an orchestrator-owned
 serial step per the #310→#317 lesson (a fully-green slice merged with its `Program.cs` wiring never
 executed, leaving the endpoint dead at 404).
