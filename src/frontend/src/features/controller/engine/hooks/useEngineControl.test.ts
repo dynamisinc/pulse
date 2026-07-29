@@ -116,6 +116,17 @@ describe('useEngineControl — default state', () => {
     expect(result.current.degraded).toBe(false)
     expect(result.current.effective).toEqual(runningAutonomy(AutonomyLevel.DelayedAuto))
   })
+
+  it('modeSettledCount defaults to 0 and never changes under mock mode (there is no live POST to settle)', () => {
+    const { result } = renderHook(() => useEngineControl())
+    expect(result.current.modeSettledCount).toBe(0)
+
+    act(() => result.current.setMode('suggest-only'))
+    act(() => result.current.setMode('stop'))
+    act(() => result.current.setMode('live'))
+
+    expect(result.current.modeSettledCount).toBe(0)
+  })
 })
 
 describe('useEngineControl — kill switch (ADP-042)', () => {
@@ -336,6 +347,64 @@ describe('useEngineControl — live mode (UAT engine-pause fix; USE_MOCK_DATA=fa
     })
 
     expect(result.current.mode).toBe('live')
+  })
+
+  // -----------------------------------------------------------------------
+  // `modeSettledCount` (autonomy-safety story 06) — the settle SIGNAL
+  // `<EngineControlBar>` watches (instead of racing the optimistic `mode`
+  // flip) to know when it's safe to refetch engine settings without beating
+  // the kill-switch POST to the read.
+  // -----------------------------------------------------------------------
+
+  it('modeSettledCount bumps AFTER the optimistic flip, once the live POST resolves — not in the same synchronous call as the flip', async () => {
+    let resolveLive: () => void = () => {}
+    mockedLiveSetMode.mockReturnValue(new Promise(resolve => { resolveLive = resolve }))
+    const { result } = renderHook(() => useEngineControl())
+
+    act(() => result.current.setMode('stop'))
+
+    // The optimistic flip already happened; the settle signal has NOT yet —
+    // the POST is still in flight.
+    expect(result.current.mode).toBe('stop')
+    expect(result.current.modeSettledCount).toBe(0)
+
+    await act(async () => {
+      resolveLive()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.modeSettledCount).toBe(1)
+  })
+
+  it('modeSettledCount ALSO bumps on a rejected POST — a settlement either way is a valid refetch trigger', async () => {
+    mockedLiveSetMode.mockRejectedValue(new Error('network down'))
+    const { result } = renderHook(() => useEngineControl())
+
+    await act(async () => {
+      result.current.setMode('stop')
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.mode).toBe('live') // reverted
+    expect(result.current.modeSettledCount).toBe(1)
+  })
+
+  it('modeSettledCount bumps once per settle, across repeated flips', async () => {
+    mockedLiveSetMode.mockResolvedValue(undefined)
+    const { result } = renderHook(() => useEngineControl())
+
+    await act(async () => {
+      result.current.setMode('stop')
+      await Promise.resolve()
+    })
+    await act(async () => {
+      result.current.setMode('live')
+      await Promise.resolve()
+    })
+
+    expect(result.current.modeSettledCount).toBe(2)
   })
 })
 

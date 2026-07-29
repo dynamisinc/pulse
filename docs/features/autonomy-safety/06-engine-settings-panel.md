@@ -105,3 +105,73 @@ registration (the pattern this story mirrors, not replaces).
   subsequently generated burst actually counts down instead of queuing (cross-checked against story
   05's own UAT pass); flip back to Suggest and confirm the label + behavior follow. Screenshot or
   recording attached to the story/issue before flipping Status to Complete.
+
+## Build notes (as implemented) — rebuild #2, the reconciliation model DEVIATES from AC3/AC4
+
+**This story was built three times.** The first two attempts implemented AC3/AC4's literal text
+("posts the change with an optimistic update that reverts on rejection") on the same OPTIMISTIC
+model `useEngineControl.setMode`'s kill switch already uses. Across two Gate-1 review passes that
+model produced **six Criticals, every one the same root-cause shape**: the reconciliation ordered
+responses by ISSUANCE but applied them on LANDING, so a late response could silently overwrite
+strictly newer truth — a stale GET erasing an active safety clamp; the revert baseline being the
+click-time *optimistic* value rather than server-confirmed truth (two rejections in a row left the
+panel asserting a posture the server never applied, unrecoverable in-session); the refetch firing
+on the *optimistic* mode flip and racing the very kill-switch POST it was meant to observe; one
+sequence counter shared across the two mutations (which write DISJOINT fields) discarding a
+genuinely successful autonomy change because a differently-timed tier-policy response landed
+first (the panel then read SUGGEST while the server was actually DELAYED-AUTO — failing UNSAFE); a
+GET issued after a mutation stealing "ownership" of a field and discarding that mutation's
+authoritative 200; and a late-landing GET erasing a clamp a newer response had already reported.
+Two of these six were reproduced with executed probe tests. **All six passed a fully green test
+suite** — better guarding produced more code, not fewer bugs.
+
+**Tom's decision (approved before this rebuild): drop the optimistic model entirely.** This is a
+low-frequency admin surface (an operator changes autonomy posture rarely) — the responsiveness
+optimism bought is worth very little against six Criticals of one class. The rebuilt
+`useEngineSettings` hook instead:
+- writes **no speculative value** on a control interaction — the clicked control's own
+  `pendingAutonomyDefault`/`pendingTierPolicy` flag flips true (rendered as a disabled control +
+  a text "Applying…" affordance) while its POST is outstanding, and `settings` itself is untouched
+  until a response actually lands;
+- on success, applies the **full authoritative** `EngineSettingsDto` from the response verbatim
+  (all three endpoints return the identical shape, so no follow-up read is ever needed);
+- on rejection, simply re-enables the control and surfaces the error — **there is no revert,
+  because nothing was ever asserted**;
+- is **fully serialized** per exercise (at most one request — the GET or either mutation — is ever
+  outstanding at a time), which is what makes the "two mutations racing to overwrite each other's
+  field" Critical structurally UNREPRESENTABLE rather than merely guarded: both mutable controls
+  disable whenever ANYTHING is in flight, not only the one just clicked, so a second concurrent
+  request can never even be attempted;
+- keeps exactly ONE guard beyond that serialization — a single "latest applied response" sequence
+  counter, incremented on every applied response (GET or either mutation), that ignores anything
+  older on landing. No second sequence number, no per-field tracker, no confirmed-vs-optimistic
+  split — that is the exact shape that failed three times.
+
+**This satisfies AC3/AC4's underlying INTENT** ("the panel never claims an autonomy posture the
+backend didn't actually apply") more completely than the optimistic model ever did — nothing is
+ever displayed before the server confirms it, so there is no window in which the panel could be
+showing an unconfirmed posture at all. AC3/AC4's literal "optimistic update that reverts on
+rejection" phrasing is NOT what was built; this is recorded here as a deliberate, approved deviation
+rather than a silent reword. See `useEngineSettings.ts`'s own module header for the full mechanism
+and the four historical bug shapes' unrepresentability argument in detail.
+
+**Everything else reviewed well and was ported forward largely as-is** across the rebuild: the
+flyout's read-only provider/tier display, the clamp note (derived from `safetyClampActive` alone,
+never a level-equality inference — WR-003), `inMemoryStateNote`, the zero-`input/select/textarea`
+governed-config-boundary test, the sticky `forbidden` (403) contract, the fail-closed wire
+narrowing + error-shape policy in `engineSettingsActions.ts`, the "ENGINE" toolstrip registration in
+`ControllerConsole.tsx`, and `useEngineControl`'s `modeSettledCount` mechanism (a settle signal —
+bumped in both the `.then` and `.catch` of the live kill-switch POST — that `EngineControlBar`
+watches instead of the raw optimistic `mode` flip, so its "Live" label's refetch never races the
+kill-switch POST it is meant to observe).
+
+**One additional fix folded in from the prior attempt's review**: `useComposeAsPersona`'s
+persisted-draft store (so a draft survives `ControllerConsole` unmounting `<PersonaComposer>` for an
+unrelated reason, e.g. the ENGINE tool activating and closing the persona dock) now ALSO discards
+that persisted draft on the dock's EXPLICIT close (Esc/X) — `ControllerConsole`'s `closeDock` calls
+`composeAsPersonaDraftStore.discardDraft(exerciseId, personaId)`. The prior attempt's own test for
+this claimed it was handled but was tautological (it called the store's test-only `resetForTests()`
+directly and asserted empty, never driving a real Esc/X); `ControllerConsole.
+personaDraftDiscard.test.tsx` now drives the actual production wiring end-to-end, including a
+scoping test proving the ENGINE tool's WR-005 dock-close does NOT discard the draft (only an
+explicit operator close does).
