@@ -398,27 +398,45 @@ area; barrel exports added.
 > (`engine.autonomy_default_changed` / `engine.tier_policy_changed`), diverging from the legacy
 > swamped-mode/kill-switch/restore trio, for an audit record that survives a process restart.
 >
-> **⛔ PR #386 IS BLOCKED — and the reason is architectural.** `main` advanced past this umbrella's base
-> (exercise-configuration, profiles-social-graph, planner-settings-nav) and now serves
-> `GET /api/overlay-state` through an **`IOverlayStateProjection`** seam implemented by `LifecycleProjection`
-> — overlay state derived from the exercise lifecycle. Story 08 had *replaced* that handler with its own
-> pause-driven read. Two complementary claimants, one slot.
+> **PR #386 UNBLOCKED and CI-green (2026-07-29).** The architectural collision is resolved. `main` had
+> landed an `IOverlayStateProjection` seam (lifecycle-driven overlay: COR-032 pre-start, COR-054 ENDEX)
+> that competed with story 08's pause-driven overlay for the single overlay slot.
 >
-> **Tom's ruling (2026-07-27): lifecycle wins — `endex` > `pre-start` > `pause` > `none`.** Lifecycle answers
-> "is this exercise live at all"; pause is a control within a live exercise, and ENDEX must be terminal.
+> **Tom's ruling: lifecycle wins — `endex` > `pre-start` > `pause` > `none`.** Implemented as a
+> `SteeringPauseOverlayProjection` **decorator** over `main`'s lifecycle projection: consult lifecycle, and
+> only on `none` consult the pause store. **Story 08 no longer touches `ParticipantShellEndpoints.cs` at
+> all** (byte-identical to `main`), which deleted the shared-file coordination point *and* the
+> `RequestServices.GetService` workaround and its silent-degradation trade-off.
 >
-> **Implementation shape (NOT yet built):** the pause state becomes an `IOverlayStateProjection` contributor
-> that composes the lifecycle projection — consult lifecycle, and only on `none` consult the pause store —
-> registered via `services.Replace(...)` after both, per `main`'s contributor convention. **Story 08 then
-> stops editing `ParticipantShellEndpoints.cs` altogether**, which deletes the one shared-file coordination
-> point *and* the `RequestServices.GetService` workaround and its silent-degradation trade-off. The pause
-> write path, push, register plumbing and client guards are all already built and Gate-2 clean — only the
-> read-side composition changes. The other conflict (`Program.cs`) is trivial: both sides added usings and
-> wiring lines.
+> Four further Criticals were found and fixed after that, in three separate review rounds:
+> 1. **The ruling was enforced on the GET only — the SignalR push bypassed it**, so a participant saw the
+>    holding page after ENDEX. Provable from the builder's own green test. The rule now lives in one place
+>    (`SteeringOverlayPrecedence`) with **three** call sites: endpoint refusal, participant read, publish gate.
+> 2. Per Tom, a Freeze outside a running world is now **refused outright (409 + reason)** rather than
+>    silently no-op'd — which also eliminated a half-applied `tier=freeze` + frozen-clock state and stops
+>    `staged` starting a scenario clock COR-032 forbids.
+> 3. **The steering mutations were not role-gated.** #350/#352 predate #297/#353, so an assigned
+>    *evaluator* or *planner* could freeze the world and re-aim the escalation — more disruptive than the
+>    kill switch #297 was filed to protect. Both POSTs now carry `EngineCockpitControllerRoleFilter`; both
+>    GETs stay open ("an evaluator may watch"). It survived because #353's drift guard filtered on
+>    `/api/engine` alone — now widened to `/api/steering` too, and its host had to be wired for the
+>    widening to check anything at all.
+> 4. `ISteeringOverlaySource` — `main`'s own documented "one-file adapter" seam — was **declined**, verified:
+>    the lifecycle composer joins with "pause if EITHER side asks" and is never told the lifecycle status, so
+>    that seam would have shown the holding page after EndEx. Pinned by a test so nobody "finishes the merge".
 >
-> **PRs open:** #385 (autonomy, MERGEABLE, CI green) · #386 (world-steering, CONFLICTING — above) ·
-> #387 (golive, MERGEABLE, CI green). Copilot reviewed all three; its findings are folded (see the
-> `fold Copilot review` commits). Recommendation: **merge #385 and #387 now; #386 waits.**
+> **The ordering is load-bearing and silent.** `AddExerciseLifecycle()` and `AddPauseParticipantOverlay()`
+> both `Replace(IOverlayStateProjection)`; reversed, the decorator is evicted with no throw and no log, and
+> Freeze goes invisible again. `Program.cs` now flags it at both ends and
+> `SteeringCompositionRootWiringTests` catches it — verified by reordering.
+>
+> **Gates:** 0 warnings; **389 + 1722** backend, 0 skipped (real SQL); frontend green in CI (3m37s).
+> **CI all four checks pass, `MERGEABLE | CLEAN`; Copilot reviewed 51/51 files with no new comments.**
+> Awaiting Tom's merge.
+>
+> **Two semantic merge breaks happened in this wave, both invisible to git** — #353's required
+> `ReactionLoopDriver` ctor parameter, and identity-auth-roles/13's required `AuthenticatedSession` members.
+> A clean `git merge-tree` says nothing about whether the result compiles; always rebuild after a re-merge.
 >
 > **Open follow-ups (none blocking):** SG-201 suppress overlay publishes whose participant-visible
 > snapshot is unchanged (a timing side channel, no content exposure); `Storyline.TargetIntensity` is now
