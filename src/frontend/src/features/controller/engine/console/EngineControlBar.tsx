@@ -33,10 +33,23 @@
  *     STALENESS. The kill switch mutates the SAME server-side autonomy state
  *     `useEngineSettings()` describes, entirely outside that hook — so this
  *     component calls `engineSettings.refetch()` whenever
- *     `engineControl.mode`/`degraded` changes (skipping the initial mount, to
- *     avoid a redundant duplicate of the hook's own first GET), closing the
- *     window where tripping the kill switch would leave this label reporting
- *     a clamp that's no longer (or newly) accurate.
+ *     `engineControl.modeSettledCount`/`degraded` changes (skipping the
+ *     initial mount, to avoid a redundant duplicate of the hook's own first
+ *     GET), closing the window where tripping the kill switch would leave
+ *     this label reporting a clamp that's no longer (or newly) accurate.
+ *     Deliberately NOT `engineControl.mode`: `setMode` flips `mode`
+ *     optimistically and SYNCHRONOUSLY, in the SAME call that fires the live
+ *     kill-switch POST, so a watcher keyed on `mode` would refetch settings
+ *     WHILE that POST is still in-flight — and the settings GET (one filter)
+ *     is favoured to win that race against the POST (mutation + validation +
+ *     a telemetry write), making the stale read the LIKELIER ordering, not a
+ *     corner case. That race was CR-101 — a Critical. `modeSettledCount`
+ *     (`useEngineControl`'s module header) is a settle SIGNAL, bumped only
+ *     once the live request has actually concluded (both `.then` and
+ *     `.catch`), so watching it instead of `mode` is what makes the refetch
+ *     observe the POST rather than race it. See the in-component comment
+ *     above the effect below for the full mechanics — do not "simplify" this
+ *     dependency array back to `mode`; that reintroduces CR-101.
  *  b. The degrade-mode indicator — text + icon, shown only while
  *     `useEngineControl().degraded` is true (a mock provider-degraded clamp to
  *     Suggest). A small dev-only affordance toggles it for demoing the
@@ -131,6 +144,10 @@ function labelFor(mode: EngineMode, autonomy: EngineSettingsAutonomy | null): st
 export function EngineControlBar() {
   const engineControl = useEngineControl()
   const engineSettings = useEngineSettings()
+  // Destructured so the effect below can depend on the STABLE `refetch`
+  // reference directly (see that effect's comment) rather than the whole
+  // `engineSettings` object, which is a fresh literal every render.
+  const { refetch: refetchEngineSettings } = engineSettings
   const demand = useDemandMeter()
   const { pendingCount, timersUnder60sCount } = useReviewQueue()
 
@@ -162,18 +179,24 @@ export function EngineControlBar() {
   // clamps with no live round trip, so there is no settle race for them.
   // Skips the very first run (the hook's own mount effect already fetched
   // once) — only a subsequent settle/degraded CHANGE re-triggers it.
+  // `refetchEngineSettings` (not the whole `engineSettings` object) is the
+  // correct third dependency here: `useEngineSettings()` returns a FRESH
+  // object literal on every render (so the object itself is never a safe
+  // effect dependency — it would self-trigger on the very refetch this effect
+  // causes), but `refetch` is `useCallback`-memoized against only
+  // `exerciseId`, so its reference stays stable across re-renders and store
+  // notifications alike, changing only on a genuine exercise switch. No
+  // `eslint-disable` needed — `degraded`/`modeSettledCount` are the only
+  // MEANINGFUL triggers, and `refetchEngineSettings` is listed because it is
+  // what the effect calls, not because it is expected to change.
   const skippedInitialRefetch = useRef(false)
   useEffect(() => {
     if (!skippedInitialRefetch.current) {
       skippedInitialRefetch.current = true
       return
     }
-    engineSettings.refetch()
-    // `engineSettings` itself changes identity on every store notification
-    // (including the refetch this effect just caused), which would otherwise
-    // self-trigger — only `degraded`/`modeSettledCount` are meaningful here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engineControl.degraded, engineControl.modeSettledCount])
+    refetchEngineSettings()
+  }, [engineControl.degraded, engineControl.modeSettledCount, refetchEngineSettings])
 
   return (
     <Stack

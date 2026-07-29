@@ -220,6 +220,20 @@ describe('useEngineSettings — live mode (USE_MOCK_DATA=false)', () => {
     expect(result.current.error).toMatch(/could not be applied/i)
   })
 
+  it('setForTests genuinely bypasses the live fetch (Copilot review finding): mounting AFTER it does not fire the mount-effect GET', () => {
+    // Before the fix, `setForTests` never recorded this exercise as
+    // "already fetched", so `ensureLiveFetchStarted`'s mount effect would
+    // still issue a real GET behind the seam's back — exactly the leak the
+    // seam's own docs claimed did not exist.
+    engineSettingsStore.setForTests('ex-mock-0001', dto({ tierPolicyMode: 'standard' }))
+
+    const { result } = renderHook(() => useEngineSettings())
+
+    expect(result.current.settings?.tierPolicyMode).toBe('standard')
+    expect(result.current.loading).toBe(false)
+    expect(mockedGetSettings).not.toHaveBeenCalled()
+  })
+
   // -----------------------------------------------------------------------
   // AWAIT, THEN APPLY — the headline behaviour this rebuild exists to prove.
   // -----------------------------------------------------------------------

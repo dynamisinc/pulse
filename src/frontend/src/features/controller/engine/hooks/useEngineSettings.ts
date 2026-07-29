@@ -321,6 +321,15 @@ function resetForTests(): void {
  * require a real backend round trip to construct. Resets the internal
  * sequencing to a fresh baseline so a subsequently-tested request behaves
  * exactly as if this snapshot were the most recent applied response.
+ *
+ * MARKS `liveFetchStarted` too (Copilot review finding) — without this, a
+ * test that calls `setForTests` and then mounts `useEngineSettings()` under
+ * `USE_MOCK_DATA=false` would still trigger `ensureLiveFetchStarted`'s
+ * mount-effect GET, since nothing had recorded this exercise as already
+ * fetched. That is exactly the "bypasses any live fetch" this seam documents
+ * — a seam that silently permits a real request behind a caller's back is
+ * how a test ends up passing (or failing) for the wrong reason, not because
+ * of what it actually asserts.
  */
 function setForTests(
   exerciseId: string,
@@ -336,6 +345,7 @@ function setForTests(
     pendingTierPolicy: false,
   })
   internalByExercise.set(exerciseId, defaultInternal())
+  liveFetchStarted.add(exerciseId)
 }
 
 /**
