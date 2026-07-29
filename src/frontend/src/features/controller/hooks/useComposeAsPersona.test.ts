@@ -21,13 +21,22 @@
  * test.ts`) — no provider tree needed. `@/core/services/api` is mocked
  * (mirrors `composeService.test.ts`) so `composeAsPersona`'s real `createPost`
  * → `buildAndEmit` never touches the network for its own best-effort POST.
+ *
+ * Also covers the DRAFT-SURVIVES-UNMOUNT store (autonomy-safety story 06,
+ * Gate-1 WR-103): a mount/unmount/remount for the SAME (exercise, persona)
+ * restores the exact draft text, a different persona never observes it, and
+ * `publish()` clears it. The EXPLICIT discard path (Esc/X on the persona
+ * dock) is deliberately NOT tested here — this hook has no notion of "the
+ * dock closed"; that discard lives in `ControllerConsole`'s `closeDock` and
+ * is covered end-to-end, driving the REAL Esc/X, in `ControllerConsole.
+ * personaDraftDiscard.test.tsx`.
  */
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import type { StaffPersona } from '@/features/personas'
 import type { Post } from '@/features/social'
-import { useComposeAsPersona } from './useComposeAsPersona'
+import { composeAsPersonaDraftStore, useComposeAsPersona } from './useComposeAsPersona'
 
 vi.mock('@/core/services/api', () => ({
   api: { post: vi.fn().mockResolvedValue(undefined) },
@@ -82,6 +91,10 @@ const ACTIVE_PERSONA: StaffPersona = {
 beforeEach(() => {
   mockedUseExerciseContext.mockReturnValue(scope())
   vi.mocked(publishPost).mockReset().mockResolvedValue(undefined)
+  // Gate-1 WR-103's persisted-draft store is a module singleton keyed by
+  // (exerciseId, personaId) — several tests below reuse the SAME
+  // persona/exercise, so reset it between tests.
+  composeAsPersonaDraftStore.resetForTests()
 })
 
 describe('useComposeAsPersona — LIVE persist (UAT fix)', () => {
@@ -127,5 +140,73 @@ describe('useComposeAsPersona — LIVE persist (UAT fix)', () => {
     expect(() => act(() => result.current.publish())).not.toThrow()
 
     await waitFor(() => expect(publishPost).toHaveBeenCalledTimes(1))
+  })
+})
+
+describe('useComposeAsPersona — the draft SURVIVES an unmount (Gate-1 WR-103)', () => {
+  it('typing a draft, unmounting (e.g. the console closes the dock for an unrelated reason), and remounting for the SAME persona restores the exact text', () => {
+    const first = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    act(() => first.result.current.setText('Boil-water notice lifted for Zone 3.'))
+    expect(first.result.current.text).toBe('Boil-water notice lifted for Zone 3.')
+
+    // Simulates ControllerConsole unmounting <PersonaComposer> for a reason
+    // that is NOT the operator choosing to discard their text (e.g. the
+    // ENGINE settings tool activating and closing the persona dock).
+    first.unmount()
+
+    const second = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    expect(second.result.current.text).toBe('Boil-water notice lifted for Zone 3.')
+  })
+
+  it('publish() clears the persisted draft too, so a later remount for the SAME persona starts empty', async () => {
+    const first = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    act(() => first.result.current.setText('Sent already.'))
+    act(() => first.result.current.publish())
+    await waitFor(() => expect(publishPost).toHaveBeenCalledTimes(1))
+    first.unmount()
+
+    const second = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    expect(second.result.current.text).toBe('')
+  })
+
+  it('a DIFFERENT persona never observes another persona\'s in-progress draft', () => {
+    const other: StaffPersona = { ...ACTIVE_PERSONA, id: 'persona-other' }
+
+    const first = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    act(() => first.result.current.setText('Only for Fairhaven Water.'))
+    first.unmount()
+
+    const second = renderHook(() =>
+      useComposeAsPersona({ activePersona: other, actingHumanId: 'human-ctl-7' }),
+    )
+    expect(second.result.current.text).toBe('')
+  })
+
+  it('discardDraft() removes a persisted draft directly (the primitive ControllerConsole\'s explicit Esc/X close calls) — a no-op if there was none', () => {
+    const first = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    act(() => first.result.current.setText('About to be explicitly dismissed.'))
+    first.unmount()
+
+    composeAsPersonaDraftStore.discardDraft('ex-live-0001', ACTIVE_PERSONA.id)
+
+    const second = renderHook(() =>
+      useComposeAsPersona({ activePersona: ACTIVE_PERSONA, actingHumanId: 'human-ctl-7' }),
+    )
+    expect(second.result.current.text).toBe('')
+
+    // No-op when there is nothing to discard.
+    expect(() => composeAsPersonaDraftStore.discardDraft('ex-live-0001', 'no-such-persona')).not.toThrow()
   })
 })

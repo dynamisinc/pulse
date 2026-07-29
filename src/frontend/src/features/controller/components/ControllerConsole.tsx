@@ -47,6 +47,20 @@
  * storylines, rumor tracker, trainee monitor, break-fiction, or pause tiers —
  * those remain separate features/stories.
  *
+ * ## ENGINE SETTINGS tool (feature: autonomy-safety, story 06)
+ * A sibling "ENGINE" surface tool, registered the same way as "Personas"
+ * (`useRegisterSurfaceTool()`, no badge) — activating it opens
+ * `<EngineSettingsPanel>`, keyed on `isActive(ENGINE_SETTINGS_TOOL_ID)`. This
+ * is the console admin surface for the exercise autonomy default + tier-policy
+ * mode (`../engine`'s `useEngineSettings`, story 05's `GET/POST
+ * /api/engine/settings`) — the same one-flyout-at-a-time toolstrip contract,
+ * not a new extension point. The persona-dock host is closed whenever ENGINE
+ * activates — the toolstrip's one-flyout-at-a-time contract only governs
+ * `activeToolId`, but the persona-dock host's `open` is a SEPARATE
+ * `dockPersonaId !== null` flag (set by picking a persona from the palette),
+ * so without this the engine panel could paint over a still-mounted, still-
+ * Tab-reachable persona composer instead of replacing it.
+ *
  * ## Entry points to "post as persona" (both funnel to the persona-dock host)
  *  1. ⌘K / Ctrl+K, or activating the "Personas" toolstrip tool → the command
  *     palette opens (its PERSONAS section is the search/select entry point).
@@ -64,7 +78,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faMasksTheater, faTowerBroadcast } from '@fortawesome/free-solid-svg-icons'
+import { faGear, faMasksTheater, faTowerBroadcast } from '@fortawesome/free-solid-svg-icons'
 import { usePersonas } from '@/features/personas'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useRegisterSurfaceTool, useToolstrip } from '@/features/staffShell/toolRegistry'
@@ -78,12 +92,15 @@ import { CommandPalette, type CommandPalettePersonaSlot } from '../console/Comma
 // comes from the `.ts`.
 import { PersonaDockHost } from '../console/personaDockHost.tsx'
 import { PERSONAS_TOOL_ID, type PersonaDockSlots } from '../console/personaDockHost'
+import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { EscalationDial } from './steering/EscalationDial'
 import { PausePill } from './steering/PausePill'
 import {
   DraftDisposition,
   DraftTimerDriver,
+  ENGINE_SETTINGS_TOOL_ID,
   EngineControlBar,
+  EngineSettingsPanel,
   ReviewQueue,
   useEngineControl,
   useReviewQueue,
@@ -168,6 +185,22 @@ export function ControllerConsole(
     badge: personaCount > 0 ? { count: personaCount, escalating: false } : undefined,
   })
 
+  // The "ENGINE" consult-on-demand tool (feature: autonomy-safety, story 06) —
+  // the console admin surface for the exercise autonomy default + tier-policy
+  // mode (story 05's API). No badge (this is a settings surface, not a
+  // pending-attention one). Its flyout is keyed on `isActive(...)` below,
+  // exactly like the "Personas" tool's palette above.
+  useRegisterSurfaceTool({
+    id: ENGINE_SETTINGS_TOOL_ID,
+    label: 'ENGINE',
+    icon: faGear,
+    tooltip: 'Engine settings — autonomy default, tier policy, provider (read-only)',
+  })
+  const engineSettingsOpen = isActive(ENGINE_SETTINGS_TOOL_ID)
+  const closeEngineSettings = useCallback(() => {
+    if (isActive(ENGINE_SETTINGS_TOOL_ID)) toggleTool(ENGINE_SETTINGS_TOOL_ID)
+  }, [isActive, toggleTool])
+
   // The "Personas" toolstrip tool's active state is the SINGLE source of truth
   // for whether the ⌘K palette is open, so the toolstrip button always reflects
   // the palette and ⌘K + the button toggle the exact same state — opening via
@@ -197,7 +230,48 @@ export function ControllerConsole(
   const handleSelectPersona = useCallback((personaId: string) => {
     setDockPersonaId(personaId)
   }, [])
-  const closeDock = useCallback(() => setDockPersonaId(null), [])
+  // The EXPLICIT close (Esc/X on the dock) is the operator choosing to
+  // discard whatever draft was in progress — so this ALSO clears the
+  // persisted-draft store (`useComposeAsPersona`'s Gate-1 WR-103 mirror),
+  // otherwise a later re-open for the SAME persona would silently pre-fill
+  // text the operator just explicitly dismissed. This is deliberately here,
+  // not in `useComposeAsPersona` itself: that hook's unmount (e.g. this
+  // console closing the dock for an UNRELATED reason, like ENGINE
+  // activating below) must NOT discard the draft — only an explicit close
+  // intent should.
+  const closeDock = useCallback(() => {
+    if (dockPersonaId !== null) {
+      composeAsPersonaDraftStore.discardDraft(exerciseId, dockPersonaId)
+    }
+    setDockPersonaId(null)
+  }, [dockPersonaId, exerciseId])
+
+  // The persona-dock host's `open` (`dockPersonaId !== null`) is independent
+  // of the toolstrip's one-flyout-at-a-time `activeToolId` — activating
+  // ENGINE does not, by itself, close a dock left open from an earlier
+  // persona selection. Both flyouts render at the same edge/width/z-index, so
+  // without this a still-mounted, still-Tab-reachable persona composer would
+  // sit obscured underneath the engine panel instead of being replaced by it.
+  //
+  // Gating the RENDERED `open` prop DIRECTLY (`dockPersonaOpen`, below) — not
+  // via a `useEffect` calling `setDockPersonaId(null)` — so the dock closes in
+  // the SAME commit ENGINE opens in: an effect-driven close would land one
+  // render later than `EngineSettingsPanel`'s own open-transition focus
+  // effect, and `PersonaDockHost`'s focus-RESTORE effect firing in that later,
+  // separate commit would steal focus back — overriding, rather than being
+  // overridden by, the engine panel's own focus. `PersonaDockHost` is
+  // declared BEFORE `EngineSettingsPanel` in the JSX below, so within the ONE
+  // commit ENGINE opens in, the dock's closing (focus-restoring) effect fires
+  // FIRST and the engine panel's own focus, firing second, is what's left
+  // standing. The `useEffect` below still clears the underlying
+  // `dockPersonaId` STATE (one render later, with no visible/focus effect —
+  // the dock is already not rendered by then; note it deliberately does NOT
+  // discard the persisted draft — see `closeDock`'s own comment) so a LATER
+  // close of the engine panel doesn't resurrect a stale dock.
+  const dockPersonaOpen = dockPersonaId !== null && !engineSettingsOpen
+  useEffect(() => {
+    if (engineSettingsOpen) setDockPersonaId(null)
+  }, [engineSettingsOpen])
 
   return (
     <Box
@@ -311,7 +385,9 @@ export function ControllerConsole(
         renderPersonaResults={renderPersonaResults}
       />
 
-      <PersonaDockHost open={dockPersonaId !== null} onClose={closeDock} slots={dockSlots} />
+      <PersonaDockHost open={dockPersonaOpen} onClose={closeDock} slots={dockSlots} />
+
+      <EngineSettingsPanel open={engineSettingsOpen} onClose={closeEngineSettings} />
     </Box>
   )
 }
