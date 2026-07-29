@@ -259,7 +259,7 @@ public sealed class AnonymousAccessRegressionTests
     }
 
     [Fact]
-    public async Task StaffAndEngineRoutes_WithALiveNonStaffSession_AreStillRefusedByTHEIROWNFilters()
+    public async Task StaffAndEngineRoutes_WithALiveNonStaffSession_AreStillRefusedByTheirOwnFilters()
     {
         // The anti-redundancy assertion, and the reason this test exists at all. Story 11's gate now answers first
         // for an ANONYMOUS caller, which means every anonymous probe above would pass even if
@@ -519,8 +519,10 @@ public sealed class AnonymousAccessRegressionTests
         private readonly string? _acceptedToken;
 
         /// <param name="acceptedToken">
-        /// When supplied, <see cref="ISessionAuthenticator"/> resolves EXACTLY this raw token to a live participant
-        /// session and nothing else, so a probe can get PAST the gate and observe who refuses next.
+        /// When supplied, <see cref="ISessionAuthenticator"/> resolves EXACTLY this raw token to a live
+        /// <c>readonly</c> session and nothing else, so a probe can get PAST the gate and observe who refuses next.
+        /// The kind is <c>readonly</c> rather than <c>participant</c> deliberately and load-bearingly — see the
+        /// comment at the construction site in <see cref="SingleTokenSessionAuthenticator"/>.
         /// </param>
         public AnonymousProbeFactory(string? acceptedToken = null)
         {
@@ -555,7 +557,8 @@ public sealed class AnonymousAccessRegressionTests
     }
 
     /// <summary>
-    /// Resolves one known raw token to a live <c>participant</c> session; every other token resolves to
+    /// Resolves one known raw token to a live <c>readonly</c> session — NOT <c>participant</c>, for the
+    /// host-binding reason documented at the construction site; every other token resolves to
     /// <c>null</c> (fail closed), exactly as the real authenticator does for an unknown, expired or revoked one.
     /// </summary>
     private sealed class SingleTokenSessionAuthenticator : ISessionAuthenticator
