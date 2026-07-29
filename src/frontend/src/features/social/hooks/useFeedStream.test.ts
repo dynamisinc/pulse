@@ -244,6 +244,97 @@ describe('useFeedStream — bounded ring under burst (NFR-002, SOC-071)', () => 
   })
 })
 
+describe('useFeedStream — the optional `admit` predicate filters arrivals (feeds-discovery/08)', () => {
+  it('omitting `admit` admits everything — the All Posts path is unchanged', async () => {
+    const fake = new FakeFeedStreamSource()
+    const { result } = renderHook(() => useFeedStream({ enabled: true, source: fake }))
+    await waitFor(() => expect(fake.startCalls).toBe(1))
+
+    act(() => {
+      fake.push(buildView('p1', { authorPersonaId: 'persona-a' }))
+      fake.push(buildView('p2', { authorPersonaId: 'persona-b' }))
+    })
+
+    expect(result.current.newCount).toBe(2)
+  })
+
+  it('never counts NOR buffers a rejected arrival, and the count always equals the drain', async () => {
+    const fake = new FakeFeedStreamSource()
+    const admit = (post: ParticipantPostView) => post.authorPersonaId === 'persona-followed'
+    const { result } = renderHook(() => useFeedStream({ enabled: true, source: fake, admit }))
+    await waitFor(() => expect(fake.startCalls).toBe(1))
+
+    act(() => {
+      fake.push(buildView('p1', { authorPersonaId: 'persona-followed' }))
+      fake.push(buildView('p2', { authorPersonaId: 'persona-unfollowed' }))
+      fake.push(buildView('p3', { authorPersonaId: 'persona-followed' }))
+    })
+
+    // 3 arrived, 2 admitted — the count promises only what it can deliver.
+    expect(result.current.newCount).toBe(2)
+
+    let drained: ParticipantPostView[] = []
+    act(() => {
+      drained = result.current.loadBuffered()
+    })
+
+    // …and the drain hands back EXACTLY that many, newest-first. A pill saying
+    // "2 new posts" that drains to 2 posts is the whole point of the option.
+    expect(drained).toHaveLength(2)
+    expect(drained.map(p => p.id)).toEqual(['p3', 'p1'])
+    expect(result.current.newCount).toBe(0)
+  })
+
+  it('leaves no dedup trace for a rejected post — one that later becomes admissible still buffers', async () => {
+    // Mirrors <Feed>'s ref-backed predicate: a STABLE function whose answer
+    // changes as the viewer's followed set moves, with no re-subscribe.
+    const fake = new FakeFeedStreamSource()
+    const followed = new Set<string>()
+    const admit = (post: ParticipantPostView) => followed.has(post.authorPersonaId)
+    const { result } = renderHook(() => useFeedStream({ enabled: true, source: fake, admit }))
+    await waitFor(() => expect(fake.startCalls).toBe(1))
+
+    act(() => fake.push(buildView('p1', { authorPersonaId: 'persona-a' })))
+    expect(result.current.newCount).toBe(0)
+
+    // The reader follows persona-a mid-session; the SAME post id is re-offered
+    // (a redelivery) and must now be admitted — a stale dedup entry from the
+    // rejection would silently swallow it.
+    followed.add('persona-a')
+    act(() => fake.push(buildView('p1', { authorPersonaId: 'persona-a' })))
+    expect(result.current.newCount).toBe(1)
+
+    // No re-subscribe was needed for any of that (stable predicate identity).
+    expect(fake.startCalls).toBe(1)
+    expect(fake.stopCalls).toBe(0)
+  })
+
+  it('a stable predicate is not re-subscribed on re-render; a changed one re-subscribes without losing the buffer', async () => {
+    const fake = new FakeFeedStreamSource()
+    const admitAll = () => true
+    const { result, rerender } = renderHook(
+      ({ admit }) => useFeedStream({ enabled: true, source: fake, admit }),
+      { initialProps: { admit: admitAll } },
+    )
+    await waitFor(() => expect(fake.startCalls).toBe(1))
+
+    act(() => fake.push(buildView('p1')))
+    expect(result.current.newCount).toBe(1)
+
+    // Same identity → no churn.
+    rerender({ admit: admitAll })
+    expect(fake.startCalls).toBe(1)
+    expect(fake.stopCalls).toBe(0)
+
+    // A NEW identity re-subscribes (documented cost of the stability contract),
+    // but the buffer survives — only a disable transition clears it, so what the
+    // reader was already promised is not silently withdrawn.
+    rerender({ admit: () => true })
+    await waitFor(() => expect(fake.startCalls).toBe(2))
+    expect(result.current.newCount).toBe(1)
+  })
+})
+
 describe('useFeedStream — surfaces the source transport mode (NFR-003 transparency)', () => {
   it('reflects the source mode at render time, including after it changes underneath', async () => {
     const fake = new FakeFeedStreamSource()

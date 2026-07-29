@@ -9,7 +9,9 @@
  *   - the BOUNDARY-mocked path (mirrors `personaService.test.ts`) asserts the
  *     exact wire contract — `POST`/`DELETE /personas/{id}/follow`,
  *     `GET /personas/{id}/following|followers` — and that a malformed id-list
- *     body fails closed.
+ *     body fails closed;
+ *   - `subscribeFollowChanges` (feeds-discovery/08): a successful write notifies
+ *     cached-graph consumers, a FAILED one does not, and unsubscribe holds.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/core/services/api'
@@ -19,6 +21,7 @@ import {
   resolveFollowing,
   resolveFollowers,
   resetMockFollowEdges,
+  subscribeFollowChanges,
 } from './followService'
 
 /** Casts an arbitrary body into the shape `api.get`'s mock return expects. */
@@ -72,6 +75,63 @@ describe('followPersona / unfollowPersona / resolveFollowing (shipped mock path)
     await followPersona('persona-fulcoem')
     const followers = await resolveFollowers('persona-fulcoem')
     expect(followers).toContain('persona-dreyes_fh')
+  })
+})
+
+describe('subscribeFollowChanges — the "your cached follow graph moved" signal (feeds-discovery/08)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    resetMockFollowEdges()
+  })
+
+  it('notifies listeners after a successful follow AND unfollow', async () => {
+    const listener = vi.fn()
+    const unsubscribe = subscribeFollowChanges(listener)
+
+    await followPersona('persona-fairhavenwater')
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    await unfollowPersona('persona-fairhavenwater')
+    expect(listener).toHaveBeenCalledTimes(2)
+
+    unsubscribe()
+  })
+
+  it('notifies on an IDEMPOTENT repeat too — that is exactly when a cached set may be stale', async () => {
+    await followPersona('persona-fairhavenwater')
+    const listener = vi.fn()
+    const unsubscribe = subscribeFollowChanges(listener)
+
+    // `changed: false` — the server already had the edge, but a client that
+    // never saw it needs the nudge to re-read.
+    await expect(followPersona('persona-fairhavenwater')).resolves.toEqual({
+      following: true,
+      changed: false,
+    })
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    unsubscribe()
+  })
+
+  it('does NOT notify when the write fails', async () => {
+    const listener = vi.fn()
+    const unsubscribe = subscribeFollowChanges(listener)
+    vi.spyOn(api, 'post').mockRejectedValue(new Error('network down'))
+
+    await expect(followPersona('persona-fairhavenwater')).rejects.toThrow('network down')
+    expect(listener).not.toHaveBeenCalled()
+
+    unsubscribe()
+  })
+
+  it('stops notifying after unsubscribe, and unsubscribing twice is safe', async () => {
+    const listener = vi.fn()
+    const unsubscribe = subscribeFollowChanges(listener)
+    unsubscribe()
+    unsubscribe()
+
+    await followPersona('persona-fairhavenwater')
+    expect(listener).not.toHaveBeenCalled()
   })
 })
 
