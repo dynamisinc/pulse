@@ -162,6 +162,20 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
         try
         {
             // The ticket comes FIRST, so the last-invoked publish holds the highest one (see the remarks).
+            //
+            // SG-002 (Gate-2), examined and DELIBERATELY NOT CHANGED: a suppressed Freeze below burns this
+            // exercise's ticket without writing anything. Moving the suppression gate above this line is not
+            // possible without also moving the AUTHORITATIVE TIER READ above it — the gate turns on `tier`, and
+            // trusting `transition.To` instead is precisely the staleness this publisher exists to avoid. Taking
+            // the ticket after that read (and, for a Freeze, after an awaited lifecycle read) would let a publish
+            // invoked LATER take a LOWER ticket than one invoked earlier, so a stale earlier write could outrank
+            // the true final state — breaking "the highest ticket belongs to the last-invoked publish", which is
+            // the whole convergence argument (see OverlayStateService's out-of-order note).
+            //
+            // The cost of leaving it is a gap in a monotonic per-exercise counter, which is unobservable: the
+            // counter is never projected, only compared against itself, and gaps already occur whenever `Apply`
+            // loses to a newer write or the catch below fires. Nothing a participant or the console can read is
+            // touched by a suppressed Freeze.
             var sequence = _overlayState.NextSequence(exerciseId);
             var tier = _tierReader(exerciseId);
             authoritativeTier = tier;

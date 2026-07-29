@@ -27,6 +27,7 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Xunit;
 
@@ -320,6 +321,80 @@ public sealed class StorylineSteeringEndpointsTests
         storyline.TargetIntensity.Should().BeNull();
     }
 
+    // ---- #297: only a CONTROLLER may steer; an assigned evaluator/planner may only WATCH -----------
+
+    /// <summary>
+    /// The Gate-2 gap this closes: an assigned <c>planner</c>/<c>evaluator</c> passed the staff gate and could
+    /// re-aim the exercise's escalation — which, via the already-shipped <c>TargetFollow.Modulate</c>, also
+    /// reshapes burst direction and count. #297's signed ruling covers this mutation too, so it is refused
+    /// <c>403</c> and the live storyline is left untouched.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("evaluator")]
+    [InlineData("planner")]
+    public async Task SetTarget_FromAnAssignedNonControllerStaffSession_Returns403_AndNeverMutates(string role)
+    {
+        var exerciseId = Guid.NewGuid();
+        var storyline = SeededStoryline(exerciseId);
+        await using var host = await StartHostAsync(
+            Registration(exerciseId, storyline), exerciseId, assignedRole: role);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri($"/api/steering/storylines/{storyline.Id}/target", UriKind.Relative),
+            new { target = 90 });
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            $"an assigned {role} may WATCH the dial but never steer it — only a controller sets a target (#297)");
+        storyline.TargetIntensity.Should().BeNull(
+            "the role gate rejects before the live Storyline the reaction loop ticks is ever touched");
+    }
+
+    /// <summary>
+    /// The POSITIVE control for the gate above: without it, a filter that rejected EVERY caller would pass. The
+    /// same target an evaluator/planner is refused still lands for an assigned controller.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task SetTarget_FromAnAssignedControllerStaffSession_StillSetsTheTarget_NotABlanketDeny()
+    {
+        var exerciseId = Guid.NewGuid();
+        var storyline = SeededStoryline(exerciseId);
+        await using var host = await StartHostAsync(
+            Registration(exerciseId, storyline), exerciseId, assignedRole: "controller");
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri($"/api/steering/storylines/{storyline.Id}/target", UriKind.Relative),
+            new { target = 90 });
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.OK, "an assigned controller is exactly who #297 says MAY steer the engine");
+        storyline.TargetIntensity.Should().Be(90, "the target reached the live storyline");
+    }
+
+    /// <summary>
+    /// #297's other half: "an evaluator may watch." The storyline read stays on the staff-only group, so an
+    /// assigned non-controller still sees the dial's actual/target/phase.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("evaluator")]
+    [InlineData("planner")]
+    public async Task GetStoryline_FromAnAssignedNonControllerStaffSession_Returns200_SoTheyCanWatch(string role)
+    {
+        var exerciseId = Guid.NewGuid();
+        var storyline = SeededStoryline(exerciseId, intensity: 62);
+        await using var host = await StartHostAsync(
+            Registration(exerciseId, storyline), exerciseId, assignedRole: role);
+
+        var response = await host.Client.GetAsync(
+            new Uri($"/api/steering/storylines/{storyline.Id}", UriKind.Relative));
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            $"an assigned {role} may WATCH the escalation dial — only the target POST is controller-only (#297)");
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("intensity").GetInt32().Should().Be(62, "the read is the live storyline's own");
+    }
+
     // ---- helpers ------------------------------------------------------------------------------------
 
     private static Storyline SeededStoryline(Guid exerciseId, int intensity = 62)
@@ -353,23 +428,30 @@ public sealed class StorylineSteeringEndpointsTests
         ReactionLoopRegistration registration,
         Guid? currentExerciseId,
         bool authenticatedStaff = true,
-        Guid? assignedExerciseId = null)
+        Guid? assignedExerciseId = null,
+        string assignedRole = "controller")
     {
         var registry = new ReactionLoopRegistry();
         registry.Register(registration);
-        return StartHostAsync(registry, currentExerciseId, authenticatedStaff, assignedExerciseId);
+        return StartHostAsync(registry, currentExerciseId, authenticatedStaff, assignedExerciseId, assignedRole);
     }
 
     private async Task<StorylineSteeringTestHost> StartHostAsync(
         ReactionLoopRegistry registry,
         Guid? currentExerciseId,
         bool authenticatedStaff = true,
-        Guid? assignedExerciseId = null)
+        Guid? assignedExerciseId = null,
+        string assignedRole = "controller")
     {
         _fixture.ConnectionString.Should().NotBeNull(
             "the Docker-gated MsSql fixture must have started and captured its connection string before these tests run");
         return await StorylineSteeringTestHost.StartAsync(
-            _fixture.ConnectionString!, registry, currentExerciseId, authenticatedStaff, assignedExerciseId);
+            _fixture.ConnectionString!,
+            registry,
+            currentExerciseId,
+            authenticatedStaff,
+            assignedExerciseId,
+            assignedRole);
     }
 
     private static int CountRoutes(EndpointDataSource dataSource, string method, string rawText)
@@ -408,7 +490,8 @@ public sealed class StorylineSteeringEndpointsTests
             IReactionLoopRegistry registry,
             Guid? currentExerciseId,
             bool authenticatedStaff = true,
-            Guid? assignedExerciseId = null)
+            Guid? assignedExerciseId = null,
+            string assignedRole = "controller")
         {
             var staffUserId = Guid.NewGuid();
             var accessor = authenticatedStaff
@@ -417,7 +500,7 @@ public sealed class StorylineSteeringEndpointsTests
 
             if (authenticatedStaff && (assignedExerciseId ?? currentExerciseId) is { } assignExercise)
             {
-                await SeedStaffAssignmentAsync(connectionString, staffUserId, assignExercise);
+                await SeedStaffAssignmentAsync(connectionString, staffUserId, assignExercise, assignedRole);
             }
 
             var builder = WebApplication.CreateBuilder();
@@ -453,7 +536,14 @@ public sealed class StorylineSteeringEndpointsTests
             await _app.DisposeAsync();
         }
 
-        private static async Task SeedStaffAssignmentAsync(string connectionString, Guid staffUserId, Guid exerciseId)
+        /// <summary>
+        /// Seeds the <see cref="Exercise"/> + <see cref="StaffAssignment"/> rows the reused cockpit gates read.
+        /// <paramref name="assignedRole"/> is load-bearing since the #297 controller-role gate landed on the target
+        /// POST: it defaults to <c>controller</c> (what every pre-existing test assumes) and the role-gate tests
+        /// pass <c>evaluator</c>/<c>planner</c> explicitly.
+        /// </summary>
+        private static async Task SeedStaffAssignmentAsync(
+            string connectionString, Guid staffUserId, Guid exerciseId, string assignedRole)
         {
             var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<PulseDbContext>()
                 .UseSqlServer(connectionString)
@@ -472,7 +562,7 @@ public sealed class StorylineSteeringEndpointsTests
                 Id = Guid.NewGuid(),
                 StaffUserId = staffUserId,
                 ExerciseId = exerciseId,
-                Role = "controller",
+                Role = assignedRole,
                 CreatedAt = DateTimeOffset.UtcNow,
             });
             await context.SaveChangesAsync();

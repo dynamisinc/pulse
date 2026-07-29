@@ -49,6 +49,9 @@
  * what we have already applied is dropped too — the server publishes a
  * per-exercise monotonic `sequence` precisely so a late out-of-order push cannot
  * re-show a holding page over a world the controller has already resumed.
+ * A failed re-GET keeps the previous snapshot — with ONE exception: a `403` means
+ * the world is closed to participants, which is never a pause, so it CLEARS the
+ * overlay rather than stranding a holding page across every reconnect (WR-001).
  *
  * NOTHING HERE TRUSTS ARRIVAL ORDER (CR-001). Two seed GETs race on every
  * startup — `ensureStarted` issues one and `connection.start()`'s `Connected`
@@ -81,6 +84,7 @@
 
 import { useEffect, useSyncExternalStore } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import axios from 'axios'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { useExerciseContext } from '@/core/exerciseContext'
@@ -330,7 +334,8 @@ function applyLive(next: OverlayState, sequence: number): void {
  * never allowed to rewind the cutoff below an already-consumed push.
  *
  * A failed/malformed read leaves the previous snapshot in place — never a guessed
- * or invented overlay — and the next reconnect retries.
+ * or invented overlay — and the next reconnect retries. The ONE exception is a
+ * `403`, which is definitive rather than transient: see `refetchLive`.
  */
 async function refetchLive(): Promise<void> {
   const generation = ++fetchGeneration
@@ -346,9 +351,28 @@ async function refetchLive(): Promise<void> {
 
     if (!isWireOverlayState(response.data)) return
     applyLive(toOverlayState(response.data), readSequence(response.data))
-  } catch {
-    // Transient failure (including a fail-closed 401 on an unresolved scope) —
-    // keep the previous snapshot; the next reconnect resyncs.
+  } catch (error) {
+    // WR-001: a `403` is DEFINITIVE, not transient. The server's lifecycle gate
+    // refuses THIS route only where the world is closed to participants
+    // (`build`/`archived`, and any unrecognised state) — `paused` and `completed`
+    // are carved out precisely so an overlay can still render — so a 403 can
+    // never mean "the world is paused". Keeping the previous snapshot there was
+    // the bug: a tab frozen while `live` and still connected at `archived` re-GETs
+    // a 403 on every reconnect and renders the holding page forever, healed only
+    // by a full reload. So CLEAR the overlay instead.
+    //
+    // The clear is ordering-guarded exactly like the success path above, and it
+    // deliberately does NOT rewind `lastAppliedSequence`: nothing about a refused
+    // read makes an already-consumed push replayable.
+    //
+    // Everything else stays FAIL-CLOSED — a `401` (unresolved scope), a `5xx`, a
+    // malformed body, or a network failure keeps the previous snapshot and lets
+    // the next reconnect resync, because none of those tells us the world is not
+    // paused.
+    if (axios.isAxiosError(error) && error.response?.status === 403) {
+      if (generation !== fetchGeneration || appliedPushCount !== pushesWhenIssued) return
+      applyLive(DEFAULT_OVERLAY_STATE, lastAppliedSequence)
+    }
   }
 }
 

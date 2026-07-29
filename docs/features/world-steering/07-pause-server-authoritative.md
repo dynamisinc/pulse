@@ -217,7 +217,19 @@ the shipped `EngineCockpitStaffAuthorizationFilter`; the shipped kill-switch/res
   - `PauseTierEndpointsTests.Post_NonFreezeTier_LeavesTheClockRunning` (AC-1)
   - `PauseTierEndpointsTests.Get_AfterAPost_ResyncsTheRecordedTier` (AC-7)
   - `PauseTierEndpointsTests.Post_UnknownTier_Returns400` / `Post_MissingActingHuman_Returns400` (AC-7)
-  - `PauseTierEndpointsTests.AddPauseTierSteering_RegistersTheNoOpOverlayPublisherDefault` (AC-7)
+  - `PauseOverlayCompositionTests.AddPauseTierSteering_Alone_StillResolvesAWorkingNoOpPublisher` (AC-7)
+    — this story's `TryAddSingleton` no-op overlay-publisher default, proven by DI resolution with story 08
+    absent (re-pointed at Gate-2, WR-002: the previously cited
+    `PauseTierEndpointsTests.AddPauseTierSteering_RegistersTheNoOpOverlayPublisherDefault` never existed)
+  - **#297 role gate (added at Gate-2 — the mutation is controller-only, the read is not):**
+    `PauseTierEndpointsTests.Post_FromAnAssignedNonControllerStaffSession_Returns403_AndNeverFreezes`
+    (theory: `evaluator`, `planner` — 403, clock unfrozen, no tier recorded, no participant overlay),
+    `.Post_FromAnAssignedControllerStaffSession_StillFreezes_TheGateIsNotABlanketDeny` (the positive
+    control), `.Get_FromAnAssignedNonControllerStaffSession_Returns200_SoTheyCanWatch` (theory:
+    `evaluator`, `planner` — the resync GET stays open), and the widened drift guard
+    `EngineSettingsEndpointsTests.EveryMutatingStaffSteeringRouteInTheRealRouteTable_IsCoveredByTheRoleGateTests`
+    (now covers `/api/steering`, not only `/api/engine` — the omission that let this gap ship) plus
+    `.EveryMutatingRoute_FromANonControllerAssignedStaffSession_Returns403` (AC-7)
 - Unit (frontend): `usePauseState`'s live branch — optimistic flip, POST, and revert-on-rejection
   unless superseded by a newer transition (mirrors the `useEngineControl.setMode` revert test).
   - `usePauseState — live mode > flips the tier optimistically AND POSTs it with the acting human + time zone` (AC-1)

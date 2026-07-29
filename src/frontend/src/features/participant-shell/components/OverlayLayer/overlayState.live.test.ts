@@ -21,7 +21,11 @@
  *    cutoff below a push that has already been consumed;
  *  - a push with no `sequence` is unorderable and therefore dropped (SG-002),
  *    while the sequence-less GET fallback body stays acceptable;
- *  - a failed GET leaves the previous snapshot alone rather than inventing one.
+ *  - a failed GET leaves the previous snapshot alone rather than inventing one —
+ *    EXCEPT a `403` (WR-001), which is definitive: the lifecycle gate refuses this
+ *    route only where the world is closed to participants, which is never a pause,
+ *    so the overlay is CLEARED instead of stranding a holding page on every
+ *    reconnect. `401`/`5xx`/network failures stay fail-closed.
  *
  * Uses the module's own test seam (`ensureStarted(connection)`) with a
  * hand-rolled fake `RealtimeConnection` plus a mocked `api` — mirroring
@@ -315,6 +319,70 @@ describe('liveOverlayStateStore — no trust in arrival order (CR-001)', () => {
     expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
     connection.push(wireState({ state: 'none', register: 'in-fiction', sequence: 4 }))
     expect(liveOverlayStateStore.getSnapshot().state).toBe('none')
+  })
+})
+
+describe('liveOverlayStateStore — a refused re-GET (WR-001)', () => {
+  /** A rejection `axios.isAxiosError()` recognizes, carrying an HTTP status. */
+  function axiosErrorWith(status: number): Error {
+    return Object.assign(new Error(`HTTP ${status}`), {
+      isAxiosError: true,
+      response: { status },
+    })
+  }
+
+  async function seedFrozen(): Promise<void> {
+    resolveGet(wireState({ state: 'pause', register: 'out-of-fiction', sequence: 5 }))
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
+  }
+
+  it('CLEARS a stranded holding page when the re-GET is refused 403 (the world is closed)', async () => {
+    // A tab frozen while `live` that is still connected when the exercise reaches
+    // `archived`: the lifecycle gate now 403s /api/overlay-state, which can never
+    // mean "paused". Keeping the previous snapshot rendered the holding page across
+    // every reconnect, clearable only by a full reload.
+    await seedFrozen()
+
+    getMock.mockRejectedValue(axiosErrorWith(403))
+    connection.setState(HubConnectionState.Connected)
+    await flush()
+
+    expect(liveOverlayStateStore.getSnapshot()).toEqual({
+      state: 'none',
+      register: 'in-fiction',
+      message: '',
+    })
+  })
+
+  it('KEEPS the holding page on a 401, a 5xx, or a network failure (fail closed)', async () => {
+    await seedFrozen()
+
+    for (const rejection of [axiosErrorWith(401), axiosErrorWith(503), new Error('Network Error')]) {
+      getMock.mockRejectedValue(rejection)
+      connection.setState(HubConnectionState.Connected)
+      await flush()
+
+      expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
+    }
+  })
+
+  it('does not rewind the stale-push cutoff when it clears on a 403', async () => {
+    await seedFrozen()
+
+    getMock.mockRejectedValue(axiosErrorWith(403))
+    connection.setState(HubConnectionState.Connected)
+    await flush()
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('none')
+
+    // A push at or below the already-consumed sequence 5 is still stale...
+    connection.push(wireState({ state: 'pause', register: 'out-of-fiction', sequence: 5 }))
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('none')
+
+    // ...while a genuinely newer one still applies.
+    connection.push(wireState({ state: 'pause', register: 'out-of-fiction', sequence: 6 }))
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
   })
 })
 
