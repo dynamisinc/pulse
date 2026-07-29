@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom'
+import { configure } from '@testing-library/react'
 import axios, { type AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 
@@ -37,3 +38,30 @@ api.defaults.adapter = config =>
       config,
     })
     : realAdapter(config)
+
+// ---------------------------------------------------------------------------
+// Align RTL's async window with Vitest's test timeout (TEST-ONLY).
+//
+// `vite.config.ts` sets `testTimeout: 10000`, but that governs the TEST; React
+// Testing Library's `waitFor`/`findBy*` window is `asyncUtilTimeout`, which is a
+// SEPARATE knob defaulting to 1000ms. Nothing configured it, so the two were 10x
+// apart: a test was allowed 10s overall while every `findBy*` inside it gave up
+// after 1s.
+//
+// Under a full parallel run that 1s window is what gives. Symptom (issue #391):
+// a rotating set of RTL files — each awaiting the full provider stack plus
+// asynchronously-resolved mock data — fails one at a time, every one passing in
+// isolation, sometimes alongside PARTIAL COLLECTION (176 of 197 files) as workers
+// time out. Five distinct files were observed failing across consecutive runs
+// while gating one branch, none of them touched by it.
+//
+// That is worse than flaky: when the suite reports failures AND silently collects
+// fewer files, neither green nor red is trustworthy, and a real regression can be
+// waved away as "the known flake". Vitest's `isolate: true`/forks defaults rule
+// out singleton bleed, so this is contention, not shared state.
+//
+// Fixed centrally rather than per-file, and deliberately NOT with
+// `--no-file-parallelism` — that hides the race instead of removing it, and this
+// repo rejected it once already for that reason (PR #312, which fixed the same
+// class with `findBy` + a raised timeout).
+configure({ asyncUtilTimeout: 5000 })

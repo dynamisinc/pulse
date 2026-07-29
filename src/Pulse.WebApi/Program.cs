@@ -378,9 +378,17 @@ app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + 
 
 // World-steering endpoints (Wave 2) — same COR-001 discipline as the cockpit above: scope comes only from the
 // resolved IExerciseContext, never a client exerciseId, and both groups reuse EngineCockpitStaffAuthorizationFilter
-// unmodified (401 unauthenticated/unscoped, 403 not-assigned). #351 maps NO route of its own: participants read
-// through participant-shell's already-mapped GET /api/overlay-state and the push rides the already-mapped
-// /hubs/exercise, so it is service-registration only (above).
+// unmodified (401 unauthenticated/unscoped, 403 not-assigned).
+// #297/#353, same two-tier shape as the /api/engine block above: within each group the MUTATING routes carry an
+// additional EngineCockpitControllerRoleFilter, so an assigned evaluator or planner may WATCH via the two GETs
+// but cannot steer — freezing the world and re-aiming the escalation are both more participant-visible than the
+// kill switch #297 was filed to protect. This was NOT true when #350/#352 were written (they predate that
+// decision) and the gap survived because the drift guard in EngineSettingsEndpointsTests filtered on
+// /api/engine alone; it now derives from /api/engine AND /api/steering, so a new ungated mutating steering
+// route reds the build.
+// #351 maps NO route of its own: participants read through participant-shell's already-mapped
+// GET /api/overlay-state and the push rides the already-mapped /hubs/exercise, so it is service-registration
+// only (above).
 app.MapPauseTierSteering();   // #350 pause tier (Freeze reaches the real clock)
 app.MapStorylineSteering();   // #352 storyline actual/target read + target set
 
