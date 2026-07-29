@@ -34,6 +34,16 @@
  *     telemetry already logged the attempted change either way). `degrade`/
  *     `restore` (the mock provider-degraded clamp) are UNCHANGED — a separate
  *     mock, not part of this flip.
+ *
+ *     `setMode` accepts an OPTIONAL `{ onRejected }` callback, invoked after
+ *     that revert, so a COMPOSING caller can undo its own coupled state too
+ *     (world-steering/07: `usePauseState` must not keep showing ENGINE PAUSED
+ *     when the kill-switch POST this hook owns has failed and the control bar
+ *     has already snapped back to LIVE). It is deliberately a callback rather
+ *     than a returned promise: every existing caller is fire-and-forget, and
+ *     returning a rejecting promise from `setMode` would create unhandled
+ *     rejections (and turn `act(() => setMode(...))` into an un-awaited async
+ *     act) across surfaces that never asked for the outcome.
  *  - `degrade(reason)` / `restore()` — the AUTOMATIC provider-degraded clamp
  *    (mirrors `DegradeToSuggest` / `RestoreFromSafety`): a mock stand-in for a
  *    generation-provider circuit breaker tripping. `degrade` only ever LOWERS
@@ -140,8 +150,27 @@ function resetForTests(): void {
   listeners.clear()
 }
 
-/** The module-singleton engine-control store. Exposed for test-only reset. */
-export const engineControlStore = { getSnapshot, subscribe, resetForTests }
+/**
+ * Adopts a mode the SERVER already has, locally and SILENTLY — no telemetry, no
+ * backend POST. Used only by resync paths (world-steering/07's `usePauseState`
+ * mount resync) that learn the engine is already stopped because some *other*
+ * human stopped it: emitting `engine.autonomy_changed` here would write a
+ * safety action into the audit trail attributed to THIS console's acting human,
+ * for an action they never took (COR-018/XC-004 accuracy), and re-POSTing the
+ * kill switch would echo a command nobody issued. The causing action was
+ * already logged by whoever performed it.
+ */
+function adoptServerMode(exerciseId: string, mode: EngineMode): void {
+  const current = getSnapshot(exerciseId)
+  if (current.mode === mode) return
+  setFor(exerciseId, { ...current, mode })
+}
+
+/**
+ * The module-singleton engine-control store. Exposed for the test-only reset and
+ * the silent server adopt.
+ */
+export const engineControlStore = { getSnapshot, subscribe, resetForTests, adoptServerMode }
 
 // ---------------------------------------------------------------------------
 // effective autonomy derivation
@@ -164,6 +193,16 @@ function deriveEffective(state: EngineControlState): EffectiveAutonomy {
 // The hook
 // ---------------------------------------------------------------------------
 
+/** Options a composing caller can pass to `setMode`. */
+export interface SetEngineModeOptions {
+  /**
+   * Invoked (live mode only) after a rejected kill-switch/restore POST has been
+   * reverted, so a caller with COUPLED state can undo it too — see the module
+   * header. Never called in mock mode, and never called for a no-op.
+   */
+  readonly onRejected?: () => void
+}
+
 /** The surface `<EngineControlBar>` (and `DraftTimerDriver`) binds to. */
 export interface UseEngineControlResult {
   /** The kill switch's current position. Defaults `'live'`. */
@@ -175,7 +214,7 @@ export interface UseEngineControlResult {
   /** The mock degraded reason, or `null` when healthy — drives the alert copy. */
   readonly degradedReason: string | null
   /** Sets the kill switch's position — always a human action, logged (ADP-041). */
-  readonly setMode: (mode: EngineMode) => void
+  readonly setMode: (mode: EngineMode, options?: SetEngineModeOptions) => void
   /** Trips the automatic degraded clamp (mock provider-degraded), logged. No-op if already on. */
   readonly degrade: (reason: string) => void
   /** Explicitly lifts the degraded clamp (never automatic), logged. No-op if already healthy. */
@@ -216,7 +255,7 @@ export function useEngineControl(): UseEngineControlResult {
   )
 
   const setMode = useCallback(
-    (mode: EngineMode) => {
+    (mode: EngineMode, options?: SetEngineModeOptions) => {
       const current = getSnapshot(exerciseId)
       if (current.mode === mode) return
       const next: EngineControlState = { ...current, mode }
@@ -250,6 +289,17 @@ export function useEngineControl(): UseEngineControlResult {
         const live = getSnapshot(exerciseId)
         if (live.mode === next.mode) {
           setFor(exerciseId, { ...live, mode: current.mode })
+        }
+
+        // Let a COMPOSING caller undo its own coupled state (world-steering/07:
+        // the ENGINE PAUSED tier must not outlive the stop it claims). Called
+        // after our own revert, and guarded so a caller's callback can never
+        // break this hook's contract.
+        try {
+          options?.onRejected?.()
+        } catch {
+          // A composing caller's revert must never resurface as an unhandled
+          // rejection inside the kill switch's own failure path.
         }
       })
     },
