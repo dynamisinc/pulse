@@ -36,6 +36,25 @@ function withSession(children: ReactNode) {
   return render(<SessionProvider>{children}</SessionProvider>)
 }
 
+/**
+ * Asserts the button's follow state — the same discriminating-signal helper the
+ * sibling `Profile.follow.test.tsx` uses, and for the same reason.
+ *
+ * Deliberately NOT `toHaveTextContent('Follow')`: that matcher is a SUBSTRING
+ * match, so "Follow" also matches "Following". An assertion written that way
+ * passes against a button stuck in the WRONG state, and — worse — a `waitFor`
+ * gated on it resolves immediately instead of waiting for the transition it is
+ * supposed to be waiting for, so whatever follows the gate races the render
+ * (this file's rollback spec flaked exactly that way under CI load).
+ * `aria-pressed` is the unambiguous signal (and the one assistive tech reports,
+ * NFR-001); the exact trimmed label is checked alongside it.
+ */
+function expectFollowState(button: HTMLElement, following: boolean) {
+  expect(button).toHaveAttribute('aria-pressed', String(following))
+  expect(button).toHaveAttribute('data-following', String(following))
+  expect(button.textContent?.trim()).toBe(following ? 'Following' : 'Follow')
+}
+
 beforeEach(() => {
   // Resolves with the server's authoritative envelope (SG-001) — `following`
   // `true` for a follow / `false` for an unfollow, with `changed: true` because
@@ -59,14 +78,12 @@ describe('FollowButton — toggle + accessible state (SOC-051, NFR-001)', () => 
     )
 
     const button = await screen.findByTestId('follow-button')
-    expect(button).toHaveTextContent('Follow')
-    expect(button).toHaveAttribute('aria-pressed', 'false')
+    expectFollowState(button, false)
     expect(button).toHaveAttribute('aria-label', 'Follow Fairhaven Water')
 
     fireEvent.click(button)
 
-    expect(button).toHaveTextContent('Following')
-    expect(button).toHaveAttribute('aria-pressed', 'true')
+    expectFollowState(button, true)
     expect(button).toHaveAttribute('aria-label', 'Unfollow Fairhaven Water')
 
     await waitFor(() => expect(followPersona).toHaveBeenCalledWith('persona-fairhavenwater'))
@@ -99,11 +116,11 @@ describe('FollowButton — toggle + accessible state (SOC-051, NFR-001)', () => 
 
     const button = await screen.findByTestId('follow-button')
     fireEvent.click(button)
-    expect(button).toHaveTextContent('Following')
+    expectFollowState(button, true) // optimistic
 
-    await waitFor(() => expect(button).toHaveTextContent('Follow'))
-    expect(button).not.toHaveTextContent('Following')
-    expect(button).toHaveAttribute('aria-pressed', 'false')
+    // The gate is the ROLLBACK itself, not a substring both states satisfy.
+    await waitFor(() => expect(button).toHaveAttribute('aria-pressed', 'false'))
+    expectFollowState(button, false)
   })
 
   it('marks the button aria-busy + disabled while the write is pending', async () => {
