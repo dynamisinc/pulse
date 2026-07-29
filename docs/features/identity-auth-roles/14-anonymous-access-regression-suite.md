@@ -1,6 +1,6 @@
 # Story: Anonymous-access regression suite — every non-allowlisted route fail-closes
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-012 (with COR-001 implicated)  ·  **Design decisions:** none  ·  **Issue:** #367
 **Stack:** backend  ·  **Review:** Tier-2 (auth surface + the isolation seam — always-Critical class)
 
@@ -21,40 +21,110 @@ central design point is enumeration, not a fixed list (below).
 ## Acceptance Criteria
 
 ### Enumeration from the live host, not a hand-maintained list
-- [ ] Given a real `WebApplicationFactory<Program>` host (mirroring
+- [x] Given a real `WebApplicationFactory<Program>` host (mirroring
       `Pulse.WebApi.Tests/Features/Ops/Bootstrap/CompositionRootWiringTests.cs` and
       `Pulse.WebApi.Tests/Features/Social/CompositionRootWiringTests.cs`, both of which already
       resolve the aggregate `EndpointDataSource` from `factory.Services`), when the suite runs, then
       it enumerates every mapped `RouteEndpoint` from that live `EndpointDataSource` — **never** a
       hand-typed list of route strings — so a newly added endpoint is covered automatically without
       anyone writing a new test for it.
-- [ ] Given the enumerated route list, when a route is **not** one of the 11 allowlisted routes
+- [x] Given the enumerated route list, when a route is **not** one of the 11 allowlisted routes
       (`GET /api/exercise-context`, `POST /api/auth/login`, `POST /api/auth/staff/login`,
       `POST /api/auth/shared`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /health`,
       `GET /health/ready`, `POST /api/ops/bootstrap-exercise`, `POST /api/ops/seed-engine-content`,
       `POST /api/ops/bind-participant-persona`), when it is called with no `Authorization` header
       and no cookie, then it returns 401.
-- [ ] Given the same enumeration, when a route **is** one of the 11 allowlisted routes, then it
+- [x] Given the same enumeration, when a route **is** one of the 11 allowlisted routes, then it
       remains reachable with no credential (i.e. does not 401 for that reason — a 400 for a missing
       body, or a 404 for the ops secret gate, is a different and acceptable outcome; only a 401
       caused by the new default-deny gate is the regression this checks for).
-- [ ] The allowlist itself is the **only** hand-maintained artifact in this suite — expressed as a
+- [x] The allowlist itself is the **only** hand-maintained artifact in this suite — expressed as a
       single, explicitly reviewed constant (ideally the same one story 11's `.AllowAnonymous()`
       marks reference, so the two cannot drift apart) — and extending it is a deliberate, visible
-      diff, never an accidental new opt-out.
+      diff, never an accidental new opt-out. *(`PreAuthAllowlist`, unchanged by this story, and now
+      pinned to 11 by literal so that GROWING it fails a test rather than merely appearing in a diff
+      — see Decision 5. The suite's one other hand-maintained **exemption** — the only list that can
+      excuse a route from an assertion — is a single, self-policing entry (Decision 3); the remaining
+      hand-typed lists are **coverage guards**, which can only ever make the sweep stricter.)*
 
 ### The hub and the staff/engine surfaces
-- [ ] Given an unauthenticated client, when it attempts to connect to `/hubs/exercise`, then the
+- [x] Given an unauthenticated client, when it attempts to connect to `/hubs/exercise`, then the
       connection is aborted and it joins no SignalR group (extends
       `ExerciseRealtimeHub.OnConnectedAsync`'s existing empty-scope-abort test with the
-      no-credential-at-all case).
-- [ ] Given the `/api/staff/*` and `/api/engine/*` surfaces (already gated by
+      no-credential-at-all case). *(Plus a plain-HTTP probe of `/hubs/exercise/negotiate` — the
+      exploit's actual first step, and the endpoint a SignalR client alone does not isolate.)*
+- [x] Given the `/api/staff/*` and `/api/engine/*` surfaces (already gated by
       `ICurrentStaffSessionAccessor` / `EngineCockpitStaffAuthorizationFilter` before this feature's
       stories 11-13 existed), when the default-deny wrapper lands, then they return their existing
       401/403 — unchanged — including the three previously **un-probed**
       `/api/engine/review/{draftId}/edit`, `/re-roll`, `/veto` routes (the audit inferred their
       behavior from the shared `MapGroup` filter rather than probing them individually; this suite
-      asserts them directly).
+      asserts them directly). *(Asserted in BOTH directions — see Decision 2, which is the half that
+      keeps this AC from being vacuous.)*
+
+## Decisions made during the build
+
+**1. One `[Fact]` with an `AssertionScope`, not a `[MemberData]` theory.** The AC asks for
+"parameterized over the live `EndpointDataSource`". A theory would have to build the host during xUnit's
+**discovery** phase, where the process-wide `ConnectionStrings__DefaultConnection` mutation the factory needs has
+no ordering guarantee against other classes' hosts (`AssemblyInfo.cs` disables *execution* parallelization, not
+discovery). A single fact wrapped in `AssertionScope` gives what the theory was for — every failing route reported
+in one run, not just the first — with one host build and no discovery-time hazard.
+
+**2. The sweep asserts staff/engine authorization in BOTH directions, and the second one is the point.** Story 11's
+gate now answers first for an anonymous caller, which means an anonymous-only probe of `/api/staff/*` and
+`/api/engine/*` would pass **even if `EngineCockpitStaffAuthorizationFilter` and the staff endpoints' own
+`ICurrentStaffSessionAccessor` checks were deleted outright**. A suite that only probed anonymously would therefore
+have gone non-discriminating about the staff-only guarantee (XC-002) the moment the gate landed — which is exactly
+what happened to a test in another feature after story 12 (WR-003 on #388). So the suite also presents a **live
+non-staff session**, gets past the gate, and requires the pre-existing filters to be the ones that refuse. Absence
+of `WWW-Authenticate` is the proof of authorship.
+
+**3. Two mechanisms make a route unprobeable for *authorization*; one is handled by enumeration, one is a filed
+finding.** Minimal-API **parameter binding runs before endpoint filters**, so a body the binder rejects means the
+authorization filter never executes — and the test would look green while proving nothing.
+- *Content-type binding* (`POST /api/staff/accounts/import` binds an `IFormFile`, so JSON gets 415 before any
+  filter): solved by enumeration, not a list — the probe reads each endpoint's own inferred `IAcceptsMetadata` and
+  sends multipart where the endpoint asks for it. Same principle as the route set itself.
+- *Body-validated-before-identity* (`POST /api/staff/active-exercise` returns its own
+  `BadRequest("exerciseId must be a GUID.")` before calling the only service that can report
+  `Unauthenticated`/`NotAssigned`): a genuine finding, **filed as #393 rather than folded in**, per this story's
+  own Out of Scope. Not a vulnerability — an anonymous caller never reaches it and the handler never reaches the
+  service — but it is the same *shape* as the pattern that caused #359. It is the suite's single named exception,
+  and the exception is self-policing: every listed route must still be mapped, and every route **not** listed must
+  return a real 401/403, so a future endpoint acquiring this shape fails the suite and forces a decision.
+
+**4. The guards were verified to bite, not assumed to.** A sweep that cannot fail is a sweep that proves nothing.
+Nine neuters were applied to production code and reverted, and the suite had to fail for the *right* reason each
+time. The load-bearing ones:
+
+| Neuter | Caught by |
+|---|---|
+| `FallbackPolicy` → permissive `RequireAssertion(_ => true)` | the anonymous sweep, the staff/engine sweep, and the `/negotiate` probe |
+| Delete `.AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>()` | the live-session sweep **only** — reporting `GET /api/engine/settings` returning **200** to a non-staff session |
+| Add an allowlist entry with no matching `.AllowAnonymousPreAuth()` mark | the allowlist sweep + the coverage guard |
+| Remove one `.AllowAnonymousPreAuth()` mark | the allowlist sweep |
+| Break `Concretize` (`:guid` → a non-Guid) | the anonymous sweep (404 + **no** challenge — a mis-concretized probe cannot pass silently) |
+| Drop the multipart branch from `ProbeBody` | the live-session sweep (415 at binding on `/api/staff/accounts/import`) |
+| Point the probe at a token the authenticator does not resolve | the live-session sweep's **positive control** |
+
+The second row is Decision 2 proved rather than argued: with the engine filter gone, **every anonymous probe still
+passed**, and only the live-session test failed.
+
+**5. Two vacuity holes the Tier-2 review found in this suite, both closed.**
+- **The live-session sweep was itself vacuous for the reason it exists.** The probe session was `participant` —
+  and a participant session is **host-bound**, so `SessionAuthenticationMiddleware` short-circuits with a bare 403
+  (no challenge, before `UseAuthorization`) whenever the host-resolved exercise is absent. That 403 satisfied *both*
+  assertions while the endpoint, its filter and the whole authorization decision stayed unreachable. Proven: adding
+  `/api/staff` to `Program.cs`'s `UseExerciseResolution` exclusion left all tests green. Fixed by switching the
+  probe to `readonly` — a genuine non-staff kind that is **not** host-bound, so a refusal there can only have been
+  authored by the endpoint's own check — plus a **positive control** (a gated non-staff route must NOT 401 for this
+  session), since every other assertion in that test asserts a refusal and would pass just as well if the session
+  were never accepted at all.
+- **Nothing pinned the allowlist's SIZE.** `HaveCount(PreAuthAllowlist.Routes.Count)` is self-referential, and
+  story 11's marks-equal-allowlist invariant is self-referential the same way — so a route added to the allowlist
+  **and** marked would have been invisible to every test in both suites, leaving AC4 resting on human diff review.
+  Now pinned to the literal 11.
 
 ## Out of Scope
 Fixing any newly-discovered gap beyond what stories 11/12/13 already close — a genuinely new
@@ -87,6 +157,14 @@ to reach a live database for most of them; where a route's own logic needs a DB 
 **Baseline to preserve:** 747 passing / 0 skipped on `main` with `PULSE_TEST_SQL_CONNECTION` set to
 LocalDB (`[RequiresDockerFact]` tests included). This suite adds to that count; it must not reduce
 it or introduce a new skip.
+
+> **As built.** The baseline had moved a long way by the time this landed: **1506** on `main` after story 13
+> (#392), **1512** with this suite's 6 tests, 0 skipped, `[RequiresDockerFact]` suites executing against LocalDB.
+> One file, test-project only: `Pulse.WebApi.Tests/Features/Identity/Sessions/AnonymousAccessRegressionTests.cs`.
+> No production code changed — which is the honest outcome for a regression-suite story, and the reason the
+> finding it surfaced went to **#393** rather than into this diff. (Six tests rather than ten: the Tier-2 review
+> identified one as a line-for-line duplicate of story 11's hub-connection test, and three single-assertion theory
+> cases were folded into the coverage guard so the whole guard costs one host build instead of four.)
 
 Cross-reference `implementation.md`'s per-story tech notes and Wave Plan — this story is scheduled
 after 11, 12, and 13 have all merged, since it asserts their combined behavior.
