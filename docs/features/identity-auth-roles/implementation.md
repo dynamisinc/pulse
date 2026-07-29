@@ -27,6 +27,28 @@
 | 13 `POST /api/telemetry` scope authority **[Tier-2, #362]** | backend | Server-stamps `exerciseId` + actor identity from the session (reusing story 12's accessor); rejects (400) a disagreeing client-supplied `exerciseId` rather than silently overwriting it; no pre-auth carve-out (verified: no legitimately pre-auth emitter exists). | `Telemetry/TelemetryController.cs` | — |
 | 14 Anonymous-access regression suite **[Tier-2, #367]** | backend (tests) | `EndpointDataSource`-enumerated sweep (never a hand-maintained route list) asserting every non-allowlisted route 401s with no credential, the hub aborts an unauthenticated connection, and `/api/staff/*`+`/api/engine/*` are unchanged. Verifies 11+12+13 together. | `Pulse.WebApi.Tests/Features/Identity/Sessions/AnonymousAccessRegressionTests.cs` (new) | — |
 
+> **As-built correction to the stories 11-14 rows above (2026-07-28).** The rows are the PLAN; two of them name a
+> seam that was never built, and leaving that uncorrected would send the next reader looking for a file that does
+> not exist. The rest of the table is accurate.
+> - **Story 12 did NOT add `Features/Identity/Sessions/CurrentSessionAccessor.cs` / `ICurrentSessionAccessor`.** It
+>   reused the two accessors that already existed — `ICurrentSessionPersonaAccessor`
+>   (`Features/Social/Follows/`) and `ICurrentStaffSessionAccessor` — behind a new
+>   `Features/Social/PostAttributionResolver.cs`, deliberately avoiding a fourth parallel session-lookup seam.
+>   Consolidating the existing three remains its own tracked follow-up.
+> - **Story 13 therefore does not "reuse story 12's accessor" either.** It reads the identity from
+>   `HttpContext.User` via a new fail-closed `SessionPrincipal.Read`, after `AuthenticatedSession` /
+>   `SessionPrincipal` were extended to carry `PrincipalId` / `ActingHumanId` / `PersonaId` — resolving the blocker
+>   `ENDPOINT-AUTH-AUDIT.md` itself identified, at the level it identified it. The reason is cost, not taste:
+>   telemetry is the burst-rate path (SOC-071), and an endpoint-time accessor would add a token→session query PER
+>   EVENT, whereas the claims are already in hand from the one lookup the middleware performs. Files: new
+>   `Telemetry/TelemetryEnvelopeAuthority.cs`; edits to `Telemetry/TelemetryController.cs`,
+>   `Features/Identity/Sessions/{ISessionAuthenticator,SessionAuthenticator,SessionPrincipal}.cs`.
+> - **Story 13 authored no migration.** The FK on `TelemetryEvent.ExerciseId` was considered and declined — no
+>   `IExerciseScoped` entity in this model has one. See story 13's Decision 6.
+> - **Story 14 landed 6 tests, test-project only**, and surfaced one finding filed as **#393** rather than folded
+>   in. Its live-session half (the assertion that the staff/engine filters, not the gate, refuse a non-staff
+>   caller) is the part that keeps the story-11 gate from silently making those filters redundant.
+
 ## Reuse map
 <Name B0's real seams — build on them, do not recreate.>
 
