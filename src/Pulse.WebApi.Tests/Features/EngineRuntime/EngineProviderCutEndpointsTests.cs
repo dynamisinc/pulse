@@ -428,10 +428,11 @@ public sealed class EngineProviderCutEndpointsTests
 }
 
 /// <summary>
-/// The REQUEST-CONTRACT half of story 07 AC4 — deliberately a model-only <see cref="FactAttribute"/> outside
-/// the SQL collection, so this half of the "this endpoint can never become a provider chooser" guard runs on
-/// every machine and in every CI job, not only where a real SQL Server is reachable. It reflects over the real
-/// request DTO, so it observes production code with no host at all.
+/// Story 07's model-only wire-contract guards — deliberately <see cref="FactAttribute"/>s outside the SQL
+/// collection, so they run on every machine and in every CI job, not only where a real SQL Server is reachable.
+/// They reflect over / read the real production contract types, so they observe production code with no host at
+/// all: the REQUEST-CONTRACT half of AC4 ("this endpoint can never become a provider chooser"), and the backend
+/// half of the Gate-2 WR-G2-007 <see cref="EngineSettingsDto.InMemoryNote"/> drift guard.
 /// </summary>
 /// <remarks>
 /// The ROUTE-TABLE half necessarily lives in the host-bearing suite above
@@ -461,5 +462,36 @@ public sealed class EngineGenerationProviderRequestShapeTests
                 || name.Contains("endpoint", StringComparison.OrdinalIgnoreCase)
                 || name.Contains("deployment", StringComparison.OrdinalIgnoreCase)
                 || name.Contains("model", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Gate-2 WR-G2-007, backend half: the shared <see cref="EngineSettingsDto.InMemoryNote"/> must keep naming
+    /// THIS lever and its reset target, so an operator is told a restart returns generation to the
+    /// startup-configured provider instead of discovering it. Model-only, like the AC4 guard above, so it runs on
+    /// every machine and in every CI job.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the paired half of the frontend guard in</b>
+    /// <c>src/frontend/src/features/controller/engine/hooks/useEngineSettings.test.ts</c> ("WR-002: the mock
+    /// inMemoryStateNote honestly names the generation-provider cut …"), which asserts the same two markers
+    /// against the mock's copy of the note. That one alone could only catch a REVERT of the mock fixture to the
+    /// pre-story-07 wording; this one makes an edit to the C# <c>const</c> that drops either marker fail a build,
+    /// which is the direction that already shipped a stale note to UAT once.
+    /// </para>
+    /// <para>
+    /// <b>What the pair still does NOT close, stated honestly:</b> the two sides assert the same two markers
+    /// <i>independently</i>, against two separate strings. So the pair catches a one-sided drop of a marker in
+    /// either language, but NOT a coordinated reword that changes both copies together (nor a copy that keeps the
+    /// markers while the rest of the sentence goes stale, nor divergence in any text outside the markers). There
+    /// is still no shared source of truth across the language boundary — closing that needs a generated/exported
+    /// contract fixture, tracked separately.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheSharedInMemoryNote_NamesTheGenerationProviderCutAndItsStartupConfiguredResetTarget()
+    {
+        EngineSettingsDto.InMemoryNote.Should().MatchRegex("(?i)generation-provider cut")
+            .And.MatchRegex("(?i)startup-configured provider");
     }
 }

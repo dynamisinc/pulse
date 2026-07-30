@@ -26,11 +26,11 @@ using Xunit;
 
 /// <summary>
 /// autonomy-safety story 07 — the service half of the runtime "cut generation to Fake" egress lever, against a
-/// REAL SQL Server (Testcontainers / local SQL), because the XC-004 audit row is the assertion for AC7.
+/// REAL SQL Server (Testcontainers / local SQL), because the XC-004 audit row is the assertion for AC8.
 /// Covers AC1 (cut → the exercise's next burst is Fake, nothing else moves), AC2 (restore → the
 /// startup-configured provider and no other), AC3 (the already-Fake / double-call no-ops: no state change, NO
 /// spurious telemetry), AC5 (configured vs effective as two independently readable facts), AC6 (isolation +
-/// fail-closed scope) and AC7 (exactly one server-side event per real transition, both directions).
+/// fail-closed scope) and AC8 (exactly one server-side event per real transition, both directions).
 /// </summary>
 [Collection(MsSqlCollection.Name)]
 public sealed class EngineProviderCutServiceTests
@@ -166,7 +166,7 @@ public sealed class EngineProviderCutServiceTests
             2, "two real transitions → exactly two events; the two repeats changed nothing and emitted nothing");
     }
 
-    // ---- AC7: one server-side event per transition, carrying actor + times + from/to -------------
+    // ---- AC8: one server-side event per transition, carrying actor + times + from/to -------------
 
     [RequiresDockerFact]
     public async Task Cut_EmitsExactlyOneProviderChangedEvent_WithActorScenarioTimeAndFromTo()
