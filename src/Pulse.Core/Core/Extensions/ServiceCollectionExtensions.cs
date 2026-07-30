@@ -20,6 +20,24 @@ public static class ServiceCollectionExtensions
     /// depends only on <see cref="IGenerationProvider"/>, <see cref="IPromptAssembler"/>, and
     /// <see cref="ITierPolicy"/>; swapping the provider is a configuration change, not a code change.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Both the configured provider AND Fake are registered (autonomy-safety story 07).</b> The
+    /// discriminator still decides the CONFIGURED provider exactly as before — and the NFR-005 governance gate
+    /// still runs first, before any adapter or HttpClient is constructed, failing closed on ungoverned config.
+    /// What changed is that <see cref="IGenerationProvider"/> now resolves to a
+    /// <see cref="GenerationProviderSelector"/> over the configured provider and
+    /// <see cref="FakeGenerationProvider"/>, so a controller can CUT one exercise's generation to Fake at
+    /// runtime (ADP-042) with no restart. The selector can only ever pick between those two
+    /// already-registered instances: this adds no reachable endpoint, and restoring returns to exactly the
+    /// signed startup configuration (§8.2).
+    /// </para>
+    /// <para>
+    /// The <c>Fake</c>-configured case (the committed default, and every CI run) wraps Fake on BOTH sides
+    /// rather than skipping the selector — the shape stays uniform so the cut path is exercised in CI instead
+    /// of only in an environment with a live provider.
+    /// </para>
+    /// </remarks>
     public static IServiceCollection AddEngineGeneration(this IServiceCollection services, IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -32,14 +50,21 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPromptAssembler, PromptAssembler>();
         services.AddSingleton<ITierPolicy, TierPolicy>();
 
+        // The runtime egress lever's per-exercise state (story 07). Registered in exactly ONE place, so the
+        // reaction loop's selector and the settings endpoints that flip it cannot end up on two dictionaries —
+        // a second registry would mean a controller's cut never reached the loop.
+        services.TryAddSingleton<IGenerationProviderCutRegistry, GenerationProviderCutRegistry>();
+        services.TryAddSingleton<FakeGenerationProvider>();
+
         switch (options.Provider.Trim())
         {
             case "" or "Fake":
-                services.AddSingleton<IGenerationProvider, FakeGenerationProvider>();
+                AddSelector<FakeGenerationProvider>(services);
                 break;
 
             case "AzureOpenAI":
                 AddHttpProvider<AzureOpenAIGenerationProvider>(services, options);
+                AddSelector<AzureOpenAIGenerationProvider>(services);
                 break;
 
             case "ClaudeFoundry":
@@ -47,6 +72,7 @@ public static class ServiceCollectionExtensions
                 // (architecture §3.1), same governance gate + keyless Entra + resilience as Azure OpenAI;
                 // only the wire format (native Anthropic Messages API) differs, inside the adapter.
                 AddHttpProvider<ClaudeFoundryGenerationProvider>(services, options);
+                AddSelector<ClaudeFoundryGenerationProvider>(services);
                 break;
 
             default:
@@ -58,9 +84,26 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers an egressing (real) generation provider behind <see cref="IGenerationProvider"/> — the
-    /// shared setup for every provider that reaches a tenant-bounded endpoint (Azure OpenAI today,
-    /// Claude-on-Foundry too). The NFR-005 governance gate runs <b>first</b>, before any adapter or
+    /// Registers the ONE <see cref="IGenerationProvider"/> the rest of the system resolves: the story-07
+    /// selector over <typeparamref name="TConfigured"/> (the startup-configured provider) and
+    /// <see cref="FakeGenerationProvider"/>. Deliberately TRANSIENT, matching the lifetime a typed-client
+    /// adapter already had before the selector existed, so handler rotation is unchanged; the cut STATE it
+    /// reads is the singleton registry, so the decision is shared host-wide while the wrapper is not.
+    /// </summary>
+    private static void AddSelector<TConfigured>(IServiceCollection services)
+        where TConfigured : class, IGenerationProvider =>
+        services.AddTransient<IGenerationProvider>(serviceProvider => new GenerationProviderSelector(
+            serviceProvider.GetRequiredService<TConfigured>(),
+            serviceProvider.GetRequiredService<FakeGenerationProvider>(),
+            serviceProvider.GetRequiredService<IGenerationProviderCutRegistry>()));
+
+    /// <summary>
+    /// Registers an egressing (real) generation provider as its OWN typed client — the shared setup for every
+    /// provider that reaches a tenant-bounded endpoint (Azure OpenAI today, Claude-on-Foundry too). The
+    /// concrete type (not <see cref="IGenerationProvider"/>) is the typed client so story 07's
+    /// <see cref="GenerationProviderSelector"/> can be the resolved <see cref="IGenerationProvider"/> while
+    /// this adapter keeps its own resilient <see cref="HttpClient"/>. The NFR-005 governance gate runs
+    /// <b>first</b>, before any adapter or
     /// HttpClient is constructed, so a misconfigured or ungoverned deployment fails fast at startup rather
     /// than reaching a live endpoint. Auth is keyless (managed identity in prod, az-cli login in dev); the
     /// retry + circuit-breaker + per-attempt-timeout pipeline (story 05) is identical across providers so
@@ -84,7 +127,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IProviderHealthListener, NoOpProviderHealthListener>();
 
         services
-            .AddHttpClient<IGenerationProvider, TProvider>(client =>
+            .AddHttpClient<TProvider>(client =>
             {
                 client.BaseAddress = endpoint;
 

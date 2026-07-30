@@ -21,7 +21,14 @@ using Pulse.Core.Features.Generation.Models;
 /// </summary>
 public sealed class FakeGenerationProvider : IGenerationProvider
 {
-    public string Name => "Fake";
+    /// <summary>
+    /// The <see cref="IGenerationProvider.Name"/> / <c>Generation:Provider</c> discriminator for the offline
+    /// provider — the single source of truth for the literal that the tier-binding rule and story 07's
+    /// cut/effective-provider projection both compare against.
+    /// </summary>
+    public const string ProviderName = "Fake";
+
+    public string Name => ProviderName;
 
     public GenerationGovernance Governance => GenerationGovernance.InProcess;
 

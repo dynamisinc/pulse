@@ -454,6 +454,7 @@ public sealed class EngineReviewSafetyInvariantTests
                 TierPolicy,
                 new FakeGenerationProvider(),
                 Options.Create(new GenerationOptions()),
+                new GenerationProviderCutRegistry(),
                 NullLogger<EngineReviewService>.Instance);
         }
 

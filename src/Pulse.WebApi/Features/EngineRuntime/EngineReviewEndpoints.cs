@@ -17,7 +17,8 @@ using Pulse.Core.Features.Generation.Services;
 /// The controller review-cockpit API (story 02) on <c>/api/engine</c>: the exercise-scoped queue GET plus the
 /// approve / edit / veto / re-roll / batch-approve review actions and the swamped-mode + kill-switch + restore
 /// autonomy controls, plus the engine-settings GET + the autonomy-default / tier-policy POSTs (autonomy-safety
-/// story 05). Minimal-API extension methods (the <c>Add*</c>/<c>Map*</c> convention) — the orchestrator wires
+/// story 05) and the generation-provider cut/restore egress lever (autonomy-safety story 07).
+/// Minimal-API extension methods (the <c>Add*</c>/<c>Map*</c> convention) — the orchestrator wires
 /// the single <see cref="AddEngineReview"/> / <see cref="MapEngineReview"/> pair into <c>Program.cs</c> AFTER
 /// this story is Gate-2 clean (paired with the mock→live flip of <c>useReviewQueue</c>, a SEPARATE step); no
 /// builder edits <c>Program.cs</c>.
@@ -108,6 +109,13 @@ public static class EngineReviewEndpoints
         steering.MapPost("/api/engine/autonomy/restore", RestoreAsync);
         steering.MapPost("/api/engine/settings/autonomy-default", SetAutonomyDefaultAsync);
         steering.MapPost("/api/engine/settings/tier-policy", SetTierPolicyAsync);
+
+        // autonomy-safety story 07 (ADP-042) — the runtime EGRESS lever. Two routes, on the same controller-role
+        // steering group as every other engine mutation. Deliberately a BINARY pair and not one route taking a
+        // provider name: there is no route, field, or literal anywhere here that selects a provider, so the wire
+        // shape itself cannot become a chooser by a later, smaller change (NFR-005 / ADP-025).
+        steering.MapPost("/api/engine/generation-provider/cut-to-fake", CutGenerationToFakeAsync);
+        steering.MapPost("/api/engine/generation-provider/restore", RestoreGenerationProviderAsync);
 
         return endpoints;
     }
@@ -332,6 +340,47 @@ public static class EngineReviewEndpoints
         return MapSettings(result);
     }
 
+    /// <summary>
+    /// <c>POST /api/engine/generation-provider/cut-to-fake</c> — cuts this exercise's generation to the offline
+    /// <c>Fake</c> provider so it stops egressing, effective on the next burst (autonomy-safety story 07,
+    /// ADP-042). Controller-role only. Takes ONLY <c>actingHumanId</c> (+ optional <c>timeZone</c>): the
+    /// destination is not expressible, so this can never route generation to an unattested endpoint (NFR-005).
+    /// Cutting when the configured provider is already <c>Fake</c> is an idempotent no-op reported as
+    /// <c>alreadyFake: true</c>.
+    /// </summary>
+    private static async Task<IResult> CutGenerationToFakeAsync(
+        EngineGenerationProviderRequest? request,
+        EngineReviewService service,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return Results.BadRequest("A JSON cut-to-fake body is required.");
+        }
+
+        var result = await service.CutGenerationToFakeAsync(request.ToInput(), cancellationToken);
+        return MapSettings(result);
+    }
+
+    /// <summary>
+    /// <c>POST /api/engine/generation-provider/restore</c> — returns this exercise's generation to the
+    /// STARTUP-CONFIGURED provider and no other (§8.2 human-only raise, capped at the pre-existing baseline).
+    /// Controller-role only. Restoring with no cut active is an idempotent no-op, not an error.
+    /// </summary>
+    private static async Task<IResult> RestoreGenerationProviderAsync(
+        EngineGenerationProviderRequest? request,
+        EngineReviewService service,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return Results.BadRequest("A JSON restore body is required.");
+        }
+
+        var result = await service.RestoreGenerationProviderAsync(request.ToInput(), cancellationToken);
+        return MapSettings(result);
+    }
+
     /// <summary>Maps an engine-settings result to its HTTP status (fail closed).</summary>
     private static IResult MapSettings(EngineSettingsResult result) => result.Outcome switch
     {
@@ -461,6 +510,32 @@ public sealed class EngineTierPolicyRequest
 
     /// <summary>The requested tier-policy mode — <c>standard</c>, <c>ambient</c>, or <c>auto</c> (clears the override).</summary>
     public string? Mode { get; init; }
+
+    /// <summary>The exercise IANA time zone for the XC-004 envelope (XC-008) — optional; defaults to <c>UTC</c>.</summary>
+    public string? TimeZone { get; init; }
+
+    /// <summary>Projects the request to the service input.</summary>
+    /// <returns>The action input.</returns>
+    public EngineReviewActionInput ToInput() => new(ActingHumanId, TimeZone);
+}
+
+/// <summary>
+/// The request body for BOTH generation-provider lever routes (autonomy-safety story 07) — the acting human
+/// (COR-018) plus the optional XC-008 telemetry zone, matching the existing settings convention.
+/// </summary>
+/// <remarks>
+/// <b>The absence here is the contract (AC4).</b> This type deliberately has NO property that names, selects, or
+/// hints at a provider — not on the cut, not on the restore. The lever is a binary between the
+/// startup-configured provider and <c>Fake</c>, and "select any other provider" is a Tier-2 governance change
+/// against <c>PROVIDER-GOVERNANCE.md</c> §8 (UNSIGNED), not a smaller version of this feature. An extra
+/// provider-ish field posted by a client is unmapped and therefore IGNORED — never honoured — which
+/// <c>EngineProviderCutEndpointsTests</c> asserts explicitly so the ignoring is proven rather than assumed.
+/// Adding a selector property here would be the exact change review must refuse.
+/// </remarks>
+public sealed class EngineGenerationProviderRequest
+{
+    /// <summary>The controller behind the shared account (COR-018) — required.</summary>
+    public string? ActingHumanId { get; init; }
 
     /// <summary>The exercise IANA time zone for the XC-004 envelope (XC-008) — optional; defaults to <c>UTC</c>.</summary>
     public string? TimeZone { get; init; }

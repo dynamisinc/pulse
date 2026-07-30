@@ -47,6 +47,27 @@ public static class EngineEventTypes
     public const string TierPolicyChanged = "engine.tier_policy_changed";
 
     /// <summary>
+    /// <c>engine.provider_changed</c> — the exercise's EFFECTIVE generation provider changed at runtime
+    /// (autonomy-safety story 07): a controller cut generation to <c>Fake</c> to stop egress, or restored it to
+    /// the startup-configured provider. ONE extensible event type carries both directions via the payload's
+    /// <c>reason</c> discriminator (<see cref="EngineEventPayloads.ProviderChanged.ReasonCut"/> /
+    /// <see cref="EngineEventPayloads.ProviderChanged.ReasonRestore"/>) rather than a cut/restore PAIR — a
+    /// smaller taxonomy footprint, and the from→to pair already says which way it went.
+    /// <para>
+    /// This event is the only durable record of the change (the cut state itself is process memory), and it is
+    /// emitted SERVER-side on both directions — deliberately not repeating the kill-switch gap where frontend
+    /// emission is the sole audit trail.
+    /// </para>
+    /// <para>
+    /// <b>PENDING RATIFICATION.</b> The engine event vocabulary is owned by
+    /// <c>engine-telemetry-tuning/01-engine-event-types.md</c> (#173); story 07's AC7 requires this name and
+    /// payload shape to be aligned with that story before either is finalized. It is additive to the unchanged
+    /// v0 envelope (<c>eventType</c> is an OPEN string), so ratification can rename it without a migration.
+    /// </para>
+    /// </summary>
+    public const string ProviderChanged = "engine.provider_changed";
+
+    /// <summary>
     /// The v1.1 rumor-lineage event family (E8 architecture §10/§11). RESERVED now so the rumor model
     /// (<c>rumor-model</c>, v1.1) needs no envelope migration when it lands — these names + the
     /// <c>rumorRef</c>/<c>mutationOf</c> lineage fields (see <see cref="EngineEventPayloads"/>) are already

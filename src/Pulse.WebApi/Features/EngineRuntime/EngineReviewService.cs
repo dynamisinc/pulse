@@ -56,7 +56,9 @@ using Pulse.WebApi.Features.Social;
 /// event each (<see cref="EngineEventTypes.AutonomyDefaultChanged"/> /
 /// <see cref="EngineEventTypes.TierPolicyChanged"/>) — a deliberate, reviewer-approved divergence from the
 /// swamped-mode/kill-switch/restore trio, which persist none: those controls' state is process memory, so the
-/// event is the only record of the change that survives a restart.
+/// event is the only record of the change that survives a restart. Story 07's generation-provider cut/restore
+/// joins them on the same terms, emitting one <see cref="EngineEventTypes.ProviderChanged"/> per real
+/// transition — and none at all for an idempotent no-op (an already-Fake cut, a restore with no cut active).
 /// </para>
 /// </remarks>
 public sealed partial class EngineReviewService
@@ -77,10 +79,11 @@ public sealed partial class EngineReviewService
     private readonly EngineAutonomyRegistry _autonomy;
     private readonly EngineTierPolicyRegistry _tierPolicy;
     /// <summary><see cref="IGenerationProvider.Name"/> of the offline provider, which ignores tier bindings.</summary>
-    private const string FakeProviderName = "Fake";
+    private const string FakeProviderName = FakeGenerationProvider.ProviderName;
 
     private readonly IGenerationProvider _generationProvider;
     private readonly GenerationOptions _generationOptions;
+    private readonly IGenerationProviderCutRegistry _providerCut;
     private readonly ILogger<EngineReviewService> _logger;
 
     /// <summary>Creates the review service over its persistence, scope, clock, telemetry, publish, push, and autonomy collaborators.</summary>
@@ -95,6 +98,7 @@ public sealed partial class EngineReviewService
     /// <param name="tierPolicy">The per-exercise model-tier-policy registry the reaction loop reads per burst.</param>
     /// <param name="generationProvider">The active generation provider — read ONLY for its name on the settings GET.</param>
     /// <param name="generationOptions">The governed <c>Generation</c> configuration — read-only here (never mutated, NFR-005).</param>
+    /// <param name="providerCut">The per-exercise generation-provider cut state (story 07) — the SAME singleton the loop's selector reads.</param>
     /// <param name="logger">Diagnostics for the loud (non-fatal) engine-settings audit-persist failure path.</param>
     public EngineReviewService(
         IEngineReviewStore store,
@@ -108,6 +112,7 @@ public sealed partial class EngineReviewService
         EngineTierPolicyRegistry tierPolicy,
         IGenerationProvider generationProvider,
         IOptions<GenerationOptions> generationOptions,
+        IGenerationProviderCutRegistry providerCut,
         ILogger<EngineReviewService> logger)
     {
         ArgumentNullException.ThrowIfNull(store);
@@ -121,6 +126,7 @@ public sealed partial class EngineReviewService
         ArgumentNullException.ThrowIfNull(tierPolicy);
         ArgumentNullException.ThrowIfNull(generationProvider);
         ArgumentNullException.ThrowIfNull(generationOptions);
+        ArgumentNullException.ThrowIfNull(providerCut);
         ArgumentNullException.ThrowIfNull(logger);
 
         _store = store;
@@ -134,6 +140,7 @@ public sealed partial class EngineReviewService
         _tierPolicy = tierPolicy;
         _generationProvider = generationProvider;
         _generationOptions = generationOptions.Value;
+        _providerCut = providerCut;
         _logger = logger;
     }
 
@@ -584,6 +591,139 @@ public sealed partial class EngineReviewService
         return EngineSettingsResult.Ok(BuildSettings(exerciseId));
     }
 
+    // ---- Generation-provider cut (story 07: the runtime EGRESS lever, ADP-042) --------------------
+
+    /// <summary>
+    /// CUTS this exercise's generation to <see cref="FakeGenerationProvider"/> — the manual egress brake
+    /// (ADP-042). The exercise's next burst is generated offline instead of reaching the live provider:
+    /// immediately, with no restart, no config change, and no effect on any other exercise (COR-001). The set of
+    /// registered providers is exactly what startup created; this only changes which ALREADY-REGISTERED instance
+    /// this exercise resolves to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Never a provider chooser (NFR-005 / ADP-025).</b> There is no parameter here, and no field on the
+    /// request body, that names a provider — the only destination is Fake, and the only way back is the
+    /// startup-configured provider. Nothing this method can do makes an endpoint reachable that
+    /// <c>GenerationGovernance.Validate</c> did not sign off at startup.
+    /// </para>
+    /// <para>
+    /// <b>Idempotent, and honest about a no-op.</b> When the configured provider is ALREADY <c>Fake</c> (the
+    /// committed default) nothing is recorded and NO telemetry is emitted — the snapshot reports
+    /// <c>alreadyFake: true</c> rather than a false "I just locked something down" signal. A second cut while one
+    /// is already active is likewise a no-op with no second audit event.
+    /// </para>
+    /// </remarks>
+    /// <param name="input">The acting human (COR-018) + optional telemetry zone (XC-008).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The resulting settings snapshot, or a fail-closed/invalid outcome.</returns>
+    public async Task<EngineSettingsResult> CutGenerationToFakeAsync(
+        EngineReviewActionInput input,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveScope(out var exerciseId))
+        {
+            return EngineSettingsResult.ScopeUnresolved();
+        }
+
+        if (string.IsNullOrWhiteSpace(input.ActingHumanId))
+        {
+            return EngineSettingsResult.Invalid("actingHumanId is required (COR-018).");
+        }
+
+        var configured = _generationProvider.Name;
+
+        // Already offline: there is no egress to stop. Report it (alreadyFake) instead of recording a cut that
+        // would make the console claim a lockdown that never happened, and emit nothing.
+        if (!IsFakeProvider(configured))
+        {
+            var changed = _providerCut.Cut(exerciseId);
+            if (changed)
+            {
+                await CommitProviderChangeAsync(
+                    exerciseId, configured, FakeProviderName, EngineEventPayloads.ProviderChanged.ReasonCut,
+                    input, cancellationToken);
+            }
+        }
+
+        return EngineSettingsResult.Ok(BuildSettings(exerciseId));
+    }
+
+    /// <summary>
+    /// RESTORES this exercise's generation to the STARTUP-CONFIGURED provider and no other — the §8.2 human-only
+    /// raise, capped at the pre-existing baseline (the direct sibling of <see cref="RestoreFromSafetyAsync"/>).
+    /// It can never land on a provider that was not already running at startup, so it can never exceed the
+    /// governed baseline. Restoring when no cut is active is an idempotent no-op that still succeeds, and emits
+    /// no telemetry.
+    /// </summary>
+    /// <remarks>
+    /// <b>The audit write is deliberately non-fatal, which is asymmetric here.</b>
+    /// <see cref="CommitProviderChangeAsync"/> runs AFTER the registry mutation and swallows a persist failure
+    /// (loud log, non-fatal — inherited from the story-05 settings path and matching the
+    /// <see cref="RestoreFromSafetyAsync"/> kill-switch precedent), so for a CUT it fails toward less egress,
+    /// but for a RESTORE it means egress resumes with only a log line if this event — the only durable record of
+    /// the change, since the cut state is process memory — fails to persist.
+    /// </remarks>
+    /// <param name="input">The acting human (COR-018) + optional telemetry zone (XC-008).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The resulting settings snapshot, or a fail-closed/invalid outcome.</returns>
+    public async Task<EngineSettingsResult> RestoreGenerationProviderAsync(
+        EngineReviewActionInput input,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveScope(out var exerciseId))
+        {
+            return EngineSettingsResult.ScopeUnresolved();
+        }
+
+        if (string.IsNullOrWhiteSpace(input.ActingHumanId))
+        {
+            return EngineSettingsResult.Invalid("actingHumanId is required (COR-018).");
+        }
+
+        // The restore DESTINATION is read from the running provider, never from the request — that is what makes
+        // "capped at the startup baseline" structural rather than a validation rule someone could relax.
+        var configured = _generationProvider.Name;
+
+        if (_providerCut.Restore(exerciseId))
+        {
+            await CommitProviderChangeAsync(
+                exerciseId, FakeProviderName, configured, EngineEventPayloads.ProviderChanged.ReasonRestore,
+                input, cancellationToken);
+        }
+
+        return EngineSettingsResult.Ok(BuildSettings(exerciseId));
+    }
+
+    /// <summary>Whether a provider name is the offline provider's (the cut destination / the already-Fake case).</summary>
+    private static bool IsFakeProvider(string providerName) =>
+        string.Equals(providerName, FakeProviderName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Persists the single <c>engine.provider_changed</c> XC-004 event for a real cut/restore transition — the
+    /// same one-event-per-meaningful-action, own-unit-of-work, non-fatal-on-failure shape the story-05 settings
+    /// events use (the cut state is process memory, so this event IS its durable record).
+    /// </summary>
+    private Task CommitProviderChangeAsync(
+        Guid exerciseId,
+        string fromProvider,
+        string toProvider,
+        string reason,
+        EngineReviewActionInput input,
+        CancellationToken cancellationToken)
+    {
+        var payload = new EngineEventPayloads.ProviderChanged
+        {
+            FromProvider = fromProvider,
+            ToProvider = toProvider,
+            Reason = reason,
+            ScenarioMinute = _clock.CurrentScenarioMinute(exerciseId),
+        };
+
+        return CommitSettingsEventAsync(
+            EngineEventTypes.ProviderChanged, exerciseId, input, payload, cancellationToken);
+    }
+
     // ---- Auto-HOLD tick (non-request-bound; silence is never approval, D5-014/1.1) --------------
 
     /// <summary>
@@ -674,9 +814,19 @@ public sealed partial class EngineReviewService
         return scope is not null && scope.Value != Guid.Empty;
     }
 
-    /// <summary>Composes the current settings snapshot for an exercise (provider + governed tiers + autonomy + tier policy).</summary>
+    /// <summary>
+    /// Composes the current settings snapshot for an exercise (configured + EFFECTIVE provider, governed tiers,
+    /// autonomy, tier policy).
+    /// </summary>
+    /// <remarks>
+    /// <see cref="IGenerationProvider.Name"/> is the STARTUP-CONFIGURED provider even while a cut is active (the
+    /// story-07 selector passes it through by design), so the effective provider is resolved from the cut
+    /// REGISTRY here — per exercise — and put on the wire as its own field rather than left to be re-derived
+    /// (WR-003).
+    /// </remarks>
     private EngineSettingsDto BuildSettings(Guid exerciseId) => EngineSettingsDto.From(
         _generationProvider.Name,
+        _providerCut.IsCutToFake(exerciseId),
         _generationOptions,
         EngineAutonomyStateDto.From(_autonomy.GetOrCreate(exerciseId)),
         _tierPolicy.GetMode(exerciseId));
