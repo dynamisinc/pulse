@@ -7,7 +7,10 @@
 Every engine action logged with its trigger and storyline, extending the XC-004 v0 event schema, plus
 the surface that exposes those actions for post-exercise tuning and feeds E10. This is what lets the
 AAR explain *why the world turned* — the sentiment/intensity arc rendered with dial-input overlays so
-a hotwash separates designed pressure from participant-driven pressure.
+a hotwash separates designed pressure from participant-driven pressure. A third, narrower story
+(03) adds the **live-ops** counterpart: a controller/admin panel on current AI generation volume (and,
+second, cost) — what the engine is calling, on which provider/model, right now — distinct from story
+02's post-exercise tuning arc.
 
 ## Requirements covered
 ADP-041 (every engine action logged with trigger + storyline for E10 and tuning). Extends the XC-004
@@ -22,6 +25,7 @@ table). EVL-014 (dial-input overlays). Master PRD XC-004 (the v0 schema this ext
 |---|-------|----------------|--------|-------|
 | 01 | Engine event types (extend XC-004) | ADP-041 / XC-004 | Not Started | #173 |
 | 02 | Tuning & observability surface | ADP-041 | Not Started | #174 |
+| 03 | AI generation usage panel | ADP-041 | Not Started | #401 |
 
 ## Dependencies
 The XC-004 v0 telemetry emitter (E1); every E8 feature emits through it (reaction-loop, storyline-model,
@@ -45,3 +49,12 @@ event types must fit the XC-004 v0 taxonomy, not fork it. Every event carries wa
 actor (incl. the human behind a shared org account, COR-018), and channel. Sentiment/intensity arcs
 render with dial-input overlays (EVL-014) so the AAR is defensible in a hotwash (no sentiment
 circularity).
+
+Story 03 (usage panel) is a **read view** over the same `engine.generated` event, not a second
+taxonomy or store — it must query/project the existing `TelemetryEvents` rows behind the
+`IExerciseScoped`/`PulseDbContext` isolation guarantee. Volume (calls, tokens by category, latency,
+guard-result mix) is committed scope; cost is a second, clearly-separated section priced from a
+config-sourced per-model table (Foundry deployments are not version-pinned, so pricing is not
+hardcoded) and degrades to an explicit "unpriced" state rather than a silently-wrong $0. Verified this
+session: UAT runs the `Fake` provider (zero LLM egress, 0 tokens, 1,722 `engine.generated` rows) — the
+panel is the pre-flight verification surface for the unsigned `PROVIDER-GOVERNANCE.md` §8 go-live.
