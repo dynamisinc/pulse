@@ -28,8 +28,9 @@ engine-review-cockpit (#34–36) and world-steering; produces exactly what they 
 | 02 | Auto-HOLD-on-timeout wiring (never auto-send) | ADP-040 / D5-014/1.1 | Complete | #170 |
 | 03 | Kill switch (drop to Suggest / stop) | ADP-042 | Complete | #171 |
 | 04 | Controller-workload contract (≤6/min demand) | CTL-034 / D5-014/2.7 | Complete | #172 |
-| 05 | Engine settings API (autonomy default + tier policy, runtime-settable) | ADP §2.3 / ADP-025 | Not Started | #353 |
-| 06 | Engine settings panel (console admin surface) | ADP §2.3 | Not Started | #354 |
+| 05 | Engine settings API (autonomy default + tier policy, runtime-settable) | ADP §2.3 / ADP-025 | In Progress — built, Gate-2 clean; DoD needs verified-in-UAT | #353 |
+| 06 | Engine settings panel (console admin surface) | ADP §2.3 | In Progress — built + merged to main, gates clean; DoD needs verified-in-UAT | #354 |
+| 07 | Cut generation to the Fake provider (runtime egress safety lever) | ADP-042 / NFR-005/ADP-025 | Not Started | #402 |
 
 **Delivered** as the pure-backend `Pulse.Core/Features/Autonomy/*` slice (see its `README.md`): the
 `EngineAutonomyState` aggregate (level resolution + kill switch + degraded-mode clamp), the pure
