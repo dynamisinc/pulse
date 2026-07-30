@@ -300,10 +300,16 @@ was run against the combined tree. **Clean: 0 Criticals, 3 Warnings, 3 Suggestio
   off-by-one plus its unevidenced AC7, and the present-progressive/"verify before trusting" language
   throughout this doc).
 - **Warning WR-G2-007** (three hand-maintained copies of `InMemoryNote` — `EngineSettingsContracts.cs`,
-  `useEngineSettings.ts`'s mock, and `EngineSettingsPanel.test.tsx`'s verbatim assertion) is being folded
-  in parallel on both stacks: a frontend dedupe plus a paired backend assertion, so either side dropping
-  a marker reds a build. The residual C#↔TS gap — no shared source of truth across the language boundary
-  — remains open and is **deliberately not closed here** (same limit WR-004's doc comment already names).
+  `useEngineSettings.ts`'s mock, and `EngineSettingsPanel.test.tsx`'s verbatim assertion) **was folded on
+  both stacks** (`cae25c3` frontend, `b190c59` backend). Three copies became two: the panel test now reads
+  `MOCK_ENGINE_SETTINGS.inMemoryStateNote` instead of re-typing it, and a paired backend assertion
+  (`EngineGenerationProviderRequestShapeTests.TheSharedInMemoryNote_NamesTheGenerationProviderCutAndItsStartupConfiguredResetTarget`)
+  means either side dropping a marker reds a build — both markers were neuter-verified to bite. It sits in
+  the one story-07 contract class that is a plain `[Fact]` outside the SQL collection, so it runs on every
+  machine; the two pre-existing `InMemoryNote` assertions are `[RequiresDockerFact]` and check only one
+  marker, so neither could serve. The residual C#↔TS gap — no shared source of truth across the language
+  boundary, so the pair catches a one-sided marker drop but **not** a coordinated reword — remains open and
+  is **deliberately not closed here** (same limit WR-004's doc comment already names).
 - **Suggestion S-3** (a model-only sibling for the `ExerciseId` propagation guard, which is currently
   `[RequiresDockerFact]`) was **not taken** — recorded as a known, accepted gap rather than dropped
   silently.
@@ -366,7 +372,7 @@ orchestrator sign-off, not a builder-assignable file.
 | `EngineProviderCutEndpointsTests.BothRoutes_MissingActingHumanId_Return400` / `BothRoutes_MissingBody_Return400` | AC1 |
 | `EngineProviderCutEndpointsTests.BothLeverRoutes_AreMappedExactlyOnce_OnTheExistingEngineGroup` | AC1 |
 | `EngineSettingsEndpointsTests.EveryMutatingRoute_FromANonControllerAssignedStaffSession_Returns403` (both new routes added to `MutatingRoutes`) — an evaluator-assigned session reaches neither route, and the gate rejects before any publish funnel (XC-002/SOC-003). Asserts role gating and no side-effect only; it makes **no** telemetry assertion, so it is not AC8 evidence | AC1, AC7 |
-| `participantIsolation.test.ts` — "finds NO import/require of features/controller/engine/\*\* (alias or relative) under any participant surface root" (Gate-2 fold S-1) — the static complement to the runtime role gate above, closing the "no participant surface projects the effective-provider fact, directly or inferably" half of AC7. Present in the working tree as of this doc pass, **not yet committed** (built in parallel by the frontend agent on `build/autonomy-safety/07-cut-to-fake-console`) | AC7 |
+| `participantIsolation.test.ts` — "finds NO import/require of features/controller/engine/\*\* (alias or relative) under any participant surface root" (Gate-2 fold S-1) — the static complement to the runtime role gate above, closing the "no participant surface projects the effective-provider fact, directly or inferably" half of AC7. Committed in `cae25c3` and integrated on the umbrella. Both halves were neuter-verified: an injected import (alias *and* relative form) reds it, and the non-vacuity assertion reds when the participant globs match no files, so it cannot pass by scanning nothing | AC7 |
 | `EngineSettingsEndpointsTests.EveryRoute_FromAStaffSessionAssignedToADifferentExercise_FailsClosed` | AC6 |
 | `EngineSettingsEndpointsTests.EveryMutatingStaffSteeringRouteInTheRealRouteTable_IsCoveredByTheRoleGateTests` (drift guard) | AC1 |
 | `GenerationProviderCutCompositionRootWiringTests.*` (4 — real-host route table, 401-not-404, one shared registry, the selector resolves) | AC1, AC6 |
