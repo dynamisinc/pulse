@@ -101,6 +101,15 @@ export const ENGINE_SETTINGS_PANEL_TITLE = 'Engine settings'
 /** Flyout panel width — matches `PersonaDockHost`'s scale. */
 const PANEL_WIDTH_PX = 380
 
+/**
+ * `id` of the "already Fake" explanatory note, programmatically associated
+ * to the disabled Cut button via `aria-describedby` (WR-002) — a disabled
+ * `<button>` is out of the tab order, so screen-reader users in browse mode
+ * must be able to reach the reason from the control itself, not only by
+ * reading past it in document order (WCAG 2.1 SC 1.3.1 / 3.3.2).
+ */
+const ALREADY_FAKE_NOTE_ID = 'provider-lever-already-fake-note'
+
 /** D5 dark operator-chrome tokens (matches `ReviewQueue`'s/`EngineControlBar`'s `chrome`). */
 const chrome = {
   panel: '#0f1826',
@@ -572,6 +581,7 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                   type="button"
                   data-testid="provider-lever-cut"
                   disabled={providerLeverControlsDisabled || settings.alreadyFake}
+                  aria-describedby={settings.alreadyFake ? ALREADY_FAKE_NOTE_ID : undefined}
                   onClick={() => cutGenerationToFake()}
                   sx={{
                     alignSelf: 'flex-start',
@@ -601,6 +611,7 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                   a control that looks live but can never change anything. */}
               {settings.alreadyFake && !settings.providerCutToFake && (
                 <Stack
+                  id={ALREADY_FAKE_NOTE_ID}
                   data-testid="provider-lever-already-fake-note"
                   direction="row"
                   sx={{ alignItems: 'flex-start', gap: 0.6 }}
@@ -666,7 +677,8 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                 PROVIDER &amp; TIERS (READ-ONLY)
               </Typography>
               <Typography data-testid="engine-settings-provider" sx={{ fontSize: 12, color: chrome.ink }}>
-                Provider: <Box component="span" sx={{ fontWeight: 700 }}>{settings.provider}</Box>
+                Configured provider (startup):{' '}
+                <Box component="span" sx={{ fontWeight: 700 }}>{settings.provider}</Box>
               </Typography>
               {settings.tiers.length === 0 && (
                 <Typography sx={{ fontSize: 11, color: chrome.inkFaint }}>

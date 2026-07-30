@@ -175,6 +175,11 @@ describe('useEngineSettings — mock mode (USE_MOCK_DATA=true, the default)', ()
   })
 
   it('WR-002: the mock inMemoryStateNote honestly names the generation-provider cut (and its startup-configured-provider reset target) as reset-on-restart too — this is the exact class of drift that once shipped a stale note to UAT silently, since nothing asserted the fixture reflected the live contract', () => {
+    // LIMIT, stated honestly: this asserts the MOCK's copy against two content
+    // markers, so it catches a REVERT to the pre-story-07 wording. It cannot
+    // catch the NEXT edit to EngineSettingsContracts.cs's InMemoryNote — there
+    // is no shared source of truth across the language boundary. Closing that
+    // needs a generated/exported contract fixture, tracked separately.
     const { result } = renderHook(() => useEngineSettings())
 
     expect(result.current.settings?.inMemoryStateNote).toMatch(/generation-provider cut/i)

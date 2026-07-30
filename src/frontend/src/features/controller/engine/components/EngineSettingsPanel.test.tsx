@@ -288,6 +288,26 @@ describe('EngineSettingsPanel — generation-provider cut/restore lever (story 0
     expect(screen.getByTestId('provider-lever-already-fake-note')).toBeInTheDocument()
   })
 
+  it('WR-002: programmatically associates the disabled Cut button with its explanation via aria-describedby, so a screen-reader user in browse mode (who never reaches a disabled control by Tab) can still discover WHY it is inert', async () => {
+    // default dto(): provider 'Fake', alreadyFake true
+    engineSettingsStore.setForTests(EXERCISE_ID, dto())
+    renderPanel(true)
+
+    await screen.findByTestId('engine-settings-panel')
+    const cutButton = screen.getByTestId('provider-lever-cut')
+    const note = screen.getByTestId('provider-lever-already-fake-note')
+
+    // `toHaveAccessibleDescription` computes the accessible description the
+    // SAME way assistive tech does (resolving `aria-describedby`), so this
+    // proves the programmatic link rather than merely both facts being true
+    // independently.
+    expect(cutButton).toHaveAccessibleDescription(/already Fake/i)
+
+    // Belt-and-braces: assert the association directly too — the id the
+    // button's aria-describedby points at resolves to the note element.
+    expect(cutButton).toHaveAttribute('aria-describedby', note.id)
+  })
+
   it('does NOT render the inert note when alreadyFake is false — the cut control is genuinely actionable', async () => {
     engineSettingsStore.setForTests(
       EXERCISE_ID,
