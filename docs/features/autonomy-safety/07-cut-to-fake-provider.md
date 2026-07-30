@@ -1,6 +1,6 @@
 # Story: Cut generation to the Fake provider (runtime egress safety lever)
 
-**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress — backend built (edges 6a + 6b), Gate-1 clean (0 Criticals, 3 Warnings — see Build notes), **not yet merged to the umbrella**. Frontend (edge 7, the console toggle) is not built. NOT Complete: this story's DoD requires verified-in-UAT, and UAT is impossible today — it needs `PROVIDER-GOVERNANCE.md` §8 signed AND an environment running an egressing provider, neither of which exists yet.
+**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress — backend built (edges 6a + 6b), integrated on the umbrella (`feature/autonomy-safety-cut-to-fake`), Gate-1 clean (0 Criticals, folded per Build notes) and Gate-2 clean (0 Criticals, 0 build warnings — see Build notes). Frontend (edge 7, the console toggle) is not built. NOT Complete: this story's DoD requires verified-in-UAT, and UAT is impossible today — it needs `PROVIDER-GOVERNANCE.md` §8 signed AND an environment running an egressing provider, neither of which exists yet.
 **Requirements:** ADP-042 (kill-switch family — extends the "one manual control, only ever less" lever
 to the provider/egress axis), NFR-005 / ADP-025 (the governed-endpoint boundary this lever must not
 cross)  ·  **Design decisions:** none  ·  **Issue:** #402
@@ -195,13 +195,27 @@ existing `/api/engine` group in `EngineReviewEndpoints.cs`, gated by the same
 - **Not built here:** the console toggle/indicator (edge 7) and therefore AC5's NFR-001 label half; the
   UAT pass (impossible until §8 is signed — see Tests).
 - **Gate-1 outcome:** clean, 0 Criticals, 3 Warnings. WR-001 (the AC4 route guard was self-referential
-  and did not bite) and WR-003 (concrete adapters became directly resolvable, so a future consumer
-  could bypass the lever) are being folded on this branch — an architecture test for WR-003 is being
-  added now. WR-002 (the `InMemoryNote` frontend mock drift called out above, under Wire additions) is
-  **deferred to edge 7 and must be in its diff** — the frontend suite passes silently against the stale
-  string today because both stale copies (`useEngineSettings.ts`'s mock and
-  `EngineSettingsPanel.test.tsx`'s verbatim assertion) are fixtures, not assertions against the live
-  contract; edge 7 must also add the one assertion that would catch this class of drift in future.
+  and did not bite) was folded by replacing it with `EngineProviderCutEndpointsTests.
+  TheGenerationProviderPrefix_CarriesExactlyTheBinaryPair_WithNoRouteParameter`, which asserts over the
+  real `EndpointDataSource` (so it observes `EngineReviewEndpoints.cs` rather than constants in the test
+  class). WR-003 (concrete adapters became directly resolvable, so a future consumer could bypass the
+  lever) was folded by adding `GenerationProviderInjectionArchitectureTests.
+  NoProductionTypeOtherThanTheSelector_InjectsAConcreteGenerationProvider`, the NFR-005 "the selector is
+  the only way in" invariant. Both landed in `78e8dc3`. WR-002 (the `InMemoryNote` frontend mock drift
+  called out above, under Wire additions) is **deferred to edge 7 and must be in its diff** — the
+  frontend suite passes silently against the stale string today because both stale copies
+  (`useEngineSettings.ts`'s mock and `EngineSettingsPanel.test.tsx`'s verbatim assertion) are fixtures,
+  not assertions against the live contract; edge 7 must also add the one assertion that would catch this
+  class of drift in future.
+- **Gate-2 outcome (post-integration, `ad33971`):** clean, 0 Criticals, 0 build warnings. `399/399`
+  `Pulse.Core.Tests` + `1759/1759` `Pulse.WebApi.Tests` green (0 skipped) under the LocalDB hatch. No
+  fold residue in any reachable commit; no semantic collision (`main` had not moved since the fork).
+  Gate 2 raised four Warnings: WR-G2-001/002/003 are documentation drift (status line, Build notes
+  tense, and this AC↔test table's now-deleted WR-001 test name) — fixed in this pass. WR-G2-004 (the
+  architecture guard's coverage claim overreached — constructor injection only, service-location
+  uncovered) is being folded by the backend agent in parallel, along with S-G2-001 (an end-to-end
+  `ExerciseId` propagation guard, because `ExerciseId` now gates egress selection and CI cannot observe
+  a regression when every environment runs Fake on both sides of the selector).
 
 ## Dependencies
 Story 03 (kill switch — the precedent this mirrors: "one manual control, only ever less", the
@@ -249,7 +263,8 @@ orchestrator sign-off, not a builder-assignable file.
 | `EngineProviderCutServiceTests.GetSettings_ReportsConfiguredAndEffectiveProvider_AsTwoIndependentlyReadableFields` | AC5 |
 | `EngineProviderCutServiceTests.GetSettings_WithFakeConfigured_ReportsAlreadyFake_SoTheConsoleCanSayTheLeverIsInert` | AC3, AC5 |
 | `EngineGenerationProviderRequestShapeTests.TheCutAndRestoreRequestContract_HasNoPropertyThatCouldSelectAProvider` | AC4 |
-| `EngineGenerationProviderRequestShapeTests.NeitherLeverRouteTemplate_CarriesAProviderSegmentOrQuerySlot` | AC4 |
+| `EngineProviderCutEndpointsTests.TheGenerationProviderPrefix_CarriesExactlyTheBinaryPair_WithNoRouteParameter` | AC4 |
+| `GenerationProviderInjectionArchitectureTests.NoProductionTypeOtherThanTheSelector_InjectsAConcreteGenerationProvider` | AC1, AC2 |
 | `EngineProviderCutEndpointsTests.APostedProviderSelector_IsIgnored_AndTheDestinationStaysFake` | AC4 |
 | `EngineProviderCutEndpointsTests.ARestoreThatNamesAProvider_StillLandsOnTheStartupConfiguredOne` | AC2, AC4 |
 | `EngineProviderCutEndpointsTests.Cut_ThenGetSettings_ReportsConfiguredAndEffectiveProviderAsSeparateKeys` | AC1, AC5 |
@@ -272,6 +287,20 @@ fails). That last check also showed the endpoint-level `401` is written by
 `EngineCockpitStaffAuthorizationFilter` BEFORE the handler, so the endpoint test is an outcome
 (defence-in-depth) assertion only — recorded in its own doc-comment so it is never mistaken for proof of
 the service guard.
+
+**Neuter-and-confirm, the two Gate-1 folds (WR-001/WR-003), added post-`72c4cfe`.** Both independently
+proven to bite by Gate 2:
+- **The route guard** (`EngineProviderCutEndpointsTests.
+  TheGenerationProviderPrefix_CarriesExactlyTheBinaryPair_WithNoRouteParameter`): adding a third route
+  under `/api/engine/generation-provider` (e.g. a `.../cut-to/{provider}` selector) fails it, naming all
+  three templates from the real route table. A second, independent guard
+  (`EngineSettingsEndpointsTests.EveryMutatingStaffSteeringRouteInTheRealRouteTable_IsCoveredByTheRoleGateTests`)
+  also fails on that same edit — two angles on the same drift, not one.
+- **The architecture guard** (`GenerationProviderInjectionArchitectureTests.
+  NoProductionTypeOtherThanTheSelector_InjectsAConcreteGenerationProvider`): a production type taking a
+  concrete adapter (e.g. `AzureOpenAIGenerationProvider`) as a constructor parameter fails it; and its
+  non-vacuity assertion is real — pointing provider discovery at an empty assembly list fails with "the
+  guard is worthless if the reflection found no adapters at all".
 
 **Frontend (edge 7) — not built here.** The console toggle + the effective-vs-configured label (AC5's
 NFR-001 half) and the AC6 staff-only surface remain edge 7's. Note for that builder: `inMemoryStateNote`
