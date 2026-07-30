@@ -36,7 +36,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
-import { engineSettingsStore, type EngineSettingsDto } from '../hooks/useEngineSettings'
+import {
+  engineSettingsStore,
+  MOCK_ENGINE_SETTINGS,
+  type EngineSettingsDto,
+} from '../hooks/useEngineSettings'
 import { EngineSettingsPanel } from './EngineSettingsPanel'
 
 /** The fixed exercise id `ExerciseContextProvider`'s mock resolver returns. */
@@ -65,9 +69,9 @@ function dto(overrides: Partial<EngineSettingsDto> = {}): EngineSettingsDto {
     },
     tierPolicyMode: 'auto',
     inMemoryState: true,
-    inMemoryStateNote:
-      'Autonomy default, tier-policy mode and the generation-provider cut are held in process ' +
-      'memory; a restart resets them to suggest / auto / the startup-configured provider.',
+    // Gate-2 fold WR-G2-007: reuse the mock's own copy rather than re-typing
+    // the note string a third time — one frontend source of truth.
+    inMemoryStateNote: MOCK_ENGINE_SETTINGS.inMemoryStateNote,
     ...overrides,
   }
 }
