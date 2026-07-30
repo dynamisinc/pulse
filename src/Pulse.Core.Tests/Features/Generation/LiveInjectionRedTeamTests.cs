@@ -63,8 +63,12 @@ public sealed class LiveInjectionRedTeamTests
         var provider = serviceProvider.GetRequiredService<IGenerationProvider>();
         var assembler = serviceProvider.GetRequiredService<IPromptAssembler>();
 
-        provider.Should().BeOfType<AzureOpenAIGenerationProvider>(
-            "the governed live config must select the in-tenant Azure OpenAI adapter through the gated path");
+        // Since autonomy-safety story 07 the resolved IGenerationProvider is the per-exercise cut selector; what
+        // matters here is that the governed path put the LIVE in-tenant adapter behind it (and that this run
+        // therefore really does egress to the model under test, rather than quietly measuring Fake).
+        provider.Should().BeOfType<GenerationProviderSelector>()
+            .Which.ConfiguredProvider.Should().BeOfType<AzureOpenAIGenerationProvider>(
+                "the governed live config must select the in-tenant Azure OpenAI adapter through the gated path");
 
         var failures = new List<string>();
 
