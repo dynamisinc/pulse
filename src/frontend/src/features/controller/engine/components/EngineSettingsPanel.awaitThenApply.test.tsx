@@ -42,6 +42,9 @@ const mockedUseEngineSettings = vi.mocked(useEngineSettings)
 function dto(overrides: Partial<EngineSettingsDto> = {}): EngineSettingsDto {
   return {
     provider: 'Fake',
+    effectiveProvider: 'Fake',
+    providerCutToFake: false,
+    alreadyFake: true,
     tiers: [],
     autonomy: {
       swampedMode: false,
@@ -66,8 +69,11 @@ function settingsResult(overrides: Partial<UseEngineSettingsResult> = {}): UseEn
     forbidden: false,
     pendingAutonomyDefault: false,
     pendingTierPolicy: false,
+    pendingProviderLever: false,
     setAutonomyDefault: vi.fn(),
     setTierPolicyMode: vi.fn(),
+    cutGenerationToFake: vi.fn(),
+    restoreGenerationProvider: vi.fn(),
     refetch: vi.fn(),
     ...overrides,
   }
@@ -145,5 +151,53 @@ describe('EngineSettingsPanel — await-then-apply: no speculative value, disabl
       'delayed-auto is not selectable in v1',
     )
     expect(screen.queryByTestId('engine-settings-load-error')).not.toBeInTheDocument()
+  })
+
+  it('while pendingProviderLever is true: shows "Applying…" next to the provider lever AND disables the autonomy/tier groups too (the SAME serialization invariant, now covering a third mutation kind)', async () => {
+    mockedUseEngineSettings.mockReturnValue(
+      settingsResult({
+        settings: dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', alreadyFake: false }),
+        pendingProviderLever: true,
+      }),
+    )
+    renderPanel()
+
+    await screen.findByTestId('engine-settings-panel')
+    expect(screen.getByTestId('provider-lever-applying')).toBeInTheDocument()
+    expect(screen.getByTestId('provider-lever-cut')).toBeDisabled()
+    expect(screen.getByTestId('autonomy-default-delayed-auto')).toBeDisabled()
+    expect(screen.getByTestId('tier-policy-standard')).toBeDisabled()
+  })
+
+  it('a pending AUTONOMY mutation also disables the provider lever (not only its own group) — the shared serialization invariant runs both ways', async () => {
+    mockedUseEngineSettings.mockReturnValue(
+      settingsResult({
+        settings: dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', alreadyFake: false }),
+        pendingAutonomyDefault: true,
+      }),
+    )
+    renderPanel()
+
+    await screen.findByTestId('engine-settings-panel')
+    expect(screen.getByTestId('provider-lever-cut')).toBeDisabled()
+    expect(screen.queryByTestId('provider-lever-applying')).not.toBeInTheDocument()
+  })
+
+  it('on a provider-lever rejection, there is no revert: settings is exactly what the hook reports, the pending flag is false, and the error renders as an action error', async () => {
+    mockedUseEngineSettings.mockReturnValue(
+      settingsResult({
+        settings: dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', providerCutToFake: false, alreadyFake: false }),
+        pendingProviderLever: false,
+        error: 'The engine settings change could not be applied. Try again.',
+      }),
+    )
+    renderPanel()
+
+    await screen.findByTestId('engine-settings-panel')
+    expect(screen.getByTestId('provider-lever-cut')).not.toBeDisabled()
+    expect(screen.queryByTestId('provider-lever-restore')).not.toBeInTheDocument()
+    expect(screen.getByTestId('engine-settings-action-error')).toHaveTextContent(
+      'The engine settings change could not be applied. Try again.',
+    )
   })
 })

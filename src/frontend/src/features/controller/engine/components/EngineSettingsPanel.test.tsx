@@ -45,6 +45,12 @@ const EXERCISE_ID = 'ex-mock-0001'
 function dto(overrides: Partial<EngineSettingsDto> = {}): EngineSettingsDto {
   return {
     provider: 'Fake',
+    // Matches the mock/live default posture everywhere today: the configured
+    // provider IS Fake, so the lever is inert (`alreadyFake: true`) and no
+    // cut is active.
+    effectiveProvider: 'Fake',
+    providerCutToFake: false,
+    alreadyFake: true,
     tiers: [
       { tier: 'Ambient', model: 'fake-ambient', deployment: 'ambient', zdrCapable: false },
       { tier: 'Standard', model: 'fake-standard', deployment: '', zdrCapable: false },
@@ -60,8 +66,8 @@ function dto(overrides: Partial<EngineSettingsDto> = {}): EngineSettingsDto {
     tierPolicyMode: 'auto',
     inMemoryState: true,
     inMemoryStateNote:
-      'Autonomy default and tier-policy mode are held in process memory; a restart resets them ' +
-      'to suggest / auto.',
+      'Autonomy default, tier-policy mode and the generation-provider cut are held in process ' +
+      'memory; a restart resets them to suggest / auto / the startup-configured provider.',
     ...overrides,
   }
 }
@@ -216,6 +222,112 @@ describe('EngineSettingsPanel — 403 read-only (story 05 AC6/#297)', () => {
     expect(screen.getByTestId('autonomy-default-delayed-auto')).toBeDisabled()
     expect(screen.getByTestId('tier-policy-standard')).toBeDisabled()
     expect(screen.getByTestId('engine-settings-readonly-note')).toBeInTheDocument()
+  })
+})
+
+describe('EngineSettingsPanel — generation-provider cut/restore lever (story 07, ADP-042)', () => {
+  it('reads effectiveProvider DIRECTLY off the DTO — never re-derives it from providerCutToFake/provider (WR-003 trap: a naive "not cut => provider" derivation would get this wrong)', async () => {
+    engineSettingsStore.setForTests(
+      EXERCISE_ID,
+      dto({
+        provider: 'AzureOpenAI',
+        // Deliberately NOT derivable from provider/providerCutToFake — a
+        // naive `providerCutToFake ? 'Fake' : provider` re-derivation would
+        // render "AzureOpenAI" here instead.
+        effectiveProvider: 'sentinel-effective-value',
+        providerCutToFake: false,
+        alreadyFake: false,
+      }),
+    )
+    renderPanel(true)
+
+    await screen.findByTestId('engine-settings-panel')
+    expect(screen.getByTestId('provider-effective-label')).toHaveTextContent('sentinel-effective-value')
+  })
+
+  it('shows the effective-vs-configured distinction as TEXT (not colour alone) when a cut is active, and renders the RESTORE control (never CUT)', async () => {
+    engineSettingsStore.setForTests(
+      EXERCISE_ID,
+      dto({
+        provider: 'AzureOpenAI',
+        effectiveProvider: 'Fake',
+        providerCutToFake: true,
+        alreadyFake: false,
+      }),
+    )
+    renderPanel(true)
+
+    await screen.findByTestId('engine-settings-panel')
+    expect(screen.getByTestId('provider-effective-label')).toHaveTextContent('RUNNING ON: Fake')
+    expect(screen.getByTestId('provider-effective-label')).toHaveTextContent('cut from AzureOpenAI')
+    expect(screen.getByTestId('provider-lever-restore')).toBeInTheDocument()
+    expect(screen.queryByTestId('provider-lever-cut')).not.toBeInTheDocument()
+  })
+
+  it('renders the CUT control (never RESTORE) with a plain "RUNNING ON" label when no cut is active', async () => {
+    engineSettingsStore.setForTests(
+      EXERCISE_ID,
+      dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', providerCutToFake: false, alreadyFake: false }),
+    )
+    renderPanel(true)
+
+    await screen.findByTestId('engine-settings-panel')
+    expect(screen.getByTestId('provider-effective-label')).toHaveTextContent('RUNNING ON: AzureOpenAI')
+    expect(screen.getByTestId('provider-effective-label')).not.toHaveTextContent('cut from')
+    expect(screen.getByTestId('provider-lever-cut')).toBeInTheDocument()
+    expect(screen.queryByTestId('provider-lever-restore')).not.toBeInTheDocument()
+  })
+
+  it('renders the cut lever as INERT (disabled + an explanatory note) when alreadyFake is true, rather than a control that looks live but does nothing', async () => {
+    // default dto(): provider 'Fake', alreadyFake true
+    engineSettingsStore.setForTests(EXERCISE_ID, dto())
+    renderPanel(true)
+
+    await screen.findByTestId('engine-settings-panel')
+    expect(screen.getByTestId('provider-lever-cut')).toBeDisabled()
+    expect(screen.getByTestId('provider-lever-already-fake-note')).toBeInTheDocument()
+  })
+
+  it('does NOT render the inert note when alreadyFake is false — the cut control is genuinely actionable', async () => {
+    engineSettingsStore.setForTests(
+      EXERCISE_ID,
+      dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', providerCutToFake: false, alreadyFake: false }),
+    )
+    renderPanel(true)
+
+    await screen.findByTestId('engine-settings-panel')
+    expect(screen.getByTestId('provider-lever-cut')).not.toBeDisabled()
+    expect(screen.queryByTestId('provider-lever-already-fake-note')).not.toBeInTheDocument()
+  })
+
+  it('clicking CUT in mock mode applies instantly when the lever is actionable (not alreadyFake)', async () => {
+    const user = userEvent.setup()
+    engineSettingsStore.setForTests(
+      EXERCISE_ID,
+      dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', providerCutToFake: false, alreadyFake: false }),
+    )
+    renderPanel(true)
+    await screen.findByTestId('engine-settings-panel')
+
+    await user.click(screen.getByTestId('provider-lever-cut'))
+
+    expect(screen.getByTestId('provider-effective-label')).toHaveTextContent('RUNNING ON: Fake')
+    expect(screen.getByTestId('provider-lever-restore')).toBeInTheDocument()
+  })
+
+  it('clicking RESTORE in mock mode returns to the configured provider instantly', async () => {
+    const user = userEvent.setup()
+    engineSettingsStore.setForTests(
+      EXERCISE_ID,
+      dto({ provider: 'AzureOpenAI', effectiveProvider: 'Fake', providerCutToFake: true, alreadyFake: false }),
+    )
+    renderPanel(true)
+    await screen.findByTestId('engine-settings-panel')
+
+    await user.click(screen.getByTestId('provider-lever-restore'))
+
+    expect(screen.getByTestId('provider-effective-label')).toHaveTextContent('RUNNING ON: AzureOpenAI')
+    expect(screen.getByTestId('provider-lever-cut')).toBeInTheDocument()
   })
 })
 

@@ -65,6 +65,8 @@ vi.mock('../services/engineSettingsActions', async () => {
     getSettings: vi.fn(),
     setAutonomyDefault: vi.fn(),
     setTierPolicyMode: vi.fn(),
+    cutGenerationToFake: vi.fn(),
+    restoreGenerationProvider: vi.fn(),
   }
 })
 
@@ -73,6 +75,8 @@ const mockedUseControllerIdentity = vi.mocked(useControllerIdentity)
 const mockedGetSettings = vi.mocked(engineSettingsActions.getSettings)
 const mockedSetAutonomyDefault = vi.mocked(engineSettingsActions.setAutonomyDefault)
 const mockedSetTierPolicyMode = vi.mocked(engineSettingsActions.setTierPolicyMode)
+const mockedCutGenerationToFake = vi.mocked(engineSettingsActions.cutGenerationToFake)
+const mockedRestoreGenerationProvider = vi.mocked(engineSettingsActions.restoreGenerationProvider)
 
 function scopeFor(exerciseId: string): ExerciseScope {
   return { exerciseId, exerciseName: 'Test Exercise', timeZone: 'America/New_York', status: 'active' }
@@ -91,6 +95,9 @@ function identity(overrides: Partial<ControllerIdentity> = {}): ControllerIdenti
 function dto(overrides: Partial<EngineSettingsDto> = {}): EngineSettingsDto {
   return {
     provider: 'Fake',
+    effectiveProvider: 'Fake',
+    providerCutToFake: false,
+    alreadyFake: true,
     tiers: [{ tier: 'Ambient', model: 'fake-ambient', deployment: 'ambient', zdrCapable: false }],
     autonomy: {
       swampedMode: false,
@@ -165,6 +172,62 @@ describe('useEngineSettings — mock mode (USE_MOCK_DATA=true, the default)', ()
     act(() => result.current.refetch())
 
     expect(mockedGetSettings).not.toHaveBeenCalled()
+  })
+
+  it('WR-002: the mock inMemoryStateNote honestly names the generation-provider cut (and its startup-configured-provider reset target) as reset-on-restart too — this is the exact class of drift that once shipped a stale note to UAT silently, since nothing asserted the fixture reflected the live contract', () => {
+    const { result } = renderHook(() => useEngineSettings())
+
+    expect(result.current.settings?.inMemoryStateNote).toMatch(/generation-provider cut/i)
+    expect(result.current.settings?.inMemoryStateNote).toMatch(/startup-configured provider/i)
+  })
+
+  it('the mock default posture matches every real environment today: provider is Fake, so the lever is INERT (alreadyFake, no cut active, effectiveProvider === provider)', () => {
+    const { result } = renderHook(() => useEngineSettings())
+
+    expect(result.current.settings?.provider).toBe('Fake')
+    expect(result.current.settings?.alreadyFake).toBe(true)
+    expect(result.current.settings?.providerCutToFake).toBe(false)
+    expect(result.current.settings?.effectiveProvider).toBe(result.current.settings?.provider)
+  })
+
+  it('cutGenerationToFake is an honest no-op when alreadyFake is true (mirrors the live backend) — no network call, no state change', () => {
+    const { result } = renderHook(() => useEngineSettings())
+    const before = result.current.settings
+
+    act(() => result.current.cutGenerationToFake())
+
+    expect(result.current.settings).toBe(before)
+    expect(result.current.settings?.providerCutToFake).toBe(false)
+    expect(mockedCutGenerationToFake).not.toHaveBeenCalled()
+  })
+
+  it('cutGenerationToFake/restoreGenerationProvider apply instantly (no network) once the configured provider is NOT already Fake', () => {
+    engineSettingsStore.setForTests(
+      'ex-mock-0001',
+      dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', providerCutToFake: false, alreadyFake: false }),
+    )
+    const { result } = renderHook(() => useEngineSettings())
+
+    act(() => result.current.cutGenerationToFake())
+    expect(result.current.settings?.providerCutToFake).toBe(true)
+    expect(result.current.settings?.effectiveProvider).toBe('Fake')
+    expect(result.current.settings?.provider).toBe('AzureOpenAI') // unchanged — the configured provider's meaning never moves
+    expect(mockedCutGenerationToFake).not.toHaveBeenCalled()
+
+    act(() => result.current.restoreGenerationProvider())
+    expect(result.current.settings?.providerCutToFake).toBe(false)
+    expect(result.current.settings?.effectiveProvider).toBe('AzureOpenAI')
+    expect(mockedRestoreGenerationProvider).not.toHaveBeenCalled()
+  })
+
+  it('restoreGenerationProvider is an honest no-op when no cut is active — no network call, no state change', () => {
+    const { result } = renderHook(() => useEngineSettings())
+    const before = result.current.settings
+
+    act(() => result.current.restoreGenerationProvider())
+
+    expect(result.current.settings).toBe(before)
+    expect(mockedRestoreGenerationProvider).not.toHaveBeenCalled()
   })
 })
 
@@ -508,5 +571,162 @@ describe('useEngineSettings — live mode (USE_MOCK_DATA=false)', () => {
     expect(mockedGetSettings).toHaveBeenCalledTimes(2)
     await waitFor(() => expect(result.current.settings?.autonomy.safetyClampActive).toBe(true))
     expect(result.current.settings?.autonomy.degradedReason).toBe('kill switch engaged')
+  })
+
+  // -----------------------------------------------------------------------
+  // STORY 07 — the generation-provider cut/restore lever (ADP-042). Same
+  // await-then-apply / serialization contract as the two mutations above,
+  // now sharing the SAME `requestInFlight` guard (a third mutation kind, not
+  // a fourth parallel mechanism).
+  // -----------------------------------------------------------------------
+
+  it('cutGenerationToFake writes NO speculative value: settings is untouched while the POST is outstanding, pendingProviderLever is true, and the FULL authoritative response (effectiveProvider/providerCutToFake/alreadyFake) is applied verbatim on success', async () => {
+    mockedGetSettings.mockResolvedValue(
+      dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', providerCutToFake: false, alreadyFake: false }),
+    )
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.settings).not.toBeNull())
+    const settingsBeforeClick = result.current.settings
+
+    let resolvePost: (value: EngineSettingsDto) => void = () => {}
+    mockedCutGenerationToFake.mockReturnValue(new Promise(resolve => { resolvePost = resolve }))
+
+    act(() => result.current.cutGenerationToFake())
+
+    // NOT optimistic — displayed settings is EXACTLY what it was before the
+    // click (same object reference), while the lever shows in-flight.
+    expect(result.current.settings).toBe(settingsBeforeClick)
+    expect(result.current.settings?.providerCutToFake).toBe(false)
+    expect(result.current.pendingProviderLever).toBe(true)
+    expect(mockedCutGenerationToFake).toHaveBeenCalledWith({
+      actingHumanId: 'human-controller-01',
+      timeZone: 'America/New_York',
+    })
+
+    await act(async () => {
+      resolvePost(
+        dto({ provider: 'AzureOpenAI', effectiveProvider: 'Fake', providerCutToFake: true, alreadyFake: false }),
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.pendingProviderLever).toBe(false)
+    expect(result.current.settings?.effectiveProvider).toBe('Fake')
+    expect(result.current.settings?.providerCutToFake).toBe(true)
+    expect(result.current.settings?.provider).toBe('AzureOpenAI') // unchanged (WR-003)
+  })
+
+  it('restoreGenerationProvider: same await-then-apply contract, returning effectiveProvider to the configured provider on success', async () => {
+    mockedGetSettings.mockResolvedValue(
+      dto({ provider: 'AzureOpenAI', effectiveProvider: 'Fake', providerCutToFake: true, alreadyFake: false }),
+    )
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.settings).not.toBeNull())
+
+    let resolvePost: (value: EngineSettingsDto) => void = () => {}
+    mockedRestoreGenerationProvider.mockReturnValue(
+      new Promise(resolve => { resolvePost = resolve }),
+    )
+
+    act(() => result.current.restoreGenerationProvider())
+    expect(result.current.pendingProviderLever).toBe(true)
+    // Untouched until the response lands — no speculative value.
+    expect(result.current.settings?.providerCutToFake).toBe(true)
+
+    await act(async () => {
+      resolvePost(
+        dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', providerCutToFake: false, alreadyFake: false }),
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.pendingProviderLever).toBe(false)
+    expect(result.current.settings?.providerCutToFake).toBe(false)
+    expect(result.current.settings?.effectiveProvider).toBe('AzureOpenAI')
+  })
+
+  it('on a cutGenerationToFake rejection: there is NO revert (settings is untouched, same reference), the lever re-enables, and the error is surfaced', async () => {
+    mockedGetSettings.mockResolvedValue(
+      dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', providerCutToFake: false, alreadyFake: false }),
+    )
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.settings).not.toBeNull())
+    const settingsBeforeClick = result.current.settings
+
+    const rejection = Object.assign(new Error('Bad Gateway'), {
+      isAxiosError: true,
+      response: { status: 502, data: '' },
+    })
+    mockedCutGenerationToFake.mockRejectedValue(rejection)
+
+    await act(async () => {
+      result.current.cutGenerationToFake()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.settings).toBe(settingsBeforeClick)
+    expect(result.current.settings?.providerCutToFake).toBe(false)
+    expect(result.current.pendingProviderLever).toBe(false)
+    expect(result.current.error).toMatch(/could not be applied/i)
+  })
+
+  it('a 403 from the provider lever flips `forbidden` — the panel renders read-only rather than a failed action', async () => {
+    mockedGetSettings.mockResolvedValue(
+      dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', providerCutToFake: false, alreadyFake: false }),
+    )
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.settings).not.toBeNull())
+
+    const rejection = Object.assign(new Error('Forbidden'), {
+      isAxiosError: true,
+      response: { status: 403, data: 'Forbidden' },
+    })
+    mockedCutGenerationToFake.mockRejectedValue(rejection)
+
+    await act(async () => {
+      result.current.cutGenerationToFake()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.forbidden).toBe(true)
+    expect(result.current.settings?.providerCutToFake).toBe(false)
+  })
+
+  it('the provider lever shares the SAME serialization guard as the other two mutations: attempting it while an autonomy-default mutation is in flight is a no-op', async () => {
+    mockedGetSettings.mockResolvedValue(
+      dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', providerCutToFake: false, alreadyFake: false }),
+    )
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.settings).not.toBeNull())
+
+    mockedSetAutonomyDefault.mockReturnValue(new Promise(() => {})) // never resolves
+    act(() => result.current.setAutonomyDefault('delayed-auto'))
+    expect(result.current.pendingAutonomyDefault).toBe(true)
+
+    act(() => result.current.cutGenerationToFake())
+
+    expect(mockedCutGenerationToFake).not.toHaveBeenCalled()
+    expect(result.current.pendingProviderLever).toBe(false)
+  })
+
+  it('conversely, attempting an autonomy-default mutation while the provider lever is in flight is a no-op', async () => {
+    mockedGetSettings.mockResolvedValue(
+      dto({ provider: 'AzureOpenAI', effectiveProvider: 'AzureOpenAI', providerCutToFake: false, alreadyFake: false }),
+    )
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.settings).not.toBeNull())
+
+    mockedCutGenerationToFake.mockReturnValue(new Promise(() => {})) // never resolves
+    act(() => result.current.cutGenerationToFake())
+    expect(result.current.pendingProviderLever).toBe(true)
+
+    act(() => result.current.setAutonomyDefault('delayed-auto'))
+
+    expect(mockedSetAutonomyDefault).not.toHaveBeenCalled()
+    expect(result.current.pendingAutonomyDefault).toBe(false)
   })
 })

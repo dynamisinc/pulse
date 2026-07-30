@@ -37,6 +37,9 @@ const EXERCISE_ID = 'ex-mock-0001'
 function settingsDto(overrides: Partial<EngineSettingsDto> = {}): EngineSettingsDto {
   return {
     provider: 'Fake',
+    effectiveProvider: 'Fake',
+    providerCutToFake: false,
+    alreadyFake: true,
     tiers: [],
     autonomy: {
       swampedMode: false,
