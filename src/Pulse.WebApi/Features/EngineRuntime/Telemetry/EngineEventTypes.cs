@@ -60,7 +60,7 @@ public static class EngineEventTypes
     /// </para>
     /// <para>
     /// <b>PENDING RATIFICATION.</b> The engine event vocabulary is owned by
-    /// <c>engine-telemetry-tuning/01-engine-event-types.md</c> (#173); story 07's AC7 requires this name and
+    /// <c>engine-telemetry-tuning/01-engine-event-types.md</c> (#173); story 07's AC8 requires this name and
     /// payload shape to be aligned with that story before either is finalized. It is additive to the unchanged
     /// v0 envelope (<c>eventType</c> is an OPEN string), so ratification can rename it without a migration.
     /// </para>

@@ -233,7 +233,7 @@ public static class EngineEventPayloads
     /// a cut/restore pair.
     /// </summary>
     /// <remarks>
-    /// <b>PENDING #173 ratification</b> (story 07 AC7) — see <see cref="EngineEventTypes.ProviderChanged"/>.
+    /// <b>PENDING #173 ratification</b> (story 07 AC8) — see <see cref="EngineEventTypes.ProviderChanged"/>.
     /// Carries only provider NAMES that were already registered at startup; it can never name an endpoint the
     /// NFR-005 governance gate did not sign off.
     /// </remarks>
