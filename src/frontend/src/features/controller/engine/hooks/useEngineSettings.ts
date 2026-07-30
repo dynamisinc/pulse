@@ -1,9 +1,9 @@
 /**
  * features/controller/engine/hooks/useEngineSettings.ts
  * ---------------------------------------------------------------------------
- * The engine SETTINGS read/write hook (feature: autonomy-safety, story 06;
- * ADP-025/NFR-005, COR-001, COR-018, D5 §2 "Engine control"). STAFF world —
- * pure hook, no UI, no COBRA.
+ * The engine SETTINGS read/write hook (feature: autonomy-safety, stories 06 +
+ * 07; ADP-025/NFR-005, COR-001, COR-018, ADP-042, D5 §2 "Engine control").
+ * STAFF world — pure hook, no UI, no COBRA.
  *
  * The SINGLE SOURCE both `<EngineSettingsPanel>` (this story) and
  * `<EngineControlBar>`'s "Live" label read — this hook is the first cockpit
@@ -122,6 +122,40 @@
  * open-transition refetch would otherwise silently re-enable the controls the
  * moment the panel is reopened.
  *
+ * ## STORY 07 — the generation-provider cut/restore lever (ADP-042)
+ * `cutGenerationToFake`/`restoreGenerationProvider` are a THIRD pair of
+ * mutations added onto the SAME hook, reusing every mechanism above verbatim:
+ * await-then-apply (no speculative value), the shared per-exercise
+ * `requestInFlight` serialization (a provider-lever click is a no-op while
+ * the GET or either OTHER mutation is outstanding, and vice versa — one
+ * shared guard across all four mutation kinds, not a fourth parallel one),
+ * and the single sequence-number "latest applied response" guard. A single
+ * `pendingProviderLever` flag covers both directions (cut and restore can
+ * never both be the live control at once — the panel renders exactly one of
+ * them depending on `providerCutToFake`), mirroring `pendingAutonomyDefault`/
+ * `pendingTierPolicy`'s per-control shape.
+ *
+ * **WR-003, applied to the provider axis.** `effectiveProvider` and
+ * `providerCutToFake` are read VERBATIM off the applied `EngineSettingsDto` —
+ * this hook (and `<EngineSettingsPanel>`) never re-derives "a cut is active,
+ * therefore effectively Fake" by comparing `provider` against
+ * `providerCutToFake`. That is exactly the mislabelled-posture bug class the
+ * configured/effective split exists to prevent, now on a second field pair.
+ *
+ * **`alreadyFake` is presented honestly, not discarded.** When the startup-
+ * configured provider is already `Fake` (every environment today, including
+ * UAT), the backend reports a real no-op via `alreadyFake: true` rather than
+ * a false "I just locked something down" signal. This hook passes that fact
+ * straight through in `settings.alreadyFake`; the panel renders the cut
+ * control as INERT (disabled, with an explanatory note) rather than
+ * presenting a control that looks live but does nothing.
+ *
+ * **No telemetry emitted here either** — story 07's two endpoints emit their
+ * own server-side `engine.provider_changed` event on both directions (see
+ * that story's Build notes), so this hook stays silent for the same reason
+ * the settings mutations above do: a client emission would double the audit
+ * record.
+ *
  * ## PER-EXERCISE SCOPE (COR-001)
  * Module-singleton store keyed by `exerciseId` — mirrors `useEngineControl`'s
  * / `useSwampedMode`'s shape (`subscribe`/`resetForTests`), so a remount under
@@ -142,8 +176,10 @@ import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useControllerIdentity } from '../../identity/controllerIdentity'
 import {
+  cutGenerationToFake as postCutGenerationToFake,
   describeSettingsError,
   getSettings as fetchSettings,
+  restoreGenerationProvider as postRestoreGenerationProvider,
   setAutonomyDefault as postAutonomyDefault,
   setTierPolicyMode as postTierPolicyMode,
   type AutonomyDefaultLevel,
@@ -166,10 +202,25 @@ export type {
  * A plausible static settings snapshot, mirroring story 05's actual shipped
  * exercise default: healthy (no clamp), Suggest base/effective, `auto` tier
  * policy, the offline Fake provider with no bound deployments (matches dev/
- * UAT's real Generation config today).
+ * UAT's real Generation config today). `provider` is `Fake`, so — matching
+ * the live `EngineSettingsDto.From` projection's own logic — `alreadyFake` is
+ * `true` and `providerCutToFake` is `false`/`effectiveProvider` equals
+ * `provider`: the cut/restore lever is INERT here, exactly as it is in every
+ * environment today (WR-002/story 07 — this mock is what UAT actually runs
+ * on, so it must render the SAME honest "nothing to cut" posture the real
+ * backend would).
+ *
+ * `inMemoryStateNote` is a byte-for-byte copy of the backend's
+ * `EngineSettingsDto.InMemoryNote` constant (`EngineSettingsContracts.cs`) —
+ * kept in sync BY HAND since the two live in different languages with no
+ * shared source of truth; see `useEngineSettings.test.ts`'s WR-002 content
+ * assertion for the guard that catches this copy drifting out of sync again.
  */
 const MOCK_ENGINE_SETTINGS: EngineSettingsDto = {
   provider: 'Fake',
+  effectiveProvider: 'Fake',
+  providerCutToFake: false,
+  alreadyFake: true,
   tiers: [
     { tier: 'Ambient', model: 'fake-ambient (mock)', deployment: '', zdrCapable: false },
     { tier: 'Standard', model: 'fake-standard (mock)', deployment: '', zdrCapable: false },
@@ -185,8 +236,8 @@ const MOCK_ENGINE_SETTINGS: EngineSettingsDto = {
   tierPolicyMode: 'auto',
   inMemoryState: true,
   inMemoryStateNote:
-    'Autonomy default and tier-policy mode are held in process memory; a restart resets them to ' +
-    'suggest / auto.',
+    'Autonomy default, tier-policy mode and the generation-provider cut are held in process ' +
+    'memory; a restart resets them to suggest / auto / the startup-configured provider.',
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +261,12 @@ interface EngineSettingsState {
   readonly pendingAutonomyDefault: boolean
   /** The tier-policy POST is outstanding — disable ONLY that control. */
   readonly pendingTierPolicy: boolean
+  /**
+   * The provider-lever POST (cut OR restore — see module header, story 07) is
+   * outstanding — disable that control. One flag covers both directions:
+   * exactly one of the cut/restore controls is ever rendered at a time.
+   */
+  readonly pendingProviderLever: boolean
 }
 
 const DEFAULT_STATE: EngineSettingsState = {
@@ -219,6 +276,7 @@ const DEFAULT_STATE: EngineSettingsState = {
   forbidden: false,
   pendingAutonomyDefault: false,
   pendingTierPolicy: false,
+  pendingProviderLever: false,
 }
 
 const MOCK_STATE: EngineSettingsState = {
@@ -228,6 +286,7 @@ const MOCK_STATE: EngineSettingsState = {
   forbidden: false,
   pendingAutonomyDefault: false,
   pendingTierPolicy: false,
+  pendingProviderLever: false,
 }
 
 /**
@@ -343,6 +402,7 @@ function setForTests(
     forbidden: options.forbidden ?? false,
     pendingAutonomyDefault: false,
     pendingTierPolicy: false,
+    pendingProviderLever: false,
   })
   internalByExercise.set(exerciseId, defaultInternal())
   liveFetchStarted.add(exerciseId)
@@ -493,6 +553,32 @@ function mockApplyAutonomyDefault(
   }
 }
 
+/**
+ * Mirrors story 07's server-side idempotency (`EngineProviderCutServiceTests.
+ * Cut_WhenTheConfiguredProviderIsAlreadyFake_IsAnHonestNoOp_WithNoTelemetry`):
+ * cutting is a genuine no-op — returns the SAME object, not a copy — when the
+ * configured provider is already `Fake` or a cut is already active. Otherwise
+ * flips `providerCutToFake` on and `effectiveProvider` to `Fake`, leaving
+ * `provider` untouched (the startup-configured provider's meaning never
+ * changes — same discipline as the live `EngineSettingsDto.From` projection).
+ */
+function mockApplyCutToFake(previous: EngineSettingsDto): EngineSettingsDto {
+  if (previous.alreadyFake || previous.providerCutToFake) return previous
+  return { ...previous, providerCutToFake: true, effectiveProvider: 'Fake' }
+}
+
+/**
+ * Mirrors story 07's server-side idempotency
+ * (`EngineProviderCutServiceTests.Restore_WithNoCutActive_IsAnIdempotentNoOp_WithNoTelemetry`):
+ * restoring when no cut is active is a genuine no-op. Otherwise returns
+ * generation to the startup-configured `provider` — never a third provider
+ * (§8.2's "human-only raise, capped at the pre-existing baseline").
+ */
+function mockApplyRestoreProvider(previous: EngineSettingsDto): EngineSettingsDto {
+  if (!previous.providerCutToFake) return previous
+  return { ...previous, providerCutToFake: false, effectiveProvider: previous.provider }
+}
+
 function runSetAutonomyDefault(
   exerciseId: string,
   level: AutonomyDefaultLevel,
@@ -584,6 +670,106 @@ function runSetTierPolicyMode(
     .finally(() => settle(exerciseId))
 }
 
+/**
+ * Cuts this exercise's generation to `Fake` (story 07, ADP-042). Same await-
+ * then-apply / serialization contract as {@link runSetAutonomyDefault} — no
+ * speculative value, `pendingProviderLever` flips while the POST is
+ * outstanding, the full authoritative response is applied verbatim on
+ * success, and there is no revert on rejection. Under mock, applies the
+ * SAME idempotent no-op logic the live backend applies server-side
+ * ({@link mockApplyCutToFake}) — instantly, no network call.
+ */
+function runCutGenerationToFake(
+  exerciseId: string,
+  ctx: { readonly actingHumanId: string; readonly timeZone: string },
+): void {
+  const current = getSnapshot(exerciseId)
+  if (!current.settings) return // not loaded yet
+
+  if (USE_MOCK_DATA) {
+    setFor(exerciseId, { ...current, settings: mockApplyCutToFake(current.settings) })
+    return
+  }
+
+  const internal = getInternal(exerciseId)
+  // Defensive — the UI already disables the lever whenever anything is in
+  // flight (the shared serialization invariant), so this should be
+  // unreachable through normal use.
+  if (internal.requestInFlight) return
+
+  const mySeq = issue(exerciseId)
+  setFor(exerciseId, { ...current, pendingProviderLever: true, error: null })
+
+  postCutGenerationToFake(ctx)
+    .then(settings => {
+      const latest = getSnapshot(exerciseId)
+      if (tryApply(exerciseId, mySeq)) {
+        setFor(exerciseId, { ...latest, settings, pendingProviderLever: false, error: null })
+      } else {
+        setFor(exerciseId, { ...latest, pendingProviderLever: false })
+      }
+    })
+    .catch((error: unknown) => {
+      // No revert — nothing was ever asserted. Re-enable the control and
+      // surface the failure; `settings` is untouched.
+      const described = describeSettingsError(error)
+      const latest = getSnapshot(exerciseId)
+      setFor(exerciseId, {
+        ...latest,
+        pendingProviderLever: false,
+        error: described.message,
+        forbidden: described.status === 403 ? true : latest.forbidden,
+      })
+    })
+    .finally(() => settle(exerciseId))
+}
+
+/**
+ * Restores this exercise's generation to the startup-configured provider
+ * (story 07, ADP-042 §8.2). Same await-then-apply / serialization contract as
+ * {@link runCutGenerationToFake}. Under mock, applies
+ * {@link mockApplyRestoreProvider}'s idempotent no-op logic instantly.
+ */
+function runRestoreGenerationProvider(
+  exerciseId: string,
+  ctx: { readonly actingHumanId: string; readonly timeZone: string },
+): void {
+  const current = getSnapshot(exerciseId)
+  if (!current.settings) return
+
+  if (USE_MOCK_DATA) {
+    setFor(exerciseId, { ...current, settings: mockApplyRestoreProvider(current.settings) })
+    return
+  }
+
+  const internal = getInternal(exerciseId)
+  if (internal.requestInFlight) return
+
+  const mySeq = issue(exerciseId)
+  setFor(exerciseId, { ...current, pendingProviderLever: true, error: null })
+
+  postRestoreGenerationProvider(ctx)
+    .then(settings => {
+      const latest = getSnapshot(exerciseId)
+      if (tryApply(exerciseId, mySeq)) {
+        setFor(exerciseId, { ...latest, settings, pendingProviderLever: false, error: null })
+      } else {
+        setFor(exerciseId, { ...latest, pendingProviderLever: false })
+      }
+    })
+    .catch((error: unknown) => {
+      const described = describeSettingsError(error)
+      const latest = getSnapshot(exerciseId)
+      setFor(exerciseId, {
+        ...latest,
+        pendingProviderLever: false,
+        error: described.message,
+        forbidden: described.status === 403 ? true : latest.forbidden,
+      })
+    })
+    .finally(() => settle(exerciseId))
+}
+
 // ---------------------------------------------------------------------------
 // The hook
 // ---------------------------------------------------------------------------
@@ -603,6 +789,12 @@ export interface UseEngineSettingsResult {
   /** The tier-policy POST is outstanding. */
   readonly pendingTierPolicy: boolean
   /**
+   * The generation-provider cut/restore POST (story 07) is outstanding —
+   * disable that control. One flag for both directions (see
+   * {@link EngineSettingsState.pendingProviderLever}).
+   */
+  readonly pendingProviderLever: boolean
+  /**
    * Requests the exercise autonomy default. AWAITS the response and applies
    * it verbatim on success; on rejection, re-enables the control and surfaces
    * the error — `settings` is untouched either way until a response lands.
@@ -613,6 +805,19 @@ export interface UseEngineSettingsResult {
   /** Requests the tier-policy mode. Same await-then-apply contract as
    * {@link setAutonomyDefault}. */
   readonly setTierPolicyMode: (mode: TierPolicyMode) => void
+  /**
+   * Cuts this exercise's generation to `Fake` (story 07, ADP-042). Same
+   * await-then-apply contract as {@link setAutonomyDefault}. When the
+   * configured provider is already `Fake`, the applied response reports
+   * `alreadyFake: true` — an honest no-op, not a false success.
+   */
+  readonly cutGenerationToFake: () => void
+  /**
+   * Restores this exercise's generation to the startup-configured provider
+   * (story 07, §8.2 — capped at the pre-existing baseline, never a third
+   * provider). Same await-then-apply contract as {@link setAutonomyDefault}.
+   */
+  readonly restoreGenerationProvider: () => void
   /**
    * Forces a fresh `GET /api/engine/settings` — a no-op under mock. Callers
    * refetch whenever a safety-relevant sibling state SETTLES (the kill
@@ -653,6 +858,14 @@ export function useEngineSettings(): UseEngineSettingsResult {
     [exerciseId, identity.actingHumanId, timeZone],
   )
 
+  const cutGenerationToFakeCb = useCallback(() => {
+    runCutGenerationToFake(exerciseId, { actingHumanId: identity.actingHumanId, timeZone })
+  }, [exerciseId, identity.actingHumanId, timeZone])
+
+  const restoreGenerationProviderCb = useCallback(() => {
+    runRestoreGenerationProvider(exerciseId, { actingHumanId: identity.actingHumanId, timeZone })
+  }, [exerciseId, identity.actingHumanId, timeZone])
+
   const refetchCb = useCallback(() => {
     invalidate(exerciseId)
   }, [exerciseId])
@@ -664,8 +877,11 @@ export function useEngineSettings(): UseEngineSettingsResult {
     forbidden: state.forbidden,
     pendingAutonomyDefault: state.pendingAutonomyDefault,
     pendingTierPolicy: state.pendingTierPolicy,
+    pendingProviderLever: state.pendingProviderLever,
     setAutonomyDefault: setAutonomyDefaultCb,
     setTierPolicyMode: setTierPolicyModeCb,
+    cutGenerationToFake: cutGenerationToFakeCb,
+    restoreGenerationProvider: restoreGenerationProviderCb,
     refetch: refetchCb,
   }
 }

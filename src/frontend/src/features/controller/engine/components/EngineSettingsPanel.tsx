@@ -23,6 +23,18 @@
  *    fix (see `useEngineSettings`'s module header);
  *  - the TIER-POLICY MODE (Standard / Ambient / auto-by-purpose) — the same
  *    await-then-apply pattern;
+ *  - the GENERATION-PROVIDER CUT/RESTORE LEVER (story 07, ADP-042) — a binary
+ *    control (never a provider chooser, see `EngineGenerationProviderRequest`
+ *    on the backend) that cuts this exercise's generation to the offline
+ *    `Fake` provider, or restores it to the startup-configured one. The
+ *    effective-vs-configured distinction is labelled from `effectiveProvider`
+ *    DIRECTLY (the story-07 sibling of the WR-003 discipline above — never
+ *    re-derived by comparing `provider` against `providerCutToFake`), as
+ *    TEXT (e.g. "RUNNING ON: FAKE (cut from AzureOpenAI)"), never colour
+ *    alone (NFR-001). When `alreadyFake` is `true` (every environment today,
+ *    including UAT), the cut control renders DISABLED with an explanatory
+ *    note — the lever is genuinely inert, and the panel says so plainly
+ *    rather than offering a control that looks live but does nothing;
  *  - the active PROVIDER + tier-to-model mapping, READ-ONLY — this panel
  *    never grows a deployment/model field anywhere (preserves story 05's
  *    governed-config boundary);
@@ -32,14 +44,15 @@
  * AWAIT, THEN APPLY (see `useEngineSettings`'s module header for the full
  * rebuild history + rationale). Clicking a control writes NO speculative
  * value here — it disables while its own POST is outstanding
- * (`pendingAutonomyDefault`/`pendingTierPolicy`) with a text "Applying…"
- * affordance, and both mutable controls are disabled whenever ANYTHING is in
- * flight (`loading` too), not only the one just clicked — this is what makes
- * the historical "two mutations racing to overwrite each other's field" bug
- * class structurally unrepresentable rather than merely guarded (see the
- * hook's module header). On success the FULL authoritative snapshot is
- * applied; on rejection the control simply re-enables and the error is shown
- * — there is no revert, because nothing was ever asserted.
+ * (`pendingAutonomyDefault`/`pendingTierPolicy`/`pendingProviderLever`) with a
+ * text "Applying…" affordance, and every mutable control (including the
+ * story-07 provider lever) is disabled whenever ANYTHING is in flight
+ * (`loading` too), not only the one just clicked — this is what makes the
+ * historical "two mutations racing to overwrite each other's field" bug class
+ * structurally unrepresentable rather than merely guarded (see the hook's
+ * module header). On success the FULL authoritative snapshot is applied; on
+ * rejection the control simply re-enables and the error is shown — there is
+ * no revert, because nothing was ever asserted.
  *
  * 403 HANDLING (story 05 AC6/#297). Once `useEngineSettings().forbidden` is
  * `true` (a mutating call came back 403 — assigned staff but not a
@@ -87,6 +100,15 @@ export const ENGINE_SETTINGS_PANEL_TITLE = 'Engine settings'
 
 /** Flyout panel width — matches `PersonaDockHost`'s scale. */
 const PANEL_WIDTH_PX = 380
+
+/**
+ * `id` of the "already Fake" explanatory note, programmatically associated
+ * to the disabled Cut button via `aria-describedby` (WR-002) — a disabled
+ * `<button>` is out of the tab order, so screen-reader users in browse mode
+ * must be able to reach the reason from the control itself, not only by
+ * reading past it in document order (WCAG 2.1 SC 1.3.1 / 3.3.2).
+ */
+const ALREADY_FAKE_NOTE_ID = 'provider-lever-already-fake-note'
 
 /** D5 dark operator-chrome tokens (matches `ReviewQueue`'s/`EngineControlBar`'s `chrome`). */
 const chrome = {
@@ -156,8 +178,11 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
     forbidden,
     pendingAutonomyDefault,
     pendingTierPolicy,
+    pendingProviderLever,
     setAutonomyDefault,
     setTierPolicyMode,
+    cutGenerationToFake,
+    restoreGenerationProvider,
     refetch,
   } = useEngineSettings()
 
@@ -199,9 +224,18 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
   // this file's + `useEngineSettings`'s module headers: this is the
   // serialization invariant that makes the "two mutations racing to
   // overwrite each other's field" bug class structurally unrepresentable.
-  const anyRequestInFlight = loading || pendingAutonomyDefault || pendingTierPolicy
+  const anyRequestInFlight =
+    loading || pendingAutonomyDefault || pendingTierPolicy || pendingProviderLever
   const autonomyControlsDisabled = forbidden || anyRequestInFlight
   const tierControlsDisabled = forbidden || anyRequestInFlight
+  // The CUT control is additionally disabled when the lever is INERT
+  // (`alreadyFake`) — a control that looks live but can never change
+  // anything must not be left clickable (see this file's module header).
+  // The RESTORE control has no such extra case: it is only ever rendered
+  // while `providerCutToFake` is true, which the backend never reports
+  // alongside `alreadyFake` (cutting an already-Fake provider records no
+  // real transition).
+  const providerLeverControlsDisabled = forbidden || anyRequestInFlight
 
   const autonomy = settings?.autonomy ?? null
   // `effectiveLevel` is `null` IFF `generationStopped` is `true` (story 05's
@@ -231,6 +265,18 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
         ? `A safety clamp is active (${autonomy.degradedReason}) — only an explicit restore lifts it.`
         : 'A safety clamp is active on this exercise — only an explicit restore lifts it.'
       : null
+
+  // EFFECTIVE-VS-CONFIGURED PROVIDER (story 07, WR-003 applied to the
+  // provider axis). `effectiveProvider`/`providerCutToFake` are read
+  // DIRECTLY off `settings` — NEVER re-derived by comparing `provider`
+  // against `providerCutToFake` (that inference is the exact mislabelled-
+  // posture bug class the configured/effective split exists to prevent).
+  // TEXT, never colour alone (NFR-001).
+  const providerEffectiveLabel = settings
+    ? settings.providerCutToFake
+      ? `RUNNING ON: ${settings.effectiveProvider} (cut from ${settings.provider})`
+      : `RUNNING ON: ${settings.effectiveProvider}`
+    : null
 
   return (
     <Box
@@ -467,6 +513,130 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
               )}
             </Stack>
 
+            <Box sx={{ height: '1px', bgcolor: chrome.line }} />
+
+            {/* Generation-provider cut/restore lever (story 07, ADP-042) —
+                a binary control, never a provider chooser. */}
+            <Stack sx={{ gap: 0.75 }}>
+              <Typography
+                component="h3"
+                sx={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.1em', color: chrome.inkMuted }}
+              >
+                GENERATION PROVIDER
+              </Typography>
+
+              {providerEffectiveLabel && (
+                <Stack
+                  data-testid="provider-effective-label"
+                  direction="row"
+                  role="status"
+                  aria-live="polite"
+                  sx={{ alignItems: 'flex-start', gap: 0.6 }}
+                >
+                  <FontAwesomeIcon
+                    icon={settings.providerCutToFake ? faTriangleExclamation : faCircleInfo}
+                    color={settings.providerCutToFake ? chrome.amber : chrome.blue}
+                    aria-hidden="true"
+                  />
+                  <Typography
+                    sx={{
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      color: settings.providerCutToFake ? chrome.amber : chrome.ink,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {providerEffectiveLabel}
+                  </Typography>
+                </Stack>
+              )}
+
+              {settings.providerCutToFake ? (
+                <Box
+                  component="button"
+                  type="button"
+                  data-testid="provider-lever-restore"
+                  disabled={providerLeverControlsDisabled}
+                  onClick={() => restoreGenerationProvider()}
+                  sx={{
+                    alignSelf: 'flex-start',
+                    px: 1,
+                    py: 0.6,
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    color: chrome.ink,
+                    bgcolor: chrome.card,
+                    border: `1px solid ${chrome.blue}`,
+                    borderRadius: '7px',
+                    cursor: providerLeverControlsDisabled ? 'not-allowed' : 'pointer',
+                    opacity: providerLeverControlsDisabled ? 0.5 : 1,
+                    '&:hover': providerLeverControlsDisabled ? undefined : { borderColor: chrome.blue },
+                  }}
+                >
+                  Restore to {settings.provider}
+                </Box>
+              ) : (
+                <Box
+                  component="button"
+                  type="button"
+                  data-testid="provider-lever-cut"
+                  disabled={providerLeverControlsDisabled || settings.alreadyFake}
+                  aria-describedby={settings.alreadyFake ? ALREADY_FAKE_NOTE_ID : undefined}
+                  onClick={() => cutGenerationToFake()}
+                  sx={{
+                    alignSelf: 'flex-start',
+                    px: 1,
+                    py: 0.6,
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    color: chrome.ink,
+                    bgcolor: chrome.card,
+                    border: `1px solid ${chrome.line}`,
+                    borderRadius: '7px',
+                    cursor: providerLeverControlsDisabled || settings.alreadyFake ? 'not-allowed' : 'pointer',
+                    opacity: providerLeverControlsDisabled || settings.alreadyFake ? 0.5 : 1,
+                    '&:hover':
+                      providerLeverControlsDisabled || settings.alreadyFake
+                        ? undefined
+                        : { borderColor: chrome.blue },
+                  }}
+                >
+                  Cut to Fake
+                </Box>
+              )}
+
+              {/* AC3/alreadyFake: the lever is genuinely INERT when the
+                  configured provider is already Fake (every environment
+                  today, including UAT) — say so plainly rather than leaving
+                  a control that looks live but can never change anything. */}
+              {settings.alreadyFake && !settings.providerCutToFake && (
+                <Stack
+                  id={ALREADY_FAKE_NOTE_ID}
+                  data-testid="provider-lever-already-fake-note"
+                  direction="row"
+                  sx={{ alignItems: 'flex-start', gap: 0.6 }}
+                >
+                  <FontAwesomeIcon icon={faCircleInfo} color={chrome.inkFaint} aria-hidden="true" />
+                  <Typography sx={{ fontSize: 10.5, color: chrome.inkFaint, lineHeight: 1.4 }}>
+                    This exercise's configured provider is already Fake — cutting has nothing to
+                    change. The lever becomes active once a real (egressing) provider is
+                    configured.
+                  </Typography>
+                </Stack>
+              )}
+
+              {pendingProviderLever && (
+                <Typography
+                  data-testid="provider-lever-applying"
+                  role="status"
+                  aria-live="polite"
+                  sx={{ fontSize: 10.5, color: chrome.blue }}
+                >
+                  Applying…
+                </Typography>
+              )}
+            </Stack>
+
             {forbidden && (
               <Stack
                 data-testid="engine-settings-readonly-note"
@@ -507,7 +677,8 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                 PROVIDER &amp; TIERS (READ-ONLY)
               </Typography>
               <Typography data-testid="engine-settings-provider" sx={{ fontSize: 12, color: chrome.ink }}>
-                Provider: <Box component="span" sx={{ fontWeight: 700 }}>{settings.provider}</Box>
+                Configured provider (startup):{' '}
+                <Box component="span" sx={{ fontWeight: 700 }}>{settings.provider}</Box>
               </Typography>
               {settings.tiers.length === 0 && (
                 <Typography sx={{ fontSize: 11, color: chrome.inkFaint }}>
