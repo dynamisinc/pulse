@@ -1,6 +1,6 @@
 # Story: Cut generation to the Fake provider (runtime egress safety lever)
 
-**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress — backend (edges 6a+6b) AND frontend (edge 7, the console lever) are both now built. Backend integrated on the umbrella (`feature/autonomy-safety-cut-to-fake`), Gate-1 clean and Gate-2 clean (0 Criticals — see Build notes). Frontend built on `build/autonomy-safety/07-cut-to-fake-console` as a "GENERATION PROVIDER" section inside story 06's existing "ENGINE" flyout (no new toolstrip entry, no new route) — see Build notes (frontend). Its own Gate-1 pass is clean: 0 Criticals, 4 Warnings (WR-001..WR-004, this review's own numbering — see Build notes), three of which are being folded on that branch in parallel with this doc pass. Every AC now has code behind it. NOT Complete: this story's DoD requires verified-in-UAT, and UAT remains blocked — `PROVIDER-GOVERNANCE.md` §8 is still unsigned AND no environment runs an egressing provider. New this pass: the §8 provisioning deploy was attempted and failed on a pre-existing, unrelated infrastructure defect (`databaseDeploy` / `Microsoft.Sql/servers.properties.administrators` is create-only), so UAT is now gated behind an infra fix as well as the governance signature — see Tests.
+**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress — backend (edges 6a+6b) AND frontend (edge 7, the console lever) are both now built. Backend integrated on the umbrella (`feature/autonomy-safety-cut-to-fake`), Gate-1 clean and Gate-2 clean (0 Criticals — see Build notes). Frontend built on `build/autonomy-safety/07-cut-to-fake-console` as a "GENERATION PROVIDER" section inside story 06's existing "ENGINE" flyout (no new toolstrip entry, no new route) — see Build notes (frontend). Its own Gate-1 pass is clean: 0 Criticals, 4 Warnings (WR-001..WR-004, this review's own numbering — see Build notes), all four now folded and integrated (`8e5a9b7`). A subsequent full-stack Gate-2 (post-integration, `#402`) is also clean: 0 Criticals, 3 Warnings, 3 Suggestions — see Build notes and Tests. Every AC now has code behind it, including AC7 (staff-only). NOT Complete: this story's DoD requires verified-in-UAT, and UAT remains blocked — `PROVIDER-GOVERNANCE.md` §8 is still unsigned AND no environment runs an egressing provider. New this pass: the §8 provisioning deploy was attempted and failed on a pre-existing, unrelated infrastructure defect (`databaseDeploy` / `Microsoft.Sql/servers.properties.administrators` is create-only), so UAT is now gated behind an infra fix as well as the governance signature — see Tests.
 **Requirements:** ADP-042 (kill-switch family — extends the "one manual control, only ever less" lever
 to the provider/egress axis), NFR-005 / ADP-025 (the governed-endpoint boundary this lever must not
 cross)  ·  **Design decisions:** none  ·  **Issue:** #402
@@ -157,7 +157,7 @@ Azure OpenAI)"), never a color chip alone (NFR-001).
 existing `/api/engine` group in `EngineReviewEndpoints.cs`, gated by the same
 `EngineCockpitControllerRoleFilter` every other mutating `/api/engine` route already uses; the
 `EngineSettingsDto`/`EngineSettingsContracts.cs` additive field; the `EngineEventTypes.cs`/
-`EngineEventPayloads.cs` telemetry vocabulary, pending the #173 alignment noted in AC7.
+`EngineEventPayloads.cs` telemetry vocabulary, pending the #173 alignment noted in AC8.
 
 ## Build notes (backend, edges 6a + 6b — as built)
 - **The 6a/6b seam was split slightly differently from the literal Wave-Plan row** (orchestrator call,
@@ -181,7 +181,7 @@ existing `/api/engine` group in `EngineReviewEndpoints.cs`, gated by the same
   fields (WR-003). `InMemoryNote` was EDITED (it now names the provider cut) — a wire + fixture change.
 - **Telemetry vocabulary:** ONE new event type, `engine.provider_changed`, with
   `{fromProvider, toProvider, reason: cut|restore, scenarioMinute}` — not a cut/restore pair (smaller
-  taxonomy footprint; the from→to already says the direction). **Pending #173 ratification** per AC7; the
+  taxonomy footprint; the from→to already says the direction). **Pending #173 ratification** per AC8; the
   code carries that note at both the event-type and payload declarations.
 - **`GenerationResilienceTests`' transport override had to be re-pointed at the concrete adapter type.**
   Registering the real provider's typed client as its own concrete type (`AddHttpClient<TProvider>`,
@@ -216,9 +216,13 @@ existing `/api/engine` group in `EngineReviewEndpoints.cs`, gated by the same
   Gate 2 raised four Warnings: WR-G2-001/002/003 are documentation drift (status line, Build notes
   tense, and this AC↔test table's now-deleted WR-001 test name) — fixed in this pass. WR-G2-004 (the
   architecture guard's coverage claim overreached — constructor injection only, service-location
-  uncovered) is being folded by the backend agent in parallel, along with S-G2-001 (an end-to-end
-  `ExerciseId` propagation guard, because `ExerciseId` now gates egress selection and CI cannot observe
-  a regression when every environment runs Fake on both sides of the selector).
+  uncovered) and S-G2-001 (an end-to-end `ExerciseId` propagation guard, because `ExerciseId` now gates
+  egress selection and CI cannot observe a regression when every environment runs Fake on both sides of
+  the selector) were folded by the backend agent in `eb21758` and integrated on the umbrella in
+  `8dbf60d` — see the two guards' entries in the AC↔test table above
+  (`GenerationProviderInjectionArchitectureTests.NoProductionSourceOutsideTheCompositionRoot_
+  ServiceLocatesAConcreteGenerationProvider` and `EngineSettingsLoopIntegrationTests.
+  TheExerciseIdTheProviderReceives_IsTheOneItsTickWasDrivenWith`).
 
 ## Build notes (frontend, edge 7 — as built)
 - **Location: inside story 06's existing "ENGINE" flyout, not a new surface.** A "GENERATION PROVIDER"
@@ -259,21 +263,50 @@ separate Gate-1 passes, called out explicitly to avoid confusion.)
   the "Not built here" Build-notes bullet, and the Tests section's "Frontend — not built here" line).
   Closed by this doc pass.
 - **WR-002** — the disabled Cut button had no programmatic link to its explanatory note for a
-  screen-reader user in browse mode (who never tabs to a disabled control). Being folded in parallel on
-  this branch: `aria-describedby` on the Cut button plus a `toHaveAccessibleDescription`/`aria-describedby`
+  screen-reader user in browse mode (who never tabs to a disabled control). Folded: `aria-describedby`
+  on the Cut button (`EngineSettingsPanel.tsx`) plus a `toHaveAccessibleDescription`/`aria-describedby`
   test.
 - **WR-003** — the read-only `Provider:` label became ambiguous once an `effectiveProvider` existed
-  alongside it. Being folded in parallel: relabel to "Configured provider (startup):".
+  alongside it. Folded: relabelled to "Configured provider (startup):".
 - **WR-004** — the mock-note content-match guard (above) asserts the wording is present but doesn't say
-  what it *can't* see. Being folded in parallel: a doc-comment on that test stating the limit plainly —
-  it catches a regression to the pre-story-07 wording, but there is no shared source of truth across the
-  C#/TS boundary, so it cannot catch the *next* edit to `EngineSettingsContracts.cs`'s `InMemoryNote`
-  diverging again; closing that gap needs a generated/exported contract fixture, tracked separately.
+  what it *can't* see. Folded: an honest-limit doc comment added to that test in `useEngineSettings.test.ts`
+  stating the limit plainly — it catches a regression to the pre-story-07 wording, but there is no shared
+  source of truth across the C#/TS boundary, so it cannot catch the *next* edit to
+  `EngineSettingsContracts.cs`'s `InMemoryNote` diverging again; closing that gap needs a
+  generated/exported contract fixture, tracked separately (see also WR-G2-007 below).
 
-As of this doc pass, WR-002/003/004's code is present in the working tree on
-`build/autonomy-safety/07-cut-to-fake-console` but not yet committed — the frontend agent is folding
-them concurrently with this doc update; verify they have landed before treating this Gate-1 pass as
-fully closed.
+All three of WR-002/003/004 landed in `8e5a9b7` (edge-7 Gate-1 WR-002/003/004 fold) and are integrated
+on the umbrella as of `9b06e11`; this Gate-1 pass is fully closed.
+
+## Gate-2 outcome (full-stack, post-integration, #402)
+With both the backend (6a+6b) and the frontend (edge 7) integrated on the umbrella, a full-stack Gate-2
+was run against the combined tree. **Clean: 0 Criticals, 3 Warnings, 3 Suggestions.**
+- **The wire contract was verified field-by-field on both sides.** All three new fields
+  (`effectiveProvider`, `providerCutToFake`, `alreadyFake`) are `required` non-nullable on
+  `EngineSettingsDto` with explicit `[JsonPropertyName]` attributes, and the frontend's
+  `isWireEngineSettings` validator is neither stricter nor looser than the server contract — it rejects
+  exactly the same malformed shapes the server would never send, and accepts exactly the same well-formed
+  ones.
+- **Mock/live parity was verified against the server's actual idempotency branches** — there is no
+  posture the mock can present that the server would not, and UAT's mock posture (`Provider=Fake`,
+  `alreadyFake: true`) matches what the real backend reports there.
+- **`main` had not moved since the fork (`cb5f25b`)**, so there was no semantic-collision surface to
+  check.
+- **AC1's real-egressing-provider case is earned in-process, not deferred to UAT:**
+  `GenerationProviderSelectorTests.ThroughAddEngineGeneration_ACutExerciseGeneratesThroughFake_
+  WithoutTouchingTheLiveAdapter` builds the real composition root with the governed Azure config, cuts,
+  and asserts the burst never touches the live adapter — so no AC tick depends on UAT.
+- **Warnings WR-G2-005/006** are the two documentation-drift findings fixed by this pass (the AC
+  off-by-one plus its unevidenced AC7, and the present-progressive/"verify before trusting" language
+  throughout this doc).
+- **Warning WR-G2-007** (three hand-maintained copies of `InMemoryNote` — `EngineSettingsContracts.cs`,
+  `useEngineSettings.ts`'s mock, and `EngineSettingsPanel.test.tsx`'s verbatim assertion) is being folded
+  in parallel on both stacks: a frontend dedupe plus a paired backend assertion, so either side dropping
+  a marker reds a build. The residual C#↔TS gap — no shared source of truth across the language boundary
+  — remains open and is **deliberately not closed here** (same limit WR-004's doc comment already names).
+- **Suggestion S-3** (a model-only sibling for the `ExerciseId` propagation guard, which is currently
+  `[RequiresDockerFact]`) was **not taken** — recorded as a known, accepted gap rather than dropped
+  silently.
 
 ## Dependencies
 Story 03 (kill switch — the precedent this mirrors: "one manual control, only ever less", the
@@ -282,7 +315,7 @@ controller-role gate this story's endpoints extend); story 06 (`EngineSettingsPa
 `useEngineSettings.ts` — the console home this story adds a control to, and the await-then-apply
 pattern it reuses); engine-generation-infra (`AddEngineGeneration`, `FakeGenerationProvider`, the
 circuit-breaker degraded path this lever is the manual sibling of); `engine-telemetry-tuning/
-01-engine-event-types.md` (#173) — the taxonomy alignment named in AC7 must be resolved with that
+01-engine-event-types.md` (#173) — the taxonomy alignment named in AC8 must be resolved with that
 story, not decided unilaterally here. The composition-root change is a planning-time dependency on
 orchestrator sign-off, not a builder-assignable file.
 
@@ -310,14 +343,14 @@ orchestrator sign-off, not a builder-assignable file.
 | `EngineProviderCutServiceTests.Restore_ReturnsTheExerciseToTheStartupConfiguredProvider_AndNeverAnother` | AC2 |
 | `EngineProviderCutServiceTests.Cut_WhenTheConfiguredProviderIsAlreadyFake_IsAnHonestNoOp_WithNoTelemetry` | AC3 |
 | `EngineProviderCutServiceTests.Restore_WithNoCutActive_IsAnIdempotentNoOp_WithNoTelemetry` | AC3 |
-| `EngineProviderCutServiceTests.CuttingTwice_AndRestoringTwice_EmitsExactlyOneEventPerRealTransition` | AC3, AC7 |
-| `EngineProviderCutServiceTests.Cut_EmitsExactlyOneProviderChangedEvent_WithActorScenarioTimeAndFromTo` | AC7 |
-| `EngineProviderCutServiceTests.Restore_EmitsItsOwnProviderChangedEvent_WithTheReversedFromToAndTheRestoreReason` | AC7 |
-| `EngineProviderCutServiceTests.Cut_EmitsNoOtherEngineEvent` | AC7 |
+| `EngineProviderCutServiceTests.CuttingTwice_AndRestoringTwice_EmitsExactlyOneEventPerRealTransition` | AC3, AC8 |
+| `EngineProviderCutServiceTests.Cut_EmitsExactlyOneProviderChangedEvent_WithActorScenarioTimeAndFromTo` | AC8 |
+| `EngineProviderCutServiceTests.Restore_EmitsItsOwnProviderChangedEvent_WithTheReversedFromToAndTheRestoreReason` | AC8 |
+| `EngineProviderCutServiceTests.Cut_EmitsNoOtherEngineEvent` | AC8 |
 | `EngineProviderCutServiceTests.CutInExerciseA_NeverChangesExerciseBsEffectiveProvider` | **AC6 (Critical)** |
 | `EngineProviderCutServiceTests.RestoreInExerciseA_NeverLiftsExerciseBsCut` | **AC6 (Critical)** |
 | `EngineProviderCutServiceTests.CutAndRestore_WithAnUnresolvedScope_FailClosed_AndChangeNothing` | **AC6 (Critical)** |
-| `EngineProviderCutServiceTests.CutAndRestore_WithoutAnActingHuman_AreRejected_AndChangeNothing` | AC1, AC7 |
+| `EngineProviderCutServiceTests.CutAndRestore_WithoutAnActingHuman_AreRejected_AndChangeNothing` | AC1, AC8 |
 | `EngineProviderCutServiceTests.GetSettings_ReportsConfiguredAndEffectiveProvider_AsTwoIndependentlyReadableFields` | AC5 |
 | `EngineProviderCutServiceTests.GetSettings_WithFakeConfigured_ReportsAlreadyFake_SoTheConsoleCanSayTheLeverIsInert` | AC3, AC5 |
 | `EngineGenerationProviderRequestShapeTests.TheCutAndRestoreRequestContract_HasNoPropertyThatCouldSelectAProvider` | AC4 |
@@ -332,7 +365,9 @@ orchestrator sign-off, not a builder-assignable file.
 | `EngineProviderCutEndpointsTests.BothRoutes_WithAnUnresolvedScope_Return401_WithNoSnapshot` | AC6 |
 | `EngineProviderCutEndpointsTests.BothRoutes_MissingActingHumanId_Return400` / `BothRoutes_MissingBody_Return400` | AC1 |
 | `EngineProviderCutEndpointsTests.BothLeverRoutes_AreMappedExactlyOnce_OnTheExistingEngineGroup` | AC1 |
-| `EngineSettingsEndpointsTests.EveryMutatingRoute_FromANonControllerAssignedStaffSession_Returns403` (both new routes added to `MutatingRoutes`) | AC1, AC7 |
+| `EngineSettingsEndpointsTests.EveryMutatingRoute_FromANonControllerAssignedStaffSession_Returns403` (both new routes added to `MutatingRoutes`) | AC1, AC8 |
+| `EngineSettingsEndpointsTests.EveryMutatingRoute_FromANonControllerAssignedStaffSession_Returns403` — the same test, cited again for its staff/controller-role gating (an evaluator-assigned session never reaches either route; XC-002/SOC-003) | AC7 |
+| `participantIsolation.test.ts` — "finds NO import/require of features/controller/engine/\*\* (alias or relative) under any participant surface root" (Gate-2 fold S-1) — the static complement to the runtime role gate above, closing the "no participant surface projects the effective-provider fact, directly or inferably" half of AC7. Present in the working tree as of this doc pass, **not yet committed** (built in parallel by the frontend agent on `build/autonomy-safety/07-cut-to-fake-console`) | AC7 |
 | `EngineSettingsEndpointsTests.EveryRoute_FromAStaffSessionAssignedToADifferentExercise_FailsClosed` | AC6 |
 | `EngineSettingsEndpointsTests.EveryMutatingStaffSteeringRouteInTheRealRouteTable_IsCoveredByTheRoleGateTests` (drift guard) | AC1 |
 | `GenerationProviderCutCompositionRootWiringTests.*` (4 — real-host route table, 401-not-404, one shared registry, the selector resolves) | AC1, AC6 |
@@ -374,7 +409,7 @@ files also carry story 05/06's own pre-existing coverage (see `06-engine-setting
 | `EngineSettingsPanel.test.tsx` — "renders the CUT control (never RESTORE) with a plain \"RUNNING ON\" label when no cut is active" | AC5 |
 | `EngineSettingsPanel.test.tsx` — "renders the cut lever as INERT (disabled + an explanatory note) when alreadyFake is true, rather than a control that looks live but does nothing" | AC3 |
 | `EngineSettingsPanel.test.tsx` — "does NOT render the inert note when alreadyFake is false — the cut control is genuinely actionable" | AC3 |
-| `EngineSettingsPanel.test.tsx` — "WR-002: programmatically associates the disabled Cut button with its explanation via aria-describedby, …" (edge-7 Gate-1 WR-002 fold, in progress — see Build notes) | NFR-001 |
+| `EngineSettingsPanel.test.tsx` — "WR-002: programmatically associates the disabled Cut button with its explanation via aria-describedby, …" (edge-7 Gate-1 WR-002 fold, landed `8e5a9b7` — see Build notes) | NFR-001 |
 | `EngineSettingsPanel.test.tsx` — "clicking CUT in mock mode applies instantly when the lever is actionable (not alreadyFake)" | AC1, AC5 |
 | `EngineSettingsPanel.test.tsx` — "clicking RESTORE in mock mode returns to the configured provider instantly" | AC2, AC5 |
 | `engineSettingsActions.test.ts` — "throws MalformedEngineSettingsResponseError when the story-07 fields (effectiveProvider/providerCutToFake/alreadyFake) are missing — the parser validates every declared field, not a spot-checked subset" | AC5 |
@@ -394,9 +429,9 @@ files also carry story 05/06's own pre-existing coverage (see `06-engine-setting
 | `useEngineSettings.test.ts` — "the provider lever shares the SAME serialization guard as the other two mutations: attempting it while an autonomy-default mutation is in flight is a no-op" | AC5 |
 | `useEngineSettings.test.ts` — "conversely, attempting an autonomy-default mutation while the provider lever is in flight is a no-op" | AC5 |
 
-Test names verified against the tree at the time of this doc pass; `EngineSettingsPanel.test.tsx` and
-`useEngineSettings.test.ts` are being live-edited by the frontend agent concurrently (WR-002/003/004
-folds), so re-check for 1-2 additional tests before treating this list as final.
+Test names verified against the tree as integrated on the umbrella (`9b06e11`), including the
+`EngineSettingsPanel.test.tsx` and `useEngineSettings.test.ts` additions from the WR-002/003/004 folds
+(`8e5a9b7`) — this list is final for this pass.
 
 - **UAT (required once `PROVIDER-GOVERNANCE.md` §8 is signed and a live provider is reachable in an
   environment) — not meaningful before then.** With the live provider active: cut to Fake as a
