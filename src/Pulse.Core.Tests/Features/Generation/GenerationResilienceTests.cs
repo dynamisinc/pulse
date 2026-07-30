@@ -74,7 +74,9 @@ public class GenerationResilienceTests
         // Inject the mock transport into the SAME named typed client AddEngineGeneration configured. Since
         // autonomy-safety story 07 that client is keyed on the CONCRETE adapter type (IGenerationProvider is
         // now the cut-aware selector over it), so this must name the concrete type too — naming the interface
-        // would create a second, pipeline-less client and silently stop testing the resilience handler.
+        // would create a second, pipeline-less client AND displace the selector by last-wins registration.
+        // Not a silent failure, though: both tests below would go red, because the mock transport would sit
+        // behind no resilience handler at all. CI catches this one; the comment is here to save the diagnosis.
         services.AddHttpClient<AzureOpenAIGenerationProvider>()
             .ConfigurePrimaryHttpMessageHandler(() => handler);
 
