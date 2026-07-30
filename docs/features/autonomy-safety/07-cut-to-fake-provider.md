@@ -365,8 +365,7 @@ orchestrator sign-off, not a builder-assignable file.
 | `EngineProviderCutEndpointsTests.BothRoutes_WithAnUnresolvedScope_Return401_WithNoSnapshot` | AC6 |
 | `EngineProviderCutEndpointsTests.BothRoutes_MissingActingHumanId_Return400` / `BothRoutes_MissingBody_Return400` | AC1 |
 | `EngineProviderCutEndpointsTests.BothLeverRoutes_AreMappedExactlyOnce_OnTheExistingEngineGroup` | AC1 |
-| `EngineSettingsEndpointsTests.EveryMutatingRoute_FromANonControllerAssignedStaffSession_Returns403` (both new routes added to `MutatingRoutes`) | AC1, AC8 |
-| `EngineSettingsEndpointsTests.EveryMutatingRoute_FromANonControllerAssignedStaffSession_Returns403` — the same test, cited again for its staff/controller-role gating (an evaluator-assigned session never reaches either route; XC-002/SOC-003) | AC7 |
+| `EngineSettingsEndpointsTests.EveryMutatingRoute_FromANonControllerAssignedStaffSession_Returns403` (both new routes added to `MutatingRoutes`) — an evaluator-assigned session reaches neither route, and the gate rejects before any publish funnel (XC-002/SOC-003). Asserts role gating and no side-effect only; it makes **no** telemetry assertion, so it is not AC8 evidence | AC1, AC7 |
 | `participantIsolation.test.ts` — "finds NO import/require of features/controller/engine/\*\* (alias or relative) under any participant surface root" (Gate-2 fold S-1) — the static complement to the runtime role gate above, closing the "no participant surface projects the effective-provider fact, directly or inferably" half of AC7. Present in the working tree as of this doc pass, **not yet committed** (built in parallel by the frontend agent on `build/autonomy-safety/07-cut-to-fake-console`) | AC7 |
 | `EngineSettingsEndpointsTests.EveryRoute_FromAStaffSessionAssignedToADifferentExercise_FailsClosed` | AC6 |
 | `EngineSettingsEndpointsTests.EveryMutatingStaffSteeringRouteInTheRealRouteTable_IsCoveredByTheRoleGateTests` (drift guard) | AC1 |
