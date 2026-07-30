@@ -1,6 +1,6 @@
 # Story: Cut generation to the Fake provider (runtime egress safety lever)
 
-**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress — backend built (edges 6a + 6b), Gate-1 clean (0 Criticals, 3 Warnings — see Build notes), **not yet merged to the umbrella**. Frontend (edge 7, the console toggle) is not built. NOT Complete: this story's DoD requires verified-in-UAT, and UAT is impossible today — it needs `PROVIDER-GOVERNANCE.md` §8 signed AND an environment running an egressing provider, neither of which exists yet.
 **Requirements:** ADP-042 (kill-switch family — extends the "one manual control, only ever less" lever
 to the provider/egress axis), NFR-005 / ADP-025 (the governed-endpoint boundary this lever must not
 cross)  ·  **Design decisions:** none  ·  **Issue:** #402
@@ -183,8 +183,25 @@ existing `/api/engine` group in `EngineReviewEndpoints.cs`, gated by the same
   `{fromProvider, toProvider, reason: cut|restore, scenarioMinute}` — not a cut/restore pair (smaller
   taxonomy footprint; the from→to already says the direction). **Pending #173 ratification** per AC7; the
   code carries that note at both the event-type and payload declarations.
+- **`GenerationResilienceTests`' transport override had to be re-pointed at the concrete adapter type.**
+  Registering the real provider's typed client as its own concrete type (`AddHttpClient<TProvider>`,
+  above) means a test that still injects its mock transport via `AddHttpClient<IGenerationProvider,
+  AzureOpenAIGenerationProvider>()` would create a second, pipeline-less client — and, because
+  registration is last-wins, would also displace the selector as the resolved `IGenerationProvider`.
+  This was genuinely load-bearing, but **not a silent failure**: left unfixed, it would have red
+  `Retry_RecoversFromTransientFailure` and `CircuitBreaker_…_AndSignalsDegraded` outright, because the
+  mock transport would no longer sit under the resilience pipeline those tests assert on. Fixed by
+  naming the concrete typed client instead.
 - **Not built here:** the console toggle/indicator (edge 7) and therefore AC5's NFR-001 label half; the
   UAT pass (impossible until §8 is signed — see Tests).
+- **Gate-1 outcome:** clean, 0 Criticals, 3 Warnings. WR-001 (the AC4 route guard was self-referential
+  and did not bite) and WR-003 (concrete adapters became directly resolvable, so a future consumer
+  could bypass the lever) are being folded on this branch — an architecture test for WR-003 is being
+  added now. WR-002 (the `InMemoryNote` frontend mock drift called out above, under Wire additions) is
+  **deferred to edge 7 and must be in its diff** — the frontend suite passes silently against the stale
+  string today because both stale copies (`useEngineSettings.ts`'s mock and
+  `EngineSettingsPanel.test.tsx`'s verbatim assertion) are fixtures, not assertions against the live
+  contract; edge 7 must also add the one assertion that would catch this class of drift in future.
 
 ## Dependencies
 Story 03 (kill switch — the precedent this mirrors: "one manual control, only ever less", the
@@ -269,9 +286,3 @@ mock/live divergence class this repo keeps hitting.
   functional tests are provable only against the Fake-startup-configured case (cut/restore no-op path)
   and against a stubbed/governed-config live provider in-process — no environment exercises a real
   egressing cut, so no UAT pass is claimed.
-- **UAT (required once `PROVIDER-GOVERNANCE.md` §8 is signed and a live provider is reachable in an
-  environment) — not meaningful before then.** With the live provider active: cut to Fake as a
-  controller, confirm the next burst is visibly canned/Fake content and the console indicator updates;
-  restore, confirm the next burst returns to live-generated content. Until §8 is signed, this story's
-  functional tests are provable only against the Fake-startup-configured case (cut/restore no-op path)
-  — document that limitation on the story rather than claiming a UAT pass that could not have occurred.
