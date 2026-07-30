@@ -30,7 +30,7 @@ engine-review-cockpit (#34–36) and world-steering; produces exactly what they 
 | 04 | Controller-workload contract (≤6/min demand) | CTL-034 / D5-014/2.7 | Complete | #172 |
 | 05 | Engine settings API (autonomy default + tier policy, runtime-settable) | ADP §2.3 / ADP-025 | In Progress — built, Gate-2 clean; DoD needs verified-in-UAT | #353 |
 | 06 | Engine settings panel (console admin surface) | ADP §2.3 | In Progress — built + merged to main, gates clean; DoD needs verified-in-UAT | #354 |
-| 07 | Cut generation to the Fake provider (runtime egress safety lever) | ADP-042 / NFR-005/ADP-025 | Not Started | #402 |
+| 07 | Cut generation to the Fake provider (runtime egress safety lever) | ADP-042 / NFR-005/ADP-025 | In Progress — backend built (edges 6a+6b), Gate-1/Gate-2 clean; frontend edge 7 + UAT outstanding | #402 |
 
 **Delivered** as the pure-backend `Pulse.Core/Features/Autonomy/*` slice (see its `README.md`): the
 `EngineAutonomyState` aggregate (level resolution + kill switch + degraded-mode clamp), the pure
