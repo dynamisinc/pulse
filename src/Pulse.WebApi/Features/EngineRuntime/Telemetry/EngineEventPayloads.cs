@@ -226,6 +226,42 @@ public static class EngineEventPayloads
         public required int ScenarioMinute { get; init; }
     }
 
+    /// <summary>
+    /// Payload for <see cref="EngineEventTypes.ProviderChanged"/> — the exercise's EFFECTIVE generation
+    /// provider's from→to plus WHY it moved (autonomy-safety story 07). Both directions of the egress lever ride
+    /// this one shape; <see cref="Reason"/> is the discriminator, so the taxonomy grows by one entry rather than
+    /// a cut/restore pair.
+    /// </summary>
+    /// <remarks>
+    /// <b>PENDING #173 ratification</b> (story 07 AC7) — see <see cref="EngineEventTypes.ProviderChanged"/>.
+    /// Carries only provider NAMES that were already registered at startup; it can never name an endpoint the
+    /// NFR-005 governance gate did not sign off.
+    /// </remarks>
+    public sealed record ProviderChanged
+    {
+        /// <summary>The <see cref="Reason"/> literal for a controller cutting generation to <c>Fake</c> (egress stopped).</summary>
+        public const string ReasonCut = "cut";
+
+        /// <summary>The <see cref="Reason"/> literal for a controller restoring the startup-configured provider.</summary>
+        public const string ReasonRestore = "restore";
+
+        /// <summary>The provider that was serving this exercise's bursts before the change.</summary>
+        [JsonPropertyName("fromProvider")]
+        public required string FromProvider { get; init; }
+
+        /// <summary>The provider serving this exercise's bursts after the change.</summary>
+        [JsonPropertyName("toProvider")]
+        public required string ToProvider { get; init; }
+
+        /// <summary>Why it changed — <see cref="ReasonCut"/> or <see cref="ReasonRestore"/>.</summary>
+        [JsonPropertyName("reason")]
+        public required string Reason { get; init; }
+
+        /// <summary>The scenario minute the change was made at (COR-050/053).</summary>
+        [JsonPropertyName("scenarioMinute")]
+        public required int ScenarioMinute { get; init; }
+    }
+
     /// <summary>Payload for <see cref="EngineEventTypes.StorylineStateChanged"/> — from→to phase + cause.</summary>
     public sealed record StorylineStateChanged
     {

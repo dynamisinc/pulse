@@ -159,6 +159,33 @@ existing `/api/engine` group in `EngineReviewEndpoints.cs`, gated by the same
 `EngineSettingsDto`/`EngineSettingsContracts.cs` additive field; the `EngineEventTypes.cs`/
 `EngineEventPayloads.cs` telemetry vocabulary, pending the #173 alignment noted in AC7.
 
+## Build notes (backend, edges 6a + 6b — as built)
+- **The 6a/6b seam was split slightly differently from the literal Wave-Plan row** (orchestrator call,
+  recorded here): 6a delivers the selector, the cut-registry interface + in-memory implementation, and the
+  DI registration — self-contained and green on its own; 6b delivers the two routes, the
+  `effectiveProvider` field, the telemetry, and the mutation path. 6a alone would have left the DI tests
+  red, so they ship as two commits on one branch.
+- **Registration mechanics.** `AddHttpProvider<TProvider>` now registers the CONCRETE adapter as its own
+  typed client (`AddHttpClient<TProvider>`), and `IGenerationProvider` resolves to
+  `GenerationProviderSelector` over `(configured, Fake, cutRegistry)`. The
+  `AddResilienceHandler("engine-generation", …)` pipeline and the `GenerationGovernance.Validate` startup
+  gate are unchanged and still run before any adapter/HttpClient is constructed. `Provider=Fake` wraps Fake
+  on both sides so the cut path is exercised in CI. **`Program.cs` is untouched** — both routes ride the
+  already-wired `MapEngineReview()` and the registry rides the already-wired `AddEngineGeneration()`.
+- **`Name`/`Governance` pass through to the startup-configured provider even while cut** (deliberate): it
+  keeps `provider`'s meaning, keeps the tier-binding validation running (tier bindings are a deployment
+  fact and the tier must be servable on restore), and keeps the NFR-006 questionnaire honest.
+  `GenerationResult.ProviderName` is where a cut burst truthfully reports `Fake`.
+- **Wire additions:** `effectiveProvider` (string), `providerCutToFake` (bool) and `alreadyFake` (bool) on
+  `EngineSettingsDto`; `provider` unchanged. All three are resolved server-side so no consumer compares
+  fields (WR-003). `InMemoryNote` was EDITED (it now names the provider cut) — a wire + fixture change.
+- **Telemetry vocabulary:** ONE new event type, `engine.provider_changed`, with
+  `{fromProvider, toProvider, reason: cut|restore, scenarioMinute}` — not a cut/restore pair (smaller
+  taxonomy footprint; the from→to already says the direction). **Pending #173 ratification** per AC7; the
+  code carries that note at both the event-type and payload declarations.
+- **Not built here:** the console toggle/indicator (edge 7) and therefore AC5's NFR-001 label half; the
+  UAT pass (impossible until §8 is signed — see Tests).
+
 ## Dependencies
 Story 03 (kill switch — the precedent this mirrors: "one manual control, only ever less", the
 restore-capped-at-baseline shape); story 05 (`EngineSettingsDto`/`EngineReviewService`/the
@@ -171,19 +198,77 @@ story, not decided unilaterally here. The composition-root change is a planning-
 orchestrator sign-off, not a builder-assignable file.
 
 ## Tests
-- Unit: cutting resolves the loop's next burst through `FakeGenerationProvider`; restoring resolves it
-  back through the startup-configured provider; neither call ever selects a third provider.
-- Unit: cut/restore are each idempotent when the startup-configured provider is already `Fake`
-  (`alreadyFake: true`, no state change, no spurious telemetry).
-- Unit: the wire contract accepts no provider-selector field/literal on either endpoint (a fuzz/shape
-  test asserting the request DTO has no such property, plus a 400/ignored-field test).
-- Unit: `GET /api/engine/settings` reports `provider` (configured, unchanged) and `effectiveProvider`
-  (Fake while cut, configured otherwise) as two independently readable fields — no comparison-based
-  re-derivation is exercised anywhere in the panel or its tests.
-- Unit: isolation — a cut in exercise A never changes exercise B's `effectiveProvider`; unresolved
-  scope on any of the three endpoints is `401` with no snapshot.
-- Unit: the server emits exactly one telemetry event per cut/restore call, carrying actor + wall +
-  scenario time + exercise + from/to provider — pending the #173 vocabulary decision (AC7).
+
+**Backend (edges 6a + 6b) — written, green.** `Pulse.Core.Tests` are plain `[Fact]`;
+`Pulse.WebApi.Tests` DB-touching suites are `[RequiresDockerFact]` (real SQL via Testcontainers, or
+`PULSE_TEST_SQL_CONNECTION` locally).
+
+| Test | AC |
+|---|---|
+| `GenerationProviderSelectorTests.WithNoCut_DelegatesToTheConfiguredProvider` | AC1 |
+| `GenerationProviderSelectorTests.AfterCut_DelegatesToTheFakeProvider_AndTheConfiguredProviderIsNeverCalled` | AC1 |
+| `GenerationProviderSelectorTests.ThroughAddEngineGeneration_ACutExerciseGeneratesThroughFake_WithoutTouchingTheLiveAdapter` | AC1 |
+| `GenerationProviderSelectorTests.AfterRestore_DelegatesToTheConfiguredProviderAgain_AndNeverAThirdProvider` | AC2 |
+| `GenerationProviderSelectorTests.ACutInOneExercise_NeverChangesAnotherExercisesResolution` | AC1, AC6 |
+| `GenerationProviderSelectorTests.AnUnscopedRequest_FailsClosedToFake_AndNeverEgresses` | AC6 |
+| `GenerationProviderSelectorTests.NameAndGovernance_DescribeTheConfiguredDeployment_EvenWhileACutIsActive` | AC5 |
+| `GenerationProviderSelectorTests.Cut_IsIdempotent_AndOnlyReportsTheRealTransition` | AC3 |
+| `GenerationProviderSelectorTests.ThroughAddEngineGeneration_TheCutRegistryIsASingleSharedInstance` | AC1 |
+| `AddEngineGenerationTests.*` (4, rewritten to assert what the selector WRAPS) | AC1, AC2 |
+| `ProviderLiveConfigTests.CommittedAppsettings_KeepsFakeProvider_SoCiNeverEgresses` (strengthened: neither side of the lever can egress) | AC2 |
+| `EngineProviderCutServiceTests.Cut_WithALiveConfiguredProvider_RoutesTheExercisesNextBurstThroughFake` | AC1 |
+| `EngineProviderCutServiceTests.Cut_LeavesTheConfiguredProviderFieldUnchanged_SoExistingConsumersDoNotStartLying` | AC5 |
+| `EngineProviderCutServiceTests.Restore_ReturnsTheExerciseToTheStartupConfiguredProvider_AndNeverAnother` | AC2 |
+| `EngineProviderCutServiceTests.Cut_WhenTheConfiguredProviderIsAlreadyFake_IsAnHonestNoOp_WithNoTelemetry` | AC3 |
+| `EngineProviderCutServiceTests.Restore_WithNoCutActive_IsAnIdempotentNoOp_WithNoTelemetry` | AC3 |
+| `EngineProviderCutServiceTests.CuttingTwice_AndRestoringTwice_EmitsExactlyOneEventPerRealTransition` | AC3, AC7 |
+| `EngineProviderCutServiceTests.Cut_EmitsExactlyOneProviderChangedEvent_WithActorScenarioTimeAndFromTo` | AC7 |
+| `EngineProviderCutServiceTests.Restore_EmitsItsOwnProviderChangedEvent_WithTheReversedFromToAndTheRestoreReason` | AC7 |
+| `EngineProviderCutServiceTests.Cut_EmitsNoOtherEngineEvent` | AC7 |
+| `EngineProviderCutServiceTests.CutInExerciseA_NeverChangesExerciseBsEffectiveProvider` | **AC6 (Critical)** |
+| `EngineProviderCutServiceTests.RestoreInExerciseA_NeverLiftsExerciseBsCut` | **AC6 (Critical)** |
+| `EngineProviderCutServiceTests.CutAndRestore_WithAnUnresolvedScope_FailClosed_AndChangeNothing` | **AC6 (Critical)** |
+| `EngineProviderCutServiceTests.CutAndRestore_WithoutAnActingHuman_AreRejected_AndChangeNothing` | AC1, AC7 |
+| `EngineProviderCutServiceTests.GetSettings_ReportsConfiguredAndEffectiveProvider_AsTwoIndependentlyReadableFields` | AC5 |
+| `EngineProviderCutServiceTests.GetSettings_WithFakeConfigured_ReportsAlreadyFake_SoTheConsoleCanSayTheLeverIsInert` | AC3, AC5 |
+| `EngineGenerationProviderRequestShapeTests.TheCutAndRestoreRequestContract_HasNoPropertyThatCouldSelectAProvider` | AC4 |
+| `EngineGenerationProviderRequestShapeTests.NeitherLeverRouteTemplate_CarriesAProviderSegmentOrQuerySlot` | AC4 |
+| `EngineProviderCutEndpointsTests.APostedProviderSelector_IsIgnored_AndTheDestinationStaysFake` | AC4 |
+| `EngineProviderCutEndpointsTests.ARestoreThatNamesAProvider_StillLandsOnTheStartupConfiguredOne` | AC2, AC4 |
+| `EngineProviderCutEndpointsTests.Cut_ThenGetSettings_ReportsConfiguredAndEffectiveProviderAsSeparateKeys` | AC1, AC5 |
+| `EngineProviderCutEndpointsTests.Cut_WithFakeConfigured_Returns200_WithAlreadyFakeTrue_AndRecordsNoCut` | AC3 |
+| `EngineProviderCutEndpointsTests.BothRoutes_WithAnUnresolvedScope_Return401_WithNoSnapshot` | AC6 |
+| `EngineProviderCutEndpointsTests.BothRoutes_MissingActingHumanId_Return400` / `BothRoutes_MissingBody_Return400` | AC1 |
+| `EngineProviderCutEndpointsTests.BothLeverRoutes_AreMappedExactlyOnce_OnTheExistingEngineGroup` | AC1 |
+| `EngineSettingsEndpointsTests.EveryMutatingRoute_FromANonControllerAssignedStaffSession_Returns403` (both new routes added to `MutatingRoutes`) | AC1, AC7 |
+| `EngineSettingsEndpointsTests.EveryRoute_FromAStaffSessionAssignedToADifferentExercise_FailsClosed` | AC6 |
+| `EngineSettingsEndpointsTests.EveryMutatingStaffSteeringRouteInTheRealRouteTable_IsCoveredByTheRoleGateTests` (drift guard) | AC1 |
+| `GenerationProviderCutCompositionRootWiringTests.*` (4 — real-host route table, 401-not-404, one shared registry, the selector resolves) | AC1, AC6 |
+
+**Neuter-and-confirm (a guard that cannot fail is decoration).** Verified by temporarily breaking each
+guard and watching the named test fail, then restoring: the composition-root wiring (both `MapPost`
+lines commented → all 4 wiring tests fail on 404 / 0 routes); the isolation guard
+(`IsCutToFake` made scope-blind → both `EngineProviderCutServiceTests` isolation tests AND the two
+`GenerationProviderSelectorTests` per-exercise tests fail); the fail-closed guard (both service methods
+falling back to a fabricated scope → `CutAndRestore_WithAnUnresolvedScope_FailClosed_AndChangeNothing`
+fails). That last check also showed the endpoint-level `401` is written by
+`EngineCockpitStaffAuthorizationFilter` BEFORE the handler, so the endpoint test is an outcome
+(defence-in-depth) assertion only — recorded in its own doc-comment so it is never mistaken for proof of
+the service guard.
+
+**Frontend (edge 7) — not built here.** The console toggle + the effective-vs-configured label (AC5's
+NFR-001 half) and the AC6 staff-only surface remain edge 7's. Note for that builder: `inMemoryStateNote`
+changed (it now names the provider cut), and `useEngineSettings.ts`'s mock copy of that string plus
+`EngineSettingsPanel.test.tsx`'s verbatim assertion are now stale against the live contract — the exact
+mock/live divergence class this repo keeps hitting.
+
+- **UAT (required once `PROVIDER-GOVERNANCE.md` §8 is signed and a live provider is reachable in an
+  environment) — not meaningful before then.** With the live provider active: cut to Fake as a
+  controller, confirm the next burst is visibly canned/Fake content and the console indicator updates;
+  restore, confirm the next burst returns to live-generated content. Until §8 is signed, this story's
+  functional tests are provable only against the Fake-startup-configured case (cut/restore no-op path)
+  and against a stubbed/governed-config live provider in-process — no environment exercises a real
+  egressing cut, so no UAT pass is claimed.
 - **UAT (required once `PROVIDER-GOVERNANCE.md` §8 is signed and a live provider is reachable in an
   environment) — not meaningful before then.** With the live provider active: cut to Fake as a
   controller, confirm the next burst is visibly canned/Fake content and the console indicator updates;
