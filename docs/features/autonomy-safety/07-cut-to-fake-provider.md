@@ -265,6 +265,8 @@ orchestrator sign-off, not a builder-assignable file.
 | `EngineGenerationProviderRequestShapeTests.TheCutAndRestoreRequestContract_HasNoPropertyThatCouldSelectAProvider` | AC4 |
 | `EngineProviderCutEndpointsTests.TheGenerationProviderPrefix_CarriesExactlyTheBinaryPair_WithNoRouteParameter` | AC4 |
 | `GenerationProviderInjectionArchitectureTests.NoProductionTypeOtherThanTheSelector_InjectsAConcreteGenerationProvider` | AC1, AC2 |
+| `GenerationProviderInjectionArchitectureTests.NoProductionSourceOutsideTheCompositionRoot_ServiceLocatesAConcreteGenerationProvider` | AC1, AC2 (Gate-2 WR-G2-004 — the service-location vector the ctor guard cannot see) |
+| `EngineSettingsLoopIntegrationTests.TheExerciseIdTheProviderReceives_IsTheOneItsTickWasDrivenWith` | AC1, AC6 (Gate-2 S-G2-001 — `ExerciseId` now gates egress selection, so a dropped hop would silently route every burst to Fake) |
 | `EngineProviderCutEndpointsTests.APostedProviderSelector_IsIgnored_AndTheDestinationStaysFake` | AC4 |
 | `EngineProviderCutEndpointsTests.ARestoreThatNamesAProvider_StillLandsOnTheStartupConfiguredOne` | AC2, AC4 |
 | `EngineProviderCutEndpointsTests.Cut_ThenGetSettings_ReportsConfiguredAndEffectiveProviderAsSeparateKeys` | AC1, AC5 |
