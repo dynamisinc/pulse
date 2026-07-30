@@ -215,8 +215,14 @@ export type {
  * kept in sync BY HAND since the two live in different languages with no
  * shared source of truth; see `useEngineSettings.test.ts`'s WR-002 content
  * assertion for the guard that catches this copy drifting out of sync again.
+ *
+ * Exported (Gate-2 fold WR-G2-007) so `EngineSettingsPanel.test.tsx`'s own
+ * `dto()` fixture factory can read `inMemoryStateNote` off THIS constant
+ * instead of re-typing the note string a third time — one frontend source of
+ * truth for the wording, still kept in sync by hand against the backend
+ * constant across the language boundary.
  */
-const MOCK_ENGINE_SETTINGS: EngineSettingsDto = {
+export const MOCK_ENGINE_SETTINGS: EngineSettingsDto = {
   provider: 'Fake',
   effectiveProvider: 'Fake',
   providerCutToFake: false,

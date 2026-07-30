@@ -43,7 +43,7 @@
   no-optimism reconciliation model that story's rebuild settled on, ported forward rather than
   re-litigated); `FakeGenerationProvider`/`AddEngineGeneration` (engine-generation-infra — the two
   registrations this story's composition-root change must make coexist); `IEngineTelemetryEmitter`/
-  `EngineEventTypes` (extend once the #173 taxonomy question in the story's AC7 is resolved).
+  `EngineEventTypes` (extend once the #173 taxonomy question in the story's AC8 is resolved).
 
 ## Wave Plan (DAG-ready)
 
