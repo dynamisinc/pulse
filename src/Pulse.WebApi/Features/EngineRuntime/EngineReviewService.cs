@@ -656,6 +656,14 @@ public sealed partial class EngineReviewService
     /// governed baseline. Restoring when no cut is active is an idempotent no-op that still succeeds, and emits
     /// no telemetry.
     /// </summary>
+    /// <remarks>
+    /// <b>The audit write is deliberately non-fatal, which is asymmetric here.</b>
+    /// <see cref="CommitProviderChangeAsync"/> runs AFTER the registry mutation and swallows a persist failure
+    /// (loud log, non-fatal — inherited from the story-05 settings path and matching the
+    /// <see cref="RestoreFromSafetyAsync"/> kill-switch precedent), so for a CUT it fails toward less egress,
+    /// but for a RESTORE it means egress resumes with only a log line if this event — the only durable record of
+    /// the change, since the cut state is process memory — fails to persist.
+    /// </remarks>
     /// <param name="input">The acting human (COR-018) + optional telemetry zone (XC-008).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The resulting settings snapshot, or a fail-closed/invalid outcome.</returns>

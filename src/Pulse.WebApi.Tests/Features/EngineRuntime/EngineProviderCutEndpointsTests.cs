@@ -38,8 +38,8 @@ using Xunit;
 /// exactly as <c>Program.cs</c> wires the feature (<c>AddEngineGeneration</c> → <c>AddEngineReview</c> →
 /// <c>MapEngineReview</c>) against real SQL. Covers the two routes' existence + wire shape (AC1/AC5), the
 /// already-Fake no-op (AC3), the fail-closed <c>401</c> (AC6), and — AC4 — that the wire contract has NO slot
-/// for selecting a provider, proven both structurally (the request DTO's property set) and behaviourally (a
-/// posted provider selector is ignored, never honoured).
+/// for selecting a provider, proven over the real route table, structurally (the request DTO's property set)
+/// and behaviourally (a posted provider selector is ignored, never honoured).
 /// </summary>
 /// <remarks>
 /// The controller-role gate (#297) and the cross-exercise refusal on these two routes are covered by
@@ -70,6 +70,42 @@ public sealed class EngineProviderCutEndpointsTests
     }
 
     // ---- AC4: there is no slot for a provider selector, anywhere on the wire ---------------------
+
+    /// <summary>
+    /// The ROUTE-TABLE half of AC4: the <c>/api/engine/generation-provider</c> prefix carries EXACTLY the binary
+    /// cut/restore pair, and neither route has a parameter.
+    /// </summary>
+    /// <remarks>
+    /// Asserted over the real <see cref="EndpointDataSource"/> — the routes <c>MapEngineReview</c> actually
+    /// mapped — and NOT over template constants declared in this test class. A constants-only version of this
+    /// guard cannot observe <c>EngineReviewEndpoints.cs</c> at all: adding a third
+    /// <c>.../cut-to/{provider}</c> route leaves it green, which is precisely the "smaller change slipping in
+    /// unreviewed" AC4 exists to stop. Needing the SQL-gated host is an acceptable price for a guard that
+    /// observes reality; the model-only (host-free) half of AC4 is the request-DTO shape test below.
+    /// </remarks>
+    [RequiresDockerFact]
+    public async Task TheGenerationProviderPrefix_CarriesExactlyTheBinaryPair_WithNoRouteParameter()
+    {
+        await using var host = await StartHostAsync(Guid.NewGuid());
+
+        var lever = host.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText)
+            .Where(template => template is not null && template.StartsWith(
+                "/api/engine/generation-provider", StringComparison.OrdinalIgnoreCase))
+            .Select(template => template!)
+            .ToList();
+
+        lever.Should().BeEquivalentTo(
+            [CutRoute, RestoreRoute],
+            "the lever is a BINARY pair; any third route under this prefix is a provider chooser by another name "
+            + "(AC4) — a Tier-2 governance change against PROVIDER-GOVERNANCE.md §8 (UNSIGNED), not a smaller "
+            + "version of this feature");
+        lever.Should().OnlyContain(
+            template => !template.Contains('{', StringComparison.Ordinal),
+            "a route parameter here would be a provider selector — the destination is baked into the route name "
+            + "('cut to fake', not 'cut to whatever you name')");
+    }
 
     [RequiresDockerFact]
     public async Task APostedProviderSelector_IsIgnored_AndTheDestinationStaysFake()
@@ -392,10 +428,16 @@ public sealed class EngineProviderCutEndpointsTests
 }
 
 /// <summary>
-/// The STRUCTURAL half of story 07 AC4 — deliberately a model-only <see cref="FactAttribute"/> outside the SQL
-/// collection, so the "this endpoint can never become a provider chooser" guard runs on every machine and in
-/// every CI job, not only where a real SQL Server is reachable.
+/// The REQUEST-CONTRACT half of story 07 AC4 — deliberately a model-only <see cref="FactAttribute"/> outside
+/// the SQL collection, so this half of the "this endpoint can never become a provider chooser" guard runs on
+/// every machine and in every CI job, not only where a real SQL Server is reachable. It reflects over the real
+/// request DTO, so it observes production code with no host at all.
 /// </summary>
+/// <remarks>
+/// The ROUTE-TABLE half necessarily lives in the host-bearing suite above
+/// (<see cref="EngineProviderCutEndpointsTests.TheGenerationProviderPrefix_CarriesExactlyTheBinaryPair_WithNoRouteParameter"/>),
+/// because only a built host can be asked what routes were actually mapped.
+/// </remarks>
 public sealed class EngineGenerationProviderRequestShapeTests
 {
     [Fact]
@@ -420,23 +462,4 @@ public sealed class EngineGenerationProviderRequestShapeTests
                 || name.Contains("deployment", StringComparison.OrdinalIgnoreCase)
                 || name.Contains("model", StringComparison.OrdinalIgnoreCase));
     }
-
-    [Fact]
-    public void NeitherLeverRouteTemplate_CarriesAProviderSegmentOrQuerySlot()
-    {
-        // Route templates are the other place a chooser could appear ("/cut-to/{provider}"). Both are fixed
-        // literals with no parameter at all, which is what makes the binary shape unmistakable on the wire.
-        foreach (var template in new[] { CutRoute, RestoreRoute })
-        {
-            template.Should().NotContain("{", "a route parameter here would be a provider selector by another name");
-            template.Should().NotContain("?");
-        }
-
-        CutRoute.Should().Be("/api/engine/generation-provider/cut-to-fake",
-            "the destination is baked into the route name — 'cut to fake', not 'cut to whatever you name'");
-        RestoreRoute.Should().Be("/api/engine/generation-provider/restore");
-    }
-
-    private const string CutRoute = "/api/engine/generation-provider/cut-to-fake";
-    private const string RestoreRoute = "/api/engine/generation-provider/restore";
 }
