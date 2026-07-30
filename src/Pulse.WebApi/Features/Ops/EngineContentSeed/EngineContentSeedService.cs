@@ -12,6 +12,7 @@ using Pulse.Core.Features.Storylines.Models;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Ops.Bootstrap;
 
@@ -54,8 +55,13 @@ using Pulse.WebApi.Features.Ops.Bootstrap;
 /// </remarks>
 public sealed partial class EngineContentSeedService
 {
-    /// <summary>The XC-004 audit event type emitted on a successful seed (additive open vocab, mirroring <c>exercise.bootstrapped</c>).</summary>
-    private const string ContentSeededEventType = "engine.content_seeded";
+    /// <summary>
+    /// The XC-004 audit event type emitted on a successful seed (additive open vocab, mirroring
+    /// <c>exercise.bootstrapped</c>). Single-sourced from the engine taxonomy of record
+    /// (<see cref="EngineEventTypes.ContentSeeded"/>, #173) rather than re-declared as a private literal, so
+    /// the vocabulary an E10/E9 consumer reads there is complete.
+    /// </summary>
+    private const string ContentSeededEventType = EngineEventTypes.ContentSeeded;
 
     private const string SchemaVersion = "v0";
     private const string SystemActorKind = "system";
