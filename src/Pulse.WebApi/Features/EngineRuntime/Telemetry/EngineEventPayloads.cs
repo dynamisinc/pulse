@@ -136,7 +136,14 @@ public static class EngineEventPayloads
         [JsonPropertyName("postRef")]
         public required string PostRef { get; init; }
 
-        /// <summary>The publish origin — <c>engine</c> or <c>engine-edited</c> (E8 architecture §11).</summary>
+        /// <summary>
+        /// The publish origin. Always <c>engine</c> in v1: the architecture §11 table lists an
+        /// <c>engine-edited</c> value, but the build settled the approve/edit distinction as TELEMETRY-only —
+        /// it is carried by <see cref="Reviewed.Action"/> (<c>edit</c>) on the <c>engine.reviewed</c> event, and
+        /// there is deliberately no <c>engine-edited</c> post origin (see <c>EngineReviewService.EditAsync</c>
+        /// and the frontend's <c>reviewActions.ts</c>). Kept as an open string rather than an enum so a later
+        /// origin needs no shape change.
+        /// </summary>
         [JsonPropertyName("origin")]
         public required string Origin { get; init; }
 
@@ -233,9 +240,9 @@ public static class EngineEventPayloads
     /// a cut/restore pair.
     /// </summary>
     /// <remarks>
-    /// <b>PENDING #173 ratification</b> (story 07 AC8) — see <see cref="EngineEventTypes.ProviderChanged"/>.
-    /// Carries only provider NAMES that were already registered at startup; it can never name an endpoint the
-    /// NFR-005 governance gate did not sign off.
+    /// <b>RATIFIED by #173</b> (story 07 AC8) — see <see cref="EngineEventTypes.ProviderChanged"/>. Carries only
+    /// provider NAMES that were already registered at startup; it can never name an endpoint the NFR-005
+    /// governance gate did not sign off.
     /// </remarks>
     public sealed record ProviderChanged
     {
