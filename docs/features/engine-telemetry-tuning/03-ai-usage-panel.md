@@ -1,6 +1,6 @@
 # Story: AI generation usage panel
 
-**Feature:** Engine telemetry & tuning  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Engine telemetry & tuning  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress (built + Gate-2 clean; awaiting UAT verification)
 **Requirements:** ADP-041  ·  **Design decisions:** none  ·  **Issue:** #401
 
 ## Context
@@ -57,37 +57,86 @@ story 02 (#174), which is the post-exercise hotwash/tuning arc surface with EVL-
 this story is the narrower live-operations question.
 
 ## Acceptance Criteria
-- [ ] **Given** the usage panel needs to make the active provider unambiguous within the usage
+- [x] **Given** the usage panel needs to make the active provider unambiguous within the usage
       context, **when** it states which provider the volume/cost data below belongs to, **then** it
       reuses the existing `GET /api/engine/settings` `provider` value (already surfaced in
       `EngineSettingsPanel.tsx`) rather than deriving a second, independently-computed provider
       readout — two staff surfaces disagreeing about which provider is live would be worse than one
       surface stating it once.
-- [ ] **Given** the exercise's `engine.generated` events, **when** the panel renders volume, **then**
+- [x] **Given** the exercise's `engine.generated` events, **when** the panel renders volume, **then**
       it shows call counts over time broken down by provider and model, with tokens split into input,
       output, cache-read, and cache-creation (priced differently, kept distinct), latency, and the
       guard-result mix (a re-roll is a call that cost money and produced nothing, so it's counted, not
       dropped).
-- [ ] **Given** the same event data, **when** the panel renders cost (a separately labeled section from
+- [x] **Given** the same event data, **when** the panel renders cost (a separately labeled section from
       volume), **then** it prices tokens against a per-model price table sourced from config (never
       hardcoded, since Foundry deployments in this repo are not version-pinned and pricing drifts); a
       model with no price-table entry shows its token counts with an explicit "unpriced" state, never a
       silently-wrong $0. (Note: the `Fake` provider reports 0 tokens by construction, so cost correctly
       reads $0 pre-flip — that is not this AC's failure case.)
-- [ ] **Isolation (XC-001/COR-001):** the panel shows only the calling controller's own exercise's
+- [x] **Isolation (XC-001/COR-001):** the panel shows only the calling controller's own exercise's
       usage; a cross-exercise request for another exercise's usage returns 403/404.
-- [ ] **Two worlds (XC-002/D0 §2):** staff surface — COBRA theme (`@/theme/styledComponents`), lives
+- [x] **Two worlds (XC-002/D0 §2):** staff surface — COBRA theme (`@/theme/styledComponents`), lives
       under the controller console route tree, never rendered on or leaking into a participant path
       (SOC-003 — participants never see engine call volume, cost, or provider identity).
-- [ ] **Scenario time (COR-053):** the panel is staff-only so wall-clock is permitted and is in fact the
+- [x] **Scenario time (COR-053):** the panel is staff-only so wall-clock is permitted and is in fact the
       more useful axis for a live ops question ("what did the engine spend in the last 10 minutes of
       real time") — the panel labels its time axis explicitly as wall-clock, not scenario time, so a
       reader is never left guessing which clock they're looking at.
-- [ ] **Accessibility (NFR-001):** WCAG 2.1 AA; the provider state and guard-result mix are never
+- [x] **Accessibility (NFR-001):** WCAG 2.1 AA; the provider state and guard-result mix are never
       color-only (e.g. an icon/text label alongside any red/amber/green usage or guard-failure cue).
-- [ ] **Telemetry (XC-004):** the panel is a read/view over the existing `engine.generated` event log
+- [x] **Telemetry (XC-004):** the panel is a read/view over the existing `engine.generated` event log
       (story 01's extension of the v0 schema) — it introduces no parallel event taxonomy and no second
       store; it queries or projects the existing `TelemetryEvents` rows.
+
+> **Status note:** all eight ACs above are proven on the integrated umbrella (Gate-2 verdict: PASS on
+> AC1–AC8; AC4's isolation additionally proven by a neuter-and-watch-it-fail test against the central
+> query filter; AC5 additionally enforced structurally by the directory-level
+> `participantIsolation.test.ts` import guard). The one thing still outstanding is the manual UAT check
+> in the Tests section below (verify against the UAT DB pre-flip) — that has **not** been run yet, which
+> is why this story's Status stays **In Progress**, not Complete, until it is.
+
+## Follow-ups recorded during build (NOT built here)
+Each of these was raised in code review and **consciously deferred** — recorded here so none is
+silently dropped once this story closes.
+
+- **No `EventType` index on `TelemetryEvents`.** Every usage read re-scans the exercise's
+  `engine.generated` rows (there is no index on `EventType`, only on `ExerciseId`). A schema change
+  would pull in Tier-2 human sign-off plus a migration whose snapshot could collide with any other
+  migration landing in the same wave, so it was deliberately left out of this story, which owns
+  behaviour, not schema. Mitigated for now by the panel doing **no interval polling**: exactly one
+  read on first panel open per console session (WR-001, folded — see the "03c as built" section
+  below), plus a manual Refresh button. The honest revisit trigger is the day this panel — or any
+  other reader of `engine.generated` — starts polling on an interval; until then the cost of the
+  scan is paid once per session, not continuously.
+- **S-1 — a frontend/backend seam drift risk on the default window.** `useEngineUsage.ts:120`
+  hardcodes `60` as the server's default window and uses that constant to decide whether to *omit*
+  the `windowMinutes` query parameter, while `EngineUsageAggregator.DefaultWindowMinutes` is the
+  actual owner of that default on the backend. If the backend default ever changed, the "1 hr" chip
+  would stay visually pressed while the panel silently rendered a different window underneath it —
+  no error surfaces on either side, and no cross-language test can catch a drift like this. The
+  correct fix is for the frontend to treat "default" as "omit the parameter and adopt whatever
+  `usage.window.windowMinutes` comes back in the response" rather than asserting its own copy of the
+  number. Deferred because it touches `UsagePanel.tsx`, which a parallel session is concurrently
+  editing; tracked here so it isn't lost.
+- **S-2 — the wire cost DTO relies on validator enforcement rather than an unrepresentable shape.**
+  `EngineUsageModelCostDto` leaves the five cost fields and `rates` as plain optionals with only
+  `Priced` required, so C# would permit constructing a `priced: true` row with nulls — exactly the
+  shape the frontend's `isWireModelCost` validator now hard-rejects (WR-003, folded). A private
+  constructor plus `Priced(...)`/`Unpriced(...)` factory methods on the backend DTO would make the
+  wrong shape impossible to construct in the first place, rather than merely caught downstream. Gate
+  2 confirmed the backend **cannot currently emit** such a row through any live code path, so this is
+  hardening for the future, not a live defect today.
+- **S-3 — the controller-console `chrome` style-token block is now duplicated in six files**, the
+  known replicated-design-token hazard this repo has hit before. Gate 2 asked for a separate,
+  mechanical consolidation PR rather than folding it into this story's diff; that cleanup is already
+  spawned as its own task.
+- **The price table ships no live-provider $/token figures.** This was always Out of Scope for this
+  story (config data entry, not a design decision), so a live model correctly reads "unpriced" until
+  a deployment supplies real rates. The key shape a real deployment needs to fill in is documented in
+  `appsettings.Generation.Example.json`, with placeholder rate values left deliberately as **strings**
+  so an unedited copy-paste of the example fails to bind rather than silently pricing a live model at
+  $0.
 
 ## Out of Scope
 E10's full timeline/replay UI; story 02's sentiment/intensity arcs and EVL-014 dial overlays (that is

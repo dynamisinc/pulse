@@ -25,7 +25,7 @@ table). EVL-014 (dial-input overlays). Master PRD XC-004 (the v0 schema this ext
 |---|-------|----------------|--------|-------|
 | 01 | Engine event types (extend XC-004) | ADP-041 / XC-004 | In Progress | #173 |
 | 02 | Tuning & observability surface | ADP-041 | Not Started | #174 |
-| 03 | AI generation usage panel | ADP-041 | Not Started | #401 |
+| 03 | AI generation usage panel | ADP-041 | In Progress (built + Gate-2 clean; awaiting UAT verification) | #401 |
 
 ## Dependencies
 The XC-004 v0 telemetry emitter (E1); every E8 feature emits through it (reaction-loop, storyline-model,
@@ -79,7 +79,10 @@ treat it as signed for planning purposes only, per Tom's instruction, not as an 
 
 Story 03 is decomposed into **two serial build edges** in `implementation.md`'s Wave Plan — one backend
 edge (`03a`: usage read API, volume aggregation, price table and the cost rollup over it) then the
-frontend panel (`03c`), strictly serial after it (no codegen; the endpoint/DTO shape is the seam) — it is
-prep-complete and build-ready, though still **Not Started**. An earlier draft split the rollup out as a
-parallel `03b`; see the note under that Wave Plan for why it was collapsed (the contract would have had
-to be frozen before the wave that creates it, and the two edges' file footprints are not disjoint).
+frontend panel (`03c`), strictly serial after it (no codegen; the endpoint/DTO shape is the seam). An
+earlier draft split the rollup out as a parallel `03b`; see the note under that Wave Plan for why it was
+collapsed (the contract would have had to be frozen before the wave that creates it, and the two edges'
+file footprints are not disjoint). **Status:** both edges built, merged to the `feature/engine-telemetry-usage`
+umbrella, and Gate-2 clean (0 Critical) on the integrated diff — all eight ACs proven. Story 03 stays
+**In Progress**, not Complete, until the story's own manual UAT check (panel reads the live UAT DB
+pre-flip correctly) is run.
