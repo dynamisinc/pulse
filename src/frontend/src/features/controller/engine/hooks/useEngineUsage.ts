@@ -22,13 +22,21 @@
  * flag), so it stays `true` for as long as ANY issued request is still
  * outstanding, regardless of how many are in flight at once.
  *
- * ## No auto-refresh polling (deliberate non-goal, per the story)
+ * ## No auto-refresh polling, AND no fetch-on-console-mount (WR-001)
  * `TelemetryEvents` carries no index on `EventType`, so every read re-scans
- * the exercise's `engine.*` rows — a polling interval would compound that on
- * every tick for every open console. This hook exposes `refresh()` (manual)
- * only; `<UsagePanel>` also calls it once on every OPEN TRANSITION, mirroring
- * `<EngineSettingsPanel>`'s own staleness discipline, but nothing here ever
- * fires on a timer.
+ * the exercise's `engine.*` rows — unlike `useEngineSettings` (a cheap
+ * indexed read that CAN afford `<EngineSettingsPanel>`'s "refetch on every
+ * open" staleness discipline), this hook's mount effect must not fire until
+ * an operator actually asks. `<UsagePanel>` enforces that by mounting the
+ * component that calls this hook (`UsagePanelBody`) ONLY while the flyout is
+ * `open` — so `ensureStarted`'s mount-triggered fetch below runs exactly
+ * ONCE per exercise, the first time USAGE is ever opened in that console
+ * session, never at console boot and never a second time back-to-back on
+ * that same first open. Re-opening later reuses the cached snapshot; the
+ * panel's manual "Refresh" button (`refresh()`, below) is the ONLY thing
+ * that re-scans after that — there is no timer, and no automatic
+ * refetch-on-reopen (a deliberate divergence from `EngineSettingsPanel`,
+ * for the re-scan-cost reason above).
  *
  * ## The window (AC2/AC6)
  * `windowMinutes` defaults to the server's own default (60) — deliberately
@@ -51,7 +59,10 @@
  * stored payload that still cost money), a `re-roll` in the guard mix, and a
  * non-zero `unparseableEvents`. The `Fake` provider row mirrors UAT's real
  * dataset today: real call volume, ZERO tokens (by construction), priced at
- * an honest `$0` (not "unpriced").
+ * an honest `$0` (not "unpriced"). SG-006: every seed's calls/tokens/latency
+ * genuinely SCALE with `windowMinutes` (see `WINDOW_SCALE`) — UAT runs on
+ * this mock flag, so a selector whose five presets all showed the identical
+ * 46 calls would read as broken, not as a demo.
  *
  * `refresh()` is a NO-OP under mock (mirrors `useEngineSettings.refetch()` —
  * "there is nothing to refetch") — there is no server to go stale, so
@@ -170,8 +181,37 @@ function bucketsFor(starts: readonly string[], counts: readonly number[]) {
   return starts.map((startWallClock, i) => ({ startWallClock, calls: counts[i] ?? 0 }))
 }
 
-/** One synthetic model's shape before its bucket series is attached. */
+/** One guard-result/call-count pair, in either a seed's or a rollup's shape. */
+interface MockGuardSplit {
+  readonly result: string
+  readonly calls: number
+}
+
+/**
+ * One synthetic model's BASE (60-minute-window) shape. `guardSplit` is a
+ * FUNCTION of the (already window-scaled) call count rather than a fixed
+ * array, so a scaled-down call count (e.g. the 1-minute preset) still sums
+ * exactly to itself instead of silently drifting from the invariant
+ * `sum(guardResults.calls) === totals.calls` (SG-006).
+ */
 interface MockModelSeed {
+  readonly provider: string
+  readonly model: string
+  readonly baseCalls: number
+  readonly baseInputTokens: number
+  readonly baseOutputTokens: number
+  readonly baseCacheReadInputTokens: number
+  readonly baseCacheCreationInputTokens: number
+  readonly baseLatencyTotalMs: number
+  /** NOT scaled with the window — a plausible single-call ceiling regardless of volume. */
+  readonly latencyMaxMs: number
+  readonly guardSplit: (calls: number) => readonly MockGuardSplit[]
+  readonly priced: boolean
+  readonly rates: EngineUsageRates | null
+}
+
+/** One resolved (window-scaled, concrete-numbers) model row, before ordering/bucketing. */
+interface ResolvedMockModel {
   readonly provider: string
   readonly model: string
   readonly calls: number
@@ -181,7 +221,7 @@ interface MockModelSeed {
   readonly cacheCreationInputTokens: number
   readonly latencyTotalMs: number
   readonly latencyMaxMs: number
-  readonly guardResults: readonly { readonly result: string; readonly calls: number }[]
+  readonly guardResults: readonly MockGuardSplit[]
   readonly priced: boolean
   readonly rates: EngineUsageRates | null
 }
@@ -193,9 +233,165 @@ function round6(value: number): number {
 }
 
 /**
+ * SG-006: the mock's own call-volume scale relative to {@link DEFAULT_WINDOW_MINUTES}
+ * (the 60-minute base every seed below is written against) — so selecting a
+ * different preset under `USE_MOCK_DATA` visibly changes calls/tokens/cost,
+ * not just the bucket count. Not linear at the extremes (a literal 1/60th of
+ * a 60-minute burst would round every seed to 0, silently dropping the
+ * priced/unpriced/re-roll/unattributed states this mock exists to
+ * demonstrate) — chosen so every preset still shows every state.
+ */
+const WINDOW_SCALE: Readonly<Record<number, number>> = {
+  1: 0.05,
+  15: 0.4,
+  60: 1,
+  240: 3,
+  1440: 12,
+}
+
+function windowScaleFactor(windowMinutes: number): number {
+  return WINDOW_SCALE[windowMinutes] ?? windowMinutes / DEFAULT_WINDOW_MINUTES
+}
+
+/**
+ * Scales a token/latency quantity — `0` stays `0` (the Fake provider's
+ * tokens, by construction).
+ */
+function scaleQuantity(base: number, factor: number): number {
+  return Math.round(base * factor)
+}
+
+/**
+ * Scales a call count — floored at `1` (never `0`) whenever the base is
+ * positive, so every seed stays visible at every window preset.
+ */
+function scaleCalls(base: number, factor: number): number {
+  if (base <= 0) return 0
+  return Math.max(1, Math.round(base * factor))
+}
+
+/**
+ * SG-001: orders guard-result rows by call count descending, then result
+ * ordinal — mirrors the backend's actual `OrderByDescending(calls)
+ * .ThenBy(result, Ordinal)` contract (`EngineUsageAggregator.ProjectGuardResults`),
+ * the SAME discipline `orderModels` below already applies to `byModel`.
+ * Applied to BOTH the per-model and the aggregate guard-result arrays — a
+ * fixed seed/insertion order would only match the real contract by accident.
+ */
+function sortGuardResults(entries: readonly MockGuardSplit[]): MockGuardSplit[] {
+  return [...entries].sort((a, b) => {
+    if (a.calls !== b.calls) return b.calls - a.calls
+    return a.result < b.result ? -1 : a.result > b.result ? 1 : 0
+  })
+}
+
+/**
+ * Orders resolved model rows by call count descending, then provider, then
+ * model — mirrors the backend's `byModel`/`cost.byModel` contract (AC2: "the
+ * busiest model is first").
+ */
+function orderModels(models: readonly ResolvedMockModel[]): ResolvedMockModel[] {
+  return [...models].sort((a, b) => {
+    if (a.calls !== b.calls) return b.calls - a.calls
+    if (a.provider !== b.provider) return a.provider < b.provider ? -1 : 1
+    return a.model < b.model ? -1 : a.model > b.model ? 1 : 0
+  })
+}
+
+/**
+ * The BASE (60-minute) seed data every window preset scales from (SG-006).
+ * Static — module-level, not a function of `windowMinutes`/`nowMs`.
+ */
+const RAW_MODEL_SEEDS: readonly MockModelSeed[] = [
+  // The Fake provider — mirrors UAT's real dataset today: real volume, ZERO
+  // tokens by construction, priced at an honest $0 (never "unpriced" — the
+  // price table DOES have an entry, it's just all zeros).
+  {
+    provider: 'Fake',
+    model: 'fake-deterministic',
+    baseCalls: 40,
+    baseInputTokens: 0,
+    baseOutputTokens: 0,
+    baseCacheReadInputTokens: 0,
+    baseCacheCreationInputTokens: 0,
+    baseLatencyTotalMs: 0.8,
+    latencyMaxMs: 0.05,
+    guardSplit: calls => [{ result: 'pass', calls }],
+    priced: true,
+    rates: {
+      inputPer1MTokens: 0,
+      outputPer1MTokens: 0,
+      cacheReadPer1MTokens: 0,
+      cacheCreationPer1MTokens: 0,
+    },
+  },
+  // A priced live model, including a re-roll (a call that cost money and
+  // produced nothing — counted, never dropped) — at least one re-roll
+  // survives scaling down to a single call.
+  {
+    provider: 'AzureOpenAI',
+    model: 'gpt-5.4',
+    baseCalls: 4,
+    baseInputTokens: 8_000,
+    baseOutputTokens: 2_000,
+    baseCacheReadInputTokens: 300,
+    baseCacheCreationInputTokens: 40,
+    baseLatencyTotalMs: 9_200,
+    latencyMaxMs: 3_100,
+    guardSplit: calls => {
+      const reRoll = Math.min(calls, Math.max(1, Math.round(calls * 0.25)))
+      const pass = calls - reRoll
+      return pass > 0
+        ? [{ result: 'pass', calls: pass }, { result: 're-roll', calls: reRoll }]
+        : [{ result: 're-roll', calls: reRoll }]
+    },
+    priced: true,
+    rates: {
+      inputPer1MTokens: 5,
+      outputPer1MTokens: 15,
+      cacheReadPer1MTokens: 0.5,
+      cacheCreationPer1MTokens: 6.25,
+    },
+  },
+  // A model with NO price-table entry — the explicit AC3 "unpriced" state.
+  // Token counts are still real; every cost field must render null, never $0.
+  {
+    provider: 'AzureOpenAI',
+    model: 'gpt-5.4-mini',
+    baseCalls: 1,
+    baseInputTokens: 500,
+    baseOutputTokens: 120,
+    baseCacheReadInputTokens: 0,
+    baseCacheCreationInputTokens: 0,
+    baseLatencyTotalMs: 1_400,
+    latencyMaxMs: 1_400,
+    guardSplit: calls => [{ result: 'pass', calls }],
+    priced: false,
+    rates: null,
+  },
+  // A thin/partly-null stored payload — empty provider/model. The call
+  // still cost money and is still counted; render honestly as unattributed.
+  {
+    provider: '',
+    model: '',
+    baseCalls: 1,
+    baseInputTokens: 50,
+    baseOutputTokens: 10,
+    baseCacheReadInputTokens: 0,
+    baseCacheCreationInputTokens: 0,
+    baseLatencyTotalMs: 900,
+    latencyMaxMs: 900,
+    guardSplit: calls => [{ result: 'drop', calls }],
+    priced: false,
+    rates: null,
+  },
+]
+
+/**
  * Builds a plausible, deterministic `EngineUsageDto` for `windowMinutes` as
  * of `nowMs` — no network call. See this module's header for exactly which
- * states this snapshot exercises and why (AC2/AC3/AC8).
+ * states this snapshot exercises and why (AC2/AC3/AC8), and {@link WINDOW_SCALE}
+ * for why volume/cost genuinely differ across window presets (SG-006).
  */
 export function buildMockEngineUsage(windowMinutes: number, nowMs: number): EngineUsageDto {
   const { starts, bucketMinutes, fromWallClock, toWallClock } = buildBucketGeometry(
@@ -203,116 +399,46 @@ export function buildMockEngineUsage(windowMinutes: number, nowMs: number): Engi
     windowMinutes,
   )
   const bucketCount = starts.length
+  const factor = windowScaleFactor(windowMinutes)
 
-  const seeds: readonly MockModelSeed[] = [
-    // The Fake provider — mirrors UAT's real dataset today: real volume, ZERO
-    // tokens by construction, priced at an honest $0 (never "unpriced" — the
-    // price table DOES have an entry, it's just all zeros).
-    {
-      provider: 'Fake',
-      model: 'fake-deterministic',
-      calls: 40,
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheReadInputTokens: 0,
-      cacheCreationInputTokens: 0,
-      latencyTotalMs: 0.8,
-      latencyMaxMs: 0.05,
-      guardResults: [{ result: 'pass', calls: 40 }],
-      priced: true,
-      rates: {
-        inputPer1MTokens: 0,
-        outputPer1MTokens: 0,
-        cacheReadPer1MTokens: 0,
-        cacheCreationPer1MTokens: 0,
-      },
-    },
-    // A priced live model, including a re-roll (a call that cost money and
-    // produced nothing — counted, never dropped).
-    {
-      provider: 'AzureOpenAI',
-      model: 'gpt-5.4',
-      calls: 4,
-      inputTokens: 8_000,
-      outputTokens: 2_000,
-      cacheReadInputTokens: 300,
-      cacheCreationInputTokens: 40,
-      latencyTotalMs: 9_200,
-      latencyMaxMs: 3_100,
-      guardResults: [
-        { result: 'pass', calls: 3 },
-        { result: 're-roll', calls: 1 },
-      ],
-      priced: true,
-      rates: {
-        inputPer1MTokens: 5,
-        outputPer1MTokens: 15,
-        cacheReadPer1MTokens: 0.5,
-        cacheCreationPer1MTokens: 6.25,
-      },
-    },
-    // A model with NO price-table entry — the explicit AC3 "unpriced" state.
-    // Token counts are still real; every cost field must render null, never $0.
-    {
-      provider: 'AzureOpenAI',
-      model: 'gpt-5.4-mini',
-      calls: 1,
-      inputTokens: 500,
-      outputTokens: 120,
-      cacheReadInputTokens: 0,
-      cacheCreationInputTokens: 0,
-      latencyTotalMs: 1_400,
-      latencyMaxMs: 1_400,
-      guardResults: [{ result: 'pass', calls: 1 }],
-      priced: false,
-      rates: null,
-    },
-    // A thin/partly-null stored payload — empty provider/model. The call
-    // still cost money and is still counted; render honestly as unattributed.
-    {
-      provider: '',
-      model: '',
-      calls: 1,
-      inputTokens: 50,
-      outputTokens: 10,
-      cacheReadInputTokens: 0,
-      cacheCreationInputTokens: 0,
-      latencyTotalMs: 900,
-      latencyMaxMs: 900,
-      guardResults: [{ result: 'drop', calls: 1 }],
-      priced: false,
-      rates: null,
-    },
-  ]
-
-  // Ordered by call count descending, then provider, then model — mirrors
-  // the backend's own `byModel`/`cost.byModel` ordering contract (AC2: "the
-  // busiest model is first") rather than relying on the seed list above
-  // happening to be written in that order.
-  const orderedSeeds = [...seeds].sort((a, b) => {
-    if (a.calls !== b.calls) return b.calls - a.calls
-    if (a.provider !== b.provider) return a.provider < b.provider ? -1 : 1
-    return a.model < b.model ? -1 : a.model > b.model ? 1 : 0
-  })
-
-  const byModel = orderedSeeds.map(seed => {
-    const counts = recencyWeightedDistribution(bucketCount, seed.calls)
+  const resolvedModels: readonly ResolvedMockModel[] = RAW_MODEL_SEEDS.map(seed => {
+    const calls = scaleCalls(seed.baseCalls, factor)
     return {
       provider: seed.provider,
       model: seed.model,
+      calls,
+      inputTokens: scaleQuantity(seed.baseInputTokens, factor),
+      outputTokens: scaleQuantity(seed.baseOutputTokens, factor),
+      cacheReadInputTokens: scaleQuantity(seed.baseCacheReadInputTokens, factor),
+      cacheCreationInputTokens: scaleQuantity(seed.baseCacheCreationInputTokens, factor),
+      latencyTotalMs: seed.baseLatencyTotalMs * factor,
+      latencyMaxMs: seed.latencyMaxMs,
+      guardResults: sortGuardResults(seed.guardSplit(calls)),
+      priced: seed.priced,
+      rates: seed.rates,
+    }
+  })
+
+  const orderedModels = orderModels(resolvedModels)
+
+  const byModel = orderedModels.map(model => {
+    const counts = recencyWeightedDistribution(bucketCount, model.calls)
+    return {
+      provider: model.provider,
+      model: model.model,
       totals: {
-        calls: seed.calls,
-        inputTokens: seed.inputTokens,
-        outputTokens: seed.outputTokens,
-        cacheReadInputTokens: seed.cacheReadInputTokens,
-        cacheCreationInputTokens: seed.cacheCreationInputTokens,
+        calls: model.calls,
+        inputTokens: model.inputTokens,
+        outputTokens: model.outputTokens,
+        cacheReadInputTokens: model.cacheReadInputTokens,
+        cacheCreationInputTokens: model.cacheCreationInputTokens,
         latency: {
-          totalMs: seed.latencyTotalMs,
-          averageMs: seed.calls > 0 ? round6(seed.latencyTotalMs / seed.calls) : 0,
-          maxMs: seed.latencyMaxMs,
+          totalMs: model.latencyTotalMs,
+          averageMs: model.calls > 0 ? round6(model.latencyTotalMs / model.calls) : 0,
+          maxMs: model.latencyMaxMs,
         },
       },
-      guardResults: seed.guardResults,
+      guardResults: model.guardResults,
       buckets: bucketsFor(starts, counts),
       _bucketCounts: counts,
     }
@@ -321,26 +447,26 @@ export function buildMockEngineUsage(windowMinutes: number, nowMs: number): Engi
   const overallBucketCounts = starts.map((_, i) =>
     byModel.reduce((sum, m) => sum + (m._bucketCounts[i] ?? 0), 0),
   )
-  const totalCalls = seeds.reduce((sum, s) => sum + s.calls, 0)
-  const totalInput = seeds.reduce((sum, s) => sum + s.inputTokens, 0)
-  const totalOutput = seeds.reduce((sum, s) => sum + s.outputTokens, 0)
-  const totalCacheRead = seeds.reduce((sum, s) => sum + s.cacheReadInputTokens, 0)
-  const totalCacheCreation = seeds.reduce((sum, s) => sum + s.cacheCreationInputTokens, 0)
-  const totalLatencyMs = seeds.reduce((sum, s) => sum + s.latencyTotalMs, 0)
-  const maxLatencyMs = seeds.reduce((max, s) => Math.max(max, s.latencyMaxMs), 0)
+  const totalCalls = resolvedModels.reduce((sum, m) => sum + m.calls, 0)
+  const totalInput = resolvedModels.reduce((sum, m) => sum + m.inputTokens, 0)
+  const totalOutput = resolvedModels.reduce((sum, m) => sum + m.outputTokens, 0)
+  const totalCacheRead = resolvedModels.reduce((sum, m) => sum + m.cacheReadInputTokens, 0)
+  const totalCacheCreation = resolvedModels.reduce((sum, m) => sum + m.cacheCreationInputTokens, 0)
+  const totalLatencyMs = resolvedModels.reduce((sum, m) => sum + m.latencyTotalMs, 0)
+  const maxLatencyMs = resolvedModels.reduce((max, m) => Math.max(max, m.latencyMaxMs), 0)
 
   const guardTotals = new Map<string, number>()
-  for (const seed of seeds) {
-    for (const g of seed.guardResults) {
+  for (const model of resolvedModels) {
+    for (const g of model.guardResults) {
       guardTotals.set(g.result, (guardTotals.get(g.result) ?? 0) + g.calls)
     }
   }
 
-  const costByModel = orderedSeeds.map(seed => {
-    if (!seed.priced || !seed.rates) {
+  const costByModel = orderedModels.map(model => {
+    if (!model.priced || !model.rates) {
       return {
-        provider: seed.provider,
-        model: seed.model,
+        provider: model.provider,
+        model: model.model,
         priced: false,
         inputCost: null,
         outputCost: null,
@@ -350,24 +476,24 @@ export function buildMockEngineUsage(windowMinutes: number, nowMs: number): Engi
         rates: null,
       }
     }
-    const inputCost = round6((seed.inputTokens / RATE_UNIT) * seed.rates.inputPer1MTokens)
-    const outputCost = round6((seed.outputTokens / RATE_UNIT) * seed.rates.outputPer1MTokens)
+    const inputCost = round6((model.inputTokens / RATE_UNIT) * model.rates.inputPer1MTokens)
+    const outputCost = round6((model.outputTokens / RATE_UNIT) * model.rates.outputPer1MTokens)
     const cacheReadCost = round6(
-      (seed.cacheReadInputTokens / RATE_UNIT) * seed.rates.cacheReadPer1MTokens,
+      (model.cacheReadInputTokens / RATE_UNIT) * model.rates.cacheReadPer1MTokens,
     )
     const cacheCreationCost = round6(
-      (seed.cacheCreationInputTokens / RATE_UNIT) * seed.rates.cacheCreationPer1MTokens,
+      (model.cacheCreationInputTokens / RATE_UNIT) * model.rates.cacheCreationPer1MTokens,
     )
     return {
-      provider: seed.provider,
-      model: seed.model,
+      provider: model.provider,
+      model: model.model,
       priced: true,
       inputCost,
       outputCost,
       cacheReadCost,
       cacheCreationCost,
       totalCost: round6(inputCost + outputCost + cacheReadCost + cacheCreationCost),
-      rates: seed.rates,
+      rates: model.rates,
     }
   })
 
@@ -397,7 +523,9 @@ export function buildMockEngineUsage(windowMinutes: number, nowMs: number): Engi
     },
     buckets: bucketsFor(starts, overallBucketCounts),
     byModel: byModel.map(({ _bucketCounts: _omit, ...rest }) => rest),
-    guardResults: Array.from(guardTotals.entries()).map(([result, calls]) => ({ result, calls })),
+    guardResults: sortGuardResults(
+      Array.from(guardTotals.entries()).map(([result, calls]) => ({ result, calls })),
+    ),
     cost: {
       currency: 'USD',
       pricedTotalCost,

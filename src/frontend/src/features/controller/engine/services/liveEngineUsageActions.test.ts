@@ -168,6 +168,100 @@ describe('getUsage', () => {
     expect(result.byModel[0]?.provider).toBe('')
     expect(result.byModel[0]?.model).toBe('')
   })
+
+  describe('WR-003: `priced` and its cost fields are a COUPLED shape, never a partly-null "priced" row', () => {
+    it('accepts a priced row whose five cost fields and rates are all real numbers', async () => {
+      const pricedRow = {
+        provider: 'AzureOpenAI',
+        model: 'gpt-5.4',
+        priced: true,
+        inputCost: 0.04,
+        outputCost: 0.03,
+        cacheReadCost: 0.00015,
+        cacheCreationCost: 0.00025,
+        totalCost: 0.0704,
+        rates: {
+          inputPer1MTokens: 5,
+          outputPer1MTokens: 15,
+          cacheReadPer1MTokens: 0.5,
+          cacheCreationPer1MTokens: 6.25,
+        },
+      }
+      getMock.mockResolvedValue({
+        data: {
+          ...VALID_DTO,
+          cost: { ...VALID_DTO.cost, anyUnpriced: false, byModel: [pricedRow] },
+        },
+      })
+
+      const result = await getUsage()
+
+      expect(result.cost.byModel[0]?.priced).toBe(true)
+      expect(result.cost.byModel[0]?.totalCost).toBe(0.0704)
+    })
+
+    it('throws when priced:true carries a null inputCost — never a silently-wrong $0 next to real token counts', async () => {
+      const malformedRow = {
+        provider: 'AzureOpenAI',
+        model: 'gpt-5.4',
+        priced: true,
+        inputCost: null,
+        outputCost: 0.03,
+        cacheReadCost: 0.00015,
+        cacheCreationCost: 0.00025,
+        totalCost: 0.0704,
+        rates: {
+          inputPer1MTokens: 5,
+          outputPer1MTokens: 15,
+          cacheReadPer1MTokens: 0.5,
+          cacheCreationPer1MTokens: 6.25,
+        },
+      }
+      getMock.mockResolvedValue({
+        data: { ...VALID_DTO, cost: { ...VALID_DTO.cost, byModel: [malformedRow] } },
+      })
+
+      await expect(getUsage()).rejects.toThrow(MalformedEngineUsageResponseError)
+    })
+
+    it('throws when priced:true carries no rates (every other cost field present)', async () => {
+      const malformedRow = {
+        provider: 'AzureOpenAI',
+        model: 'gpt-5.4',
+        priced: true,
+        inputCost: 0.04,
+        outputCost: 0.03,
+        cacheReadCost: 0.00015,
+        cacheCreationCost: 0.00025,
+        totalCost: 0.0704,
+        rates: null,
+      }
+      getMock.mockResolvedValue({
+        data: { ...VALID_DTO, cost: { ...VALID_DTO.cost, byModel: [malformedRow] } },
+      })
+
+      await expect(getUsage()).rejects.toThrow(MalformedEngineUsageResponseError)
+    })
+
+    it('throws when priced:false carries a stray non-null cost field beside "unpriced"', async () => {
+      const malformedRow = {
+        provider: 'AzureOpenAI',
+        model: 'gpt-5.4-mini',
+        priced: false,
+        inputCost: 0,
+        outputCost: null,
+        cacheReadCost: null,
+        cacheCreationCost: null,
+        totalCost: null,
+        rates: null,
+      }
+      getMock.mockResolvedValue({
+        data: { ...VALID_DTO, cost: { ...VALID_DTO.cost, byModel: [malformedRow] } },
+      })
+
+      await expect(getUsage()).rejects.toThrow(MalformedEngineUsageResponseError)
+    })
+  })
 })
 
 describe('describeUsageError', () => {

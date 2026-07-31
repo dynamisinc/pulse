@@ -212,6 +212,68 @@ describe('buildMockEngineUsage (pure)', () => {
     const nowMs = Date.parse('2033-09-04T14:00:00.000Z')
     expect(buildMockEngineUsage(60, nowMs)).toEqual(buildMockEngineUsage(60, nowMs))
   })
+
+  it('SG-006: calls and tokens genuinely SCALE across window presets — never identical at every preset', () => {
+    const nowMs = Date.parse('2033-09-04T14:00:00.000Z')
+    const oneMinute = buildMockEngineUsage(1, nowMs)
+    const oneHour = buildMockEngineUsage(60, nowMs)
+    const oneDay = buildMockEngineUsage(1440, nowMs)
+
+    expect(oneMinute.totals.calls).toBeLessThan(oneHour.totals.calls)
+    expect(oneHour.totals.calls).toBeLessThan(oneDay.totals.calls)
+    expect(oneHour.totals.inputTokens).toBeLessThan(oneDay.totals.inputTokens)
+  })
+
+  it('SG-006: every seed stays visible (priced, unpriced, unattributed, re-roll) even at the smallest 1-minute preset', () => {
+    const usage = buildMockEngineUsage(1, Date.parse('2033-09-04T14:00:00.000Z'))
+
+    expect(usage.byModel.length).toBeGreaterThanOrEqual(4)
+    expect(usage.cost.byModel.some(m => m.priced)).toBe(true)
+    expect(usage.cost.byModel.some(m => !m.priced)).toBe(true)
+    expect(usage.byModel.some(m => m.provider === '' && m.model === '')).toBe(true)
+  })
+
+  it('SG-006: the Fake provider always reports ZERO tokens regardless of window (by construction)', () => {
+    for (const minutes of [1, 15, 60, 240, 1440]) {
+      const usage = buildMockEngineUsage(minutes, Date.parse('2033-09-04T14:00:00.000Z'))
+      const fake = usage.byModel.find(m => m.provider === 'Fake')
+      expect(fake?.totals.inputTokens).toBe(0)
+      expect(fake?.totals.outputTokens).toBe(0)
+    }
+  })
+
+  it('SG-001: sorts the aggregate guardResults by calls descending, then result ordinal — mirrors the backend contract', () => {
+    const usage = buildMockEngineUsage(60, Date.parse('2033-09-04T14:00:00.000Z'))
+
+    const calls = usage.guardResults.map(g => g.calls)
+    expect(calls).toEqual([...calls].sort((a, b) => b - a))
+    // Tie-break: equal-count entries must be ordinal-ascending by result.
+    for (let i = 1; i < usage.guardResults.length; i += 1) {
+      const prev = usage.guardResults[i - 1]
+      const cur = usage.guardResults[i]
+      if (prev && cur && prev.calls === cur.calls) {
+        expect(prev.result <= cur.result).toBe(true)
+      }
+    }
+  })
+
+  it('SG-001: sorts each model row\'s OWN guardResults the same way', () => {
+    const usage = buildMockEngineUsage(60, Date.parse('2033-09-04T14:00:00.000Z'))
+    const gpt54 = usage.byModel.find(m => m.model === 'gpt-5.4')
+
+    expect(gpt54?.guardResults.map(g => g.calls)).toEqual(
+      [...(gpt54?.guardResults.map(g => g.calls) ?? [])].sort((a, b) => b - a),
+    )
+  })
+
+  it('every model buckets series sums to that model\'s own totals.calls (WR-002 — the per-model series is real, not decorative)', () => {
+    const usage = buildMockEngineUsage(1440, Date.parse('2033-09-04T14:00:00.000Z'))
+
+    for (const model of usage.byModel) {
+      const bucketSum = model.buckets.reduce((sum, b) => sum + b.calls, 0)
+      expect(bucketSum).toBe(model.totals.calls)
+    }
+  })
 })
 
 describe('useEngineUsage — live mode (USE_MOCK_DATA=false)', () => {

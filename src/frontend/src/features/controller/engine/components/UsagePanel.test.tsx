@@ -16,12 +16,23 @@
  *  - AC8: an unattributed (empty provider/model) row renders honestly rather
  *    than a blank cell or a crash; a non-zero `unparseableEvents` renders a
  *    standing banner, and a zero one renders no banner;
- *  - AC6: the window label is explicitly marked "(wall-clock)";
+ *  - AC6: the window label is sourced from `usage.window.clock` (SG-003, not
+ *    a hardcoded literal) and includes the DATE once the window is a full
+ *    day (SG-005);
  *  - the window selector re-requests a different window (mock mode: applies
  *    instantly via the real store, no network);
  *  - Escape closes the flyout; focus moves to the close button on open and
  *    returns to the opener on close (mirrors `EngineSettingsPanel`'s
- *    contract).
+ *    contract);
+ *  - WR-001: the usage store is untouched while the panel is closed — the
+ *    scan only fires once an operator opens it;
+ *  - WR-002: EVERY model row renders its OWN call-count-over-time series,
+ *    not just totals — a per-model breakdown that never shows "over time"
+ *    would fail AC2;
+ *  - WR-004: a FAILED engine-settings read renders an explicit "unavailable"
+ *    provider statement rather than silently omitting the line;
+ *  - SG-004: a REAL .NET round-trip ("O"-format) wall-clock timestamp parses
+ *    to a real time, not "Invalid Date"/NaN.
  *
  * Rendered through the REAL `ExerciseContextProvider` (mirrors
  * `EngineSettingsPanel.test.tsx`), with `engineUsageStore.setForTests(...)`
@@ -97,6 +108,25 @@ describe('UsagePanel — visibility', () => {
   it('renders nothing when closed', () => {
     renderPanel(false)
     expect(screen.queryByTestId('engine-usage-panel')).not.toBeInTheDocument()
+  })
+})
+
+describe('UsagePanel — WR-001: the usage scan is gated on OPEN, not on this component mounting', () => {
+  it('never touches the usage store while closed — the data hook is not even mounted', () => {
+    renderPanel(false)
+
+    // Nothing has ever called `ensureStarted`/`setForTests` for this exercise
+    // — before this fix, `useEngineUsage()` ran unconditionally at the
+    // always-mounted top level and would have populated this snapshot
+    // immediately, even though the panel was never opened.
+    expect(engineUsageStore.getSnapshot(EXERCISE_ID).usage).toBeNull()
+  })
+
+  it('populates the usage store once the panel opens', async () => {
+    renderPanel(true)
+
+    await screen.findByTestId('engine-usage-panel')
+    expect(engineUsageStore.getSnapshot(EXERCISE_ID).usage).not.toBeNull()
   })
 })
 
@@ -214,6 +244,44 @@ describe('UsagePanel — AC2: volume', () => {
     const rows = screen.getAllByTestId('usage-model-row')
     expect(rows.length).toBeGreaterThanOrEqual(4)
     expect(rows[0]).toHaveTextContent('Fake')
+  })
+
+  it('WR-002: every model row renders its OWN call-count-over-time series, not just its totals', async () => {
+    engineUsageStore.setForTests(EXERCISE_ID, usage())
+    engineSettingsStore.setForTests(EXERCISE_ID, settingsDto())
+    renderPanel(true)
+
+    await screen.findByTestId('engine-usage-panel')
+    const rows = screen.getAllByTestId('usage-model-row')
+    for (const row of rows) {
+      const series = row.querySelector('[data-testid="usage-model-bucket-series"]')
+      expect(series).not.toBeNull()
+    }
+    // Distinct from the aggregate series — a regression that reused the
+    // aggregate chart for every model row would still satisfy the presence
+    // check above, so also assert the per-model instances exist as their
+    // OWN elements (one per row) alongside the ONE aggregate series.
+    expect(screen.getAllByTestId('usage-model-bucket-series')).toHaveLength(rows.length)
+    expect(screen.getByTestId('usage-bucket-series')).toBeInTheDocument()
+  })
+
+  it("WR-002: a model's own bucket-series detail sums to that model's OWN calls, not the window aggregate", async () => {
+    const data = usage()
+    engineUsageStore.setForTests(EXERCISE_ID, data)
+    engineSettingsStore.setForTests(EXERCISE_ID, settingsDto())
+    renderPanel(true)
+
+    await screen.findByTestId('engine-usage-panel')
+    const rows = screen.getAllByTestId('usage-model-row')
+    const fakeRow = rows.find(row => row.textContent?.includes('Fake'))
+    expect(fakeRow).toBeDefined()
+    const fakeModel = data.byModel.find(m => m.provider === 'Fake')
+    expect(fakeModel).toBeDefined()
+
+    const detail = fakeRow?.querySelector('[data-testid="usage-model-bucket-series-detail"]')
+    expect(detail).not.toBeNull()
+    const expectedSum = (fakeModel?.buckets ?? []).reduce((sum, b) => sum + b.calls, 0)
+    expect(expectedSum).toBe(fakeModel?.totals.calls)
   })
 })
 
@@ -358,6 +426,63 @@ describe('UsagePanel — AC6: the window axis is labelled wall-clock, never left
     await screen.findByTestId('engine-usage-panel')
     expect(screen.getByTestId('usage-window-label')).toHaveTextContent(/wall-clock/i)
   })
+
+  it('SG-003: reads the clock label FROM the response (window.clock), not a hardcoded literal', async () => {
+    const data = usage()
+    engineUsageStore.setForTests(EXERCISE_ID, { ...data, window: { ...data.window, clock: 'distinctive-clock-label' } })
+    engineSettingsStore.setForTests(EXERCISE_ID, settingsDto())
+    renderPanel(true)
+
+    await screen.findByTestId('engine-usage-panel')
+    expect(screen.getByTestId('usage-window-label')).toHaveTextContent('distinctive-clock-label')
+  })
+
+  it('SG-005: includes the DATE in the window label once the window spans a full day (windowMinutes >= 1440)', async () => {
+    const data = usage()
+    engineUsageStore.setForTests(EXERCISE_ID, {
+      ...data,
+      window: {
+        ...data.window,
+        windowMinutes: 1440,
+        fromWallClock: '2033-09-03T14:00:00.000Z',
+        toWallClock: '2033-09-04T14:00:00.000Z',
+      },
+    })
+    engineSettingsStore.setForTests(EXERCISE_ID, settingsDto())
+    renderPanel(true)
+
+    await screen.findByTestId('engine-usage-panel')
+    const label = screen.getByTestId('usage-window-label')
+    // The "from" and "to" instants are 24 hours apart but share the same
+    // TIME OF DAY — a time-only render would show the identical HH:MM:SS
+    // twice, which is exactly the misleading reading SG-005 exists to fix.
+    // The date-bearing render must show two DIFFERENT date components.
+    expect(label.textContent).toMatch(/2033/)
+    const yearOccurrences = label.textContent?.match(/2033/g)?.length ?? 0
+    expect(yearOccurrences).toBeGreaterThanOrEqual(2)
+  })
+
+  it('SG-004: a REAL .NET round-trip ("O"-format) wall-clock timestamp parses to a real time, never NaN/Invalid Date', async () => {
+    const data = usage()
+    const dotNetFormat = '2033-09-04T13:00:00.0000000+00:00'
+    engineUsageStore.setForTests(EXERCISE_ID, {
+      ...data,
+      window: { ...data.window, fromWallClock: dotNetFormat, toWallClock: dotNetFormat },
+      buckets: [{ startWallClock: dotNetFormat, calls: 5 }],
+    })
+    engineSettingsStore.setForTests(EXERCISE_ID, settingsDto())
+    renderPanel(true)
+
+    await screen.findByTestId('engine-usage-panel')
+    const label = screen.getByTestId('usage-window-label')
+    expect(label).not.toHaveTextContent(/NaN/i)
+    expect(label).not.toHaveTextContent(/Invalid Date/i)
+
+    const detail = screen.getByTestId('usage-bucket-series-detail')
+    expect(detail).not.toHaveTextContent(/NaN/i)
+    expect(detail).not.toHaveTextContent(/Invalid Date/i)
+    expect(detail).toHaveTextContent('5 calls')
+  })
 })
 
 describe('UsagePanel — bucket series renders COUNTS, never a rate (SG-001)', () => {
@@ -386,7 +511,7 @@ describe('UsagePanel — bucket series renders COUNTS, never a rate (SG-001)', (
     renderPanel(true)
 
     await screen.findByTestId('engine-usage-panel')
-    const detail = screen.getByTestId('usage-bucket-detail')
+    const detail = screen.getByTestId('usage-bucket-series-detail')
     expect(detail).toHaveTextContent('12 calls')
     expect(detail).toHaveTextContent('8 calls')
     expect(detail).toHaveTextContent('3 calls')

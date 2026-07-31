@@ -110,10 +110,11 @@ export interface EngineUsageGuardResult {
 /**
  * One provider+model's volume within the window. `provider`/`model` name
  * whichever ACTUALLY PRODUCED these historical calls (verbatim from the event
- * log) — a DIFFERENT question from "what is live now"
- * ({@link EngineUsageProviderQuestion}, AC1) — and MAY be an empty string for
- * a thin/partly-null stored payload; render such a row as unattributed rather
- * than hiding it or crashing (the call still cost money).
+ * log) — a DIFFERENT question from "what is live now" (AC1, answered
+ * separately by `GET /api/engine/settings` — see `<UsagePanel>`'s module
+ * header) — and MAY be an empty string for a thin/partly-null stored
+ * payload; render such a row as unattributed rather than hiding it or
+ * crashing (the call still cost money).
  */
 export interface EngineUsageModel {
   readonly provider: string
@@ -194,10 +195,6 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-function isNullableFiniteNumber(value: unknown): value is number | null {
-  return value === null || isFiniteNumber(value)
-}
-
 function isWireLatency(value: unknown): value is EngineUsageLatency {
   return (
     isRecord(value) &&
@@ -262,18 +259,51 @@ function isWireRates(value: unknown): value is EngineUsageRates {
   )
 }
 
+/**
+ * WR-003: `priced` and the five cost fields (`input`/`output`/`cacheRead`/
+ * `cacheCreation`/`totalCost`, plus `rates`) are COUPLED by contract — the
+ * 03a DTO doc-comment states "when `priced` is `false` every cost field is
+ * `null`", which by construction means `priced: true` carries REAL numbers
+ * throughout. An earlier version of this validator accepted `priced: true`
+ * alongside a `null` cost field (via a lenient `isNullableFiniteNumber` on
+ * every field regardless of `priced`) — that shape would have the panel
+ * print a confident `$0.00` beside real token counts (`row.inputCost ?? 0`)
+ * with no error anywhere, exactly the "plausible-but-wrong number" AC3
+ * exists to prevent. Reject the mismatch here instead: a `priced: true` row
+ * with any `null` cost field (or missing `rates`) is now MALFORMED, not a
+ * display nuance — `getUsage()` throws rather than rendering a silently-wrong
+ * zero. `priced: false` still requires every cost field to be exactly
+ * `null` (never a stray number beside "unpriced") and `rates` to be absent
+ * or `null`.
+ */
 function isWireModelCost(value: unknown): value is EngineUsageModelCost {
+  if (
+    !isRecord(value) ||
+    typeof value.provider !== 'string' ||
+    typeof value.model !== 'string' ||
+    typeof value.priced !== 'boolean'
+  ) {
+    return false
+  }
+
+  if (value.priced) {
+    return (
+      isFiniteNumber(value.inputCost) &&
+      isFiniteNumber(value.outputCost) &&
+      isFiniteNumber(value.cacheReadCost) &&
+      isFiniteNumber(value.cacheCreationCost) &&
+      isFiniteNumber(value.totalCost) &&
+      isWireRates(value.rates)
+    )
+  }
+
   return (
-    isRecord(value) &&
-    typeof value.provider === 'string' &&
-    typeof value.model === 'string' &&
-    typeof value.priced === 'boolean' &&
-    isNullableFiniteNumber(value.inputCost) &&
-    isNullableFiniteNumber(value.outputCost) &&
-    isNullableFiniteNumber(value.cacheReadCost) &&
-    isNullableFiniteNumber(value.cacheCreationCost) &&
-    isNullableFiniteNumber(value.totalCost) &&
-    (value.rates === null || value.rates === undefined ? true : isWireRates(value.rates))
+    value.inputCost === null &&
+    value.outputCost === null &&
+    value.cacheReadCost === null &&
+    value.cacheCreationCost === null &&
+    value.totalCost === null &&
+    (value.rates === null || value.rates === undefined)
   )
 }
 
