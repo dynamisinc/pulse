@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
@@ -101,9 +102,16 @@ public class EngineEventTaxonomyTests
             "every engine event type is prefixed by the thing it happened to, so a consumer can filter the "
             + "engine's events out of the shared v0 log with a prefix match");
 
+        // The predicate must enforce what the name of this test CLAIMS. The earlier version checked only
+        // lowercase-and-no-spaces, which would have admitted `engine.provider-changed` — a hyphen is exactly
+        // the drift a "lower_snake" pin is supposed to stop, and it would silently break a consumer's
+        // prefix/segment parsing (Copilot review, PR #405).
+        var namespacedLowerSnake = new Regex(@"^[a-z]+\.[a-z]+(?:_[a-z]+)*$", RegexOptions.CultureInvariant);
+
         all.Should().OnlyContain(
-            name => name == name.ToLowerInvariant() && !name.Contains(' ', StringComparison.Ordinal),
-            "the wire vocabulary is lower_snake within its prefix — a casing drift is a silently-missed filter");
+            name => namespacedLowerSnake.IsMatch(name),
+            "the wire vocabulary is namespaced lower_snake (`prefix.some_event`) — casing, hyphen, space or "
+            + "double-underscore drift is a silently-missed filter downstream");
     }
 
     [Fact]

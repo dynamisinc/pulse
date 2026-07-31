@@ -102,9 +102,10 @@ Staff surface — COBRA styling throughout; sits alongside `ReviewQueue.tsx`, `E
 and `console/EngineControlBar.tsx` in
 `src/frontend/src/features/controller/engine/components/`.
 
-See `implementation.md` for the reuse map and Wave Plan rows (`stack: backend` × 2 — 03a usage read
-API, 03b price table/cost rollup, can-run-with each other in wave 3 — then `stack: frontend` 03c, wave
-4, strictly serial after both) and the composition-root integration-seam note — this story adds the
+See `implementation.md` for the reuse map and Wave Plan rows (one `stack: backend` edge — 03a: usage read
+API, volume aggregation, price table and the cost rollup over it, wave 3 — then `stack: frontend` 03c,
+wave 4, strictly serial after it; an earlier draft split the rollup out as a parallel 03b and the note
+under that Wave Plan records why it was collapsed) and the composition-root integration-seam note — this story adds the
 first telemetry *read* endpoint in `Pulse.WebApi`, which needs a `WebApplicationFactory<Program>`
 composition-root route guard, not just slice-level TestServer coverage.
 

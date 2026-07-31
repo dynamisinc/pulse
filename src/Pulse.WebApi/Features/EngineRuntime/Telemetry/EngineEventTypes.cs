@@ -10,9 +10,12 @@ namespace Pulse.WebApi.Features.EngineRuntime.Telemetry;
 /// <remarks>
 /// <para>
 /// <b>This type is the engine event-type TAXONOMY OF RECORD</b> (<c>engine-telemetry-tuning/01</c>, #173).
-/// Every engine <c>eventType</c> the server emits — including the ones added later by other E8 features —
-/// is named here, so E10 metrics and E9's INT-031 stream have one list to read rather than a set of private
-/// literals scattered across feature slices. <c>EngineEventTaxonomyTests</c> pins the complete set by
+/// Every engine <c>eventType</c> that can appear in the telemetry log is named here — whichever tier wrote
+/// it. That deliberately includes the ones added later by other E8 features, the ops-seed event that builds
+/// its own envelope, and <see cref="AutonomyChanged"/>, which only the FRONTEND emits (via
+/// <c>POST /api/telemetry</c>; no server path writes it). Naming a client-emitted type in a server-side class
+/// is intentional: E10 metrics and E9's INT-031 stream need one complete list to read, not a server-only
+/// subset plus a set of private literals scattered across feature slices and the web client. <c>EngineEventTaxonomyTests</c> pins the complete set by
 /// reflection: adding a constant without updating that pin fails the build's test gate, and adding a private
 /// literal somewhere else instead is what the pin exists to discourage.
 /// </para>

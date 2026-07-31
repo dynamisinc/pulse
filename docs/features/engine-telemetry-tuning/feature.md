@@ -77,7 +77,9 @@ idempotent), so the App Service carries its managed identity and all eleven `Gen
 (`Provider = Fake`) — §8's human sign-off itself remains unticked and is out of this story's scope;
 treat it as signed for planning purposes only, per Tom's instruction, not as an actual sign-off.
 
-Story 03 is decomposed into three build edges in `implementation.md`'s Wave Plan — two backend edges
-(usage read API, price table/cost rollup) that can run in parallel with each other, then a frontend
-panel edge that is strictly serial after both (no codegen; the endpoint/DTO shape is the seam) — it is
-prep-complete and build-ready, though still **Not Started**.
+Story 03 is decomposed into **two serial build edges** in `implementation.md`'s Wave Plan — one backend
+edge (`03a`: usage read API, volume aggregation, price table and the cost rollup over it) then the
+frontend panel (`03c`), strictly serial after it (no codegen; the endpoint/DTO shape is the seam) — it is
+prep-complete and build-ready, though still **Not Started**. An earlier draft split the rollup out as a
+parallel `03b`; see the note under that Wave Plan for why it was collapsed (the contract would have had
+to be frozen before the wave that creates it, and the two edges' file footprints are not disjoint).
