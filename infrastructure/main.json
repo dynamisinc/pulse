@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.44.1.10279",
-      "templateHash": "2033251721347831000"
+      "templateHash": "14215197543380728326"
     }
   },
   "parameters": {
@@ -558,7 +558,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.44.1.10279",
-              "templateHash": "6501175863935087279"
+              "templateHash": "3833234360622930342"
             }
           },
           "parameters": {
@@ -608,10 +608,24 @@
                 "administratorLogin": "[parameters('adminLogin')]",
                 "administratorLoginPassword": "[parameters('adminPassword')]",
                 "minimalTlsVersion": "1.2",
-                "publicNetworkAccess": "Enabled",
-                "administrators": "[if(not(equals(parameters('entraAdminObjectId'), '')), createObject('administratorType', 'ActiveDirectory', 'azureADOnlyAuthentication', false(), 'login', parameters('entraAdminLogin'), 'sid', parameters('entraAdminObjectId'), 'tenantId', subscription().tenantId, 'principalType', 'User'), null())]"
+                "publicNetworkAccess": "Enabled"
               },
               "tags": "[parameters('tags')]"
+            },
+            {
+              "condition": "[not(equals(parameters('entraAdminObjectId'), ''))]",
+              "type": "Microsoft.Sql/servers/administrators",
+              "apiVersion": "2023-08-01-preview",
+              "name": "[format('{0}/{1}', parameters('serverName'), 'ActiveDirectory')]",
+              "properties": {
+                "administratorType": "ActiveDirectory",
+                "login": "[parameters('entraAdminLogin')]",
+                "sid": "[parameters('entraAdminObjectId')]",
+                "tenantId": "[subscription().tenantId]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Sql/servers', parameters('serverName'))]"
+              ]
             },
             {
               "type": "Microsoft.Sql/servers/databases",

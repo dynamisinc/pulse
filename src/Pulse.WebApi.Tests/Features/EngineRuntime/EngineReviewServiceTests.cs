@@ -680,6 +680,7 @@ public sealed class EngineReviewServiceTests
             new EngineTierPolicyRegistry(),
             new FakeGenerationProvider(),
             Options.Create(new GenerationOptions()),
+            new GenerationProviderCutRegistry(),
             NullLogger<EngineReviewService>.Instance);
 
         return new Harness(service, db, published, registry, time);

@@ -75,6 +75,13 @@ public sealed class EngineSettingsEndpointsTests
         ("/api/engine/settings/autonomy-default", new { actingHumanId = "c-1", level = "delayed-auto" }),
         ("/api/engine/settings/tier-policy", new { actingHumanId = "c-1", mode = "ambient" }),
 
+        // autonomy-safety story 07: the generation-provider egress lever. Added here (not only in its own
+        // suite) because the drift guard below derives the mutating surface from the REAL route table and
+        // would otherwise red the build — which is exactly the #297 protection working as designed: a new
+        // mutating /api/engine route must be proven controller-only, not merely mapped.
+        ("/api/engine/generation-provider/cut-to-fake", new { actingHumanId = "c-1", timeZone = "UTC" }),
+        ("/api/engine/generation-provider/restore", new { actingHumanId = "c-1", timeZone = "UTC" }),
+
         // world-steering (#350/#352): freezing the world and re-aiming the escalation are MORE
         // participant-visible than the kill switch above, so they carry the same controller-only gate.
         ("/api/steering/pause-tier", new { tier = "engine", actingHumanId = "c-1", timeZone = "UTC" }),

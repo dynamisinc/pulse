@@ -588,7 +588,8 @@ public sealed class EngineSettingsServiceTests
         GenerationOptions? generationOptions = null,
         EngineAutonomyRegistry? autonomy = null,
         EngineTierPolicyRegistry? tierPolicy = null,
-        IGenerationProvider? generationProvider = null)
+        IGenerationProvider? generationProvider = null,
+        IGenerationProviderCutRegistry? providerCut = null)
     {
         var context = new ExerciseContext { CurrentExerciseId = currentExerciseId };
         var db = _fixture.CreateContext(context);
@@ -613,6 +614,7 @@ public sealed class EngineSettingsServiceTests
             tiers,
             generationProvider ?? new FakeGenerationProvider(),
             Options.Create(generationOptions ?? new GenerationOptions()),
+            providerCut ?? new GenerationProviderCutRegistry(),
             NullLogger<EngineReviewService>.Instance);
 
         return new Harness(service, db, registry, tiers);

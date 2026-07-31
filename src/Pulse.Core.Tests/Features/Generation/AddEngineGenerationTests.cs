@@ -14,6 +14,22 @@ public class AddEngineGenerationTests
             .AddInMemoryCollection(values.Select(v => new KeyValuePair<string, string?>(v.Key, v.Value)))
             .Build();
 
+    /// <summary>
+    /// The startup-configured provider behind the resolved <see cref="IGenerationProvider"/>. Since
+    /// autonomy-safety story 07 the resolved instance is a <see cref="GenerationProviderSelector"/> over BOTH
+    /// the configured provider and <see cref="FakeGenerationProvider"/> (the runtime egress lever, ADP-042), so
+    /// these tests assert what the selector WRAPS — a strictly stronger check than the old "is exactly type X",
+    /// because it also pins that Fake is the other, only other, reachable side.
+    /// </summary>
+    private static IGenerationProvider ConfiguredBehindTheSelector(IGenerationProvider resolved)
+    {
+        var selector = resolved.Should().BeOfType<GenerationProviderSelector>(
+            "the reaction loop must resolve the story-07 selector, or a runtime cut can never take effect").Subject;
+        selector.FakeProvider.Should().BeOfType<FakeGenerationProvider>(
+            "a cut may only ever land on the offline provider — never a third, provider-chooser destination");
+        return selector.ConfiguredProvider;
+    }
+
     [Fact]
     public void WithFakeProvider_ResolvesFakeProvider()
     {
@@ -26,7 +42,7 @@ public class AddEngineGenerationTests
         var resolved = provider.GetRequiredService<IGenerationProvider>();
 
         // Assert
-        resolved.Should().BeOfType<FakeGenerationProvider>();
+        ConfiguredBehindTheSelector(resolved).Should().BeOfType<FakeGenerationProvider>();
         resolved.Name.Should().Be("Fake");
         resolved.Governance.TenantBounded.Should().BeTrue();
     }
@@ -42,7 +58,8 @@ public class AddEngineGenerationTests
         using var provider = services.BuildServiceProvider();
 
         // Assert
-        provider.GetRequiredService<IGenerationProvider>().Should().BeOfType<FakeGenerationProvider>();
+        ConfiguredBehindTheSelector(provider.GetRequiredService<IGenerationProvider>())
+            .Should().BeOfType<FakeGenerationProvider>();
     }
 
     [Fact]
@@ -80,7 +97,7 @@ public class AddEngineGenerationTests
         var resolved = provider.GetRequiredService<IGenerationProvider>();
 
         // Assert
-        resolved.Should().BeOfType<AzureOpenAIGenerationProvider>();
+        ConfiguredBehindTheSelector(resolved).Should().BeOfType<AzureOpenAIGenerationProvider>();
         resolved.Name.Should().Be("AzureOpenAI");
         resolved.Governance.TenantBounded.Should().BeTrue();
     }
@@ -105,7 +122,7 @@ public class AddEngineGenerationTests
         var resolved = provider.GetRequiredService<IGenerationProvider>();
 
         // Assert
-        resolved.Should().BeOfType<ClaudeFoundryGenerationProvider>();
+        ConfiguredBehindTheSelector(resolved).Should().BeOfType<ClaudeFoundryGenerationProvider>();
         resolved.Name.Should().Be("ClaudeFoundry");
         resolved.Governance.TenantBounded.Should().BeTrue();
     }

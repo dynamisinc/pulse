@@ -146,6 +146,7 @@ public sealed class EngineSettingsAuditFailureTests
                 TierPolicy,
                 new FakeGenerationProvider(),
                 Options.Create(new GenerationOptions()),
+                new GenerationProviderCutRegistry(),
                 Logger);
         }
 

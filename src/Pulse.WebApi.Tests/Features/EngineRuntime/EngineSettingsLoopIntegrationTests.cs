@@ -36,6 +36,12 @@ using Xunit;
 /// and a tier-policy override changes the tier the burst is actually generated at. Real SQL Server
 /// (Testcontainers) + the offline generation provider; every test is <see cref="RequiresDockerFactAttribute"/>.
 /// </summary>
+/// <remarks>
+/// The same harness — a recording provider in the resolved-<see cref="IGenerationProvider"/> seat, driven through
+/// real loop ticks — also carries story 07's <c>ExerciseId</c>-propagation guard
+/// (<see cref="TheExerciseIdTheProviderReceives_IsTheOneItsTickWasDrivenWith"/>), because that is the one place
+/// the value the provider ACTUALLY receives is observable end-to-end.
+/// </remarks>
 [Collection(MsSqlCollection.Name)]
 public sealed class EngineSettingsLoopIntegrationTests
 {
@@ -223,6 +229,78 @@ public sealed class EngineSettingsLoopIntegrationTests
         itemB.RoutedAtLevel.Should().Be(AutonomyLevel.Suggest);
     }
 
+    /// <summary>
+    /// Gate-2 S-G2-001. Since autonomy-safety story 07, <see cref="GenerationProviderSelector.Resolve"/> fails
+    /// closed to <see cref="FakeGenerationProvider"/> on <see cref="Guid.Empty"/> — which makes
+    /// <c>GenerationRequest.ExerciseId</c> load-bearing for EGRESS SELECTION, not just for prompt content. If any
+    /// hop between the tick and the provider ever drops or substitutes the id
+    /// (<c>ReactionLoopHost.BuildGenerateRequest</c> → <see cref="GenerateStage"/> →
+    /// <see cref="PromptAssembler"/> → <c>GenerationRequest</c>), every burst in a live deployment would silently
+    /// resolve to Fake and the engine would stop egressing entirely — and CI could not see it, because CI runs
+    /// Fake on BOTH sides of the selector, so Fake-vs-live is unobservable there.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// So the regression is made observable a different way: assert on the id the PROVIDER actually received.
+    /// <see cref="RecordingGenerationProvider"/> sits in exactly the seat
+    /// <see cref="GenerationProviderSelector"/> occupies in production (the resolved
+    /// <see cref="IGenerationProvider"/>), so the value it records is precisely the value
+    /// <see cref="GenerationProviderSelector.Resolve"/> would dispatch on. Asserting there rather than on an
+    /// intermediate hop is the point — an assertion one layer up would leave the same blind spot underneath it
+    /// (<c>PromptAssemblerTests</c> already covers the assembler hop in isolation).
+    /// </para>
+    /// <para>Two exercises are driven so a cached or substituted id fails too, not only a zeroed one.</para>
+    /// </remarks>
+    [RequiresDockerFact]
+    public async Task TheExerciseIdTheProviderReceives_IsTheOneItsTickWasDrivenWith()
+    {
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+        var time = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(time);
+
+        var clock = host.GetRequiredService<IExerciseClock>();
+        clock.Start(exerciseA, ScenarioStart, TimeZoneInfo.Utc);
+        clock.Start(exerciseB, ScenarioStart, TimeZoneInfo.Utc);
+        time.Advance(TimeSpan.FromMinutes(25)); // both 20-minute response windows blow
+
+        var autonomy = host.GetRequiredService<EngineAutonomyRegistry>();
+        var provider = host.GetRequiredService<RecordingGenerationProvider>();
+
+        var castA = Cast("@rosa", "@marcus", "@lena");
+        var castB = Cast("@rosa", "@marcus", "@lena");
+        var first = await RunOneTickAsync(
+            host,
+            Registration(
+                exerciseA,
+                [SeededStoryline(exerciseA, "Water main contamination fears", castA.Keys.ToList())],
+                castA,
+                autonomy.GetOrCreate(exerciseA)));
+        var second = await RunOneTickAsync(
+            host,
+            Registration(
+                exerciseB,
+                [SeededStoryline(exerciseB, "Boil-water advisory rumours", castB.Keys.ToList())],
+                castB,
+                autonomy.GetOrCreate(exerciseB)));
+
+        first.ReviewItemsEnqueued.Should().Be(1);
+        second.ReviewItemsEnqueued.Should().Be(1);
+
+        provider.ExerciseIds.Should().NotBeEmpty(
+            "the ticks must actually have reached the provider, or this guard proves nothing about the chain");
+        provider.ExerciseIds.Should().NotContain(
+            Guid.Empty,
+            "an empty ExerciseId at ANY hop makes the selector fail closed to Fake for EVERY burst — a live "
+            + "deployment would stop egressing altogether, and no other test can see it because CI runs Fake on "
+            + "both sides of the selector");
+        provider.ExerciseIds.Should().Equal(
+            [exerciseA, exerciseB],
+            "each burst must reach the provider carrying the exercise its OWN tick was driven with — the whole "
+            + "chain (loop → generate stage → prompt assembler → GenerationRequest) is what decides which "
+            + "provider egresses (COR-001, NFR-005)");
+    }
+
     // ---- host + helpers --------------------------------------------------------------------------
 
     /// <summary>
@@ -347,14 +425,20 @@ public sealed class EngineSettingsLoopIntegrationTests
         };
 
     /// <summary>
-    /// The offline <see cref="FakeGenerationProvider"/> with the requested <see cref="GenerationTier"/> recorded,
-    /// so a test can prove which tier a burst was actually generated at.
+    /// The offline <see cref="FakeGenerationProvider"/> with the requested <see cref="GenerationTier"/> and
+    /// <c>ExerciseId</c> recorded, so a test can prove which tier a burst was actually generated at — and which
+    /// exercise the request arrived carrying, which since story 07 decides whether the burst egresses at all.
+    /// Recorded at the resolved-<see cref="IGenerationProvider"/> seat, i.e. exactly where
+    /// <see cref="GenerationProviderSelector"/> sits in production.
     /// </summary>
     private sealed class RecordingGenerationProvider : IGenerationProvider
     {
         private readonly FakeGenerationProvider _inner = new();
 
         public List<GenerationTier> Tiers { get; } = [];
+
+        /// <summary>The <c>ExerciseId</c> each request arrived with, in call order (S-G2-001).</summary>
+        public List<Guid> ExerciseIds { get; } = [];
 
         public string Name => _inner.Name;
 
@@ -364,6 +448,7 @@ public sealed class EngineSettingsLoopIntegrationTests
         {
             ArgumentNullException.ThrowIfNull(request);
             Tiers.Add(request.Tier);
+            ExerciseIds.Add(request.ExerciseId);
             return _inner.GenerateAsync(request, cancellationToken);
         }
     }
