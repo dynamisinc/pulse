@@ -76,10 +76,19 @@ public static class EngineUsageAggregator
     /// <returns>The rollup.</returns>
     /// <remarks>
     /// <para>
-    /// <b>Every supplied call is counted exactly once.</b> The caller filters to the window in SQL, but a stray
-    /// instant outside it is attributed to the nearest EDGE bucket rather than dropped, so
-    /// <c>sum(buckets.calls) == totals.calls</c> always holds — a series that silently disagreed with its own
-    /// total is precisely the plausible-but-wrong reading this view must not produce.
+    /// <b>Every call with a non-null <see cref="EngineGenerationCall.Payload"/> is counted exactly once.</b> The
+    /// caller filters to the window in SQL, but a stray instant outside it is attributed to the nearest EDGE
+    /// bucket rather than dropped, so <c>sum(buckets.calls) == totals.calls</c> always holds — a series that
+    /// silently disagreed with its own total is precisely the plausible-but-wrong reading this view must not
+    /// produce.
+    /// </para>
+    /// <para>
+    /// The one thing NOT counted: a call whose <see cref="EngineGenerationCall.Payload"/> is null is skipped
+    /// entirely — it lands in neither the totals nor <paramref name="unparseableEventCount"/>. That is
+    /// unreachable from <see cref="EngineUsageService"/>, which resolves each row's payload before calling here
+    /// and counts every unreadable one into <paramref name="unparseableEventCount"/> itself; the branch exists
+    /// only so a direct caller of this pure function cannot NRE. A future second caller must count its own
+    /// unreadable rows the same way rather than passing them through as nulls.
     /// </para>
     /// <para>
     /// Provider/model grouping is ORDINAL (exact-match): the values are machine-written by one emitter, and
