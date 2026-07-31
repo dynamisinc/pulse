@@ -138,6 +138,67 @@ public sealed class EngineUsagePriceTableTests
     }
 
     /// <summary>
+    /// <b>The operator-facing example documents the pricing key shape (WR-003).</b>
+    /// <c>appsettings.Generation.Example.json</c> is the file someone opens at provider-flip time and it documents
+    /// every other <c>Generation:*</c> key; without a <c>Pricing</c> block the first person to use this panel
+    /// reads a correct "unpriced" as a defect. Two things are pinned against the REAL file: the documented key
+    /// path exists, and its model keys are exactly the <c>Tiers.*.Model</c> ids the same file configures — because
+    /// the model key must match what an <c>engine.generated</c> event records, and an example that drifted onto
+    /// the DEPLOYMENT names instead would teach the exact mistake that renders a live model "unpriced".
+    /// </summary>
+    /// <remarks>
+    /// This asserts the shape and the key names only. It deliberately does NOT assert that the example's rate
+    /// VALUES bind to decimals — they are placeholder strings on purpose, so that copying the block without
+    /// editing it fails loudly rather than pricing a live model at $0. Real figures are per-environment config
+    /// data entry (story 03, Out of Scope), so there is nothing numeric here to pin.
+    /// </remarks>
+    [Fact]
+    public void TheGovernedExample_DocumentsThePricingKeyShape_KeyedByTheModelIdsItsOwnTiersConfigure()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddJsonFile(
+                Path.Combine(AppContext.BaseDirectory, "ConfigFixtures", "appsettings.Generation.Example.json"),
+                optional: false)
+            .Build();
+
+        var pricing = configuration.GetSection(EngineUsagePricingOptions.SectionName);
+        pricing.Exists().Should().BeTrue(
+            "the file an operator opens at provider-flip time must document this section, or a correct "
+            + "'unpriced' reading gets filed as a bug");
+        pricing["Currency"].Should().Be("USD");
+
+        var generation = configuration.GetSection(GenerationOptions.SectionName).Get<GenerationOptions>();
+        generation.Should().NotBeNull("adding the Pricing block must not have disturbed the governed example");
+        var tierModels = generation!.Tiers.Values.Select(tier => tier.Model).Distinct().ToList();
+        tierModels.Should().NotBeEmpty("the example configures tier models, which is what makes this comparable");
+
+        var pricedModels = pricing.GetSection($"Providers:{generation.Provider}").GetChildren()
+            .Select(model => model.Key)
+            .ToList();
+
+        pricedModels.Should().BeEquivalentTo(
+            tierModels,
+            "the price table is keyed by the MODEL id an engine.generated event records — the same ids the "
+            + "example's own Tiers configure — never by the deployment name");
+
+        foreach (var model in pricedModels)
+        {
+            var rates = pricing.GetSection($"Providers:{generation.Provider}:{model}");
+            rates.GetChildren().Select(rate => rate.Key).Should().BeEquivalentTo(
+                new[]
+                {
+                    nameof(EngineModelPriceOptions.InputPer1MTokens),
+                    nameof(EngineModelPriceOptions.OutputPer1MTokens),
+                    nameof(EngineModelPriceOptions.CacheReadPer1MTokens),
+                    nameof(EngineModelPriceOptions.CacheCreationPer1MTokens),
+                },
+                "all four categories are documented because they price separately — an example showing only "
+                + "input/output would teach a reader that cache tokens are free ({0})",
+                model);
+        }
+    }
+
+    /// <summary>
     /// The hazard this options class exists to avoid, pinned: the pricing keys live UNDER
     /// <c>Generation</c> for operator-facing tidiness, but they must NOT reach
     /// <see cref="GenerationOptions"/> — <c>AddEngineGeneration</c> runs a fail-closed NFR-005 startup

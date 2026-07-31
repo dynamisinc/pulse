@@ -408,19 +408,32 @@ public sealed class EngineUsageAggregatorTests
     /// provider (a DIFFERENT question: which provider produced these historical calls) lives one level down,
     /// on the per-model rows, and is asserted present here so this test cannot pass by the shape being empty.
     /// </summary>
+    /// <remarks>
+    /// The rejection is by SUBSTRING, not by an enumerated blocklist: an earlier version named
+    /// <c>Provider</c>/<c>EffectiveProvider</c>/<c>ProviderCutToFake</c> explicitly, which a future
+    /// <c>LiveProvider</c> or <c>CurrentProvider</c> would have walked straight past. What it still cannot catch,
+    /// stated so nobody over-trusts it: a provider readout smuggled INSIDE a new nested object whose own name says
+    /// nothing about providers (a top-level <c>Current { Provider }</c>), because the legitimate nested
+    /// <c>ByModel</c> and <c>Cost</c> rows must be allowed to carry exactly that member. That residue is a review
+    /// question, not a reflection one.
+    /// </remarks>
     [Fact]
     public void UsageDto_CarriesNoLiveProviderField_ButPerModelRowsDoNameTheirProvider()
     {
-        var topLevel = typeof(EngineUsageDto).GetProperties().Select(p => p.Name).ToList();
+        var offending = typeof(EngineUsageDto).GetProperties()
+            .Select(property => property.Name)
+            .Where(name => name.Contains("Provider", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
-        topLevel.Should().NotContain("Provider");
-        topLevel.Should().NotContain("EffectiveProvider");
-        topLevel.Should().NotContain("ProviderCutToFake");
+        offending.Should().BeEmpty(
+            "no TOP-LEVEL member of this DTO may name a provider under any spelling — 'which provider is live "
+            + "now' is GET /api/engine/settings' single authoritative answer, and a second independently-computed "
+            + "readout is the two-surfaces-disagreeing failure AC1 forbids");
 
         typeof(EngineUsageModelDto).GetProperties().Select(p => p.Name).Should().Contain(
             "Provider",
             "the historical 'which provider produced THESE calls' question is answered from the event data, "
-            + "per model — that one is this endpoint's job");
+            + "per model — that one is this endpoint's job, so this test cannot pass by the shape being empty");
     }
 }
 

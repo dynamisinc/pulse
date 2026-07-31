@@ -40,6 +40,20 @@ using Xunit;
 /// endpoint's request delegate and leaves no metadata naming the type, so a check that looked like it verified
 /// the gate here would in fact verify nothing.
 /// </para>
+/// <para>
+/// <b>A stated deviation from the story's integration-seam wording, not a silently narrower guard.</b>
+/// <c>implementation.md</c>'s integration seam asks the composition-root guard to assert the route "resolves and
+/// returns data through the real wiring". This guard delivers the RESOLVES half only. The "returns data" half is
+/// met instead by <see cref="EngineUsageEndpointsTests"/>, which serves real 200s with real rows against real SQL
+/// Server — but on a HAND-WIRED host (feature registrations only, no application middleware), so no test in this
+/// story serves a 200 through <c>Program.cs</c>'s full pipeline. Doing that would need the real host pointed at a
+/// live database plus a real issued staff session, which is a fixture this repo does not have and which this
+/// behaviour-only edge does not earn. The residual risk is bounded and named: a defect in
+/// <c>Program.cs</c>'s middleware ORDER around this route (rather than in its registrations, which are covered
+/// here) would not be caught by this story's tests. That class of defect is what
+/// <c>ExerciseConfiguration/LifecycleGatingPipelineOrderTests</c>' real-SQL probe exists for, and adding a usage
+/// route to that kind of coverage belongs to whoever next needs a full-pipeline fixture.
+/// </para>
 /// </remarks>
 public sealed class EngineUsageCompositionRootWiringTests
 {

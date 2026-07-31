@@ -111,10 +111,28 @@ public sealed class EngineUsageWindowDto
     public required int WindowMinutes { get; init; }
 
     /// <summary>The bucket width in minutes, chosen server-side from the window so the series stays bounded.</summary>
+    /// <remarks>
+    /// <b>The FINAL bucket may be PARTIAL — do not render calls-per-bucket as a rate without checking.</b> Bucket
+    /// width is derived from the window against the bucket ceiling, so when
+    /// <see cref="WindowMinutes"/> is not a whole multiple of <see cref="BucketMinutes"/> the last bucket covers
+    /// less than <see cref="BucketMinutes"/> of real time (a 61-minute window buckets at 2 minutes into 31
+    /// buckets, and the 31st holds a single minute). Counts are still exact and
+    /// <c>sum(buckets.calls) == totals.calls</c> still holds, so a bar chart of COUNTS is correct as served. A
+    /// consumer that divides by <see cref="BucketMinutes"/> to show a RATE, however, would understate the last
+    /// bucket by up to half — and the last bucket is the freshest point, the one an operator actually watches on a
+    /// live-ops view. Either compute the final bucket's true span
+    /// (<c>windowMinutes - bucketMinutes * (bucketCount - 1)</c>) or render counts, not rates. Every window the
+    /// panel is expected to offer (1 / 15 / 60 / 240 / 1440) divides evenly, so this is latent rather than live —
+    /// stated here because that is a property of the CALLER's window choice, not a guarantee of this contract.
+    /// </remarks>
     [JsonPropertyName("bucketMinutes")]
     public required int BucketMinutes { get; init; }
 
     /// <summary>How many buckets every series in this response carries.</summary>
+    /// <remarks>
+    /// <c>bucketMinutes * bucketCount</c> may exceed <see cref="WindowMinutes"/> by up to
+    /// <c>bucketMinutes - 1</c>; see the note on <see cref="BucketMinutes"/> for what that means for a consumer.
+    /// </remarks>
     [JsonPropertyName("bucketCount")]
     public required int BucketCount { get; init; }
 }

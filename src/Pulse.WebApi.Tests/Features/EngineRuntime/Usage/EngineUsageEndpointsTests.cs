@@ -105,9 +105,14 @@ public sealed class EngineUsageEndpointsTests
         cost.TryGetProperty("pricedTotalCost", out _).Should().BeTrue();
         cost.TryGetProperty("anyUnpriced", out _).Should().BeTrue();
 
-        root.TryGetProperty("provider", out _).Should().BeFalse(
-            "AC1: 'which provider is live now' is GET /api/engine/settings' single authoritative answer — this "
-            + "endpoint never computes a second one");
+        // Name-agnostic, matching the reflection pin: an enumerated key check would let a future
+        // `liveProvider`/`currentProvider` through, and the wire is the half a client actually reads.
+        root.EnumerateObject()
+            .Select(property => property.Name)
+            .Where(name => name.Contains("provider", StringComparison.OrdinalIgnoreCase))
+            .Should().BeEmpty(
+                "AC1: 'which provider is live now' is GET /api/engine/settings' single authoritative answer — this "
+                + "endpoint never serves a second one under ANY top-level key spelling");
     }
 
     [RequiresDockerFact]
@@ -474,14 +479,32 @@ public sealed class EngineUsageEndpointsTests
     // ---- layer ORDERING: does the auth gate really answer first? -----------------------------------
 
     /// <summary>
-    /// <b>The minimal-API ordering trap, pinned in the direction that matters.</b> This endpoint takes a query
-    /// parameter AND sits behind an <see cref="Microsoft.AspNetCore.Http.IEndpointFilter"/>, so "which answers
-    /// first" is a real question. For a value that BINDS but is out of range, the answer is the correct one:
-    /// validation lives in the service, behind the gate, so an anonymous caller gets <c>401</c> and learns
-    /// nothing about the window bounds. Pinned because a refactor that moved validation forward — into a
-    /// route-constraint, a binding attribute or a filter registered before the auth filter — would silently flip
-    /// this to 400.
+    /// <b>The minimal-API ordering trap, pinned in the direction that matters — on THIS host.</b> This endpoint
+    /// takes a query parameter AND sits behind an <see cref="Microsoft.AspNetCore.Http.IEndpointFilter"/>, so
+    /// "which answers first" is a real question. For a value that BINDS but is out of range, the answer is the
+    /// correct one: validation lives in the service, behind the filter, so the caller gets <c>401</c> and learns
+    /// nothing about the window bounds.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Read the attribution carefully.</b> What is measured here is <c>UsageTestHost</c>, which wires the
+    /// feature's <c>AddEngineReview()</c>/<c>MapEngineReview()</c> pair and NO authentication or authorization
+    /// middleware at all — so the only thing that can refuse is the slice's own
+    /// <c>EngineCockpitStaffAuthorizationFilter</c>, reading the stubbed
+    /// <c>ICurrentStaffSessionAccessor</c>. That is deliberately the harshest case for this assertion: with no
+    /// outer gate present, the slice's own filter still answers before the service's validation.
+    /// </para>
+    /// <para>
+    /// In the REAL host the first responder is something else and strictly earlier: <c>Program.cs</c>'s
+    /// deny-by-default <c>AddSessionAuthorization()</c> <c>FallbackPolicy</c> + <c>app.UseAuthorization()</c>,
+    /// which refuses every endpoint declaring no authorization metadata of its own except the eleven routes in
+    /// <c>PreAuthAllowlist</c> — and <c>/api/engine/usage</c> is correctly NOT among them. So production is more
+    /// closed than this test measures, not less; this test does not, and does not claim to, exercise that outer
+    /// gate. Pinned anyway because a refactor that moved validation forward — into a route constraint, a binding
+    /// attribute, or a filter registered ahead of the auth filter — would flip THIS layer to 400 while the outer
+    /// gate silently masked the regression in production.
+    /// </para>
+    /// </remarks>
     [RequiresDockerFact]
     public async Task GetUsage_AnonymousWithAnOutOfRangeWindow_Is401_TheAuthGateAnswersBeforeValidation()
     {
@@ -500,18 +523,30 @@ public sealed class EngineUsageEndpointsTests
     }
 
     /// <summary>
-    /// <b>The trap this repo has been bitten by, checked and found NOT to apply here — which is exactly why it is
-    /// now pinned.</b> Minimal-API parameter binding failures have historically been reported ahead of endpoint
-    /// guards; measured on this endpoint, they are not. An <c>IEndpointFilter</c> wraps the innermost step that
-    /// performs binding and reports a parameter-check failure, so the cockpit auth filter answers FIRST: an
-    /// anonymous caller sending a value that cannot bind at all gets <c>401</c>, not the framework's <c>400</c>.
+    /// <b>The trap this repo has been bitten by, checked and found NOT to apply to the slice's own filter.</b>
+    /// Minimal-API parameter binding failures have historically been reported ahead of endpoint guards; measured
+    /// on <c>UsageTestHost</c>, they are not. An <c>IEndpointFilter</c> wraps the innermost step that performs
+    /// binding and reports a parameter-check failure, so <c>EngineCockpitStaffAuthorizationFilter</c> answers
+    /// FIRST: a session-less caller sending a value that cannot bind at all gets <c>401</c>, not the framework's
+    /// <c>400</c>.
     /// </summary>
     /// <remarks>
-    /// Pinned because it is fragile in both directions. It would flip to <c>400</c> if this route were ever moved
-    /// off a filtered group, if the gate were re-expressed as middleware ahead of routing, or if a binding
-    /// attribute / route constraint moved validation in front of the filter — and a <c>400</c> would tell an
-    /// unauthenticated caller the endpoint exists and what its parameter looks like, which is a disclosure this
-    /// staff-only surface gets for free today and should not lose silently.
+    /// <para>
+    /// <b>Scope of the claim.</b> <c>UsageTestHost</c> wires no authentication or authorization middleware, so the
+    /// 401 here is the SLICE's filter and nothing else — which is the point: even with no outer gate to hide
+    /// behind, binding does not answer ahead of the guard. It is NOT a measurement of the real pipeline. In the
+    /// real host <c>Program.cs</c>'s deny-by-default <c>FallbackPolicy</c> (<c>AddSessionAuthorization()</c> +
+    /// <c>app.UseAuthorization()</c>) refuses an anonymous caller earlier still, since <c>/api/engine/usage</c> is
+    /// correctly absent from the eleven-route <c>PreAuthAllowlist</c>; production is strictly more closed than
+    /// what is asserted below.
+    /// </para>
+    /// <para>
+    /// Pinned because this layer is fragile in both directions and the outer gate would mask its loss. It would
+    /// flip to <c>400</c> if this route were moved off a filtered group, if the slice gate were re-expressed as
+    /// middleware ahead of routing, or if a binding attribute / route constraint moved validation in front of the
+    /// filter — and on any host or future surface where the fallback policy does not apply, a <c>400</c> would
+    /// tell an unauthenticated caller the endpoint exists and what its parameter looks like.
+    /// </para>
     /// </remarks>
     [RequiresDockerFact]
     public async Task GetUsage_AnonymousWithAnUnbindableWindow_IsStill401_TheFilterWrapsParameterBinding()
@@ -791,10 +826,20 @@ public sealed class EngineUsageEndpointsTests
     }
 
     /// <summary>
-    /// A minimal host wired exactly as <c>Program.cs</c> wires the feature (AddEngineGeneration →
+    /// A minimal host wired exactly as <c>Program.cs</c> wires the FEATURE (AddEngineGeneration →
     /// AddEngineReview → MapEngineReview), with a configurable staff session and a fixed server-authoritative
     /// exercise scope. Mirrors <c>EngineSettingsEndpointsTests</c>' host.
     /// </summary>
+    /// <remarks>
+    /// <b>It wires the feature, NOT the application pipeline.</b> There is no <c>UseAuthentication</c>,
+    /// <c>UseAuthorization</c>, <c>AddSessionAuthorization</c>, exercise-resolution middleware or lifecycle gate
+    /// here — so every refusal observed through this host comes from the slice's own
+    /// <c>EngineCockpitStaffAuthorizationFilter</c> or from <c>EngineUsageService</c>, and never from
+    /// <c>Program.cs</c>'s deny-by-default <c>FallbackPolicy</c>. That makes the refusals asserted here the
+    /// slice's OWN guarantees (the useful thing to pin, since the outer gate would otherwise mask their loss),
+    /// and it means no assertion here may be read as a measurement of the production pipeline, which refuses an
+    /// anonymous caller earlier and harder.
+    /// </remarks>
     private sealed class UsageTestHost : IAsyncDisposable
     {
         private readonly WebApplication _app;
