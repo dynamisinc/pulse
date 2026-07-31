@@ -27,16 +27,8 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTriangleExclamation, faToggleOn, faToggleOff } from '@fortawesome/free-solid-svg-icons'
 import { Box, Stack, Typography } from '@mui/material'
 import { useSwampedMode } from '../hooks/useSwampedMode'
-
-/** D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only. */
-const chrome = {
-  card: '#111c2b',
-  line: '#28384b',
-  ink: '#e9eff7',
-  inkMuted: '#9db1c8',
-  inkFaint: '#63758b',
-  amber: '#f5a623',
-} as const
+// D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
+import { consoleChrome as chrome } from '../../consoleChrome'
 
 export function SwampedModeToggle() {
   const { swampedMode, isLead, setSwampedMode } = useSwampedMode()

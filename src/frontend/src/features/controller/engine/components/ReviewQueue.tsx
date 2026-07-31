@@ -58,21 +58,8 @@ import { usePersonas } from '@/features/personas'
 import type { Persona } from '@/features/personas'
 import { DraftDisposition, type EngineReviewItem } from '../models/reviewContracts'
 import { useReviewQueue } from '../hooks/useReviewQueue'
-
-/** D5 dark operator-chrome tokens (README §"Design Tokens"). Staff-only. */
-const chrome = {
-  panel: '#0f1826',
-  card: '#111c2b',
-  cardBorder: '#1c2a3a',
-  line: '#28384b',
-  ink: '#e9eff7',
-  inkMuted: '#9db1c8',
-  inkFaint: '#63758b',
-  blue: '#4d97d1',
-  red: '#e42217',
-  amber: '#f5a623',
-  green: '#33a06f',
-} as const
+// D5 dark operator-chrome tokens (README §"Design Tokens"). Staff-only.
+import { consoleChrome as chrome } from '../../consoleChrome'
 
 export interface ReviewQueueEditSlotProps {
   /** The burst being edited. */

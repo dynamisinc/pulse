@@ -79,20 +79,8 @@ import { useDemandMeter } from '../hooks/useDemandMeter'
 import { useEngineControl, type EngineMode } from '../hooks/useEngineControl'
 import { useEngineSettings, type EngineSettingsAutonomy } from '../hooks/useEngineSettings'
 import { useReviewQueue } from '../hooks/useReviewQueue'
-
-/** D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only. */
-const chrome = {
-  bg: '#0a1017',
-  panel: '#0f1826',
-  line: '#28384b',
-  ink: '#e9eff7',
-  inkMuted: '#9db1c8',
-  inkFaint: '#63758b',
-  blue: '#4d97d1',
-  red: '#e42217',
-  amber: '#f5a623',
-  green: '#33a06f',
-} as const
+// D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
+import { consoleChrome as chrome } from '../../consoleChrome'
 
 /** The kill switch's cycle order + display copy (D5 §2 "Live / Suggest-only / STOP ENGINE"). */
 const MODE_CYCLE: readonly EngineMode[] = ['live', 'suggest-only', 'stop']

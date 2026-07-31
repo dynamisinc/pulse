@@ -35,16 +35,8 @@ import { CobraLinkButton, CobraPrimaryButton, CobraTextField } from '@/theme/sty
 import { Avatar, VerifiedMark, type AvatarPersona } from '@/features/social'
 import { usePersonas } from '@/features/personas'
 import type { ReviewQueueEditSlotProps } from './ReviewQueue'
-
-/** D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only. */
-const chrome = {
-  panel: '#0f1826',
-  line: '#28384b',
-  ink: '#e9eff7',
-  inkMuted: '#9db1c8',
-  inkFaint: '#63758b',
-  blue: '#4d97d1',
-} as const
+// D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
+import { consoleChrome as chrome } from '../../consoleChrome'
 
 /** Fallback avatar identity when the persona isn't resolved yet (mirrors `ReviewQueue`). */
 function fallbackAvatar(handle: string): AvatarPersona {

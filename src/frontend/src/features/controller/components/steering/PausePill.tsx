@@ -90,18 +90,8 @@ import {
   type OverlayRegister,
   type PauseTier,
 } from '../../hooks/usePauseState'
-
-/** D5 dark operator-chrome tokens (matches `SwampedModeToggle`). Staff-only. */
-const chrome = {
-  card: '#111c2b',
-  line: '#28384b',
-  ink: '#e9eff7',
-  inkMuted: '#9db1c8',
-  inkFaint: '#63758b',
-  running: '#37c46b',
-  paused: '#4a90d9',
-  amber: '#f5a623',
-} as const
+// D5 dark operator-chrome tokens (matches `SwampedModeToggle`). Staff-only.
+import { consoleChrome as chrome } from '../../consoleChrome'
 
 /** The tiers a controller can SELECT to pause (excludes the `running` baseline). */
 type PauseChoice = Exclude<PauseTier, 'running'>

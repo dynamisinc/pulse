@@ -91,6 +91,8 @@ import {
   type AutonomyDefaultLevel,
   type TierPolicyMode,
 } from '../hooks/useEngineSettings'
+// D5 dark operator-chrome tokens (matches `ReviewQueue`'s/`EngineControlBar`'s `chrome`).
+import { consoleChrome as chrome } from '../../consoleChrome'
 
 /** Stable toolstrip-registry id for the console's "ENGINE" surface tool. */
 export const ENGINE_SETTINGS_TOOL_ID = 'engine-settings'
@@ -109,21 +111,6 @@ const PANEL_WIDTH_PX = 380
  * reading past it in document order (WCAG 2.1 SC 1.3.1 / 3.3.2).
  */
 const ALREADY_FAKE_NOTE_ID = 'provider-lever-already-fake-note'
-
-/** D5 dark operator-chrome tokens (matches `ReviewQueue`'s/`EngineControlBar`'s `chrome`). */
-const chrome = {
-  panel: '#0f1826',
-  card: '#111c2b',
-  cardBorder: '#1c2a3a',
-  line: '#28384b',
-  ink: '#e9eff7',
-  inkMuted: '#9db1c8',
-  inkFaint: '#63758b',
-  blue: '#4d97d1',
-  red: '#e42217',
-  amber: '#f5a623',
-  green: '#33a06f',
-} as const
 
 const AUTONOMY_OPTIONS: ReadonlyArray<{ value: AutonomyDefaultLevel; label: string }> = [
   { value: 'suggest', label: 'Suggest' },
