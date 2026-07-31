@@ -633,8 +633,10 @@ public sealed partial class EngineReviewService
 
         var configured = _generationProvider.Name;
 
-        // Already offline: there is no egress to stop. Report it (alreadyFake) instead of recording a cut that
-        // would make the console claim a lockdown that never happened, and emit nothing.
+        // Only cut when the configured provider actually egresses — i.e. this guard is the "NOT already
+        // offline" case. When it IS already Fake we fall straight through to the snapshot below, which reports
+        // alreadyFake and emits nothing: recording a cut there would make the console claim a lockdown that
+        // never happened.
         if (!IsFakeProvider(configured))
         {
             var changed = _providerCut.Cut(exerciseId);

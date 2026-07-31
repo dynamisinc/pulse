@@ -111,10 +111,12 @@ export interface EngineSettingsDto {
   /**
    * The provider actually serving THIS exercise's bursts right now (story
    * 07) — `Fake` while a cut is active, otherwise identical to
-   * {@link provider}. READ THIS DIRECTLY (WR-003): never re-derive "a cut is
-   * active, therefore effectively Fake" by comparing {@link provider} against
-   * {@link providerCutToFake} — that inference is exactly the mislabelled-
-   * posture bug class the configured/effective split exists to prevent.
+   * {@link provider}. READ THIS FIELD DIRECTLY (WR-003): the server has
+   * already resolved the posture, so never reconstruct it from the other
+   * fields — e.g. `providerCutToFake ? 'Fake' : provider`. That inference is
+   * the mislabelled-posture bug class the configured/effective split exists to
+   * prevent: it silently disagrees with the server the moment either field's
+   * meaning shifts.
    */
   readonly effectiveProvider: string
   /**

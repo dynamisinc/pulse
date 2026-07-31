@@ -44,6 +44,11 @@
  * `features/controller/engine/services/liveReviewActions.ts` in prose without
  * importing it) — precedent 17, no tautological / over-eager tests.
  *
+ * Comments are also STRIPPED before scanning, so a commented-out import — which
+ * carries the full import syntax and would otherwise read as a real violation —
+ * is not flagged either (Copilot review, PR #403; see {@link stripComments} for
+ * the limits it does not claim to cover).
+ *
  * The file-count assertion guards against silently passing by scanning zero
  * files, matching the sibling guard's own non-vacuity discipline.
  */
@@ -69,14 +74,42 @@ const FORBIDDEN_SPECIFIER_PATTERNS: RegExp[] = [
 ]
 
 /**
+ * Strip `//` line comments and block comments, leaving string/template literals
+ * intact so a `//` inside e.g. `'https://example.test'` is never mistaken for a
+ * comment. Needed because {@link extractImportSpecifiers} is regex-based: a
+ * COMMENTED-OUT import (`// import { x } from '@/features/controller/engine/y'`)
+ * carries the full import syntax and would otherwise be reported as a real
+ * violation.
+ *
+ * HONEST LIMIT: this is a lexer approximation, not a parser. It does not model
+ * regex literals, so a regex containing an unbalanced quote could in principle
+ * desynchronise the string-skipping. That is tolerable for a guard over app
+ * source, and is stated rather than implied — an earlier version of this file
+ * claimed it "never matches prose in comments", which was true of prose but not
+ * of commented-out code (Copilot review, PR #403).
+ */
+function stripComments(source: string): string {
+  return source.replace(
+    /('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
+    (match, stringLiteral: string | undefined) => (stringLiteral === undefined ? '' : match),
+  )
+}
+
+/**
  * Extract every static `import ... from '<specifier>'`, SIDE-EFFECT-only
  * `import '<specifier>'`, dynamic `import('<specifier>')`, and
  * `require('<specifier>')` module specifier from a source file's text.
- * Deliberately specifier-only (not a full parse) so it never matches prose in
- * comments that merely *mentions* the engine module without an actual import.
+ *
+ * Comments are stripped first (see {@link stripComments}), so this reports
+ * neither prose that merely *mentions* the engine module (no quoted specifier)
+ * nor a commented-out import (full syntax, but not a real edge). What it does
+ * NOT catch: a specifier assembled at runtime from a variable — no textual
+ * guard can, and such a construct in a participant surface would be a far
+ * louder review problem than this test.
  */
 function extractImportSpecifiers(source: string): string[] {
   const specifiers: string[] = []
+  const scannable = stripComments(source)
   const patterns = [
     /import\s+(?:type\s+)?[^'"]*?from\s+['"]([^'"]+)['"]/g,
     // Side-effect-only import (no `from`), e.g. `import '@/features/controller/engine'` —
@@ -87,7 +120,7 @@ function extractImportSpecifiers(source: string): string[] {
   ]
 
   for (const pattern of patterns) {
-    for (const match of source.matchAll(pattern)) {
+    for (const match of scannable.matchAll(pattern)) {
       const specifier = match[1]
       if (specifier !== undefined) specifiers.push(specifier)
     }
@@ -161,5 +194,35 @@ describe('Participant surfaces never import the engine-settings module (SOC-003 
     }
 
     expect(violations).toEqual([])
+  })
+
+  // Both halves of the extractor's contract, asserted against synthetic sources so they hold
+  // independently of whatever the real participant tree happens to contain today.
+  it('flags a REAL import in both the alias and relative forms', () => {
+    expect(
+      findViolations({
+        'social/a.ts': "import { useEngineSettings } from '@/features/controller/engine/hooks/useEngineSettings'",
+        'social/b.ts': "import { x } from '../../controller/engine/services/engineSettingsActions'",
+        'social/c.ts': "const m = await import('@/features/controller/engine/hooks/useEngineSettings')",
+      }).map(v => v.file),
+    ).toEqual(['social/a.ts', 'social/b.ts', 'social/c.ts'])
+  })
+
+  it('does NOT flag a commented-out import, a prose mention, or an engine path inside a string literal', () => {
+    expect(
+      findViolations({
+        // A commented-out import carries the full syntax — the case the regex-only
+        // version of this guard would have reported as a real violation (Copilot, PR #403).
+        'social/line-comment.ts':
+          "// import { useEngineSettings } from '@/features/controller/engine/hooks/useEngineSettings'\nexport const a = 1",
+        'social/block-comment.ts':
+          "/* import { x } from '../../controller/engine/services/engineSettingsActions' */\nexport const b = 2",
+        // Prose that merely names the module (no quoted specifier at all).
+        'social/prose.ts': '// See features/controller/engine/services/liveReviewActions.ts for the staff twin.\nexport const c = 3',
+        // A `//`-bearing string must survive comment-stripping, or the stripper would
+        // corrupt the source it is meant to read.
+        'social/url.ts': "export const u = 'https://example.test/x'\nexport const d = 4",
+      }),
+    ).toEqual([])
   })
 })
