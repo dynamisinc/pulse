@@ -23,7 +23,7 @@ table). EVL-014 (dial-input overlays). Master PRD XC-004 (the v0 schema this ext
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Engine event types (extend XC-004) | ADP-041 / XC-004 | Not Started | #173 |
+| 01 | Engine event types (extend XC-004) | ADP-041 / XC-004 | In Progress | #173 |
 | 02 | Tuning & observability surface | ADP-041 | Not Started | #174 |
 | 03 | AI generation usage panel | ADP-041 | Not Started | #401 |
 
