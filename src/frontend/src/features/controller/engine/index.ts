@@ -105,3 +105,29 @@ export type {
 } from './hooks/useEngineSettings'
 export { EngineSettingsPanel, ENGINE_SETTINGS_TOOL_ID } from './components/EngineSettingsPanel'
 export type { EngineSettingsPanelProps } from './components/EngineSettingsPanel'
+
+// --- AI generation usage panel (engine-telemetry-tuning, story 03c) — the
+// live-ops volume/cost view over `GET /api/engine/usage` (story 03a).
+// `engineUsageStore` (incl. its test-only `setForTests`) is DELIBERATELY NOT
+// re-exported here — mirrors `engineSettingsStore`'s own omission; tests
+// import the store directly from `./hooks/useEngineUsage`. ---
+export {
+  DEFAULT_WINDOW_MINUTES,
+  ENGINE_USAGE_WINDOW_PRESETS_MINUTES,
+  useEngineUsage,
+} from './hooks/useEngineUsage'
+export type {
+  EngineUsageBucket,
+  EngineUsageCost,
+  EngineUsageDto,
+  EngineUsageGuardResult,
+  EngineUsageLatency,
+  EngineUsageModel,
+  EngineUsageModelCost,
+  EngineUsageRates,
+  EngineUsageTotals,
+  EngineUsageWindow,
+  UseEngineUsageResult,
+} from './hooks/useEngineUsage'
+export { UsagePanel, ENGINE_USAGE_TOOL_ID, ENGINE_USAGE_PANEL_TITLE } from './components/UsagePanel'
+export type { UsagePanelProps } from './components/UsagePanel'

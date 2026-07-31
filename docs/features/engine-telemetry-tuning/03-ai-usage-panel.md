@@ -368,3 +368,170 @@ tie-break, provider dropped from the grouping key, `Ceiling` for `Floor` at the 
 > re-scans the exercise's rows per read, so an index earns its place once 03c polls on an interval — but it is
 > a schema change (Tier-2 human sign-off + a migration whose snapshot collides with any other migration in the
 > same wave), so it belongs to a story that owns the schema, not to this behaviour-only edge.
+
+### 03c (frontend edge) — as built
+
+`src/frontend/src/features/controller/engine/`:
+`hooks/useEngineUsage.ts` (+ `.test.ts`, `.mockContractConformance.test.ts`),
+`services/liveEngineUsageActions.ts` (+ `.test.ts`),
+`components/UsagePanel.tsx` (+ `.test.tsx`, `.providerUnavailable.test.tsx`);
+mounted via `features/controller/components/ControllerConsole.tsx`
+(+ `.usageTool.test.tsx`).
+
+Gate-1 review (clean, 0 Critical, 5 Warnings — all five folded below, plus the cheap high-value
+Suggestions) is captured here as the frozen `WR-00x`/`SG-00x` labels the fold used; they are local to
+this 03c review round (independent of 03a's own `WR-`/`SG-` numbering above).
+
+**AC1 — the provider statement reuses `GET /api/engine/settings`, never a second readout**
+- `UsagePanel.test.tsx` — `UsagePanel — AC1: the provider statement is sourced ONLY from useEngineSettings()`
+  (4 tests: no-cut / cut-posture / icon+text pairing / structurally distinct from the historical
+  `byModel[].provider` rows, which may legitimately disagree with the live statement).
+- **WR-004 (folded):** a FAILED `GET /api/engine/settings` leaves `useEngineSettings().settings` at
+  `null` (only `error` is set) — silently omitting the provider line in that case would leave the
+  historical `byModel` rows (which may name `Fake`) as the only provider information on the page,
+  inviting exactly the inference-from-history AC1 exists to prevent. Fixed: an explicit
+  "LIVE PROVIDER: unavailable (engine settings could not be read) — the rows below name the provider
+  that produced each PAST call, not what is live now." statement, icon-paired (never colour alone),
+  and NOT shown while settings is merely still loading (no false "unavailable"). Proven by the
+  wholesale-mocked sibling file `UsagePanel.providerUnavailable.test.tsx` (4 tests) — a SEPARATE file
+  from `UsagePanel.test.tsx` because `vi.mock('../hooks/useEngineSettings')` is file-scoped/hoisted
+  and would otherwise break that file's tests against the real settings store (mirrors
+  `EngineSettingsPanel.awaitThenApply.test.tsx`'s established convention).
+
+**AC2 — volume: calls over time, by provider/model, token categories distinct, latency, guard mix**
+- `UsagePanel.test.tsx` — `AC2: volume` (totals/tokens/latency; guard-result mix icon+text; "including
+  the busiest (Fake) first").
+- **WR-002 (folded, the one AC gap Gate-1 flagged as real, not polish):** `ModelVolumeRow` rendered
+  totals/latency/guards per model but NEVER that model's own call-count-over-time series — so the
+  shipped panel was (calls over time, aggregate) + (calls, NOT over time, by model), which does not
+  satisfy "call counts over time broken down by provider and model". Fixed by refactoring
+  `BucketSeries` to take `buckets`/`bucketMinutes` directly (not a whole `EngineUsageDto`) so it can
+  render EITHER the aggregate series or one model's own `model.buckets` — every `ModelVolumeRow` now
+  renders its own `<BucketSeries testId="usage-model-bucket-series">`, distinct per row and distinct
+  from the aggregate `testId="usage-bucket-series"`. Proven by
+  `UsagePanel.test.tsx`'s `WR-002: every model row renders its OWN call-count-over-time series, not
+  just its totals` (asserts one per-model series PER row, distinct from the one aggregate series) and
+  `WR-002: a model's own bucket-series detail sums to that model's OWN calls, not the window aggregate`;
+  at the mock-data level, `useEngineUsage.test.ts`'s `every model buckets series sums to that model's
+  own totals.calls (WR-002 — the per-model series is real, not decorative)`.
+
+**AC3 — cost, config-sourced, explicit "unpriced" (never a silently-wrong $0)**
+- `UsagePanel.test.tsx` — `AC3: cost is a separately labelled section` (6 tests: currency shown;
+  unpriced renders "UNPRICED" never `$0`; the FLOOR label when `anyUnpriced`; no formatted currency
+  figure at all in an unpriced row — the check that actually catches a fallback `$0` rather than a
+  literal-`"$0"` string search that this format never produces; icon+text pairing; floor note absent
+  when every model is priced).
+- **WR-003 (folded — "the one thing AC3 forbids"):** `isWireModelCost` accepted `priced: true` with a
+  `null` cost field (the type-level nullability existed for the UNPRICED case, but nothing coupled it
+  to `priced`), so a backend regression or a partly-populated row would print a confident `0.00 USD`
+  beside real token counts with no error anywhere — the wire boundary's OWN `?? 0` render fallback
+  would silently paper over it. Fixed at the validator, not the renderer (the "pick one" option this
+  finding offered): `isWireModelCost` now REJECTS the shape entirely — `priced: true` requires all
+  five cost fields AND `rates` to be present numbers/object; `priced: false` requires all five to be
+  EXACTLY `null` (never a stray number beside "unpriced"). A malformed row of either shape now throws
+  `MalformedEngineUsageResponseError` rather than rendering. Proven by
+  `liveEngineUsageActions.test.ts`'s `WR-003: priced and its cost fields are a COUPLED shape, never a
+  partly-null "priced" row` (4 tests: accepts a fully-real priced row; throws on `priced:true` +
+  `null inputCost`; throws on `priced:true` + missing `rates`; throws on `priced:false` + a stray
+  non-null field). The renderer's `row.inputCost ?? 0` fallback is now unreachable dead code for any
+  response that passed the validator — left in place as harmless defence, not the enforcement point.
+
+**Isolation / staff-only / telemetry / scenario-time (AC4/AC5/AC6/"Telemetry")** — unchanged from the
+original build; see the ACs above. Two folds specific to AC6:
+- **SG-003 (folded):** the window label hardcoded the literal `'wall-clock'` instead of reading
+  `usage.window.clock` — the field 03a added expressly so the panel STATES the clock rather than
+  assuming it. Fixed; proven by `UsagePanel.test.tsx`'s `SG-003: reads the clock label FROM the
+  response (window.clock), not a hardcoded literal`.
+- **SG-005 (folded):** `formatWallClockTime` was time-of-day only, so the 1440-minute (24-hour) preset
+  read as an identical `HH:MM:SS–HH:MM:SS` across a day boundary. Fixed: the window label now includes
+  the date whenever `windowMinutes >= 1440`. Proven by `UsagePanel.test.tsx`'s `SG-005: includes the
+  DATE in the window label once the window spans a full day`.
+
+**AC7 — accessibility (NFR-001), guard mix and provider/unpriced states never colour-only**
+Covered throughout the AC1/AC2/AC3 tests above (icon+text pairing asserted directly, e.g. `pairs the
+provider-cut indicator with BOTH an icon and text`, `pairs the UNPRICED state with an icon`, `pairs the
+"unavailable" statement with an icon`).
+- **SG-007 (folded — a doc-comment overclaim, not a behaviour change):** the module header claimed the
+  bucket-series numbers were "always also present as plain, readable text/rows", but the per-bucket
+  breakdown sits inside a collapsed `<details>` — reachable, not pre-rendered as visible text. Reworded
+  to state the AGGREGATE figures (calls/tokens/latency/guard mix) are always plain text, and the
+  bucket-by-bucket counts are "reachable via a keyboard-operable disclosure" — WCAG 2.1 AA needs the
+  information reachable, not necessarily pre-expanded. The `<summary>` copy itself now also says
+  "reachable via disclosure" rather than "view exact counts", for the same honesty. No test change (a
+  wording fix); `UsagePanel.test.tsx`'s existing bucket-detail tests already prove the information IS
+  reachable via the `<details>`/`<summary>` element.
+
+**AC8 — a read over the existing event log, honest about unreadable rows** — unchanged; see
+`UsagePanel.test.tsx`'s `AC8: unattributed rows and unparseable events`.
+
+**WR-001 (folded) — the scan fired on console mount, not on panel open.** `<UsagePanel>` is rendered
+unconditionally by `ControllerConsole.tsx`, and hooks run before the component's own `if (!open) return
+null` — so `useEngineUsage`'s mount effect issued `GET /api/engine/usage` for every controller-console
+session whether or not USAGE was ever opened, then the (now-removed) open-transition `refresh()` effect
+issued a SECOND read on first open. `GET /api/engine/usage` is the one endpoint in this story with no
+`TelemetryEvents.EventType` index — a full re-scan per console page-load, forever, is the exact cost
+this finding flags (`EngineSettingsPanel`'s equivalent mount-fetch is cheap/indexed and is unaffected).
+Fixed by splitting the component: `<UsagePanel>` (outer, always mounted) owns only focus management and
+open/close chrome; the data hooks (`useEngineUsage`/`useEngineSettings`) moved to a new child
+`<UsagePanelBody>`, rendered ONLY while `open`. Mounting `UsagePanelBody` IS the "open" signal
+`useEngineUsage`'s own mount-triggered `ensureStarted()` fires on — the separate "refetch on open
+transition" effect was removed entirely rather than layered on top (which would have re-introduced the
+double read on every open, not just the first). Net effect: exactly ONE scan, the first time USAGE is
+ever opened per console session; a later reopen reuses the cached snapshot; the visible "Refresh"
+button is the only way to force a new scan after that — a deliberate divergence from
+`EngineSettingsPanel`'s own "refetch on every open" discipline, justified by the re-scan cost above (see
+`useEngineUsage.ts`'s module header). Proven by `UsagePanel.test.tsx`'s
+`WR-001: the usage scan is gated on OPEN, not on this component mounting` (2 tests: the store is
+untouched while closed; it populates once opened) and the reachability suite
+(`ControllerConsole.usageTool.test.tsx`) continuing to pass unmodified (the split is invisible to that
+mount/open/close contract).
+
+**SG-006 (folded) — the mock's window presets were data-identical (a live UAT bug-report risk).**
+`buildMockEngineUsage`'s seeds were fixed absolute call/token counts regardless of `windowMinutes`, so
+under `USE_MOCK_DATA=true` (UAT's own flag) clicking 1 min → 24 hr showed the identical 46 calls and
+identical cost at every preset — only the bucket count changed. Given this repo's UAT history, an
+operator would file that as "the window selector is broken". Fixed: every seed now carries a BASE
+(60-minute) figure and is scaled by a `WINDOW_SCALE` factor per preset (calls floored at 1 whenever the
+base is positive, so every seed — priced/unpriced/unattributed/re-roll — stays visible even at the
+1-minute preset; the `Fake` row's tokens stay exactly `0` at every window, by construction). Guard-result
+splits are now a FUNCTION of the scaled call count (not a fixed array), so
+`sum(guardResults.calls) === totals.calls` holds exactly at every window, not just the original 60-minute
+baseline. Proven by `useEngineUsage.test.ts`'s three `SG-006:` tests (calls/tokens strictly increase
+across presets; every seed stays visible at the 1-minute preset; `Fake` stays token-zero at every
+window) plus the pre-existing `useEngineUsage.mockContractConformance.test.ts` (unchanged, still green)
+continuing to prove every scaled shape still passes the real wire validator.
+
+**SG-001 (folded) — the mock's guard-result ordering matched the backend's `OrderByDescending(calls)
+.ThenBy(result, Ordinal)` contract by accident, not by construction.** Both the aggregate and per-model
+`guardResults` arrays were seed-insertion order. Fixed with a shared `sortGuardResults` comparator
+(mirrors the `provider`/`model` comparator `orderModels` already applied to `byModel`), applied to both
+arrays. Proven by `useEngineUsage.test.ts`'s two `SG-001:` tests (aggregate order + calls-descending/
+ordinal tie-break; one model row's own guard results sorted the same way).
+
+**SG-004 (folded) — no fixture ever exercised a REAL backend timestamp format.** The mock emits
+`Date.toISOString()`; the live backend emits .NET round-trip `"O"` format
+(`2033-09-04T13:00:00.0000000+00:00`). `formatWallClockTime`'s `Number.isNaN` fallback already made this
+benign (V8's `Date` parser accepts the `"O"` format fine), but nothing proved it. Added
+`UsagePanel.test.tsx`'s `SG-004: a REAL .NET round-trip ("O"-format) wall-clock timestamp parses to a
+real time, never NaN/Invalid Date` — feeds an `"O"`-format string into the window label and a bucket
+row via `engineUsageStore.setForTests`, asserts no `NaN`/`Invalid Date` text and the correct count.
+
+**SG-008 (folded) — two doc-comments claimed more than the code does, a named repeat pattern on this
+feature.** `liveEngineUsageActions.ts` carried a broken `{@link EngineUsageProviderQuestion}` (a symbol
+that exists nowhere in the repo); reworded to plain prose pointing at `GET /api/engine/settings`/AC1.
+`UsagePanel.tsx`'s module header claimed `alreadyFake` was read directly off `useEngineSettings()`'s
+result, but the component only ever reads `effectiveProvider`/`provider`/`providerCutToFake` — removed
+the false claim rather than adding unused behaviour to match it. Doc-only; no test (a doc-comment
+correctness fix has no runtime assertion to add).
+
+**SG-002 (recorded, no code change)** — the "four token categories never summed into one number"
+protection (AC2) is `useEngineUsage.test.ts`'s mock using PAIRWISE-DISTINCT category values plus
+`UsagePanel.test.tsx`'s per-`data-testid` assertions (`usage-tokens-input`/`-output`/`-cache-read`/
+`-cache-creation`), which together make a summing regression print the SAME wrong number under four
+different test ids and red all four — not the weaker "the fields are structurally distinct in the
+type" argument. Recorded here per the fold instruction so this isn't re-litigated as a gap.
+
+**Final gates (`C:/Code/pulse-wt-etu-03c/src/frontend`):** `npm run build:check` clean (0 errors);
+`npm run lint` clean (0 warnings, 0 errors); `npm run test:run` — 214 test files passed (214), 2072
+tests passed (2072), matching-or-beating the pre-fold 213-file/2051-test baseline by exactly the one new
+file (`UsagePanel.providerUnavailable.test.tsx`) and 21 new tests this fold added, no regressions.
