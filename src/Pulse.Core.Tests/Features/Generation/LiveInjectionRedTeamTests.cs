@@ -63,8 +63,13 @@ public sealed class LiveInjectionRedTeamTests
         var provider = serviceProvider.GetRequiredService<IGenerationProvider>();
         var assembler = serviceProvider.GetRequiredService<IPromptAssembler>();
 
-        provider.Should().BeOfType<AzureOpenAIGenerationProvider>(
-            "the governed live config must select the in-tenant Azure OpenAI adapter through the gated path");
+        // Since autonomy-safety story 07 the resolved IGenerationProvider is the per-exercise cut selector; what
+        // matters here is that the governed path put the LIVE in-tenant adapter behind it (and that this run
+        // therefore really does egress to the model under test, rather than quietly measuring Fake).
+        var liveProvider = provider.Should().BeOfType<GenerationProviderSelector>()
+            .Which.ConfiguredProvider.Should().BeOfType<AzureOpenAIGenerationProvider>(
+                "the governed live config must select the in-tenant Azure OpenAI adapter through the gated path")
+            .Subject;
 
         var failures = new List<string>();
 
@@ -72,6 +77,17 @@ public sealed class LiveInjectionRedTeamTests
         {
             var request = assembler.Assemble(BuildInput(attack));
             var result = await provider.GenerateAsync(request);
+
+            // Gate-2 S-2: the type assertion above proves what the selector WRAPS; this proves what actually
+            // SERVED this burst. GenerationProviderSelector.Resolve(request.ExerciseId) fails closed to
+            // FakeGenerationProvider on Guid.Empty, so an ExerciseId-propagation regression anywhere upstream
+            // would leave the wiring assertion green while every attack below was silently answered offline —
+            // i.e. a "live red-team PASS" that measured Fake. Only the served provider's own stamp rules that out.
+            result.ProviderName.Should().Be(
+                liveProvider.Name,
+                "the burst must have egressed to the in-tenant Azure OpenAI deployment under test, not fallen back "
+                + $"to '{FakeGenerationProvider.ProviderName}' — an offline burst cannot exercise the four-layer "
+                + "isolation boundary this suite exists to prove (ADP-024, §12.2)");
 
             var guard = ContentGuard.InspectBurst(result.Posts);
             _output.WriteLine($"[{(guard.Clean ? "PASS" : "FAIL")}] {attack.Category} / {attack.Name}");

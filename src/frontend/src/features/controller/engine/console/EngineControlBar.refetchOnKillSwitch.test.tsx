@@ -65,6 +65,9 @@ function settingsResult(overrides: Partial<UseEngineSettingsResult> = {}): UseEn
   return {
     settings: {
       provider: 'Fake',
+      effectiveProvider: 'Fake',
+      providerCutToFake: false,
+      alreadyFake: true,
       tiers: [],
       autonomy: {
         swampedMode: false,
@@ -83,8 +86,11 @@ function settingsResult(overrides: Partial<UseEngineSettingsResult> = {}): UseEn
     forbidden: false,
     pendingAutonomyDefault: false,
     pendingTierPolicy: false,
+    pendingProviderLever: false,
     setAutonomyDefault: vi.fn(),
     setTierPolicyMode: vi.fn(),
+    cutGenerationToFake: vi.fn(),
+    restoreGenerationProvider: vi.fn(),
     refetch: refetchMock,
     ...overrides,
   }

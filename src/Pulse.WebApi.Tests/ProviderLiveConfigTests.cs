@@ -43,9 +43,18 @@ public sealed class ProviderLiveConfigTests
 
         using var provider = services.BuildServiceProvider();
 
-        provider.GetRequiredService<IGenerationProvider>().Should().BeOfType<FakeGenerationProvider>(
+        // Since autonomy-safety story 07 the resolved IGenerationProvider is the per-exercise cut selector, so
+        // the committed default is pinned where it now lives: the CONFIGURED side of that selector. The
+        // assertion is unchanged in intent and strictly stronger — it also pins that the only other provider
+        // the selector could ever reach is Fake as well, so no CI path can egress.
+        var selector = provider.GetRequiredService<IGenerationProvider>()
+            .Should().BeOfType<GenerationProviderSelector>().Subject;
+
+        selector.ConfiguredProvider.Should().BeOfType<FakeGenerationProvider>(
             "the committed appsettings.json default must stay Provider=Fake — CI has no governed endpoint "
             + "and must never reach a live/egressing provider (engine-runtime/04, NFR-005).");
+        selector.FakeProvider.Should().BeOfType<FakeGenerationProvider>(
+            "and the cut destination is Fake too, so NEITHER side of the runtime lever can egress in CI");
     }
 
     [Fact]
@@ -59,7 +68,10 @@ public sealed class ProviderLiveConfigTests
         using var provider = services.BuildServiceProvider();
         var resolved = provider.GetRequiredService<IGenerationProvider>();
 
-        resolved.Should().BeOfType<AzureOpenAIGenerationProvider>();
+        resolved.Should().BeOfType<GenerationProviderSelector>()
+            .Which.ConfiguredProvider.Should().BeOfType<AzureOpenAIGenerationProvider>(
+                "the governed example still selects the live in-tenant adapter — story 07 changed only which "
+                + "wrapper the loop resolves, never which endpoint the config may reach");
         resolved.Governance.TenantBounded.Should().BeTrue("the governed example must pass the NFR-005 gate");
         resolved.Governance.NoTrainingAttested.Should().BeTrue();
         resolved.Governance.Residency.Should().NotBeNullOrWhiteSpace();

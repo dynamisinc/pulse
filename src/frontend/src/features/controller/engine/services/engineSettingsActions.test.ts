@@ -18,9 +18,11 @@
 import { AxiosError, AxiosHeaders } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  cutGenerationToFake,
   describeSettingsError,
   getSettings,
   MalformedEngineSettingsResponseError,
+  restoreGenerationProvider,
   setAutonomyDefault,
   setTierPolicyMode,
   type EngineSettingsDto,
@@ -40,6 +42,9 @@ const CTX = { actingHumanId: 'human-controller-01', timeZone: 'America/New_York'
 
 const VALID_DTO: EngineSettingsDto = {
   provider: 'Fake',
+  effectiveProvider: 'Fake',
+  providerCutToFake: false,
+  alreadyFake: true,
   tiers: [{ tier: 'Ambient', model: 'fake-ambient', deployment: 'ambient', zdrCapable: false }],
   autonomy: {
     swampedMode: false,
@@ -84,6 +89,18 @@ describe('getSettings', () => {
 
     await expect(getSettings()).rejects.toThrow(MalformedEngineSettingsResponseError)
   })
+
+  it('throws MalformedEngineSettingsResponseError when the story-07 fields (effectiveProvider/providerCutToFake/alreadyFake) are missing — the parser validates every declared field, not a spot-checked subset', async () => {
+    const {
+      effectiveProvider: _effectiveProvider,
+      providerCutToFake: _providerCutToFake,
+      alreadyFake: _alreadyFake,
+      ...withoutStory07Fields
+    } = VALID_DTO
+    getMock.mockResolvedValue({ data: withoutStory07Fields })
+
+    await expect(getSettings()).rejects.toThrow(MalformedEngineSettingsResponseError)
+  })
 })
 
 describe('setAutonomyDefault', () => {
@@ -117,6 +134,61 @@ describe('setTierPolicyMode', () => {
       mode: 'ambient',
       timeZone: 'America/New_York',
     })
+  })
+})
+
+describe('cutGenerationToFake (story 07, ADP-042)', () => {
+  it('POSTs the cut-to-fake path with ONLY actingHumanId + timeZone — no provider selector field of any kind', async () => {
+    postMock.mockResolvedValue({ data: VALID_DTO })
+
+    await cutGenerationToFake(CTX)
+
+    expect(postMock).toHaveBeenCalledWith('/engine/generation-provider/cut-to-fake', {
+      actingHumanId: 'human-controller-01',
+      timeZone: 'America/New_York',
+    })
+    // The exact body shape — asserted explicitly rather than merely `toHaveBeenCalledWith`
+    // an object that happens to satisfy a superset check, since AC4's whole point is that
+    // NO extra field (a provider name, an id, anything) is ever sent.
+    const [, body] = postMock.mock.calls[0] as [string, Record<string, unknown>]
+    expect(Object.keys(body).sort()).toEqual(['actingHumanId', 'timeZone'])
+  })
+
+  it('resolves with the parsed DTO, including the story-07 fields', async () => {
+    postMock.mockResolvedValue({
+      data: { ...VALID_DTO, provider: 'AzureOpenAI', effectiveProvider: 'Fake', providerCutToFake: true, alreadyFake: false },
+    })
+
+    const result = await cutGenerationToFake(CTX)
+
+    expect(result.effectiveProvider).toBe('Fake')
+    expect(result.providerCutToFake).toBe(true)
+    expect(result.alreadyFake).toBe(false)
+  })
+})
+
+describe('restoreGenerationProvider (story 07, ADP-042 §8.2)', () => {
+  it('POSTs the restore path with ONLY actingHumanId + timeZone — the SAME no-selector body shape as the cut', async () => {
+    postMock.mockResolvedValue({ data: VALID_DTO })
+
+    await restoreGenerationProvider(CTX)
+
+    expect(postMock).toHaveBeenCalledWith('/engine/generation-provider/restore', {
+      actingHumanId: 'human-controller-01',
+      timeZone: 'America/New_York',
+    })
+    const [, body] = postMock.mock.calls[0] as [string, Record<string, unknown>]
+    expect(Object.keys(body).sort()).toEqual(['actingHumanId', 'timeZone'])
+  })
+
+  it('resolves with the parsed DTO, reflecting the restored (non-cut) posture', async () => {
+    // VALID_DTO: effectiveProvider === provider, providerCutToFake false.
+    postMock.mockResolvedValue({ data: VALID_DTO })
+
+    const result = await restoreGenerationProvider(CTX)
+
+    expect(result.providerCutToFake).toBe(false)
+    expect(result.effectiveProvider).toBe(result.provider)
   })
 })
 
