@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Generation.Services;
+using Pulse.WebApi.Features.EngineRuntime.Usage;
 
 /// <summary>
 /// The controller review-cockpit API (story 02) on <c>/api/engine</c>: the exercise-scoped queue GET plus the
@@ -39,7 +40,9 @@ public static class EngineReviewEndpoints
     /// <see cref="EngineAutonomyProviderHealthListener"/> — which REPLACES the generation core's no-op
     /// <see cref="IProviderHealthListener"/> so a provider circuit trip clamps every active exercise to Suggest
     /// (§3.5) — and the per-exercise <see cref="EngineTierPolicyRegistry"/> (Singleton, TryAdd — shared with
-    /// <c>AddReactionLoopHost</c>).
+    /// <c>AddReactionLoopHost</c>). Plus, since engine-telemetry-tuning story 03a, the read-only
+    /// <see cref="EngineUsageService"/> (Scoped) and its config-bound
+    /// <see cref="EngineUsagePricingOptions"/> price table.
     /// </summary>
     /// <remarks>
     /// <b>Wire this AFTER <c>AddEngineGeneration</c>.</b> Two things depend on that order: the
@@ -56,6 +59,19 @@ public static class EngineReviewEndpoints
         services.AddScoped<EngineReviewService>();
         services.AddScoped<IEngineReviewBroadcaster, EngineReviewBroadcaster>();
         services.AddSingleton<EngineAutonomyRegistry>();
+
+        // engine-telemetry-tuning story 03a — the read-only AI-usage rollup behind GET /api/engine/usage, and
+        // the config-sourced per-model price table it costs against. BindConfiguration (not an IConfiguration
+        // parameter on this method) deliberately: it resolves IConfiguration from the container at
+        // options-build time, so this slice's ALREADY-WIRED Add*/Map* pair needs no signature change and the
+        // orchestrator-owned Program.cs needs no edit at all. The section is Generation:Pricing — a SEPARATE
+        // options class from GenerationOptions on purpose (AddEngineGeneration runs an NFR-005 startup
+        // governance gate over that object; pricing data must not be entangled with it), and an
+        // absent/empty section binds to an empty table, which renders every model as explicitly "unpriced"
+        // rather than a silently-wrong $0.
+        services.AddOptions<EngineUsagePricingOptions>()
+            .BindConfiguration(EngineUsagePricingOptions.SectionName);
+        services.AddScoped<EngineUsageService>();
 
         // The per-exercise model-tier-policy store (story 05). TryAdd so this and AddReactionLoopHost converge on
         // ONE singleton whichever is wired first — the load-bearing shared-instance point: the settings POST and
@@ -99,6 +115,11 @@ public static class EngineReviewEndpoints
         cockpit.MapGet("/api/engine/review-queue", GetQueueAsync);
         cockpit.MapGet("/api/engine/settings", GetSettingsAsync);
 
+        // engine-telemetry-tuning story 03a — the AI-usage read. On the READ-ONLY cockpit group beside the two
+        // GETs above, deliberately NOT on the `steering` sub-group: that group's extra controller-role gate
+        // exists for MUTATIONS, and a spend/volume read is observability an assigned evaluator may watch.
+        cockpit.MapGet("/api/engine/usage", GetUsageAsync);
+
         steering.MapPost("/api/engine/review/{draftId:guid}/approve", ApproveAsync);
         steering.MapPost("/api/engine/review/{draftId:guid}/edit", EditAsync);
         steering.MapPost("/api/engine/review/{draftId:guid}/veto", VetoAsync);
@@ -131,6 +152,35 @@ public static class EngineReviewEndpoints
         return result.Outcome == EngineReviewOutcome.Ok
             ? Results.Ok(result.Items)
             : Results.Unauthorized();
+    }
+
+    /// <summary>
+    /// <c>GET /api/engine/usage</c> — the current exercise's AI-generation usage over a WALL-CLOCK window
+    /// (engine-telemetry-tuning story 03a): call counts over time by provider and model with the four token
+    /// categories kept distinct, latency, the guard-result mix, and a separately-labelled cost section priced
+    /// from the <c>Generation:Pricing</c> table. Open to ANY assigned staff caller (an evaluator may watch);
+    /// fails closed with <c>401</c> on an unresolved scope (COR-001).
+    /// </summary>
+    /// <param name="windowMinutes">
+    /// Optional wall-clock window length; defaults to <see cref="EngineUsageAggregator.DefaultWindowMinutes"/>
+    /// and is capped at <see cref="EngineUsageAggregator.MaxWindowMinutes"/> — out of range is a <c>400</c>,
+    /// never a silent clamp to a window the caller did not ask for.
+    /// </param>
+    /// <param name="service">The usage service.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private static async Task<IResult> GetUsageAsync(
+        int? windowMinutes,
+        EngineUsageService service,
+        CancellationToken cancellationToken)
+    {
+        var result = await service.GetUsageAsync(windowMinutes, cancellationToken);
+        return result.Outcome switch
+        {
+            EngineReviewOutcome.Ok => Results.Ok(result.Usage),
+            EngineReviewOutcome.ScopeUnresolved => Results.Unauthorized(),
+            EngineReviewOutcome.Invalid => Results.BadRequest(result.ValidationError),
+            _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
+        };
     }
 
     /// <summary><c>POST /api/engine/review/{draftId}/approve</c> — publish the burst through the shared funnel (one decision per burst).</summary>
