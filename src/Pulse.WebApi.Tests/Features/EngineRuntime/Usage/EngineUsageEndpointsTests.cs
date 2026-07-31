@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.Core.Core.Extensions;
@@ -335,6 +336,339 @@ public sealed class EngineUsageEndpointsTests
         atCap.StatusCode.Should().Be(HttpStatusCode.OK, "the cap is inclusive");
     }
 
+    // ==============================================================================================
+    // ADVERSARIAL PASS (story 03a QA review). Everything below was added BESIDE the builder's suite,
+    // not in place of it, to close gaps where the original coverage was silent or credited the wrong
+    // mechanism. Nothing above was changed except the test host gaining an optional configuration
+    // hook (needed by the priced-vs-unpriced wire test).
+    // ==============================================================================================
+
+    // ---- AC4: isolation, attacked ----------------------------------------------------------------
+
+    /// <summary>
+    /// <b>Isolation, extended to EVERY projection on the wire — not just <c>totals</c> and the model name.</b>
+    /// The builder's crown-jewel test asserts A's call count, input tokens and model name. This one attacks the
+    /// four projections it does not look at, each of which is an independent leak surface derived from the same
+    /// query: the aggregate BUCKET series, the GUARD-RESULT mix (a distinctive literal only B produced), the
+    /// COST rows, and <c>unparseableEvents</c> (B's malformed rows must not inflate A's honesty counter). B's
+    /// rows are proven to physically exist with <c>IgnoreQueryFilters</c>, so every zero here is the central
+    /// query filter closing the door rather than an empty table.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task GetUsage_ScopesEverySeriesOnTheWire_NotJustTheTotals_WhileTheOtherExercisesRowsProvablyExist()
+    {
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+
+        await SeedGeneratedAsync(exerciseA, minutesAgo: 5, model: "model-a", inputTokens: 10, guardResult: "pass");
+
+        // B: a different guard literal, a different provider/model, real tokens, and two unreadable payloads.
+        for (var index = 0; index < 4; index++)
+        {
+            await SeedGeneratedAsync(
+                exerciseB,
+                minutesAgo: 5,
+                provider: "ProviderB",
+                model: "model-b",
+                inputTokens: 1_000_000,
+                guardResult: "b-only-guard-literal");
+        }
+
+        await SeedRawPayloadAsync(exerciseB, payload: "{ not json", minutesAgo: 5);
+        await SeedRawPayloadAsync(exerciseB, payload: null, minutesAgo: 5);
+
+        await using var host = await StartHostAsync(exerciseA);
+        var usage = await ReadUsageAsync(host);
+
+        usage.GetProperty("buckets").EnumerateArray().Sum(b => b.GetProperty("calls").GetInt32()).Should().Be(
+            1, "the aggregate SERIES is a leak surface of its own — B's four calls must not raise A's histogram");
+
+        usage.GetProperty("guardResults").EnumerateArray()
+            .Select(g => g.GetProperty("result").GetString())
+            .Should().Equal(
+                new[] { "pass" },
+                "a guard-result literal only the other exercise produced must not appear in A's mix — the mix "
+                + "is grouped from the same rows the totals are, so it needs its own assertion");
+
+        usage.GetProperty("cost").GetProperty("byModel").EnumerateArray()
+            .Select(c => c.GetProperty("model").GetString())
+            .Should().Equal(new[] { "model-a" }, "and the COST rows are scoped too, not just the volume rows");
+
+        usage.GetProperty("unparseableEvents").GetInt32().Should().Be(
+            0,
+            "B's two unreadable rows must not inflate A's honesty counter — it is counted from the same scoped "
+            + "query, so a leak there would make A's operator chase a data problem in somebody else's exercise");
+
+        await using var verify = _fixture.CreateContext();
+        (await verify.TelemetryEvents.IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == exerciseB && e.EventType == EngineEventTypes.Generated))
+            .Should().Be(
+                6,
+                "IgnoreQueryFilters proves all six of B's engine.generated rows (four readable, two unreadable) "
+                + "are really in the table, so every zero above is the filter working, not an empty fixture");
+    }
+
+    /// <summary>
+    /// <b>There is no client-supplied scope vector, and this proves it rather than assuming it.</b> The handler
+    /// takes exactly one query parameter (<c>windowMinutes</c>); scope comes only from the server-authoritative
+    /// <c>IExerciseContext</c>. A future refactor that accepted an <c>exerciseId</c> parameter "for convenience"
+    /// would be the single worst regression this feature could ship, so the absence is pinned behaviourally: the
+    /// request below ASKS for exercise B by every plausible parameter name and still receives only A's data.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task GetUsage_IgnoresAnyClientSuppliedExerciseId_ScopeComesOnlyFromTheServerContext()
+    {
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+
+        await SeedGeneratedAsync(exerciseA, minutesAgo: 5, model: "model-a", inputTokens: 10);
+        await SeedGeneratedAsync(exerciseB, minutesAgo: 5, model: "model-b", inputTokens: 5_000_000);
+
+        await using var host = await StartHostAsync(exerciseA);
+
+        var query = $"?exerciseId={exerciseB}&exercise={exerciseB}&ExerciseId={exerciseB}&scope={exerciseB}";
+        var usage = await ReadUsageAsync(host, query);
+
+        usage.GetProperty("totals").GetProperty("calls").GetInt32().Should().Be(
+            1, "an exercise id supplied by the caller is not a scope — it is ignored outright");
+        usage.GetProperty("totals").GetProperty("inputTokens").GetInt64().Should().Be(10);
+        usage.GetProperty("byModel").EnumerateArray().Select(m => m.GetProperty("model").GetString())
+            .Should().Equal(new[] { "model-a" });
+
+        await using var verify = _fixture.CreateContext();
+        (await verify.TelemetryEvents.IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == exerciseB && e.EventType == EngineEventTypes.Generated))
+            .Should().Be(1, "B's row exists, so A's blindness to it is the filter — not an empty table");
+    }
+
+    /// <summary>
+    /// <b>Pins WHICH layer refuses a cross-exercise staff caller, and pins it exactly.</b> The neighbouring
+    /// <c>GetUsage_FromAStaffSessionAssignedToADifferentExercise_FailsClosed</c> accepts either 401 or 403, which
+    /// cannot tell the assignment gate from the service's own fail-closed path — and 401 is what the service
+    /// returns, so a regression that broke the assignment check while leaving scope resolution intact could keep
+    /// that assertion green. <c>403</c> is only reachable from
+    /// <c>EngineCockpitStaffAuthorizationFilter</c>'s assignment branch, so asserting it exactly is what
+    /// attributes the refusal to the right mechanism.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task GetUsage_FromAStaffSessionAssignedElsewhere_IsRefusedWithExactly403_TheAssignmentGate()
+    {
+        var resolved = Guid.NewGuid();
+        var assignedElsewhere = Guid.NewGuid();
+
+        await SeedGeneratedAsync(resolved, minutesAgo: 5, inputTokens: 4_242);
+        await using var host = await StartHostAsync(resolved, assignedExerciseId: assignedElsewhere);
+
+        var response = await host.Client.GetAsync(new Uri("/api/engine/usage", UriKind.Relative));
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            "403 is reachable ONLY from the assignment branch of the cockpit staff filter (an unresolved scope "
+            + "is 401 in both the filter and the service), so pinning it exactly is what proves the "
+            + "cross-exercise refusal came from the assignment gate rather than from something else failing");
+
+        (await response.Content.ReadAsStringAsync()).Should().NotContain(
+            "4242", "and the refusal carries no fragment of the resolved exercise's spend");
+    }
+
+    // ---- layer ORDERING: does the auth gate really answer first? -----------------------------------
+
+    /// <summary>
+    /// <b>The minimal-API ordering trap, pinned in the direction that matters.</b> This endpoint takes a query
+    /// parameter AND sits behind an <see cref="Microsoft.AspNetCore.Http.IEndpointFilter"/>, so "which answers
+    /// first" is a real question. For a value that BINDS but is out of range, the answer is the correct one:
+    /// validation lives in the service, behind the gate, so an anonymous caller gets <c>401</c> and learns
+    /// nothing about the window bounds. Pinned because a refactor that moved validation forward — into a
+    /// route-constraint, a binding attribute or a filter registered before the auth filter — would silently flip
+    /// this to 400.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task GetUsage_AnonymousWithAnOutOfRangeWindow_Is401_TheAuthGateAnswersBeforeValidation()
+    {
+        await using var host = await StartHostAsync(Guid.NewGuid(), authenticatedStaff: false);
+
+        foreach (var query in new[] { "?windowMinutes=1441", "?windowMinutes=0", "?windowMinutes=-5", "?windowMinutes=2147483647" })
+        {
+            var response = await host.Client.GetAsync(new Uri($"/api/engine/usage{query}", UriKind.Relative));
+
+            response.StatusCode.Should().Be(
+                HttpStatusCode.Unauthorized,
+                "refusal must come BEFORE validation: an unauthenticated caller is told 'no', not 'your window "
+                + "is out of bounds' ({0})",
+                query);
+        }
+    }
+
+    /// <summary>
+    /// <b>The trap this repo has been bitten by, checked and found NOT to apply here — which is exactly why it is
+    /// now pinned.</b> Minimal-API parameter binding failures have historically been reported ahead of endpoint
+    /// guards; measured on this endpoint, they are not. An <c>IEndpointFilter</c> wraps the innermost step that
+    /// performs binding and reports a parameter-check failure, so the cockpit auth filter answers FIRST: an
+    /// anonymous caller sending a value that cannot bind at all gets <c>401</c>, not the framework's <c>400</c>.
+    /// </summary>
+    /// <remarks>
+    /// Pinned because it is fragile in both directions. It would flip to <c>400</c> if this route were ever moved
+    /// off a filtered group, if the gate were re-expressed as middleware ahead of routing, or if a binding
+    /// attribute / route constraint moved validation in front of the filter — and a <c>400</c> would tell an
+    /// unauthenticated caller the endpoint exists and what its parameter looks like, which is a disclosure this
+    /// staff-only surface gets for free today and should not lose silently.
+    /// </remarks>
+    [RequiresDockerFact]
+    public async Task GetUsage_AnonymousWithAnUnbindableWindow_IsStill401_TheFilterWrapsParameterBinding()
+    {
+        await using var host = await StartHostAsync(Guid.NewGuid(), authenticatedStaff: false);
+
+        foreach (var query in new[] { "?windowMinutes=abc", "?windowMinutes=99999999999999", "?windowMinutes=6.5", "?windowMinutes=" })
+        {
+            var response = await host.Client.GetAsync(new Uri($"/api/engine/usage{query}", UriKind.Relative));
+
+            response.StatusCode.Should().Be(
+                HttpStatusCode.Unauthorized,
+                "the endpoint filter runs BEFORE the parameter-check failure is reported, so an anonymous caller "
+                + "is refused rather than told what the endpoint's parameter looks like ({0})",
+                query);
+        }
+    }
+
+    /// <summary>
+    /// <b>Both 400s exist, and they come from different layers — the response BODY is what tells them apart.</b>
+    /// A value that cannot bind is rejected by the framework with an empty body; a value that binds but is out of
+    /// range is rejected by <c>EngineUsageService</c> with a message naming the parameter. Pinned because the two
+    /// are indistinguishable by status code alone, so a regression that lost the service's validation entirely
+    /// (leaving only binding) would otherwise still look like a passing 400.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task GetUsage_HasTwoDistinct400Paths_FrameworkBindingAndServiceValidation()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+
+        foreach (var unbindable in new[] { "abc", "99999999999999", "6.5", string.Empty })
+        {
+            var binding = await host.Client.GetAsync(
+                new Uri($"/api/engine/usage?windowMinutes={unbindable}", UriKind.Relative));
+
+            binding.StatusCode.Should().Be(HttpStatusCode.BadRequest, "'{0}' cannot bind to int?", unbindable);
+            (await binding.Content.ReadAsStringAsync()).Should().BeEmpty(
+                "the FRAMEWORK rejected it during binding — the handler never ran, so there is no message ('{0}')",
+                unbindable);
+        }
+
+        var validation = await host.Client.GetAsync(
+            new Uri("/api/engine/usage?windowMinutes=1441", UriKind.Relative));
+
+        validation.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await validation.Content.ReadAsStringAsync()).Should().Contain(
+            "windowMinutes",
+            "1441 BINDS fine, so this 400 came from the service's own bounds check — which is the one that would "
+            + "silently disappear in a refactor while the status code kept looking right");
+    }
+
+    /// <summary>
+    /// The gate also answers before validation for an AUTHENTICATED-but-unassigned caller: a cross-exercise
+    /// staff session asking for an out-of-range window gets the COR-005 <c>403</c>, not a <c>400</c> that would
+    /// have confirmed the endpoint's parameter bounds to somebody with no business reading it.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task GetUsage_AssignedElsewhereWithAnOutOfRangeWindow_Is403NotAValidationError()
+    {
+        var resolved = Guid.NewGuid();
+        await using var host = await StartHostAsync(resolved, assignedExerciseId: Guid.NewGuid());
+
+        var response = await host.Client.GetAsync(
+            new Uri("/api/engine/usage?windowMinutes=1441", UriKind.Relative));
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            "the assignment gate refuses before the service ever looks at windowMinutes");
+    }
+
+    /// <summary>
+    /// <b>An OMITTED parameter takes the default; an EMPTY one does not — measured, and it matters to story 03c.</b>
+    /// <c>?windowMinutes=</c> is a binding failure (<c>400</c>, asserted in
+    /// <see cref="GetUsage_HasTwoDistinct400Paths_FrameworkBindingAndServiceValidation"/>), not a fall-through to
+    /// the default. So the panel must OMIT the parameter to get the 60-minute default rather than sending an empty
+    /// value from an unset control — a one-character difference between a working first read and a 400.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task GetUsage_WithTheWindowParameterOmitted_TakesTheDocumentedDefault()
+    {
+        await using var host = await StartHostAsync(Guid.NewGuid());
+
+        var usage = await ReadUsageAsync(host);
+
+        usage.GetProperty("window").GetProperty("windowMinutes").GetInt32().Should().Be(
+            EngineUsageAggregator.DefaultWindowMinutes, "the default is the panel's first read");
+        usage.GetProperty("window").GetProperty("bucketCount").GetInt32().Should().Be(60);
+
+        var empty = await host.Client.GetAsync(new Uri("/api/engine/usage?windowMinutes=", UriKind.Relative));
+        empty.StatusCode.Should().Be(
+            HttpStatusCode.BadRequest,
+            "whereas an explicitly EMPTY value is rejected — recorded here so 03c sends no parameter at all "
+            + "rather than an empty one");
+    }
+
+    // ---- AC3: the two zeroes must be distinguishable ON THE WIRE ----------------------------------
+
+    /// <summary>
+    /// <b>AC3's sharpest edge, proven end-to-end in ONE response body.</b> A model with a CONFIGURED ZERO rate
+    /// and a model ABSENT from the table both produce "no cost", and the whole AC turns on a reader being able
+    /// to tell them apart. The aggregator unit tests cover each state separately; this serves both in a single
+    /// HTTP response and reads the raw JSON: the configured one is <c>priced: true</c> with a numeric
+    /// <c>0</c> and its rates echoed, the absent one is <c>priced: false</c> with <c>totalCost</c> present-and-
+    /// <c>null</c>. It also proves the host's serializer does not omit the null (a
+    /// <c>DefaultIgnoreCondition</c> change would turn "unpriced" into "key missing", which a client reading
+    /// <c>totalCost ?? 0</c> would render as free).
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task GetUsage_TellsAConfiguredZeroRateApartFromAnAbsentModel_OnTheWire()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(
+            exerciseId,
+            extraConfiguration: new Dictionary<string, string?>
+            {
+                ["Generation:Pricing:Currency"] = "USD",
+                ["Generation:Pricing:Providers:Fake:fake-deterministic:InputPer1MTokens"] = "0",
+                ["Generation:Pricing:Providers:Fake:fake-deterministic:OutputPer1MTokens"] = "0",
+                ["Generation:Pricing:Providers:Fake:fake-deterministic:CacheReadPer1MTokens"] = "0",
+                ["Generation:Pricing:Providers:Fake:fake-deterministic:CacheCreationPer1MTokens"] = "0",
+            });
+
+        // Two calls on the priced-at-zero model so it leads the breakdown, one on the unpriced model.
+        await SeedGeneratedAsync(exerciseId, minutesAgo: 5, provider: "Fake", model: "fake-deterministic");
+        await SeedGeneratedAsync(exerciseId, minutesAgo: 4, provider: "Fake", model: "fake-deterministic");
+        await SeedGeneratedAsync(
+            exerciseId, minutesAgo: 3, provider: "ClaudeFoundry", model: "claude-sonnet-5", inputTokens: 900_000);
+
+        var usage = await ReadUsageAsync(host);
+        var rows = usage.GetProperty("cost").GetProperty("byModel").EnumerateArray()
+            .ToDictionary(c => c.GetProperty("model").GetString()!, c => c);
+
+        var configuredZero = rows["fake-deterministic"];
+        configuredZero.GetProperty("priced").GetBoolean().Should().BeTrue();
+        configuredZero.GetProperty("totalCost").ValueKind.Should().Be(
+            JsonValueKind.Number, "a CONFIGURED zero is a known number, so it is served as one");
+        configuredZero.GetProperty("totalCost").GetDecimal().Should().Be(0m);
+        configuredZero.GetProperty("rates").GetProperty("inputPer1MTokens").GetDecimal().Should().Be(
+            0m, "and the applied rate is echoed, so the zero is visibly a rate rather than an unexplained zero");
+
+        var absent = rows["claude-sonnet-5"];
+        absent.GetProperty("priced").GetBoolean().Should().BeFalse();
+        absent.GetProperty("totalCost").ValueKind.Should().Be(
+            JsonValueKind.Null,
+            "an ABSENT model asserts no cost at all — and the key is PRESENT-and-null, not omitted: a client "
+            + "reading `totalCost ?? 0` on a missing key would render 900k unpriced tokens as free");
+        absent.GetProperty("rates").ValueKind.Should().Be(JsonValueKind.Null);
+
+        usage.GetProperty("cost").GetProperty("anyUnpriced").GetBoolean().Should().BeTrue(
+            "one configured model does not make the total complete");
+        usage.GetProperty("cost").GetProperty("pricedTotalCost").GetDecimal().Should().Be(
+            0m, "the floor is genuinely zero here — the only priced model is the one that costs nothing");
+        usage.GetProperty("totals").GetProperty("inputTokens").GetInt64().Should().Be(
+            900_000, "while VOLUME stays complete: the unpriced model's tokens are reported in full");
+    }
+
     // ---- host + helpers --------------------------------------------------------------------------
 
     private static async Task<JsonElement> ReadUsageAsync(UsageTestHost host, string query = "")
@@ -426,12 +760,18 @@ public sealed class EngineUsageEndpointsTests
         Guid? currentExerciseId,
         bool authenticatedStaff = true,
         Guid? assignedExerciseId = null,
-        string assignedRole = "controller")
+        string assignedRole = "controller",
+        IEnumerable<KeyValuePair<string, string?>>? extraConfiguration = null)
     {
         _fixture.ConnectionString.Should().NotBeNull(
             "the Docker-gated MsSql fixture must have started and captured its connection string before these tests run");
         return await UsageTestHost.StartAsync(
-            _fixture.ConnectionString!, currentExerciseId, authenticatedStaff, assignedExerciseId, assignedRole);
+            _fixture.ConnectionString!,
+            currentExerciseId,
+            authenticatedStaff,
+            assignedExerciseId,
+            assignedRole,
+            extraConfiguration);
     }
 
     private static int CountRoutes(EndpointDataSource dataSource, string method, string rawText)
@@ -474,7 +814,8 @@ public sealed class EngineUsageEndpointsTests
             Guid? currentExerciseId,
             bool authenticatedStaff,
             Guid? assignedExerciseId,
-            string assignedRole)
+            string assignedRole,
+            IEnumerable<KeyValuePair<string, string?>>? extraConfiguration = null)
         {
             var staffUserId = Guid.NewGuid();
             var accessor = authenticatedStaff
@@ -491,6 +832,13 @@ public sealed class EngineUsageEndpointsTests
             builder.WebHost.UseTestServer();
             builder.Configuration["ConnectionStrings:DefaultConnection"] = connectionString;
             builder.Configuration["Generation:Provider"] = "Fake";
+
+            // No appsettings.json reaches this host's content root, so the price table binds EMPTY unless a test
+            // supplies keys here — which is why most tests below read the explicit "unpriced" state.
+            if (extraConfiguration is not null)
+            {
+                builder.Configuration.AddInMemoryCollection(extraConfiguration);
+            }
 
             builder.Services.AddPulsePersistence(builder.Configuration);
             builder.Services.AddExerciseScoping();

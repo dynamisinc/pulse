@@ -267,6 +267,45 @@ options registration reds all three ("Body was inferred but the method does not 
 parameters … `service | Body (Inferred)`" — an unregistered handler dependency on a GET is a host-build throw
 here, not a silent 500). Both restored and re-confirmed green.
 
+### 03a — adversarial QA pass (added beside the above, nothing removed)
+
+A second, independent test pass hunted for coverage that PASSES without PROVING. Three gaps were found and
+closed; no production behaviour was changed and no existing test was weakened or deleted.
+
+**Verdict on the AC4 isolation coverage: REAL, not vacuous.** Verified by neutering — the central query filter
+was skipped for `TelemetryEvent` in `PulseDbContext.OnModelCreating`, and
+`GetUsage_SeesOnlyItsOwnExercisesCalls_WhileTheOtherExercisesRowsProvablyExist` went red ("Expected … to be 1 …
+but found 17"). The `IgnoreQueryFilters` proof is genuine (a second context, not a self-referential count), so
+the zero is the filter closing the door. Filter restored, re-confirmed green.
+
+**Gap 1 — the 401 fail-closed test credited the wrong layer.** `GetUsage_UnresolvedScope_Returns401_FailClosed`
+is answered by `EngineCockpitStaffAuthorizationFilter`, not by `EngineUsageService`: with the service's
+`TryResolveScope()` replaced by `return true`, that test still PASSED. So the service's own COR-001 branch — and
+its `windowMinutes` bounds check — were both unexercised. New `EngineUsageServiceFailClosedTests` drives the
+service directly over a `PulseDbContext` pointed at an unreachable SQL Server, so "refused without querying" is
+observable rather than asserted, with `TheUnreachableHarnessReallyBites_AQueryHereThrows` as the positive control.
+
+**Gap 2 — layer ordering was unpinned.** Measured, not assumed: the endpoint filter wraps parameter binding, so an
+anonymous caller sending an UNBINDABLE `windowMinutes` gets `401` (not the framework's `400`) — the correct
+ordering, now pinned in both directions. Two distinct `400` paths exist and are distinguishable only by BODY
+(framework binding = empty; service validation = names the parameter). Note for 03c: `?windowMinutes=` (empty) is a
+`400` — the parameter must be OMITTED to get the default.
+
+**Gap 3 — aggregation boundaries and ordering.** `EngineUsageAggregatorArithmeticTests`: tick-exact edge/bucket
+placement; every window in [1, 1440] against the bucket ceiling; six windows whose minutes do not divide evenly;
+bucketing by instant rather than local clock; the model and guard-mix tie-breaks (previously order-insensitive
+assertions); an unrecognised guard literal plus `sum(guardResults) == totals.calls`; same model name under two
+providers not merged; pricing from summed tokens so rounding cannot accumulate; the six-decimal away-from-zero
+mode; volume-complete-vs-cost-floor; and the explicit-nulls payload shape `required` does not reject.
+
+New endpoint tests: isolation extended to the bucket series, guard mix, cost rows and `unparseableEvents`; a
+client-supplied `exerciseId` proven to be ignored; the cross-exercise refusal pinned to exactly `403` (the
+assignment gate) rather than `BeOneOf(403, 401)`; and a configured-zero rate told apart from an absent model in one
+response body.
+
+All new tests were verified to BITE: four defects injected into the aggregator at once (banker's rounding, no
+tie-break, provider dropped from the grouping key, `Ceiling` for `Floor` at the bucket edge) reddened seven of them.
+
 > **Future consideration, deliberately NOT done here:** an index on `TelemetryEvents.EventType`. The panel
 > re-scans the exercise's rows per read, so an index earns its place once 03c polls on an interval — but it is
 > a schema change (Tier-2 human sign-off + a migration whose snapshot collides with any other migration in the
