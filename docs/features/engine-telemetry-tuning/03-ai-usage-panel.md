@@ -115,6 +115,18 @@ endpoint on the existing `EngineRuntime` slice (alongside `EngineReviewEndpoints
 the `IExerciseScoped` / `PulseDbContext` central query-filter isolation guarantee
 (`src/Pulse.WebApi/Data/Entities/TelemetryEvent.cs:20`) — no bespoke exercise-scoping logic.
 
+> **RESOLVED by 03a as built:** the existing slice, not a new one. `GET /api/engine/usage` is mapped on
+> `EngineReviewEndpoints.cs`'s **`cockpit`** sub-group — the staff-only READ group `GET
+> /api/engine/review-queue` and `GET /api/engine/settings` already sit on — and NOT on the `steering`
+> sub-group, whose additional `EngineCockpitControllerRoleFilter` gates *mutations* (a spend/volume view is
+> observability an assigned evaluator may watch, asserted by
+> `EngineUsageEndpointsTests.GetUsage_IsReadableByAnAssignedEvaluator_NotJustAController`). Because
+> `AddEngineReview`/`MapEngineReview` are already wired, this needed **no** orchestrator-owned `Program.cs`
+> edit and no new slice. Isolation comes from the central query filter over the `IExerciseScoped`
+> `TelemetryEvent` entity — `EngineUsageService` contains no hand-written `ExerciseId` predicate and no
+> `FromSql`/aggregate SQL. No EF migration and no schema change; in particular **no `EventType` index** was
+> added (still a future consideration — see the note below).
+
 **Decided: aggregation mechanics — app-layer projection (Tom, ratified).** `TelemetryEvent.Payload`
 is an opaque `nvarchar(max)` JSON string the server "never parses" today
 (`src/Pulse.WebApi/Data/Entities/TelemetryEvent.cs:73-77`, by design per the v0 envelope contract).
@@ -184,3 +196,175 @@ to be defined, though the emission itself is already implemented. No dependency 
 - Unit: a cross-exercise usage request returns 403/404 (isolation).
 - Manual: verify against the UAT DB pre-flip — panel reads "Fake — no model calls" (mirroring the
   1,722-row Fake-provider dataset verified this session) with $0 cost and populated volume counts.
+
+### 03a (backend edge) — as built
+
+`src/Pulse.WebApi.Tests/Features/EngineRuntime/Usage/`
+
+**AC1 — no second provider readout (reuse `GET /api/engine/settings`)**
+- `EngineUsageAggregatorTests.UsageDto_CarriesNoLiveProviderField_ButPerModelRowsDoNameTheirProvider` (AC1) —
+  reflection pin: the top-level DTO has no `provider`/`effectiveProvider`, while the per-model rows do carry the
+  *historical* provider (the different question).
+- `EngineUsageEndpointsTests.GetUsage_ReturnsTheDocumentedWireShape_TheFrozenSeamForTheFrontendPanel` (AC1) —
+  the served JSON has no top-level `provider` key.
+
+**AC2 — volume: calls over time, by provider/model, token categories distinct, latency, guard mix**
+- `EngineUsageAggregatorTests.BuildWindow_DefaultsToOneMinuteBuckets_AndNeverExceedsTheBucketCeiling` (AC2)
+- `EngineUsageAggregatorTests.Aggregate_PlacesEachCallInItsWallClockBucket_AndKeepsTheSeriesDense` (AC2)
+- `EngineUsageAggregatorTests.Aggregate_AttributesEveryCallExactlyOnce_SoTheSeriesSumsToTheTotal` (AC2)
+- `EngineUsageAggregatorTests.Aggregate_BreaksVolumeDownByProviderAndModel_BusiestFirst` (AC2)
+- `EngineUsageAggregatorTests.Aggregate_KeepsTheFourTokenCategoriesDistinct_AndNeverSumsThemIntoOneNumber` (AC2)
+- `EngineUsageAggregatorTests.Aggregate_CountsTheGuardResultMix_IncludingReRollsThatCostMoneyAndProducedNothing` (AC2)
+- `EngineUsageAggregatorTests.Aggregate_SummarisesLatency_TotalAverageAndMax` (AC2)
+- `EngineUsageAggregatorTests.Aggregate_WithNoCalls_ReturnsADenseZeroSeriesAndNoModels_NeverAnEmptyBody` (AC2)
+- `EngineUsageEndpointsTests.GetUsage_RollsUpThisExercisesGeneratedEvents_TokensLatencyAndGuardMix` (AC2)
+- `EngineUsageEndpointsTests.GetUsage_CountsOnlyEngineGeneratedRows_NotTheRestOfTheEngineEventLog` (AC2/AC8)
+- `EngineUsageEndpointsTests.GetUsage_ExcludesRowsOutsideTheRequestedWindow` (AC2)
+- `EngineUsageEndpointsTests.GetUsage_WithAWindowOutsideTheSupportedBounds_Returns400_NeverASilentClamp` (AC2)
+
+**AC3 — cost, config-sourced, explicit "unpriced" (never a silently-wrong $0)**
+- `EngineUsageAggregatorTests.Aggregate_PricesAModelWithAPriceTableEntry_PerTokenCategory` (AC3)
+- `EngineUsageAggregatorTests.Aggregate_ReportsAModelWithNoPriceTableEntryAsUnpriced_WithNullCostsNeverZero` (AC3)
+- `EngineUsageAggregatorTests.Aggregate_PricedTotalCoversOnlyPricedModels_AndSaysSoWithAnyUnpriced` (AC3)
+- `EngineUsageAggregatorTests.Aggregate_PricesTheFakeProviderAtZero_WhichIsAFactNotAPlaceholder` (AC3)
+- `EngineUsagePriceTableTests.TheDocumentedKeyShape_BindsProviderAndModelRates` (AC3)
+- `EngineUsagePriceTableTests.Lookup_IsCaseInsensitiveOnBothProviderAndModel` (AC3)
+- `EngineUsagePriceTableTests.AnAbsentSection_BindsToAnEmptyTable_SoEveryModelIsUnpricedRatherThanFree` (AC3)
+- `EngineUsagePriceTableTests.Empty_PricesNothing` / `.TryGetRates_WithNoProviderOrModel_IsUnpriced` (AC3)
+- `EngineUsagePriceTableTests.CommittedAppsettings_PricesFakeAtZero_AndPricesNoLiveProvider` (AC3)
+- `EngineUsagePriceTableTests.ThePricingSection_IsNotBoundByGenerationOptions_SoTheGovernanceGateIsUntouched` (AC3)
+
+**AC4 — isolation (XC-001/COR-001), fails closed**
+- `EngineUsageEndpointsTests.GetUsage_SeesOnlyItsOwnExercisesCalls_WhileTheOtherExercisesRowsProvablyExist` (AC4) —
+  the crown-jewel shape: A sees 1 call, B's 5 are invisible (count *and* tokens *and* model name), and
+  `IgnoreQueryFilters` proves B's rows physically exist, so the zero is the filter closing the door.
+- `EngineUsageEndpointsTests.GetUsage_UnresolvedScope_Returns401_FailClosed` (AC4)
+- `EngineUsageEndpointsTests.GetUsage_FromAStaffSessionAssignedToADifferentExercise_FailsClosed` (AC4)
+
+**AC5 — staff-only surface (XC-002/SOC-003)**
+- `EngineUsageEndpointsTests.GetUsage_WithNoStaffSession_IsRefused` (AC5)
+- `EngineUsageEndpointsTests.GetUsage_IsReadableByAnAssignedEvaluator_NotJustAController` (AC5)
+
+**AC6 — wall-clock axis, labelled (COR-053 staff carve-out)**
+- `EngineUsageAggregatorTests.Aggregate_LabelsItsTimeAxisAsWallClock_SoNoReaderHasToGuessTheClock` (AC6)
+
+**AC8 — a read over the existing event log, no second store; honest about unreadable rows**
+- `EngineUsagePayloadReaderTests.TryRead_ReadsBackWhatTheRealEmitterWrote_FieldForField` (AC8)
+- `EngineUsagePayloadReaderTests.TryRead_RejectsNullBlankAndMalformedPayloads_WithoutThrowing` (AC8)
+- `EngineUsagePayloadReaderTests.TryRead_RejectsAShapeMismatch_RatherThanSilentlyScoringItAsZeros` (AC8)
+- `EngineUsageAggregatorTests.Aggregate_ReportsTheUnparseableRowCountVerbatim_WithoutScoringThemAsZeros` (AC8)
+- `EngineUsageEndpointsTests.GetUsage_WithNullAndMalformedPayloads_CountsThemExplicitly_AndNeither500sNorScoresThemAsZeros` (AC8)
+
+**Composition root (required beyond the ACs — the #310→#317 dead-wiring class)**
+- `EngineUsageCompositionRootWiringTests.ProgramCs_MapsTheUsageRoute_ExactlyOnce`
+- `EngineUsageCompositionRootWiringTests.ProgramCs_ResolvesTheUsageService_FromARealRequestScope`
+- `EngineUsageCompositionRootWiringTests.ProgramCs_BindsThePriceTable_FromTheCommittedGenerationPricingSection`
+- `EngineUsageEndpointsTests.UsageRoute_IsMappedExactlyOnce_OnTheExistingEngineGroup`
+
+Verified to BITE, not merely to pass: commenting out the `cockpit.MapGet("/api/engine/usage", …)` line reds
+`ProgramCs_MapsTheUsageRoute_ExactlyOnce` ("Expected … to be 1 … but found 0"); commenting out the service +
+options registration reds all three ("Body was inferred but the method does not allow inferred body
+parameters … `service | Body (Inferred)`" — an unregistered handler dependency on a GET is a host-build throw
+here, not a silent 500). Both restored and re-confirmed green.
+
+### 03a — adversarial QA pass (added beside the above, nothing removed)
+
+A second, independent test pass hunted for coverage that PASSES without PROVING. Three gaps were found and
+closed; **no production behaviour was changed** (the only production edits in this pass are contract/config
+documentation — an XML remark and a `Generation:Pricing` example block) and **no existing test was weakened,
+deleted or rewritten** — new assertions were added beside the originals, and where an original is looser than its
+replacement that is stated below rather than silently resolved by deletion.
+
+**Verdict on the AC4 isolation coverage: REAL, not vacuous.** Verified by neutering — the central query filter
+was skipped for `TelemetryEvent` in `PulseDbContext.OnModelCreating`, and
+`GetUsage_SeesOnlyItsOwnExercisesCalls_WhileTheOtherExercisesRowsProvablyExist` went red ("Expected … to be 1 …
+but found 17"). The `IgnoreQueryFilters` proof is genuine (a second context, not a self-referential count), so
+the zero is the filter closing the door. Filter restored, re-confirmed green.
+
+**Gap 1 — the 401 fail-closed test credited the wrong layer.** `GetUsage_UnresolvedScope_Returns401_FailClosed`
+is answered by `EngineCockpitStaffAuthorizationFilter`, not by `EngineUsageService`: with the service's
+`TryResolveScope()` replaced by `return true`, that test still PASSED. So the service's own COR-001 branch — and
+its `windowMinutes` bounds check — were both unexercised. New `EngineUsageServiceFailClosedTests` drives the
+service directly over a `PulseDbContext` pointed at an unreachable SQL Server, so "refused without querying" is
+observable rather than asserted, with `TheUnreachableHarnessReallyBites_AQueryHereThrows` as the positive control.
+
+**Gap 2 — layer ordering was unpinned.** Measured, not assumed: the endpoint filter wraps parameter binding, so a
+session-less caller sending an UNBINDABLE `windowMinutes` gets `401` (not the framework's `400`) — the correct
+ordering, now pinned in both directions. Two distinct `400` paths exist and are distinguishable only by BODY
+(framework binding = empty; service validation = names the parameter). Note for 03c: `?windowMinutes=` (empty) is a
+`400` — the parameter must be OMITTED to get the default.
+
+> **Attribution correction (review finding WR-001, folded).** Those ordering measurements were taken on
+> `UsageTestHost`, which wires the *feature* (`AddEngineReview`/`MapEngineReview`) and **no** authentication or
+> authorization middleware — so the refusals observed there are the slice's own
+> `EngineCockpitStaffAuthorizationFilter`, not the application pipeline. In the real host the first responder is
+> `Program.cs`'s deny-by-default `AddSessionAuthorization()` `FallbackPolicy` + `app.UseAuthorization()`, and
+> `/api/engine/usage` is correctly absent from the eleven-route `PreAuthAllowlist` — so **production refuses an
+> anonymous caller earlier and harder than these tests measure**. The conclusion (refusal precedes validation and
+> binding) holds; the mechanism credited did not. Both docstrings and `UsageTestHost`'s own summary now name the
+> host measured and state the production ordering explicitly. Pinning the slice layer is still worth it precisely
+> *because* the outer gate would otherwise mask its loss.
+
+**Gap 3 — aggregation boundaries and ordering.** `EngineUsageAggregatorArithmeticTests`: tick-exact edge/bucket
+placement; every window in [1, 1440] against the bucket ceiling; six windows whose minutes do not divide evenly;
+bucketing by instant rather than local clock; the model and guard-mix tie-breaks (previously order-insensitive
+assertions); an unrecognised guard literal plus `sum(guardResults) == totals.calls`; same model name under two
+providers not merged; pricing from summed tokens so rounding cannot accumulate; the six-decimal away-from-zero
+mode; volume-complete-vs-cost-floor; and the explicit-nulls payload shape `required` does not reject.
+
+New endpoint tests: isolation extended to the bucket series, guard mix, cost rows and `unparseableEvents`; a
+client-supplied `exerciseId` proven to be ignored; a strict-`403` cross-exercise refusal test added **beside**
+`GetUsage_FromAStaffSessionAssignedToADifferentExercise_FailsClosed` — whose `BeOneOf([Forbidden, Unauthorized])`
+is deliberately **kept, not replaced**, since a loose fail-closed assertion is still a true statement and removing
+a passing test to make room is not this pass's business; and a configured-zero rate told apart from an absent
+model in one response body. `403` is reachable only from the assignment branch of the cockpit filter, so the new
+test is what attributes the refusal, while the old one continues to state the weaker guarantee.
+
+All new tests were verified to BITE: four defects injected into the aggregator at once (banker's rounding, no
+tie-break, provider dropped from the grouping key, `Ceiling` for `Floor` at the bucket edge) reddened seven of them.
+
+**Also folded from the same review round:**
+
+- **WR-003 — the operator-facing example now documents the pricing keys.** `appsettings.Generation.Example.json`
+  gained a `Generation:Pricing` block: **key shape only**, keyed by the `Tiers.*.Model` ids an `engine.generated`
+  event actually records, with all four categories present, plus the "a correct `unpriced` reading is not a defect"
+  note that this repo's UAT history says someone will otherwise file as a bug. The rate values are placeholder
+  **strings** on purpose — they will not bind to a decimal, so copying the block without editing it fails loudly
+  instead of pricing a live model at `$0`. Real figures stay out (story Out of Scope: they are per-environment
+  config data entry, and Foundry deployments are not version-pinned so a committed figure goes stale silently).
+  `EngineUsagePriceTableTests.TheGovernedExample_DocumentsThePricingKeyShape_KeyedByTheModelIdsItsOwnTiersConfigure`
+  pins the shape and the model-key/tier-model agreement, so the example cannot drift onto deployment names.
+  `PROVIDER-GOVERNANCE.md` was deliberately not touched — §8 is another owner's document.
+- **SG-001 — the final bucket may be PARTIAL, now stated on the contract.** `EngineUsageWindowDto.BucketMinutes`
+  documents that `windowMinutes` need not be a whole multiple of `bucketMinutes` (61 → 2-minute buckets, the 31st
+  holding one minute). Counts stay exact and `sum(buckets) == totals.calls` still holds, so a chart of COUNTS is
+  correct as served — but 03c rendering calls-per-bucket as a **rate** would understate the freshest bucket by up
+  to half, and that is the point an operator watches. The note gives the true final span
+  (`windowMinutes - bucketMinutes * (bucketCount - 1)`). Documentation only: the bucketing behaviour is unchanged,
+  and every window the panel is expected to offer (1/15/60/240/1440) divides evenly, so this is latent, not live.
+- **SG-005 — the AC1 provider pin is now name-agnostic.** The reflection test enumerated three literal names
+  (`Provider`/`EffectiveProvider`/`ProviderCutToFake`), which a future `LiveProvider` would have walked past; it
+  now rejects any top-level member whose name *contains* `Provider`, and the wire-shape test does the same over the
+  served JSON's top-level keys. The residue is stated in the test rather than left implied: a readout smuggled
+  inside a new nested object with an innocuous name is not reachable by reflection, because the legitimate nested
+  `byModel`/`cost` rows must be allowed to carry `provider`.
+
+**Two findings recorded and deliberately NOT fixed** (so nobody re-litigates them):
+
+- **The price-table case collision is an unreachable branch, not a tolerable failure mode.**
+  `EngineUsagePriceTable.FromOptions` assigns `providers[providerName] = rates` into an `OrdinalIgnoreCase`
+  dictionary, so two provider keys differing only in case would overwrite rather than merge. The reviewer retired
+  this empirically: probing two configuration sources supplying `Providers:Fake:m1` and `Providers:fake:m2`, the
+  configuration root **collapses them to one child and merges the model maps** (both models priced, nothing
+  dropped). So the collision is unreachable from *any* `IConfiguration` source — not merely from a single JSON file
+  — and only from a hand-constructed options object. No fix, and no test for an unreachable branch.
+- **SG-004 — `BuildWindow`'s internal `Math.Clamp` vs the endpoint's deliberate `400`.** `BuildWindow` clamps an
+  out-of-range `windowMinutes` while `EngineUsageService` rejects it outright, so the clamp is defence that no live
+  path reaches. Raised in review and **consciously deferred** — the current shape is accepted. The behaviour that
+  matters to a caller (no silent clamp; `400`, inclusive at both bounds) is pinned at both the HTTP layer and
+  directly on the service.
+
+> **Future consideration, deliberately NOT done here:** an index on `TelemetryEvents.EventType`. The panel
+> re-scans the exercise's rows per read, so an index earns its place once 03c polls on an interval — but it is
+> a schema change (Tier-2 human sign-off + a migration whose snapshot collides with any other migration in the
+> same wave), so it belongs to a story that owns the schema, not to this behaviour-only edge.
