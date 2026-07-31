@@ -94,6 +94,21 @@ afterEach(() => {
   engineSettingsStore.resetForTests()
 })
 
+/**
+ * Reads the per-bucket call counts back off a rendered `<BucketSeries>`'s
+ * disclosure element (`data-testid="...-detail"`) — each `<li>` row renders
+ * `"<time><calls> calls"` with no separating text node, so the count is
+ * pulled out with a trailing `"N calls"` match rather than assumed to be a
+ * whole `<span>`'s text content.
+ */
+function extractRenderedBucketCounts(detail: Element): number[] {
+  return Array.from(detail.querySelectorAll('li')).map(li => {
+    const match = (li.textContent ?? '').match(/([\d,]+)\s*calls\s*$/)
+    if (!match) throw new Error(`Could not parse a call count out of bucket row: "${li.textContent}"`)
+    return Number(match[1]?.replace(/,/g, ''))
+  })
+}
+
 function renderPanel(open: boolean, onClose: () => void = vi.fn()) {
   return render(
     <ThemeProvider theme={cobraTheme}>
@@ -280,8 +295,23 @@ describe('UsagePanel — AC2: volume', () => {
 
     const detail = fakeRow?.querySelector('[data-testid="usage-model-bucket-series-detail"]')
     expect(detail).not.toBeNull()
-    const expectedSum = (fakeModel?.buckets ?? []).reduce((sum, b) => sum + b.calls, 0)
-    expect(expectedSum).toBe(fakeModel?.totals.calls)
+
+    // Read the ACTUALLY RENDERED per-bucket counts back off the DOM (never
+    // the fixture) — a regression that passed the AGGREGATE `usage.buckets`
+    // into this row's `<BucketSeries>` (instead of `model.buckets`) must red
+    // this test; comparing the fixture to itself, as an earlier version of
+    // this test did, cannot ever catch that (Gate-2 W-1).
+    const renderedFakeCounts = extractRenderedBucketCounts(detail as Element)
+    const renderedSum = renderedFakeCounts.reduce((sum, count) => sum + count, 0)
+    expect(renderedSum).toBe(fakeModel?.totals.calls)
+
+    // AND distinct from the rendered AGGREGATE series — the specific
+    // regression this guard exists to catch (every model row rendering the
+    // window's aggregate series instead of its own) would make this row's
+    // rendered counts equal the aggregate's rendered counts.
+    const aggregateDetail = screen.getByTestId('usage-bucket-series-detail')
+    const renderedAggregateCounts = extractRenderedBucketCounts(aggregateDetail)
+    expect(renderedFakeCounts).not.toEqual(renderedAggregateCounts)
   })
 })
 

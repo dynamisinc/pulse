@@ -233,6 +233,17 @@ function round6(value: number): number {
 }
 
 /**
+ * S-4: rounds a latency figure to 3dp, mirroring the backend's own
+ * `EngineUsageAggregator.LatencyDecimals` — kills the float-artifact class
+ * (`baseLatencyTotalMs * factor` producing a long tail) even though
+ * `formatMs` already caps display at 2dp; benign today, but a scaled value
+ * shouldn't need a display-layer cap to look honest.
+ */
+function round3(value: number): number {
+  return Math.round(value * 1_000) / 1_000
+}
+
+/**
  * SG-006: the mock's own call-volume scale relative to {@link DEFAULT_WINDOW_MINUTES}
  * (the 60-minute base every seed below is written against) — so selecting a
  * different preset under `USE_MOCK_DATA` visibly changes calls/tokens/cost,
@@ -403,6 +414,20 @@ export function buildMockEngineUsage(windowMinutes: number, nowMs: number): Engi
 
   const resolvedModels: readonly ResolvedMockModel[] = RAW_MODEL_SEEDS.map(seed => {
     const calls = scaleCalls(seed.baseCalls, factor)
+    // S-4: round to 3dp, mirroring the backend's own latency rounding.
+    const latencyTotalMs = round3(seed.baseLatencyTotalMs * factor)
+    const latencyAverageMs = calls > 0 ? latencyTotalMs / calls : 0
+    // W-2: `latencyMaxMs` is a running max over the SAME calls that build
+    // `latencyTotalMs` — structurally, `avg <= max <= total` always (the
+    // backend gets this for free, `EngineUsageAggregator`'s max accumulator
+    // runs over the calls it also sums). The seed's fixed ceiling does NOT
+    // scale with the window factor (a "busiest single call" figure has no
+    // reason to shrink just because fewer calls are shown), but at a small
+    // enough factor that fixed ceiling can exceed the now-shrunk total —
+    // clamping down to `total` (never below `avg`) keeps both invariants
+    // true at every window, and collapses to max === avg === total exactly
+    // when there is only one call (the only mathematically valid answer).
+    const latencyMaxMs = Math.min(latencyTotalMs, Math.max(latencyAverageMs, seed.latencyMaxMs))
     return {
       provider: seed.provider,
       model: seed.model,
@@ -411,8 +436,8 @@ export function buildMockEngineUsage(windowMinutes: number, nowMs: number): Engi
       outputTokens: scaleQuantity(seed.baseOutputTokens, factor),
       cacheReadInputTokens: scaleQuantity(seed.baseCacheReadInputTokens, factor),
       cacheCreationInputTokens: scaleQuantity(seed.baseCacheCreationInputTokens, factor),
-      latencyTotalMs: seed.baseLatencyTotalMs * factor,
-      latencyMaxMs: seed.latencyMaxMs,
+      latencyTotalMs,
+      latencyMaxMs,
       guardResults: sortGuardResults(seed.guardSplit(calls)),
       priced: seed.priced,
       rates: seed.rates,
@@ -434,7 +459,10 @@ export function buildMockEngineUsage(windowMinutes: number, nowMs: number): Engi
         cacheCreationInputTokens: model.cacheCreationInputTokens,
         latency: {
           totalMs: model.latencyTotalMs,
-          averageMs: model.calls > 0 ? round6(model.latencyTotalMs / model.calls) : 0,
+          // S-4: 3dp, matching the backend's `LatencyDecimals` for every
+          // latency field (total/average/max) — `round6` is reserved for
+          // currency (the backend's separate `CostDecimals`).
+          averageMs: model.calls > 0 ? round3(model.latencyTotalMs / model.calls) : 0,
           maxMs: model.latencyMaxMs,
         },
       },
@@ -452,8 +480,16 @@ export function buildMockEngineUsage(windowMinutes: number, nowMs: number): Engi
   const totalOutput = resolvedModels.reduce((sum, m) => sum + m.outputTokens, 0)
   const totalCacheRead = resolvedModels.reduce((sum, m) => sum + m.cacheReadInputTokens, 0)
   const totalCacheCreation = resolvedModels.reduce((sum, m) => sum + m.cacheCreationInputTokens, 0)
-  const totalLatencyMs = resolvedModels.reduce((sum, m) => sum + m.latencyTotalMs, 0)
-  const maxLatencyMs = resolvedModels.reduce((max, m) => Math.max(max, m.latencyMaxMs), 0)
+  // S-4: rounded to 3dp (mirrors the backend). W-2: `maxLatencyMs` is the max
+  // of the PER-MODEL max values, each of which is already clamped to its own
+  // `avg <= max <= total` — the true global max (across every individual
+  // call from every model) equals the max of the per-model maxes, so no
+  // separate aggregate-level clamp is needed; it inherits both invariants
+  // transitively (max <= total: each per-model max <= that model's own
+  // total <= the summed total; avg <= max: a basic fact about any nonempty
+  // set of non-negative numbers).
+  const totalLatencyMs = round3(resolvedModels.reduce((sum, m) => sum + m.latencyTotalMs, 0))
+  const maxLatencyMs = round3(resolvedModels.reduce((max, m) => Math.max(max, m.latencyMaxMs), 0))
 
   const guardTotals = new Map<string, number>()
   for (const model of resolvedModels) {
@@ -517,7 +553,7 @@ export function buildMockEngineUsage(windowMinutes: number, nowMs: number): Engi
       cacheCreationInputTokens: totalCacheCreation,
       latency: {
         totalMs: totalLatencyMs,
-        averageMs: totalCalls > 0 ? round6(totalLatencyMs / totalCalls) : 0,
+        averageMs: totalCalls > 0 ? round3(totalLatencyMs / totalCalls) : 0,
         maxMs: maxLatencyMs,
       },
     },

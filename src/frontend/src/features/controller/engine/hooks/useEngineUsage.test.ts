@@ -29,7 +29,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import * as liveEngineUsageActions from '../services/liveEngineUsageActions'
 import type { EngineUsageDto } from '../services/liveEngineUsageActions'
-import { buildMockEngineUsage, engineUsageStore, useEngineUsage } from './useEngineUsage'
+import {
+  ENGINE_USAGE_WINDOW_PRESETS_MINUTES,
+  buildMockEngineUsage,
+  engineUsageStore,
+  useEngineUsage,
+} from './useEngineUsage'
 
 vi.mock('@/core/exerciseContext', () => ({
   useExerciseContext: vi.fn(),
@@ -239,6 +244,46 @@ describe('buildMockEngineUsage (pure)', () => {
       const fake = usage.byModel.find(m => m.provider === 'Fake')
       expect(fake?.totals.inputTokens).toBe(0)
       expect(fake?.totals.outputTokens).toBe(0)
+    }
+  })
+
+  it('W-2: latency stays arithmetically POSSIBLE at every preset — avg <= max <= total, aggregate and per-model', () => {
+    // The backend gets this for free: `MaxLatencyMs` is a running max over the
+    // very calls that build `TotalLatencyMs`, so `avg <= max <= total` holds by
+    // construction (EngineUsageAggregator). The mock builds the two figures
+    // SEPARATELY — a fixed per-seed ceiling against a window-scaled total — so
+    // nothing structural stops them contradicting each other. They did: at the
+    // 1-minute preset the AzureOpenAI/gpt-5.4 row rendered "1 call, total 460 ms,
+    // max 3,100 ms" — an impossible reading, on the surface UAT actually shows
+    // (UAT runs USE_MOCK_DATA=true). Asserted across EVERY preset rather than
+    // the one reported instance, so the whole class is closed, not that case.
+    for (const minutes of ENGINE_USAGE_WINDOW_PRESETS_MINUTES) {
+      const usage = buildMockEngineUsage(minutes, Date.parse('2033-09-04T14:00:00.000Z'))
+
+      const totals = usage.totals.latency
+      expect(totals.averageMs).toBeLessThanOrEqual(totals.maxMs)
+      expect(totals.maxMs).toBeLessThanOrEqual(totals.totalMs)
+
+      for (const model of usage.byModel) {
+        const latency = model.totals.latency
+        expect(latency.averageMs).toBeLessThanOrEqual(latency.maxMs)
+        expect(latency.maxMs).toBeLessThanOrEqual(latency.totalMs)
+      }
+    }
+  })
+
+  it('W-2: a single-call row collapses to max === avg === total — the only valid answer for one call', () => {
+    // The sharpest case, and the one the original defect rendered most visibly:
+    // with exactly one call there is nothing for a max to be the max OF except
+    // that call, so all three figures must agree.
+    for (const minutes of ENGINE_USAGE_WINDOW_PRESETS_MINUTES) {
+      const usage = buildMockEngineUsage(minutes, Date.parse('2033-09-04T14:00:00.000Z'))
+
+      for (const model of usage.byModel.filter(m => m.totals.calls === 1)) {
+        const { totalMs, averageMs, maxMs } = model.totals.latency
+        expect(averageMs).toBe(totalMs)
+        expect(maxMs).toBe(totalMs)
+      }
     }
   })
 
