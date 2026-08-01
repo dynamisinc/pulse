@@ -104,6 +104,8 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { useStorylineTarget } from '../../hooks/useStorylineTarget'
 import type { StorylinePhase } from '../../services/storylineMock'
+// Dark operator-chrome tokens (matches `EngineControlBar`/`ReviewQueue`'s tokens). Staff-only.
+import { consoleChrome as chrome } from '../../consoleChrome'
 
 /**
  * The phases in which `Storyline.Tick` actually drives actual intensity
@@ -128,16 +130,6 @@ const PHASE_DESCRIPTIONS: Record<StorylinePhase, string> = {
 
 /** The one-line, plain-language scale legend (AC5) — static, not per-exercise configured copy. */
 const SCALE_LEGEND = '0 = quiet · 100 = crisis-level attention'
-
-/** Dark operator-chrome tokens (matches `EngineControlBar`/`ReviewQueue`'s tokens). Staff-only. */
-const chrome = {
-  panel: '#0f1826',
-  line: '#28384b',
-  ink: '#e9eff7',
-  inkMuted: '#9db1c8',
-  blue: '#4d97d1',
-  amber: '#f5a623',
-} as const
 
 function clamp0to100(value: number): number {
   return Math.min(100, Math.max(0, Math.round(value)))
@@ -406,7 +398,7 @@ export function EscalationDial() {
           height: 28,
           mt: 2,
           borderRadius: '6px',
-          bgcolor: '#0a1017',
+          bgcolor: chrome.bg,
           border: `1px solid ${chrome.line}`,
           cursor: 'pointer',
           touchAction: 'none',
