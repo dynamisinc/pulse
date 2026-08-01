@@ -61,6 +61,17 @@
  * so without this the engine panel could paint over a still-mounted, still-
  * Tab-reachable persona composer instead of replacing it.
  *
+ * ## USAGE tool (feature: engine-telemetry-tuning, story 03c)
+ * A second sibling surface tool, registered/gated exactly like ENGINE above
+ * — activating it opens `<UsagePanel>`, keyed on
+ * `isActive(ENGINE_USAGE_TOOL_ID)`. This is the console's live-ops AI-
+ * generation volume/cost view (`../engine`'s `useEngineUsage`, story 03a's
+ * `GET /api/engine/usage`) — the SAME shared `activeToolId` already makes
+ * ENGINE and USAGE mutually exclusive (one flyout open at a time across the
+ * whole toolstrip, D7-011), and the persona-dock host is closed whenever
+ * EITHER activates, for the identical obscured-composer reason ENGINE's own
+ * note above states.
+ *
  * ## Entry points to "post as persona" (both funnel to the persona-dock host)
  *  1. ⌘K / Ctrl+K, or activating the "Personas" toolstrip tool → the command
  *     palette opens (its PERSONAS section is the search/select entry point).
@@ -78,7 +89,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faGear, faMasksTheater, faTowerBroadcast } from '@fortawesome/free-solid-svg-icons'
+import { faChartLine, faGear, faMasksTheater, faTowerBroadcast } from '@fortawesome/free-solid-svg-icons'
 import { usePersonas } from '@/features/personas'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useRegisterSurfaceTool, useToolstrip } from '@/features/staffShell/toolRegistry'
@@ -99,9 +110,11 @@ import {
   DraftDisposition,
   DraftTimerDriver,
   ENGINE_SETTINGS_TOOL_ID,
+  ENGINE_USAGE_TOOL_ID,
   EngineControlBar,
   EngineSettingsPanel,
   ReviewQueue,
+  UsagePanel,
   useEngineControl,
   useReviewQueue,
   useSwampedMode,
@@ -201,6 +214,25 @@ export function ControllerConsole(
     if (isActive(ENGINE_SETTINGS_TOOL_ID)) toggleTool(ENGINE_SETTINGS_TOOL_ID)
   }, [isActive, toggleTool])
 
+  // The "USAGE" consult-on-demand tool (feature: engine-telemetry-tuning,
+  // story 03c) — the console's live-ops AI-generation volume/cost view
+  // (story 03a's `GET /api/engine/usage`). No badge (an observability
+  // surface, not a pending-attention one). Registered + gated exactly like
+  // ENGINE above: the SAME shared `activeToolId` already makes ENGINE and
+  // USAGE mutually exclusive (one flyout open at a time, D7-011), and
+  // activating USAGE closes an already-open persona dock the same way
+  // ENGINE does (see the `dockPersonaOpen`/effect below).
+  useRegisterSurfaceTool({
+    id: ENGINE_USAGE_TOOL_ID,
+    label: 'USAGE',
+    icon: faChartLine,
+    tooltip: 'AI generation usage — call volume, tokens, latency, and cost (read-only)',
+  })
+  const engineUsageOpen = isActive(ENGINE_USAGE_TOOL_ID)
+  const closeEngineUsage = useCallback(() => {
+    if (isActive(ENGINE_USAGE_TOOL_ID)) toggleTool(ENGINE_USAGE_TOOL_ID)
+  }, [isActive, toggleTool])
+
   // The "Personas" toolstrip tool's active state is the SINGLE source of truth
   // for whether the ⌘K palette is open, so the toolstrip button always reflects
   // the palette and ⌘K + the button toggle the exact same state — opening via
@@ -268,10 +300,10 @@ export function ControllerConsole(
   // the dock is already not rendered by then; note it deliberately does NOT
   // discard the persisted draft — see `closeDock`'s own comment) so a LATER
   // close of the engine panel doesn't resurrect a stale dock.
-  const dockPersonaOpen = dockPersonaId !== null && !engineSettingsOpen
+  const dockPersonaOpen = dockPersonaId !== null && !engineSettingsOpen && !engineUsageOpen
   useEffect(() => {
-    if (engineSettingsOpen) setDockPersonaId(null)
-  }, [engineSettingsOpen])
+    if (engineSettingsOpen || engineUsageOpen) setDockPersonaId(null)
+  }, [engineSettingsOpen, engineUsageOpen])
 
   return (
     <Box
@@ -388,6 +420,8 @@ export function ControllerConsole(
       <PersonaDockHost open={dockPersonaOpen} onClose={closeDock} slots={dockSlots} />
 
       <EngineSettingsPanel open={engineSettingsOpen} onClose={closeEngineSettings} />
+
+      <UsagePanel open={engineUsageOpen} onClose={closeEngineUsage} />
     </Box>
   )
 }
