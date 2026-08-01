@@ -138,10 +138,26 @@ describe('FollowButton — toggle + accessible state (SOC-051, NFR-001)', () => 
     const button = await screen.findByTestId('follow-button')
     fireEvent.click(button)
 
-    expect(button).toHaveAttribute('aria-busy', 'true')
-    expect(button).toBeDisabled()
+    // GATE, don't sample. The write above is a DEFERRED promise that only
+    // settles when `releaseWrite()` is called below, so the pending window is
+    // held open for the whole of this gate: it can be satisfied ONLY by
+    // observing `aria-busy`/`disabled` actually turn on, never by the write
+    // settling out from under it. A bare synchronous `expect` here instead
+    // races the click's commit and flaked under a loaded parallel run — same
+    // async-render race class as this file's rollback spec (see the
+    // `expectFollowState` note above), never shared-state bleed.
+    await waitFor(() => {
+      expect(button).toHaveAttribute('aria-busy', 'true')
+      expect(button).toBeDisabled()
+    })
 
-    releaseWrite?.()
+    // Releasing is what CLOSES the window. Throw rather than `?.()`-no-op if
+    // the write was never issued: otherwise the settle assertion below would
+    // pass vacuously against a button that had never gone busy at all.
+    if (!releaseWrite) throw new Error('followPersona was never called — no write to release')
+    releaseWrite()
+
     await waitFor(() => expect(button).not.toBeDisabled())
+    expect(button).toHaveAttribute('aria-busy', 'false')
   })
 })
