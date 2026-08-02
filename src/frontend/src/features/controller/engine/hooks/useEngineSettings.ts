@@ -106,6 +106,14 @@
  * those, that is the exact shape that failed three times; delete rather than
  * guard.
  *
+ * `isLiveGeneration` is NOT a second counter and does not participate in
+ * ordering. The sequence counter answers "is this response older than what is
+ * already applied?"; that question is only meaningful WITHIN one generation of
+ * the bookkeeping, and `resetForTests`/`setForTests` replace the whole
+ * generation. So each request carries back the object it was issued against and
+ * every landing handler drops out if that object has since been retired — see
+ * {@link isLiveGeneration} for the concrete failure this fixes.
+ *
  * ## MOCK <-> LIVE (`USE_MOCK_DATA`, `@/core/config/mockData`)
  * Mock renders a plausible static snapshot with NO network call — matching
  * every other engine hook's mock/live split. A mock mutation updates the
@@ -428,11 +436,49 @@ export const engineSettingsStore = { getSnapshot, subscribe, resetForTests, setF
 // per-field tracker", enforced by never allowing a second request to start)
 // ---------------------------------------------------------------------------
 
-/** Issues the next sequence number and marks a request as outstanding. */
-function issue(exerciseId: string): number {
+/**
+ * Issues the next sequence number and marks a request as outstanding. Returns
+ * the bookkeeping object the request was issued AGAINST, not just the sequence
+ * — every landing handler carries it back so it can tell whether it still
+ * belongs to the live generation (see {@link isLiveGeneration}).
+ */
+function issue(
+  exerciseId: string,
+): { readonly internal: EngineSettingsInternal; readonly seq: number } {
   const internal = getInternal(exerciseId)
   internal.requestInFlight = true
-  return ++internal.nextSeq
+  return { internal, seq: ++internal.nextSeq }
+}
+
+/**
+ * `false` once `internal` is no longer the REGISTERED bookkeeping for
+ * `exerciseId` — i.e. `resetForTests`/`setForTests` swapped in a fresh
+ * generation while this request was still outstanding.
+ *
+ * WHY THIS EXISTS. A promise cannot be cancelled, so a request issued before a
+ * reset still lands afterwards, and every landing handler used to re-look-up
+ * the bookkeeping BY EXERCISE ID — which by then returns the NEW generation's
+ * object. A stale response therefore wrote into a state it had nothing to do
+ * with. In a test file that is cross-test contamination with no visible cause:
+ * the observed case was a test killed by the 10s timeout with its GET still in
+ * flight, whose `.finally()` then ran during the NEXT test and cleared that
+ * test's `requestInFlight` — silently defeating the serialization guard, so a
+ * mutation the guard should have refused went through and the next test failed
+ * on an assertion that had nothing to do with what it was testing.
+ *
+ * A retired generation's response must be completely INERT: it must not apply
+ * settings (which would also let a stale seq overwrite newer truth — the exact
+ * bug class the sequence counter exists to stop, arriving by a route the
+ * counter cannot see, since the fresh generation's `appliedSeq` restarts at 0),
+ * must not clear the live generation's in-flight flag, and must not fire its
+ * queued refetch.
+ *
+ * Production never retires a generation (both swap points are the test-only
+ * seams on {@link engineSettingsStore}), so this changes no shipped behavior —
+ * it makes those seams isolate for real, which is what they already promise.
+ */
+function isLiveGeneration(exerciseId: string, internal: EngineSettingsInternal): boolean {
+  return internalByExercise.get(exerciseId) === internal
 }
 
 /**
@@ -440,8 +486,7 @@ function issue(exerciseId: string): number {
  * if it is strictly newer than whatever is already applied — the ONE guard
  * this hook keeps (module header). Returns whether it was applied.
  */
-function tryApply(exerciseId: string, mySeq: number): boolean {
-  const internal = getInternal(exerciseId)
+function tryApply(internal: EngineSettingsInternal, mySeq: number): boolean {
   if (mySeq <= internal.appliedSeq) return false
   internal.appliedSeq = mySeq
   return true
@@ -452,9 +497,12 @@ function tryApply(exerciseId: string, mySeq: number): boolean {
  * flag and, if a `refetch()` arrived while this request was outstanding,
  * fires it now — QUEUED, never dropped (generalizes the original CR-101 fix
  * to cover a GET queued behind a MUTATION, not only behind another GET).
+ *
+ * A no-op for a retired generation (see {@link isLiveGeneration}) — otherwise
+ * an abandoned request would un-latch a live one's in-flight flag.
  */
-function settle(exerciseId: string): void {
-  const internal = getInternal(exerciseId)
+function settle(exerciseId: string, internal: EngineSettingsInternal): void {
+  if (!isLiveGeneration(exerciseId, internal)) return
   internal.requestInFlight = false
   if (internal.refetchQueued) {
     internal.refetchQueued = false
@@ -478,14 +526,15 @@ function startLiveFetch(exerciseId: string): void {
     return
   }
   liveFetchStarted.add(exerciseId)
-  const mySeq = issue(exerciseId)
+  const { internal: mine, seq: mySeq } = issue(exerciseId)
 
   setFor(exerciseId, { ...getSnapshot(exerciseId), loading: true })
 
   fetchSettings()
     .then(settings => {
+      if (!isLiveGeneration(exerciseId, mine)) return
       const current = getSnapshot(exerciseId)
-      if (tryApply(exerciseId, mySeq)) {
+      if (tryApply(mine, mySeq)) {
         setFor(exerciseId, { ...current, settings, loading: false, error: null })
       } else {
         // A strictly newer response has already been applied — this GET's
@@ -494,6 +543,7 @@ function startLiveFetch(exerciseId: string): void {
       }
     })
     .catch((error: unknown) => {
+      if (!isLiveGeneration(exerciseId, mine)) return
       // WR-004: clear the "started" flag so a later mount/invalidate can
       // retry — a transient blip must not be a PERMANENT load-error state.
       liveFetchStarted.delete(exerciseId)
@@ -508,7 +558,7 @@ function startLiveFetch(exerciseId: string): void {
         forbidden: described.status === 403 ? true : current.forbidden,
       })
     })
-    .finally(() => settle(exerciseId))
+    .finally(() => settle(exerciseId, mine))
 }
 
 /**
@@ -607,19 +657,21 @@ function runSetAutonomyDefault(
   // through normal use.
   if (internal.requestInFlight) return
 
-  const mySeq = issue(exerciseId)
+  const { internal: mine, seq: mySeq } = issue(exerciseId)
   setFor(exerciseId, { ...current, pendingAutonomyDefault: true, error: null })
 
   postAutonomyDefault(level, ctx)
     .then(settings => {
+      if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
-      if (tryApply(exerciseId, mySeq)) {
+      if (tryApply(mine, mySeq)) {
         setFor(exerciseId, { ...latest, settings, pendingAutonomyDefault: false, error: null })
       } else {
         setFor(exerciseId, { ...latest, pendingAutonomyDefault: false })
       }
     })
     .catch((error: unknown) => {
+      if (!isLiveGeneration(exerciseId, mine)) return
       // No revert — nothing was ever asserted. Re-enable the control and
       // surface the failure; `settings` is untouched.
       const described = describeSettingsError(error)
@@ -631,7 +683,7 @@ function runSetAutonomyDefault(
         forbidden: described.status === 403 ? true : latest.forbidden,
       })
     })
-    .finally(() => settle(exerciseId))
+    .finally(() => settle(exerciseId, mine))
 }
 
 function runSetTierPolicyMode(
@@ -651,19 +703,21 @@ function runSetTierPolicyMode(
   const internal = getInternal(exerciseId)
   if (internal.requestInFlight) return
 
-  const mySeq = issue(exerciseId)
+  const { internal: mine, seq: mySeq } = issue(exerciseId)
   setFor(exerciseId, { ...current, pendingTierPolicy: true, error: null })
 
   postTierPolicyMode(mode, ctx)
     .then(settings => {
+      if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
-      if (tryApply(exerciseId, mySeq)) {
+      if (tryApply(mine, mySeq)) {
         setFor(exerciseId, { ...latest, settings, pendingTierPolicy: false, error: null })
       } else {
         setFor(exerciseId, { ...latest, pendingTierPolicy: false })
       }
     })
     .catch((error: unknown) => {
+      if (!isLiveGeneration(exerciseId, mine)) return
       const described = describeSettingsError(error)
       const latest = getSnapshot(exerciseId)
       setFor(exerciseId, {
@@ -673,7 +727,7 @@ function runSetTierPolicyMode(
         forbidden: described.status === 403 ? true : latest.forbidden,
       })
     })
-    .finally(() => settle(exerciseId))
+    .finally(() => settle(exerciseId, mine))
 }
 
 /**
@@ -703,19 +757,21 @@ function runCutGenerationToFake(
   // unreachable through normal use.
   if (internal.requestInFlight) return
 
-  const mySeq = issue(exerciseId)
+  const { internal: mine, seq: mySeq } = issue(exerciseId)
   setFor(exerciseId, { ...current, pendingProviderLever: true, error: null })
 
   postCutGenerationToFake(ctx)
     .then(settings => {
+      if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
-      if (tryApply(exerciseId, mySeq)) {
+      if (tryApply(mine, mySeq)) {
         setFor(exerciseId, { ...latest, settings, pendingProviderLever: false, error: null })
       } else {
         setFor(exerciseId, { ...latest, pendingProviderLever: false })
       }
     })
     .catch((error: unknown) => {
+      if (!isLiveGeneration(exerciseId, mine)) return
       // No revert — nothing was ever asserted. Re-enable the control and
       // surface the failure; `settings` is untouched.
       const described = describeSettingsError(error)
@@ -727,7 +783,7 @@ function runCutGenerationToFake(
         forbidden: described.status === 403 ? true : latest.forbidden,
       })
     })
-    .finally(() => settle(exerciseId))
+    .finally(() => settle(exerciseId, mine))
 }
 
 /**
@@ -751,19 +807,21 @@ function runRestoreGenerationProvider(
   const internal = getInternal(exerciseId)
   if (internal.requestInFlight) return
 
-  const mySeq = issue(exerciseId)
+  const { internal: mine, seq: mySeq } = issue(exerciseId)
   setFor(exerciseId, { ...current, pendingProviderLever: true, error: null })
 
   postRestoreGenerationProvider(ctx)
     .then(settings => {
+      if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
-      if (tryApply(exerciseId, mySeq)) {
+      if (tryApply(mine, mySeq)) {
         setFor(exerciseId, { ...latest, settings, pendingProviderLever: false, error: null })
       } else {
         setFor(exerciseId, { ...latest, pendingProviderLever: false })
       }
     })
     .catch((error: unknown) => {
+      if (!isLiveGeneration(exerciseId, mine)) return
       const described = describeSettingsError(error)
       const latest = getSnapshot(exerciseId)
       setFor(exerciseId, {
@@ -773,7 +831,7 @@ function runRestoreGenerationProvider(
         forbidden: described.status === 403 ? true : latest.forbidden,
       })
     })
-    .finally(() => settle(exerciseId))
+    .finally(() => settle(exerciseId, mine))
 }
 
 // ---------------------------------------------------------------------------
