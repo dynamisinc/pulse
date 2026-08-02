@@ -459,6 +459,50 @@ describe('useEngineSettings — live mode (USE_MOCK_DATA=false)', () => {
     expect(result.current.pendingTierPolicy).toBe(false)
   })
 
+  it('a request abandoned by a RETIRED generation cannot un-latch the live one: resetForTests() while a GET is outstanding makes that GET inert', async () => {
+    // WHY THIS EXISTS. A promise cannot be cancelled, so `resetForTests()` can
+    // forget a request but not stop it. Before the `isLiveGeneration` guard,
+    // the landing handlers re-looked-up their bookkeeping BY EXERCISE ID and
+    // therefore wrote into whatever generation was current when they landed —
+    // so an abandoned GET's `.finally()` cleared the NEXT test's
+    // `requestInFlight` and the serialization guard above silently stopped
+    // holding. That is not a hypothetical: a full-suite run killed the
+    // preceding test on the 10s timeout with its GET still in flight, and the
+    // serialization test then failed because a mutation it expected to be
+    // refused went through. The failure named a hook invariant that was
+    // actually fine, in a test that had nothing to do with the cause.
+    let landAbandonedGet: (value: EngineSettingsDto) => void = () => {}
+    mockedGetSettings.mockReturnValueOnce(new Promise(resolve => { landAbandonedGet = resolve }))
+    renderHook(() => useEngineSettings())
+
+    // The harness resets between tests — generation 1's GET is still outstanding.
+    engineSettingsStore.resetForTests()
+
+    // Generation 2 — i.e. everything the NEXT test does.
+    mockedGetSettings.mockResolvedValue(dto())
+    const { result } = renderHook(() => useEngineSettings())
+    await waitFor(() => expect(result.current.settings).not.toBeNull())
+
+    mockedSetAutonomyDefault.mockReturnValue(new Promise(() => {})) // never resolves
+    act(() => result.current.setAutonomyDefault('delayed-auto'))
+    expect(result.current.pendingAutonomyDefault).toBe(true)
+
+    // Generation 1's abandoned GET lands now, inside generation 2's lifetime.
+    await act(async () => {
+      landAbandonedGet(dto({ tierPolicyMode: 'standard' }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    // It applied nothing...
+    expect(result.current.settings?.tierPolicyMode).toBe('auto')
+    // ...and, the part that actually broke, it did not release the live
+    // generation's serialization latch.
+    act(() => result.current.setTierPolicyMode('standard'))
+    expect(mockedSetTierPolicyMode).not.toHaveBeenCalled()
+    expect(result.current.pendingTierPolicy).toBe(false)
+  })
+
   it('an explicit refetch() that arrives while a MUTATION is in flight is QUEUED (never dropped) and fires once the mutation settles', async () => {
     mockedGetSettings.mockResolvedValueOnce(dto()) // initial load
     const { result } = renderHook(() => useEngineSettings())
