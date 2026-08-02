@@ -120,9 +120,10 @@ export function useFollow(options: UseFollowOptions): UseFollowResult {
 
   // Guards a stray resolve/rejection from an ABANDONED request (one whose target
   // changed mid-flight) from mutating state that no longer corresponds to it. The
-  // token is bumped by the personaId reset below as well as by each toggle — without
-  // that reset it could never actually differ at resolve time, since `pending` already
-  // blocks a second toggle, and the guard would be decorative.
+  // token is bumped by each toggle and by a genuine personaId CHANGE below — without
+  // the latter it could never actually differ at settle time, since `pending` already
+  // blocks a second toggle, and the guard would be decorative. It must NOT bump on
+  // mount: see the effect below for the rollback defect that caused.
   const requestTokenRef = useRef(0)
 
   // Re-point the hook when the TARGET changes. `useState` seeds once, so a mounted
@@ -140,11 +141,32 @@ export function useFollow(options: UseFollowOptions): UseFollowResult {
     setPending(false)
   }
 
-  // Invalidate any in-flight write when the target changes. This lives in an effect
+  // Invalidate any in-flight write when the target CHANGES. This lives in an effect
   // rather than in the render-phase reset above because refs must not be touched during
   // render; it still runs on commit, i.e. before any pending promise can resolve, so a
   // write issued for the PREVIOUS persona can never settle onto the new one's state.
+  //
+  // The MOUNT run must not bump. A passive effect flushes AFTER commit, so the button is
+  // already in the DOM and clickable while this effect is still pending — and React runs
+  // a click handler dispatched in that window BEFORE flushing it. When that happened the
+  // first toggle took token N, this effect then moved the ref to N+1, and every settle
+  // handler saw `requestTokenRef.current !== token` and returned: the rejected write
+  // never rolled back and the button stayed on "Following" forever — precisely the AC
+  // this hook exists to uphold, inverted. It reproduced 60/60 times once the click was
+  // dispatched ahead of the flush, and intermittently reddened
+  // `FollowButton.test.tsx`'s rollback spec in CI (a 5s gate expiring with the DOM still
+  // showing "Following"), which had been written off as parallel-run contention (#391).
+  //
+  // Skipping the first run makes the guard's verdict INDEPENDENT of whether the click or
+  // the flush wins that race, which is the actual defect — a mount is not an
+  // abandonment. A genuine `personaId` change still bumps, so the abandon semantics the
+  // guard exists for are unchanged.
+  const targetSettledRef = useRef(false)
   useEffect(() => {
+    if (!targetSettledRef.current) {
+      targetSettledRef.current = true
+      return
+    }
     requestTokenRef.current += 1
   }, [personaId])
 
