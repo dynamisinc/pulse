@@ -122,10 +122,17 @@ describe('SessionProvider', () => {
 
     await waitFor(() => expect(consoleSpy).toHaveBeenCalled())
 
-    // Fail-closed for CONTENT: no descendant of SessionProvider ever mounts...
+    // The failure is VISIBLE (a redirect), not a blank render. Awaited with
+    // `findBy`, NOT a one-shot `getBy`: `consoleSpy` being called and the
+    // `<Navigate>` having COMMITTED are two different moments, and the
+    // `waitFor` above only gates the first. Under full-suite load React had not
+    // yet flushed the redirect render, so the one-shot query saw an empty body
+    // and this test failed while passing in isolation.
+    expect(await screen.findByTestId('login-sentinel')).toBeInTheDocument()
+    // Fail-closed for CONTENT: no descendant of SessionProvider ever mounts —
+    // asserted at the SETTLED post-redirect state, where it is a real claim
+    // rather than a query against a DOM that has not rendered anything yet.
     expect(screen.queryByTestId('probe')).not.toBeInTheDocument()
-    // ...but the failure is now VISIBLE (a redirect), not a blank render.
-    expect(screen.getByTestId('login-sentinel')).toBeInTheDocument()
 
     consoleSpy.mockRestore()
   })
@@ -170,7 +177,9 @@ describe('SessionProvider', () => {
     )
 
     await waitFor(() => expect(consoleSpy).toHaveBeenCalled())
-    expect(screen.getByTestId('login-sentinel')).toBeInTheDocument()
+    // `findBy`, not `getBy` — same race as the test above: the spy fires before
+    // the redirect commits.
+    expect(await screen.findByTestId('login-sentinel')).toBeInTheDocument()
 
     // Inspect EVERYTHING console.error was actually called with — never the
     // raw token, and never the string "Bearer " (the header prefix).
