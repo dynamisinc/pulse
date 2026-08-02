@@ -57,7 +57,7 @@
  * the live post-publish path.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { useSession } from '@/core/auth'
 import { followPersona, unfollowPersona } from '../services/followService'
 
@@ -120,9 +120,11 @@ export function useFollow(options: UseFollowOptions): UseFollowResult {
 
   // Guards a stray resolve/rejection from an ABANDONED request (one whose target
   // changed mid-flight) from mutating state that no longer corresponds to it. The
-  // token is bumped by the personaId reset below as well as by each toggle — without
-  // that reset it could never actually differ at resolve time, since `pending` already
-  // blocks a second toggle, and the guard would be decorative.
+  // token is bumped by each toggle and by a genuine personaId CHANGE below — without
+  // the latter it could never actually differ at settle time, since `pending` already
+  // blocks a second toggle, and the guard would be decorative. It must NOT bump on
+  // mount, and it must bump BEFORE the retargeted button can be clicked. The layout
+  // effect below documents the rollback defect that violating either rule caused.
   const requestTokenRef = useRef(0)
 
   // Re-point the hook when the TARGET changes. `useState` seeds once, so a mounted
@@ -140,11 +142,41 @@ export function useFollow(options: UseFollowOptions): UseFollowResult {
     setPending(false)
   }
 
-  // Invalidate any in-flight write when the target changes. This lives in an effect
+  // Invalidate any in-flight write when the target CHANGES. This lives in an effect
   // rather than in the render-phase reset above because refs must not be touched during
-  // render; it still runs on commit, i.e. before any pending promise can resolve, so a
-  // write issued for the PREVIOUS persona can never settle onto the new one's state.
-  useEffect(() => {
+  // render.
+  //
+  // TWO separate ordering hazards made the naive `useEffect` version actively harmful,
+  // and both have the same shape: a PASSIVE effect flushes after commit, so the button is
+  // painted and clickable while the bump is still pending — and React runs a click
+  // dispatched in that window BEFORE flushing it. The toggle took token N, this effect
+  // then moved the ref to N+1, and every settle handler saw
+  // `requestTokenRef.current !== token` and returned. The rejected write never rolled
+  // back and the button stayed on "Following" forever — precisely the AC this hook exists
+  // to uphold, inverted.
+  //
+  //  1. ON MOUNT — a mount is not an abandonment, so it must not bump at all. Fixed by
+  //     skipping the first run. Reproduced 60/60 once the click was dispatched ahead of
+  //     the flush, and intermittently reddened `FollowButton.test.tsx`'s rollback spec in
+  //     CI (a 5s gate expiring with the DOM still on "Following"), which had been written
+  //     off as parallel-run contention (#391).
+  //  2. AFTER A REAL TARGET CHANGE — skipping the mount does NOT save this one: the first
+  //     click on the NEW target can still beat the pending bump and be suppressed
+  //     identically. `useLayoutEffect` is what closes it: a layout effect is flushed
+  //     synchronously during commit, before paint and before the browser can deliver any
+  //     input, so the bump is always already applied by the time the retargeted button is
+  //     clickable. (Caught in review by Copilot on #409 — the passive-effect version of
+  //     this fix was incomplete.)
+  //
+  // Together these make the guard's verdict INDEPENDENT of whether a click or the flush
+  // wins the race, which is the actual defect. A genuine `personaId` change still bumps,
+  // so the abandon semantics the guard exists for are unchanged.
+  const targetSettledRef = useRef(false)
+  useLayoutEffect(() => {
+    if (!targetSettledRef.current) {
+      targetSettledRef.current = true
+      return
+    }
     requestTokenRef.current += 1
   }, [personaId])
 

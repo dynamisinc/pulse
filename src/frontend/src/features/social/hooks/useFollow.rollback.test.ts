@@ -93,3 +93,48 @@ describe('useFollow — optimistic rollback on a failed write', () => {
     expect(result.current.followerCount).toBe(11)
   })
 })
+
+/**
+ * The OTHER half of the settle guard: it must still ABANDON a write whose target
+ * changed mid-flight. This is the behaviour `requestTokenRef` exists for, and it
+ * had no test — so the fix that stopped the guard firing on MOUNT (see
+ * `useFollow.ts`) could have disabled it outright with the suite still green.
+ */
+describe('useFollow — a write abandoned by a target change must not settle onto the new target', () => {
+  it('does not roll back onto the NEW persona when the OLD persona\'s write fails late', async () => {
+    let rejectWrite: (() => void) | undefined
+    vi.mocked(followPersona).mockImplementation(
+      () => new Promise<never>((_, reject) => {
+        rejectWrite = () => reject(new Error('server refused, late'))
+      }),
+    )
+
+    const { result, rerender } = renderHook(
+      ({ id, count }: { id: string; count: number }) =>
+        useFollow({ personaId: id, initialFollowerCount: count }),
+      { wrapper, initialProps: { id: 'persona-a', count: 10 } },
+    )
+    await waitFor(() => expect(result.current.canFollow).toBe(true))
+
+    act(() => result.current.toggleFollow())
+    expect(result.current.isFollowing).toBe(true)
+    expect(result.current.followerCount).toBe(11)
+
+    // Re-point at a DIFFERENT persona while A's write is still in flight.
+    rerender({ id: 'persona-b', count: 900 })
+    expect(result.current.followerCount).toBe(900)
+
+    // A's write now fails. Its rollback targets A's pre-toggle count (10) — if the
+    // guard let it through, B's count would be clobbered to 10. The count, not
+    // `isFollowing`, is the discriminating signal here: B's reset already put
+    // `isFollowing` at false, so that alone cannot tell the two outcomes apart.
+    expect(rejectWrite).toBeDefined()
+    await act(async () => {
+      rejectWrite?.()
+      await Promise.resolve()
+    })
+
+    expect(result.current.followerCount).toBe(900)
+    expect(result.current.isFollowing).toBe(false)
+  })
+})
