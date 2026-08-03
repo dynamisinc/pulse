@@ -37,6 +37,24 @@ D7 establishes the two container shells every surface mounts into. Both are **Ph
     tokens** + the thumbnail-distinguishability hard gate (D7-009).
   - **Action:** author `docs/features/staff-shell/` (feature.md + implementation.md + 5 stories).
 
+- [ ] **ADD — `staff-navigation` (Epic E1, Phase 1, world: staff)** · reuses D7-010/D7-011, no new `D7-xxx`
+  - **Trigger.** A 2026-08-01 backlog audit found no staff surface-switching model anywhere in the
+    design corpus: `SHELL-CONTRACT.md` gives the staff shell exactly three elements (header /
+    toolstrip / work area) and no navigation element, and `RoleAwareEntry` sends each staff role to
+    exactly one hardcoded surface with no path of its own — roughly 40 planned staff surfaces
+    across E1/E4/E5/E6/E7/E8/E10 have no door.
+  - **Decision.** The brand lockup (`PULSE` / surface name) — already present in every staff header,
+    currently static — becomes a role-gated **surface launcher**. This is a navigation-model
+    decision, not a new visual-system choice: it explicitly reuses the header element D7-010 folded
+    the old exercise bar into, and explicitly does **not** add a nav rail (would contest the shell's
+    three-element ownership) or a second toolstrip tenant (the toolstrip is reserved for
+    consult-on-demand flyouts, D7-011/D5-017). New requirement IDs `COR-070`–`COR-073` are filed
+    into the epic (`docs/01-platform-core-isolation.md` F1.7) rather than coined design-side and
+    left unfiled, unlike `COR-060`–`COR-066`.
+  - **Action:** author `docs/features/staff-navigation/` (feature.md + implementation.md + 4
+    stories). `SHELL-CONTRACT.md`'s Header row carries a cross-reference addendum; no other D7
+    document changes.
+
 ---
 
 ## B. Amendments to existing features (AMEND / RECONCILE)
@@ -134,6 +152,7 @@ D7 establishes the two container shells every surface mounts into. Both are **Ph
 |---|---|---|---|
 | `participant-shell` (E1) | D7-001..006/008 | ADD | New participant container feature (7 stories) |
 | `staff-shell` (E7) | D7-007/009/010/011 | ADD | New staff frame feature (5 stories) |
+| `staff-navigation` (E1) | D7-010/011 (reused) | ADD | Header lockup → role-gated surface launcher; new COR-070..073 (4 stories) |
 | `console-shell` #2 | D7-007/010/011, R-006 | RECONCILE | Unfreeze; frame→staff-shell, console keeps its content |
 | `console-shell` 01 #9 | D7-011 | AMEND | Toolbox registers into the shell dock |
 | `console-shell` 03 #11 | D7-007/010 | RECONCILE | Identity badge in staff-shell header; behavior stands |
