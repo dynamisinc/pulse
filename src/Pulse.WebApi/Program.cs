@@ -13,8 +13,11 @@ using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
+using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Features.Ops.EngineContentSeed;
+using Pulse.WebApi.Features.Ops.OrgAdminSeed;
+using Pulse.WebApi.Features.OrganizationResolution;
 using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
@@ -131,6 +134,15 @@ builder.Services.AddSharedReadOnly();
 // rate-limiter policy (registers no new limiter); staff endpoints are gated by ICurrentStaffSessionAccessor.
 builder.Services.AddSharedCredentialLifecycle();
 
+// Exercise lifecycle administration (E1 exercise-lifecycle-admin, COR-074/075/076) — the ORGANIZATION-tier
+// staff slice: POST/GET /api/org/exercises and GET /api/org/staff-assignments. Registers the slice's three
+// scoped services plus the shared StaffCallerContext, which resolves the caller's identity, role and CUSTOMER
+// tenant from the server-issued session alone. Placed after AddStaffIdentity/AddSessions: StaffCallerContext
+// resolves ICurrentStaffSessionAccessor (a Replace()d registration, so this is a readability convention
+// rather than a hard order) and reads the tenant off the IOrganizationContext that AddExerciseScoping
+// registers. Its pipeline half — app.UseOrganizationResolution(), below — IS order-critical.
+builder.Services.AddExerciseLifecycleAdmin();
+
 // UAT bootstrap seam (feature login/05, #308/#310) — the secret-gated, idempotent seed endpoint that
 // creates the FIRST Exercise/StaffAssignment/SharedCredential/Account in an empty database (no other
 // endpoint can, since they all require an already-authenticated staff session). The slice ships its own
@@ -139,6 +151,19 @@ builder.Services.AddSharedCredentialLifecycle();
 // Authentication:Bootstrap:Secret is configured. No middleware/ordering constraint: the header secret is
 // the only gate, reusing the single app.UseRateLimiter() below.
 builder.Services.AddOpsBootstrap(builder.Configuration);
+
+// NON-PRODUCTION orgAdmin startup seeder — the missing half of the org tier. orgAdmin shipped as a real
+// server-side role with its own authorization filter and endpoints (Features/ExerciseLifecycleAdmin), but
+// nothing could PROVISION the first one: BootstrapService accepts only controller/evaluator/planner, staff
+// login requires a pre-existing StaffAssignment, and exercise creation copies the creator's role — so the
+// org-admin surface was reachable only by hand-inserting a row. This registers a one-shot IHostedService that
+// re-checks on every boot and grants the configured allowlist account orgAdmin if the organization has none.
+// It maps NO route and adds NO middleware, so there is no pipeline-ordering constraint.
+// In Production AddOrgAdminSeed registers NOTHING AT ALL (OrgAdminSeedGate) — passing builder.Environment is
+// what makes that structural rather than a flag the seeder consults, and an unset ASPNETCORE_ENVIRONMENT
+// defaults to Production, so the fail-closed direction is the default one. It is additionally inert unless
+// Authentication:StaffIdentity carries an entry (with a secret) for the target account.
+builder.Services.AddOrgAdminSeed(builder.Environment, builder.Configuration);
 
 // Social API (Phase B1, feature/social-api) — orchestrator-wired composition root. Each story exposes its
 // own Add*/Map* extension (never edits this file itself); these five DI calls register the read/write
@@ -253,6 +278,26 @@ app.UseWhen(
 // host-after-session inverts precedence (shows the wrong exercise) — keep it exactly here.
 app.UseSessionAuthentication();
 
+// CUSTOMER-tenant resolution (exercise-isolation/11 + exercise-lifecycle-admin, COR-010) — the PRODUCTION
+// writer of IOrganizationContext, which nothing populated before this: the org-axis global query filter
+// matched Guid.Empty on every request, so every IOrganizationScoped read (the PersonaTemplate library)
+// returned zero rows — fail-closed and harmless only while nothing read templates, and load-bearing the
+// moment the org-admin endpoints do.
+//
+// ORDER IS LOAD-BEARING, in BOTH directions, and each mistake is silent:
+//   * It MUST run AFTER UseSessionAuthentication(), which is what assigns HttpContext.User. Earlier, the
+//     principal is still anonymous, no tenant is ever resolved, and every /api/org/* route 401s while every
+//     template read quietly returns zero rows — a tenant tier that looks wired and is inert.
+//   * It MUST run BEFORE anything constructs the REQUEST-SCOPED PulseDbContext, which captures BOTH scopes
+//     once, in its constructor. Nothing between UseExerciseResolution() and here builds that context (the
+//     host resolver and the session authenticator both use their own throwaway scopes) — which is exactly
+//     why this slot works and a later one would not. This middleware follows the same discipline for its own
+//     lookup.
+// It reads only the authenticated staff caller's own StaffUser.OrganizationId — never a body, route or query
+// value — and leaves the tenant UNSET for anonymous/participant/read-only callers (XC-002). It cannot widen
+// the exercise axis: the two axes cover disjoint entity sets.
+app.UseOrganizationResolution();
+
 // Default-deny authorization (identity-auth-roles/11) — MUST be called EXPLICITLY, and MUST sit exactly here:
 // immediately after UseSessionAuthentication, which is what populates HttpContext.User for a live session.
 // WebApplication auto-inserts UseAuthorization() ahead of ALL user middleware when it is never called
@@ -348,6 +393,15 @@ app.MapExerciseConfigurationEndpoints();
 app.MapComplianceChromeEndpoints();     // story 02 — GET/PUT /api/staff/chrome-settings
 app.MapPracticeModeEndpoints();         // story 04 — GET/PUT /api/staff/practice-mode
 app.MapExerciseLifecycleEndpoints();    // story 03 — GET /api/staff/exercise-lifecycle, POST .../transition
+
+// E1 exercise-lifecycle-admin (COR-074/075/076) — the ORGANIZATION-tier staff surface, the endpoint half of
+// AddExerciseLifecycleAdmin() above. Deliberately /api/org/* rather than /api/staff/*: every /api/staff/*
+// route is scoped to the ONE server-resolved exercise, while these span the caller's whole customer tenant.
+// No route, query or body carries an organization id in any form — the tenant is always the caller's own,
+// resolved by app.UseOrganizationResolution() — so there is no IDOR surface on the org axis. Role-gated by
+// OrgAdminAuthorizationFilter: planner OR orgAdmin on the two exercise routes, orgAdmin ALONE on the
+// staff-assignment read (COR-076 — orgAdmin is its own authorization family, not a bigger staff role).
+app.MapExerciseLifecycleAdminEndpoints();  // COR-074/075/076 POST+GET /api/org/exercises, GET /api/org/staff-assignments
 
 // Identity + exercise-resolution endpoints (Phase B2 Waves 1–3). Scope comes only from the resolved
 // IExerciseContext (COR-001); /exercise-context and /session read the resolved scope, never a client

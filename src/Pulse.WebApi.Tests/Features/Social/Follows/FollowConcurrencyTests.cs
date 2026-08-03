@@ -178,6 +178,7 @@ public class FollowConcurrencyTests
         await using var seed = _fixture.CreateContext();
         seed.Exercises.Add(new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = world.Exercise,
             Name = $"Exercise {world.Exercise:N}",
             TimeZone = "UTC",

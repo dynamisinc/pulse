@@ -192,6 +192,7 @@ public class ParticipantShellEndpointsTests
         await using var context = _fixture.CreateContext();
         context.Exercises.Add(new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = exerciseId,
             Name = "Participant shell contract exercise",
             TimeZone = "UTC",

@@ -277,6 +277,8 @@ public sealed class FollowService
         // 5. One server clock read shared by the edge and its telemetry event; the scenario instant is
         //    resolved server-side (COR-053), never from client input.
         var now = DateTimeOffset.UtcNow;
+        // org-scope-exempt(ResolvedScope): exerciseId comes from TryGetScope (IExerciseContext) at step 1 and
+        // is never a request field; it only supplies the scenario-time fallback and the telemetry time zone.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.Id == exerciseId, cancellationToken);
