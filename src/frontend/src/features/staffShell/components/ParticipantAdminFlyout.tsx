@@ -38,13 +38,40 @@
  * shell-global flyouts on preview entry, so this tool never visually covers
  * the preview stage.
  *
- * ## Safety (AC5) — triage and link out, never a password field
+ * ## Safety (AC5) — triage only, never a password field
  * This tool NEVER collects a participant's password — there is no text
  * input anywhere in this component. Quick actions ("Unlock" / "Resend") are
  * one-click triage actions that a real backend would perform out-of-band
- * (e.g. sending a reset link); the footer link routes to the FULL admin
- * surface (out of scope here, E1 identity-auth-roles) for anything beyond
- * this quick triage.
+ * (e.g. sending a reset link). Anything beyond this quick triage belongs to
+ * the FULL participant-admin surface (out of scope here, E1
+ * identity-auth-roles/08) — see below.
+ *
+ * ## The footer link to the full admin surface (staff-navigation/04, COR-073)
+ * This flyout used to end with `<CobraLinkButton href="/staff/participant-admin">
+ * Open full participant admin →</CobraLinkButton>`. That was a DEAD CONTROL
+ * dressed as navigation, and worse than a broken link:
+ *  - it was a raw `href`, i.e. a FULL PAGE RELOAD out of the SPA — every bit of
+ *    client-side state (this flyout, the open toolstrip, any in-progress work
+ *    in the surface behind it) discarded on click;
+ *  - `/staff/participant-admin` is not in `STAFF_ROUTE_REGISTRY`
+ *    (`@/features/staff/staffRouteRegistry`), so the reload landed in the
+ *    `*` catch-all and `StaffRouteTree` bounced the staff member back to their
+ *    role's default surface. Click → lose everything → end up somewhere else.
+ *
+ * The full participant-admin surface is one of the ~40 planned staff surfaces
+ * and is NOT BUILT (identity-auth-roles/08, Not Started). Rather than invent it,
+ * or fake it with a disabled-but-focusable button, the footer is ABSENT — the
+ * same "absent, not a dead control" rule this component already applies to
+ * role-gated quick actions (see "Role gating" above and
+ * `../participantAdminMocks`'s header for why absent beat disabled). Nothing
+ * here is focusable, so nothing here can be tabbed to and activated for no
+ * effect (NFR-001).
+ *
+ * TO RESTORE IT (one small edit, once the surface exists): add the registry
+ * entry in `@/features/staff/staffRouteRegistry`, then render a react-router
+ * `<Link to={entry.path}>`-based control here — CLIENT-SIDE navigation, never a
+ * raw `href`. Do not hardcode the path string: read it from the registry entry
+ * so a rename can't resurrect this exact bug.
  *
  * ## Role gating (COR-017)
  * A quick action is entirely ABSENT (not disabled) when the current staff
@@ -326,15 +353,12 @@ export function ParticipantAdminFlyout() {
         ))}
       </Stack>
 
-      <Box sx={{ px: 1.75, py: 1.25, borderTop: `1px solid ${staffShellTokens.toolstrip.borderColor}` }}>
-        <CobraLinkButton
-          href="/staff/participant-admin"
-          data-testid="participant-admin-footer-link"
-          sx={{ fontSize: 11.5, px: 0 }}
-        >
-          Open full participant admin →
-        </CobraLinkButton>
-      </Box>
+      {/* NO FOOTER LINK — see "The footer link to the full admin surface" in
+          the module header. `/staff/participant-admin` has no registry entry
+          and no surface behind it, so there is deliberately nothing focusable
+          here to activate. Restore this footer as a react-router `<Link>` (or
+          a `useNavigate` control) to the registry entry's `path` the moment
+          identity-auth-roles/08 declares one — never as a raw `href`. */}
     </Box>
   )
 }

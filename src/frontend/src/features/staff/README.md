@@ -5,6 +5,38 @@ COBRA look via `@/theme/styledComponents`-adjacent tokens (`CobraStyles`), FontA
 icons only, MUI system props through `sx` (MUI 9). It must never read as a participant
 skin, and it never mounts a participant/brand theme.
 
+## The staff route registry — `staffRouteRegistry.tsx`
+
+**The one place a staff surface is declared.** `App.tsx` injects
+`STAFF_ROUTE_REGISTRY` into `RoleAwareEntry`, which (for a resolved staff role only)
+hands it to `StaffRouteTree` — see
+[`features/app-shell/README.md`](../app-shell/README.md) for the two-layer routing model
+and the COR-004 guarantee that keeps participants off these URLs entirely.
+
+| Entry field | Meaning |
+|-------------|---------|
+| `id` | Stable machine id — focus keys, telemetry, launcher keys. Never displayed. |
+| `path` | The deep link. Must start `/staff/`; must not be `/staff/login`. |
+| `label` | Launcher item **and** the focus-scope label. |
+| `icon` | FontAwesome `IconDefinition` (never `@mui/icons-material`). |
+| `element` | The route composition, owned by the surface's own feature. |
+| `allowedRoles` | The **single** gate — routing today, launcher visibility later. |
+| `group` | Launcher section: `plan` / `conduct` / `evaluate` / `administer`. |
+| `isDefaultFor?` | Roles that land here for a bare `/staff`, an unknown path, or a path they may not open. Must be ⊆ `allowedRoles`; exactly one entry per role. |
+| `description?` | One line of launcher copy. No routing meaning. |
+
+Shipped paths: `/staff/plan` (planner), `/staff/console` (controller), `/staff/evaluate`
+(evaluator). **Adding surface #4** = build its route composition in its own feature,
+export it, add one entry. No routing-glue edit — `staffRouteRegistry.test.tsx` asserts the
+table's invariants and `features/app-shell/registryIsTheOnlySeam.test.ts` asserts the glue
+never names a surface.
+
+The route compositions themselves live with their features
+(`@/features/controller`, `@/features/evaluator`, `@/features/planner`) so the registry can
+import them without an `App.tsx` cycle. `element` is a `ReactNode`, so a future
+code-split surface simply declares
+`element: <Suspense fallback={…}><LazyFoo /></Suspense>` — no shape change.
+
 ## Story 05 — Staff cross-exercise switcher (COR-005, D5-012(g))
 
 The **pre-conduct exercise switcher** a controller/evaluator/planner uses to pick which

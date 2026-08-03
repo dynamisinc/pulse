@@ -127,6 +127,7 @@ public sealed class LifecycleGatingPipelineOrderTests
         await using var context = _fixture.CreateContext();
         context.Exercises.Add(new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = exerciseId,
             Name = "Wave-3 wiring probe",
             Hostname = host,

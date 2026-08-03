@@ -28,6 +28,7 @@ using Pulse.WebApi.Features.EngineRuntime.Usage;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Helpers;
 using Xunit;
 
 /// <summary>
@@ -930,11 +931,15 @@ public sealed class EngineUsageEndpointsTests
             await using var context = new PulseDbContext(options);
             context.Exercises.Add(new Exercise
             {
+                OrganizationId = Organization.DefaultOrganizationId,
                 Id = exerciseId,
                 Name = "Engine Usage Test Exercise",
                 TimeZone = "UTC",
                 Status = "active",
             });
+            // exercise-isolation/11: the staff human the session names must EXIST and share the exercise's
+            // customer tenant, or the org bound fails closed and every staff endpoint 403s.
+            context.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
             context.StaffAssignments.Add(new StaffAssignment
             {
                 Id = Guid.NewGuid(),

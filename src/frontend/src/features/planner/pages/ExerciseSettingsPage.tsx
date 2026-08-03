@@ -20,13 +20,18 @@
  * right — the Cadence/COBRA idiom for dense operator config, chosen over tabs
  * because it keeps scaling as more panels land.
  *
- * Five sections, from ONE registry (`SECTIONS` below):
+ * Six sections, from ONE registry (`SECTIONS` below):
  *
  *   1. Identity & schedule  ┐
  *   2. Channels             ├─ three VIEWS over ONE shared settings form
  *   3. Theming & outlets    ┘
  *   4. Compliance chrome    ─  its own form, its own save (story 02)
  *   5. Practice / sandbox   ─  its own form, its own save (story 04)
+ *   6. Import accounts      ─  its own form, its own save (staff-navigation
+ *                              story 03, COR-072) — the home
+ *                              `exercise-configuration/feature.md`'s open
+ *                              question (b) left unresolved for `AccountImport`
+ *                              (COR-011): a sixth section, not a sibling route.
  *
  * ============================================================================
  * THE STICKY SHELL: WHAT MOVES AND WHAT DOES NOT
@@ -108,7 +113,7 @@
  *   - exactly ONE `<ExerciseSettingsPanel />` is mounted for all three, with the
  *     selected section passed in as a prop. Three mounts would mean three form
  *     states and three partial saves — each one wiping the other two sections;
- *   - it stays MOUNTED (just `hidden`) while sections 4–5 are on screen, so a
+ *   - it stays MOUNTED (just `hidden`) while sections 4–6 are on screen, so a
  *     planner's unsaved edits survive a detour and are there on return;
  *   - Save and Revert live in that panel's shared footer, visible in all three
  *     sections, so nobody hunts for the section that owns the button.
@@ -124,6 +129,41 @@
  * color alone) and moves the planner to the first one if the problem is not on
  * their screen. The server reports only its FIRST failure, so this client-side
  * pass is what makes a multi-section problem discoverable at all.
+ *
+ * ============================================================================
+ * THE SECTION IS URL-ADDRESSABLE (COR-072, staff-navigation story 03)
+ * ============================================================================
+ * Which section is showing used to live in a plain `useState`, so a reload —
+ * or a colleague's link — always landed back on Identity & schedule. It is now
+ * a `?section=<id>` query parameter on this surface's registered path
+ * (`/staff/plan`, from `staffRouteRegistry`), read/written with React Router's
+ * `useSearchParams`:
+ *
+ *   - `resolveSectionId()` is the ONE fail-safe boundary: an unknown, stale or
+ *     hand-edited `section` value (including a missing one) degrades to
+ *     `DEFAULT_SECTION` rather than throwing. `sectionById()` below still
+ *     throws on a miss — that stays a registry/id-drift bug, never reachable
+ *     once `activeId` is only ever the resolver's output;
+ *   - `selectSection()` (still the single seam every click and "Back to
+ *     Identity & schedule" link go through) writes the param via
+ *     `setSearchParams`, which pushes a history entry — so browser back/forward
+ *     moves between sections exactly like any other navigation;
+ *   - `lastSettingsSection` — "the settings section to come back to" — is kept
+ *     in sync with the URL by its own effect (not only by `selectSection`), so
+ *     a back/forward hop that lands on one of the three shared-form sections
+ *     shows the RIGHT one, not whichever was last clicked;
+ *   - the focus-management effect below is UNCHANGED from before this story:
+ *     focus still moves to the content pane only on an explicit selection
+ *     (through `selectSection`), never on first render — including a first
+ *     render that happens to be a deep link. That is a deliberate, narrow
+ *     reading of "unchanged accessibility contract": this story does not make
+ *     a fresh page load onto a non-default section grab focus away from the
+ *     page heading, matching the pre-existing "never on first render" rule.
+ *
+ * Sections 1–3 stay ONE mounted `<ExerciseSettingsPanel>` regardless of how
+ * `activeId` changed (click, URL edit, or back/forward) — see the constraint
+ * above. Nothing about the full-replace save changes here; only WHAT DRIVES
+ * `activeId` changed.
  *
  * ACCESSIBILITY (NFR-001, WCAG 2.1 AA). The pattern is NAVIGATION + a labeled
  * REGION, implemented completely — not a half-built tablist:
@@ -166,11 +206,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Box, ButtonBase, Divider, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import {
   faArrowLeft,
+  faFileImport,
   faFlask,
   faGears,
   faPenToSquare,
@@ -189,6 +231,7 @@ import {
 import { ExerciseSettingsPanel } from '../components/ExerciseSettingsPanel'
 import { ComplianceChromePanel } from '../components/ComplianceChromePanel'
 import { PracticeModePanel } from '../components/PracticeModePanel'
+import { AccountImport } from '../components/AccountImport'
 import { PANEL_SAVE_BAR_SCROLL_PADDING_PX } from '../components/PanelSaveBar'
 
 // ---------------------------------------------------------------------------
@@ -196,7 +239,7 @@ import { PANEL_SAVE_BAR_SCROLL_PADDING_PX } from '../components/PanelSaveBar'
 // ---------------------------------------------------------------------------
 
 /** Every section the nav can select. Adding a panel adds one member here. */
-type ExerciseConfigSectionId = ExerciseSettingsSectionId | 'chrome' | 'practice'
+type ExerciseConfigSectionId = ExerciseSettingsSectionId | 'chrome' | 'practice' | 'accounts'
 
 /**
  * What a section shows.
@@ -246,6 +289,15 @@ const SECTIONS: readonly ExerciseConfigSection[] = [
     icon: faFlask,
     content: { kind: 'panel', panel: <PracticeModePanel /> },
   },
+  {
+    // Label matches `AccountImport`'s own `h2` verbatim (same precedent as
+    // `chrome`/`practice` above), so the nav item a planner clicks and the
+    // heading they land on cannot drift apart.
+    id: 'accounts',
+    label: 'Import participant accounts',
+    icon: faFileImport,
+    content: { kind: 'panel', panel: <AccountImport /> },
+  },
 ]
 
 /**
@@ -263,11 +315,32 @@ function isSettingsSection(id: ExerciseConfigSectionId): id is ExerciseSettingsS
  * The registry entry for `id`. Throws rather than returning `undefined`: the id
  * always comes from the registry, so a miss means the registry and the id union
  * have drifted — which should fail loudly, not render a nameless pane.
+ *
+ * ONLY ever called with the output of {@link resolveSectionId} (below) — never
+ * directly with a raw URL value — which is what keeps this a registry/id-drift
+ * assertion rather than a crash a stale bookmark could trigger.
  */
 function sectionById(id: ExerciseConfigSectionId): ExerciseConfigSection {
   const found = SECTIONS.find(section => section.id === id)
   if (found === undefined) throw new Error(`Unknown exercise-configuration section: ${id}`)
   return found
+}
+
+/** The query parameter this page's section lives in, on its registered path. */
+const SECTION_QUERY_PARAM = 'section'
+
+/**
+ * The FAIL-SAFE boundary between the URL and the section registry (COR-072).
+ * `null` (the parameter is absent — a bare `/staff/plan`) and any value that is
+ * not one of {@link SECTIONS}' ids (an unknown, removed or hand-edited section)
+ * both degrade to {@link DEFAULT_SECTION} — a stale or mistyped link is a
+ * planner mistake, not a bug worth throwing over. This is the ONE place a raw
+ * URL value is trusted; everywhere else in this file, `activeId` is already
+ * known-good.
+ */
+function resolveSectionId(rawValue: string | null): ExerciseConfigSectionId {
+  const match = SECTIONS.find(section => section.id === rawValue)
+  return match?.id ?? DEFAULT_SECTION
 }
 
 // ---------------------------------------------------------------------------
@@ -385,26 +458,47 @@ function SectionShell({ active, children }: SectionShellProps) {
  * and a React Query `QueryClientProvider`.
  */
 export function ExerciseSettingsPage() {
-  const [activeId, setActiveId] = useState<ExerciseConfigSectionId>(DEFAULT_SECTION)
+  // THE URL IS THE SOURCE OF TRUTH for which section shows (COR-072): a plain
+  // `useState` here always reset to `DEFAULT_SECTION` on reload and could never
+  // be linked. `resolveSectionId` is the fail-safe boundary — an absent or
+  // unknown `?section=` value degrades to `DEFAULT_SECTION` rather than
+  // throwing, so a stale or hand-edited link never crashes the page.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeId = resolveSectionId(searchParams.get(SECTION_QUERY_PARAM))
+
   const [settingsStatus, setSettingsStatus] = useState<ExerciseSettingsStatus>(
     CLEAN_EXERCISE_SETTINGS_STATUS,
   )
 
   // The settings section to come BACK to: the last one the planner looked at, so
-  // a detour through compliance chrome returns them where they left off.
-  const [lastSettingsSection, setLastSettingsSection] =
-    useState<ExerciseSettingsSectionId>(DEFAULT_SECTION)
+  // a detour through compliance chrome returns them where they left off. Seeded
+  // from the URL so a deep link straight into e.g. `?section=channels` shows
+  // the right section of the shared form on first paint, not `identity`.
+  const [lastSettingsSection, setLastSettingsSection] = useState<ExerciseSettingsSectionId>(
+    isSettingsSection(activeId) ? activeId : DEFAULT_SECTION,
+  )
 
   const contentRef = useRef<HTMLDivElement>(null)
-  // Focus moves only after a real selection — never on first render, which would
-  // yank a screen reader away from the page heading.
+  // Focus moves only after a real selection — never on first render (including
+  // a first render landing on a deep-linked, non-default section), which would
+  // yank a screen reader away from the page heading. UNCHANGED by this story:
+  // still driven only by an explicit call to `selectSection`, never by the URL
+  // changing underneath it (e.g. browser back/forward).
   const focusOnNextRender = useRef(false)
 
-  const selectSection = useCallback((id: ExerciseConfigSectionId) => {
-    focusOnNextRender.current = true
-    setActiveId(id)
-    if (isSettingsSection(id)) setLastSettingsSection(id)
-  }, [])
+  const selectSection = useCallback(
+    (id: ExerciseConfigSectionId) => {
+      focusOnNextRender.current = true
+      // A new history entry, so browser back/forward moves between sections —
+      // the same as any other real navigation.
+      setSearchParams(previous => {
+        const next = new URLSearchParams(previous)
+        next.set(SECTION_QUERY_PARAM, id)
+        return next
+      })
+    },
+    [setSearchParams],
+  )
 
   useEffect(() => {
     if (!focusOnNextRender.current) return
@@ -412,11 +506,19 @@ export function ExerciseSettingsPage() {
     contentRef.current?.focus()
   }, [activeId])
 
-  // Stable identity: the settings form reports its status through this on every
-  // change, and an unstable callback would re-fire its effect every render.
-  const handleSettingsStatus = useCallback((status: ExerciseSettingsStatus) => {
-    setSettingsStatus(status)
-  }, [])
+  // Keeps "the settings section to come back to" in sync with the URL for ANY
+  // reason `activeId` changed — a click through `selectSection`, but ALSO a
+  // browser back/forward hop, which does not go through that callback. Without
+  // this, back/forward could land the nav on e.g. "Channels" while the shared
+  // form kept showing whichever settings section was last explicitly clicked.
+  // Keeps "the settings section to come back to" in sync with the URL for ANY
+  // reason `activeId` changed — a click through `selectSection`, but ALSO a
+  // browser back/forward hop, which does not go through that callback. Without
+  // this, back/forward could land the nav on e.g. "Channels" while the shared
+  // form kept showing whichever settings section was last explicitly clicked.
+  useEffect(() => {
+    if (isSettingsSection(activeId)) setLastSettingsSection(activeId)
+  }, [activeId])
 
   const activeSection = sectionById(activeId)
   const settingsActive = isSettingsSection(activeId)
@@ -628,7 +730,10 @@ export function ExerciseSettingsPage() {
           <SectionShell active={settingsActive}>
             <ExerciseSettingsPanel
               section={lastSettingsSection}
-              onStatusChange={handleSettingsStatus}
+              // `setSettingsStatus` (a state setter) is ALREADY stable across
+              // renders by React's own contract — no `useCallback` wrapper
+              // needed to give the form a stable identity for its effect.
+              onStatusChange={setSettingsStatus}
               onRequestSection={selectSection}
             />
           </SectionShell>

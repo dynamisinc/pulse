@@ -109,6 +109,37 @@ The planning/development cycle is a first-class phase, not just "before." A typi
 | COR-053 | **Scenario time is the participant-visible time.** All in-fiction surfaces (post timestamps, "2h ago" relative times, article datelines, weather products, portal dateline) render in scenario time in the exercise's time zone. Wall-clock time is captured in telemetry (XC-004) but never shown inside the fiction. Backdated content (COR-023) and post-jump backfills render consistently under this rule. |
 | COR-054 | **EndEx:** Completing an exercise presents participants a configurable EndEx state (out-of-fiction thank-you/hotwash-instructions page); shared credentials expire per policy (immediate or +N hours for hotwash); the world remains accessible **read-only** to staff and (optionally, facilitated) participants for hotwash — "go find the post I mean" is a real hotwash need. Replay and core metrics are available ≤15 min after EndEx (EVL-033). |
 
+### F1.7 Staff navigation & exercise lifecycle administration
+
+Added 2026-08-01, filed from a backlog audit (`docs/features/staff-navigation/`,
+`docs/features/exercise-lifecycle-admin/`) that found two structural holes: no staff
+surface-switching model exists anywhere in the design corpus (`RoleAwareEntry` sends each staff
+role to exactly one hardcoded surface — no deep links, no navigation element — for the ~40 staff
+surfaces planned across E1/E4/E5/E6/E7/E8/E10), and "create an exercise" has no requirement ID
+anywhere (the only creation language is the un-IDed UX narrative in §5 below; `COR-045` exercise
+duplication presupposes a create path that has never had a requirement or a story). These IDs are
+filed here, in the epic, rather than continuing the un-backfilled `COR-060`–`COR-066` pattern
+(coined directly in the D7 design session and never back-filed — see Open question 5).
+
+| ID | Requirement |
+|---|---|
+| COR-070 | **Staff route tree & surface registry:** staff surfaces are real, deep-linkable routes (bookmarkable, back/forward-safe) — not a single role-keyed hand-off rendered by one catch-all route with no path of its own. A staff surface registry is the extensibility seam every new staff surface (console, evaluator, planner, org admin, and future E4–E6/E8/E10 staff tooling) registers into: adding a surface is a registry entry, not a route-table rewrite. The **participant catch-all (COR-004) is unchanged** — participants keep exactly zero addressable route table, only their one resolved landing surface. |
+| COR-071 | **Surface launcher:** staff reach the registry's surfaces from a single, role-gated launcher anchored to the staff header's brand lockup (`PULSE` / surface name) — grouped by function, keyboard-operable (NFR-001). This is the only new staff-chrome element; it does not add a nav rail (would contest the shell's three-element ownership, `SHELL-CONTRACT.md` §1) and does not add a second toolstrip tenant (the toolstrip is for consult-on-demand flyouts, D7-011/D5-017) — it reuses the header element D7-010 already folded the old exercise bar into. |
+| COR-072 | **Deep-linked configuration sections:** a staff surface's internal sections (e.g. the planner's exercise-settings sections) are URL-addressable, so a reload or a shared link returns the caller to the section they were on rather than always the surface's default section. |
+| COR-073 | **Live exercise-context refresh on switch:** when a staff member switches active exercise (COR-005), every mounted consumer of the exercise scope — not only the React-Query-backed data that already invalidates correctly — reflects the newly active exercise without a full page reload or an incidental remount. |
+| COR-074 | **Exercise creation:** a Planner or OrgAdmin can create a new exercise from a staff surface — not the ops-only bootstrap seam (`POST /api/ops/bootstrap-exercise`), which is explicitly documented as unreachable in a real customer-facing deployment. Creation allocates a hostname (COR-008), sets the initial lifecycle state to `Build` (COR-032), auto-assigns the creator a `StaffAssignment`, and records the exercise's owning organization. |
+| COR-075 | **Exercise list & management:** staff with an organization-scoped role see and manage the set of exercises their organization owns (never a global, cross-organization list) — the surface a Planner/OrgAdmin lands on before using COR-074's create action or COR-045's duplicate action. |
+| COR-076 | **OrgAdmin surface family:** OrgAdmin (COR-010) is its own surface family — neither the participant world nor the existing staff console/evaluator/planner surfaces — for organization-scoped administration (exercise list/management, staff assignment across the organization's exercises). Distinct from a persona "posting as an organization" (COR-018), which is in-fiction content attribution, not platform administration. |
+| COR-077 | **Org-level authentication (no exercise scope):** an OrgAdmin (COR-010) can authenticate and hold a live session scoped to their organization with **no bound exercise** — resolved from organization membership alone, for an organization that owns zero exercises and therefore has no per-exercise `StaffAssignment` to grant the role through. A session with no exercise scope must fail closed on every exercise-scoped read/write (never widen the filter to "every exercise") and must reach only the org-tier surfaces explicitly gated for it (COR-076). Filed 2026-08-02 from a backlog audit of the OrgAdmin surface family (`docs/features/exercise-lifecycle-admin/03-orgadmin-surface-family.md`'s "Known gaps"): the role whose own job includes creating an organization's first exercise (COR-074) cannot itself sign in under today's login funnel until one exists — chicken-and-egg. Provisioning the very first OrgAdmin of a brand-new organization in a real (non-seeded) production deployment is a related, still-open gap this requirement does not itself close (see `docs/features/identity-auth-roles/15-org-level-authentication.md`). |
+
+**Dependency note:** COR-074/075/076 depend on the `Organization` tenant tier (§3.1's `Organization`
+entity; tracked at `docs/features/exercise-isolation/11-organization-tenant-boundary.md`). That
+story's own text defers the tier to a wave "gated on multi-customer go-live" — **superseded for
+this work**: the tier is being pulled forward now as a hard prerequisite for exercise creation,
+exercise management, and the OrgAdmin surface family, and is being built in parallel to this
+backlog. Read `exercise-isolation/11`'s own file for its current status rather than assuming
+"Deferred" still holds.
+
 ## 5. User experience
 
 **Participant first login.** A participant receives a URL and credentials from exercise staff. They log in on a clean, brandable login page (no Dynamis branding by default, no exercise pick list) and land in their exercise's world. The only reminder they're in an exercise is the compliance banner — thin, at the very top/bottom edge of the viewport, visually separate from the simulated apps, exactly like Looking Glass's green UNCLASSIFIED bars. Everything inside the frame is the fiction.
@@ -133,3 +164,9 @@ Channel functionality (E2–E6), posting as personas (E7), automated persona beh
    library and would leak one exercise's naming into another's world, against COR-001. See
    `docs/features/backend-host/03-persona-handle-uniqueness.md`.
 4. Multi-time-zone exercises (statewide/hurricane with mutual-aid players across zones): single exercise time zone (XC-008) is a known constraint, accepted for launch; revisit with multi-region demand. (Review A13.)
+5. **Tracked cleanup, not a blocker:** `COR-060`–`COR-066` were coined directly in the D7 design
+   session (`docs/design/D7-application-shells/`) and shipped in `docs/features/participant-shell/`
+   and `docs/features/staff-shell/` without ever being back-filed into this epic document — unlike
+   `COR-070`–`COR-076` (F1.7), which file new IDs here first per the recommended practice. Back-fill
+   `COR-060`–`COR-066` into a future-F1 subsection once picked up; their content is stable and
+   shipped, so this is a documentation debt, not a renumbering — do not renumber them.

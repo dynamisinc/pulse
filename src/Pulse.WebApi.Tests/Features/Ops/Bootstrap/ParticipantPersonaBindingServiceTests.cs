@@ -62,6 +62,7 @@ public sealed class ParticipantPersonaBindingServiceTests
         await using var context = _fixture.CreateContext();
         context.Exercises.Add(new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = seeded.ExerciseId,
             Name = "Seeded",
             Hostname = host,

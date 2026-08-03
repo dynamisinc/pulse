@@ -58,6 +58,7 @@ public sealed class EngineContentSeedServiceTests
         await using var seed = _fixture.CreateContext();
         seed.Exercises.Add(new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = exerciseId,
             Name = "Seed E2E",
             Hostname = hostname,

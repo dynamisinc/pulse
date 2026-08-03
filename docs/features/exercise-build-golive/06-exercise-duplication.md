@@ -27,7 +27,12 @@ implementation.md (story 06).
 
 ## Dependencies
 Stories 01/04; exercise-configuration (new exercise in Build); persona-management (cast). Compounds
-build investment.
+build investment. **`exercise-lifecycle-admin/01-exercise-creation.md` (COR-074) is a hard
+prerequisite, filed 2026-08-01:** duplication has always presupposed a create path, and until that
+story none existed as a requirement, a story, or a customer-facing endpoint — only the secret-gated
+ops bootstrap seam could create an `Exercise` row. Duplication targets the same creation path
+(hostname allocation, `Build` status, creator `StaffAssignment`, org ownership) that story
+establishes; it does not invent a second one.
 
 ## Tests
 - Integration: cloning copies world definition and config but not participant data or conduct history;

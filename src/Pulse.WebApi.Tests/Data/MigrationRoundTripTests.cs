@@ -32,7 +32,7 @@ public class MigrationRoundTripTests
     public async Task Exercise_RoundTrips()
     {
         var id = Guid.NewGuid();
-        var exercise = new Exercise { Id = id, Name = $"Round Trip Exercise {id}" };
+        var exercise = new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = id, Name = $"Round Trip Exercise {id}" };
 
         await using (var writeContext = _fixture.CreateContext())
         {
@@ -53,6 +53,7 @@ public class MigrationRoundTripTests
         var id = Guid.NewGuid();
         var template = new PersonaTemplate
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = id,
             DisplayName = "Reporter Template",
             Handle = $"@template_{id:N}",
@@ -64,10 +65,15 @@ public class MigrationRoundTripTests
             await writeContext.SaveChangesAsync();
         }
 
-        await using var readContext = _fixture.CreateContext();
+        // exercise-isolation/11: PersonaTemplate is IOrganizationScoped, so the read must be made under the
+        // owning CUSTOMER tenant. An unscoped context would (correctly) see zero rows — that fail-closed
+        // behaviour is proved in OrganizationIsolationTests; here we are round-tripping the columns.
+        await using var readContext = _fixture.CreateContextForOrganization(Organization.DefaultOrganizationId);
         var reloaded = await readContext.PersonaTemplates.SingleAsync(p => p.Id == id);
 
         reloaded.Id.Should().Be(template.Id);
+        reloaded.OrganizationId.Should().Be(
+            Organization.DefaultOrganizationId, "the tenant column must round-trip like every other column");
         reloaded.DisplayName.Should().Be(template.DisplayName);
         reloaded.Handle.Should().Be(template.Handle);
     }
@@ -81,9 +87,10 @@ public class MigrationRoundTripTests
 
         await using (var writeContext = _fixture.CreateContext())
         {
-            writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Persona Round Trip Exercise" });
+            writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Persona Round Trip Exercise" });
             writeContext.PersonaTemplates.Add(new PersonaTemplate
             {
+                OrganizationId = Organization.DefaultOrganizationId,
                 Id = templateId,
                 DisplayName = "Anchor Template",
                 Handle = $"@anchor_{templateId:N}",
@@ -123,7 +130,7 @@ public class MigrationRoundTripTests
 
         await using (var writeContext = _fixture.CreateContext())
         {
-            writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Post Round Trip Exercise" });
+            writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Post Round Trip Exercise" });
             writeContext.Posts.Add(new Post
             {
                 Id = postId,
@@ -171,7 +178,7 @@ public class MigrationRoundTripTests
 
         await using (var writeContext = _fixture.CreateContext())
         {
-            writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Telemetry Round Trip Exercise" });
+            writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Telemetry Round Trip Exercise" });
             writeContext.TelemetryEvents.Add(new TelemetryEvent
             {
                 EventId = eventId,
@@ -257,7 +264,7 @@ public class MigrationRoundTripTests
 
         await using (var writeContext = _fixture.CreateContext())
         {
-            writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Null Target Round Trip Exercise" });
+            writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Null Target Round Trip Exercise" });
             writeContext.TelemetryEvents.Add(new TelemetryEvent
             {
                 EventId = eventId,
@@ -300,6 +307,7 @@ public class MigrationRoundTripTests
         var currentScenarioTime = new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5));
         var exercise = new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = id,
             Name = $"Identity Seam Freeze Exercise {id}",
             Hostname = $"atl-cie-{id:N}.example.com",
@@ -334,7 +342,7 @@ public class MigrationRoundTripTests
 
         await using (var writeContext = _fixture.CreateContext())
         {
-            writeContext.Exercises.Add(new Exercise { Id = id, Name = "Defaulted Exercise" });
+            writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = id, Name = "Defaulted Exercise" });
             await writeContext.SaveChangesAsync();
         }
 
@@ -370,6 +378,7 @@ public class MigrationRoundTripTests
         {
             writeContext.Exercises.Add(new Exercise
             {
+                OrganizationId = Organization.DefaultOrganizationId,
                 Id = id,
                 Name = "Configured Exercise",
                 Status = "staged",
@@ -437,7 +446,7 @@ public class MigrationRoundTripTests
 
         await using (var writeContext = _fixture.CreateContext())
         {
-            writeContext.Exercises.Add(new Exercise { Id = id, Name = "Unconfigured Exercise" });
+            writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = id, Name = "Unconfigured Exercise" });
             await writeContext.SaveChangesAsync();
         }
 
@@ -467,6 +476,50 @@ public class MigrationRoundTripTests
         reloaded.IsPracticeMode.Should().BeFalse("an exercise that has never been flagged is real conduct (COR-033)");
     }
 
+    // --- exercise-lifecycle-admin story 02: the one column that feature's migration adds ------------------
+
+    /// <summary>
+    /// Story exercise-lifecycle-admin/02 (COR-075) AC2: <c>Exercise.CreatedAt</c> round-trips, and is NULL for
+    /// a row nobody stamped. The nullability is the point, not an oversight — the creation instant of every
+    /// exercise that predates the column is genuinely unknown, and a backfilled migration-run-time would be a
+    /// fabricated date the org-scoped list would render to a staff human as fact.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task Exercise_RoundTrips_WithTheOrgAdminCreatedAtColumn()
+    {
+        var stampedId = Guid.NewGuid();
+        var unstampedId = Guid.NewGuid();
+        var createdAt = new DateTimeOffset(2033, 6, 14, 15, 0, 0, TimeSpan.Zero);
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.Exercises.Add(new Exercise
+            {
+                OrganizationId = Organization.DefaultOrganizationId,
+                Id = stampedId,
+                Name = $"Created-At Exercise {stampedId}",
+                CreatedAt = createdAt,
+            });
+            writeContext.Exercises.Add(new Exercise
+            {
+                OrganizationId = Organization.DefaultOrganizationId,
+                Id = unstampedId,
+                Name = $"Unstamped Exercise {unstampedId}",
+            });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = _fixture.CreateContext();
+
+        var stamped = await readContext.Exercises.SingleAsync(e => e.Id == stampedId);
+        stamped.CreatedAt.Should().Be(createdAt, "the column must round-trip as a real datetimeoffset");
+
+        var unstamped = await readContext.Exercises.SingleAsync(e => e.Id == unstampedId);
+        unstamped.CreatedAt.Should().BeNull(
+            "the migration adds the column NULLABLE with no default and no backfill, so an unstamped row "
+            + "reads as 'unknown' rather than as a plausible-looking date nobody chose");
+    }
+
     [RequiresDockerFact]
     public async Task Account_RoundTrips_WithRealExerciseId()
     {
@@ -479,7 +532,7 @@ public class MigrationRoundTripTests
 
         await using (var writeContext = _fixture.CreateContext())
         {
-            writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Account Round Trip Exercise" });
+            writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Account Round Trip Exercise" });
             writeContext.Accounts.Add(new Account
             {
                 Id = accountId,
@@ -527,7 +580,7 @@ public class MigrationRoundTripTests
 
         await using (var writeContext = _fixture.CreateContext())
         {
-            writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Shared Credential Round Trip Exercise" });
+            writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Shared Credential Round Trip Exercise" });
             writeContext.SharedCredentials.Add(new SharedCredential
             {
                 Id = credentialId,
@@ -573,6 +626,7 @@ public class MigrationRoundTripTests
         {
             writeContext.StaffUsers.Add(new StaffUser
             {
+                OrganizationId = Organization.DefaultOrganizationId,
                 Id = staffUserId,
                 ExternalSubject = $"idp-sub-{staffUserId:N}",
                 Username = "controller.jane",

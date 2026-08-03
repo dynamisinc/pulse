@@ -38,8 +38,19 @@ import {
 } from '../services/staffAssignmentsService'
 import type { StaffAssignment } from '../types'
 
+// MOCK COMPLETENESS ONLY (staff-navigation/04): `useSetActiveExercise` now also
+// consumes `useExerciseScopeRefresh()` from this module, so the factory has to
+// supply it or the import is `undefined` at call time. No test SEMANTICS change
+// here — every assertion below is untouched. The refresh's real behaviour (an
+// atomic, server-authoritative re-resolve that a `useExerciseContext()` consumer
+// picks up without a remount) is covered by
+// `../hooks/useSetActiveExercise.contextRefresh.test.tsx` against the REAL
+// provider, and by `@/core/exerciseContext/exerciseContextRefresh.test.tsx`.
+const mockRefreshExerciseScope = vi.fn()
+
 vi.mock('@/core/exerciseContext', () => ({
   useExerciseContext: vi.fn(),
+  useExerciseScopeRefresh: () => mockRefreshExerciseScope,
 }))
 
 vi.mock('../services/staffAssignmentsService', async importOriginal => {

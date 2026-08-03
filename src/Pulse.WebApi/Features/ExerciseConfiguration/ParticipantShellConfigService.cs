@@ -697,6 +697,8 @@ public sealed class ParticipantShellConfigService
             return null;
         }
 
+        // org-scope-exempt(ResolvedScope): exerciseId comes from HasResolvedScope (IExerciseContext), never a
+        // client value, so this participant-facing read cannot reach another exercise or another customer.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);

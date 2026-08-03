@@ -96,6 +96,10 @@ public sealed class StaffLoginService
         // 2. Validate the exercise resolves to a real Exercise BEFORE anything is stamped with it (Wave-0
         //    deferred FKs → service-layer validation), and load its scenario-time placeholder + time zone for
         //    the telemetry envelope. Exercise is the scope root (never IExerciseScoped), so this is unfiltered.
+        // org-scope-exempt(TenantChecked): exerciseId here IS client-supplied (the login body names the
+        // exercise), so this read is deliberately unbounded — a tenant bound would need a tenant that does
+        // not exist yet. The cross-customer case is refused below by the explicit
+        // `staffUser.OrganizationId != exercise.OrganizationId` check, before any session is issued.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
@@ -128,6 +132,8 @@ public sealed class StaffLoginService
         var identity = authentication.Identity;
 
         // 4. Resolve / provision the StaffUser by external subject (unscoped — findable regardless of scope).
+        // org-scope-exempt(ResolutionRoot): this read IS the identity resolution — an IdP subject mapped to a
+        // staff human before any session or tenant exists. A tenant bound here would lock every human out.
         var staffUser = await _dbContext.StaffUsers
             .FirstOrDefaultAsync(u => u.ExternalSubject == identity.ExternalSubject, cancellationToken);
 
@@ -136,6 +142,11 @@ public sealed class StaffLoginService
             staffUser = new StaffUser
             {
                 Id = Guid.NewGuid(),
+                // exercise-isolation/11 (COR-010): a first-seen staff human joins the CUSTOMER that owns the
+                // exercise they are logging in to — the only tenant the server can attribute them to here,
+                // and never a client-supplied value. (A multi-customer IdP that carries an org claim plugs in
+                // exactly here.) The write-guard rejects an empty tenant, so this is not optional.
+                OrganizationId = exercise.OrganizationId,
                 ExternalSubject = identity.ExternalSubject,
                 DisplayName = identity.DisplayName,
                 Username = identity.Username,
@@ -145,9 +156,26 @@ public sealed class StaffLoginService
         }
         else
         {
-            // Keep the recorded identity fresh from the authoritative provider on each login.
+            // Keep the recorded identity fresh from the authoritative provider on each login. The
+            // OrganizationId is deliberately NOT refreshed: re-homing a staff human across a customer
+            // boundary on a routine login is exactly the silent cross-tenant move story 11 exists to prevent.
             staffUser.DisplayName = identity.DisplayName;
             staffUser.Username = identity.Username;
+        }
+
+        // exercise-isolation/11 AC3 — reachability is bounded by the tenant. An assignment alone is no longer
+        // sufficient: the staff human and the exercise must belong to the SAME customer. This fails closed
+        // (403, no session) and is checked BEFORE the assignment lookup below so a cross-tenant attempt never
+        // reveals whether an assignment exists. In the single-customer deployment this can only ever be true;
+        // it is the guard that keeps it true once there are two.
+        if (staffUser.OrganizationId != exercise.OrganizationId)
+        {
+            _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
+                exerciseId, role: null, actingHumanId: staffUser.Id.ToString(), outcome: FailureOutcomePayload,
+                now: now, scenarioTime: scenarioTime, timeZone: exercise.TimeZone, targetStaffUserId: staffUser.Id));
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            return StaffLoginResult.NotAssigned();
         }
 
         // 5. Authorization: the staff user must be assigned to the selected exercise. StaffAssignment is the

@@ -159,6 +159,8 @@ public sealed partial class EngineContentSeedService
 
         // 3. RESOLVE (never create) the exercise for this host. Exercise is unscoped → this by-host read is
         //    unfiltered; it is never written. A host that resolves to nothing is a 404, not a create.
+        // org-scope-exempt(ResolutionRoot): the by-HOSTNAME read that resolves which exercise to seed; the
+        // tenant is derived FROM the result, so it cannot be a precondition of the query.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Hostname == host, cancellationToken);

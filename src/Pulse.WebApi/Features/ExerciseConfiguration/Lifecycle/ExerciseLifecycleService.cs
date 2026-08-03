@@ -230,6 +230,8 @@ public sealed class ExerciseLifecycleService
                 $"'to' must be one of: {string.Join(", ", ExerciseLifecycleStates.All)}.");
         }
 
+        // org-scope-exempt(ResolvedScope): exerciseId comes from the server-resolved scope, never the request
+        // body (the body carries only the target state), so this lifecycle write stays inside the caller's tenant.
         var exercise = await _dbContext.Exercises
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
 
@@ -317,6 +319,8 @@ public sealed class ExerciseLifecycleService
 
     /// <summary>Reads just the status column of the SERVER-RESOLVED exercise, or <c>null</c> when absent.</summary>
     private async Task<string?> ReadStoredStatusAsync(Guid exerciseId, CancellationToken cancellationToken) =>
+        // org-scope-exempt(ResolvedScope): every caller passes the SERVER-RESOLVED exercise id (see the
+        // summary above), never a client value, so this status read cannot reach another customer's row.
         await _dbContext.Exercises
             .AsNoTracking()
             .Where(e => e.Id == exerciseId)

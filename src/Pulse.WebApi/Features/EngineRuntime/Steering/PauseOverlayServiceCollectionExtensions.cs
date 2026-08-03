@@ -85,6 +85,8 @@ public static class PauseOverlayServiceCollectionExtensions
             {
                 await using var scope = provider.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
 
+                // org-scope-exempt(ResolvedScope): exerciseId is the SERVER-resolved scope the transition
+                // carries, never a client-supplied id, so this status read stays inside the caller's tenant.
                 return await scope.ServiceProvider.GetRequiredService<PulseDbContext>().Exercises
                     .AsNoTracking()
                     .Where(exercise => exercise.Id == exerciseId)

@@ -35,7 +35,7 @@ public sealed class AccountProvisioningServiceTests
 
     private async Task<Exercise> SeedExerciseAsync()
     {
-        var exercise = new Exercise { Id = Guid.NewGuid(), Name = $"Exercise {Guid.NewGuid():N}", TimeZone = "UTC", Status = "active" };
+        var exercise = new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = Guid.NewGuid(), Name = $"Exercise {Guid.NewGuid():N}", TimeZone = "UTC", Status = "active" };
         await using var seed = _fixture.CreateContext();
         seed.Exercises.Add(exercise);
         await seed.SaveChangesAsync();

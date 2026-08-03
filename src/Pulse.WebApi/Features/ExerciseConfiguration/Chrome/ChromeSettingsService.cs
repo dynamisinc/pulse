@@ -144,6 +144,8 @@ public sealed class ChromeSettingsService
             return ChromeSettingsResult.ScopeUnresolved();
         }
 
+        // org-scope-exempt(ResolvedScope): exerciseId comes from TryResolveScope (IExerciseContext), never a
+        // request body, so the row read is the caller's own exercise and therefore their own organization.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
@@ -176,6 +178,8 @@ public sealed class ChromeSettingsService
             return ChromeSettingsResult.Invalid(validationError);
         }
 
+        // org-scope-exempt(ResolvedScope): exerciseId comes from TryResolveScope (IExerciseContext), never the
+        // request body, so this write targets the caller's own exercise within their own organization.
         var exercise = await _dbContext.Exercises
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
 

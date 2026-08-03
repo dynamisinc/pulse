@@ -84,14 +84,17 @@ as written. **Open question:** should staff *writes* be role-scoped (planner-onl
 Director-only for lifecycle transitions), and which story owns that hardening — a new story in
 `identity-auth-roles`, or an AC added to each writing story? Not decided here.
 
-**(b) `AccountImport` is orphaned.** Built and tested for planners
+**(b) `AccountImport` is orphaned.** ~~Built and tested for planners
 (`identity-auth-roles/02`, COR-011) and exported from `features/planner/index.ts`, but **mounted
 nowhere** — verified by grep across `src/frontend/src` (the only hits outside the planner folder are two
 comments). This was excusable while no planner surface existed; it no longer is, because
 `PlannerWorkspaceRoute` now exists and mounts **only** `ExerciseSettingsPage`, whose documented
-composition points are story 02's and story 04's panels. **Open question:** where does account import
-live — a third panel on the settings page, a sibling planner route, or a tab? It is not this feature's
-requirement, so no wave-3 story should absorb it opportunistically. Not decided here.
+composition points are story 02's and story 04's panels.~~ **Resolved (2026-08-01):** a sixth,
+deep-linkable section on `ExerciseSettingsPage`, exactly like Compliance chrome and Practice/sandbox
+(self-contained panel, own hook/service/query, no props) — not a sibling route or a tab, per
+`docs/features/staff-navigation/03-deep-linked-planner-sections.md` (COR-072), which also gives
+`ExerciseSettingsPage`'s sections a URL each. That story owns the mount; nothing in this feature's
+own wave 3 absorbs it.
 
 **(c) Channel-enablement route gating is unowned.** Already recorded in
 [`01-per-exercise-settings.md`](01-per-exercise-settings.md) → "Known gap: channel-enablement route

@@ -16,6 +16,7 @@ using Pulse.WebApi.Features.ExerciseConfiguration.PracticeMode;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Helpers;
 
 /// <summary>
 /// A minimal host wired EXACTLY as the orchestrator will wire story 04 into <c>Program.cs</c> —
@@ -129,6 +130,7 @@ public sealed class PracticeModeTestHost : IAsyncDisposable
         {
             context.Exercises.Add(new Exercise
             {
+                OrganizationId = Organization.DefaultOrganizationId,
                 Id = exerciseId,
                 // Leak-word-free by design: the shell-config assertions reject any body containing
                 // "practice"/"sandbox", so a fixture name carrying those words would one day fail on
@@ -139,6 +141,9 @@ public sealed class PracticeModeTestHost : IAsyncDisposable
             });
         }
 
+        // exercise-isolation/11: the staff human the session names must EXIST and share the exercise's
+        // customer tenant, or the org bound fails closed and every staff endpoint 403s.
+        context.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
         context.StaffAssignments.Add(new StaffAssignment
         {
             Id = Guid.NewGuid(),

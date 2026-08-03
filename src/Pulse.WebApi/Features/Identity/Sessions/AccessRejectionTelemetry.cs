@@ -105,6 +105,8 @@ public sealed partial class AccessRejectionTelemetry
 
             // Exercise is the scope ROOT (never IExerciseScoped), so this read is unfiltered. It supplies the
             // envelope's scenario time + time zone, exactly as the login services do.
+            // org-scope-exempt(ResolvedScope): exerciseId.Value is the server-resolved scope for the rejected
+            // request, never a client value; it only supplies the telemetry envelope's clock fields.
             var exercise = await dbContext.Exercises
                 .AsNoTracking()
                 .FirstOrDefaultAsync(e => e.Id == exerciseId.Value, context.RequestAborted);

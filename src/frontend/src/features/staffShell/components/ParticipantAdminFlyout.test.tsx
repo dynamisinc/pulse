@@ -8,7 +8,10 @@
  *    (locked-out + no-login-yet, excluding active) — AC2.
  *  - Opening the tool renders a 330px flyout, absolutely positioned flush
  *    against the 56px toolstrip, listing rows (name/role/status chip/quick
- *    action) plus a footer link to the full admin surface — AC1.
+ *    action) — AC1.
+ *  - No dead footer link: the full participant-admin surface is not built, so
+ *    nothing here is a raw `href` to an unregistered path (staff-navigation/04,
+ *    COR-073 AC3; NFR-001).
  *  - Never a `createPortal`/`document.body` escape (AC1).
  *  - The status chip is TEXT + ICON for every status, never color-only
  *    (NFR-001).
@@ -175,7 +178,7 @@ describe('ParticipantAdminFlyout — flyout content, closed by default (AC1)', (
     expect(screen.queryByTestId('participant-admin-flyout')).not.toBeInTheDocument()
   })
 
-  it('opens a 330px flyout listing rows (name/role/status chip/quick action) plus a footer link to the full admin surface', async () => {
+  it('opens a 330px flyout listing rows (name/role/status chip/quick action)', async () => {
     const user = userEvent.setup()
     renderFlyout()
 
@@ -198,10 +201,35 @@ describe('ParticipantAdminFlyout — flyout content, closed by default (AC1)', (
     // Active participants have nothing to triage — no quick action at all.
     expect(within(activeRow).queryByRole('button')).not.toBeInTheDocument()
 
-    expect(within(flyout).getByTestId('participant-admin-footer-link')).toHaveAttribute(
-      'href',
-      '/staff/participant-admin',
-    )
+  })
+
+  // staff-navigation/04 (COR-073), AC3 + NFR-001. This test previously PINNED
+  // the defect: it asserted the footer control carried href="/staff/participant-
+  // admin" — a raw anchor to a path no registry entry declares, i.e. a full page
+  // reload out of the SPA that lands in the catch-all and bounces the staff
+  // member to their role's default surface. The full participant-admin surface
+  // (identity-auth-roles/08) is Not Started, so the honest degrade is ABSENCE —
+  // the same rule this component already applies to role-gated quick actions.
+  // Re-pointed to assert the property that actually matters and cannot be
+  // satisfied by an unbuilt link: NOTHING in this flyout navigates by raw href.
+  it('renders no dead footer link — no raw href to an unbuilt surface (AC3, NFR-001)', async () => {
+    const user = userEvent.setup()
+    renderFlyout()
+
+    await openFlyout(user)
+
+    const flyout = screen.getByTestId('participant-admin-flyout')
+    expect(within(flyout).queryByTestId('participant-admin-footer-link')).not.toBeInTheDocument()
+    expect(within(flyout).queryByText(/open full participant admin/i)).not.toBeInTheDocument()
+    // No raw anchor anywhere in the flyout: a full-page reload out of the SPA
+    // must not be reachable from a staff tool, whatever it is labelled.
+    expect(flyout.querySelectorAll('a[href]')).toHaveLength(0)
+    // Every remaining focusable control is a real, live quick action — nothing
+    // is tabbable-but-inert (NFR-001).
+    for (const button of within(flyout).getAllByRole('button')) {
+      expect(button).not.toBeDisabled()
+      expect(button).not.toHaveAttribute('aria-disabled', 'true')
+    }
   })
 
   it('positions the flyout absolutely, flush against the 56px toolstrip', async () => {

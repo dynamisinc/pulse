@@ -117,7 +117,7 @@ public class TelemetryEnvelopeGuardTests
         var exerciseId = Guid.NewGuid();
 
         await using var writeContext = _fixture.CreateContext();
-        writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Envelope Guard Positive Control" });
+        writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Envelope Guard Positive Control" });
         writeContext.TelemetryEvents.Add(BuildEvent(
             eventId,
             exerciseId,
@@ -137,7 +137,7 @@ public class TelemetryEnvelopeGuardTests
         var exerciseId = Guid.NewGuid();
 
         await using var writeContext = _fixture.CreateContext();
-        writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Envelope Guard Attributed Control" });
+        writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Envelope Guard Attributed Control" });
         writeContext.TelemetryEvents.Add(BuildEvent(
             eventId,
             exerciseId,
@@ -158,7 +158,7 @@ public class TelemetryEnvelopeGuardTests
         var exerciseId = Guid.NewGuid();
 
         await using var writeContext = _fixture.CreateContext();
-        writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Envelope Guard Batch" });
+        writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Envelope Guard Batch" });
         writeContext.TelemetryEvents.Add(BuildEvent(
             conformantId, exerciseId, new TelemetryActor { Kind = "system" }));
         writeContext.TelemetryEvents.Add(BuildEvent(

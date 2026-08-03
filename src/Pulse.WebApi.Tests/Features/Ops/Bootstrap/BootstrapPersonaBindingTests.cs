@@ -65,6 +65,7 @@ public sealed class BootstrapPersonaBindingTests
         await using var seed = _fixture.CreateContext();
         seed.Exercises.Add(new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = exerciseId,
             Name = "Seeded",
             Hostname = host,

@@ -112,8 +112,11 @@ public class ExerciseConfigurationMigrationTests
 
         await database.MigrateToAsync(MigrationUnderTest);
 
-        await using var context = database.CreateContext();
-        var reloaded = await context.Exercises.AsNoTracking().SingleAsync(e => e.Id == id);
+        // Read via RAW SQL, not EF. The database is deliberately parked at this migration, whose schema
+        // predates later columns (exercise-isolation/11's Exercises.OrganizationId among them) that the
+        // CURRENT entity model maps — so an EF materialization would fail on a missing column and mask what
+        // this test is actually about. Same reason InsertExerciseAsync/ReadStatusesAsync are raw.
+        var reloaded = await database.ReadConfigurationColumnsAsync(id);
 
         reloaded.ComplianceChromeEnabled.Should().BeTrue(
             "the migration must add the chrome switch ON, matching the shipped constant — a pre-existing " +
@@ -161,6 +164,25 @@ public class ExerciseConfigurationMigrationTests
             "after a rollback every row must be inside the legacy four — an un-widened client's isExerciseStatus " +
             "guard fails closed on anything else and blanks the participant world");
     }
+
+    /// <summary>The story-01a columns read back raw from a database parked at that migration.</summary>
+    /// <param name="ComplianceChromeEnabled">The COR-031 chrome switch.</param>
+    /// <param name="WatermarkEnabled">The NFR-008 watermark switch.</param>
+    /// <param name="IsPracticeMode">The COR-033 practice flag.</param>
+    /// <param name="WorldName">The COR-030 world name (null = unconfigured).</param>
+    /// <param name="EnabledChannels">The COR-030 channel list (null = unconfigured).</param>
+    /// <param name="BrandName">The COR-030 brand name (null = unconfigured).</param>
+    /// <param name="ChromeTopText">The COR-031 top banner text (null = unconfigured).</param>
+    /// <param name="ScheduledStartAt">The COR-030 schedule start (null = unscheduled).</param>
+    public sealed record ConfigurationColumns(
+        bool ComplianceChromeEnabled,
+        bool WatermarkEnabled,
+        bool IsPracticeMode,
+        string? WorldName,
+        string? EnabledChannels,
+        string? BrandName,
+        string? ChromeTopText,
+        DateTimeOffset? ScheduledStartAt);
 
     /// <summary>
     /// A throwaway database on the same real SQL Server the shared fixture resolved, created per test and
@@ -231,6 +253,41 @@ public class ExerciseConfigurationMigrationTests
             await command.ExecuteNonQueryAsync();
 
             return id;
+        }
+
+        /// <summary>
+        /// Reads the columns story 01a's migration is responsible for, for one exercise — raw SQL, so it is
+        /// independent of every schema version that came AFTER the migration under test.
+        /// </summary>
+        /// <param name="id">The exercise id.</param>
+        /// <returns>The backfilled switch + settings values.</returns>
+        public async Task<ConfigurationColumns> ReadConfigurationColumnsAsync(Guid id)
+        {
+            await using var connection = new SqlConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT [ComplianceChromeEnabled], [WatermarkEnabled], [IsPracticeMode],
+                       [WorldName], [EnabledChannels], [BrandName], [ChromeTopText], [ScheduledStartAt]
+                FROM [Exercises] WHERE [Id] = @id;
+                """;
+            command.Parameters.AddWithValue("@id", id);
+
+            await using var reader = await command.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+            {
+                throw new InvalidOperationException($"No Exercises row for {id}.");
+            }
+
+            return new ConfigurationColumns(
+                reader.GetBoolean(0),
+                reader.GetBoolean(1),
+                reader.GetBoolean(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5),
+                reader.IsDBNull(6) ? null : reader.GetString(6),
+                reader.IsDBNull(7) ? null : reader.GetDateTimeOffset(7));
         }
 
         /// <summary>Reads every exercise's stored status, keyed by id — raw SQL, schema-version independent.</summary>

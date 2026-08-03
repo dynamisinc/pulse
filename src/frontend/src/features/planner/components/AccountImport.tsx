@@ -9,11 +9,18 @@
  *
  * TWO WORLDS — this is the STAFF world (D0 §2 / CLAUDE.md). It uses the COBRA
  * look: `@/theme/styledComponents` (`CobraPrimaryButton` / `CobraSecondaryButton`)
- * + `CobraStyles` spacing, and it renders inside a COBRA `ThemeProvider` (the
- * later app-shell/planner story mounts it — this component OWNs only itself,
- * its hook, and its service, never the route table). It must NEVER read as a
- * participant skin. Icons are FontAwesome only (never `@mui/icons-material`);
- * MUI system props go through `sx` (MUI 9).
+ * + `CobraStyles` spacing, and it renders inside a COBRA `ThemeProvider`. It
+ * must NEVER read as a participant skin. Icons are FontAwesome only (never
+ * `@mui/icons-material`); MUI system props go through `sx` (MUI 9).
+ *
+ * MOUNTED as the sixth section of `ExerciseSettingsPage`
+ * (staff-navigation/03 — COR-072), exactly like `ComplianceChromePanel` and
+ * `PracticeModePanel`: a self-contained panel — own hook, own service, no
+ * props threaded in — so this component still owns only itself. This closes
+ * `exercise-configuration/feature.md`'s open question (b), which had left it
+ * built, tested and exported but reachable by nothing. The heading below is a
+ * real `<h2>` (`component="h2"` on an `h6`-styled `Typography`) so it composes
+ * correctly into that page's "one `h1`, an `h2` per section" contract.
  *
  * ACCESSIBILITY (NFR-001, WCAG 2.1 AA):
  *  - Per-row status is NEVER color-only: `created` / `failed` each pair a
@@ -272,7 +279,7 @@ export function AccountImport() {
     >
       <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 0.5 }}>
         <FontAwesomeIcon icon={faUsers} aria-hidden />
-        <Typography id="account-import-heading" variant="h6" sx={{ fontWeight: 700 }}>
+        <Typography id="account-import-heading" variant="h6" component="h2" sx={{ fontWeight: 700 }}>
           Import participant accounts
         </Typography>
       </Stack>

@@ -58,6 +58,8 @@ public sealed class PracticeModeEvaluationEligibility : IEvaluationEligibility
         var exerciseId = scope.Value;
 
         // Nullable projection so "no row" is distinguishable from "row with the flag off".
+        // org-scope-exempt(ResolvedScope): exerciseId is scope.Value from IExerciseContext, never a client
+        // value, so this eligibility read is confined to the caller's own exercise and hence their tenant.
         var isPracticeMode = await _dbContext.Exercises
             .AsNoTracking()
             .Where(e => e.Id == exerciseId)

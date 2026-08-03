@@ -30,6 +30,9 @@ and the exercise clock (COR-050).
 ## Dependencies
 Exercise-configuration lifecycle (COR-032); exercise-clock (StartEx starts the clock, COR-050);
 persona-management, and each channel's composers (the content being built). Backend not present yet.
+**Story 06 (COR-045, duplication) additionally depends on `exercise-lifecycle-admin/01-exercise-creation.md`
+(COR-074, filed 2026-08-01)** — the create path duplication has always presupposed did not exist as
+a requirement or endpoint until that story.
 
 ## Design notes
 Staff world. The two go-live moments are deliberately distinct: **Build → Staged** opens the ambient

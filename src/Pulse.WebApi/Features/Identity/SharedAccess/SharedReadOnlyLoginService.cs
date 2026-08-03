@@ -125,6 +125,8 @@ public sealed class SharedReadOnlyLoginService
         // 3. Load the resolved exercise for the telemetry envelope (scenario time + time zone). Exercise is the
         //    scope root (never IExerciseScoped), so this by-id read is unfiltered. A resolved scope with no
         //    backing exercise cannot carry valid scoped telemetry — fail closed with no event.
+        // org-scope-exempt(ResolvedScope): exerciseId is scope.Value from IExerciseContext (host-resolved),
+        // never a login-body field, so this read is confined to the exercise the caller actually reached.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);

@@ -194,8 +194,8 @@ public sealed class SessionScopeIsolationTests
         var postB = Guid.NewGuid();
 
         await using var seed = _fixture.CreateContext();
-        seed.Exercises.Add(new Exercise { Id = exerciseA, Name = "A", Hostname = hostA, TimeZone = "UTC", Status = "active" });
-        seed.Exercises.Add(new Exercise { Id = exerciseB, Name = "B", Hostname = hostB, TimeZone = "UTC", Status = "active" });
+        seed.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseA, Name = "A", Hostname = hostA, TimeZone = "UTC", Status = "active" });
+        seed.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseB, Name = "B", Hostname = hostB, TimeZone = "UTC", Status = "active" });
         seed.Posts.Add(NewPost(postA, exerciseA));
         seed.Posts.Add(NewPost(postB, exerciseB));
         await seed.SaveChangesAsync();

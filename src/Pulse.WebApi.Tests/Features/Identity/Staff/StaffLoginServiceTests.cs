@@ -41,6 +41,7 @@ public sealed class StaffLoginServiceTests
     {
         var exercise = new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = Guid.NewGuid(),
             Name = $"Exercise {Guid.NewGuid():N}",
             TimeZone = timeZone,
@@ -59,6 +60,7 @@ public sealed class StaffLoginServiceTests
         await using var seed = _fixture.CreateContext();
         seed.StaffUsers.Add(new StaffUser
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = staffUserId,
             ExternalSubject = subject,
             DisplayName = displayName,

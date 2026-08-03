@@ -24,6 +24,16 @@ using Pulse.WebApi.Data.Entities;
 /// content query from then on.
 /// </para>
 /// <para>
+/// <b>Bounded by the CUSTOMER tenant (exercise-isolation/11 AC3, COR-010).</b> "Cross-exercise" has never
+/// meant "cross-customer". Both operations here now resolve the caller's own <c>StaffUser.OrganizationId</c>
+/// SERVER-SIDE and bound the exercise by it: the listing joins through
+/// <see cref="OrganizationScope.InOrganization{TEntity}"/>, and the switch refuses (403 NotAssigned) an
+/// exercise belonging to another organization. Both fail CLOSED on an unresolved tenant — an unknown
+/// organization reaches nothing, never everything. <c>Exercise</c> and <c>StaffUser</c> carry no global query
+/// filter on either axis (they are the resolution roots), which is precisely why the bound must be written
+/// here rather than inherited.
+/// </para>
+/// <para>
 /// <b>Active-exercise selection persistence + the Wave-2 seam.</b> Setting the active exercise persists the
 /// selection onto the staff <c>Session</c> row (its bound <see cref="Session.ExerciseId"/> and per-exercise
 /// <see cref="Session.Role"/>). The PER-REQUEST application of that selection into
@@ -70,9 +80,24 @@ public sealed class StaffAssignmentService
             return null;
         }
 
-        // Own-only (filtered by StaffUserId) + cross-exercise (StaffAssignment is unscoped). Inner-join to
-        // Exercise (the scope root, unfiltered) for the display name — an assignment pointing at a missing
-        // exercise is dropped rather than surfaced with a null name.
+        // exercise-isolation/11 AC3 (COR-010): reachability is bounded by the CUSTOMER tenant. Resolve the
+        // caller's own organization from their StaffUser row — server-side, never a client value — and use it
+        // to bound the exercise join below. A staff user whose row has somehow vanished resolves to no tenant
+        // and therefore reaches nothing (fail closed), rather than falling back to "all exercises".
+        // org-scope-exempt(OwnIdentity): this reads the CALLER'S OWN staff row, by the id their server-issued
+        // session carries — it is how the caller's tenant is discovered, so it cannot itself be tenant-bound.
+        var callerOrganizationId = await _dbContext.StaffUsers
+            .AsNoTracking()
+            .Where(u => u.Id == current.StaffUserId)
+            .Select(u => (Guid?)u.OrganizationId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // Own-only (filtered by StaffUserId) + cross-exercise (StaffAssignment is unscoped) + within-tenant
+        // (InOrganization). Inner-join to Exercise for the display name — an assignment pointing at a missing
+        // exercise is dropped rather than surfaced with a null name. Exercise carries no global query filter
+        // on EITHER axis (it is both scope roots' resolution target), which is exactly why the tenant bound
+        // has to be written explicitly here; OrganizationScope.InOrganization is the fail-closed helper that
+        // makes "explicit" mean "matches nothing when unresolved".
         //
         // Project the raw Guid (NOT a.ExerciseId.ToString()) so the join materializes first and the Guid is
         // stringified CLIENT-SIDE below. A `.ToString()` inside this EF projection is translated to SQL and
@@ -85,7 +110,7 @@ public sealed class StaffAssignmentService
         var rows = await (
             from a in _dbContext.StaffAssignments.AsNoTracking()
             where a.StaffUserId == current.StaffUserId
-            join e in _dbContext.Exercises.AsNoTracking() on a.ExerciseId equals e.Id
+            join e in _dbContext.Exercises.AsNoTracking().InOrganization(callerOrganizationId) on a.ExerciseId equals e.Id
             orderby e.Name
             select new { a.ExerciseId, ExerciseName = e.Name, a.Role }).ToListAsync(cancellationToken);
 
@@ -133,8 +158,22 @@ public sealed class StaffAssignmentService
             return SetActiveExerciseResult.NotAssigned();
         }
 
+        // exercise-isolation/11 AC3 (COR-010): the caller's own CUSTOMER tenant, resolved server-side.
+        // org-scope-exempt(OwnIdentity): this reads the CALLER'S OWN staff row, by the id their server-issued
+        // session carries — it is how the caller's tenant is discovered, so it cannot itself be tenant-bound.
+        var callerOrganizationId = await _dbContext.StaffUsers
+            .AsNoTracking()
+            .Where(u => u.Id == current.StaffUserId)
+            .Select(u => (Guid?)u.OrganizationId)
+            .FirstOrDefaultAsync(cancellationToken);
+
         // Wave-0 deferred FKs → validate the exercise resolves to a real Exercise before persisting the
-        // selection (and to read its display name for the confirmation). Exercise is the unfiltered scope root.
+        // selection (and to read its display name for the confirmation). Exercise is the unfiltered scope
+        // root on both axes.
+        // org-scope-exempt(TenantChecked): exerciseId IS client-supplied (the switch names the target), so
+        // this read is deliberately unbounded and answers only "does this id exist at all". The cross-customer
+        // case is refused a few lines below by the explicit `exercise.OrganizationId != callerOrganizationId`
+        // comparison, which returns NotAssigned (403) before the selection is persisted or a name disclosed.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
@@ -142,6 +181,16 @@ public sealed class StaffAssignmentService
         if (exercise is null)
         {
             return SetActiveExerciseResult.Invalid("exerciseId does not resolve to a known exercise.");
+        }
+
+        // exercise-isolation/11 AC3 (COR-010): the tenant bound, applied EXPLICITLY because Exercise carries
+        // no global filter. Written as an unconditional inequality against a nullable so an UNRESOLVED caller
+        // tenant refuses too (null != any real tenant) — fail closed on the org axis, never "unknown tenant
+        // sees everything". Refused as NotAssigned (403), the same shape as an unassigned exercise, so a
+        // cross-customer selection discloses nothing beyond "you may not have this".
+        if (exercise.OrganizationId != callerOrganizationId)
+        {
+            return SetActiveExerciseResult.NotAssigned();
         }
 
         // Load the persisted staff session row to update (Session is unscoped → findable regardless of scope).

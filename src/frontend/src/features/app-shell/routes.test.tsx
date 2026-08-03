@@ -25,12 +25,14 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { faSliders } from '@fortawesome/free-solid-svg-icons'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSession, useRole } from '@/core/auth'
 import type { Session } from '@/core/auth'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
 import { createRoleAwareRoutes } from './routes'
+import type { RoleAwareEntryProps } from './RoleAwareEntry'
 import { LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
 
 vi.mock('@/core/services/api', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
@@ -73,9 +75,22 @@ const SESSION: Session = {
   expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
 }
 
-const SURFACES = {
+const SURFACES: RoleAwareEntryProps = {
   participantSurface: <div data-testid="participant-surface" />,
-  staffSurfaces: { controller: <div data-testid="staff-surface-controller" /> },
+  // The staff route REGISTRY (stubbed): one deep-linkable controller surface.
+  // Only staff sessions ever reach it — see the catch-all case below.
+  staffRoutes: [
+    {
+      id: 'controller-console',
+      path: '/staff/console',
+      label: 'Controller Console',
+      icon: faSliders,
+      element: <div data-testid="staff-surface-controller" />,
+      allowedRoles: ['controller'],
+      isDefaultFor: ['controller'],
+      group: 'conduct',
+    },
+  ],
   participantGuard: StubGuard,
   staffSwitcher: <div data-testid="exercise-switcher" />,
 }

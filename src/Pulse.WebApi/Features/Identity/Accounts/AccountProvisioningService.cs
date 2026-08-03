@@ -260,6 +260,8 @@ public sealed class AccountProvisioningService
         }
 
         // R6: the active exercise must resolve to a real Exercise before any account row is stamped with it.
+        // org-scope-exempt(ResolvedScope): scope.Value is the server-resolved active exercise, never a client
+        // value, so this existence probe cannot confirm or deny another customer's exercise.
         var exerciseExists = await _dbContext.Exercises
             .AsNoTracking()
             .AnyAsync(e => e.Id == scope.Value, cancellationToken);

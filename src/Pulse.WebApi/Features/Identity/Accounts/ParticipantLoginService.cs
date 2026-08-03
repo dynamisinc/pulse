@@ -118,6 +118,8 @@ public sealed class ParticipantLoginService
 
         // 3. R6: the resolved scope must be a live Exercise before anything is stamped with it. Exercise is the
         //    unscoped scope root, so this read is unfiltered.
+        // org-scope-exempt(ResolvedScope): scope.Value is the host-resolved exercise from IExerciseContext,
+        // never a login-body field, so this read is confined to the exercise the participant reached.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == scope.Value, cancellationToken);

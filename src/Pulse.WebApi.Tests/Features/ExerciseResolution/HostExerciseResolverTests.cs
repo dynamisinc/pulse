@@ -155,6 +155,7 @@ public class HostExerciseResolverTests
         await using var seed = _fixture.CreateContext();
         seed.Exercises.Add(new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = id,
             Name = $"Exercise {id:N}",
             Hostname = hostname,

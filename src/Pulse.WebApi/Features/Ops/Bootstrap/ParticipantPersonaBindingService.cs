@@ -145,6 +145,8 @@ public sealed class ParticipantPersonaBindingService
 
         // 5. RESOLVE (never create) the exercise for this host. Exercise is unscoped → this by-host read is
         //    unfiltered; it is never written.
+        // org-scope-exempt(ResolutionRoot): the by-HOSTNAME read that resolves which exercise this binding is
+        // for; the tenant is derived FROM the result, so it cannot be a precondition of the query.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Hostname == host, cancellationToken);

@@ -8,9 +8,7 @@
  * shipped `/evaluator` staff composition.
  *
  * PROVIDER STACK (staff world — COBRA lives in StaffShellFrame):
- *   ExerciseContextProvider  — exercise scope (useExerciseContext / the
- *                              controller identity + persona reads bind to it).
- *   > ToolstripProvider      — the shell-owned toolstrip registry the console
+ *   ToolstripProvider        — the shell-owned toolstrip registry the console
  *                              registers its "Personas" tool into (D7-011).
  *   > ActivePersonaProvider  — the ONE shared "operating as" seam the picker
  *                              writes and the composer/context-panel read
@@ -18,6 +16,19 @@
  *   > StaffShellFrame        — the COBRA theme boundary + Cadence chrome
  *                              (header + toolstrip dock); ControllerConsole is
  *                              its work-area child.
+ *
+ * NO `ExerciseContextProvider` HERE — deliberately (CR-001). The exercise scope
+ * this console reads (`useExerciseContext`, the identity + persona reads) comes
+ * from the ONE provider hoisted in `features/app-shell/routes.tsx`. This
+ * composition used to mount a second one, on the reasoning that re-resolving the
+ * same host/auth-resolved scope was harmless. It is not: the cross-exercise
+ * switcher (`ExerciseSwitcherSlot`) renders as a SIBLING of `StaffRouteTree`, so
+ * its `useExerciseScopeRefresh()` (staff-navigation/04, COR-073) reaches the
+ * HOISTED provider and commits the new scope atomically, without a remount. A
+ * nested provider therefore never hears about the switch — the header badge
+ * would keep naming the old exercise while `resetQueries()` repopulated the
+ * console from the new one. A test that mounts this route directly must supply
+ * the provider itself.
  *
  * THE WIRED LOOP (the thing this wave demonstrates):
  *   ⌘K / Personas tool → CommandPalette → PersonaPicker (search/select) sets
@@ -56,7 +67,6 @@
  */
 
 import { useCallback, useMemo } from 'react'
-import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { ToolstripProvider } from '@/features/staffShell/toolRegistry'
 import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
@@ -75,7 +85,7 @@ import { PersonaComposer } from './components/PersonaComposer'
 import { PersonaContextPanel } from './components/PersonaContextPanel'
 
 /**
- * The console content, inside all four providers so it may read the controller
+ * The console content, inside the provider stack so it may read the controller
  * identity + the active persona and build the wired palette/dock slots.
  */
 function ControllerConsoleContent() {
@@ -153,17 +163,15 @@ function ConsoleStaffHeader() {
  */
 export function ControllerConsoleRoute() {
   return (
-    <ExerciseContextProvider>
-      <ToolstripProvider>
-        <ActivePersonaProvider>
-          <StaffShellFrame
-            header={<ConsoleStaffHeader />}
-            toolstrip={<Toolstrip />}
-          >
-            <ControllerConsoleContent />
-          </StaffShellFrame>
-        </ActivePersonaProvider>
-      </ToolstripProvider>
-    </ExerciseContextProvider>
+    <ToolstripProvider>
+      <ActivePersonaProvider>
+        <StaffShellFrame
+          header={<ConsoleStaffHeader />}
+          toolstrip={<Toolstrip />}
+        >
+          <ControllerConsoleContent />
+        </StaffShellFrame>
+      </ActivePersonaProvider>
+    </ToolstripProvider>
   )
 }

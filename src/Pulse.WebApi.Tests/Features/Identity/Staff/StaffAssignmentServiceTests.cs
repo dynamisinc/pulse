@@ -35,7 +35,7 @@ public sealed class StaffAssignmentServiceTests
 
     private async Task<Exercise> SeedExerciseAsync(string name)
     {
-        var exercise = new Exercise { Id = Guid.NewGuid(), Name = name, TimeZone = "UTC", Status = "active" };
+        var exercise = new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = Guid.NewGuid(), Name = name, TimeZone = "UTC", Status = "active" };
         await using var seed = _fixture.CreateContext();
         seed.Exercises.Add(exercise);
         await seed.SaveChangesAsync();
@@ -47,6 +47,7 @@ public sealed class StaffAssignmentServiceTests
         await using var seed = _fixture.CreateContext();
         seed.StaffUsers.Add(new StaffUser
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = staffUserId,
             ExternalSubject = subject,
             DisplayName = "Staffer",

@@ -11,7 +11,7 @@ attribution. Identity providers stay behind an interface — Entra/SSO is a futu
 
 ## Requirements covered
 COR-010, COR-011, COR-012, COR-013, COR-014, COR-015, COR-016, COR-017, COR-018 (with NFR-009 abuse
-resistance and XC-004 attribution).
+resistance and XC-004 attribution), COR-077 (org-level authentication, new — story 15).
 
 **COR-018 is split across two stories.** Story 10 delivers the **provisioning-time, single-persona,
 ops-endpoint** half of story 09's first AC (Complete, #342) — relocated in from `login/07` (see
@@ -40,6 +40,7 @@ non-negotiables (staff vs participant worlds).
 | 12 | `POST /api/posts` derives identity server-side, never from the body | COR-018 (+COR-001, NFR-009) | Not Started | #366 |
 | 13 | `POST /api/telemetry` server-stamps `exerciseId` from session scope | XC-004 (+COR-001) | Not Started | #362 |
 | 14 | Anonymous-access regression suite | COR-012 (+COR-001) | Not Started | #367 |
+| 15 | Org-level authentication for OrgAdmin (session with no exercise scope) | COR-077 (new) | Not Started | — |
 
 ## Dependencies
 
@@ -90,6 +91,14 @@ scope-authority (previously tracked standalone as #362, folded in here and retit
 anonymous-401 regression suite that would have caught this (new #367). See each story's own file
 for the full analysis; story 11's file carries the correction it adds to story 03's `#60` AC
 record.
+
+**Story 15 (COR-077, new) closes an authentication gap `exercise-lifecycle-admin/03`'s OrgAdmin surface
+family surfaced but does not own.** `StaffLoginService.LoginAsync` (this feature's story 05) requires a
+`StaffAssignment` on a specific `Exercise`; an organization with zero exercises therefore has no path to an
+`orgAdmin` session at all — the role whose own job includes creating the org's first exercise (COR-074)
+cannot authenticate until one exists. Story 15 owns the fix (the login funnel + the `Session`/
+`SessionIssueRequest`/`AuthenticatedSession` exercise-scope representation); `exercise-lifecycle-admin/03`
+is the consumer, not the owner, of that fix. See story 15's own "Why this story lives here" section.
 
 ## Design notes
 Foundation, spanning staff and participant worlds. Read-only sessions still get an ephemeral identity

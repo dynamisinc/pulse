@@ -100,7 +100,7 @@ public class WriteGuardTests
         var invalidPostId = Guid.NewGuid();
 
         await using var writeContext = _fixture.CreateContext();
-        writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Mixed Batch Exercise" });
+        writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Mixed Batch Exercise" });
         writeContext.Posts.Add(new Post
         {
             Id = validPostId,
@@ -147,7 +147,7 @@ public class WriteGuardTests
 
         await using (var writeContext = _fixture.CreateContext())
         {
-            writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Positive Control Exercise" });
+            writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Positive Control Exercise" });
             writeContext.Posts.Add(new Post
             {
                 Id = postId,
@@ -235,7 +235,7 @@ public class WriteGuardTests
 
         await using (var writeContext = _fixture.CreateContext())
         {
-            writeContext.Exercises.Add(new Exercise { Id = exerciseId, Name = "Identity Positive Control Exercise" });
+            writeContext.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Identity Positive Control Exercise" });
             writeContext.Accounts.Add(new Account
             {
                 Id = accountId,

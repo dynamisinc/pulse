@@ -15,8 +15,18 @@ namespace Pulse.WebApi.Data;
 ///   <item><description><b>Not scoped — shared library asset:</b> <c>PersonaTemplate</c> is a reusable
 ///   authoring-library record shared across many runs (XC-005 — the telemetry schema's note that
 ///   persona templates are shared across runs, "never a reusable template id"). Binding it to a single
-///   exercise would be wrong, so it is deliberately NOT scoped.</description></item>
+///   exercise would be wrong, so it is deliberately NOT scoped. It IS bounded on the OTHER axis: as of
+///   exercise-isolation/11 it is <see cref="IOrganizationScoped"/>, so it is shared across one CUSTOMER's
+///   runs and no further.</description></item>
 /// </list>
+/// <para>
+/// <b>Relationship to the organization axis (exercise-isolation/11).</b> This marker and
+/// <see cref="IOrganizationScoped"/> are INDEPENDENT and ADDITIVE. Nothing about the exercise axis changed
+/// when the tenant tier landed: the same entities are scoped, with the same predicate, the same fail-closed
+/// <see cref="System.Guid.Empty"/> collapse, and the same write-guard. An unresolved ORGANIZATION cannot
+/// return one extra row on this axis. Never move an entity off this marker onto the org one to "simplify" —
+/// the tenant tier is a coarser boundary and would not protect participants from each other.
+/// </para>
 /// </remarks>
 public interface IExerciseScoped
 {

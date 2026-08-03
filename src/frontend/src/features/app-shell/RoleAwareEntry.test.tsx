@@ -15,17 +15,30 @@
  * on this branch yet, and are INJECTED into `RoleAwareEntry` as props (IoC), so
  * the tests supply stubs directly — no `vi.mock` of a not-yet-resolvable module
  * (which Vite's import-analysis would reject before the mock could intercept).
+ *
+ * The staff route REGISTRY is injected the same way (`staffRoutes`), stubbed
+ * below. Two mechanical consequences of the staff branch becoming a nested route
+ * tree, both visible here:
+ *  - the entry is mounted under a SPLAT route (`path="*"`), because the staff
+ *    tree is a descendant `<Routes>` and react-router only matches those under a
+ *    splat parent — which is exactly how `routes.tsx` mounts it in the app;
+ *  - a staff session entering at `/` is redirected (in-router) to its default
+ *    surface, so the staff cases below still assert on the surface they always
+ *    did; the deep-link/gating/fallback behaviour itself is covered in
+ *    `RoleAwareEntry.staffRouting.test.tsx`.
  */
 import type { ComponentType, ReactNode } from 'react'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { useTheme } from '@mui/material/styles'
+import { faClipboardCheck, faSliders } from '@fortawesome/free-solid-svg-icons'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSession, useRole } from '@/core/auth'
 import type { Session } from '@/core/auth'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
 import { RoleAwareEntry, type RoleAwareEntryProps } from './RoleAwareEntry'
+import type { StaffRouteRegistry } from './staffRouting'
 
 // Avoid the shared axios client's teardown race (a real POST rejecting after
 // the worker exits) — no network is used here anyway.
@@ -84,13 +97,34 @@ function ThemeProbe() {
   )
 }
 
+/** A stub staff registry mirroring the real one's shape and paths. */
+const STUB_STAFF_ROUTES: StaffRouteRegistry = [
+  {
+    id: 'controller-console',
+    path: '/staff/console',
+    label: 'Controller Console',
+    icon: faSliders,
+    element: <div data-testid="staff-surface-controller" />,
+    allowedRoles: ['controller'],
+    isDefaultFor: ['controller'],
+    group: 'conduct',
+  },
+  {
+    id: 'evaluator-dashboard',
+    path: '/staff/evaluate',
+    label: 'Evaluator Dashboard',
+    icon: faClipboardCheck,
+    element: <div data-testid="staff-surface-evaluator" />,
+    allowedRoles: ['evaluator'],
+    isDefaultFor: ['evaluator'],
+    group: 'evaluate',
+  },
+]
+
 function renderEntry(props: Partial<RoleAwareEntryProps> = {}) {
   const merged: RoleAwareEntryProps = {
     participantSurface: <div data-testid="participant-surface" />,
-    staffSurfaces: {
-      controller: <div data-testid="staff-surface-controller" />,
-      evaluator: <div data-testid="staff-surface-evaluator" />,
-    },
+    staffRoutes: STUB_STAFF_ROUTES,
     participantGuard: StubGuard,
     staffSwitcher: stubSwitcher,
     ...props,
@@ -98,8 +132,9 @@ function renderEntry(props: Partial<RoleAwareEntryProps> = {}) {
   return render(
     <MemoryRouter initialEntries={['/']}>
       <Routes>
-        <Route path="/" element={<RoleAwareEntry {...merged} />} />
         <Route path="/login" element={<div data-testid="login-sentinel" />} />
+        {/* Splat, as `routes.tsx` mounts it — the staff tree is a descendant <Routes>. */}
+        <Route path="*" element={<RoleAwareEntry {...merged} />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -157,14 +192,27 @@ describe('RoleAwareEntry — staff', () => {
 
   it('mounts the staff surface UNDER the COBRA theme (two-worlds)', () => {
     primeSession({ role: 'controller' })
-    renderEntry({ staffSurfaces: { controller: <ThemeProbe /> } })
+    renderEntry({
+      staffRoutes: [
+        {
+          id: 'controller-console',
+          path: '/staff/console',
+          label: 'Controller Console',
+          icon: faSliders,
+          element: <ThemeProbe />,
+          allowedRoles: ['controller'],
+          isDefaultFor: ['controller'],
+          group: 'conduct',
+        },
+      ],
+    })
 
     expect(screen.getByTestId('theme-probe')).toHaveAttribute('data-theme-cobra', 'true')
   })
 
   it('fails closed for a staff role with no built surface', () => {
     primeSession({ role: 'planner' })
-    renderEntry({ staffSurfaces: {} })
+    renderEntry({ staffRoutes: [] })
 
     expect(screen.getByTestId('login-sentinel')).toBeInTheDocument()
     expect(screen.queryByTestId('exercise-switcher')).not.toBeInTheDocument()
@@ -219,6 +267,11 @@ describe('RoleAwareEntry — focus management (NFR-001)', () => {
     primeSession({ role: 'controller' })
     renderEntry()
 
-    expect(document.activeElement).toHaveAttribute('data-app-shell-focus-scope', 'staff:controller')
+    // Keyed by the ROUTE now, not the role: the staff focus scope lives inside
+    // the route tree so moving between staff surfaces re-focuses too.
+    expect(document.activeElement).toHaveAttribute(
+      'data-app-shell-focus-scope',
+      'staff:controller-console',
+    )
   })
 })

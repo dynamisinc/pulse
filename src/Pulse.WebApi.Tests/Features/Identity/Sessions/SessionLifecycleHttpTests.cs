@@ -93,7 +93,7 @@ public sealed class SessionLifecycleHttpTests
     private async Task SeedExerciseAsync(Guid exerciseId, string host)
     {
         await using var seed = _fixture.CreateContext();
-        seed.Exercises.Add(new Exercise { Id = exerciseId, Name = "Ex", Hostname = host, TimeZone = "UTC", Status = "active" });
+        seed.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseId, Name = "Ex", Hostname = host, TimeZone = "UTC", Status = "active" });
         await seed.SaveChangesAsync();
     }
 

@@ -22,7 +22,7 @@
 | 08 Hostname → resolution **[Tier-2]** | **fullstack (B2)** | Host→exercise map + `UseExerciseResolution()` middleware that **sets `ExerciseContext.CurrentExerciseId`** (anonymous/pre-auth participant populator); unknown host fails closed; serves `GET /api/exercise-context` (frozen `ExerciseScope`); flips `USE_MOCK_EXERCISE_CONTEXT`. Owns the **precedence model**. | `Features/ExerciseResolution/` (host map, `UseExerciseResolution()`/`AddExerciseResolution()`, `ExerciseContextEndpoints`); + infra (cert/DNS); + `USE_MOCK_EXERCISE_CONTEXT` flip | `GET /api/exercise-context`; the host→exercise map; the middleware; the scope-seam write (participant arm) |
 | 09 Network readiness | frontend | Self-test page + allowlist doc. | `features/connectivity/pages/SelfTest.tsx` | — |
 | 10 Mock context provider *(Complete, #211)* | frontend | Mock resolver behind the axios client; provider + hook only. | `core/exerciseContext/exerciseContext.tsx` (shipped) | `ExerciseContextProvider`, `useExerciseContext()` |
-| 11 Organization tenant boundary **[Tier-2, deferred → multi-customer go-live]** | backend | The customer tenant tier ABOVE the exercise: `Organization` entity + `Exercise.OrganizationId` + org-scoping of `PersonaTemplate`/cast/accounts/staff. Deferred (Option B) — built in a dedicated wave gated on multi-customer go-live; records the gap + the resolution. Layers over the exercise filter, does not replace it. | (when built) `Organization` entity + `PulseDbContext` config/migration + the second scoping axis | the customer tenant scope |
+| 11 Organization tenant boundary **[Tier-2, BUILT — awaiting sign-off]** | backend | The customer tenant tier ABOVE the exercise. Pulled forward from the "multi-customer go-live" gate as a hard prerequisite for exercise creation / management / OrgAdmin. **Hybrid mechanism:** a second CENTRAL global-filter axis (`IOrganizationScoped` → `PersonaTemplate`) *plus* a fail-closed `IQueryable.InOrganization(orgId)` resolution constraint for the two RESOLUTION ROOTS (`Exercise`, `StaffUser`) a filter cannot cover. Additive — the exercise axis is byte-for-byte unchanged. | `Data/{Entities/Organization.cs, IOrganizationContext.cs, IOrganizationOwned.cs, IOrganizationScoped.cs, OrganizationContext.cs, OrganizationScope.cs, OrganizationScopeViolationException.cs}`; `PulseDbContext` (2nd filter axis + `GuardOrganizationScope`); migration `20260801131212_OrganizationTenantBoundary`; `AddOrganizationScoping()` (called FROM `AddExerciseScoping()` — **no `Program.cs` edit**) | the customer tenant scope; `InOrganization()`; the `org-scope-exempt(...)` marker contract |
 
 ## Reuse map
 - **B0 backend seams (real C# in `src/Pulse.WebApi/`, merged):**
@@ -32,9 +32,20 @@
     `PulseDbContext` consumes.
   - `Data/PulseDbContext.cs` — the read-side global query filter (story 01) + write-guard; every scoped
     query reads the `ExerciseContext` story 08 populates. `Data/IExerciseScoped.cs` — the marker. **Note
-    (story 11):** `PersonaTemplate` is deliberately NOT `IExerciseScoped` (a cross-exercise shared library,
-    XC-005) and is therefore **globally shared today** — correct within one customer, but a cross-customer
-    leak once the `Organization` tenant tier exists; story 11 scopes it to the owning org.
+    (story 11, now BUILT):** `PersonaTemplate` is deliberately NOT `IExerciseScoped` (a cross-exercise shared
+    library, XC-005), which used to make it **globally shared** — correct within one customer, a
+    cross-customer leak with two. Story 11 closed that: it is now `IOrganizationScoped`, so it is shared
+    across one CUSTOMER's runs and no further.
+- **Story-11 seams (build on these; do NOT re-implement a tenant bound per query):**
+  - `Data/IOrganizationScoped.cs` → the entity is covered **centrally**; add the marker and the
+    `PulseDbContext` filter loop picks it up by reflection. Nothing to write per query.
+  - `Data/IOrganizationOwned.cs` alone → the entity is a **resolution root** and is NOT filtered; every read
+    that lists or selects across the tenant must call `OrganizationScope.InOrganization(serverResolvedOrgId)`.
+    `OrganizationScopeSweepTests` enforces this over the whole production tree: an unconstrained read must
+    either take the constraint or carry an `// org-scope-exempt(<Reason>): <why>` marker from a fixed
+    vocabulary, and the exemption count is pinned so a new one cannot land unreviewed.
+  - Scope comes from `IOrganizationContext`, the authenticated staff user's own `StaffUser.OrganizationId`,
+    or the server-resolved exercise's `OrganizationId` — **never** a request body, route or query value.
   - `Data/Extensions/ExerciseScopingServiceCollectionExtensions.cs` — `AddExerciseScoping()` (wired).
   - `Features/{Social,Realtime,Telemetry}/*` — the minimal-API endpoint pattern story 08's
     `ExerciseContextEndpoints` follows (`AddX()`/`MapX()`, route base `/api`).

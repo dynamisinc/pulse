@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Providers;
@@ -399,6 +400,7 @@ public sealed class BootstrapServiceTests
         {
             seed.StaffUsers.Add(new StaffUser
             {
+                OrganizationId = Organization.DefaultOrganizationId,
                 Id = preExistingId,
                 ExternalSubject = subject,
                 DisplayName = "Prior Login",
@@ -670,5 +672,83 @@ public sealed class BootstrapServiceTests
         var exercise = await read.Exercises.AsNoTracking().SingleAsync(e => e.Id == exerciseId);
         exercise.Name.Should().NotContain("<b>", "the exercise name is sanitized on ingest (NFR-004)");
         exercise.Name.Should().Contain("Pilot");
+    }
+
+    /// <summary>
+    /// COR-010/COR-076 — the ops seam is the ONLY path to a real deployment's FIRST organization administrator:
+    /// staff login needs a pre-existing assignment, exercise creation copies the creator's role, and the
+    /// zero-config seeder is non-production by design. Without this, the OrgAdmin surface is reachable only by
+    /// hand-inserting a row.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task Bootstrap_CanMintTheFirstOrgAdmin_AndStoresTheCanonicalCamelCaseRole()
+    {
+        var host = NewHostname();
+        const string staffSecret = "staff-only-placeholder-secret";
+        var admin = new DynamisStaffAccount
+        {
+            Username = $"orgadmin-{Guid.NewGuid():N}",
+            Secret = staffSecret,
+            ExternalSubject = $"idp|{Guid.NewGuid():N}",
+            DisplayName = "Org Admin",
+        };
+
+        Guid exerciseId;
+        await using (var context = _fixture.CreateContext())
+        {
+            // Deliberately requested in the WRONG case, to prove the canonicalising map is what normalises it
+            // rather than the caller happening to send the right spelling.
+            var result = await NewService(context, admin).BootstrapAsync(
+                new BootstrapExerciseRequest
+                {
+                    Hostname = host,
+                    ExerciseName = "Org bootstrap",
+                    Staff = new BootstrapStaffRequest { Username = admin.Username, Role = "ORGADMIN" },
+                },
+                Secret);
+
+            result.Staff.Should().NotBeNull("orgAdmin is an accepted bootstrap staff role");
+            result.Staff!.Created.Should().BeTrue();
+            exerciseId = result.ExerciseId!.Value;
+        }
+
+        await using (var read = _fixture.CreateContext())
+        {
+            var assignment = await read.StaffAssignments.AsNoTracking()
+                .SingleAsync(a => a.ExerciseId == exerciseId);
+
+            // The drift guard that actually matters. Both server-side role sets compare case-insensitively, so a
+            // lowercase "orgadmin" would authorize perfectly well here and then fail closed to /login in the UI,
+            // because the frontend's isExerciseRole() tests EXACT membership of the frozen six-role vocabulary
+            // (core/auth/roles.ts). Asserting the persisted spelling is the only place that split-brain is visible.
+            assignment.Role.Should().Be(ExerciseAdminRoles.OrgAdmin);
+            assignment.Role.Should().Be("orgAdmin", "the frozen Session.role vocabulary is camelCase");
+        }
+    }
+
+    /// <summary>An out-of-vocabulary role is still refused — widening the map must not have opened it up.</summary>
+    [RequiresDockerFact]
+    public async Task Bootstrap_StillRefusesARoleOutsideTheVocabulary()
+    {
+        var host = NewHostname();
+        var someone = new DynamisStaffAccount
+        {
+            Username = $"nobody-{Guid.NewGuid():N}",
+            Secret = "staff-only-placeholder-secret",
+            ExternalSubject = $"idp|{Guid.NewGuid():N}",
+            DisplayName = "Nobody",
+        };
+
+        await using var context = _fixture.CreateContext();
+        var result = await NewService(context, someone).BootstrapAsync(
+            new BootstrapExerciseRequest
+            {
+                Hostname = host,
+                ExerciseName = "Bad role",
+                Staff = new BootstrapStaffRequest { Username = someone.Username, Role = "superadmin" },
+            },
+            Secret);
+
+        result.Staff.Should().BeNull("'superadmin' is not in the frozen role vocabulary");
     }
 }
