@@ -20,6 +20,9 @@ export { useAccountImport } from './hooks/useAccountImport'
 // ONE form with ONE save, because the settings `PUT` is a FULL REPLACE. Mount it
 // ONCE and change the prop — never one panel per section.
 export { ExerciseSettingsPage } from './pages/ExerciseSettingsPage'
+// The route composition the staff route registry mounts at `/staff/plan`
+// (moved out of `App.tsx` so the registry can import it without a cycle).
+export { PlannerWorkspaceRoute } from './PlannerWorkspaceRoute'
 export { ExerciseSettingsPanel } from './components/ExerciseSettingsPanel'
 export {
   EXERCISE_SETTINGS_SECTION_META,

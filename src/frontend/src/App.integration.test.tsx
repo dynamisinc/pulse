@@ -1,23 +1,30 @@
 /**
  * App.integration.test.tsx
  * ---------------------------------------------------------------------------
- * Integration-B wiring tests for the staff route compositions `App.tsx` owns —
- * the Evaluator Dashboard (`EvaluatorDashboardRoute`) and the planner's
- * Exercise Settings workspace (`PlannerWorkspaceRoute`) — plus the ROUTE TABLE
- * those surfaces are handed to. The individual pieces are unit-tested in their
- * own stories; this file proves they are WIRED together, in the composition
- * root, exactly as they ship.
+ * Integration-B wiring tests for the two staff route compositions `App.tsx`
+ * re-exports — the Evaluator Dashboard (`EvaluatorDashboardRoute`) and the
+ * planner's Exercise Settings workspace (`PlannerWorkspaceRoute`) — plus the
+ * ROUTE TABLE those surfaces are handed to. The individual pieces are
+ * unit-tested in their own stories; this file proves they are WIRED together, in
+ * the composition root, exactly as they ship.
+ *
+ * (Both compositions were DEFINED here in `App.tsx` until staff deep-linking
+ * landed; they now live with their own features, because the staff route
+ * registry has to import them and cannot import from the module that imports the
+ * registry. `App.tsx` re-exports them, so the imports below — and the component
+ * identities they assert on — are unchanged.)
  *
  * WHY THE ROUTE-TABLE CASE EXISTS (WR-003 on the exercise-configuration
- * umbrella, #41). `RoleAwareEntry` fails a staff role with no built surface
- * closed — a planner whose `staffSurfaces.planner` slot is missing is redirected
- * to `/login`, forever, with no error anywhere. `RoleAwareEntry.test.tsx` covers
- * that MECHANISM with its own injected surface map, so it is blind to the real
- * table in `App.tsx`: deleting `planner:` from `staffSurfaces` used to leave the
- * whole suite green while planners silently lost their surface. The last
- * describe below closes that hole by asserting on the arguments `App.tsx`
- * actually hands `createRoleAwareRoutes` at module load — see the spy note on
- * the `vi.mock` factory.
+ * umbrella, #41). `RoleAwareEntry` fails a staff role with no reachable surface
+ * closed — a planner with no registry entry is redirected to `/login`, forever,
+ * with no error anywhere. `RoleAwareEntry.test.tsx` covers that MECHANISM with
+ * its own injected stub registry, so it is blind to the REAL registry: dropping
+ * the planner entry used to leave the whole suite green while planners silently
+ * lost their surface. The last describe below closes that hole by asserting on
+ * the arguments `App.tsx` actually hands `createRoleAwareRoutes` at module load
+ * — see the spy note on the `vi.mock` factory — now expressed against the
+ * registry (`resolveDefaultStaffRoute` per role) rather than the removed
+ * role→surface map.
  *
  * Evaluator Dashboard — proves:
  *
@@ -50,7 +57,13 @@
  *    at all rather than a dead one.
  *
  * `ExerciseContextProvider` resolves its mock scope asynchronously (it renders
- * nothing until resolved), so the first assertion waits via `findBy*`.
+ * nothing until resolved), so the first assertion waits via `findBy*`. THE
+ * FIXTURE mounts that provider, not the route compositions (CR-001): in
+ * production the ONE provider is hoisted into the `*` catch-all by
+ * `createRoleAwareRoutes`, so a surface mounted in isolation has to be given the
+ * ancestor the router would have given it. Reinstating a provider inside a route
+ * composition to make this file pass would re-open CR-001 — see
+ * `features/app-shell/exerciseScopeRefreshComposition.test.tsx`.
  *
  * `StaffHeader` (mounted inside both route compositions) calls `useNavigate()`
  * for its sign-out control (feature: login, story 04) — wrapped in a real
@@ -62,7 +75,10 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
+import { ExerciseContextProvider } from '@/core/exerciseContext'
 import type { RoleAwareEntryProps, StaffSurfaceRole } from './features/app-shell'
+import { resolveDefaultStaffRoute, staffRoutesForRole } from './features/app-shell'
+import { STAFF_ROUTE_REGISTRY } from './features/staff'
 import { EvaluatorDashboardRoute, PlannerWorkspaceRoute } from './App'
 
 /**
@@ -89,12 +105,18 @@ vi.mock('./features/app-shell', async importOriginal => {
   }
 })
 
-/** A dedicated client per render so React Query state never leaks between cases. */
+/**
+ * A dedicated client per render so React Query state never leaks between cases.
+ * `ExerciseContextProvider` stands in for the hoisted, router-owned one (see the
+ * module header) — the route compositions no longer mount their own.
+ */
 function renderInStaffWorld(surface: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <MemoryRouter>
-      <QueryClientProvider client={client}>{surface}</QueryClientProvider>
+      <QueryClientProvider client={client}>
+        <ExerciseContextProvider>{surface}</ExerciseContextProvider>
+      </QueryClientProvider>
     </MemoryRouter>,
   )
 }
@@ -245,7 +267,7 @@ describe('PlannerWorkspaceRoute — Integration B wiring (exercise-configuration
   })
 })
 
-describe('App route table — the staff surface map handed to createRoleAwareRoutes', () => {
+describe('App route table — the staff route registry handed to createRoleAwareRoutes', () => {
   /** The captured argument, narrowed once for every case below. */
   function capturedSurfaces(): RoleAwareEntryProps {
     const captured = routeTable.surfaces
@@ -255,19 +277,31 @@ describe('App route table — the staff surface map handed to createRoleAwareRou
     return captured as RoleAwareEntryProps
   }
 
-  it('fills every staff role that has a built surface — including planner', () => {
-    const { staffSurfaces } = capturedSurfaces()
-
-    // Named individually (not a loop over a list this test owns) so deleting a
-    // slot from App.tsx fails HERE, loudly, instead of silently shrinking a
-    // list and leaving that role's staff redirected to /login forever.
-    expect(staffSurfaces.controller).toBeDefined()
-    expect(staffSurfaces.evaluator).toBeDefined()
-    expect(staffSurfaces.planner).toBeDefined()
+  it('hands over the REAL staff route registry, not an ad-hoc table', () => {
+    // Identity against `@/features/staff` — so "App.tsx quietly builds its own
+    // list of staff surfaces" (the drift this registry exists to prevent) fails
+    // here rather than in UAT.
+    expect(capturedSurfaces().staffRoutes).toBe(STAFF_ROUTE_REGISTRY)
   })
 
-  it('maps the planner slot to PlannerWorkspaceRoute, not to some other element', () => {
-    const planner = capturedSurfaces().staffSurfaces.planner
+  it('gives every staff role a default surface to land on — including planner', () => {
+    const { staffRoutes } = capturedSurfaces()
+
+    // Named individually (not a loop over a list this test owns) so deleting an
+    // entry from the registry fails HERE, loudly, instead of silently shrinking
+    // a list and leaving that role's staff redirected to /login forever. This is
+    // the successor to the old `staffSurfaces.{role}` slot assertions (WR-003).
+    expect(resolveDefaultStaffRoute(staffRoutes, 'controller')?.path).toBe('/staff/console')
+    expect(resolveDefaultStaffRoute(staffRoutes, 'evaluator')?.path).toBe('/staff/evaluate')
+    expect(resolveDefaultStaffRoute(staffRoutes, 'planner')?.path).toBe('/staff/plan')
+    // COR-076 — the org-admin family's home page. Without this entry every
+    // org-admin session goes back to the fail-closed login redirect.
+    expect(resolveDefaultStaffRoute(staffRoutes, 'orgAdmin')?.path).toBe('/staff/exercises')
+  })
+
+  it('maps the planner entry to PlannerWorkspaceRoute, not to some other element', () => {
+    const planner = capturedSurfaces().staffRoutes.find(entry => entry.path === '/staff/plan')
+      ?.element
 
     // Identity, not just presence: swapping the planner surface for another
     // staff page — or for a participant element — fails here too.
@@ -275,15 +309,17 @@ describe('App route table — the staff surface map handed to createRoleAwareRou
     expect(isValidElement(planner) ? planner.type : undefined).toBe(PlannerWorkspaceRoute)
   })
 
-  it('mounts a surface for each of the three staff roles RoleAwareEntry can route', () => {
-    const { staffSurfaces } = capturedSurfaces()
+  it('mounts a surface for every staff-surface role RoleAwareEntry can route', () => {
+    const { staffRoutes } = capturedSurfaces()
 
     // `StaffSurfaceRole` is the union RoleAwareEntry branches on; a role added
-    // to it later shows up here as an unfilled slot rather than as a silent
-    // fail-closed redirect discovered in UAT.
-    const roles: StaffSurfaceRole[] = ['controller', 'evaluator', 'planner']
+    // to it later shows up here as a role with nowhere to land rather than as a
+    // silent fail-closed redirect discovered in UAT. `orgAdmin` joined that
+    // union with COR-076 and is listed here for exactly that reason — before
+    // its surface landed, an org-admin session was redirected to /login.
+    const roles: StaffSurfaceRole[] = ['controller', 'evaluator', 'planner', 'orgAdmin']
     for (const role of roles) {
-      expect(staffSurfaces[role]).toBeDefined()
+      expect(staffRoutesForRole(staffRoutes, role).length).toBeGreaterThan(0)
     }
   })
 

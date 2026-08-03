@@ -12,15 +12,45 @@
  *                         composed participant guard (`exercise-isolation/04`).
  *                         NO exercise picker, NO staff surface reachable, and —
  *                         by construction — NO COBRA ancestor (XC-002, D0 §2).
- *   controller /        -> the matching staff surface (console / evaluator /
- *   evaluator / planner    …), mounted inside a COBRA hand-off boundary next to
- *                          the cross-exercise switcher (`exercise-isolation/05`,
- *                          COR-005). Staff-only; impossible on a participant path.
+ *   controller /        -> the NESTED STAFF ROUTE TREE (`StaffRouteTree`) over
+ *   evaluator /            the injected staff route registry, mounted inside a
+ *   planner / orgAdmin     COBRA hand-off boundary next to the cross-exercise
+ *                          switcher (`exercise-isolation/05`, COR-005).
+ *                          Staff-only; impossible on a participant path.
  *   expired /            -> fail closed to the login entry (never a default
  *   unsupported role       surface, never a cross-world surface).
- *   unresolved            -> the providers above this component fail closed to
- *                            null; the RootFailClosedBoundary additionally
- *                            redirects to the login entry if a hook throws.
+ *   role with no         -> fail closed to the login entry as well: the branch
+ *   registered surface      is entered, `resolveDefaultStaffRoute` finds
+ *                           nothing, and NO switcher and NO COBRA are mounted.
+ *   unresolved           -> the providers above this component fail closed to
+ *                           null; the RootFailClosedBoundary additionally
+ *                           redirects to the login entry if a hook throws.
+ *
+ * ## COR-076 — `orgAdmin` is a routed role, not a fourth world
+ * `orgAdmin` used to fall through to the fail-closed arm below, so an org-admin
+ * who signed in was bounced straight back to the login page. It now takes the
+ * staff-tree branch: `isStaffSurfaceRole()` (`./staffRouting`) admits it,
+ * because there is no third VISUAL world in Pulse — org administration renders
+ * in COBRA like every other staff surface and is gated, like every other
+ * surface, by its registry entry's `allowedRoles`. What did NOT change is
+ * `core/auth/roles.ts`: `orgAdmin` is still outside `STAFF_ROLES`, because that
+ * set is the XC-002 authorization boundary, not a routing table. See
+ * `staffRouting.ts`'s `StaffSurfaceRole` for the full two-predicates argument.
+ * The fail-closed arm below is untouched and still catches any role that is
+ * genuinely unexpected.
+ *
+ * ## COR-004 — the participant branch is LOCATION-BLIND, mechanically
+ * Staff surfaces are real, deep-linkable URLs (`/staff/console`,
+ * `/staff/evaluate`, `/staff/plan`, …). Participants have none: they have no UI
+ * concept of exercise selection and must not route on a typed path, so a
+ * participant typing `/staff/console` still lands on their participant surface.
+ * The guarantee is STRUCTURAL, not a conditional: this module imports no
+ * location-reading API at all (`useLocation` / `useParams` / `useMatch` /
+ * `Routes`), so the participant branch physically cannot read the URL. Every
+ * location read lives in `StaffRouteTree`, which is rendered ONLY after the
+ * resolved role has been narrowed to a staff role. `participantLocationBlindness
+ * .test.ts` asserts that import ban against this file's real source, so
+ * re-introducing a URL read on the participant path fails the suite.
  *
  * ## Two worlds (D0 §2) — world-neutral until the hand-off
  * RoleAwareEntry itself is world-neutral: it imports NO COBRA and NO brand skin
@@ -30,11 +60,12 @@
  * branch has no `ThemeProvider(cobraTheme)` anywhere above it — the skin comes
  * entirely from the injected participant surface (its own `BrandThemeProvider`).
  *
- * ## Inversion of control (why the surfaces + guard + switcher are props)
- * The concrete route compositions live in the composition root (`App.tsx`): the
- * participant surface is inline (`BrandThemeProvider` -> `ShellLayout` ->
- * channel), and `EvaluatorDashboardRoute` is defined and exported by `App.tsx`
- * itself. The two composed seams — `ParticipantLandingGuard`
+ * ## Inversion of control (why the registry + guard + switcher are props)
+ * The concrete participant surface is composed in the composition root
+ * (`App.tsx`, inline `BrandThemeProvider` -> `ShellLayout` -> channel), and the
+ * concrete STAFF surfaces are declared once in the staff-world registry
+ * (`@/features/staff/staffRouteRegistry`) which `App.tsx` injects here. The two
+ * composed seams — `ParticipantLandingGuard`
  * (exercise-isolation/04) and `ExerciseSwitcher` (exercise-isolation/05) — ship
  * on sibling branches and are NOT resolvable on this branch. So all of these are
  * INJECTED as props and wired by the orchestrator in `App.tsx` (the integration
@@ -46,28 +77,33 @@
  * this feature's README).
  *
  * ## Accessibility (NFR-001)
- * On every role/route change `RouteFocusScope` moves focus to the top of the
+ * On every world change `RouteFocusScope` moves focus to the top of the
  * newly-entered surface (a programmatic-only `tabIndex={-1}` container), so
- * focus is never lost to `<body>`. The surfaces keep their own landmarks; this
- * scope does not add a competing `<main>`.
+ * focus is never lost to `<body>`. On the staff side the scope is per-ROUTE
+ * (inside `StaffRouteTree`), so navigating between staff surfaces re-focuses
+ * too. The surfaces keep their own landmarks; this scope does not add a
+ * competing `<main>`.
  */
 
-import { Component, useEffect, useRef, type ComponentType, type ReactNode } from 'react'
+import { Component, type ComponentType, type ReactNode } from 'react'
 import { Navigate } from 'react-router-dom'
 import { ThemeProvider } from '@mui/material/styles'
 import {
   useSession,
   useRole,
   isParticipantRole,
-  isStaffRole,
   isSessionExpired,
 } from '@/core/auth'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { LOGIN_PATH } from './constants'
-
-/** The staff roles that map to a built staff surface (controller/evaluator/planner). */
-export type StaffSurfaceRole = 'controller' | 'evaluator' | 'planner'
+import { RouteFocusScope } from './RouteFocusScope'
+import { StaffRouteTree } from './StaffRouteTree'
+import {
+  isStaffSurfaceRole,
+  resolveDefaultStaffRoute,
+  type StaffRouteRegistry,
+} from './staffRouting'
 
 export interface RoleAwareEntryProps {
   /**
@@ -79,12 +115,15 @@ export interface RoleAwareEntryProps {
    */
   participantSurface: ReactNode
   /**
-   * The concrete staff route compositions, keyed by staff role. Each is a
-   * self-contained COBRA surface (it mounts its own `StaffShellFrame`). A role
-   * with no entry here fails closed (a staff person with no built surface never
-   * silently lands on the wrong one).
+   * The STAFF ROUTE REGISTRY — the one declared table of staff surfaces
+   * (`@/features/staff/staffRouteRegistry`), injected by the orchestrator. Each
+   * entry is a self-contained COBRA surface (it mounts its own
+   * `StaffShellFrame`) plus the metadata that gates it (`allowedRoles`) and will
+   * later section it in a launcher (`group`). A role with NO entry it may open
+   * fails closed to the login entry — a staff person with no built surface never
+   * silently lands on someone else's.
    */
-  staffSurfaces: Partial<Record<StaffSurfaceRole, ReactNode>>
+  staffRoutes: StaffRouteRegistry
   /**
    * The composed participant landing guard (`exercise-isolation/04`) — a
    * children-wrapping component that renders its children only for a resolved,
@@ -99,41 +138,6 @@ export interface RoleAwareEntryProps {
    * (as an element), rendered ONLY on the staff branch under the COBRA hand-off.
    */
   staffSwitcher: ReactNode
-}
-
-/**
- * A programmatic-only focus target that moves focus to the top of the surface
- * whenever `focusKey` changes (i.e. on a role/route change), so focus is never
- * stranded on `<body>` (NFR-001). Deliberately world-neutral: a plain `<div>`
- * with inline styles (no MUI, no theme) so it is safe to wrap either world. It
- * carries NO landmark role — the surfaces own their own `<main>`/regions.
- */
-function RouteFocusScope({
-  focusKey,
-  label,
-  children,
-}: {
-  focusKey: string
-  label: string
-  children: ReactNode
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    ref.current?.focus()
-  }, [focusKey])
-
-  return (
-    <div
-      ref={ref}
-      tabIndex={-1}
-      aria-label={label}
-      data-app-shell-focus-scope={focusKey}
-      style={{ outline: 'none' }}
-    >
-      {children}
-    </div>
-  )
 }
 
 /**
@@ -156,7 +160,7 @@ function StaffWorldHandoff({ children }: { children: ReactNode }) {
  */
 function RoleRouter({
   participantSurface,
-  staffSurfaces,
+  staffRoutes,
   participantGuard: ParticipantGuard,
   staffSwitcher,
 }: RoleAwareEntryProps) {
@@ -178,6 +182,8 @@ function RoleRouter({
   }
 
   if (isParticipantRole(role)) {
+    // LOCATION-BLIND (COR-004). Nothing on this branch consults the URL — the
+    // participant gets their surface whatever they typed. See the module header.
     return (
       <RouteFocusScope
         focusKey="participant"
@@ -188,31 +194,37 @@ function RoleRouter({
     )
   }
 
-  if (isStaffRole(role)) {
-    // The literal narrowing lets us index the role-keyed surface map without a
-    // cast; STAFF_ROLES === these three surface roles (core/auth/roles.ts).
-    const surface =
-      role === 'controller' || role === 'evaluator' || role === 'planner'
-        ? staffSurfaces[role]
-        : undefined
-    if (surface === undefined) {
+  if (isStaffSurfaceRole(role)) {
+    // Resolve the role's default surface BEFORE mounting any staff chrome: a
+    // staff role the registry has nothing for fails closed to the login entry
+    // with no switcher and no COBRA rendered (unchanged pre-existing behaviour),
+    // and `StaffRouteTree` can never redirect to a path it did not register.
+    const defaultRoute = resolveDefaultStaffRoute(staffRoutes, role)
+    if (defaultRoute === undefined) {
       return <Navigate to={LOGIN_PATH} replace />
     }
     return (
-      <RouteFocusScope
-        focusKey={`staff:${role}`}
-        label="Staff workspace"
-      >
-        <StaffWorldHandoff>
-          {staffSwitcher}
-          {surface}
-        </StaffWorldHandoff>
-      </RouteFocusScope>
+      <StaffWorldHandoff>
+        {staffSwitcher}
+        <StaffRouteTree
+          routes={staffRoutes}
+          role={role}
+          defaultPath={defaultRoute.path}
+        />
+      </StaffWorldHandoff>
     )
   }
 
-  // orgAdmin (a separate surface family, roles.ts) or any unexpected role:
-  // fail closed. Never a default surface, never a cross-world surface (XC-002).
+  // Any UNEXPECTED role: fail closed. Never a default surface, never a
+  // cross-world surface (XC-002).
+  //
+  // `orgAdmin` no longer lands here (COR-076) — it is admitted by
+  // `isStaffSurfaceRole()` above and, like every staff role, fails closed one
+  // branch earlier if the registry has no surface it may open. This arm is kept
+  // deliberately: `ExerciseRole` is a closed union today, so nothing should
+  // reach it, but a role string that ever escapes `isExerciseRole()` validation
+  // (a hand-edited session, a backend-ahead deploy) must still hit a closed
+  // door rather than a default surface.
   return <Navigate to={LOGIN_PATH} replace />
 }
 

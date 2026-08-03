@@ -23,6 +23,17 @@
  *
  * Left-to-right, per SHELL-CONTRACT §1 "Header":
  *   1. Brand lockup — PULSE (bold) over the surface name (small caps, muted).
+ *      THE STAFF SURFACE LAUNCHER (feature: staff-navigation, story 02;
+ *      COR-071) lives here: `SurfaceLauncher` (`./SurfaceLauncher.tsx`) owns
+ *      this slot entirely, and wires ITSELF — it reads `{registry, role}` from
+ *      `StaffNavigationProvider` (published by `StaffRouteTree`, so every staff
+ *      surface is covered with no per-composition edit) and the current path
+ *      from `useLocation()`. The `staffRoutes` / `role` / `currentPath` props
+ *      below are OVERRIDES only; nothing in production passes them. It renders
+ *      an interactive, role-gated, grouped disclosure menu when the role can
+ *      reach two or more surfaces, and the original static, non-interactive
+ *      lockup otherwise — see that file's module header for the full IoC
+ *      rationale (no registry import here, ever) and the degrade rule.
  *   2. Exercise identity badge — exercise name + role/cell. STATIC DURING
  *      CONDUCT (COR-005): this is plain, non-interactive text — there is no
  *      switcher control here at all (the switcher UX is out of scope for
@@ -79,9 +90,11 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
 import { endSession } from '@/core/auth'
 import { LOGIN_PATH } from '@/features/app-shell/constants'
+import type { StaffRouteRegistry, StaffSurfaceRole } from '@/features/app-shell'
 import { staffShellTokens } from '../staffShellTokens'
 import { useStaffPresence, useStaffRoleCell } from '../staffHeaderMocks'
 import { STATE_PILL_CONFIG, type StatePillConfig } from './statePillConfig'
+import { SurfaceLauncher } from './SurfaceLauncher'
 
 /**
  * Classification marking shown in every staff header (SHELL-CONTRACT §1
@@ -122,6 +135,26 @@ export interface StaffHeaderProps {
    * {@link pauseStatePillConfig}.
    */
   stateOverride?: StatePillConfig
+  /**
+   * OVERRIDE for the staff surface launcher's registry (feature:
+   * staff-navigation, story 02; COR-071), forwarded verbatim to
+   * `SurfaceLauncher`. NO COMPOSITION PASSES THIS, and none needs to: the
+   * launcher reads `{registry, role}` from `StaffNavigationProvider`
+   * (`StaffRouteTree`) via context. Kept only so a test — or a future
+   * composition needing a different table — can inject one; see
+   * `SurfaceLauncher.tsx`'s module header for why this header never imports the
+   * concrete registry itself.
+   */
+  staffRoutes?: StaffRouteRegistry
+  /** OVERRIDE for the resolved staff role gating `staffRoutes`. Context-supplied
+   * in production, exactly like `staffRoutes`. */
+  role?: StaffSurfaceRole
+  /**
+   * OVERRIDE for the current location's pathname — which launcher entry is
+   * marked as the current surface. Defaults, inside `SurfaceLauncher`, to
+   * `useLocation().pathname` (WR-001); this header passes nothing in production.
+   */
+  currentPath?: string
 }
 
 const TIME_WITH_SECONDS: Intl.DateTimeFormatOptions = {
@@ -178,8 +211,15 @@ export function StaffHeader({
   previewActive = false,
   onTogglePreview,
   stateOverride,
+  staffRoutes,
+  role: launcherRole,
+  currentPath,
 }: StaffHeaderProps) {
   const { exerciseName, timeZone, status } = useExerciseContext()
+  // NOTE: this `role`/`cell` pair is the identity-badge's display mock (e.g.
+  // "CONTROLLER" / "SimCell-1", see staffHeaderMocks.ts) — a different thing
+  // from the launcher's `StaffSurfaceRole` prop above (renamed `launcherRole`
+  // to avoid shadowing it).
   const { role, cell } = useStaffRoleCell()
   const presence = useStaffPresence()
   const navigate = useNavigate()
@@ -218,24 +258,14 @@ export function StaffHeader({
         minWidth: 0,
       }}
     >
-      {/* 1. Brand lockup */}
-      <Stack data-testid="staff-header-lockup" sx={{ lineHeight: 1.05, flex: 'none' }}>
-        <Typography sx={{ fontSize: 15, fontWeight: 800, letterSpacing: '0.02em' }}>
-          PULSE
-        </Typography>
-        <Typography
-          sx={{
-            fontSize: 9.5,
-            fontWeight: 700,
-            letterSpacing: '0.16em',
-            color: staffShellTokens.header.textMuted,
-            textTransform: 'uppercase',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {surfaceName}
-        </Typography>
-      </Stack>
+      {/* 1. Brand lockup — the staff surface launcher (COR-071). See module
+          header point 1 and SurfaceLauncher.tsx for the full contract. */}
+      <SurfaceLauncher
+        surfaceName={surfaceName}
+        registry={staffRoutes}
+        role={launcherRole}
+        currentPath={currentPath}
+      />
 
       {/* 2. Exercise identity badge — static during conduct (COR-005): plain
           text only, never a switcher control (out of scope for this story). */}

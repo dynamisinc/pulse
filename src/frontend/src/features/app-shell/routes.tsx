@@ -34,11 +34,20 @@
  *   - `/staff/login` -> `StaffSignInPage` (feature: login, story 03) — the
  *                        staff/controller sign-in form, linked from
  *                        `ParticipantSignInPage`.
- *   - `*`            -> the role-aware entry. A catch-all so the browser
- *                        routes on the resolved ROLE, never on the typed path
- *                        (COR-004): a participant typing `/console` still
- *                        lands on their participant surface, a staff member
- *                        typing `/shell` still lands on their staff surface.
+ *   - `*`            -> the role-aware entry. A catch-all — deliberately NOT a
+ *                        flat staff route table — so the browser routes on the
+ *                        resolved ROLE first and only then, for STAFF, on the
+ *                        typed path (COR-004): a participant typing
+ *                        `/staff/console` still lands on their participant
+ *                        surface, because `RoleAwareEntry`'s participant branch
+ *                        never reads the location at all. Staff deep links
+ *                        (`/staff/console`, `/staff/evaluate`, `/staff/plan`, …)
+ *                        are matched by the nested `StaffRouteTree` INSIDE this
+ *                        catch-all, after the role has decided the world.
+ *                        Because the tree is a DESCENDANT `<Routes>`, this
+ *                        catch-all must stay a splat (`*`) route: its
+ *                        `pathnameBase` of `/` is what the registry's absolute
+ *                        paths are matched against.
  *
  * ## The two login routes (pre-auth, PRE-`RoleAwareEntry`)
  * Both are SIBLINGS of the `*` catch-all, mounted OUTSIDE
@@ -51,6 +60,11 @@
  * entirely on its own (`ParticipantSignInPage`'s CSS-module brand-neutral skin;
  * `StaffSignInPage`'s own `cobraTheme` mount) — this file itself imports no
  * COBRA and no participant skin, exactly as before.
+ *
+ * NOTE for future staff surfaces: `/staff/login` is matched HERE, before the
+ * catch-all, so it can never be reached by the nested staff route tree. A
+ * registry entry claiming that exact path would be dead — the registry's own
+ * test asserts none does.
  *
  * World: routing glue — world-neutral. The only world-specific mounting lives
  * inside `RoleAwareEntry` at the staff hand-off, and inside the two login pages

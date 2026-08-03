@@ -18,7 +18,7 @@ names).
 
 | File | Role |
 |------|------|
-| `pages/ExerciseSettingsPage.tsx` | The page mounted as the planner staff surface: a `<main>` landmark with one `h1`, a **left section nav** and a content pane. A **composition point** — a panel is one entry in its `SECTIONS` registry. It holds no data fetching and no panel state; its one documented exception is nav state (which section is selected, plus a mirror of the settings form's dirty/error status so the nav can mark it). |
+| `pages/ExerciseSettingsPage.tsx` | The page mounted as the planner staff surface: a `<main>` landmark with one `h1`, a **left section nav** and a content pane. A **composition point** — a panel is one entry in its `SECTIONS` registry. It holds no data fetching and no panel state; its one documented exception is nav state (which section is selected — now URL-addressable via `?section=` on the surface's `/staff/plan` path, staff-navigation story 03 / COR-072 — plus a mirror of the settings form's dirty/error status so the nav can mark it). |
 | `exerciseSettingsSections.ts` | The section vocabulary shared by the page's nav and the settings panel's `h2`: ids, nav order, label + icon + blurb, and the `ExerciseSettingsStatus` the form reports up. One table, so the item a planner clicks and the heading they land on cannot drift apart. |
 | `components/ExerciseSettingsPanel.tsx` | The COBRA settings editor itself: loads the settings, renders **one section at a time** (`section` prop), and full-replaces **all of them** on save. `PUT` is a **full replace, not a patch**, so the form submits every managed field on every save — including fields in sections that are not rendered, because the values live in React state, never in the DOM (enforced structurally — see that file's header, rule 1). Re-renders from the server's response, never from local form state. |
 | `hooks/useExerciseSettings.ts` | React Query 5 `useExerciseSettings()` (query) + `useSaveExerciseSettings()` (mutation, seeds the query cache with the server's re-projection). Exports `EXERCISE_SETTINGS_QUERY_KEY`; the key carries **no exercise id** — scope is server-resolved (COR-001). |
@@ -28,10 +28,11 @@ names).
 
 ### Layout: left section nav + content pane (and why sections 1–3 share a form)
 
-The page is a section nav on the left and the selected section on the right — five
+The page is a section nav on the left and the selected section on the right — six
 sections: Identity & schedule, Channels, Theming & outlets, Compliance chrome,
-Practice / sandbox. Sections 4 and 5 are self-contained panels with their own
-endpoints and their own saves. Sections 1–3 are **not** three forms:
+Practice / sandbox, Import participant accounts. Sections 4–6 are self-contained
+panels with their own endpoints and their own saves. Sections 1–3 are **not** three
+forms:
 
 - `PUT /api/staff/exercise-settings` is a **full replace** — verified against a live
   backend, a body without `brandName` / `locale` / `outletNames` wiped all three and
@@ -44,7 +45,7 @@ endpoints and their own saves. Sections 1–3 are **not** three forms:
   an off-screen field is still submitted unchanged. `ExerciseSettingsUpdate` keeps
   every property required-and-nullable, so omitting one is a compile error.
 - Save / Revert live in a shared footer visible in all three sections.
-- The settings panel stays **mounted (just `hidden`)** while sections 4–5 are on
+- The settings panel stays **mounted (just `hidden`)** while sections 4–6 are on
   screen, so unsaved edits survive a detour; while it is dirty the nav shows a
   `role="status"` notice, and away from the form that notice says nothing was
   discarded and offers the way back. No `beforeunload` prompt.
@@ -82,6 +83,21 @@ Whatever scrolls, the commit point does not: with one save covering sections 1�
 panel's footer is a `PanelSaveBar` pinned to the bottom of the pane, and the pane
 reserves `scroll-padding-bottom` so a focused field is never scrolled to behind it
 (without that reservation the outlet-name fields landed 70px behind the bar).
+
+### URL-addressable sections (COR-072, feature: staff-navigation, story 03)
+
+Which section shows is a `?section=<id>` query parameter on this surface's registered
+path (`/staff/plan` from `@/features/staff/staffRouteRegistry`), read/written with
+React Router's `useSearchParams` — not a plain `useState`. A reload or a colleague's
+link now lands on the section it names, browser back/forward moves between sections,
+and an unknown/removed/hand-edited `section` value fails closed to `identity` rather
+than throwing (`resolveSectionId()` in `ExerciseSettingsPage.tsx` is the one fail-safe
+boundary; `sectionById()` still throws, but only ever on an already-validated id, so a
+stale bookmark can never reach it). Sections 1–3 staying **one** mounted
+`ExerciseSettingsPanel` (see above) is unchanged — only what drives `activeId` changed.
+Focus management is unchanged too: it still moves to the content pane only on an
+explicit selection (a nav click or the "Back to …" link), never on first render —
+including a first render that happens to be a deep link.
 
 ### Backend contract consumed
 
@@ -143,7 +159,7 @@ accounts by CSV.
 
 | File | Role |
 |------|------|
-| `components/AccountImport.tsx` | The COBRA import panel: choose a CSV, upload it, render the per-row result summary (total / created / failed, plus each failed row's reason). Status is never color-only (icon + text + color). **Not mounted anywhere yet — see "Mounting" below.** |
+| `components/AccountImport.tsx` | The COBRA import panel: choose a CSV, upload it, render the per-row result summary (total / created / failed, plus each failed row's reason). Status is never color-only (icon + text + color). **Mounted as `ExerciseSettingsPage`'s sixth section (staff-navigation story 03, COR-072) — see "Mounting" below.** |
 | `hooks/useAccountImport.ts` | React Query 5 mutation wrapping the import service. |
 | `services/accountImportService.ts` | The data seam. Routes through the shared axios client with a mock adapter behind `USE_MOCK_DATA` (one env-guarded flip point); validates the response body fail-closed; throws a transport-agnostic `AccountImportError`. |
 | `types.ts` | The `AccountImportResult` / `AccountImportRowResult` client contract (mirrors the backend DTOs). Deliberately **not** a shared seam: stories 02 and 04 of exercise-configuration keep their contract types in their own service modules. |
@@ -184,13 +200,17 @@ the route table.
   different deletion. Without the guard a deleted registry entry or mount ships green
   — the panel suites render their panels directly and `App.integration.test.tsx` only
   covers the page's route composition, not its contents. Add a section, add it there.
-- **`AccountImport` is exported but NOT mounted anywhere.** It is reachable only by
-  importing it from this barrel; no route, page or panel renders it today, so a
-  planner has no way to reach the CSV import in the running app. This is a known
-  open question, recorded here rather than resolved: it is not a decision this README
-  makes. Whoever mounts it must do so inside a COBRA `ThemeProvider` (e.g. the shared
-  staff shell) and a React Query `QueryClientProvider` — the same envelope
-  `ExerciseSettingsPage` gets.
+- **`AccountImport` IS mounted**, as `ExerciseSettingsPage`'s sixth section
+  (staff-navigation story 03, COR-072) — one entry in `SECTIONS`, exactly like
+  `ComplianceChromePanel` / `PracticeModePanel` above. This closes
+  `exercise-configuration/feature.md`'s open question (b) ("where does account import
+  live"): a sixth section, not a sibling route — provisioning participants is squarely
+  inside what this page already calls itself ("Set up the exercise you are signed in
+  to"). It inherits the same envelope as every other section (the COBRA
+  `ThemeProvider` from `StaffShellFrame`, the app's `QueryClientProvider`) and is
+  covered by the same composition guard in `pages/ExerciseSettingsPage.test.tsx`, plus
+  its own deep-link tests (mounting directly at `/staff/plan?section=accounts`
+  renders it, and it is reachable from the nav).
 
 ## Scope note
 

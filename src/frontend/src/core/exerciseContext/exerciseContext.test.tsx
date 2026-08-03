@@ -100,11 +100,11 @@ describe('ExerciseContextProvider', () => {
     expect(screen.queryByTestId('probe')).not.toBeInTheDocument()
   })
 
-  it('fails closed - renders nothing - when the mock resolution rejects', async () => {
+  it('fails closed - mounts no child, serves no scope - when the mock resolution rejects', async () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     mockResolve.mockRejectedValue(new Error('mock resolution failed'))
 
-    const { container } = render(
+    render(
       <ExerciseContextProvider>
         <Probe />
       </ExerciseContextProvider>,
@@ -112,8 +112,15 @@ describe('ExerciseContextProvider', () => {
 
     await waitFor(() => expect(consoleSpy).toHaveBeenCalled())
 
-    expect(container).toBeEmptyDOMElement()
+    // The fail-closed property is "no child is mounted, so no scope - default,
+    // stale, or aggregate - can be observed". That is unchanged.
     expect(screen.queryByTestId('probe')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('exerciseId')).not.toBeInTheDocument()
+    // WR-007: the closed state is no longer an EMPTY document. It renders the
+    // provider's own world-neutral recovery notice - which carries no exercise
+    // identity of its own - instead of a white screen the user cannot act on.
+    // (The `loading` case above still renders literally nothing.)
+    expect(screen.getByTestId('exercise-scope-unavailable')).toBeInTheDocument()
 
     consoleSpy.mockRestore()
   })

@@ -40,19 +40,29 @@
  * `../services/staffAssignmentsService.ts` for the mock seam
  * (`USE_MOCK_DATA`) that lets this render fully with no backend.
  *
- * KNOWN LIMITATION (flagged, not silently papered over): `ExerciseContextProvider`
- * resolves its scope ONCE on mount and has no refetch/invalidate hook (by
- * design — see that module's own header). So immediately after a successful
- * switch, this component reflects the NEW active exercise from the switch
- * mutation's OWN response (`justSwitchedTo`, local state) rather than from
- * `useExerciseContext()`, which keeps reporting the pre-switch scope until the
- * provider tree remounts. Every OTHER staff query goes through React Query,
- * which this component's switch mutation invalidates in full (see
- * `useSetActiveExercise.ts`), so those DO re-scope correctly; only the
- * `useExerciseContext()`-sourced scope itself (e.g. `StaffHeader`'s exercise
- * name elsewhere on the page) needs a follow-up (a provider refetch
- * capability, or the host reloading after a switch) to fully catch up.
- * Tracked for `app-shell/01` / a follow-on story.
+ * SCOPE REFRESH (staff-navigation/04, COR-073 — the follow-up this header used
+ * to flag as a KNOWN LIMITATION, now built): `ExerciseContextProvider` is no
+ * longer mount-once. `useSetActiveExercise` re-resolves the scope FROM THE
+ * SERVER on success and commits it atomically, so every `useExerciseContext()`
+ * consumer — `StaffHeader`'s exercise-name badge above all — follows a switch
+ * with no page reload and no remount. See that hook's header for the
+ * cancel → re-resolve → commit → reset ordering guarantee.
+ *
+ * WHY `justSwitchedTo` SURVIVES (it is no longer the mechanism, and no longer
+ * a workaround for a missing one): the switch mutation's own 200 response is
+ * the server's statement of which assignment is now active, and this component
+ * shows it as a LOCAL, PROVISIONAL echo so THIS control confirms the action it
+ * just performed. It is superseded the instant the provider re-resolves to a
+ * different exercise (see the convergence effect below), so the echo can never
+ * out-live or contradict the authoritative scope. Two reasons to keep it:
+ *  - it is server-sourced (the POST response body), never a client assertion;
+ *  - under `USE_MOCK_DATA` the mock `/exercise-context` adapter is stateless
+ *    and always re-resolves to the same canned exercise, so in dev/UAT it is
+ *    the only true statement of the switch available to this row. FLAGGED: the
+ *    mock `/staff/active-exercise` and mock `/exercise-context` adapters do not
+ *    share a fake session, so a mock-mode switch does not move the header
+ *    badge. That is a mock-seam gap, not a gap in this mechanism (against a
+ *    real backend the badge moves) — worth a follow-up story.
  *
  * ACCESSIBILITY (NFR-001, WCAG 2.1 AA):
  *  - The whole control has an accessible name (`aria-labelledby` to its own
@@ -74,7 +84,7 @@
  * SCENARIO TIME (COR-053): not applicable — staff world, no timestamps here.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Box, CircularProgress, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCircleCheck, faRightLeft, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
@@ -235,9 +245,18 @@ export function ExerciseSwitcher() {
   const scope = useExerciseContext()
   const assignmentsQuery = useStaffAssignments()
   const switchMutation = useSetActiveExercise()
-  // See module header "KNOWN LIMITATION": immediate local reflection of a
-  // successful switch, independent of useExerciseContext()'s mount-once scope.
+  // See module header "WHY `justSwitchedTo` SURVIVES": a PROVISIONAL, local echo
+  // of the switch response — never the mechanism, never authoritative.
   const [justSwitchedTo, setJustSwitchedTo] = useState<StaffAssignment | null>(null)
+
+  // CONVERGENCE. The moment the provider re-resolves to a different exercise,
+  // the server-resolved scope is the only truth this row may show — drop the
+  // echo so the two can never disagree (a switcher insisting on exercise X
+  // while the header badge reads Y is exactly the mixed-scope confusion
+  // COR-073 exists to remove).
+  useEffect(() => {
+    setJustSwitchedTo(null)
+  }, [scope.exerciseId])
 
   const activeExerciseId = justSwitchedTo?.exerciseId ?? scope.exerciseId
 

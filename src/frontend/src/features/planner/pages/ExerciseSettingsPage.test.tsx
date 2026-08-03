@@ -73,17 +73,31 @@
  *
  * TWO WORLDS — STAFF (D0 §2). Rendered inside the COBRA `ThemeProvider` and a
  * React Query client, the same envelope `StaffShellFrame` + `App.tsx` give it.
+ *
+ * URL-ADDRESSABLE SECTIONS (COR-072, staff-navigation story 03). The page now
+ * reads/writes which section shows through `useSearchParams`, so every
+ * `render()` below needs a real `MemoryRouter` (`renderPage()` takes the
+ * starting URL). The deep-link / fail-safe / back-forward behavior gets its
+ * own describe block near the bottom of this file, separate from the
+ * composition-mount-guard block above, which does not care which mechanism
+ * drives `activeId` — only that every registered section is reachable and
+ * renders its own content.
  */
 import type { ReactNode } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from '@mui/material/styles'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseSettingsPage } from './ExerciseSettingsPage'
 import { PANEL_SAVE_BAR_SCROLL_PADDING_PX } from '../components/PanelSaveBar'
-import { getExerciseSettings, type ExerciseSettings } from '../services/exerciseSettingsService'
+import {
+  getExerciseSettings,
+  updateExerciseSettings,
+  type ExerciseSettings,
+} from '../services/exerciseSettingsService'
 import { getChromeSettings } from '../services/chromeSettingsService'
 import { getPracticeMode } from '../services/practiceModeService'
 
@@ -122,6 +136,7 @@ const SECTIONS = [
   { id: 'theming', nav: 'Theming & outlets', heading: 'Theming & outlets' },
   { id: 'chrome', nav: 'Compliance chrome', heading: 'Compliance chrome' },
   { id: 'practice', nav: 'Practice / sandbox', heading: 'Practice / sandbox' },
+  { id: 'accounts', nav: 'Import participant accounts', heading: 'Import participant accounts' },
 ] as const
 
 /** A part-configured exercise, for the page-owned tests that need a loaded form. */
@@ -145,14 +160,22 @@ const SETTINGS: ExerciseSettings = {
   outletNames: {},
 }
 
-function renderPage() {
+/**
+ * Renders the page inside a real `MemoryRouter`, since it now reads/writes
+ * `?section=` via `useSearchParams`. Defaults to the surface's bare path (the
+ * common case for the composition-mount-guard tests above); the deep-link
+ * tests below pass a starting URL that already names a section.
+ */
+function renderPage(initialEntries: readonly string[] = ['/staff/plan']) {
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   })
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider theme={cobraTheme}>{children}</ThemeProvider>
+        <ThemeProvider theme={cobraTheme}>
+          <MemoryRouter initialEntries={[...initialEntries]}>{children}</MemoryRouter>
+        </ThemeProvider>
       </QueryClientProvider>
     )
   }
@@ -429,5 +452,179 @@ describe('ExerciseSettingsPage — unsaved changes and off-screen validation', (
       'aria-current',
       'page',
     )
+  })
+
+  it('saves EVERY shared-form field after switching between all three sections via the URL', async () => {
+    const user = userEvent.setup()
+    vi.mocked(updateExerciseSettings).mockResolvedValue(SETTINGS)
+    renderPage()
+    await screen.findByTestId('exercise-settings-form')
+
+    // Identity: edit a field...
+    await user.type(screen.getByLabelText('World name'), '!')
+    // ...move to Channels BY URL (the nav click drives `?section=`) and edit
+    // there too...
+    await user.click(screen.getByTestId('exercise-config-nav-channels'))
+    await user.click(screen.getByRole('checkbox', { name: 'News' }))
+    // ...and to Theming, same story.
+    await user.click(screen.getByTestId('exercise-config-nav-theming'))
+    await user.type(screen.getByLabelText('Brand name'), 'Atlanta Sim')
+
+    // Save from Theming: the ONE mounted form must submit every edit from
+    // every section, not just the one on screen (the full-replace contract).
+    await user.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() => expect(updateExerciseSettings).toHaveBeenCalledTimes(1))
+    const call = vi.mocked(updateExerciseSettings).mock.calls[0]
+    if (call === undefined) throw new Error('updateExerciseSettings was not called')
+    const [update] = call
+    expect(update.worldName).toBe('Metro Atlanta!')
+    expect(update.enabledChannels).toEqual(expect.arrayContaining(['social', 'news']))
+    expect(update.brandName).toBe('Atlanta Sim')
+  })
+})
+
+/**
+ * ============================================================================
+ * URL-ADDRESSABLE SECTIONS (COR-072, staff-navigation story 03)
+ * ============================================================================
+ * `renderPage()` mounts fresh for every test in this block — jsdom + RTL give
+ * no other way to simulate "a reload", but a fresh mount at a URL naming a
+ * section IS the bug this story fixes: before this story, `activeId` always
+ * started at `DEFAULT_SECTION` regardless of what `renderPage()` was called
+ * with, so these assertions would have failed against the pre-story code.
+ */
+describe('ExerciseSettingsPage — deep-linked sections', () => {
+  it('renders the section named by the URL on arrival — not the default', () => {
+    renderPage(['/staff/plan?section=channels'])
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Channels' })).toBeInTheDocument()
+    expect(screen.getByTestId('exercise-config-nav-channels')).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    // The regression this story fixes: a fresh mount at a non-default section
+    // must NOT show Identity & schedule.
+    expect(screen.queryByRole('heading', { level: 2, name: 'Identity & schedule' })).not
+      .toBeInTheDocument()
+  })
+
+  it('a reload at a section URL does not fall back to Identity & schedule', () => {
+    // "Reload" = a brand-new mount against the same starting URL — the exact
+    // scenario a plain `useState<ExerciseConfigSectionId>(DEFAULT_SECTION)`
+    // could never honor, since it always resets to `identity` regardless of
+    // the URL. This is the bug report, asserted directly.
+    renderPage(['/staff/plan?section=practice'])
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Practice / sandbox' })).toBeInTheDocument()
+    expect(screen.getByTestId('exercise-config-nav-practice')).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+  })
+
+  it('falls back to the default section for an unknown id, without throwing', () => {
+    // A stale bookmark or a hand-edited URL naming a removed/misspelt section
+    // id must degrade gracefully — the render must not throw at all.
+    expect(() => renderPage(['/staff/plan?section=does-not-exist'])).not.toThrow()
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Identity & schedule' })).toBeInTheDocument()
+    expect(screen.getByTestId('exercise-config-nav-identity')).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+  })
+
+  it('falls back to the default section when the parameter is simply absent', () => {
+    expect(() => renderPage(['/staff/plan'])).not.toThrow()
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Identity & schedule' })).toBeInTheDocument()
+  })
+
+  it('mounts AccountImport as a registered, deep-linkable sixth section', () => {
+    renderPage(['/staff/plan?section=accounts'])
+
+    // The real panel's own heading + region — not a testid a stub could pass.
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Import participant accounts' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('region', { name: 'Import participant accounts' }),
+    ).toBeInTheDocument()
+    // A real CSV picker is on screen, not a placeholder.
+    expect(screen.getByTestId('account-import-file-input')).toBeInTheDocument()
+    expect(screen.getByTestId('exercise-config-nav-accounts')).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+  })
+
+  it('reaches AccountImport from the nav too (not only by direct link)', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByTestId('exercise-config-nav-accounts'))
+
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Import participant accounts' }),
+    ).toBeInTheDocument()
+  })
+
+  /**
+   * A tiny harness exposing browser back/forward as buttons, since jsdom has
+   * no chrome to click. This is the standard React Router testing recipe:
+   * `useNavigate(-1)` / `useNavigate(1)` drive the SAME history stack a real
+   * back/forward button would, inside the same `MemoryRouter` the page reads
+   * `useSearchParams` from.
+   */
+  function BackForwardHarness() {
+    const navigate = useNavigate()
+    return (
+      <>
+        <button type="button" onClick={() => navigate(-1)}>
+          test-go-back
+        </button>
+        <button type="button" onClick={() => navigate(1)}>
+          test-go-forward
+        </button>
+        <ExerciseSettingsPage />
+      </>
+    )
+  }
+
+  function renderWithHistoryHarness() {
+    const queryClient = new QueryClient({
+      defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+    })
+    return render(<BackForwardHarness />, {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider theme={cobraTheme}>
+            <MemoryRouter initialEntries={['/staff/plan']}>{children}</MemoryRouter>
+          </ThemeProvider>
+        </QueryClientProvider>
+      ),
+    })
+  }
+
+  it('moves between sections on browser back and forward', async () => {
+    const user = userEvent.setup()
+    renderWithHistoryHarness()
+
+    // Two real selections push two history entries onto the same stack.
+    await user.click(screen.getByTestId('exercise-config-nav-chrome'))
+    expect(screen.getByRole('heading', { level: 2, name: 'Compliance chrome' })).toBeInTheDocument()
+    await user.click(screen.getByTestId('exercise-config-nav-practice'))
+    expect(screen.getByRole('heading', { level: 2, name: 'Practice / sandbox' })).toBeInTheDocument()
+
+    // Back once: chrome. Back again: the starting section (identity).
+    await user.click(screen.getByRole('button', { name: 'test-go-back' }))
+    expect(screen.getByRole('heading', { level: 2, name: 'Compliance chrome' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'test-go-back' }))
+    expect(screen.getByRole('heading', { level: 2, name: 'Identity & schedule' })).toBeInTheDocument()
+
+    // Forward once: back to chrome.
+    await user.click(screen.getByRole('button', { name: 'test-go-forward' }))
+    expect(screen.getByRole('heading', { level: 2, name: 'Compliance chrome' })).toBeInTheDocument()
   })
 })
