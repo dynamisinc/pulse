@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Providers;
@@ -79,12 +80,28 @@ public sealed class BootstrapService
     /// canonical frozen lowercase value so a request that says <c>Controller</c> stores <c>controller</c> (the
     /// exact <c>Session.role</c> vocabulary), mirroring <see cref="AccountFieldRules"/>'s participant-role map.
     /// </summary>
+    /// <remarks>
+    /// <c>orgAdmin</c> (COR-010/COR-076) is here so a real deployment has a path to its FIRST organization
+    /// administrator. Nothing else can mint one: staff login requires a pre-existing <see cref="StaffAssignment"/>,
+    /// exercise creation copies the creator's role, and the zero-config seeder
+    /// (<c>Features/Ops/OrgAdminSeed</c>) is non-production by design. Without this entry the OrgAdmin surface is
+    /// reachable only by hand-inserting a row — see the deploy note on PR #411.
+    /// <para>
+    /// The canonical value MUST stay exactly <c>orgAdmin</c> (camelCase), which is why it is taken from
+    /// <see cref="ExerciseAdminRoles.OrgAdmin"/> rather than restated as a literal. It is stored verbatim onto
+    /// <c>Session.Role</c>, and the frontend's <c>isExerciseRole()</c> guard tests EXACT membership of the frozen
+    /// six-role vocabulary (<c>core/auth/roles.ts</c>) — so a lowercase <c>"orgadmin"</c> would authorize fine
+    /// server-side (both role sets compare case-insensitively) and then fail closed to /login in the UI, which is
+    /// exactly the kind of split-brain that is hard to diagnose from either side alone.
+    /// </para>
+    /// </remarks>
     private static readonly Dictionary<string, string> CanonicalStaffRoles =
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["controller"] = "controller",
             ["evaluator"] = "evaluator",
             ["planner"] = "planner",
+            [ExerciseAdminRoles.OrgAdmin] = ExerciseAdminRoles.OrgAdmin,
         };
 
     private readonly PulseDbContext _dbContext;
@@ -375,7 +392,8 @@ public sealed class BootstrapService
 
         if (string.IsNullOrEmpty(staff.Role) || !CanonicalStaffRoles.TryGetValue(staff.Role.Trim(), out var role))
         {
-            return StaffValidation.Invalid("staff.role must be a staff role (controller, evaluator, or planner).");
+            return StaffValidation.Invalid(
+                "staff.role must be a staff role (controller, evaluator, planner, or orgAdmin).");
         }
 
         // Resolve against the SAME Phase-1 allowlist staff login authenticates against — only an entry with a
