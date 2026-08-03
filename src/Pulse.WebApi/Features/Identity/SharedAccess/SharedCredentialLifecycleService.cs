@@ -236,6 +236,8 @@ public sealed class SharedCredentialLifecycleService
 
         // The exercise (scope root, never IExerciseScoped → unfiltered) for the telemetry envelope. A resolved
         // scope with no backing exercise cannot carry valid scoped telemetry — fail closed.
+        // org-scope-exempt(ResolvedScope): exerciseId is the server-resolved scope passed in by the caller
+        // above, never a request field; it only supplies the telemetry envelope's scenario time + time zone.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);

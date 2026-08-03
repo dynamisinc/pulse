@@ -61,6 +61,8 @@ public static class ExerciseContextEndpoints
         // Exercise is not IExerciseScoped, so this PK lookup is not itself scope-filtered; the id is the
         // server-resolved scope, never a client input. A missing row (should not happen for a resolved
         // scope) also fails closed.
+        // org-scope-exempt(ResolvedScope): scope.Value is the server-resolved exercise from IExerciseContext,
+        // so the single row read is the caller's own exercise and thus already inside their organization.
         var exercise = await dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.Id == scope.Value, cancellationToken);

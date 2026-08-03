@@ -181,6 +181,9 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
 
+                    b.Property<DateTimeOffset?>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<DateTimeOffset?>("CurrentScenarioTime")
                         .HasColumnType("datetimeoffset");
 
@@ -204,6 +207,9 @@ namespace Pulse.WebApi.Data.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("OutletNamesJson")
                         .HasColumnType("nvarchar(max)");
@@ -245,6 +251,8 @@ namespace Pulse.WebApi.Data.Migrations
                         .IsUnique()
                         .HasFilter("[Hostname] IS NOT NULL");
 
+                    b.HasIndex("OrganizationId");
+
                     b.ToTable("Exercises");
                 });
 
@@ -279,6 +287,28 @@ namespace Pulse.WebApi.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Follows");
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.Organization", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("Organizations");
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.Persona", b =>
@@ -366,7 +396,12 @@ namespace Pulse.WebApi.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
 
                     b.ToTable("PersonaTemplates");
                 });
@@ -586,6 +621,9 @@ namespace Pulse.WebApi.Data.Migrations
                     b.Property<DateTimeOffset?>("LastLoginAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("Username")
                         .HasColumnType("nvarchar(max)");
 
@@ -593,6 +631,8 @@ namespace Pulse.WebApi.Data.Migrations
 
                     b.HasIndex("ExternalSubject")
                         .IsUnique();
+
+                    b.HasIndex("OrganizationId");
 
                     b.ToTable("StaffUsers");
                 });

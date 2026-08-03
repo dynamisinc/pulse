@@ -399,6 +399,7 @@ public sealed class BootstrapServiceTests
         {
             seed.StaffUsers.Add(new StaffUser
             {
+                OrganizationId = Organization.DefaultOrganizationId,
                 Id = preExistingId,
                 ExternalSubject = subject,
                 DisplayName = "Prior Login",

@@ -34,6 +34,7 @@ public sealed class ParticipantLoginServiceTests
     {
         var exercise = new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = Guid.NewGuid(),
             Name = $"Exercise {Guid.NewGuid():N}",
             TimeZone = timeZone,

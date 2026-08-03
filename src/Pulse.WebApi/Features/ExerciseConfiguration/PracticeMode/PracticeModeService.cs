@@ -147,6 +147,8 @@ public sealed class PracticeModeService
             return PracticeModeResult.ScopeUnresolved();
         }
 
+        // org-scope-exempt(ResolvedScope): exerciseId comes from TryResolveScope (IExerciseContext), never a
+        // request body, so the row read is the caller's own exercise and therefore their own organization.
         var stored = await _dbContext.Exercises
             .AsNoTracking()
             .Where(e => e.Id == exerciseId)
@@ -185,6 +187,8 @@ public sealed class PracticeModeService
             return PracticeModeResult.Invalid("isPracticeMode is required (true or false).");
         }
 
+        // org-scope-exempt(ResolvedScope): exerciseId comes from TryResolveScope (IExerciseContext), never the
+        // request body (which carries only the flag), so this write stays inside the caller's own tenant.
         var exercise = await _dbContext.Exercises
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
 

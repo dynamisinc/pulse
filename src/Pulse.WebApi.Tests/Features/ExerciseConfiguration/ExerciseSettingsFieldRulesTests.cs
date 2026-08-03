@@ -363,6 +363,7 @@ public sealed class ExerciseSettingsFieldRulesTests
     {
         var exercise = new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = Guid.NewGuid(),
             Name = "Atlanta CIE",
             TimeZone = "America/New_York",
@@ -400,6 +401,7 @@ public sealed class ExerciseSettingsFieldRulesTests
         // not quietly become the place they leak from.
         var json = JsonSerializer.Serialize(ExerciseSettingsDto.FromExercise(new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = Guid.NewGuid(),
             Name = "N",
             TimeZone = "UTC",

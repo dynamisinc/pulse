@@ -69,6 +69,9 @@ public sealed partial class HostExerciseResolver : IHostExerciseResolver
             // Fetch up to TWO matches so an ambiguous host (one exercise's Hostname equalling a DIFFERENT
             // exercise's BrandedDomain — there is no cross-column uniqueness guard) is detected rather than
             // silently resolved to an arbitrary row (a nondeterministic cross-exercise misroute).
+            // org-scope-exempt(ResolutionRoot): this read IS the scope resolution — a bare Host header mapped
+            // to an exercise before any tenant is known. A tenant bound here would return zero rows for every
+            // request and blank the platform; the tenant is DERIVED from whichever exercise this resolves to.
             var matchingExerciseIds = await dbContext.Exercises
                 .AsNoTracking()
                 .Where(exercise => exercise.Hostname == host || exercise.BrandedDomain == host)

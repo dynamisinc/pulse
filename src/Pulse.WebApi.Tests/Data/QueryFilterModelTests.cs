@@ -48,16 +48,22 @@ public class QueryFilterModelTests
     [Theory]
     [InlineData(typeof(Exercise))]
     [InlineData(typeof(PersonaTemplate))]
-    public void NonScopedEntity_HasNoGlobalQueryFilter(Type unscopedType)
+    [InlineData(typeof(Organization))]
+    public void NonScopedEntity_HasNoExerciseGlobalQueryFilter(Type unscopedType)
     {
         using var context = BuildModelOnlyContext();
 
         var entityType = context.Model.FindEntityType(unscopedType);
 
         entityType.Should().NotBeNull();
-        entityType!.GetDeclaredQueryFilters().Should().BeEmpty(
-            $"{unscopedType.Name} is not IExerciseScoped (aggregate root / shared library asset) and must NOT " +
-            "be exercise-filtered — over-filtering would hide legitimately shared rows");
+
+        // The EXERCISE axis is the anonymous (null-keyed) filter. PersonaTemplate now also carries the
+        // exercise-isolation/11 ORGANIZATION filter under its own key, so "has no filters at all" is no
+        // longer the right assertion — "is not confined to one EXERCISE" is, and it is the one that matters
+        // here: over-filtering by exercise would hide legitimately cross-run shared rows (XC-005).
+        entityType!.FindDeclaredQueryFilter(null).Should().BeNull(
+            $"{unscopedType.Name} is not IExerciseScoped (aggregate root / tenant root / shared library " +
+            "asset) and must NOT be exercise-filtered — over-filtering would hide legitimately shared rows");
     }
 
     [Fact]
@@ -74,6 +80,83 @@ public class QueryFilterModelTests
         uncovered.Should().BeEmpty(
             "the filter reflects over IExerciseScoped centrally, so EVERY scoped entity — including any added " +
             "later — is covered automatically; a scoped entity with no filter would leak across exercises");
+    }
+
+    [Theory]
+    [InlineData(typeof(PersonaTemplate))]
+    public void EveryOrganizationScopedEntity_HasTheTenantGlobalQueryFilter(Type orgScopedType)
+    {
+        using var context = BuildModelOnlyContext();
+
+        var entityType = context.Model.FindEntityType(orgScopedType);
+
+        entityType.Should().NotBeNull();
+        entityType!.FindDeclaredQueryFilter(PulseDbContext.OrganizationScopeFilterKey).Should().NotBeNull(
+            $"{orgScopedType.Name} is IOrganizationScoped, so the central CUSTOMER-tenant filter must cover " +
+            "it — this is exercise-isolation/11's gap 2 (a shared library asset visible to every customer)");
+    }
+
+    [Fact]
+    public void EveryIOrganizationScopedEntity_IsCoveredByTheCentralTenantFilter_WithNoneMissed()
+    {
+        using var context = BuildModelOnlyContext();
+
+        var uncovered = context.Model.GetEntityTypes()
+            .Where(t => typeof(IOrganizationScoped).IsAssignableFrom(t.ClrType))
+            .Where(t => t.FindDeclaredQueryFilter(PulseDbContext.OrganizationScopeFilterKey) is null)
+            .Select(t => t.ClrType.Name)
+            .ToList();
+
+        uncovered.Should().BeEmpty(
+            "the tenant filter reflects over IOrganizationScoped centrally, so EVERY org-scoped entity — " +
+            "including any added later — is covered automatically; an uncovered one would leak across customers");
+    }
+
+    [Fact]
+    public void TheTwoAxesAreSeparatelyKeyed_SoNeitherCanSilentlyReplaceTheOther()
+    {
+        // The load-bearing structural property of exercise-isolation/11. EF Core keys global query filters;
+        // registering the tenant filter under the SAME (anonymous) key the exercise axis uses would REPLACE
+        // the always-Critical exercise predicate on any entity carrying both markers — and the model would
+        // still look "filtered". Asserting the keys are distinct is what makes that unrepresentable.
+        using var context = BuildModelOnlyContext();
+
+        var post = context.Model.FindEntityType(typeof(Post));
+        post!.FindDeclaredQueryFilter(null).Should().NotBeNull(
+            "the exercise axis is the anonymous (null-keyed) filter and must stay exactly where it was");
+        post.FindDeclaredQueryFilter(PulseDbContext.OrganizationScopeFilterKey).Should().BeNull(
+            "Post is not IOrganizationScoped — it is transitively bounded by its exercise's organization");
+
+        var template = context.Model.FindEntityType(typeof(PersonaTemplate));
+        template!.FindDeclaredQueryFilter(PulseDbContext.OrganizationScopeFilterKey).Should().NotBeNull(
+            "the tenant axis is registered under its own distinct key");
+        template.FindDeclaredQueryFilter(null).Should().BeNull(
+            "and it did not land on the exercise axis's key, which would have made the two compete");
+
+        PulseDbContext.OrganizationScopeFilterKey.Should().NotBeNullOrEmpty(
+            "an empty/null tenant filter key would collide with the exercise axis's anonymous key");
+    }
+
+    [Fact]
+    public void EveryExerciseScopedEntity_StillHasItsExerciseFilter_AfterTheTenantAxisLanded()
+    {
+        // A regression fence around the always-Critical guarantee: the org axis is additive, so the set of
+        // exercise-filtered entities must be exactly what it was. If a future refactor moves an entity from
+        // IExerciseScoped onto IOrganizationScoped to "simplify", this goes red — the tenant boundary is a
+        // COARSER bound and would not protect participants of two exercises from each other.
+        using var context = BuildModelOnlyContext();
+
+        var exerciseFiltered = context.Model.GetEntityTypes()
+            .Where(t => t.FindDeclaredQueryFilter(null) is not null)
+            .Select(t => t.ClrType.Name)
+            .ToList();
+
+        exerciseFiltered.Should().BeEquivalentTo(
+            context.Model.GetEntityTypes()
+                .Where(t => typeof(IExerciseScoped).IsAssignableFrom(t.ClrType))
+                .Select(t => t.ClrType.Name),
+            "the exercise axis must cover exactly the IExerciseScoped entities — no more (over-filtering " +
+            "hides shared rows) and no fewer (a gap leaks across exercises)");
     }
 
     [Fact]

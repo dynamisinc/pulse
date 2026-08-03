@@ -327,16 +327,18 @@ public class QueryFilterIsolationTests
     }
 
     [RequiresDockerFact]
-    public async Task NonScopedEntities_AreNeverFiltered_RegardlessOfScope()
+    public async Task NonScopedEntities_AreNeverExerciseFiltered_RegardlessOfScope()
     {
         var exerciseId = Guid.NewGuid();
         var templateId = Guid.NewGuid();
+        var organizationId = Organization.DefaultOrganizationId;
 
         await using (var seed = _fixture.CreateContext())
         {
-            seed.Exercises.Add(new Exercise { Id = exerciseId, Name = "Visible Exercise" });
+            seed.Exercises.Add(new Exercise { OrganizationId = organizationId, Id = exerciseId, Name = "Visible Exercise" });
             seed.PersonaTemplates.Add(new PersonaTemplate
             {
+                OrganizationId = organizationId,
                 Id = templateId,
                 DisplayName = "Visible Template",
                 Handle = $"@t_{templateId:N}",
@@ -344,13 +346,19 @@ public class QueryFilterIsolationTests
             await seed.SaveChangesAsync();
         }
 
-        // Read under an unrelated exercise scope — the non-scoped entities must stay fully visible.
-        await using var read = _fixture.CreateContext(ScopeFor(Guid.NewGuid()));
+        // Read under an UNRELATED exercise scope — but the template's own TENANT — so the only thing that
+        // could hide these rows is the exercise axis. Both must stay fully visible: neither entity is
+        // IExerciseScoped, and the exercise-isolation/11 tenant axis (which PersonaTemplate now does carry)
+        // must not have quietly turned into an exercise bound.
+        await using var read = _fixture.CreateContext(
+            ScopeFor(Guid.NewGuid()),
+            new OrganizationContext { CurrentOrganizationId = organizationId });
 
         (await read.Exercises.CountAsync(e => e.Id == exerciseId)).Should().Be(
-            1, "Exercise is the aggregate root and carries no query filter");
+            1, "Exercise is the aggregate root and carries no query filter on either axis");
         (await read.PersonaTemplates.CountAsync(t => t.Id == templateId)).Should().Be(
-            1, "PersonaTemplate is a shared library asset and carries no query filter");
+            1, "a persona template stays shared across ALL of its organization's exercise runs (XC-005) — " +
+               "the tenant filter must bound it by CUSTOMER, never by exercise");
     }
 
     [RequiresDockerFact]

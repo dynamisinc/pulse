@@ -33,14 +33,58 @@ namespace Pulse.WebApi.Data.Entities;
 /// and NEVER from a client-supplied id, body field, route or query parameter — that is exactly the
 /// cross-exercise-leak vector COR-001 / XC-002 forbid.
 /// </para>
+/// <para>
+/// <b>Organization tenant boundary (exercise-isolation/11, COR-010).</b> An exercise now belongs to exactly
+/// one customer <see cref="Organization"/> via the non-nullable <see cref="OrganizationId"/>, so this entity
+/// implements <see cref="IOrganizationOwned"/> — the write-guard refuses to persist one with an empty
+/// tenant. It is deliberately NOT <see cref="IOrganizationScoped"/>: see <see cref="OrganizationId"/>.
+/// </para>
 /// </remarks>
-public sealed class Exercise
+public sealed class Exercise : IOrganizationOwned
 {
     /// <summary>Primary key and the isolation scope every scoped entity's <c>ExerciseId</c> references.</summary>
     public Guid Id { get; set; }
 
+    /// <summary>
+    /// The owning customer tenant (COR-010, exercise-isolation/11) — an exercise belongs to exactly one
+    /// <see cref="Organization"/>. Non-nullable; server-stamped, never taken from a client body.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>NOT globally filtered, and that is a decision, not an omission.</b> This entity carries
+    /// <see cref="IOrganizationOwned"/> but NOT <see cref="IOrganizationScoped"/>, because <c>Exercise</c> is
+    /// the RESOLUTION ROOT of the inner tier: <c>HostExerciseResolver</c> reads this table from a bare
+    /// <c>Host</c> header precisely in order to DISCOVER which tenant/exercise a request belongs to, and
+    /// <c>BootstrapService</c> reads it to seed an empty database. A tenant filter here would be evaluated
+    /// before a tenant is known and would, fail-closed, return zero rows for every request — blanking the
+    /// platform rather than protecting it.
+    /// </para>
+    /// <para>
+    /// <b>So any staff/platform query that LISTS or SELECTS ACROSS exercises must bound itself explicitly</b>
+    /// with <see cref="OrganizationScope.InOrganization{TEntity}"/> — that is the enforced constraint for
+    /// this entity, and it is what a future <c>GET/POST /api/staff/exercises</c> must use. Reads of a SINGLE
+    /// already-server-resolved exercise (via <c>IExerciseContext</c>) need no extra bound: the resolved scope
+    /// is by definition the caller's own.
+    /// </para>
+    /// </remarks>
+    public Guid OrganizationId { get; set; }
+
     /// <summary>Human-readable name for the run (staff-facing) — projects onto the frozen <c>ExerciseScope.exerciseName</c>.</summary>
     public required string Name { get; set; }
+
+    /// <summary>
+    /// Server wall-clock instant (UTC) the exercise row was created, or <c>null</c> for a row created before
+    /// this column existed (exercise-lifecycle-admin story 02, COR-075 — the org-scoped list shows a created
+    /// date so a planner can tell two similarly-named runs apart).
+    /// </summary>
+    /// <remarks>
+    /// <b>Nullable on purpose, and it is not a placeholder.</b> The creation instant of the exercises that
+    /// predate this column is genuinely unknown — every other candidate (the migration's own run time, a
+    /// <c>DateTimeOffset.MinValue</c> sentinel) would be a fabricated date rendered to a staff human as fact.
+    /// <c>null</c> means "unknown", and the list DTO emits it as <c>null</c> so the surface can say so.
+    /// Server-stamped from <c>DateTimeOffset.UtcNow</c> at creation, never from a client body.
+    /// </remarks>
+    public DateTimeOffset? CreatedAt { get; set; }
 
     /// <summary>
     /// The provisioned per-exercise host (subdomain, e.g. <c>atl-cie.{platform-domain}.com</c>) the story-08

@@ -159,6 +159,8 @@ public sealed class BootstrapService
 
         // 3. Resolve any existing exercise for this host (Exercise is unscoped → this by-host read is unfiltered).
         //    Tracked so it can be reused as-is; it is never mutated (idempotent, non-clobbering).
+        // org-scope-exempt(ResolutionRoot): the by-HOSTNAME read that establishes which exercise (and hence
+        // which tenant) this bootstrap is about. There is no tenant to bound by until it resolves.
         var exercise = await _dbContext.Exercises
             .FirstOrDefaultAsync(e => e.Hostname == host, cancellationToken);
         var exerciseCreated = exercise is null;
@@ -208,6 +210,8 @@ public sealed class BootstrapService
             // failure was something else — rethrow rather than mask a genuine error as a 200.
             _dbContext.ChangeTracker.Clear();
 
+            // org-scope-exempt(ResolutionRoot): the same by-HOSTNAME resolution, re-run after a unique-index
+            // race, to find the exercise the concurrent bootstrap won with. Still pre-tenant by construction.
             var winner = await _dbContext.Exercises
                 .FirstOrDefaultAsync(e => e.Hostname == host, cancellationToken);
             if (winner is null)
@@ -240,12 +244,19 @@ public sealed class BootstrapService
     {
         var now = DateTimeOffset.UtcNow;
 
+        // exercise-isolation/11 (COR-010): every Exercise and StaffUser belongs to exactly one customer
+        // Organization, and the write-guard refuses an empty one — so the tenant must be resolved BEFORE any
+        // owned row is staged. Bootstrap is the single-customer seed path, so it uses the same well-known
+        // DEFAULT organization the OrganizationTenantBoundary migration backfills existing data onto.
+        var organizationId = await ResolveDefaultOrganizationAsync(now, cancellationToken);
+
         var exercise = existingExercise;
         if (exercise is null)
         {
             exercise = new Exercise
             {
                 Id = Guid.NewGuid(),
+                OrganizationId = organizationId,
                 Name = exerciseName!,
                 Hostname = host,
                 TimeZone = timeZone,
@@ -259,8 +270,13 @@ public sealed class BootstrapService
 
         var exerciseId = exercise.Id;
 
+        // A REUSED exercise keeps its own tenant — never re-homed onto the default (non-clobbering, and the
+        // safe direction: silently moving a customer's exercise between tenants is the worst thing this
+        // endpoint could do). Any staff user provisioned below joins THAT exercise's organization.
+        var exerciseOrganizationId = exercise.OrganizationId;
+
         var staffResult = staffValidation.Resolved is { } staff
-            ? await ProvisionStaffAsync(exerciseId, staff, now, cancellationToken)
+            ? await ProvisionStaffAsync(exerciseId, exerciseOrganizationId, staff, now, cancellationToken)
             : null;
 
         var sharedCredentialResult = provisionSharedCredential
@@ -292,6 +308,43 @@ public sealed class BootstrapService
 
         return BootstrapResult.Provisioned(
             exerciseId, host, exerciseCreated, staffResult, sharedCredentialResult, accountResult);
+    }
+
+    /// <summary>
+    /// Resolves — creating on first use — the well-known DEFAULT <see cref="Organization"/> every
+    /// bootstrap-seeded exercise and staff user is homed onto (exercise-isolation/11, COR-010).
+    /// </summary>
+    /// <remarks>
+    /// Idempotent by construction, exactly like the rest of this service: the lookup is by the FIXED
+    /// <see cref="Organization.DefaultOrganizationId"/>, which the <c>OrganizationTenantBoundary</c>
+    /// migration also inserts — so on any migrated database this is a pure read and a re-run can never mint
+    /// a second "default" tenant. The create branch exists only for a database whose <c>Organizations</c>
+    /// row was removed, and it stages the insert into the SAME unit of work as everything else (one
+    /// <c>SaveChangesAsync</c>), so a failed bootstrap leaves no orphan tenant behind.
+    /// </remarks>
+    private async Task<Guid> ResolveDefaultOrganizationAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        // Organization is the tenant scope root — it carries no query filter, so this read is unfiltered
+        // (the same reason the by-hostname Exercise read above is).
+        // org-scope-exempt(TenantRoot): a lookup of the TENANT ROOT table by the FIXED, well-known
+        // Organization.DefaultOrganizationId — there is no outer scope to bound it by, and it enumerates
+        // nothing: it can only ever return the one deterministic row the migration also seeds.
+        var existing = await _dbContext.Organizations
+            .FirstOrDefaultAsync(o => o.Id == Organization.DefaultOrganizationId, cancellationToken);
+
+        if (existing is not null)
+        {
+            return existing.Id;
+        }
+
+        _dbContext.Organizations.Add(new Organization
+        {
+            Id = Organization.DefaultOrganizationId,
+            Name = Organization.DefaultOrganizationName,
+            CreatedAt = now,
+        });
+
+        return Organization.DefaultOrganizationId;
     }
 
     /// <summary>Normalizes the requested time zone: trimmed, bounded, defaulting to <c>UTC</c> when blank.</summary>
@@ -399,11 +452,19 @@ public sealed class BootstrapService
     }
 
     /// <summary>Provisions (or reuses) the <see cref="StaffUser"/> + <see cref="StaffAssignment"/> for the exercise.</summary>
+    /// <remarks>
+    /// The <paramref name="organizationId"/> is the TARGET EXERCISE's tenant (exercise-isolation/11): a
+    /// newly-provisioned staff human joins the customer whose exercise they are being assigned to. An
+    /// existing staff row's organization is never re-homed — the same non-clobbering rule this service
+    /// applies to every other reused row, and the safe direction across a customer boundary.
+    /// </remarks>
     private async Task<BootstrapStaffResult> ProvisionStaffAsync(
-        Guid exerciseId, ResolvedStaff staff, DateTimeOffset now, CancellationToken cancellationToken)
+        Guid exerciseId, Guid organizationId, ResolvedStaff staff, DateTimeOffset now, CancellationToken cancellationToken)
     {
         // StaffUser is unscoped (spans exercises) — resolve/create by external subject, reusing a row a prior
         // failed login may already have auto-provisioned (never overwritten).
+        // org-scope-exempt(ResolutionRoot): resolve-or-create by IdP subject — the identity resolution itself,
+        // and the row that would CARRY the tenant, so it cannot be found through a tenant bound.
         var staffUser = await _dbContext.StaffUsers
             .FirstOrDefaultAsync(u => u.ExternalSubject == staff.ExternalSubject, cancellationToken);
 
@@ -412,6 +473,7 @@ public sealed class BootstrapService
             staffUser = new StaffUser
             {
                 Id = Guid.NewGuid(),
+                OrganizationId = organizationId,
                 ExternalSubject = staff.ExternalSubject,
                 DisplayName = staff.DisplayName,
                 Username = staff.Username,

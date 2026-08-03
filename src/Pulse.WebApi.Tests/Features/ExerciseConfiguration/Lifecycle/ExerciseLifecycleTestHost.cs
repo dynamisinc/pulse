@@ -22,6 +22,7 @@ using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Helpers;
 
 /// <summary>
 /// A host wired EXACTLY as the orchestrator will wire story 03 — <c>AddExerciseConfiguration()</c> (01b's
@@ -163,6 +164,9 @@ public sealed class ExerciseLifecycleTestHost : IAsyncDisposable
             context.Exercises.Add(ExerciseLifecycleTestData.ExerciseInState(exerciseId, "live"));
         }
 
+        // exercise-isolation/11: the staff human the session names must EXIST and share the exercise's
+        // customer tenant, or the org bound fails closed and every staff endpoint 403s.
+        context.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
         context.StaffAssignments.Add(new StaffAssignment
         {
             Id = Guid.NewGuid(),
@@ -207,6 +211,7 @@ public static class ExerciseLifecycleTestData
     /// <returns>The entity to add.</returns>
     public static Exercise ExerciseInState(Guid exerciseId, string status) => new()
     {
+        OrganizationId = Organization.DefaultOrganizationId,
         Id = exerciseId,
         Name = "Lifecycle Test Exercise",
         TimeZone = "UTC",

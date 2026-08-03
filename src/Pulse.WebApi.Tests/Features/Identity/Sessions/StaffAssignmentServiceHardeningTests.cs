@@ -29,7 +29,7 @@ public sealed class StaffAssignmentServiceHardeningTests
     {
         var id = Guid.NewGuid();
         await using var seed = _fixture.CreateContext();
-        seed.Exercises.Add(new Exercise { Id = id, Name = $"Ex {id:N}", TimeZone = "UTC", Status = "active" });
+        seed.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = id, Name = $"Ex {id:N}", TimeZone = "UTC", Status = "active" });
         await seed.SaveChangesAsync();
         return id;
     }
@@ -39,6 +39,7 @@ public sealed class StaffAssignmentServiceHardeningTests
         await using var seed = _fixture.CreateContext();
         seed.StaffUsers.Add(new StaffUser
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = staffUserId,
             ExternalSubject = $"idp|{staffUserId:N}",
             DisplayName = "Staffer",

@@ -252,6 +252,8 @@ public static class PauseTierEndpoints
     {
         // Exercise is deliberately UNSCOPED (its own Id IS the scope), so this is a direct read by the resolved
         // scope's id — never a client-supplied one.
+        // org-scope-exempt(ResolvedScope): exerciseId is the server-resolved scope passed in by the endpoint,
+        // never a client-supplied id, so this steering-state read cannot cross an exercise or a tenant.
         var row = await dbContext.Exercises
             .AsNoTracking()
             .Where(exercise => exercise.Id == exerciseId)

@@ -36,6 +36,7 @@ public sealed class SharedCredentialLifecycleIsolationTests
     {
         var exercise = new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = Guid.NewGuid(),
             Name = $"Exercise {Guid.NewGuid():N}",
             TimeZone = "UTC",

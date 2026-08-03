@@ -91,6 +91,7 @@ public class ExerciseScopeDtoTests
     {
         var exercise = new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = Guid.NewGuid(),
             Name = "Coastal Cascade Exercise",
             Hostname = "atl-cie.example.com",
@@ -115,6 +116,7 @@ public class ExerciseScopeDtoTests
         // must never appear on the participant-facing wire shape at all — not even as an extra JSON key.
         var exercise = new Exercise
         {
+            OrganizationId = Organization.DefaultOrganizationId,
             Id = Guid.NewGuid(),
             Name = "Leak Check Exercise",
             Hostname = "should-never-leak.example.com",

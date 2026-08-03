@@ -194,6 +194,8 @@ public sealed class SessionService
     {
         // The bound exercise supplies the (placeholder) scenario time + time zone for the envelope. It is the
         // unscoped scope root, so this read is not filtered.
+        // org-scope-exempt(ResolvedScope): session.ExerciseId is the binding on a SERVER-ISSUED session row,
+        // stamped at issue time from the resolved scope — the caller cannot name a different exercise here.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == session.ExerciseId, cancellationToken);

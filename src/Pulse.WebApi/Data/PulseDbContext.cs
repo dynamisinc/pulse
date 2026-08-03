@@ -10,7 +10,8 @@ using Pulse.WebApi.Data.Entities;
 /// <c>SharedCredential</c> (exercise-scoped) alongside the cross-exercise <c>StaffUser</c>,
 /// <c>StaffAssignment</c>, and <c>Session</c> records (deliberately NOT <see cref="IExerciseScoped"/> —
 /// each carries a plain <c>ExerciseId</c> and documents its exemption in its own remarks).
-/// <c>Organization</c> / <c>Cast</c> remain deferred (exercise-isolation/11, gated on multi-customer go-live).
+/// <c>Organization</c> — the CUSTOMER tenant tier above the exercise (exercise-isolation/11, COR-010) — now
+/// lives here too, as a SECOND, independent scoping axis over <see cref="IOrganizationScoped"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -25,9 +26,26 @@ using Pulse.WebApi.Data.Entities;
 /// READ-side global query filter is <c>exercise-isolation/01</c>'s job — do not describe this as
 /// "isolation is done".
 /// </para>
+/// <para>
+/// <b>TWO independent scoping axes (exercise-isolation/11).</b> The always-Critical EXERCISE axis
+/// (<see cref="IExerciseScoped"/>) is unchanged and untouched by the tenant work. A second, additive
+/// ORGANIZATION axis (<see cref="IOrganizationScoped"/>) covers the org-owned shared-library assets the
+/// exercise axis deliberately does not cover. The two are separately-keyed EF global filters that AND
+/// together on any entity carrying both markers, and they fail closed independently — an unresolved tenant
+/// can never widen an exercise scope, because the axes cover disjoint entity sets. Read
+/// <see cref="IOrganizationScoped"/> for the full mechanism decision.
+/// </para>
 /// </remarks>
 public class PulseDbContext : DbContext
 {
+    /// <summary>
+    /// The EF Core filter KEY the organization (customer tenant) global query filter is registered under.
+    /// Distinct from the exercise axis's anonymous (null) key so the two axes coexist and AND together
+    /// instead of one silently replacing the other — see <see cref="ApplyOrganizationScopeFilter{TEntity}"/>.
+    /// Public so the isolation tests can assert each axis by name.
+    /// </summary>
+    public const string OrganizationScopeFilterKey = "OrganizationScope";
+
     /// <summary>
     /// Open generic handle to <see cref="ApplyExerciseScopeFilter{TEntity}"/>, resolved once and closed
     /// per <see cref="IExerciseScoped"/> CLR type in <see cref="OnModelCreating"/>.
@@ -40,10 +58,27 @@ public class PulseDbContext : DbContext
             $"Could not reflect {nameof(ApplyExerciseScopeFilter)} — the read-side exercise scope filter is unwired.");
 
     /// <summary>
+    /// Open generic handle to <see cref="ApplyOrganizationScopeFilter{TEntity}"/>, resolved once and closed
+    /// per <see cref="IOrganizationScoped"/> CLR type in <see cref="OnModelCreating"/>.
+    /// </summary>
+    private static readonly MethodInfo ApplyOrganizationScopeFilterMethod =
+        typeof(PulseDbContext).GetMethod(
+            nameof(ApplyOrganizationScopeFilter),
+            BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException(
+            $"Could not reflect {nameof(ApplyOrganizationScopeFilter)} — the read-side organization scope filter is unwired.");
+
+    /// <summary>
     /// The exercise scope for the read-side global query filter, captured ONCE at construction. Fails
     /// closed to <see cref="Guid.Empty"/> when no scope is resolved (see the constructor).
     /// </summary>
     private readonly Guid _currentExerciseId;
+
+    /// <summary>
+    /// The CUSTOMER tenant scope for the second read-side global query filter, captured ONCE at
+    /// construction. Fails closed to <see cref="Guid.Empty"/> when no organization is resolved.
+    /// </summary>
+    private readonly Guid _currentOrganizationId;
 
     /// <summary>Creates the context with externally-supplied options (DI / design-time / tests).</summary>
     /// <param name="options">The EF Core options (provider, connection string).</param>
@@ -54,19 +89,35 @@ public class PulseDbContext : DbContext
     /// the registered <see cref="IExerciseContext"/>. A <c>null</c> accessor — or a null
     /// <see cref="IExerciseContext.CurrentExerciseId"/> — means "no scope resolved" and fails closed.
     /// </param>
-    public PulseDbContext(DbContextOptions<PulseDbContext> options, IExerciseContext? exerciseContext = null)
+    /// <param name="organizationContext">
+    /// The current CUSTOMER tenant for the second read-side global query filter (exercise-isolation/11).
+    /// OPTIONAL/nullable for the same reasons, and with the same fail-closed collapse: a null accessor — or
+    /// a null <see cref="IOrganizationContext.CurrentOrganizationId"/> — matches ZERO
+    /// <see cref="IOrganizationScoped"/> rows, never all tenants. It CANNOT affect the exercise axis: the
+    /// two axes cover disjoint entity sets.
+    /// </param>
+    public PulseDbContext(
+        DbContextOptions<PulseDbContext> options,
+        IExerciseContext? exerciseContext = null,
+        IOrganizationContext? organizationContext = null)
         : base(options)
     {
         // Fail-closed capture (the always-Critical property): an unset scope collapses to Guid.Empty,
         // which the write-guard guarantees no scoped row ever carries — so the query filter matches zero
         // rows, never all exercises. Read the reasoning in full in OnModelCreating.
         _currentExerciseId = exerciseContext?.CurrentExerciseId ?? Guid.Empty;
+
+        // The same fail-closed capture, one tier out (COR-010). Independent of the line above by design.
+        _currentOrganizationId = organizationContext?.CurrentOrganizationId ?? Guid.Empty;
     }
+
+    /// <summary>The customer tenants (COR-010) — the aggregate root of the OUTER isolation tier.</summary>
+    public DbSet<Organization> Organizations => Set<Organization>();
 
     /// <summary>The exercise runs — the aggregate root / isolation scope.</summary>
     public DbSet<Exercise> Exercises => Set<Exercise>();
 
-    /// <summary>The shared, cross-run persona authoring library (XC-005).</summary>
+    /// <summary>The persona authoring library, shared across an ORGANIZATION's runs (XC-005 within the tenant).</summary>
     public DbSet<PersonaTemplate> PersonaTemplates => Set<PersonaTemplate>();
 
     /// <summary>Personas instantiated within a single exercise run.</summary>
@@ -109,9 +160,34 @@ public class PulseDbContext : DbContext
         // target and the provisioned database sort/compare identically (the MSSQL container default already matches).
         modelBuilder.UseCollation("SQL_Latin1_General_CP1_CI_AS");
 
+        // ==========================================================================================
+        // ORGANIZATION TENANT TIER (exercise-isolation/11, COR-010) — the customer boundary ABOVE the
+        // exercise. Create-then-extend: a new DbSet + config + one migration, never a second DbContext.
+        // ==========================================================================================
+        modelBuilder.Entity<Organization>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // Bounded (index-key eligible) display name; unique so two tenants cannot share a name and be
+            // confused for one another on a staff/platform surface.
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+            entity.HasIndex(e => e.Name).IsUnique();
+
+            // NOT IOrganizationOwned / IOrganizationScoped: Organization IS the tenant scope, exactly as
+            // Exercise is the exercise scope. It carries no filter of its own.
+        });
+
         modelBuilder.Entity<Exercise>(entity =>
         {
             entity.HasKey(e => e.Id);
+
+            // IOrganizationOwned (exercise-isolation/11): an exercise belongs to exactly one customer.
+            // Required + indexed — the index serves the "list this organization's exercises" read that a
+            // future POST/GET /api/staff/exercises performs through OrganizationScope.InOrganization(...).
+            // NO global query filter here, deliberately: Exercise is the resolution root (see the property's
+            // XML doc and IOrganizationScoped's remarks).
+            entity.Property(e => e.OrganizationId).IsRequired();
+            entity.HasIndex(e => e.OrganizationId);
 
             // B2 story 08: host → exercise map. Bounded lengths (index-key eligible) + FILTERED unique
             // indexes so many exercises may share a NULL host without colliding, yet a provisioned host is
@@ -176,7 +252,14 @@ public class PulseDbContext : DbContext
         modelBuilder.Entity<PersonaTemplate>(entity =>
         {
             entity.HasKey(e => e.Id);
-            // NOT IExerciseScoped: a shared library asset, no ExerciseId (XC-005).
+            // NOT IExerciseScoped: a shared library asset, no ExerciseId (XC-005) — a template is reusable
+            // across an organization's runs, and binding it to one run would break the reuse it exists for.
+            //
+            // IS IOrganizationScoped (exercise-isolation/11): "shared across runs" means shared across ONE
+            // CUSTOMER's runs. The central org filter applied at the bottom of this method covers it
+            // automatically; this is story 11's "gap 2" — the latent cross-customer library leak — closed.
+            entity.Property(e => e.OrganizationId).IsRequired();
+            entity.HasIndex(e => e.OrganizationId);
         });
 
         modelBuilder.Entity<Persona>(entity =>
@@ -331,6 +414,12 @@ public class PulseDbContext : DbContext
             entity.Property(e => e.ExternalSubject).HasMaxLength(256);
             entity.HasIndex(e => e.ExternalSubject).IsUnique();
             // NOT IExerciseScoped: staff-world access record, spans exercises (COR-005). No ExerciseId.
+
+            // IOrganizationOwned (exercise-isolation/11): a staff human spans EXERCISES but never CUSTOMERS.
+            // Required + indexed for the "this organization's staff" read. NO global query filter: like
+            // Exercise, StaffUser is a resolution root (looked up by ExternalSubject pre-session).
+            entity.Property(e => e.OrganizationId).IsRequired();
+            entity.HasIndex(e => e.OrganizationId);
         });
 
         modelBuilder.Entity<StaffAssignment>(entity =>
@@ -385,6 +474,36 @@ public class PulseDbContext : DbContext
             }
         }
         // ------------------------------------------------------------------------------------------
+
+        // ------------------------------------------------------------------------------------------
+        // READ-SIDE GLOBAL QUERY FILTER, SECOND AXIS — exercise-isolation/11 (COR-010): the CUSTOMER
+        // tenant boundary above the exercise. Applied CENTRALLY over IOrganizationScoped by the same
+        // reflect-over-the-model idiom, so a newly-added org-owned library entity is covered automatically.
+        //
+        // ADDITIVE, NEVER SUBSTITUTIVE. This loop runs AFTER the exercise loop above and uses a DISTINCT
+        // filter key (OrganizationScopeFilterKey), so on an entity carrying both markers EF Core 10 keeps
+        // BOTH named filters and ANDs them. It cannot overwrite, relax or disable the always-Critical
+        // exercise predicate — which is why the exercise loop above is left byte-for-byte unchanged.
+        //
+        // FAIL CLOSED (captured in the ctor): _currentOrganizationId is
+        //     organizationContext?.CurrentOrganizationId ?? Guid.Empty
+        // and GuardOrganizationScope below forbids persisting any org-owned row with an empty
+        // OrganizationId — so an unresolved tenant matches NOTHING, never every customer's library.
+        //
+        // AND IT CANNOT WIDEN THE EXERCISE SCOPE. The two axes cover disjoint entity sets today
+        // (IOrganizationScoped = PersonaTemplate; IExerciseScoped = the participant content entities), and
+        // even where they overlap the predicates conjoin. There is no code path by which an unresolved —
+        // or a wrongly-resolved — organization returns MORE IExerciseScoped rows than before this story.
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (typeof(IOrganizationScoped).IsAssignableFrom(entityType.ClrType))
+            {
+                ApplyOrganizationScopeFilterMethod
+                    .MakeGenericMethod(entityType.ClrType)
+                    .Invoke(this, [modelBuilder]);
+            }
+        }
+        // ------------------------------------------------------------------------------------------
     }
 
     /// <summary>
@@ -401,10 +520,32 @@ public class PulseDbContext : DbContext
         modelBuilder.Entity<TEntity>().HasQueryFilter(e => e.ExerciseId == _currentExerciseId);
     }
 
+    /// <summary>
+    /// Adds the read-side global query filter to one <see cref="IOrganizationScoped"/> entity — the second
+    /// (CUSTOMER tenant) axis. Same strongly-typed-generic idiom as
+    /// <see cref="ApplyExerciseScopeFilter{TEntity}"/>, invoked by reflection from
+    /// <see cref="OnModelCreating"/> for each org-scoped entity type.
+    /// </summary>
+    /// <remarks>
+    /// Registered under the explicit <see cref="OrganizationScopeFilterKey"/> rather than as the anonymous
+    /// (null-keyed) filter the exercise axis uses. That key is LOAD-BEARING, not cosmetic: EF Core keys
+    /// global filters, and re-using the anonymous key would REPLACE the exercise predicate on any entity
+    /// that ever carries both markers — silently deleting the always-Critical per-exercise guarantee while
+    /// still looking filtered. A distinct key makes the two axes conjoin instead of compete, and lets the
+    /// model tests assert each axis independently.
+    /// </remarks>
+    private void ApplyOrganizationScopeFilter<TEntity>(ModelBuilder modelBuilder)
+        where TEntity : class, IOrganizationScoped
+    {
+        modelBuilder.Entity<TEntity>()
+            .HasQueryFilter(OrganizationScopeFilterKey, e => e.OrganizationId == _currentOrganizationId);
+    }
+
     /// <inheritdoc />
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         GuardExerciseScope();
+        GuardOrganizationScope();
         GuardTelemetryEnvelope();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -413,6 +554,7 @@ public class PulseDbContext : DbContext
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         GuardExerciseScope();
+        GuardOrganizationScope();
         GuardTelemetryEnvelope();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
@@ -439,6 +581,45 @@ public class PulseDbContext : DbContext
                 throw new ExerciseScopeViolationException(
                     $"Refusing to persist {entry.Entity.GetType().Name} with a default (empty) ExerciseId " +
                     "(COR-001/XC-001 write-time isolation guard).");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fail-closed write-time CUSTOMER-tenant guard (COR-010, exercise-isolation/11, Tier-2). Scans every
+    /// tracked <see cref="IOrganizationOwned"/> entity being added or modified and THROWS
+    /// <see cref="OrganizationScopeViolationException"/> — before <c>base.SaveChanges</c> runs, so nothing
+    /// reaches the database — if any carries a default (<see cref="Guid.Empty"/>) <c>OrganizationId</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the twin of <see cref="GuardExerciseScope"/> one tier out, and it is what makes the empty
+    /// GUID a usable fail-closed sentinel on BOTH the read filter
+    /// (<see cref="ApplyOrganizationScopeFilter{TEntity}"/>) and the resolution constraint
+    /// (<see cref="OrganizationScope.InOrganization{TEntity}"/>): if no row can carry it, neither can match.
+    /// </para>
+    /// <para>
+    /// It covers <see cref="IOrganizationOwned"/> — the WIDER marker — not just
+    /// <see cref="IOrganizationScoped"/>. That is deliberate: <c>Exercise</c> and <c>StaffUser</c> are not
+    /// read-filtered, so this guard is the ONLY structural thing standing between a future creation
+    /// endpoint and an orphan exercise that belongs to no customer and that no org-bounded staff surface
+    /// could ever reach or administer.
+    /// </para>
+    /// </remarks>
+    private void GuardOrganizationScope()
+    {
+        foreach (var entry in ChangeTracker.Entries<IOrganizationOwned>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified))
+            {
+                continue;
+            }
+
+            if (entry.Entity.OrganizationId == Guid.Empty)
+            {
+                throw new OrganizationScopeViolationException(
+                    $"Refusing to persist {entry.Entity.GetType().Name} with a default (empty) OrganizationId " +
+                    "(COR-010 write-time customer-tenant guard, exercise-isolation/11).");
             }
         }
     }

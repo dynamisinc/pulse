@@ -62,6 +62,7 @@ public class UnscopedIdentityEntityTests
         {
             seed.StaffUsers.Add(new StaffUser
             {
+                OrganizationId = Organization.DefaultOrganizationId,
                 Id = staffUserId,
                 ExternalSubject = $"idp|{staffUserId:N}",
                 DisplayName = "Cross-Exercise Controller",
@@ -139,6 +140,7 @@ public class UnscopedIdentityEntityTests
         {
             seed.StaffUsers.Add(new StaffUser
             {
+                OrganizationId = Organization.DefaultOrganizationId,
                 Id = staffUserId,
                 ExternalSubject = $"idp|{staffUserId:N}",
                 DisplayName = "Unconfined Staff User",
@@ -167,6 +169,7 @@ public class UnscopedIdentityEntityTests
         {
             seed.StaffUsers.Add(new StaffUser
             {
+                OrganizationId = Organization.DefaultOrganizationId,
                 Id = staffUserId,
                 ExternalSubject = $"idp|{staffUserId:N}",
                 DisplayName = "Pre-Scope Staff User",

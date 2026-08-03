@@ -278,8 +278,8 @@ public sealed class SharedReadOnlyWriteDenialIsolationTests
         var postB = Guid.NewGuid();
 
         await using var seed = _fixture.CreateContext();
-        seed.Exercises.Add(new Exercise { Id = exerciseA, Name = "A", Hostname = hostA, TimeZone = "UTC", Status = "active" });
-        seed.Exercises.Add(new Exercise { Id = exerciseB, Name = "B", Hostname = hostB, TimeZone = "UTC", Status = "active" });
+        seed.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseA, Name = "A", Hostname = hostA, TimeZone = "UTC", Status = "active" });
+        seed.Exercises.Add(new Exercise { OrganizationId = Organization.DefaultOrganizationId, Id = exerciseB, Name = "B", Hostname = hostB, TimeZone = "UTC", Status = "active" });
         seed.SharedCredentials.Add(NewCredential(exerciseA, SeedData.PasswordA));
         seed.SharedCredentials.Add(NewCredential(exerciseB, SeedData.PasswordB));
         seed.Posts.Add(NewPost(postA, exerciseA));

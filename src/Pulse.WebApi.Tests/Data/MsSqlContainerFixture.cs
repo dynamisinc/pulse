@@ -157,7 +157,18 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
     /// read-side global query filter is bound to <paramref name="exerciseContext"/>. Pass <c>null</c> for
     /// the fail-closed "no scope resolved" case.
     /// </summary>
-    public PulseDbContext CreateContext(IExerciseContext? exerciseContext)
+    public PulseDbContext CreateContext(IExerciseContext? exerciseContext) =>
+        CreateContext(exerciseContext, organizationContext: null);
+
+    /// <summary>
+    /// Builds a fresh, independently-tracked <see cref="PulseDbContext"/> bound to BOTH scoping axes —
+    /// the exercise scope and the exercise-isolation/11 CUSTOMER tenant scope. Pass <c>null</c> for either
+    /// to exercise that axis's fail-closed "no scope resolved" case.
+    /// </summary>
+    /// <param name="exerciseContext">The exercise scope, or <c>null</c> for the fail-closed default.</param>
+    /// <param name="organizationContext">The customer tenant, or <c>null</c> for the fail-closed default.</param>
+    /// <returns>A context whose global query filters are bound to the supplied scopes.</returns>
+    public PulseDbContext CreateContext(IExerciseContext? exerciseContext, IOrganizationContext? organizationContext)
     {
         if (ConnectionString is null)
         {
@@ -169,8 +180,17 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
             .UseSqlServer(ConnectionString)
             .Options;
 
-        return new PulseDbContext(options, exerciseContext);
+        return new PulseDbContext(options, exerciseContext, organizationContext);
     }
+
+    /// <summary>
+    /// Builds a fresh context scoped to a CUSTOMER tenant only (no exercise scope) — the shape an
+    /// org-owned shared-library (<see cref="Pulse.WebApi.Data.IOrganizationScoped"/>) read takes.
+    /// </summary>
+    /// <param name="organizationId">The tenant to bind the org-axis filter to.</param>
+    /// <returns>A context whose organization filter is bound to <paramref name="organizationId"/>.</returns>
+    public PulseDbContext CreateContextForOrganization(Guid organizationId) =>
+        CreateContext(exerciseContext: null, new OrganizationContext { CurrentOrganizationId = organizationId });
 
     /// <summary>Opens a connection and runs a single non-query statement (DDL for the ephemeral test DB).</summary>
     private static async Task ExecuteNonQueryAsync(string connectionString, string sql)
