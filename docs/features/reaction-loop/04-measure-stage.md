@@ -1,6 +1,6 @@
 # Story: Measure stage — telemetry + storyline update
 
-**Feature:** Reaction loop  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Reaction loop  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Superseded — built as `engine-runtime/01` (#294); see this feature's `feature.md` and `implementation.md`
 **Requirements:** ADP-041, XC-004  ·  **Design decisions:** none  ·  **Issue:** #160
 
 ## Context
