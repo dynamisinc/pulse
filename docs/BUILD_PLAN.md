@@ -14,9 +14,13 @@
 ## Where we are (2026-10-06)
 
 - **Idle since 2026-08-03.** The last merge was #411 (staff navigation + Organization tier + exercise
-  creation backend). No open PRs and no commits on any branch since.
-- **`main` is deployed to UAT and UAT is up.** Deploy Backend and Deploy Frontend for #411 were green;
-  the API's `GET /health` and the UAT site both answered 200 on 2026-10-06.
+  creation backend). No commits on any branch between then and this refresh.
+- **⛔ UAT has been broken since 2026-08-03 — fix in #413.** #411's `OrganizationTenantBoundary`
+  migration never applied: in the deploy's idempotent script its hand-written SQL failed to compile
+  (`Msg 207`), and `sqlcmd` ran without `-b`, so the step still reported success. The code shipped
+  against the old schema. Every exercise-scoped read, including the sign-in pages' exercise lookup,
+  returns 500, while `/health` and `/health/ready` stay green. Nothing below can be verified until #413
+  is merged and deployed.
 - **Phase 2 (E8) is further along than Phase 1 (E1/E2/E7)** — the engine-first order the master PRD
   recommends ("pilot exercises run on Social + engine").
 - **The bottleneck is verification, not code.** 27 stories are built, reviewed and on `main` but not
@@ -71,11 +75,12 @@ Dates assume a demo on or near 2026-10-18; shift them if the date moves. 🧑 = 
 
 | When | Step | Done when |
 |---|---|---|
-| Oct 7–8 | **1. Baseline UAT.** Re-seed the engine (see [operating notes](#uat-operating-notes)), sign in as participant and controller, walk the storyline once on `Fake`. File every break as an issue. | Each beat marked works / broken |
+| Oct 7 | **0. Unbreak UAT.** 🧑 Review and merge #413 (Tier-2: it applies the Organization tier to UAT's data). Deploy Backend runs the migration; then `pwsh scripts/uat/Reset-DemoState.ps1` must end `READY`. | The reset script ends `READY` |
+| Oct 7–8 | **1. Baseline UAT.** Walk [`demo/BASELINE-CHECKLIST.md`](demo/BASELINE-CHECKLIST.md) once on `Fake`: reset, then the storyline beats as participant and controller. File every break as an issue. | Every checklist row marked ✅ / ⚠️ / ❌ |
 | Oct 7–8 | **2. Decide live AI.** 🧑 Recommended: yes — on `Fake` the content is canned and the engine, the differentiator, won't read as adaptive. §8 fixes the order: check the Ambient model *version* against the 2026-07-18 measured run (§6 re-run trigger; re-run the live red-team and latency pass if it changed) → confirm evidence (i) in Azure → 🧑 **sign §8** → flip the three `uat.bicepparam` params in one reviewed commit → Deploy Infrastructure → re-seed. | The usage panel shows real calls |
 | Oct 8–14 | **3. Fix what step 1 breaks.** Small PRs straight to `main` — no umbrellas this close to a demo. | The storyline runs clean |
 | Oct 8–14 | **4. Pay down verification debt.** Run the UAT round trips [below](#verification-debt); flip each story to Complete with evidence (screenshots, telemetry rows) and close its issue. | #349–#354, #401, #402 closed |
-| Oct 12–14 | **5. Demo reset script.** One command that re-seeds the engine, resets the demo storyline and checks the bootstrap accounts, so every rehearsal starts from the same state. | Reset → ready in under 5 min |
+| Oct 12–14 | **5. Harden the reset.** [`scripts/uat/Reset-DemoState.ps1`](../scripts/uat/Reset-DemoState.ps1) exists: health, schema, restart, re-seed, persona binding, wiring. Decide whether rehearsal posts need clearing between runs (UAT holds ~4,800 posts; nothing deletes them today) and add it only if the baseline says so. | Reset → `READY` in under 5 min |
 | Oct 14 | **Code freeze for the backend.** Every backend deploy restarts the App Service and drops the in-memory engine loop. Frontend-only fixes stay safe. | — |
 | Oct 15–16 | **6. Two full rehearsals** 🧑 from a clean reset, timed, on the demo machine and network. | Two clean runs |
 | Oct 17–18 | Buffer · demo | |
@@ -133,10 +138,11 @@ These look like bugs otherwise.
   header, so seed and bootstrap against the API host, not the custom domain — see the
   [`login/06` runbook](features/login/06-uat-goLive-config-runbook.md).
 - **Every backend deploy or App Service restart drops the engine.** Loop registration, storylines,
-  autonomy and the clock live in process memory (there is no `Storyline` entity). Re-seed with
-  `POST /api/ops/seed-engine-content` (`X-Bootstrap-Secret`; body `{"hostname": "<API host>"}`). A
-  re-seed resets the storyline to scenario minute 0. Frontend-only deploys don't restart it. After any
-  long idle, assume a re-seed is needed.
+  autonomy and the clock live in process memory (there is no `Storyline` entity). Run
+  `pwsh scripts/uat/Reset-DemoState.ps1`, which restarts the API, re-seeds via
+  `POST /api/ops/seed-engine-content` and checks the result. It reads the bootstrap secret through your
+  `az` login and never prints it; `-CheckOnly` is read-only and needs no secret. A re-seed resets the
+  storyline to scenario minute 0. Frontend-only deploys don't restart the API.
 - **Freeze outside a running world is refused (409 with a reason)** by design: in `staged` it would start
   a clock COR-032 forbids.
 - **#390:** a tab that received a Freeze while `live` and never reconnects can stay on the holding page
@@ -147,7 +153,12 @@ These look like bugs otherwise.
 - **An org with zero exercises can't have an org admin sign in** — COR-077 /
   `identity-auth-roles/15`, not started.
 - **The Organization migration's `THROW 50011` pre-flight** fails a deploy loudly if any row can't be
-  homed to an organization. It passed on 2026-08-03.
+  homed to an organization. It has never run in UAT: the 2026-08-03 deploy failed to compile it (see
+  [Where we are](#where-we-are-2026-10-06)). UAT holds 1 exercise and 1 staff user to home, so it should
+  pass when #413 deploys.
+- **`/health` and `/health/ready` don't prove the schema.** Both stayed green for two months while every
+  exercise-scoped read 500'd. `GET /api/exercise-context` (anonymous) is the quick schema check; the
+  reset script and, after #413, the deploy smoke test both use it.
 - **The autonomy default is `suggest`** (set 2026-07-29), so drafts queue for approval. That's correct.
 - **Live AI** means three `uat.bicepparam` params (`generationProviderLive`, `generationTenantBounded`,
   `generationNoTrainingAttested`) flipped together in one commit, only after §8 is signed. Ambient for
@@ -200,6 +211,11 @@ These look like bugs otherwise.
 
 ## Lessons to keep in view
 
+- **A green deploy is not an applied migration.** On 2026-08-03 the deploy's `sqlcmd` (no `-b`) printed 7
+  SQL errors and "Successfully executed", and UAT then ran new code on the old schema for two months. Every
+  migration test passed because `Migrate()` runs each operation alone, while the deploy runs each migration
+  as one compiled batch. Hand-written SQL that names a column added in the same migration must be
+  `EXEC(N'…')`-wrapped. `IdempotentMigrationScriptTests` now replays the real script (#413).
 - **"Merged" is not "on `main`", and "on `main`" is not "works in UAT".** A reviewed fix once merged into
   an umbrella 30 seconds after that umbrella merged, and never reached `main` (#373, recovered as #397).
   A fully green slice once merged with its `Program.cs` wiring never executed, leaving the endpoint dead
