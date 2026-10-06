@@ -42,6 +42,20 @@ namespace Pulse.WebApi.Data.Migrations
     /// <c>Organization.DefaultOrganizationId</c>, and each backfill only touches <c>NULL</c>s — so a replay
     /// (e.g. <c>sqlcmd -I</c> against a partially-applied database) is a no-op rather than a duplicate tenant.
     /// </para>
+    /// <para>
+    /// <b>The backfill and the guard are wrapped in <c>EXEC(N'…')</c> — load-bearing, do not unwrap.</b> In
+    /// the deploy's idempotent script this whole migration is ONE batch, and SQL Server compiles a batch
+    /// before running any of it. A hand-written statement that names <c>OrganizationId</c> therefore fails to
+    /// compile (<c>Msg 207: Invalid column name</c>), because the column it names is only added by an
+    /// <c>ALTER</c> earlier in that same, not-yet-run batch — and then NOTHING in the batch runs. That is
+    /// exactly what happened on 2026-08-03: the migration never applied to UAT, the deploy (sqlcmd without
+    /// <c>-b</c>) still reported success, and the code shipped against the old schema. <c>EXEC</c> defers
+    /// compilation to the moment the statement runs, after the <c>ALTER</c>. A <c>THROW</c> raised inside the
+    /// <c>EXEC</c> still aborts the outer batch (verified on SQL Server: the trailing <c>COMMIT</c> never
+    /// runs), so the guard keeps its roll-back-and-stop behaviour. <c>Database.Migrate()</c> runs each
+    /// operation as its own command and cannot see this class of failure, which is why
+    /// <c>IdempotentMigrationScriptTests</c> replays the real script, batch by batch.
+    /// </para>
     /// </remarks>
     public partial class OrganizationTenantBoundary : Migration
     {
@@ -114,27 +128,33 @@ namespace Pulse.WebApi.Data.Migrations
             // 4. Backfill the existing UAT/production data onto the default tenant. Single-customer is the
             //    documented operating assumption up to this migration, so one tenant is the correct and only
             //    truthful mapping — there is no per-row customer information in the model to split on.
-            //    NULL-only, so a replay changes nothing.
+            //    NULL-only, so a replay changes nothing. EXEC-wrapped so it compiles only when it runs, after
+            //    the ALTERs above (see the remarks — unwrapped, it never applied to UAT).
             migrationBuilder.Sql($"""
-                UPDATE [Exercises]        SET [OrganizationId] = '{DefaultOrganizationId}' WHERE [OrganizationId] IS NULL;
-                UPDATE [PersonaTemplates] SET [OrganizationId] = '{DefaultOrganizationId}' WHERE [OrganizationId] IS NULL;
-                UPDATE [StaffUsers]       SET [OrganizationId] = '{DefaultOrganizationId}' WHERE [OrganizationId] IS NULL;
+                EXEC(N'
+                UPDATE [Exercises]        SET [OrganizationId] = ''{DefaultOrganizationId}'' WHERE [OrganizationId] IS NULL;
+                UPDATE [PersonaTemplates] SET [OrganizationId] = ''{DefaultOrganizationId}'' WHERE [OrganizationId] IS NULL;
+                UPDATE [StaffUsers]       SET [OrganizationId] = ''{DefaultOrganizationId}'' WHERE [OrganizationId] IS NULL;
+                ');
                 """);
 
             // 5. PRE-FLIGHT GUARD. Refuse to proceed if the backfill left anything unhomed, or homed on the
             //    Guid.Empty sentinel the write-guard / read-filters treat as "no tenant". Either would produce
             //    rows that satisfy NOT NULL yet are permanently unreachable by every org-bounded surface — a
-            //    silent data-loss outcome. THROW rolls the whole migration back (see the remarks).
+            //    silent data-loss outcome. THROW rolls the whole migration back (see the remarks). EXEC-wrapped
+            //    for the same compile-time reason as step 4; the THROW still aborts the outer batch.
             migrationBuilder.Sql($"""
+                EXEC(N'
                 IF EXISTS (
-                    SELECT 1 FROM [Exercises]        WHERE [OrganizationId] IS NULL OR [OrganizationId] = '{EmptyTenantSentinel}'
+                    SELECT 1 FROM [Exercises]        WHERE [OrganizationId] IS NULL OR [OrganizationId] = ''{EmptyTenantSentinel}''
                     UNION ALL
-                    SELECT 1 FROM [PersonaTemplates] WHERE [OrganizationId] IS NULL OR [OrganizationId] = '{EmptyTenantSentinel}'
+                    SELECT 1 FROM [PersonaTemplates] WHERE [OrganizationId] IS NULL OR [OrganizationId] = ''{EmptyTenantSentinel}''
                     UNION ALL
-                    SELECT 1 FROM [StaffUsers]       WHERE [OrganizationId] IS NULL OR [OrganizationId] = '{EmptyTenantSentinel}')
+                    SELECT 1 FROM [StaffUsers]       WHERE [OrganizationId] IS NULL OR [OrganizationId] = ''{EmptyTenantSentinel}'')
                 BEGIN
-                    THROW 50011, 'OrganizationTenantBoundary: an org-owned row was left without a usable OrganizationId after the backfill. Refusing to enforce NOT NULL over unreachable rows (exercise-isolation/11, COR-010).', 1;
+                    THROW 50011, ''OrganizationTenantBoundary: an org-owned row was left without a usable OrganizationId after the backfill. Refusing to enforce NOT NULL over unreachable rows (exercise-isolation/11, COR-010).'', 1;
                 END
+                ');
                 """);
 
             // 6. Now the columns can honestly be NOT NULL — with no residual DEFAULT constraint.
