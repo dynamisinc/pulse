@@ -1,6 +1,6 @@
 # Story: Official responses reach the live loop — a PIO's post can address a storyline  `[backend]`
 
-**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** In Review (built; Gate-2 findings folded, awaiting re-review + UAT)
+**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** In Review (built; Gate-2 clean on re-review; awaiting merge + UAT)
 **Requirements:** ADP-002, ADP-002a (COR-001, XC-004, CTL-034, ADP-011, E8 arch §7 / §8.2)  ·  **Design decisions:** none new  ·  **Issue:** #415
 
 > **Delivers the deferred half of `response-reaction/01` (#163).** That story's two unchecked ACs (the
@@ -33,9 +33,10 @@ beat is the PIO answering and the world calming down.
   still succeeds, the failure is logged, and later observers still run. A refused post notifies no observer.
 - [x] **Each post resolves exactly once.** Given posts are waiting, when the loop ticks, then it drains the
   exercise's inbox into `ObserveStage.Observe`, so each post is resolved on one tick only. Draining is
-  at-most-once: a tick that faults after draining loses those posts' resolution, which is safer than
-  resolving one twice. The inbox is bounded (50 per exercise, oldest dropped first) so a frozen or
-  unregistered loop cannot grow it without limit, and a re-seed clears the exercise's queue.
+  at-most-once, which is safer than resolving a post twice. A tick that faults after draining keeps its
+  posts' in-memory effects (an addressed storyline, pending slows) but loses their telemetry and any
+  response burst. The inbox is bounded (50 per exercise, oldest dropped first) so a frozen or unregistered
+  loop cannot grow it without limit, and a re-seed clears the exercise's queue.
 - [x] **A genuine match addresses the storyline.** Given an official post matches a storyline (a hashtag
   hit, or enough coverage of the storyline's expectation) and response auto-confirm is on for the exercise,
   when the tick resolves it, then `MissSafeResolver.Apply` resets the silence clock, bends intensity and
@@ -51,12 +52,15 @@ beat is the PIO answering and the world calming down.
   controller's authority over the dial is absolute.
 - [x] **Miss-safe default (ADP-002a, safety-critical).** Given a plausible match that has not been
   confirmed (auto-confirm off), then the storyline is **not** addressed and its silence clock keeps running,
-  and a slow is left pending on it: its **next escalation burst**, whenever the reaction cadence lets it fire,
-  carries fewer voices (`MissSafeResolver.Slow`: never zero). Given an official post whose target is unknown
-  (it matches nothing, or names a storyline the exercise no longer holds), then every storyline an answer
-  could still address gets that pending slow. Neither case is ever treated as silence, and neither ever
-  pauses escalation. One pending slow per storyline, spent by the burst that carries it (a dropped burst
-  leaves it pending) and removed by a match, so a stream of irrelevant posts can keep bursts slowed but never
+  and, unless it is already addressed, a slow is left pending on it: its **next escalation burst**, whenever
+  the reaction cadence lets it fire, carries fewer voices (`MissSafeResolver.Slow`: never zero). This applies
+  even before its window opens, since a plausible answer can pre-empt the concern. Given an official post
+  whose target is unknown (it matches nothing, or names a storyline the exercise no longer holds), then every
+  **actively escalating** storyline (Escalating or Peak) gets that pending slow; a Seeded one is not escalating
+  yet, so an unrelated post at STARTEX never softens its opening burst. Neither case is ever treated as silence,
+  and neither ever pauses escalation. A storyline holds one pending slow, removed by a match and spent only by
+  a burst that reaches the review queue. A trigger with no burst (a stopped engine, an exhausted budget) or a
+  burst the guard drops leaves it pending. So a stream of irrelevant posts can keep bursts slowed but never
   stop them. The design holds the slow until the controller's Y/N; that surface doesn't exist yet, so one
   burst carries it. The slow outlives the tick on purpose: the loop ticks every few seconds while a silent
   storyline re-fires every few scenario minutes, so a slow that only lasted the tick would almost never
@@ -81,6 +85,18 @@ beat is the PIO answering and the world calming down.
   @FulcoEM) posts a statement carrying `#WaterIssues` or the expectation's wording, then within a tick or two
   the console shows the storyline **Addressed** and a 3-voice response burst waits in the review queue.
   *(Ticked only when seen in UAT.)*
+
+## Decision needed (before a multi-participant run)
+**What counts as "official content".** The observer's only filter is `origin: participant`, so every
+participant post is official content. ADP-002a says any unmatched official content slows all active
+escalation, so where responders post routinely, every active storyline's bursts stay slowed while posting
+continues. Gate-2's probe showed this: decided counts with one unrelated post per cadence window were
+`[2,1,1,1,1,1,3,3]` against a baseline of `[2,2,2,2,2,2,3,3]`. That follows the requirement's letter but
+dampens the core silence mechanic.
+- **Options:** narrow official content to agency-typed author personas; count at most one unmatched post per
+  storyline per cadence window; or accept it as the steady state.
+- **The single-PIO demo is unaffected** as long as the PIO does not post off-topic during beat 3.
+- Tom's call.
 
 ## Out of Scope
 - **The controller's "does this address #X? Y/N" surface** for a `NeedsConfirmation` suggestion (E7
@@ -139,6 +155,9 @@ the slice used as built), `social-api` (`PostIngestService`).
   - unmatched slows, with no `action-seen`
   - a stale target acts as unmatched
   - **an unconfirmed answer between bursts still slows the next burst, and only that one**
+  - a slow survives a stopped engine and rides the first burst after the restore
+  - an unrelated post before the window opens leaves the opening burst at full pressure
+  - an unconfirmed answer about an already-addressed storyline leaves no slow on it
   - a follow-up answer draws no second burst
   - each post resolved once
   - the end-to-end path through the real `PostIngestService`
@@ -148,6 +167,9 @@ the slice used as built), `social-api` (`PostIngestService`).
   - a one-tick slow fails only the between-bursts test
   - voicing every match fails the follow-up test
   - attributing posts to the matcher's guess fails both no-`action-seen` assertions
+
+  The re-review of that fold (2026-10-07) came back clean. Its follow-ups were the Seeded scope and the
+  addressed-storyline guard, each pinned by a test that fails when its fix is neutered.
 - `EngineContentSeedServiceTests`: auto-confirm off by default, on only by opt-in (and audited); the seed
   clears only its own exercise's inbox.
 - `ResponseReactionBehaviorTests` (Core): burst of 3, bounded by cast and by the per-minute cap.

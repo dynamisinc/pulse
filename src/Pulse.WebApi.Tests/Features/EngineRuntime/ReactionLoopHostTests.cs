@@ -611,9 +611,94 @@ public sealed class ReactionLoopHostTests
         baselineWaterCount.Should().BeGreaterThan(1, "precondition: an unslowed burst has more than one voice, so a slow is visible");
         (await DecidedCountAsync(withPost, water.Id)).Should().Be(
             Math.Max(1, baselineWaterCount / 2), "the storyline the answer plausibly addresses is slowed");
+
+        var baselinePowerCount = await DecidedCountAsync(baseline, baselinePower.Id);
+        baselinePowerCount.Should().BeGreaterThan(1, "precondition: otherwise a slowed power burst would look unslowed");
         (await DecidedCountAsync(withPost, power.Id)).Should().Be(
-            await DecidedCountAsync(baseline, baselinePower.Id),
+            baselinePowerCount,
             "a storyline the answer does not touch keeps its full pressure: only an UNMATCHED post slows everything");
+    }
+
+    [RequiresDockerFact]
+    public async Task Tick_WhenAnUnrelatedPostLandsBeforeTheWindowOpens_TheFirstBurstKeepsItsFullPressure()
+    {
+        // ADP-002a slows "active storyline escalation". A Seeded storyline is not escalating yet, so a responder's
+        // unrelated post at STARTEX must not soften the opening "vacuum fills with worry" burst minutes later.
+        var withPost = Guid.NewGuid();
+        var baseline = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(manualTime);
+        var (storyline, registration) = SilentExercise(host, manualTime, withPost);
+        var (_, baselineRegistration) = SilentExercise(host, manualTime, baseline);
+
+        manualTime.Advance(TimeSpan.FromMinutes(1));
+        host.GetRequiredService<IAddressingInbox>().Enqueue(withPost, OfficialPost(UnrelatedPost));
+        await RunOneTickAsync(host, registration);
+        await RunOneTickAsync(host, baselineRegistration);
+        storyline.Phase.Should().Be(StorylinePhase.Seeded, "precondition: the post lands before the silence window opens");
+
+        manualTime.Advance(TimeSpan.FromMinutes(24)); // minute 25: the window has opened
+        await RunOneTickAsync(host, registration);
+        await RunOneTickAsync(host, baselineRegistration);
+
+        var baselineCount = await DecidedCountAsync(baseline);
+        baselineCount.Should().BeGreaterThan(1, "precondition: a slowed burst would be visibly smaller");
+        (await DecidedCountAsync(withPost)).Should().Be(baselineCount, "nothing was escalating when the post landed");
+    }
+
+    [RequiresDockerFact]
+    public async Task Tick_WhenNoBurstCarriesThePendingSlow_ItWaitsForTheNextBurstThatDoes()
+    {
+        // The slow is spent only when a burst actually reaches the review queue. A full stop makes every decision
+        // null, so the slow must survive it and soften the first burst after the controller restores the engine.
+        var withPost = Guid.NewGuid();
+        var baseline = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(manualTime);
+        var (_, registration) = SilentExercise(host, manualTime, withPost);
+        var (_, baselineRegistration) = SilentExercise(host, manualTime, baseline);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+        registration.Autonomy.EngageKillSwitch(KillSwitchMode.FullStop, "controller-1", 25);
+        baselineRegistration.Autonomy.EngageKillSwitch(KillSwitchMode.FullStop, "controller-1", 25);
+
+        host.GetRequiredService<IAddressingInbox>().Enqueue(withPost, OfficialPost(AnsweringPost)); // auto-confirm off
+        (await RunOneTickAsync(host, registration)).ReviewItemsEnqueued.Should().Be(
+            0, "precondition: the engine is stopped, so no burst can carry the slow");
+        await RunOneTickAsync(host, baselineRegistration);
+
+        manualTime.Advance(TimeSpan.FromMinutes(1));
+        registration.Autonomy.RestoreFromSafety("controller-1", 26);
+        baselineRegistration.Autonomy.RestoreFromSafety("controller-1", 26);
+        await RunOneTickAsync(host, registration);
+        await RunOneTickAsync(host, baselineRegistration);
+
+        var baselineCount = await DecidedCountAsync(baseline);
+        baselineCount.Should().BeGreaterThan(1, "precondition: an unslowed burst has more than one voice, so a slow is visible");
+        (await DecidedCountAsync(withPost)).Should().Be(
+            Math.Max(1, baselineCount / 2), "the slow outlived the stopped tick and rode the first burst after the restore");
+    }
+
+    [RequiresDockerFact]
+    public async Task Tick_WhenAnUnconfirmedAnswerSuggestsAnAlreadyAddressedStoryline_NoSlowIsLeftOnIt()
+    {
+        // An off-platform marker addresses the storyline (the identical satisfier); a plausible but unconfirmed post
+        // about it in the same tick must not leave a slow that would sit there and weaken a later re-escalation.
+        var exerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(manualTime);
+        var (storyline, registration) = SilentExercise(host, manualTime, exerciseId);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+        var inbox = host.GetRequiredService<IAddressingInbox>();
+        inbox.Enqueue(
+            exerciseId,
+            new AddressingObservation(AddressingSource.OffPlatformMarker, Guid.NewGuid().ToString(), "Press briefing held", storyline.Id));
+        inbox.Enqueue(exerciseId, OfficialPost(AnsweringPost)); // auto-confirm off: needs confirmation
+
+        await RunOneTickAsync(host, registration);
+
+        storyline.Phase.Should().Be(StorylinePhase.Addressed, "precondition: the marker addressed the storyline");
+        registration.PendingSlows.IsPending(storyline.Id).Should().BeFalse(
+            "an addressed storyline has no escalation left to slow");
     }
 
     [RequiresDockerFact]

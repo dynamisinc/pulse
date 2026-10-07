@@ -448,8 +448,9 @@ public sealed partial class ReactionLoopDriver
         //    post participants made since the last tick (engine-runtime/06 — until then this was always [], so
         //    no participant post could ever address a storyline). The reaction cadence (ADP-011) suppresses
         //    re-reacting to the SAME ongoing silence every tick: an unaddressed storyline re-fires at most once
-        //    per MinMinutesBetweenInactionReactions scenario minutes. Draining is at-most-once: a tick that
-        //    faults after this point loses its posts' resolution, which is safer than resolving a post twice.
+        //    per MinMinutesBetweenInactionReactions scenario minutes. Draining is at-most-once, which is safer
+        //    than resolving a post twice: a tick that faults later keeps its posts' in-memory effects (an
+        //    addressed storyline, pending slows) but loses their telemetry and any response burst.
         var observed = ObserveStage.Observe(
             registration.Storylines,
             _addressingInbox.Drain(registration.ExerciseId),
@@ -613,8 +614,8 @@ public sealed partial class ReactionLoopDriver
     /// emits one <c>engine.observed</c> (<c>action-seen</c>) against the storyline the resolver names (a match, or
     /// a suggestion awaiting confirmation) and none for a post that relates to nothing; applies a genuine match
     /// (silence clock reset, bend-down, phase → Addressed, with the resulting storyline telemetry); and otherwise
-    /// leaves a miss-safe slow pending: on the suggested storyline for an unconfirmed match, and on every storyline
-    /// an answer could still address when the post's target is unknown.
+    /// leaves a miss-safe slow pending: on the suggested storyline for an unconfirmed match (unless it is already
+    /// addressed), and on every actively escalating storyline when the post's target is unknown.
     /// </summary>
     private OfficialPostResolutions ResolveOfficialPosts(
         ReactionLoopRegistration registration,
@@ -658,15 +659,22 @@ public sealed partial class ReactionLoopDriver
             }
             else if (resolution.Kind == MatchKind.NeedsConfirmation && target is not null)
             {
-                registration.PendingSlows.Add(target.Id);
+                // A plausible answer slows its storyline even before the window opens (it may pre-empt the
+                // concern), but one already addressed has no escalation left to slow.
+                if (StorylineStateMachine.CanTransition(target.Phase, StorylineTrigger.OfficialResponseMatched))
+                {
+                    registration.PendingSlows.Add(target.Id);
+                }
             }
             else
             {
                 // Unmatched, or a match naming a storyline this registration no longer holds (a stale marker hint):
-                // the target is unknown, so every storyline an answer could still address is slowed.
+                // the target is unknown, so every ACTIVELY escalating storyline is slowed (ADP-002a: "all active
+                // storyline escalation"). A Seeded storyline is not escalating yet: an unrelated post made before
+                // its window opens must not soften its first burst minutes later.
                 foreach (var storyline in registration.Storylines)
                 {
-                    if (StorylineStateMachine.CanTransition(storyline.Phase, StorylineTrigger.OfficialResponseMatched))
+                    if (storyline.Phase is StorylinePhase.Escalating or StorylinePhase.Peak)
                     {
                         registration.PendingSlows.Add(storyline.Id);
                     }
