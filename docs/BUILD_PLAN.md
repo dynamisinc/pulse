@@ -45,6 +45,12 @@
 
 ## Demo — target ~2026-10-18 (proposed: confirm audience, date and storyline)
 
+> **2026-10-07: proposed replacement →
+> [`demo/PARTICIPANT-FIRST-DEMO-PLAN.md`](demo/PARTICIPANT-FIRST-DEMO-PLAN.md).** The prospect cares most
+> about a finished-looking participant social app (including inline video) and about controllers driving
+> it, and less about the engine. That plan re-aims the 12 days at participant polish and controller tweaks,
+> and keeps the engine as a short teaser. Until Tom confirms it, the engine-first plan below stands.
+
 **Recommendation: demo what is already built — a live pilot exercise on the social channel, with the
 adaptive engine reacting — and spend the 12 days on verification, live AI and hardening, not new
 features.** Every beat below exists on `main`; most of it has never been run end to end in UAT on real
