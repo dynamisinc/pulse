@@ -242,7 +242,13 @@ jobs:
           # exercise-scoped query 500'd ("Invalid column name 'OrganizationId'"). /api/exercise-context is
           # anonymous and reads [Exercises] through the full model, so a code/schema mismatch shows up here as
           # a 5xx. 200 = an exercise is bound to this host; 404 = none is (a legitimately empty environment).
-          for i in $(seq 1 6); do
+          #
+          # Same ~3-minute window as the liveness step, and for a related reason: the OLD process keeps
+          # serving for minutes after "Deploy to App Service" returns, on top of DLLs the deploy has
+          # overwritten. On 2026-10-07 it answered BadImageFormatException 500s (garbled method names) for
+          # ~3 minutes until the new instance took over at +3 min, and a 1-minute window red-flagged a good
+          # deploy. The old process also passes /health, so the earlier steps can't wait this out.
+          for i in $(seq 1 18); do
             CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://${WEBAPP_NAME}.azurewebsites.net/api/exercise-context" || echo 000)
             echo "attempt $i: /api/exercise-context -> $CODE"
             { [ "$CODE" = "200" ] || [ "$CODE" = "404" ]; } && exit 0
