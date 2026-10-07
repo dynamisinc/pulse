@@ -130,6 +130,18 @@ notifications, direct messages, the E3–E6 channels, E10 evaluation, org-level 
   The engine is citizens-first and has never published as FulcoEM, and the controller can veto any draft
   that does. Real fix, a small backend story: drop participant-bound personas from the engine cast at
   seed time.
+- ❌ **Beat 4 can't work: the live engine never sees participant posts.** `ReactionLoopHost.cs:419` calls
+  `ObserveStage.Observe(..., addressing: [], ...)` on every tick, so no official post ever reaches
+  response matching. The silence escalation runs on whatever the PIO says. On 2026-10-07, @FulcoEM's
+  "Water is contaminated, do not drink" was followed one second later by another `inaction-timer`
+  burst. `response-reaction/01–03` (#163–#165) are marked Complete, but they exist only as unit-tested
+  `Pulse.Core` logic (`ResponseMatcher`, `MissSafeResolver`, `ResponseReactionBehavior`): an unwired seam.
+  - **What wiring needs:** feed participant posts into the tick as addressing candidates, then
+    `MissSafeResolver.Resolve`. With no controller-confirm UI built, it needs auto-confirm on for the demo.
+    Then `Apply`: reset the silence clock, bend intensity down, and generate reactions to the statement.
+  - **Matching is keyword-based.** `#WaterIssues` in the post scores 0.9; otherwise it's word overlap with
+    "official statement from Fulton County Emergency Management addressing the water safety concern",
+    against a 0.3 threshold. The post above scored ~0.08.
 - ⚠️ **On a wide screen the participant feed is a narrow, left-aligned column** with a blank right side.
   Mobile-first is right, but on a laptop or projector it reads unfinished. Polish candidate.
 
