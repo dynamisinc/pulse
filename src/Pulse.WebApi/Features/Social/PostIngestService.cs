@@ -260,7 +260,9 @@ public sealed partial class PostIngestService
 
     /// <summary>
     /// Notifies each observer of a committed post. An observer that throws is logged and skipped: the post is
-    /// already committed and broadcast, so an observer failure must never turn into a failed request.
+    /// already committed and broadcast, so an observer failure must never turn into a failed request (a client
+    /// retrying a 500 would duplicate the post). That includes an <see cref="OperationCanceledException"/>:
+    /// observers take no cancellation token, so one thrown here is the observer's own, never this request's.
     /// </summary>
     private void NotifyObservers(Guid exerciseId, Post post)
     {
@@ -270,10 +272,12 @@ public sealed partial class PostIngestService
             {
                 observer.OnPostPublished(exerciseId, post);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning disable CA1031 // An observer fault must never fail a post that has already committed.
+            catch (Exception ex)
             {
                 LogObserverFailed(ex, observer.GetType().Name, post.Id);
             }
+#pragma warning restore CA1031
         }
     }
 

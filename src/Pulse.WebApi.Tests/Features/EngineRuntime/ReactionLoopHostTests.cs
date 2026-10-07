@@ -491,6 +491,7 @@ public sealed class ReactionLoopHostTests
         storyline.MinutesSinceLastOfficialResponse.Should().Be(25, "and never resets the silence clock");
 
         var baselineCount = await DecidedCountAsync(baseline);
+        baselineCount.Should().BeGreaterThan(1, "precondition: an unslowed burst has more than one voice, so a slow is visible");
         (await DecidedCountAsync(withPost)).Should().Be(
             Math.Max(1, baselineCount / 2),
             "a pending official post SLOWS the escalation burst (ADP-002a) — fewer voices, never zero");
@@ -516,9 +517,16 @@ public sealed class ReactionLoopHostTests
 
         storyline.Phase.Should().Be(StorylinePhase.Escalating, "an unmatched post never addresses the storyline");
         storyline.MinutesSinceLastOfficialResponse.Should().Be(25, "and is never treated as an answer to the silence");
+
+        var baselineCount = await DecidedCountAsync(baseline);
+        baselineCount.Should().BeGreaterThan(1, "precondition: an unslowed burst has more than one voice, so a slow is visible");
         (await DecidedCountAsync(withPost)).Should().Be(
-            Math.Max(1, (await DecidedCountAsync(baseline)) / 2),
+            Math.Max(1, baselineCount / 2),
             "but it is never treated as silence either: the escalation slows (miss-safe, ADP-002a)");
+
+        (await EventsAsync(withPost)).Should().NotContain(
+            e => e.EventType == EngineEventTypes.Observed && e.Payload.GetProperty("trigger").GetString() == "action-seen",
+            "a post that relates to no storyline is not recorded as an answer to one (E10's response metrics read these)");
     }
 
     [RequiresDockerFact]
@@ -539,6 +547,169 @@ public sealed class ReactionLoopHostTests
         (await EventsAsync(exerciseId))
             .Count(e => e.EventType == EngineEventTypes.Observed && e.Payload.GetProperty("trigger").GetString() == "action-seen")
             .Should().Be(1, "the tick drains the inbox, so a post is resolved once and never re-answers the storyline");
+    }
+
+    [RequiresDockerFact]
+    public async Task Tick_WhenAnUnconfirmedAnswerLandsBetweenBursts_TheNextEscalationBurstIsStillSlowed()
+    {
+        // The common case: the loop ticks every few seconds, but the reaction cadence lets a silent storyline
+        // re-fire only every few scenario minutes, so nearly every post lands on a tick with no burst due. The
+        // slow must wait for the storyline's next burst, not die with the tick that drained the post.
+        var withPost = Guid.NewGuid();
+        var baseline = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(manualTime);
+        var (storyline, registration) = SilentExercise(host, manualTime, withPost);
+        var (_, baselineRegistration) = SilentExercise(host, manualTime, baseline);
+
+        async Task TickBothAsync()
+        {
+            await RunOneTickAsync(host, registration);
+            await RunOneTickAsync(host, baselineRegistration);
+        }
+
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+        await TickBothAsync(); // both escalate
+
+        manualTime.Advance(TimeSpan.FromMinutes(1));
+        host.GetRequiredService<IAddressingInbox>().Enqueue(withPost, OfficialPost(AnsweringPost)); // auto-confirm off
+        var quiet = await RunOneTickAsync(host, registration);
+        await RunOneTickAsync(host, baselineRegistration);
+        quiet.InactionTriggers.Should().Be(0, "precondition: the post lands on a tick with no burst due");
+
+        manualTime.Advance(TimeSpan.FromMinutes(2)); // minute 28: the 3-minute cadence has elapsed
+        await TickBothAsync();
+        manualTime.Advance(TimeSpan.FromMinutes(3)); // minute 31
+        await TickBothAsync();
+
+        storyline.Phase.Should().NotBe(StorylinePhase.Addressed, "an unconfirmed suggestion never addresses the storyline");
+        var baselineCounts = await DecidedCountsInOrderAsync(baseline);
+        baselineCounts.Should().HaveCount(3, "precondition: three escalation bursts in each exercise");
+        baselineCounts[1].Should().BeGreaterThan(1, "precondition: an unslowed burst has more than one voice, so a slow is visible");
+        (await DecidedCountsInOrderAsync(withPost)).Should().Equal(
+            [baselineCounts[0], Math.Max(1, baselineCounts[1] / 2), baselineCounts[2]],
+            "the slow waits for the storyline's next burst (ADP-002a) and is spent by it: one slowed burst per answer");
+    }
+
+    [RequiresDockerFact]
+    public async Task Tick_WhenAnUnconfirmedAnswerSuggestsOneStoryline_OnlyThatStorylineSlows()
+    {
+        var withPost = Guid.NewGuid();
+        var baseline = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(manualTime);
+        var (water, power, registration) = WaterAndPowerExercise(host, withPost);
+        var (baselineWater, baselinePower, baselineRegistration) = WaterAndPowerExercise(host, baseline);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+
+        // #WaterIssues names the water storyline; auto-confirm is off, so it awaits the controller's Y/N.
+        host.GetRequiredService<IAddressingInbox>().Enqueue(withPost, OfficialPost(AnsweringPost));
+        await RunOneTickAsync(host, registration);
+        await RunOneTickAsync(host, baselineRegistration);
+
+        var baselineWaterCount = await DecidedCountAsync(baseline, baselineWater.Id);
+        baselineWaterCount.Should().BeGreaterThan(1, "precondition: an unslowed burst has more than one voice, so a slow is visible");
+        (await DecidedCountAsync(withPost, water.Id)).Should().Be(
+            Math.Max(1, baselineWaterCount / 2), "the storyline the answer plausibly addresses is slowed");
+        (await DecidedCountAsync(withPost, power.Id)).Should().Be(
+            await DecidedCountAsync(baseline, baselinePower.Id),
+            "a storyline the answer does not touch keeps its full pressure: only an UNMATCHED post slows everything");
+    }
+
+    [RequiresDockerFact]
+    public async Task Tick_WhenTheStorylineIsAlreadyAddressed_AFollowUpAnswerResetsTheClock_ButDrawsNoSecondBurst()
+    {
+        var exerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(manualTime);
+        var (storyline, registration) = SilentExercise(host, manualTime, exerciseId);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+        registration.ResponseMatching.EnableAutoConfirm();
+        var inbox = host.GetRequiredService<IAddressingInbox>();
+
+        inbox.Enqueue(exerciseId, OfficialPost(AnsweringPost));
+        (await RunOneTickAsync(host, registration)).ReviewItemsEnqueued.Should().Be(
+            1, "the answer that addresses the storyline draws the response burst");
+
+        manualTime.Advance(TimeSpan.FromMinutes(2));
+        inbox.Enqueue(exerciseId, OfficialPost("Follow-up on #WaterIssues: crews are flushing the mains tonight."));
+        var followUp = await RunOneTickAsync(host, registration);
+
+        followUp.ReviewItemsEnqueued.Should().Be(
+            0, "a follow-up to an answered storyline must not become another gratitude wave and review decision (CTL-034)");
+        storyline.MinutesSinceLastOfficialResponse.Should().Be(0, "but it is still an official response: the silence clock resets");
+    }
+
+    [RequiresDockerFact]
+    public async Task Tick_WhenAMatchNamesAStorylineThatNoLongerExists_ItAddressesNothing_AndEscalationSlows()
+    {
+        var withPost = Guid.NewGuid();
+        var baseline = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(manualTime);
+        var (storyline, registration) = SilentExercise(host, manualTime, withPost);
+        var (_, baselineRegistration) = SilentExercise(host, manualTime, baseline);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+
+        // An off-platform marker hinting at a storyline from an earlier seed: the resolver calls it a match, but
+        // to a storyline this registration does not hold. Its target is unknown, so it must act as unmatched.
+        host.GetRequiredService<IAddressingInbox>().Enqueue(
+            withPost,
+            new AddressingObservation(
+                AddressingSource.OffPlatformMarker, Guid.NewGuid().ToString(), "Press briefing held", StorylineHintId: Guid.NewGuid()));
+        await RunOneTickAsync(host, registration);
+        await RunOneTickAsync(host, baselineRegistration);
+
+        storyline.Phase.Should().Be(StorylinePhase.Escalating, "nothing this exercise holds was answered");
+        storyline.MinutesSinceLastOfficialResponse.Should().Be(25, "so no silence clock resets");
+        var baselineCount = await DecidedCountAsync(baseline);
+        baselineCount.Should().BeGreaterThan(1, "precondition: an unslowed burst has more than one voice, so a slow is visible");
+        (await DecidedCountAsync(withPost)).Should().Be(
+            Math.Max(1, baselineCount / 2), "an answer whose target is unknown slows every storyline (miss-safe, ADP-002a)");
+        (await EventsAsync(withPost)).Should().NotContain(
+            e => e.EventType == EngineEventTypes.Observed && e.Payload.GetProperty("trigger").GetString() == "action-seen",
+            "and is never recorded against a storyline that does not exist");
+    }
+
+    private static (Storyline Water, Storyline Power, ReactionLoopRegistration Registration) WaterAndPowerExercise(
+        ServiceProvider host, Guid exerciseId)
+    {
+        host.GetRequiredService<IExerciseClock>().Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
+        var cast = Cast("@rosa", "@marcus", "@lena");
+        var water = SeededStoryline(exerciseId, "Water main contamination fears", cast.Keys.ToList());
+        var power = Storyline.Create(
+            exerciseId,
+            title: "Substation fire outage",
+            expectation: "a restoration estimate from the electric cooperative",
+            responseWindowMin: 20,
+            participatingPersonas: cast.Keys.ToList(),
+            hashtags: ["#PowerOut"]);
+        power.Seed(0);
+        return (water, power, Registration(exerciseId, [water, power], cast));
+    }
+
+    private async Task<int> DecidedCountAsync(Guid exerciseId, Guid storylineId) =>
+        (await EventsAsync(exerciseId))
+            .Where(e => e.EventType == EngineEventTypes.Decided
+                && e.Payload.GetProperty("storyline").GetString() == storylineId.ToString())
+            .Select(e => e.Payload.GetProperty("count").GetInt32())
+            .Single();
+
+    private async Task<List<int>> DecidedCountsInOrderAsync(Guid exerciseId)
+    {
+        await using var read = _fixture.CreateContext(ScopeFor(exerciseId));
+        var payloads = await read.TelemetryEvents
+            .Where(e => e.EventType == EngineEventTypes.Decided)
+            .OrderBy(e => e.WallClockTime)
+            .Select(e => e.Payload)
+            .ToListAsync();
+        return payloads.Select(CountOf).ToList();
+
+        static int CountOf(string? payload)
+        {
+            using var document = JsonDocument.Parse(payload ?? "{}");
+            return document.RootElement.GetProperty("count").GetInt32();
+        }
     }
 
     [RequiresDockerFact]

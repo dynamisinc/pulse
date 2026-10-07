@@ -279,6 +279,13 @@ public sealed class ReactionLoopRegistration
     /// suggestion that slows the escalation (miss-safe).
     /// </summary>
     public ResponseMatchTrustCurve ResponseMatching { get; init; } = new();
+
+    /// <summary>
+    /// The miss-safe slows official posts have left pending on this exercise's storylines (ADP-002a,
+    /// engine-runtime/06): each is carried by that storyline's next escalation burst, or removed by a match.
+    /// Per registration, so a re-seed starts clean.
+    /// </summary>
+    public PendingResponseSlows PendingSlows { get; } = new();
 }
 
 /// <summary>
@@ -441,7 +448,8 @@ public sealed partial class ReactionLoopDriver
         //    post participants made since the last tick (engine-runtime/06 — until then this was always [], so
         //    no participant post could ever address a storyline). The reaction cadence (ADP-011) suppresses
         //    re-reacting to the SAME ongoing silence every tick: an unaddressed storyline re-fires at most once
-        //    per MinMinutesBetweenInactionReactions scenario minutes.
+        //    per MinMinutesBetweenInactionReactions scenario minutes. Draining is at-most-once: a tick that
+        //    faults after this point loses its posts' resolution, which is safer than resolving a post twice.
         var observed = ObserveStage.Observe(
             registration.Storylines,
             _addressingInbox.Drain(registration.ExerciseId),
@@ -454,21 +462,22 @@ public sealed partial class ReactionLoopDriver
 
         // 2b. RESPOND — resolve each official post with the miss-safe resolver (ADP-002/002a). A genuine match
         //     addresses its storyline now (silence clock reset, intensity bent down, phase → Addressed); anything
-        //     else is never treated as silence, but slows this tick's escalation instead (never pauses it).
+        //     else is never treated as silence, but leaves the escalation it may have answered slowed until that
+        //     storyline's next burst (never paused).
         var responses = ResolveOfficialPosts(registration, observed.AddressingCandidates, scenarioMinute, context, pendingEvents);
 
         // 3-5. DECIDE → GENERATE → enqueue. Response reactions go first (the responder's moment), then the
-        //       inaction bursts, minus any storyline a response just addressed (it is no longer silent). CTL-034:
+        //       inaction bursts, minus any storyline a response just answered (it is no longer silent). CTL-034:
         //       never demand more than the budget of review decisions per scenario minute — one burst = one decision.
         var work = new List<(Storyline Storyline, ReactionTriggerKind Kind)>();
-        foreach (var addressed in responses.Matched)
+        foreach (var addressed in responses.Voiced)
         {
             work.Add((addressed, ReactionTriggerKind.OfficialResponse));
         }
 
         foreach (var trigger in observed.InactionTriggers)
         {
-            if (responses.IsMatched(trigger.StorylineId))
+            if (responses.IsAnswered(trigger.StorylineId))
             {
                 continue;
             }
@@ -496,9 +505,11 @@ public sealed partial class ReactionLoopDriver
                 continue;
             }
 
-            // Miss-safe (ADP-002a): an official post that was seen but not matched slows the escalation it may
-            // have been answering — fewer voices this burst, never zero.
-            if (kind == ReactionTriggerKind.Inaction && responses.ShouldSlow(storyline.Id))
+            // Miss-safe (ADP-002a): an official post that was seen but not matched left this storyline's escalation
+            // slowed — fewer voices this burst, never zero. The slow is spent only once a burst actually carries it
+            // to the review queue (below), so a dropped burst leaves it pending for the next one.
+            var slowed = kind == ReactionTriggerKind.Inaction && registration.PendingSlows.IsPending(storyline.Id);
+            if (slowed)
             {
                 intent = MissSafeResolver.Slow(intent);
             }
@@ -538,6 +549,11 @@ public sealed partial class ReactionLoopDriver
             if (kind == ReactionTriggerKind.Inaction)
             {
                 storyline.RecordEngineReaction(scenarioMinute);
+            }
+
+            if (slowed)
+            {
+                registration.PendingSlows.Remove(storyline.Id);
             }
         }
 
@@ -593,11 +609,12 @@ public sealed partial class ReactionLoopDriver
     }
 
     /// <summary>
-    /// Resolves this tick's official posts against the storylines (ADP-002/002a, engine-runtime/06). Emits one
-    /// <c>engine.observed</c> (<c>action-seen</c>) per post that relates to a storyline, applies every genuine
-    /// match (silence clock reset, bend-down, phase → Addressed, with the resulting storyline telemetry), and
-    /// records which storylines' escalation the miss-safe default slows this tick: the suggested storyline for
-    /// an unconfirmed match, every storyline for an unmatched post (its target is unknown).
+    /// Resolves this tick's official posts against the storylines (ADP-002/002a, engine-runtime/06). Per post it
+    /// emits one <c>engine.observed</c> (<c>action-seen</c>) against the storyline the resolver names (a match, or
+    /// a suggestion awaiting confirmation) and none for a post that relates to nothing; applies a genuine match
+    /// (silence clock reset, bend-down, phase → Addressed, with the resulting storyline telemetry); and otherwise
+    /// leaves a miss-safe slow pending: on the suggested storyline for an unconfirmed match, and on every storyline
+    /// an answer could still address when the post's target is unknown.
     /// </summary>
     private OfficialPostResolutions ResolveOfficialPosts(
         ReactionLoopRegistration registration,
@@ -612,40 +629,48 @@ public sealed partial class ReactionLoopDriver
             var resolution = MissSafeResolver.Resolve(
                 candidate, registration.Storylines, registration.ResponseMatching.AutoConfirmEnabled);
 
-            // The storyline the post most plausibly relates to, for telemetry lineage even when it did not clear
-            // the threshold: the observation happened; whether it addressed anything is the resolution's job.
-            var related = resolution.StorylineId
-                ?? ResponseMatcher.SuggestBest(candidate.Text, registration.Storylines)?.StorylineId;
-            if (related is { } relatedId)
+            // Attribute the observation only to a storyline the resolver named and this registration still holds.
+            // The matcher suggests SOME storyline whenever one exists, even at zero confidence, so falling back to
+            // its best guess would record every off-topic post as an answer to storyline[0] (E10 reads these).
+            var target = resolution.StorylineId is { } namedId
+                ? registration.Storylines.FirstOrDefault(s => s.Id == namedId)
+                : null;
+            if (target is not null)
             {
-                pendingEvents.Add(BuildActionSeenEvent(context, relatedId, candidate.ScenarioMinute));
+                pendingEvents.Add(BuildActionSeenEvent(context, target.Id, candidate.ScenarioMinute));
             }
 
-            LogOfficialPostResolved(candidate.Reference, resolution.Kind, resolution.Confidence, related);
+            LogOfficialPostResolved(candidate.Reference, resolution.Kind, resolution.Confidence, target?.Id);
 
-            switch (resolution.Kind)
+            if (resolution.Kind == MatchKind.Matched && target is not null)
             {
-                case MatchKind.Matched when resolution.StorylineId is { } matchedId:
-                    var storyline = registration.Storylines.FirstOrDefault(s => s.Id == matchedId);
-                    if (storyline is null)
+                var sentimentBefore = target.Sentiment;
+                var raised = MissSafeResolver.Apply(resolution, target, scenarioMinute);
+                pendingEvents.AddRange(_measureStage.MapStorylineEvents(
+                    raised, target.Sentiment - sentimentBefore, amplification: 0.0, context));
+                registration.PendingSlows.Remove(target.Id);
+
+                // Voice a response only when THIS answer addressed the storyline. A later answer to a storyline that
+                // is already addressed still resets its clock and bends it (storyline-model's rule) but draws no
+                // second burst: N follow-up posts must not become N gratitude waves and N review decisions (CTL-034).
+                var addressedNow = raised.OfType<StorylineStateChanged>().Any(change => change.To == StorylinePhase.Addressed);
+                resolutions.AddAnswered(target, voice: addressedNow);
+            }
+            else if (resolution.Kind == MatchKind.NeedsConfirmation && target is not null)
+            {
+                registration.PendingSlows.Add(target.Id);
+            }
+            else
+            {
+                // Unmatched, or a match naming a storyline this registration no longer holds (a stale marker hint):
+                // the target is unknown, so every storyline an answer could still address is slowed.
+                foreach (var storyline in registration.Storylines)
+                {
+                    if (StorylineStateMachine.CanTransition(storyline.Phase, StorylineTrigger.OfficialResponseMatched))
                     {
-                        break;
+                        registration.PendingSlows.Add(storyline.Id);
                     }
-
-                    var sentimentBefore = storyline.Sentiment;
-                    var raised = MissSafeResolver.Apply(resolution, storyline, scenarioMinute);
-                    pendingEvents.AddRange(_measureStage.MapStorylineEvents(
-                        raised, storyline.Sentiment - sentimentBefore, amplification: 0.0, context));
-                    resolutions.AddMatched(storyline);
-                    break;
-
-                case MatchKind.NeedsConfirmation when resolution.StorylineId is { } suggestedId:
-                    resolutions.Slow(suggestedId);
-                    break;
-
-                default:
-                    resolutions.SlowAll();
-                    break;
+                }
             }
         }
 
@@ -798,34 +823,26 @@ public sealed partial class ReactionLoopDriver
     private partial void LogOfficialPostResolved(string reference, MatchKind kind, double confidence, Guid? storylineId);
 
     /// <summary>
-    /// What one tick's official posts did: the storylines a genuine match addressed (each voiced once as a
-    /// response reaction, and never also as an inaction burst this tick), and whose escalation the miss-safe
-    /// default slows.
+    /// What one tick's official posts answered: every storyline a genuine match reached (never also voiced as an
+    /// inaction burst this tick), and among them the ones this tick's answer moved to Addressed, each voiced once
+    /// as a response reaction. Miss-safe slows outlive the tick, so they live on the registration instead.
     /// </summary>
     private sealed class OfficialPostResolutions
     {
-        private readonly HashSet<Guid> _matchedIds = [];
-        private readonly HashSet<Guid> _slowed = [];
-        private bool _slowAll;
+        private readonly HashSet<Guid> _answered = [];
 
-        /// <summary>The storylines a match addressed this tick, in resolution order.</summary>
-        public List<Storyline> Matched { get; } = [];
+        /// <summary>The storylines to voice a response reaction for, in resolution order.</summary>
+        public List<Storyline> Voiced { get; } = [];
 
-        public void AddMatched(Storyline storyline)
+        public void AddAnswered(Storyline storyline, bool voice)
         {
-            if (_matchedIds.Add(storyline.Id))
+            if (_answered.Add(storyline.Id) && voice)
             {
-                Matched.Add(storyline);
+                Voiced.Add(storyline);
             }
         }
 
-        public bool IsMatched(Guid storylineId) => _matchedIds.Contains(storylineId);
-
-        public void Slow(Guid storylineId) => _slowed.Add(storylineId);
-
-        public void SlowAll() => _slowAll = true;
-
-        public bool ShouldSlow(Guid storylineId) => _slowAll || _slowed.Contains(storylineId);
+        public bool IsAnswered(Guid storylineId) => _answered.Contains(storylineId);
     }
 
     /// <summary>Builds the <c>engine.decided</c> event (personas / tone mix / count / autonomy / rate-cap state).</summary>

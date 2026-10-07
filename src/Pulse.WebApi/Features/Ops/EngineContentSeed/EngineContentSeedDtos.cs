@@ -128,7 +128,7 @@ public sealed class EngineContentSeedResponseDto
             StorylineTitle = result.StorylineTitle ?? string.Empty,
             ResponseWindowMinutes = result.ResponseWindowMinutes,
             AutoConfirmResponses = result.AutoConfirmResponses,
-            Note ="The reaction loop was registered (or its registration replaced). The starter storyline is "
+            Note = "The reaction loop was registered (or its registration replaced). The starter storyline is "
                 + "in-memory and rebuilt fresh at scenario minute 0 on every seed, so a re-run resets any "
                 + "intensity/phase progress accrued since the last seed; persona rows are reused, never "
                 + "duplicated. Re-call this endpoint after a host restart (the in-memory registry is emptied)."

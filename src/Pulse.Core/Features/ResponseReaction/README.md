@@ -44,4 +44,7 @@ markers (CTL-026) as identical satisfiers.
 `PostIngestService` queued since the last tick (its `IAddressingInbox`). Each post goes through
 `MissSafeResolver.Resolve` against the exercise's `ResponseMatchTrustCurve`, which is off unless the
 operator's seed request opts in. A match is applied before the tick's inaction triggers are decided, so an
-addressed storyline is voiced once, as a response, and never also as silence on the same tick.
+addressed storyline is voiced once, as a response, and never also as silence on the same tick; only the answer
+that moves it to Addressed draws that burst. `Slow` is applied by the host to the storyline's next escalation
+burst, not the tick's: an unconfirmed or unmatched post leaves a pending slow that the next burst spends
+(or a match removes), because posts land between bursts far more often than on them.

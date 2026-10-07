@@ -1,6 +1,6 @@
 # Story: Official responses reach the live loop — a PIO's post can address a storyline  `[backend]`
 
-**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** In Review (built, suite-green; awaiting Gate-2 + UAT)
+**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** In Review (built; Gate-2 findings folded, awaiting re-review + UAT)
 **Requirements:** ADP-002, ADP-002a (COR-001, XC-004, CTL-034, ADP-011, E8 arch §7 / §8.2)  ·  **Design decisions:** none new  ·  **Issue:** #415
 
 > **Delivers the deferred half of `response-reaction/01` (#163).** That story's two unchecked ACs (the
@@ -28,45 +28,59 @@ beat is the PIO answering and the world calming down.
   `EngineAddressingObserver` enqueues it into that exercise's `IAddressingInbox` as an official-post
   `AddressingObservation`. Engine, seed and controller posts are not enqueued: only `origin: participant`
   can be a response (the world talking is not an answer).
-- [x] **An observer can never fail a post.** Given an observer throws, then the post (already committed
-  and broadcast) still succeeds, the failure is logged, and later observers still run. A refused post
-  notifies no observer.
+- [x] **An observer can never fail a post.** Given an observer throws anything, cancellation included
+  (observers take no token, so it is never the request's), then the post (already committed and broadcast)
+  still succeeds, the failure is logged, and later observers still run. A refused post notifies no observer.
 - [x] **Each post resolves exactly once.** Given posts are waiting, when the loop ticks, then it drains the
-  exercise's inbox into `ObserveStage.Observe`, so each post is resolved on one tick only. The inbox is
-  bounded (50 per exercise, oldest dropped first) so a frozen or unregistered loop cannot grow it without
-  limit, and a re-seed clears the exercise's queue.
+  exercise's inbox into `ObserveStage.Observe`, so each post is resolved on one tick only. Draining is
+  at-most-once: a tick that faults after draining loses those posts' resolution, which is safer than
+  resolving one twice. The inbox is bounded (50 per exercise, oldest dropped first) so a frozen or
+  unregistered loop cannot grow it without limit, and a re-seed clears the exercise's queue.
 - [x] **A genuine match addresses the storyline.** Given an official post matches a storyline (a hashtag
   hit, or enough coverage of the storyline's expectation) and response auto-confirm is on for the exercise,
   when the tick resolves it, then `MissSafeResolver.Apply` resets the silence clock, bends intensity and
   sentiment down, and moves the storyline to **Addressed**. That storyline gets no inaction burst on the
-  same tick. A second matching post is safe: the transition is guarded, so it only re-resets the clock.
-- [x] **The world reacts to the response.** Given a storyline was just addressed, then the loop decides it
-  through the now-registered `ResponseReactionBehavior` (an `OfficialResponse` trigger) and enqueues one
-  response burst of up to **3 voices** (`DefaultBurstSize`), bounded by the eligible cast and the
-  per-minute cap, with the gratitude / follow-up / one-skeptic mix. It goes to the review queue like every
-  other burst: one burst is one review decision (CTL-034).
+  same tick. A later answer to a storyline that is already addressed still resets its clock and bends it
+  again (storyline-model's rule), but draws no second response burst.
+- [x] **The world reacts to the response.** Given a post's match moved the storyline to Addressed, then the
+  loop decides it through the now-registered `ResponseReactionBehavior` (an `OfficialResponse` trigger) and
+  enqueues one response burst of up to **3 voices** (`DefaultBurstSize`), bounded by the eligible cast and
+  the per-minute cap, with the gratitude / follow-up / one-skeptic mix. It goes to the review queue like
+  every other burst: one burst is one review decision (CTL-034). Follow-up answers never become N gratitude
+  waves. A dial target asking for calm (lower or hold) suppresses this burst like every other one: the
+  controller's authority over the dial is absolute.
 - [x] **Miss-safe default (ADP-002a, safety-critical).** Given a plausible match that has not been
   confirmed (auto-confirm off), then the storyline is **not** addressed and its silence clock keeps running,
-  but its inaction burst that tick is slowed (`MissSafeResolver.Slow`: fewer voices, never zero). Given an
-  official post that matches nothing, then every storyline's inaction burst that tick is slowed. Neither
-  case is ever treated as silence, and neither ever pauses escalation.
+  and a slow is left pending on it: its **next escalation burst**, whenever the reaction cadence lets it fire,
+  carries fewer voices (`MissSafeResolver.Slow`: never zero). Given an official post whose target is unknown
+  (it matches nothing, or names a storyline the exercise no longer holds), then every storyline an answer
+  could still address gets that pending slow. Neither case is ever treated as silence, and neither ever
+  pauses escalation. One pending slow per storyline, spent by the burst that carries it (a dropped burst
+  leaves it pending) and removed by a match, so a stream of irrelevant posts can keep bursts slowed but never
+  stop them. The design holds the slow until the controller's Y/N; that surface doesn't exist yet, so one
+  burst carries it. The slow outlives the tick on purpose: the loop ticks every few seconds while a silent
+  storyline re-fires every few scenario minutes, so a slow that only lasted the tick would almost never
+  meet a burst.
 - [x] **The trust curve stays human-owned (E8 §8.2).** Auto-confirm is **off** unless the operator opts in
   on the seed request (`"autoConfirmResponses": true`), and the choice is recorded in the seed's audit
   event. The engine never turns it on itself.
 - [x] **Isolation (COR-001).** The observer keys the inbox by the scope `PostIngestService` resolved on the
   server; the driver drains only the ticking exercise's queue; a re-seed clears only its own exercise.
-- [x] **Telemetry (XC-004), no new types.** Each official post that relates to a storyline emits
-  `engine.observed` with the taxonomy's existing `action-seen` trigger. A match emits the same
+- [x] **Telemetry (XC-004), no new types.** Each official post emits `engine.observed` with the taxonomy's
+  existing `action-seen` trigger against the storyline the resolver names (a match, or a suggestion awaiting
+  confirmation). A post that relates to no storyline emits none; the matcher would otherwise name the first
+  storyline even at zero confidence, and E10 reads these as answers. A match emits the same
   `storyline.state_changed` (cause `matched-response`) and `engine.measured` events the measure stage
   emits, via the extracted `MeasureStage.MapStorylineEvents`. The response burst's `engine.decided` carries
   its tone mix. Each resolution is also logged (kind, confidence, storyline).
 - [x] **Composition-root guard.** A real-`Program` test asserts the engine's observer is registered exactly
   once and that one inbox singleton is shared by the observer, the seed and the driver. Neutering either the
   drain or the observer registration fails 7 tests (verified).
-- [ ] **UAT verification.** Given this build is deployed and the engine is re-seeded with
-  `autoConfirmResponses: true`, when the PIO (bound to @FulcoEM) posts a statement carrying `#WaterIssues`
-  or the expectation's wording, then within a tick or two the console shows the storyline **Addressed** and
-  a 3-voice response burst waits in the review queue. *(Ticked only when seen in UAT.)*
+- [ ] **UAT verification.** Given this build is deployed, the engine is re-seeded with
+  `autoConfirmResponses: true` and no dial target is set (a re-seed clears it), when the PIO (bound to
+  @FulcoEM) posts a statement carrying `#WaterIssues` or the expectation's wording, then within a tick or two
+  the console shows the storyline **Addressed** and a 3-voice response burst waits in the review queue.
+  *(Ticked only when seen in UAT.)*
 
 ## Out of Scope
 - **The controller's "does this address #X? Y/N" surface** for a `NeedsConfirmation` suggestion (E7
@@ -83,16 +97,24 @@ beat is the PIO answering and the world calming down.
   registered; inaction triggers still run the default composer. Separate finding.
 - **Persisting the inbox.** It lives in memory like the rest of the engine's state; a restart loses pending
   posts along with the storylines, and a re-seed rebuilds both.
+- **XC-004 trace for an unmatched post.** It is logged and slows escalation, but emits no telemetry: the
+  taxonomy has no "unmatched official content" or "controller prompted" event, and adding one is #173's
+  deferred ADP-002a item, not this story's.
+- **A re-seed during play can race a host pass.** The host snapshots the registry at the start of a pass, so
+  a re-seed landing mid-pass can let the old registration's tick drain posts made after the re-seed's clear
+  and resolve them against the discarded storyline. The window is seconds wide and needs a re-seed while
+  participants post; the demo re-seeds before play.
 
 ## Technical Notes
 - `Features/Social/IPostPublishedObserver.cs`: the seam. `PostIngestService` notifies observers as step 7,
-  after commit and broadcast, each inside its own catch (cancellation still propagates).
+  after commit and broadcast, each inside its own catch-all.
 - `Features/EngineRuntime/Addressing/`: `IAddressingInbox` / `AddressingInbox` (per-exercise concurrent
-  queues) and `EngineAddressingObserver` (participant-origin filter).
+  queues), `EngineAddressingObserver` (participant-origin filter), and `PendingResponseSlows` (the miss-safe
+  slows waiting for a storyline's next burst).
 - `ReactionLoopHost.cs`: `ReactionLoopDriver` drains the inbox, resolves each post
   (`ResolveOfficialPosts`), then decides response bursts first and inaction bursts second, minus any
-  storyline a response just addressed. `ReactionLoopRegistration.ResponseMatching` carries the per-exercise
-  trust curve.
+  storyline a response just answered. `ReactionLoopRegistration.ResponseMatching` carries the per-exercise
+  trust curve and `ReactionLoopRegistration.PendingSlows` the pending slows (both reset by a re-seed).
 - `MeasureStage.MapStorylineEvents`: extracted so the response path and the measure stage emit identical
   storyline telemetry.
 - `ResponseReactionBehavior` (Core): sizes the response as a burst. The base composer sizes by phase, and
@@ -111,9 +133,21 @@ the slice used as built), `social-api` (`PostIngestService`).
 - `AddressingInboxTests`: drain-once, per-exercise isolation, the bound, clear; the observer's origin filter.
 - `PostIngestServiceObserverTests` (real SQL): server-resolved scope, refused post notifies nobody, a
   throwing observer never fails the post.
-- `ReactionLoopHostTests` (real SQL): matched → Addressed with a 3-voice gratitude burst and no silence
-  burst; needs-confirmation stays Escalating but slowed; unmatched slows; each post resolved once; and the
-  end-to-end path through the real `PostIngestService`.
+- `ReactionLoopHostTests` (real SQL):
+  - matched → Addressed with a 3-voice gratitude burst and no silence burst
+  - needs-confirmation stays Escalating but slowed, and only on the suggested storyline
+  - unmatched slows, with no `action-seen`
+  - a stale target acts as unmatched
+  - **an unconfirmed answer between bursts still slows the next burst, and only that one**
+  - a follow-up answer draws no second burst
+  - each post resolved once
+  - the end-to-end path through the real `PostIngestService`
+
+  Gate-2 (2026-10-07) found the first version's slow lived only one tick, while every slow test lined its
+  post up with a trigger, so none could see it. Neutering checks, each restored afterwards:
+  - a one-tick slow fails only the between-bursts test
+  - voicing every match fails the follow-up test
+  - attributing posts to the matcher's guess fails both no-`action-seen` assertions
 - `EngineContentSeedServiceTests`: auto-confirm off by default, on only by opt-in (and audited); the seed
   clears only its own exercise's inbox.
 - `ResponseReactionBehaviorTests` (Core): burst of 3, bounded by cast and by the per-minute cap.

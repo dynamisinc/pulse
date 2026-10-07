@@ -14,7 +14,10 @@ using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 /// the escalation curve), then maps the raised domain events onto the XC-004 telemetry taxonomy: one
 /// <c>engine.measured</c> per tick (intensity/sentiment delta + amplification) and one
 /// <c>storyline.state_changed</c> per phase transition (from→to + cause). It builds the events; the caller
-/// adds them to its own unit of work and saves them alongside the loop's other stage events.
+/// adds them to its own unit of work and saves them alongside the loop's other stage events. A matched
+/// official response bends a storyline outside the tick, and its events go through the same mapping
+/// (<see cref="MapStorylineEvents"/>), so a tick with a match carries a second <c>engine.measured</c> for
+/// that storyline, next to its <c>storyline.state_changed</c> (cause <c>matched-response</c>).
 /// </summary>
 /// <remarks>
 /// <para>
