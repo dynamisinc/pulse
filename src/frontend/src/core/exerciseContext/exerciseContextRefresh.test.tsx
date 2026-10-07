@@ -40,7 +40,7 @@
  * `features/app-shell/exerciseScopeRefreshComposition.test.tsx`; this file keeps
  * owning the provider's own semantics.
  */
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -77,10 +77,16 @@ const BRAVO: ExerciseScope = {
  * A staff-header-style consumer: renders the scope's exercise NAME and counts
  * its OWN mounts, so a test can tell "re-rendered under the new scope" apart
  * from "was torn down and rebuilt" (which a reload/remount would also satisfy).
+ *
+ * The count is taken in a LAYOUT effect, which runs inside the commit, before
+ * any assertion can see the new DOM. A passive `useEffect` can still be pending
+ * when `findByTestId` resolves. Under CI load that read the first mount as 0
+ * (2026-10-07). It would also let a REMOUNT go uncounted at the no-remount
+ * check, so the deterministic count is what makes that check mean something.
  */
 function ScopeBadge({ onMount }: { onMount?: () => void }) {
   const scope = useExerciseContext()
-  useEffect(() => {
+  useLayoutEffect(() => {
     onMount?.()
     // Mount-only on purpose: this counts MOUNTS, not renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
