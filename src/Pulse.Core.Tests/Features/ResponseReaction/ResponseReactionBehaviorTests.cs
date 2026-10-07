@@ -123,6 +123,23 @@ public class ResponseReactionBehaviorTests
     }
 
     [Fact]
+    public void Behavior_UnderARaiseDialTarget_StillVoicesTheBurstSize_NotTheTargetsPostCount()
+    {
+        // A raise target makes the base composer ask for as many posts as closing the gap takes (bounded only by
+        // the cast and the per-minute cap). A reaction to an answer is a burst, never a target-follow flood.
+        var storyline = AddressedStoryline();
+        storyline.SetTargetIntensity(100, scenarioMinute: 31);
+        var context = ResponseContext(storyline, personas: 10);
+        IntentComposer.Compose(context)!.Count.Should().BeGreaterThan(
+            ResponseReactionBehavior.DefaultBurstSize, "precondition: the raise target alone would ask for more");
+
+        var intent = new ResponseReactionBehavior().Decide(context)!;
+
+        intent.Count.Should().Be(ResponseReactionBehavior.DefaultBurstSize);
+        intent.Personas.Should().HaveCount(ResponseReactionBehavior.DefaultBurstSize);
+    }
+
+    [Fact]
     public void AMatch_StopsActiveSilenceEscalation_TheHandoff()
     {
         var s = EscalatingStoryline();

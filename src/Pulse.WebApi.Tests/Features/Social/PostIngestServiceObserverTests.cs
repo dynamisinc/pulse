@@ -2,11 +2,13 @@ namespace Pulse.WebApi.Tests.Features.Social;
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Tests.Data;
 
@@ -80,6 +82,25 @@ public class PostIngestServiceObserverTests
         (await read.Posts.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == exerciseId)).Should().Be(1);
     }
 
+    [RequiresDockerFact]
+    public async Task AFailedBroadcast_AfterTheCommit_StillReachesEveryObserver()
+    {
+        // The broadcast runs after the commit and can throw (or be cancelled with the request). A committed PIO
+        // answer must still reach the engine; otherwise it is persisted but can never address its storyline.
+        var exerciseId = Guid.NewGuid();
+        var observer = new RecordingObserver();
+        await using var context = _fixture.CreateContext(ScopeFor(exerciseId));
+        var service = new PostIngestService(context, ScopeFor(exerciseId), new ThrowingFeedBroadcaster(), [observer]);
+
+        var ingest = () => service.IngestAsync(Request(), ParticipantAttribution());
+
+        await ingest.Should().ThrowAsync<InvalidOperationException>("precondition: the broadcast failed after the commit");
+        observer.Calls.Should().ContainSingle("the observer hears a committed post whatever the broadcast does");
+
+        await using var read = _fixture.CreateContext();
+        (await read.Posts.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == exerciseId)).Should().Be(1);
+    }
+
     private static IExerciseContext ScopeFor(Guid exerciseId) =>
         new ExerciseContext { CurrentExerciseId = exerciseId };
 
@@ -108,5 +129,11 @@ public class PostIngestServiceObserverTests
     {
         public void OnPostPublished(Guid exerciseId, Post post) =>
             throw new InvalidOperationException("observer exploded");
+    }
+
+    private sealed class ThrowingFeedBroadcaster : IFeedBroadcaster
+    {
+        public Task BroadcastPostAsync(Guid exerciseId, ParticipantPostDto post, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("hub connection lost");
     }
 }

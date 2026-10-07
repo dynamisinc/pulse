@@ -60,12 +60,13 @@ public sealed class ResponseReactionBehavior : IReactionBehavior
             return null;
         }
 
-        // A matched response draws a BURST, not a single reply. The base composer sizes by phase, and a
-        // matched storyline has just moved to Addressed, which sizes to one voice — too few to carry the mix.
-        // Size it to the burst, still bounded by the cast and the per-minute cap, never below the composer's.
+        // A matched response draws a BURST of the configured size, not the composer's count. The composer sizes
+        // by phase (a just-addressed storyline sizes to one voice, too few to carry the mix) or by a raise dial
+        // target (which can ask for dozens of posts, turning one answer into a huge review item). Neither fits a
+        // reaction to an answer, so the burst size decides, bounded by the cast and the per-minute cap. The
+        // composer's gates above still hold. Its non-null intent means the cap has room, so count is at least 1.
         var desired = Math.Min(_burstSize, context.EligiblePersonas.Count);
-        var allowed = RateGovernance.WithinCap(context.RateConfig, context.PostsThisMinute, desired).Allowed;
-        var count = Math.Max(intent.Count, allowed);
+        var count = RateGovernance.WithinCap(context.RateConfig, context.PostsThisMinute, desired).Allowed;
 
         return intent with
         {

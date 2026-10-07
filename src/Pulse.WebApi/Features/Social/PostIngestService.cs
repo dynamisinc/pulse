@@ -247,12 +247,14 @@ public sealed partial class PostIngestService
         _dbContext.TelemetryEvents.Add(telemetryEvent);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        // 6. Fan out the participant-safe projection only (XC-002 — the broadcast never carries provenance).
-        await _broadcaster.BroadcastPostAsync(exerciseId, ParticipantPostDto.FromPost(post), cancellationToken);
-
-        // 7. Tell in-process observers (the engine's response-reaction inbox, engine-runtime/06) AFTER the
-        //    commit, so nothing ever reacts to a post that failed to persist.
+        // 6. Tell in-process observers (the engine's response-reaction inbox, engine-runtime/06) the moment the
+        //    post is committed: never before, so nothing reacts to a post that failed to persist, and never after
+        //    the broadcast, which can throw or be cancelled with the request and would strand a committed answer
+        //    outside the engine for good.
         NotifyObservers(exerciseId, post);
+
+        // 7. Fan out the participant-safe projection only (XC-002 — the broadcast never carries provenance).
+        await _broadcaster.BroadcastPostAsync(exerciseId, ParticipantPostDto.FromPost(post), cancellationToken);
 
         // 8. Hand the full post back to the endpoint, which shapes the response by caller role.
         return PostIngestResult.Created(post);
@@ -260,8 +262,8 @@ public sealed partial class PostIngestService
 
     /// <summary>
     /// Notifies each observer of a committed post. An observer that throws is logged and skipped: the post is
-    /// already committed and broadcast, so an observer failure must never turn into a failed request (a client
-    /// retrying a 500 would duplicate the post). That includes an <see cref="OperationCanceledException"/>:
+    /// already committed, so an observer failure must never skip the broadcast or turn into a failed request (a
+    /// client retrying a 500 would duplicate the post). That includes an <see cref="OperationCanceledException"/>:
     /// observers take no cancellation token, so one thrown here is the observer's own, never this request's.
     /// </summary>
     private void NotifyObservers(Guid exerciseId, Post post)

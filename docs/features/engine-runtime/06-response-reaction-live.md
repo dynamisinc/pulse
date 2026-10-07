@@ -23,14 +23,17 @@ beat is the PIO answering and the world calming down.
 
 ## Acceptance Criteria
 - [x] **Participant posts reach the loop.** Given a participant post commits through the single ingest
-  funnel (`PostIngestService.IngestAsync`), when it has been saved and broadcast, then every registered
+  funnel (`PostIngestService.IngestAsync`), the moment it is saved, then every registered
   `IPostPublishedObserver` hears it with the **server-resolved** exercise scope (never a client value), and
   `EngineAddressingObserver` enqueues it into that exercise's `IAddressingInbox` as an official-post
   `AddressingObservation`. Engine, seed and controller posts are not enqueued: only `origin: participant`
-  can be a response (the world talking is not an answer).
+  can be a response (the world talking is not an answer). Observers run before the real-time broadcast, so a
+  broadcast that throws, or is cancelled with the request, can never strand a committed answer outside the
+  engine.
 - [x] **An observer can never fail a post.** Given an observer throws anything, cancellation included
-  (observers take no token, so it is never the request's), then the post (already committed and broadcast)
-  still succeeds, the failure is logged, and later observers still run. A refused post notifies no observer.
+  (observers take no token, so it is never the request's), then the post (already committed) is still
+  broadcast and the request still succeeds, the failure is logged, and later observers still run. A refused
+  post notifies no observer.
 - [x] **Each post resolves exactly once.** Given posts are waiting, when the loop ticks, then it drains the
   exercise's inbox into `ObserveStage.Observe`, so each post is resolved on one tick only. Draining is
   at-most-once, which is safer than resolving a post twice. A tick that faults after draining keeps its
@@ -46,7 +49,8 @@ beat is the PIO answering and the world calming down.
 - [x] **The world reacts to the response.** Given a post's match moved the storyline to Addressed, then the
   loop decides it through the now-registered `ResponseReactionBehavior` (an `OfficialResponse` trigger) and
   enqueues one response burst of up to **3 voices** (`DefaultBurstSize`), bounded by the eligible cast and
-  the per-minute cap, with the gratitude / follow-up / one-skeptic mix. It goes to the review queue like
+  the per-minute cap. A raise dial target never enlarges it: the burst size decides, not the target's post
+  count. The burst carries the gratitude / follow-up / one-skeptic mix. It goes to the review queue like
   every other burst: one burst is one review decision (CTL-034). Follow-up answers never become N gratitude
   waves. A dial target asking for calm (lower or hold) suppresses this burst like every other one: the
   controller's authority over the dial is absolute.
@@ -122,8 +126,8 @@ dampens the core silence mechanic.
   participants post; the demo re-seeds before play.
 
 ## Technical Notes
-- `Features/Social/IPostPublishedObserver.cs`: the seam. `PostIngestService` notifies observers as step 7,
-  after commit and broadcast, each inside its own catch-all.
+- `Features/Social/IPostPublishedObserver.cs`: the seam. `PostIngestService` notifies observers as step 6,
+  right after the commit and before the broadcast, each inside its own catch-all.
 - `Features/EngineRuntime/Addressing/`: `IAddressingInbox` / `AddressingInbox` (per-exercise concurrent
   queues), `EngineAddressingObserver` (participant-origin filter), and `PendingResponseSlows` (the miss-safe
   slows waiting for a storyline's next burst).
@@ -133,9 +137,10 @@ dampens the core silence mechanic.
   trust curve and `ReactionLoopRegistration.PendingSlows` the pending slows (both reset by a re-seed).
 - `MeasureStage.MapStorylineEvents`: extracted so the response path and the measure stage emit identical
   storyline telemetry.
-- `ResponseReactionBehavior` (Core): sizes the response as a burst. The base composer sizes by phase, and
-  a just-addressed storyline sizes to one voice, too few to carry the mix. Still bounded by cast and cap,
-  never below the composer's count.
+- `ResponseReactionBehavior` (Core): sizes the response at its burst size, not the composer's count. The
+  composer sizes by phase (a just-addressed storyline gets one voice, too few to carry the mix) or by a raise
+  dial target (which could flood one answer). The composer's gates still apply, and the count is still
+  bounded by cast and cap.
 - Seed slice: `autoConfirmResponses` on the request, the response and the audit payload; the seed clears
   the exercise's inbox after registering the loop. Both `AddReactionLoopHost` and `AddEngineContentSeed`
   `TryAdd` the inbox so they converge on one singleton whichever is wired first.
@@ -148,7 +153,8 @@ the slice used as built), `social-api` (`PostIngestService`).
 ## Tests
 - `AddressingInboxTests`: drain-once, per-exercise isolation, the bound, clear; the observer's origin filter.
 - `PostIngestServiceObserverTests` (real SQL): server-resolved scope, refused post notifies nobody, a
-  throwing observer never fails the post.
+  throwing observer never fails the post, and a broadcast that fails after the commit still reaches every
+  observer.
 - `ReactionLoopHostTests` (real SQL):
   - matched → Addressed with a 3-voice gratitude burst and no silence burst
   - needs-confirmation stays Escalating but slowed, and only on the suggested storyline
@@ -172,5 +178,8 @@ the slice used as built), `social-api` (`PostIngestService`).
   addressed-storyline guard, each pinned by a test that fails when its fix is neutered.
 - `EngineContentSeedServiceTests`: auto-confirm off by default, on only by opt-in (and audited); the seed
   clears only its own exercise's inbox.
-- `ResponseReactionBehaviorTests` (Core): burst of 3, bounded by cast and by the per-minute cap.
+- `ResponseReactionBehaviorTests` (Core): burst of 3, bounded by cast and by the per-minute cap, and still 3
+  under a raise dial target.
+- Copilot review (2026-10-07) found the raise-target overflow and the broadcast-before-notify ordering. The
+  two new tests fail when their fixes are neutered.
 - `ResponseReactionCompositionRootWiringTests`, `ReactionLoopHostDiTests`: the wiring guards.
