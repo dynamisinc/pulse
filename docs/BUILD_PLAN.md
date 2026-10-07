@@ -130,8 +130,15 @@ notifications, direct messages, the E3–E6 channels, E10 evaluation, org-level 
   The engine is citizens-first and has never published as FulcoEM, and the controller can veto any draft
   that does. Real fix, a small backend story: drop participant-bound personas from the engine cast at
   seed time.
-- 🔧 **Beat 4 couldn't work: the live engine never saw participant posts. Fixed in #416** (story
-  `engine-runtime/06`, #415); it needs merge, deploy and a UAT check. `ReactionLoopHost.cs:419` called
+- ✅ **Beat 4 couldn't work: the live engine never saw participant posts. Fixed in #416** (story
+  `engine-runtime/06`, #415). Merged, deployed and **UAT-verified on 2026-10-07**: a `#WaterIssues` post
+  turned the storyline Addressed and queued a 3-voice response 2 s later. Two things found on the way:
+  - **On `Fake` the response wording is canned**, so the gratitude mix needs the live provider to read as
+    gratitude. That is one more reason for Decision 2.
+  - **Answer only after beat 3 has escalated.** An answer before the 3-minute window opens resolves the
+    storyline at once.
+
+  The original problem: `ReactionLoopHost.cs:419` called
   `ObserveStage.Observe(..., addressing: [], ...)` on every tick, so no official post ever reached
   response matching. The silence escalation ran on whatever the PIO said. On 2026-10-07, @FulcoEM's
   "Water is contaminated, do not drink" was followed one second later by another `inaction-timer`
@@ -166,7 +173,7 @@ Built, reviewed and on `main`, but not Complete. Most need one observed round tr
 | `autonomy-safety/05` engine settings API | #353 | Suggest → Delayed-auto makes a live burst count down instead of queuing |
 | `autonomy-safety/06` engine settings panel | #354 | The console Engine flyout shows and sets the above, with correct labels |
 | `engine-runtime/05` live-provider go-live | #349 | A live AI round trip in UAT — after §8 |
-| `engine-runtime/06` official responses reach the loop | #415 | After #416 deploys and a `-AutoConfirmResponses` reset: a PIO post with `#WaterIssues` turns the storyline Addressed and queues a 3-voice response burst |
+| ~~`engine-runtime/06` official responses reach the loop~~ | ~~#415~~ | ✅ Verified 2026-10-07 and closed: `#WaterIssues` led to Addressed and a 3-voice response 2 s later |
 | `autonomy-safety/07` cut to `Fake` | #402 | The console lever cuts a *live* provider to `Fake` — after §8 |
 | `engine-telemetry-tuning/03` AI usage panel | #401 | The panel turns "0 calls, $0" into real numbers — after §8 |
 | `engine-telemetry-tuning/01` engine event types | #173 | Close-out pass: the taxonomy was ratified as built in #403/#405 |
