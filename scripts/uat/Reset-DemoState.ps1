@@ -72,9 +72,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-# The Windows az CLI prints a harmless "32-bit Python" cryptography warning on every call; keep it out of
-# the report. Scoped to this process and its children.
-$env:PYTHONWARNINGS = 'ignore'
+. "$PSScriptRoot/Common.ps1"
 $api = "https://$ApiHost"
 $results = [System.Collections.Generic.List[object]]::new()
 
@@ -140,11 +138,10 @@ function Test-Wiring {
 
 function Get-BootstrapSecret {
     if ($env:PULSE_BOOTSTRAP_SECRET) { return $env:PULSE_BOOTSTRAP_SECRET }
-    $value = az webapp config appsettings list --resource-group $ResourceGroup --name $WebAppName `
-        --subscription $Subscription --only-show-errors `
-        --query "[?name=='Authentication__Bootstrap__Secret'].value | [0]" -o tsv
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($value)) {
-        throw "Could not read Authentication__Bootstrap__Secret from $WebAppName. Run 'az login' with access to the Shared SandBox subscription, or set PULSE_BOOTSTRAP_SECRET."
+    $value = Invoke-Az webapp config appsettings list --resource-group $ResourceGroup --name $WebAppName `
+        --subscription $Subscription --query "[?name=='Authentication__Bootstrap__Secret'].value | [0]" -o tsv
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        throw "$WebAppName has no Authentication__Bootstrap__Secret setting. Set PULSE_BOOTSTRAP_SECRET instead."
     }
     return $value.Trim()
 }
@@ -164,12 +161,14 @@ elseif (-not $healthy -and -not $NoRestart) {
 if (-not $CheckOnly) {
     if (-not $NoRestart) {
         Write-Host "`n3. Restart the App Service (clears in-memory engine, pause and autonomy state)" -ForegroundColor Cyan
-        az webapp restart --resource-group $ResourceGroup --name $WebAppName --subscription $Subscription --only-show-errors
-        if ($LASTEXITCODE -ne 0) { Add-Result 'Restart' FAIL 'az webapp restart failed — check your az login and access to the Shared SandBox subscription' }
-        else {
+        try {
+            Invoke-Az webapp restart --resource-group $ResourceGroup --name $WebAppName --subscription $Subscription | Out-Null
             Add-Result 'Restart' PASS "$WebAppName restarted"
             Start-Sleep -Seconds 15
             $healthy = Test-ApiAndSchema -Attempts 18
+        }
+        catch {
+            Add-Result 'Restart' FAIL $_.Exception.Message
         }
     }
 

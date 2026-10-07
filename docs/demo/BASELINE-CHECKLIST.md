@@ -18,8 +18,12 @@
 - **Two fresh tabs:** participant and controller. Sessions live in per-tab storage, so two fresh tabs in
   one browser can hold different sessions, but a *duplicated* tab copies the session. A second monitor or a
   phone for the participant view makes the demo read better.
-- **Accounts:** the UAT participant account (runbook step 4) and the controller allowlist account
-  (`controller1`). Their secrets are yours: never paste them into an agent session.
+- **Accounts.** Never paste either secret into an agent session.
+  - **Controller `controller1`:** `pwsh scripts/uat/Copy-StaffSecret.ps1 controller1` copies its secret
+    to the clipboard without showing it.
+  - **Participant:** `participant1`'s password is stored only as a hash and can't be recovered. Create a
+    fresh login with `pwsh scripts/uat/New-DemoParticipant.ps1 -Username pio1 -DisplayName "PIO (demo)"`.
+    It prompts for a password and binds the posting persona @mvega_fh (`-PersonaHandle` to change it).
 - **URLs:** participant `https://pulse-uat.cobrasoftware.com/login` · controller
   `https://pulse-uat.cobrasoftware.com/staff/login`, then `/staff/console`.
 
