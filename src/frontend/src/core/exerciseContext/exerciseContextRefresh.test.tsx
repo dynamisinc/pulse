@@ -40,7 +40,7 @@
  * `features/app-shell/exerciseScopeRefreshComposition.test.tsx`; this file keeps
  * owning the provider's own semantics.
  */
-import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useState, type ReactNode } from 'react'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -197,7 +197,9 @@ describe('useExerciseScopeRefresh — the switch actually re-scopes the UI (COR-
     let captured: (() => Promise<ExerciseScope>) | undefined
     function Capture() {
       const refresh = useExerciseScopeRefresh()
-      useEffect(() => {
+      // A layout effect, like ScopeBadge's: a passive one can still be pending
+      // when findByTestId resolves, leaving `captured` undefined under CI load.
+      useLayoutEffect(() => {
         captured = refresh
       }, [refresh])
       return null
@@ -415,7 +417,9 @@ describe('participant paths are unaffected (COR-004, XC-002)', () => {
     let captured: (() => Promise<ExerciseScope>) | undefined
     function ParticipantWithRefresh() {
       const refresh = useExerciseScopeRefresh()
-      useEffect(() => {
+      // A layout effect: a passive one can still be pending when findByTestId
+      // resolves, and then the steering attempt below silently never runs.
+      useLayoutEffect(() => {
         captured = refresh
       }, [refresh])
       return <ParticipantSurface />
@@ -427,6 +431,9 @@ describe('participant paths are unaffected (COR-004, XC-002)', () => {
       </ExerciseContextProvider>,
     )
     await screen.findByTestId('participant-exercise')
+    // Without the refresh in hand this test would pass without ever trying to
+    // steer: both assertions below already hold after the mount-time resolve.
+    expect(captured).toBeTypeOf('function')
 
     await act(async () => {
       // No argument is even accepted by the type; a runtime attempt is ignored.

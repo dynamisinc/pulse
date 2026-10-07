@@ -36,7 +36,7 @@
  * `features/app-shell/exerciseScopeRefreshComposition.test.tsx`; this file owns
  * the ORDERING contract.
  */
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -168,11 +168,19 @@ function SurfaceSubtree({ children }: { children: ReactNode }) {
  */
 let switchToBravo: (() => Promise<StaffAssignment>) | undefined
 
-/** The switch control, driving the real `useSetActiveExercise`. */
+/**
+ * The switch control, driving the real `useSetActiveExercise`.
+ *
+ * `switchToBravo` is captured in a LAYOUT effect, which runs inside the commit
+ * that mounts this control alongside the scope label. A passive `useEffect` can
+ * still be pending when `findByTestId('scope-label')` resolves; under CI load
+ * the order test then called `switchToBravo?.()` while it was still undefined,
+ * so no switch ran and the step log stayed empty (2026-10-07).
+ */
 function SwitchControl() {
   const mutation = useSetActiveExercise()
   const { mutateAsync } = mutation
-  useEffect(() => {
+  useLayoutEffect(() => {
     switchToBravo = () => mutateAsync('ex-bravo')
   }, [mutateAsync])
   return (
