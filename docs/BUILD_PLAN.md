@@ -15,12 +15,13 @@
 
 - **Idle since 2026-08-03.** The last merge was #411 (staff navigation + Organization tier + exercise
   creation backend). No commits on any branch between then and this refresh.
-- **⛔ UAT has been broken since 2026-08-03 — fix in #413.** #411's `OrganizationTenantBoundary`
+- **✅ UAT was broken 2026-08-03 → 2026-10-06; fixed by #413.** #411's `OrganizationTenantBoundary`
   migration never applied: in the deploy's idempotent script its hand-written SQL failed to compile
-  (`Msg 207`), and `sqlcmd` ran without `-b`, so the step still reported success. The code shipped
-  against the old schema. Every exercise-scoped read, including the sign-in pages' exercise lookup,
-  returns 500, while `/health` and `/health/ready` stay green. Nothing below can be verified until #413
-  is merged and deployed.
+  (`Msg 207`), and `sqlcmd` ran without `-b`, so the step still reported success. Every exercise-scoped
+  read, including the sign-in pages' exercise lookup, returned 500 while `/health` and `/health/ready`
+  stayed green. #413 is merged and deployed: the migration is applied (verified in the database) and
+  the reset script's `-CheckOnly` reports `READY`. #413's own deploy run shows red only because its
+  new smoke test gave up during the post-deploy handover window; #414 widens it.
 - **Phase 2 (E8) is further along than Phase 1 (E1/E2/E7)** — the engine-first order the master PRD
   recommends ("pilot exercises run on Social + engine").
 - **The bottleneck is verification, not code.** 27 stories are built, reviewed and on `main` but not
@@ -75,12 +76,12 @@ Dates assume a demo on or near 2026-10-18; shift them if the date moves. 🧑 = 
 
 | When | Step | Done when |
 |---|---|---|
-| Oct 7 | **0. Unbreak UAT.** 🧑 Review and merge #413 (Tier-2: it applies the Organization tier to UAT's data). Deploy Backend runs the migration; then `pwsh scripts/uat/Reset-DemoState.ps1` must end `READY`. | The reset script ends `READY` |
+| Oct 6 ✅ | **0. Unbreak UAT.** #413 merged and deployed; the Organization tier is applied to UAT's data; `Reset-DemoState.ps1 -CheckOnly` ends `READY`. Still to do: 🧑 the full reset (restart + re-seed) before the walk. | ✅ `-CheckOnly` `READY` |
 | Oct 7–8 | **1. Baseline UAT.** Walk [`demo/BASELINE-CHECKLIST.md`](demo/BASELINE-CHECKLIST.md) once on `Fake`: reset, then the storyline beats as participant and controller. File every break as an issue. | Every checklist row marked ✅ / ⚠️ / ❌ |
-| Oct 7–8 | **2. Decide live AI.** 🧑 Recommended: yes — on `Fake` the content is canned and the engine, the differentiator, won't read as adaptive. §8 fixes the order: check the Ambient model *version* against the 2026-07-18 measured run (§6 re-run trigger; re-run the live red-team and latency pass if it changed) → confirm evidence (i) in Azure → 🧑 **sign §8** → flip the three `uat.bicepparam` params in one reviewed commit → Deploy Infrastructure → re-seed. | The usage panel shows real calls |
+| Oct 7–8 | **2. Decide live AI.** 🧑 Recommended: yes — on `Fake` the content is canned and the engine, the differentiator, won't read as adaptive. **Pre-signing checks re-run 2026-10-06, all clean:** the Ambient deployment is still `gpt-5.4-mini` **2026-03-17**, the measured build, so no §6 re-run is needed. Evidence (i) holds: the API's managed identity has `Cognitive Services OpenAI User` on `aif-pulse-uat`, `disableLocalAuth` is true, and it runs in `centralus` on `DataZoneStandard`. Remaining: 🧑 **sign §8** → flip the three `uat.bicepparam` params in one reviewed commit → Deploy Infrastructure → reset. | The usage panel shows real calls |
 | Oct 8–14 | **3. Fix what step 1 breaks.** Small PRs straight to `main` — no umbrellas this close to a demo. | The storyline runs clean |
 | Oct 8–14 | **4. Pay down verification debt.** Run the UAT round trips [below](#verification-debt); flip each story to Complete with evidence (screenshots, telemetry rows) and close its issue. | #349–#354, #401, #402 closed |
-| Oct 12–14 | **5. Harden the reset.** [`scripts/uat/Reset-DemoState.ps1`](../scripts/uat/Reset-DemoState.ps1) exists: health, schema, restart, re-seed, persona binding, wiring. Decide whether rehearsal posts need clearing between runs (UAT holds ~4,800 posts; nothing deletes them today) and add it only if the baseline says so. | Reset → `READY` in under 5 min |
+| Oct 12–14 | **5. Harden the reset.** [`scripts/uat/Reset-DemoState.ps1`](../scripts/uat/Reset-DemoState.ps1) exists: health, schema, restart, re-seed, persona binding, wiring. Add whatever the opening-feed decision (Decision 4) needs: archiving old posts and/or scripted opening posts. | Reset → `READY` in under 5 min |
 | Oct 14 | **Code freeze for the backend.** Every backend deploy restarts the App Service and drops the in-memory engine loop. Frontend-only fixes stay safe. | — |
 | Oct 15–16 | **6. Two full rehearsals** 🧑 from a clean reset, timed, on the demo machine and network. | Two clean runs |
 | Oct 17–18 | Buffer · demo | |
@@ -104,6 +105,13 @@ notifications, direct messages, the E3–E6 channels, E10 evaluation, org-level 
 1. Audience, date and storyline — confirm or change the proposal above.
 2. Live AI for the demo — sign §8 (step 2) or demo on `Fake`.
 3. Whether to show exercise creation (needs the Organization-tier Tier-2 sign-off plus a frontend story).
+4. **What the participant feed opens on.** Today it opens on the 4,815 engine posts from July's runs
+   (Jul 24–29): the same water storyline, but at peak panic, dated July, while a fresh run starts at
+   scenario minute 0. New posts do sort above them, because scenario time tracks the wall clock.
+   Recommended: before the baseline, archive the old posts by setting `DeletedAt`, which is reversible
+   (one timestamp marks the batch). The feed, Following feed and threads already skip archived posts;
+   check hashtag and profile views on the walk. Then choose the opening content: a few scripted persona
+   posts at minute 0, or let the engine fill the feed on its own.
 
 ---
 
@@ -152,10 +160,12 @@ These look like bugs otherwise.
   username must be in the configured allowlist).
 - **An org with zero exercises can't have an org admin sign in** — COR-077 /
   `identity-auth-roles/15`, not started.
-- **The Organization migration's `THROW 50011` pre-flight** fails a deploy loudly if any row can't be
-  homed to an organization. It has never run in UAT: the 2026-08-03 deploy failed to compile it (see
-  [Where we are](#where-we-are-2026-10-06)). UAT holds 1 exercise and 1 staff user to home, so it should
-  pass when #413 deploys.
+- **The Organization tier is live in UAT** (applied 2026-10-06 by #413). One "Default Organization" holds
+  the exercise and the staff user; the `THROW 50011` pre-flight passed.
+- **For ~3 minutes after a backend deploy, the old process keeps serving** on top of DLLs the deploy has
+  overwritten. It returns `BadImageFormatException` 500s with garbled method names, yet still passes
+  `/health`. Wait for the new instance; the reset script's retries cover it. The red #413 deploy run
+  was this window, fixed by #414. Run-from-package would remove it; that's a post-demo infra change.
 - **`/health` and `/health/ready` don't prove the schema.** Both stayed green for two months while every
   exercise-scoped read 500'd. `GET /api/exercise-context` (anonymous) is the quick schema check; the
   reset script and, after #413, the deploy smoke test both use it.

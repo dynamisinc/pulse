@@ -7,9 +7,11 @@
 
 ## Before you start
 
-- **Blocker until it lands: #413** (the Organization-migration fix). Until it is merged and deployed, UAT
-  answers 500 to every exercise-scoped read, including the sign-in pages' exercise lookup, and the reset
-  script stops at "Schema matches code".
+- **UAT is healthy again** (#413 merged and deployed 2026-10-06; `-CheckOnly` reports `READY`). If the
+  reset ever stops at "Schema matches code", the last backend deploy's migration failed; check that
+  run's migration step.
+- **Decide the opening feed first** ([BUILD_PLAN → Decision 4](../BUILD_PLAN.md#decisions-needed-)).
+  Without archiving, step 1.3 opens on July's 4,815 peak-phase posts.
 - **Reset first:** `pwsh scripts/uat/Reset-DemoState.ps1`. It must end `READY`. It restarts the API, so
   refresh any tab opened before it ran. If the participant's composer is missing in step 1, re-run it with
   `-ParticipantUsername <participant> -PersonaHandle mvega_fh`.
