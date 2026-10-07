@@ -11,7 +11,7 @@ This is the "timely, accurate release calms the crowd" half of the differentiato
 v1.1 rumor crowd-correction mechanic.
 
 ## Acceptance Criteria
-- [ ] *(The tunable reaction mix is delivered by `ResponseReactionBehavior`; the actual generation is reaction-loop story 03 — blocked on E2/E7.)* Given an official post matched to a storyline, when the engine reacts, then it generates a
+- [ ] *(The tunable reaction mix is delivered by `ResponseReactionBehavior`. The live loop now voices it as a 3-voice burst: built in `engine-runtime/06` (#415). Tick when UAT-verified there.)* Given an official post matched to a storyline, when the engine reacts, then it generates a
       persona-voiced burst with a **tunable mix** (default: mostly gratitude + follow-up questions +
       one skeptic), appropriate to the storyline's cast.
 - [x] Given a matched response, when it lands, then the storyline transitions toward **ADDRESSED** and
@@ -21,7 +21,7 @@ v1.1 rumor crowd-correction mechanic.
       the same matched-response behavior as an on-platform match (identical satisfier).
 - [x] Given active silence-escalation on the storyline, when a match lands, then escalation stops and
       hands off to this reaction.
-- [ ] *(Generation/guard/publish + `engine.generated`/`published`/`state_changed` telemetry are reaction-loop story 03 + #173 — blocked/deferred; the storyline bend toward ADDRESSED is delivered above.)* **LLM governance (NFR-005/ADP-024) + content guard (ADP-023):** generation via the tenant-bounded
+- [ ] *(The response burst runs the live loop's generate stage (guard, review, publish funnel) and emits the `engine.*` events plus `storyline.state_changed` (cause `matched-response`): built in `engine-runtime/06` (#415). Tick when UAT-verified there.)* **LLM governance (NFR-005/ADP-024) + content guard (ADP-023):** generation via the tenant-bounded
       provider with isolation; never breaks fiction. **Telemetry (XC-004):** the reaction emits
       `engine.generated`/`engine.published` and a `storyline.state_changed` (→ADDRESSED). Staff-only
       origin (SOC-003).
