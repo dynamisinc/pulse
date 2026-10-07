@@ -22,7 +22,7 @@ Adversarial review D4/A6 (the anti-berate-the-PIO requirement). `docs/features/w
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Matched-response reaction | ADP-002 | Done (decide policy + bend); live reaction built in `engine-runtime/06` (#415), UAT pending | #163 |
+| 01 | Matched-response reaction | ADP-002 | Done (decide policy + bend); live reaction built in `engine-runtime/06` (#415), mechanics UAT-verified; the mix's wording needs the live provider | #163 |
 | 02 | Miss-safe unmatched default (safety-critical) | ADP-002a | Complete | #164 |
 | 03 | Match suggestion + trust curve | ADP-002a (open Q2) | Complete | #165 |
 

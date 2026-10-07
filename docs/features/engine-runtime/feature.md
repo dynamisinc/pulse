@@ -63,7 +63,7 @@ supersedes D5-005) is inherited by story 02 through the built `autonomy-safety` 
 | 03 | Scenario-clock service — native COR-050 clock driving the loop's timers `[backend]` | COR-050/051/052 (COR-053, COR-001) | Complete | #287 |
 | 04 | Provider live-config — governed Azure OpenAI + measured eval `[backend] [TIER-2]` | NFR-005, ADP-025, NFR-003, ADP-024 | Complete | #288 |
 | 05 | Live provider UAT go-live — Azure OpenAI, Ambient tier, suggest-only `[backend/infra] [TIER-2]` | NFR-005, ADP-025 (NFR-003, ADP-024) | Not Started | #349 |
-| 06 | Official responses reach the live loop — a PIO's post can address a storyline `[backend]` | ADP-002, ADP-002a (COR-001, XC-004, CTL-034) | In Review | #415 |
+| 06 | Official responses reach the live loop — a PIO's post can address a storyline `[backend]` | ADP-002, ADP-002a (COR-001, XC-004, CTL-034) | Complete | #415 |
 
 Story 06 was found by the October 2026 demo baseline. The `response-reaction` slice was Complete as a
 library, but the loop handed it `addressing: []` on every tick, so no participant post could ever answer a

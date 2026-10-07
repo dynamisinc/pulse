@@ -11,7 +11,7 @@ This is the "timely, accurate release calms the crowd" half of the differentiato
 v1.1 rumor crowd-correction mechanic.
 
 ## Acceptance Criteria
-- [ ] *(The tunable reaction mix is delivered by `ResponseReactionBehavior`. The live loop now voices it as a 3-voice burst: built in `engine-runtime/06` (#415). Tick when UAT-verified there.)* Given an official post matched to a storyline, when the engine reacts, then it generates a
+- [ ] *(The tunable reaction mix is delivered by `ResponseReactionBehavior`. The live loop now voices it as a 3-voice burst: built in `engine-runtime/06` (#415). Its mechanics were UAT-verified on 2026-10-07: the decided burst carries the gratitude mix. On the `Fake` provider the WORDS are canned, so tick this on the first live-provider run.)* Given an official post matched to a storyline, when the engine reacts, then it generates a
       persona-voiced burst with a **tunable mix** (default: mostly gratitude + follow-up questions +
       one skeptic), appropriate to the storyline's cast.
 - [x] Given a matched response, when it lands, then the storyline transitions toward **ADDRESSED** and
@@ -21,7 +21,7 @@ v1.1 rumor crowd-correction mechanic.
       the same matched-response behavior as an on-platform match (identical satisfier).
 - [x] Given active silence-escalation on the storyline, when a match lands, then escalation stops and
       hands off to this reaction.
-- [ ] *(The response burst runs the live loop's generate stage (guard, review, publish funnel) and emits the `engine.*` events plus `storyline.state_changed` (cause `matched-response`): built in `engine-runtime/06` (#415). Tick when UAT-verified there.)* **LLM governance (NFR-005/ADP-024) + content guard (ADP-023):** generation via the tenant-bounded
+- [ ] *(The response burst runs the live loop's generate stage (guard, review, publish funnel) and emits the `engine.*` events plus `storyline.state_changed` (cause `matched-response`): built in `engine-runtime/06` (#415). `engine.generated` and `storyline.state_changed` were seen in UAT on 2026-10-07. `engine.published` follows a controller approve. The governed-provider half is #349 (§8). Tick once a live-provider response is approved and published.)* **LLM governance (NFR-005/ADP-024) + content guard (ADP-023):** generation via the tenant-bounded
       provider with isolation; never breaks fiction. **Telemetry (XC-004):** the reaction emits
       `engine.generated`/`engine.published` and a `storyline.state_changed` (→ADDRESSED). Staff-only
       origin (SOC-003).

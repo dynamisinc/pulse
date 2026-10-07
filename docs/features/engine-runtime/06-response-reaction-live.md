@@ -1,6 +1,6 @@
 # Story: Official responses reach the live loop — a PIO's post can address a storyline  `[backend]`
 
-**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** In Review (built; Gate-2 clean on re-review; awaiting merge + UAT)
+**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Complete (merged #416, UAT-verified 2026-10-07)
 **Requirements:** ADP-002, ADP-002a (COR-001, XC-004, CTL-034, ADP-011, E8 arch §7 / §8.2)  ·  **Design decisions:** none new  ·  **Issue:** #415
 
 > **Delivers the deferred half of `response-reaction/01` (#163).** That story's two unchecked ACs (the
@@ -84,11 +84,15 @@ beat is the PIO answering and the world calming down.
 - [x] **Composition-root guard.** A real-`Program` test asserts the engine's observer is registered exactly
   once and that one inbox singleton is shared by the observer, the seed and the driver. Neutering either the
   drain or the observer registration fails 7 tests (verified).
-- [ ] **UAT verification.** Given this build is deployed, the engine is re-seeded with
+- [x] **UAT verification.** Given this build is deployed, the engine is re-seeded with
   `autoConfirmResponses: true` and no dial target is set (a re-seed clears it), when the PIO (bound to
   @FulcoEM) posts a statement carrying `#WaterIssues` or the expectation's wording, then within a tick or two
   the console shows the storyline **Addressed** and a 3-voice response burst waits in the review queue.
-  *(Ticked only when seen in UAT.)*
+  *Seen in UAT on 2026-10-07 (#415 comment). pio1's "#WaterIssues resolved" at 19:40:34Z was answered on the
+  next tick, 2 s later: `action-seen`, then **Seeded → Addressed** (`matched-response`), then a decided burst
+  of 3 (`mvega_fh`, `tbrandt41`, `kwardFH`; gratitude mix), then review item `43ffd637…`, queued at Suggest
+  with 3 posts. On the `Fake` provider the burst's wording is canned (it ignores the tone mix), so gratitude
+  only reads as gratitude with the live provider.*
 
 ## Decision needed (before a multi-participant run)
 **What counts as "official content".** The observer's only filter is `origin: participant`, so every
