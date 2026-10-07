@@ -162,6 +162,12 @@ jobs:
       # fails on essentially every merge (each lands after an idle gap). So: a soft first apply to WAKE the
       # DB, poll until it reports Online, then an authoritative second apply against the resumed DB. The
       # migration script is idempotent, so re-applying after a partial/failed first attempt is safe.
+      #
+      # `-b` (exit on error) is LOAD-BEARING on both attempts. Without it sqlcmd prints a SQL error and exits 0,
+      # so the step passes. On 2026-08-03 the OrganizationTenantBoundary batch failed to compile (Msg 207)
+      # inside this step, which still reported "Successfully executed SQL file", and the app then shipped
+      # against the old schema. With -b a failed batch fails the step, attempt 2 retries it, and a second
+      # failure stops the job before "Deploy to App Service".
       - name: Apply EF migration — attempt 1 (wakes a paused serverless DB; may fail on cold start)
         id: migrate1
         continue-on-error: true
@@ -169,6 +175,7 @@ jobs:
         with:
           connection-string: ${{ secrets.AZURE_SQL_CONNECTION_STRING }}
           path: ./migrations/pulse.sql
+          arguments: '-b'
 
       - name: Wait for serverless SQL to resume
         if: steps.migrate1.outcome == 'failure'
@@ -189,6 +196,7 @@ jobs:
         with:
           connection-string: ${{ secrets.AZURE_SQL_CONNECTION_STRING }}
           path: ./migrations/pulse.sql
+          arguments: '-b'
 
       - name: Remove transient SQL firewall rule
         if: always() && steps.fw.outputs.rule_name != ''
@@ -226,6 +234,22 @@ jobs:
           CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://${WEBAPP_NAME}.azurewebsites.net/health/ready" || echo 000)
           echo "/health/ready -> $CODE"
           [ "$CODE" = "200" ] || echo "::warning::/health/ready returned $CODE — check ConnectionStrings__DefaultConnection and SQL reachability."
+
+      - name: Smoke test — an exercise-scoped read works (the schema matches the code)
+        run: |
+          # /health proves the process is up and /health/ready that the DB is REACHABLE; neither touches the
+          # schema. After the 2026-08-03 migration silently failed, both stayed green while every
+          # exercise-scoped query 500'd ("Invalid column name 'OrganizationId'"). /api/exercise-context is
+          # anonymous and reads [Exercises] through the full model, so a code/schema mismatch shows up here as
+          # a 5xx. 200 = an exercise is bound to this host; 404 = none is (a legitimately empty environment).
+          for i in $(seq 1 6); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://${WEBAPP_NAME}.azurewebsites.net/api/exercise-context" || echo 000)
+            echo "attempt $i: /api/exercise-context -> $CODE"
+            { [ "$CODE" = "200" ] || [ "$CODE" = "404" ]; } && exit 0
+            sleep 10
+          done
+          echo "::error::/api/exercise-context returned $CODE — the deployed code and the database schema likely disagree; check the migration step's output for 'Msg' lines."
+          exit 1
 
       - name: Summary
         if: always()
