@@ -72,6 +72,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# The Windows az CLI prints a harmless "32-bit Python" cryptography warning on every call; keep it out of
+# the report. Scoped to this process and its children.
+$env:PYTHONWARNINGS = 'ignore'
 $api = "https://$ApiHost"
 $results = [System.Collections.Generic.List[object]]::new()
 
@@ -178,7 +181,20 @@ if (-not $CheckOnly) {
 
         $seedBody = @{ hostname = $ApiHost }
         if ($PSBoundParameters.ContainsKey('ResponseWindowMinutes')) { $seedBody.responseWindowMinutes = $ResponseWindowMinutes }
-        $seed = Invoke-Probe '/api/ops/seed-engine-content' -Method POST -Headers $headers -Body ($seedBody | ConvertTo-Json -Compress)
+
+        # The seed is idempotent (loop registration replaced, personas reused), so a transient server or
+        # connection failure is safe to retry. On 2026-10-07 a single Azure SQL login reset mid-seed
+        # returned 500, and the next call would have succeeded.
+        $seed = $null
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $seed = Invoke-Probe '/api/ops/seed-engine-content' -Method POST -Headers $headers -Body ($seedBody | ConvertTo-Json -Compress)
+            $code = if ($seed) { [int] $seed.StatusCode } else { 0 }
+            if ($code -ne 0 -and $code -lt 500) { break }
+            if ($attempt -lt 3) {
+                Write-Host "    seed -> $code (attempt $attempt/3), retrying in 10s…" -ForegroundColor DarkGray
+                Start-Sleep -Seconds 10
+            }
+        }
         switch ([int] $seed.StatusCode) {
             200 {
                 $s = $seed.Content | ConvertFrom-Json
