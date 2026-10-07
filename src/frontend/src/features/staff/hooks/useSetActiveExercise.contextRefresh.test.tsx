@@ -36,7 +36,7 @@
  * `features/app-shell/exerciseScopeRefreshComposition.test.tsx`; this file owns
  * the ORDERING contract.
  */
-import { useEffect, useLayoutEffect, type ReactNode } from 'react'
+import { useLayoutEffect, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -132,7 +132,9 @@ function ScopedConsole() {
   const data = scopedQuery.data ?? '(no data)'
   frames.push({ label: scope.exerciseName, data })
 
-  useEffect(() => {
+  // A layout effect, so the mount count is settled before any assertion can see
+  // the DOM (a passive effect can still be pending under CI load).
+  useLayoutEffect(() => {
     badgeMounts += 1
   }, [])
 
