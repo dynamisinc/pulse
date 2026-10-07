@@ -10,9 +10,12 @@
       2. Checks the deployed code and the database schema agree: /api/exercise-context must return 200
          for the UAT host. A 5xx there is what the 2026-08-03 silent migration failure looked like, while
          both health checks stayed green.
-      3. Restarts the App Service (skip with -NoRestart). Engine state — loop registration, storylines,
-         autonomy overrides, the kill switch, the pause tier and the scenario clock — lives in process
-         memory, so a restart is the only way to clear what the last rehearsal left behind.
+      3. Only with -Restart: restarts the App Service, then STOPS. Engine state (loop registration,
+         storylines, autonomy overrides, the kill switch, the pause tier, the scenario clock) lives in
+         process memory, so a restart clears whatever the last rehearsal left behind. But the old process
+         keeps serving for several minutes, and the new one starts empty. On 2026-10-07 a seed sent
+         straight after a restart landed on the old process and vanished at the handover ~6 minutes later.
+         So after -Restart, wait ~8 minutes and run the script again without it.
       4. Re-seeds the engine (POST /api/ops/seed-engine-content): registers the reaction loop and rebuilds
          the starter storyline at scenario minute 0. Persona rows are reused, never duplicated.
       5. Optionally binds a participant account to a posting persona (-ParticipantUsername with
@@ -29,9 +32,12 @@
 .PARAMETER CheckOnly
     Read-only: run checks 1, 2 and 6, change nothing, need no secret and no az login.
 
+.PARAMETER Restart
+    Restart the App Service and stop (step 3); run again without it ~8 minutes later. Use it to clear pause,
+    autonomy and kill-switch state that a rehearsal left behind.
+
 .PARAMETER NoRestart
-    Skip the App Service restart (step 3). The engine is still re-seeded, but pause, autonomy and
-    kill-switch state from the last session survive.
+    Accepted for old command lines and ignored: restarting is now opt-in (-Restart).
 
 .PARAMETER ResponseWindowMinutes
     Scenario minutes of participant silence before the storyline escalates. Omit for the server's
@@ -42,8 +48,11 @@
     different persona replaces the old binding and the response says which).
 
 .PARAMETER PersonaHandle
-    The persona to bind, e.g. mvega_fh, tbrandt41 or kwardFH (individuals). Org accounts such as
-    FairhavenWater are for controllers, not participants.
+    The persona to bind. For the PIO demo use FulcoEM: the starter storyline's silence test waits for
+    "an official statement from Fulton County Emergency Management". Avoid the citizen personas
+    (mvega_fh, tbrandt41, kwardFH, dreyes_fh): the engine writes as them, so the participant would see the
+    engine posting under their own name. The participant must sign out and back in afterwards, because a
+    session keeps the persona it signed in with.
 
 .EXAMPLE
     pwsh scripts/uat/Reset-DemoState.ps1 -CheckOnly
@@ -52,11 +61,15 @@
     pwsh scripts/uat/Reset-DemoState.ps1
 
 .EXAMPLE
-    pwsh scripts/uat/Reset-DemoState.ps1 -ParticipantUsername participant1 -PersonaHandle mvega_fh
+    pwsh scripts/uat/Reset-DemoState.ps1 -ParticipantUsername pio1 -PersonaHandle FulcoEM
+
+.EXAMPLE
+    pwsh scripts/uat/Reset-DemoState.ps1 -Restart     # then, ~8 minutes later: pwsh scripts/uat/Reset-DemoState.ps1
 #>
 [CmdletBinding()]
 param(
     [switch] $CheckOnly,
+    [switch] $Restart,
     [switch] $NoRestart,
     [ValidateRange(1, 180)] [int] $ResponseWindowMinutes,
     [string] $ParticipantUsername,
@@ -154,24 +167,24 @@ if ($CheckOnly) {
     Write-Host "`n6. Wiring" -ForegroundColor Cyan
     Test-Wiring
 }
-elseif (-not $healthy -and -not $NoRestart) {
-    Write-Host "`nThe API or schema check failed. A restart won't fix a schema mismatch; continuing to restart anyway, since a wedged process looks the same." -ForegroundColor Yellow
+elseif ($Restart) {
+    Write-Host "`n3. Restart the App Service (clears in-memory engine, pause and autonomy state)" -ForegroundColor Cyan
+    try {
+        Invoke-Az webapp restart --resource-group $ResourceGroup --name $WebAppName --subscription $Subscription | Out-Null
+        Write-Host "  [PASS] Restart — $WebAppName restart requested" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "  [FAIL] Restart — $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host ''
+    Write-Host 'RESTARTED — not seeded yet, on purpose.' -ForegroundColor Yellow
+    Write-Host '  The old process keeps serving for several minutes and the new one starts with an empty engine, so a'
+    Write-Host '  seed sent now would be lost at the handover. Wait ~8 minutes, then run this script again without -Restart.'
+    exit 3
 }
 
 if (-not $CheckOnly) {
-    if (-not $NoRestart) {
-        Write-Host "`n3. Restart the App Service (clears in-memory engine, pause and autonomy state)" -ForegroundColor Cyan
-        try {
-            Invoke-Az webapp restart --resource-group $ResourceGroup --name $WebAppName --subscription $Subscription | Out-Null
-            Add-Result 'Restart' PASS "$WebAppName restarted"
-            Start-Sleep -Seconds 15
-            $healthy = Test-ApiAndSchema -Attempts 18
-        }
-        catch {
-            Add-Result 'Restart' FAIL $_.Exception.Message
-        }
-    }
-
     Write-Host "`n4. Re-seed the engine" -ForegroundColor Cyan
     $secret = $null
     try {
@@ -210,7 +223,7 @@ if (-not $CheckOnly) {
             Write-Host "`n5. Bind the participant to a posting persona" -ForegroundColor Cyan
             $bindBody = @{ hostname = $ApiHost; username = $ParticipantUsername; personaHandle = $PersonaHandle } | ConvertTo-Json -Compress
             $bind = Invoke-Probe '/api/ops/bind-participant-persona' -Method POST -Headers $headers -Body $bindBody
-            if ([int] $bind.StatusCode -eq 200) { Add-Result 'Participant bound' PASS "$ParticipantUsername -> @$PersonaHandle" }
+            if ([int] $bind.StatusCode -eq 200) { Add-Result 'Participant bound' PASS "$ParticipantUsername -> @$PersonaHandle (sign that participant out and back in)" }
             else { Add-Result 'Participant bound' FAIL "$($bind.StatusCode) — unknown username or persona, or the secret was rejected (all answer 404)" }
         }
         elseif ($ParticipantUsername -or $PersonaHandle) {
@@ -237,7 +250,7 @@ if ($failed -eq 0) {
     if (-not $CheckOnly) {
         Write-Host "  Participant: $SiteUrl/login     Controller: $SiteUrl/staff/login  (then /staff/console)"
         Write-Host '  Use two FRESH tabs, not a duplicated one: each tab keeps its own session.'
-        Write-Host '  Tabs opened before the restart must be refreshed.'
+        Write-Host '  Refresh any console tab that was already open so it picks up the new storyline.'
     }
     exit 0
 }

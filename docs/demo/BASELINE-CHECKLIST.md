@@ -12,18 +12,22 @@
   run's migration step.
 - **Decide the opening feed first** ([BUILD_PLAN → Decision 4](../BUILD_PLAN.md#decisions-needed-)).
   Without archiving, step 1.3 opens on July's 4,815 peak-phase posts.
-- **Reset first:** `pwsh scripts/uat/Reset-DemoState.ps1`. It must end `READY`. It restarts the API, so
-  refresh any tab opened before it ran. If the participant's composer is missing in step 1, re-run it with
-  `-ParticipantUsername <participant> -PersonaHandle mvega_fh`.
+- **Reset first:** `pwsh scripts/uat/Reset-DemoState.ps1`. It must end `READY`; then refresh any console
+  tab that was already open. It no longer restarts the API by default. After a restart the old process
+  keeps serving for minutes, and the seed is lost at the handover. If you need a clean slate, run it with
+  `-Restart`, wait ~8 minutes, then run it again without it.
 - **Two fresh tabs:** participant and controller. Sessions live in per-tab storage, so two fresh tabs in
   one browser can hold different sessions, but a *duplicated* tab copies the session. A second monitor or a
   phone for the participant view makes the demo read better.
 - **Accounts.** Never paste either secret into an agent session.
   - **Controller `controller1`:** `pwsh scripts/uat/Copy-StaffSecret.ps1 controller1` copies its secret
     to the clipboard without showing it.
-  - **Participant:** `participant1`'s password is stored only as a hash and can't be recovered. Create a
-    fresh login with `pwsh scripts/uat/New-DemoParticipant.ps1 -Username pio1 -DisplayName "PIO (demo)"`.
-    It prompts for a password and binds the posting persona @mvega_fh (`-PersonaHandle` to change it).
+  - **Participant (the PIO):** `participant1`'s password is stored only as a hash and can't be recovered.
+    Create a fresh login with `pwsh scripts/uat/New-DemoParticipant.ps1 -Username pio1 -DisplayName "PIO (demo)"`.
+    It prompts for a password and binds **@FulcoEM**, the official account the storyline's silence test
+    waits for. Don't bind a citizen persona (mvega_fh and friends), because the engine writes as them too.
+    To rebind an existing login, run `Reset-DemoState.ps1 -ParticipantUsername pio1 -PersonaHandle FulcoEM`,
+    then sign that participant out and back in.
 - **URLs:** participant `https://pulse-uat.cobrasoftware.com/login` · controller
   `https://pulse-uat.cobrasoftware.com/staff/login`, then `/staff/console`.
 

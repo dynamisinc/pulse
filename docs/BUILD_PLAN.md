@@ -111,7 +111,24 @@ notifications, direct messages, the E3–E6 channels, E10 evaluation, org-level 
    Recommended: before the baseline, archive the old posts by setting `DeletedAt`, which is reversible
    (one timestamp marks the batch). The feed, Following feed and threads already skip archived posts;
    check hashtag and profile views on the walk. Then choose the opening content: a few scripted persona
-   posts at minute 0, or let the engine fill the feed on its own.
+   posts at minute 0, or let the engine fill the feed on its own. **The review queue has the same
+   problem:** it opens with 51 pending July drafts (all as @mvega_fh, in `EngineReviewItems`).
+   "Batch approve" would publish them, so they need clearing too.
+
+### Baseline findings so far (2026-10-06)
+
+- ✅ **UAT outage** — fixed by #413.
+- ✅ **A seed straight after a restart is silently lost.** The old instance served for ~6 minutes, took
+  the seed, then handed over to a new, empty one ("No live storyline" in the console). The reset script
+  no longer restarts by default; `-Restart` now stops and tells you to re-run ~8 minutes later.
+- ⚠️ **The engine writes as any castable persona, including one bound to a participant.** All the citizen
+  personas are castable, so a participant on @mvega_fh would see the engine posting under their own
+  name. Workaround: bind the PIO to **@FulcoEM**, the account the storyline's silence test expects.
+  The engine is citizens-first and has never published as FulcoEM, and the controller can veto any draft
+  that does. Real fix, a small backend story: drop participant-bound personas from the engine cast at
+  seed time.
+- ⚠️ **On a wide screen the participant feed is a narrow, left-aligned column** with a blank right side.
+  Mobile-first is right, but on a laptop or projector it reads unfinished. Polish candidate.
 
 ---
 
@@ -162,10 +179,13 @@ These look like bugs otherwise.
   `identity-auth-roles/15`, not started.
 - **The Organization tier is live in UAT** (applied 2026-10-06 by #413). One "Default Organization" holds
   the exercise and the staff user; the `THROW 50011` pre-flight passed.
-- **For ~3 minutes after a backend deploy, the old process keeps serving** on top of DLLs the deploy has
-  overwritten. It returns `BadImageFormatException` 500s with garbled method names, yet still passes
-  `/health`. Wait for the new instance; the reset script's retries cover it. The red #413 deploy run
-  was this window, fixed by #414. Run-from-package would remove it; that's a post-demo infra change.
+- **For several minutes after a backend deploy or a restart, the old process keeps serving.**
+  - After a deploy it runs on top of DLLs the deploy has overwritten. It returns `BadImageFormatException`
+    500s with garbled method names, yet still passes `/health`. The red #413 deploy run was this window,
+    fixed by #414.
+  - After a restart, the handover took ~6 minutes on 2026-10-07, and anything seeded on the old process was
+    lost. Seed only once the new instance is serving (see the reset script's `-Restart`).
+  - Run-from-package would remove the deploy case; that's a post-demo infra change.
 - **`/health` and `/health/ready` don't prove the schema.** Both stayed green for two months while every
   exercise-scoped read 500'd. `GET /api/exercise-context` (anonymous) is the quick schema check; the
   reset script and, after #413, the deploy smoke test both use it.

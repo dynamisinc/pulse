@@ -20,8 +20,12 @@
     The name staff see for this account.
 
 .PARAMETER PersonaHandle
-    The persona the participant posts as. Individuals: mvega_fh, tbrandt41, kwardFH. Organization accounts
-    (FairhavenWater, FulcoEM, Newsline7) are also personas the controller and engine post as.
+    The persona the participant posts as. The default is FulcoEM (Fulton County EM): the starter storyline's
+    silence test waits for "an official statement from Fulton County Emergency Management", so a PIO
+    participant posting as @FulcoEM is what can satisfy it. Avoid the citizen personas (mvega_fh,
+    tbrandt41, kwardFH, dreyes_fh): the engine writes as them, so the participant would see the engine
+    posting under their own name. To change an existing login's persona, use
+    Reset-DemoState.ps1 -ParticipantUsername <name> -PersonaHandle <handle>.
 
 .EXAMPLE
     pwsh scripts/uat/New-DemoParticipant.ps1 -Username pio1 -DisplayName 'PIO (demo)'
@@ -30,7 +34,7 @@
 param(
     [Parameter(Mandatory)] [string] $Username,
     [string] $DisplayName = 'Demo Participant',
-    [string] $PersonaHandle = 'mvega_fh',
+    [string] $PersonaHandle = 'FulcoEM',
     [string] $ApiHost = 'app-pulse-api-uat-dynamis.azurewebsites.net',
     [string] $SiteUrl = 'https://pulse-uat.cobrasoftware.com',
     [string] $Subscription = '2a127d53-c9bf-471a-8196-3155eae6cb1b',
