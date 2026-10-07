@@ -15,7 +15,8 @@
   as a demo opening.
 - **Clear, then reset.** Run `pwsh scripts/uat/Clear-DemoContent.ps1` first. It archives older posts and
   vetoes stale engine drafts, and is reversible: it prints an undo command. Then run
-  `pwsh scripts/uat/Reset-DemoState.ps1`, which must end `READY`. Then refresh any console tab that was
+  `pwsh scripts/uat/Reset-DemoState.ps1 -AutoConfirmResponses`, which must end `READY` (beat 4 needs the
+  switch, and #416 deployed). Then refresh any console tab that was
   already open. It no longer restarts the API by default. After a restart the old process
   keeps serving for minutes, and the seed is lost at the handover. If you need a clean slate, run it with
   `-Restart`, wait ~8 minutes, then run it again without it.
@@ -51,7 +52,7 @@ screenshot, in the results table at the end. Times are scenario time unless a st
 |---|---|---|
 | 1.1 | Open the participant URL | The sign-in page renders in the exercise's brand, not the COBRA staff look |
 | 1.2 | Sign in as the participant | Lands on the social feed |
-| 1.3 | Look at the feed before touching anything | Posts with author names and handles; verified marks on agency accounts; timestamps in **scenario time**, never wall-clock. **Record what the opening state looks like**: UAT holds ~4,800 posts from July, and old posts may sort or date oddly against a storyline re-seeded at minute 0 |
+| 1.3 | Look at the feed before touching anything | Posts with author names and handles; verified marks on agency accounts; timestamps in **scenario time**, never wall-clock. **Record what the opening state looks like**: after the clear the feed starts empty until the engine or the controller posts (Decision 4). Note anything left over from before the clear that sorts or dates oddly against a storyline re-seeded at minute 0 |
 | 1.4 | Open a thread; like a post; click a hashtag; open a profile | Each opens in-channel and back navigation works |
 | 1.5 | Find the composer | Present (participant bound to a persona). Absent means no binding: see "Before you start" |
 
@@ -75,8 +76,10 @@ screenshot, in the results table at the end. Times are scenario time unless a st
 
 | # | Do | Expect |
 |---|---|---|
-| 4.1 | As the participant, post an official statement | It appears in the feed |
-| 4.2 | Watch the review queue for a few minutes | New drafts react to the statement, not just to the original incident |
+| 4.0 | Check step 0's output | `Official posts … auto-confirm ON`. Anything else: re-run the reset with `-AutoConfirmResponses`, which needs #416 deployed. Without it a statement only slows the escalation, because the console has no confirm button yet (#415) |
+| 4.1 | As the participant (on @FulcoEM), post an official statement that **carries `#WaterIssues`** | It appears in the feed. Matching is keyword-based: without the hashtag, the post must use the storyline's wording (Fulton County Emergency Management, water, safety, official statement) |
+| 4.2 | Watch the console for a tick or two | The storyline turns **Addressed**, and the silence drafts stop |
+| 4.3 | Watch the review queue | One new burst of up to 3 voices reacts to the statement: mostly gratitude and follow-up questions, one skeptic |
 
 ## 5. Steering (beat 5) — closes #352, #353, #354
 
@@ -132,8 +135,10 @@ Copy this table into a dated comment (or a `docs/demo/results-YYYY-MM-DD.md`) fo
 | 3.1 | | |
 | 3.2 | | |
 | 3.3 | | |
+| 4.0 | | |
 | 4.1 | | |
 | 4.2 | | |
+| 4.3 | | |
 | 5.1 | | |
 | 5.2 | | |
 | 5.3 | | |

@@ -130,18 +130,25 @@ notifications, direct messages, the E3–E6 channels, E10 evaluation, org-level 
   The engine is citizens-first and has never published as FulcoEM, and the controller can veto any draft
   that does. Real fix, a small backend story: drop participant-bound personas from the engine cast at
   seed time.
-- ❌ **Beat 4 can't work: the live engine never sees participant posts.** `ReactionLoopHost.cs:419` calls
-  `ObserveStage.Observe(..., addressing: [], ...)` on every tick, so no official post ever reaches
-  response matching. The silence escalation runs on whatever the PIO says. On 2026-10-07, @FulcoEM's
+- 🔧 **Beat 4 couldn't work: the live engine never saw participant posts. Fixed in #416** (story
+  `engine-runtime/06`, #415); it needs merge, deploy and a UAT check. `ReactionLoopHost.cs:419` called
+  `ObserveStage.Observe(..., addressing: [], ...)` on every tick, so no official post ever reached
+  response matching. The silence escalation ran on whatever the PIO said. On 2026-10-07, @FulcoEM's
   "Water is contaminated, do not drink" was followed one second later by another `inaction-timer`
-  burst. `response-reaction/01–03` (#163–#165) are marked Complete, but they exist only as unit-tested
+  burst. `response-reaction/01–03` (#163–#165) were marked Complete, but they existed only as unit-tested
   `Pulse.Core` logic (`ResponseMatcher`, `MissSafeResolver`, `ResponseReactionBehavior`): an unwired seam.
-  - **What wiring needs:** feed participant posts into the tick as addressing candidates, then
-    `MissSafeResolver.Resolve`. With no controller-confirm UI built, it needs auto-confirm on for the demo.
-    Then `Apply`: reset the silence clock, bend intensity down, and generate reactions to the statement.
+  - **What #416 does:** participant posts reach the loop through the ingest funnel. A match resets the
+    silence clock, bends intensity down, turns the storyline **Addressed** and queues a 3-voice response
+    burst (mostly gratitude and follow-up questions, one skeptic) instead of a silence burst. An
+    unconfirmed or unmatched post slows the escalation but never pauses it.
+  - **The demo needs `Reset-DemoState.ps1 -AutoConfirmResponses`.** There is no controller-confirm button
+    yet, so without the opt-in a matching post only slows the escalation. The script reports what the
+    server applied.
   - **Matching is keyword-based.** `#WaterIssues` in the post scores 0.9; otherwise it's word overlap with
     "official statement from Fulton County Emergency Management addressing the water safety concern",
-    against a 0.3 threshold. The post above scored ~0.08.
+    against a 0.3 threshold. The post above scored ~0.08, so even after #416 it would only slow the
+    escalation. **Script the PIO's beat-4 post to carry `#WaterIssues`.**
+  - **Merging #416 is a backend deploy:** do it before the Oct 14 freeze, then re-seed ~8 minutes later.
 - ⚠️ **On a wide screen the participant feed is a narrow, left-aligned column** with a blank right side.
   Mobile-first is right, but on a laptop or projector it reads unfinished. Polish candidate.
 
@@ -159,6 +166,7 @@ Built, reviewed and on `main`, but not Complete. Most need one observed round tr
 | `autonomy-safety/05` engine settings API | #353 | Suggest → Delayed-auto makes a live burst count down instead of queuing |
 | `autonomy-safety/06` engine settings panel | #354 | The console Engine flyout shows and sets the above, with correct labels |
 | `engine-runtime/05` live-provider go-live | #349 | A live AI round trip in UAT — after §8 |
+| `engine-runtime/06` official responses reach the loop | #415 | After #416 deploys and a `-AutoConfirmResponses` reset: a PIO post with `#WaterIssues` turns the storyline Addressed and queues a 3-voice response burst |
 | `autonomy-safety/07` cut to `Fake` | #402 | The console lever cuts a *live* provider to `Fake` — after §8 |
 | `engine-telemetry-tuning/03` AI usage panel | #401 | The panel turns "0 calls, $0" into real numbers — after §8 |
 | `engine-telemetry-tuning/01` engine event types | #173 | Close-out pass: the taxonomy was ratified as built in #403/#405 |

@@ -17,7 +17,8 @@
          straight after a restart landed on the old process and vanished at the handover ~6 minutes later.
          So after -Restart, wait ~8 minutes and run the script again without it.
       4. Re-seeds the engine (POST /api/ops/seed-engine-content): registers the reaction loop and rebuilds
-         the starter storyline at scenario minute 0. Persona rows are reused, never duplicated.
+         the starter storyline at scenario minute 0. Persona rows are reused, never duplicated. With
+         -AutoConfirmResponses, a PIO post that plausibly answers the storyline addresses it straight away.
       5. Optionally binds a participant account to a posting persona (-ParticipantUsername with
          -PersonaHandle), so the participant's composer is present.
       6. Confirms the session-gated routes the demo uses answer 401 (wired), never 404 (dead).
@@ -43,6 +44,14 @@
     Scenario minutes of participant silence before the storyline escalates. Omit for the server's
     demo-tuned default (3). The server clamps it to 1–180.
 
+.PARAMETER AutoConfirmResponses
+    Let a participant post that plausibly answers the storyline address it without a controller confirming
+    the match (the response-matching opt-in; the engine never turns it on itself). Demo beat 4 needs it: the
+    console has no confirm button yet, so without it a PIO's statement only SLOWS the escalation. Matching
+    is keyword-based: the post should carry #WaterIssues or the expectation's wording (water, safety, an
+    official statement). Needs the engine-runtime/06 build (#415); an older server ignores the field, and
+    the script then reports WARN.
+
 .PARAMETER ParticipantUsername
     With -PersonaHandle: bind this participant account to that persona (idempotent; re-binding a
     different persona replaces the old binding and the response says which).
@@ -61,6 +70,9 @@
     pwsh scripts/uat/Reset-DemoState.ps1
 
 .EXAMPLE
+    pwsh scripts/uat/Reset-DemoState.ps1 -AutoConfirmResponses     # the demo setting, once #415 is deployed
+
+.EXAMPLE
     pwsh scripts/uat/Reset-DemoState.ps1 -ParticipantUsername pio1 -PersonaHandle FulcoEM
 
 .EXAMPLE
@@ -72,6 +84,7 @@ param(
     [switch] $Restart,
     [switch] $NoRestart,
     [ValidateRange(1, 180)] [int] $ResponseWindowMinutes,
+    [switch] $AutoConfirmResponses,
     [string] $ParticipantUsername,
     [string] $PersonaHandle,
 
@@ -193,6 +206,7 @@ if (-not $CheckOnly) {
 
         $seedBody = @{ hostname = $ApiHost }
         if ($PSBoundParameters.ContainsKey('ResponseWindowMinutes')) { $seedBody.responseWindowMinutes = $ResponseWindowMinutes }
+        if ($AutoConfirmResponses) { $seedBody.autoConfirmResponses = $true }
 
         # The seed is idempotent (loop registration replaced, personas reused), so a transient server or
         # connection failure is safe to retry. On 2026-10-07 a single Azure SQL login reset mid-seed
@@ -213,6 +227,19 @@ if (-not $CheckOnly) {
                 Add-Result 'Engine seeded' PASS ("storyline '{0}' at minute 0; escalates after {1} scenario min of silence; personas {2} created / {3} reused" -f `
                     $s.storylineTitle, $s.responseWindowMinutes, $s.personasCreated, $s.personasReused)
                 if ($s.personasBackfilled -gt 0 -or $s.personasCastableClosed -gt 0) { Add-Result 'Seed modified rows' WARN $s.note }
+
+                # A server older than engine-runtime/06 (#415) silently ignores the field and omits it from
+                # the response, so report what the SERVER says it applied, not what was asked for.
+                $applied = $s.PSObject.Properties['autoConfirmResponses']
+                if ($null -eq $applied) {
+                    Add-Result 'Official posts' WARN 'server predates #415: participant posts never reach the engine, so a PIO statement cannot address the storyline'
+                }
+                elseif ($applied.Value) {
+                    Add-Result 'Official posts' PASS 'auto-confirm ON: a PIO post that plausibly answers the storyline addresses it'
+                }
+                else {
+                    Add-Result 'Official posts' WARN 'auto-confirm OFF: a PIO post only slows the escalation (re-run with -AutoConfirmResponses for demo beat 4)'
+                }
             }
             404 { Add-Result 'Engine seeded' FAIL '404 — the secret was rejected, or no exercise is bound to the host (the endpoint does not say which)' }
             429 { Add-Result 'Engine seeded' FAIL '429 — seed rate limit (10/min); wait a minute and re-run' }
