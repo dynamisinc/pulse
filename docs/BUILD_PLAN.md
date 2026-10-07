@@ -186,11 +186,16 @@ These look like bugs otherwise.
   header, so seed and bootstrap against the API host, not the custom domain — see the
   [`login/06` runbook](features/login/06-uat-goLive-config-runbook.md).
 - **Every backend deploy or App Service restart drops the engine.** Loop registration, storylines,
-  autonomy and the clock live in process memory (there is no `Storyline` entity). Run
-  `pwsh scripts/uat/Reset-DemoState.ps1`, which restarts the API, re-seeds via
-  `POST /api/ops/seed-engine-content` and checks the result. It reads the bootstrap secret through your
-  `az` login and never prints it; `-CheckOnly` is read-only and needs no secret. A re-seed resets the
-  storyline to scenario minute 0. Frontend-only deploys don't restart the API.
+  autonomy and the clock live in process memory (there is no `Storyline` entity).
+  - **Wait ~8 minutes** after the deploy or restart, so the old process has handed over.
+  - Then run `pwsh scripts/uat/Reset-DemoState.ps1 -AutoConfirmResponses`. It re-seeds via
+    `POST /api/ops/seed-engine-content` and checks the result. It reads the bootstrap secret through your
+    `az` login and never prints it; `-CheckOnly` is read-only and needs no secret. It only restarts the
+    API with `-Restart`, and then stops.
+  - A re-seed resets the storyline to scenario minute 0 and **rebuilds the response-matching opt-in**.
+    Re-seeding without the switch, or calling the endpoint by hand with just `{"hostname": …}`, turns
+    auto-confirm **off**, and demo beat 4 then only slows the escalation (#416).
+  - Frontend-only deploys don't restart the API.
 - **Freeze outside a running world is refused (409 with a reason)** by design: in `staged` it would start
   a clock COR-032 forbids.
 - **#390:** a tab that received a Freeze while `live` and never reconnects can stay on the holding page
