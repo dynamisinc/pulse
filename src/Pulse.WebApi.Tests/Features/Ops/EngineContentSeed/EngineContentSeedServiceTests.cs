@@ -15,7 +15,9 @@ using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.Core.Features.ReactionLoop.Models;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Addressing;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Features.Ops.EngineContentSeed;
@@ -74,12 +76,14 @@ public sealed class EngineContentSeedServiceTests
         IReactionLoopRegistry registry,
         EngineAutonomyRegistry autonomy,
         string configuredSecret = ConfiguredSecret,
-        TimeProvider? timeProvider = null) =>
+        TimeProvider? timeProvider = null,
+        IAddressingInbox? addressingInbox = null) =>
         new(
             db,
             Options.Create(new BootstrapOptions { Secret = configuredSecret }),
             new PersonaCastSeeder(db),
             registry,
+            addressingInbox ?? new AddressingInbox(),
             autonomy,
             timeProvider ?? TimeProvider.System,
             NullLogger<EngineContentSeedService>.Instance);
@@ -177,6 +181,66 @@ public sealed class EngineContentSeedServiceTests
             "the registration MUST route on the exact per-exercise EngineAutonomyState the cockpit's "
             + "kill-switch/swamped-mode/auto-HOLD read and mutate — never a fresh, detached instance (AC3, the "
             + "single most important correctness detail in this feature)");
+    }
+
+    [RequiresDockerFact]
+    public async Task Seed_AutoConfirmResponses_IsOffByDefault_AndOnlyAnExplicitOptInTurnsItOn()
+    {
+        // engine-runtime/06: the response-matching trust curve is only ever enabled by a human (§8.2). A seed
+        // that says nothing must leave it OFF; only the operator's explicit opt-in turns it on, and the opt-in
+        // is recorded in the durable audit trail, not just in the response.
+        var hostname = UniqueHostname();
+        var exerciseId = await InsertExerciseAsync(hostname);
+        var registry = new ReactionLoopRegistry();
+        var autonomyRegistry = new EngineAutonomyRegistry();
+
+        await using (var db1 = _fixture.CreateContext())
+        {
+            var result = await BuildService(db1, registry, autonomyRegistry)
+                .SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret);
+            result.AutoConfirmResponses.Should().BeFalse();
+            registry.Active.Single(r => r.ExerciseId == exerciseId).ResponseMatching.AutoConfirmEnabled
+                .Should().BeFalse("a seed that does not opt in must never auto-confirm a response match");
+        }
+
+        await using (var db2 = _fixture.CreateContext())
+        {
+            var result = await BuildService(db2, registry, autonomyRegistry).SeedAsync(
+                new EngineContentSeedRequest { Hostname = hostname, AutoConfirmResponses = true }, ConfiguredSecret);
+            result.AutoConfirmResponses.Should().BeTrue();
+            registry.Active.Single(r => r.ExerciseId == exerciseId).ResponseMatching.AutoConfirmEnabled
+                .Should().BeTrue("the operator's explicit opt-in enables auto-confirm on the fresh registration");
+        }
+
+        await using var verify = _fixture.CreateContext();
+        var payloads = await verify.TelemetryEvents.IgnoreQueryFilters()
+            .Where(e => e.ExerciseId == exerciseId && e.EventType == "engine.content_seeded")
+            .Select(e => e.Payload!)
+            .ToListAsync();
+        payloads.Select(p => JsonDocument.Parse(p).RootElement.GetProperty("autoConfirmResponses").GetBoolean())
+            .Should().BeEquivalentTo([false, true], "each seed's opt-in decision is in its own audit event");
+    }
+
+    [RequiresDockerFact]
+    public async Task Seed_ClearsTheExercisesOfficialPostInbox_SoAnEarlierRunsPostCannotAnswerTheNewStoryline()
+    {
+        var hostname = UniqueHostname();
+        var exerciseId = await InsertExerciseAsync(hostname);
+        var otherExerciseId = Guid.NewGuid();
+        var inbox = new AddressingInbox();
+
+        // Posts queued before this seed belong to the previous run's storyline.
+        inbox.Enqueue(exerciseId, new AddressingObservation(AddressingSource.OfficialPost, "earlier-run", "#WaterIssues update"));
+        inbox.Enqueue(otherExerciseId, new AddressingObservation(AddressingSource.OfficialPost, "other", "#WaterIssues update"));
+
+        await using var db = _fixture.CreateContext();
+        await BuildService(db, new ReactionLoopRegistry(), new EngineAutonomyRegistry(), addressingInbox: inbox)
+            .SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret);
+
+        inbox.Drain(exerciseId).Should().BeEmpty(
+            "a re-seed builds a fresh storyline; a post made during the earlier run must never satisfy it");
+        inbox.Drain(otherExerciseId).Should().ContainSingle(
+            "seeding exercise A never touches exercise B's pending posts (COR-001)");
     }
 
     [RequiresDockerFact]

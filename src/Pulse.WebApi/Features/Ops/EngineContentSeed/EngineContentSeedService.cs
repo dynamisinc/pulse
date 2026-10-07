@@ -8,10 +8,12 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Pulse.Core.Features.ResponseReaction.Services;
 using Pulse.Core.Features.Storylines.Models;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Addressing;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Ops.Bootstrap;
@@ -85,6 +87,7 @@ public sealed partial class EngineContentSeedService
     private readonly BootstrapOptions _options;
     private readonly PersonaCastSeeder _personaSeeder;
     private readonly IReactionLoopRegistry _registry;
+    private readonly IAddressingInbox _addressingInbox;
     private readonly EngineAutonomyRegistry _autonomyRegistry;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<EngineContentSeedService> _logger;
@@ -94,6 +97,7 @@ public sealed partial class EngineContentSeedService
     /// <param name="options">The bound options carrying the REUSED bootstrap secret (the fail-closed gate).</param>
     /// <param name="personaSeeder">Story 01's idempotent persona-cast seeder (shares <paramref name="dbContext"/>).</param>
     /// <param name="registry">The in-memory reaction-loop registry this service populates (the #324 gap).</param>
+    /// <param name="addressingInbox">The engine's official-post inbox, cleared when a fresh storyline is registered (engine-runtime/06).</param>
     /// <param name="autonomyRegistry">The per-exercise autonomy-state registry the cockpit reads/writes — the SHARED instance the registration must use (AC3).</param>
     /// <param name="timeProvider">The server wall-clock source (never client input) for <c>ScenarioStart</c> + the telemetry envelope.</param>
     /// <param name="logger">Diagnostics logger — records the seeder's mutations to EXISTING rows (Gate-1 S-B); never logs a secret.</param>
@@ -102,6 +106,7 @@ public sealed partial class EngineContentSeedService
         IOptions<BootstrapOptions> options,
         PersonaCastSeeder personaSeeder,
         IReactionLoopRegistry registry,
+        IAddressingInbox addressingInbox,
         EngineAutonomyRegistry autonomyRegistry,
         TimeProvider timeProvider,
         ILogger<EngineContentSeedService> logger)
@@ -110,6 +115,7 @@ public sealed partial class EngineContentSeedService
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(personaSeeder);
         ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(addressingInbox);
         ArgumentNullException.ThrowIfNull(autonomyRegistry);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
@@ -118,6 +124,7 @@ public sealed partial class EngineContentSeedService
         _options = options.Value ?? new BootstrapOptions();
         _personaSeeder = personaSeeder;
         _registry = registry;
+        _addressingInbox = addressingInbox;
         _autonomyRegistry = autonomyRegistry;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -217,6 +224,15 @@ public sealed partial class EngineContentSeedService
             persona => new EnginePersona(persona.InstanceId, persona.Dossier),
             StringComparer.OrdinalIgnoreCase);
 
+        // 4e. Response matching (engine-runtime/06). Auto-confirm is OFF unless the operator opted in on this
+        //     request: the trust curve is only ever enabled by a human, never by the engine (§8.2).
+        var autoConfirmResponses = request.AutoConfirmResponses == true;
+        var responseMatching = new ResponseMatchTrustCurve();
+        if (autoConfirmResponses)
+        {
+            responseMatching.EnableAutoConfirm();
+        }
+
         var registration = new ReactionLoopRegistration
         {
             ExerciseId = exerciseId,
@@ -229,13 +245,15 @@ public sealed partial class EngineContentSeedService
             RateConfig = RateGovernanceConfig.Default,
             Autonomy = autonomy,
             ControllerDeskId = Guid.NewGuid(),
+            ResponseMatching = responseMatching,
         };
 
         // 5. Exactly one XC-004 audit event (COR-001-stamped with the exercise's own id) in the SAME unit of
         //    work as story 01's persona writes (AC7).
         _dbContext.TelemetryEvents.Add(BuildSeededTelemetry(
             exercise, now, new PersonaSeedCounts(
-                personasCreated, personasReused, personasBackfilled, personasCastableClosed), storyline));
+                personasCreated, personasReused, personasBackfilled, personasCastableClosed), storyline,
+            autoConfirmResponses));
 
         // One SaveChanges — the write-guard runs here; every scoped row carries the non-empty exercise id.
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -244,13 +262,18 @@ public sealed partial class EngineContentSeedService
         //    registered against un-persisted personas. Register overwrites by exerciseId — never duplicated.
         _registry.Register(registration);
 
+        // 7. Drop any official posts still queued for the PREVIOUS registration (engine-runtime/06): a post made
+        //    during an earlier run must never satisfy the fresh storyline built above.
+        _addressingInbox.Clear(exerciseId);
+
         return EngineContentSeedResult.Provisioned(
             exerciseId,
             host,
             new PersonaSeedCounts(personasCreated, personasReused, personasBackfilled, personasCastableClosed),
             storyline.Id,
             storyline.Title,
-            storyline.ResponseWindowMin);
+            storyline.ResponseWindowMin,
+            autoConfirmResponses);
     }
 
     /// <summary>
@@ -303,7 +326,8 @@ public sealed partial class EngineContentSeedService
         Exercise exercise,
         DateTimeOffset now,
         PersonaSeedCounts counts,
-        Storyline storyline)
+        Storyline storyline,
+        bool autoConfirmResponses)
     {
         var payload = JsonSerializer.Serialize(
             new
@@ -318,6 +342,10 @@ public sealed partial class EngineContentSeedService
                 storylineId = storyline.Id.ToString(),
                 storylineTitle = storyline.Title,
                 responseWindowMinutes = storyline.ResponseWindowMin,
+
+                // engine-runtime/06: the human opt-in to auto-confirming plausible official responses is part
+                // of the durable audit trail, not just the response the operator happened to read.
+                autoConfirmResponses,
             },
             PayloadSerializerOptions);
 
@@ -375,7 +403,8 @@ public sealed class EngineContentSeedResult
         PersonaSeedCounts personas,
         Guid? storylineId,
         string? storylineTitle,
-        int responseWindowMinutes)
+        int responseWindowMinutes,
+        bool autoConfirmResponses)
     {
         Outcome = outcome;
         Error = error;
@@ -385,6 +414,7 @@ public sealed class EngineContentSeedResult
         StorylineId = storylineId;
         StorylineTitle = storylineTitle;
         ResponseWindowMinutes = responseWindowMinutes;
+        AutoConfirmResponses = autoConfirmResponses;
     }
 
     /// <summary>Which outcome occurred.</summary>
@@ -431,6 +461,9 @@ public sealed class EngineContentSeedResult
     /// <summary>The clamped silence window (scenario minutes) the storyline was armed with.</summary>
     public int ResponseWindowMinutes { get; }
 
+    /// <summary>Whether the seed opted the exercise in to auto-confirming plausible official responses (engine-runtime/06).</summary>
+    public bool AutoConfirmResponses { get; }
+
     /// <summary>A successful seed.</summary>
     /// <param name="exerciseId">The resolved exercise id.</param>
     /// <param name="hostname">The bound host.</param>
@@ -438,6 +471,7 @@ public sealed class EngineContentSeedResult
     /// <param name="storylineId">The built storyline id.</param>
     /// <param name="storylineTitle">The built storyline title.</param>
     /// <param name="responseWindowMinutes">The clamped silence window.</param>
+    /// <param name="autoConfirmResponses">Whether the operator opted in to auto-confirming plausible official responses.</param>
     /// <returns>A provisioned result.</returns>
     public static EngineContentSeedResult Provisioned(
         Guid exerciseId,
@@ -445,30 +479,31 @@ public sealed class EngineContentSeedResult
         PersonaSeedCounts personas,
         Guid storylineId,
         string storylineTitle,
-        int responseWindowMinutes)
+        int responseWindowMinutes,
+        bool autoConfirmResponses = false)
     {
         ArgumentException.ThrowIfNullOrEmpty(hostname);
         ArgumentNullException.ThrowIfNull(personas);
         return new EngineContentSeedResult(
             EngineContentSeedOutcome.Provisioned, null, exerciseId, hostname,
-            personas, storylineId, storylineTitle, responseWindowMinutes);
+            personas, storylineId, storylineTitle, responseWindowMinutes, autoConfirmResponses);
     }
 
     /// <summary>A validation failure.</summary>
     /// <param name="error">The human-readable reason.</param>
     /// <returns>An invalid result.</returns>
     public static EngineContentSeedResult Invalid(string error) =>
-        new(EngineContentSeedOutcome.Invalid, error, null, null, PersonaSeedCounts.None, null, null, 0);
+        new(EngineContentSeedOutcome.Invalid, error, null, null, PersonaSeedCounts.None, null, null, 0, false);
 
     /// <summary>The fail-closed result for an unconfigured/wrong secret.</summary>
     /// <returns>A rejected result.</returns>
     public static EngineContentSeedResult Rejected() =>
-        new(EngineContentSeedOutcome.Rejected, null, null, null, PersonaSeedCounts.None, null, null, 0);
+        new(EngineContentSeedOutcome.Rejected, null, null, null, PersonaSeedCounts.None, null, null, 0, false);
 
     /// <summary>The result for a hostname that resolves to no exercise (never creating one).</summary>
     /// <returns>A host-not-found result.</returns>
     public static EngineContentSeedResult HostNotFound() =>
-        new(EngineContentSeedOutcome.HostNotFound, null, null, null, PersonaSeedCounts.None, null, null, 0);
+        new(EngineContentSeedOutcome.HostNotFound, null, null, null, PersonaSeedCounts.None, null, null, 0, false);
 }
 
 /// <summary>

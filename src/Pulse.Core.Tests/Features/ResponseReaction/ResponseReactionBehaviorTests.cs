@@ -66,6 +66,62 @@ public class ResponseReactionBehaviorTests
         new ResponseReactionBehavior().Decide(Context(EscalatingStoryline(), EffectiveAutonomy.Stopped)).Should().BeNull();
     }
 
+    private static PersonaDossier Persona(string handle) =>
+        new() { Handle = handle, DisplayName = handle.TrimStart('@'), Type = PersonaType.Resident };
+
+    private static Storyline AddressedStoryline()
+    {
+        var s = EscalatingStoryline();
+        MissSafeResolver.Apply(new MatchResolution(MatchKind.Matched, s.Id, 0.9, false), s, scenarioMinute: 31);
+        return s;
+    }
+
+    private static ReactionContext ResponseContext(
+        Storyline storyline, int personas, RateGovernanceConfig? rate = null, int postsThisMinute = 0) => new()
+        {
+            Storyline = storyline,
+            Trigger = ReactionTriggerKind.OfficialResponse,
+            Autonomy = EffectiveAutonomy.Running(AutonomyLevel.Suggest),
+            EligiblePersonas = [.. Enumerable.Range(0, personas).Select(i => Persona($"@p{i}"))],
+            RateConfig = rate ?? RateGovernanceConfig.Default,
+            PostsThisMinute = postsThisMinute,
+            ScenarioMinute = 31,
+        };
+
+    [Fact]
+    public void Behavior_VoicesAMatchAsABurst_ThatCanCarryTheMix()
+    {
+        // The live loop decides the response AFTER the match moved the storyline to Addressed, where the base
+        // composer sizes to a single voice — too few for "gratitude + a follow-up + one skeptic".
+        var intent = new ResponseReactionBehavior().Decide(ResponseContext(AddressedStoryline(), personas: 5));
+
+        intent!.Count.Should().Be(ResponseReactionBehavior.DefaultBurstSize);
+        intent.Personas.Should().HaveCount(ResponseReactionBehavior.DefaultBurstSize, "one post per persona");
+    }
+
+    [Fact]
+    public void Behavior_BurstIsBoundedByTheCast()
+    {
+        new ResponseReactionBehavior().Decide(ResponseContext(AddressedStoryline(), personas: 2))!
+            .Count.Should().Be(2, "a burst never asks for more voices than the storyline's cast");
+    }
+
+    [Fact]
+    public void Behavior_BurstIsBoundedByThePerMinuteCap()
+    {
+        var tight = new RateGovernanceConfig(maxEnginePostsPerMinute: 4, minBelievableActivity: 1);
+
+        new ResponseReactionBehavior().Decide(ResponseContext(AddressedStoryline(), personas: 5, tight, postsThisMinute: 3))!
+            .Count.Should().Be(1, "only one post is left under this minute's cap (ADP-011)");
+    }
+
+    [Fact]
+    public void Behavior_WithACustomBurstSize_UsesIt()
+    {
+        new ResponseReactionBehavior(burstSize: 2).Decide(ResponseContext(AddressedStoryline(), personas: 5))!
+            .Count.Should().Be(2);
+    }
+
     [Fact]
     public void AMatch_StopsActiveSilenceEscalation_TheHandoff()
     {

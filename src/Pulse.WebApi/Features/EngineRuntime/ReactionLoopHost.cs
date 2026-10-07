@@ -15,10 +15,13 @@ using Pulse.Core.Features.Autonomy.Services;
 using Pulse.Core.Features.Generation.Models;
 using Pulse.Core.Features.ReactionLoop.Models;
 using Pulse.Core.Features.ReactionLoop.Services;
+using Pulse.Core.Features.ResponseReaction.Models;
+using Pulse.Core.Features.ResponseReaction.Services;
 using Pulse.Core.Features.Storylines.Models;
 using Pulse.Core.Features.Storylines.Services;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Addressing;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Review;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
@@ -267,6 +270,15 @@ public sealed class ReactionLoopRegistration
     /// <see cref="WorkloadDemandMeter"/>). A demand measure, never a controller-performance measure.
     /// </summary>
     public required Guid ControllerDeskId { get; init; }
+
+    /// <summary>
+    /// The response-matching trust curve for this exercise (ADP-002a, engine-runtime/06). It holds whether a
+    /// plausible match of an official post auto-confirms. Off by default: only a human opts in (the
+    /// operator's seed request), and the engine never enables it itself (§8.2). Without it, a plausible match
+    /// needs the controller's confirmation, which has no console surface yet, so it stays an unaddressed
+    /// suggestion that slows the escalation (miss-safe).
+    /// </summary>
+    public ResponseMatchTrustCurve ResponseMatching { get; init; } = new();
 }
 
 /// <summary>
@@ -315,7 +327,7 @@ public sealed class ReactionLoopRegistry : IReactionLoopRegistry
 /// <see cref="ReactionLoopHost"/>'s. Registered as a singleton; the scoped collaborators (context, clock,
 /// review store) are taken from the tick's scope.
 /// </summary>
-public sealed class ReactionLoopDriver
+public sealed partial class ReactionLoopDriver
 {
     /// <summary>The default Delayed-auto countdown length in scenario minutes for an enqueued timed burst.</summary>
     public const int DefaultDelayedAutoCountdownMinutes = 5;
@@ -326,7 +338,13 @@ public sealed class ReactionLoopDriver
     private readonly IExerciseClock _exerciseClock;
     private readonly TimeProvider _timeProvider;
     private readonly EngineTierPolicyRegistry _tierPolicy;
-    private readonly DecideStage _decideStage = new();
+    private readonly IAddressingInbox _addressingInbox;
+    private readonly ILogger<ReactionLoopDriver> _logger;
+
+    // The matched-response reaction (response-reaction/01) is the decide-stage policy for an OfficialResponse
+    // trigger. Registered here because the loop is what raises that trigger (engine-runtime/06); every other
+    // trigger kind still runs the default composer.
+    private readonly DecideStage _decideStage = new DecideStage().Register(new ResponseReactionBehavior());
     private readonly ConcurrentDictionary<Guid, ExerciseTickState> _tickStates = new();
 
     /// <summary>Creates the driver over the generate/measure stages, telemetry emitter, scenario clock, and server clock.</summary>
@@ -336,13 +354,17 @@ public sealed class ReactionLoopDriver
     /// <param name="exerciseClock">The native scenario clock (for the scenario instant on the envelope).</param>
     /// <param name="timeProvider">The server wall-clock source for the telemetry envelope (never client input).</param>
     /// <param name="tierPolicy">The per-exercise model-tier-policy override a controller may set at runtime (story 05).</param>
+    /// <param name="addressingInbox">The official posts participants made since the last tick (engine-runtime/06).</param>
+    /// <param name="logger">Records how each official post resolved (matched / needs confirmation / unmatched).</param>
     public ReactionLoopDriver(
         GenerateStage generateStage,
         MeasureStage measureStage,
         IEngineTelemetryEmitter telemetryEmitter,
         IExerciseClock exerciseClock,
         TimeProvider timeProvider,
-        EngineTierPolicyRegistry tierPolicy)
+        EngineTierPolicyRegistry tierPolicy,
+        IAddressingInbox addressingInbox,
+        ILogger<ReactionLoopDriver> logger)
     {
         ArgumentNullException.ThrowIfNull(generateStage);
         ArgumentNullException.ThrowIfNull(measureStage);
@@ -350,6 +372,8 @@ public sealed class ReactionLoopDriver
         ArgumentNullException.ThrowIfNull(exerciseClock);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(tierPolicy);
+        ArgumentNullException.ThrowIfNull(addressingInbox);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _generateStage = generateStage;
         _measureStage = measureStage;
@@ -357,6 +381,8 @@ public sealed class ReactionLoopDriver
         _exerciseClock = exerciseClock;
         _timeProvider = timeProvider;
         _tierPolicy = tierPolicy;
+        _addressingInbox = addressingInbox;
+        _logger = logger;
     }
 
     /// <summary>
@@ -411,12 +437,14 @@ public sealed class ReactionLoopDriver
             pendingEvents.AddRange(measured.TelemetryEvents);
         }
 
-        // 2. OBSERVE — the refreshed world for inaction triggers (silence windows elapsed). The reaction
-        //    cadence (ADP-011) suppresses re-reacting to the SAME ongoing silence every tick: an unaddressed
-        //    storyline re-fires at most once per MinMinutesBetweenInactionReactions scenario minutes.
+        // 2. OBSERVE — the refreshed world for inaction triggers (silence windows elapsed), plus every official
+        //    post participants made since the last tick (engine-runtime/06 — until then this was always [], so
+        //    no participant post could ever address a storyline). The reaction cadence (ADP-011) suppresses
+        //    re-reacting to the SAME ongoing silence every tick: an unaddressed storyline re-fires at most once
+        //    per MinMinutesBetweenInactionReactions scenario minutes.
         var observed = ObserveStage.Observe(
             registration.Storylines,
-            addressing: [],
+            _addressingInbox.Drain(registration.ExerciseId),
             scenarioClock,
             registration.RateConfig.MinMinutesBetweenInactionReactions);
         foreach (var trigger in observed.InactionTriggers)
@@ -424,9 +452,35 @@ public sealed class ReactionLoopDriver
             pendingEvents.Add(BuildObservedEvent(context, trigger));
         }
 
-        // 3-5. DECIDE → GENERATE → enqueue, per trigger. CTL-034: never demand more than the budget of
-        //       review decisions per scenario minute — one burst = one decision.
+        // 2b. RESPOND — resolve each official post with the miss-safe resolver (ADP-002/002a). A genuine match
+        //     addresses its storyline now (silence clock reset, intensity bent down, phase → Addressed); anything
+        //     else is never treated as silence, but slows this tick's escalation instead (never pauses it).
+        var responses = ResolveOfficialPosts(registration, observed.AddressingCandidates, scenarioMinute, context, pendingEvents);
+
+        // 3-5. DECIDE → GENERATE → enqueue. Response reactions go first (the responder's moment), then the
+        //       inaction bursts, minus any storyline a response just addressed (it is no longer silent). CTL-034:
+        //       never demand more than the budget of review decisions per scenario minute — one burst = one decision.
+        var work = new List<(Storyline Storyline, ReactionTriggerKind Kind)>();
+        foreach (var addressed in responses.Matched)
+        {
+            work.Add((addressed, ReactionTriggerKind.OfficialResponse));
+        }
+
         foreach (var trigger in observed.InactionTriggers)
+        {
+            if (responses.IsMatched(trigger.StorylineId))
+            {
+                continue;
+            }
+
+            var silent = registration.Storylines.FirstOrDefault(s => s.Id == trigger.StorylineId);
+            if (silent is not null)
+            {
+                work.Add((silent, ReactionTriggerKind.Inaction));
+            }
+        }
+
+        foreach (var (storyline, kind) in work)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -435,17 +489,18 @@ public sealed class ReactionLoopDriver
                 break;
             }
 
-            var storyline = registration.Storylines.FirstOrDefault(s => s.Id == trigger.StorylineId);
-            if (storyline is null)
-            {
-                continue;
-            }
-
-            var reactionContext = BuildReactionContext(registration, storyline, tickState, scenarioMinute);
+            var reactionContext = BuildReactionContext(registration, storyline, kind, tickState, scenarioMinute);
             var intent = _decideStage.Decide(reactionContext);
             if (intent is null)
             {
                 continue;
+            }
+
+            // Miss-safe (ADP-002a): an official post that was seen but not matched slows the escalation it may
+            // have been answering — fewer voices this burst, never zero.
+            if (kind == ReactionTriggerKind.Inaction && responses.ShouldSlow(storyline.Id))
+            {
+                intent = MissSafeResolver.Slow(intent);
             }
 
             pendingEvents.Add(BuildDecidedEvent(context, intent, tickState.PostsThisMinute));
@@ -477,10 +532,13 @@ public sealed class ReactionLoopDriver
             tickState.DemandMeter.Record(DemandEventKind.QueueFire, scenarioMinute);
             tickState.PostsThisMinute += reviewItem.Posts.Count;
 
-            // Record the reaction so the next tick's Observe suppresses re-reacting to this storyline's ongoing
-            // silence until the reaction cadence elapses (ADP-011). Does NOT reset the silence clock — an engine
-            // reaction is not an official response, so anxiety keeps building while officials stay silent.
-            storyline.RecordEngineReaction(scenarioMinute);
+            // Record an inaction reaction so the next tick's Observe suppresses re-reacting to this storyline's
+            // ongoing silence until the reaction cadence elapses (ADP-011). Does NOT reset the silence clock — an
+            // engine reaction is not an official response, so anxiety keeps building while officials stay silent.
+            if (kind == ReactionTriggerKind.Inaction)
+            {
+                storyline.RecordEngineReaction(scenarioMinute);
+            }
         }
 
         await PersistAsync(dbContext, reviewStore, pendingEvents, reviewItems, cancellationToken).ConfigureAwait(false);
@@ -534,10 +592,71 @@ public sealed class ReactionLoopDriver
         }
     }
 
+    /// <summary>
+    /// Resolves this tick's official posts against the storylines (ADP-002/002a, engine-runtime/06). Emits one
+    /// <c>engine.observed</c> (<c>action-seen</c>) per post that relates to a storyline, applies every genuine
+    /// match (silence clock reset, bend-down, phase → Addressed, with the resulting storyline telemetry), and
+    /// records which storylines' escalation the miss-safe default slows this tick: the suggested storyline for
+    /// an unconfirmed match, every storyline for an unmatched post (its target is unknown).
+    /// </summary>
+    private OfficialPostResolutions ResolveOfficialPosts(
+        ReactionLoopRegistration registration,
+        IReadOnlyList<AddressingCandidate> candidates,
+        int scenarioMinute,
+        EngineTelemetryContext context,
+        List<TelemetryEvent> pendingEvents)
+    {
+        var resolutions = new OfficialPostResolutions();
+        foreach (var candidate in candidates)
+        {
+            var resolution = MissSafeResolver.Resolve(
+                candidate, registration.Storylines, registration.ResponseMatching.AutoConfirmEnabled);
+
+            // The storyline the post most plausibly relates to, for telemetry lineage even when it did not clear
+            // the threshold: the observation happened; whether it addressed anything is the resolution's job.
+            var related = resolution.StorylineId
+                ?? ResponseMatcher.SuggestBest(candidate.Text, registration.Storylines)?.StorylineId;
+            if (related is { } relatedId)
+            {
+                pendingEvents.Add(BuildActionSeenEvent(context, relatedId, candidate.ScenarioMinute));
+            }
+
+            LogOfficialPostResolved(candidate.Reference, resolution.Kind, resolution.Confidence, related);
+
+            switch (resolution.Kind)
+            {
+                case MatchKind.Matched when resolution.StorylineId is { } matchedId:
+                    var storyline = registration.Storylines.FirstOrDefault(s => s.Id == matchedId);
+                    if (storyline is null)
+                    {
+                        break;
+                    }
+
+                    var sentimentBefore = storyline.Sentiment;
+                    var raised = MissSafeResolver.Apply(resolution, storyline, scenarioMinute);
+                    pendingEvents.AddRange(_measureStage.MapStorylineEvents(
+                        raised, storyline.Sentiment - sentimentBefore, amplification: 0.0, context));
+                    resolutions.AddMatched(storyline);
+                    break;
+
+                case MatchKind.NeedsConfirmation when resolution.StorylineId is { } suggestedId:
+                    resolutions.Slow(suggestedId);
+                    break;
+
+                default:
+                    resolutions.SlowAll();
+                    break;
+            }
+        }
+
+        return resolutions;
+    }
+
     /// <summary>Builds the eligible-cast <see cref="ReactionContext"/> for a storyline from the registration.</summary>
     private static ReactionContext BuildReactionContext(
         ReactionLoopRegistration registration,
         Storyline storyline,
+        ReactionTriggerKind trigger,
         ExerciseTickState tickState,
         int scenarioMinute)
     {
@@ -553,7 +672,7 @@ public sealed class ReactionLoopDriver
         return new ReactionContext
         {
             Storyline = storyline,
-            Trigger = ReactionTriggerKind.Inaction,
+            Trigger = trigger,
             Autonomy = registration.Autonomy.ResolveEffective(storyline.Id),
             EligiblePersonas = eligible,
             RateConfig = registration.RateConfig,
@@ -652,6 +771,61 @@ public sealed class ReactionLoopDriver
         };
 
         return _telemetryEmitter.BuildEvent(EngineEventTypes.Observed, context, payload);
+    }
+
+    /// <summary>
+    /// Builds the <c>engine.observed</c> event for an official post the loop saw (engine-runtime/06), using the
+    /// taxonomy's documented <c>action-seen</c> trigger, so the pinned payload shape is unchanged. Whether the
+    /// post matched is recorded by the <c>storyline.state_changed</c> (cause <c>matched-response</c>) that a
+    /// match raises, and in the resolution log line.
+    /// </summary>
+    private TelemetryEvent BuildActionSeenEvent(EngineTelemetryContext context, Guid storylineId, int scenarioMinute)
+    {
+        var payload = new EngineEventPayloads.Observed
+        {
+            Trigger = "action-seen",
+            Storyline = storylineId.ToString(),
+            ScenarioMinute = scenarioMinute,
+        };
+
+        return _telemetryEmitter.BuildEvent(EngineEventTypes.Observed, context, payload);
+    }
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Information,
+        Message = "Official post {Reference} resolved as {Kind} (confidence {Confidence}) against storyline {StorylineId}.")]
+    private partial void LogOfficialPostResolved(string reference, MatchKind kind, double confidence, Guid? storylineId);
+
+    /// <summary>
+    /// What one tick's official posts did: the storylines a genuine match addressed (each voiced once as a
+    /// response reaction, and never also as an inaction burst this tick), and whose escalation the miss-safe
+    /// default slows.
+    /// </summary>
+    private sealed class OfficialPostResolutions
+    {
+        private readonly HashSet<Guid> _matchedIds = [];
+        private readonly HashSet<Guid> _slowed = [];
+        private bool _slowAll;
+
+        /// <summary>The storylines a match addressed this tick, in resolution order.</summary>
+        public List<Storyline> Matched { get; } = [];
+
+        public void AddMatched(Storyline storyline)
+        {
+            if (_matchedIds.Add(storyline.Id))
+            {
+                Matched.Add(storyline);
+            }
+        }
+
+        public bool IsMatched(Guid storylineId) => _matchedIds.Contains(storylineId);
+
+        public void Slow(Guid storylineId) => _slowed.Add(storylineId);
+
+        public void SlowAll() => _slowAll = true;
+
+        public bool ShouldSlow(Guid storylineId) => _slowAll || _slowed.Contains(storylineId);
     }
 
     /// <summary>Builds the <c>engine.decided</c> event (personas / tone mix / count / autonomy / rate-cap state).</summary>

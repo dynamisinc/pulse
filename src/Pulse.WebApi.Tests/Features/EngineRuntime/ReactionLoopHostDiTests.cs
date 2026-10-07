@@ -60,6 +60,23 @@ public sealed class ReactionLoopHostDiTests
     }
 
     [Fact]
+    public void AddReactionLoopHost_WiresTheOfficialPostInbox_IntoTheSocialWritePath()
+    {
+        // engine-runtime/06: the loop drained `addressing: []` for a whole wave because nothing fed it. The
+        // composition guard is that the observer PostIngestService calls is registered, and that it and the
+        // driver resolve the SAME inbox singleton — a detached inbox would be the same dead seam again.
+        using var provider = BuildProvider();
+
+        var observers = provider.GetServices<Pulse.WebApi.Features.Social.IPostPublishedObserver>().ToList();
+        observers.Should().ContainSingle(o => o is Pulse.WebApi.Features.EngineRuntime.Addressing.EngineAddressingObserver,
+            "PostIngestService notifies every registered observer; the engine's must be one of them");
+
+        var inbox = provider.GetRequiredService<Pulse.WebApi.Features.EngineRuntime.Addressing.IAddressingInbox>();
+        provider.GetRequiredService<Pulse.WebApi.Features.EngineRuntime.Addressing.IAddressingInbox>()
+            .Should().BeSameAs(inbox, "the inbox is a singleton the observer writes and the driver drains");
+    }
+
+    [Fact]
     public void EnginePublishService_IsSingleton_SoBothTheLoopAndApproveShareOneFunnel()
     {
         using var provider = BuildProvider();

@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -14,10 +15,12 @@ using Pulse.Core.Core.Extensions;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Autonomy.Services;
 using Pulse.Core.Features.Generation.Models;
+using Pulse.Core.Features.ReactionLoop.Models;
 using Pulse.Core.Features.Storylines.Models;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Addressing;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Features.Realtime;
@@ -398,6 +401,183 @@ public sealed class ReactionLoopHostTests
         await using var readFrozen = _fixture.CreateContext(ScopeFor(frozen));
         (await readFrozen.EngineReviewItems.CountAsync()).Should().Be(
             0, "a freeze halts ticking, so the frozen exercise generated nothing (COR-052)");
+    }
+
+    // ---- engine-runtime/06: official responses reach the live loop -----------------------------------------
+
+    private const string AnsweringPost = "County update on #WaterIssues: do not drink tap water until further notice.";
+    private const string UnrelatedPost = "Reminder: the Elm Street farmers market opens Saturday at 8am.";
+
+    private static AddressingObservation OfficialPost(string text) =>
+        new(AddressingSource.OfficialPost, Guid.NewGuid().ToString(), text);
+
+    /// <summary>Starts an exercise clock 25 scenario minutes in: past the test storyline's 20-minute silence window.</summary>
+    private static (Storyline Storyline, ReactionLoopRegistration Registration) SilentExercise(
+        ServiceProvider host, ManualTimeProvider manualTime, Guid exerciseId)
+    {
+        host.GetRequiredService<IExerciseClock>().Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
+        var cast = Cast("@rosa", "@marcus", "@lena");
+        var storyline = SeededStoryline(exerciseId, "Water main contamination fears", cast.Keys.ToList());
+        return (storyline, Registration(exerciseId, [storyline], cast));
+    }
+
+    private async Task<List<(string EventType, JsonElement Payload)>> EventsAsync(Guid exerciseId)
+    {
+        await using var read = _fixture.CreateContext(ScopeFor(exerciseId));
+        var rows = await read.TelemetryEvents.Select(e => new { e.EventType, e.Payload }).ToListAsync();
+        return rows.Select(r => (r.EventType, JsonDocument.Parse(r.Payload ?? "{}").RootElement.Clone())).ToList();
+    }
+
+    private async Task<int> DecidedCountAsync(Guid exerciseId) =>
+        (await EventsAsync(exerciseId))
+            .Where(e => e.EventType == EngineEventTypes.Decided)
+            .Select(e => e.Payload.GetProperty("count").GetInt32())
+            .Single();
+
+    [RequiresDockerFact]
+    public async Task Tick_WhenAParticipantPostAnswersTheStoryline_AddressesIt_AndVoicesAResponseNotMoreSilence()
+    {
+        var exerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(manualTime);
+        var (storyline, registration) = SilentExercise(host, manualTime, exerciseId);
+        manualTime.Advance(TimeSpan.FromMinutes(25)); // the silence window (20) has blown: this tick would escalate
+        registration.ResponseMatching.EnableAutoConfirm(); // the operator's opt-in
+
+        host.GetRequiredService<IAddressingInbox>().Enqueue(exerciseId, OfficialPost(AnsweringPost));
+
+        var result = await RunOneTickAsync(host, registration);
+
+        storyline.Phase.Should().Be(StorylinePhase.Addressed, "a confirmed match addresses the storyline (ADP-002)");
+        storyline.MinutesSinceLastOfficialResponse.Should().Be(0, "the response resets the silence clock");
+        result.ReviewItemsEnqueued.Should().Be(
+            1, "one burst — the response reaction — and NOT an escalation burst for the silence it just answered");
+
+        var events = await EventsAsync(exerciseId);
+        events.Should().Contain(
+            e => e.EventType == EngineEventTypes.Observed && e.Payload.GetProperty("trigger").GetString() == "action-seen",
+            "the official post is observed with the taxonomy's action-seen trigger");
+        events.Should().Contain(
+            e => e.EventType == EngineEventTypes.StorylineStateChanged
+                && e.Payload.GetProperty("cause").GetString() == "matched-response"
+                && e.Payload.GetProperty("toPhase").GetString() == nameof(StorylinePhase.Addressed),
+            "the match is recorded as a storyline transition to Addressed, caused by the matched response");
+        var decided = events.Where(e => e.EventType == EngineEventTypes.Decided).Should().ContainSingle().Subject;
+        decided.Payload.GetProperty("toneMix").GetString().Should().StartWith(
+            "gratitude", "the matched-response reaction leans to gratitude + calm + one skeptic (response-reaction/01)");
+        decided.Payload.GetProperty("count").GetInt32().Should().Be(
+            3, "a response is a burst that can carry the mix — all three of this storyline's voices, not one reply");
+    }
+
+    [RequiresDockerFact]
+    public async Task Tick_WhenAPlausibleMatchAwaitsConfirmation_TheStorylineStaysSilent_AndItsEscalationIsSlowed()
+    {
+        // Two identical silent exercises in one host; only one receives the (unconfirmed) official post.
+        var withPost = Guid.NewGuid();
+        var baseline = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(manualTime);
+        var (storyline, registration) = SilentExercise(host, manualTime, withPost);
+        var (_, baselineRegistration) = SilentExercise(host, manualTime, baseline);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+
+        // Auto-confirm is OFF (the default): a plausible match needs the controller's Y/N.
+        host.GetRequiredService<IAddressingInbox>().Enqueue(withPost, OfficialPost(AnsweringPost));
+
+        await RunOneTickAsync(host, registration);
+        await RunOneTickAsync(host, baselineRegistration);
+
+        storyline.Phase.Should().Be(StorylinePhase.Escalating, "an unconfirmed suggestion never addresses a storyline (miss-safe)");
+        storyline.MinutesSinceLastOfficialResponse.Should().Be(25, "and never resets the silence clock");
+
+        var baselineCount = await DecidedCountAsync(baseline);
+        (await DecidedCountAsync(withPost)).Should().Be(
+            Math.Max(1, baselineCount / 2),
+            "a pending official post SLOWS the escalation burst (ADP-002a) — fewer voices, never zero");
+    }
+
+    [RequiresDockerFact]
+    public async Task Tick_WhenAnOfficialPostMatchesNothing_ItIsNeitherSilenceNorAnAnswer_AndEscalationSlows()
+    {
+        var withPost = Guid.NewGuid();
+        var baseline = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(manualTime);
+        var (storyline, registration) = SilentExercise(host, manualTime, withPost);
+        var (_, baselineRegistration) = SilentExercise(host, manualTime, baseline);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+
+        // Even with auto-confirm ON, an irrelevant post cannot game the engine into calming down.
+        registration.ResponseMatching.EnableAutoConfirm();
+        host.GetRequiredService<IAddressingInbox>().Enqueue(withPost, OfficialPost(UnrelatedPost));
+
+        await RunOneTickAsync(host, registration);
+        await RunOneTickAsync(host, baselineRegistration);
+
+        storyline.Phase.Should().Be(StorylinePhase.Escalating, "an unmatched post never addresses the storyline");
+        storyline.MinutesSinceLastOfficialResponse.Should().Be(25, "and is never treated as an answer to the silence");
+        (await DecidedCountAsync(withPost)).Should().Be(
+            Math.Max(1, (await DecidedCountAsync(baseline)) / 2),
+            "but it is never treated as silence either: the escalation slows (miss-safe, ADP-002a)");
+    }
+
+    [RequiresDockerFact]
+    public async Task Tick_ResolvesEachOfficialPostExactlyOnce()
+    {
+        var exerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(manualTime);
+        var (_, registration) = SilentExercise(host, manualTime, exerciseId);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+        registration.ResponseMatching.EnableAutoConfirm();
+        host.GetRequiredService<IAddressingInbox>().Enqueue(exerciseId, OfficialPost(AnsweringPost));
+
+        await RunOneTickAsync(host, registration);
+        manualTime.Advance(TimeSpan.FromMinutes(1));
+        await RunOneTickAsync(host, registration);
+
+        (await EventsAsync(exerciseId))
+            .Count(e => e.EventType == EngineEventTypes.Observed && e.Payload.GetProperty("trigger").GetString() == "action-seen")
+            .Should().Be(1, "the tick drains the inbox, so a post is resolved once and never re-answers the storyline");
+    }
+
+    [RequiresDockerFact]
+    public async Task ParticipantPost_ThroughTheRealIngestFunnel_AddressesTheStorylineOnTheNextTick()
+    {
+        // The supply-nothing test: no test double feeds the inbox. A participant post goes through the same
+        // PostIngestService the HTTP endpoint uses, and only the composition (observer → inbox → driver) can
+        // carry it to the loop. Before engine-runtime/06 every link of this chain was missing.
+        var exerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        await using var host = BuildHost(manualTime);
+        var (storyline, registration) = SilentExercise(host, manualTime, exerciseId);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+        registration.ResponseMatching.EnableAutoConfirm();
+
+        using (var scope = host.CreateScope())
+        {
+            ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = exerciseId;
+            var ingest = scope.ServiceProvider.GetRequiredService<PostIngestService>();
+            var posted = await ingest.IngestAsync(
+                new CreatePostRequest
+                {
+                    Text = AnsweringPost,
+                    ScenarioTime = "2033-06-01T09:25:00Z",
+                    TimeZone = "UTC",
+                },
+                new PostAttribution
+                {
+                    AuthorPersonaId = Guid.NewGuid(),
+                    Origin = "participant",
+                    ActingHumanId = "participant-pio-1",
+                });
+            posted.Outcome.Should().Be(PostIngestOutcome.Created);
+        }
+
+        await RunOneTickAsync(host, registration);
+
+        storyline.Phase.Should().Be(
+            StorylinePhase.Addressed, "a participant's post reaches the loop through the real write path and answers the storyline");
     }
 
     private static async Task WaitUntilAsync(Func<Task<bool>> condition)

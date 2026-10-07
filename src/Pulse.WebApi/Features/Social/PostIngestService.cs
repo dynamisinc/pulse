@@ -1,6 +1,8 @@
 namespace Pulse.WebApi.Features.Social;
 
 using System.Globalization;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Realtime;
@@ -41,7 +43,7 @@ using Pulse.WebApi.Features.Realtime;
 /// reachable over HTTP at all).
 /// </para>
 /// </remarks>
-public sealed class PostIngestService
+public sealed partial class PostIngestService
 {
     /// <summary>The <c>PostOrigin</c> union — the only accepted <c>origin</c> values (full union, not narrowed).</summary>
     private static readonly HashSet<string> AllowedOrigins = new(StringComparer.Ordinal)
@@ -55,15 +57,24 @@ public sealed class PostIngestService
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly IFeedBroadcaster _broadcaster;
+    private readonly IReadOnlyList<IPostPublishedObserver> _observers;
+    private readonly ILogger<PostIngestService> _logger;
 
     /// <summary>Creates the ingest service with its persistence, scope, and broadcast collaborators.</summary>
     /// <param name="dbContext">The persistence context the post and its telemetry event are written through.</param>
     /// <param name="exerciseContext">The server-authoritative exercise scope (COR-001) — the sole scoping source.</param>
     /// <param name="broadcaster">The contract-first real-time fan-out seam (story 03 owns the implementation).</param>
+    /// <param name="observers">
+    /// In-process observers told about each committed post (e.g. the engine's response-reaction inbox,
+    /// engine-runtime/06). Optional: DI supplies every registered observer, possibly none.
+    /// </param>
+    /// <param name="logger">Diagnostics logger for an observer that throws; optional.</param>
     public PostIngestService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
-        IFeedBroadcaster broadcaster)
+        IFeedBroadcaster broadcaster,
+        IEnumerable<IPostPublishedObserver>? observers = null,
+        ILogger<PostIngestService>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -72,6 +83,8 @@ public sealed class PostIngestService
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _broadcaster = broadcaster;
+        _observers = observers?.ToList() ?? [];
+        _logger = logger ?? NullLogger<PostIngestService>.Instance;
     }
 
     /// <summary>
@@ -237,9 +250,38 @@ public sealed class PostIngestService
         // 6. Fan out the participant-safe projection only (XC-002 — the broadcast never carries provenance).
         await _broadcaster.BroadcastPostAsync(exerciseId, ParticipantPostDto.FromPost(post), cancellationToken);
 
-        // 7. Hand the full post back to the endpoint, which shapes the response by caller role.
+        // 7. Tell in-process observers (the engine's response-reaction inbox, engine-runtime/06) AFTER the
+        //    commit, so nothing ever reacts to a post that failed to persist.
+        NotifyObservers(exerciseId, post);
+
+        // 8. Hand the full post back to the endpoint, which shapes the response by caller role.
         return PostIngestResult.Created(post);
     }
+
+    /// <summary>
+    /// Notifies each observer of a committed post. An observer that throws is logged and skipped: the post is
+    /// already committed and broadcast, so an observer failure must never turn into a failed request.
+    /// </summary>
+    private void NotifyObservers(Guid exerciseId, Post post)
+    {
+        foreach (var observer in _observers)
+        {
+            try
+            {
+                observer.OnPostPublished(exerciseId, post);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogObserverFailed(ex, observer.GetType().Name, post.Id);
+            }
+        }
+    }
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Error,
+        Message = "Post-published observer {Observer} failed for post {PostId}; the post itself was committed.")]
+    private partial void LogObserverFailed(Exception exception, string observer, Guid postId);
 }
 
 /// <summary>The outcome kind of a <see cref="PostIngestService.IngestAsync"/> call.</summary>
