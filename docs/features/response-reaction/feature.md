@@ -22,7 +22,7 @@ Adversarial review D4/A6 (the anti-berate-the-PIO requirement). `docs/features/w
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Matched-response reaction | ADP-002 | Done (decide policy + bend; generate blocked) | #163 |
+| 01 | Matched-response reaction | ADP-002 | Done (decide policy + bend); live reaction built in `engine-runtime/06` (#415), UAT pending | #163 |
 | 02 | Miss-safe unmatched default (safety-critical) | ADP-002a | Complete | #164 |
 | 03 | Match suggestion + trust curve | ADP-002a (open Q2) | Complete | #165 |
 
@@ -31,8 +31,12 @@ Adversarial review D4/A6 (the anti-berate-the-PIO requirement). `docs/features/w
 never self-escalates match-autonomy), `MissSafeResolver` (the safety-critical slow-not-pause / never-silence
 / anti-gaming logic + the off-platform-marker identical satisfier + the storyline bend via
 `RecordMatchedResponse`), and `ResponseReactionBehavior` (the tunable gratitude/follow-up/skeptic reaction
-intent). The generate→publish of the reaction, the controller-prompt/opt-in UI (E7 cockpit), and the XC-004
-logging (#173) are the remaining blocked/deferred pieces.
+intent). **Wired into the live loop by `engine-runtime/06` (#415):** participant posts now reach the
+resolver, a genuine match addresses its storyline and draws a response burst through the generate → review →
+publish path with the #173 telemetry, and the miss-safe slow applies to unconfirmed or unmatched posts.
+Until then the loop passed `addressing: []` every tick, so none of this slice was reachable. Still deferred:
+the controller's Y/N confirm surface (E7 cockpit). Without it, auto-confirm (operator opt-in on the seed) is
+the only way a match addresses a storyline.
 
 ## Dependencies
 `reaction-loop` (decide/generate), `storyline-model` (intensity/sentiment bend, expectation),

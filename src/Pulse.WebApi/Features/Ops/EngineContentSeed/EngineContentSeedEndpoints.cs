@@ -84,6 +84,11 @@ public static class EngineContentSeedEndpoints
         services.TryAddSingleton<EngineAutonomyRegistry>();
         services.TryAddSingleton<IReactionLoopRegistry, ReactionLoopRegistry>();
 
+        // engine-runtime/06: the seed clears an exercise's official-post inbox when it registers a fresh
+        // storyline. TryAdd so this converges on the SAME singleton AddReactionLoopHost registers and the loop drains.
+        services.TryAddSingleton<Pulse.WebApi.Features.EngineRuntime.Addressing.IAddressingInbox,
+            Pulse.WebApi.Features.EngineRuntime.Addressing.AddressingInbox>();
+
         // Scoped to match the PulseDbContext unit of work the persona writes + the single audit event commit
         // through together.
         services.AddScoped<PersonaCastSeeder>();

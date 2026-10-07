@@ -3,7 +3,9 @@ namespace Pulse.WebApi.Features.EngineRuntime;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Addressing;
 using Pulse.WebApi.Features.EngineRuntime.Publishing;
+using Pulse.WebApi.Features.Social;
 
 /// <summary>
 /// Composition-root extensions for story 01 — the reaction-loop host + the shared publish funnel. The
@@ -27,6 +29,8 @@ public static class ReactionLoopHostExtensions
     ///   <item><see cref="EngineTierPolicyRegistry"/> — the per-exercise tier-policy override the driver reads (singleton, TryAdd).</item>
     ///   <item><see cref="IEnginePublishService"/> — the single publish funnel (singleton; always builds its own
     ///   server-authoritative scope) that story 02's approve path also calls.</item>
+    ///   <item><see cref="IAddressingInbox"/> + <see cref="EngineAddressingObserver"/> — the official-response
+    ///   inbox the driver drains each tick, fed from the social write path (engine-runtime/06).</item>
     ///   <item><see cref="ReactionLoopHost"/> — the hosted <see cref="Microsoft.Extensions.Hosting.BackgroundService"/>.</item>
     /// </list>
     /// </summary>
@@ -53,6 +57,13 @@ public static class ReactionLoopHostExtensions
         // The single publish funnel (SOC-003) — a singleton that establishes its own per-exercise scope for
         // every publish unit of work (COR-001), so both the loop and story 02's approve share one path.
         services.TryAddSingleton<IEnginePublishService, EnginePublishService>();
+
+        // engine-runtime/06: the inbox of official posts the driver drains each tick, and the post-published
+        // observer that fills it from PostIngestService. TryAdd so AddEngineContentSeed (which clears an
+        // exercise's inbox when it re-seeds) converges on the SAME singleton whichever is wired first; a detached
+        // inbox would leave the loop reading a queue nothing writes to — the unwired seam this story closes.
+        services.TryAddSingleton<IAddressingInbox, AddressingInbox>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IPostPublishedObserver, EngineAddressingObserver>());
 
         services.AddHostedService<ReactionLoopHost>();
 

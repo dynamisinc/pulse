@@ -14,7 +14,10 @@ using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 /// the escalation curve), then maps the raised domain events onto the XC-004 telemetry taxonomy: one
 /// <c>engine.measured</c> per tick (intensity/sentiment delta + amplification) and one
 /// <c>storyline.state_changed</c> per phase transition (from→to + cause). It builds the events; the caller
-/// adds them to its own unit of work and saves them alongside the loop's other stage events.
+/// adds them to its own unit of work and saves them alongside the loop's other stage events. A matched
+/// official response bends a storyline outside the tick, and its events go through the same mapping
+/// (<see cref="MapStorylineEvents"/>), so a tick with a match carries a second <c>engine.measured</c> for
+/// that storyline, next to its <c>storyline.state_changed</c> (cause <c>matched-response</c>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -62,26 +65,50 @@ public sealed class MeasureStage
         var tick = storyline.Tick(clock, signals);
         var amplification = signals?.Amplification?.Velocity ?? 0.0;
 
+        var events = MapStorylineEvents(tick.Events, storyline.Sentiment - sentimentBefore, amplification, context);
+        return new MeasureStageResult(tick, events);
+    }
+
+    /// <summary>
+    /// Maps storyline domain events onto the XC-004 taxonomy: one <c>storyline.state_changed</c> per
+    /// transition and one <c>engine.measured</c> per measurement. <see cref="Measure"/> uses it for a tick; the
+    /// driver uses it for events raised outside a tick, such as a matched official response
+    /// (engine-runtime/06), so both paths emit identical shapes. Builds the events; the caller persists them.
+    /// </summary>
+    /// <param name="raised">The storyline events to map, in order.</param>
+    /// <param name="sentimentDelta">The sentiment change the events represent (for <c>engine.measured</c>).</param>
+    /// <param name="amplification">The amplification velocity to report (for <c>engine.measured</c>).</param>
+    /// <param name="context">The server-authoritative telemetry envelope context.</param>
+    /// <returns>The built telemetry events, in order.</returns>
+    public IReadOnlyList<TelemetryEvent> MapStorylineEvents(
+        IReadOnlyList<IStorylineEvent> raised,
+        double sentimentDelta,
+        double amplification,
+        EngineTelemetryContext context)
+    {
+        ArgumentNullException.ThrowIfNull(raised);
+        ArgumentNullException.ThrowIfNull(context);
+
         var events = new List<TelemetryEvent>();
-        foreach (var raised in tick.Events)
+        foreach (var storylineEvent in raised)
         {
-            switch (raised)
+            switch (storylineEvent)
             {
                 case StorylineStateChanged stateChanged:
                     events.Add(BuildStateChangedEvent(stateChanged, context));
                     break;
 
                 case StorylineMeasured measured:
-                    events.Add(BuildMeasuredEvent(measured, storyline.Sentiment - sentimentBefore, amplification, context));
+                    events.Add(BuildMeasuredEvent(measured, sentimentDelta, amplification, context));
                     break;
 
                 default:
-                    // Steering-action events are logged on the controller path, not the measure tick.
+                    // Steering-action events are logged on the controller path, not here.
                     break;
             }
         }
 
-        return new MeasureStageResult(tick, events);
+        return events;
     }
 
     /// <summary>Builds the <c>storyline.state_changed</c> event (from→to phase + cause) for a transition.</summary>

@@ -27,6 +27,16 @@ public sealed class EngineContentSeedRequest
     /// </summary>
     [JsonPropertyName("responseWindowMinutes")]
     public int? ResponseWindowMinutes { get; init; }
+
+    /// <summary>
+    /// Optional opt-in (engine-runtime/06): when <c>true</c>, a participant's post that plausibly answers the
+    /// storyline (match confidence at or above <c>ResponseMatcher.MatchThreshold</c>) is confirmed
+    /// automatically instead of waiting for the controller's Y/N, which has no console surface yet. Omit or
+    /// <c>false</c> for the default: suggestions are never auto-confirmed. This is the human opt-in the
+    /// response-matching trust curve requires; the engine never enables it itself (§8.2).
+    /// </summary>
+    [JsonPropertyName("autoConfirmResponses")]
+    public bool? AutoConfirmResponses { get; init; }
 }
 
 /// <summary>
@@ -84,6 +94,10 @@ public sealed class EngineContentSeedResponseDto
     [JsonPropertyName("responseWindowMinutes")]
     public required int ResponseWindowMinutes { get; init; }
 
+    /// <summary>Whether this seed opted the exercise in to auto-confirming plausible official responses (engine-runtime/06).</summary>
+    [JsonPropertyName("autoConfirmResponses")]
+    public required bool AutoConfirmResponses { get; init; }
+
     /// <summary>
     /// A human-readable note documenting the idempotent-re-run limitation — the loop registration is replaced
     /// (never duplicated) and the storyline is rebuilt fresh at minute 0, so any intensity/phase progress
@@ -113,6 +127,7 @@ public sealed class EngineContentSeedResponseDto
                 "A provisioned seed result must carry a storyline id.")).ToString(),
             StorylineTitle = result.StorylineTitle ?? string.Empty,
             ResponseWindowMinutes = result.ResponseWindowMinutes,
+            AutoConfirmResponses = result.AutoConfirmResponses,
             Note = "The reaction loop was registered (or its registration replaced). The starter storyline is "
                 + "in-memory and rebuilt fresh at scenario minute 0 on every seed, so a re-run resets any "
                 + "intensity/phase progress accrued since the last seed; persona rows are reused, never "
