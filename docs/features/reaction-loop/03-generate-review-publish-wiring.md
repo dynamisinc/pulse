@@ -1,6 +1,6 @@
 # Story: Generate → review → publish wiring
 
-**Feature:** Reaction loop  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Not Started
+**Feature:** Reaction loop  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** Superseded — built as `engine-runtime/01` (#294); see this feature's `feature.md` and `implementation.md`
 **Requirements:** F8.1, ADP-040  ·  **Design decisions:** none  ·  **Issue:** #159
 
 ## Context

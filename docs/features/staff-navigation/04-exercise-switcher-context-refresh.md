@@ -1,17 +1,17 @@
 # Story: Exercise-switcher context refresh + the dead participant-admin footer link
 
-**Feature:** Staff navigation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Blocked — CRITICAL
-defect found at Gate 2 (CR-001), fix in progress by another agent right now. Do not merge until
-re-verified.
+**Feature:** Staff navigation  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress — built;
+the Gate-2 Critical (CR-001) was fixed before #411 merged. Awaiting UAT verification.
 **Requirements:** COR-073  ·  **Design decisions:** none  ·  **Issue:** —
 
 ## Blockers
-**CR-001 (Critical, Gate 2):** the header badge does not update after a switch, in the exact
-composition the app actually ships (see "Root-cause: the nested-provider defect" below). A fix is
-being authored **right now, in this working tree, by another agent** — do not treat anything below
-as verified until that lands and the suite is re-run against the real nested composition. **AC1 is
-deliberately left unticked** pending that re-verification; do not flip it to `[x]` from this
-document alone.
+None. **CR-001 (Critical, Gate 2) was resolved before merge.** The header badge did not update after a
+switch, in the exact composition the app ships (see "Root-cause: the nested-provider defect" below).
+It was fixed in #411 (commit `8956e0c`) by removing the three per-surface `ExerciseContextProvider`s.
+`features/app-shell/exerciseScopeRefreshComposition.test.tsx` reproduces the defect in the shipped
+nesting and mechanically scans every staff route composition so it cannot return. Sections below
+that call the fix "in progress" describe the state at Gate 2. **AC1 stays unticked until it is
+verified in UAT.**
 
 ## Context
 Two small, already-documented staff-navigation bugs, grouped into one story because both are
