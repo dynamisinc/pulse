@@ -10,10 +10,13 @@
 - **UAT is healthy again** (#413 merged and deployed 2026-10-06; `-CheckOnly` reports `READY`). If the
   reset ever stops at "Schema matches code", the last backend deploy's migration failed; check that
   run's migration step.
-- **Decide the opening feed first** ([BUILD_PLAN → Decision 4](../BUILD_PLAN.md#decisions-needed-)).
-  Without archiving, step 1.3 opens on July's 4,815 peak-phase posts.
-- **Reset first:** `pwsh scripts/uat/Reset-DemoState.ps1`. It must end `READY`; then refresh any console
-  tab that was already open. It no longer restarts the API by default. After a restart the old process
+- **Opening state:** July's 4,821 posts and 51 stale drafts were cleared on 2026-10-06 (Decision 4). After
+  a clear the feed opens EMPTY until the engine or the controller posts. Record in 1.3 whether that works
+  as a demo opening.
+- **Clear, then reset.** Run `pwsh scripts/uat/Clear-DemoContent.ps1` first. It archives older posts and
+  vetoes stale engine drafts, and is reversible: it prints an undo command. Then run
+  `pwsh scripts/uat/Reset-DemoState.ps1`, which must end `READY`. Then refresh any console tab that was
+  already open. It no longer restarts the API by default. After a restart the old process
   keeps serving for minutes, and the seed is lost at the handover. If you need a clean slate, run it with
   `-Restart`, wait ~8 minutes, then run it again without it.
 - **Two fresh tabs:** participant and controller. Sessions live in per-tab storage, so two fresh tabs in

@@ -105,7 +105,10 @@ notifications, direct messages, the E3–E6 channels, E10 evaluation, org-level 
 1. Audience, date and storyline — confirm or change the proposal above.
 2. Live AI for the demo — sign §8 (step 2) or demo on `Fake`.
 3. Whether to show exercise creation (needs the Organization-tier Tier-2 sign-off plus a frontend story).
-4. **What the participant feed opens on.** Today it opens on the 4,815 engine posts from July's runs
+4. ✅ **Cleared 2026-10-06 at Tom's request:** 4,821 July posts archived and 51 stale drafts vetoed, by
+   [`scripts/uat/Clear-DemoContent.ps1`](../scripts/uat/Clear-DemoContent.ps1) (undo manifest kept). Still
+   open: what the demo opens on, now that the feed starts empty. The background on the decision:
+   **What the participant feed opens on.** It opened on the 4,815 engine posts from July's runs
    (Jul 24–29): the same water storyline, but at peak panic, dated July, while a fresh run starts at
    scenario minute 0. New posts do sort above them, because scenario time tracks the wall clock.
    Recommended: before the baseline, archive the old posts by setting `DeletedAt`, which is reversible
