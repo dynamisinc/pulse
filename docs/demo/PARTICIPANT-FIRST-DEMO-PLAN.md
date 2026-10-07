@@ -331,8 +331,17 @@ Effort: S ≤ ½ day of agent time, M ≈ 1 day, L ≈ 2 days.
 
 ## 6. Wave plan — file ownership (orchestrator contract)
 
-Builders own **disjoint** files; P2's `implementation.md` refines this to file level. **Orchestrator-owned**
-(never a builder):
+Builders own **disjoint** files. **[`features/demo-polish/implementation.md`](../features/demo-polish/implementation.md)
+§4 is authoritative**: it refines this table to file level and records 14 decisions (DP-1…DP-14) where the plan
+was incomplete. Notable ones:
+
+- B1 also lands the frozen interface seams, so Wave 1b compiles in parallel.
+- F0 takes the like/repost wiring relocation and splits `social.module.css`.
+- PE's backend half runs in Wave 2 and F7 moves to Wave 3.
+
+Where the table below and that file differ, that file wins.
+
+**Orchestrator-owned** (never a builder):
 
 - `src/frontend/src/App.tsx` and the participant route table
 - `src/Pulse.WebApi/Program.cs` (DI registrations and endpoint `Map…` calls)
@@ -377,8 +386,8 @@ Weekend days are agent build days with light human review. 🧑 marks a Tom touc
 
 | Date | Day | Work | Gate / exit |
 |---|---|---|---|
-| **Wed 10/7** | D-13 | ✅ Assessment; ✅ decisions. **Wave 0:** P1 (CI fix), P2 (stories) start | — |
-| **Thu 10/8** | D-12 | P2 done; contract frozen. **Wave 1:** I1 ∥ B1 ∥ F0 ∥ B5. 🧑 P3 test clips | `main` CI green; contract in `implementation.md` |
+| **Wed 10/7** | D-13 | ✅ Assessment; ✅ decisions; ✅ P1 (CI fix, e73e4a0); ✅ P2 (25 stories + `implementation.md`, contract frozen) | 🧑 DP-11 / DP-12 open |
+| **Thu 10/8** | D-12 | Merge P1 to `main`. **Wave 1:** I1 ∥ B1 ∥ F0 ∥ B5. 🧑 P3 test clips | `main` CI green |
 | **Fri 10/9** | D-11 | 🧑 **Deploy Infrastructure** (I1). B1 merges → backend deploy + reset. **Wave 1b:** BM ∥ BP ∥ B2 ∥ B3 ∥ B6 | Storage live; schema applied in UAT |
 | **Sat 10/10** | D-10 | Wave 1b merges → backend deploy + reset. **UAT media smoke test:** upload an MP4, play it, seek, read SAS. **Wave 2 fan-out:** F1–F6 | **Cut line 1:** if BM isn't live, Wave 2 keeps building on mocks and BM gets Sunday; the media beats depend on it |
 | **Sun 10/11** | D-9 | Wave 2 builds + Gate 1 | — |
