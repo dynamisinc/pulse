@@ -17,7 +17,7 @@ template and flipped per environment in [`parameters/uat.bicepparam`](parameters
 | Toggle | Turns on | `main.bicep` default | UAT today |
 |---|---|---|---|
 | `deployMonitoring` | Log Analytics + Application Insights | `false` | `true` |
-| `deployStorage` | Storage account (blob media) | `false` | `false` |
+| `deployStorage` | Storage account (keyless blob media, private `post-media` container) | `false` | `true` |
 | `deployDatabase` | Azure SQL server + database | `false` | `true` |
 | `deployBackend` | App Service / Function App (per `hostingModel`) | `false` | `true` |
 | `deploySignalR` | Azure SignalR Service (real-time fan-out) | `false` | `false` (hub self-hosted) |
@@ -93,9 +93,10 @@ az resource list -g rg-pulse-uat-centralus -o table   # only the Static Web App
 ### Linter config
 
 [`bicepconfig.json`](bicepconfig.json) disables `outputs-should-not-contain-secrets`: the
-storage/database/signalr/staticwebapp modules deliberately surface connection strings and the
-SWA deployment token as outputs (the contract the composed template consumes). `az bicep build`
-is warning-free.
+database/signalr/staticwebapp modules deliberately surface connection strings and the
+SWA deployment token as outputs (the contract the composed template consumes). The storage module
+no longer does — it is keyless and has no connection-string output (see
+"[Blob storage for post media](#blob-storage-for-post-media-keyless)"). `az bicep build` is warning-free.
 
 ## CI/CD
 
@@ -281,8 +282,63 @@ the OpenAI surface's `cognitiveservices.azure.com`), data-plane role **`Cognitiv
   ```
   See [`docs/features/engine-generation-infra/PROVIDER-COMPARISON.md`](../docs/features/engine-generation-infra/PROVIDER-COMPARISON.md).
 
+## Blob storage for post media (keyless)
+
+`deployStorage = true` (UAT, demo-polish/01) stands up `stpulseuat` for post photos, videos and posters.
+
+- **No keys.** `allowSharedKeyAccess: false`, so the data plane rejects account keys and account-key
+  SAS. The module has **no** connection-string output and the App Service has **no**
+  `Azure__BlobStorage__ConnectionString` setting. `allowBlobPublicAccess: false`, TLS 1.2 minimum,
+  HTTPS only.
+- **One private container**, `post-media` (`publicAccess: 'None'`). The API mints short-lived,
+  read-only, single-blob **user-delegation SAS** URLs for in-scope media, because `<img>`/`<video>`
+  cannot send an `Authorization` header (plan §4 "Why read SAS").
+- **Access.** `main.bicep` passes the App Service's `principalId` to `storage.bicep` as
+  `backendPrincipalId`, which grants **Storage Blob Data Contributor** at **storage-account scope**.
+  The user-delegation-key action is account-level, so a container-scoped grant could not sign. Same
+  deterministic-name pattern as `ai.bicep`, so a re-run never duplicates the grant.
+- **CORS.** The blob service allows `GET`/`HEAD`/`OPTIONS` from `frontendUrl` only, exposing
+  `Content-Length`, `Content-Range`, `Accept-Ranges` (video range requests; future WebVTT).
+- **App settings** (`webapp.bicep`): `Azure__BlobStorage__Provider = Azure`,
+  `Azure__BlobStorage__ServiceUri = https://stpulseuat.blob.core.windows.net`,
+  `Azure__BlobStorage__ContainerName = post-media`. The URI is a plain `main.bicep` local, not a
+  storage-module output (that would be a webApp↔storage cycle, as with `ai`).
+- **Deploy prerequisite.** The grant is a `roleAssignments` write, so the deploy SP needs
+  role-assignment write on the RG. This is the same prerequisite `deployAi` already has (see the
+  `deployAi` section above).
+- **Propagation.** RBAC can take several minutes to apply. Do **not** run the media smoke test in the
+  first ~10 minutes after the deploy; a `403 AuthorizationPermissionMismatch` in that window is
+  propagation, not a bug.
+
+Post-deploy check (Tom, after **Deploy Infrastructure**):
+
+```bash
+RG=rg-pulse-uat-centralus
+az storage account show -n stpulseuat -g $RG \
+  --query "{sharedKey:allowSharedKeyAccess, publicBlob:allowBlobPublicAccess, tls:minimumTlsVersion, httpsOnly:enableHttpsTrafficOnly}" -o json
+# expect sharedKey=false, publicBlob=false, tls=TLS1_2, httpsOnly=true
+
+PRINCIPAL=$(az webapp identity show -n app-pulse-api-uat-dynamis -g $RG --query principalId -o tsv)
+az role assignment list --assignee "$PRINCIPAL" \
+  --scope $(az storage account show -n stpulseuat -g $RG --query id -o tsv) -o table
+# expect Storage Blob Data Contributor at the account scope
+
+# Control-plane read (needs no data-plane role and no key):
+az storage container-rm show --storage-account stpulseuat -g $RG -n post-media --query publicAccess -o tsv
+# expect None
+
+curl -s -o /dev/null -w '%{http_code}\n' https://stpulseuat.blob.core.windows.net/post-media/probe
+# expect a 4xx (409 PublicAccessNotPermitted), never 200
+```
+
 ## Follow-ups
 
+- **`functionapp.bicep` is not keyless-compatible.** It still builds `AzureWebJobsStorage` and
+  `WEBSITE_CONTENTAZUREFILECONNECTIONSTRING` from `listKeys()` against `stpulse{env}`. With
+  `allowSharedKeyAccess: false` that key is rejected, so the Functions host could not start. This is
+  harmless while `hostingModel = 'webapi'` (no Function App deploys). Before `functions`/`both`, move it
+  to identity-based storage (`AzureWebJobsStorage__accountName` plus the Function App's identity and
+  data roles) or give it its own storage account.
 - ~~Wire the backend host's managed identity into `ai.bicep` (`backendPrincipalId`)~~ — **done**
   (engine-runtime/05): `webapp.bicep` has a system-assigned identity + `principalId` output and
   `main.bicep` threads it into `ai.bicep`, so the App Service gets `Cognitive Services OpenAI User`
