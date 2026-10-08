@@ -1,179 +1,217 @@
 # Pulse AI engine: governance brief
 
-**For:** the customer program manager reviewing Pulse's optional AI feature for CISA approval
-**From:** Dynamis (Tom Bull) · **Facts as of:** 2026-10-08 (Pulse `main` at commit `2d08edf`)
-**Scope:** only the AI engine that drafts simulated social-media posts. The rest of Pulse uses no AI.
+**For:** the customer program manager reviewing Pulse's optional AI feature for CISA approval ·
+**From:** Dynamis (Tom Bull) · **Facts as of:** 2026-10-08 (Pulse `main` at `2d08edf`; Microsoft pages
+retrieved the same day). References such as [R1] and [M1] point to the sources at the end.
 
 ## Summary
 
-Pulse has an optional AI engine that drafts simulated social-media posts for controllers to review.
-**It is not switched on in any environment today.** Every Pulse environment, including our test
-environment (UAT), runs an offline stand-in ("Fake") that produces canned text inside the Pulse server
-and makes no call to any AI service. When switched on, the engine calls Azure OpenAI in Dynamis's own
-**commercial** Azure subscription. It sends only exercise-authored scenario text, and every draft waits
-for a controller to approve it before participants can see it. Our internal sign-off to switch it on in
-UAT is still unsigned. Pulse itself has no FedRAMP authorization or ATO. The decisions your approval
-needs are listed under each concern below.
+Pulse has an optional AI engine that drafts simulated social-media posts for controllers to review. **It
+is switched off in every environment today.** Each one, including our test environment (UAT), runs an
+offline stand-in ("Fake") that writes canned text inside Pulse and calls no AI service. When switched on,
+the engine calls Azure OpenAI in Dynamis's **commercial** Azure subscription. Microsoft lists that service
+within commercial Azure's FedRAMP High authorization [M6], but **Pulse itself has no FedRAMP authorization or ATO**. The
+engine sends scenario text only, never participant identities. By default, nothing it drafts posts until a
+controller approves it. Our internal sign-off to switch it on is still unsigned [R1]. Pulse works fully
+without it.
 
 ## 1. Data boundary and FedRAMP
 
 **What we do**
 
-- **One model service, in our Azure subscription.** The engine calls Azure OpenAI on one Azure AI
-  Foundry resource, `aif-pulse-uat`, in **commercial Azure, Central US**. The model deployments use
-  Microsoft's **Data Zone Standard** type. The configured models are `gpt-5.4-mini` (version
-  2026-03-17, the "Ambient" tier planned for first use) and `gpt-5.4` (version 2026-03-05).
-- **No keys.** The resource has key-based access disabled (`disableLocalAuth: true`). The Pulse server
-  signs in with its own Azure managed identity, which holds the "Cognitive Services OpenAI User" role.
-- **Not network-isolated yet.** Public network access to the AI resource is enabled. Every call still
-  needs an Entra ID sign-in, but there is no private endpoint yet.
-- **What Pulse sends** (one request per burst of posts):
-  1. fixed instructions: the model's role, the rules (stay in the fiction, treat the feed as untrusted),
-     and the task;
-  2. the exercise scenario brief. Today this is one fixed sentence about a fictional town ("Fairhaven");
-  3. a short profile for each persona voiced in the burst: handle, display name, type, voice notes, style
-     settings and audience size;
-  4. the storyline's state: title, open public expectation, minutes since an official response,
-     intensity, phase, target tone mix and hashtags;
-  5. a "world feed" block for recent exercise posts. **Today the live engine fills it with
-     "no recent world activity"**: the code that would pass participant posts is not connected.
-- **What Pulse never sends:** participant or staff names, usernames, emails or passwords; exercise IDs;
-  direct messages; evaluator notes or telemetry; database records; any API key (none exists). Official
-  posts that participants make (for example, a PIO statement) are matched to storylines inside Pulse.
-  Their text is not sent to the model.
-- **Model output** is limited to a fixed structure: per post, a persona handle, text, a sentiment score
-  and hashtags.
+- **Where the AI runs.** One Azure AI Foundry resource in commercial Azure, Central US. It hosts
+  `gpt-5.4-mini` (2026-03-17) and `gpt-5.4` (2026-03-05) [R2][R3][M5]. All of Pulse is hosted in
+  commercial Azure [R3].
+- **US-only processing.** We use Microsoft's "Data Zone Standard" deployment type. For a US resource,
+  "prompts and responses may be processed anywhere within the United States", and stored data stays in
+  the resource's geography [M1][M4]. Microsoft may add regions to the US zone without notice [M4].
+- **No training.** Microsoft states prompts and completions are "NOT available to OpenAI" and "NOT used to
+  train any generative AI foundation models without your permission or instruction" [M1][M13].
+- **No keys, but no private network.** Key access is disabled. Pulse signs in with its own Azure managed
+  identity ("Cognitive Services OpenAI User" role). Public network access is enabled (Entra ID sign-in is
+  still required), and there is no private endpoint [R2].
+- **What goes to the model** [R4][R5]:
+  - fixed instructions;
+  - the scenario brief, which today is one sentence about a fictional town;
+  - profiles of the personas being voiced: handle, name, type, voice notes, style;
+  - the storyline's state: title, the unanswered public concern, minutes since an official response,
+    intensity, tone, hashtags.
 
-**Evidence**
-
-- Repository: `infrastructure/modules/ai.bicep` (resource, key-less setting, network setting, Data Zone
-  type, models, role assignment) and `infrastructure/parameters/uat.bicepparam` (Central US;
-  `generationProviderLive = false`).
-- Repository: `PromptAssembler.cs`, `WorldFeedFence.cs`, `AzureOpenAIGenerationProvider.cs` (exactly what
-  goes into a request) and `ReactionLoopHost.cs` (`BuildGenerateRequest` passes no world posts).
-- Microsoft documentation: see the Sources table (rows M1–M4).
-
-<!-- MS-FACTS-1 -->
+  A slot exists for recent exercise posts. **Today it is always sent as "no recent world activity"**.
+- **What never goes to the model** [R4][R5]: participant or staff names, usernames, emails or passwords;
+  exercise IDs; direct messages; evaluator data; telemetry; API keys (none exist). Pulse matches official responses (for
+  example, a PIO's post) to storylines itself, without sending them to the model.
 
 **What remains for your approval**
 
-- **Commercial Azure or Azure Government.** <!-- MS-GOV -->
-- **What scenario content may go to the model.** Today the brief and personas are fixed demo text that
-  Dynamis wrote. Once exercise designers write their own, everything in those fields goes to the model.
-  CISA should decide what classification of scenario detail is allowed there.
-- **Abuse-monitoring retention.** <!-- MS-ABUSE -->
-- **Network isolation.** Whether a private endpoint is required before use.
+- **Commercial Azure or Azure Government.**
+  - **Coverage.** Microsoft lists Azure OpenAI as FedRAMP High in commercial Azure, and as FedRAMP High
+    plus DoD IL2, IL4 and IL5 in Azure Government [M6]. The listing is per service; it does not name model
+    versions.
+  - **Azure Government's extra control.** Access to systems processing customer data is limited to
+    "screened US persons" [M7][M8].
+  - **Pulse's own authorization.** Microsoft says customers "need to achieve your own authorizations for
+    components outside these services" [M7]. That means Pulse.
+  - **If CISA requires Azure Government**, none of the following is built or estimated:
+    - host in US Gov Arizona or Virginia [M9][M10];
+    - switch models: `gpt-5.4` and `gpt-5.4-mini` are **not** on Microsoft's Azure Government list (it
+      includes gpt-5.6, gpt-5.1, gpt-4.1, gpt-4.1-mini and gpt-4o) [M9], then re-run our evaluation [R1];
+    - change Pulse's endpoint configuration, because the commercial domain is hard-coded [R3][M8];
+    - take on detecting misuse ourselves, because "not all features of Abuse Monitoring are enabled"
+      there [M10].
+- **Microsoft abuse monitoring.** If Microsoft's systems detect signs of misuse, a sample of prompts and
+  outputs may be stored in the resource's geography for review by authorized Microsoft employees [M1].
+  Microsoft's current pages state neither how long this data is kept nor where US reviewers sit. Only
+  customers "managed by a Microsoft account team or under an eligible program" can apply to opt out
+  [M2][M3]. We have not applied [R1].
+- **Scenario content.** Today the brief and personas are fixed demo text that Dynamis wrote. Once your
+  designers write their own, CISA should set what detail may go in those fields.
+- **Network.** Decide whether a private endpoint is required.
 
 ## 2. ATO and approval paperwork
 
 **What we do**
 
-- **Default off, everywhere.** The committed default is the offline Fake generator. A customer
-  environment can be deployed with no AI resource at all (`deployAi = false`). Turning on a live model
-  for production is a separate, later decision with its own sign-off.
-- **Two locks before any call leaves Pulse.** (a) Our written sign-off,
-  [`PROVIDER-GOVERNANCE.md` §8](../features/engine-runtime/PROVIDER-GOVERNANCE.md), must be signed and
-  dated by a person, and three settings must be changed together in one reviewed commit.
-  (b) At startup, Pulse refuses to run with a live model unless its configuration declares the full
-  posture: tenant-bounded, no-training, a stated residency, and a stated retention stance. This check
-  reads what a person has declared; it does not inspect Azure. Automated tests in CI cover it.
-- **Infrastructure as code.** The AI resource, identity, role and settings are defined in Bicep in the
-  repository, so a reviewer can read the exact configuration.
-
-**Evidence**
-
-- `PROVIDER-GOVERNANCE.md` §2–§3 and §8 (status: **UNSIGNED**); `GenerationGovernance.cs`;
-  `ProviderLiveConfigTests` / `AddEngineGenerationTests`.
-- Measured test run, 2026-07-18, against `aif-pulse-uat`: 10 of 10 generated bursts passed Pulse's
-  fiction and injection guard; 95th-percentile response time 1.98 s (gpt-5.4-mini) and 2.66 s (gpt-5.4)
-  ([`MEASURED-RESULTS.md`](../features/engine-generation-infra/MEASURED-RESULTS.md)). That run used a
-  developer's Azure sign-in from a test harness, not the Pulse server.
+- **Off by default.** The default everywhere, including automated tests, is the offline generator. A
+  customer environment can be deployed with no AI resource at all. A live model in production needs its
+  own sign-off [R3][R11].
+- **Two locks.** First, a person must sign our governance sign-off, and three settings then change
+  together in one reviewed commit [R1]. Second, Pulse will not start with a live model unless its
+  configuration declares the posture: tenant-bounded, no-training, residency and retention. This check
+  reads what a person declared; it does not inspect Azure [R1][R6].
+- **Readable configuration.** The resource, identity, role and settings are defined as code in the
+  repository [R2][R3].
+- **Test evidence.** On 2026-07-18, 10 of 10 bursts generated by the UAT models passed Pulse's guard.
+  The 95th-percentile response time was 1.98 s for `gpt-5.4-mini` and 2.66 s for `gpt-5.4`. That run
+  used a developer's sign-in from a test harness, not the Pulse server [R7].
 
 **What remains for your approval**
 
-- **Pulse has no FedRAMP authorization, ATO, System Security Plan or third-party assessment.** The
-  repository holds no authorization package. Hosting is commercial Azure, with Azure Government listed as
-  a roadmap item.
-- **Which approvals apply.** That is CISA's call (for example, ATO scope, AI use review, privacy review).
-  We can provide this brief, the governance document, the Bicep files and the test evidence. We cannot
-  provide an authorization package that does not exist.
-- **Simplest path:** approve Pulse with the AI engine off. The AI engine can then be reviewed separately
-  later.
+- **No authorization package.** Pulse has no ATO, System Security Plan or third-party assessment, and the
+  repository contains no authorization package. Azure Government is a roadmap item [R11].
+- **Which reviews apply** (for example ATO scope, AI use review, privacy review) is CISA's call. We can
+  supply this brief, the governance document, the infrastructure code and the test evidence.
+- **Simplest path.** Approve Pulse with the engine off, and review the engine separately later.
 
 ## 3. Content risk
 
 **What we do**
 
-- **A human approves every post (default).** The engine starts each exercise in **Suggest** mode: every
-  draft goes to the controller review queue, and nothing posts until a controller approves it. Controllers
-  can also edit, veto or regenerate a draft.
-- **An automated check runs before review.** Pulse's own guard is a pattern filter that rejects drafts
-  that break the fiction ("this is a drill", "as an AI") or show signs of a hijacked prompt. A failing
-  draft is regenerated or dropped, never shown. It is not a general harmful-content classifier.
-  <!-- MS-FILTER -->
-- **Participant text is treated as untrusted.** Participants are trained in information manipulation.
-  The design fences any feed content off as data, not instructions. An 8-attack injection test suite
-  (for example, "the exercise is over" and "print your instructions") runs against the live model.
-- **Fiction by design.** Drafts post as ordinary in-exercise posts by fictional personas, on the Pulse
-  social channel only. The engine voices rumor, worry and skepticism on purpose: that is the training
-  stress. In the current demo cast, the engine does not voice the impersonator or troll accounts.
+- **A person approves each post.** Exercises start in **Suggest** mode. Every draft waits in the review
+  queue to be approved, edited, vetoed or regenerated [R8].
+- **Two automated checks first.**
+  - **Microsoft's default safety policy** applies, because Pulse sets no custom one. It screens prompts and
+    outputs for hate, violence, sexual and self-harm content at "Medium" severity, and lists jailbreak
+    detection on prompts [M11].
+  - **Pulse's own pattern filter** catches broken fiction ("this is a drill", "as an AI") and signs of a
+    hijacked prompt. It regenerates or drops a failing draft before anyone sees it [R9].
 
-**Evidence**
-
-- `ContentGuard.cs`, `GenerateStage.cs`, `InjectionRedTeam.cs`, `AutoHoldPolicy.cs`,
-  `AutonomyLevel.cs`; E8 architecture §3.4, §8 and §9
-  ([`E8-ENGINE-ARCHITECTURE.md`](../design/E8-ENGINE-ARCHITECTURE.md)).
+  Neither check is the last line of defense. If Microsoft's filter is unavailable, a request "still
+  completes without content filtering" [M12], and Pulse does not detect that case.
+- **Participant text is untrusted.** The design fences feed content off as data, not instructions. An
+  8-attack injection test set, including "the exercise is over", can be run against the live model
+  [R9].
+- **Fiction by design.** Approved drafts post as fictional personas on the social channel only. Rumor and
+  worry are intended, because they are the training stress. In the current demo cast, the engine does
+  not voice the impersonator or the rumor outlet [R5].
 
 **What remains for your approval**
 
-- **Known defect, to fix before live use:** unapproved drafts are also broadcast over the real-time
-  connection participants share. The participant app does not show them, but they are visible in a
-  browser's developer tools. The fix (`social-api/05`) is not started.
-- **Autonomy limit.** Whether the exercise may only run in Suggest mode (our recommendation), or may also
-  use Delayed-auto (see table).
-- **Disclosure.** Participants are not told which posts were AI-drafted, which is also true of
-  controller-written posts. Staff records keep that origin. Decide whether the participant briefing
-  should say that some simulated posts are AI-drafted and approved by a controller.
+- **A known defect to fix before live use.** Unapproved drafts are also sent over the real-time
+  connection participants share. The app does not show them, but browser developer tools do. The fix is
+  not started [R10].
+- **Autonomy.** Allow Suggest only (our recommendation), or also Delayed-auto.
+- **Disclosure.** Participants cannot tell AI-drafted posts from controller-written ones; staff records
+  can. Decide whether the participant briefing should say so.
 
 ## Human control model
 
-| Control | Who | What it does | Status |
+| Control | Who | Effect | Status [R8] |
 |---|---|---|---|
-| **Suggest** (default) | Starts here | Every draft waits for a controller; nothing posts without approval | Built |
+| **Suggest** (default) | Starts here | Nothing posts without a controller's approval | Built |
 | Approve / edit / veto / regenerate | Controller | One decision per burst | Built |
-| Delayed-auto (optional) | Controller turns on | A countdown runs. If no one decides, the draft is **held, not posted** | Built; UAT check pending |
-| Swamped mode (optional) | Controller turns on | The only way an undecided draft posts when its countdown ends (Delayed-auto only) | Built |
-| Auto | — | **Not selectable in this version**; the code rejects it | Not available |
-| Kill switch | Controller | Instantly drops the engine to Suggest or stops it; only a controller can restore it | Built |
-| Cut to Fake | Controller | Switches that exercise to the offline generator with no restart. Restore can only return to the provider approved at startup | Built; untested live (no live AI yet) |
-| Automatic fallback | System | On an outage, or a call slower than 10 s, drops to Suggest. Automation never raises autonomy | Built |
+| Delayed-auto | Controller opts in | A countdown runs; if nobody decides, the draft is **held, not posted** | Built; UAT check pending |
+| Swamped mode | Controller opts in | The only way an undecided draft posts when its countdown ends | Built |
+| Auto | n/a | **Cannot be selected in this version** | Not available |
+| Kill switch | Controller | Drops to Suggest or stops at once; only a controller can lift it | Built |
+| Cut to Fake | Controller | Switches the exercise to the offline generator with no restart; restore returns only to the approved model | Built; untested with a live model |
+| Automatic fallback | System | Drops to Suggest when at least half of 10 or more calls fail or take over 10 s; never raises autonomy | Built |
 
-Only controllers assigned to the exercise can use these controls; evaluators can watch but not change
-them. Review decisions, settings changes and Cut to Fake/restore are recorded with the acting person.
-Kill-switch and swamped-mode changes are not yet written to that record.
+Only controllers assigned to the exercise can use these controls. Review decisions, settings changes and
+cut/restore are logged with the acting person.
 
 ## With AI off
 
-Pulse does not need the AI engine. With it off, there is no network call to any AI service. Controllers
-post as any persona by hand, and participants use the same social feed either way. The engine's controls
-then drive only the offline Fake generator, or the engine can be stopped completely.
+Pulse does not need the engine. With it off, Pulse makes no AI calls. Controllers post as any persona by
+hand, and participants use the same feed. The engine can run on the offline generator or be stopped
+[R3][R8][R10].
 
-## Open items
+## Open items (beyond those above)
 
-1. Sign-off §8 is unsigned. No live AI traffic has come from the Pulse server in any environment.
-2. The Azure-side checks for the managed identity's role, the disabled keys and the region have not been
-   recorded after deployment (the commands are in §8).
-3. Model versions are not pinned (`OnceNewDefaultVersionAvailable`), so the 2026-07-18 results apply
-   only to the versions tested. Pin them before approval.
-4. No private endpoint. Public network access is enabled, with Entra ID sign-in required.
-5. Retention is "Retained". Zero data retention needs Microsoft's approval, which has not been
-   requested.
-6. The draft-broadcast defect (section 3).
-7. Kill-switch and swamped-mode changes are not yet in the audit record.
-8. The repository keeps no per-attack log of the live injection test run.
-9. Azure Government: not built, deployed or tested. The endpoint domain is hard-coded to commercial
-   Azure.
+1. The Pulse server has never sent live AI traffic, because the sign-off is unsigned [R1][R11].
+2. The repository has no record of the post-deployment Azure check that keys are off, the role is
+   assigned and the region is correct ([R1] §8).
+3. Model versions can auto-upgrade, so the July results apply only to the versions tested. Pin them
+   before approval [R1][R2].
+4. Kill-switch and swamped-mode changes are not logged yet. Settings and cut/restore log entries are
+   best-effort: if the write fails, the change still applies [R8].
+5. No per-attack log of the live injection test run is kept [R7].
+
+---
 
 ## Sources
 
-<!-- SOURCES -->
+**Pulse repository** (`dynamisinc/pulse`, `main` at `2d08edf`)
+
+| Ref | Source |
+|---|---|
+| R1 | `docs/features/engine-runtime/PROVIDER-GOVERNANCE.md` (§2 contract, §3 startup gate, §6 re-run triggers, §8 sign-off: **UNSIGNED**) |
+| R2 | `infrastructure/modules/ai.bicep` (`disableLocalAuth: true`, `publicNetworkAccess: 'Enabled'`, `DataZoneStandard`, models and versions, `versionUpgradeOption`, role assignment) |
+| R3 | `infrastructure/parameters/uat.bicepparam` (`location = 'centralus'`, `deployAi = true`, `generationProviderLive = false`); `infrastructure/main.bicep` (Fake unless both toggles are set; commercial endpoint domain) |
+| R4 | `src/Pulse.Core/Features/Generation/Services/PromptAssembler.cs`, `WorldFeedFence.cs`, `AzureOpenAIGenerationProvider.cs` |
+| R5 | `src/Pulse.WebApi/Features/EngineRuntime/ReactionLoopHost.cs` (`BuildGenerateRequest` passes no world posts; official posts matched locally); `Ops/EngineContentSeed/EngineContentSeedService.cs`, `PersonaCastSeeder.cs` |
+| R6 | `src/Pulse.Core/Features/Generation/Services/GenerationGovernance.cs`; `ProviderLiveConfigTests`, `AddEngineGenerationTests` |
+| R7 | `docs/features/engine-generation-infra/MEASURED-RESULTS.md` (run of 2026-07-18) |
+| R8 | `AutonomyLevel.cs`, `AutoHoldPolicy.cs`, `EngineReviewService.cs`, `EngineCockpitControllerRoleFilter.cs`; `docs/features/autonomy-safety/03-kill-switch.md`, `07-cut-to-fake-provider.md` (#402); `engine-generation-infra/05-degraded-mode-fallback.md` |
+| R9 | `ContentGuard.cs`, `GenerateStage.cs`, `InjectionRedTeam.cs`, `LiveInjectionRedTeamTests.cs`; `docs/design/E8-ENGINE-ARCHITECTURE.md` §3.4, §8, §9 |
+| R10 | `docs/demo/PARTICIPANT-FIRST-DEMO-PLAN.md` (scorecard); `docs/features/social-api/05-realtime-role-scoped-groups.md` (Not Started); `EngineReviewBroadcaster.cs` |
+| R11 | `docs/00-MASTER-PRD.md` NFR-005, NFR-006; `docs/features/engine-runtime/05-live-provider-uat-golive.md` (no live traffic yet; production out of scope) |
+
+**Microsoft documentation** (all retrieved 2026-10-08; "page date" is the page's own `ms.date`)
+
+| Ref | Page | Page date |
+|---|---|---|
+| M1 | [Data, privacy, and security for Models sold by Azure](https://learn.microsoft.com/en-us/azure/foundry/responsible-ai/openai/data-privacy) | 2026-05-18 |
+| M2 | [Abuse monitoring](https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/abuse-monitoring) | 2026-05-13 |
+| M3 | [Limited access](https://learn.microsoft.com/en-us/azure/foundry/responsible-ai/openai/limited-access) | 2023-11-03 |
+| M4 | [Deployment types](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types) | 2026-08-06 |
+| M5 | [Model region availability](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure-region-availability) (gpt-5.4 and gpt-5.4-mini under Data Zone Standard in centralus) | 2026-09-03 |
+| M6 | [Azure services in FedRAMP and DoD audit scope](https://learn.microsoft.com/en-us/azure/azure-government/compliance/azure-services-in-fedramp-auditscope) | 2026-09-21 |
+| M7 | [FedRAMP compliance offering](https://learn.microsoft.com/en-us/azure/compliance/offerings/offering-fedramp) | 2023-04-04 |
+| M8 | [Compare Azure Government and global Azure](https://learn.microsoft.com/en-us/azure/azure-government/compare-azure-government-global-azure) | 2025-08-21 |
+| M9 | [Models sold by Azure in Azure Government](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure-gov) | 2026-09-01 |
+| M10 | [Deployment types in Azure Government](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types-gov) | 2026-04-03 |
+| M11 | [Default Guardrail policies for Azure OpenAI](https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/default-safety-policies) | 2026-05-31 |
+| M12 | [Content filtering (classic)](https://learn.microsoft.com/en-us/azure/foundry-classic/foundry-models/concepts/content-filter) | 2026-08-04 |
+| M13 | [Microsoft Product Terms, Universal License Terms for Online Services](https://www.microsoft.com/licensing/terms/product/ForOnlineServices/EAEAS) | none shown |
+
+## Not verified
+
+These items are deliberately not stated as fact in this brief:
+
+- **How long Microsoft keeps abuse-monitoring data.** The current pages [M1][M2] give no period. Older
+  guidance cited 30 days; it is not repeated here.
+- **Where Microsoft's human reviewers sit for US commercial deployments, and whether they are US
+  persons.** [M1] specifies location only for the European Economic Area.
+- **Whether FedRAMP High coverage is stated for specific models** (gpt-5.4, gpt-5.4-mini) or deployment
+  types. [M6] lists services only.
+- **The current FedRAMP Marketplace listing.** fedramp.gov was not checked. Microsoft's pages still refer
+  to a JAB-issued P-ATO.
+- **Azure Government onboarding and eligibility**, and whether the abuse-monitoring opt-out exists there.
+- **Whether Microsoft's jailbreak detection blocks a request or only flags it by default.** [M11] lists
+  it; Microsoft's classic content-filter page [M12] calls it optional.
+- **The live Azure state of `aif-pulse-uat`:** role assignment, disabled keys, region and current model
+  versions. There was no Azure access from the session that wrote this brief (see Open item 2).
+- **Per-attack results of the live injection test** (Open item 5).
+- **Whether any Dynamis-level security documents** (for example, from COBRA) apply to Pulse. Tom to
+  confirm.
