@@ -1,6 +1,6 @@
 # Story: Explore — trending, search, hashtag polish
 
-**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** SOC-040, SOC-041 (client-side, organic), SOC-042, SOC-082 (lite), SOC-052, NFR-001  ·  **Design decisions:** D1-R1, D1-008 (the platform never flags a lookalike)  ·  **Issue:** #434
 **Story ID:** F6  ·  **Stack:** frontend  ·  **Priority:** Should  ·  **Effort:** M  ·  **Wave:** 2  ·  **Cut line 2:** search is cut before trending
 **Home stories:** [`hashtags-trending/02`](../hashtags-trending/02-organic-trending.md) (lite), [`feeds-discovery/03`](../feeds-discovery/03-search.md) (lite).
