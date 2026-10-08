@@ -85,8 +85,11 @@ The review gates are **structurally independent** of the builder — a different
 so independence is cheap (no human queue). Two review tiers:
 
 - **Tier 1 — structural independence (always).** The `code-review` agent (Gates 1 & 2 below) plus
-  **GitHub Copilot on the umbrella→`main` PR**. Both are independent of the builder agent; fold their
-  findings before merge.
+  **GitHub Copilot on every PR**: request a Copilot review as soon as any PR opens (umbrella → `main`,
+  a direct fix, or docs). Use the GitHub MCP `request_copilot_review`, or add Copilot as a reviewer in
+  the UI. Request it again after a push that changes code substantially. Both are independent of the
+  builder agent; fold their findings before merge, either by fixing them or by replying on the thread
+  with why not.
 - **Tier 2 — human sign-off (Critical classes only).** A second person, reserved for isolation-scope
   breaks, security, and schema/contract changes. Everything else ships on Tier 1.
 
@@ -225,4 +228,4 @@ the relevant `design/D1..D7` brief for a participant surface.
 | `backend-agent` | The builder for a `backend`/`fullstack` story (`Pulse.Core`); same "strictly to ACs" contract, `dotnet build + dotnet test` gate. |
 | `testing-agent` | Covers the ACs (Vitest / xUnit); isolation / scenario-time / telemetry / sanitization first. |
 | `code-review` | The Tier-1 gate — read-only, adversarial; emits the `{clean, findings}` verdict for Gates 1 & 2. |
-| GitHub Copilot | Tier-1 independent reviewer on the umbrella→`main` PR; fold its findings before merge (`fix(...): address Copilot PR review`). |
+| GitHub Copilot | Tier-1 independent reviewer on **every** PR (requested when the PR opens); fold its findings before merge (`fix(...): address Copilot PR review`). |

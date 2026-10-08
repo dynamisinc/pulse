@@ -415,7 +415,7 @@ This follows [`ORCHESTRATION_MECHANICS.md`](../ORCHESTRATION_MECHANICS.md) and c
 
 1. **Short-lived wave umbrellas, not per-feature umbrellas.**
    - Each wave gets `feature/demo-w<N>-<track>`, cut from the latest `origin/main` and merged back
-     **within 1–2 days** through one PR (Gate 0 CI + Copilot + Gate 2).
+     **within 1–2 days** through one PR (Gate 0 CI + Copilot, requested on every PR as it opens, + Gate 2).
    - Builders branch `build/demo-polish/<ID>-<slug>` off the wave umbrella, one worktree each.
    - Why: the live plan warns against long umbrellas this close to a demo, and the #373 landedness
      miss is the reason. Short umbrellas keep the orchestrator's isolation and gates and still land daily.
