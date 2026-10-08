@@ -197,6 +197,8 @@ describe('uploadVideoWithPoster — poster first, then the video with posterMedi
     poster: new Blob(['jpeg'], { type: 'image/jpeg' }),
     width: 640,
     height: 360,
+    posterWidth: 640,
+    posterHeight: 360,
     durationSec: 4,
   }
 
@@ -224,6 +226,27 @@ describe('uploadVideoWithPoster — poster first, then the video with posterMedi
     // The poster is a registered image, hidden from the library; the video is listed.
     expect(listMockMedia('image').some(item => item.url === 'blob:mock-1')).toBe(false)
     expect(listMockMedia('video').some(item => item.id === video.id)).toBe(true)
+  })
+
+  it('gives the video the SOURCE size and duration when the poster was downscaled', async () => {
+    captureMock.mockResolvedValue({
+      ...captured,
+      width: 3840,
+      height: 2160,
+      posterWidth: 1280,
+      posterHeight: 720,
+      durationSec: 12.5,
+    })
+
+    const promise = uploadVideoWithPoster(videoFile())
+    await vi.advanceTimersByTimeAsync(TOTAL_MS * 2)
+
+    expect(await promise).toMatchObject({
+      kind: 'video',
+      width: 3840,
+      height: 2160,
+      durationSec: 12.5,
+    })
   })
 
   it('reports monotonic progress across both uploads, ending at 1', async () => {
@@ -303,6 +326,43 @@ describe('uploadPickedMedia — the composer entry point', () => {
     expect(await promise).toMatchObject({ kind: 'image', width: 1200, height: 800 })
   })
 
+  it('hands the upload abort signal to the image size read', async () => {
+    readSizeMock.mockResolvedValue({ width: 1200, height: 800 })
+    const controller = new AbortController()
+    const file = imageFile()
+
+    const promise = uploadPickedMedia(file, { signal: controller.signal })
+    await vi.advanceTimersByTimeAsync(TOTAL_MS)
+    await promise
+
+    expect(readSizeMock).toHaveBeenCalledWith(file, { signal: controller.signal })
+  })
+
+  it('passes no signal option to the size read when the upload has none', async () => {
+    readSizeMock.mockResolvedValue({ width: 1200, height: 800 })
+    const file = imageFile()
+
+    const promise = uploadPickedMedia(file)
+    await vi.advanceTimersByTimeAsync(TOTAL_MS)
+    await promise
+
+    expect(readSizeMock).toHaveBeenCalledWith(file, {})
+  })
+
+  it('rejects with an AbortError and uploads nothing when cancelled during the size read', async () => {
+    const controller = new AbortController()
+    readSizeMock.mockImplementation(async () => {
+      controller.abort()
+      throw new DOMException('The upload was cancelled.', 'AbortError')
+    })
+
+    await expect(uploadPickedMedia(imageFile(), { signal: controller.signal })).rejects.toSatisfy(
+      isAbortError,
+    )
+    expect(createObjectURL).not.toHaveBeenCalled()
+    expect(listMockMedia().some(item => item.fileName === 'flood.png')).toBe(false)
+  })
+
   it('still uploads an image whose size could not be read', async () => {
     readSizeMock.mockRejectedValue(new Error('undecodable'))
 
@@ -319,6 +379,8 @@ describe('uploadPickedMedia — the composer entry point', () => {
       poster: new Blob(['jpeg'], { type: 'image/jpeg' }),
       width: 640,
       height: 360,
+      posterWidth: 640,
+      posterHeight: 360,
       durationSec: 4,
     })
 

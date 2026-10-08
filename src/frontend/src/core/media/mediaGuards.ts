@@ -8,15 +8,19 @@
  * asset is.
  *
  * They FAIL CLOSED on a malformed required member (no id / kind / url, a
- * wrong-typed optional), but treat `null` on an OPTIONAL member (`posterUrl`,
- * `width`, `height`, `durationSec`) as ABSENT — one backend member that forgot
- * `JsonIgnoreCondition.WhenWritingNull` must not fail-close a whole upload or the
- * whole library. The parsed result is REBUILT from the contract keys, so a null
- * (or any stray server-side key) never reaches a consumer.
+ * wrong-typed optional) and on a PRESENT optional number outside the frozen
+ * contract's range: `width`/`height` are integers 1..{@link MEDIA_MAX_DIMENSION},
+ * `durationSec` is a double (fractional seconds are valid) with
+ * 0 < x <= {@link MEDIA_MAX_DURATION_SEC}. They treat `null` on an OPTIONAL member
+ * (`posterUrl`, `width`, `height`, `durationSec`) as ABSENT — one backend member
+ * that forgot `JsonIgnoreCondition.WhenWritingNull` must not fail-close a whole
+ * upload or the whole library. The parsed result is REBUILT from the contract
+ * keys, so a null (or any stray server-side key) never reaches a consumer.
  *
  * World-neutral (`core/`): pure functions, no React, no theme.
  */
 
+import { MEDIA_MAX_DIMENSION, MEDIA_MAX_DURATION_SEC } from './mediaErrors'
 import type { MediaAssetView, StaffMediaAssetView } from './types'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -27,8 +31,26 @@ function isAbsent(value: unknown): boolean {
   return value === undefined || value === null
 }
 
-function isOptionalNumber(value: unknown): value is number | undefined | null {
-  return isAbsent(value) || (typeof value === 'number' && Number.isFinite(value))
+/** Absent, or an integer pixel size in 1..{@link MEDIA_MAX_DIMENSION}. */
+function isOptionalDimension(value: unknown): value is number | undefined | null {
+  return (
+    isAbsent(value) ||
+    (typeof value === 'number' &&
+      Number.isInteger(value) &&
+      value >= 1 &&
+      value <= MEDIA_MAX_DIMENSION)
+  )
+}
+
+/** Absent, or seconds with 0 < x <= {@link MEDIA_MAX_DURATION_SEC} (fractions allowed). */
+function isOptionalDuration(value: unknown): value is number | undefined | null {
+  return (
+    isAbsent(value) ||
+    (typeof value === 'number' &&
+      Number.isFinite(value) &&
+      value > 0 &&
+      value <= MEDIA_MAX_DURATION_SEC)
+  )
 }
 
 /** The `MediaAssetView` in `value`, rebuilt from its contract keys, or `undefined`. */
@@ -40,9 +62,8 @@ export function parseMediaAssetView(value: unknown): MediaAssetView | undefined 
   if (kind !== 'image' && kind !== 'video') return undefined
   if (typeof url !== 'string' || url.length === 0) return undefined
   if (!isAbsent(posterUrl) && typeof posterUrl !== 'string') return undefined
-  if (!isOptionalNumber(width) || !isOptionalNumber(height) || !isOptionalNumber(durationSec)) {
-    return undefined
-  }
+  if (!isOptionalDimension(width) || !isOptionalDimension(height)) return undefined
+  if (!isOptionalDuration(durationSec)) return undefined
 
   return {
     id,

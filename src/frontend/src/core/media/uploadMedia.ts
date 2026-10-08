@@ -310,9 +310,11 @@ export async function uploadVideoWithPoster(
   const posterFile = new File([captured.poster], `${stripExtension(file.name)}.poster.jpg`, {
     type: 'image/jpeg',
   })
+  // The POSTER's own size (it may be downscaled), never the video's: the server
+  // records the hint against the stored image.
   const poster = await uploadMedia(posterFile, {
-    width: captured.width,
-    height: captured.height,
+    width: captured.posterWidth,
+    height: captured.posterHeight,
     onProgress: fraction => report(fraction * POSTER_PROGRESS_SHARE),
     ...(signal ? { signal } : {}),
   })
@@ -330,7 +332,8 @@ export async function uploadVideoWithPoster(
 /**
  * The composer entry point: picks the flow for the picked file's kind. An image
  * has its natural size read first (best-effort — an undecodable image is still
- * uploaded, the server is the real gate); a video goes through
+ * uploaded, the server is the real gate; the read honours the upload's abort
+ * signal, so a cancelled upload releases its decode at once); a video goes through
  * {@link uploadVideoWithPoster}.
  */
 export async function uploadPickedMedia(
@@ -344,7 +347,10 @@ export async function uploadPickedMedia(
 
   let size: { width: number; height: number } | undefined
   try {
-    size = await readImageSize(file)
+    size = await readImageSize(
+      file,
+      handlers.signal !== undefined ? { signal: handlers.signal } : {},
+    )
   } catch {
     size = undefined
   }

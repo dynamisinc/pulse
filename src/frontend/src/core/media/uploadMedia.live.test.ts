@@ -19,13 +19,15 @@ import { MEDIA_LIBRARY_QUERY_KEY } from './mediaLibraryKey'
 import { isAbortError, MEDIA_ERROR_TEXT, MediaUploadError } from './mediaErrors'
 
 const postMock = vi.hoisted(() => vi.fn())
+const captureMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/core/config/mockData', () => ({ USE_MOCK_DATA: false }))
 vi.mock('@/core/services/api', () => ({
   api: { post: postMock },
 }))
+vi.mock('./captureVideoPoster', () => ({ captureVideoPoster: captureMock }))
 
-import { uploadMedia } from './uploadMedia'
+import { uploadMedia, uploadVideoWithPoster } from './uploadMedia'
 
 interface PostConfig {
   headers?: Record<string, string>
@@ -52,6 +54,7 @@ function httpError(status: number): Error {
 }
 
 beforeEach(() => {
+  captureMock.mockReset()
   postMock.mockReset()
   postMock.mockResolvedValue({ data: ASSET })
 })
@@ -159,6 +162,18 @@ describe('uploadMedia (live) — result and library freshness', () => {
     })
   })
 
+  it.each([
+    ['width 0', { width: 0 }],
+    ['height 16385', { height: 16385 }],
+    ['a fractional width', { width: 1.5 }],
+    ['durationSec 0', { durationSec: 0 }],
+    ['durationSec 3600.1', { durationSec: 3600.1 }],
+  ])('fails closed on an out-of-contract numeric member (%s)', async (_label, patch) => {
+    postMock.mockResolvedValueOnce({ data: { ...ASSET, ...patch } })
+
+    await expect(uploadMedia(png())).rejects.toThrow(MEDIA_ERROR_TEXT.failed)
+  })
+
   it('still fails closed on a wrong-typed optional member', async () => {
     postMock.mockResolvedValueOnce({ data: { ...ASSET, width: 'wide' } })
 
@@ -230,5 +245,40 @@ describe('uploadMedia (live) — failures are mapped and never swallowed', () =>
     postMock.mockRejectedValueOnce(Object.assign(new Error('canceled'), { name: 'CanceledError' }))
 
     await expect(uploadMedia(png())).rejects.toSatisfy(isAbortError)
+  })
+})
+
+describe('uploadVideoWithPoster (live) — each upload carries ITS OWN size hints', () => {
+  const clip = new File([new Uint8Array([1])], 'big.mp4', { type: 'video/mp4' })
+
+  it('sends the downscaled POSTER size on the poster and the SOURCE size on the video', async () => {
+    captureMock.mockResolvedValue({
+      poster: new Blob(['jpeg'], { type: 'image/jpeg' }),
+      width: 3840,
+      height: 2160,
+      posterWidth: 1280,
+      posterHeight: 720,
+      durationSec: 12.5,
+    })
+    postMock
+      .mockResolvedValueOnce({ data: { ...ASSET, id: 'poster-1' } })
+      .mockResolvedValueOnce({ data: { ...ASSET, kind: 'video', id: 'video-1' } })
+
+    await uploadVideoWithPoster(clip)
+
+    expect(postMock).toHaveBeenCalledTimes(2)
+    const posterForm = postMock.mock.calls[0]?.[1] as FormData
+    const videoForm = postMock.mock.calls[1]?.[1] as FormData
+
+    expect(posterForm.get('kind')).toBe('image')
+    expect(posterForm.get('width')).toBe('1280')
+    expect(posterForm.get('height')).toBe('720')
+    expect(posterForm.has('durationSec')).toBe(false)
+
+    expect(videoForm.get('kind')).toBe('video')
+    expect(videoForm.get('width')).toBe('3840')
+    expect(videoForm.get('height')).toBe('2160')
+    expect(videoForm.get('durationSec')).toBe('12.5')
+    expect(videoForm.get('posterMediaId')).toBe('poster-1')
   })
 })
