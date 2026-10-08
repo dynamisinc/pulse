@@ -29,7 +29,7 @@ export {
 export type { MediaValidationResult } from './validateMediaFile'
 
 export { readImageSize } from './readImageSize'
-export type { ImageSize } from './readImageSize'
+export type { ImageSize, ReadImageSizeOptions } from './readImageSize'
 
 export { captureVideoPoster, POSTER_CAPTURE_TIMEOUT_MS } from './captureVideoPoster'
 export type { CapturedVideoPoster, CaptureVideoPosterOptions } from './captureVideoPoster'

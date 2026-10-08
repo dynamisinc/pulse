@@ -24,9 +24,15 @@
  *  - Repost is wired when the session can amplify (`useAmplify().canAmplify`); the
  *    SEPARATE Quote trigger next to it opens an inline `QuoteComposer` panel. Quote
  *    deliberately carries NO `data-action`, so the reply/repost/like(/share)
- *    canonical set (R-002) and every `button[data-action]` assertion are unaffected.
- *  - `onReply` is an optional prop: omit it and the reply button is an
- *    inert-until-wired `<button>`. Never wired in `readOnly`.
+ *    canonical set (R-002) is unaffected.
+ *  - NO FOCUSABLE NO-OPS. An action with nothing wired to it renders as the same
+ *    INERT markup the read-only variant uses (a `data-action` span: icon, count,
+ *    visually-hidden label) — never a `<button>` with an actionable name and no
+ *    `onClick`, which would be a keyboard/screen-reader dead control. (The same rule
+ *    `PostBody` applies to unwired hashtags.) That is: `onReply` is an optional prop
+ *    and without it Reply is inert; `share` has no handler at all and is always
+ *    inert; like/repost are inert when the session cannot react/amplify. The
+ *    `data-action` attribute stays on the inert span so selectors still find it.
  *  - `variant === 'readOnly'` (COR-015/D1-011, observer sessions): the interactive
  *    controls are ABSENT — not disabled — and the counts render as inert text with
  *    a visually-hidden label.
@@ -36,7 +42,8 @@
  * fail-closed, there is no default session).
  *
  * DOM hooks (tests depend on them): `data-testid="post-actions"`,
- * `button[data-action="reply|repost|like|share"]`, `data-testid="post-quote-trigger"`,
+ * `[data-action="reply|repost|like|share"]` (a `button` when wired, an inert `span`
+ * when not or when read-only), `data-testid="post-quote-trigger"`,
  * `data-testid="quote-composer"` (the panel).
  *
  * Participant world — plain elements, FontAwesome icons, `PostActions.module.css`.
@@ -105,7 +112,8 @@ export function PostActions({ post, variant, onReply }: PostActionsProps) {
 
   /**
    * The reply/like/repost action-row `onClick`s: the optional-prop, inert-until-
-   * wired contract. `share` has no handler — always `undefined`.
+   * wired contract. `share` has no handler — always `undefined`. An action whose
+   * handler is `undefined` is rendered INERT (not a button): see the module header.
    */
   const actionClickHandler = (key: ActionSpec['key']): (() => void) | undefined => {
     if (key === 'reply') return onReply ? () => onReply(post.id) : undefined
@@ -130,10 +138,13 @@ export function PostActions({ post, variant, onReply }: PostActionsProps) {
           const label = isLiked
             ? `${action.label}, ${action.count}, liked`
             : `${action.label}, ${action.count}`
+          const onClick = actionClickHandler(action.key)
+          // Read-only, or nothing wired: never a focusable control that does nothing.
+          const isInert = isReadOnly || onClick === undefined
 
           return (
             <Fragment key={action.key}>
-              {isReadOnly ? (
+              {isInert ? (
                 <span className={styles.actionInert} data-action={action.key}>
                   <FontAwesomeIcon
                     icon={action.icon}
@@ -150,7 +161,7 @@ export function PostActions({ post, variant, onReply }: PostActionsProps) {
                   data-action={action.key}
                   aria-label={label}
                   aria-pressed={pressed}
-                  onClick={actionClickHandler(action.key)}
+                  onClick={onClick}
                 >
                   <FontAwesomeIcon
                     icon={action.icon}
