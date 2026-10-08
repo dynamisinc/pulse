@@ -469,4 +469,74 @@ public class ReactionEndpointTests
         (await ReadEventsAsync(_fixture, world.Exercise, "repost")).Should().HaveCount(2).And.OnlyContain(
             e => e.ScenarioTime == postScenarioTime, "the events carry the clamped scenario time too");
     }
+
+    [RequiresDockerFact]
+    public async Task React_ARunningClockEarlierThanThePost_IsAuthoritative_NotClampedToThePost()
+    {
+        // The post's CreatedScenarioTime can be client-supplied this phase, so a post stamped AHEAD of the running
+        // clock must not drag reaction times forward: a running clock wins as-is (M-1). Only fallbacks are clamped.
+        var postScenarioTime = new DateTimeOffset(2033, 9, 4, 15, 0, 0, TimeSpan.Zero);
+        var world = await SeedWorldAsync(_fixture, postScenarioTime: postScenarioTime);
+
+        await using var host = CreateHost(_fixture);
+        var clock = host.Services.GetRequiredService<IExerciseClock>();
+        clock.Start(world.Exercise, new DateTimeOffset(2033, 9, 4, 12, 0, 0, TimeSpan.Zero), TimeZoneInfo.Utc);
+        clock.Freeze(world.Exercise);
+        var clockTime = clock.CurrentScenarioTime(world.Exercise)!.Value;
+        clockTime.Should().BeBefore(postScenarioTime, "this test needs a running clock EARLIER than the post");
+
+        using var client = host.CreateClientFor(world.Host, world.Token);
+
+        (await client.PutAsync(ReactionUri(world.Post, "like"), content: null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.DeleteAsync(ReactionUri(world.Post, "like"))).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var row = (await ReadReactionsAsync(_fixture, world.Post)).Should().ContainSingle().Subject;
+        row.CreatedScenarioTime.Should().Be(clockTime, "a running clock is authoritative, not clamped to the post");
+        row.DeletedAt.Should().Be(clockTime, "the un-like carries the clock's value too, not the post's");
+
+        (await ReadEventsAsync(_fixture, world.Exercise, "reaction")).Should().HaveCount(2).And.OnlyContain(
+            e => e.ScenarioTime == clockTime, "the events carry the clock's value, not the post's");
+    }
+
+    [RequiresDockerFact]
+    public async Task Unlike_AfterTheRunningClockIsGone_NeverPrecedesTheLikesOwnScenarioTime()
+    {
+        // Like at running-clock post+30m; the host restarts (the in-memory clock is gone); the un-like's fallback
+        // would be the post's own time, i.e. BEFORE the like. The history must never show an un-like before its like
+        // (L-1): the un-like is floored at the active row's own CreatedScenarioTime.
+        var postScenarioTime = new DateTimeOffset(2033, 9, 4, 10, 0, 0, TimeSpan.Zero);
+        var world = await SeedWorldAsync(_fixture, postScenarioTime: postScenarioTime);
+        world.ScenarioTime.Should().BeBefore(postScenarioTime, "the stored fallback must lose to the post's own time here");
+
+        DateTimeOffset likeTime;
+        await using (var firstHost = CreateHost(_fixture))
+        {
+            var clock = firstHost.Services.GetRequiredService<IExerciseClock>();
+            clock.Start(world.Exercise, postScenarioTime.AddMinutes(30), TimeZoneInfo.Utc);
+            clock.Freeze(world.Exercise);
+            likeTime = clock.CurrentScenarioTime(world.Exercise)!.Value;
+
+            using var client = firstHost.CreateClientFor(world.Host, world.Token);
+            (await client.PutAsync(ReactionUri(world.Post, "like"), content: null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        await using (var restartedHost = CreateHost(_fixture))
+        {
+            restartedHost.Services.GetRequiredService<IExerciseClock>().CurrentScenarioTime(world.Exercise).Should().BeNull(
+                "the restarted host has lost the in-memory clock");
+
+            using var client = restartedHost.CreateClientFor(world.Host, world.Token);
+            (await client.DeleteAsync(ReactionUri(world.Post, "like"))).StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        var row = (await ReadReactionsAsync(_fixture, world.Post)).Should().ContainSingle().Subject;
+        row.CreatedScenarioTime.Should().Be(likeTime);
+        row.DeletedAt.Should().Be(
+            likeTime, "the un-like is floored at the like's own scenario instant, not the post's earlier one");
+
+        var events = await ReadEventsAsync(_fixture, world.Exercise, "reaction");
+        events.Should().HaveCount(2);
+        events.Last().Payload.Should().Be("{\"reaction\":\"like\",\"liked\":false}");
+        events.Last().ScenarioTime.Should().Be(likeTime, "the un-like event carries the same floored instant");
+    }
 }

@@ -1,5 +1,6 @@
 namespace Pulse.WebApi.Features.Social.Reactions;
 
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
@@ -38,25 +39,34 @@ using Pulse.WebApi.Features.Social.Follows;
 /// <b>Idempotent, one XC-004 event per state change.</b> A repeat that changes nothing writes nothing and emits
 /// nothing. A concurrent double-submit is folded into the same idempotent success in both directions:
 /// <list type="bullet">
-///   <item><description>Activate: the loser's insert hits the filtered unique index; the tracker is cleared (which
-///   discards its pending event), the database is re-read, and the call folds to "unchanged" only when an active
-///   row really exists. Any other persistence failure is rethrown, never hidden behind a 200.</description></item>
+///   <item><description>Activate: the loser's insert hits the filtered unique index (SQL error 2601/2627 naming
+///   <c>IX_PostReactions_PostId_PersonaId_Kind</c>; nothing else is folded); the tracker is cleared (which discards
+///   its pending event), the database is re-read, and the call folds to "unchanged" only when an active row really
+///   exists. Any other persistence failure is rethrown, never hidden behind a 200.</description></item>
 ///   <item><description>Deactivate: a soft delete is an UPDATE, which a racing request cannot make fail, so the
 ///   service makes the race visible instead. Inside ONE database transaction it runs a conditional
-///   <c>UPDATE … SET DeletedAt WHERE … AND DeletedAt IS NULL</c> and then saves the event. The loser's UPDATE
+///   <c>UPDATE … SET DeletedAt WHERE Id = @activeRow AND DeletedAt IS NULL</c> and then saves the event. The loser's UPDATE
 ///   affects zero rows, so it rolls back and emits nothing. The transaction keeps the row change and its event a
 ///   single unit of work.</description></item>
 /// </list>
 /// </para>
 /// <para>
 /// <b>Scenario time (COR-053).</b> The new row's <see cref="PostReaction.CreatedScenarioTime"/>, the soft delete's
-/// <see cref="PostReaction.DeletedAt"/> and the event's scenario instant are ONE value, resolved server-side: the
-/// exercise's running clock, else its persisted <c>CurrentScenarioTime</c>, else the reacted-to post's own
-/// <see cref="Post.CreatedScenarioTime"/> (always a scenario instant). The result is then CLAMPED to be no earlier
-/// than the post's own scenario instant, because a reaction cannot precede its post and the stored
-/// <c>CurrentScenarioTime</c> can be a stale seed value. The wall clock is NEVER stamped into scenario time (DP-15,
-/// the same order the takedown uses); it is used only for the telemetry envelope's <c>wallClockTime</c> /
-/// <c>emittedAt</c>.
+/// <see cref="PostReaction.DeletedAt"/> and the event's scenario instant are ONE value, resolved server-side (the
+/// order the takedown uses):
+/// <list type="number">
+///   <item><description>A RUNNING exercise clock is authoritative and is used as-is, never clamped:
+///   <see cref="Post.CreatedScenarioTime"/> can still be client-supplied this phase, so a post stamped ahead of the
+///   clock must not drag every other participant's reaction time forward.</description></item>
+///   <item><description>Otherwise the exercise's persisted <c>CurrentScenarioTime</c>, else the post's own
+///   <see cref="Post.CreatedScenarioTime"/> (always a scenario instant), CLAMPED to be no earlier than the post's
+///   instant: the stored value is written only by the seed and can be stale.</description></item>
+///   <item><description>An un-like is additionally never earlier than the active row's own
+///   <see cref="PostReaction.CreatedScenarioTime"/>, so the history never shows an un-like before its like (e.g. a
+///   like stamped by a running clock that a host restart has since lost).</description></item>
+/// </list>
+/// The wall clock is NEVER stamped into scenario time (DP-15); it is used only for the telemetry envelope's
+/// <c>wallClockTime</c> / <c>emittedAt</c>.
 /// </para>
 /// </remarks>
 public sealed class ReactionService
@@ -76,6 +86,15 @@ public sealed class ReactionService
     private const string PersonaActorKind = "persona";
     private const string PostEntityType = "post";
     private const string FallbackTimeZone = "UTC";
+
+    /// <summary>The filtered unique index that holds at most one ACTIVE reaction per (post, persona, kind) (DP-15).</summary>
+    private const string ActiveReactionIndexName = "IX_PostReactions_PostId_PersonaId_Kind";
+
+    /// <summary>SQL Server: "Cannot insert duplicate key row in object … with unique index …".</summary>
+    private const int DuplicateKeyErrorNumber = 2601;
+
+    /// <summary>SQL Server: "Violation of … constraint …".</summary>
+    private const int UniqueConstraintErrorNumber = 2627;
 
     /// <summary>The <c>PostOrigin</c> value for a participant acting as their own account (the only caller allowed).</summary>
     private const string ParticipantOrigin = "participant";
@@ -200,16 +219,15 @@ public sealed class ReactionService
         }
 
         // 5. Idempotent repeat: the world already holds what the caller asked for. No row, no event.
-        var isActive = await ActiveReactionExistsAsync(postId, personaId, kind, cancellationToken);
-        if (isActive == activate)
+        var activeReaction = await FindActiveReactionAsync(postId, personaId, kind, cancellationToken);
+        if ((activeReaction is not null) == activate)
         {
             return ReactionResult.Unchanged(
                 await ReadStateAsync(postId, personaId, kind, baseline, cancellationToken));
         }
 
         // 6. One wall-clock read for the telemetry envelope ONLY, and ONE scenario instant shared by the row and its
-        //    event. Scenario time is never the wall clock (DP-15): the last fallback is the post's own scenario
-        //    instant, which a reaction to it cannot precede.
+        //    event. Scenario time is never the wall clock (DP-15); see the type remarks for the order.
         var now = DateTimeOffset.UtcNow;
         // org-scope-exempt(ResolvedScope): exerciseId comes from TryGetScope (IExerciseContext) at step 1 and is
         // never a request field; it only supplies the scenario-time fallback and the telemetry time zone.
@@ -218,15 +236,16 @@ public sealed class ReactionService
             .Where(candidate => candidate.Id == exerciseId)
             .Select(candidate => new { candidate.CurrentScenarioTime, candidate.TimeZone })
             .FirstOrDefaultAsync(cancellationToken);
-        var resolvedScenarioTime = _exerciseClock.CurrentScenarioTime(exerciseId)
-            ?? exercise?.CurrentScenarioTime
-            ?? baseline.PostScenarioTime;
+        // A RUNNING clock is authoritative and is not clamped (the post's own time may be client-supplied). Only the
+        // fallbacks are clamped to the post: the stored CurrentScenarioTime is seed-written and can be stale.
+        var scenarioTime = _exerciseClock.CurrentScenarioTime(exerciseId)
+            ?? Later(exercise?.CurrentScenarioTime ?? baseline.PostScenarioTime, baseline.PostScenarioTime);
 
-        // A reaction or un-like can never predate its post. The stored CurrentScenarioTime is written only by the
-        // seed, so it can be stale and earlier than a post made since; clamp to the post's own scenario instant.
-        var scenarioTime = resolvedScenarioTime < baseline.PostScenarioTime
-            ? baseline.PostScenarioTime
-            : resolvedScenarioTime;
+        // An un-like never precedes the like it ends (its row's own scenario instant), whatever the source above.
+        if (!activate)
+        {
+            scenarioTime = Later(scenarioTime, activeReaction!.CreatedScenarioTime);
+        }
         var timeZone = string.IsNullOrWhiteSpace(exercise?.TimeZone) ? FallbackTimeZone : exercise.TimeZone;
 
         var telemetryEvent = BuildTelemetryEvent(
@@ -234,7 +253,7 @@ public sealed class ReactionService
 
         var changed = activate
             ? await ActivateAsync(exerciseId, postId, personaId, kind, scenarioTime, telemetryEvent, cancellationToken)
-            : await DeactivateAsync(exerciseId, postId, personaId, kind, scenarioTime, telemetryEvent, cancellationToken);
+            : await DeactivateAsync(exerciseId, activeReaction!.Id, scenarioTime, telemetryEvent, cancellationToken);
 
         var state = await ReadStateAsync(postId, personaId, kind, baseline, cancellationToken);
         return changed ? ReactionResult.Changed(state) : ReactionResult.Unchanged(state);
@@ -272,14 +291,15 @@ public sealed class ReactionService
             await _dbContext.SaveChangesAsync(cancellationToken);
             return true;
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException exception) when (IsActiveReactionUniqueViolation(exception))
         {
             // A concurrent request with the SAME intent beat this one past the existence check, and the filtered
             // unique index refused the second active row. Clearing the tracker drops this unit of work's event
-            // with the row: the winner already emitted the one event for the one state change.
+            // with the row: the winner already emitted the one event for the one state change. Any other failure
+            // is not caught at all.
             _dbContext.ChangeTracker.Clear();
 
-            if (!await ActiveReactionExistsAsync(postId, personaId, kind, cancellationToken))
+            if (await FindActiveReactionAsync(postId, personaId, kind, cancellationToken) is null)
             {
                 // The database does NOT hold what the caller asked for, so this was not the race. It is a real
                 // persistence failure; surface it instead of claiming a write that never happened.
@@ -291,16 +311,16 @@ public sealed class ReactionService
     }
 
     /// <summary>
-    /// Soft-deletes the ACTIVE reaction (stamps <see cref="PostReaction.DeletedAt"/> in scenario time; never a hard
-    /// delete) and saves its event, inside one transaction. The conditional update is what makes a concurrent double
-    /// un-like visible: the loser's update affects zero rows, so it rolls back and emits nothing.
+    /// Soft-deletes the ACTIVE reaction found at step 5 (stamps <see cref="PostReaction.DeletedAt"/> in scenario time;
+    /// never a hard delete) and saves its event, inside one transaction. The update targets that exact row, so the
+    /// stamp computed from its <see cref="PostReaction.CreatedScenarioTime"/> is the one written to it. The conditional
+    /// update is what makes a concurrent double un-like visible: the loser's update affects zero rows, so it rolls
+    /// back and emits nothing.
     /// </summary>
     /// <returns><c>true</c> when this call deactivated the row; <c>false</c> when a racing request already had.</returns>
     private async Task<bool> DeactivateAsync(
         Guid exerciseId,
-        Guid postId,
-        Guid personaId,
-        string kind,
+        Guid activeReactionId,
         DateTimeOffset scenarioTime,
         TelemetryEvent telemetryEvent,
         CancellationToken cancellationToken)
@@ -314,9 +334,7 @@ public sealed class ReactionService
         // ExecuteUpdate bypasses) has nothing to check here.
         var affected = await _dbContext.PostReactions
             .Where(reaction => reaction.ExerciseId == exerciseId
-                && reaction.PostId == postId
-                && reaction.PersonaId == personaId
-                && reaction.Kind == kind
+                && reaction.Id == activeReactionId
                 && reaction.DeletedAt == null)
             .ExecuteUpdateAsync(setters => setters.SetProperty(reaction => reaction.DeletedAt, deletedAt), cancellationToken);
 
@@ -333,16 +351,31 @@ public sealed class ReactionService
         return true;
     }
 
-    /// <summary>Whether the persona holds an ACTIVE reaction of <paramref name="kind"/> on the post (scoped read).</summary>
-    private Task<bool> ActiveReactionExistsAsync(Guid postId, Guid personaId, string kind, CancellationToken cancellationToken) =>
+    /// <summary>
+    /// The persona's ACTIVE reaction of <paramref name="kind"/> on the post (scoped read), or <c>null</c> when there is
+    /// none. Returns the row's id and its own scenario instant (the floor for an un-like's stamp).
+    /// </summary>
+    private Task<ActiveReaction?> FindActiveReactionAsync(
+        Guid postId, Guid personaId, string kind, CancellationToken cancellationToken) =>
         _dbContext.PostReactions
             .AsNoTracking()
-            .AnyAsync(
-                reaction => reaction.PostId == postId
-                    && reaction.PersonaId == personaId
-                    && reaction.Kind == kind
-                    && reaction.DeletedAt == null,
-                cancellationToken);
+            .Where(reaction => reaction.PostId == postId
+                && reaction.PersonaId == personaId
+                && reaction.Kind == kind
+                && reaction.DeletedAt == null)
+            .Select(reaction => new ActiveReaction(reaction.Id, reaction.CreatedScenarioTime))
+            .FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>The later of two scenario instants.</summary>
+    private static DateTimeOffset Later(DateTimeOffset first, DateTimeOffset second) => first >= second ? first : second;
+
+    /// <summary>
+    /// Whether a failed save is the filtered unique index on ACTIVE reactions refusing a second active row (the
+    /// double-submit race), as opposed to any other database error, which must surface.
+    /// </summary>
+    private static bool IsActiveReactionUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is SqlException { Number: DuplicateKeyErrorNumber or UniqueConstraintErrorNumber } sqlException
+        && sqlException.Message.Contains(ActiveReactionIndexName, StringComparison.Ordinal);
 
     /// <summary>
     /// The caller-observable state after the call: counts = baseline + real, and the viewer flags, both read through
@@ -458,6 +491,9 @@ public sealed class ReactionService
     /// to add to the real counts) and its own scenario instant (the last scenario-time fallback).
     /// </summary>
     private sealed record ReactionBaseline(int Reply, int Repost, int Like, DateTimeOffset PostScenarioTime);
+
+    /// <summary>The caller's currently active reaction row: its id and its own scenario instant.</summary>
+    private sealed record ActiveReaction(Guid Id, DateTimeOffset CreatedScenarioTime);
 }
 
 /// <summary>The outcome kind of a <see cref="ReactionService"/> call.</summary>
