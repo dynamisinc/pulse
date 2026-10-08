@@ -148,10 +148,10 @@ Each published post's own `post`/`reply` event carries `origin: 'inject'` + the 
 | Story | Stack / agent | Owns | Depends on | Target |
 |---|---|---|---|---|
 | 06 | backend / backend-agent | `Features/Injects/**`, `Data/Entities/InjectItem*.cs`, `PulseDbContext` (DbSets + config only), one migration + snapshot, tests under `Features/Injects/**`; the orchestrator adds the `Program.cs` lines | demo-polish B1 merged (migration on top); BP + B2 for media/reply live | build now; merge by Tue 10/13 (freeze Thu 10/15) |
-| 07 | frontend / frontend-agent | `features/controller/runSheet/**`, `components/steering/PausePill.tsx` (injects option only) | 06 contract (mock first); C1 picker; C4 slot | merge Wed 10/14 |
+| 07 | frontend / frontend-agent | `features/controller/runSheet/**`, `components/steering/PausePill.tsx` (re-add the injects option, after #449) | 06 contract (mock first); C1 picker; C4 slot | merge Wed 10/14 |
 
 **Changes this slice makes to demo-polish (Tom approved, 2026-10-08):**
 - **C3 (#438)** is replaced by 06 + 07. 07 keeps the `RunSheetPanel` seam, so the orchestrator mount is unchanged.
-- **C4 (#439)** no longer hides PAUSE INJECTS; 07 makes it live.
+- **C4 (#439)** removed the disabled Pause injects placeholder in #449; 07 re-adds it as a live control.
 - **S1 (#443)** creates the demo script through `POST /api/injects` instead of writing `pulse.runsheet.v1` JSON.
 - **BP (#425):** see IQ-10.

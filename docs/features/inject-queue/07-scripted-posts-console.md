@@ -56,8 +56,8 @@ participant view.
 - [ ] **Live sync (IQ-6).** The panel polls `GET /api/injects` every ~3 s while mounted and visible, and immediately
       after its own mutation. A fire, hold, skip or edit by another controller shows in this console within ~3 s. Burst
       progress (*n/m*) advances live.
-- [ ] **PAUSE INJECTS is live.** In `PausePill`, the "Pause injects" option is enabled (its "No inject queue yet"
-      disabled reason is removed) and sets the existing `injects` tier through the existing pause-tier action. While
+- [ ] **PAUSE INJECTS is live.** In `PausePill`, the "Pause injects" option is **re-added** to `TIER_OPTIONS`
+      (C4 removed the disabled placeholder in #449 and left a re-enable note) and sets the existing `injects` tier through the existing pause-tier action. While
       it is active the panel shows "Injects paused: bursts are suspended; manual fire still works" (IQ-5).
 - [ ] **Staff world only.**
       - Uses `@/theme/styledComponents` (COBRA) + `consoleChrome`/staff tokens, FontAwesome icons and MUI 9 `sx`-only.
@@ -80,9 +80,7 @@ participant view.
 - **Files.** New `src/frontend/src/features/controller/runSheet/**`: `RunSheetPanel`, `RunSheetRow`,
   `InjectItemEditor`, `useInjectQueue` (React Query, `refetchInterval: 3000`), `injectService` (live) +
   `injectMock`, and `types.ts` mirroring story 06's DTOs.
-  - It also edits `components/steering/PausePill.tsx` (the injects option only).
-  - **Collision note:** C4 must **not** remove the injects option. Its "relabel or hide PAUSE INJECTS" item is
-    withdrawn by this slice.
+  - It also edits `components/steering/PausePill.tsx` (re-adds the injects option only, after C4's #449 merges).
 - **Mount.** C4 adds `runSheetSlot` to `ControllerConsole` and the orchestrator mounts `<RunSheetPanel/>` in
   `ControllerConsoleRoute.tsx`, both unchanged from the frozen seam (§4.2 of demo-polish implementation.md). If C4 has
   merged when this PR is ready, this PR may add that one mount line with the demo-polish orchestrator's agreement.
