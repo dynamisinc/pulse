@@ -248,7 +248,7 @@ describe('ComposeModal', () => {
       // Post is the last control in DOM order and is now enabled; mark it unrendered.
       const post = within(dialog).getByRole('button', { name: 'Post' })
       post.setAttribute('data-test-unrendered', '')
-      const addPhotos = within(dialog).getByRole('button', { name: 'Add photos' })
+      const addPhotos = within(dialog).getByRole('button', { name: /^Add photos/ })
       addPhotos.focus()
 
       await user.tab()
