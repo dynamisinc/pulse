@@ -12,8 +12,8 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Builds the KEYLESS <see cref="BlobServiceClient"/> both Azure media types use: the configured
-/// <c>Azure:BlobStorage:ServiceUri</c> plus a <see cref="TokenCredential"/> (<c>DefaultAzureCredential</c> in
-/// production — the App Service's managed identity). There is no connection-string, account-key or SAS-token
+/// <c>Azure:BlobStorage:ServiceUri</c> plus a <see cref="TokenCredential"/> (the App Service's managed identity
+/// in production, <see cref="MediaEndpoints.CreateCredential"/>). There is no connection-string, account-key or SAS-token
 /// overload anywhere in this slice (COR-002, demo-polish BM AC "No account key, ever").
 /// </summary>
 public static class MediaBlobServiceClientFactory
@@ -33,6 +33,37 @@ public static class MediaBlobServiceClientFactory
         ArgumentNullException.ThrowIfNull(credential);
 
         return new BlobServiceClient(ValidateServiceUri(options.ServiceUri), credential, clientOptions);
+    }
+
+    /// <summary>
+    /// Retries per media storage call beyond the first attempt (the SDK default is 3, with exponential back-off).
+    /// One retry absorbs a blip; more would only make a reader queue longer during a storage-auth outage (Wave 1b
+    /// Gate-2 M-1).
+    /// </summary>
+    public const int MaxRetries = 1;
+
+    /// <summary>
+    /// The per-try network timeout of the key/signing client (the SDK default is 100 s). The key cache bounds the
+    /// whole fetch more tightly still (<see cref="UserDelegationKeyCache.DefaultFetchTimeout"/>).
+    /// </summary>
+    public static readonly TimeSpan SigningNetworkTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// The per-try network timeout of the upload client. One try is one block PUT of at most
+    /// <see cref="AzureBlobMediaStore.TransferBlockBytes"/>, buffered before it is sent, so this bounds the in-region
+    /// hop to storage, never the participant's own upload speed.
+    /// </summary>
+    public static readonly TimeSpan UploadNetworkTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>The production client options: <see cref="MaxRetries"/> and the given per-try network timeout.</summary>
+    /// <param name="networkTimeout">The per-try network timeout.</param>
+    /// <returns>New client options (callers own them).</returns>
+    public static BlobClientOptions CreateClientOptions(TimeSpan networkTimeout)
+    {
+        var clientOptions = new BlobClientOptions();
+        clientOptions.Retry.MaxRetries = MaxRetries;
+        clientOptions.Retry.NetworkTimeout = networkTimeout;
+        return clientOptions;
     }
 
     /// <summary>Validates the configured service URI (see <see cref="Create"/>).</summary>
@@ -98,9 +129,12 @@ public sealed partial class AzureBlobMediaStore : IMediaStore
 
     /// <summary>Creates the store. Throws (fails closed) without a usable <c>ServiceUri</c>.</summary>
     /// <param name="options">The storage options (<c>ServiceUri</c>, <c>ContainerName</c>).</param>
-    /// <param name="credential">The token credential — <c>DefaultAzureCredential</c> in production.</param>
+    /// <param name="credential">The token credential — the managed identity in production (<see cref="MediaEndpoints.CreateCredential"/>).</param>
     /// <param name="logger">Diagnostics logger.</param>
-    /// <param name="clientOptions">Optional client options (tests substitute the transport).</param>
+    /// <param name="clientOptions">
+    /// Optional client options (tests substitute the transport). When omitted, the production options:
+    /// <see cref="MediaBlobServiceClientFactory.MaxRetries"/> and <see cref="MediaBlobServiceClientFactory.UploadNetworkTimeout"/>.
+    /// </param>
     public AzureBlobMediaStore(
         IOptions<MediaStorageOptions> options,
         TokenCredential credential,
@@ -113,7 +147,9 @@ public sealed partial class AzureBlobMediaStore : IMediaStore
 
         var storage = options.Value;
         var containerName = MediaBlobServiceClientFactory.ValidateContainerName(storage.ContainerName);
-        _container = MediaBlobServiceClientFactory.Create(storage, credential, clientOptions).GetBlobContainerClient(containerName);
+        _container = MediaBlobServiceClientFactory
+            .Create(storage, credential, clientOptions ?? MediaBlobServiceClientFactory.CreateClientOptions(MediaBlobServiceClientFactory.UploadNetworkTimeout))
+            .GetBlobContainerClient(containerName);
         _logger = logger;
     }
 

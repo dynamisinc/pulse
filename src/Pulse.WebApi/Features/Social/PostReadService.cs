@@ -8,9 +8,8 @@ using Pulse.WebApi.Features.Social.Follows;
 /// <summary>
 /// The participant feed read behind <c>GET /api/feed</c> (SOC-080, SOC-081; the thread read is
 /// <c>Threads.ThreadReadService</c>). Queries <see cref="PulseDbContext.Posts"/> — which the central
-/// exercise-scoping global query filter confines to the current run automatically (COR-001) — and narrows every
-/// row through the FROZEN
-/// <see cref="ParticipantPostDto.FromPost"/>, the sole server-side XC-002 projection. Provenance
+/// exercise-scoping global query filter confines to the current run automatically (COR-001) — and projects every
+/// row through <see cref="IParticipantPostProjector"/>, the server-side XC-002 projection. Provenance
 /// (<c>origin</c>/<c>actingHumanId</c>/<c>createdWallClock</c>/<c>injectId</c>) is dropped BEFORE
 /// serialization, not merely unread by the client — this is the retirement of finding S2-2: a bypassed or
 /// compromised client can never recover it because it is never on the wire.

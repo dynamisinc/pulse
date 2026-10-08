@@ -22,8 +22,10 @@ using Pulse.WebApi.Features.Social.Follows;
 
 /// <summary>
 /// The Azure credential and (optionally) client options the Azure media store and key source are built with.
-/// Production registers <c>DefaultAzureCredential</c> (the App Service's managed identity) with default client
-/// options; a test host may replace this one registration to substitute the HTTP transport. It carries a
+/// Production registers the App Service's system-assigned managed identity (<see cref="MediaEndpoints.CreateCredential"/>)
+/// with no client options, so the store and key source use their bounded production options
+/// (<see cref="MediaBlobServiceClientFactory.CreateClientOptions"/>); a test host may replace this one registration to
+/// substitute the HTTP transport. It carries a
 /// <see cref="TokenCredential"/> only — there is no shared-key or connection-string member to put here.
 /// </summary>
 public sealed class MediaAzureClientSettings
@@ -110,7 +112,8 @@ public static class MediaEndpoints
         services.TryAddScoped<ICurrentSessionPersonaAccessor, CurrentSessionPersonaAccessor>();
 
         // Keyless: a token credential only (managed identity in App Service). Constructing it performs no I/O.
-        services.TryAddSingleton(_ => new MediaAzureClientSettings(new DefaultAzureCredential()));
+        services.TryAddSingleton(provider =>
+            new MediaAzureClientSettings(CreateCredential(provider.GetRequiredService<IHostEnvironment>())));
 
         services.AddSingleton<IUserDelegationKeySource>(provider =>
         {
@@ -154,6 +157,25 @@ public static class MediaEndpoints
         staff.MapGet(LibraryRoute, ListAsync);
 
         return endpoints;
+    }
+
+    /// <summary>
+    /// The keyless media credential (Wave 1b Gate-2 M-1). Outside Development it is the App Service's
+    /// SYSTEM-ASSIGNED managed identity (<c>infrastructure/modules/webapp.bicep</c>: <c>identity.type
+    /// 'SystemAssigned'</c>, so no client id), used directly: <c>DefaultAzureCredential</c> walks its whole
+    /// credential chain on every token request, which during a storage-auth outage adds latency to every failed
+    /// attempt. Development keeps <c>DefaultAzureCredential</c> (developer sign-in). Constructing either performs
+    /// no I/O.
+    /// </summary>
+    /// <param name="environment">The host environment.</param>
+    /// <returns>The credential.</returns>
+    public static TokenCredential CreateCredential(IHostEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+
+        return environment.IsDevelopment()
+            ? new DefaultAzureCredential()
+            : new ManagedIdentityCredential(ManagedIdentityId.SystemAssigned);
     }
 
     /// <summary>
@@ -260,7 +282,8 @@ public static class MediaEndpoints
 
     /// <summary>
     /// <c>POST /api/media</c> — multipart upload, streamed. 201 <see cref="MediaAssetView"/>; 400/401/403/413/415;
-    /// 429 from the rate limiter; 503 <c>{"error":"media-store-unavailable"}</c> when no store is configured.
+    /// 429 from the rate limiter; 503 <c>{"error":"media-store-unavailable"}</c> when no store is configured, or when
+    /// the stored asset's read URL could not be signed (the asset row stays).
     /// </summary>
     private static async Task<IResult> UploadAsync(
         HttpContext httpContext,
@@ -301,7 +324,8 @@ public static class MediaEndpoints
         }
         catch (MediaStoreUnavailableException)
         {
-            // Rows exist but no store is configured to sign them — say so rather than fabricate URLs.
+            // Rows exist but cannot be signed — no store is configured, or ANY signing fault, which the service
+            // converts to this exception (Wave 1b Gate-2 L-2) — so say so rather than fabricate URLs or 500.
             return Results.Json(new MediaErrorDto(StoreUnavailableErrorCode), statusCode: StatusCodes.Status503ServiceUnavailable);
         }
 

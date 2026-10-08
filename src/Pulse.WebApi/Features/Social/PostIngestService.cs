@@ -358,14 +358,17 @@ public sealed partial class PostIngestService
 
         // 6. Tell in-process observers (the engine's response-reaction inbox, engine-runtime/06) the moment the
         //    post is committed: never before, so nothing reacts to a post that failed to persist, and never after
-        //    the broadcast, which can throw or be cancelled with the request and would strand a committed answer
+        //    the broadcast, which can throw and would strand a committed answer
         //    outside the engine for good.
         NotifyObservers(exerciseId, post);
 
         // 7. Fan out the participant-safe projection only (XC-002 — the broadcast never carries provenance or a
-        //    baseline). No viewer state: one payload goes to every member of the exercise group.
-        var participantView = await ProjectCommittedPostAsync(post, mediaItems.Count > 0, inReplyTo, cancellationToken);
-        await _broadcaster.BroadcastPostAsync(exerciseId, participantView, cancellationToken);
+        //    baseline). No viewer state: one payload goes to every member of the exercise group. The request's token
+        //    is NOT passed from here on (as B6's takedown does): the post has committed, so a client that disconnects
+        //    now must not cancel the projection or the broadcast — its retry would DUPLICATE the post, never re-send
+        //    the push (Wave 1b Gate-2 L-1).
+        var participantView = await ProjectCommittedPostAsync(post, mediaItems.Count > 0, inReplyTo, CancellationToken.None);
+        await _broadcaster.BroadcastPostAsync(exerciseId, participantView, CancellationToken.None);
 
         // 8. Hand the full post (and its projection) back to the endpoint, which shapes the response by caller role.
         return PostIngestResult.Created(post, participantView);
@@ -383,8 +386,12 @@ public sealed partial class PostIngestService
     /// <para>
     /// <b>A projection failure never fails the write (Gate-1 M-1).</b> The post is committed and observers have
     /// been told, so a throw here would leave it unbroadcast, answer the caller 500 (whose retry duplicates the
-    /// post) and abort an engine burst mid-loop. Any failure except cancellation is logged and answered with the
-    /// baseline view instead: counts = baseline, the already-resolved <c>inReplyTo</c>, and no media.
+    /// post) and abort an engine burst mid-loop. Any failure is logged and answered with the baseline view instead:
+    /// counts = baseline, the already-resolved <c>inReplyTo</c>, and no media. The caller passes
+    /// <see cref="CancellationToken.None"/> (the post has committed), so a cancellation here is never the caller's
+    /// and is absorbed like any other failure. An <see cref="ExerciseScopeViolationException"/> keeps the same
+    /// fallback (the baseline view is built from this post alone, inside the resolved scope) but is logged at
+    /// ERROR: it means the projector saw an out-of-scope row, an isolation signal (Wave 1b Gate-2 L-4).
     /// </para>
     /// </remarks>
     private async Task<ParticipantPostDto> ProjectCommittedPostAsync(
@@ -399,8 +406,13 @@ public sealed partial class PostIngestService
         {
             return (await _projector.ProjectAsync([post], new PostProjectionOptions(), cancellationToken))[0];
         }
+        catch (ExerciseScopeViolationException ex)
+        {
+            LogProjectionScopeViolation(ex, post.Id);
+            return BaselineView(post, inReplyTo);
+        }
 #pragma warning disable CA1031 // A projection fault must never fail a post that has already committed.
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
             LogProjectionFailed(ex, post.Id);
             return BaselineView(post, inReplyTo);
@@ -654,6 +666,12 @@ public sealed partial class PostIngestService
         Message = "Participant projection failed for committed post {PostId}; broadcasting the baseline view instead.")]
     private partial void LogProjectionFailed(Exception exception, Guid postId);
 
+    [LoggerMessage(
+        EventId = 4,
+        Level = LogLevel.Error,
+        Message = "Participant projection of committed post {PostId} hit an exercise-scope violation (COR-001); broadcasting the baseline view instead.")]
+    private partial void LogProjectionScopeViolation(Exception exception, Guid postId);
+
     /// <summary>One validated attachment: the asset, its optional poster override, and the sanitized alt text.</summary>
     private sealed record RequestedMedia(Guid AssetId, Guid? PosterId, string Alt);
 
@@ -734,15 +752,6 @@ public sealed class PostIngestResult
     /// <returns>A <see cref="PostIngestOutcome.Invalid"/> result.</returns>
     public static PostIngestResult Invalid(string validationError) =>
         new(PostIngestOutcome.Invalid, null, validationError);
-
-    /// <summary>A successful ingest.</summary>
-    /// <param name="post">The persisted post.</param>
-    /// <returns>A <see cref="PostIngestOutcome.Created"/> result.</returns>
-    public static PostIngestResult Created(Post post)
-    {
-        ArgumentNullException.ThrowIfNull(post);
-        return new PostIngestResult(PostIngestOutcome.Created, post, null, ParticipantPostDto.FromPost(post));
-    }
 
     /// <summary>A successful ingest together with the participant projection that was broadcast.</summary>
     /// <param name="post">The persisted post.</param>

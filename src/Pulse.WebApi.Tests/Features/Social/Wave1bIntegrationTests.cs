@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.Social;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -12,7 +13,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +24,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Media;
+using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Threads;
@@ -307,6 +312,42 @@ public sealed class Wave1bIntegrationTests
     }
 
     /// <summary>
+    /// Checklist 24 (Gate-2 S-4), over the wire: the SignalR <c>PostReceived</c> push of a post with media carries the
+    /// REAL signer's URL and the alt text, through the real <c>SignalRFeedBroadcaster</c> and <c>ExerciseRealtimeHub</c>,
+    /// and never a <c>viewer</c> (one payload goes to the whole exercise).
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task PostReceived_CarriesTheRealSignedMediaUrlAndAlt_AndNoViewer()
+    {
+        var world = await SeedWorldAsync();
+
+        await using var host = NewHost();
+        using var participant = host.CreateClientFor(world.Exercise.Host, world.Participant.Token);
+        await using var listener = await HubRecorder.ConnectAsync(host, world.Exercise.Host, world.Other.Token);
+        await listener.WaitUntilInGroupAsync(host, $"exercise:{world.Exercise.ExerciseId}");
+
+        var mediaId = await UploadAsync(participant, MediaTestFiles.Png(3000));
+        using var created = await participant.PostAsync(PostsUri, Json(PostBody("live photo", media: [MediaItem(mediaId, "<i>Levee</i> breach")])));
+        created.StatusCode.Should().Be(HttpStatusCode.Created, await created.Content.ReadAsStringAsync());
+        var postId = JsonNode.Parse(await created.Content.ReadAsStringAsync())!["id"]!.GetValue<string>();
+
+        string blobName;
+        await using (var check = _fixture.CreateContext())
+        {
+            var assetId = Guid.Parse(mediaId);
+            blobName = (await check.MediaAssets.IgnoreQueryFilters().SingleAsync(asset => asset.Id == assetId)).BlobName;
+        }
+
+        var pushed = await listener.WaitForPostAsync(postId);
+        pushed.AsObject().ContainsKey("viewer").Should().BeFalse("a broadcast never carries viewer state");
+        var media = pushed["media"]!.AsArray().Should().ContainSingle().Subject!;
+        media["id"]!.GetValue<string>().Should().Be(mediaId);
+        media["alt"]!.GetValue<string>().Should().Be("Levee breach");
+        media["url"]!.GetValue<string>().Should().Be(
+            $"http://{world.Exercise.Host}/dev-media/{blobName}", "the push is projected through the REAL signer, like the feed");
+    }
+
+    /// <summary>
     /// Checklist 8 + 21: after B6 takes a reply down, B3 answers 404 exactly as for an unknown id, the parent's reply
     /// count drops by one, the feed (even with replies) omits it, and B2's thread shows it as a tombstone.
     /// </summary>
@@ -567,6 +608,77 @@ public sealed class Wave1bIntegrationTests
         await db.SaveChangesAsync();
 
         return new World(exercise, participant, other, staff, authorPersona, other.Session.PersonaId!.Value);
+    }
+
+    /// <summary>
+    /// A started hub connection (long polling — the only transport <c>TestServer</c> supports end to end) recording
+    /// every raw <c>PostReceived</c> payload. Group membership is proven with a nonce probe, as B6's live-removal suite
+    /// does, because <c>StartAsync</c> can return before the hub's <c>OnConnectedAsync</c> has joined the group.
+    /// </summary>
+    private sealed class HubRecorder : IAsyncDisposable
+    {
+        private const string PostReceived = "PostReceived";
+        private const string Probe = "Wave1bProbe";
+        private static readonly TimeSpan DeliveryTimeout = TimeSpan.FromSeconds(10);
+
+        private readonly HubConnection _connection;
+        private readonly ConcurrentQueue<string> _posts = new();
+        private readonly ConcurrentDictionary<string, byte> _probes = new(StringComparer.Ordinal);
+
+        private HubRecorder(HubConnection connection)
+        {
+            _connection = connection;
+            _connection.On<JsonElement>(PostReceived, payload => _posts.Enqueue(payload.GetRawText()));
+            _connection.On<string>(Probe, nonce => _probes.TryAdd(nonce, 0));
+        }
+
+        public static async Task<HubRecorder> ConnectAsync(MediaTestHost host, string hostname, string token)
+        {
+            var connection = new HubConnectionBuilder()
+                .WithUrl(new Uri($"http://{hostname}/hubs/exercise"), options =>
+                {
+                    options.HttpMessageHandlerFactory = _ => host.Server.CreateHandler();
+                    options.Transports = HttpTransportType.LongPolling;
+                    options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+                })
+                .Build();
+            var recorder = new HubRecorder(connection);
+            await connection.StartAsync();
+            return recorder;
+        }
+
+        public async Task WaitUntilInGroupAsync(MediaTestHost host, string groupName)
+        {
+            var hubContext = host.Services.GetRequiredService<IHubContext<ExerciseRealtimeHub>>();
+            var nonce = Guid.NewGuid().ToString();
+            var deadline = DateTime.UtcNow + DeliveryTimeout;
+            while (DateTime.UtcNow < deadline && !_probes.ContainsKey(nonce))
+            {
+                await hubContext.Clients.Group(groupName).SendAsync(Probe, nonce);
+                await Task.Delay(100);
+            }
+
+            _probes.ContainsKey(nonce).Should().BeTrue($"the connection should join {groupName} within {DeliveryTimeout}");
+        }
+
+        public async Task<JsonNode> WaitForPostAsync(string postId)
+        {
+            var deadline = DateTime.UtcNow + DeliveryTimeout;
+            while (DateTime.UtcNow < deadline)
+            {
+                var match = _posts.Select(raw => JsonNode.Parse(raw)!).FirstOrDefault(post => Id(post) == postId);
+                if (match is not null)
+                {
+                    return match;
+                }
+
+                await Task.Delay(50);
+            }
+
+            throw new TimeoutException($"PostReceived for {postId} did not arrive within {DeliveryTimeout}.");
+        }
+
+        public ValueTask DisposeAsync() => _connection.DisposeAsync();
     }
 
     /// <summary>A wire <c>counts</c> object, read back for value comparison.</summary>

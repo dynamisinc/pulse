@@ -6,7 +6,7 @@ namespace Pulse.WebApi.Features.Media;
 /// </summary>
 public static class MediaStorageProviders
 {
-    /// <summary>Azure Blob Storage through <c>DefaultAzureCredential</c> (keyless). The UAT/production provider.</summary>
+    /// <summary>Azure Blob Storage through the managed identity (keyless). The UAT/production provider.</summary>
     public const string Azure = "Azure";
 
     /// <summary>A directory on the local disk. Honoured ONLY when <c>ASPNETCORE_ENVIRONMENT=Development</c>.</summary>
@@ -23,7 +23,7 @@ public static class MediaStorageProviders
 /// </summary>
 /// <remarks>
 /// <b>There is deliberately no connection-string or account-key member.</b> Media storage is keyless: the
-/// service URI plus the App Service's managed identity (<c>DefaultAzureCredential</c>) is the whole credential
+/// service URI plus the App Service's managed identity (<c>MediaEndpoints.CreateCredential</c>) is the whole credential
 /// story, so no code path exists that could authenticate with a shared key (demo-polish BM, COR-002).
 /// </remarks>
 public sealed class MediaStorageOptions

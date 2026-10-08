@@ -39,18 +39,36 @@ public sealed class PostMediaWiringTests
         Single<IParticipantPostProjector>(services).ImplementationType.Should().Be(typeof(ParticipantPostProjector));
     }
 
-    [Fact]
-    public void CallingEveryRegistration_StillLeavesExactlyOneFallbackPerSeam()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void CallingEveryRegistration_IncludingAddSocialThreads_StillLeavesExactlyOneFallbackPerSeam(bool threadsFirst)
     {
+        // AddSocialThreads also calls TryAddPostSeamFallbacks (it requires the projector), in either position.
         var services = new ServiceCollection();
+        if (threadsFirst)
+        {
+            services.AddSocialThreads();
+        }
+
         services.AddSocialFeedRead();
         services.AddSocialPostWrite();
         services.AddSocialPersonaRead();
+        if (!threadsFirst)
+        {
+            services.AddSocialThreads();
+        }
 
         Single<IPostEngagementReader>(services);
         Single<IMediaUrlSigner>(services);
-        Single<IReplyParentResolver>(services);
         Single<IParticipantPostProjector>(services);
+
+        // The resolver seam: AddSocialThreads contributes B2's REAL resolver with a plain Add, so the only question
+        // is that the fallback never stacks and the real one is what resolves (the last registration).
+        services.Count(d => d.ServiceType == typeof(IReplyParentResolver) && d.ImplementationType == typeof(UnavailableReplyParentResolver))
+            .Should().BeLessThanOrEqualTo(1, "the fallback resolver is TryAdd'ed, so it never stacks");
+        services.Last(d => d.ServiceType == typeof(IReplyParentResolver)).ImplementationType.Should().Be(
+            typeof(ReplyParentResolver), "B2's real resolver wins whichever order the registrations run in");
     }
 
     [Fact]

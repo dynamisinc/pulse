@@ -27,8 +27,11 @@ using Pulse.WebApi.Data.Entities;
 /// </para>
 /// <para>
 /// <b>demo-polish BP.</b> <see cref="ParticipantPostProjector"/> is the read-side producer: counts = baseline +
-/// real, signed media URLs, <c>inReplyTo</c>, and <c>viewer</c> only for a persona-bound participant read.
-/// <see cref="FromPost"/> remains the zero-count fallback for a host with no projector registered. A derived
+/// real, signed media URLs, <c>inReplyTo</c>, and <c>viewer</c> only for a persona-bound participant read. Every
+/// read surface (feed, thread, the ingest broadcast of a post with media or a parent) goes through it; the
+/// projector is always registered (<c>TryAddPostSeamFallbacks</c>). <see cref="FromPost"/> is the participant-safe
+/// narrowing the ingest path builds its baseline view on (a new post with no media and no parent, or a projection
+/// that failed after the commit), and the post-write endpoint's last-resort participant shape. A derived
 /// shape (DP-17) adds only participant-safe members and must be serialized through its derived declared type.
 /// </para>
 /// </remarks>

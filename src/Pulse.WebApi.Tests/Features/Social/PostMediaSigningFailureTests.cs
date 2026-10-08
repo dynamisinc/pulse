@@ -96,6 +96,9 @@ public class PostMediaSigningFailureTests
             m => m.Contains("Signing 1 media asset(s)", StringComparison.Ordinal),
             m => m.Contains("Signing 2 media asset(s)", StringComparison.Ordinal));
         factory.Logs.Entries.Should().NotContain(
+            e => e.Category == ProjectorCategory && (e.EventId.Id == 1 || e.EventId.Id == 2),
+            "after a BATCH failure the per-item drop/poster-omitted warnings are suppressed: one read, one warning (Gate-2 L-3)");
+        factory.Logs.Entries.Should().NotContain(
             e => e.Category == IngestCategory && e.EventId.Id == 3,
             "the projector absorbed the signing fault itself, so ingest never needed its whole-projection fallback");
     }

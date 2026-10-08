@@ -91,7 +91,7 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
         var postIds = posts.Select(post => post.Id).Distinct().ToArray();
 
         var media = await LoadMediaAsync(postIds, cancellationToken);
-        var urls = await SignAsync(media, cancellationToken);
+        var (urls, signingFailed) = await SignAsync(media, cancellationToken);
         var replyParents = await LoadReplyParentsAsync(posts, cancellationToken);
 
         // Viewer state is read only when it will be shown, so a broadcast or staff read never asks for it.
@@ -101,7 +101,7 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
         var mediaByPost = media.ToLookup(row => row.PostId);
 
         return posts
-            .Select(post => Project(post, mediaByPost[post.Id], urls, replyParents, engagement, viewerPersonaId))
+            .Select(post => Project(post, mediaByPost[post.Id], urls, signingFailed, replyParents, engagement, viewerPersonaId))
             .ToArray();
     }
 
@@ -113,6 +113,7 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
         Post post,
         IEnumerable<MediaRow> mediaRows,
         IReadOnlyDictionary<Guid, string> urls,
+        bool signingFailed,
         IReadOnlyDictionary<Guid, string> replyParentHandles,
         IReadOnlyDictionary<Guid, PostEngagement> engagement,
         Guid? viewerPersonaId)
@@ -121,7 +122,7 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
 
         var media = mediaRows
             .OrderBy(row => row.Order)
-            .Select(row => ToMediaDto(row, urls))
+            .Select(row => ToMediaDto(row, urls, logOmissions: !signingFailed))
             .OfType<PostMediaDto>()
             .ToArray();
 
@@ -154,18 +155,24 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
     /// <summary>
     /// Maps one media row to the participant shape: the asset id, kind, URL, alt and display hints only — no
     /// storage or uploader detail. A row whose URL was not minted is dropped rather than served without one, and
-    /// a poster with no URL is omitted; both are logged with the asset id (Gate-1 L-4).
+    /// a poster with no URL is omitted; both are logged with the asset id (Gate-1 L-4) — unless the whole signing
+    /// batch failed, which <see cref="SignAsync"/> already logged ONCE, so one read never writes 1 + N warnings
+    /// (Wave 1b Gate-2 L-3).
     /// </summary>
-    private PostMediaDto? ToMediaDto(MediaRow row, IReadOnlyDictionary<Guid, string> urls)
+    private PostMediaDto? ToMediaDto(MediaRow row, IReadOnlyDictionary<Guid, string> urls, bool logOmissions)
     {
         if (!urls.TryGetValue(row.Asset.Id, out var url))
         {
-            LogMediaDropped(row.Asset.Id, row.PostId);
+            if (logOmissions)
+            {
+                LogMediaDropped(row.Asset.Id, row.PostId);
+            }
+
             return null;
         }
 
         string? posterUrl = null;
-        if (row.Poster is { } poster && !urls.TryGetValue(poster.Id, out posterUrl))
+        if (row.Poster is { } poster && !urls.TryGetValue(poster.Id, out posterUrl) && logOmissions)
         {
             LogPosterOmitted(poster.Id, row.PostId);
         }
@@ -208,16 +215,17 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
     /// <b>A signing failure degrades the page, never fails it.</b> A storage hiccup (a delegation-key fetch
     /// that fails or times out, RBAC not yet propagated, an unconfigured provider while media rows exist) must not
     /// blank the whole feed. Such a failure is logged ONCE and answered with an empty URL map, so every item is
-    /// dropped (and logged) by the existing no-URL path while the posts themselves are still served. Two
+    /// dropped by the existing no-URL path (without a per-item log) while the posts themselves are still served. Two
     /// exceptions are NOT absorbed: cancellation, and <see cref="ExerciseScopeViolationException"/> — a scope
     /// mismatch is an isolation signal and must fail closed.
     /// </remarks>
-    private async Task<IReadOnlyDictionary<Guid, string>> SignAsync(
+    /// <returns>The minted URLs, and whether the whole batch failed (its per-item omissions are then not re-logged).</returns>
+    private async Task<(IReadOnlyDictionary<Guid, string> Urls, bool Failed)> SignAsync(
         List<MediaRow> media, CancellationToken cancellationToken)
     {
         if (media.Count == 0)
         {
-            return new Dictionary<Guid, string>();
+            return (new Dictionary<Guid, string>(), false);
         }
 
         var assets = media
@@ -228,13 +236,13 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
 
         try
         {
-            return await _mediaUrlSigner.GetReadUrlsAsync(assets, cancellationToken);
+            return (await _mediaUrlSigner.GetReadUrlsAsync(assets, cancellationToken), false);
         }
 #pragma warning disable CA1031 // A storage fault must degrade the page to media-less posts, never fail it.
         catch (Exception ex) when (ex is not OperationCanceledException and not ExerciseScopeViolationException)
         {
             LogSigningFailed(ex, assets.Length);
-            return new Dictionary<Guid, string>();
+            return (new Dictionary<Guid, string>(), true);
         }
 #pragma warning restore CA1031
     }

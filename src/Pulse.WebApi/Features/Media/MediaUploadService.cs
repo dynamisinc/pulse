@@ -36,7 +36,7 @@ public enum MediaUploadOutcome
     /// <summary>415 — not an allowed type by magic bytes, empty, or a <c>kind</c> hint that disagrees.</summary>
     UnsupportedMediaType,
 
-    /// <summary>503 — no media store is configured.</summary>
+    /// <summary>503 — no media store is configured, or the stored asset's read URL could not be signed (the row stays).</summary>
     StoreUnavailable,
 }
 
@@ -281,7 +281,22 @@ public sealed partial class MediaUploadService
             LogUploaded(asset.Id, exerciseId, account, asset.Kind, asset.Bytes);
 
             var toSign = hints.Poster is null ? new[] { asset } : new[] { asset, hints.Poster };
-            var urls = await _signer.GetReadUrlsAsync(toSign, cancellationToken);
+            IReadOnlyDictionary<Guid, string> urls;
+            try
+            {
+                urls = await _signer.GetReadUrlsAsync(toSign, cancellationToken);
+            }
+#pragma warning disable CA1031 // A signing fault after the commit is a storage outage, answered 503, never a 500.
+            catch (Exception ex) when (ex is not OperationCanceledException and not ExerciseScopeViolationException)
+            {
+                // The row and the blob are committed and stay (the library and a later post can use the asset once
+                // storage auth recovers); only the response URL could not be minted. 503 tells the client to retry
+                // later; a 500 would read as a lost upload (Wave 1b Gate-2 L-2).
+                LogSigningFailedAfterCommit(ex, asset.Id, exerciseId);
+                return MediaUploadResult.Failed(MediaUploadOutcome.StoreUnavailable);
+            }
+#pragma warning restore CA1031
+
             return MediaUploadResult.Created(MediaAssetView.FromAsset(
                 asset, urls[asset.Id], hints.Poster is null ? null : urls[hints.Poster.Id]));
         }
@@ -689,6 +704,12 @@ public sealed partial class MediaUploadService
         Level = LogLevel.Information,
         Message = "Media uploaded: asset {AssetId} in exercise {ExerciseId} by account {Account} — {Kind}, {Bytes} bytes.")]
     private partial void LogUploaded(Guid assetId, Guid exerciseId, string account, string kind, long bytes);
+
+    [LoggerMessage(
+        EventId = 2,
+        Level = LogLevel.Warning,
+        Message = "Media asset {AssetId} in exercise {ExerciseId} was stored, but its read URL could not be signed; answering 503.")]
+    private partial void LogSigningFailedAfterCommit(Exception exception, Guid assetId, Guid exerciseId);
 
     /// <summary>The uploading human and the kind of account behind them.</summary>
     private sealed record Uploader(string AccountKind, string HumanId);

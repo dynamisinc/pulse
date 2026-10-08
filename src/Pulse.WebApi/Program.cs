@@ -377,8 +377,9 @@ app.MapSocialThreadEndpoints();   // #270 GET /api/threads/{postId}
 // (identity-auth-roles/06) so a shared read-only session is refused (403) before the handler runs — the
 // server-side realization of the read-only-never-writes guarantee (COR-015). Opt-in per sim-write by design
 // (a verb-blanket would wrongly block read-only's legitimate writes to /api/telemetry, /auth/refresh,
-// /auth/logout, SignalR negotiate); each FUTURE sim-write (E2 reply/react/follow/DM) must apply the same
-// guard — tracked for a defense-in-depth backstop before E2 participant writes land.
+// /auth/logout, SignalR negotiate). Every participant sim-write applies the same guard: replies ride POST
+// /api/posts; reactions (demo-polish B3) are the next line; follows and BM's POST /api/media apply it inside
+// their own Map extensions. Any FUTURE sim-write (e.g. DMs) must do the same.
 app.MapGroup(string.Empty).DenyReadOnlySessions().MapSocialPostEndpoints();
 app.MapGroup(string.Empty).DenyReadOnlySessions().MapSocialReactionEndpoints(); // demo-polish B3
 

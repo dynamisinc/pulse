@@ -2,6 +2,8 @@ namespace Pulse.WebApi.Features.Media;
 
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 
@@ -56,7 +58,7 @@ public sealed class MediaLibraryResult
 /// staff/assignment gate is the endpoint filter's job (<c>EngineCockpitStaffAuthorizationFilter</c>); scope comes
 /// only from <see cref="IExerciseContext"/> (COR-001), so another exercise's media is never returned.
 /// </summary>
-public sealed class MediaLibraryService
+public sealed partial class MediaLibraryService
 {
     /// <summary>The default page size.</summary>
     public const int DefaultTake = 100;
@@ -67,12 +69,18 @@ public sealed class MediaLibraryService
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly IMediaUrlSigner _signer;
+    private readonly ILogger<MediaLibraryService> _logger;
 
     /// <summary>Creates the service.</summary>
     /// <param name="dbContext">The persistence context (exercise-filtered).</param>
     /// <param name="exerciseContext">The resolved exercise scope — the ONLY scoping source.</param>
     /// <param name="signer">The read-URL signer.</param>
-    public MediaLibraryService(PulseDbContext dbContext, IExerciseContext exerciseContext, IMediaUrlSigner signer)
+    /// <param name="logger">Diagnostics for a signing failure; optional.</param>
+    public MediaLibraryService(
+        PulseDbContext dbContext,
+        IExerciseContext exerciseContext,
+        IMediaUrlSigner signer,
+        ILogger<MediaLibraryService>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -81,6 +89,7 @@ public sealed class MediaLibraryService
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _signer = signer;
+        _logger = logger ?? NullLogger<MediaLibraryService>.Instance;
     }
 
     /// <summary>Lists the library.</summary>
@@ -88,6 +97,11 @@ public sealed class MediaLibraryService
     /// <param name="take">Optional page size, 1..<see cref="MaxTake"/> (default <see cref="DefaultTake"/>).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The outcome.</returns>
+    /// <exception cref="MediaStoreUnavailableException">
+    /// The page's read URLs could not be signed: no store is configured, or ANY signing fault (a failed or timed-out
+    /// delegation-key fetch, RBAC not yet propagated). The endpoint answers 503 rather than fabricate URLs. Cancellation
+    /// and <see cref="ExerciseScopeViolationException"/> are not converted (Wave 1b Gate-2 L-2).
+    /// </exception>
     public async Task<MediaLibraryResult> ListAsync(string? kind, string? take, CancellationToken cancellationToken = default)
     {
         var scope = _exerciseContext.CurrentExerciseId;
@@ -153,7 +167,19 @@ public sealed class MediaLibraryService
                 .Where(asset => asset.ExerciseId == exerciseId && wantedPosterIds.Contains(asset.Id))
                 .ToListAsync(cancellationToken);
 
-        var urls = await _signer.GetReadUrlsAsync([.. assets, .. posters], cancellationToken);
+        IReadOnlyDictionary<Guid, string> urls;
+        try
+        {
+            urls = await _signer.GetReadUrlsAsync([.. assets, .. posters], cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException
+            and not ExerciseScopeViolationException
+            and not MediaStoreUnavailableException)
+        {
+            // Any storage fault degrades the same way as "no store": one warning, then the endpoint's 503.
+            LogSigningFailed(ex, assets.Count + posters.Count);
+            throw new MediaStoreUnavailableException("The media library's read URLs could not be signed.", ex);
+        }
 
         var items = assets
             .Select(asset => StaffMediaAssetView.FromAsset(
@@ -164,4 +190,10 @@ public sealed class MediaLibraryService
 
         return MediaLibraryResult.Ok(items);
     }
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Warning,
+        Message = "Signing {AssetCount} media library asset(s) failed; answering 503.")]
+    private partial void LogSigningFailed(Exception exception, int assetCount);
 }

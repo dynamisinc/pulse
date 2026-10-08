@@ -561,8 +561,13 @@ public class PostMediaWriteTests
         (await CountRowsAsync(_fixture, world.Exercise)).Should().Be((2, 1, 1), "the seeded parent, plus the new post, its item and its event");
     }
 
+    /// <summary>
+    /// Wave 1b Gate-2 L-1 changed the second half of this contract: the post-commit projection no longer runs on the
+    /// request's token, so a cancellation it throws can only be internal (never the caller's). Propagating it would
+    /// 500 a committed post and skip its broadcast, so it is now absorbed like any other projection fault.
+    /// </summary>
     [RequiresDockerFact]
-    public async Task AProjectionFailure_IsLoggedAsAWarning_ButCancellationStillPropagates()
+    public async Task AProjectionFailure_IsLoggedAsAWarning_EvenAnInternalCancellationAfterTheCommit()
     {
         var exerciseId = Guid.NewGuid();
         var parent = await SeedPostAsync(_fixture, exerciseId, Guid.NewGuid(), BaseScenarioTime);
@@ -593,13 +598,17 @@ public class PostMediaWriteTests
 
         await using (var context = _fixture.CreateContext(scope))
         {
+            var logger = new CapturingLogger<PostIngestService>();
+            var broadcaster = new FakeFeedBroadcaster();
             var service = new PostIngestService(
-                context, scope, new FakeFeedBroadcaster(), null, null,
+                context, scope, broadcaster, null, logger,
                 new FakeReplyParentResolver(context, new ResolverProbe()), new ThrowingProjector(new OperationCanceledException()));
 
-            var ingest = () => service.IngestAsync(Reply("cancelled"), attribution);
+            var result = await service.IngestAsync(Reply("cancelled"), attribution);
 
-            await ingest.Should().ThrowAsync<OperationCanceledException>("cancellation is never swallowed as a projection fault");
+            result.Outcome.Should().Be(PostIngestOutcome.Created, "the post has committed; an internal cancellation must not 500 it");
+            broadcaster.Calls.Should().ContainSingle("and it is still broadcast, with the baseline view");
+            logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.EventId.Id == 3);
         }
     }
 
