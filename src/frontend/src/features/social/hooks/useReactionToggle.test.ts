@@ -225,6 +225,30 @@ describe('useReactionToggle — in-flight guard and gating', () => {
     await waitFor(() => expect(result.current.pending).toBe(false))
   })
 
+  it('a tap in the commit gap acts on the SERVER\'s reconciled values and rolls back onto them', async () => {
+    const first = deferred<ReactionState>()
+    vi.mocked(putReaction).mockReturnValueOnce(first.promise)
+    const { result } = setup({ initialCount: 10 })
+
+    act(() => result.current.toggle()) // optimistic: on, 11
+    // The handler React bound to the optimistic render. Between the guard releasing
+    // (`.finally`) and React committing the reconciled values, a tap still runs THIS.
+    const staleToggle = result.current.toggle
+    await act(async () => first.resolve(state('like', true, 14))) // server: on, 14
+    expect(result.current.count).toBe(14)
+
+    vi.mocked(deleteReaction).mockRejectedValueOnce(new Error('503'))
+    act(() => staleToggle())
+
+    // It acted on 14 (the server's number), not on the stale optimistic 11 ...
+    expect(deleteReaction).toHaveBeenCalledWith('post-1', 'like', { active: true, count: 14 })
+    expect(result.current.count).toBe(13)
+    // ... so the rollback restores 14, not 11.
+    await waitFor(() => expect(result.current.errorMessage).toBe('It failed.'))
+    expect(result.current.active).toBe(true)
+    expect(result.current.count).toBe(14)
+  })
+
   it('canAct: false is a hard no-op — no request, no state change', () => {
     const { result } = setup({ canAct: false })
 

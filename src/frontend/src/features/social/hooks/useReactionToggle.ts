@@ -20,7 +20,10 @@
  *    failure message (rendered into a polite live region by `PostActions`).
  *  - The IN-FLIGHT GUARD: while a write is pending a second `toggle()` is a no-op.
  *    It is a REF, not state, so two taps inside one tick (before React re-renders)
- *    still cannot double-count or race each other's rollback.
+ *    still cannot double-count or race each other's rollback. The state `toggle`
+ *    acts on is a ref too (mirrored on every set), so a tap in the gap between the
+ *    guard releasing and React committing the reconciled values still sees the
+ *    SERVER's numbers, and a rollback there restores them.
  *  - `canAct`: the render gate. The wrapper computes it (not read-only AND a bound
  *    persona); when false `toggle()` is a no-op and the control is ABSENT in the
  *    card (D1-011), with the count rendered as inert text.
@@ -107,6 +110,19 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
   const [count, setCount] = useState(seed.count)
   const [pending, setPending] = useState(false)
 
+  // The LATEST state, mirrored in a ref and updated in the same call as every
+  // `setActive` / `setCount` (see `commit`). `toggle` reads it instead of its
+  // render-captured `active` / `count`: the guard below is released in `.finally`,
+  // BEFORE React has committed the reconciled values, so a tap in that gap would
+  // otherwise act on the stale optimistic values — and a failed write there would
+  // "roll back" onto them, not onto what the server last said.
+  const stateRef = useRef({ active: seed.active, count: seed.count })
+  const commit = useCallback((next: { active: boolean; count: number }) => {
+    stateRef.current = next
+    setActive(next.active)
+    setCount(next.count)
+  }, [])
+
   // A ref (not state): two taps in one tick must not both pass the guard.
   const inFlightRef = useRef(false)
 
@@ -114,12 +130,14 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
     if (!canAct || inFlightRef.current) return
     inFlightRef.current = true
 
-    const previous = { active, count }
+    const previous = stateRef.current
     const nextActive = !previous.active
 
-    setActive(nextActive)
     // Clamp at 0 defensively so a desynced seed can never render a negative count.
-    setCount(nextActive ? previous.count + 1 : Math.max(0, previous.count - 1))
+    commit({
+      active: nextActive,
+      count: nextActive ? previous.count + 1 : Math.max(0, previous.count - 1),
+    })
     setPending(true)
     clear()
 
@@ -132,15 +150,13 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
         state => {
           // Reconcile onto the server's own answer (viewer flag + count).
           const confirmed = kind === 'like' ? state.viewer.liked : state.viewer.reposted
-          setActive(confirmed)
-          setCount(state.counts[kind])
+          commit({ active: confirmed, count: state.counts[kind] })
           // Mock only, and only for a real state change (the server's rule).
           if (USE_MOCK_DATA && confirmed !== previous.active) emitMockTelemetry(confirmed)
         },
         () => {
           // Roll back EXACTLY, and tell the viewer (polite live region).
-          setActive(previous.active)
-          setCount(previous.count)
+          commit(previous)
           show(failureMessage)
         },
       )
@@ -148,7 +164,7 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
         inFlightRef.current = false
         setPending(false)
       })
-  }, [canAct, active, count, postId, kind, failureMessage, emitMockTelemetry, clear, show])
+  }, [canAct, commit, postId, kind, failureMessage, emitMockTelemetry, clear, show])
 
   return { active, count, pending, errorMessage: message, toggle }
 }

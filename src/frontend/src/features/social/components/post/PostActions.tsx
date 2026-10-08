@@ -37,12 +37,16 @@
  * from the DOM, not greyed out. (`useAmplify().doQuote` and `amplify.quotePost`
  * stay for the later quote story.)
  *
- * READ-ONLY / NO-PERSONA (COR-015 / D1-011). `variant === 'readOnly'` (observer
- * sessions) renders NO buttons at all: every count is inert text with a
- * visually-hidden label. A writable session with no bound persona has no identity
- * to react as, so its like / repost are likewise inert counts (never a dead
- * button); reply stays a button. `onReply` is an optional prop: omit it and the
- * reply button is an inert-until-wired `<button>`.
+ * READ-ONLY / NO-PERSONA / UNWIRED (COR-015 / D1-011, WR-002). An action is a
+ * `<button>` only when pressing it does something; otherwise it is the SAME inert
+ * markup for all three (an `actionInert` span: icon, count, visually-hidden label,
+ * `data-action` kept) — never a focusable no-op:
+ *  - `variant === 'readOnly'` (observer cards) OR a session that is itself read-only
+ *    (`session.isReadOnly`, even on a `variant="full"` card): ALL THREE are inert.
+ *  - a writable session with no bound persona has no identity to react as, so like
+ *    and repost are inert.
+ *  - Reply is a button only when `onReply` is supplied; omit the prop and it is an
+ *    inert count (the page that mounts the card has not wired navigation yet).
  *
  * TELEMETRY (XC-004). LIVE: none from the client — the server emits `reaction` /
  * `repost` (implementation.md §1.8). MOCK: one event per confirmed toggle (see
@@ -54,7 +58,8 @@
  *
  * DOM hooks (tests depend on them): `data-testid="post-actions"`,
  * `button[data-action="reply|repost|like"]` (or `span[data-action]` when inert),
- * `data-testid="post-actions-notice"` (the live region).
+ * `data-testid="post-actions-notice"` (the live region; present only while a like
+ * or repost control is).
  *
  * Participant world — plain elements, FontAwesome icons, `PostActions.module.css`.
  * No COBRA, no MUI.
@@ -135,9 +140,13 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
     notice,
   })
 
-  const isReadOnly = variant === 'readOnly'
+  // A card is read-only when its VARIANT says so (observer shells) or when the SESSION
+  // itself is read-only — the two can disagree (`variant="full"` + a read-only
+  // session), and then all three actions must still go inert together (COR-015).
+  const isReadOnly = variant === 'readOnly' || reaction.isReadOnly
   const canLike = !isReadOnly && reaction.canReact
   const canRepost = !isReadOnly && amplify.canAmplify
+  const canReply = !isReadOnly && onReply !== undefined
 
   // Canonical reply · repost · like order (R-002). A toggle shows the hook's own
   // optimistic total only while it is a live control; inert counts follow the post.
@@ -147,9 +156,9 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
       label: 'Reply',
       icon: faComment,
       count: post.counts.reply,
-      interactive: !isReadOnly,
-      // `onReply` is optional: omitted => an inert-until-wired button.
-      onClick: onReply ? () => onReply(post.id) : undefined,
+      // `onReply` is optional: omitted => inert text, never a focusable no-op button.
+      interactive: canReply,
+      onClick: canReply ? () => onReply(post.id) : undefined,
     },
     {
       key: 'repost',
@@ -224,10 +233,10 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
           )
         })}
       </div>
-      {/* Always mounted (when there are controls) so the region exists BEFORE its
-          text changes — a live region injected with its content is announced
-          unreliably. Empty when there is nothing to say. */}
-      {!isReadOnly && (
+      {/* Always mounted while a like / repost control exists (only those can fail), so
+          the region exists BEFORE its text changes — a live region injected with its
+          content is announced unreliably. Empty when there is nothing to say. */}
+      {(canLike || canRepost) && (
         <div
           className={styles.notice}
           role="status"

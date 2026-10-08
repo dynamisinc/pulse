@@ -76,7 +76,7 @@ afterEach(() => {
 
 describe('PostActions — anatomy (R-002, NFR-001)', () => {
   it('renders reply, repost, like in canonical order with "<Label>, <count>" names', async () => {
-    await renderActions(<PostActions post={buildPost()} variant="full" />)
+    await renderActions(<PostActions post={buildPost()} variant="full" onReply={vi.fn()} />)
 
     const buttons = screen.getByTestId('post-actions').querySelectorAll('button[data-action]')
     expect(Array.from(buttons).map(b => b.getAttribute('data-action'))).toEqual([
@@ -142,7 +142,11 @@ describe('PostActions — compact counts with exact accessible names (F3)', () =
 
   it('compacts the reply and repost counts too, and keeps the exact figure in their names', async () => {
     await renderActions(
-      <PostActions post={buildPost({ counts: { reply: 1450, repost: 12300, like: 9 } })} variant="full" />,
+      <PostActions
+        post={buildPost({ counts: { reply: 1450, repost: 12300, like: 9 } })}
+        variant="full"
+        onReply={vi.fn()}
+      />,
     )
 
     expect(screen.getByRole('button', { name: 'Reply, 1.4 thousand (1,450)' })).toHaveTextContent('1.4K')
@@ -336,7 +340,7 @@ describe('PostActions — rollback on a failed write (F3)', () => {
 })
 
 describe('PostActions — in-flight guard', () => {
-  it('two taps inside one tick send ONE request and count once', async () => {
+  it('two back-to-back taps before the write settles send ONE request and count once', async () => {
     const putSpy = vi.spyOn(api, 'put')
     await renderActions(<PostActions post={buildPost({ id: 'post-dbl' })} variant="full" />)
     const like = screen.getByRole('button', { name: 'Like, 42' })
@@ -398,22 +402,34 @@ describe('PostActions — a card re-pointed at another post (keyed state)', () =
   })
 })
 
-describe('PostActions — onReply', () => {
-  it('fires onReply with the post id on click', async () => {
+describe('PostActions — Reply is a button only when it is wired (WR-002, F3)', () => {
+  it('a wired Reply is a button and fires onReply with the post id on click', async () => {
     const onReply = vi.fn()
     const user = userEvent.setup()
     await renderActions(<PostActions post={buildPost({ id: 'post-r' })} variant="full" onReply={onReply} />)
 
-    await user.click(screen.getByRole('button', { name: /^reply/i }))
+    const reply = screen.getByRole('button', { name: 'Reply, 3' })
+    expect(reply.tagName).toBe('BUTTON')
+    await user.click(reply)
 
+    expect(onReply).toHaveBeenCalledTimes(1)
     expect(onReply).toHaveBeenCalledWith('post-r')
   })
 
-  it('is an inert-until-wired button without onReply', async () => {
+  it('an unwired Reply is inert text: not a button, not focusable, count still readable', async () => {
     const user = userEvent.setup()
     await renderActions(<PostActions post={buildPost()} variant="full" />)
 
-    await expect(user.click(screen.getByRole('button', { name: /^reply/i }))).resolves.toBeUndefined()
+    expect(screen.queryByRole('button', { name: /^reply/i })).not.toBeInTheDocument()
+    const reply = screen.getByTestId('post-actions').querySelector('[data-action="reply"]')
+    expect(reply?.tagName).toBe('SPAN')
+    expect(reply).not.toHaveAttribute('tabindex')
+    expect(reply).toHaveTextContent('3')
+    expect(within(reply as HTMLElement).getByText('Reply')).toBeInTheDocument()
+
+    // Tab order skips it entirely: the first stop is Repost.
+    await user.tab()
+    expect(screen.getByRole('button', { name: /^repost/i })).toHaveFocus()
   })
 })
 

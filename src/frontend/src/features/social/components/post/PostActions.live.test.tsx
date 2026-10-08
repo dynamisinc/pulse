@@ -256,6 +256,22 @@ describe('PostActions (live) — rollback', () => {
     expect(screen.getByRole('button', { name: 'Like, 42' })).toHaveAttribute('aria-pressed', 'false')
   })
 
+  it('treats a well-formed answer for a DIFFERENT post as a failure (fail closed)', async () => {
+    const otherPost = reactionBody('like', true, { repost: 7, like: 99 }, { liked: true, reposted: false })
+    vi.mocked(api.put).mockResolvedValue({
+      data: { ...otherPost.data, postId: 'ffffffff-ffff-4fff-8fff-ffffffffffff' },
+    })
+    const user = userEvent.setup()
+    render(<PostActions post={buildPost()} variant="full" />)
+
+    await user.click(screen.getByRole('button', { name: 'Like, 42' }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('post-actions-notice')).toHaveTextContent(/couldn't update your like/i))
+    // Rolled back to this post's own numbers; the other post's 99 never lands.
+    expect(screen.getByRole('button', { name: 'Like, 42' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
   it('a rapid double tap while the write is pending sends ONE request', async () => {
     let resolve: (value: unknown) => void = () => undefined
     vi.mocked(api.put).mockReturnValue(new Promise(r => { resolve = r }))

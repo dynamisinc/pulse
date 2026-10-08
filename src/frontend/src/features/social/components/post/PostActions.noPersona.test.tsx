@@ -62,7 +62,7 @@ afterEach(() => {
 })
 
 describe('PostActions — writable session with no bound persona (full variant)', () => {
-  it('renders like and repost as inert counts, keeps Reply a button, and shows no notice region', () => {
+  it('renders like and repost as inert counts, keeps a wired Reply a button, and no notice region', () => {
     render(<PostActions post={buildPost()} variant="full" onReply={vi.fn()} />)
 
     const region = screen.getByTestId('post-actions')
@@ -74,6 +74,14 @@ describe('PostActions — writable session with no bound persona (full variant)'
     expect(region).toHaveTextContent('1.4K')
     expect(within(region).getByText('1.4 thousand (1,450)')).toBeInTheDocument()
     expect(screen.queryByTestId('post-quote-trigger')).not.toBeInTheDocument()
+    // Nothing that can fail => no live region.
+    expect(screen.queryByTestId('post-actions-notice')).not.toBeInTheDocument()
+  })
+
+  it('with Reply unwired too, nothing in the row is a button', () => {
+    render(<PostActions post={buildPost()} variant="full" />)
+
+    expect(within(screen.getByTestId('post-actions')).queryAllByRole('button')).toHaveLength(0)
   })
 
   it('issues no request when an inert count is clicked', async () => {

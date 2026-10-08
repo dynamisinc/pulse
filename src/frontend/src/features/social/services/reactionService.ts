@@ -33,7 +33,7 @@
  * (and only when `USE_MOCK_DATA`), so the two can never double-count.
  *
  * FAIL CLOSED. A 2xx whose body is not a well-formed `ReactionState` for the
- * requested kind REJECTS — the hook then rolls back rather than reconcile onto
+ * requested post AND kind REJECTS — the hook then rolls back rather than reconcile onto
  * garbage.
  *
  * MOCK ADAPTER (dev / UAT-no-backend / Vitest). Mirrors the server's semantics
@@ -135,12 +135,21 @@ function isCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-/** Narrowing guard for the 200 body — fail closed on anything else. */
-function isReactionState(data: unknown, kind: ReactionKind): data is ReactionState {
+/**
+ * Narrowing guard for the 200 body — fail closed on anything else. The body must
+ * describe the post and kind that were asked about: a well-formed state for a
+ * DIFFERENT post (or kind) is as useless as garbage, and reconciling onto it would
+ * put another post's numbers on this card.
+ */
+function isReactionState(
+  data: unknown,
+  postId: string,
+  kind: ReactionKind,
+): data is ReactionState {
   if (!isRecord(data)) return false
   const { counts, viewer } = data
   return (
-    typeof data.postId === 'string' &&
+    data.postId === postId &&
     data.kind === kind &&
     typeof data.active === 'boolean' &&
     isRecord(counts) &&
@@ -212,7 +221,7 @@ async function writeReaction(
     method === 'put'
       ? await api.put<unknown>(url, undefined, config)
       : await api.delete<unknown>(url, config)
-  if (!isReactionState(response.data, kind)) {
+  if (!isReactionState(response.data, postId, kind)) {
     throw new Error(`${method === 'put' ? 'putReaction' : 'deleteReaction'}: malformed reaction state`)
   }
   return response.data

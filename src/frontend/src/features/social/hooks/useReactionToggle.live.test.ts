@@ -54,8 +54,12 @@ describe('useReactionToggle (live) — zero client telemetry', () => {
 
     act(() => result.current.toggle())
     await waitFor(() => expect(result.current.count).toBe(11))
+    // Settled (not merely reconciled): the success callback — where a mock-mode emit
+    // would live — has certainly run before we assert it never fired.
+    await waitFor(() => expect(result.current.pending).toBe(false))
     act(() => result.current.toggle())
     await waitFor(() => expect(result.current.count).toBe(10))
+    await waitFor(() => expect(result.current.pending).toBe(false))
 
     expect(emitMockTelemetry).not.toHaveBeenCalled()
   })

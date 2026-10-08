@@ -59,6 +59,7 @@ describe('PostCard — composition and DOM hooks', () => {
         })}
         onOpen={vi.fn()}
         onOpenProfile={vi.fn()}
+        onReply={vi.fn()}
       />,
     )
 
