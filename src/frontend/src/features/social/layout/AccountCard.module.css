@@ -1,0 +1,142 @@
+/*
+ * features/social/layout/AccountCard.module.css
+ * ---------------------------------------------------------------------------
+ * The nav rail's account card. Mobile-first: the base is the ICON rail (avatar
+ * stacked over an icon-only sign-out, text visually hidden but still in the
+ * accessibility tree); from 840px the card widens to avatar + name/handle over a
+ * labelled Sign out button. Reads the channel's `--pc-*` palette; light only (F5 owns the tokens
+ * sweep). No COBRA / MUI.
+ */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0 0;
+}
+
+.identity {
+  /* Visually hidden in the icon rail; the text stays in the a11y tree. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.name {
+  display: block;
+  color: var(--pc-ink);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.handle {
+  display: block;
+  color: var(--pc-ink-muted);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.signOut {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--pc-ink-muted);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.signOut:hover {
+  background: var(--pc-hover);
+  color: var(--pc-ink);
+}
+
+.signOut:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 2px;
+}
+
+.signOutIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.signOutLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (min-width: 840px) {
+  /*
+   * Two rows in the 240px rail: avatar + name/handle on top, the Sign out button
+   * beneath. (One row would leave the name ~40px once the button took its share.)
+   * A persona-less card has only the button, which then simply fills the card.
+   */
+  .card {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    align-items: center;
+    gap: 2px 10px;
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .card:hover {
+    background: var(--pc-hover);
+  }
+
+  .identity {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    min-width: 0;
+    clip-path: none;
+    overflow: hidden;
+  }
+
+  .name,
+  .handle {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .signOut {
+    grid-column: 1 / -1;
+    justify-self: start;
+    min-width: 0;
+    min-height: 0;
+    padding: 6px 4px 2px;
+  }
+
+  /* The visible label is for sighted users; it is the button's name either way. */
+  .signOutLabel {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    clip-path: none;
+    overflow: visible;
+  }
+}

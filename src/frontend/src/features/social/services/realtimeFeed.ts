@@ -21,6 +21,19 @@
  * — so `origin`/`actingHumanId`/`createdWallClock`/`injectId` can never reach a
  * caller.
  *
+ * CONTRACT v2 (demo-polish F2). A `PostReceived` payload is the full
+ * `ParticipantPostView` minus `viewer`, so the rebuild also KEEPS the two v2
+ * members a live post needs to render: `media` (photos / the inline video) and
+ * `inReplyTo` ("Replying to @handle"). Both are rebuilt key-by-key like every
+ * other field: a malformed `media` ENTRY (no id/kind/url/alt, a wrong-typed
+ * size, an unknown kind) is DROPPED and the rest of the post is still delivered —
+ * a bad attachment never crashes the stream or hides the post — and a malformed
+ * `inReplyTo` is omitted. Nothing is spread, so a stray provenance key riding
+ * inside a media entry or the reply object is dropped too (XC-002). `viewer` is
+ * never copied (it is absent on broadcasts by contract). Whether a media `url` is
+ * safe to RENDER is not decided here — the media components allow-list it
+ * (`components/media/safeMediaUrl.ts`).
+ *
  * TESTABILITY (NFR-003 fallback + recovery). `createRealtimeFeed({ connection,
  * fetchFeed, pollIntervalMs, reconnectWindowMs })` lets RTL inject a fake
  * connection (to force "hub unreachable → polling" and "recover") and a fake
@@ -33,8 +46,9 @@
 
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import type { RealtimeConnection } from '@/core/realtime/connection'
+import { parseMediaAssetView } from '@/core/media/mediaGuards'
 import { toParticipantView } from '@/features/social'
-import type { ParticipantPostView, Post } from '@/features/social'
+import type { ParticipantPostView, Post, PostInReplyTo, PostMedia } from '@/features/social'
 import { resolveFeed } from './feedService'
 
 /** The hub event carrying a newly-persisted post. Mirrors `SignalRFeedBroadcaster`'s constant. */
@@ -79,16 +93,54 @@ export interface CreateRealtimeFeedOptions {
   readonly reconnectWindowMs?: number
 }
 
+/** One `media` entry rebuilt from its contract keys, or `null` when it is malformed. */
+function toPostMedia(entry: unknown): PostMedia | null {
+  // The asset keys (id, kind, url, posterUrl, width, height, durationSec) are parsed and
+  // REBUILT by the shared guard: null on an optional member is absent, a wrong type fails.
+  const asset = parseMediaAssetView(entry)
+  if (asset === undefined) return null
+  // `alt` is REQUIRED on every attachment (NFR-001) — an entry without one is malformed.
+  const { alt } = entry as Record<string, unknown>
+  if (typeof alt !== 'string' || alt.trim().length === 0) return null
+  return { ...asset, alt }
+}
+
+/**
+ * The valid entries of a payload's `media`, or `undefined` when there are none.
+ * A non-array `media`, or one whose every entry is malformed, yields `undefined`
+ * (the key is omitted); a partly-malformed array keeps just the good entries.
+ */
+function toPostMediaList(value: unknown): PostMedia[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const media: PostMedia[] = []
+  for (const entry of value) {
+    const item = toPostMedia(entry)
+    if (item !== null) media.push(item)
+  }
+  return media.length > 0 ? media : undefined
+}
+
+/** A payload's `inReplyTo` rebuilt from its two contract keys, or `undefined` when malformed. */
+function toInReplyTo(value: unknown): PostInReplyTo | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const { postId, authorHandle } = value as Record<string, unknown>
+  if (typeof postId !== 'string' || postId.length === 0) return undefined
+  if (typeof authorHandle !== 'string' || authorHandle.length === 0) return undefined
+  return { postId, authorHandle }
+}
+
 /**
  * Validates a raw `PostReceived` payload and rebuilds it as a participant-safe
  * `ParticipantPostView`. Returns `null` (dropped, never cast blindly) for any
  * out-of-shape payload. Builds a fresh literal from the known-safe fields only
  * — it never spreads the payload, so no stray provenance key can ride along
- * (XC-002 defence in depth; the server already omits them).
+ * (XC-002 defence in depth; the server already omits them). The contract-v2
+ * members `media` and `inReplyTo` are kept when well-formed (see the module header).
  */
 function toParticipantPostView(payload: unknown): ParticipantPostView | null {
   if (typeof payload !== 'object' || payload === null) return null
-  const { id, authorPersonaId, text, scenarioTime, counts } = payload as Record<string, unknown>
+  const { id, authorPersonaId, text, scenarioTime, counts, media, inReplyTo } =
+    payload as Record<string, unknown>
   if (
     typeof id !== 'string' || id.length === 0 ||
     typeof authorPersonaId !== 'string' || authorPersonaId.length === 0 ||
@@ -102,7 +154,18 @@ function toParticipantPostView(payload: unknown): ParticipantPostView | null {
   if (typeof reply !== 'number' || typeof repost !== 'number' || typeof like !== 'number') {
     return null
   }
-  return { id, authorPersonaId, text, scenarioTime, counts: { reply, repost, like } }
+
+  const mediaList = toPostMediaList(media)
+  const replyTo = toInReplyTo(inReplyTo)
+  return {
+    id,
+    authorPersonaId,
+    text,
+    scenarioTime,
+    counts: { reply, repost, like },
+    ...(mediaList !== undefined ? { media: mediaList } : {}),
+    ...(replyTo !== undefined ? { inReplyTo: replyTo } : {}),
+  }
 }
 
 /**

@@ -1,204 +1,259 @@
 /**
  * features/social/components/post/PostActions.tsx
  * ---------------------------------------------------------------------------
- * The action row of the decomposed `<PostCard>`: reply · repost · like (· share)
- * (R-002), the separate Quote trigger and the inline quote panel (demo-polish
- * F0, DP-14). `PostCard` ALREADY MOUNTS it, so F3 (engagement) owns this file +
- * its CSS module + the hooks it calls — it never needs to touch the frozen
+ * The action row of the decomposed `<PostCard>`: reply · repost · like (R-002),
+ * with PERSISTED like / repost toggles (demo-polish F3 "Engagement"; SOC-030,
+ * SOC-020/021, NFR-001, COR-015, D1-011). `PostCard` ALREADY MOUNTS it (F0,
+ * DP-14), so every card on every surface — feed, thread, profile, hashtag, the
+ * quoted-post card — has live like/repost with NO per-page wiring; this file + its
+ * CSS module + the hooks it calls are F3's, and it never touches the frozen
  * `PostCard`.
  *
- * SELF-WIRING (DP-14 — the relocation F0 performed). Before F0 the like/repost/
- * quote wiring lived at TWO call sites (`Feed.tsx`'s `FeedRow`, `ThreadView.tsx`'s
- * `ThreadCard`) and Profile / HashtagFeed / QuotePostCard cards had DEAD buttons.
- * Now this component calls the existing LOCAL-OPTIMISTIC `useReaction()` /
- * `useAmplify()` hooks itself, so every card everywhere has live like/repost with
- * NO per-page wiring, and F3 can make them persist by editing only this part and
- * those hooks. Behaviour is otherwise unchanged:
- *  - `useReaction` seeds from `post.counts.like` and the post's `viewer.liked`
- *    (the seed is read once; the hook owns the state after — a feed re-render
- *    never clobbers an in-flight toggle). The displayed like count is the hook's
- *    optimistic total, so a toggle renders immediately (SOC-030).
- *  - The like control carries `aria-pressed` plus an "…, liked" accessible-name
- *    suffix, and the active state pairs a colour change with a count weight
- *    change — never colour-only (NFR-001).
- *  - Repost is wired when the session can amplify (`useAmplify().canAmplify`); the
- *    SEPARATE Quote trigger next to it opens an inline `QuoteComposer` panel. Quote
- *    deliberately carries NO `data-action`, so the reply/repost/like(/share)
- *    canonical set (R-002) is unaffected.
- *  - NO FOCUSABLE NO-OPS. An action with nothing wired to it renders as the same
- *    INERT markup the read-only variant uses (a `data-action` span: icon, count,
- *    visually-hidden label) — never a `<button>` with an actionable name and no
- *    `onClick`, which would be a keyboard/screen-reader dead control. (The same rule
- *    `PostBody` applies to unwired hashtags.) That is: `onReply` is an optional prop
- *    and without it Reply is inert; `share` has no handler at all and is always
- *    inert; like/repost are inert when the session cannot react/amplify. The
- *    `data-action` attribute stays on the inert span so selectors still find it.
- *  - `variant === 'readOnly'` (COR-015/D1-011, observer sessions): the interactive
- *    controls are ABSENT — not disabled — and the counts render as inert text with
- *    a visually-hidden label.
+ * WIRING. The component calls `useReaction()` / `useAmplify()` itself. Both seed
+ * ONCE from the post (`counts.like` / `counts.repost`, `viewer.liked` /
+ * `viewer.reposted`, so after a refresh the heart / repost are still on) and own
+ * the state after: optimistic flip + ±1, `PUT`/`DELETE` through `reactionService`,
+ * reconcile to the response, exact rollback on failure (a feed re-render never
+ * clobbers an in-flight toggle). The row is keyed by the post id so a card that is
+ * re-pointed at a DIFFERENT post (thread navigation reuses the mounted card) never
+ * shows the previous post's state or lets an in-flight response land on it.
+ *
+ * COMPACT COUNTS. Counts render with the shared magnitude formatter —
+ * `formatMagnitude` (exact below 1 000, then `1.4K`, `12.3K`, `1.2M`, truncated,
+ * `.0` dropped) from `services/audience.ts`; there is no second formatter. A
+ * screen reader does not read "1.4K" reliably, so the accessible name carries
+ * `spokenMagnitude` ("1.4 thousand") PLUS the exact number ("1.4 thousand (1,450)")
+ * from 1 000 up; below 1 000 the name is simply the number ("Like, 42").
+ *
+ * NEVER COLOUR-ONLY (NFR-001). A toggle's ON state combines: a FILLED icon (the
+ * resting icon is an outline — CSS only, the glyph is the same FontAwesome solid
+ * path), a bolder count, `aria-pressed="true"`, and an "…, liked" / "…, reposted"
+ * accessible-name suffix. A failed write shows a brief inline message with an icon
+ * and text, announced through an always-mounted POLITE live region
+ * (`role="status"`) so assistive technology hears it without losing focus.
+ *
+ * HIDDEN, NOT DISABLED (D1-011 / F3). There is NO Quote trigger, NO quote panel
+ * (`QuoteComposer` is no longer mounted) and NO Share action — they are absent
+ * from the DOM, not greyed out. (`useAmplify().doQuote` and `amplify.quotePost`
+ * stay for the later quote story.)
+ *
+ * READ-ONLY / NO-PERSONA / UNWIRED (COR-015 / D1-011, WR-002). An action is a
+ * `<button>` only when pressing it does something; otherwise it is the SAME inert
+ * markup for all three (an `actionInert` span: icon, count, visually-hidden label,
+ * `data-action` kept) — never a focusable no-op:
+ *  - `variant === 'readOnly'` (observer cards) OR a session that is itself read-only
+ *    (`session.isReadOnly`, even on a `variant="full"` card): ALL THREE are inert.
+ *  - a writable session with no bound persona has no identity to react as, so like
+ *    and repost are inert.
+ *  - Reply is a button only when `onReply` is supplied; omit the prop and it is an
+ *    inert count (the page that mounts the card has not wired navigation yet).
+ *
+ * TELEMETRY (XC-004). LIVE: none from the client — the server emits `reaction` /
+ * `repost` (implementation.md §1.8). MOCK: one event per confirmed toggle (see
+ * `useReaction` / `useAmplify`).
  *
  * REQUIRES context: `ExerciseContextProvider` + `SessionProvider` (the hooks read
  * `useExerciseContext()` / `useSession()`, which throw outside their providers —
  * fail-closed, there is no default session).
  *
  * DOM hooks (tests depend on them): `data-testid="post-actions"`,
- * `[data-action="reply|repost|like|share"]` (a `button` when wired, an inert `span`
- * when not or when read-only), `data-testid="post-quote-trigger"`,
- * `data-testid="quote-composer"` (the panel).
+ * `button[data-action="reply|repost|like"]` (or `span[data-action]` when inert),
+ * `data-testid="post-actions-notice"` (the live region; present only while a like
+ * or repost control is).
  *
  * Participant world — plain elements, FontAwesome icons, `PostActions.module.css`.
  * No COBRA, no MUI.
  */
 
-import { Fragment, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faComment,
   faRetweet,
   faHeart,
-  faArrowUpFromBracket,
-  faQuoteRight,
+  faCircleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { useReaction } from '../../hooks/useReaction'
 import { useAmplify } from '../../hooks/useAmplify'
-import { QuoteComposer } from '../QuoteComposer'
-import type { PostCardVariant, PostCounts, PostView } from './types'
+import { useTransientMessage } from '../../hooks/useTransientMessage'
+import { formatMagnitude, spokenMagnitude } from '../../services/audience'
+import type { PostCardVariant, PostView } from './types'
 import styles from './PostActions.module.css'
 
+type ActionKey = 'reply' | 'repost' | 'like'
+
 interface ActionSpec {
-  key: 'reply' | 'repost' | 'like' | 'share'
+  key: ActionKey
   label: string
   icon: IconDefinition
   count: number
+  /** Accessible-name suffix while ON ("liked" / "reposted"); toggles only. */
+  activeSuffix?: string
+  /** True when this action renders as a control (else inert count text). */
+  interactive: boolean
+  /** Toggle actions only: whether the viewer's reaction is currently ON. */
+  pressed?: boolean
+  onClick?: () => void
 }
 
-/** Canonical reply · repost · like (· share) order (R-002). */
-function buildActions(counts: PostCounts): ActionSpec[] {
-  const actions: ActionSpec[] = [
-    { key: 'reply', label: 'Reply', icon: faComment, count: counts.reply },
-    { key: 'repost', label: 'Repost', icon: faRetweet, count: counts.repost },
-    { key: 'like', label: 'Like', icon: faHeart, count: counts.like },
-  ]
-  if (counts.share !== undefined) {
-    actions.push({ key: 'share', label: 'Share', icon: faArrowUpFromBracket, count: counts.share })
-  }
-  return actions
+/**
+ * The accessible form of a count: the plain number below 1 000, otherwise the
+ * spoken magnitude plus the exact figure ("1.4 thousand (1,450)") so neither the
+ * compact visual form nor a truncated spoken form hides the real number.
+ */
+function spokenCount(count: number): string {
+  const spoken = spokenMagnitude(count)
+  if (!Number.isFinite(count) || count < 1000) return spoken
+  return `${spoken} (${Math.floor(count).toLocaleString('en-US')})`
 }
 
 export interface PostActionsProps {
-  /** The post the row acts on (id, counts, viewer state, author name for the quote form). */
+  /** The post the row acts on (id, counts, viewer state). */
   readonly post: PostView
   readonly variant: PostCardVariant
   /** Fires with the post id when the reply action is activated. */
   readonly onReply?: (id: string) => void
 }
 
-export function PostActions({ post, variant, onReply }: PostActionsProps) {
+/**
+ * Public entry. Keys the stateful row by post id (see the module header) so the
+ * hooks' seed-once state can never outlive the post it belongs to.
+ */
+export function PostActions(props: PostActionsProps) {
+  return <PostActionsRow key={props.post.id} {...props} />
+}
+
+function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
+  // ONE failure-message channel for both toggles: a single live region per card,
+  // and the most recent failure always replaces an older one.
+  const notice = useTransientMessage()
   const reaction = useReaction({
     postId: post.id,
     initialLikeCount: post.counts.like,
     initiallyLiked: post.viewer?.liked ?? false,
+    notice,
   })
-  const amplify = useAmplify({ postId: post.id })
-  const [quoting, setQuoting] = useState(false)
+  const amplify = useAmplify({
+    postId: post.id,
+    initialRepostCount: post.counts.repost,
+    initiallyReposted: post.viewer?.reposted ?? false,
+    notice,
+  })
 
-  const isReadOnly = variant === 'readOnly'
-  // The like count shown is the hook's own optimistic total (SOC-030).
-  const actions = buildActions({ ...post.counts, like: reaction.likeCount })
+  // A card is read-only when its VARIANT says so (observer shells) or when the SESSION
+  // itself is read-only — the two can disagree (`variant="full"` + a read-only
+  // session), and then all three actions must still go inert together (COR-015).
+  const isReadOnly = variant === 'readOnly' || reaction.isReadOnly
+  const canLike = !isReadOnly && reaction.canReact
+  const canRepost = !isReadOnly && amplify.canAmplify
+  const canReply = !isReadOnly && onReply !== undefined
 
-  const canLike = reaction.canReact
-  const canAmplify = amplify.canAmplify
-
-  /**
-   * The reply/like/repost action-row `onClick`s: the optional-prop, inert-until-
-   * wired contract. `share` has no handler — always `undefined`. An action whose
-   * handler is `undefined` is rendered INERT (not a button): see the module header.
-   */
-  const actionClickHandler = (key: ActionSpec['key']): (() => void) | undefined => {
-    if (key === 'reply') return onReply ? () => onReply(post.id) : undefined
-    if (key === 'like') return canLike ? reaction.toggleLike : undefined
-    if (key === 'repost') return canAmplify ? () => { amplify.doRepost() } : undefined
-    return undefined
-  }
-
-  const handleQuoteSubmit = (commentary: string) => {
-    amplify.doQuote(commentary)
-    setQuoting(false)
-  }
+  // Canonical reply · repost · like order (R-002). A toggle shows the hook's own
+  // optimistic total only while it is a live control; inert counts follow the post.
+  const actions: ActionSpec[] = [
+    {
+      key: 'reply',
+      label: 'Reply',
+      icon: faComment,
+      count: post.counts.reply,
+      // `onReply` is optional: omitted => inert text, never a focusable no-op button.
+      interactive: canReply,
+      onClick: canReply ? () => onReply(post.id) : undefined,
+    },
+    {
+      key: 'repost',
+      label: 'Repost',
+      icon: faRetweet,
+      count: canRepost ? amplify.repostCount : post.counts.repost,
+      activeSuffix: 'reposted',
+      interactive: canRepost,
+      pressed: canRepost ? amplify.repostedByViewer : undefined,
+      onClick: canRepost ? amplify.toggleRepost : undefined,
+    },
+    {
+      key: 'like',
+      label: 'Like',
+      icon: faHeart,
+      count: canLike ? reaction.likeCount : post.counts.like,
+      activeSuffix: 'liked',
+      interactive: canLike,
+      pressed: canLike ? reaction.likedByViewer : undefined,
+      onClick: canLike ? reaction.toggleLike : undefined,
+    },
+  ]
 
   return (
     <>
       <div className={styles.actions} data-testid="post-actions">
         {actions.map(action => {
-          const isLiked = action.key === 'like' && canLike && reaction.likedByViewer
-          const activeClass = `${styles.actionButton} ${styles.actionButtonActive}`
-          const buttonClass = isLiked ? activeClass : styles.actionButton
-          const pressed = action.key === 'like' && canLike ? reaction.likedByViewer : undefined
-          const label = isLiked
-            ? `${action.label}, ${action.count}, liked`
-            : `${action.label}, ${action.count}`
-          const onClick = actionClickHandler(action.key)
-          // Read-only, or nothing wired: never a focusable control that does nothing.
-          const isInert = isReadOnly || onClick === undefined
+          const compact = formatMagnitude(action.count)
+          const spoken = spokenCount(action.count)
+
+          if (!action.interactive) {
+            return (
+              <span key={action.key} className={styles.actionInert} data-action={action.key}>
+                <FontAwesomeIcon
+                  icon={action.icon}
+                  aria-hidden="true"
+                  className={styles.actionIcon}
+                />
+                {/* "1.4K" is read unreliably by screen readers, so when the compact
+                    form differs from the spoken one the visual copy is hidden from
+                    AT and the spoken copy stands in for it. */}
+                <span className={styles.actionCount} aria-hidden={spoken !== compact || undefined}>
+                  {compact}
+                </span>
+                {spoken !== compact && <span className={styles.srOnly}>{spoken}</span>}
+                <span className={styles.srOnly}>{action.label}</span>
+              </span>
+            )
+          }
+
+          const isOn = action.pressed === true
+          const label =
+            isOn && action.activeSuffix
+              ? `${action.label}, ${spoken}, ${action.activeSuffix}`
+              : `${action.label}, ${spoken}`
 
           return (
-            <Fragment key={action.key}>
-              {isInert ? (
-                <span className={styles.actionInert} data-action={action.key}>
-                  <FontAwesomeIcon
-                    icon={action.icon}
-                    aria-hidden="true"
-                    className={styles.actionIcon}
-                  />
-                  <span className={styles.actionCount}>{action.count}</span>
-                  <span className={styles.srOnly}>{action.label}</span>
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  className={buttonClass}
-                  data-action={action.key}
-                  aria-label={label}
-                  aria-pressed={pressed}
-                  onClick={onClick}
-                >
-                  <FontAwesomeIcon
-                    icon={action.icon}
-                    aria-hidden="true"
-                    className={styles.actionIcon}
-                  />
-                  <span className={styles.actionCount}>{action.count}</span>
-                </button>
-              )}
-              {/* Quote — a SEPARATE control next to Repost (SOC-020), never a
-                  `data-action`/canonical-set member (see module header). */}
-              {action.key === 'repost' && !isReadOnly && canAmplify && (
-                <button
-                  type="button"
-                  className={styles.quoteTrigger}
-                  data-testid="post-quote-trigger"
-                  aria-label="Quote"
-                  onClick={() => setQuoting(true)}
-                >
-                  <FontAwesomeIcon
-                    icon={faQuoteRight}
-                    aria-hidden="true"
-                    className={styles.actionIcon}
-                  />
-                </button>
-              )}
-            </Fragment>
+            <button
+              key={action.key}
+              type="button"
+              className={
+                isOn ? `${styles.actionButton} ${styles.actionButtonActive}` : styles.actionButton
+              }
+              data-action={action.key}
+              aria-label={label}
+              aria-pressed={action.pressed}
+              onClick={action.onClick}
+            >
+              <FontAwesomeIcon icon={action.icon} aria-hidden="true" className={styles.actionIcon} />
+              <span className={styles.actionCount}>{compact}</span>
+            </button>
           )
         })}
       </div>
-      {quoting && (
-        <div className={styles.quotePanel}>
-          <QuoteComposer
-            authorName={post.author.displayName}
-            onSubmit={handleQuoteSubmit}
-            onCancel={() => setQuoting(false)}
-          />
+      {/* Always mounted while a like / repost control exists (only those can fail), so
+          the region exists BEFORE its text changes — a live region injected with its
+          content is announced unreliably. Empty when there is nothing to say. */}
+      {(canLike || canRepost) && (
+        <div
+          className={styles.notice}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-testid="post-actions-notice"
+        >
+          {notice.message !== null && (
+            <>
+              <FontAwesomeIcon
+                icon={faCircleExclamation}
+                aria-hidden="true"
+                className={styles.noticeIcon}
+              />
+              <span>{notice.message}</span>
+            </>
+          )}
         </div>
       )}
     </>

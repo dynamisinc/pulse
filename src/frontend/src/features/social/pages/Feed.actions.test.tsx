@@ -10,18 +10,17 @@
  *    targeting that post;
  *  - unliking it again drops the count back and emits a second 'reaction'
  *    event with `payload.liked: false`;
- *  - reposting a post emits exactly one XC-004 'repost' event targeting it,
- *    with NO count mutation (amplification counts are story 02, out of
- *    scope here);
- *  - activating the separate "Quote" trigger opens the inline commentary
- *    composer, and submitting it emits exactly one XC-004 'quote' event
- *    carrying the typed commentary, then closes the composer.
+ *  - reposting a post bumps ITS rendered count, flips the control ON
+ *    (aria-pressed) and emits exactly one XC-004 'repost' event (payload
+ *    `{ reposted: true }`) targeting it; undoing emits a second with
+ *    `{ reposted: false }` (demo-polish F3 — the repost is a persisted toggle);
+ *  - the Quote trigger, its panel and any Share action are ABSENT (F3).
  *
  * Renders through the same real provider stack `Feed.test.tsx` uses
  * (ExerciseContext + Session + ShellContext, all resolved via their built-in
  * mock adapters).
  */
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
@@ -105,15 +104,19 @@ describe('Feed — like wiring (SOC-030)', () => {
   })
 })
 
-describe('Feed — repost wiring (SOC-020)', () => {
-  it('reposting the top post emits exactly one repost event targeting it', async () => {
+describe('Feed — repost wiring (SOC-020, SOC-021)', () => {
+  it('reposting the top post bumps its count, emits exactly one repost event; undoing emits another', async () => {
     const user = userEvent.setup()
     renderFeed()
 
     const cards = await screen.findAllByTestId('post-card')
     const topCard = first(cards)
 
-    await user.click(within(topCard).getByRole('button', { name: /^repost/i }))
+    await user.click(within(topCard).getByRole('button', { name: 'Repost, 88' }))
+
+    // The repost is a PERSISTED toggle now (F3): the count moves and the control reads ON.
+    const reposted = within(topCard).getByRole('button', { name: 'Repost, 89, reposted' })
+    expect(reposted).toHaveAttribute('aria-pressed', 'true')
 
     const repostEvents = getEmittedTelemetryEvents().filter(e => e.eventType === 'repost')
     expect(repostEvents).toHaveLength(1)
@@ -122,50 +125,26 @@ describe('Feed — repost wiring (SOC-020)', () => {
     expect(event.channel).toBe('social')
     expect(event.actor.kind).toBe('persona')
     expect(event.target).toEqual({ entityType: 'post', entityId: 'post-seed-kward-correction' })
+    expect(event.payload).toEqual({ reposted: true })
 
-    // No count mutation — amplification counts are story 02 (out of scope).
+    await user.click(reposted)
     expect(within(topCard).getByRole('button', { name: 'Repost, 88' })).toBeInTheDocument()
+    const after = getEmittedTelemetryEvents().filter(e => e.eventType === 'repost')
+    expect(after).toHaveLength(2)
+    expect(after[1]?.payload).toEqual({ reposted: false })
   })
 })
 
-describe('Feed — quote wiring (SOC-020, NFR-004)', () => {
-  it('opens the inline quote composer and, on submit, emits one quote event with the commentary', async () => {
-    const user = userEvent.setup()
+describe('Feed — quote and share are hidden (F3, D1-011)', () => {
+  it('renders no Quote trigger, no quote panel and no Share action on any card', async () => {
     renderFeed()
 
     const cards = await screen.findAllByTestId('post-card')
-    const topCard = first(cards)
-
-    await user.click(within(topCard).getByRole('button', { name: 'Quote' }))
-
-    const composer = await screen.findByTestId('quote-composer')
-    await user.type(
-      within(composer).getByLabelText('Quote commentary'),
-      'This is unconfirmed — wait for @FairhavenWater.',
-    )
-    await user.click(within(composer).getByRole('button', { name: 'Quote' }))
-
-    await waitFor(() => expect(screen.queryByTestId('quote-composer')).not.toBeInTheDocument())
-
-    const quoteEvents = getEmittedTelemetryEvents().filter(e => e.eventType === 'quote')
-    expect(quoteEvents).toHaveLength(1)
-    const event = quoteEvents[0]
-    if (!event) throw new Error('expected a quote event')
-    expect(event.target).toEqual({ entityType: 'post', entityId: 'post-seed-kward-correction' })
-  })
-
-  it('does not submit an empty/whitespace-only commentary (Quote stays disabled)', async () => {
-    const user = userEvent.setup()
-    renderFeed()
-
-    const cards = await screen.findAllByTestId('post-card')
-    const topCard = first(cards)
-
-    await user.click(within(topCard).getByRole('button', { name: 'Quote' }))
-    const composer = await screen.findByTestId('quote-composer')
-
-    expect(within(composer).getByRole('button', { name: 'Quote' })).toBeDisabled()
-    expect(getEmittedTelemetryEvents().filter(e => e.eventType === 'quote')).toHaveLength(0)
+    expect(cards.length).toBeGreaterThan(0)
+    expect(screen.queryByTestId('post-quote-trigger')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^quote/i })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('quote-composer')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /share/i })).not.toBeInTheDocument()
   })
 
   it('renders no repost/quote controls at all under a read-only (observer) session (D1-011)', async () => {

@@ -12,15 +12,15 @@
  *
  * Theming model mirrors `../theme/social.module.css` exactly, so the page frame
  * and its loading/empty states track the post cards: `.feed` declares the
- * light-mode palette as CSS custom properties, then rules read `var(--fd-*)`.
- * Dark mode has the same TWO independent triggers as social.module.css — the OS
- * `prefers-color-scheme: dark` media query AND a host-set `[data-theme="dark"]`
- * on the root or any ancestor — neither dependent on a React theme provider.
- * Values mirror `tokens.ts`'s LIGHT/DARK_PALETTE; keep both in sync by hand.
+ * light palette as CSS custom properties, then rules read `var(--fd-*)`.
+ * LIGHT ONLY (demo-polish F5): the former OS and `data-theme` dark-mode blocks
+ * were removed — the Social skin has no dark palette, and
+ * `theme/forcedLight.guard.test.ts` keeps it that way. Values mirror
+ * `tokens.ts`'s LIGHT_PALETTE; keep both in sync by hand.
  */
 
 .feed {
-  /* Light-mode palette (default) */
+  /* Light palette (the only palette) */
   --fd-bg: #fff;
   --fd-ink: #0e1518;
   --fd-ink-muted: #61707a;
@@ -35,25 +35,6 @@
   color: var(--fd-ink);
   font-family: 'Figtree', system-ui, sans-serif;
   text-align: left;
-}
-
-/* OS-level dark mode (no host override). */
-@media (prefers-color-scheme: dark) {
-  .feed {
-    --fd-bg: #0c1116;
-    --fd-ink: #e9eef1;
-    --fd-ink-muted: #8aa0ac;
-    --fd-line: #233039;
-  }
-}
-
-/* Host-forced dark mode — `data-theme="dark"` on the root OR an ancestor. */
-:global([data-theme='dark']) .feed,
-.feed:global([data-theme='dark']) {
-  --fd-bg: #0c1116;
-  --fd-ink: #e9eef1;
-  --fd-ink-muted: #8aa0ac;
-  --fd-line: #233039;
 }
 
 /* The post list. `aria-live="polite"` (set in the TSX) is the seam story 04's

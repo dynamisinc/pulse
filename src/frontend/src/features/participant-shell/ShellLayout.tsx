@@ -48,6 +48,12 @@
  *     rather than folded into `ChannelNav` (see that component's own header for
  *     why: it would either grow `ChannelNav.tsx`'s tightly-pinned button-count
  *     assertions or tie sign-out's availability to the channel config).
+ *     It is the shell's FALLBACK: a channel that renders its own account
+ *     control (social's nav-rail account card) claims it with
+ *     `useClaimShellAccountControl()` and the row is not rendered while the
+ *     claim stands, so the participant never sees two Sign outs and the channel
+ *     does not start 34px lower than it needs to (demo-polish F1). Every channel
+ *     that makes no claim keeps the row.
  *   - `<OverlayLayer>` (story 05) — pause/EndEx (below chrome) + break-fiction
  *     (above everything).
  * Each layer is SELF-CONTAINED (reads its own exercise-scoped mock seam), so
@@ -85,13 +91,14 @@
  * World: participant. No COBRA, no MUI theme, no default MUI look (D0 §2).
  */
 
-import type { CSSProperties, ReactNode } from 'react'
+import { useCallback, useState, type CSSProperties, type ReactNode } from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
 import {
   SHELL_CHROME_BOTTOM_VAR,
   SHELL_CHROME_TOP_VAR,
   SHELL_Z,
+  ShellAccountControlClaimProvider,
   ShellContextProvider,
   type ShellMountProps,
 } from './mountContract'
@@ -155,6 +162,15 @@ export function ShellLayout({ children }: ShellLayoutProps) {
   const { variant } = useShellState()
   const { now: scenarioNow } = useScenarioTime()
 
+  // How many mounted channels currently render their own account control (see the
+  // module header). A count, not a boolean, so overlapping claims (a channel swap)
+  // cannot release each other's.
+  const [accountClaims, setAccountClaims] = useState(0)
+  const claimAccountControl = useCallback(() => {
+    setAccountClaims(count => count + 1)
+    return () => setAccountClaims(count => Math.max(0, count - 1))
+  }, [])
+
   const mountProps: ShellMountProps = { variant, scenarioNow }
 
   return (
@@ -174,14 +190,18 @@ export function ShellLayout({ children }: ShellLayoutProps) {
       <ChannelNav />
 
       {/* Participant sign-out (feature: login, story 04). Its own sibling —
-          see the module header for why this is not folded into ChannelNav. */}
-      <ParticipantSignOutControl />
+          see the module header for why this is not folded into ChannelNav.
+          Absent while a mounted channel has claimed the account control
+          (it renders its own Sign out). */}
+      {accountClaims === 0 && <ParticipantSignOutControl />}
 
       {/* The ONE place a channel mounts: zero-styling reset boundary, chrome
           inset, own stacking context at SHELL_Z.content (AC1/AC3). */}
       <div data-testid="pulse-shell-content-region" style={contentRegionStyle}>
         <ShellContextProvider value={mountProps}>
-          {children}
+          <ShellAccountControlClaimProvider value={claimAccountControl}>
+            {children}
+          </ShellAccountControlClaimProvider>
         </ShellContextProvider>
       </div>
 

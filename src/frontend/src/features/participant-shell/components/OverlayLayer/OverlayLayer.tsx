@@ -41,6 +41,11 @@
  * states, not user actions (AC "not user-dismissable"); they clear only when
  * `useOverlayState()`'s resolved `state` changes.
  *
+ * Priority over the channel (demo-polish F2): every root carries `data-shell-layer`, the
+ * overlay's focus trap always wins over a channel's own modal (`core/a11y/modalPriority`),
+ * and any fullscreen is exited while an overlay is up (`useLeaveFullscreenWhileActive`) —
+ * a fullscreen element would otherwise paint above this layer.
+ *
  * A11y (NFR-001): each render is a modal region (`role="dialog"` /
  * `role="alertdialog"` for break-fiction's higher urgency, `aria-modal`,
  * `aria-labelledby` pointing at its own heading) and focus-trapped via
@@ -68,6 +73,7 @@ import { useEffect, useId, useState, type CSSProperties, type RefObject } from '
 import { SHELL_Z } from '../../mountContract'
 import { isWatermarkRequired, useChromeConfig } from '../../chromeConfig'
 import { useOverlayState } from './overlayState'
+import { useLeaveFullscreenWhileActive } from './useLeaveFullscreenWhileActive'
 import { useOverlayFocusTrap } from './useOverlayFocusTrap'
 import { formatWallClockNow, readWallClockNow } from './wallClock'
 
@@ -296,6 +302,7 @@ function InFictionMaintenancePage({ containerRef, variant }: ControlPageProps) {
       aria-modal="true"
       aria-labelledby={headingId}
       tabIndex={-1}
+      data-shell-layer="overlay"
       data-testid={testId}
       style={inFictionPageStyle}
     >
@@ -329,6 +336,7 @@ function OutOfFictionControlPage({ containerRef, variant }: ControlPageProps) {
       aria-modal="true"
       aria-labelledby={headingId}
       tabIndex={-1}
+      data-shell-layer="overlay"
       data-testid={testId}
       style={outOfFictionPageStyle}
     >
@@ -366,6 +374,7 @@ function BreakFictionOverlay({ containerRef, message, wallClockNow }: BreakFicti
       aria-modal="true"
       aria-labelledby={headingId}
       tabIndex={-1}
+      data-shell-layer="overlay"
       data-testid="pulse-overlay-break-fiction"
       style={breakFictionContainerStyle}
     >
@@ -406,7 +415,17 @@ export function OverlayLayer() {
   const isActive = state !== 'none'
   const isBreakFiction = state === 'broadcast'
 
-  const containerRef = useOverlayFocusTrap<HTMLDivElement>(isActive)
+  // The root element is a different component per state/register, so key the trap on both:
+  // a pause -> break-fiction swap must re-engage it on the NEW root (not strand focus on <body>).
+  const layerKey = `${state}:${register}`
+  const containerRef = useOverlayFocusTrap<HTMLDivElement>(isActive, layerKey)
+  // Nothing may stay fullscreen above the overlay (the browser paints fullscreen over everything).
+  // While another element is fullscreen the page behind is un-focusable, so the trap's
+  // focus-on-activation can fail: once fullscreen is left, take focus if it is not already ours.
+  useLeaveFullscreenWhileActive(isActive, layerKey, () => {
+    const container = containerRef.current
+    if (container !== null && !container.contains(document.activeElement)) container.focus()
+  })
   const wallClockNow = useWallClockNow(isBreakFiction)
 
   if (state === 'none') return null

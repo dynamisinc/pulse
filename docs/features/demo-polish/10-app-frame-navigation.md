@@ -1,6 +1,6 @@
 # Story: App frame and navigation
 
-**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-004, SOC-053, SOC-083, XC-007, NFR-001  ·  **Design decisions:** D1-013 (frame), D1-011 (absent, not disabled), D1-R1 ("Who to follow")  ·  **Issue:** #429
 **Story ID:** F1  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** L  ·  **Wave:** 2
 **Home stories:** D1-013 ([`D1-social-app/README.md`](../../design/D1-social-app/README.md)), [`participant-shell/03`](../participant-shell/03-channel-nav.md), [`app-shell/01`](../app-shell/01-global-nav.md).

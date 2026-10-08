@@ -3,62 +3,62 @@
  * ---------------------------------------------------------------------------
  * The like/unlike state machine behind a post's action-row like control
  * (feature: reactions, story 01 — "Like with count"; SOC-030, XC-004,
- * COR-001, D1-011). Participant world (Pulse Social skin) — pure hook + pure
- * helper, no UI, no COBRA, no themed MUI.
+ * COR-001, D1-011; PERSISTED by demo-polish F3). Participant world (Pulse Social
+ * skin) — pure hook + pure helper, no UI, no COBRA, no themed MUI.
  *
  * WHAT THIS OWNS
  *  - The VIEWER'S own like state for one post: `likedByViewer` (their toggle)
- *    and `likeCount` (the running total, updated optimistically as they
- *    like/unlike). Seeded once from the post's current count/own-state and
- *    then owned locally — a feed re-render never clobbers an in-flight toggle.
- *  - `toggleLike()`, the single sanctioned like/unlike action: it flips the
- *    viewer's state, adjusts the count by ±1, and emits exactly one XC-004
- *    `'reaction'` telemetry event capturing the resulting state (both the
- *    add AND the remove — E10's mood/sentiment metrics read the toggle in
- *    both directions). Never throws because of telemetry (`buildAndEmit` is
- *    caller-safe): a dead telemetry pipeline must never block a like.
+ *    and `likeCount` (the running total). Seeded once from the post's current
+ *    count / `viewer.liked` (so a refresh keeps the heart on) and then owned
+ *    locally — a feed re-render never clobbers an in-flight toggle.
+ *  - `toggleLike()`, the single sanctioned like/unlike action. It is now a REAL
+ *    write: flip + ±1 optimistically, `PUT`/`DELETE /api/posts/{id}/reactions/like`,
+ *    reconcile to the response's `counts` + `viewer`, and ROLL BACK exactly on
+ *    failure with a brief message (`errorMessage`, announced by `PostActions` in a
+ *    polite live region). A second tap while a write is in flight is a no-op.
+ *    All of that lives in `useReactionToggle`, shared with the repost control.
  *  - `canReact` / `isReadOnly`: the render gate the action row consumes so the
- *    like CONTROL is ABSENT (not disabled) in an observer/read-only session
- *    (COR-015/D1-011) — the count still renders inert there, sourced from
- *    `likeCount`.
+ *    like CONTROL is ABSENT (not disabled) in an observer/read-only session or a
+ *    session with no bound persona (COR-015/D1-011) — the count still renders
+ *    inert there, sourced from `likeCount`.
+ *
+ * TELEMETRY (XC-004). LIVE mode: NONE from the client — the server emits the
+ * `reaction` event once per state change (implementation.md §1.8). MOCK mode
+ * (`USE_MOCK_DATA`): exactly one `'reaction'` event per confirmed toggle, add AND
+ * remove (E10's mood/sentiment metrics read both directions), via
+ * {@link buildLikeTelemetryInput}. `buildAndEmit` is caller-safe: a dead telemetry
+ * pipeline never blocks a like.
  *
  * TWO-WORLDS / ISOLATION
- *  - `exerciseId`/`timeZone` come from `useExerciseContext()` and are used ONLY
- *    to STAMP the telemetry envelope — never as a fetch/scoping param
- *    (COR-001/XC-002); like isolation is enforced server-side once a backend
- *    lands.
- *  - The actor is attributed as the viewer's persona (`kind: 'persona'`,
- *    `personaId` + `actingHumanId`), mirroring `createPost` exactly: a like is
- *    a participant action performed AS their persona account (COR-018). A
- *    session with no bound persona has no identity to react as, so `canReact`
- *    is false and `toggleLike()` is a no-op.
- *  - Observer/read-only (COR-015/D1-011): `isReadOnly` is surfaced so the
- *    action row renders NO like control (absent, not disabled). `toggleLike()`
- *    additionally hard-guards on it (belt-and-braces).
+ *  - `exerciseId`/`timeZone` come from `useExerciseContext()` and are used ONLY to
+ *    STAMP the mock-mode telemetry envelope — never as a fetch/scoping param, and
+ *    never on the wire (COR-001/XC-002): the request carries no `exerciseId`, no
+ *    `personaId`, no body.
+ *  - The mock-mode telemetry actor is the viewer's persona (`kind: 'persona'`,
+ *    `personaId` + `actingHumanId`), mirroring `createPost`: a like is a
+ *    participant action performed AS their persona account (COR-018). A session
+ *    with no bound persona has no identity to react as, so `canReact` is false
+ *    and `toggleLike()` is a no-op.
  *
- * SCENARIO TIME (COR-053): the telemetry `scenarioTime` is
- * `scenarioNow().toISOString()` from `@/core/clock`; `wallClockTime` is the
- * real instant from `@/core/time/wallClock` (telemetry-only, never rendered).
- * Bare `new Date()`/`Date.now()` are lint-banned on this participant path.
+ * SCENARIO TIME (COR-053): the mock-mode telemetry `scenarioTime` is
+ * `scenarioNow().toISOString()` from `@/core/clock`; `wallClockTime` is the real
+ * instant from `@/core/time/wallClock` (telemetry-only, never rendered). In LIVE
+ * mode the client stamps no reaction time at all — the server uses the exercise
+ * clock. Bare `new Date()`/`Date.now()` are lint-banned on this participant path.
  *
- * BACKEND SEAM: there is no reaction persistence yet — a like is local
- * optimistic state + a telemetry event. When the backend lands, the write goes
- * through a `reactionService` (mirroring `postService.createPost`); this hook's
- * public shape (`likeCount`/`likedByViewer`/`toggleLike`) is designed to stay
- * unchanged when that seam slots in.
- *
- * WIRING NOTE: this hook is self-contained and buildable/testable in
- * isolation. Threading `likedByViewer`/`toggleLike` INTO `<PostCard>`'s action
- * row (and the `Feed`/`ThreadView` call sites) is an orchestrator-owned serial
- * pass — see `docs/features/reactions/implementation.md`'s integration seam.
+ * The public shape (`likeCount`/`likedByViewer`/`toggleLike`/`canReact`/
+ * `isReadOnly`) is unchanged from the local-only version; `pending` and
+ * `errorMessage` are additive.
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback } from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { scenarioNow } from '@/core/clock'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import { buildAndEmit, type BuildTelemetryEventInput } from '@/core/telemetry'
+import { useReactionToggle } from './useReactionToggle'
+import type { UseTransientMessageResult } from './useTransientMessage'
 
 /** Options for {@link useReaction}. */
 export interface UseReactionOptions {
@@ -68,6 +68,8 @@ export interface UseReactionOptions {
   readonly initialLikeCount: number
   /** Whether the viewer has already liked this post — seeds `likedByViewer`. */
   readonly initiallyLiked?: boolean
+  /** A shared failure-message channel (one live region per card); see `useReactionToggle`. */
+  readonly notice?: UseTransientMessageResult
 }
 
 /** The like surface the action row binds to. */
@@ -84,8 +86,15 @@ export interface UseReactionResult {
   readonly canReact: boolean
   /** Observer/read-only session (COR-015) — the like control must be ABSENT. */
   readonly isReadOnly: boolean
-  /** Toggles the viewer's like, updates the count, and emits telemetry. A
-   * no-op unless `canReact`. */
+  /** True while the like write is in flight (a second tap is a no-op until it settles). */
+  readonly pending: boolean
+  /** The brief failure message to announce after a rolled-back write, or `null`. */
+  readonly errorMessage: string | null
+  /**
+   * Toggles the viewer's like: optimistic flip + count, persisted through
+   * `reactionService`, rolled back on failure. A no-op unless `canReact`, and a
+   * no-op while `pending`.
+   */
   readonly toggleLike: () => void
 }
 
@@ -130,64 +139,63 @@ export function buildLikeTelemetryInput(params: LikeTelemetryParams): BuildTelem
   }
 }
 
+/** Shown (and announced) when a like / unlike write fails and is rolled back. */
+const LIKE_FAILURE_MESSAGE = "Couldn't update your like. Please try again."
+
 /**
  * The like control's state + action machine for one post. See the module
  * header for the full contract; a post's action-row like affordance is its
  * only intended consumer.
  */
 export function useReaction(options: UseReactionOptions): UseReactionResult {
-  const { postId, initialLikeCount, initiallyLiked = false } = options
+  const { postId, initialLikeCount, initiallyLiked = false, notice } = options
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
-
-  const [likedByViewer, setLikedByViewer] = useState(initiallyLiked)
-  const [likeCount, setLikeCount] = useState(initialLikeCount)
 
   const isReadOnly = session.isReadOnly
   const canReact = !isReadOnly && session.personaId !== undefined
 
-  const toggleLike = useCallback(() => {
-    // Re-derive the guard locally rather than trusting a stale closure, and
-    // narrow `personaId` to a string (no non-null assertion).
-    const personaId = session.personaId
-    if (session.isReadOnly || personaId === undefined) return
+  // MOCK mode only (the toggle engine never calls this live): the one XC-004
+  // event per confirmed state change. Narrows `personaId` to a string (no
+  // non-null assertion) and reads the scenario clock AT EMIT time.
+  const emitMockTelemetry = useCallback(
+    (liked: boolean) => {
+      const personaId = session.personaId
+      if (personaId === undefined) return
+      buildAndEmit(
+        buildLikeTelemetryInput({
+          exerciseId,
+          timeZone,
+          scenarioTime: scenarioNow().toISOString(),
+          wallClockTime: wallClockNowIso(),
+          personaId,
+          actingHumanId: session.actingHumanId,
+          postId,
+          liked,
+        }),
+      )
+    },
+    [exerciseId, timeZone, session.personaId, session.actingHumanId, postId],
+  )
 
-    // Optimistic toggle: flip own state and adjust the count by ±1. Clamp at 0
-    // defensively so a desynced initial count can never render negative.
-    const nextLiked = !likedByViewer
-    setLikedByViewer(nextLiked)
-    setLikeCount(prev => (nextLiked ? prev + 1 : Math.max(0, prev - 1)))
-
-    // Exactly one XC-004 event per toggle; caller-safe, so a telemetry failure
-    // never blocks the like (COR-001: exerciseId stamps the envelope, it is not
-    // a scoping param).
-    buildAndEmit(
-      buildLikeTelemetryInput({
-        exerciseId,
-        timeZone,
-        scenarioTime: scenarioNow().toISOString(),
-        wallClockTime: wallClockNowIso(),
-        personaId,
-        actingHumanId: session.actingHumanId,
-        postId,
-        liked: nextLiked,
-      }),
-    )
-  }, [
-    exerciseId,
-    timeZone,
-    session.personaId,
-    session.actingHumanId,
-    session.isReadOnly,
+  const toggle = useReactionToggle({
     postId,
-    likedByViewer,
-  ])
+    kind: 'like',
+    initialCount: initialLikeCount,
+    initiallyActive: initiallyLiked,
+    canAct: canReact,
+    failureMessage: LIKE_FAILURE_MESSAGE,
+    notice,
+    emitMockTelemetry,
+  })
 
   return {
-    likeCount,
-    likedByViewer,
+    likeCount: toggle.count,
+    likedByViewer: toggle.active,
     canReact,
     isReadOnly,
-    toggleLike,
+    pending: toggle.pending,
+    errorMessage: toggle.errorMessage,
+    toggleLike: toggle.toggle,
   }
 }

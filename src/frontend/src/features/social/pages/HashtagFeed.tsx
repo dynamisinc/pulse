@@ -1,61 +1,56 @@
 /**
  * features/social/pages/HashtagFeed.tsx
  * ---------------------------------------------------------------------------
- * The hashtag feed — the posts carrying one hashtag, with a chronological
- * ("Latest") and an engagement-ranked ("Top") tab (feature: hashtags-trending,
- * story 01; SOC-040, COR-001, COR-053, XC-004, NFR-001). Participant world
- * (Pulse Social skin): plain semantic elements + a scoped CSS Module — NO
- * COBRA, NO themed MUI, FontAwesome-only if icons are ever needed here.
+ * The hashtag feed (`/hashtag/:tag`) — the posts carrying one hashtag, with a "Recent"
+ * (scenario time descending) and a "Top" (engagement descending) tab (feature:
+ * hashtags-trending/01; demo-polish F6; SOC-040, COR-001, COR-053, XC-004, NFR-001).
+ * Participant world (Pulse Social skin): plain semantic elements + a scoped CSS
+ * Module — NO COBRA, NO themed MUI, FontAwesome-only.
  *
  * WHAT IT DOES
- *  - Reuses the exercise's All Posts read (`useFeed()` — the same
- *    participant-safe, exercise-scoped convergence the main feed uses) and
- *    filters it to the posts whose text contains `tag`, via `extractHashtags`
- *    (`../utils/hashtags`, the one definition of "what a hashtag is"). Each
- *    surviving post renders through the keystone `<PostCard>` — identical card,
- *    identical scenario-time rendering — so this page is pure presentation +
- *    filtering, never a second post-rendering path.
- *  - Two tabs (SOC-040): "Latest" = chronological (newest-first, the order
- *    `useFeed` already returns), "Top" = ranked by engagement (like + repost +
- *    reply + share), newest-first as the tiebreak. Tab state is local `useState`
- *    (no route — Phase 1 has no cross-channel router; see `SocialChannel`). The
- *    tablist follows the WAI-ARIA tabs pattern (NFR-001): each tab carries a
- *    unique `id` + `aria-controls` pointing at the panel, the panel carries an
- *    `id` + `aria-labelledby` pointing back at the active tab, and a roving
- *    tabindex (active tab `tabIndex=0`, inactive `tabIndex=-1`, Arrow/Home/End
- *    to move) keeps only the active tab in the natural Tab order — mirroring
- *    `Profile.tsx`'s tablist.
+ *  - Reads the exercise's All Posts feed (`useFeed()`, the same participant-safe,
+ *    exercise-scoped read the main feed uses) and keeps the posts whose text carries
+ *    the tag (`extractHashtags`, the one definition of "what a hashtag is"). Each one
+ *    renders through the keystone `<PostCard>` — identical card, identical
+ *    scenario-time rendering, live like/repost — so this page is filtering and
+ *    presentation only.
+ *  - HEADER: the tag as authors write it (`#WaterIssues`, the casing used most — the
+ *    URL key is lowercase) and a post count ("16 posts"), shown once the posts have
+ *    loaded, never a premature "0 posts". The `tag` prop may be any URL-ish form
+ *    (`WaterIssues`, `#waterissues`, `%23waterissues`); `tagKey` normalizes it.
+ *  - TABS (WAI-ARIA tabs pattern, NFR-001): unique `id` + `aria-controls`, a panel
+ *    labelled by the active tab, and a roving tabindex (Arrow/Home/End) so only the
+ *    active tab is in the natural Tab order — mirroring `Profile.tsx`. Tab state is
+ *    local. Both orders come from `../explore/search`'s `sortPosts`, shared with
+ *    Explore's search toggle; "Top" ties break newest-first.
+ *  - EMPTY / ERROR: an honest text state with an icon ("No posts with #tag yet."), and
+ *    a separate message when the posts could not be read (an outage is not an empty
+ *    hashtag). A soft-deleted post is neither listed nor counted.
+ *  - REPLY: a card's Reply opens its thread with the composer focused
+ *    (`requestReplyFocus` then `onOpenThread`); with no `onOpenThread` Reply renders
+ *    as inert text, never a no-op button.
+ *  - HASHTAGS IN A CARD: a card's own `#Other` is a link to THAT hashtag's feed
+ *    (`onHashtagOpen`, threaded to every card; Gate-2 M-4). Without it the anchors stay
+ *    inert, so a hashtag page could not be left by tapping another tag.
+ *  - IDS: the heading, the tabs and the panel get `useId()`-based ids, so two instances
+ *    of the page (or a page beside another tablist) never collide on a static id.
  *
- * ISOLATION (COR-001). The post set comes from `useFeed()`, which takes NO
- * client `exerciseId` — the session binds the exercise and query scoping is
- * server-side. Filtering by hashtag happens over that already-scoped set, so a
- * hashtag feed can never surface another exercise's posts.
+ * ISOLATION (COR-001): `useFeed()` takes no client `exerciseId`; filtering happens
+ * over that already-scoped set. SCENARIO TIME (COR-053): this page renders no
+ * timestamp itself; each card does. Wall-clock is read once for the telemetry
+ * envelope only, never rendered.
  *
- * SCENARIO TIME (COR-053). This page renders no timestamp itself — every
- * `<PostCard>` self-renders its relative "2h ago" via `useScenarioTime()` in
- * the exercise zone. Wall-clock is read ONCE here for the telemetry envelope
- * only (`wallClockNowIso()`), never rendered.
+ * VARIANT (COR-015 / D1-011): cards render `full` or `readOnly` per the shell mount
+ * variant, so an observer sees inert counts with the controls ABSENT.
  *
- * VARIANT (COR-015 / D1-011). The shell mount variant is read via
- * `useShellContext()`; cards render `full` or `readOnly` exactly as the All
- * Posts feed does, so an observer session sees inert counts with the
- * interactive controls ABSENT. `onOpenThread` (supplied by the shell channel at
- * integration — Wave 2) opens a post's thread from a card tap or reply.
- *
- * TELEMETRY (XC-004). Emits exactly ONE `'view'` event per `tag` (a ref keyed
- * on the tag, mirroring `ThreadView`), targeting the hashtag entity — so a
- * different hashtag re-emits without a remount, but switching the Latest/Top
- * tab does not (a tab switch is not a new view).
- *
- * REACHABILITY NOTE. Wiring a hashtag TAP (in a `<PostCard>`) to open this page
- * is the shell-channel view-composition change owned by the Wave-2 orchestrator
- * pass (`SocialChannel`, alongside profile navigation) — see
- * docs/features/hashtags-trending/implementation.md. This page is built and
- * self-contained now; the `data-hashtag` seam the linkified anchors carry is
- * what that pass reads.
+ * TELEMETRY (XC-004): ONE `'view'` per tag (a ref keyed on the normalized tag,
+ * mirroring `ThreadView`), so a different hashtag re-emits without a remount, but a
+ * Recent/Top switch does not.
  */
 
-import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { memo, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faHashtag } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { scenarioNow } from '@/core/clock'
@@ -67,15 +62,23 @@ import {
   affordancesAvailable,
 } from '@/features/participant-shell/mountContract'
 import { useFeed } from '../hooks/useFeed'
+import { normalizeHashtagParam } from '../layout/socialNavigation'
+import { requestReplyFocus } from '../services/replyIntent'
 import { extractHashtags } from '../utils/hashtags'
+import { sortPosts } from '../explore/search'
+import { pickDisplayCasing } from '../explore/trending'
+import { isVisiblePost } from '../explore/visibility'
 import styles from './HashtagFeed.module.css'
 
 type CardVariant = 'full' | 'readOnly'
-type HashtagTab = 'latest' | 'top'
+type HashtagTab = 'recent' | 'top'
 
 export interface HashtagFeedProps {
-  /** The hashtag to show, NORMALIZED (lowercased, no leading `#`) — the same
-   * key `extractHashtags`/the linkified anchors produce. */
+  /**
+   * The hashtag to show, in any URL-ish form (`WaterIssues`, `#WaterIssues`,
+   * `%23waterissues`): the page decodes, strips `#` and lowercases it itself
+   * (`tagKey`) -- the same key `extractHashtags` and the linkified anchors produce.
+   */
   readonly tag: string
   /** Opens a post's flattened thread; the shell channel supplies it at
    * integration (Wave 2). Omitted in isolation — the feed still renders. */
@@ -87,13 +90,21 @@ export interface HashtagFeedProps {
    * inert text (no focusable no-op, WR-002).
    */
   readonly onOpenProfile?: (personaId: string) => void
+  /**
+   * Opens the tapped hashtag's feed (SOC-040) -- the same opener the main feed's cards
+   * get -- so a card on this page can lead to a DIFFERENT hashtag. Omitted in
+   * isolation: the cards' hashtags stay inert text.
+   */
+  readonly onHashtagOpen?: (tag: string) => void
 }
 
 interface HashtagRowProps {
   post: PostView
   variant: CardVariant
   onOpenThread?: (id: string) => void
+  onReply?: (id: string) => void
   onOpenProfile?: (personaId: string) => void
+  onHashtagOpen?: (tag: string) => void
 }
 
 /** A single row, memoized so an unchanged post skips re-render (NFR-002/
@@ -102,7 +113,9 @@ const HashtagRow = memo(function HashtagRow({
   post,
   variant,
   onOpenThread,
+  onReply,
   onOpenProfile,
+  onHashtagOpen,
 }: HashtagRowProps) {
   return (
     <li className={styles.row}>
@@ -110,20 +123,55 @@ const HashtagRow = memo(function HashtagRow({
         post={post}
         variant={variant}
         onOpen={onOpenThread}
-        onReply={onOpenThread}
+        onReply={onReply}
         onOpenProfile={onOpenProfile}
+        onHashtagOpen={onHashtagOpen}
       />
     </li>
   )
 })
 
-/** Engagement weight for the "Top" tab: every interaction counts once. */
-function engagementScore(post: PostView): number {
-  const { reply, repost, like, share } = post.counts
-  return reply + repost + like + (share ?? 0)
+/**
+ * The Reply action on a card: record the intent, then open the thread, whose reply
+ * composer takes focus on arrival (F4's `requestReplyFocus` handoff).
+ */
+function openThreadForReply(id: string, onOpenThread: (id: string) => void): void {
+  requestReplyFocus(id)
+  onOpenThread(id)
 }
 
-export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedProps) {
+/**
+ * The routing key for whatever form of the tag arrived: URL-decoded (a malformed
+ * escape keeps the raw text), `#`-stripped, lowercased. F1's `normalizeHashtagParam`
+ * does the strip + lowercase + validation; a string it rejects (not a possible
+ * hashtag) still gets a best-effort key, so the page renders its honest empty state
+ * for it rather than throwing.
+ */
+function tagKey(raw: string): string {
+  let decoded = raw
+  try {
+    decoded = decodeURIComponent(raw)
+  } catch {
+    // keep the raw text
+  }
+  return normalizeHashtagParam(decoded) ?? decoded.replace(/^#+/, '').toLowerCase()
+}
+
+/** "1 post" / "16 posts". */
+function postCountLabel(count: number): string {
+  return `${count.toLocaleString('en-US')} ${count === 1 ? 'post' : 'posts'}`
+}
+
+export function HashtagFeed({
+  tag: rawTag,
+  onOpenThread,
+  onOpenProfile,
+  onHashtagOpen,
+}: HashtagFeedProps) {
+  const tag = useMemo(() => tagKey(rawTag), [rawTag])
+  // Unique per instance: the heading, tabs and panel ids (see the module header).
+  const idBase = useId()
+  const headingId = `${idBase}-heading`
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
   const { variant } = useShellContext()
@@ -131,24 +179,36 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
 
   const cardVariant: CardVariant = affordancesAvailable(variant) ? 'full' : 'readOnly'
 
-  // Local tab state — Phase 1 has no route; defaults to chronological "Latest".
-  const [tab, setTab] = useState<HashtagTab>('latest')
+  // Local tab state — defaults to chronological "Recent".
+  const [tab, setTab] = useState<HashtagTab>('recent')
 
-  // Posts carrying this hashtag, already exercise-scoped by `useFeed`. `posts`
-  // is newest-first, so 'latest' keeps that order; 'top' sorts a copy by
-  // engagement, newest-first as the tiebreak (a stable sort preserves it).
+  // Posts carrying this hashtag, already exercise-scoped by `useFeed` (a
+  // soft-deleted post would never count). `sortPosts` (shared with Explore's
+  // search toggle) gives both orders: 'recent' = scenario time descending,
+  // 'top' = engagement descending with newest-first as the tiebreak.
   const matched = useMemo(
-    () => posts.filter(post => extractHashtags(post.text).includes(tag)),
+    () => posts.filter(post => isVisiblePost(post) && extractHashtags(post.text).includes(tag)),
     [posts, tag],
   )
-  const shown = useMemo(
-    () => (tab === 'top' ? [...matched].sort((a, b) => engagementScore(b) - engagementScore(a)) : matched),
-    [matched, tab],
+  const shown = useMemo(() => sortPosts(matched, tab), [matched, tab])
+  // How the tag reads on the page: the casing authors use most (`#WaterIssues`), else
+  // the routing key.
+  const label = useMemo(() => pickDisplayCasing(matched, tag) ?? `#${tag}`, [matched, tag])
+
+  // The Reply action opens the thread. Stable identity so the memoized rows skip
+  // re-render (NFR-002/SOC-071); absent when no thread opener was supplied, so
+  // the card renders Reply as inert text rather than a no-op button.
+  const handleReply = useMemo(
+    () =>
+      onOpenThread === undefined
+        ? undefined
+        : (id: string) => openThreadForReply(id, onOpenThread),
+    [onOpenThread],
   )
 
   // XC-004: one 'view' per hashtag. Keying the ref on `tag` re-emits when the
   // page is re-pointed at a DIFFERENT hashtag without a remount, but a
-  // Latest/Top tab switch (not a new view) does not.
+  // Recent/Top tab switch (not a new view) does not.
   const emittedForRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (emittedForRef.current === tag) return
@@ -173,25 +233,32 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
     event.preventDefault()
-    setTab(current => (current === 'latest' ? 'top' : 'latest'))
+    setTab(current => (current === 'recent' ? 'top' : 'recent'))
   }
 
   return (
-    <section className={styles.page} aria-labelledby="hashtag-feed-heading">
+    <section className={styles.page} aria-labelledby={headingId}>
       <header className={styles.header}>
-        <h1 id="hashtag-feed-heading" className={styles.title}>{`#${tag}`}</h1>
-        <p className={styles.subtitle}>Posts</p>
+        <h1 id={headingId} className={styles.title}>{label}</h1>
+        {/* The count appears once the posts are in (never a premature "0 posts"). */}
+        {!loading && error === undefined && (
+          <p className={styles.subtitle} data-testid="hashtag-post-count">
+            {postCountLabel(matched.length)}
+          </p>
+        )}
       </header>
 
-      <div className={styles.tabs} role="tablist" aria-label={`#${tag} feed order`}>
+      <div className={styles.tabs} role="tablist" aria-label={`${label} feed order`}>
         <TabButton
-          id="latest"
-          label="Latest"
-          active={tab === 'latest'}
+          idBase={idBase}
+          id="recent"
+          label="Recent"
+          active={tab === 'recent'}
           onSelect={setTab}
           onKeyDown={handleTabKeyDown}
         />
         <TabButton
+          idBase={idBase}
           id="top"
           label="Top"
           active={tab === 'top'}
@@ -202,11 +269,10 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
 
       <ul
         className={styles.list}
-        aria-live="polite"
         role="tabpanel"
-        id={`hashtag-tabpanel-${tab}`}
-        aria-labelledby={`hashtag-tab-${tab}`}
-        aria-label={`#${tag}, ${tab === 'top' ? 'Top' : 'Latest'}`}
+        id={tabpanelId(idBase, tab)}
+        aria-labelledby={tabId(idBase, tab)}
+        aria-label={`${label}, ${tab === 'top' ? 'Top' : 'Recent'}`}
       >
         {shown.map(post => (
           <HashtagRow
@@ -214,7 +280,9 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
             post={post}
             variant={cardVariant}
             onOpenThread={onOpenThread}
+            onReply={handleReply}
             onOpenProfile={onOpenProfile}
+            onHashtagOpen={onHashtagOpen}
           />
         ))}
       </ul>
@@ -226,13 +294,26 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
         <p className={styles.state} role="status">Posts aren’t available right now.</p>
       )}
       {isEmpty && (
-        <p className={styles.state}>{`No posts with #${tag} yet.`}</p>
+        <div className={styles.empty} data-testid="hashtag-empty">
+          <FontAwesomeIcon icon={faHashtag} className={styles.emptyIcon} aria-hidden="true" />
+          <p className={styles.emptyText}>{`No posts with ${label} yet.`}</p>
+        </div>
       )}
     </section>
   )
 }
 
+/** The tab / panel DOM ids for one page instance (`useId()` base + the tab name). */
+function tabId(idBase: string, tab: HashtagTab): string {
+  return `${idBase}-tab-${tab}`
+}
+function tabpanelId(idBase: string, tab: HashtagTab): string {
+  return `${idBase}-tabpanel-${tab}`
+}
+
 interface TabButtonProps {
+  /** The page instance's `useId()` base, so two pages never share a tab id. */
+  idBase: string
   id: HashtagTab
   label: string
   active: boolean
@@ -242,16 +323,16 @@ interface TabButtonProps {
 
 /** A tab, programmatically associated with its panel per the WAI-ARIA tabs
  * pattern (NFR-001): a unique `id` + `aria-controls` pointing at the panel
- * `TabButton`'s active sibling renders (`hashtag-tabpanel-${id}`), and a roving
+ * `TabButton`'s active sibling renders (`tabpanelId(idBase, id)`), and a roving
  * `tabIndex` (0 when active, -1 otherwise) so only the active tab is Tab-reachable. */
-function TabButton({ id, label, active, onSelect, onKeyDown }: TabButtonProps) {
+function TabButton({ idBase, id, label, active, onSelect, onKeyDown }: TabButtonProps) {
   return (
     <button
       type="button"
       role="tab"
-      id={`hashtag-tab-${id}`}
+      id={tabId(idBase, id)}
       aria-selected={active}
-      aria-controls={`hashtag-tabpanel-${id}`}
+      aria-controls={tabpanelId(idBase, id)}
       tabIndex={active ? 0 : -1}
       className={active ? `${styles.tab} ${styles.tabActive}` : styles.tab}
       onClick={() => onSelect(id)}

@@ -478,3 +478,109 @@ describe('AlertBar — no leaked intervals/listeners on unmount', () => {
     removeSpy.mockRestore()
   })
 })
+
+describe('AlertBar — publishes --pulse-alert-height (demo-polish F1 M1)', () => {
+  const readVar = () => document.documentElement.style.getPropertyValue('--pulse-alert-height')
+
+  /** A controllable `ResizeObserver`: tests fire it to model the bar changing size. */
+  class FakeResizeObserver {
+    static instances: FakeResizeObserver[] = []
+    disconnected = false
+    private readonly callback: () => void
+    constructor(callback: () => void) {
+      this.callback = callback
+      FakeResizeObserver.instances.push(this)
+    }
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {
+      this.disconnected = true
+    }
+    fire(): void {
+      this.callback()
+    }
+  }
+
+  let measuredHeight = 0
+  let rectSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    measuredHeight = 0
+    FakeResizeObserver.instances = []
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
+      () => ({ height: measuredHeight }) as DOMRect,
+    )
+  })
+
+  afterEach(() => {
+    rectSpy.mockRestore()
+    vi.unstubAllGlobals()
+    document.documentElement.style.removeProperty('--pulse-alert-height')
+  })
+
+  it('is 0px while no alert is active (the empty live region reserves nothing)', () => {
+    mockUseAlerts.mockReturnValue([])
+    render(<AlertBar />)
+    expect(readVar()).toBe('0px')
+  })
+
+  it('publishes the rendered height of an active alert, before the first paint', () => {
+    mockUseAlerts.mockReturnValue([makeAlert({ severity: 'advisory' })])
+    measuredHeight = 34
+    render(<AlertBar />)
+    expect(readVar()).toBe('34px')
+  })
+
+  it('follows the bar as it resizes (an alert arriving, the emergency stack expanding)', () => {
+    mockUseAlerts.mockReturnValue([])
+    render(<AlertBar />)
+    expect(readVar()).toBe('0px')
+
+    measuredHeight = 34
+    act(() => FakeResizeObserver.instances.forEach(observer => observer.fire()))
+    expect(readVar()).toBe('34px')
+
+    measuredHeight = 96
+    act(() => FakeResizeObserver.instances.forEach(observer => observer.fire()))
+    expect(readVar()).toBe('96px')
+  })
+
+  it('removes the var and stops observing on unmount', () => {
+    mockUseAlerts.mockReturnValue([makeAlert({ severity: 'info' })])
+    measuredHeight = 34
+    const { unmount } = render(<AlertBar />)
+    expect(readVar()).toBe('34px')
+
+    unmount()
+
+    expect(readVar()).toBe('')
+    expect(FakeResizeObserver.instances.every(observer => observer.disconnected)).toBe(true)
+  })
+
+  it('shares the one :root var between two bars: the tallest wins, the last one out clears it', () => {
+    mockUseAlerts.mockReturnValue([makeAlert({ severity: 'info' })])
+    measuredHeight = 34
+    const first = render(<AlertBar />)
+    measuredHeight = 70
+    const second = render(<AlertBar />)
+    expect(readVar()).toBe('70px')
+
+    second.unmount()
+    // The survivor's inset stays reserved (its own measured height), not cleared.
+    expect(readVar()).toBe('34px')
+
+    first.unmount()
+    expect(readVar()).toBe('')
+  })
+
+  it('still publishes its initial measurement where ResizeObserver does not exist', () => {
+    vi.unstubAllGlobals() // back to jsdom, which has no ResizeObserver
+    mockUseAlerts.mockReturnValue([makeAlert({ severity: 'info' })])
+    measuredHeight = 34
+    const { unmount } = render(<AlertBar />)
+    expect(readVar()).toBe('34px')
+    unmount()
+    expect(readVar()).toBe('')
+  })
+})

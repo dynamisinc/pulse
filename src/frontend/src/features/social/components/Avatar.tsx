@@ -1,9 +1,17 @@
 /**
  * features/social/components/Avatar.tsx
  * ---------------------------------------------------------------------------
- * The interim avatar treatment (R-004 — docs/design/DECISIONS.md cross-surface
- * reconciliation) until the COR-024 photo library lands. Raw initials are
- * RETIRED as of this decision:
+ * The avatar primitive (R-004 — docs/design/DECISIONS.md cross-surface
+ * reconciliation; COR-024 photo library, demo-polish F5).
+ *
+ * PHOTO FIRST. When the persona carries an `avatarUrl` (the COR-024 library
+ * image, `GET /api/personas`), the avatar is that image: a circular
+ * `<img alt="" loading="lazy">` filling the circle. The circle's own
+ * `avatarColor` shows while it loads.
+ *
+ * FALLBACK. With no `avatarUrl`, an unsafe one (see `safeImageUrl`), or an
+ * image that FAILS to load (`onError`), the avatar renders the R-004 treatment
+ * that predates photos. Raw initials are RETIRED as of that decision:
  *
  *  - `kind === 'org'`   -> a monogram: the persona's `initials`, centered on a
  *                          circle filled with `avatarColor` (logo-analog;
@@ -14,9 +22,15 @@
  *                          inline SVG shape, ~85% white) over `avatarColor`.
  *                          Offline-safe, no photo dependency.
  *
- * Decorative only: `aria-hidden`, no alt text duplicated here — the post
- * card's name/handle text carries the author's identity for assistive tech,
- * not the avatar graphic.
+ * NO LOOKALIKE CUE (SOC-052). `AvatarPersona` deliberately has no `verified`
+ * (or any trust) member, so this component CANNOT treat an unverified account
+ * differently: an impersonator may use a near-identical photo and gets exactly
+ * the same rendering as the real account. Verification is shown by the
+ * `<VerifiedMark>` seal's presence or absence, nowhere else.
+ *
+ * Decorative only: the wrapper is `aria-hidden` and the image has `alt=""` —
+ * the post card's name/handle text carries the author's identity for assistive
+ * tech, not the avatar graphic.
  *
  * This is a cross-surface primitive (R-004 note on `PostCard.tsx`): the E7
  * staff console imports the same component rather than re-styling its own
@@ -29,10 +43,19 @@
  * no COBRA/MUI dependency either way.
  */
 
+import { useState } from 'react'
 import type { Persona } from '@/features/personas'
+import { safeImageUrl } from '../utils/safeImageUrl'
 
-/** The subset of `Persona` an avatar needs to render (kept minimal and reusable). */
-export type AvatarPersona = Pick<Persona, 'kind' | 'avatarColor' | 'initials' | 'displayName'>
+/**
+ * The subset of `Persona` an avatar needs to render (kept minimal and reusable).
+ * `avatarUrl` is optional on `Persona`, so existing literals keep compiling. There
+ * is no `verified` here on purpose (SOC-052 — see the module header).
+ */
+export type AvatarPersona = Pick<
+  Persona,
+  'kind' | 'avatarColor' | 'initials' | 'displayName' | 'avatarUrl'
+>
 
 export interface AvatarProps {
   persona: AvatarPersona
@@ -45,11 +68,18 @@ const DEFAULT_SIZE = 42
 export function Avatar({ persona, size = DEFAULT_SIZE }: AvatarProps) {
   const dimension = `${size}px`
 
+  // The url that last failed to load. Keyed by URL (not a boolean) so a persona
+  // whose `avatarUrl` later CHANGES gets a fresh attempt without an effect/reset.
+  const [failedUrl, setFailedUrl] = useState<string | undefined>(undefined)
+  const candidate = safeImageUrl(persona.avatarUrl)
+  const imageUrl = candidate !== undefined && candidate !== failedUrl ? candidate : undefined
+
   return (
     <span
       aria-hidden="true"
       data-testid="post-avatar"
       data-avatar-kind={persona.kind}
+      data-avatar-image={imageUrl !== undefined ? 'photo' : 'fallback'}
       style={{
         width: dimension,
         height: dimension,
@@ -62,7 +92,23 @@ export function Avatar({ persona, size = DEFAULT_SIZE }: AvatarProps) {
         overflow: 'hidden',
       }}
     >
-      {persona.kind === 'org' ? (
+      {imageUrl !== undefined ? (
+        <img
+          src={imageUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          draggable={false}
+          onError={() => setFailedUrl(imageUrl)}
+          style={{
+            display: 'block',
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            borderRadius: '999px',
+          }}
+        />
+      ) : persona.kind === 'org' ? (
         <span
           style={{
             color: '#fff',

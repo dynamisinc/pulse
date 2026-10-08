@@ -1,0 +1,258 @@
+/*
+ * features/social/components/media/VideoPlayer.module.css
+ * ---------------------------------------------------------------------------
+ * The inline video player. Reads the `--pc-*` tokens from the enclosing card
+ * root. The frame's `aspect-ratio` is set inline from the contract's width/height
+ * (4:5 ... 16:9, else 16:9), so the box is reserved before the poster loads.
+ *
+ * Overlay layout (all absolutely positioned over the frame; none of it affects
+ * layout, so the watermark toggling can never shift anything):
+ *     top row     duration badge | EXERCISE watermark slot | Mute . Expand
+ *     center      Play / Pause
+ *     bottom      the browser's native control bar
+ * `.player` re-enables pointer events the slot's wrapper turns off, so the player
+ * is independently clickable above the card's open-the-thread overlay.
+ */
+
+.player {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid var(--pc-line);
+  border-radius: 16px;
+  background: #000;
+  color: #fff;
+  pointer-events: auto;
+}
+
+/*
+ * Inside the modal viewer: as large as the stage allows while keeping the ratio. The
+ * viewer is inset by the compliance-chrome banners and carries a ~64px bottom toolbar, so
+ * the height budget is the DYNAMIC viewport minus both banner insets minus 140px (toolbar +
+ * stage padding) — a landscape phone with the banners on must not push the player over
+ * Close. `vh` first as the fallback for browsers without `dvh`.
+ */
+.expanded {
+  width: min(
+    100%,
+    calc((100vh - var(--pulse-chrome-top, 0px) - var(--pulse-chrome-bottom, 0px) - 140px) * var(--vp-ratio, 1.7778))
+  );
+  width: min(
+    100%,
+    calc((100dvh - var(--pulse-chrome-top, 0px) - var(--pulse-chrome-bottom, 0px) - 140px) * var(--vp-ratio, 1.7778))
+  );
+  max-width: 100%;
+  margin: 0 auto;
+  border-radius: 12px;
+}
+
+/*
+ * Keyboard focus ring: a white 2px ring against the player, then a DARK 3px ring outside it
+ * — neutral on purpose (no brand accent: a light accent on a light page, or a dark one on a
+ * dark page, would vanish). Light page: the dark ring shows; dark page: the white ring shows.
+ */
+.player:focus-visible {
+  outline: 3px solid #0e1518;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.video {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  object-fit: contain;
+}
+
+/* Fullscreen: fill the screen (the watermark + buttons are children, so they stay). */
+.player:fullscreen {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  aspect-ratio: auto !important;
+}
+
+.player:-webkit-full-screen {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  aspect-ratio: auto !important;
+}
+
+/* ---------- overlays ---------- */
+
+/*
+ * The top row: duration | watermark slot | Mute . Expand. A flex row, not three
+ * absolute pins, so the watermark can never collide with the controls however
+ * narrow the player gets. Click-through; the buttons turn pointer events back on.
+ */
+.topBar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  left: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.duration {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 72%);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+/*
+ * NFR-008 watermark slot. ALWAYS in the DOM with the SAME flexible width whether
+ * empty or filled (`flex: 1 1 0`), so toggling it never moves the duration badge or
+ * the buttons; the visible pill is the inner span, which exists only when the text does.
+ */
+.watermark {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 0;
+  justify-content: center;
+}
+
+.watermarkText {
+  max-width: 100%;
+  padding: 3px 8px;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 85%);
+  border-radius: 4px;
+  background: rgb(0 0 0 / 55%);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.corner {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.control {
+  display: inline-flex;
+  pointer-events: auto;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 55%);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 62%);
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.control:hover {
+  background: rgb(0 0 0 / 82%);
+}
+
+/* A white + dark double ring: visible over any footage (NFR-001). */
+.control:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px #000;
+}
+
+.playToggle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: 52px;
+  height: 52px;
+  transform: translate(-50%, -50%);
+  font-size: 20px;
+}
+
+/* While playing the centre button fades away, but stays focusable and returns on hover/focus. */
+.playToggle[aria-pressed='true'] {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.playToggle[aria-pressed='true']:hover,
+.playToggle[aria-pressed='true']:focus-visible {
+  opacity: 1;
+}
+
+/* ---------- unplayable ---------- */
+
+.unplayable {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 44px 16px 16px;
+  background: var(--pc-panel);
+  color: var(--pc-ink);
+  text-align: center;
+}
+
+.unplayableIcon {
+  color: var(--pc-ink-muted);
+  font-size: 22px;
+}
+
+.unplayableMessage {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.unplayableAlt {
+  display: -webkit-box;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--pc-ink-muted);
+  font-size: 13px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+/* Visually hidden, still read by assistive tech (the duration badge's "Video length"). */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playToggle[aria-pressed='true'] {
+    transition: none;
+  }
+}

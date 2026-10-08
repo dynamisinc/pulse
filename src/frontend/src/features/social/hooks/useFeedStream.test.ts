@@ -15,7 +15,10 @@
  *    seam — `start()`/`subscribe()` are called with exactly the arguments the
  *    interface defines, nothing more (COR-001, by construction);
  *  - a drained post carries none of the four provenance keys (XC-002, defence
- *    in depth over the type-level guarantee).
+ *    in depth over the type-level guarantee);
+ *  - `discard(ids)` (demo-polish F4) takes named posts back out of the buffer and
+ *    lowers the count to match — how the author's own echo, buffered before the post
+ *    was registered as theirs, is kept off the pill.
  */
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
@@ -391,5 +394,63 @@ describe('useFeedStream — drained posts carry no provenance (XC-002)', () => {
     for (const key of ['origin', 'actingHumanId', 'createdWallClock', 'injectId']) {
       expect(Object.prototype.hasOwnProperty.call(loaded as object, key)).toBe(false)
     }
+  })
+})
+
+describe('useFeedStream — discard(ids) removes buffered posts and keeps the count honest (F4)', () => {
+  it('removes only the named posts, lowers newCount, and leaves the rest drainable', async () => {
+    const fake = new FakeFeedStreamSource()
+    const { result } = renderHook(() => useFeedStream({ enabled: true, source: fake }))
+    await waitFor(() => expect(fake.startCalls).toBe(1))
+    act(() => {
+      fake.push(buildView('p1'))
+      fake.push(buildView('mine'))
+      fake.push(buildView('p3'))
+    })
+    expect(result.current.newCount).toBe(3)
+
+    act(() => result.current.discard(['mine']))
+
+    expect(result.current.newCount).toBe(2)
+    let drained: ParticipantPostView[] = []
+    act(() => {
+      drained = result.current.loadBuffered()
+    })
+    expect(drained.map(v => v.id)).toEqual(['p3', 'p1'])
+  })
+
+  it('ignores ids that are not buffered, and an empty list', async () => {
+    const fake = new FakeFeedStreamSource()
+    const { result } = renderHook(() => useFeedStream({ enabled: true, source: fake }))
+    await waitFor(() => expect(fake.startCalls).toBe(1))
+    act(() => fake.push(buildView('p1')))
+
+    act(() => result.current.discard(['not-buffered']))
+    act(() => result.current.discard([]))
+
+    expect(result.current.newCount).toBe(1)
+  })
+
+  it('lets a discarded id be buffered again if it genuinely re-arrives (its id is forgotten)', async () => {
+    const fake = new FakeFeedStreamSource()
+    const { result } = renderHook(() => useFeedStream({ enabled: true, source: fake }))
+    await waitFor(() => expect(fake.startCalls).toBe(1))
+    act(() => fake.push(buildView('p1')))
+    act(() => result.current.discard(['p1']))
+    expect(result.current.newCount).toBe(0)
+
+    act(() => fake.push(buildView('p1')))
+
+    expect(result.current.newCount).toBe(1)
+  })
+
+  it('has a stable identity across renders', async () => {
+    const fake = new FakeFeedStreamSource()
+    const { result, rerender } = renderHook(() => useFeedStream({ enabled: true, source: fake }))
+    const first = result.current.discard
+
+    rerender()
+
+    expect(result.current.discard).toBe(first)
   })
 })

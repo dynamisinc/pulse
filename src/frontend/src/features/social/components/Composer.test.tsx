@@ -14,8 +14,7 @@
  *  - the char limit honors the `charLimit` prop override;
  *  - a stored-XSS payload is sanitized on the publish path (NFR-004) — the
  *    emitted/returned post text carries no `<script>`;
- *  - the image-attach affordance validates MIME/size/count and rejects video
- *    with a documented follow-up message;
+ *  - the attach tray (demo-polish F4): see `Composer.attach.test.tsx`;
  *  - keyboard operability (NFR-001): the textarea + Post button are reachable
  *    and the ring exposes an accessible remaining-character status.
  *
@@ -29,7 +28,7 @@
  * scenario instant a published post carries is deterministic.
  */
 import type { ReactNode } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
@@ -39,8 +38,10 @@ import {
   getEmittedTelemetryEvents,
   resetTelemetryBuffer,
 } from '@/core/telemetry'
-import type { Post } from '@/features/social'
+import type { ParticipantPostView } from '@/features/social'
 import { Composer } from './Composer'
+import { ownPostStore } from '../services/ownPostStore'
+import { postStore } from '../services/postStore'
 
 function fixedClock(instant: Date): IExerciseClock {
   return { scenarioNow: () => instant }
@@ -63,11 +64,13 @@ beforeEach(() => {
 
 afterEach(() => {
   resetExerciseClock()
+  postStore.resetForTests()
+  ownPostStore.resetForTests()
 })
 
 describe('Composer — compose + publish (SOC-001)', () => {
   it('publishes typed text, clears the draft, and fires onPosted with the new post', async () => {
-    const onPosted = vi.fn<(post: Post) => void>()
+    const onPosted = vi.fn<(view: ParticipantPostView) => void>()
     const user = userEvent.setup()
     await renderComposer(<Composer onPosted={onPosted} />)
 
@@ -85,6 +88,8 @@ describe('Composer — compose + publish (SOC-001)', () => {
     expect(onPosted).toHaveBeenCalledTimes(1)
     const post = onPosted.mock.calls[0]?.[0]
     expect(post?.text).toBe('Boil-water advisory lifted for zone 3.')
+    // The host gets the participant-safe VIEW, never the full model (XC-002).
+    expect(post).not.toHaveProperty('origin')
     // Draft cleared, so the button is disabled again.
     expect(input).toHaveValue('')
     expect(postButton).toBeDisabled()
@@ -164,7 +169,7 @@ describe('Composer — depleting ring counter (D1-R5)', () => {
 
 describe('Composer — content security (NFR-004)', () => {
   it('sanitizes a stored-XSS <script> payload on the publish path — the new post carries no <script>', async () => {
-    const onPosted = vi.fn<(post: Post) => void>()
+    const onPosted = vi.fn<(view: ParticipantPostView) => void>()
     const user = userEvent.setup()
     await renderComposer(<Composer onPosted={onPosted} />)
 
@@ -183,7 +188,7 @@ describe('Composer — content security (NFR-004)', () => {
   })
 
   it('sanitizes a stored-XSS <img onerror> payload on the publish path — no script/img element is ever produced', async () => {
-    const onPosted = vi.fn<(post: Post) => void>()
+    const onPosted = vi.fn<(view: ParticipantPostView) => void>()
     const user = userEvent.setup()
     await renderComposer(<Composer onPosted={onPosted} />)
 
@@ -202,32 +207,5 @@ describe('Composer — content security (NFR-004)', () => {
     // element from the payload either.
     expect((window as unknown as { __composerImgXss?: boolean }).__composerImgXss).toBeUndefined()
     expect(document.querySelectorAll('script')).toHaveLength(scriptCountBefore)
-  })
-})
-
-describe('Composer — media attach validation (SOC-001, NFR-004)', () => {
-  it('accepts a valid image and lists it as an attachment', async () => {
-    const user = userEvent.setup()
-    await renderComposer(<Composer />)
-
-    const file = new File(['x'], 'flood.png', { type: 'image/png' })
-    await user.upload(screen.getByTestId('composer-file-input'), file)
-
-    expect(screen.getByTestId('composer-media')).toHaveTextContent('flood.png')
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-  })
-
-  it('rejects a video file with the documented inline-video follow-up message', async () => {
-    await renderComposer(<Composer />)
-
-    // `fireEvent.change` bypasses the input's `accept="image/*"` UI filter so
-    // the code-level MIME guard (the real content-security boundary) is what's
-    // exercised here.
-    const video = new File(['x'], 'clip.mp4', { type: 'video/mp4' })
-    const input = screen.getByTestId('composer-file-input')
-    fireEvent.change(input, { target: { files: [video] } })
-
-    expect(screen.getByRole('alert')).toHaveTextContent(/inline video is coming soon/i)
-    expect(screen.queryByTestId('composer-media')).not.toBeInTheDocument()
   })
 })

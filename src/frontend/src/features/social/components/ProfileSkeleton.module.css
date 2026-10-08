@@ -1,0 +1,137 @@
+/*
+ * features/social/components/ProfileSkeleton.module.css
+ * ---------------------------------------------------------------------------
+ * Styles for the profile loading skeleton (demo-polish F5, story 14). CSS Module,
+ * participant world: no COBRA, no MUI. LIGHT ONLY (no dark-mode rule).
+ *
+ * GEOMETRY PARITY with `pages/Profile.module.css`: 600px column, 150px banner,
+ * identity block padded `0 16px 12px` with the 80px avatar in a 4px ring pulled up
+ * 42px over the banner, then a tab strip with a bottom rule. The shimmer is
+ * decorative and removed under `prefers-reduced-motion`; the "Loading profile"
+ * status text is the accessible alternative.
+ */
+
+.skeleton {
+  position: relative; /* anchors the visually hidden status text */
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 600px;
+  background: #fff;
+}
+
+.block {
+  display: block;
+  flex: none;
+  border-radius: 6px;
+  background-color: #e9edef;
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, .65) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  background-position: 100% 0;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.banner {
+  height: 150px;
+  border-radius: 0;
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.avatarRing {
+  display: inline-flex;
+  width: max-content;
+  margin-top: -42px;
+  margin-bottom: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: #fff;
+}
+
+.avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 999px;
+}
+
+.name {
+  width: 180px;
+  height: 20px;
+}
+
+.handle {
+  width: 110px;
+  height: 15px;
+}
+
+.bio {
+  width: 100%;
+  height: 15px;
+}
+
+.bioShort {
+  width: 55%;
+}
+
+.stats {
+  display: flex;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+.stat {
+  width: 88px;
+  height: 14px;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  padding: 14px 8px;
+  border-bottom: 1px solid #e5e8ea;
+}
+
+.tab {
+  flex: 1 1 0;
+  height: 14px;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block {
+    animation: none;
+    background-image: none;
+  }
+}
+
+/* Visually hidden, still announced: the status text for assistive tech. */
+.srOnly {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}

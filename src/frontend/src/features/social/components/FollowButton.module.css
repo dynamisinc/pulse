@@ -7,9 +7,10 @@
  *
  * Theming mirrors the sibling social modules (`NewPostsPill.module.css`): the
  * per-exercise accent `var(--pulse-ac)` (COR-030) with the Cadence-navy
- * fallback drives both states (filled "Follow" / outlined "Following"), so no
- * separate dark-mode palette is needed here — the accent variable is the only
- * color input and it is supplied by the ancestor brand theme in both modes.
+ * fallback drives both states (filled "Follow" / outlined "Following"). The
+ * accent variable is the only color input and it is supplied by the ancestor
+ * brand scope (`theme/SocialBrandScope`). LIGHT ONLY (demo-polish F5): there is
+ * no dark palette anywhere in the Social skin.
  *
  * The "Following" state is deliberately NOT a color-only change (NFR-001):
  * it swaps to an outlined treatment (no filled background) AND the component
@@ -34,7 +35,12 @@
   cursor: pointer;
 }
 
-.button:hover:not(:disabled) {
+/* HOVER is brightness(1.08) on the FILLED (Follow) state ONLY -- the one hover
+ * `theme/accent.ts` models (`HOVER_BRIGHTNESS`; white on the brightened fill >= 4.5:1).
+ * The transparent "Following" state carries ACCENT TEXT, and brightening text that sits
+ * on the row's hover tint drops it to ~4.15:1 (AA fail, Gate-2 H-2), so it takes a
+ * background tint instead (below). `theme/accentHover.guard.test.ts` pins both. */
+.button:not(.following):hover:not(:disabled) {
   filter: brightness(1.08);
 }
 
@@ -54,6 +60,16 @@
 .following {
   background: transparent;
   color: var(--fb-accent);
+}
+
+/* Hover for the outlined state: an OPAQUE tint, not a filter. #f4f4f5 is exactly the
+ * "accent text on the hover tint over white" surface `theme/accent.ts` certifies
+ * (`TEXT_SURFACES.onHover`). It is deliberately NOT the translucent `--pc-hover`
+ * (rgba .045): inside a hovered "Who to follow" row that would stack on the row's own
+ * tint (-> ~#eaeaeb, accent text 4.30:1, AA fail). Opaque, the surface is #f4f4f5
+ * whatever is underneath. */
+.following:hover:not(:disabled) {
+  background: #f4f4f5;
 }
 
 .icon {

@@ -69,6 +69,26 @@
  * is a fixed WIRE instant (when the alert went active), not "now"; only the
  * rendering is bound to the live scenario clock.
  *
+ * ## Publishing its own height (`--pulse-alert-height`)
+ * Being `position: fixed`, the bar reserves no space -- so a channel's sticky
+ * rails / headers / modal backdrop / skip link, which pin to the viewport top,
+ * would slide UNDER an active alert. The bar therefore measures itself and
+ * publishes its rendered height on `:root` as `SHELL_ALERT_HEIGHT_VAR` (px;
+ * `0px` while no alert is active), kept current by a `ResizeObserver` (the ticker
+ * wrapping, the emergency band's "+N more" stack expanding, an alert arriving or
+ * clearing). A channel offsets its top pins by `chrome-top + alert-height`. The
+ * var is removed when the last bar unmounts, so no stale inset outlives the shell.
+ * Several bars at once (an outer shell + a `preview` shell) share the one `:root`
+ * var: it carries the TALLEST, and only the last one out clears it -- the same
+ * ref-counting `ComplianceChrome` uses for the chrome insets (WR-001).
+ *
+ * ## Vs a fullscreen element (`useExitFullscreenOnNewAlert`)
+ * The browser paints a fullscreen element above EVERYTHING, this bar included, so a
+ * channel's fullscreen video would hide a new alert indefinitely. When a NEW advisory or
+ * emergency alert becomes active the bar leaves fullscreen ONCE for it (info does not);
+ * re-entering fullscreen with the same alert still active is allowed. It uses
+ * `core/dom/fullscreen` only -- the shell imports nothing from a channel.
+ *
  * Never user-dismissable (PRT-010) — there is intentionally no close/dismiss
  * affordance anywhere in this component. Alerts here are in-fiction/simulated
  * only; a real-world message is the break-fiction overlay (story 05), never
@@ -78,14 +98,15 @@
  * React + inline style, FontAwesome icons only.
  */
 
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faBullhorn, faCircleInfo, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
-import { SHELL_CHROME_TOP_VAR, SHELL_Z } from '../../mountContract'
+import { SHELL_ALERT_HEIGHT_VAR, SHELL_CHROME_TOP_VAR, SHELL_Z } from '../../mountContract'
 import { useAlerts } from './useAlerts'
+import { useExitFullscreenOnNewAlert } from './useExitFullscreenOnNewAlert'
 import type { Alert, AlertSeverity } from './alertTypes'
 
 /** Ticker auto-rotation interval (SHELL-CONTRACT.md §2: "~3.5s"). */
@@ -282,10 +303,52 @@ function pickActiveAlert(
   return preferred ?? alerts[0] ?? null
 }
 
+/**
+ * Rendered height of each live `AlertBar`, keyed per instance. The shared `:root`
+ * var publishes the tallest (and is removed when the map empties) so one bar
+ * unmounting never clears the inset a still-mounted sibling needs.
+ */
+const alertBarHeights = new Map<symbol, number>()
+
+function publishAlertHeight(): void {
+  const root = document.documentElement
+  if (alertBarHeights.size === 0) {
+    root.style.removeProperty(SHELL_ALERT_HEIGHT_VAR)
+    return
+  }
+  root.style.setProperty(SHELL_ALERT_HEIGHT_VAR, `${Math.max(...alertBarHeights.values())}px`)
+}
+
 export function AlertBar() {
   const alerts = useAlerts()
+  // A fullscreen element paints above this fixed bar: leave it once when a NEW advisory /
+  // emergency alert arrives (see the hook's header for the tiers and the once-only rule).
+  useExitFullscreenOnNewAlert(alerts)
   const { timeZone } = useExerciseContext()
   const { format } = useScenarioTime(timeZone)
+
+  // Publish this bar's rendered height (see the module header). A layout effect so
+  // the inset is correct before the first paint; the observer keeps it current.
+  // `ResizeObserver` is feature-detected (jsdom has none): the initial measurement
+  // still publishes.
+  const hostRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const host = hostRef.current
+    if (host === null) return
+    const id = Symbol('alert-bar')
+    const measure = () => {
+      alertBarHeights.set(id, host.getBoundingClientRect().height)
+      publishAlertHeight()
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure)
+    observer?.observe(host)
+    return () => {
+      observer?.disconnect()
+      alertBarHeights.delete(id)
+      publishAlertHeight()
+    }
+  }, [])
 
   const hasEmergency = alerts.some(alert => alert.severity === 'emergency')
   const treatment: 'none' | 'ticker' | 'emergencyBand' =
@@ -351,6 +414,7 @@ export function AlertBar() {
 
   return (
     <div
+      ref={hostRef}
       role="status"
       aria-live={liveAnnounceLevel}
       aria-atomic="true"

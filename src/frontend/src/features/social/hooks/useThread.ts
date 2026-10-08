@@ -44,22 +44,49 @@
  * ancestors omitted), and returns a taken-down reply as a tombstone: `status:
  * 'taken-down'`, empty `text`, no `media`, zero `counts`. The guards below accept
  * the optional v2 members (`media`/`inReplyTo`/`viewer`) and reject malformed ones.
+ *
+ * REPLIES CREATED IN DEV (demo-polish F4). The mock thread is built from
+ * `postStore` (seeded with `listPosts()` and, in dev, the demo fixtures) PLUS the
+ * fixture threads, so a reply the participant composes in `npm run dev` — which
+ * `useComposePost` appends to `postStore`, where `appendPost` links it to its
+ * parent — shows in that parent's thread on the next resolve. (The older
+ * `listPosts()`-only build could never show one.)
+ *
+ * LIVE REPLY APPEND (demo-polish F4, story 13). With `options.live`, the hook
+ * also listens to the UNFILTERED arrival source (`feedStreamSource.
+ * defaultArrivalSource` — replies never reach the feed's pill, they land here):
+ * a post whose `inReplyTo.postId` is the focused post is APPENDED BELOW the
+ * existing replies (arrival order, never re-sorted, so nothing under the reader
+ * moves), de-duplicated by id against both the fetched replies and earlier live
+ * ones, and counted into the focused post's `counts.reply`. It is a derived
+ * overlay on the fetched thread rather than a rewrite of it, so a late fetch
+ * result that already contains the live reply neither duplicates nor double-counts
+ * it. `appendReply(view)` is the same append for the viewer's OWN reply (the 201
+ * response), which makes the SignalR echo of that reply a no-op. `newReplyCount`
+ * is how many replies arrived from SOMEONE ELSE since the thread loaded — what
+ * `<ThreadView>`'s polite live region announces ("1 new reply"); the viewer's own
+ * reply is not announced as new.
+ *
+ * Reconnect gap: a reply that arrived while the transport was down is not
+ * replayed here (the feed's polling fallback reads the top-level feed only), so
+ * a reload is the recovery path. Not in this story's scope.
  */
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { personaIdForHandle } from '@/features/personas'
 import {
-  listPosts,
   toParticipantView,
   type ParticipantPostView,
   type Post,
   type PostCounts,
 } from '@/features/social'
 import { hasWellFormedV2Members } from '../services/postService'
+import { postStore } from '../services/postStore'
 import { listDemoFixturePosts, listDemoTakenDownPosts } from '../services/mockFixtures'
+import { defaultArrivalSource, type FeedStreamSource } from '../services/feedStreamSource'
 
 /**
  * A mock reply fixture — a full `Post` (so it narrows through
@@ -84,12 +111,60 @@ export interface ThreadReplyView extends ParticipantPostView {
 export interface UseThreadResult {
   /** The ancestor chain, oldest first. Empty when the focused post is a root. */
   readonly ancestors: readonly ParticipantPostView[]
-  /** The focused post, or `undefined` while loading / if it could not be resolved. */
+  /**
+   * The focused post, or `undefined` while loading / if it could not be resolved.
+   * Its `counts.reply` includes the replies appended live since load.
+   */
   readonly focused: ParticipantPostView | undefined
-  /** The focused post's direct replies (order: as authored). */
+  /**
+   * The focused post's direct replies, oldest first as fetched, then any replies
+   * appended live (or by `appendReply`) in arrival order.
+   */
   readonly replies: readonly ThreadReplyView[]
   readonly loading: boolean
   readonly error: unknown
+  /**
+   * How many replies from SOMEONE ELSE were appended live since the thread
+   * loaded. Drives the polite "N new replies" announcement; the viewer's own
+   * reply never counts. 0 until a live reply arrives (and always 0 unless
+   * `options.live`).
+   */
+  readonly newReplyCount: number
+  /**
+   * Appends the viewer's OWN just-published reply below the existing ones and
+   * bumps the focused post's reply count — once. A no-op if that reply (by id) is
+   * already in the thread, so the realtime echo of it, arriving before or after,
+   * can never duplicate it.
+   *
+   * It is also a no-op unless the reply belongs to the thread that is focused NOW:
+   * a 201 can land after the reader has moved on to another thread, and appending it
+   * there would show a reply under the wrong post. The parent is `parentPostId` when
+   * the caller names it (the composer knows which post it replied to), else the
+   * reply's own `inReplyTo.postId`; with neither, it is appended.
+   */
+  readonly appendReply: (reply: ParticipantPostView, parentPostId?: string) => void
+}
+
+/** Options for {@link useThread}. */
+export interface UseThreadOptions {
+  /**
+   * Listen for live replies to the focused post and append them (see the module
+   * header). Default `false`: the hook is then a plain one-shot read, exactly as
+   * before. `<ThreadView>` turns it on for sessions that stream (D1-011).
+   */
+  readonly live?: boolean
+  /**
+   * The arrival source for live replies. Defaults to the shared
+   * `defaultArrivalSource`. Injectable for tests; MUST be a stable reference
+   * across renders (it is an effect dependency).
+   */
+  readonly source?: FeedStreamSource
+  /**
+   * The viewer's own persona id. A live reply authored by it is appended but not
+   * announced as new (it is the viewer's own, arriving as its echo). Omit for a
+   * session with no persona.
+   */
+  readonly viewerPersonaId?: string
 }
 
 // -----------------------------------------------------------------------------
@@ -231,10 +306,14 @@ function toTombstone(post: Post): MockReplyPost {
 }
 
 function buildMockThreadResponse(focusedPostId: string): ThreadWireResponse {
-  // Visible posts only: a soft-deleted post is never an ancestor or a focus.
-  const byId = new Map<string, Post>(
-    [...listPosts(), ...listDemoFixturePosts()].map(post => [post.id, post]),
-  )
+  // Visible posts only: a soft-deleted post is never an ancestor or a focus. The
+  // fixture threads are always known (a thread is looked up by id, it is not a
+  // feed); `postStore` is laid over them so its version of a post wins — it holds
+  // the bumped reply counts AND every reply composed since the page loaded.
+  const byId = new Map<string, Post>()
+  for (const post of listDemoFixturePosts()) byId.set(post.id, post)
+  for (const post of postStore.getPosts()) byId.set(post.id, post)
+
   const replies: MockReplyPost[] = [
     ...(MOCK_REPLIES_BY_PARENT[focusedPostId] ?? []),
     ...[...byId.values()]
@@ -327,29 +406,49 @@ export async function resolveThread(focusedPostId: string): Promise<ThreadWireRe
   return response.data
 }
 
+/** A live (or own) reply that overlays the fetched thread. */
+interface LiveReply {
+  readonly view: ParticipantPostView
+  /** Counted into `newReplyCount` (a reply from someone else). */
+  readonly announce: boolean
+}
+
 /**
  * Resolves a flattened thread for a component. A thin useState/useEffect
  * wrapper over `resolveThread()` (mirrors `usePersonas()`) that narrows every
  * post to its participant-safe view (`toParticipantView`, XC-002) before
- * handing it back.
+ * handing it back, and (with `options.live`) overlays replies that arrive after
+ * the load — see the module header.
  */
-export function useThread(focusedPostId: string): UseThreadResult {
+export function useThread(focusedPostId: string, options: UseThreadOptions = {}): UseThreadResult {
+  const { live = false, source = defaultArrivalSource, viewerPersonaId } = options
+
   const [ancestors, setAncestors] = useState<readonly ParticipantPostView[]>([])
   const [focused, setFocused] = useState<ParticipantPostView | undefined>(undefined)
-  const [replies, setReplies] = useState<readonly ThreadReplyView[]>([])
+  const [fetchedReplies, setFetchedReplies] = useState<readonly ThreadReplyView[]>([])
+  const [liveReplies, setLiveReplies] = useState<readonly LiveReply[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(undefined)
+
+  // Adds a reply to the live overlay, once per id.
+  const addLiveReply = useCallback((view: ParticipantPostView, announce: boolean) => {
+    setLiveReplies(prev =>
+      prev.some(entry => entry.view.id === view.id) ? prev : [...prev, { view, announce }],
+    )
+  }, [])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    // A different thread starts with no overlay from the previous one.
+    setLiveReplies([])
 
     resolveThread(focusedPostId)
       .then(resolved => {
         if (cancelled) return
         setAncestors(resolved.ancestors.map(toParticipantView))
         setFocused(resolved.focused ? toParticipantView(resolved.focused) : undefined)
-        setReplies(
+        setFetchedReplies(
           resolved.replies.map(reply => ({
             ...toParticipantView(reply),
             replyToPersonaId: reply.replyToPersonaId,
@@ -362,7 +461,7 @@ export function useThread(focusedPostId: string): UseThreadResult {
         if (cancelled) return
         setAncestors([])
         setFocused(undefined)
-        setReplies([])
+        setFetchedReplies([])
         setError(err)
       })
       .finally(() => {
@@ -374,5 +473,79 @@ export function useThread(focusedPostId: string): UseThreadResult {
     }
   }, [focusedPostId])
 
-  return { ancestors, focused, replies, loading, error }
+  // Live replies. Subscribed from mount (not from the fetch result) so a reply
+  // that lands while the thread is still loading is kept and merged, not lost.
+  useEffect(() => {
+    if (!live) return
+    const unsubscribe = source.subscribe(post => {
+      if (post.inReplyTo?.postId !== focusedPostId) return
+      // The viewer's own reply is appended (silently) by `appendReply`; if its
+      // echo wins that race it is still not "new" to them. (The test is the viewer's
+      // PERSONA, so a reply by someone else operating the same shared org persona
+      // from another session is appended but not announced either - a deliberate,
+      // accepted simplification: it still appears, only the announcement is skipped.)
+      addLiveReply(post, post.authorPersonaId !== viewerPersonaId)
+    })
+    void source.start().catch(() => {})
+    return () => {
+      unsubscribe()
+      source.stop()
+    }
+  }, [live, source, focusedPostId, viewerPersonaId, addLiveReply])
+
+  // The thread focused RIGHT NOW, readable from a callback that outlives a render
+  // (`appendReply` is called from a publish that can resolve after navigation).
+  const focusedPostIdRef = useRef(focusedPostId)
+  useEffect(() => {
+    focusedPostIdRef.current = focusedPostId
+  }, [focusedPostId])
+
+  const appendReply = useCallback(
+    (reply: ParticipantPostView, parentPostId?: string) => {
+      const parent = parentPostId ?? reply.inReplyTo?.postId
+      if (parent !== undefined && parent !== focusedPostIdRef.current) return
+      addLiveReply(reply, false)
+    },
+    [addLiveReply],
+  )
+
+  // The overlay, minus anything the fetch already returned (a late fetch that
+  // already includes the live reply must not show it twice or count it twice).
+  const { replies, focusedWithLive, newReplyCount } = useMemo(() => {
+    const fetchedIds = new Set(fetchedReplies.map(reply => reply.id))
+    const overlay = liveReplies.filter(entry => !fetchedIds.has(entry.view.id))
+    // A live reply is a DIRECT reply to the focused post, so what it replies to
+    // is the focused post's author (the contract's `replyToPersonaId`) — an
+    // opaque id, never derived from the handle.
+    const focusedAuthorId = focused?.authorPersonaId ?? ''
+    return {
+      replies: overlay.length === 0
+        ? fetchedReplies
+        : [
+          ...fetchedReplies,
+          ...overlay.map((entry): ThreadReplyView => ({
+            ...entry.view,
+            replyToPersonaId: focusedAuthorId,
+            status: 'visible',
+          })),
+        ],
+      focusedWithLive: focused !== undefined && overlay.length > 0
+        ? {
+          ...focused,
+          counts: { ...focused.counts, reply: focused.counts.reply + overlay.length },
+        }
+        : focused,
+      newReplyCount: overlay.filter(entry => entry.announce).length,
+    }
+  }, [fetchedReplies, liveReplies, focused])
+
+  return {
+    ancestors,
+    focused: focusedWithLive,
+    replies,
+    loading,
+    error,
+    newReplyCount,
+    appendReply,
+  }
 }

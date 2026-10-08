@@ -1,0 +1,225 @@
+/*
+ * features/social/layout/NavRail.module.css
+ * ---------------------------------------------------------------------------
+ * The left rail. MOBILE-FIRST: the base rules are the ICON rail (68px, labels
+ * visually hidden but kept in the accessibility tree); from 840px
+ * (`NAV_EXPANDED_MIN_WIDTH`) the rail is the full 240px with visible labels.
+ * Widths mirror `frameMetrics.ts` -- `SocialChannel.layout.test.tsx` checks the
+ * numbers against it.
+ *
+ * TWO STICKY GROUPS, NOT ONE FIXED-HEIGHT BOX. The rail itself is just a tall
+ * column that stretches to the full height of the grid row. Inside it:
+ *   - `.top` (logo, links, Post) is `sticky; top: <banner + alert>` -- it pins just
+ *     below the shell's top EXERCISE banner AND an active alert
+ *     (`--pulse-chrome-top` + `--pulse-alert-height`, each `0px` when absent);
+ *   - `.bottom` (the account card) is `sticky; bottom: <bottom banner>`.
+ * The earlier design sized the rail `100dvh - banners` and pinned it as one box, but
+ * the shell lays its channel strip and sign-out row IN FLOW above the channel, so at
+ * scroll 0 that box started ~70px down the page and its bottom edge -- the account
+ * card, with Sign out -- sat below the viewport, under the bottom banner. A sticky
+ * BOTTOM offset has no such dependency: whatever is stacked above the channel, the
+ * card is held `--pulse-chrome-bottom` above the viewport's bottom edge from the
+ * first frame, and settles at the end of the rail when the page is scrolled to the
+ * bottom. (On a viewport too short to hold both groups they overlap -- the card is
+ * painted over the links -- rather than the card leaving the screen.)
+ *
+ * Colors come from the `--pc-*` palette composed onto the channel root; the
+ * accent is the per-exercise `--pulse-ac` via `--pc-accent`. Light only (F5 owns
+ * the tokens sweep). No COBRA / MUI.
+ */
+
+.rail {
+  box-sizing: border-box;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 68px;
+  padding: 4px 8px 0;
+  background: var(--pc-bg);
+  color: var(--pc-ink);
+}
+
+.top {
+  position: sticky;
+  top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 8px;
+  background: var(--pc-bg);
+}
+
+.bottom {
+  position: sticky;
+  bottom: var(--pulse-chrome-bottom, 0px);
+  padding: 8px 0 12px;
+  background: var(--pc-bg);
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  color: var(--pc-accent);
+}
+
+.logo:hover {
+  background: var(--pc-hover);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 48px;
+  height: 48px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  color: var(--pc-ink);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.link:hover {
+  background: var(--pc-hover);
+}
+
+.link:focus-visible,
+.logo:focus-visible,
+.post:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 2px;
+}
+
+/*
+ * Active pill: heavier weight + an inset accent bar + a wash -- three cues, so
+ * the current page is never signalled by color alone (NFR-001). `aria-current`
+ * carries the same state to assistive tech.
+ */
+.linkActive {
+  background: var(--pc-hover);
+  box-shadow: inset 3px 0 0 var(--pc-accent);
+  font-weight: 800;
+}
+
+.icon {
+  width: 22px;
+  height: 22px;
+}
+
+/* Visually hidden in the icon rail; still the link's accessible name. */
+.label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.post {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 48px;
+  height: 48px;
+  margin-top: 12px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--pc-accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* 1.08 is the ONE brightening `theme/accent.ts` models (`HOVER_BRIGHTNESS`): white on
+ * the brightened default-amber fill is 4.56:1. The former 1.12 was 4.26:1 -- under AA
+ * (Gate-2 H-2). `theme/accentHover.guard.test.ts` fails the build on a larger value. */
+.post:hover {
+  filter: brightness(1.08);
+}
+
+.postIcon {
+  width: 20px;
+  height: 20px;
+}
+
+.postLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (min-width: 840px) {
+  .rail {
+    width: 240px;
+    padding: 4px 12px 0;
+  }
+
+  .top {
+    align-items: stretch;
+  }
+
+  .logo {
+    align-self: flex-start;
+  }
+
+  .list {
+    align-items: stretch;
+  }
+
+  .link {
+    justify-content: flex-start;
+    width: auto;
+    padding: 0 20px 0 16px;
+  }
+
+  .label,
+  .postLabel {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    clip-path: none;
+    overflow: visible;
+  }
+
+  .post {
+    width: 100%;
+    height: 52px;
+    font-size: 17px;
+  }
+
+  /* Wide rail: the feather is redundant next to the word "Post". */
+  .postIcon {
+    display: none;
+  }
+}
