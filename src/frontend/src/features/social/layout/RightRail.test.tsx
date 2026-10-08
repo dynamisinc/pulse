@@ -2,9 +2,9 @@
  * features/social/layout/RightRail.test.tsx
  * ---------------------------------------------------------------------------
  * The right rail (demo-polish F1, "Right rail" AC): the `aside[aria-label=Sidebar]`
- * landmark exposing `searchSlot` and `trendingSlot` (EMPTY until F6), with
- * "Who to follow" -- titled exactly that, never "official" (D1-R1) -- in
- * `RightRailContent`.
+ * landmark exposing `searchSlot` and `trendingSlot`, with F6's search box and Trending
+ * panel and "Who to follow" -- titled exactly that, never "official" (D1-R1) -- in
+ * `RightRailContent`; on `/explore` the search and trending move to the page itself.
  */
 import { render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -22,7 +22,7 @@ describe('RightRail', () => {
     expect(screen.getByRole('complementary', { name: 'Sidebar' })).toBeInTheDocument()
   })
 
-  it('renders no slot wrappers while the slots are empty (F6 has not landed)', () => {
+  it('renders no slot wrappers while the slots are empty', () => {
     render(<RightRail />)
     expect(screen.queryByTestId('right-rail-search-slot')).not.toBeInTheDocument()
     expect(screen.queryByTestId('right-rail-trending-slot')).not.toBeInTheDocument()
@@ -48,7 +48,7 @@ describe('RightRail', () => {
 })
 
 describe('RightRailContent (mounted by the channel)', () => {
-  it('holds "Who to follow" only, titled exactly that, with no search / trending yet', async () => {
+  it('holds the search box, Trending and "Who to follow" (titled exactly that), in order', async () => {
     renderChannel()
     const module = await screen.findByTestId('who-to-follow')
     const rail = screen.getByRole('complementary', { name: 'Sidebar' })
@@ -56,8 +56,28 @@ describe('RightRailContent (mounted by the channel)', () => {
     expect(within(module).getByRole('heading', { name: 'Who to follow' })).toBeInTheDocument()
     // D1-R1: nothing in the module claims authority.
     expect(module.textContent ?? '').not.toMatch(/official|trusted|recommended/i)
-    expect(screen.queryByTestId('right-rail-search-slot')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('right-rail-trending-slot')).not.toBeInTheDocument()
+
+    const search = within(rail).getByTestId('right-rail-search-slot')
+    const trending = within(rail).getByTestId('right-rail-trending-slot')
+    expect(within(search).getByRole('search', { name: 'Search posts and people' })).toBeInTheDocument()
+    expect(within(trending).getByRole('region', { name: 'What’s happening' })).toBeInTheDocument()
+    const order = (rail.textContent ?? '')
+    expect(order.indexOf('Search posts and people')).toBeLessThan(order.indexOf('What’s happening'))
+    expect(order.indexOf('What’s happening')).toBeLessThan(order.indexOf('Who to follow'))
+  })
+
+  it('hides the rail\'s search and trending on /explore (the page has its own)', async () => {
+    renderChannel({ entries: ['/explore'] })
+    await screen.findByTestId('explore-page')
+    const rail = screen.getByRole('complementary', { name: 'Sidebar' })
+
+    expect(within(rail).queryByTestId('right-rail-search-slot')).not.toBeInTheDocument()
+    expect(within(rail).queryByTestId('right-rail-trending-slot')).not.toBeInTheDocument()
+    // One search landmark and one trends region on the whole page, not two.
+    expect(screen.getAllByRole('search')).toHaveLength(1)
+    expect(screen.getAllByRole('region', { name: 'What’s happening' })).toHaveLength(1)
+    // "Who to follow" stays.
+    expect(await within(rail).findByTestId('who-to-follow')).toBeInTheDocument()
   })
 
   it('caps the module at 3 rows', async () => {

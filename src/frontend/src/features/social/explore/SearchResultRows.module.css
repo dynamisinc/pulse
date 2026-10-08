@@ -1,0 +1,127 @@
+/*
+ * features/social/explore/SearchResultRows.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the People / Posts result rows (demo-polish F6). CSS Module —
+ * locally scoped, NO COBRA/MUI (participant world, Pulse skin). LIGHT ONLY: the
+ * social surface is forced light (F5), so there are no theme-switching rules
+ * here.
+ *
+ * The rows read the shared `--pc-*` palette from the nearest token root —
+ * `SearchBox` puts `.tokens` on its root, so this file declares only its own
+ * `--ex-muted` where it is used.
+ *
+ * The lookalike rule (SOC-052 / D1-008): there is NO class here that depends on
+ * whether an account is verified — the seal's presence is the only difference
+ * between two rows, and CSS cannot tell them apart.
+ *
+ * Contrast (WCAG 2.1 AA, ratios computed): ink #0e1518 on white 18.4:1; muted
+ * #56656f on white 6.0:1 and on the hover tint (#f4f4f5) 5.5:1. The focus ring is
+ * the ink colour (18.4:1 against white, well over the 3:1 non-text minimum).
+ */
+
+.row {
+  --ex-muted: #56656f;
+
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--pc-line);
+}
+
+.row:hover {
+  background: var(--pc-hover);
+}
+
+.identity {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nameRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ex-muted);
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.name {
+  color: var(--pc-ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.seal {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.handle {
+  overflow-wrap: anywhere;
+  color: var(--ex-muted);
+  font-size: 14px;
+}
+
+.dot,
+.time {
+  color: var(--ex-muted);
+  font-size: 14px;
+}
+
+.bio {
+  margin-top: 2px;
+  overflow-wrap: break-word;
+  color: var(--pc-ink);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.snippet {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  color: var(--pc-ink);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+/*
+ * The row link. It is stretched over the whole row (`::after`) so the row is one
+ * big target and one tab stop. The seal and handle stay readable underneath for
+ * assistive tech; only the pointer is captured.
+ */
+.rowLink {
+  display: block;
+  color: var(--pc-ink);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.rowLink::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.rowLink:focus-visible {
+  outline: none;
+}
+
+.rowLink:focus-visible::after {
+  outline: 2px solid var(--pc-ink);
+  outline-offset: -2px;
+}

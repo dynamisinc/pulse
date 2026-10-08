@@ -4,25 +4,23 @@
  * WHAT the right rail contains -- separated from `RightRail.tsx` (the landmark
  * and its slots) so that adding a module is a one-file, one-line edit.
  *
- * TODAY: "Who to follow" only. It moved here from the feed column (SOC-053,
- * D1-R1: the module is titled exactly **Who to follow**, never "official"); the
- * display cap is the same 3 rows the inline module used.
+ * TOP TO BOTTOM: the search box, the Trending panel (both F6, mounted here by the
+ * orchestrator after F1 and F6 merged), then "Who to follow" (SOC-053, D1-R1: titled
+ * exactly **Who to follow**, never "official"; capped at 3 rows).
  *
- * ORCHESTRATOR-EDITED LATER. After F1 and F6 both merge, the orchestrator mounts
- * F6's search box and trending panel here by passing them to the two slots:
- *
- *     <RightRail searchSlot={<SearchBox />} trendingSlot={<TrendingPanel />}>
- *       <WhoToFollow limit={WHO_TO_FOLLOW_LIMIT} />
- *     </RightRail>
- *
- * No Wave-2 builder edits this file (implementation.md section 4.2). Nothing in
- * `social/layout/**` imports F6's files, so F1 builds and merges independently.
+ * ON `/explore` the search box and Trending are NOT rendered: the Explore page has
+ * its own, and one page must have exactly one search landmark and one trends region.
+ * Both read the shared Explore baseline (`explore/exploreFeedStore`), so unmounting
+ * one set while the other mounts in the same commit costs no refetch.
  *
  * World: participant. No COBRA, no MUI.
  */
 
 import { WhoToFollow } from '../components/WhoToFollow'
+import { SearchBox } from '../explore/SearchBox'
+import { TrendingPanel } from '../explore/TrendingPanel'
 import { RightRail } from './RightRail'
+import { matchSocialRoute, useSocialNavigation } from './socialNavigation'
 
 /**
  * How many "Who to follow" rows the rail shows. A DISPLAY cap only -- it never
@@ -33,8 +31,14 @@ import { RightRail } from './RightRail'
 export const WHO_TO_FOLLOW_LIMIT = 3
 
 export function RightRailContent() {
+  const { location } = useSocialNavigation()
+  const onExplore = matchSocialRoute(location.pathname) === 'explore'
+
   return (
-    <RightRail>
+    <RightRail
+      searchSlot={onExplore ? undefined : <SearchBox variant="rail" />}
+      trendingSlot={onExplore ? undefined : <TrendingPanel />}
+    >
       <WhoToFollow limit={WHO_TO_FOLLOW_LIMIT} />
     </RightRail>
   )

@@ -1,0 +1,41 @@
+/*
+ * features/social/explore/ExplorePage.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the Explore page (demo-polish F6). CSS Module — locally
+ * scoped, NO COBRA/MUI (participant world, Pulse skin). LIGHT ONLY: the social
+ * surface is forced light (F5), so there are no theme-switching rules here.
+ *
+ * A LEFT-ANCHORED single column (~600px, matching the post-card max-width and the
+ * feed), no auto side margins (D1-013). `.page` composes the shared `.tokens` so
+ * the heading reads the same palette as the cards.
+ */
+
+.page {
+  composes: tokens from '../theme/social.module.css';
+
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 600px;
+  margin: 0;
+  background: var(--pc-bg);
+  color: var(--pc-ink);
+  font-family: 'Figtree', system-ui, sans-serif;
+  text-align: left;
+}
+
+.title {
+  margin: 0;
+  padding: 14px 16px 6px;
+  color: var(--pc-ink);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.searchWrap {
+  padding: 8px 16px 12px;
+}
+
+.trendingWrap {
+  padding: 0 16px 16px;
+}
