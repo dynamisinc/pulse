@@ -28,6 +28,10 @@ public static class PersonaEndpoints
         ArgumentNullException.ThrowIfNull(services);
         services.AddScoped<PersonaReadService>();
 
+        // demo-polish BP: the persona read signs avatar/banner URLs. The fail-closed signer fallback is TryAdd'ed
+        // (PostSeamFallbacks) so this slice stands alone; the media slice's real signer replaces it.
+        services.TryAddPostSeamFallbacks();
+
         // profiles-social-graph/07: the follow graph is composed into the persona surface (its routes hang off
         // /api/personas/{id}) rather than asking for a separate Program.cs line the orchestrator owns.
         services.AddSocialFollowGraph();
@@ -245,6 +249,25 @@ public sealed class PersonaResponseDto
     public required string JoinedAt { get; init; }
 
     /// <summary>
+    /// The signed read URL of the persona's avatar image (demo-polish BP); OMITTED when the persona has none.
+    /// </summary>
+    [JsonPropertyName("avatarUrl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AvatarUrl { get; init; }
+
+    /// <summary>
+    /// The signed read URL of the persona's profile banner (demo-polish BP); OMITTED when the persona has none.
+    /// </summary>
+    [JsonPropertyName("bannerUrl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BannerUrl { get; init; }
+
+    /// <summary>The persona's profile location (DP-4); OMITTED when the persona has none.</summary>
+    [JsonPropertyName("location")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Location { get; init; }
+
+    /// <summary>
     /// Projects a persisted <see cref="Data.Entities.Persona"/> instance to the participant-facing shape.
     /// Maps the participant-safe persisted fields (<c>bio</c>/<c>audienceBand</c>/<c>followerCount</c>/
     /// <c>joinedAt</c>) and derives <c>avatarColor</c>/<c>initials</c>. It MUST NOT read
@@ -259,11 +282,15 @@ public sealed class PersonaResponseDto
     /// caller has no follow graph to compose against.
     /// </param>
     /// <param name="outboundFollowEdges">The persona's REAL outbound follow-edge count — the following count verbatim.</param>
+    /// <param name="avatarUrl">The signed avatar URL, or <c>null</c> when the persona has no avatar.</param>
+    /// <param name="bannerUrl">The signed banner URL, or <c>null</c> when the persona has no banner.</param>
     /// <returns>The participant-safe projection of <paramref name="persona"/>.</returns>
     public static PersonaResponseDto FromPersona(
         Data.Entities.Persona persona,
         int inboundFollowEdges = 0,
-        int outboundFollowEdges = 0)
+        int outboundFollowEdges = 0,
+        string? avatarUrl = null,
+        string? bannerUrl = null)
     {
         ArgumentNullException.ThrowIfNull(persona);
 
@@ -284,6 +311,9 @@ public sealed class PersonaResponseDto
             AudienceMagnitude = persona.AudienceMagnitude,
             FollowingCount = outboundFollowEdges,
             JoinedAt = PersonaDerivedPresentation.ToScenarioIsoInstant(persona.JoinedAt),
+            AvatarUrl = avatarUrl,
+            BannerUrl = bannerUrl,
+            Location = persona.Location,
         };
     }
 }
@@ -370,6 +400,21 @@ public sealed class StaffPersonaResponseDto
     [JsonPropertyName("joinedAt")]
     public required string JoinedAt { get; init; }
 
+    /// <summary>The signed avatar URL (demo-polish BP); omitted when the persona has none.</summary>
+    [JsonPropertyName("avatarUrl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AvatarUrl { get; init; }
+
+    /// <summary>The signed banner URL (demo-polish BP); omitted when the persona has none.</summary>
+    [JsonPropertyName("bannerUrl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BannerUrl { get; init; }
+
+    /// <summary>The persona's profile location (DP-4); omitted when the persona has none.</summary>
+    [JsonPropertyName("location")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Location { get; init; }
+
     /// <summary>
     /// Projects a persisted <see cref="Data.Entities.Persona"/> to the staff shape — the participant fields
     /// plus the authoring archetype. Never projects <see cref="Data.Entities.Persona.Castable"/>.
@@ -377,11 +422,15 @@ public sealed class StaffPersonaResponseDto
     /// <param name="persona">The full persona entity to project.</param>
     /// <param name="inboundFollowEdges">The persona's REAL inbound follow-edge count in the caller's exercise scope.</param>
     /// <param name="outboundFollowEdges">The persona's REAL outbound follow-edge count.</param>
+    /// <param name="avatarUrl">The signed avatar URL, or <c>null</c> when the persona has no avatar.</param>
+    /// <param name="bannerUrl">The signed banner URL, or <c>null</c> when the persona has no banner.</param>
     /// <returns>The staff-facing projection of <paramref name="persona"/>.</returns>
     public static StaffPersonaResponseDto FromPersona(
         Data.Entities.Persona persona,
         int inboundFollowEdges = 0,
-        int outboundFollowEdges = 0)
+        int outboundFollowEdges = 0,
+        string? avatarUrl = null,
+        string? bannerUrl = null)
     {
         ArgumentNullException.ThrowIfNull(persona);
 
@@ -403,6 +452,9 @@ public sealed class StaffPersonaResponseDto
             AudienceMagnitude = persona.AudienceMagnitude,
             FollowingCount = outboundFollowEdges,
             JoinedAt = PersonaDerivedPresentation.ToScenarioIsoInstant(persona.JoinedAt),
+            AvatarUrl = avatarUrl,
+            BannerUrl = bannerUrl,
+            Location = persona.Location,
         };
     }
 }

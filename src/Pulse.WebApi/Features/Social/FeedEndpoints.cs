@@ -37,6 +37,11 @@ public static class FeedEndpoints
 
         services.AddScoped<PostReadService>();
 
+        // demo-polish BP: the participant projector every feed row goes through, plus fail-closed fallbacks for
+        // the engagement reader, URL signer and reply-parent resolver it consumes (PostSeamFallbacks — TryAdd, so
+        // the real B2/B3/BM registrations replace them).
+        services.TryAddPostSeamFallbacks();
+
         // profiles-social-graph/07: the Following scope filters authors by the caller's follow graph, so the
         // read path depends on the follow services. The registration is idempotent (TryAdd), so calling it
         // here AND from AddSocialPersonaRead is safe and neither slice can be wired without its dependency.
@@ -59,6 +64,11 @@ public static class FeedEndpoints
     /// rather than adding a second one lets the Following feed be a query-string toggle instead of a second
     /// integration. An unrecognized value is a <c>400</c>, never a silent fall-back to the unfiltered feed:
     /// a typo must not hand a participant the All Posts set while the UI labels it "Following".
+    /// <para>
+    /// <b>Replies (DP-5).</b> Both scopes are top-level only by default; <c>?includeReplies=true</c> adds the
+    /// replies (the profile "Posts &amp; replies" tab). Either way the read returns at most
+    /// <see cref="PostReadService.FeedTake"/> posts.
+    /// </para>
     /// </remarks>
     /// <param name="endpoints">The route builder to map onto.</param>
     /// <returns>The same route builder, for chaining.</returns>
@@ -68,6 +78,7 @@ public static class FeedEndpoints
 
         endpoints.MapGet("/api/feed", async (
             string? scope,
+            bool? includeReplies,
             IExerciseContext exerciseContext,
             PostReadService readService,
             CancellationToken cancellationToken) =>
@@ -81,12 +92,12 @@ public static class FeedEndpoints
 
             if (string.IsNullOrEmpty(scope) || string.Equals(scope, AllFeedScope, StringComparison.OrdinalIgnoreCase))
             {
-                return Results.Ok(await readService.GetFeedAsync(cancellationToken));
+                return Results.Ok(await readService.GetFeedAsync(includeReplies ?? false, cancellationToken));
             }
 
             if (string.Equals(scope, FollowingFeedScope, StringComparison.OrdinalIgnoreCase))
             {
-                return Results.Ok(await readService.GetFollowingFeedAsync(cancellationToken));
+                return Results.Ok(await readService.GetFollowingFeedAsync(includeReplies ?? false, cancellationToken));
             }
 
             return Results.BadRequest($"scope must be '{AllFeedScope}' or '{FollowingFeedScope}'.");
