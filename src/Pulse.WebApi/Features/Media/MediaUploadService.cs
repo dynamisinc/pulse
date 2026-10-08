@@ -97,7 +97,7 @@ public sealed class MediaUploadResult
 /// anything is read or stored.
 /// </para>
 /// <para>
-/// <b>Scenario time — the DP-18 staff-metadata exception.</b> <see cref="MediaAsset.CreatedScenarioTime"/> is
+/// <b>Scenario time — the DP-18a staff-metadata exception.</b> <see cref="MediaAsset.CreatedScenarioTime"/> is
 /// stamped <c>running exercise clock ?? the exercise's persisted CurrentScenarioTime ?? the server wall clock</c>.
 /// The wall-clock fallback is deliberate here and ONLY here: an asset has no post to anchor to, the column is
 /// staff-only metadata (the library's <c>uploadedAtScenario</c>; no participant payload carries it), and S1 seeds
@@ -302,11 +302,12 @@ public sealed partial class MediaUploadService
     private async Task<MediaUploadResult?> ReadBodyAsync(
         string boundary, Stream body, Guid exerciseId, UploadState upload, CancellationToken cancellationToken)
     {
-        // BodyLengthLimit is a backstop for runaway (unknown/text) sections, NOT the file ceiling: it is the whole
-        // request's own limit (largest kind + multipart overhead), so it sits a full MiB above every per-kind ceiling.
-        // One read off the reader never returns more than its ReadBufferBytes buffer, so MaxLengthReadStream always
-        // sees the crossing read first and the answer is the exact per-kind 413 — never the reader's
-        // InvalidDataException (which a ceiling of "largest + 1" used to raise for an oversize video: a 400).
+        // BodyLengthLimit bounds runaway (unknown/text) sections; it is NOT the file ceiling. It is the whole request's
+        // own limit (largest kind + multipart overhead), a full MiB above every per-kind ceiling, and one read off the
+        // reader never returns more than its ReadBufferBytes buffer — so for the file part MaxLengthReadStream always
+        // sees the crossing read first and the answer is the exact per-kind 413. (A ceiling of "largest + 1" let the
+        // reader's InvalidDataException win for an oversize video: a 400.) Consequently an InvalidDataException from
+        // the reader can only mean a MALFORMED body — a bad delimiter line, oversized part headers — and is a 400.
         var reader = new MultipartReader(boundary, body, ReadBufferBytes)
         {
             HeadersCountLimit = 8,
@@ -372,12 +373,6 @@ public sealed partial class MediaUploadService
             // The endpoint's own request-size limit tripped (Kestrel) — same answer as the per-kind ceiling.
             return TooLarge(upload);
         }
-        catch (InvalidDataException) when (upload.FileStreaming)
-        {
-            // Inside a section body the reader raises InvalidDataException only for its length limit, so while the
-            // file is streaming this is "too large" — answered as the per-kind 413, never a misleading 400.
-            return TooLarge(upload);
-        }
         catch (InvalidDataException)
         {
             return MediaUploadResult.Failed(MediaUploadOutcome.Invalid, "The multipart body is malformed.");
@@ -440,9 +435,7 @@ public sealed partial class MediaUploadService
         // existing name must not have that blob deleted by us. So the blob becomes ours to clean up (the caller's
         // finally, unless the row commits) only once SaveAsync has COMPLETED.
         var content = new PrefixedReadStream(head.AsMemory(0, headLength), section.Body);
-        upload.FileStreaming = true;
         var bytes = await _store.SaveAsync(blobName, sniffed.ContentType, content, maxBytes, cancellationToken);
-        upload.FileStreaming = false;
         upload.Stored = new StoredFile(assetId, blobName, bytes);
         return null;
     }
@@ -545,7 +538,7 @@ public sealed partial class MediaUploadService
             DurationSec = hints.DurationSec,
             OriginalFileName = upload.OriginalFileName!,
             UploadedByHumanId = uploaderHumanId,
-            // DP-18 staff-metadata exception (see the class remarks): clock ?? persisted scenario time ?? wall clock.
+            // DP-18a staff-metadata exception (see the class remarks): clock ?? persisted scenario time ?? wall clock.
             // Never participant-visible; CreatedWallClock is the authoritative upload order.
             CreatedScenarioTime = _exerciseClock.CurrentScenarioTime(exerciseId) ?? exerciseScenarioTime ?? now,
             CreatedWallClock = now,
@@ -723,8 +716,5 @@ public sealed partial class MediaUploadService
         public string? OriginalFileName { get; set; }
 
         public bool Committed { get; set; }
-
-        /// <summary>True only while the file part is being streamed into the store.</summary>
-        public bool FileStreaming { get; set; }
     }
 }

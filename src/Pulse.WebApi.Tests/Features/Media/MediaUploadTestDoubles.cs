@@ -416,3 +416,63 @@ internal sealed class CapturingLogger<T> : ILogger<T>
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
         Messages.Add(formatter(state, exception));
 }
+
+/// <summary>Passes reads through until <c>throwAfterBytes</c> have been handed out, then throws the given exception.</summary>
+internal sealed class ThrowsAfterStream : Stream
+{
+    private readonly Stream _inner;
+    private readonly long _throwAfterBytes;
+    private readonly Func<Exception> _exception;
+    private long _read;
+
+    public ThrowsAfterStream(Stream inner, long throwAfterBytes, Func<Exception> exception)
+    {
+        _inner = inner;
+        _throwAfterBytes = throwAfterBytes;
+        _exception = exception;
+    }
+
+    public override bool CanRead => true;
+
+    public override bool CanSeek => false;
+
+    public override bool CanWrite => false;
+
+    public override long Length => throw new NotSupportedException();
+
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+    public override int Read(Span<byte> buffer)
+    {
+        if (_read >= _throwAfterBytes)
+        {
+            throw _exception();
+        }
+
+        var read = _inner.Read(buffer[..(int)Math.Min(buffer.Length, _throwAfterBytes - _read)]);
+        _read += read;
+        return read;
+    }
+
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(Read(buffer.Span));
+
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+        Task.FromResult(Read(buffer, offset, count));
+
+    public override void Flush()
+    {
+    }
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+}

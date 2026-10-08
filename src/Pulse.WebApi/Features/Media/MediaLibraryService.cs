@@ -126,7 +126,7 @@ public sealed class MediaLibraryService
         }
 
         // Newest first by the WALL clock — the authoritative upload order. CreatedScenarioTime may come from three
-        // different time bases (running clock / persisted scenario time / wall clock: the DP-18 staff-metadata
+        // different time bases (running clock / persisted scenario time / wall clock: the DP-18a staff-metadata
         // exception documented on MediaUploadService), so sorting by it could interleave them; it is only DISPLAYED
         // (uploadedAtScenario). Id breaks ties deterministically.
         var assets = await query

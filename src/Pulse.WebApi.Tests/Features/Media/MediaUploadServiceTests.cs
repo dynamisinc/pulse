@@ -185,6 +185,7 @@ public sealed class MediaUploadServiceTests
     [InlineData("video", 1024 * 1024)]
     [InlineData("image", 1)]
     [InlineData("image", 64 * 1024)]
+    [InlineData("image", 1024 * 1024)]
     public async Task OversizeUpload_UnderTheShippedDefaults_Is413_WithNoBlobAndNoRow(string kind, int overshoot)
     {
         var drain = new DrainingMediaStore();
@@ -197,6 +198,49 @@ public sealed class MediaUploadServiceTests
         result.Outcome.Should().Be(MediaUploadOutcome.TooLarge, "an oversize {0} is a 413 under the shipped limits (+{1} bytes)", kind, overshoot);
         drain.Completed.Should().BeEmpty("no blob was completed");
         drain.Deletes.Should().ContainSingle("the store deleted its own partial");
+        harness.AllAssets().Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Gate-1 L-C — Kestrel's real path for a body over the endpoint's own request-size limit: the request stream
+    /// throws <see cref="Microsoft.AspNetCore.Http.BadHttpRequestException"/> with 413 mid-file (TestServer never
+    /// enforces that limit, so this drives it directly). It is the same 413, with no blob and no row.
+    /// </summary>
+    [Fact]
+    public async Task RequestBodyOverTheServerLimit_IsTooLarge_WithNoBlobAndNoRow()
+    {
+        using var harness = new UploadHarness();
+        using var generated = new GeneratedUploadBody(MediaTestFiles.Mp4(64), 512 * 1024);
+        using var body = new ThrowsAfterStream(
+            generated, throwAfterBytes: 200 * 1024, () => new Microsoft.AspNetCore.Http.BadHttpRequestException("Request body too large.", 413));
+
+        var result = await harness.Service.UploadAsync(generated.ContentType, body);
+
+        result.Outcome.Should().Be(MediaUploadOutcome.TooLarge);
+        harness.Recording.SaveAttempts.Should().ContainSingle("the file had started streaming");
+        harness.Recording.Blobs.Should().BeEmpty("the store deleted its partial");
+        harness.AllAssets().Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Gate-1 L-A — a MALFORMED body is a 400, never a 413: a valid small PNG whose closing boundary line carries 200 junk
+    /// bytes trips the reader's line-length check WHILE the file part streams. (The removed "InvalidDataException while
+    /// streaming means too large" backstop answered this 413 "The file is too large.")
+    /// </summary>
+    [Fact]
+    public async Task MalformedClosingBoundaryAfterAValidSmallFile_Is400_WithNoBlobAndNoRow()
+    {
+        using var harness = new UploadHarness();
+        const string boundary = "malformed-boundary";
+        var prefix = System.Text.Encoding.ASCII.GetBytes(
+            $"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"p.png\"\r\nContent-Type: image/png\r\n\r\n");
+        var closing = System.Text.Encoding.ASCII.GetBytes($"\r\n--{boundary}{new string('x', 200)}\r\n");
+        using var body = new MemoryStream([.. prefix, .. MediaTestFiles.Png(256), .. closing]);
+
+        var result = await harness.Service.UploadAsync($"multipart/form-data; boundary={boundary}", body);
+
+        result.Outcome.Should().Be(MediaUploadOutcome.Invalid, "a malformed delimiter is a bad request, not an oversize file");
+        harness.Recording.Blobs.Should().BeEmpty();
         harness.AllAssets().Should().BeEmpty();
     }
 
@@ -299,7 +343,7 @@ public sealed class MediaUploadServiceTests
     }
 
     /// <summary>
-    /// Gate-1 H-1 — the pinned fallback order for the staff-only <c>CreatedScenarioTime</c> (the DP-18 staff-metadata
+    /// Gate-1 H-1 — the pinned fallback order for the staff-only <c>CreatedScenarioTime</c> (the DP-18a staff-metadata
     /// exception): the running exercise clock wins; else the exercise's persisted scenario time; else the server wall
     /// clock, in which case it equals <c>CreatedWallClock</c>.
     /// </summary>
