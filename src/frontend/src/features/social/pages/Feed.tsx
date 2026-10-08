@@ -147,6 +147,24 @@
  * intent (`services/replyIntent`) and then calls `onOpenThread`, so it works through
  * whatever navigation the shell owns. (A body tap opens the thread without it.)
  *
+ * A TAKEN-DOWN POST VANISHES (demo-polish C5, story 22). A controller's takedown reaches
+ * this page as a recorded id in the session's `removedPosts` store (SignalR `PostRemoved`
+ * via `realtimeFeed`; the console's own call in mock mode). The page hides any post whose id
+ * is there, at once and without a refresh, wherever it came from — the frozen baseline, a
+ * pill-loaded row, or the viewer's own just-published post — and it leaves NO trace: no
+ * "removed" row, no moderator chrome, no announcement (the participant's fiction simply
+ * has one post fewer). The pill's side is handled too: a removed id is never admitted to
+ * the buffer, and one already buffered is `discard`ed before paint, so the "N new posts"
+ * count never promises a post that would load nothing. Rows already loaded into this page's
+ * own state are pruned, so a removed post's text is not kept around either (XC-002). An id
+ * the page is not showing changes nothing — no re-render of any row, no focus move.
+ * If the post that was removed held keyboard focus, focus moves to the feed REGION (the
+ * `<section>`, `tabIndex={-1}`) instead of falling to `<body>`, so a keyboard or
+ * screen-reader user keeps their place (NFR-001); the region is named by the page heading,
+ * so it is announced as "Home" / "Following". The list's polite live region announces
+ * additions only, so a removal is silent by design. A read-only/observer mount opens no
+ * transport (D1-011), so it learns of a removal on its next read, like a polling session.
+ *
  * LOADING STATE: the "Loading posts…" line is `<FeedSkeleton>` (F0 stub -> F5
  * fills in skeleton rows); this page only decides WHEN to show it.
  *
@@ -167,6 +185,7 @@ import {
   useEffect,
   useLayoutEffect,
   useRef,
+  useSyncExternalStore,
 } from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
@@ -185,6 +204,7 @@ import { useFeedStream } from '../hooks/useFeedStream'
 import { useFollowedSet } from '../hooks/useFollowedSet'
 import { useOwnPosts } from '../hooks/useOwnPosts'
 import { ownPostStore } from '../services/ownPostStore'
+import { removedPosts } from '../services/removedPosts'
 import { requestReplyFocus } from '../services/replyIntent'
 import { NewPostsPill } from '../components/NewPostsPill'
 import { FeedSkeleton } from '../components/FeedSkeleton'
@@ -260,7 +280,7 @@ const FeedRow = memo(function FeedRow({
   onOpenProfile,
 }: FeedRowProps) {
   return (
-    <li className={styles.row}>
+    <li className={styles.row} data-feed-post-id={post.id}>
       {/* Tapping the post body opens the flattened thread (SOC-011); its reply
           affordance opens it with the composer focused (F4). The shell channel
           supplies onOpenThread. */}
@@ -333,18 +353,22 @@ export function Feed({
   // always defined when `isFollowing` holds (the COR-015 guard above).
   const { isFollowed } = useFollowedSet(isFollowing ? session.personaId : undefined)
 
-  // The arrival filter (module header). Two rules, both applied at the moment a
+  // The arrival filter (module header). Three rules, all applied at the moment a
   // post is OFFERED to the buffer:
   //  - never count the viewer's OWN post as "new" - it is already on screen at the
   //    top (an echo that lands after registration is rejected here; one that landed
   //    before is `discard`ed below);
+  //  - never buffer a post that has already been TAKEN DOWN (C5): a removal can beat the
+  //    arrival, and a counted-but-removed post would promise a load that shows nothing;
   //  - under Following, admit only accounts the reader follows (feeds-discovery/08).
   // Stable identity - `isFollowing` and `isFollowed` are stable for the component's
-  // life and `ownPostStore.has` is read at call time - so this predicate never
-  // re-subscribes the stream, not even when the reader follows someone.
+  // life and `ownPostStore.has` / `removedPosts.has` are read at call time - so this
+  // predicate never re-subscribes the stream, not even when the reader follows someone.
   const admitArrival = useCallback(
     (post: ParticipantPostView) =>
-      !ownPostStore.has(post.id) && (!isFollowing || isFollowed(post.authorPersonaId)),
+      !ownPostStore.has(post.id) &&
+      !removedPosts.has(post.id) &&
+      (!isFollowing || isFollowed(post.authorPersonaId)),
     [isFollowing, isFollowed],
   )
 
@@ -372,6 +396,42 @@ export function Feed({
   const [liveViews, setLiveViews] = useState<readonly PostView[]>([])
 
   const sectionRef = useRef<HTMLElement>(null)
+
+  // Taken-down posts (C5): the session's removed ids, a stable snapshot that changes only when
+  // a removal is recorded. Everything displayed below is filtered through it.
+  const removed = useSyncExternalStore(removedPosts.subscribe, removedPosts.getAll)
+
+  // A removed post that is still buffered behind the pill is taken out BEFORE paint, so the
+  // count never flashes a number for a post that would load nothing. (A removed post that
+  // arrives afterwards never gets in: `admitArrival`.) Pruning `liveViews` drops the removed
+  // text from this page's own state too; the functional update returns the SAME array when
+  // nothing matches, so an unrelated removal costs no re-render.
+  useLayoutEffect(() => {
+    if (removed.size === 0) return
+    discard([...removed])
+    setLiveViews(prev => (prev.some(view => removed.has(view.id))
+      ? prev.filter(view => !removed.has(view.id))
+      : prev))
+  }, [removed, discard])
+
+  // Focus continuity (NFR-001). When the removed post held focus, React is about to unmount the
+  // focused node and the browser would drop focus to <body>. The store notifies SYNCHRONOUSLY,
+  // before React re-renders, so this listener still sees the focused card; it only records the
+  // intent, and the layout effect below (after the row is gone) moves focus to the feed region.
+  const refocusRegionRef = useRef(false)
+  useEffect(() => removedPosts.subscribe(() => {
+    const section = sectionRef.current
+    const active = document.activeElement
+    if (section === null || !(active instanceof HTMLElement) || !section.contains(active)) return
+    const postId = active.closest<HTMLElement>('[data-feed-post-id]')?.dataset.feedPostId
+    if (postId !== undefined && removedPosts.has(postId)) refocusRegionRef.current = true
+  }), [])
+  useLayoutEffect(() => {
+    if (!refocusRegionRef.current) return
+    refocusRegionRef.current = false
+    // The scroll position is the reader's: focusing must not move the viewport.
+    sectionRef.current?.focus({ preventScroll: true })
+  }, [removed])
   // The sr-only <h1> labelling the section. Home mounts TWO Feed instances (All Posts and
   // the lazily mounted Following), so a literal id would be duplicated in the document
   // (Gate-2 low); `useId()` gives each its own.
@@ -429,7 +489,9 @@ export function Feed({
     // feed rendered), so this is fail-soft cover with no data loss.
     if (personaById.size === 0) return
 
-    const buffered = loadBuffered()
+    // A post taken down while it sat behind the pill never loads (belt and braces: the layout
+    // effect above has normally discarded it already).
+    const buffered = loadBuffered().filter(post => !removedPosts.has(post.id))
     if (buffered.length === 0) return
 
     const resolved = resolveLiveViews(buffered, personaById, renderedIds)
@@ -496,10 +558,23 @@ export function Feed({
     const ownIds = new Set(ownViews.map(view => view.id))
     return sortNewestFirst([...ownViews, ...liveViews.filter(view => !ownIds.has(view.id))])
   }, [ownViews, liveViews])
-  const displayViews = aboveBaseline.length > 0 ? [...aboveBaseline, ...posts] : posts
+  // What is actually shown: own + loaded + baseline, minus anything taken down (C5). The array
+  // is rebuilt only when one of its inputs changes; the rows' own `PostView` identities are
+  // untouched, so a removal re-renders no surviving row (NFR-002/SOC-071).
+  const displayViews = useMemo(() => {
+    const all = aboveBaseline.length > 0 ? [...aboveBaseline, ...posts] : posts
+    return removed.size === 0 ? all : all.filter(post => !removed.has(post.id))
+  }, [aboveBaseline, posts, removed])
+  // Every post the page held is gone: say so in the page's own empty-state voice.
+  const allRemoved = posts.length > 0 && displayViews.length === 0
 
   return (
-    <section ref={sectionRef} className={styles.feed} aria-labelledby={headingId}>
+    <section
+      ref={sectionRef}
+      className={styles.feed}
+      aria-labelledby={headingId}
+      tabIndex={-1}
+    >
       <h1 id={headingId} className={styles.srOnly}>{isFollowing ? 'Following' : 'Home'}</h1>
 
       {/* Sticky "▲ N new posts" pill (feeds-discovery/04). Its own polite live
@@ -538,7 +613,7 @@ export function Feed({
           never the same "No posts yet." wording that would read as if the
           whole feed were broken/empty, and NEVER a silent fallback to
           rendering the All Posts content instead. */}
-      {!loading && error === undefined && posts.length === 0 && (
+      {!loading && error === undefined && (posts.length === 0 || allRemoved) && (
         <p className={styles.state}>
           {isFollowing ? 'No posts from accounts you follow yet.' : 'No posts yet.'}
         </p>

@@ -13,6 +13,7 @@ import { endSession } from './endSession'
 import { logout } from './logout'
 import { queryClient } from '../services/queryClient'
 import { ownPostStore } from '@/features/social/services/ownPostStore'
+import { removedPosts } from '@/features/social/services/removedPosts'
 import {
   consumeReplyFocus,
   requestReplyFocus,
@@ -28,6 +29,7 @@ beforeEach(() => {
   mockLogout.mockResolvedValue(undefined)
   queryClient.clear()
   ownPostStore.resetForTests()
+  removedPosts.resetForTests()
   resetReplyIntent()
 })
 
@@ -92,6 +94,31 @@ describe('endSession', () => {
     let seenInsideLogout: number | undefined
     mockLogout.mockImplementation(async () => {
       seenInsideLogout = ownPostStore.getAll().length
+    })
+
+    await endSession()
+
+    expect(seenInsideLogout).toBe(0)
+  })
+
+  it('forgets the session\'s taken-down post ids so the next sign-in never inherits them (C5)', async () => {
+    removedPosts.add('post-taken-down')
+    const heard = vi.fn()
+    removedPosts.subscribe(heard)
+
+    await endSession()
+
+    expect(removedPosts.has('post-taken-down')).toBe(false)
+    expect(removedPosts.getAll().size).toBe(0)
+    // A mounted feed is told, so it can show whatever it had hidden.
+    expect(heard).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears the removed ids SYNCHRONOUSLY too, before awaiting logout()', async () => {
+    removedPosts.add('post-taken-down')
+    let seenInsideLogout: number | undefined
+    mockLogout.mockImplementation(async () => {
+      seenInsideLogout = removedPosts.getAll().size
     })
 
     await endSession()

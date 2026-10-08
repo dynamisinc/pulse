@@ -28,6 +28,11 @@
  *      same tab. Both modules are leaves (no imports beyond types) so this adds
  *      nothing to `core/auth`'s dependency graph.
  *
+ *   4. FORGET THE SESSION'S TAKEN-DOWN POST IDS (demo-polish C5): `removedPosts` is the
+ *      same kind of tab-lived module singleton (opaque ids that stop a post being shown),
+ *      reset the same way so a sign-in on the same tab never inherits the last session's.
+ *      Also a leaf module (no imports).
+ *
  * NAVIGATION is the CALLER's job (the control does `void endSession()` then
  * `navigate(LOGIN_PATH)`) — this module has no router dependency, mirroring
  * `logout()`. Both `clear()` and the token clear run SYNCHRONOUSLY before
@@ -39,6 +44,7 @@
  */
 import { queryClient } from '../services/queryClient'
 import { ownPostStore } from '@/features/social/services/ownPostStore'
+import { removedPosts } from '@/features/social/services/removedPosts'
 import { resetReplyIntent } from '@/features/social/services/replyIntent'
 import { logout } from './logout'
 
@@ -51,6 +57,7 @@ import { logout } from './logout'
 export async function endSession(): Promise<void> {
   queryClient.clear()
   ownPostStore.reset()
+  removedPosts.reset()
   resetReplyIntent()
   await logout()
 }

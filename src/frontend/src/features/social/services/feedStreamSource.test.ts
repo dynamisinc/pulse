@@ -26,7 +26,12 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { ParticipantPostView, Post } from '@/features/social'
-import type { PostStreamHandler, RealtimeFeed, FeedTransportMode } from './realtimeFeed'
+import type {
+  PostRemovedHandler,
+  PostStreamHandler,
+  RealtimeFeed,
+  FeedTransportMode,
+} from './realtimeFeed'
 import {
   makeMockArrivalSource,
   makeMockPostStoreSource,
@@ -49,6 +54,11 @@ class FakeRealtimeFeed implements RealtimeFeed {
 
   subscribe(handler: PostStreamHandler): () => void {
     return this.subscribeSpy(handler)
+  }
+
+  // Part of the `RealtimeFeed` surface since C5; the arrival-source wrappers never use it.
+  subscribeRemoved(_handler: PostRemovedHandler): () => void {
+    return () => {}
   }
 
   start(): Promise<void> {
@@ -102,6 +112,7 @@ describe('makeRealtimeArrivalSource — faithful passthrough over the shared tra
 interface FakeStore {
   getPosts: () => Post[]
   appendPost: (post: Post) => void
+  removePost: (postId: string) => boolean
   subscribe: (listener: () => void) => () => void
   resetForTests: () => void
 }
@@ -114,6 +125,12 @@ function makeFakeStore(initial: Post[]): FakeStore {
     appendPost: post => {
       posts = [...posts, post]
       for (const listener of listeners) listener()
+    },
+    removePost: postId => {
+      const present = posts.some(post => post.id === postId)
+      posts = posts.filter(post => post.id !== postId)
+      if (present) for (const listener of listeners) listener()
+      return present
     },
     subscribe: listener => {
       listeners.add(listener)

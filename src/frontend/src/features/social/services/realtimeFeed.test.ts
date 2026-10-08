@@ -22,7 +22,12 @@
  *    `inReplyTo`, DROPS malformed media entries (never crashing the stream or
  *    hiding the post), omits a malformed `inReplyTo`, and never copies
  *    provenance — not at the payload level, not inside a media entry, not
- *    inside the reply object.
+ *    inside the reply object;
+ *  - CONTRACT v2 (demo-polish C5): `PostRemoved { postId }` is surfaced to
+ *    `subscribeRemoved` subscribers, rebuilt as `{ postId }` ONLY, dropped when
+ *    malformed (non-object, missing / empty / non-string id), delivered for an id the
+ *    transport never saw (the consumer decides; an unknown id changes nothing on screen),
+ *    isolated per handler, released by unsubscribe and by `stop()`, and silent while polling.
  *
  * Fake timers throughout (no real `setTimeout`/`setInterval` waits) — bounded,
  * deterministic, matches the harness's "wait on visible state, not sleeps"
@@ -33,9 +38,10 @@ import { HubConnectionState } from '@/core/realtime/connection'
 import type { RealtimeConnection, RealtimeEventHandler } from '@/core/realtime/connection'
 import type { Post } from '@/features/social'
 import { createRealtimeFeed } from './realtimeFeed'
-import type { PostStreamHandler } from './realtimeFeed'
+import type { PostRemovedEvent, PostStreamHandler } from './realtimeFeed'
 
 const POST_RECEIVED_EVENT = 'PostReceived'
+const POST_REMOVED_EVENT = 'PostRemoved'
 
 class FakeConnection implements RealtimeConnection {
   state: HubConnectionState = HubConnectionState.Disconnected
@@ -43,9 +49,14 @@ class FakeConnection implements RealtimeConnection {
   startImpl: () => Promise<void> = () => Promise.resolve()
 
   private readonly pushHandlers = new Set<RealtimeEventHandler>()
+  private readonly removedHandlers = new Set<RealtimeEventHandler>()
   private readonly stateListeners = new Set<(state: HubConnectionState) => void>()
 
   subscribe(eventName: string, handler: RealtimeEventHandler): () => void {
+    if (eventName === POST_REMOVED_EVENT) {
+      this.removedHandlers.add(handler)
+      return () => this.removedHandlers.delete(handler)
+    }
     if (eventName !== POST_RECEIVED_EVENT) return () => {}
     this.pushHandlers.add(handler)
     return () => this.pushHandlers.delete(handler)
@@ -70,6 +81,14 @@ class FakeConnection implements RealtimeConnection {
 
   push(payload: unknown): void {
     for (const handler of this.pushHandlers) handler(payload)
+  }
+
+  pushRemoved(payload: unknown): void {
+    for (const handler of [...this.removedHandlers]) handler(payload)
+  }
+
+  removedSubscriberCount(): number {
+    return this.removedHandlers.size
   }
 
   setState(state: HubConnectionState): void {
@@ -610,5 +629,157 @@ describe('createRealtimeFeed — v2 on the polling fallback', () => {
 
     feed.stop()
     vi.useRealTimers()
+  })
+})
+
+describe('createRealtimeFeed - PostRemoved (demo-polish C5)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function startedFeed(fetchFeed = vi.fn<() => Promise<Post[]>>().mockResolvedValue([])) {
+    const connection = new FakeConnection()
+    const feed = createRealtimeFeed({ connection, fetchFeed })
+    const removed: PostRemovedEvent[] = []
+    feed.subscribeRemoved(event => removed.push(event))
+    await feed.start()
+    return { connection, feed, removed, fetchFeed }
+  }
+
+  it('surfaces a valid PostRemoved { postId } to every subscriber', async () => {
+    const { connection, feed, removed } = await startedFeed()
+    const second: PostRemovedEvent[] = []
+    feed.subscribeRemoved(event => second.push(event))
+
+    connection.pushRemoved({ postId: 'post-gone' })
+
+    expect(removed).toEqual([{ postId: 'post-gone' }])
+    expect(second).toEqual([{ postId: 'post-gone' }])
+    feed.stop()
+  })
+
+  it('rebuilds the event as { postId } ONLY - a stray key on the wire never reaches a subscriber (XC-002)', async () => {
+    const { connection, feed, removed } = await startedFeed()
+
+    connection.pushRemoved({
+      postId: 'post-gone',
+      exerciseId: 'ex-other',
+      text: 'the removed post text',
+      actingHumanId: 'human-1',
+      category: 'pii',
+    })
+
+    expect(removed).toHaveLength(1)
+    expect(Object.keys(removed[0] ?? {})).toEqual(['postId'])
+    expect(JSON.stringify(removed)).not.toContain('removed post text')
+    feed.stop()
+  })
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['a string', 'post-gone'],
+    ['a number', 7],
+    ['an array', ['post-gone']],
+    ['an empty object', {}],
+    ['a missing id (wrong key)', { id: 'post-gone' }],
+    ['an empty id', { postId: '' }],
+    ['a numeric id', { postId: 12 }],
+    ['a null id', { postId: null }],
+    ['an object id', { postId: { value: 'post-gone' } }],
+  ])('drops a malformed payload (%s) - never delivered, never thrown', async (_label, payload) => {
+    const { connection, feed, removed } = await startedFeed()
+
+    expect(() => connection.pushRemoved(payload)).not.toThrow()
+
+    expect(removed).toEqual([])
+    feed.stop()
+  })
+
+  it('delivers an id the transport never saw: the consumer decides, and ignores what it is not showing', async () => {
+    const { connection, feed, removed } = await startedFeed()
+    // Nothing was ever pushed or polled with this id.
+    connection.pushRemoved({ postId: 'post-never-seen' })
+
+    expect(removed).toEqual([{ postId: 'post-never-seen' }])
+    feed.stop()
+  })
+
+  it('keeps delivering posts after a removal, and removals after a post (independent events)', async () => {
+    const { connection, feed, removed } = await startedFeed()
+    const posts: string[] = []
+    feed.subscribe(post => posts.push(post.id))
+
+    connection.pushRemoved({ postId: 'a' })
+    connection.push(buildPushPayload({ id: 'post-after' }))
+    connection.pushRemoved({ postId: 'b' })
+
+    expect(posts).toEqual(['post-after'])
+    expect(removed.map(event => event.postId)).toEqual(['a', 'b'])
+    feed.stop()
+  })
+
+  it('isolates a throwing handler: the others still hear the removal', async () => {
+    const { connection, feed } = await startedFeed()
+    const failing = vi.fn(() => {
+      throw new Error('consumer bug')
+    })
+    const healthy = vi.fn()
+    feed.subscribeRemoved(failing)
+    feed.subscribeRemoved(healthy)
+
+    expect(() => connection.pushRemoved({ postId: 'post-gone' })).not.toThrow()
+
+    expect(failing).toHaveBeenCalledTimes(1)
+    expect(healthy).toHaveBeenCalledWith({ postId: 'post-gone' })
+    feed.stop()
+  })
+
+  it('stops delivering to an unsubscribed handler (idempotent unsubscribe)', async () => {
+    const { connection, feed } = await startedFeed()
+    const handler = vi.fn()
+    const unsubscribe = feed.subscribeRemoved(handler)
+
+    connection.pushRemoved({ postId: 'one' })
+    unsubscribe()
+    unsubscribe()
+    connection.pushRemoved({ postId: 'two' })
+
+    expect(handler).toHaveBeenCalledTimes(1)
+    feed.stop()
+  })
+
+  it('releases its hub subscription on stop() and re-acquires it on start() (no leak, no double delivery)', async () => {
+    const { connection, feed, removed } = await startedFeed()
+    expect(connection.removedSubscriberCount()).toBe(1)
+
+    feed.stop()
+    expect(connection.removedSubscriberCount()).toBe(0)
+
+    await feed.start()
+    expect(connection.removedSubscriberCount()).toBe(1)
+    connection.pushRemoved({ postId: 'post-gone' })
+    expect(removed).toEqual([{ postId: 'post-gone' }])
+    feed.stop()
+  })
+
+  it('delivers removals while the transport is real-time and falls silent in polling (the next read just omits the post)', async () => {
+    const connection = new FakeConnection()
+    connection.startImpl = () => Promise.reject(new Error('hub unreachable'))
+    const fetchFeed = vi.fn<() => Promise<Post[]>>().mockResolvedValue([buildPersonaAgnosticPost()])
+    const feed = createRealtimeFeed({ connection, fetchFeed, pollIntervalMs: 1000 })
+    const removed: PostRemovedEvent[] = []
+    feed.subscribeRemoved(event => removed.push(event))
+    await feed.start()
+    await vi.advanceTimersByTimeAsync(3000)
+
+    expect(feed.mode).toBe('polling')
+    // Polling surfaces posts and nothing else; no removal event is invented from a poll.
+    expect(removed).toEqual([])
+    feed.stop()
   })
 })
