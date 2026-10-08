@@ -31,6 +31,9 @@
  *     `freeze` makes fire/retry a 409 ("The world is frozen") and suspends bursts;
  *     `engine` has no effect. Set it with `setPauseTier` (the queue read reports it
  *     as `pauseTier`, exactly like the server).
+ *   - CHILD IDENTITY (contract amendment): on edit a child echoing its `id` keeps its
+ *     identity; no `id` = new; an unfired child left out is removed. `replyTo: { sequence }`
+ *     points at an EARLIER sibling (works at create) and is stored as that sibling's id.
  *   - PEERS: `as(actorId)` returns the SAME store acting as another controller, so a
  *     test (or a dev with two tabs' worth of imagination) can fire/edit "as someone
  *     else" and watch the console pick it up on its next poll.
@@ -341,10 +344,32 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     return 'fired'
   }
 
-  const buildPosts = (writes: InjectPostWrite[], existing: InjectPostDto[] = []): InjectPostDto[] =>
-    writes.map((write, index) => {
-      const old = existing[index]
-      // A child that already fired is immutable ("a fired post is corrected with takedown").
+  /**
+   * Builds an item's children from a write (contract: "Child identity on PUT"). Children are
+   * ordered by ARRAY POSITION (`sequence`). A write carrying the `id` of an existing child of
+   * THIS item keeps that child's identity (status, fired post, replies pointing at it); one
+   * without an `id` is new; an unknown / repeated / foreign `id` is a 400. An unfired child
+   * left out is removed; a fired one cannot be (400). A fired child is immutable ("corrected
+   * with takedown"). `replyTo: { sequence }` (an EARLIER sibling) resolves to that sibling's
+   * id here, so it survives later reorders, and works at CREATE time when no ids exist yet.
+   */
+  const buildPosts = (
+    writes: InjectPostWrite[],
+    existing: InjectPostDto[] = [],
+  ): InjectPostDto[] => {
+    const byId = new Map(existing.map(post => [post.id, post]))
+    const claimed = new Set<string>()
+
+    const built = writes.map((write, index) => {
+      let old: InjectPostDto | undefined
+      if (write.id !== undefined) {
+        old = byId.get(write.id)
+        if (!old || claimed.has(write.id)) {
+          const message = 'That post is not part of this item'
+          throw new InjectValidationError(message, { [`posts.${index}.id`]: message })
+        }
+        claimed.add(write.id)
+      }
       if (old && old.status === 'fired') return old
       const post: InjectPostDto = {
         ...clone(write),
@@ -355,6 +380,25 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
       if (old?.status === 'failed') post.error = old.error
       return post
     })
+
+    if (existing.some(post => post.status === 'fired' && !claimed.has(post.id))) {
+      throw new InjectValidationError("A fired post can't be removed", {
+        posts: "A fired post can't be removed",
+      })
+    }
+
+    built.forEach((post, index) => {
+      const reply = post.replyTo
+      if (post.status === 'fired' || !reply || !('sequence' in reply)) return
+      const target = built[reply.sequence - 1]
+      if (!target || reply.sequence - 1 >= index) {
+        const message = 'Reply to an earlier post in this burst'
+        throw new InjectValidationError(message, { [`posts.${index}.replyTo`]: message })
+      }
+      post.replyTo = { injectPostId: target.id }
+    })
+    return built
+  }
 
   // ----- the runner -------------------------------------------------------
 
@@ -554,6 +598,8 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
       throw conflict(`A ${item.status} item can't be edited`, item)
     }
     check(write)
+    // Build (and validate) the children BEFORE touching the item: a 400 changes nothing.
+    const posts = buildPosts(write.posts, item.posts)
     item.kind = write.kind
     item.title = write.title.trim()
     if (write.notes) item.notes = write.notes
@@ -563,11 +609,7 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     item.assigneeId = write.assigneeId ?? null
     if (write.kind === 'burst') item.burstWindowSeconds = write.burstWindowSeconds ?? 90
     else delete item.burstWindowSeconds
-    // Children keep their ids by position (a fired child is immutable), so a
-    // reply-to-sibling reference survives an edit.
-    const rebuilt = buildPosts(write.posts, item.posts)
-    const keptFired = item.posts.slice(rebuilt.length).filter(post => post.status === 'fired')
-    item.posts = [...rebuilt, ...keptFired]
+    item.posts = posts
     item.posts.forEach((post, index) => {
       post.sequence = index + 1
     })

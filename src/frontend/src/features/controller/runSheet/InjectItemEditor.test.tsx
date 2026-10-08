@@ -368,29 +368,165 @@ describe('InjectItemEditor — reply-to', () => {
     expect(options.some(o => o.includes('Later one'))).toBe(false)
   })
 
-  it('offers earlier children of THIS burst once it exists, and says to save first when creating', () => {
+  it('offers earlier posts of THIS burst as reply targets — on a NEW burst too — and sends `{ sequence }`', async () => {
+    const { onSubmit } = renderEditor()
+    fillBurst()
+    fireEvent.click(screen.getByTestId('editor-add-post'))
+    change(/^Post 3 persona/, PERSONA)
+    change(/^Post 3 text/, 'third')
+
+    const first = within(field(/^Post 1 reply to/)).getAllByRole('option').map(o => o.textContent ?? '')
+    expect(first.filter(o => o.startsWith('This burst'))).toHaveLength(0)
+    const third = within(field(/^Post 3 reply to/)).getAllByRole('option').map(o => o.textContent ?? '')
+    expect(third.filter(o => o.startsWith('This burst'))).toHaveLength(2)
+    expect(third.some(o => o.includes('#1') && o.includes('first'))).toBe(true)
+
+    fireEvent.change(field(/^Post 3 reply to/), { target: { value: `sib:${siblingKeyFor(3, 1)}` } })
+    fireEvent.change(field(/^Post 2 reply to/), { target: { value: `sib:${siblingKeyFor(2, 1)}` } })
+    save()
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(submitted(onSubmit).posts.map(p => p.replyTo)).toEqual([
+      undefined,
+      { sequence: 1 },
+      { sequence: 1 },
+    ])
+    // A create sends no child ids.
+    expect(submitted(onSubmit).posts.every(p => p.id === undefined)).toBe(true)
+  })
+
+  it('the sibling label tracks the live draft text and persona', () => {
+    renderEditor()
+    fillBurst()
+    const option = within(field(/^Post 2 reply to/))
+      .getAllByRole('option')
+      .find(o => o.textContent?.startsWith('This burst'))
+    expect(option?.textContent).toContain('#1')
+    expect(option?.textContent).toContain('FairhavenWater')
+    expect(option?.textContent).toContain('first')
+  })
+
+  it('on edit, existing children echo their id on PUT and an added post has none', async () => {
     const burstItem = makeItem({
       id: 'inj-burst',
       kind: 'burst',
       order: 3,
+      version: 4,
       posts: [
         makePost({ id: 'bp1', sequence: 1, text: 'one' }),
-        makePost({ id: 'bp2', sequence: 2, text: 'two' }),
-        makePost({ id: 'bp3', sequence: 3, text: 'three' }),
+        makePost({ id: 'bp2', sequence: 2, text: 'two', replyTo: { injectPostId: 'bp1' } }),
+      ],
+      total: 2,
+    })
+    const { onSubmit } = renderEditor({ mode: 'edit', item: burstItem, items: [burstItem] })
+    // The server's same-item pointer shows up as a sibling choice on post 2.
+    expect((field(/^Post 2 reply to/) as HTMLSelectElement).value.startsWith('sib:')).toBe(true)
+    fireEvent.click(screen.getByTestId('editor-add-post'))
+    change(/^Post 3 persona/, PERSONA)
+    change(/^Post 3 text/, 'third')
+    save()
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    const posts = submitted(onSubmit).posts
+    expect(posts.map(p => p.id)).toEqual(['bp1', 'bp2', undefined])
+    expect(posts[1]?.replyTo).toEqual({ sequence: 1 })
+  })
+
+  /** The draft key behind the nth sibling option of post `forPost` (read off the option value). */
+  function siblingKeyFor(forPost: number, target: number): string {
+    const options = within(field(new RegExp(`^Post ${forPost} reply to`))).getAllByRole('option')
+    const option = options.filter(o => o.getAttribute('value')?.startsWith('sib:'))[target - 1]
+    const value = option?.getAttribute('value')
+    if (!value) throw new Error('no sibling option')
+    return value.slice('sib:'.length)
+  }
+
+  it('REORDER keeps a reply correct when its target is still earlier (re-pointed to the new position)', async () => {
+    const { onSubmit } = renderEditor()
+    fillBurst()
+    fireEvent.click(screen.getByTestId('editor-add-post'))
+    change(/^Post 3 persona/, PERSONA)
+    change(/^Post 3 text/, 'third')
+    // Post 3 replies to post 1.
+    fireEvent.change(field(/^Post 3 reply to/), { target: { value: `sib:${siblingKeyFor(3, 1)}` } })
+    // Move post 2 UP: order becomes [second, first, third]; the target (first) is now #2.
+    fireEvent.click(screen.getByRole('button', { name: 'Move post 2 up' }))
+    expect(screen.queryByTestId('inject-editor-post-2-reply-notice')).toBeNull()
+    save()
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(submitted(onSubmit).posts.map(p => p.text)).toEqual(['second', 'first', 'third'])
+    expect(submitted(onSubmit).posts[2]?.replyTo).toEqual({ sequence: 2 })
+  })
+
+  it('REORDER that puts the target AFTER its reply clears the reply and says so inline', () => {
+    renderEditor()
+    fillBurst()
+    // Post 2 replies to post 1; then move post 1 DOWN: the target now comes after its reply.
+    fireEvent.change(field(/^Post 2 reply to/), { target: { value: `sib:${siblingKeyFor(2, 1)}` } })
+    fireEvent.click(screen.getByRole('button', { name: 'Move post 1 down' }))
+    const notice = screen.getByTestId('inject-editor-post-0-reply-notice')
+    expect(notice).toHaveTextContent('now comes after it, so the reply was cleared')
+    expect(field(/^Post 1 reply to/)).toHaveValue('')
+  })
+
+  it('REMOVING the target clears the reply and says so; unrelated removals keep replies', async () => {
+    const { onSubmit } = renderEditor()
+    fillBurst()
+    fireEvent.click(screen.getByTestId('editor-add-post'))
+    change(/^Post 3 persona/, PERSONA)
+    change(/^Post 3 text/, 'third')
+    fireEvent.change(field(/^Post 3 reply to/), { target: { value: `sib:${siblingKeyFor(3, 2)}` } })
+    // Remove post 1 (unrelated): the reply to post 2 stays, now pointing at position 1.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove post 1' }))
+    expect(screen.queryByTestId('inject-editor-post-1-reply-notice')).toBeNull()
+    save()
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(submitted(onSubmit).posts[1]?.replyTo).toEqual({ sequence: 1 })
+  })
+
+  it('removing the TARGET of a reply clears it with an inline notice', () => {
+    renderEditor()
+    fillBurst()
+    fireEvent.click(screen.getByTestId('editor-add-post'))
+    change(/^Post 3 persona/, PERSONA)
+    change(/^Post 3 text/, 'third')
+    fireEvent.change(field(/^Post 3 reply to/), { target: { value: `sib:${siblingKeyFor(3, 2)}` } })
+    fireEvent.click(screen.getByRole('button', { name: 'Remove post 2' }))
+    const notice = screen.getByTestId('inject-editor-post-1-reply-notice')
+    expect(notice).toHaveTextContent('was removed, so the reply was cleared')
+    expect(field(/^Post 2 reply to/)).toHaveValue('')
+  })
+
+  it('choosing a reply again dismisses the notice', () => {
+    renderEditor()
+    fillBurst()
+    fireEvent.change(field(/^Post 2 reply to/), { target: { value: `sib:${siblingKeyFor(2, 1)}` } })
+    fireEvent.click(screen.getByRole('button', { name: 'Move post 1 down' }))
+    expect(screen.getByTestId('inject-editor-post-0-reply-notice')).toBeInTheDocument()
+    fireEvent.change(field(/^Post 1 reply to/), { target: { value: '' } })
+    expect(screen.queryByTestId('inject-editor-post-0-reply-notice')).toBeNull()
+  })
+
+  it('a post that already FIRED is locked (fields, move, remove) while the others stay editable', () => {
+    const partly = makeItem({
+      id: 'inj-partly',
+      kind: 'burst',
+      status: 'held',
+      order: 1,
+      posts: [
+        makePost({ id: 'f1', sequence: 1, status: 'fired', text: 'already out' }),
+        makePost({ id: 'f2', sequence: 2, status: 'pending', text: 'not yet' }),
+        makePost({ id: 'f3', sequence: 3, status: 'pending', text: 'later' }),
       ],
       total: 3,
+      firedCount: 1,
     })
-    const { unmount } = renderEditor({ mode: 'edit', item: burstItem, items: [...earlier, burstItem] })
-    const third = within(field(/^Post 3 reply to/)).getAllByRole('option').map(o => o.textContent ?? '')
-    expect(third.filter(o => o.startsWith('This burst'))).toHaveLength(2)
-    const first = within(field(/^Post 1 reply to/)).getAllByRole('option').map(o => o.textContent ?? '')
-    expect(first.filter(o => o.startsWith('This burst'))).toHaveLength(0)
-    unmount()
-
-    renderEditor()
-    fireEvent.click(screen.getByRole('radio', { name: 'Burst (pile-on)' }))
-    expect(screen.getAllByText('To reply to another post in this burst, save it first, then edit.'))
-      .not.toHaveLength(0)
+    renderEditor({ mode: 'edit', item: partly, items: [partly] })
+    expect(field(/^Post 1 text/)).toBeDisabled()
+    expect(field(/^Post 1 persona/)).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Remove post 1' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Move post 1 down' })).toBeDisabled()
+    expect(screen.getByTestId('post-locked')).toHaveTextContent('ALREADY FIRED')
+    expect(field(/^Post 2 text/)).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Remove post 2' })).toBeEnabled()
   })
 
   it('keeps a scripted reply target that is no longer in the list instead of silently dropping it', () => {
