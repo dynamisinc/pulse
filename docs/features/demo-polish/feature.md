@@ -1,7 +1,7 @@
 # Feature: Demo polish (participant-first demo)
 
 **Epic:** E1 Platform Core & Isolation · E2 Social Network · E7 Controller Command Surface (sliced)  ·  **Phase:** 1  ·  **Feature ref:** cross-feature demo slice (no single `F{n}.{m}`)
-**World:** both — participant (F-stories) and staff (C-stories, PE)  ·  **Issue:** —
+**World:** both — participant (F-stories) and staff (C-stories, PE)  ·  **Issue:** #419
 
 ## Summary
 A time-boxed push (**ready Mon 2026-10-19, demo Tue 2026-10-20**) that makes the participant social app look and
