@@ -130,6 +130,30 @@ describe('validateWrite', () => {
     expect(err([{ mediaId: 'm1', alt: 'a'.repeat(1001) }])['posts.0.media.0.alt']).toBeDefined()
   })
 
+  it('replyTo { sequence } must be an EARLIER sibling: whole, >= 1 and before the post itself', () => {
+    const at = (i: number, sequence: number) =>
+      validateWrite(
+        validWrite({
+          kind: 'burst',
+          posts: [validPost, validPost, { ...validPost, replyTo: { sequence } }].slice(0, 3),
+        }),
+      )[`posts.${i}.replyTo`]
+    expect(at(2, 1)).toBeUndefined()
+    expect(at(2, 2)).toBeUndefined()
+    expect(at(2, 3)).toBeDefined() // itself
+    expect(at(2, 4)).toBeDefined() // a later post
+    expect(at(2, 0)).toBeDefined()
+    expect(at(2, 1.5)).toBeDefined()
+    // The first post has no earlier sibling at all.
+    const first = validateWrite(
+      validWrite({
+        kind: 'burst',
+        posts: [{ ...validPost, replyTo: { sequence: 1 } }, validPost],
+      }),
+    )
+    expect(first['posts.0.replyTo']).toBeDefined()
+  })
+
   it('a reply needs a target; a baseline is whole numbers in 0..1,000,000', () => {
     const post = (extra: object) =>
       validateWrite(validWrite({ posts: [{ ...validPost, ...extra }] }))

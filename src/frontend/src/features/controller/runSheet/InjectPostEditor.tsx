@@ -12,8 +12,11 @@
  *     never confused with its unverified lookalike (SOC-052).
  *   - TEXT: counted in Unicode code points (an emoji is 1). Over the limit is an
  *     error you see as you type, as text with an icon, never colour alone.
- *   - REPLY TO: "Not a reply" | an EARLIER scripted post in this sheet | "A post id…"
- *     (paste an existing post's id). The server validates both in scope.
+ *   - REPLY TO: "Not a reply" | an EARLIER post of THIS burst (works on a new burst too:
+ *     it is held by the target's draft key and sent as `{ sequence }`) | an earlier post in
+ *     another item (`{ injectPostId }`) | "A post id…" (paste an existing post's id,
+ *     `{ postId }`). The server validates all three in scope. If a reorder or removal made a
+ *     sibling reply impossible the editor cleared it and says so inline (`replyNotice`).
  *   - BASELINE: optional starting likes / reposts / replies (0..1,000,000), off by
  *     default.
  *
@@ -24,7 +27,13 @@
 
 import { memo } from 'react'
 import { Box, Checkbox, FormControlLabel } from '@mui/material'
-import { faArrowDown, faArrowUp, faTrash } from '@fortawesome/free-solid-svg-icons'
+import {
+  faArrowDown,
+  faArrowUp,
+  faCircleInfo,
+  faTrash,
+} from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { StaffPersona } from '@/features/personas'
 import { consoleChrome as chrome } from '../consoleChrome'
 import { RunSheetField } from './RunSheetField'
@@ -34,7 +43,10 @@ import type { DraftPost, DraftReply } from './injectDraft'
 import { INJECT_LIMITS, countCodePoints } from './injectRules'
 
 export interface ReplyOption {
-  /** The scripted post's id (`replyTo.injectPostId`). */
+  /**
+   * For `replyOptions`: the scripted post's id (`replyTo.injectPostId`). For `siblingOptions`:
+   * the earlier draft post's stable key.
+   */
   readonly value: string
   readonly label: string
 }
@@ -49,9 +61,12 @@ export interface InjectPostEditorProps {
   readonly post: DraftPost
   readonly personas: readonly StaffPersona[]
   readonly personasUnavailable: boolean
+  /** Posts in OTHER items this post may reply to (`{ injectPostId }`). */
   readonly replyOptions: readonly ReplyOption[]
-  /** Shown under the reply select (e.g. why a sibling can't be picked yet). */
-  readonly replyHint?: string
+  /** EARLIER posts of this same item (`{ sequence }`), keyed by draft key. */
+  readonly siblingOptions: readonly ReplyOption[]
+  /** The post already fired: it is immutable, so every field and button is locked. */
+  readonly locked: boolean
   readonly errors: Readonly<Record<string, string>>
   readonly disabled: boolean
   readonly canMoveUp: boolean
@@ -66,8 +81,10 @@ export interface InjectPostEditorProps {
 const NOT_A_REPLY = ''
 const PASTE_ID = '__post-id'
 const SCRIPTED_PREFIX = 'inj:'
+const SIBLING_PREFIX = 'sib:'
 
 function replySelectValue(reply: DraftReply): string {
+  if (reply.kind === 'sibling') return `${SIBLING_PREFIX}${reply.key}`
   if (reply.kind === 'scripted') return `${SCRIPTED_PREFIX}${reply.injectPostId}`
   if (reply.kind === 'postId') return PASTE_ID
   return NOT_A_REPLY
@@ -82,9 +99,10 @@ function InjectPostEditorImpl({
   personas,
   personasUnavailable,
   replyOptions,
-  replyHint,
+  siblingOptions,
+  locked,
   errors,
-  disabled,
+  disabled: formDisabled,
   canMoveUp,
   canMoveDown,
   canRemove,
@@ -94,6 +112,8 @@ function InjectPostEditorImpl({
   onRemove,
 }: InjectPostEditorProps) {
   const n = index + 1
+  // A fired post is immutable: locked like a read-only form, but only for itself.
+  const disabled = formDisabled || locked
   const name = (base: string): string => (burst ? `Post ${n} ${base.toLowerCase()}` : base)
   const points = countCodePoints(post.text)
   const personaKnown = personas.some(p => p.id === post.personaId)
@@ -106,11 +126,16 @@ function InjectPostEditorImpl({
   const scriptedId = post.reply.kind === 'scripted' ? post.reply.injectPostId : undefined
   const scriptedKnown = scriptedId === undefined || replyOptions.some(o => o.value === scriptedId)
 
+  // Changing the reply is the user's answer to any "cleared your reply" note: drop it.
+  const setReply = (reply: DraftReply): void => onChange({ reply, replyNotice: undefined })
+
   const onReplyChange = (value: string): void => {
-    if (value === NOT_A_REPLY) onChange({ reply: { kind: 'none' } })
+    if (value === NOT_A_REPLY) setReply({ kind: 'none' })
     else if (value === PASTE_ID) {
-      onChange({ reply: { kind: 'postId', postId: post.reply.kind === 'postId' ? post.reply.postId : '' } })
-    } else onChange({ reply: { kind: 'scripted', injectPostId: value.slice(SCRIPTED_PREFIX.length) } })
+      setReply({ kind: 'postId', postId: post.reply.kind === 'postId' ? post.reply.postId : '' })
+    } else if (value.startsWith(SIBLING_PREFIX)) {
+      setReply({ kind: 'sibling', key: value.slice(SIBLING_PREFIX.length) })
+    } else setReply({ kind: 'scripted', injectPostId: value.slice(SCRIPTED_PREFIX.length) })
   }
 
   return (
@@ -132,6 +157,11 @@ function InjectPostEditorImpl({
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
           <Box sx={{ flex: 1, fontSize: 12, fontWeight: 800, letterSpacing: '0.06em' }}>
             {`POST ${n} OF ${count}`}
+            {locked ? (
+              <Box component="span" data-testid="post-locked" sx={{ ml: 1, color: chrome.inkMuted }}>
+                ALREADY FIRED: LOCKED
+              </Box>
+            ) : null}
           </Box>
           <RunSheetIconButton
             icon={faArrowUp}
@@ -207,9 +237,13 @@ function InjectPostEditorImpl({
         onChange={onReplyChange}
         disabled={disabled}
         error={errors.replyTo}
-        hint={replyHint}
       >
         <option value={NOT_A_REPLY}>Not a reply</option>
+        {siblingOptions.map(option => (
+          <option key={`sib-${option.value}`} value={`${SIBLING_PREFIX}${option.value}`}>
+            {option.label}
+          </option>
+        ))}
         {replyOptions.map(option => (
           <option key={option.value} value={`${SCRIPTED_PREFIX}${option.value}`}>
             {option.label}
@@ -220,12 +254,22 @@ function InjectPostEditorImpl({
         ) : null}
         <option value={PASTE_ID}>An existing post (paste its id)…</option>
       </RunSheetField>
+      {post.replyNotice ? (
+        <Box
+          role="status"
+          data-testid={`${idPrefix}-reply-notice`}
+          sx={{ fontSize: 12, color: chrome.ink }}
+        >
+          <FontAwesomeIcon icon={faCircleInfo} color={chrome.amber} aria-hidden="true" />{' '}
+          {post.replyNotice}
+        </Box>
+      ) : null}
       {post.reply.kind === 'postId' ? (
         <RunSheetField
           id={`${idPrefix}-reply-post-id`}
           label={name('Reply to post id')}
           value={post.reply.postId}
-          onChange={value => onChange({ reply: { kind: 'postId', postId: value } })}
+          onChange={value => setReply({ kind: 'postId', postId: value })}
           disabled={disabled}
         />
       ) : null}
@@ -317,12 +361,13 @@ function samePostEditorProps(a: InjectPostEditorProps, b: InjectPostEditorProps)
     a.post === b.post &&
     a.personas === b.personas &&
     a.personasUnavailable === b.personasUnavailable &&
-    a.replyHint === b.replyHint &&
+    a.locked === b.locked &&
     a.disabled === b.disabled &&
     a.canMoveUp === b.canMoveUp &&
     a.canMoveDown === b.canMoveDown &&
     a.canRemove === b.canRemove &&
     sameOptions(a.replyOptions, b.replyOptions) &&
+    sameOptions(a.siblingOptions, b.siblingOptions) &&
     sameRecord(a.errors, b.errors)
   )
 }

@@ -6,10 +6,22 @@
  *  - post mode submits ONLY the first post but keeps the others in the draft;
  *  - blank numbers are "unset", non-numbers are flagged, not sent;
  *  - reply modes / media / baseline map onto the frozen `InjectPostWrite` members;
- *  - `draftFromItem` -> `draftToWrite` round-trips a server item.
+ *  - `draftFromItem` -> `draftToWrite` round-trips a server item;
+ *  - CHILD IDENTITY (amendment): existing children echo their `id` on PUT, new ones omit it;
+ *  - SIBLING REPLIES: held by draft key and sent as `{ sequence }` (works at create), recomputed
+ *    after a reorder, CLEARED with an inline notice if the target was removed or now comes after.
  */
 import { describe, expect, it } from 'vitest'
-import { blankDraft, blankPost, draftFromItem, draftToWrite } from './injectDraft'
+import {
+  REPLY_TARGET_NOW_LATER,
+  REPLY_TARGET_REMOVED,
+  blankDraft,
+  blankPost,
+  draftFromItem,
+  draftToWrite,
+  normalizeSiblingReplies,
+  type Draft,
+} from './injectDraft'
 import { makeItem, makePost } from './runSheetTestHarness'
 
 const filled = () => {
@@ -127,7 +139,7 @@ describe('draftToWrite', () => {
 })
 
 describe('draftFromItem', () => {
-  it('round-trips a server item through the form and back', () => {
+  it('round-trips a server item through the form and back, echoing every child id', () => {
     const item = makeItem({
       kind: 'burst',
       title: 'Pile-on',
@@ -156,14 +168,186 @@ describe('draftFromItem', () => {
       assigneeId: 'human-controller-02',
       burstWindowSeconds: 120,
       posts: [
-        { personaId: 'persona-fairhavenwater', text: 'one', media: [{ mediaId: 'm', alt: 'alt' }] },
         {
+          id: 'p1',
+          personaId: 'persona-fairhavenwater',
+          text: 'one',
+          media: [{ mediaId: 'm', alt: 'alt' }],
+        },
+        {
+          id: 'p2',
           personaId: 'persona-fairhavenwater',
           text: 'two',
-          replyTo: { injectPostId: 'p1' },
+          // A reply to an earlier SIBLING is re-expressed as its current position.
+          replyTo: { sequence: 1 },
           engagementBaseline: { like: 5 },
         },
       ],
     })
+  })
+
+  it('flags a fired child so the editor can lock it', () => {
+    const item = makeItem({
+      kind: 'burst',
+      posts: [
+        makePost({ id: 'p1', sequence: 1, status: 'fired' }),
+        makePost({ id: 'p2', sequence: 2, status: 'pending' }),
+      ],
+    })
+    const draft = draftFromItem(item)
+    expect(draft.posts.map(p => p.fired)).toEqual([true, false])
+  })
+
+  it('a server `{ sequence }` reply and a same-item `{ injectPostId }` reply both become sibling replies', () => {
+    const item = makeItem({
+      kind: 'burst',
+      posts: [
+        makePost({ id: 'p1', sequence: 1 }),
+        makePost({ id: 'p2', sequence: 2, replyTo: { sequence: 1 } }),
+        makePost({ id: 'p3', sequence: 3, replyTo: { injectPostId: 'p2' } }),
+      ],
+    })
+    const draft = draftFromItem(item)
+    expect(draft.posts[1]?.reply).toEqual({ kind: 'sibling', key: draft.posts[0]?.key })
+    expect(draft.posts[2]?.reply).toEqual({ kind: 'sibling', key: draft.posts[1]?.key })
+  })
+
+  it('a reply to a post in ANOTHER item stays `injectPostId`; a pasted id stays `postId`', () => {
+    const item = makeItem({
+      kind: 'burst',
+      posts: [
+        makePost({ id: 'p1', sequence: 1, replyTo: { injectPostId: 'other-item-post' } }),
+        makePost({ id: 'p2', sequence: 2, replyTo: { postId: 'post-9' } }),
+      ],
+    })
+    const draft = draftFromItem(item)
+    expect(draft.posts[0]?.reply).toEqual({ kind: 'scripted', injectPostId: 'other-item-post' })
+    expect(draft.posts[1]?.reply).toEqual({ kind: 'postId', postId: 'post-9' })
+    const { write } = draftToWrite(draft)
+    expect(write.posts[0]?.replyTo).toEqual({ injectPostId: 'other-item-post' })
+    expect(write.posts[1]?.replyTo).toEqual({ postId: 'post-9' })
+  })
+})
+
+describe('child identity on PUT', () => {
+  it('a new post has no id; existing posts echo theirs', () => {
+    const item = makeItem({
+      kind: 'burst',
+      posts: [makePost({ id: 'p1', sequence: 1 }), makePost({ id: 'p2', sequence: 2 })],
+    })
+    const draft = draftFromItem(item)
+    draft.posts.push({ ...blankPost(), personaId: 'persona-a', text: 'brand new' })
+    const { write } = draftToWrite(draft)
+    expect(write.posts.map(p => p.id)).toEqual(['p1', 'p2', undefined])
+    expect(write.posts[2]).not.toHaveProperty('id')
+  })
+
+  it('a create never sends an id', () => {
+    const draft = filled()
+    expect(draftToWrite(draft).write.posts[0]).not.toHaveProperty('id')
+  })
+
+  it('a removed post is simply omitted (the server drops an unfired child left out)', () => {
+    const item = makeItem({
+      kind: 'burst',
+      posts: [
+        makePost({ id: 'p1', sequence: 1 }),
+        makePost({ id: 'p2', sequence: 2 }),
+        makePost({ id: 'p3', sequence: 3 }),
+      ],
+    })
+    const draft = draftFromItem(item)
+    draft.posts = draft.posts.filter(p => p.id !== 'p2')
+    expect(draftToWrite(draft).write.posts.map(p => p.id)).toEqual(['p1', 'p3'])
+  })
+})
+
+describe('sibling replies', () => {
+  /** A 3-post burst; post 3 replies to post 1 (a create: no ids). */
+  const burstDraft = (): Draft => {
+    const draft = filled()
+    draft.kind = 'burst'
+    draft.posts = [
+      { ...blankPost(), personaId: 'persona-a', text: 'one' },
+      { ...blankPost(), personaId: 'persona-b', text: 'two' },
+      { ...blankPost(), personaId: 'persona-c', text: 'three' },
+    ]
+    return draft
+  }
+
+  it('works at CREATE time: a sibling reply is sent as `{ sequence }` of its target', () => {
+    const draft = burstDraft()
+    const first = draft.posts[0]
+    const second = draft.posts[1]
+    const third = draft.posts[2]
+    if (!first || !second || !third) throw new Error('fixture')
+    second.reply = { kind: 'sibling', key: first.key }
+    third.reply = { kind: 'sibling', key: second.key }
+    const { write, errors } = draftToWrite(draft)
+    expect(errors).toEqual({})
+    expect(write.posts.map(p => p.replyTo)).toEqual([undefined, { sequence: 1 }, { sequence: 2 }])
+  })
+
+  it('a reply to a post at or after itself (or a missing target) is refused on that post', () => {
+    const draft = burstDraft()
+    const first = draft.posts[0]
+    const third = draft.posts[2]
+    if (!first || !third) throw new Error('fixture')
+    first.reply = { kind: 'sibling', key: third.key } // a LATER post
+    expect(draftToWrite(draft).errors['posts.0.replyTo']).toBeDefined()
+    first.reply = { kind: 'sibling', key: 'no-such-key' }
+    expect(draftToWrite(draft).errors['posts.0.replyTo']).toBeDefined()
+  })
+
+  it('stays correct when posts are reordered: `{ sequence }` follows the target\'s new position', () => {
+    const draft = burstDraft()
+    const [first, second, third] = draft.posts
+    if (!first || !second || !third) throw new Error('fixture')
+    third.reply = { kind: 'sibling', key: first.key }
+    // Swap posts 1 and 2: the target (first) is now position 2, still before `third`.
+    draft.posts = normalizeSiblingReplies([second, first, third])
+    expect(draft.posts[2]?.reply).toEqual({ kind: 'sibling', key: first.key })
+    expect(draftToWrite(draft).write.posts[2]?.replyTo).toEqual({ sequence: 2 })
+  })
+})
+
+describe('normalizeSiblingReplies', () => {
+  const trio = () => {
+    const a = { ...blankPost(), text: 'a' }
+    const b = { ...blankPost(), text: 'b' }
+    const c = { ...blankPost(), text: 'c' }
+    return { a, b, c }
+  }
+
+  it('clears a reply whose target was REMOVED, with an inline notice', () => {
+    const { a, b, c } = trio()
+    const reply = { ...c, reply: { kind: 'sibling' as const, key: b.key } }
+    const out = normalizeSiblingReplies([a, reply]) // b removed
+    expect(out[1]?.reply).toEqual({ kind: 'none' })
+    expect(out[1]?.replyNotice).toBe(REPLY_TARGET_REMOVED)
+  })
+
+  it('clears a reply whose target now comes AFTER it, with an inline notice', () => {
+    const { a, b } = trio()
+    const reply = { ...b, reply: { kind: 'sibling' as const, key: a.key } }
+    const out = normalizeSiblingReplies([reply, a]) // a moved below its reply
+    expect(out[0]?.reply).toEqual({ kind: 'none' })
+    expect(out[0]?.replyNotice).toBe(REPLY_TARGET_NOW_LATER)
+  })
+
+  it('keeps a reply whose target merely moved but is still earlier (re-pointed by key)', () => {
+    const { a, b, c } = trio()
+    const reply = { ...c, reply: { kind: 'sibling' as const, key: a.key } }
+    const out = normalizeSiblingReplies([b, a, reply])
+    expect(out[2]).toBe(reply) // untouched, same object
+    expect(out[2]?.replyNotice).toBeUndefined()
+  })
+
+  it('leaves non-sibling replies and plain posts untouched (same object identity)', () => {
+    const { a, b } = trio()
+    const scripted = { ...b, reply: { kind: 'scripted' as const, injectPostId: 'x' } }
+    const out = normalizeSiblingReplies([a, scripted])
+    expect(out[0]).toBe(a)
+    expect(out[1]).toBe(scripted)
   })
 })

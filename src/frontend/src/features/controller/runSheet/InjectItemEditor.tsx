@@ -48,6 +48,7 @@ import {
   blankPost,
   draftFromItem,
   draftToWrite,
+  normalizeSiblingReplies,
   type Draft,
   type DraftPost,
 } from './injectDraft'
@@ -167,16 +168,21 @@ export function InjectItemEditor({
     return options
   }, [items, item, personas])
 
-  /** Earlier children of THIS burst (only once it exists on the server, so they have ids). */
-  const siblingOptions = (index: number): ReplyOption[] => {
-    if (!item || mode === 'create') return []
-    return item.posts.slice(0, index).map(post => ({
-      value: post.id,
-      label: `This burst · #${post.sequence} @${
-        personas.find(p => p.id === post.personaId)?.handle ?? post.personaId
-      }: ${excerpt(post.text, 40)}`,
-    }))
-  }
+  /**
+   * EARLIER posts of THIS item as reply targets — available on a NEW burst too: they are held
+   * by the draft post's stable key and sent as `{ sequence }`, so no server ids are needed.
+   * The label reads the live draft (position, persona, start of the text).
+   */
+  const siblingOptionsFor = (index: number): ReplyOption[] =>
+    shownPosts.slice(0, index).map((sibling, at) => {
+      const handle = personas.find(p => p.id === sibling.personaId)?.handle
+      return {
+        value: sibling.key,
+        label:
+          `This burst · #${at + 1} ${handle ? `@${handle}` : '(no persona yet)'}: ` +
+          excerpt(sibling.text.trim() === '' ? '(no text yet)' : sibling.text, 40),
+      }
+    })
 
   // ----- draft edits ------------------------------------------------------
 
@@ -208,14 +214,19 @@ export function InjectItemEditor({
       if (!moved || !other) return previous
       posts[index] = other
       posts[target] = moved
-      return { ...previous, posts }
+      // A reply whose target now comes AFTER it is cleared (and says so inline).
+      return { ...previous, posts: normalizeSiblingReplies(posts) }
     })
 
   const removePost = (index: number): void =>
     setDraft(previous =>
       previous.posts.length <= INJECT_LIMITS.burstMinPosts
         ? previous
-        : { ...previous, posts: previous.posts.filter((_, i) => i !== index) },
+        : {
+          ...previous,
+          // A reply to the removed post is cleared (and says so inline).
+          posts: normalizeSiblingReplies(previous.posts.filter((_, i) => i !== index)),
+        },
     )
 
   const addPost = (): void =>
@@ -419,12 +430,9 @@ export function InjectItemEditor({
             post={post}
             personas={personas}
             personasUnavailable={personasUnavailable}
-            replyOptions={[...siblingOptions(index), ...reply]}
-            replyHint={
-              burst && mode === 'create'
-                ? 'To reply to another post in this burst, save it first, then edit.'
-                : undefined
-            }
+            replyOptions={reply}
+            siblingOptions={siblingOptionsFor(index)}
+            locked={post.fired === true}
             errors={own}
             disabled={readOnly}
             canMoveUp={index > 0}

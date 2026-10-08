@@ -98,6 +98,24 @@ describe('live service — routes and verbs', () => {
     expect(getMock).toHaveBeenCalledWith('/injects/assignees')
   })
 
+  it('PUT echoes each existing child id and omits it for a new child (child identity on PUT)', async () => {
+    putMock.mockResolvedValue({ data: item })
+    const withIds: InjectItemWrite = {
+      kind: 'burst',
+      title: 'Pile-on',
+      posts: [
+        { id: 'injp-1', personaId: 'persona-a', text: 'kept' },
+        { personaId: 'persona-b', text: 'new', replyTo: { sequence: 1 } },
+      ],
+    }
+    await service.update('inj-1', withIds, 3)
+    const body = putMock.mock.calls[0]?.[1] as InjectItemWrite & { version: number }
+    expect(body.version).toBe(3)
+    expect(body.posts[0]?.id).toBe('injp-1')
+    expect(body.posts[1]).not.toHaveProperty('id')
+    expect(body.posts[1]?.replyTo).toEqual({ sequence: 1 })
+  })
+
   it('POST /injects creates with the write body unchanged', async () => {
     postMock.mockResolvedValue({ data: item })
     await service.create(write)
@@ -171,6 +189,16 @@ describe('live service — errors', () => {
     expect(error).toBeInstanceOf(InjectConflictError)
     expect((error as InjectConflictError).detail).toBe('Already fired')
     expect((error as InjectConflictError).item?.firedByHumanId).toBe('human-controller-02')
+  })
+
+  it('a 409 whose current item is a TOP-LEVEL `item` (how ASP.NET serialises it) is read too', async () => {
+    const current = makeItem({ status: 'fired', firedByHumanId: 'human-controller-02' })
+    postMock.mockRejectedValue(
+      axiosError(409, { type: 'x', title: 'Conflict', status: 409, detail: 'Already fired', item: current }),
+    )
+    const error = await service.fire('inj-1').catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(InjectConflictError)
+    expect((error as InjectConflictError).item?.status).toBe('fired')
   })
 
   it('a stale edit is a conflict too (PUT)', async () => {

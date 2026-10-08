@@ -559,6 +559,59 @@ describe('RunSheetPanel — authoring (inline editor, never a modal)', () => {
     expect(itemOf('Echo').assigneeId).toBe(ME) // a new item defaults to me
   })
 
+  it('a NEW burst can reply to an earlier sibling: saved with the reply pointing at that sibling', async () => {
+    await mountPanel()
+    press('Add item')
+    const editor = await screen.findByTestId('inject-editor')
+    fireEvent.change(within(editor).getByLabelText(/^Title/), { target: { value: 'Echo burst' } })
+    fireEvent.click(within(editor).getByRole('radio', { name: 'Burst (pile-on)' }))
+    await within(editor).findAllByRole('option', { name: /Fairhaven Water Utility/ })
+    fireEvent.change(within(editor).getByLabelText(/^Post 1 persona/), {
+      target: { value: 'persona-fairhavenwater' },
+    })
+    fireEvent.change(within(editor).getByLabelText(/^Post 1 text/), { target: { value: 'first' } })
+    fireEvent.change(within(editor).getByLabelText(/^Post 2 persona/), {
+      target: { value: 'persona-newsline7' },
+    })
+    fireEvent.change(within(editor).getByLabelText(/^Post 2 text/), { target: { value: 'reply' } })
+    const sibling = within(within(editor).getByLabelText(/^Post 2 reply to/))
+      .getAllByRole('option')
+      .find(option => option.getAttribute('value')?.startsWith('sib:'))
+    const siblingValue = sibling?.getAttribute('value')
+    if (!siblingValue) throw new Error('no sibling option on post 2')
+    fireEvent.change(within(editor).getByLabelText(/^Post 2 reply to/), {
+      target: { value: siblingValue },
+    })
+    fireEvent.click(within(editor).getByTestId('editor-save'))
+
+    await waitFor(() => expect(screen.queryByTestId('inject-editor')).toBeNull())
+    const saved = itemOf('Echo burst')
+    expect(saved.posts).toHaveLength(2)
+    expect(saved.posts[1]?.replyTo).toEqual({ injectPostId: saved.posts[0]?.id })
+  })
+
+  it('editing a burst and saving keeps every child id and its reply pointer (child identity on PUT)', async () => {
+    const created = await injectMock.create({
+      kind: 'burst',
+      title: 'Echo burst',
+      burstWindowSeconds: 60,
+      posts: [
+        { personaId: 'persona-fairhavenwater', text: 'first' },
+        { personaId: 'persona-newsline7', text: 'reply', replyTo: { sequence: 1 } },
+      ],
+    })
+    await mountPanel()
+    press('Edit Echo burst')
+    const editor = await screen.findByTestId('inject-editor')
+    fireEvent.change(within(editor).getByLabelText(/^Title/), { target: { value: 'Echo burst v2' } })
+    fireEvent.click(within(editor).getByTestId('editor-save'))
+    await waitFor(() => expect(screen.queryByTestId('inject-editor')).toBeNull())
+
+    const saved = itemOf('Echo burst v2')
+    expect(saved.posts.map(p => p.id)).toEqual(created.posts.map(p => p.id))
+    expect(saved.posts[1]?.replyTo).toEqual({ injectPostId: created.posts[0]?.id })
+  })
+
   it('Edit saves at the version it was opened at and updates the row', async () => {
     await mountPanel()
     press('Edit Alpha')

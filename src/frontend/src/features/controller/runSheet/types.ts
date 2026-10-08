@@ -25,10 +25,13 @@ export type InjectStatus = 'pending' | 'held' | 'firing' | 'fired' | 'skipped' |
 export type InjectPostStatus = 'pending' | 'fired' | 'skipped' | 'failed'
 
 export interface InjectPostWrite {
+  id?: string                                             // PUT: echo an existing child's id to keep its identity; omit for a new child
   personaId: string
   text: string                                            // 1..280 code points
   media?: { mediaId: string; alt: string }[]              // <= 4 images OR exactly 1 video; alt 1..1000
-  replyTo?: { injectPostId: string } | { postId: string } // an earlier scripted post, or an existing post
+  replyTo?: { sequence: number }                          // an EARLIER sibling in this item (1-based, < own sequence); works at create time
+         | { injectPostId: string }                       // a scripted post in another item (or this one, by id)
+         | { postId: string }                             // an existing post
   engagementBaseline?: { like?: number; repost?: number; reply?: number }   // 0..1,000,000
 }
 export interface InjectItemWrite {

@@ -470,29 +470,30 @@ describe('burst pacing (fake timers)', () => {
     expect(back.posts.map(p => p.status)).toEqual(['fired', 'pending', 'pending', 'pending'])
   })
 
-  it('a child replying to an earlier child of the same burst waits for its parent', async () => {
-    const mock = makeMock([burst(3, 60)])
-    const [b] = mock.snapshot().items
-    const first = b?.posts[0]
-    if (!b || !first) throw new Error('seed missing')
-    const edited = await mock.update(
-      b.id,
+  it('a child replying to an earlier sibling (`{ sequence }`, set at CREATE) waits for its parent', async () => {
+    const mock = makeMock([
       {
         ...burst(3, 60),
         posts: [
           post('parent'),
-          post('child', { replyTo: { injectPostId: first.id } }),
+          post('child', { replyTo: { sequence: 1 } }),
           post('last'),
         ],
       },
-      b.version,
-    )
-    expect(edited.posts[1]?.replyTo).toEqual({ injectPostId: first.id })
+    ])
+    const [b] = mock.snapshot().items
+    const first = b?.posts[0]
+    if (!b || !first) throw new Error('seed missing')
+    // Stored against the sibling's id, so it survives later reorders.
+    expect(b.posts[1]?.replyTo).toEqual({ injectPostId: first.id })
     await mock.fire(b.id)
     vi.advanceTimersByTime(200_000)
     const done = item(mock, b.id)
     expect(done.status).toBe('fired')
     expect(done.posts.map(p => p.status)).toEqual(['fired', 'fired', 'fired'])
+    // The child went out AFTER its parent.
+    const [p1, p2] = done.posts.map(p => new Date(p.firedWallClock ?? '').getTime())
+    expect(p2).toBeGreaterThanOrEqual(p1 ?? 0)
   })
 
   it('a burst child that fails fails the item at the end; retry re-fires only the failed child', async () => {
@@ -513,5 +514,149 @@ describe('burst pacing (fake timers)', () => {
     const done = item(mock, b.id)
     expect(done.status).toBe('fired')
     expect(done.firedCount).toBe(3)
+  })
+})
+
+describe('child identity on PUT + sibling replies (contract amendment)', () => {
+  const three = (): InjectItemWrite => ({
+    kind: 'burst',
+    title: 'Trio',
+    burstWindowSeconds: 60,
+    posts: [post('one'), post('two', { replyTo: { sequence: 1 } }), post('three')],
+  })
+
+  it('create accepts `{ sequence }` for an earlier sibling and echoes it as that sibling\'s id', async () => {
+    const mock = makeMock()
+    const created = await mock.create(three())
+    expect(created.posts[1]?.replyTo).toEqual({ injectPostId: created.posts[0]?.id })
+    expect(created.posts[0]?.replyTo).toBeUndefined()
+  })
+
+  it('refuses `{ sequence }` at or after the post itself, with the error on that post (400)', async () => {
+    const mock = makeMock()
+    const bad = three()
+    bad.posts[0] = post('one', { replyTo: { sequence: 1 } })
+    const error = await mock.create(bad).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(InjectValidationError)
+    expect((error as InjectValidationError).fieldErrors['posts.0.replyTo']).toBeDefined()
+  })
+
+  it('a child echoing its id keeps its identity across an edit; no id = a new child', async () => {
+    const mock = makeMock()
+    const created = await mock.create(three())
+    const [p1, p2, p3] = created.posts
+    if (!p1 || !p2 || !p3) throw new Error('fixture')
+    const updated = await mock.update(
+      created.id,
+      {
+        ...three(),
+        posts: [
+          { ...post('one edited'), id: p1.id },
+          { ...post('two'), id: p2.id, replyTo: { sequence: 1 } },
+          { ...post('three'), id: p3.id },
+          post('brand new'),
+        ],
+      },
+      created.version,
+    )
+    expect(updated.posts.map(p => p.id).slice(0, 3)).toEqual([p1.id, p2.id, p3.id])
+    expect(updated.posts[3]?.id).toBeDefined()
+    expect([p1.id, p2.id, p3.id]).not.toContain(updated.posts[3]?.id)
+    expect(updated.posts[0]?.text).toBe('one edited')
+    expect(updated.posts.map(p => p.sequence)).toEqual([1, 2, 3, 4])
+    expect(updated.posts[1]?.replyTo).toEqual({ injectPostId: p1.id })
+  })
+
+  it('an unfired child left out is removed; the rest are re-sequenced', async () => {
+    const mock = makeMock()
+    const created = await mock.create(three())
+    const [p1, , p3] = created.posts
+    if (!p1 || !p3) throw new Error('fixture')
+    const updated = await mock.update(
+      created.id,
+      { ...three(), posts: [{ ...post('one'), id: p1.id }, { ...post('three'), id: p3.id }] },
+      created.version,
+    )
+    expect(updated.posts.map(p => p.id)).toEqual([p1.id, p3.id])
+    expect(updated.posts.map(p => p.sequence)).toEqual([1, 2])
+    expect(updated.total).toBe(2)
+  })
+
+  it('reordering by array position keeps each child\'s identity and its reply pointer', async () => {
+    const mock = makeMock()
+    const created = await mock.create(three())
+    const [p1, p2, p3] = created.posts
+    if (!p1 || !p2 || !p3) throw new Error('fixture')
+    // Move `three` to the front: [three, one, two]. `two` still replies to `one`, now #2.
+    const updated = await mock.update(
+      created.id,
+      {
+        ...three(),
+        posts: [
+          { ...post('three'), id: p3.id },
+          { ...post('one'), id: p1.id },
+          { ...post('two'), id: p2.id, replyTo: { sequence: 2 } },
+        ],
+      },
+      created.version,
+    )
+    expect(updated.posts.map(p => p.id)).toEqual([p3.id, p1.id, p2.id])
+    expect(updated.posts.map(p => p.sequence)).toEqual([1, 2, 3])
+    expect(updated.posts[2]?.replyTo).toEqual({ injectPostId: p1.id })
+  })
+
+  it('an unknown, foreign or repeated child id is a 400 on that post — and changes nothing', async () => {
+    const mock = makeMock([single('Other')])
+    const created = await mock.create(three())
+    const other = mock.snapshot().items.find(i => i.title === 'Other')
+    const foreignId = other?.posts[0]?.id
+    const p1 = created.posts[0]
+    if (!p1 || !foreignId) throw new Error('fixture')
+    const attempt = (posts: InjectPostWrite[]) =>
+      mock.update(created.id, { ...three(), posts }, created.version).catch((e: unknown) => e)
+
+    for (const bad of [
+      [{ ...post('x'), id: 'ghost' }, post('y')],
+      [{ ...post('x'), id: foreignId }, post('y')],
+      [{ ...post('x'), id: p1.id }, { ...post('y'), id: p1.id }],
+    ]) {
+      const error = await attempt(bad)
+      expect(error).toBeInstanceOf(InjectValidationError)
+    }
+    const unchanged = item(mock, created.id)
+    expect(unchanged.version).toBe(created.version)
+    expect(unchanged.posts.map(p => p.id)).toEqual(created.posts.map(p => p.id))
+  })
+
+  it('a fired child is immutable and cannot be left out (400)', async () => {
+    const mock = makeMock()
+    const created = await mock.create(three())
+    const [p1, p2, p3] = created.posts
+    if (!p1 || !p2 || !p3) throw new Error('fixture')
+    await mock.fire(created.id) // releases the burst: `one` fires immediately
+    await mock.hold(created.id) // held mid-burst, so it is editable again
+    const held = item(mock, created.id)
+    expect(held.posts[0]?.status).toBe('fired')
+
+    const omitted = await mock
+      .update(created.id, { ...three(), posts: [{ ...post('two'), id: p2.id }, { ...post('three'), id: p3.id }] }, held.version)
+      .catch((e: unknown) => e)
+    expect(omitted).toBeInstanceOf(InjectValidationError)
+
+    const edited = await mock.update(
+      created.id,
+      {
+        ...three(),
+        posts: [
+          { ...post('TAMPERED'), id: p1.id },
+          { ...post('two'), id: p2.id, replyTo: { sequence: 1 } },
+          { ...post('three'), id: p3.id },
+        ],
+      },
+      held.version,
+    )
+    expect(edited.posts[0]?.text).toBe('one') // the fired post is not rewritten
+    expect(edited.posts[0]?.status).toBe('fired')
+    mock.dispose() // the release above started the (real-timer) burst runner
   })
 })

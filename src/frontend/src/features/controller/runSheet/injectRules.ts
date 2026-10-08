@@ -265,8 +265,16 @@ export function validateWrite(write: InjectItemWrite): Record<string, string> {
 
     const reply = post.replyTo
     if (reply) {
-      const id = 'injectPostId' in reply ? reply.injectPostId : reply.postId
-      if (id.trim().length === 0) errors[`${at}.replyTo`] = 'Choose the post to reply to'
+      if ('sequence' in reply) {
+        // An EARLIER sibling of this item, 1-based: strictly before this post's own position.
+        const own = i + 1
+        if (!Number.isInteger(reply.sequence) || reply.sequence < 1 || reply.sequence >= own) {
+          errors[`${at}.replyTo`] = 'Reply to an earlier post in this burst'
+        }
+      } else {
+        const id = 'injectPostId' in reply ? reply.injectPostId : reply.postId
+        if (id.trim().length === 0) errors[`${at}.replyTo`] = 'Choose the post to reply to'
+      }
     }
 
     const baseline = post.engagementBaseline
