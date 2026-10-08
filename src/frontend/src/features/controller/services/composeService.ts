@@ -69,7 +69,10 @@ export interface ComposeAsPersonaInput {
  *
  * Never throws because of telemetry — `createPost`'s `buildAndEmit` is
  * caller-safe, so a dead telemetry pipeline can never block a controller's
- * post.
+ * post. (`media`: in MOCK mode `createPost` throws for an unknown media id or a
+ * missing alt, mirroring the server's 400; in LIVE mode it never throws for
+ * media — the real asset ids are unknown to the mock registry and the server is
+ * the gate — so the live `publishPost` that follows is always reached.)
  */
 export function composeAsPersona(input: ComposeAsPersonaInput): Post {
   return createPost({

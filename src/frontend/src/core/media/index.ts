@@ -31,8 +31,8 @@ export type { MediaValidationResult } from './validateMediaFile'
 export { readImageSize } from './readImageSize'
 export type { ImageSize } from './readImageSize'
 
-export { captureVideoPoster } from './captureVideoPoster'
-export type { CapturedVideoPoster } from './captureVideoPoster'
+export { captureVideoPoster, POSTER_CAPTURE_TIMEOUT_MS } from './captureVideoPoster'
+export type { CapturedVideoPoster, CaptureVideoPosterOptions } from './captureVideoPoster'
 
 export { uploadMedia, uploadVideoWithPoster, uploadPickedMedia } from './uploadMedia'
 export type { UploadMediaOptions, UploadFlowHandlers } from './uploadMedia'

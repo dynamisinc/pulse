@@ -246,3 +246,48 @@ describe('hasWellFormedV2Members', () => {
     expect(hasWellFormedV2Members(body)).toBe(false)
   })
 })
+
+describe('null optional members are treated as ABSENT (M-4)', () => {
+  const media = { id: 'm', kind: 'image' as const, url: '/u', alt: 'a' }
+
+  it('hasWellFormedV2Members accepts null media / inReplyTo / viewer and null media sub-members', () => {
+    expect(
+      hasWellFormedV2Members({
+        media: [{ ...media, posterUrl: null, width: null, height: null, durationSec: null }],
+        inReplyTo: null,
+        viewer: null,
+      }),
+    ).toBe(true)
+    expect(hasWellFormedV2Members({ media: null, inReplyTo: null, viewer: null })).toBe(true)
+  })
+
+  it('still rejects a wrong-typed (non-null) member', () => {
+    expect(hasWellFormedV2Members({ media: [{ ...media, width: 'wide' }] })).toBe(false)
+    expect(hasWellFormedV2Members({ media: [{ ...media, posterUrl: 7 }] })).toBe(false)
+    expect(hasWellFormedV2Members({ viewer: { liked: null, reposted: false } })).toBe(false)
+  })
+
+  it('toParticipantView drops nulls instead of emitting or crashing on them', () => {
+    const wire = {
+      ...createPost(input()),
+      media: [{ ...media, posterUrl: null, width: null, height: null, durationSec: null }],
+      inReplyTo: null,
+      viewer: null,
+      linkPreview: null,
+    } as unknown as Parameters<typeof toParticipantView>[0]
+
+    const view = toParticipantView(wire)
+
+    expect(Object.keys(view).sort()).toEqual(
+      ['authorPersonaId', 'counts', 'id', 'media', 'scenarioTime', 'text'],
+    )
+    expect(view.media).toEqual([{ id: 'm', kind: 'image', url: '/u', alt: 'a' }])
+    expect(Object.keys(view.media?.[0] ?? {}).sort()).toEqual(['alt', 'id', 'kind', 'url'])
+  })
+
+  it('toParticipantView keeps a null-free media list intact', () => {
+    const wire = { ...createPost(input()), media: [{ ...media, width: 4, height: 3 }] }
+
+    expect(toParticipantView(wire).media).toEqual([{ ...media, width: 4, height: 3 }])
+  })
+})

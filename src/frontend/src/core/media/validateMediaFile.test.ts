@@ -102,6 +102,14 @@ describe('error text is shared with the server-status mapping', () => {
     expect(mediaUploadErrorMessage(415)).toBe(MEDIA_ERROR_TEXT.unsupported)
   })
 
+  it('maps a refused request (400 / 401 / 403) to one generic message that does not say why', () => {
+    for (const status of [400, 401, 403]) {
+      expect(mediaUploadErrorMessage(status, 'image')).toBe(MEDIA_ERROR_TEXT.refused)
+    }
+    expect(MEDIA_ERROR_TEXT.refused).not.toBe(MEDIA_ERROR_TEXT.failed)
+    expect(MEDIA_ERROR_TEXT.refused).not.toBe(MEDIA_ERROR_TEXT.unsupported)
+  })
+
   it('maps 429 / 503 / anything else to friendly text, never a raw body', () => {
     expect(mediaUploadErrorMessage(429)).toBe(MEDIA_ERROR_TEXT.rateLimited)
     expect(mediaUploadErrorMessage(503)).toBe(MEDIA_ERROR_TEXT.unavailable)

@@ -13,9 +13,11 @@
  * in-memory `mockMediaRegistry` — the four canned items plus anything uploaded
  * this session. Fails CLOSED on a malformed body (never an empty library).
  *
- * The client sends NO `exerciseId` (COR-001): the staff session binds the
- * exercise server-side. The upload client invalidates this query's key prefix
- * after every successful upload, so a just-uploaded asset appears on next open.
+ * The client sends NO `exerciseId` on the request (COR-001): the staff session
+ * binds the exercise server-side. The exercise id is in the query KEY only, so
+ * the cache is partitioned per exercise. The upload client invalidates this
+ * query's key PREFIX after every successful upload, so a just-uploaded asset
+ * appears on next open.
  *
  * World-neutral (`core/`): no UI, no theme.
  */
@@ -23,29 +25,15 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import type { AxiosAdapter } from 'axios'
 import { api } from '../services/api'
+import { useExerciseContext } from '../exerciseContext'
 import { USE_MOCK_DATA } from '../config/mockData'
 import { MEDIA_LIBRARY_QUERY_KEY } from './mediaLibraryKey'
+import { parseStaffMediaAssetView } from './mediaGuards'
 import { listMockMedia } from './mockMediaRegistry'
 import type { MediaKind, StaffMediaAssetView } from './types'
 
 /** `take` the client always asks for (server range is 1..200). */
 const LIBRARY_TAKE = 100
-
-function isStaffMediaAssetView(value: unknown): value is StaffMediaAssetView {
-  if (typeof value !== 'object' || value === null) return false
-  const v = value as Record<string, unknown>
-  return (
-    typeof v.id === 'string' && v.id.length > 0 &&
-    (v.kind === 'image' || v.kind === 'video') &&
-    typeof v.url === 'string' && v.url.length > 0 &&
-    typeof v.fileName === 'string' &&
-    typeof v.uploadedAtScenario === 'string' && v.uploadedAtScenario.length > 0 &&
-    (v.posterUrl === undefined || typeof v.posterUrl === 'string') &&
-    (v.width === undefined || typeof v.width === 'number') &&
-    (v.height === undefined || typeof v.height === 'number') &&
-    (v.durationSec === undefined || typeof v.durationSec === 'number')
-  )
-}
 
 /** Mock adapter: the registry (canned + uploaded), filtered by the request's `kind`. */
 const mockLibraryAdapter: AxiosAdapter = config => {
@@ -69,16 +57,29 @@ export async function resolveMediaLibrary(kind?: MediaKind): Promise<StaffMediaA
     ...(USE_MOCK_DATA ? { adapter: mockLibraryAdapter } : {}),
   })
   const data = response.data
-  if (!Array.isArray(data) || !data.every(isStaffMediaAssetView)) {
+  if (!Array.isArray(data)) {
     throw new Error('resolveMediaLibrary: resolution returned a malformed media library')
   }
-  return data
+  // Each row is parsed and rebuilt from its contract keys; a `null` optional
+  // member is treated as absent, a malformed row fails the whole read closed.
+  const rows = data.map(parseStaffMediaAssetView)
+  if (!rows.every(row => row !== undefined)) {
+    throw new Error('resolveMediaLibrary: resolution returned a malformed media library')
+  }
+  return rows
 }
 
-/** The staff media library, optionally narrowed to one kind. */
+/**
+ * The staff media library, optionally narrowed to one kind. Must render under the
+ * `ExerciseContextProvider` (always the case in the app): the session's exercise
+ * id is part of the QUERY KEY so a cached library can never be served after the
+ * staff session switches exercise (COR-001). It is a cache key only — the request
+ * itself carries no exercise id; the server resolves scope from the session.
+ */
 export function useMediaLibrary(kind?: MediaKind): UseQueryResult<StaffMediaAssetView[]> {
+  const { exerciseId } = useExerciseContext()
   return useQuery({
-    queryKey: [...MEDIA_LIBRARY_QUERY_KEY, kind ?? 'all'],
+    queryKey: [...MEDIA_LIBRARY_QUERY_KEY, exerciseId, kind ?? 'all'],
     queryFn: () => resolveMediaLibrary(kind),
   })
 }

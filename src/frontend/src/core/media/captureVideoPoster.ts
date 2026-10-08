@@ -20,8 +20,20 @@
  * poster is downscaled to at most {@link POSTER_MAX_WIDTH} px wide so it stays a
  * small JPEG (well under the 5 MiB image limit).
  *
+ * NEVER HANGS: a file that neither decodes nor errors (some containers/codecs in
+ * some browsers fire neither `loadedmetadata` nor `error`) used to leave the
+ * returned promise pending forever, wedging `uploadVideoWithPoster` and the
+ * composer's "uploading" state. The capture now races a timeout
+ * ({@link POSTER_CAPTURE_TIMEOUT_MS}) that REJECTS — which `uploadVideoWithPoster`
+ * already treats as "upload the video without a poster" — and honours an
+ * `AbortSignal` (rejecting with an `AbortError`). On success, error, timeout or
+ * abort alike the `<video>` element's source is detached and the object URL
+ * revoked exactly once.
+ *
  * World-neutral (`core/`): DOM APIs only, no React, no theme.
  */
+
+import { createAbortError } from './mediaErrors'
 
 /** What {@link captureVideoPoster} resolves with. */
 export interface CapturedVideoPoster {
@@ -47,26 +59,74 @@ const MAX_DURATION_SEC = 3600
 /** JPEG quality of the exported poster. */
 const POSTER_JPEG_QUALITY = 0.82
 
-/** Captures a poster frame and the video's dimensions/duration. */
-export function captureVideoPoster(file: File): Promise<CapturedVideoPoster> {
+/** How long to wait for the browser to decode a frame before giving up (ms). */
+export const POSTER_CAPTURE_TIMEOUT_MS = 8000
+
+/** Options for {@link captureVideoPoster}. */
+export interface CaptureVideoPosterOptions {
+  /** Aborting rejects with an `AbortError` and releases the element + object URL. */
+  readonly signal?: AbortSignal
+  /** Override {@link POSTER_CAPTURE_TIMEOUT_MS} (tests; slow-network tuning). */
+  readonly timeoutMs?: number
+}
+
+/**
+ * Captures a poster frame and the video's dimensions/duration. Rejects on a
+ * decode failure, an unsupported length, a timeout or an abort (see the module
+ * header); never leaves the returned promise pending.
+ */
+export function captureVideoPoster(
+  file: File,
+  options: CaptureVideoPosterOptions = {},
+): Promise<CapturedVideoPoster> {
+  const { signal, timeoutMs = POSTER_CAPTURE_TIMEOUT_MS } = options
+
   return new Promise<CapturedVideoPoster>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError())
+      return
+    }
+
     const objectUrl = URL.createObjectURL(file)
     const video = document.createElement('video')
     video.preload = 'auto'
     video.muted = true
     video.playsInline = true
 
+    let settled = false
+
+    // Detach everything exactly once: handlers, the timer, the abort listener, the
+    // element's source (and stop its in-flight load), and the temporary object URL.
     const release = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
       video.onloadedmetadata = null
       video.onseeked = null
       video.onerror = null
       video.removeAttribute('src')
+      video.load()
       URL.revokeObjectURL(objectUrl)
     }
-    const fail = (message: string) => {
-      release()
-      reject(new Error(message))
+    // Settles the promise AT MOST once, releasing resources first.
+    const finish = (settle: () => void) => {
+      if (settled) return
+      settled = true
+      try {
+        release()
+      } catch {
+        // Teardown is best-effort: even if detaching the element throws, the
+        // promise MUST still settle (a hang here would wedge the upload flow).
+      }
+      settle()
     }
+    const fail = (message: string) => finish(() => reject(new Error(message)))
+    function onAbort() {
+      finish(() => reject(createAbortError()))
+    }
+
+    // Declared after the closures that read it, but before anything can call them.
+    const timer = setTimeout(() => fail('That video took too long to read.'), timeoutMs)
+    signal?.addEventListener('abort', onAbort, { once: true })
 
     video.onerror = () => fail('That video could not be read.')
 
@@ -104,12 +164,11 @@ export function captureVideoPoster(file: File): Promise<CapturedVideoPoster> {
       const durationSec = video.duration
       canvas.toBlob(
         blob => {
-          release()
           if (blob === null) {
-            reject(new Error('A poster frame could not be captured.'))
+            fail('A poster frame could not be captured.')
             return
           }
-          resolve({ poster: blob, width, height, durationSec })
+          finish(() => resolve({ poster: blob, width, height, durationSec }))
         },
         'image/jpeg',
         POSTER_JPEG_QUALITY,

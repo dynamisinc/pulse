@@ -19,8 +19,9 @@
  *          (`@/core/services/api` — bearer attach + silent refresh come free),
  *          with real upload progress and `AbortSignal` cancellation. A non-2xx
  *          rejects with a `MediaUploadError` whose text is mapped from the status
- *          (413/415/429/503 -> `mediaErrors.ts`); a network failure rejects with
- *          the generic `failed` text; an abort rejects with an `AbortError`.
+ *          (400/401/403 refused, 413, 415, 429, 503 -> `mediaErrors.ts`); a
+ *          network failure rejects with the generic `failed` text; an abort
+ *          rejects with an `AbortError`.
  *          NOTHING is swallowed.
  *
  *   MOCK   `validateMediaFile` runs first (same text the server's 413/415 map
@@ -56,6 +57,7 @@ import {
   mediaUploadErrorMessage,
 } from './mediaErrors'
 import { captureVideoPoster } from './captureVideoPoster'
+import { parseMediaAssetView } from './mediaGuards'
 import { readImageSize } from './readImageSize'
 import { validateMediaFile } from './validateMediaFile'
 import {
@@ -125,20 +127,6 @@ function statusOf(error: unknown): number | undefined {
   return typeof response?.status === 'number' ? response.status : undefined
 }
 
-function isMediaAssetView(value: unknown): value is MediaAssetView {
-  if (typeof value !== 'object' || value === null) return false
-  const v = value as Record<string, unknown>
-  return (
-    typeof v.id === 'string' && v.id.length > 0 &&
-    (v.kind === 'image' || v.kind === 'video') &&
-    typeof v.url === 'string' && v.url.length > 0 &&
-    (v.posterUrl === undefined || typeof v.posterUrl === 'string') &&
-    (v.width === undefined || typeof v.width === 'number') &&
-    (v.height === undefined || typeof v.height === 'number') &&
-    (v.durationSec === undefined || typeof v.durationSec === 'number')
-  )
-}
-
 async function liveUpload(
   file: File,
   kind: MediaKind,
@@ -174,11 +162,14 @@ async function liveUpload(
     throw new MediaUploadError(mediaUploadErrorMessage(status, kind), status)
   }
 
-  if (!isMediaAssetView(data)) {
+  // Parsed (and rebuilt from the contract keys): a malformed body fails closed,
+  // a `null` optional member is treated as absent.
+  const asset = parseMediaAssetView(data)
+  if (asset === undefined) {
     throw new MediaUploadError(MEDIA_ERROR_TEXT.failed)
   }
   report(1)
-  return data
+  return asset
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +297,7 @@ export async function uploadVideoWithPoster(
 
   let captured: Awaited<ReturnType<typeof captureVideoPoster>> | undefined
   try {
-    captured = await captureVideoPoster(file)
+    captured = await captureVideoPoster(file, signal !== undefined ? { signal } : {})
   } catch {
     captured = undefined
   }

@@ -7,5 +7,9 @@
  * each other. World-neutral (`core/`).
  */
 
-/** Prefix of every media-library query; the kind filter is appended as the last element. */
+/**
+ * Prefix of every media-library query. `useMediaLibrary` appends the session's
+ * exercise id and then the kind filter: `[...prefix, exerciseId, kind | 'all']`.
+ * Invalidating the prefix refreshes every exercise/kind variant.
+ */
 export const MEDIA_LIBRARY_QUERY_KEY = ['staff', 'media'] as const

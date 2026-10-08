@@ -59,6 +59,10 @@
  * (implementation.md §1.5.2; DP-6). So `publish()` does not put the draft chips
  * on the post; the real attach tray (upload via `@/core/media`, alt text, video)
  * is F4's story, which replaces the draft state with `CreatePostMedia[]`.
+ * Publishing with chips attached therefore sends the TEXT only and raises
+ * {@link DRAFT_MEDIA_NOT_SENT_MESSAGE} as the composer's `mediaError`; publishing
+ * with chips but NO text is blocked (`canPublish` false, `publish()` a no-op).
+ * Both are pinned by `useComposePost.interim.test.ts`.
  */
 
 import { useCallback, useMemo, useState } from 'react'
@@ -76,6 +80,15 @@ export const DEFAULT_CHAR_LIMIT = 280
 /** Remaining-character threshold at/under which the count text becomes visible
  * and the ring enters its amber "low" state (D1-R5). */
 export const COUNT_VISIBLE_THRESHOLD = 20
+
+/**
+ * Shown (as the composer's `mediaError` alert, in-fiction wording) when a post is
+ * published while photo chips are attached: the chips are interim drafts with no
+ * uploaded asset behind them, so the post goes out as text only until F4's real
+ * attach tray lands (see the MEDIA note in the module header).
+ */
+export const DRAFT_MEDIA_NOT_SENT_MESSAGE =
+  "Photo upload isn't available yet — your post went out as text."
 
 /** Max images per post (SOC-001: "0–4 images OR 1 video"). */
 export const MAX_IMAGES = 4
@@ -293,9 +306,12 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
       publishPost(input).catch(() => {})
     }
 
+    // The post went out as TEXT ONLY: tell the author in-fiction that their photo
+    // chips were not sent, rather than letting them vanish silently.
+    const hadDraftChips = media.length > 0
     setText('')
     setMedia([])
-    setMediaError(undefined)
+    setMediaError(hadDraftChips ? DRAFT_MEDIA_NOT_SENT_MESSAGE : undefined)
   }, [
     exerciseId,
     timeZone,
@@ -303,6 +319,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     session.actingHumanId,
     session.isReadOnly,
     text,
+    media.length,
     charLimit,
     onPosted,
   ])

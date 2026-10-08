@@ -10,6 +10,9 @@
  *   - 415 (type/sniff/kind)  -> `unsupported`
  *   - 429 (rate limited)     -> `rateLimited`
  *   - 503 (store unconfigured)-> `unavailable`
+ *   - 400 / 401 / 403 (the request was refused: bad form field, expired or
+ *     missing session, no persona / read-only) -> `refused`, a generic message
+ *     that deliberately does not say why (never a raw server body)
  *
  * World-neutral (`core/`): plain strings and one Error subclass, no UI, no theme.
  * The video format hint is the product's guidance that Safari will not play a
@@ -36,6 +39,8 @@ export const MEDIA_ERROR_TEXT = {
   tooLargeImage: 'That image is too large (5 MB max).',
   tooLargeVideo: 'That video is too large (100 MB max).',
   rateLimited: 'Too many uploads right now. Wait a moment and try again.',
+  refused:
+    'That upload was not accepted. Try a different file, or sign in again if this keeps happening.',
   unavailable: 'Uploads are not available right now.',
   failed: 'The upload failed. Check your connection and try again.',
 } as const
@@ -54,6 +59,10 @@ export function mediaUploadErrorMessage(status: number | undefined, kind?: Media
       return MEDIA_ERROR_TEXT.unsupported
     case 429:
       return MEDIA_ERROR_TEXT.rateLimited
+    case 400:
+    case 401:
+    case 403:
+      return MEDIA_ERROR_TEXT.refused
     case 503:
       return MEDIA_ERROR_TEXT.unavailable
     default:

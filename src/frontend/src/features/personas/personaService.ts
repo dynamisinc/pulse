@@ -123,9 +123,11 @@ export function toParticipantPersona(persona: Persona): Persona {
     // Contract v2 profile decoration (demo-polish §1.5.6) — participant-safe
     // (no archetype tell), forwarded only when present so an absent value stays
     // genuinely absent and the avatar/banner fallbacks engage.
-    ...(persona.avatarUrl !== undefined ? { avatarUrl: persona.avatarUrl } : {}),
-    ...(persona.bannerUrl !== undefined ? { bannerUrl: persona.bannerUrl } : {}),
-    ...(persona.location !== undefined ? { location: persona.location } : {}),
+    // `!= null`: a `null` on the wire (a backend member missing `WhenWritingNull`)
+    // is treated as absent and the key is dropped.
+    ...(persona.avatarUrl != null ? { avatarUrl: persona.avatarUrl } : {}),
+    ...(persona.bannerUrl != null ? { bannerUrl: persona.bannerUrl } : {}),
+    ...(persona.location != null ? { location: persona.location } : {}),
     // Optional follow-graph counts (profiles-social-graph/02+07) — forwarded
     // only when present, mirroring `bio`'s pattern, so an absent value stays
     // genuinely absent rather than becoming an `undefined` key.
@@ -211,11 +213,13 @@ function isValidPersona(value: unknown): value is Persona {
     (p.followingCount === undefined || typeof p.followingCount === 'number') &&
     (p.audienceMagnitude === undefined || typeof p.audienceMagnitude === 'number') &&
     // Contract v2 (`avatarUrl`/`bannerUrl`/`location`) are OPTIONAL strings —
-    // accepted when absent (every pre-v2 body and fixture), but a present value
-    // of the wrong type fails closed rather than reaching an <img src>.
-    (p.avatarUrl === undefined || typeof p.avatarUrl === 'string') &&
-    (p.bannerUrl === undefined || typeof p.bannerUrl === 'string') &&
-    (p.location === undefined || typeof p.location === 'string')
+    // accepted when absent (every pre-v2 body and fixture) or `null` (treated as
+    // absent: one backend member missing `WhenWritingNull` must not fail-close the
+    // WHOLE persona set), but a present value of the wrong type fails closed
+    // rather than reaching an <img src>.
+    (p.avatarUrl == null || typeof p.avatarUrl === 'string') &&
+    (p.bannerUrl == null || typeof p.bannerUrl === 'string') &&
+    (p.location == null || typeof p.location === 'string')
   )
 }
 
@@ -366,8 +370,11 @@ function usePersonaResolution<T extends Persona>(resolve: () => Promise<T[]>): {
       })
       .catch((err: unknown) => {
         if (cancelled) return
-        // Fail closed: the list stays EMPTY (it is never populated before a
-        // successful resolve) and the error is surfaced to the caller.
+        // Fail closed on the FIRST load: the list is never populated before a
+        // successful resolve, so it stays EMPTY. After an `invalidatePersonas()`
+        // refetch the previously loaded list stays on screen instead (stale, but
+        // never cleared by a transient failure). Either way the error is surfaced
+        // to the caller.
         setError(err)
       })
       .finally(() => {
@@ -395,8 +402,10 @@ export function usePersonas(): UsePersonasResult {
 /**
  * Resolves the exercise's persona instances in the STAFF projection. Staff
  * world only. On a tokenless/participant-shaped response the hook reports an
- * error with an EMPTY persona list (fail-closed + visible), instead of a list
- * whose `personaType` is silently `undefined`.
+ * error with an EMPTY persona list on its first load (fail-closed + visible),
+ * instead of a list whose `personaType` is silently `undefined`. (A failed
+ * `invalidatePersonas()` refetch keeps the previously loaded list and reports the
+ * error.)
  */
 export function useStaffPersonas(): UseStaffPersonasResult {
   return usePersonaResolution(resolveStaffPersonas)

@@ -189,3 +189,75 @@ describe('invalidatePersonas — the refetch signal for the useState/useEffect h
     expect(get.mock.calls.length).toBe(callsBefore)
   })
 })
+
+describe('Persona v2 fields — a stray null does not fail-close the whole set (M-4)', () => {
+  it('accepts null avatarUrl / bannerUrl / location and drops the keys', async () => {
+    const withNulls = { ...WIRE, avatarUrl: null, bannerUrl: null, location: null }
+    vi.spyOn(api, 'get').mockResolvedValue(apiBody([withNulls, { ...WIRE, id: 'persona-2' }]))
+
+    const personas = await resolvePersonas()
+
+    expect(personas).toHaveLength(2)
+    for (const persona of personas) {
+      expect(persona).not.toHaveProperty('avatarUrl')
+      expect(persona).not.toHaveProperty('bannerUrl')
+      expect(persona).not.toHaveProperty('location')
+    }
+  })
+
+  it('accepts nulls on the staff read as well', async () => {
+    const staff = { ...WIRE, personaType: 'agency', avatarUrl: null, location: null }
+    vi.spyOn(api, 'get').mockResolvedValue(apiBody([staff]))
+
+    await expect(resolveStaffPersonas()).resolves.toHaveLength(1)
+  })
+
+  it('toParticipantPersona drops null members and keeps present ones', () => {
+    const wire = {
+      ...WIRE,
+      avatarUrl: null,
+      bannerUrl: '/b.svg',
+      location: null,
+    } as unknown as Persona
+
+    const narrowed = toParticipantPersona(wire)
+
+    expect(narrowed).not.toHaveProperty('avatarUrl')
+    expect(narrowed).not.toHaveProperty('location')
+    expect(narrowed.bannerUrl).toBe('/b.svg')
+  })
+
+  it('still fails closed on a wrong-typed non-null value', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(apiBody([{ ...WIRE, avatarUrl: 5 }]))
+
+    await expect(resolvePersonas()).rejects.toThrow(/malformed persona set/)
+  })
+})
+
+describe('usePersonas — a failed invalidatePersonas() refetch keeps the previous list (L-7)', () => {
+  it('keeps the loaded personas on screen and surfaces the error', async () => {
+    const get = vi
+      .spyOn(api, 'get')
+      .mockResolvedValueOnce(apiBody([{ ...WIRE, displayName: 'Before' }]))
+      .mockRejectedValueOnce(new Error('network down'))
+    const { result } = renderHook(() => usePersonas())
+    await waitFor(() => expect(result.current.personas[0]?.displayName).toBe('Before'))
+
+    act(() => {
+      invalidatePersonas()
+    })
+
+    await waitFor(() => expect(result.current.error).toBeDefined())
+    expect(result.current.personas[0]?.displayName).toBe('Before')
+    expect(get).toHaveBeenCalledTimes(2)
+  })
+
+  it('fails closed with an EMPTY list when the very FIRST load fails', async () => {
+    vi.spyOn(api, 'get').mockRejectedValueOnce(new Error('network down'))
+    const { result } = renderHook(() => usePersonas())
+
+    await waitFor(() => expect(result.current.error).toBeDefined())
+
+    expect(result.current.personas).toEqual([])
+  })
+})

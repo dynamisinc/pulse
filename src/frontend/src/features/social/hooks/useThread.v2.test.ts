@@ -157,3 +157,40 @@ describe('resolveThread — validation guards accept v2 and fail closed on malfo
     await expect(resolveThread('p1')).rejects.toThrow(/malformed thread/)
   })
 })
+
+describe('resolveThread — a stray null does not fail-close the whole thread (M-4)', () => {
+  const post = {
+    id: 'p1',
+    exerciseId: 'ex-mock-0001',
+    authorPersonaId: 'persona-mvega_fh',
+    actingHumanId: 'human-x',
+    text: 't',
+    counts: { reply: 0, repost: 0, like: 0 },
+    createdWallClock: '2026-07-01T00:00:00.000Z',
+    scenarioTime: '2033-09-04T14:00:00Z',
+    origin: 'participant',
+  }
+
+  it('accepts null optional members and the hook hands back clean views', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        ancestors: [{ ...post, id: 'p0', inReplyTo: null, viewer: null }],
+        focused: {
+          ...post,
+          media: [{ id: 'm', kind: 'image', url: '/u', alt: 'a', posterUrl: null, width: null }],
+          inReplyTo: null,
+          viewer: null,
+        },
+        replies: [],
+      },
+    })
+
+    const { result } = renderHook(() => useThread('p1'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.error).toBeUndefined()
+    expect(result.current.focused?.media).toEqual([{ id: 'm', kind: 'image', url: '/u', alt: 'a' }])
+    expect(result.current.focused).not.toHaveProperty('inReplyTo')
+    expect(result.current.ancestors[0]).not.toHaveProperty('viewer')
+  })
+})

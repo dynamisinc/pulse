@@ -70,7 +70,6 @@ vi.mock('../services/livePostActions', () => ({
 import { createPost } from '../services/postService'
 import { publishPost } from '../services/livePostActions'
 
-const mockedUseExerciseContext = vi.mocked(useExerciseContext)
 /** A well-formed 201 body — `publishPost` now resolves with the parsed post. */
 const PUBLISHED_VIEW = {
   id: 'post-published-1',
@@ -80,6 +79,7 @@ const PUBLISHED_VIEW = {
   scenarioTime: '2033-09-04T14:00:00Z',
 }
 
+const mockedUseExerciseContext = vi.mocked(useExerciseContext)
 const mockedUseSession = vi.mocked(useSession)
 
 function scope(): ExerciseScope {

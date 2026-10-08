@@ -48,6 +48,13 @@ function card(id: string): HTMLElement {
   return found
 }
 
+/** Waits for the SPECIFIC card (not merely "some card") — the list renders as the
+ * baseline resolves, so asserting on a card the first `findAll` happened to see
+ * can race under CI load. */
+function findCard(id: string): Promise<HTMLElement> {
+  return waitFor(() => card(id))
+}
+
 beforeEach(() => {
   resetTelemetryBuffer()
   postStore.resetForTests({ withDemoFixtures: true })
@@ -72,33 +79,36 @@ describe('Feed over the v2 demo fixtures', () => {
 
   it('shows media posts\' attachments with their alt text, image and video alike', async () => {
     renderFeed()
-    await screen.findAllByTestId('post-card')
 
     // Scoped to the media slot: a verified author's seal is also a role="img".
-    const attachments = (id: string) => within(within(card(id)).getByTestId('post-media')).getAllByRole('img')
-    expect(attachments(DEMO_IDS.grid1)).toHaveLength(1)
-    expect(attachments(DEMO_IDS.grid2)).toHaveLength(2)
-    expect(attachments(DEMO_IDS.grid3)).toHaveLength(3)
-    expect(attachments(DEMO_IDS.grid4)).toHaveLength(4)
+    const attachments = async (id: string) =>
+      within(within(await findCard(id)).getByTestId('post-media')).getAllByRole('img')
+    expect(await attachments(DEMO_IDS.grid1)).toHaveLength(1)
+    expect(await attachments(DEMO_IDS.grid2)).toHaveLength(2)
+    expect(await attachments(DEMO_IDS.grid3)).toHaveLength(3)
+    expect(await attachments(DEMO_IDS.grid4)).toHaveLength(4)
     for (const id of [DEMO_IDS.videoPoster, DEMO_IDS.videoNoPoster]) {
-      const [placeholder] = attachments(id)
+      const [placeholder] = await attachments(id)
       expect(placeholder?.getAttribute('aria-label')?.length).toBeGreaterThan(10)
     }
   })
 
   it('starts the viewer-liked fixtures in the liked state (aria-pressed, name suffix)', async () => {
     renderFeed()
-    await screen.findAllByTestId('post-card')
+    const liked = await findCard(DEMO_IDS.grid1)
+    const notLiked = await findCard(DEMO_IDS.countsModest)
 
-    expect(within(card(DEMO_IDS.grid1)).getByRole('button', { name: 'Like, 124, liked' }))
+    expect(within(liked).getByRole('button', { name: 'Like, 124, liked' }))
       .toHaveAttribute('aria-pressed', 'true')
-    expect(within(card(DEMO_IDS.countsModest)).getByRole('button', { name: 'Like, 1000' }))
+    expect(within(notLiked).getByRole('button', { name: 'Like, 1000' }))
       .toHaveAttribute('aria-pressed', 'false')
   })
 
   it('leaks no provenance value into the DOM (XC-002)', async () => {
     const { container } = renderFeed()
-    await screen.findAllByTestId('post-card')
+    // The LAST fixture in newest-first order is the oldest top-level post: once it
+    // is on screen the whole list has rendered.
+    await findCard(DEMO_IDS.hashtagReminder)
 
     const provenance = /human-simcell|human-participant|system-engine|ex-mock-0001/
     expect(container.textContent).not.toMatch(provenance)

@@ -50,8 +50,10 @@
  * the MOCK analog of the v2 `POST /api/posts`. It resolves each
  * `CreatePostMedia.mediaId` through the mock media registry (`@/core/media`) to
  * build the full `PostMedia`, mirroring the server's 400s for an unknown media id
- * and a missing alt; records `parentPostId` (the store links it to its parent —
- * see `postStore.appendPost`); and honours `engagementBaseline` for NON-
+ * and a missing alt (MOCK mode only — in live mode an unresolvable id is skipped
+ * from the local post, never thrown, because the server is the gate); records
+ * `parentPostId` (the store links it to its parent — see
+ * `postStore.appendPost`); and honours `engagementBaseline` for NON-
  * participant origins only (the server ignores it for participants). The LIVE
  * path is `livePostActions.publishPost`.
  *
@@ -64,6 +66,7 @@
 
 import { buildAndEmit, generateEventId } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { getMockMediaAsset } from '@/core/media/mockMediaRegistry'
 import { personaIdForHandle } from '@/features/personas'
 import { sanitizeText } from './sanitize'
@@ -116,31 +119,43 @@ function mergeCounts(
 }
 
 /**
- * MOCK analog of the server's media resolution: turns each `CreatePostMedia`
- * (an id the actor uploaded + alt text) into the full `PostMedia` a post
- * carries. Mirrors the server's 400s — an id the mock registry does not know,
- * or alt text that is empty after sanitization (NFR-001/NFR-004), throws
- * instead of quietly dropping the attachment, so a builder's missing-alt bug
- * shows up on `npm run dev` and not only against UAT.
+ * Builds the LOCAL post's `PostMedia[]` from `CreatePostMedia[]` (an id the actor
+ * uploaded + alt text), resolving each id through the mock media registry.
+ *
+ *  - MOCK mode (`USE_MOCK_DATA`): mirrors the server's 400s — an id the registry
+ *    does not know, or alt text that is empty after sanitization (NFR-001/
+ *    NFR-004), THROWS instead of quietly dropping the attachment, so a builder's
+ *    missing-alt bug shows up on `npm run dev` and not only against UAT.
+ *  - LIVE mode: the registry holds only mock assets, so a REAL uploaded asset id
+ *    is legitimately "unknown" here. The controller builds a local `Post` through
+ *    `createPost` (via `composeAsPersona`) BEFORE it fires `publishPost`, so
+ *    throwing would stop the publish ever being sent. The SERVER is the gate in
+ *    live mode: unresolvable (or alt-less) items are skipped from the local
+ *    `Post` and never throw.
  */
 function resolveMedia(items: readonly CreatePostMedia[] | undefined): PostMedia[] | undefined {
   if (items === undefined || items.length === 0) return undefined
 
-  return items.map(item => {
+  const resolved: PostMedia[] = []
+  for (const item of items) {
     const asset = getMockMediaAsset(item.mediaId)
     if (asset === undefined) {
-      throw new Error('createPost: that media attachment is not available.')
+      if (USE_MOCK_DATA) throw new Error('createPost: that media attachment is not available.')
+      continue
     }
     const alt = sanitizeText(item.alt).trim()
     if (alt.length === 0) {
-      throw new Error('createPost: every media attachment needs a description (alt text).')
+      if (USE_MOCK_DATA) {
+        throw new Error('createPost: every media attachment needs a description (alt text).')
+      }
+      continue
     }
     const posterUrl =
       item.posterMediaId !== undefined
         ? getMockMediaAsset(item.posterMediaId)?.url ?? asset.posterUrl
         : asset.posterUrl
 
-    return {
+    resolved.push({
       id: asset.id,
       kind: asset.kind,
       url: asset.url,
@@ -149,16 +164,19 @@ function resolveMedia(items: readonly CreatePostMedia[] | undefined): PostMedia[
       ...(asset.width !== undefined ? { width: asset.width } : {}),
       ...(asset.height !== undefined ? { height: asset.height } : {}),
       ...(asset.durationSec !== undefined ? { durationSec: asset.durationSec } : {}),
-    }
-  })
+    })
+  }
+  return resolved.length > 0 ? resolved : undefined
 }
 
 /**
  * Sanitizes + assembles a `Post` and emits exactly one XC-004 `'post'`
- * telemetry event. Never throws because of telemetry — `buildAndEmit` is
+ * telemetry event. Never throws because of TELEMETRY — `buildAndEmit` is
  * caller-safe, so a dead/misconfigured telemetry pipeline can never block a
- * post from being created. (It DOES throw for an invalid media attachment —
- * see {@link resolveMedia}.)
+ * post from being created. It can throw for ONE other reason: in MOCK mode only,
+ * an invalid media attachment (unknown id / no alt) — mirroring the server's 400.
+ * In LIVE mode it never throws for media; the server is the gate (see
+ * {@link resolveMedia}).
  */
 export function createPost(input: CreatePostInput): Post {
   const text = sanitizeText(input.text)
@@ -226,28 +244,34 @@ export function toParticipantView(post: Post): ParticipantPostView {
     // Contract v2 members. Each is rebuilt from its documented, participant-safe
     // keys (never passed through wholesale), so a wire object that happened to
     // carry an extra server-side key can not smuggle it onto a participant view.
-    ...(post.media !== undefined ? { media: post.media.map(narrowMedia) } : {}),
-    ...(post.inReplyTo !== undefined
+    // `!= null` (not `!== undefined`): a backend member that forgot
+    // `WhenWritingNull` arrives as JSON `null`; null is treated as ABSENT, so the
+    // key is dropped rather than emitted as a null a consumer would trip on.
+    ...(post.media != null ? { media: post.media.map(narrowMedia) } : {}),
+    ...(post.inReplyTo != null
       ? { inReplyTo: { postId: post.inReplyTo.postId, authorHandle: post.inReplyTo.authorHandle } }
       : {}),
-    ...(post.linkPreview !== undefined ? { linkPreview: post.linkPreview } : {}),
-    ...(post.viewer !== undefined
+    ...(post.linkPreview != null ? { linkPreview: post.linkPreview } : {}),
+    ...(post.viewer != null
       ? { viewer: { liked: post.viewer.liked, reposted: post.viewer.reposted } }
       : {}),
   }
 }
 
-/** Rebuilds one media item from its contract keys only (XC-002 defence in depth). */
+/**
+ * Rebuilds one media item from its contract keys only (XC-002 defence in depth).
+ * An optional member that is `null` on the wire is DROPPED (treated as absent).
+ */
 function narrowMedia(item: PostMedia): PostMedia {
   return {
     id: item.id,
     kind: item.kind,
     url: item.url,
     alt: item.alt,
-    ...(item.posterUrl !== undefined ? { posterUrl: item.posterUrl } : {}),
-    ...(item.width !== undefined ? { width: item.width } : {}),
-    ...(item.height !== undefined ? { height: item.height } : {}),
-    ...(item.durationSec !== undefined ? { durationSec: item.durationSec } : {}),
+    ...(item.posterUrl != null ? { posterUrl: item.posterUrl } : {}),
+    ...(item.width != null ? { width: item.width } : {}),
+    ...(item.height != null ? { height: item.height } : {}),
+    ...(item.durationSec != null ? { durationSec: item.durationSec } : {}),
   }
 }
 
@@ -256,8 +280,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** An optional member: absent (`undefined`) OR `null` (a backend that forgot `WhenWritingNull`). */
+function isAbsent(value: unknown): boolean {
+  return value === undefined || value === null
+}
+
 function isOptionalNumber(value: unknown): boolean {
-  return value === undefined || (typeof value === 'number' && Number.isFinite(value))
+  return isAbsent(value) || (typeof value === 'number' && Number.isFinite(value))
 }
 
 function isWellFormedMedia(item: unknown): boolean {
@@ -267,7 +296,7 @@ function isWellFormedMedia(item: unknown): boolean {
     (item.kind === 'image' || item.kind === 'video') &&
     typeof item.url === 'string' && item.url.length > 0 &&
     typeof item.alt === 'string' &&
-    (item.posterUrl === undefined || typeof item.posterUrl === 'string') &&
+    (isAbsent(item.posterUrl) || typeof item.posterUrl === 'string') &&
     isOptionalNumber(item.width) &&
     isOptionalNumber(item.height) &&
     isOptionalNumber(item.durationSec)
@@ -277,7 +306,9 @@ function isWellFormedMedia(item: unknown): boolean {
 /**
  * Runtime guard for the OPTIONAL contract-v2 members of a wire post — `media`,
  * `inReplyTo`, `viewer` (implementation.md §1.5.3). Each is accepted when absent
- * (every pre-v2 body and fixture) but must be well-formed when present, so a
+ * (every pre-v2 body and fixture) OR `null` (treated as absent: one backend
+ * member missing `WhenWritingNull` must not fail-close the whole feed), but must
+ * be well-formed when present, so a
  * malformed attachment fails CLOSED at the read seam instead of throwing deep in
  * the render tree (`PostMediaSlot` reads `url`/`alt`/`kind` unguarded).
  *
@@ -288,12 +319,12 @@ export function hasWellFormedV2Members(value: object): boolean {
   const p = value as Record<string, unknown>
   const { media, inReplyTo, viewer } = p
   return (
-    (media === undefined || (Array.isArray(media) && media.every(isWellFormedMedia))) &&
-    (inReplyTo === undefined ||
+    (isAbsent(media) || (Array.isArray(media) && media.every(isWellFormedMedia))) &&
+    (isAbsent(inReplyTo) ||
       (isRecord(inReplyTo) &&
         typeof inReplyTo.postId === 'string' && inReplyTo.postId.length > 0 &&
         typeof inReplyTo.authorHandle === 'string')) &&
-    (viewer === undefined ||
+    (isAbsent(viewer) ||
       (isRecord(viewer) &&
         typeof viewer.liked === 'boolean' &&
         typeof viewer.reposted === 'boolean'))

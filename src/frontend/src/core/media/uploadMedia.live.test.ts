@@ -121,6 +121,50 @@ describe('uploadMedia (live) — result and library freshness', () => {
     invalidate.mockRestore()
   })
 
+  it('treats null optional members as absent and returns a rebuilt view (M-4)', async () => {
+    postMock.mockResolvedValueOnce({
+      data: { ...ASSET, posterUrl: null, width: null, height: null, durationSec: null },
+    })
+
+    const asset = await uploadMedia(png())
+
+    expect(asset).toEqual(ASSET)
+    expect(Object.keys(asset).sort()).toEqual(['id', 'kind', 'url'])
+  })
+
+  it('keeps present optional members and drops stray server-side keys', async () => {
+    postMock.mockResolvedValueOnce({
+      data: {
+        ...ASSET,
+        kind: 'video',
+        posterUrl: 'https://blob/p.jpg',
+        width: 640,
+        height: 360,
+        durationSec: 4,
+        blobName: 'ex/secret.mp4',
+        uploadedByHumanId: 'human-secret',
+      },
+    })
+
+    const asset = await uploadMedia(png())
+
+    expect(asset).toEqual({
+      id: ASSET.id,
+      kind: 'video',
+      url: ASSET.url,
+      posterUrl: 'https://blob/p.jpg',
+      width: 640,
+      height: 360,
+      durationSec: 4,
+    })
+  })
+
+  it('still fails closed on a wrong-typed optional member', async () => {
+    postMock.mockResolvedValueOnce({ data: { ...ASSET, width: 'wide' } })
+
+    await expect(uploadMedia(png())).rejects.toThrow(MEDIA_ERROR_TEXT.failed)
+  })
+
   it('fails closed on a 2xx body that is not an asset', async () => {
     postMock.mockResolvedValueOnce({ data: { id: 'x' } })
 
@@ -149,6 +193,9 @@ describe('uploadMedia (live) — failures are mapped and never swallowed', () =>
   it.each([
     [413, MEDIA_ERROR_TEXT.tooLargeImage],
     [415, MEDIA_ERROR_TEXT.unsupported],
+    [400, MEDIA_ERROR_TEXT.refused],
+    [401, MEDIA_ERROR_TEXT.refused],
+    [403, MEDIA_ERROR_TEXT.refused],
     [429, MEDIA_ERROR_TEXT.rateLimited],
     [503, MEDIA_ERROR_TEXT.unavailable],
     [500, MEDIA_ERROR_TEXT.failed],

@@ -239,6 +239,17 @@ describe('uploadVideoWithPoster — poster first, then the video with posterMedi
     expect(seen.length).toBeGreaterThan(MOCK_PROGRESS_TICKS)
   })
 
+  it('hands the abort signal to the poster capture (it can be cancelled, not just time out)', async () => {
+    captureMock.mockResolvedValue(captured)
+    const controller = new AbortController()
+
+    const promise = uploadVideoWithPoster(videoFile(), { signal: controller.signal })
+    await vi.advanceTimersByTimeAsync(TOTAL_MS * 2)
+    await promise
+
+    expect(captureMock).toHaveBeenCalledWith(expect.any(File), { signal: controller.signal })
+  })
+
   it('uploads the video on its own when the browser cannot capture a poster', async () => {
     captureMock.mockRejectedValue(new Error('cannot decode'))
 
@@ -249,6 +260,18 @@ describe('uploadVideoWithPoster — poster first, then the video with posterMedi
     expect(createObjectURL).toHaveBeenCalledTimes(1)
     expect(video.kind).toBe('video')
     expect(video).not.toHaveProperty('posterUrl')
+  })
+
+  it('falls back to a poster-less video when the capture times out (never hangs the flow)', async () => {
+    captureMock.mockRejectedValue(new Error('That video took too long to read.'))
+
+    const promise = uploadVideoWithPoster(videoFile())
+    await vi.advanceTimersByTimeAsync(TOTAL_MS)
+    const video = await promise
+
+    expect(video.kind).toBe('video')
+    expect(video).not.toHaveProperty('posterUrl')
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
   })
 
   it('refuses a non-video file', async () => {

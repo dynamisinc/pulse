@@ -283,10 +283,11 @@ export function toPostView(view: ParticipantPostView, author: Persona): PostView
     text: view.text,
     counts: view.counts,
     scenarioTime: view.scenarioTime,
-    ...(view.media !== undefined ? { media: view.media } : {}),
-    ...(view.inReplyTo !== undefined ? { inReplyTo: view.inReplyTo } : {}),
-    ...(view.linkPreview !== undefined ? { linkPreview: view.linkPreview } : {}),
-    ...(view.viewer !== undefined ? { viewer: view.viewer } : {}),
+    // `!= null`: a `null` member (realtime payloads included) is treated as absent.
+    ...(view.media != null ? { media: view.media } : {}),
+    ...(view.inReplyTo != null ? { inReplyTo: view.inReplyTo } : {}),
+    ...(view.linkPreview != null ? { linkPreview: view.linkPreview } : {}),
+    ...(view.viewer != null ? { viewer: view.viewer } : {}),
   }
 }
 

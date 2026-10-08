@@ -234,3 +234,70 @@ describe('resolveFeed — the isPost guard on v2 members', () => {
     await expect(resolveFeed()).rejects.toThrow(/malformed post set/)
   })
 })
+
+describe('resolveFeed — a stray null does not fail-close the whole feed (M-4)', () => {
+  const wire = {
+    id: 'p1',
+    authorPersonaId: 'persona-a',
+    text: 't',
+    counts: { reply: 0, repost: 0, like: 0 },
+    scenarioTime: '2033-09-04T13:00:00Z',
+  }
+
+  it('accepts null media sub-members and null inReplyTo / viewer, and assembles clean views', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: [
+        {
+          ...wire,
+          media: [
+            {
+              id: 'm',
+              kind: 'video',
+              url: '/v.mp4',
+              alt: 'a',
+              posterUrl: null,
+              width: null,
+              height: null,
+              durationSec: null,
+            },
+          ],
+          inReplyTo: null,
+          viewer: null,
+        },
+        { ...wire, id: 'p2', media: null, linkPreview: null },
+      ],
+    })
+
+    const posts = await resolveFeed()
+    const views = assembleFeedView(posts, [AUTHOR])
+
+    expect(views).toHaveLength(2)
+    const [first, second] = views
+    expect(first?.media).toEqual([{ id: 'm', kind: 'video', url: '/v.mp4', alt: 'a' }])
+    for (const view of views) {
+      expect(view).not.toHaveProperty('inReplyTo')
+      expect(view).not.toHaveProperty('viewer')
+      expect(JSON.stringify(view)).not.toContain('null')
+    }
+    expect(second).not.toHaveProperty('media')
+    expect(second).not.toHaveProperty('linkPreview')
+  })
+
+  it('toPostView drops null members of an already-narrowed view too', () => {
+    const view = {
+      id: 'p',
+      authorPersonaId: 'persona-a',
+      text: 't',
+      counts: { reply: 0, repost: 0, like: 0 },
+      scenarioTime: '2033-09-04T13:00:00Z',
+      media: null,
+      inReplyTo: null,
+      linkPreview: null,
+      viewer: null,
+    } as unknown as Parameters<typeof toPostView>[0]
+
+    expect(Object.keys(toPostView(view, AUTHOR)).sort()).toEqual(
+      ['author', 'counts', 'id', 'scenarioTime', 'text'],
+    )
+  })
+})
