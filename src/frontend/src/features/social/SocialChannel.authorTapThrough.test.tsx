@@ -8,8 +8,10 @@
  *    thread, and a hashtag feed;
  *  - the card's own thread-open target still works and is not shadowed by the
  *    new author target;
- *  - focus lands in the newly-opened detail region on a DETAIL→DETAIL
- *    transition (thread → profile) — the SUG-001 gap this pass closes.
+ *  - focus lands on the new route's heading on a DETAIL→DETAIL transition
+ *    (thread → profile) — the SUG-001 gap this pass closed, now covered by the
+ *    route-change focus rule of demo-polish F1 (focus moves to the main region's
+ *    heading on EVERY route change).
  *
  * `useFeed` is mocked with two fixture posts whose ids are REAL seeded post
  * ids (`postService.ts`), so `useThread` — which reads the post store, not
@@ -24,6 +26,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
@@ -91,13 +94,15 @@ function renderChannel() {
   const mount: ShellMountProps = { variant: 'full', scenarioNow: SCENARIO_NOW }
   return render(
     <QueryClientProvider client={client}>
-      <ExerciseContextProvider>
-        <SessionProvider>
-          <ShellContextProvider value={mount}>
-            <SocialChannel />
-          </ShellContextProvider>
-        </SessionProvider>
-      </ExerciseContextProvider>
+      <MemoryRouter initialEntries={['/home']}>
+        <ExerciseContextProvider>
+          <SessionProvider>
+            <ShellContextProvider value={mount}>
+              <SocialChannel />
+            </ShellContextProvider>
+          </SessionProvider>
+        </ExerciseContextProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -151,7 +156,7 @@ describe('SocialChannel — author tap-through opens that author\'s profile (SOC
     expect(screen.getByTestId('social-profile-region')).toBeInTheDocument()
     expect(screen.getByTestId('social-feed-region')).not.toBeVisible()
 
-    await user.click(screen.getByRole('button', { name: /back to feed/i }))
+    await user.click(screen.getByRole('button', { name: /^back$/i }))
     await waitFor(() => expect(screen.getByTestId('social-feed-region')).toBeVisible())
     expect(screen.queryByTestId('social-profile-region')).not.toBeInTheDocument()
   })
@@ -164,7 +169,7 @@ describe('SocialChannel — author tap-through opens that author\'s profile (SOC
     // Feed -> thread (the card's own open target still works, unshadowed).
     await user.click(first(within(feedPanel()).getAllByTestId('post-open-target')))
     const thread = await screen.findByTestId('social-thread-region')
-    expect(thread).toHaveFocus()
+    expect(screen.getByRole('heading', { name: 'Post' })).toHaveFocus()
 
     // Thread -> profile: a DETAIL->DETAIL transition.
     await user.click(authorTargetFor(thread, AGENCY()))
@@ -173,9 +178,12 @@ describe('SocialChannel — author tap-through opens that author\'s profile (SOC
       await screen.findByRole('heading', { name: AGENCY().displayName }),
     ).toBeInTheDocument()
     expect(screen.queryByTestId('social-thread-region')).not.toBeInTheDocument()
-    // Focus followed the swap into the newly-shown region instead of being
-    // stranded on the now-unmounted author control (NFR-001).
-    expect(screen.getByTestId('social-profile-region')).toHaveFocus()
+    // Focus followed the swap onto the new page's heading instead of being
+    // stranded on the now-unmounted author control (NFR-001). The profile's heading
+    // renders once its own cast read settles, so focus gets there a beat later.
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: AGENCY().displayName })).toHaveFocus(),
+    )
   })
 
   it('opens the tapped author\'s profile from inside a HASHTAG FEED, and moves focus (SUG-001)', async () => {
@@ -194,7 +202,9 @@ describe('SocialChannel — author tap-through opens that author\'s profile (SOC
       await screen.findByRole('heading', { name: AGENCY().displayName }),
     ).toBeInTheDocument()
     expect(screen.queryByTestId('social-hashtag-region')).not.toBeInTheDocument()
-    expect(screen.getByTestId('social-profile-region')).toHaveFocus()
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: AGENCY().displayName })).toHaveFocus(),
+    )
   })
 
   it('still opens the thread from a card body tap — the author target does not shadow it', async () => {
