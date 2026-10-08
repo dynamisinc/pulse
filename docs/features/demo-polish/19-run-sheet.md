@@ -1,6 +1,6 @@
 # Story: Run sheet
 
-**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** CTL-010 (lite), CTL-011 (lite), CTL-013 (lite), CTL-001, COR-018, NFR-001  ·  **Design decisions:** none (file schema `pulse.runsheet.v1`, implementation.md §1.9)  ·  **Issue:** #438
 **Story ID:** C3  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** 3
 **Home stories:** [`inject-queue/02`](../inject-queue/02-fire-hold-skip-edit.md), [`/03`](../inject-queue/03-standalone-scheduler.md) (lite — manual fire only; no scheduler).
