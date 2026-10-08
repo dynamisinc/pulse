@@ -151,6 +151,7 @@ import {
   type EngineReviewItem,
   type ReviewQueueEditSlotProps,
 } from '../engine'
+import type { ReplyTarget } from '@/features/social'
 
 /** The docked review-queue column's fixed width (D5 §6 "336px, sole tenant"). */
 const REVIEW_QUEUE_WIDTH_PX = 336
@@ -188,17 +189,11 @@ const KBD_SX = {
 
 /**
  * A post being replied to, as the live-world column hands it to the composer
- * (implementation.md §1.11, owned by demo-polish F0). Declared LOCALLY, behind
- * the frozen shape, until F0 is merged and this can be imported from
- * `@/features/social`; the two are structurally identical, so swapping the
- * import later changes nothing for callers. `excerpt` is at most 140 chars.
+ * (implementation.md §1.11). Owned by demo-polish F0 (`@/features/social`); re-exported here
+ * so slot authors import the console's whole slot contract from one place. `excerpt` is at most
+ * 140 chars.
  */
-export interface ReplyTarget {
-  readonly postId: string
-  readonly authorHandle: string
-  readonly authorDisplayName: string
-  readonly excerpt: string
-}
+export type { ReplyTarget }
 
 /**
  * What the console hands to each main-area slot (implementation.md §1.11).

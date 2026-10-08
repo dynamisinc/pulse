@@ -66,7 +66,7 @@ import {
 import { useExerciseContext } from '@/core/exerciseContext'
 import { formatScenarioTime } from '@/core/clock'
 import type { Post } from '@/features/social'
-import { resolveFeed, type FeedScope } from '@/features/social/services/feedService'
+import { resolveFeed } from '@/features/social/services/feedService'
 import { postStore } from '@/features/social/services/postStore'
 import type { Persona, StaffPersona } from '@/features/personas'
 import { audienceBandLabel, categoryChipLabel, resolveVoiceNotes } from '../services/personaVoice'
@@ -111,27 +111,12 @@ const SECTION_LABEL_SX = {
 }
 
 /**
- * The frozen F0 feed-read seam (demo-polish implementation.md §1.11):
- * `resolveFeed(scope, { includeReplies })`. Typed structurally so this compiles
- * both before and after that signature lands in `feedService` — a function with
- * fewer parameters is assignable to this type, so until then the options argument
- * is simply ignored at runtime (top-level posts only; the pre-F0 feed has no
- * replies to include). Once `feedService` carries the options parameter the
- * local type can go and the call can pass the options directly.
- */
-type ResolveFeedWithOptions = (
-  scope: FeedScope,
-  options: { includeReplies: boolean },
-) => Promise<Post[]>
-
-/**
- * The live exercise feed WITH replies. `resolveFeed` is looked up at CALL time
- * (not captured into a module-level constant), so a spy or a replaced export is
- * honoured.
+ * The live exercise feed WITH replies (F0's `resolveFeed(scope, { includeReplies })`).
+ * `resolveFeed` is looked up at CALL time (not captured into a module-level constant), so a spy or
+ * a replaced export is honoured.
  */
 function readFeed(): Promise<Post[]> {
-  const resolve: ResolveFeedWithOptions = resolveFeed
-  return resolve('all', { includeReplies: true })
+  return resolveFeed('all', { includeReplies: true })
 }
 
 /**
