@@ -12,6 +12,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { endSession } from './endSession'
 import { logout } from './logout'
 import { queryClient } from '../services/queryClient'
+import { ownPostStore } from '@/features/social/services/ownPostStore'
+import {
+  consumeReplyFocus,
+  requestReplyFocus,
+  resetReplyIntent,
+} from '@/features/social/services/replyIntent'
 
 vi.mock('./logout', () => ({ logout: vi.fn().mockResolvedValue(undefined) }))
 
@@ -21,6 +27,8 @@ beforeEach(() => {
   mockLogout.mockReset()
   mockLogout.mockResolvedValue(undefined)
   queryClient.clear()
+  ownPostStore.resetForTests()
+  resetReplyIntent()
 })
 
 describe('endSession', () => {
@@ -50,5 +58,44 @@ describe('endSession', () => {
     await endSession()
 
     expect(cacheSeenInsideLogout).toBeUndefined()
+  })
+
+  it('forgets the composer\'s session-scoped state: own posts and a pending reply intent (F4)', async () => {
+    ownPostStore.add({
+      id: 'post-own-1',
+      authorPersonaId: 'persona-dreyes_fh',
+      text: 'made in the previous session',
+      counts: { reply: 0, repost: 0, like: 0 },
+      scenarioTime: '2033-09-04T15:00:00Z',
+    })
+    requestReplyFocus('post-1')
+    const heard = vi.fn()
+    ownPostStore.subscribe(heard)
+
+    await endSession()
+
+    expect(ownPostStore.getAll()).toEqual([])
+    expect(ownPostStore.has('post-own-1')).toBe(false)
+    // A mounted feed is told, so it drops the rows rather than showing them until a refresh.
+    expect(heard).toHaveBeenCalledTimes(1)
+    expect(consumeReplyFocus('post-1')).toBe(false)
+  })
+
+  it('clears them SYNCHRONOUSLY too, before awaiting logout()', async () => {
+    ownPostStore.add({
+      id: 'post-own-2',
+      authorPersonaId: 'persona-dreyes_fh',
+      text: 'x',
+      counts: { reply: 0, repost: 0, like: 0 },
+      scenarioTime: '2033-09-04T15:00:00Z',
+    })
+    let seenInsideLogout: number | undefined
+    mockLogout.mockImplementation(async () => {
+      seenInsideLogout = ownPostStore.getAll().length
+    })
+
+    await endSession()
+
+    expect(seenInsideLogout).toBe(0)
   })
 })

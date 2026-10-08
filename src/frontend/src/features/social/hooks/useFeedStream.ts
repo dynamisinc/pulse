@@ -52,6 +52,14 @@
  * set, and count), so a later re-enable without a full remount starts clean
  * rather than resurfacing stale pre-disable arrivals.
  *
+ * DISCARDING ARRIVALS AFTER THE FACT (demo-polish F4). `admit` only sees a post at
+ * the moment it arrives. The author's OWN post can arrive before the app knows
+ * its id (the SignalR echo can beat the 201 response), so by the time it is
+ * registered as "mine" the echo is already buffered and counted. `discard(ids)`
+ * removes named posts from the buffer and lowers the count to match, keeping the
+ * pill's number honest (a "1 new post" pill whose only post is the reader's own
+ * would load nothing).
+ *
  * ISOLATION (COR-001) / XC-002. The hook adds no `exerciseId` and never widens
  * a post's shape — it moves already-narrowed `ParticipantPostView`s from the
  * source into a buffer and back out. Both guarantees are inherited from the
@@ -116,6 +124,13 @@ export interface UseFeedStreamResult {
    * prepends them to the reading stream (AC2). Stable identity.
    */
   loadBuffered(): ParticipantPostView[]
+  /**
+   * Removes the named posts from the buffer (if buffered) and lowers `newCount`
+   * to match. Ids that are not buffered are ignored. Stable identity. Used by
+   * `<Feed>` to drop the echo of the reader's own post that arrived before the
+   * post was registered as theirs (see the module header).
+   */
+  discard(ids: readonly string[]): void
   /** The current transport mode (informational; fallback is transparent, NFR-003). */
   readonly mode: FeedTransportMode
 }
@@ -202,9 +217,20 @@ export function useFeedStream({
     return drained
   }, [])
 
+  const discard = useCallback((ids: readonly string[]): void => {
+    if (ids.length === 0 || bufferRef.current.length === 0) return
+    const doomed = new Set(ids)
+    const kept = bufferRef.current.filter(post => !doomed.has(post.id))
+    if (kept.length === bufferRef.current.length) return
+    for (const id of doomed) bufferedIdsRef.current.delete(id)
+    bufferRef.current = kept
+    setNewCount(kept.length)
+  }, [])
+
   return {
     newCount: enabled ? newCount : 0,
     loadBuffered,
+    discard,
     mode: source.mode,
   }
 }

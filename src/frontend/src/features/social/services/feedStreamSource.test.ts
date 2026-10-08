@@ -6,9 +6,9 @@
  * `realtimeFeed.ts`'s own transport/fallback/dedup suite (see
  * `realtimeFeed.test.ts`); this file only proves:
  *
- *  - `makeRealtimeFeedSource()` is a faithful, argument-preserving passthrough
- *    over the injected feed, and its `mode` tracks the feed's mode LIVE
- *    (including a realtime → polling flip) — the story-04-level proof that
+ *  - `makeRealtimeArrivalSource()` is a faithful, argument-preserving
+ *    passthrough over the injected feed, and its `mode` tracks the feed's mode
+ *    LIVE (including a realtime → polling flip) — the story-04-level proof that
  *    NFR-003 fallback is transparent to this seam;
  *  - `makeMockPostStoreSource()` baselines on `start()` (pre-existing store
  *    posts are never emitted), emits only posts appended AFTER, each narrowed
@@ -17,12 +17,25 @@
  *    `actingHumanId` + `injectId` — re-baselines cleanly across a stop/start
  *    cycle, and reports a constant `'realtime'` mode;
  *  - neither source threads a client `exerciseId`/scope parameter onto the
- *    store/feed it wraps (COR-001, by construction).
+ *    store/feed it wraps (COR-001, by construction);
+ *  - REPLIES NEVER RAISE THE PILL (demo-polish F4): the FEED sources
+ *    (`makeRealtimeFeedSource` / `makeMockPostStoreSource`) drop a post carrying
+ *    `inReplyTo`, while the ARRIVAL sources (what a thread listens to) deliver it;
+ *  - `refCounted` lets the feed and a thread share one transport: it starts once,
+ *    stops only with the last consumer, and an extra `stop()` is harmless.
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { ParticipantPostView, Post } from '@/features/social'
 import type { PostStreamHandler, RealtimeFeed, FeedTransportMode } from './realtimeFeed'
-import { makeMockPostStoreSource, makeRealtimeFeedSource } from './feedStreamSource'
+import {
+  makeMockArrivalSource,
+  makeMockPostStoreSource,
+  makeRealtimeArrivalSource,
+  makeRealtimeFeedSource,
+  refCounted,
+  topLevelOnly,
+  type FeedStreamSource,
+} from './feedStreamSource'
 
 // ---------------------------------------------------------------------------
 // makeRealtimeFeedSource — thin passthrough
@@ -47,10 +60,10 @@ class FakeRealtimeFeed implements RealtimeFeed {
   }
 }
 
-describe('makeRealtimeFeedSource — faithful passthrough over the shared transport (AC4)', () => {
+describe('makeRealtimeArrivalSource — faithful passthrough over the shared transport (AC4)', () => {
   it('delegates subscribe/start/stop to the injected feed unchanged, with no extra argument', async () => {
     const feed = new FakeRealtimeFeed()
-    const source = makeRealtimeFeedSource(feed)
+    const source = makeRealtimeArrivalSource(feed)
 
     const handler = vi.fn()
     const unsubscribe = source.subscribe(handler)
@@ -71,7 +84,7 @@ describe('makeRealtimeFeedSource — faithful passthrough over the shared transp
   it('reflects the feed transport mode LIVE, including a realtime → polling fallback flip (NFR-003 transparency)', () => {
     const feed = new FakeRealtimeFeed()
     feed.mode = 'realtime'
-    const source = makeRealtimeFeedSource(feed)
+    const source = makeRealtimeArrivalSource(feed)
     expect(source.mode).toBe('realtime')
 
     feed.mode = 'polling'
@@ -224,5 +237,174 @@ describe('makeMockPostStoreSource — introduces no client exerciseId (COR-001, 
     expect(getPostsSpy.mock.calls.every(args => args.length === 0)).toBe(true)
     expect(subscribeSpy).toHaveBeenCalledTimes(1)
     expect(subscribeSpy.mock.calls[0]).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Replies never raise the pill (demo-polish F4)
+// ---------------------------------------------------------------------------
+
+function view(id: string, inReplyTo?: ParticipantPostView['inReplyTo']): ParticipantPostView {
+  return {
+    id,
+    authorPersonaId: 'persona-fairhavenwater',
+    text: id,
+    counts: { reply: 0, repost: 0, like: 0 },
+    scenarioTime: '2033-09-04T15:00:00Z',
+    ...(inReplyTo !== undefined ? { inReplyTo } : {}),
+  }
+}
+
+const REPLY_TO = { postId: 'post-parent', authorHandle: 'FulcoEM' }
+
+describe('feed sources drop replies; arrival sources deliver them (demo-polish F4)', () => {
+  it('makeRealtimeFeedSource passes top-level posts and DROPS a post carrying inReplyTo', () => {
+    const feed = new FakeRealtimeFeed()
+    let push: PostStreamHandler = () => {}
+    feed.subscribeSpy = vi.fn((handler: PostStreamHandler) => {
+      push = handler
+      return () => {}
+    })
+    const received: string[] = []
+    makeRealtimeFeedSource(feed).subscribe(post => received.push(post.id))
+
+    push(view('top-1'))
+    push(view('reply-1', REPLY_TO))
+    push(view('top-2'))
+
+    expect(received).toEqual(['top-1', 'top-2'])
+  })
+
+  it('makeRealtimeArrivalSource delivers EVERYTHING, replies included (what a thread listens to)', () => {
+    const feed = new FakeRealtimeFeed()
+    let push: PostStreamHandler = () => {}
+    feed.subscribeSpy = vi.fn((handler: PostStreamHandler) => {
+      push = handler
+      return () => {}
+    })
+    const received: string[] = []
+    makeRealtimeArrivalSource(feed).subscribe(post => received.push(post.id))
+
+    push(view('top-1'))
+    push(view('reply-1', REPLY_TO))
+
+    expect(received).toEqual(['top-1', 'reply-1'])
+  })
+
+  it('makeMockPostStoreSource drops an appended reply; makeMockArrivalSource delivers it', async () => {
+    const store = makeFakeStore([])
+    const feedSource = makeMockPostStoreSource(store)
+    const arrivalSource = makeMockArrivalSource(store)
+    const fed: string[] = []
+    const arrived: string[] = []
+    feedSource.subscribe(v => fed.push(v.id))
+    arrivalSource.subscribe(v => arrived.push(v.id))
+    await feedSource.start()
+    await arrivalSource.start()
+
+    store.appendPost(buildPost({ id: 'top-1' }))
+    store.appendPost(buildPost({ id: 'reply-1', inReplyTo: REPLY_TO }))
+
+    expect(fed).toEqual(['top-1'])
+    expect(arrived).toEqual(['top-1', 'reply-1'])
+  })
+
+  it('topLevelOnly passes start/stop/mode straight through and adds no transport of its own', async () => {
+    const feed = new FakeRealtimeFeed()
+    feed.mode = 'polling'
+    const source = topLevelOnly(makeRealtimeArrivalSource(feed))
+
+    await source.start()
+    source.stop()
+
+    expect(feed.startSpy).toHaveBeenCalledTimes(1)
+    expect(feed.stopSpy).toHaveBeenCalledTimes(1)
+    expect(source.mode).toBe('polling')
+  })
+
+  it('the filter keys on a PRESENT inReplyTo only (null/undefined are top-level)', () => {
+    const feed = new FakeRealtimeFeed()
+    let push: PostStreamHandler = () => {}
+    feed.subscribeSpy = vi.fn((handler: PostStreamHandler) => {
+      push = handler
+      return () => {}
+    })
+    const received: string[] = []
+    makeRealtimeFeedSource(feed).subscribe(post => received.push(post.id))
+
+    // A wire `null` is treated as absent everywhere else in this layer.
+    push({ ...view('null-reply'), inReplyTo: null } as unknown as ParticipantPostView)
+
+    expect(received).toEqual(['null-reply'])
+  })
+})
+
+describe('refCounted — the feed and a thread share ONE transport (demo-polish F4)', () => {
+  function counting(): { source: FeedStreamSource; starts: () => number; stops: () => number } {
+    let starts = 0
+    let stops = 0
+    return {
+      source: {
+        subscribe: () => () => {},
+        start: () => {
+          starts += 1
+          return Promise.resolve()
+        },
+        stop: () => {
+          stops += 1
+        },
+        mode: 'realtime',
+      },
+      starts: () => starts,
+      stops: () => stops,
+    }
+  }
+
+  it('starts once for the first consumer and stops only when the LAST one stops', async () => {
+    const { source, starts, stops } = counting()
+    const shared = refCounted(source)
+
+    await shared.start() // the feed
+    await shared.start() // a thread
+    expect(starts()).toBe(1)
+
+    shared.stop() // the thread closes
+    expect(stops()).toBe(0)
+    shared.stop() // the feed unmounts
+    expect(stops()).toBe(1)
+  })
+
+  it('restarts the transport for a later consumer after everyone left', async () => {
+    const { source, starts } = counting()
+    const shared = refCounted(source)
+
+    await shared.start()
+    shared.stop()
+    await shared.start()
+
+    expect(starts()).toBe(2)
+  })
+
+  it('ignores an unmatched stop() instead of going negative', async () => {
+    const { source, starts, stops } = counting()
+    const shared = refCounted(source)
+
+    shared.stop()
+    expect(stops()).toBe(0)
+
+    await shared.start()
+    expect(starts()).toBe(1)
+  })
+
+  it('exposes the wrapped source mode live and delegates subscribe untouched', () => {
+    const feed = new FakeRealtimeFeed()
+    const shared = refCounted(makeRealtimeArrivalSource(feed))
+    const handler = vi.fn()
+
+    shared.subscribe(handler)
+
+    expect(feed.subscribeSpy.mock.calls[0]).toEqual([handler])
+    feed.mode = 'polling'
+    expect(shared.mode).toBe('polling')
   })
 })

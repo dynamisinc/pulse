@@ -1,6 +1,6 @@
 # Story: Threads and composer — replies, attach, instant own post
 
-**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** SOC-001, SOC-010, SOC-011, SOC-012, NFR-001, NFR-004, COR-053  ·  **Design decisions:** D1-006 (flattened thread), D1-R5 (ring counter), D1-009 (tombstone), D1-011  ·  **Issue:** #432
 **Story ID:** F4  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** L  ·  **Wave:** 2
 **Home stories:** [`posts/01`](../posts/01-post-composition.md), [`threads-replies/02`](../threads-replies/02-reply-counts-and-open.md), [`/03`](../threads-replies/03-persona-participant-replies.md).
