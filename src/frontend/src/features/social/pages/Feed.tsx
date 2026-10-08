@@ -128,6 +128,25 @@
  * supplies it). `FeedRow`'s memoization is unchanged (NFR-002/SOC-071): it is a
  * pure function of `post`/`variant`/the stable callbacks.
  *
+ * YOUR OWN POST APPEARS INSTANTLY (demo-polish F4, story 13). D1-005's "arrivals
+ * buffer behind the pill" is for OTHER people's posts. After a successful publish
+ * the composer registers the created post in `ownPostStore` (`useOwnPosts`), and
+ * this page merges it at the TOP of the All Posts feed at once — exactly once, no
+ * pill tap. The stream must then NOT hand the same post back as an "echo":
+ *   - `admit` rejects any arrival whose id is already the viewer's own (the echo
+ *     that lands AFTER the 201 / registration), and
+ *   - a layout effect `discard`s the own ids from the pill's buffer (the echo that
+ *     landed BEFORE — the broadcast can beat the 201 response) so the count never
+ *     promises a post that loads nothing.
+ * Replies never reach the pill at all: the feed stream is top-level only
+ * (`feedStreamSource.topLevelOnly`). A Following mount merges nothing of its own —
+ * your post is not "from someone you follow" — and the own-post row de-dupes
+ * against the baseline and the pill-loaded rows by id.
+ *
+ * THE REPLY BUTTON opens the thread with its composer focused: `onReply` records the
+ * intent (`services/replyIntent`) and then calls `onOpenThread`, so it works through
+ * whatever navigation the shell owns. (A body tap opens the thread without it.)
+ *
  * LOADING STATE: the "Loading posts…" line is `<FeedSkeleton>` (F0 stub -> F5
  * fills in skeleton rows); this page only decides WHEN to show it.
  *
@@ -139,7 +158,15 @@
  * guarantee is lost). Omitted ⇒ the author identity renders as inert text.
  */
 
-import { memo, useCallback, useMemo, useState, useEffect, useRef } from 'react'
+import {
+  memo,
+  useCallback,
+  useMemo,
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+} from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { scenarioNow } from '@/core/clock'
@@ -155,6 +182,9 @@ import { compareNewestFirst, toPostView, type FeedScope } from '../services/feed
 import { useFeed } from '../hooks/useFeed'
 import { useFeedStream } from '../hooks/useFeedStream'
 import { useFollowedSet } from '../hooks/useFollowedSet'
+import { useOwnPosts } from '../hooks/useOwnPosts'
+import { ownPostStore } from '../services/ownPostStore'
+import { requestReplyFocus } from '../services/replyIntent'
 import { NewPostsPill } from '../components/NewPostsPill'
 import { FeedSkeleton } from '../components/FeedSkeleton'
 import styles from './Feed.module.css'
@@ -201,6 +231,9 @@ interface FeedRowProps {
    * identity (a `useCallback`), so the memoized row still skips re-render under
    * burst (NFR-002/SOC-071) even though a function prop is threaded through. */
   onOpenThread?: (id: string) => void
+  /** Opens this post's thread with the reply composer focused (the reply button);
+   * stable identity for the same memo reason. Omitted in isolation. */
+  onReply?: (id: string) => void
   /** Opens the tapped hashtag's feed; supplied by the shell channel
    * (Wave-S3.1). Omitted in isolation — hashtags stay inert links. */
   onHashtagOpen?: (tag: string) => void
@@ -221,18 +254,20 @@ const FeedRow = memo(function FeedRow({
   post,
   variant,
   onOpenThread,
+  onReply,
   onHashtagOpen,
   onOpenProfile,
 }: FeedRowProps) {
   return (
     <li className={styles.row}>
-      {/* Tapping the post body OR its reply affordance opens the flattened
-          thread (SOC-011); the shell channel supplies onOpenThread. */}
+      {/* Tapping the post body opens the flattened thread (SOC-011); its reply
+          affordance opens it with the composer focused (F4). The shell channel
+          supplies onOpenThread. */}
       <PostCard
         post={post}
         variant={variant}
         onOpen={onOpenThread}
-        onReply={onOpenThread}
+        onReply={onReply}
         onHashtagOpen={onHashtagOpen}
         onOpenProfile={onOpenProfile}
       />
@@ -297,23 +332,39 @@ export function Feed({
   // always defined when `isFollowing` holds (the COR-015 guard above).
   const { isFollowed } = useFollowedSet(isFollowing ? session.personaId : undefined)
 
-  // The Following scope's arrival filter (module header). Stable identity —
-  // `isFollowed` is stable for the component's life, so this predicate never
+  // The arrival filter (module header). Two rules, both applied at the moment a
+  // post is OFFERED to the buffer:
+  //  - never count the viewer's OWN post as "new" - it is already on screen at the
+  //    top (an echo that lands after registration is rejected here; one that landed
+  //    before is `discard`ed below);
+  //  - under Following, admit only accounts the reader follows (feeds-discovery/08).
+  // Stable identity - `isFollowing` and `isFollowed` are stable for the component's
+  // life and `ownPostStore.has` is read at call time - so this predicate never
   // re-subscribes the stream, not even when the reader follows someone.
-  const admitFollowedAuthors = useCallback(
-    (post: ParticipantPostView) => isFollowed(post.authorPersonaId),
-    [isFollowed],
+  const admitArrival = useCallback(
+    (post: ParticipantPostView) =>
+      !ownPostStore.has(post.id) && (!isFollowing || isFollowed(post.authorPersonaId)),
+    [isFollowing, isFollowed],
   )
 
   // Real-time buffer behind the pill. Disabled (and the pill hidden) ONLY for an
-  // observer/read-only session (D1-011) — nothing streams there. The Following
-  // scope streams too, narrowed by `admit`; All Posts passes no predicate at all
-  // (the conditional spread keeps that call byte-identical to story 04's).
+  // observer/read-only session (D1-011) — nothing streams there. The stream is
+  // top-level only (replies never raise the pill - `feedStreamSource`).
   const streamEnabled = affordances
-  const { newCount, loadBuffered } = useFeedStream({
+  const { newCount, loadBuffered, discard } = useFeedStream({
     enabled: streamEnabled,
-    ...(isFollowing ? { admit: admitFollowedAuthors } : {}),
+    admit: admitArrival,
   })
+
+  // The viewer's own just-published posts (ownPostStore), newest-registered first.
+  const ownPosts = useOwnPosts()
+
+  // An own post whose echo arrived BEFORE it was registered (the broadcast can beat
+  // the 201) is already buffered and counted: take it back out before paint, so the
+  // pill never flashes a number for a post that is already on screen.
+  useLayoutEffect(() => {
+    if (ownPosts.length > 0) discard(ownPosts.map(post => post.id))
+  }, [ownPosts, discard])
 
   // Posts the reader has LOADED from the pill — prepended above the frozen
   // baseline, newest-first, accumulated across taps. Untouched until a tap.
@@ -326,14 +377,43 @@ export function Feed({
     [personas],
   )
 
-  // Ids already on screen (loaded-live + frozen baseline) — a loaded buffered
+  // The viewer's own TOP-LEVEL posts as renderable views (a reply is not a feed
+  // item). Not merged under Following - your post is not "from someone you follow".
+  // Only posts authored by THIS session's persona are merged: `ownPostStore` is also
+  // reset on sign-out (`core/auth/endSession`), and this is the second line of defence
+  // if a post made as another persona ever survived into this session.
+  // Memoized so the rows keep their identity (NFR-002/SOC-071).
+  const viewerPersonaId = session.personaId
+  const ownViews = useMemo(
+    () => isFollowing || viewerPersonaId === undefined
+      ? []
+      : resolveLiveViews(
+        ownPosts.filter(
+          post => post.inReplyTo == null && post.authorPersonaId === viewerPersonaId,
+        ),
+        personaById,
+        new Set(posts.map(post => post.id)),
+      ),
+    [isFollowing, viewerPersonaId, ownPosts, personaById, posts],
+  )
+
+  // Ids already on screen (own + loaded-live + frozen baseline) — a loaded buffered
   // post matching one is skipped, so the mount-window overlap never dupes.
   const renderedIds = useMemo(() => {
     const ids = new Set<string>()
+    for (const view of ownViews) ids.add(view.id)
     for (const view of liveViews) ids.add(view.id)
     for (const post of posts) ids.add(post.id)
     return ids
-  }, [liveViews, posts])
+  }, [ownViews, liveViews, posts])
+
+  // The reply button: remember that this thread is being opened to reply, then
+  // open it (works through whatever navigation the shell owns - replyIntent).
+  const handleReply = useCallback((postId: string) => {
+    if (onOpenThread === undefined) return
+    requestReplyFocus(postId)
+    onOpenThread(postId)
+  }, [onOpenThread])
 
   const handleLoadNew = useCallback(() => {
     // Guard BEFORE draining: if the persona cast has not resolved yet, do NOT
@@ -403,7 +483,15 @@ export function Feed({
     })
   }, [exerciseId, timeZone, session.accountId, feedEntityId])
 
-  const displayViews = liveViews.length > 0 ? [...liveViews, ...posts] : posts
+  // Above the frozen baseline: the viewer's own posts and anything loaded from the
+  // pill, newest-first by scenario time (COR-053). The sort is stable, so equal
+  // instants keep own-before-loaded. De-duped by id (own vs loaded vs baseline).
+  const aboveBaseline = useMemo(() => {
+    if (ownViews.length === 0) return liveViews
+    const ownIds = new Set(ownViews.map(view => view.id))
+    return sortNewestFirst([...ownViews, ...liveViews.filter(view => !ownIds.has(view.id))])
+  }, [ownViews, liveViews])
+  const displayViews = aboveBaseline.length > 0 ? [...aboveBaseline, ...posts] : posts
 
   return (
     <section ref={sectionRef} className={styles.feed} aria-labelledby="feed-heading">
@@ -429,6 +517,7 @@ export function Feed({
             post={post}
             variant={cardVariant}
             onOpenThread={onOpenThread}
+            onReply={onOpenThread !== undefined ? handleReply : undefined}
             onHashtagOpen={onHashtagOpen}
             onOpenProfile={onOpenProfile}
           />

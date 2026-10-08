@@ -70,6 +70,7 @@ import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { getMockMediaAsset } from '@/core/media/mockMediaRegistry'
 import { personaIdForHandle } from '@/features/personas'
 import { sanitizeText } from './sanitize'
+import { narrowMedia } from './narrowMedia'
 import type {
   CreatePostInput,
   CreatePostMedia,
@@ -79,6 +80,10 @@ import type {
   PostCounts,
   PostMedia,
 } from '../types/post'
+
+// The ONE XC-002 media narrowing lives in the leaf `./narrowMedia` (so `ownPostStore`
+// and the sign-out path can share it without importing this module's graph).
+export { narrowMedia } from './narrowMedia'
 
 // `CreatePostInput` now lives with the other contract-v2 types (`types/post.ts`);
 // it stays importable from here so existing `./postService` imports keep working.
@@ -255,23 +260,6 @@ export function toParticipantView(post: Post): ParticipantPostView {
     ...(post.viewer != null
       ? { viewer: { liked: post.viewer.liked, reposted: post.viewer.reposted } }
       : {}),
-  }
-}
-
-/**
- * Rebuilds one media item from its contract keys only (XC-002 defence in depth).
- * An optional member that is `null` on the wire is DROPPED (treated as absent).
- */
-function narrowMedia(item: PostMedia): PostMedia {
-  return {
-    id: item.id,
-    kind: item.kind,
-    url: item.url,
-    alt: item.alt,
-    ...(item.posterUrl != null ? { posterUrl: item.posterUrl } : {}),
-    ...(item.width != null ? { width: item.width } : {}),
-    ...(item.height != null ? { height: item.height } : {}),
-    ...(item.durationSec != null ? { durationSec: item.durationSec } : {}),
   }
 }
 

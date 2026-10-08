@@ -6,6 +6,10 @@
  * `createPost` produces) to its parent — resolving the parent author's handle —
  * and bumps the parent's reply count with a NEW parent object (same id, so the
  * live pill never re-emits it). The default seed stays the canonical six.
+ *
+ * The STREAM view of that (demo-polish F4): the ARRIVAL source emits the linked reply
+ * exactly once (that is what a thread listens to) and never the bumped parent, while
+ * the FEED/pill source drops the reply altogether - a reply never raises the pill.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resetMockMediaRegistry } from '@/core/media'
@@ -13,7 +17,7 @@ import { personaIdForHandle } from '@/features/personas'
 import type { Post } from '../types/post'
 import { createPost, listPosts } from './postService'
 import { postStore } from './postStore'
-import { makeMockPostStoreSource } from './feedStreamSource'
+import { makeMockArrivalSource, makeMockPostStoreSource } from './feedStreamSource'
 
 vi.mock('@/core/services/api', () => ({
   api: { post: vi.fn().mockResolvedValue(undefined) },
@@ -120,9 +124,9 @@ describe('postStore.appendPost — reply linking', () => {
   })
 })
 
-describe('postStore replies and the live pill', () => {
-  it('streams the new reply once and never re-emits the bumped parent', async () => {
-    const source = makeMockPostStoreSource()
+describe('postStore replies and the live streams', () => {
+  it('the ARRIVAL stream emits the new reply once and never re-emits the bumped parent', async () => {
+    const source = makeMockArrivalSource()
     const seen: string[] = []
     source.subscribe(view => seen.push(view.id))
     await source.start()
@@ -132,5 +136,17 @@ describe('postStore replies and the live pill', () => {
     source.stop()
 
     expect(seen).toEqual([created.id])
+  })
+
+  it('the FEED (pill) stream drops the reply, and never re-emits the bumped parent either', async () => {
+    const source = makeMockPostStoreSource()
+    const seen: string[] = []
+    source.subscribe(view => seen.push(view.id))
+    await source.start()
+
+    postStore.appendPost(reply('post-seed-fw-advisory'))
+    source.stop()
+
+    expect(seen).toEqual([])
   })
 })

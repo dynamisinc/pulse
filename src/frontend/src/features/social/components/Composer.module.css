@@ -102,59 +102,66 @@
   outline: none;
 }
 
-.mediaList {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.mediaChip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 100%;
-  padding: 6px 8px 6px 12px;
-  border: 1px solid var(--pc-line);
-  border-radius: 999px;
-  background: var(--pc-panel);
-  color: var(--pc-ink);
-  font-size: 13px;
-}
-
-.mediaLabel {
-  overflow: hidden;
-  max-width: 220px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mediaRemove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 999px;
-  background: none;
-  color: var(--pc-ink-muted);
-  cursor: pointer;
-}
-
-.mediaRemove:hover,
-.mediaRemove:focus-visible {
-  background: var(--pc-hover);
-  color: var(--pc-ink);
+.input[readonly] {
+  opacity: .7;
 }
 
 .error {
   margin: 0;
   color: var(--pc-over);
   font-size: 13px;
+}
+
+/* A failed publish (F4): the draft is kept, this says what happened in words with
+ * an icon (never colour alone) and offers Retry. */
+.publishError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--pc-over);
+  border-radius: 12px;
+  background: var(--pc-panel);
+  color: var(--pc-ink);
+  font-size: 14px;
+}
+
+.publishErrorText {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  color: var(--pc-over);
+  font-weight: 600;
+}
+
+.retryButton {
+  flex: none;
+  padding: 6px 14px;
+  border: 1px solid var(--pc-accent);
+  border-radius: 999px;
+  background: none;
+  color: var(--pc-accent);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.retryButton:hover,
+.retryButton:focus-visible {
+  background: var(--pc-hover);
+}
+
+.retryButton:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 1px;
+}
+
+.retryButton:disabled {
+  opacity: .5;
+  cursor: not-allowed;
 }
 
 .toolbar {
@@ -170,25 +177,6 @@
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-.toolButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: none;
-  border-radius: 999px;
-  background: none;
-  color: var(--pc-accent);
-  cursor: pointer;
-}
-
-.toolButton:hover,
-.toolButton:focus-visible {
-  background: var(--pc-hover);
 }
 
 .meta {
@@ -251,7 +239,13 @@
   cursor: pointer;
 }
 
-.postButton:disabled {
+.postButton:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 2px;
+}
+
+.postButton:disabled,
+.postButton[aria-disabled='true'] {
   opacity: .5;
   cursor: not-allowed;
 }
