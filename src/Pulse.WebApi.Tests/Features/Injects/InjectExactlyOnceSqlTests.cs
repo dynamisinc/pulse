@@ -61,7 +61,7 @@ public sealed class InjectExactlyOnceSqlTests
     public async Task TwoRunnerInstancesTickingTheSameBurst_PublishTheDuePostExactlyOnce()
     {
         var world = await SeedAsync(InjectKinds.Burst);
-        await using (var firer = Build(world, barrier: null, controller: world.StaffUserId))
+        await using (var firer = Build(world, interceptor: null, controller: world.StaffUserId))
         {
             (await firer.Service.FireAsync(world.ItemId)).Outcome.Should().Be(InjectOutcome.Ok);
         }
@@ -78,6 +78,107 @@ public sealed class InjectExactlyOnceSqlTests
         await using var db = Context(world.ExerciseId, null);
         (await db.InjectItemPosts.CountAsync(p => p.InjectItemId == world.ItemId && p.Status == InjectPostStatuses.Fired))
             .Should().Be(2);
+    }
+
+    // ---- L1: Hold must win against a runner tick ------------------------------------------------------
+
+    [RequiresDockerFact]
+    public async Task Hold_ThatLosesARaceToARunnerTick_ReappliesOnFreshState_AndStopsThePileOn()
+    {
+        var world = await SeedAsync(InjectKinds.Burst);
+        await using (var firer = Build(world, interceptor: null, controller: world.StaffUserId))
+        {
+            (await firer.Service.FireAsync(world.ItemId)).Outcome.Should().Be(InjectOutcome.Ok);
+        }
+
+        world.Time.Advance(TimeSpan.FromSeconds(30)); // post 2 is due
+        await using var runner = Build(world, interceptor: null, controller: null);
+
+        // The runner publishes post 2 in the window between Hold reading the item and Hold saving it.
+        var race = new BeforeSaveHook(
+            context => context.ChangeTracker.Entries<InjectItem>().Any(e => e.Entity.Status == InjectStatuses.Held),
+            () => runner.Service.AdvanceAsync(world.ItemId),
+            times: 1);
+        await using var holder = Build(world, race, controller: world.StaffUserId);
+
+        var held = await holder.Service.HoldAsync(world.ItemId);
+
+        race.Fired.Should().Be(1, "the runner tick really did land between Hold's read and its save");
+        held.Outcome.Should().Be(InjectOutcome.Ok, "Hold re-applies once on fresh state instead of losing to the tick");
+        held.Value!.Status.Should().Be("held");
+        held.Value.FiredCount.Should().Be(2, "the post the tick published is recorded, not lost");
+
+        world.Time.Advance(TimeSpan.FromMinutes(5));
+        await runner.Service.AdvanceAsync(world.ItemId);
+        (await PostCountAsync(world)).Should().Be(2, "the pile-on is stopped: post 3 waits for a release");
+    }
+
+    [RequiresDockerFact]
+    public async Task Hold_ThatKeepsLosing_Gets409WithTheStaleVersionMessage_NeverAlreadyFiring()
+    {
+        var world = await SeedAsync(InjectKinds.Burst);
+        await using (var firer = Build(world, interceptor: null, controller: world.StaffUserId))
+        {
+            await firer.Service.FireAsync(world.ItemId);
+        }
+
+        var race = new BeforeSaveHook(
+            context => context.ChangeTracker.Entries<InjectItem>().Any(e => e.Entity.Status == InjectStatuses.Held),
+            () => BumpVersionAsync(world),
+            times: 2);
+        await using var holder = Build(world, race, controller: world.StaffUserId);
+
+        var result = await holder.Service.HoldAsync(world.ItemId);
+
+        race.Fired.Should().Be(2, "both the first attempt and the one re-apply lost");
+        result.Outcome.Should().Be(InjectOutcome.Conflict);
+        result.Message.Should().Be(InjectQueueService.StaleVersionMessage, "\"already firing\" only ever answers a fire/retry");
+        result.CurrentItem!.Status.Should().Be("firing");
+    }
+
+    // ---- L2: a controller's fire event survives a record that gives up -------------------------------
+
+    [RequiresDockerFact]
+    public async Task ARecordThatGivesUp_StillEmitsExactlyOneFireEvent_AndTheLaterReconcileDoesNotDuplicateIt()
+    {
+        var world = await SeedAsync(InjectKinds.Post);
+
+        // Every record attempt loses to a concurrent writer, so RecordAsync exhausts its retries and gives up.
+        var hostile = new BeforeSaveHook(
+            context => context.ChangeTracker.Entries<InjectItemPost>().Any(e =>
+                e.State == EntityState.Modified
+                && e.Property(post => post.ClaimedAt).IsModified
+                && e.Property(post => post.ClaimedAt).OriginalValue is not null
+                && e.Entity.ClaimedAt is null),
+            () => BumpVersionAsync(world),
+            times: int.MaxValue);
+        await using (var firer = Build(world, hostile, controller: world.StaffUserId))
+        {
+            var fired = await firer.Service.FireAsync(world.ItemId);
+
+            fired.Outcome.Should().Be(InjectOutcome.Ok, "the fire went through; only its record is pending");
+            fired.Value!.Status.Should().Be("firing");
+        }
+
+        hostile.Fired.Should().Be(5, "RecordAsync tried exactly MaxRecordAttempts times");
+        (await PostCountAsync(world)).Should().Be(1);
+        var afterGiveUp = await FireEventsAsync(world);
+        afterGiveUp.Should().ContainSingle("the give-up emits the controller's fire event on its own (XC-004 has no gap)");
+
+        // Later, the runner reconciles the abandoned claim against the posts table.
+        world.Time.Advance(InjectBurstPlanner.ClaimLease + TimeSpan.FromSeconds(1));
+        await using (var runner = Build(world, interceptor: null, controller: null))
+        {
+            await runner.Service.AdvanceAsync(world.ItemId);
+        }
+
+        await using var db = Context(world.ExerciseId, null);
+        var item = await db.InjectItems.Include(i => i.Posts).SingleAsync(i => i.Id == world.ItemId);
+        item.Status.Should().Be(InjectStatuses.Fired, "the reconcile recorded the post the funnel created");
+        item.Posts.Single().FiredPostId.Should().NotBeNull();
+        (await PostCountAsync(world)).Should().Be(1, "and never published it twice");
+        (await FireEventsAsync(world)).Select(e => e.EventId).Should().Equal(
+            afterGiveUp.Select(e => e.EventId), "exactly one fire event: the reconcile saw it was already emitted");
     }
 
     // ---- harness ----
@@ -146,10 +247,10 @@ public sealed class InjectExactlyOnceSqlTests
         return new World(exerciseId, staffUserId, itemId, time, new ExerciseClockService(time));
     }
 
-    private Harness Build(World world, ClaimBarrier? barrier, Guid? controller)
+    private Harness Build(World world, IInterceptor? interceptor, Guid? controller)
     {
         var scope = new ExerciseContext { CurrentExerciseId = world.ExerciseId };
-        var db = Context(world.ExerciseId, barrier);
+        var db = Context(world.ExerciseId, interceptor);
         var ingest = new PostIngestService(db, scope, new FakeFeedBroadcaster());
         var registry = new PauseTierRegistry(world.Clock, new NullPauseOverlayPublisher(), NullLogger<PauseTierRegistry>.Instance);
         var staff = new StubCurrentStaffSessionAccessor(
@@ -164,17 +265,18 @@ public sealed class InjectExactlyOnceSqlTests
             new FunnelInjectPostPublisher(ingest),
             new FixedJitterSource(),
             world.Time,
+            new InjectRunnerSignal(),
             NullLogger<InjectQueueService>.Instance);
 
         return new Harness(db, service);
     }
 
-    private PulseDbContext Context(Guid exerciseId, ClaimBarrier? barrier)
+    private PulseDbContext Context(Guid exerciseId, IInterceptor? interceptor)
     {
         var builder = new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer(_fixture.ConnectionString!);
-        if (barrier is not null)
+        if (interceptor is not null)
         {
-            builder.AddInterceptors(barrier);
+            builder.AddInterceptors(interceptor);
         }
 
         return new PulseDbContext(builder.Options, new ExerciseContext { CurrentExerciseId = exerciseId });
@@ -184,6 +286,57 @@ public sealed class InjectExactlyOnceSqlTests
     {
         await using var db = Context(world.ExerciseId, null);
         return await db.Posts.CountAsync();
+    }
+
+    private async Task<System.Collections.Generic.List<TelemetryEvent>> FireEventsAsync(World world)
+    {
+        await using var db = Context(world.ExerciseId, null);
+        var injectId = world.ItemId.ToString();
+        return await db.TelemetryEvents
+            .Where(e => e.EventType == "inject_action" && e.InjectId == injectId && e.Payload!.Contains("\"fire\""))
+            .ToListAsync();
+    }
+
+    /// <summary>A concurrent writer: bumps the item's version behind the service's back (another controller's save).</summary>
+    private async Task BumpVersionAsync(World world)
+    {
+        await using var db = Context(world.ExerciseId, null);
+        await db.Database.ExecuteSqlAsync($"UPDATE InjectItems SET Version = Version + 1 WHERE Id = {world.ItemId}");
+    }
+
+    /// <summary>
+    /// Runs a competing action just before a matching save — the deterministic way to land another writer in the
+    /// window between a read and its save. Runs at most <c>times</c> times.
+    /// </summary>
+    private sealed class BeforeSaveHook : SaveChangesInterceptor
+    {
+        private readonly Func<DbContext, bool> _matches;
+        private readonly Func<Task> _competingWrite;
+        private readonly int _times;
+        private int _fired;
+
+        public BeforeSaveHook(Func<DbContext, bool> matches, Func<Task> competingWrite, int times)
+        {
+            _matches = matches;
+            _competingWrite = competingWrite;
+            _times = times;
+        }
+
+        public int Fired => _fired;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (_fired < _times && _matches(eventData.Context!))
+            {
+                _fired++;
+                await _competingWrite();
+            }
+
+            return result;
+        }
     }
 
     private sealed record World(Guid ExerciseId, Guid StaffUserId, Guid ItemId, ManualTimeProvider Time, IExerciseClock Clock);

@@ -222,6 +222,51 @@ public sealed class InjectBurstRunnerTests
     }
 
     [RequiresDockerFact]
+    public async Task AReconciledControllerClaim_EmitsItsOneFireEvent_AndARunnerClaimEmitsNone()
+    {
+        await using var host = await StartAsync();
+        var (seeded, item, _) = await FireBurstAsync(host);
+        var claimEventId = Guid.NewGuid().ToString();
+
+        // A crash after a controller's fire claimed post 2 and the funnel committed it, before anything was recorded.
+        await using (var db = host.Db(seeded.ExerciseId))
+        {
+            var child = await db.InjectItemPosts.SingleAsync(p => p.InjectItemId == item && p.Sequence == 2);
+            child.ClaimedAt = host.Time.GetUtcNow();
+            child.ClaimEventId = claimEventId;
+            child.ClaimAction = InjectActions.Fire;
+            child.ClaimActorId = seeded.StaffUserId;
+            (await db.InjectItems.SingleAsync(i => i.Id == item)).Version++;
+            db.Posts.Add(new Post
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = seeded.ExerciseId,
+                AuthorPersonaId = child.PersonaId,
+                Body = child.Text,
+                CreatedScenarioTime = DateTimeOffset.UtcNow,
+                CreatedWallClock = DateTimeOffset.UtcNow,
+                Origin = "inject",
+                ActingHumanId = seeded.StaffUserId.ToString(),
+                InjectId = item.ToString(),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        host.Time.Advance(InjectBurstPlanner.ClaimLease);
+        await host.Runner.RunTickAsync();
+        await host.Runner.RunTickAsync();
+
+        await using var check = host.Db(seeded.ExerciseId);
+        var fireEvents = await check.TelemetryEvents
+            .Where(e => e.EventType == "inject_action" && e.InjectId == item.ToString() && e.Payload!.Contains("\"fire\""))
+            .ToListAsync();
+        fireEvents.Select(e => e.EventId).Should().HaveCount(2, "the burst's own Fire, plus the reconciled claim's")
+            .And.Contain(claimEventId, "the reconciled claim's event is emitted under its pre-assigned id (XC-004)");
+        fireEvents.Single(e => e.EventId == claimEventId).Actor.ActingHumanId.Should().Be(seeded.StaffUserId.ToString());
+        (await check.InjectItemPosts.SingleAsync(p => p.InjectItemId == item && p.Sequence == 2)).ClaimEventId.Should().BeNull();
+    }
+
+    [RequiresDockerFact]
     public async Task AnAbandonedClaim_WhosePostNeverWentOut_IsReleased_AndPublishedOnce()
     {
         await using var host = await StartAsync();
@@ -362,6 +407,90 @@ public sealed class InjectBurstRunnerTests
         (await aDb.Posts.CountAsync(p => p.InjectId == b.ItemId.ToString())).Should().Be(0, "B's posts are invisible in A's scope");
         (await aDb.Posts.IgnoreQueryFilters().CountAsync(p => p.InjectId == b.ItemId.ToString()))
             .Should().Be(3, "they exist — the zero is the filter closing the door");
+    }
+
+    [RequiresDockerFact]
+    public async Task APoisonedItem_IsSkipped_AndAHealthyItemInTheSameExerciseStillFires()
+    {
+        await using var host = await StartAsync();
+        var seeded = await host.SeedExerciseAsync();
+        host.ActAs(seeded.ExerciseId, seeded.StaffUserId);
+        var poisoned = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 3)); // order 1: swept first
+        var healthy = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 3));  // order 2
+        await host.ActionOkAsync(poisoned.Guid, "fire");
+        await host.ActionOkAsync(healthy.Guid, "fire");
+
+        // Corrupt one of the poisoned item's media columns so loading that item throws.
+        await using (var db = host.Db(seeded.ExerciseId))
+        {
+            await db.Database.ExecuteSqlAsync(
+                $"UPDATE InjectItemPosts SET Media = N'{{not json' WHERE InjectItemId = {poisoned.Guid}");
+        }
+
+        try
+        {
+            host.Time.Advance(TimeSpan.FromSeconds(20));
+            var act = () => host.Runner.RunTickAsync();
+            await act.Should().NotThrowAsync("one poisoned item is logged and skipped, never fatal to the tick");
+
+            await using var check = host.Db(seeded.ExerciseId);
+            (await check.Posts.CountAsync(p => p.InjectId == healthy.Id)).Should().Be(
+                2, "the healthy item, swept AFTER the poisoned one, still published its due post");
+            (await check.Posts.CountAsync(p => p.InjectId == poisoned.Id)).Should().Be(1);
+        }
+        finally
+        {
+            // Take the poisoned row out of the shared database's sweep for the tests that follow.
+            await using var cleanup = host.Db(seeded.ExerciseId);
+            await cleanup.Database.ExecuteSqlAsync(
+                $"UPDATE InjectItems SET DeletedAt = SYSDATETIMEOFFSET() WHERE Id = {poisoned.Guid}");
+        }
+    }
+
+    [RequiresDockerFact]
+    public async Task AFireWakesTheIdleRunner_SoTheSecondPostIsNotHeldBackByTheIdleCadence()
+    {
+        // An ISOLATED database: the shared one holds other tests' firing bursts, which would keep the runner on its
+        // active cadence and make this test pass without the wake-up.
+        _fixture.ConnectionString.Should().NotBeNull();
+        var isolated = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(_fixture.ConnectionString!)
+        {
+            InitialCatalog = $"PulseInjectWake_{Guid.NewGuid():N}",
+        }.ConnectionString;
+        var options = new DbContextOptionsBuilder<Pulse.WebApi.Data.PulseDbContext>().UseSqlServer(isolated).Options;
+        await using var admin = new Pulse.WebApi.Data.PulseDbContext(options);
+        await admin.Database.MigrateAsync();
+
+        try
+        {
+            // Idle for ten minutes: without a wake-up nothing after the inline first post could go out in this test.
+            await using var host = await InjectTestHost.StartAsync(
+                isolated,
+                new FixedJitterSource(),
+                hostedRunner: true,
+                runnerOptions: new InjectBurstRunnerOptions { ActiveInterval = TimeSpan.FromSeconds(1), IdleInterval = TimeSpan.FromMinutes(10) });
+            var seeded = await host.SeedExerciseAsync();
+            host.ActAs(seeded.ExerciseId, seeded.StaffUserId);
+            var item = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 2)); // offsets 0, 3
+            await Task.Delay(TimeSpan.FromMilliseconds(500)); // the runner's start-up sweep finds nothing and goes idle
+
+            (await host.ActionOkAsync(item.Guid, "fire")).FiredCount.Should().Be(1);
+
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            var published = 0;
+            while (DateTime.UtcNow < deadline && published < 2)
+            {
+                await Task.Delay(200);
+                await using var db = host.Db(seeded.ExerciseId);
+                published = await db.Posts.CountAsync(p => p.InjectId == item.Id);
+            }
+
+            published.Should().Be(2, "Fire woke the runner, which switched to its 1 s cadence and published post 2 when due (+3 s)");
+        }
+        finally
+        {
+            await admin.Database.EnsureDeletedAsync();
+        }
     }
 
     // ---- helpers --------------------------------------------------------------------------------------

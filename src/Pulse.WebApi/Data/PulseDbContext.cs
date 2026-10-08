@@ -603,10 +603,12 @@ public class PulseDbContext : DbContext
             // IQ-9: the one optimistic-concurrency token for the whole item aggregate.
             entity.Property(e => e.Version).IsConcurrencyToken();
 
+            // Restrict, not Cascade (house rule, XC-010): items are soft-deleted and never hard-deleted, so a cascade
+            // could only ever erase the scripted-post history of a row someone removed by hand.
             entity.HasMany(e => e.Posts)
                 .WithOne()
                 .HasForeignKey(post => post.InjectItemId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<InjectItemPost>(entity =>
@@ -619,6 +621,8 @@ public class PulseDbContext : DbContext
             entity.Property(e => e.Text).IsRequired().HasMaxLength(1024);
             entity.Property(e => e.Status).IsRequired().HasMaxLength(16);
             entity.Property(e => e.Error).HasMaxLength(1024);
+            entity.Property(e => e.ClaimEventId).HasMaxLength(64);
+            entity.Property(e => e.ClaimAction).HasMaxLength(16);
 
             entity.OwnsMany(e => e.Media, media => media.ToJson());
         });

@@ -52,6 +52,7 @@ public sealed partial class InjectQueueService
     public const string StaleVersionMessage = "Changed by someone else. Refresh to see the latest version.";
 
     private const string FallbackTimeZone = "UTC";
+    private const string DeletedMessage = "This item was deleted by someone else.";
     private const int MaxRecordAttempts = 5;
     private const int MaxErrorLength = 1000;
 
@@ -63,6 +64,7 @@ public sealed partial class InjectQueueService
     private readonly IInjectPostPublisher _publisher;
     private readonly IBurstJitterSource _jitter;
     private readonly TimeProvider _timeProvider;
+    private readonly InjectRunnerSignal _runnerSignal;
     private readonly ILogger<InjectQueueService> _logger;
 
     /// <summary>Creates the queue service over its persistence, scope, identity, clock, pause and funnel collaborators.</summary>
@@ -74,6 +76,7 @@ public sealed partial class InjectQueueService
     /// <param name="publisher">The one post ingest funnel (IQ-2), behind its publish seam.</param>
     /// <param name="jitter">The burst jitter source (IQ-4).</param>
     /// <param name="timeProvider">The server wall clock.</param>
+    /// <param name="runnerSignal">Wakes the burst runner the moment an item starts (or resumes) firing.</param>
     /// <param name="logger">Diagnostics logger.</param>
     public InjectQueueService(
         PulseDbContext dbContext,
@@ -84,6 +87,7 @@ public sealed partial class InjectQueueService
         IInjectPostPublisher publisher,
         IBurstJitterSource jitter,
         TimeProvider timeProvider,
+        InjectRunnerSignal runnerSignal,
         ILogger<InjectQueueService> logger)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
@@ -94,6 +98,7 @@ public sealed partial class InjectQueueService
         ArgumentNullException.ThrowIfNull(publisher);
         ArgumentNullException.ThrowIfNull(jitter);
         ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(runnerSignal);
         ArgumentNullException.ThrowIfNull(logger);
 
         _dbContext = dbContext;
@@ -104,6 +109,7 @@ public sealed partial class InjectQueueService
         _publisher = publisher;
         _jitter = jitter;
         _timeProvider = timeProvider;
+        _runnerSignal = runnerSignal;
         _logger = logger;
     }
 
@@ -320,7 +326,7 @@ public sealed partial class InjectQueueService
 
         return await TrySaveAsync(item, InjectActions.Delete, caller.StaffUserId, time, cancellationToken)
             ? InjectResult.Deleted<InjectItemDto>()
-            : await ConflictWithCurrentAsync(itemId, caller.ExerciseId, facts, cancellationToken);
+            : await ConflictWithCurrentAsync(itemId, caller.ExerciseId, facts, InjectActions.Delete, cancellationToken);
     }
 
     /// <summary>
@@ -614,9 +620,10 @@ public sealed partial class InjectQueueService
 
         if (settled is null)
         {
-            return await ConflictWithCurrentAsync(item.Id, caller.ExerciseId, facts, cancellationToken);
+            return await ConflictWithCurrentAsync(item.Id, caller.ExerciseId, facts, action, cancellationToken);
         }
 
+        WakeRunnerIfFiring(settled);
         return InjectResult.Ok(await ProjectAsync(settled, facts, cancellationToken));
     }
 
@@ -668,15 +675,25 @@ public sealed partial class InjectQueueService
             case InjectStepKind.Publish:
                 // Claim BEFORE calling the funnel: the claim and the lateness shift are saved under the item's
                 // version, so a concurrent fire (or a second runner instance) loses here and never publishes.
+                // A controller's action event is NOT emitted here: it is pinned to the claim (a pre-assigned EventId) and
+                // emitted by whichever save resolves the claim — the record, a give-up, or a later reconcile — so it is
+                // exactly once even across a crash (XC-004, the event's primary key enforces it).
                 var claimed = step.Child!;
                 claimed.ClaimedAt = time.WallClock;
+                if (action is not null)
+                {
+                    claimed.ClaimEventId = Guid.NewGuid().ToString();
+                    claimed.ClaimAction = action;
+                    claimed.ClaimActorId = attributedHuman;
+                }
+
                 item.ShiftSeconds += step.LatenessSeconds;
                 if (!await TrySaveAsync(item, action: null, attributedHuman, time, cancellationToken))
                 {
                     return null;
                 }
 
-                return await PublishClaimedAsync(item, claimed, step.ParentPostId, attributedHuman, time, action);
+                return await PublishClaimedAsync(item, claimed, step.ParentPostId, attributedHuman, time);
 
             default:
                 return item;
@@ -692,8 +709,7 @@ public sealed partial class InjectQueueService
         InjectItemPost child,
         Guid? parentPostId,
         Guid attributedHuman,
-        InjectEventTime time,
-        string? action)
+        InjectEventTime time)
     {
         var (request, attribution) = InjectPostRequestFactory.Build(item, child, parentPostId, attributedHuman, time);
         var itemId = item.Id;
@@ -723,20 +739,20 @@ public sealed partial class InjectQueueService
         }
 #pragma warning restore CA1031
 
-        return await RecordAsync(itemId, exerciseId, childId, outcome, action, attributedHuman, time);
+        return await RecordAsync(itemId, exerciseId, childId, outcome, time);
     }
 
     /// <summary>
     /// Records a claimed child's outcome and settles the item, retrying on a concurrency conflict (a controller may
-    /// hold or skip the item while the post is in flight; the post went out regardless and must be recorded).
+    /// hold or skip the item while the post is in flight; the post went out regardless and must be recorded). The
+    /// claim's pending action event (if a controller made it) rides in the same save.
     /// </summary>
+    /// <returns>The item as recorded — or, if recording gave up, as it is now (its claim left for reconcile).</returns>
     private async Task<InjectItem?> RecordAsync(
         Guid itemId,
         Guid exerciseId,
         Guid childId,
         ChildOutcome outcome,
-        string? action,
-        Guid actingHumanId,
         InjectEventTime time)
     {
         for (var attempt = 1; ; attempt++)
@@ -748,16 +764,18 @@ public sealed partial class InjectQueueService
                 return item;
             }
 
+            var pendingEvent = PendingClaimEvent(child);
             outcome.ApplyTo(child);
-            child.ClaimedAt = null;
+            ClearClaim(child);
             if (outcome.IsPublished)
             {
                 item.LastPublishedAt = time.WallClock;
             }
 
             InjectTransitions.Settle(item);
+            AddClaimEvent(item, pendingEvent, time);
 
-            if (await TrySaveAsync(item, action, actingHumanId, time, CancellationToken.None))
+            if (await TrySaveAsync(item, action: null, Guid.Empty, time, CancellationToken.None))
             {
                 return item;
             }
@@ -765,10 +783,44 @@ public sealed partial class InjectQueueService
             if (attempt >= MaxRecordAttempts)
             {
                 // Leave the claim in place: once the lease expires the runner reconciles it against the posts table.
+                // The controller's action event must not wait for that, so emit it now, on its own (L2).
                 LogRecordAbandoned(itemId, childId);
-                return null;
+                return await EmitAbandonedClaimEventAsync(itemId, exerciseId, childId, time);
             }
         }
+    }
+
+    /// <summary>
+    /// After recording gave up: emits the claim's pending action event on its own — an insert that touches no item row,
+    /// so it cannot lose the race that defeated the record — and returns the item as it is now. Under the claim's
+    /// pre-assigned EventId, so the later reconcile (which re-checks) never emits it twice.
+    /// </summary>
+    private async Task<InjectItem?> EmitAbandonedClaimEventAsync(
+        Guid itemId,
+        Guid exerciseId,
+        Guid childId,
+        InjectEventTime time)
+    {
+        _dbContext.ChangeTracker.Clear();
+        var item = await LoadItemAsync(itemId, exerciseId, CancellationToken.None);
+        var child = item?.Posts.FirstOrDefault(post => post.Id == childId);
+        if (item is null || child is null || PendingClaimEvent(child) is not { } pending)
+        {
+            return item;
+        }
+
+        AddClaimEvent(item, pending, time);
+        try
+        {
+            await _dbContext.SaveChangesAsync(CancellationToken.None);
+        }
+        catch (DbUpdateException)
+        {
+            // Already emitted (the primary key says so) — exactly once holds either way.
+            _dbContext.ChangeTracker.Clear();
+        }
+
+        return item;
     }
 
     /// <summary>
@@ -792,8 +844,17 @@ public sealed partial class InjectQueueService
             LogClaimReconciled(item.Id, child.Id, orphan.Id);
         }
 
-        child.ClaimedAt = null;
+        // A controller's claim still owes its one action event unless a give-up already emitted it (L2).
+        var pendingEvent = PendingClaimEvent(child);
+        if (pendingEvent is not null
+            && await _dbContext.TelemetryEvents.AnyAsync(evt => evt.EventId == pendingEvent.EventId, cancellationToken))
+        {
+            pendingEvent = null;
+        }
+
+        ClearClaim(child);
         InjectTransitions.Settle(item);
+        AddClaimEvent(item, pendingEvent, time);
         return await TrySaveAsync(item, action, attributedHuman, time, cancellationToken) ? item : null;
     }
 
@@ -815,6 +876,29 @@ public sealed partial class InjectQueueService
             .Where(post => post.ExerciseId == exerciseId && post.InjectId == injectId && !recorded.Contains(post.Id))
             .OrderBy(post => post.CreatedWallClock)
             .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>The action event a controller's claim still owes, or <c>null</c> for a runner claim.</summary>
+    private static ClaimEvent? PendingClaimEvent(InjectItemPost child) =>
+        child is { ClaimEventId: { } eventId, ClaimAction: { } action, ClaimActorId: { } actor }
+            ? new ClaimEvent(eventId, action, actor)
+            : null;
+
+    /// <summary>Adds the claim's action event (if any) to the unit of work, reflecting the item's settled state.</summary>
+    private void AddClaimEvent(InjectItem item, ClaimEvent? pending, InjectEventTime time)
+    {
+        if (pending is not null)
+        {
+            _dbContext.TelemetryEvents.Add(InjectTelemetry.ForItem(item, pending.Action, pending.ActorId, time, pending.EventId));
+        }
+    }
+
+    private static void ClearClaim(InjectItemPost child)
+    {
+        child.ClaimedAt = null;
+        child.ClaimEventId = null;
+        child.ClaimAction = null;
+        child.ClaimActorId = null;
     }
 
     /// <summary>
@@ -874,7 +958,41 @@ public sealed partial class InjectQueueService
             return InjectResult.Conflict<InjectItemDto>(refusal, await ProjectAsync(item, facts, cancellationToken));
         }
 
-        return await SaveActionAsync(item, action, caller, facts, TimeFor(caller.ExerciseId, facts), cancellationToken);
+        if (await TrySaveAsync(item, action, caller.StaffUserId, TimeFor(caller.ExerciseId, facts), cancellationToken))
+        {
+            WakeRunnerIfFiring(item);
+            return InjectResult.Ok(await ProjectAsync(item, facts, cancellationToken));
+        }
+
+        // Lost a race — usually to a runner tick publishing the burst's next post. Re-apply ONCE against fresh state,
+        // so Hold can stop a pile-on even while it is publishing (TrySaveAsync already cleared the tracker).
+        var fresh = await LoadItemAsync(itemId, caller.ExerciseId, cancellationToken);
+        if (fresh is null)
+        {
+            return InjectResult.Conflict<InjectItemDto>(DeletedMessage, null);
+        }
+
+        if (apply(fresh, caller) is { } freshRefusal)
+        {
+            return InjectResult.Conflict<InjectItemDto>(freshRefusal, await ProjectAsync(fresh, facts, cancellationToken));
+        }
+
+        if (await TrySaveAsync(fresh, action, caller.StaffUserId, TimeFor(caller.ExerciseId, facts), cancellationToken))
+        {
+            WakeRunnerIfFiring(fresh);
+            return InjectResult.Ok(await ProjectAsync(fresh, facts, cancellationToken));
+        }
+
+        return await ConflictWithCurrentAsync(itemId, caller.ExerciseId, facts, action, cancellationToken);
+    }
+
+    /// <summary>Wakes the runner when a controller action leaves the item firing (L6: no 1 s polling while idle).</summary>
+    private void WakeRunnerIfFiring(InjectItem item)
+    {
+        if (item.Status == InjectStatuses.Firing)
+        {
+            _runnerSignal.Wake();
+        }
     }
 
     /// <summary>Saves a mutated item with its one action event; a lost race is a 409 carrying the current item.</summary>
@@ -888,27 +1006,33 @@ public sealed partial class InjectQueueService
     {
         if (!await TrySaveAsync(item, action, caller.StaffUserId, time, cancellationToken))
         {
-            return await ConflictWithCurrentAsync(item.Id, caller.ExerciseId, facts, cancellationToken);
+            return await ConflictWithCurrentAsync(item.Id, caller.ExerciseId, facts, action, cancellationToken);
         }
 
+        WakeRunnerIfFiring(item);
         return InjectResult.Ok(await ProjectAsync(item, facts, cancellationToken));
     }
 
-    /// <summary>The 409 for a lost race: the item as it is now, with the most specific readable reason.</summary>
+    /// <summary>
+    /// The 409 for a lost race: the item as it is now, with the most specific readable reason. "Already firing/fired"
+    /// is only ever the answer to a FIRE or RETRY; every other action that lost a race gets the stale-version message.
+    /// </summary>
     private async Task<InjectResult<InjectItemDto>> ConflictWithCurrentAsync(
         Guid itemId,
         Guid exerciseId,
         ExerciseFacts facts,
+        string action,
         CancellationToken cancellationToken)
     {
         _dbContext.ChangeTracker.Clear();
         var current = await LoadItemAsync(itemId, exerciseId, cancellationToken);
         if (current is null)
         {
-            return InjectResult.Conflict<InjectItemDto>("This item was deleted by someone else.", null);
+            return InjectResult.Conflict<InjectItemDto>(DeletedMessage, null);
         }
 
-        var message = current.Status is InjectStatuses.Firing or InjectStatuses.Fired
+        var message = action is InjectActions.Fire or InjectActions.Retry
+            && current.Status is InjectStatuses.Firing or InjectStatuses.Fired
             ? InjectTransitions.WhyNotFireable(current)!
             : StaleVersionMessage;
         return InjectResult.Conflict<InjectItemDto>(message, await ProjectAsync(current, facts, cancellationToken));
@@ -1253,6 +1377,9 @@ public sealed partial class InjectQueueService
 
     /// <summary>One staff user on the exercise roster.</summary>
     private sealed record RosterEntry(Guid StaffUserId, string DisplayName, string Role);
+
+    /// <summary>The action event a controller's claim owes: its pre-assigned id, the action, and who took it.</summary>
+    private sealed record ClaimEvent(string EventId, string Action, Guid ActorId);
 
     /// <summary>A claimed child's recorded outcome: the post the funnel created, or the funnel's refusal.</summary>
     private sealed class ChildOutcome
