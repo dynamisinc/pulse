@@ -120,7 +120,10 @@ public sealed class OrganizationScopeSweepTests
         // TimeZone (the DP-18 scenario-time fallback, implementation.md §0) by the IExerciseContext id.
         // demo-polish BM: +1 for MediaUploadService.PersistAsync — the scenario-time fallback read of the
         // SERVER-resolved exercise (IExerciseContext), the same pattern (DP-18a).
-        ["ResolvedScope"] = 22,
+        // inject-queue/06 (#452): +1 for InjectQueueService.ReadExerciseFactsAsync — the slice's ONE read of the
+        // exercise row, by the server-resolved scope (time zone, scenario fallback, and the tenant that bounds the
+        // staff roster join, which itself carries .InOrganization(...) and so is not an exemption).
+        ["ResolvedScope"] = 23,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and
