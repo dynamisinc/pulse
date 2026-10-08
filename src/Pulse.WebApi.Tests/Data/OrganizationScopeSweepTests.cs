@@ -116,7 +116,9 @@ public sealed class OrganizationScopeSweepTests
     /// </summary>
     private static readonly IReadOnlyDictionary<string, int> ExpectedExemptionCounts = new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        ["ResolvedScope"] = 20,
+        // demo-polish BM: +1 for MediaUploadService.PersistAsync — the scenario-time fallback read of the
+        // SERVER-resolved exercise (IExerciseContext), the same FollowService-pattern read (implementation.md §1.8).
+        ["ResolvedScope"] = 21,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and
