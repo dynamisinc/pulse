@@ -100,7 +100,7 @@ describe('Feed over the v2 demo fixtures', () => {
 
     expect(within(liked).getByRole('button', { name: 'Like, 124, liked' }))
       .toHaveAttribute('aria-pressed', 'true')
-    expect(within(notLiked).getByRole('button', { name: 'Like, 1000' }))
+    expect(within(notLiked).getByRole('button', { name: 'Like, 1 thousand (1,000)' }))
       .toHaveAttribute('aria-pressed', 'false')
   })
 

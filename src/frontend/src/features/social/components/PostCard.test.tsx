@@ -8,7 +8,7 @@
  *  - an unverified lookalike persona (SOC-052) renders a complete, plausible
  *    card with NO mark and no substitute "unverified" label;
  *  - no platform-added editorial badge text ever renders;
- *  - the action row renders in canonical reply/repost/like(/share) order
+ *  - the action row renders in canonical reply/repost/like order (no Share, F3)
  *    with correct counts, and `readOnly` hides the interactive controls
  *    while keeping the counts visible as inert text (COR-015);
  *  - post text renders as inert text, never parsed HTML (NFR-004);
@@ -153,41 +153,41 @@ describe('PostCard — no platform-added editorial badges (SOC-002)', () => {
 describe('PostCard — action row (R-002)', () => {
   it('renders reply, repost, like in canonical order with the right counts', async () => {
     await renderWithExerciseContext(
-      <PostCard post={buildPost({ counts: { reply: 3, repost: 7, like: 42 } })} />,
+      <PostCard
+        post={buildPost({ counts: { reply: 3, repost: 7, like: 42 } })}
+        onReply={vi.fn()}
+      />,
     )
 
-    // `[data-action]`, not `button[data-action]`: an unwired action (Reply without
-    // `onReply`, Share always) is an inert span carrying the same `data-action`.
     const actionsRegion = screen.getByTestId('post-actions')
-    const actions = actionsRegion.querySelectorAll('[data-action]')
+    const buttons = actionsRegion.querySelectorAll('button[data-action]')
 
-    expect(Array.from(actions).map(b => b.getAttribute('data-action'))).toEqual([
+    expect(Array.from(buttons).map(b => b.getAttribute('data-action'))).toEqual([
       'reply',
       'repost',
       'like',
     ])
-    expect(actions[0]).toHaveTextContent('3')
-    expect(actions[1]).toHaveTextContent('7')
-    expect(actions[2]).toHaveTextContent('42')
+    expect(buttons[0]).toHaveTextContent('3')
+    expect(buttons[1]).toHaveTextContent('7')
+    expect(buttons[2]).toHaveTextContent('42')
   })
 
-  it('appends share, in order, when present', async () => {
+  it('never renders a Share action, even when counts carry a share figure (F3)', async () => {
     await renderWithExerciseContext(
-      <PostCard post={buildPost({ counts: { reply: 1, repost: 2, like: 3, share: 4 } })} />,
+      <PostCard
+        post={buildPost({ counts: { reply: 1, repost: 2, like: 3, share: 4 } })}
+        onReply={vi.fn()}
+      />,
     )
 
     const actionsRegion = screen.getByTestId('post-actions')
-    const actions = actionsRegion.querySelectorAll('[data-action]')
+    const buttons = actionsRegion.querySelectorAll('button[data-action]')
 
-    expect(Array.from(actions).map(b => b.getAttribute('data-action'))).toEqual([
+    expect(Array.from(buttons).map(b => b.getAttribute('data-action'))).toEqual([
       'reply',
       'repost',
       'like',
-      'share',
     ])
-    expect(actions[3]).toHaveTextContent('4')
-    // Share has no handler, so it is inert text — not a focusable no-op button.
-    expect(actions[3]?.tagName).toBe('SPAN')
     expect(screen.queryByRole('button', { name: /share/i })).not.toBeInTheDocument()
   })
 
@@ -221,11 +221,10 @@ describe('PostCard — readOnly variant (COR-015, D1-011)', () => {
 
     const actionsRegion = screen.getByTestId('post-actions')
     expect(actionsRegion.querySelectorAll('button[data-action]')).toHaveLength(3)
-    // PostActions self-wires the amplify hook (demo-polish F0, DP-14), so a writable
-    // session also gets the SEPARATE Quote trigger next to Repost. It is deliberately
-    // not a canonical `data-action` (R-002), hence the 3 above are unchanged.
-    expect(within(actionsRegion).getByTestId('post-quote-trigger')).toBeInTheDocument()
-    expect(actionsRegion.querySelectorAll('button')).toHaveLength(4)
+    // The Quote trigger is hidden (absent, not disabled; demo-polish F3), so the
+    // three canonical controls are the whole row.
+    expect(within(actionsRegion).queryByTestId('post-quote-trigger')).not.toBeInTheDocument()
+    expect(actionsRegion.querySelectorAll('button')).toHaveLength(3)
   })
 })
 
@@ -361,19 +360,13 @@ describe('PostCard — open-region overlay never nests an interactive descendant
 describe('PostCard — reply count & thread-open affordance (SOC-011, threads-replies story 02)', () => {
   it('shows the reply count in the action row', async () => {
     await renderWithExerciseContext(
-      <PostCard post={buildPost({ counts: { reply: 9, repost: 1, like: 2 } })} onReply={vi.fn()} />,
+      <PostCard
+        post={buildPost({ counts: { reply: 9, repost: 1, like: 2 } })}
+        onReply={vi.fn()}
+      />,
     )
 
     expect(screen.getByRole('button', { name: 'Reply, 9' })).toBeInTheDocument()
-  })
-
-  it('still shows the reply count, as inert text, when onReply is not supplied', async () => {
-    await renderWithExerciseContext(
-      <PostCard post={buildPost({ counts: { reply: 9, repost: 1, like: 2 } })} />,
-    )
-
-    expect(screen.queryByRole('button', { name: /^reply/i })).not.toBeInTheDocument()
-    expect(screen.getByTestId('post-actions').querySelector('[data-action="reply"]')).toHaveTextContent('9')
   })
 
   it('fires onReply with the post id when the reply button is clicked', async () => {
@@ -403,13 +396,25 @@ describe('PostCard — reply count & thread-open affordance (SOC-011, threads-re
     expect(onReply).toHaveBeenCalledWith('post-reply-2')
   })
 
-  it('renders Reply inert — not a focusable no-op button — when onReply is not supplied', async () => {
+  it('still shows the reply count, as inert text, when onReply is not supplied', async () => {
+    await renderWithExerciseContext(
+      <PostCard post={buildPost({ counts: { reply: 9, repost: 1, like: 2 } })} />,
+    )
+
+    expect(screen.queryByRole('button', { name: /^reply/i })).not.toBeInTheDocument()
+    expect(
+      screen.getByTestId('post-actions').querySelector('[data-action="reply"]'),
+    ).toHaveTextContent('9')
+  })
+
+  it('renders Reply as inert text, not a focusable no-op button, when onReply is not supplied', async () => {
     await renderWithExerciseContext(<PostCard post={buildPost()} />)
 
-    // No `onReply`, so there is nothing to activate: not a button, not a tab stop.
+    // WR-002: nothing to activate => nothing focusable. The count stays visible.
     expect(screen.queryByRole('button', { name: /^reply/i })).not.toBeInTheDocument()
     const reply = screen.getByTestId('post-actions').querySelector('[data-action="reply"]')
     expect(reply?.tagName).toBe('SPAN')
+    expect(reply).toHaveTextContent('3')
     expect(reply).not.toHaveAttribute('tabindex')
   })
 

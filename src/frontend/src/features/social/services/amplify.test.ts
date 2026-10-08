@@ -20,7 +20,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
-import { quotePost, repost, type QuotePostInput, type RepostInput } from './amplify'
+import { emitRepostToggle, quotePost, repost, type QuotePostInput, type RepostInput } from './amplify'
 
 vi.mock('@/core/services/api', () => ({
   api: { post: vi.fn().mockResolvedValue(undefined) },
@@ -166,5 +166,33 @@ describe('quotePost (SOC-020, NFR-004)', () => {
 
     const event = getEmittedTelemetryEvents().find(e => e.eventType === 'quote')
     expect(event?.causationId).toBe('evt-original-post-1')
+  })
+})
+
+describe('emitRepostToggle (mock-mode repost / undo event, demo-polish F3)', () => {
+  it('emits one repost event carrying the server\'s payload shape { reposted }', () => {
+    emitRepostToggle({ ...repostInput(), reposted: true })
+
+    const events = getEmittedTelemetryEvents().filter(e => e.eventType === 'repost')
+    expect(events).toHaveLength(1)
+    expect(events[0]?.channel).toBe('social')
+    expect(events[0]?.actor.personaId).toBe('persona-mvega_fh')
+    expect(events[0]?.target).toEqual({ entityType: 'post', entityId: 'post-seed-fwupd-rumor' })
+    expect(events[0]?.payload).toEqual({ reposted: true })
+    expect(events[0]?.scenarioTime).toBe('2033-09-04T13:32:00Z')
+  })
+
+  it('an undo is the same event type with reposted: false', () => {
+    emitRepostToggle({ ...repostInput(), reposted: false })
+
+    const events = getEmittedTelemetryEvents().filter(e => e.eventType === 'repost')
+    expect(events[0]?.payload).toEqual({ reposted: false })
+  })
+
+  it('the legacy repost() still emits no payload', () => {
+    repost(repostInput())
+
+    const events = getEmittedTelemetryEvents().filter(e => e.eventType === 'repost')
+    expect(events[0]?.payload).toBeUndefined()
   })
 })
