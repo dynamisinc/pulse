@@ -3,28 +3,47 @@
  * ---------------------------------------------------------------------------
  * The in-composer persona-context panel (feature: persona-operation, story
  * 03 "Composer shows persona context while writing"; CTL-003, COR-020,
- * SOC-054, D5-014/2.4). Staff world (COBRA) — dense reference panel meant to
- * sit beside the composer (`persona-operation/01`), never inside it.
+ * SOC-054, D5-014/2.4; reworked by demo-polish C4,
+ * docs/features/demo-polish/20-console-cleanup.md). Staff world (COBRA) — dense
+ * reference panel meant to sit beside the composer (`persona-operation/01`),
+ * never inside it.
  *
  * So a persona stays in character across controllers, this panel shows:
+ *   - a "POSTING AS {category}" chip (D5-014/2.4, wrong-persona defense),
+ *     text-carrying the signal (NFR-001), derived from `persona.personaType`;
+ *   - the persona's BIO, straight off the server persona (`persona.bio`);
  *   - voice/personality notes (COR-020), resolved via `personaVoice`'s
  *     `resolveVoiceNotes` — voiceNotes lives on the TEMPLATE, never the
  *     instance directly (see that module's header for the full grounding
- *     correction);
+ *     correction). A persona with no authored voice notes reads "No voice notes
+ *     authored" in a muted style — a normal state in a live exercise, not an
+ *     error;
  *   - the audience-magnitude band (SOC-054), read straight off the instance
  *     (`persona.audienceBand`) — never recomputed here;
- *   - a "POSTING AS {category}" chip (D5-014/2.4, wrong-persona defense),
- *     text-carrying the signal (NFR-001), derived from `persona.personaType`;
- *   - a handful of this persona's recent posts, scoped to THIS exercise
- *     instance (COR-001) — filtered from `listPosts()` by both
- *     `exerciseId` and `authorPersonaId`, so a controller never sees another
- *     exercise's history for a same-template persona.
+ *   - up to `maxRecents` (default 3) of this persona's RECENT POSTS, read from
+ *     the LIVE EXERCISE FEED (`resolveFeed('all', { includeReplies: true })`),
+ *     filtered to posts this persona authored — replies included, so a persona
+ *     that has only been replying still shows its voice.
+ *
+ * ## Recent posts come from the real feed, not a fixture (demo-polish C4)
+ * This used to read `listPosts()` — the seeded Fairhaven fixture — which showed
+ * "No recent posts" for any persona the presenter had actually been posting as.
+ * The read now goes through the feed seam every other surface uses
+ * (`feedService.resolveFeed`: mock adapter in dev, `GET /api/feed` live). It
+ * takes NO exercise id: the session binds the exercise and the server scopes the
+ * query (COR-001). The fixture-era client guard is kept as defence in depth —
+ * a post that DOES carry an `exerciseId` different from the persona's is dropped.
+ * The feed is read once per persona (and on remount); it does not live-update.
+ *
+ * `actionsSlot` is the one place a sibling story mounts an action next to the
+ * persona (persona-edit's "Edit persona" button, wired by the console route).
+ * The panel itself adds no controls: it is read-only reference that never
+ * obstructs the fire path.
  *
  * INPUT, NOT IMPORT (Wave-1 parallel-build contract): `persona` arrives as a
- * plain prop from `persona-operation/02`'s `useActivePersona()`, wired at the
- * Wave-1 integration step. This module does not import the picker or the
- * composer, and does not publish anything itself — it is read-only reference
- * that never obstructs the fire path (no buttons, no edit affordances).
+ * plain prop from `persona-operation/02`'s `useActivePersona()`, wired by the
+ * console route. This module does not import the picker or the composer, and
+ * does not publish anything itself.
  *
  * Recents render scenario time only (COR-053), via `formatScenarioTime` +
  * `useExerciseContext()`'s configured `timeZone` — never wall-clock, even
@@ -32,12 +51,20 @@
  * chrome, not on a historical post's own dateline).
  */
 
+import { useEffect, useState, type ReactNode } from 'react'
 import { Box, Chip, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faClockRotateLeft, faIdBadge, faQuoteLeft, faUsers } from '@fortawesome/free-solid-svg-icons'
+import {
+  faAddressCard,
+  faClockRotateLeft,
+  faIdBadge,
+  faQuoteLeft,
+  faUsers,
+} from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { formatScenarioTime } from '@/core/clock'
-import { listPosts, type Post } from '@/features/social'
+import type { Post } from '@/features/social'
+import { resolveFeed, type FeedScope } from '@/features/social/services/feedService'
 import type { Persona, StaffPersona } from '@/features/personas'
 import { audienceBandLabel, categoryChipLabel, resolveVoiceNotes } from '../services/personaVoice'
 
@@ -51,9 +78,17 @@ export interface PersonaContextPanelProps {
   /** Max recent posts to show. Defaults to 3 — enough in-voice grounding
    * without turning the panel into a feed. */
   readonly maxRecents?: number
+  /** Where a sibling story mounts an action for the active persona (e.g.
+   * persona-edit's "Edit persona" button — wired by the console route, which
+   * owns that composition). Rendered beside the category chip; absent = nothing
+   * is rendered. The panel adds no controls of its own. */
+  readonly actionsSlot?: ReactNode
 }
 
 const DEFAULT_MAX_RECENTS = 3
+
+/** Secondary text for an honest "nothing here" state — muted, never alarming. */
+const MUTED_NOTE_SX = { fontSize: 12, color: '#6b6b69', fontStyle: 'italic' }
 
 const SECTION_LABEL_SX = {
   fontSize: 10.5,
@@ -64,36 +99,111 @@ const SECTION_LABEL_SX = {
 }
 
 /**
- * This persona's most recent posts, scoped to its OWN exercise instance
- * (COR-001) — matched on both `exerciseId` and `authorPersonaId` so a
- * controller never sees another exercise's history for a same-template
- * persona. Newest-first, capped at `maxRecents`.
+ * The frozen F0 feed-read seam (demo-polish implementation.md §1.11):
+ * `resolveFeed(scope, { includeReplies })`. Typed structurally so this compiles
+ * both before and after that signature lands in `feedService` — a function with
+ * fewer parameters is assignable to this type, so until then the options argument
+ * is simply ignored at runtime (top-level posts only; the pre-F0 feed has no
+ * replies to include). Once `feedService` carries the options parameter this
+ * alias can be replaced by a direct `resolveFeed(...)` call.
  */
-// Typed on the narrower `Persona`: this helper reads only the two-world
-// COMMON fields (`exerciseId`/`id`), and a `StaffPersona` is assignable to it.
-function recentPostsFor(persona: Persona, maxRecents: number): Post[] {
-  return listPosts()
-    .filter(post => post.exerciseId === persona.exerciseId && post.authorPersonaId === persona.id)
+type ResolveFeedWithOptions = (
+  scope: FeedScope,
+  options: { includeReplies: boolean },
+) => Promise<Post[]>
+const readFeed: ResolveFeedWithOptions = resolveFeed
+
+/**
+ * This persona's most recent posts from the LIVE exercise feed: authored by
+ * `persona` (replies included — the read passes `includeReplies`), newest-first
+ * by scenario time, capped at `maxRecents`. Pure over its inputs.
+ *
+ * The feed is already scoped to the session's exercise server-side (COR-001);
+ * a post that nevertheless carries a DIFFERENT `exerciseId` than the persona's
+ * (the mock/fixture shape) is dropped as defence in depth. The live wire omits
+ * `exerciseId`, which is why an absent one is accepted.
+ */
+// Typed on the two identity fields it reads, so any persona shape (and the
+// effect's primitive deps below) can feed it without a cast.
+function selectRecentPosts(
+  posts: readonly Post[],
+  persona: Pick<Persona, 'id' | 'exerciseId'>,
+  maxRecents: number,
+): Post[] {
+  return posts
+    .filter(post => {
+      const postExerciseId: string | undefined = post.exerciseId
+      if (postExerciseId !== undefined && postExerciseId !== persona.exerciseId) return false
+      return post.authorPersonaId === persona.id
+    })
     // `Date.parse` on an ISO instant (not a wall-clock read) — matches
     // `feedService`'s newest-first comparator and avoids per-item Date objects.
     .sort((a, b) => Date.parse(b.scenarioTime) - Date.parse(a.scenarioTime))
     .slice(0, maxRecents)
 }
 
+type RecentsState =
+  | { readonly status: 'loading' }
+  | { readonly status: 'error' }
+  | { readonly status: 'ready'; readonly posts: readonly Post[] }
+
 /**
- * Read-only reference panel: persona voice notes, audience-magnitude band,
- * the wrong-persona-defense category chip, and a few scoped recent posts.
- * Updates whenever `persona` changes (a new prop value on every re-render —
- * no internal caching), so switching the active persona
- * (`persona-operation/02`) refreshes this panel without a full reload.
+ * Reads the exercise feed (with replies) and narrows it to `persona`'s recent
+ * posts. Re-reads whenever the persona changes; a stale response for a previous
+ * persona is discarded. A failed read is its own state — never rendered as
+ * "no posts yet", which would be a false statement about the persona.
+ */
+function usePersonaRecentPosts(
+  persona: Pick<Persona, 'id' | 'exerciseId'>,
+  maxRecents: number,
+): RecentsState {
+  const [state, setState] = useState<RecentsState>({ status: 'loading' })
+  const personaId = persona.id
+  const personaExerciseId = persona.exerciseId
+
+  useEffect(() => {
+    let cancelled = false
+    setState({ status: 'loading' })
+    readFeed('all', { includeReplies: true })
+      .then(feed => {
+        if (cancelled) return
+        // The selector takes just the two identity fields, so this effect's deps
+        // stay primitives (no per-render object identity to re-run on).
+        const posts = selectRecentPosts(
+          feed,
+          { id: personaId, exerciseId: personaExerciseId },
+          maxRecents,
+        )
+        setState({ status: 'ready', posts })
+      })
+      .catch(() => {
+        if (!cancelled) setState({ status: 'error' })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [personaId, personaExerciseId, maxRecents])
+
+  return state
+}
+
+/**
+ * Read-only reference panel: the wrong-persona-defense category chip, the
+ * persona's bio and voice notes, the audience-magnitude band, and a few recent
+ * posts from the live feed. Updates whenever `persona` changes (a new prop value
+ * on every re-render — recents re-read for the new persona), so switching the
+ * active persona (`persona-operation/02`) refreshes this panel without a full
+ * reload.
  */
 export function PersonaContextPanel({
   persona,
   maxRecents = DEFAULT_MAX_RECENTS,
+  actionsSlot,
 }: PersonaContextPanelProps) {
   const { timeZone } = useExerciseContext()
   const voiceNotes = resolveVoiceNotes(persona)
-  const recents = recentPostsFor(persona, maxRecents)
+  const bio = persona.bio?.trim()
+  const recents = usePersonaRecentPosts(persona, maxRecents)
 
   return (
     <Box
@@ -109,23 +219,49 @@ export function PersonaContextPanel({
     >
       <Stack sx={{ px: 2, py: 1.5, borderBottom: '1px solid #dcdcdc', gap: 0.5 }}>
         <Typography sx={SECTION_LABEL_SX}>PERSONA CONTEXT</Typography>
-        <Chip
-          data-testid="persona-context-category-chip"
-          icon={<FontAwesomeIcon icon={faIdBadge} style={{ fontSize: 11 }} />}
-          label={`POSTING AS ${categoryChipLabel(persona.personaType)}`}
-          size="small"
-          sx={{
-            alignSelf: 'flex-start',
-            fontWeight: 800,
-            fontSize: 10.5,
-            letterSpacing: '.06em',
-            borderRadius: '999px',
-            border: '1px solid #1e3a5f',
-            bgcolor: '#eaf1f9',
-            color: '#1e3a5f',
-            '& .MuiChip-icon': { color: '#1e3a5f', ml: '6px' },
-          }}
-        />
+        <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+          <Chip
+            data-testid="persona-context-category-chip"
+            icon={<FontAwesomeIcon icon={faIdBadge} style={{ fontSize: 11 }} />}
+            label={`POSTING AS ${categoryChipLabel(persona.personaType)}`}
+            size="small"
+            sx={{
+              alignSelf: 'flex-start',
+              fontWeight: 800,
+              fontSize: 10.5,
+              letterSpacing: '.06em',
+              borderRadius: '999px',
+              border: '1px solid #1e3a5f',
+              bgcolor: '#eaf1f9',
+              color: '#1e3a5f',
+              '& .MuiChip-icon': { color: '#1e3a5f', ml: '6px' },
+            }}
+          />
+          {actionsSlot ? (
+            <Box data-testid="persona-context-actions" sx={{ flex: 'none' }}>
+              {actionsSlot}
+            </Box>
+          ) : null}
+        </Stack>
+      </Stack>
+
+      <Stack sx={{ px: 2, py: 1.5, gap: 0.75, borderBottom: '1px solid #eceff2' }}>
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75 }}>
+          <FontAwesomeIcon icon={faAddressCard} style={{ fontSize: 11, color: '#848482' }} />
+          <Typography sx={SECTION_LABEL_SX}>BIO</Typography>
+        </Stack>
+        {bio ? (
+          <Typography
+            data-testid="persona-context-bio"
+            sx={{ fontSize: 12.5, color: '#1a1a1a', lineHeight: 1.5 }}
+          >
+            {bio}
+          </Typography>
+        ) : (
+          <Typography data-testid="persona-context-bio" sx={MUTED_NOTE_SX}>
+            No bio on this persona.
+          </Typography>
+        )}
       </Stack>
 
       <Stack sx={{ px: 2, py: 1.5, gap: 0.75, borderBottom: '1px solid #eceff2' }}>
@@ -133,12 +269,21 @@ export function PersonaContextPanel({
           <FontAwesomeIcon icon={faQuoteLeft} style={{ fontSize: 11, color: '#848482' }} />
           <Typography sx={SECTION_LABEL_SX}>VOICE NOTES</Typography>
         </Stack>
-        <Typography
-          data-testid="persona-context-voice-notes"
-          sx={{ fontSize: 12.5, color: '#1a1a1a', lineHeight: 1.5 }}
-        >
-          {voiceNotes ?? 'Voice notes unavailable for this persona’s template.'}
-        </Typography>
+        {voiceNotes ? (
+          <Typography
+            data-testid="persona-context-voice-notes"
+            sx={{ fontSize: 12.5, color: '#1a1a1a', lineHeight: 1.5 }}
+          >
+            {voiceNotes}
+          </Typography>
+        ) : (
+          // Not an error: a persona authored without a voice-notes template is a
+          // normal state. Muted (secondary) like the other empty states, and the
+          // words say what is true — nothing has been authored.
+          <Typography data-testid="persona-context-voice-notes" sx={MUTED_NOTE_SX}>
+            No voice notes authored
+          </Typography>
+        )}
       </Stack>
 
       <Stack sx={{ px: 2, py: 1.5, gap: 0.75, borderBottom: '1px solid #eceff2' }}>
@@ -156,17 +301,29 @@ export function PersonaContextPanel({
           <FontAwesomeIcon icon={faClockRotateLeft} style={{ fontSize: 11, color: '#848482' }} />
           <Typography sx={SECTION_LABEL_SX}>RECENT POSTS</Typography>
         </Stack>
-        {recents.length === 0 ? (
-          <Typography sx={{ fontSize: 12, color: '#848482', fontStyle: 'italic' }}>
+        {recents.status === 'loading' && (
+          <Typography data-testid="persona-context-recents-loading" sx={MUTED_NOTE_SX}>
+            Loading recent posts…
+          </Typography>
+        )}
+        {recents.status === 'error' && (
+          // A failed read is NOT "no posts yet" — say what actually happened.
+          <Typography data-testid="persona-context-recents-error" sx={MUTED_NOTE_SX}>
+            Recent posts could not be loaded.
+          </Typography>
+        )}
+        {recents.status === 'ready' && recents.posts.length === 0 && (
+          <Typography data-testid="persona-context-recents-empty" sx={MUTED_NOTE_SX}>
             No recent posts from this persona in this exercise yet.
           </Typography>
-        ) : (
+        )}
+        {recents.status === 'ready' && recents.posts.length > 0 && (
           <Stack
             component="ul"
             data-testid="persona-context-recents"
             sx={{ listStyle: 'none', p: 0, m: 0, gap: 1 }}
           >
-            {recents.map(post => (
+            {recents.posts.map(post => (
               <Box component="li" key={post.id} sx={{ borderLeft: '3px solid #dbe9fa', pl: 1 }}>
                 <Typography sx={{ fontSize: 12, color: '#1a1a1a', lineHeight: 1.4 }}>{post.text}</Typography>
                 <Typography sx={{ fontSize: 10.5, color: '#848482', mt: 0.25 }}>

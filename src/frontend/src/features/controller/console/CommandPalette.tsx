@@ -1,16 +1,23 @@
 /**
  * features/controller/console/CommandPalette.tsx
  * ---------------------------------------------------------------------------
- * The controller console's ⌘K / Ctrl+K COMMAND PALETTE shell (feature:
- * console-shell, story 01 — "Toolstrip + flyouts"; D5-004/015/017/018; see
+ * The controller console's ⌘K / Ctrl+K palette shell (feature: console-shell,
+ * story 01 — "Toolstrip + flyouts"; D5-004/015/017/018; see
  * docs/features/console-shell/01-toolstrip-flyouts.md AC "⌘K command palette").
  *
  * A keyboard-first, searchable, focus-TRAPPED overlay whose PERSONAS section is
- * the entry point to the "post as persona" flow. This story ships the palette
- * shell + the PERSONAS section as a search/SELECT surface only — the searchable
+ * the entry point to the "post as persona" flow. It ships the palette shell +
+ * the PERSONAS section as a search/SELECT surface only — the searchable
  * persona LIST itself is `persona-operation/02`'s, rendered into the
- * `renderPersonaResults` slot at the serial integration step (an INPUT
- * contract, never an import of `persona-operation`'s files).
+ * `renderPersonaResults` slot by the console route (an INPUT contract, never an
+ * import of `persona-operation`'s files).
+ *
+ * ## Honest about what it does (demo-polish C4)
+ * PERSONAS is the ONLY section and there are no commands: the search field's
+ * placeholder and accessible name say "Search personas", never "personas and
+ * commands", and there is no dead/placeholder entry. When a real command set
+ * exists it adds its own section; the focus trap, Esc and focus return below
+ * are independent of that.
  *
  * ## A11y (NFR-001) — fully keyboard-operable, no pointer required
  * `role="dialog"` + `aria-modal` + `aria-label`. On open, focus moves to the
@@ -66,8 +73,8 @@ export interface CommandPaletteProps {
   /**
    * Renders the searchable persona LIST into the PERSONAS section
    * (`persona-operation/02`, wired at integration). Receives the live query +
-   * a select callback. When absent (during the fan-out), the section shows a
-   * neutral placeholder marking the seam.
+   * a select callback. When absent (the palette rendered on its own), the
+   * section shows a short hint instead of a list.
    */
   renderPersonaResults?: (slot: CommandPalettePersonaSlot) => ReactNode
 }
@@ -202,12 +209,12 @@ export function CommandPalette({
             inputRef={searchInputRef}
             value={query}
             onChange={event => setQuery(event.target.value)}
-            placeholder="Search personas and commands…"
+            placeholder="Search personas…"
             variant="standard"
             fullWidth
             slotProps={{
               input: { disableUnderline: true },
-              htmlInput: { 'aria-label': 'Search personas and commands' },
+              htmlInput: { 'aria-label': 'Search personas' },
             }}
             data-testid="command-palette-search"
           />
@@ -255,7 +262,7 @@ export function CommandPalette({
                     color: staffShellTokens.accent.secondaryText,
                   }}
                 >
-                  Search a persona to post as — the persona list mounts here.
+                  Type a name or handle to find a persona to post as.
                 </Typography>
               )}
           </Box>

@@ -4,7 +4,11 @@
  * Story 01 (Staff header) — RTL coverage for the Acceptance Criteria in
  * docs/features/staff-shell/01-staff-header.md:
  *  - renders the brand lockup + exercise identity badge + dual clock pair +
- *    state pill + FOUO classification tag + staff presence + preview button;
+ *    state pill + FOUO classification tag + preview button (and NO presence
+ *    group: the roster is empty until a real presence channel exists, and an
+ *    empty roster renders nothing — demo-polish C4);
+ *  - the identity badge's cell name IS the controller identity's call sign (one
+ *    source: the header and the console body cannot disagree — demo-polish C4);
  *  - the identity badge is STATIC during conduct (COR-005) — a Live/active
  *    exercise renders no switcher control of any kind;
  *  - the state pill carries BOTH a dot AND a text label (NFR-001, never
@@ -44,7 +48,7 @@
  * control CALLS it, never re-tests its internals.
  */
 import type { ReactElement } from 'react'
-import { act, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
+import { act, render as rtlRender, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -54,6 +58,8 @@ import type { ExerciseScope, ExerciseStatus } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { endSession } from '@/core/auth'
 import { LOGIN_PATH } from '@/features/app-shell/constants'
+import { resolveMockControllerIdentity } from '@/features/controller/identity/controllerIdentity'
+import { useStaffPresence, useStaffRoleCell } from '../staffHeaderMocks'
 
 vi.mock('@/core/exerciseContext', () => ({
   useExerciseContext: vi.fn(),
@@ -100,7 +106,7 @@ afterEach(() => {
 })
 
 describe('StaffHeader — renders every required region (AC1)', () => {
-  it('renders the brand lockup, identity badge, dual clock pair, state pill, FOUO tag, presence, and preview button', () => {
+  it('renders the brand lockup, identity badge, dual clock pair, state pill, FOUO tag, and preview button', () => {
     // The preview control is HANDLER-GATED (see the header describe below), so
     // a render that expects it must wire the handler that gives it a behavior.
     render(<StaffHeader surfaceName="Controller Console" onTogglePreview={vi.fn()} />)
@@ -112,8 +118,9 @@ describe('StaffHeader — renders every required region (AC1)', () => {
     const badge = screen.getByTestId('staff-header-identity-badge')
     expect(within(badge).getByText('Bay Shield 2026')).toBeInTheDocument()
     // Exact role/cell string (not a loose substring match) — pins the
-    // `${role} · ${cell}` join format the mock seam (staffHeaderMocks.ts) feeds it.
-    expect(within(badge).getByText('CONTROLLER · SimCell-1')).toBeInTheDocument()
+    // `${role} · ${cell}` join format the seam (staffHeaderMocks.ts) feeds it.
+    // The cell is the controller identity's call sign verbatim (one source).
+    expect(within(badge).getByText('CONTROLLER · SIMCELL-1')).toBeInTheDocument()
 
     expect(screen.getByTestId('staff-header-scenario-clock')).toBeInTheDocument()
     expect(screen.getByTestId('staff-header-wall-clock')).toBeInTheDocument()
@@ -124,9 +131,6 @@ describe('StaffHeader — renders every required region (AC1)', () => {
     // Locks the actual persistent SHELL-CONTRACT §1 marking, not just
     // whatever the constant happens to hold.
     expect(STAFF_CLASSIFICATION).toBe('UNCLASSIFIED // FOUO')
-
-    const presence = screen.getByRole('group', { name: 'Staff presence' })
-    expect(within(presence).getAllByText(/^[A-Z0-9]{2}$/).length).toBeGreaterThan(0)
 
     expect(screen.getByRole('button', { name: /preview as participant/i })).toBeInTheDocument()
   })
@@ -142,14 +146,41 @@ describe('StaffHeader — surfaceName reflects the prop, not a hardcoded lockup 
   })
 })
 
-describe('StaffHeader — staff presence roster (contract seam: staffHeaderMocks.ts)', () => {
-  it('exposes each presence member by its real accessible label, not just its initials', () => {
+describe('StaffHeader — no faked staff presence (demo-polish C4; contract seam: staffHeaderMocks.ts)', () => {
+  it('the presence seam returns an empty roster — nobody is claimed to be online', () => {
+    expect(useStaffPresence()).toEqual([])
+  })
+
+  it('renders NO presence region at all for the empty roster (no empty labelled group, no avatars)', () => {
     render(<StaffHeader surfaceName="Controller Console" />)
 
-    const presence = screen.getByRole('group', { name: 'Staff presence' })
-    expect(within(presence).getByLabelText('SimCell-1 (you)')).toBeInTheDocument()
-    expect(within(presence).getByLabelText('SimCell-2 · J. Okoro')).toBeInTheDocument()
-    expect(within(presence).getByLabelText('Director · L. Park')).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Staff presence' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('staff-header-presence')).not.toBeInTheDocument()
+    // The old fake colleagues must not be back under any label.
+    expect(screen.queryByLabelText(/J\. Okoro/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/L\. Park/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/\(you\)/)).not.toBeInTheDocument()
+  })
+})
+
+describe('StaffHeader — one SimCell name (demo-polish C4)', () => {
+  it('the header cell line is the controller identity call sign, character for character', () => {
+    const callSign = resolveMockControllerIdentity(BASE_SCOPE.exerciseId).callSign
+    render(<StaffHeader surfaceName="Controller Console" />)
+
+    const badge = screen.getByTestId('staff-header-identity-badge')
+    expect(within(badge).getByText(`CONTROLLER · ${callSign}`)).toBeInTheDocument()
+    // No second spelling of the cell name survives anywhere in the header.
+    expect(screen.getByTestId('staff-header').textContent).not.toMatch(/SimCell/)
+  })
+
+  it('useStaffRoleCell() derives role and cell from the identity seam for ANY exercise', () => {
+    mockScope({ exerciseId: 'ex-mock-0001' })
+    const { result } = renderHook(() => useStaffRoleCell())
+
+    const identity = resolveMockControllerIdentity('ex-mock-0001')
+    expect(result.current).toEqual({ role: identity.role.toUpperCase(), cell: identity.callSign })
+    expect(result.current.cell).toBe('SIMCELL-1')
   })
 })
 
