@@ -16,6 +16,14 @@
  * `<h1>` ("Post"), which is where focus lands on arrival. `ThreadView` emits its
  * own thread-open `view` telemetry on mount (XC-004); this route emits nothing.
  *
+ * `onOpenThread` IS SUPPLIED (demo-polish F4 AC, Gate-2 H-1). Without it `ThreadView`
+ * leaves every ancestor / reply card with no open target and an inert Reply button, so
+ * "Reply on another card -> open that thread with its composer focused" worked only in
+ * a unit test that passed the prop by hand. The route passes the same stable
+ * `openThread` opener the feed does: tapping an ancestor or reply opens it
+ * (`/i/status/:id`), and its Reply records the reply intent first, so the thread that
+ * opens lands in its composer.
+  *
  * World: participant. No COBRA, no MUI.
  */
 
@@ -28,14 +36,19 @@ import { SocialRedirect } from './SocialRedirect'
 
 export function ThreadRoute() {
   const { handle = '', id = '' } = useParams()
-  const { openHashtag, openProfile } = useSocialOpeners()
+  const { openThread, openHashtag, openProfile } = useSocialOpeners()
 
   if (id === '' || !isThreadHandle(handle)) return <SocialRedirect to={HOME_PATH} />
 
   return (
     <div data-testid="social-thread-region">
       <DetailHeader title="Post" />
-      <ThreadView focusedPostId={id} onHashtagOpen={openHashtag} onOpenProfile={openProfile} />
+      <ThreadView
+        focusedPostId={id}
+        onOpenThread={openThread}
+        onHashtagOpen={openHashtag}
+        onOpenProfile={openProfile}
+      />
     </div>
   )
 }

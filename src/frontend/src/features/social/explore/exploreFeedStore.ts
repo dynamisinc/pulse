@@ -14,6 +14,15 @@
  * (`resolveFeed`, top-level only) and then folds in every arrival from the shared
  * arrival source.
  *
+ * OBSERVER / READ-ONLY SESSIONS DO NOT STREAM (D1-011). `useFeedStream` and
+ * `useThread` never open the arrival transport for a mount without interactive
+ * affordances (`affordancesAvailable(variant)` false), so neither does this store: a
+ * consumer subscribes with `{ stream: false }` and the store does the one baseline READ
+ * but never subscribes to, starts or stops the shared arrival source. The rail then
+ * shows the trends as of that read (an observer is a passive view; the read still
+ * happens so Trending and search are not blank). The stream flag is part of the
+ * consumer's scope key (`useExploreFeed.ts`), so a change of it restarts cleanly.
+ *
  * ONE READ, ONE CONNECTION, REF-COUNTED. However many components consume it:
  *   - the first consumer starts it (one feed read; one subscription to the app-wide
  *     `defaultFeedStreamSource` — the ref-counted, top-level-only narrowing of the
@@ -76,12 +85,28 @@ export interface ExploreFeedSnapshot {
   readonly error: unknown
 }
 
+export interface ExploreFeedSubscribeOptions {
+  /**
+   * Whether the arrival transport may be started for this consumer. `false` for an
+   * observer / read-only mount (D1-011): the baseline read only, no stream.
+   */
+  readonly stream?: boolean
+}
+
 export interface ExploreFeedStore {
   /**
    * Registers a consumer for `scopeKey` and (for the first one) starts the baseline.
    * Returns the idempotent release. Shape-compatible with `useSyncExternalStore`.
+   *
+   * `options.stream` (default `true`) says whether the store may open the shared arrival
+   * transport. It is read when the baseline STARTS (the first consumer); consumers of one
+   * scope share a session, so they agree, and the hook folds it into the scope key.
    */
-  subscribe(scopeKey: string, listener: () => void): () => void
+  subscribe(
+    scopeKey: string,
+    listener: () => void,
+    options?: ExploreFeedSubscribeOptions,
+  ): () => void
   /** The current snapshot for `scopeKey` (the idle snapshot for any other scope). */
   getSnapshot(scopeKey: string): ExploreFeedSnapshot
   /** Drops everything immediately (tests, and sign-out paths that want it now). */
@@ -133,6 +158,7 @@ export function createExploreFeedStore(
   let snapshot: ExploreFeedSnapshot = IDLE_SNAPSHOT
   let epoch = 0 // bumped on every start/teardown: a stale async result checks it
   let dirty = false
+  let streaming = false // whether THIS run subscribed to / started the arrival source
   let unsubscribeSource: (() => void) | undefined
   let batchTimer: ReturnType<typeof setTimeout> | undefined
   let retryTimer: ReturnType<typeof setTimeout> | undefined
@@ -194,7 +220,7 @@ export function createExploreFeedStore(
       })
   }
 
-  function start(scopeKey: string): void {
+  function start(scopeKey: string, stream: boolean): void {
     active = true
     key = scopeKey
     epoch += 1
@@ -204,9 +230,13 @@ export function createExploreFeedStore(
     failure = undefined
     snapshot = { status, posts: IDLE_SNAPSHOT.posts, error: undefined }
     // Subscribe BEFORE the read so nothing that lands while it is in flight is lost;
-    // duplicates between the two are removed by id.
-    unsubscribeSource = source.subscribe(onArrival)
-    void source.start().catch(() => {})
+    // duplicates between the two are removed by id. An observer / read-only consumer
+    // (D1-011) opens no transport at all: the read below is all it gets.
+    streaming = stream
+    if (stream) {
+      unsubscribeSource = source.subscribe(onArrival)
+      void source.start().catch(() => {})
+    }
     load()
     notify()
   }
@@ -221,7 +251,10 @@ export function createExploreFeedStore(
     retryTimer = undefined
     unsubscribeSource?.()
     unsubscribeSource = undefined
-    source.stop()
+    // Only stop a source THIS run started: `stop()` is the shared transport's own
+    // ref-count release, so stopping one we never started would drop another user's hold.
+    if (streaming) source.stop()
+    streaming = false
     byId.clear()
     key = undefined
     status = 'idle'
@@ -231,12 +264,12 @@ export function createExploreFeedStore(
   }
 
   return {
-    subscribe(scopeKey, listener) {
+    subscribe(scopeKey, listener, subscribeOptions) {
       // A different session/exercise must never see the previous one's posts.
       if (active && key !== scopeKey) teardown()
       listeners.add(listener)
       holders += 1
-      if (!active) start(scopeKey)
+      if (!active) start(scopeKey, subscribeOptions?.stream ?? true)
 
       const mine = generation
       let released = false

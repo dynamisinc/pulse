@@ -368,6 +368,16 @@ describe('SearchBox — one search event per settled query (XC-004)', () => {
     expect(searches()).toHaveLength(0)
   })
 
+  it('strips HTML markup from the recorded query (NFR-004), before clamping', async () => {
+    const { user, input } = await renderBox()
+    await user.click(input)
+    await user.paste('<img src=x onerror=alert(1)>zephyr<script>alert(2)</script>')
+
+    await waitFor(() => expect(searches()).toHaveLength(1), { timeout: 3000 })
+    expect(searches()[0]?.payload?.query).toBe('zephyr')
+    expect(JSON.stringify(searches()[0]?.payload)).not.toMatch(/onerror|<script|<img/i)
+  })
+
   it('clamps a very long query', async () => {
     const { user, input } = await renderBox()
     await user.click(input)

@@ -112,8 +112,16 @@ const TEXT_SURFACES = {
   onHover: [0xf4, 0xf4, 0xf5] as Rgb,
 } as const
 
-/** `FollowButton`'s `:hover { filter: brightness(1.08) }` (CSS filters work in sRGB). */
-const HOVER_BRIGHTNESS = 1.08
+/**
+ * The ONE hover brightening the social skin may apply to an accent FILL carrying white
+ * text: `FollowButton`'s, `NewPostsPill`'s, the nav rail's Post button's and
+ * `QuoteComposer`'s `:hover { filter: brightness(1.08) }` (CSS filters work in sRGB).
+ * `accessibleAccent` certifies the accent at exactly this value, so a stylesheet that
+ * brightens MORE (the nav rail's former 1.12 measured 4.26:1) falls outside the model;
+ * `accentHover.guard.test.ts` fails on any `brightness(` above it. Exported for that
+ * guard.
+ */
+export const HOVER_BRIGHTNESS = 1.08
 
 /** The contrast of an accent in each state it is drawn in (see the module header). */
 export interface AccentStateContrasts {

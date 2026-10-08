@@ -29,13 +29,20 @@
   --pc-bg: #fff;
   --pc-panel: #f3f5f6;
   --pc-line: #e5e8ea;
+  /* Shared control border (see `theme/social.module.css`); the attach tray's required
+   * alt-text field reads it (WCAG 1.4.11). */
+  --pc-control-line: #7b8993;
   --pc-ink: #0e1518;
   --pc-ink-muted: #61707a;
   --pc-hover: rgba(14, 21, 24, .045);
   --pc-accent: var(--pulse-ac, #1e3a5f);
   /* Counter state colors (D1-R5). Always paired with the visible count number,
-   * never the sole signal. */
-  --pc-low: #b26a00;
+   * never the sole signal. `--pc-low` paints the near-limit count as 11px TEXT on white
+   * AND the ring stroke: #a35f00 is 5.01:1 on white (text needs 4.5) and 4.07:1 against
+   * the ring track `--pc-line` (the stroke is a graphic, needs 3). The former #b26a00 was
+   * 4.24:1 -- under AA for the 11px number (Gate-2 H-3).
+   * `Composer.contrast.test.ts` computes these from this file. */
+  --pc-low: #a35f00;
   --pc-over: #c02a2a;
 
   box-sizing: border-box;
@@ -72,6 +79,15 @@
 
 .input:focus-visible {
   outline: none;
+}
+
+/* The text area draws no outline of its own (it is a borderless, auto-growing field), so
+ * without this the only focus cue is the caret. The whole composer takes a 3px accent
+ * rule along its bottom edge while focus is anywhere inside it (WCAG 2.4.7; the accent
+ * is >= 4.5:1 on white via `accessibleAccent`, so well over the 3:1 non-text bar). It
+ * is an inset shadow, so nothing shifts layout. */
+.composer:focus-within {
+  box-shadow: inset 0 -3px 0 var(--pc-accent);
 }
 
 .input[readonly] {

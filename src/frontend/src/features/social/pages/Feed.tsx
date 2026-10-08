@@ -161,6 +161,7 @@
 import {
   memo,
   useCallback,
+  useId,
   useMemo,
   useState,
   useEffect,
@@ -371,6 +372,10 @@ export function Feed({
   const [liveViews, setLiveViews] = useState<readonly PostView[]>([])
 
   const sectionRef = useRef<HTMLElement>(null)
+  // The sr-only <h1> labelling the section. Home mounts TWO Feed instances (All Posts and
+  // the lazily mounted Following), so a literal id would be duplicated in the document
+  // (Gate-2 low); `useId()` gives each its own.
+  const headingId = useId()
 
   const personaById = useMemo(
     () => new Map(personas.map(p => [p.id, p] as const)),
@@ -494,8 +499,8 @@ export function Feed({
   const displayViews = aboveBaseline.length > 0 ? [...aboveBaseline, ...posts] : posts
 
   return (
-    <section ref={sectionRef} className={styles.feed} aria-labelledby="feed-heading">
-      <h1 id="feed-heading" className={styles.srOnly}>{isFollowing ? 'Following' : 'Home'}</h1>
+    <section ref={sectionRef} className={styles.feed} aria-labelledby={headingId}>
+      <h1 id={headingId} className={styles.srOnly}>{isFollowing ? 'Following' : 'Home'}</h1>
 
       {/* Sticky "▲ N new posts" pill (feeds-discovery/04). Its own polite live
           region announces the count. HIDDEN entirely for an observer/read-only

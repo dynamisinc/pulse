@@ -86,6 +86,12 @@ export interface SocialPalette {
   readonly bg: string
   readonly panel: string
   readonly line: string
+  /**
+   * The border of an interactive CONTROL (a text field, an outlined pill). `line` is a
+   * hairline DIVIDER (1.23:1 on white -- fine between rows, fails WCAG 1.4.11 as the
+   * only edge of an input); this is the >= 3:1 non-text border (3.6:1 on white).
+   */
+  readonly controlLine: string
   readonly ink: string
   readonly inkMuted: string
   readonly hover: string
@@ -96,6 +102,7 @@ export const LIGHT_PALETTE: SocialPalette = {
   bg: '#fff',
   panel: '#f3f5f6',
   line: '#e5e8ea',
+  controlLine: '#7b8993',
   ink: '#0e1518',
   inkMuted: '#61707a',
   hover: 'rgba(14, 21, 24, .045)',

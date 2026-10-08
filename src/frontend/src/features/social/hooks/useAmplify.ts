@@ -21,7 +21,7 @@
  *    persona, or a read-only/observer session, => false (D1-011, COR-015).
  *    `PostCard`'s own `variant === 'readOnly'` is the primary "controls absent"
  *    guarantee; this is belt-and-braces so a toggle can never fire.
- *  - `doQuote(commentary)`: the quote action, UNCHANGED and currently UNMOUNTED —
+ *  - `doQuote(commentary)`: the quote action, currently UNMOUNTED —
  *    the Quote trigger and panel are hidden (absent, not disabled; D1-011) for the
  *    demo. It is kept, with `amplify.quotePost`, for the later quote story.
  *
@@ -41,6 +41,7 @@ import { useCallback } from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { scenarioNow } from '@/core/clock'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { emitRepostToggle, quotePost, type QuotePostRecord } from '../services/amplify'
 import { useReactionToggle } from './useReactionToggle'
 import type { UseTransientMessageResult } from './useTransientMessage'
@@ -148,6 +149,8 @@ export function useAmplify({
       originalPostId: postId,
       origin: 'participant',
       commentary,
+      // Live: the server emits `quote` (§1.8) -- a client emit would double-count.
+      emitTelemetry: USE_MOCK_DATA,
     })
   }, [exerciseId, timeZone, session.personaId, session.actingHumanId, session.isReadOnly, postId])
 

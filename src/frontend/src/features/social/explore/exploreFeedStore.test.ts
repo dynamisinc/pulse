@@ -429,3 +429,48 @@ describe('exploreFeedStore — scope, failure, staleness', () => {
     fresh()
   })
 })
+
+describe('exploreFeedStore — an observer / read-only consumer never opens the transport (D1-011)', () => {
+  it('with { stream: false } it does the one baseline read and nothing to the source', async () => {
+    const release = store.subscribe(SCOPE, () => {}, { stream: false })
+    expect(reads).toHaveLength(1)
+    expect(source.starts).toBe(0)
+    expect(source.handlers.size).toBe(0)
+
+    reads[0]?.resolve([post('a', '2033-09-04T10:00:00Z')])
+    await settle()
+    expect(store.getSnapshot(SCOPE).status).toBe('ready')
+    expect(ids()).toEqual(['a'])
+
+    // Nothing is listening, so an arrival cannot reach the baseline; it stays as read.
+    source.emit(view('b', '2033-09-04T11:00:00Z'))
+    await vi.advanceTimersByTimeAsync(EXPLORE_ARRIVAL_BATCH_MS * 2)
+    expect(ids()).toEqual(['a'])
+
+    // Leaving releases NOTHING it did not take: `stop()` is the shared transport's
+    // ref-count release, so calling it would drop another consumer's hold.
+    release()
+    await settle()
+    expect(source.stops).toBe(0)
+    expect(store.getSnapshot(SCOPE).status).toBe('idle')
+  })
+
+  it('still retries a failed baseline read without ever touching the source', async () => {
+    const release = store.subscribe(SCOPE, () => {}, { stream: false })
+    reads[0]?.reject(new Error('down'))
+    await settle()
+    expect(store.getSnapshot(SCOPE).status).toBe('error')
+
+    await vi.advanceTimersByTimeAsync(EXPLORE_RETRY_MS)
+    expect(reads).toHaveLength(2)
+    expect(source.starts).toBe(0)
+    release()
+  })
+
+  it('streams by default (the option is opt-out), and a full consumer still starts it', () => {
+    const release = store.subscribe(SCOPE, () => {})
+    expect(source.starts).toBe(1)
+    expect(source.handlers.size).toBe(1)
+    release()
+  })
+})

@@ -241,3 +241,37 @@ describe('PostResultRow', () => {
     expect(screen.getByRole('link').querySelector('[data-testid="verified-mark"]')).toBeNull()
   })
 })
+
+describe('PersonResultRow — a reserved handle is not a link (COR-004)', () => {
+  const RESERVED: Persona = { ...REAL, id: 'persona-home', displayName: 'Home Desk', handle: 'home' }
+
+  it('renders the name as plain text with no href (the profile URL would just bounce)', () => {
+    const onOpenProfile = vi.fn()
+    render(
+      <ul>
+        <PersonResultRow persona={RESERVED} onOpenProfile={onOpenProfile} />
+      </ul>,
+    )
+    const row = screen.getByTestId('search-person')
+
+    expect(within(row).queryByRole('link')).not.toBeInTheDocument()
+    expect(row.querySelector('a')).toBeNull()
+    expect(row.querySelector('[href]')).toBeNull()
+    expect(row.querySelector('[data-result-link]')).toBeNull()
+    expect(within(row).getByText('Home Desk')).toBeInTheDocument()
+    expect(within(row).getByText('@home')).toBeInTheDocument()
+
+    fireEvent.click(within(row).getByText('Home Desk'))
+    expect(onOpenProfile).not.toHaveBeenCalled()
+  })
+
+  it('still links every ordinary handle (including one that merely CONTAINS a reserved word)', () => {
+    render(
+      <ul>
+        <PersonResultRow persona={{ ...REAL, handle: 'homesteader' }} onOpenProfile={noop} />
+      </ul>,
+    )
+    expect(screen.getByRole('link', { name: /View Fairhaven Water Utility's profile/ }))
+      .toHaveAttribute('href', '/homesteader')
+  })
+})

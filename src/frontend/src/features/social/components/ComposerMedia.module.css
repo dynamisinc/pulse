@@ -6,10 +6,9 @@
  * class and this file carries NO COBRA/MUI dependency (participant world).
  *
  * The tray renders INSIDE a composer form, whose root (`Composer.module.css`'s
- * `.composer`) declares the `--pc-*` palette (light default, OS dark, and the
- * `[data-theme="dark"]` host override) and the `--pc-low` / `--pc-over` state
- * colours, so every rule here just reads `var(--pc-*)` and tracks the skin and
- * dark mode with no theme provider.
+ * `.composer`) declares the `--pc-*` palette (light palette only, demo-polish F5)
+ * and the `--pc-low` / `--pc-over` state colours, so every rule here just reads
+ * `var(--pc-*)` and tracks the skin with no theme provider.
  *
  * NFR-001: no state is carried by colour alone. An upload's progress has a numeric
  * percentage next to the bar, "Uploaded" and every failure are words with an icon,
@@ -96,7 +95,10 @@
   box-sizing: border-box;
   width: 100%;
   padding: 6px 10px;
-  border: 1px solid var(--pc-line);
+  /* The alt-text field is REQUIRED, so its edge is an input boundary: it needs 3:1
+   * (WCAG 1.4.11). `--pc-line` (#e5e8ea) is a 1.23:1 divider; the shared control border
+   * is 3.59:1 on white (Gate-2 M-6). */
+  border: 1px solid var(--pc-control-line);
   border-radius: 8px;
   background: var(--pc-bg);
   color: var(--pc-ink);

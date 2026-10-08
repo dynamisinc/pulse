@@ -24,7 +24,8 @@
   composes: tokens from '../theme/social.module.css';
 
   --ex-muted: #56656f;
-  --ex-control-line: #7b8993;
+  /* The shared control border (`--pc-control-line`, `theme/social.module.css`). */
+  --ex-control-line: var(--pc-control-line);
 
   box-sizing: border-box;
   width: 100%;

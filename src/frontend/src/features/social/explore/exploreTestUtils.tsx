@@ -5,7 +5,9 @@
  * imported by `*.test.tsx` files in this directory, never by product code.
  *
  *  - `renderExplore` mounts a component under the provider stack the Social channel
- *    gives it: the mock exercise + viewer session, F1's navigation adapter (in-memory,
+ *    gives it: the mock exercise + viewer session, the shell mount context (variant
+ *    `full` unless `variant` says otherwise -- the baseline streams only for a mount
+ *    with interactive affordances, D1-011), F1's navigation adapter (in-memory,
  *    with a `data-testid="where"` span showing the channel location) and
  *    the persona directory. The shared Explore baseline is reset afterwards by
  *    `resetExplore()`, which every Explore test file calls in `afterEach`.
@@ -23,6 +25,10 @@ import { render, type RenderResult } from '@testing-library/react'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
 import { resetExerciseClock } from '@/core/clock'
+import {
+  ShellContextProvider,
+  type ShellVariant,
+} from '@/features/participant-shell/mountContract'
 import { personaIdForHandle } from '@/features/personas'
 import type { Post } from '@/features/social'
 import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
@@ -41,6 +47,8 @@ export function nth<T>(items: readonly T[], index: number): T {
 export interface RenderExploreOptions {
   /** Memory-adapter history, oldest first. Default `['/explore']`. */
   readonly initialEntries?: readonly string[]
+  /** The shell mount variant (default `'full'`). `'readOnly'` = an observer mount. */
+  readonly variant?: ShellVariant
 }
 
 /** Renders `ui` inside the channel's providers (see the module header). */
@@ -51,12 +59,19 @@ export function renderExplore(
   return render(
     <ExerciseContextProvider>
       <SessionProvider>
-        <MemorySocialNavigationProvider initialEntries={options.initialEntries ?? ['/explore']}>
-          <SocialDirectoryProvider>
-            {ui}
-            <Where />
-          </SocialDirectoryProvider>
-        </MemorySocialNavigationProvider>
+        <ShellContextProvider
+          value={{
+            variant: options.variant ?? 'full',
+            scenarioNow: new Date('2033-09-04T16:00:00.000Z'),
+          }}
+        >
+          <MemorySocialNavigationProvider initialEntries={options.initialEntries ?? ['/explore']}>
+            <SocialDirectoryProvider>
+              {ui}
+              <Where />
+            </SocialDirectoryProvider>
+          </MemorySocialNavigationProvider>
+        </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,
   )

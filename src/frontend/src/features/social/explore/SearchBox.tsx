@@ -43,10 +43,13 @@
  *    never colour alone. Focus rings are a solid ink outline (>= 3:1).
  *
  * TELEMETRY (XC-004). One `search` event per SETTLED non-empty query (the same 400 ms
- * debounce as the announcement), with the query (trimmed, <= 100 chars) and the post /
- * people counts as payload — no persona or post ids. The server emits no `search`
- * event, so the client emits in both mock and live mode. Not emitted while loading or
- * when a section failed (the counts would be wrong).
+ * debounce as the announcement), with the query (trimmed, HTML-stripped through
+ * `sanitizeText`, <= 100 chars) and the post / people counts as payload — no persona or
+ * post ids. The raw query is free text a participant typed or pasted (NFR-004): it is
+ * sanitized BEFORE it is truncated, so a pasted `<img onerror=…>` never reaches an event
+ * sink (an AAR export, a console replay) and a cut cannot leave half a tag behind. The
+ * server emits no `search` event, so the client emits in both mock and live mode. Not
+ * emitted while loading or when a section failed (the counts would be wrong).
  *
  * SCENARIO TIME (COR-053): result times render from ONE `useScenarioTime` snapshot in
  * the exercise zone. The debounce is a UI timer only. CONTENT SECURITY (NFR-004): the
@@ -72,6 +75,7 @@ import { scenarioNow, useScenarioTime } from '@/core/clock'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
+import { sanitizeText } from '../services/sanitize'
 import { useExploreOpeners, type ExploreOpenerProps } from './exploreNavigation'
 import { parseQuery, runSearch, type SearchSort } from './search'
 import { PersonResultRow, PostResultRow } from './SearchResultRows'
@@ -260,7 +264,7 @@ export function SearchBox({
       scenarioTime: scenarioNow().toISOString(),
       timeZone,
       payload: {
-        query: settled.query.slice(0, MAX_TELEMETRY_QUERY),
+        query: sanitizeText(settled.query).slice(0, MAX_TELEMETRY_QUERY),
         postCount: settled.postCount,
         peopleCount: settled.peopleCount,
       },

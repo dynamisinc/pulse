@@ -156,8 +156,11 @@
   cursor: pointer;
 }
 
+/* 1.08 is the ONE brightening `theme/accent.ts` models (`HOVER_BRIGHTNESS`): white on
+ * the brightened default-amber fill is 4.56:1. The former 1.12 was 4.26:1 -- under AA
+ * (Gate-2 H-2). `theme/accentHover.guard.test.ts` fails the build on a larger value. */
 .post:hover {
-  filter: brightness(1.12);
+  filter: brightness(1.08);
 }
 
 .postIcon {

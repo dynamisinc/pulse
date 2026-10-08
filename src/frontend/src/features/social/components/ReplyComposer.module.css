@@ -6,8 +6,8 @@
  * shared `ComposerForm` (`Composer.module.css`), so the reply box looks and behaves
  * like the post box; this file only styles what the reply box adds: the
  * "Replying to @handle" line above the text area. It renders INSIDE the composer
- * root, which declares the `--pc-*` palette (and its dark-mode triggers), so the
- * colours here track the skin with no theme provider.
+ * root, which declares the `--pc-*` palette (light palette only, demo-polish F5), so
+ * the colours here track the skin with no theme provider.
  */
 
 .context {

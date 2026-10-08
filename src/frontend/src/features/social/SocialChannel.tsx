@@ -50,7 +50,9 @@
  * and the shell drops its row: one Sign out on the social channel, and the channel
  * no longer starts a strip lower than it has to. Other channels make no claim and
  * keep the shell's row. A `preview` / `kiosk` mount shows no account card, so it
- * makes no claim either.
+ * makes no claim either. The claim tracks the card EXACTLY: while the card is held
+ * back for a persona-bound session whose cast is still loading (`awaitingSelf`) there
+ * is no claim, so the shell's row covers the gap and Sign out is never missing.
  *
  * ABSENT, NOT DISABLED (COR-015 / D1-011). The **Post** button exists only when the
  * shell variant grants interactive affordances AND the session can post; the account
@@ -126,14 +128,17 @@ function SocialFrame() {
   // A staff `preview` / `kiosk` mount must never expose a sign-out (it would sign
   // the STAFF user out); only a real participant mount gets the account card.
   const showAccount = variant === 'full' || variant === 'readOnly'
-  // The account card IS this channel's sign-out: tell the shell not to add its own.
-  useClaimShellAccountControl(showAccount)
   // A persona-bound session whose cast has not loaded yet has no name/avatar to show;
   // drawing the bare Sign-out-only card for those few frames and then swapping it for
   // the full one would flash and shift the rail (and remount the button under a
   // pointer). Hold the card back until the persona resolves. If the cast FAILS to
   // load (`loading` false, `self` still unknown) the bare card is the right fallback.
   const awaitingSelf = session.personaId !== undefined && self === undefined && directoryLoading
+  // The account card IS this channel's sign-out: tell the shell not to add its own --
+  // but ONLY while the card is actually on screen. While it is withheld (`awaitingSelf`)
+  // the claim is not made, so the shell's own Sign out row stays up and there is never a
+  // moment (a slow or hung cast load) with no Sign out anywhere (Gate-2 low).
+  useClaimShellAccountControl(showAccount && !awaitingSelf)
 
   // The dialog belongs to the page it was opened on: if the route changes under it
   // (browser Back / Forward are the only way, the frame behind it being inert) it

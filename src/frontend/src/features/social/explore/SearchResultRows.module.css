@@ -111,6 +111,15 @@
   text-decoration: none;
 }
 
+/* A reserved-handle account: the same type as the link, but plain text -- no overlay,
+ * no pointer cursor (it opens nothing). */
+.rowName {
+  display: block;
+  color: var(--pc-ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+
 .rowLink::after {
   content: '';
   position: absolute;

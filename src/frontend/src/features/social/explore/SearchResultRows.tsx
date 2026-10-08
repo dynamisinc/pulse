@@ -21,6 +21,13 @@
  * lookalike simply lacks the last part — the same signal a sighted reader gets. The
  * ids are neutral (`…-handle`, `…-mark`); only their count differs between the rows.
  *
+ * A RESERVED HANDLE IS NOT A LINK. A persona whose handle is a reserved first segment
+ * (`home`, `staff`, ... -- COR-004) has no profile URL: `/home` is the feed, `/staff` is
+ * redirected away. Such a row renders its name as plain text with no `href` and no
+ * stretched target (absent, not a link that bounces), exactly as `useSocialOpeners`
+ * refuses to open one. Every real handle takes the link path unchanged, so the lookalike
+ * pair above is still structurally identical.
+ *
  * ROW ACTIVATION. Each row has ONE link, stretched over the whole row
  * (`.rowLink::after`): one large target, one tab stop. It is a real `<a href>`
  * (`exploreNavigation.ts`); a plain click is handed to the in-app opener.
@@ -38,7 +45,7 @@ import type { Persona } from '@/features/personas'
 import { Avatar } from '../components/Avatar'
 import { VerifiedMark } from '../components/VerifiedMark'
 import type { PostView } from '../components/post/types'
-import { socialPaths } from '../layout/socialNavigation'
+import { isReservedSegment, socialPaths } from '../layout/socialNavigation'
 import { activateLink } from './exploreNavigation'
 import styles from './SearchResultRows.module.css'
 
@@ -56,21 +63,27 @@ export function PersonResultRow({ persona, onOpenProfile }: PersonResultRowProps
   const base = useId()
   const handleId = `${base}-handle`
   const markId = `${base}-mark`
+  // A reserved handle has no profile page to link to (see the module header).
+  const linkable = !isReservedSegment(persona.handle)
   return (
     <li className={styles.row} data-testid="search-person">
       <Avatar persona={persona} size={AVATAR_SIZE} />
       <span className={styles.identity}>
         <span className={styles.nameRow}>
-          <a
-            className={styles.rowLink}
-            href={socialPaths.profile(persona.handle)}
-            data-result-link="true"
-            aria-label={`View ${persona.displayName}'s profile`}
-            aria-describedby={persona.verified ? `${handleId} ${markId}` : handleId}
-            onClick={event => activateLink(event, () => onOpenProfile(persona.id))}
-          >
-            {persona.displayName}
-          </a>
+          {linkable
+            ? (
+              <a
+                className={styles.rowLink}
+                href={socialPaths.profile(persona.handle)}
+                data-result-link="true"
+                aria-label={`View ${persona.displayName}'s profile`}
+                aria-describedby={persona.verified ? `${handleId} ${markId}` : handleId}
+                onClick={event => activateLink(event, () => onOpenProfile(persona.id))}
+              >
+                {persona.displayName}
+              </a>
+            )
+            : <span className={styles.rowName}>{persona.displayName}</span>}
           {persona.verified && (
             <span id={markId} className={styles.seal}>
               <VerifiedMark size={SEAL_SIZE} />

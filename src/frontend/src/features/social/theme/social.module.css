@@ -53,6 +53,10 @@
   --pc-bg: #fff;
   --pc-panel: #f3f5f6;
   --pc-line: #e5e8ea;
+  /* The border of an interactive CONTROL (text field, outlined pill): 3.59:1 on white,
+   * 3.29:1 on `--pc-panel` -- WCAG 1.4.11 wants >= 3:1. `--pc-line` is a hairline
+   * DIVIDER (1.23:1) and must never be the only edge of an input. */
+  --pc-control-line: #7b8993;
   --pc-ink: #0e1518;
   --pc-ink-muted: #61707a;
   --pc-hover: rgba(14, 21, 24, .045);

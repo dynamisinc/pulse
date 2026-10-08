@@ -82,6 +82,13 @@
  * var: it carries the TALLEST, and only the last one out clears it -- the same
  * ref-counting `ComplianceChrome` uses for the chrome insets (WR-001).
  *
+ * ## Vs a fullscreen element (`useExitFullscreenOnNewAlert`)
+ * The browser paints a fullscreen element above EVERYTHING, this bar included, so a
+ * channel's fullscreen video would hide a new alert indefinitely. When a NEW advisory or
+ * emergency alert becomes active the bar leaves fullscreen ONCE for it (info does not);
+ * re-entering fullscreen with the same alert still active is allowed. It uses
+ * `core/dom/fullscreen` only -- the shell imports nothing from a channel.
+ *
  * Never user-dismissable (PRT-010) — there is intentionally no close/dismiss
  * affordance anywhere in this component. Alerts here are in-fiction/simulated
  * only; a real-world message is the break-fiction overlay (story 05), never
@@ -99,6 +106,7 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
 import { SHELL_ALERT_HEIGHT_VAR, SHELL_CHROME_TOP_VAR, SHELL_Z } from '../../mountContract'
 import { useAlerts } from './useAlerts'
+import { useExitFullscreenOnNewAlert } from './useExitFullscreenOnNewAlert'
 import type { Alert, AlertSeverity } from './alertTypes'
 
 /** Ticker auto-rotation interval (SHELL-CONTRACT.md §2: "~3.5s"). */
@@ -313,6 +321,9 @@ function publishAlertHeight(): void {
 
 export function AlertBar() {
   const alerts = useAlerts()
+  // A fullscreen element paints above this fixed bar: leave it once when a NEW advisory /
+  // emergency alert arrives (see the hook's header for the tiers and the once-only rule).
+  useExitFullscreenOnNewAlert(alerts)
   const { timeZone } = useExerciseContext()
   const { format } = useScenarioTime(timeZone)
 

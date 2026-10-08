@@ -101,8 +101,7 @@
  * The brief inline failure notice under the row (a rolled-back like / repost).
  * The element is an ALWAYS-PRESENT polite live region, so it takes no space while
  * empty; text + an icon carry the message, the left rule is decoration only
- * (never colour-only, NFR-001). The text stays on the ink colour for contrast in
- * both light and dark.
+ * (never colour-only, NFR-001). The text stays on the ink colour for contrast.
  */
 .notice {
   font-size: 13px;

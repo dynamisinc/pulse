@@ -4,15 +4,18 @@
  * The lightbox. Portalled to <body>, so it composes the shared `.tokens` class
  * (the same --pc-* palette a card carries) and otherwise uses FIXED dark-on-light
  * colours: a lightbox is dark in both colour schemes. Inset by the published
- * `--pulse-chrome-top/bottom` so the compliance banners stay visible; its z-index
- * (set inline from SHELL_Z) keeps the alert bar and overlay layer above it.
+ * `--pulse-chrome-top/bottom` so the compliance banners stay visible, and its top by
+ * `--pulse-alert-height` too (0px with no alert) so the viewer's own header / close
+ * button start BELOW the fixed alert bar instead of underneath it (PRT-010, Gate-2
+ * low); its z-index (set inline from SHELL_Z) keeps the alert bar and overlay layer
+ * above it.
  */
 
 .viewer {
   composes: tokens from '../../theme/social.module.css';
 
   position: fixed;
-  top: var(--pulse-chrome-top, 0px);
+  top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px));
   right: 0;
   bottom: var(--pulse-chrome-bottom, 0px);
   left: 0;

@@ -8,8 +8,8 @@
  * PostActions / PostReplyContext).
  *
  * `.postCard` is the token ROOT: it COMPOSES the shared `.tokens` class (the
- * `--pc-*` palette, both dark-mode triggers and the per-exercise accent hook —
- * see `theme/social.module.css`), so every part module beneath reads
+ * `--pc-*` palette -- light palette only, demo-polish F5 -- and the per-exercise
+ * accent hook; see `theme/social.module.css`), so every part module beneath reads
  * `var(--pc-*)` from here via the cascade.
  *
  * z-index tiers (the stacking contract across the part modules):

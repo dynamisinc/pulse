@@ -29,6 +29,11 @@
  *  - REPLY: a card's Reply opens its thread with the composer focused
  *    (`requestReplyFocus` then `onOpenThread`); with no `onOpenThread` Reply renders
  *    as inert text, never a no-op button.
+ *  - HASHTAGS IN A CARD: a card's own `#Other` is a link to THAT hashtag's feed
+ *    (`onHashtagOpen`, threaded to every card; Gate-2 M-4). Without it the anchors stay
+ *    inert, so a hashtag page could not be left by tapping another tag.
+ *  - IDS: the heading, the tabs and the panel get `useId()`-based ids, so two instances
+ *    of the page (or a page beside another tablist) never collide on a static id.
  *
  * ISOLATION (COR-001): `useFeed()` takes no client `exerciseId`; filtering happens
  * over that already-scoped set. SCENARIO TIME (COR-053): this page renders no
@@ -43,7 +48,7 @@
  * Recent/Top switch does not.
  */
 
-import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { memo, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faHashtag } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
@@ -85,6 +90,12 @@ export interface HashtagFeedProps {
    * inert text (no focusable no-op, WR-002).
    */
   readonly onOpenProfile?: (personaId: string) => void
+  /**
+   * Opens the tapped hashtag's feed (SOC-040) -- the same opener the main feed's cards
+   * get -- so a card on this page can lead to a DIFFERENT hashtag. Omitted in
+   * isolation: the cards' hashtags stay inert text.
+   */
+  readonly onHashtagOpen?: (tag: string) => void
 }
 
 interface HashtagRowProps {
@@ -93,6 +104,7 @@ interface HashtagRowProps {
   onOpenThread?: (id: string) => void
   onReply?: (id: string) => void
   onOpenProfile?: (personaId: string) => void
+  onHashtagOpen?: (tag: string) => void
 }
 
 /** A single row, memoized so an unchanged post skips re-render (NFR-002/
@@ -103,6 +115,7 @@ const HashtagRow = memo(function HashtagRow({
   onOpenThread,
   onReply,
   onOpenProfile,
+  onHashtagOpen,
 }: HashtagRowProps) {
   return (
     <li className={styles.row}>
@@ -112,6 +125,7 @@ const HashtagRow = memo(function HashtagRow({
         onOpen={onOpenThread}
         onReply={onReply}
         onOpenProfile={onOpenProfile}
+        onHashtagOpen={onHashtagOpen}
       />
     </li>
   )
@@ -148,8 +162,16 @@ function postCountLabel(count: number): string {
   return `${count.toLocaleString('en-US')} ${count === 1 ? 'post' : 'posts'}`
 }
 
-export function HashtagFeed({ tag: rawTag, onOpenThread, onOpenProfile }: HashtagFeedProps) {
+export function HashtagFeed({
+  tag: rawTag,
+  onOpenThread,
+  onOpenProfile,
+  onHashtagOpen,
+}: HashtagFeedProps) {
   const tag = useMemo(() => tagKey(rawTag), [rawTag])
+  // Unique per instance: the heading, tabs and panel ids (see the module header).
+  const idBase = useId()
+  const headingId = `${idBase}-heading`
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
   const { variant } = useShellContext()
@@ -215,9 +237,9 @@ export function HashtagFeed({ tag: rawTag, onOpenThread, onOpenProfile }: Hashta
   }
 
   return (
-    <section className={styles.page} aria-labelledby="hashtag-feed-heading">
+    <section className={styles.page} aria-labelledby={headingId}>
       <header className={styles.header}>
-        <h1 id="hashtag-feed-heading" className={styles.title}>{label}</h1>
+        <h1 id={headingId} className={styles.title}>{label}</h1>
         {/* The count appears once the posts are in (never a premature "0 posts"). */}
         {!loading && error === undefined && (
           <p className={styles.subtitle} data-testid="hashtag-post-count">
@@ -228,6 +250,7 @@ export function HashtagFeed({ tag: rawTag, onOpenThread, onOpenProfile }: Hashta
 
       <div className={styles.tabs} role="tablist" aria-label={`${label} feed order`}>
         <TabButton
+          idBase={idBase}
           id="recent"
           label="Recent"
           active={tab === 'recent'}
@@ -235,6 +258,7 @@ export function HashtagFeed({ tag: rawTag, onOpenThread, onOpenProfile }: Hashta
           onKeyDown={handleTabKeyDown}
         />
         <TabButton
+          idBase={idBase}
           id="top"
           label="Top"
           active={tab === 'top'}
@@ -246,8 +270,8 @@ export function HashtagFeed({ tag: rawTag, onOpenThread, onOpenProfile }: Hashta
       <ul
         className={styles.list}
         role="tabpanel"
-        id={`hashtag-tabpanel-${tab}`}
-        aria-labelledby={`hashtag-tab-${tab}`}
+        id={tabpanelId(idBase, tab)}
+        aria-labelledby={tabId(idBase, tab)}
         aria-label={`${label}, ${tab === 'top' ? 'Top' : 'Recent'}`}
       >
         {shown.map(post => (
@@ -258,6 +282,7 @@ export function HashtagFeed({ tag: rawTag, onOpenThread, onOpenProfile }: Hashta
             onOpenThread={onOpenThread}
             onReply={handleReply}
             onOpenProfile={onOpenProfile}
+            onHashtagOpen={onHashtagOpen}
           />
         ))}
       </ul>
@@ -278,7 +303,17 @@ export function HashtagFeed({ tag: rawTag, onOpenThread, onOpenProfile }: Hashta
   )
 }
 
+/** The tab / panel DOM ids for one page instance (`useId()` base + the tab name). */
+function tabId(idBase: string, tab: HashtagTab): string {
+  return `${idBase}-tab-${tab}`
+}
+function tabpanelId(idBase: string, tab: HashtagTab): string {
+  return `${idBase}-tabpanel-${tab}`
+}
+
 interface TabButtonProps {
+  /** The page instance's `useId()` base, so two pages never share a tab id. */
+  idBase: string
   id: HashtagTab
   label: string
   active: boolean
@@ -288,16 +323,16 @@ interface TabButtonProps {
 
 /** A tab, programmatically associated with its panel per the WAI-ARIA tabs
  * pattern (NFR-001): a unique `id` + `aria-controls` pointing at the panel
- * `TabButton`'s active sibling renders (`hashtag-tabpanel-${id}`), and a roving
+ * `TabButton`'s active sibling renders (`tabpanelId(idBase, id)`), and a roving
  * `tabIndex` (0 when active, -1 otherwise) so only the active tab is Tab-reachable. */
-function TabButton({ id, label, active, onSelect, onKeyDown }: TabButtonProps) {
+function TabButton({ idBase, id, label, active, onSelect, onKeyDown }: TabButtonProps) {
   return (
     <button
       type="button"
       role="tab"
-      id={`hashtag-tab-${id}`}
+      id={tabId(idBase, id)}
       aria-selected={active}
-      aria-controls={`hashtag-tabpanel-${id}`}
+      aria-controls={tabpanelId(idBase, id)}
       tabIndex={active ? 0 : -1}
       className={active ? `${styles.tab} ${styles.tabActive}` : styles.tab}
       onClick={() => onSelect(id)}

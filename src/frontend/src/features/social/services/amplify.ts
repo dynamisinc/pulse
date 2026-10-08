@@ -105,6 +105,13 @@ export type RepostInput = AmplifyInputBase
 /** Input to {@link quotePost}. `commentary` is sanitized on ingest (NFR-004). */
 export interface QuotePostInput extends AmplifyInputBase {
   readonly commentary: string
+  /**
+   * Whether this call emits the XC-004 `'quote'` event. Default `true` (the direct,
+   * mock-era behaviour). `useAmplify` passes `USE_MOCK_DATA`: in LIVE mode the server
+   * owns amplification telemetry (implementation.md §1.8, as for `repost`), so a client
+   * emit would double-count once the quote story wires the write.
+   */
+  readonly emitTelemetry?: boolean
 }
 
 /** Fields shared by every participant-safe amplification record. */
@@ -200,14 +207,15 @@ export function emitRepostToggle(input: RepostToggleInput): void {
 
 /**
  * Quote-posts an existing post: sanitizes the commentary (NFR-004), emits one
- * XC-004 `'quote'` event (provenance included), and returns a participant-safe
+ * XC-004 `'quote'` event (provenance included; unless `emitTelemetry` is `false`, the
+ * live-mode case where the server owns it), and returns a participant-safe
  * record carrying the SANITIZED commentary + a reference to the embedded
  * original. Never throws because of telemetry.
  */
 export function quotePost(input: QuotePostInput): QuotePostRecord {
   const commentary = sanitizeText(input.commentary)
   const id = `quote-${generateEventId()}`
-  emitAmplification('quote', input)
+  if (input.emitTelemetry !== false) emitAmplification('quote', input)
   return {
     id,
     kind: 'quote',
