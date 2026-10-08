@@ -1,0 +1,51 @@
+/*
+ * features/social/layout/routes/HomeView.module.css
+ * ---------------------------------------------------------------------------
+ * The All Posts / Following tablist of the Home page (SOC-080/SOC-081). The visual
+ * idiom mirrors `HashtagFeed.module.css`'s Latest/Top tabs so the channel's two
+ * feed switchers read as one control language. Reads the channel's `--pc-*`
+ * palette; light only (F5 owns the tokens sweep). No COBRA / MUI.
+ */
+
+.home {
+  min-width: 0;
+}
+
+.feedTabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--pc-line);
+}
+
+.feedTab {
+  flex: 1 1 auto;
+  padding: 12px 8px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--pc-ink-muted);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.feedTab:hover {
+  background: var(--pc-hover);
+}
+
+.feedTab:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: -2px;
+}
+
+/*
+ * The selected tab: accent color + heavier weight + an underline bar -- three
+ * cues, so the selection is NEVER conveyed by color alone (NFR-001);
+ * `aria-selected` in the TSX carries the same state to assistive tech.
+ */
+.feedTabActive {
+  border-bottom-color: var(--pc-accent);
+  color: var(--pc-accent);
+  font-weight: 800;
+}

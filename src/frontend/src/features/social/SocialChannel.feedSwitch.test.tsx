@@ -11,8 +11,10 @@
  *     the DOM, hidden, so its frozen baseline + scroll position survive), and
  *     that each instance emits its own ONE-SHOT mount `view` event — one per
  *     scope, no re-emit on a switch back.
- *  2. `<WhoToFollow>` (SOC-053) mounted in the FEED region: present alongside
- *     the feed, absent from every detail view.
+ *  2. `<WhoToFollow>` (SOC-053) mounted in the RIGHT RAIL (demo-polish F1 moved
+ *     it out of the feed column): present beside the feed, and — because the
+ *     rail is part of the frame, not of any one page — still present on every
+ *     detail view.
  *
  * Observer coverage: a `readOnly` shell mount gets NO switch at all (the
  * documented decision — a Following control it may never be served would be an
@@ -28,6 +30,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
@@ -54,13 +57,15 @@ function renderChannel(variant: ShellVariant = 'full') {
   const mount: ShellMountProps = { variant, scenarioNow: SCENARIO_NOW }
   return render(
     <QueryClientProvider client={client}>
-      <ExerciseContextProvider>
-        <SessionProvider>
-          <ShellContextProvider value={mount}>
-            <SocialChannel />
-          </ShellContextProvider>
-        </SessionProvider>
-      </ExerciseContextProvider>
+      <MemoryRouter initialEntries={['/home']}>
+        <ExerciseContextProvider>
+          <SessionProvider>
+            <ShellContextProvider value={mount}>
+              <SocialChannel />
+            </ShellContextProvider>
+          </SessionProvider>
+        </ExerciseContextProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -189,19 +194,23 @@ describe('SocialChannel — All Posts / Following switch (SOC-081)', () => {
 })
 
 describe('SocialChannel — Who to follow placement (SOC-053)', () => {
-  it('mounts the module in the feed region, never inside a post card', async () => {
+  it('mounts the module in the right rail, never inside a post card', async () => {
     renderChannel('full')
     await waitFor(() => expect(screen.getAllByTestId('post-card').length).toBeGreaterThan(0))
 
     const module = await screen.findByTestId('who-to-follow')
     expect(module).toBeVisible()
-    expect(screen.getByTestId('social-feed-region').contains(module)).toBe(true)
+    // F1: the module moved from the feed column to the `aside[aria-label=Sidebar]`.
+    expect(screen.getByRole('complementary', { name: 'Sidebar' }).contains(module)).toBe(true)
+    expect(screen.getByTestId('social-feed-region').contains(module)).toBe(false)
+    // Titled exactly "Who to follow" — never "official" (D1-R1).
+    expect(within(module).getByRole('heading', { name: 'Who to follow' })).toBeInTheDocument()
     for (const card of screen.getAllByTestId('post-card')) {
       expect(card.contains(module)).toBe(false)
     }
   })
 
-  it('does not appear in the thread / profile detail views', async () => {
+  it('stays in the rail on the thread / profile detail views', async () => {
     const user = userEvent.setup()
     renderChannel('full')
     await waitFor(() => expect(screen.getAllByTestId('post-card').length).toBeGreaterThan(0))
@@ -211,14 +220,15 @@ describe('SocialChannel — Who to follow placement (SOC-053)', () => {
     if (openTarget === undefined) throw new Error('expected an open target')
     await user.click(openTarget)
     await screen.findByTestId('thread-view')
-    // Hidden with the whole feed region — out of the a11y tree, not just off-screen.
-    expect(screen.getByTestId('who-to-follow')).not.toBeVisible()
+    // The rail belongs to the frame, not to the feed page: it persists.
+    expect(screen.getByTestId('who-to-follow')).toBeVisible()
+    expect(screen.getByTestId('social-feed-region')).not.toBeVisible()
 
-    await user.click(screen.getByRole('button', { name: /back to feed/i }))
-    await waitFor(() => expect(screen.getByTestId('who-to-follow')).toBeVisible())
+    await user.click(screen.getByRole('button', { name: /^back$/i }))
+    await waitFor(() => expect(screen.getByTestId('social-feed-region')).toBeVisible())
 
-    await user.click(screen.getByRole('button', { name: /view my profile/i }))
+    await user.click(await screen.findByRole('link', { name: 'Profile' }))
     await screen.findByTestId('social-profile-region')
-    expect(screen.getByTestId('who-to-follow')).not.toBeVisible()
+    expect(screen.getByTestId('who-to-follow')).toBeVisible()
   })
 })
