@@ -42,21 +42,21 @@
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { translateInjectError } from './injectErrors'
-import { isInjectAssigneesDto, isInjectItemDto, isInjectQueueDto } from './injectGuards'
+import {
+  isInjectAssigneesDto,
+  isInjectItemDto,
+  parseInjectQueue,
+  type InjectQueueRead,
+} from './injectGuards'
 import { injectMock } from './injectMock'
-import type {
-  InjectAssigneesDto,
-  InjectItemDto,
-  InjectItemWrite,
-  InjectQueueDto,
-} from './types'
+import type { InjectAssigneesDto, InjectItemDto, InjectItemWrite } from './types'
 
 /** The single-item transitions that take only an id (all answer 200 + the item). */
 export type InjectTransition = 'fire' | 'hold' | 'release' | 'skip' | 'unskip' | 'retry'
 
 export interface InjectService {
-  /** `GET /injects` — every item in `order`, plus the pause tier. */
-  list(): Promise<InjectQueueDto>
+  /** `GET /injects` — every renderable item in `order`, the pause tier, and any dropped ids. */
+  list(): Promise<InjectQueueRead>
   /** `GET /injects/assignees` — the staff assigned to this exercise, plus the caller's own id. */
   assignees(): Promise<InjectAssigneesDto>
   /** `POST /injects`. */
@@ -66,7 +66,7 @@ export interface InjectService {
   /** `DELETE /injects/{id}?version=n` (soft delete; 409 when fired/firing or stale). */
   remove(id: string, version: number): Promise<void>
   /** `POST /injects/reorder` with the FULL new order. */
-  reorder(ids: string[]): Promise<InjectQueueDto>
+  reorder(ids: string[]): Promise<InjectQueueRead>
   fire(id: string): Promise<InjectItemDto>
   hold(id: string): Promise<InjectItemDto>
   release(id: string): Promise<InjectItemDto>
@@ -94,9 +94,29 @@ function expectItem(data: unknown, route: string): InjectItemDto {
   return data
 }
 
-function expectQueue(data: unknown, route: string): InjectQueueDto {
-  if (!isInjectQueueDto(data)) throw new Error(`Unrecognised inject queue from ${route}`)
-  return data
+/** The dropped-id set last reported, so a poll every 3 s does not repeat the warning. */
+let lastDroppedKey = ''
+
+/**
+ * A queue body -> the read the console renders. A malformed TOP-LEVEL shape rejects (fail closed);
+ * a malformed ITEM is dropped and reported (`droppedItemIds`), and its id is logged with
+ * `console.warn` — once per distinct set, not once per poll — so the cause can be traced.
+ */
+function expectQueue(data: unknown, route: string): InjectQueueRead {
+  const queue = parseInjectQueue(data)
+  if (!queue) throw new Error(`Unrecognised inject queue from ${route}`)
+  const dropped = queue.droppedItemIds ?? []
+  const key = dropped.join('|')
+  if (key !== lastDroppedKey) {
+    lastDroppedKey = key
+    if (dropped.length > 0) {
+      console.warn(
+        `[inject-queue] ${route}: dropped ${dropped.length} malformed item(s) (ids: ${dropped.join(', ')}). ` +
+          'The run sheet shows the rest; the server sent data this build cannot render.',
+      )
+    }
+  }
+  return queue
 }
 
 /** The live implementation. Stateless; safe to create more than once. */

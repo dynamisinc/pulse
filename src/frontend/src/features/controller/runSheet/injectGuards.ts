@@ -18,9 +18,12 @@
  * `sequence` or a known `status` is MALFORMED and is never rendered: a row built from
  * it would show "Unknown persona" or offer an action it cannot honour. What happens next
  * depends on where it arrived:
- *   - a queue read (`isInjectQueueDto`) is rejected as a whole, so the panel says it
- *     cannot load (or keeps the last good rows and says contact was lost) instead of
- *     silently showing a sheet with a scripted item missing;
+ *   - a queue read (`parseInjectQueue`) DROPS the malformed item and keeps every other
+ *     one: one odd row must not blank the run sheet in the middle of an exercise. The
+ *     dropped ids come back with the read (`droppedItemIds`) so the panel can SHOW a
+ *     staff-only warning (a silently shorter sheet would read as "nothing scripted"),
+ *     and the service logs them. Only a malformed TOP-LEVEL shape (no `items` array, an
+ *     unknown `pauseTier`) rejects the read, as before;
  *   - a 409's `item` (`isInjectItemDto`) is DROPPED, so the console falls back to the
  *     polled copy rather than patching a broken row into the cache.
  */
@@ -63,14 +66,42 @@ export function isInjectItemDto(value: unknown): value is InjectItemDto {
   )
 }
 
-export function isInjectQueueDto(value: unknown): value is InjectQueueDto {
-  if (!isRecord(value)) return false
-  return (
-    Array.isArray(value.items) &&
-    value.items.every(isInjectItemDto) &&
-    typeof value.pauseTier === 'string' &&
-    PAUSE_TIERS.includes(value.pauseTier)
-  )
+/**
+ * A queue read as the console uses it: the frozen `InjectQueueDto` plus, when the server sent
+ * rows this build cannot render, the ids of the rows that were dropped. `droppedItemIds` is
+ * NOT part of the wire contract (the server never sends it); it is added here, only on read.
+ */
+export interface InjectQueueRead extends InjectQueueDto {
+  readonly droppedItemIds?: readonly string[]
+}
+
+/** The id to report for a dropped element (never its content, which may be free text). */
+function describeDropped(value: unknown): string {
+  return isRecord(value) && typeof value.id === 'string' && value.id.length > 0
+    ? value.id
+    : '(no id)'
+}
+
+/**
+ * Parses a `GET /injects` (or reorder) body. A malformed TOP-LEVEL shape (not an object, no
+ * `items` array, an unknown `pauseTier`) returns `undefined` — the caller treats the read as
+ * failed. Otherwise every well-formed item is kept in order and each malformed one is dropped
+ * and reported in `droppedItemIds`.
+ */
+export function parseInjectQueue(value: unknown): InjectQueueRead | undefined {
+  if (!isRecord(value) || !Array.isArray(value.items)) return undefined
+  if (typeof value.pauseTier !== 'string' || !PAUSE_TIERS.includes(value.pauseTier)) return undefined
+
+  const items: InjectItemDto[] = []
+  const dropped: string[] = []
+  for (const candidate of value.items) {
+    if (isInjectItemDto(candidate)) items.push(candidate)
+    else dropped.push(describeDropped(candidate))
+  }
+  const pauseTier = value.pauseTier as InjectQueueDto['pauseTier']
+  return dropped.length === 0
+    ? { items, pauseTier }
+    : { items, pauseTier, droppedItemIds: dropped }
 }
 
 export function isInjectAssigneesDto(value: unknown): value is InjectAssigneesDto {

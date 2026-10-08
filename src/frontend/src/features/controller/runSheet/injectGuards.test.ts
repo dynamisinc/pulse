@@ -4,12 +4,18 @@
  * The wire guards (inject-queue story 07): an item is renderable only if the item AND every
  * child carry what a row needs. A malformed child (no id / persona / text / sequence, an
  * unknown status) makes its item malformed — it must never be rendered:
- *  - a queue read with ANY malformed item is rejected as a whole (the panel then says it cannot
- *    load / lost contact, rather than silently showing a sheet with a scripted item missing);
+ *  - a queue read DROPS a malformed item and keeps the rest, reporting the dropped ids so the panel
+ *    can warn (one odd row must not blank the sheet; a silently shorter sheet must not read as
+ *    "nothing scripted"); only a malformed TOP-LEVEL shape rejects the read;
  *  - a 409's `item` that is malformed is dropped (the console falls back to the polled copy).
  */
 import { describe, expect, it } from 'vitest'
-import { isInjectAssigneesDto, isInjectItemDto, isInjectPostDto, isInjectQueueDto } from './injectGuards'
+import {
+  isInjectAssigneesDto,
+  isInjectItemDto,
+  isInjectPostDto,
+  parseInjectQueue,
+} from './injectGuards'
 import { makeItem, makePost } from './runSheetTestHarness'
 
 describe('isInjectPostDto', () => {
@@ -59,19 +65,50 @@ describe('isInjectItemDto', () => {
   })
 })
 
-describe('isInjectQueueDto', () => {
-  it('accepts a queue of good items', () => {
-    expect(isInjectQueueDto({ items: [makeItem({ id: 'a' }), makeItem({ id: 'b' })], pauseTier: 'running' }))
-      .toBe(true)
+describe('parseInjectQueue', () => {
+  it('keeps a queue of good items, in order, with no dropped ids', () => {
+    const parsed = parseInjectQueue({
+      items: [makeItem({ id: 'a' }), makeItem({ id: 'b' })],
+      pauseTier: 'running',
+    })
+    expect(parsed?.items.map(i => i.id)).toEqual(['a', 'b'])
+    expect(parsed?.pauseTier).toBe('running')
+    expect(parsed).not.toHaveProperty('droppedItemIds')
   })
 
-  it('rejects the WHOLE queue when one item has a malformed child (never a half-rendered sheet)', () => {
+  it('DROPS a malformed item and keeps every other one (one odd row must not blank the sheet)', () => {
     const bad = makeItem({ id: 'bad', posts: [makePost({ status: 'weird' as never })] })
-    expect(isInjectQueueDto({ items: [makeItem({ id: 'ok' }), bad], pauseTier: 'running' })).toBe(false)
+    const parsed = parseInjectQueue({
+      items: [makeItem({ id: 'first' }), bad, makeItem({ id: 'last' })],
+      pauseTier: 'injects',
+    })
+    expect(parsed?.items.map(i => i.id)).toEqual(['first', 'last'])
+    expect(parsed?.droppedItemIds).toEqual(['bad'])
+    expect(parsed?.pauseTier).toBe('injects')
   })
 
-  it('rejects an unknown pause tier', () => {
-    expect(isInjectQueueDto({ items: [], pauseTier: 'melted' })).toBe(false)
+  it('reports every dropped id; an element with no usable id is reported as "(no id)"', () => {
+    const parsed = parseInjectQueue({
+      items: [{ id: 'x', status: 'exploded' }, null, 'junk', { title: 'no id at all' }, makeItem({ id: 'ok' })],
+      pauseTier: 'running',
+    })
+    expect(parsed?.items.map(i => i.id)).toEqual(['ok'])
+    expect(parsed?.droppedItemIds).toEqual(['x', '(no id)', '(no id)', '(no id)'])
+  })
+
+  it('a queue where EVERY item is malformed is an empty list plus the dropped ids (not an error)', () => {
+    const parsed = parseInjectQueue({ items: [{ id: 'a' }, { id: 'b' }], pauseTier: 'running' })
+    expect(parsed?.items).toEqual([])
+    expect(parsed?.droppedItemIds).toEqual(['a', 'b'])
+  })
+
+  it('a malformed TOP-LEVEL shape is still an error (undefined): not an object, no items array, bad tier', () => {
+    expect(parseInjectQueue('<html>SPA fallback</html>')).toBeUndefined()
+    expect(parseInjectQueue(null)).toBeUndefined()
+    expect(parseInjectQueue({ pauseTier: 'running' })).toBeUndefined()
+    expect(parseInjectQueue({ items: 'nope', pauseTier: 'running' })).toBeUndefined()
+    expect(parseInjectQueue({ items: [], pauseTier: 'melted' })).toBeUndefined()
+    expect(parseInjectQueue({ items: [] })).toBeUndefined()
   })
 })
 

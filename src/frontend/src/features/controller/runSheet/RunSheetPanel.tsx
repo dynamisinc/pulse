@@ -581,6 +581,11 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
             <span>{MESSAGES.injectsPaused}</span>
           </Banner>
         ) : null}
+        {queue.droppedItemIds.length > 0 ? (
+          <Banner icon={faTriangleExclamation} testId="banner-dropped" live>
+            {`${queue.droppedItemIds.length} item${queue.droppedItemIds.length === 1 ? '' : 's'} couldn't be displayed (malformed data)`}
+          </Banner>
+        ) : null}
         {queue.connectionLost ? (
           <Banner icon={faTriangleExclamation} testId="banner-connection" live>
             {MESSAGES.connectionLost}
@@ -648,7 +653,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
           <Box data-testid="run-sheet-loading" sx={{ p: 2, fontSize: 12, color: chrome.inkMuted }}>
             Loading the run sheet…
           </Box>
-        ) : total === 0 && !queue.isError ? (
+        ) : total === 0 && !queue.isError && queue.droppedItemIds.length === 0 ? (
           <Box data-testid="run-sheet-empty" sx={{ p: 2, fontSize: 12.5, color: chrome.inkMuted }}>
             The run sheet is empty. Add a scripted post to get started.
           </Box>
