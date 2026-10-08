@@ -2,10 +2,19 @@
  * features/social/pages/HashtagFeed.tsx
  * ---------------------------------------------------------------------------
  * The hashtag feed — the posts carrying one hashtag, with a chronological
- * ("Latest") and an engagement-ranked ("Top") tab (feature: hashtags-trending,
- * story 01; SOC-040, COR-001, COR-053, XC-004, NFR-001). Participant world
- * (Pulse Social skin): plain semantic elements + a scoped CSS Module — NO
- * COBRA, NO themed MUI, FontAwesome-only if icons are ever needed here.
+ * ("Recent") and an engagement-ranked ("Top") tab (feature: hashtags-trending,
+ * story 01; demo-polish F6 story 15-explore polish; SOC-040, COR-001, COR-053,
+ * XC-004, NFR-001). Participant world (Pulse Social skin): plain semantic
+ * elements + a scoped CSS Module — NO COBRA, NO themed MUI, FontAwesome-only.
+ *
+ * DEMO-POLISH F6 (what changed over story 01). The page now has a HEADER (the
+ * `#tag` title plus a post-count line, "16 posts" — shown once the posts have
+ * loaded, never a premature "0 posts"), the tabs are labelled "Recent" / "Top"
+ * (was "Latest"; same chronological / engagement orders, shared with Explore's
+ * search toggle via `../explore/search`), and the empty state is an explicit,
+ * honest text message with an icon. The CSS drops its dark-mode rules (the social
+ * surface is forced light, F5) and reads the shared `--pc-*` tokens. Cards keep
+ * their live actions — those come from `PostCard`, not from this page.
  *
  * WHAT IT DOES
  *  - Reuses the exercise's All Posts read (`useFeed()` — the same
@@ -15,16 +24,16 @@
  *    surviving post renders through the keystone `<PostCard>` — identical card,
  *    identical scenario-time rendering — so this page is pure presentation +
  *    filtering, never a second post-rendering path.
- *  - Two tabs (SOC-040): "Latest" = chronological (newest-first, the order
- *    `useFeed` already returns), "Top" = ranked by engagement (like + repost +
- *    reply + share), newest-first as the tiebreak. Tab state is local `useState`
- *    (no route — Phase 1 has no cross-channel router; see `SocialChannel`). The
- *    tablist follows the WAI-ARIA tabs pattern (NFR-001): each tab carries a
- *    unique `id` + `aria-controls` pointing at the panel, the panel carries an
- *    `id` + `aria-labelledby` pointing back at the active tab, and a roving
- *    tabindex (active tab `tabIndex=0`, inactive `tabIndex=-1`, Arrow/Home/End
- *    to move) keeps only the active tab in the natural Tab order — mirroring
- *    `Profile.tsx`'s tablist.
+ *  - Two tabs (SOC-040): "Recent" = chronological (scenario time descending),
+ *    "Top" = ranked by engagement (like + repost + reply + share), newest-first
+ *    as the tiebreak (both orders from `../explore/search`'s `sortPosts`). Tab
+ *    state is local `useState` (no route — Phase 1 has no cross-channel router;
+ *    see `SocialChannel`). The tablist follows the WAI-ARIA tabs pattern
+ *    (NFR-001): each tab carries a unique `id` + `aria-controls` pointing at
+ *    the panel, the panel carries an `id` + `aria-labelledby` pointing back at
+ *    the active tab, and a roving tabindex (active tab `tabIndex=0`, inactive
+ *    `tabIndex=-1`, Arrow/Home/End to move) keeps only the active tab in the
+ *    natural Tab order — mirroring `Profile.tsx`'s tablist.
  *
  * ISOLATION (COR-001). The post set comes from `useFeed()`, which takes NO
  * client `exerciseId` — the session binds the exercise and query scoping is
@@ -44,7 +53,7 @@
  *
  * TELEMETRY (XC-004). Emits exactly ONE `'view'` event per `tag` (a ref keyed
  * on the tag, mirroring `ThreadView`), targeting the hashtag entity — so a
- * different hashtag re-emits without a remount, but switching the Latest/Top
+ * different hashtag re-emits without a remount, but switching the Recent/Top
  * tab does not (a tab switch is not a new view).
  *
  * REACHABILITY NOTE. Wiring a hashtag TAP (in a `<PostCard>`) to open this page
@@ -56,6 +65,8 @@
  */
 
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faHashtag } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { scenarioNow } from '@/core/clock'
@@ -68,10 +79,12 @@ import {
 } from '@/features/participant-shell/mountContract'
 import { useFeed } from '../hooks/useFeed'
 import { extractHashtags } from '../utils/hashtags'
+import { sortPosts } from '../explore/search'
+import { isVisiblePost } from '../explore/visibility'
 import styles from './HashtagFeed.module.css'
 
 type CardVariant = 'full' | 'readOnly'
-type HashtagTab = 'latest' | 'top'
+type HashtagTab = 'recent' | 'top'
 
 export interface HashtagFeedProps {
   /** The hashtag to show, NORMALIZED (lowercased, no leading `#`) — the same
@@ -93,6 +106,7 @@ interface HashtagRowProps {
   post: PostView
   variant: CardVariant
   onOpenThread?: (id: string) => void
+  onReply?: (id: string) => void
   onOpenProfile?: (personaId: string) => void
 }
 
@@ -102,6 +116,7 @@ const HashtagRow = memo(function HashtagRow({
   post,
   variant,
   onOpenThread,
+  onReply,
   onOpenProfile,
 }: HashtagRowProps) {
   return (
@@ -110,17 +125,28 @@ const HashtagRow = memo(function HashtagRow({
         post={post}
         variant={variant}
         onOpen={onOpenThread}
-        onReply={onOpenThread}
+        onReply={onReply}
         onOpenProfile={onOpenProfile}
       />
     </li>
   )
 })
 
-/** Engagement weight for the "Top" tab: every interaction counts once. */
-function engagementScore(post: PostView): number {
-  const { reply, repost, like, share } = post.counts
-  return reply + repost + like + (share ?? 0)
+/**
+ * The Reply action on a card: opens the post's thread (the reader replies from
+ * there). Kept as its own function so the one line F4 changes is obvious.
+ */
+function openThreadForReply(id: string, onOpenThread: (id: string) => void): void {
+  // TODO(F4-merge): call F4's `requestReplyFocus(id)` (`../services/replyIntent`)
+  // HERE, before opening the thread, so the thread's reply composer takes focus:
+  //   requestReplyFocus(id)
+  //   onOpenThread(id)
+  onOpenThread(id)
+}
+
+/** "1 post" / "16 posts". */
+function postCountLabel(count: number): string {
+  return `${count.toLocaleString('en-US')} ${count === 1 ? 'post' : 'posts'}`
 }
 
 export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedProps) {
@@ -131,24 +157,33 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
 
   const cardVariant: CardVariant = affordancesAvailable(variant) ? 'full' : 'readOnly'
 
-  // Local tab state — Phase 1 has no route; defaults to chronological "Latest".
-  const [tab, setTab] = useState<HashtagTab>('latest')
+  // Local tab state — defaults to chronological "Recent".
+  const [tab, setTab] = useState<HashtagTab>('recent')
 
-  // Posts carrying this hashtag, already exercise-scoped by `useFeed`. `posts`
-  // is newest-first, so 'latest' keeps that order; 'top' sorts a copy by
-  // engagement, newest-first as the tiebreak (a stable sort preserves it).
+  // Posts carrying this hashtag, already exercise-scoped by `useFeed` (a
+  // soft-deleted post would never count). `sortPosts` (shared with Explore's
+  // search toggle) gives both orders: 'recent' = scenario time descending,
+  // 'top' = engagement descending with newest-first as the tiebreak.
   const matched = useMemo(
-    () => posts.filter(post => extractHashtags(post.text).includes(tag)),
+    () => posts.filter(post => isVisiblePost(post) && extractHashtags(post.text).includes(tag)),
     [posts, tag],
   )
-  const shown = useMemo(
-    () => (tab === 'top' ? [...matched].sort((a, b) => engagementScore(b) - engagementScore(a)) : matched),
-    [matched, tab],
+  const shown = useMemo(() => sortPosts(matched, tab), [matched, tab])
+
+  // The Reply action opens the thread. Stable identity so the memoized rows skip
+  // re-render (NFR-002/SOC-071); absent when no thread opener was supplied, so
+  // the card renders Reply as inert text rather than a no-op button.
+  const handleReply = useMemo(
+    () =>
+      onOpenThread === undefined
+        ? undefined
+        : (id: string) => openThreadForReply(id, onOpenThread),
+    [onOpenThread],
   )
 
   // XC-004: one 'view' per hashtag. Keying the ref on `tag` re-emits when the
   // page is re-pointed at a DIFFERENT hashtag without a remount, but a
-  // Latest/Top tab switch (not a new view) does not.
+  // Recent/Top tab switch (not a new view) does not.
   const emittedForRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (emittedForRef.current === tag) return
@@ -173,21 +208,26 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
     event.preventDefault()
-    setTab(current => (current === 'latest' ? 'top' : 'latest'))
+    setTab(current => (current === 'recent' ? 'top' : 'recent'))
   }
 
   return (
     <section className={styles.page} aria-labelledby="hashtag-feed-heading">
       <header className={styles.header}>
         <h1 id="hashtag-feed-heading" className={styles.title}>{`#${tag}`}</h1>
-        <p className={styles.subtitle}>Posts</p>
+        {/* The count appears once the posts are in (never a premature "0 posts"). */}
+        {!loading && error === undefined && (
+          <p className={styles.subtitle} data-testid="hashtag-post-count">
+            {postCountLabel(matched.length)}
+          </p>
+        )}
       </header>
 
       <div className={styles.tabs} role="tablist" aria-label={`#${tag} feed order`}>
         <TabButton
-          id="latest"
-          label="Latest"
-          active={tab === 'latest'}
+          id="recent"
+          label="Recent"
+          active={tab === 'recent'}
           onSelect={setTab}
           onKeyDown={handleTabKeyDown}
         />
@@ -206,7 +246,7 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
         role="tabpanel"
         id={`hashtag-tabpanel-${tab}`}
         aria-labelledby={`hashtag-tab-${tab}`}
-        aria-label={`#${tag}, ${tab === 'top' ? 'Top' : 'Latest'}`}
+        aria-label={`#${tag}, ${tab === 'top' ? 'Top' : 'Recent'}`}
       >
         {shown.map(post => (
           <HashtagRow
@@ -214,6 +254,7 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
             post={post}
             variant={cardVariant}
             onOpenThread={onOpenThread}
+            onReply={handleReply}
             onOpenProfile={onOpenProfile}
           />
         ))}
@@ -226,7 +267,10 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
         <p className={styles.state} role="status">Posts aren’t available right now.</p>
       )}
       {isEmpty && (
-        <p className={styles.state}>{`No posts with #${tag} yet.`}</p>
+        <div className={styles.empty} data-testid="hashtag-empty">
+          <FontAwesomeIcon icon={faHashtag} className={styles.emptyIcon} aria-hidden="true" />
+          <p className={styles.emptyText}>{`No posts with #${tag} yet.`}</p>
+        </div>
       )}
     </section>
   )

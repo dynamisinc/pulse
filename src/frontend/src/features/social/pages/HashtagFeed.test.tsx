@@ -6,12 +6,12 @@
  *  - the feed shows ONLY posts carrying the given hashtag, filtered
  *    case-insensitively over the already exercise-scoped `useFeed()` read
  *    (COR-001 — no independent, client-parameterized re-fetch);
- *  - "Latest" is chronological (newest-first); "Top" is engagement-ranked,
+ *  - "Recent" is chronological (newest-first); "Top" is engagement-ranked,
  *    newest-first as the tiebreak (SOC-040);
  *  - every post's timestamp renders in scenario time, never wall-clock
  *    (COR-053);
  *  - exactly ONE 'view' telemetry event is emitted per hashtag on mount,
- *    re-emitting when re-pointed at a different tag but NOT on a Latest/Top
+ *    re-emitting when re-pointed at a different tag but NOT on a Recent/Top
  *    tab switch (XC-004);
  *  - an empty match set renders the empty-state message;
  *  - the tab affordance is exposed accessibly (role="tablist"/"tab",
@@ -137,9 +137,9 @@ describe('HashtagFeed — empty state', () => {
   })
 })
 
-describe('HashtagFeed — Latest / Top tabs (SOC-040)', () => {
+describe('HashtagFeed — Recent / Top tabs (SOC-040)', () => {
   function seedOrderingFixture() {
-    // All three carry #zone2; scores/times chosen so Latest and Top disagree.
+    // All three carry #zone2; scores/times chosen so Recent and Top disagree.
     postStore.appendPost(
       buildPost({
         id: 'post-ht-early-low',
@@ -166,7 +166,7 @@ describe('HashtagFeed — Latest / Top tabs (SOC-040)', () => {
     )
   }
 
-  it('"Latest" (default) orders newest-first', async () => {
+  it('"Recent" (default) orders newest-first', async () => {
     seedOrderingFixture()
     renderHashtagFeed('zone2')
 
@@ -200,15 +200,15 @@ describe('HashtagFeed — Latest / Top tabs (SOC-040)', () => {
     renderHashtagFeed('zone2')
     await screen.findAllByTestId('post-card')
 
-    const latestTab = screen.getByRole('tab', { name: 'Latest' })
+    const recentTab = screen.getByRole('tab', { name: 'Recent' })
     const topTab = screen.getByRole('tab', { name: 'Top' })
-    expect(latestTab).toHaveAttribute('aria-selected', 'true')
+    expect(recentTab).toHaveAttribute('aria-selected', 'true')
     expect(topTab).toHaveAttribute('aria-selected', 'false')
 
     topTab.click()
 
     await waitFor(() => expect(topTab).toHaveAttribute('aria-selected', 'true'))
-    expect(latestTab).toHaveAttribute('aria-selected', 'false')
+    expect(recentTab).toHaveAttribute('aria-selected', 'false')
   })
 
   it('exposes the tab affordance accessibly (NFR-001)', async () => {
@@ -225,18 +225,18 @@ describe('HashtagFeed — Latest / Top tabs (SOC-040)', () => {
     renderHashtagFeed('zone2')
     await screen.findAllByTestId('post-card')
 
-    const latestTab = screen.getByRole('tab', { name: 'Latest' })
+    const recentTab = screen.getByRole('tab', { name: 'Recent' })
     const topTab = screen.getByRole('tab', { name: 'Top' })
     const panel = screen.getByRole('tabpanel')
 
-    expect(latestTab.id).toBeTruthy()
+    expect(recentTab.id).toBeTruthy()
     expect(topTab.id).toBeTruthy()
-    expect(latestTab.id).not.toBe(topTab.id)
+    expect(recentTab.id).not.toBe(topTab.id)
     // The rendered panel's id/aria-labelledby names the CURRENTLY active tab,
     // and that same tab's aria-controls names the panel back — a real
     // bidirectional association, not just visual styling.
-    expect(panel).toHaveAttribute('aria-labelledby', latestTab.id)
-    expect(latestTab).toHaveAttribute('aria-controls', panel.id)
+    expect(panel).toHaveAttribute('aria-labelledby', recentTab.id)
+    expect(recentTab).toHaveAttribute('aria-controls', panel.id)
 
     fireEvent.click(topTab)
 
@@ -252,16 +252,16 @@ describe('HashtagFeed — Latest / Top tabs (SOC-040)', () => {
     renderHashtagFeed('zone2')
     await screen.findAllByTestId('post-card')
 
-    const latestTab = screen.getByRole('tab', { name: 'Latest' })
+    const recentTab = screen.getByRole('tab', { name: 'Recent' })
     const topTab = screen.getByRole('tab', { name: 'Top' })
-    expect(latestTab).toHaveAttribute('tabIndex', '0')
+    expect(recentTab).toHaveAttribute('tabIndex', '0')
     expect(topTab).toHaveAttribute('tabIndex', '-1')
 
     fireEvent.click(topTab)
 
     await waitFor(() => {
       expect(topTab).toHaveAttribute('tabIndex', '0')
-      expect(latestTab).toHaveAttribute('tabIndex', '-1')
+      expect(recentTab).toHaveAttribute('tabIndex', '-1')
     })
   })
 
@@ -270,20 +270,20 @@ describe('HashtagFeed — Latest / Top tabs (SOC-040)', () => {
     renderHashtagFeed('zone2')
     await screen.findAllByTestId('post-card')
 
-    const latestTab = screen.getByRole('tab', { name: 'Latest' })
+    const recentTab = screen.getByRole('tab', { name: 'Recent' })
     const topTab = screen.getByRole('tab', { name: 'Top' })
 
-    fireEvent.keyDown(latestTab, { key: 'ArrowRight' })
+    fireEvent.keyDown(recentTab, { key: 'ArrowRight' })
     await waitFor(() => {
       expect(topTab).toHaveAttribute('aria-selected', 'true')
       expect(topTab).toHaveAttribute('tabIndex', '0')
-      expect(latestTab).toHaveAttribute('tabIndex', '-1')
+      expect(recentTab).toHaveAttribute('tabIndex', '-1')
     })
 
     fireEvent.keyDown(topTab, { key: 'ArrowLeft' })
     await waitFor(() => {
-      expect(latestTab).toHaveAttribute('aria-selected', 'true')
-      expect(latestTab).toHaveAttribute('tabIndex', '0')
+      expect(recentTab).toHaveAttribute('aria-selected', 'true')
+      expect(recentTab).toHaveAttribute('tabIndex', '0')
       expect(topTab).toHaveAttribute('tabIndex', '-1')
     })
   })
@@ -326,7 +326,7 @@ describe('HashtagFeed — hashtag-view telemetry (XC-004)', () => {
     expect(Number.isNaN(Date.parse(view?.wallClockTime ?? ''))).toBe(false)
   })
 
-  it('does NOT re-emit a view event when only the Latest/Top tab changes', async () => {
+  it('does NOT re-emit a view event when only the Recent/Top tab changes', async () => {
     postStore.appendPost(buildPost({ id: 'post-ht-tabswitch', text: 'About #Zone2.' }))
     renderHashtagFeed('zone2')
     await screen.findAllByTestId('post-card')
@@ -389,8 +389,8 @@ describe('HashtagFeed — list is a live, labelled region (NFR-001)', () => {
 
     const panel = screen.getByRole('tabpanel')
     expect(panel).toHaveAttribute('aria-live', 'polite')
-    expect(panel).toHaveAttribute('aria-label', '#zone2, Latest')
-    expect(panel).toHaveAttribute('aria-labelledby', screen.getByRole('tab', { name: 'Latest' }).id)
+    expect(panel).toHaveAttribute('aria-label', '#zone2, Recent')
+    expect(panel).toHaveAttribute('aria-labelledby', screen.getByRole('tab', { name: 'Recent' }).id)
     expect(within(panel).getAllByTestId('post-card')).toHaveLength(1)
   })
 })
