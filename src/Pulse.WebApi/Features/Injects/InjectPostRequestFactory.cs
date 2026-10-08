@@ -21,6 +21,12 @@ using Pulse.WebApi.Features.Social;
 /// (<c>{ mediaId, alt }</c>), <paramref name="parentPostId"/> → <c>ParentPostId</c>, and the
 /// <c>Baseline*</c> columns → <c>EngagementBaseline</c>. The reply parent is already resolved (a scripted parent's
 /// <c>FiredPostId</c>, or <c>replyTo.postId</c>) and passed in, so nothing else changes.
+/// <para>
+/// <b>Tripwire (M3):</b> <c>InjectPostRequestFactoryTripwireTests</c> fails the build the moment BP's typed
+/// <c>ParentPostId</c> / <c>Media</c> / <c>EngagementBaseline</c> members exist on <see cref="CreatePostRequest"/>
+/// and this method still leaves them null — so the BP merge cannot silently ship scripted posts without their media,
+/// reply or baseline.
+/// </para>
 /// </para>
 /// </remarks>
 public static class InjectPostRequestFactory

@@ -89,6 +89,8 @@ public sealed class InjectEndpointsTests
 
         (await host.DeleteAsync(item.Id, 1))
             .StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await host.PutAsync(item.Id, new { kind = "post", title = "evaluator edit", version = 1, posts = new[] { Post(seeded.PersonaIds[0]) } }))
+            .StatusCode.Should().Be(HttpStatusCode.Forbidden, "an evaluator may not edit the script");
         (await host.Client.PostAsJsonAsync(new Uri("/api/injects/reorder", UriKind.Relative), new { ids = new[] { item.Id } }))
             .StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await CountPostsAsync(host, seeded.ExerciseId)).Should().Be(0);
@@ -479,6 +481,32 @@ public sealed class InjectEndpointsTests
         (await db.InjectItems.SingleAsync(i => i.Id == item.Guid)).DeletedAt.Should().NotBeNull("soft delete (XC-010)");
         (await ActionEventsAsync(host, seeded.ExerciseId, item.Guid)).Select(Payload).Last().Should().Be(("delete", "post", "pending"));
         (await host.ActionAsync(item.Guid, "fire")).StatusCode.Should().Be(HttpStatusCode.NotFound, "a deleted item is gone");
+    }
+
+    [RequiresDockerFact]
+    public async Task Delete_WhileAPostIsBeingPublished_Is409()
+    {
+        await using var host = await StartAsync();
+        var seeded = await ActAsControllerAsync(host);
+        var item = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 2));
+        await host.ActionOkAsync(item.Guid, "fire");
+        await host.ActionOkAsync(item.Guid, "hold");
+
+        // Post 2 is mid-publish: claimed, outcome not yet recorded.
+        await using (var db = host.Db(seeded.ExerciseId))
+        {
+            var child = await db.InjectItemPosts.SingleAsync(p => p.InjectItemId == item.Guid && p.Sequence == 2);
+            child.ClaimedAt = host.Time.GetUtcNow();
+            (await db.InjectItems.SingleAsync(i => i.Id == item.Guid)).Version++;
+            await db.SaveChangesAsync();
+        }
+
+        var current = (await host.GetQueueAsync()).Items.Single();
+        var response = await host.DeleteAsync(item.Id, current.Version);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await InjectTestHost.ReadProblemAsync(response)).Detail.Should().Be(InjectTransitions.InFlightMessage);
+        (await host.GetQueueAsync()).Items.Should().ContainSingle("the item survives so the in-flight post can be recorded");
     }
 
     [RequiresDockerFact]

@@ -29,6 +29,9 @@ using Pulse.WebApi.Data.Entities;
 /// </remarks>
 public static class InjectTransitions
 {
+    /// <summary>The refusal for an edit or delete while one of the item's posts is being published.</summary>
+    public const string InFlightMessage = "A post of this item is being published right now. Try again in a moment.";
+
     /// <summary>The live (non-deleted) children in sequence order.</summary>
     /// <param name="item">The item.</param>
     /// <returns>The live children.</returns>
@@ -63,7 +66,7 @@ public static class InjectTransitions
         // already went out stay editable-around but are themselves immutable — see InjectQueueService.UpdateAsync.)
         if (LiveChildren(item).Any(post => post.ClaimedAt is not null))
         {
-            return "A post of this item is being published right now. Try again in a moment.";
+            return InFlightMessage;
         }
 
         return null;
@@ -125,10 +128,14 @@ public static class InjectTransitions
     {
         ArgumentNullException.ThrowIfNull(item);
 
-        return item.Status is InjectStatuses.Pending or InjectStatuses.Held or InjectStatuses.Skipped
-            or InjectStatuses.Failed
-            ? null
-            : $"This item is {item.Status} and cannot be deleted.";
+        if (item.Status is not (InjectStatuses.Pending or InjectStatuses.Held or InjectStatuses.Skipped
+            or InjectStatuses.Failed))
+        {
+            return $"This item is {item.Status} and cannot be deleted.";
+        }
+
+        // The same guard as edit: a post being published right now must be allowed to land and be recorded.
+        return LiveChildren(item).Any(post => post.ClaimedAt is not null) ? InFlightMessage : null;
     }
 
     /// <summary>Why the item may not be fired, or <c>null</c> when it may.</summary>

@@ -60,6 +60,12 @@ public static class InjectBurstPlanner
     /// How long a claim may stay unrecorded before it is presumed abandoned (a crash between the claim and the
     /// recorded outcome). Ingest normally takes well under a second.
     /// </summary>
+    /// <remarks>
+    /// <b>The assumption this rests on (L3):</b> no funnel call stays uncommitted for longer than the lease. If one did
+    /// (a database stall of more than 60 s mid-ingest), reconcile could look for its post before it is committed, find
+    /// nothing, release the claim, and the post would go out a second time once the stalled commit lands. A stall that
+    /// long is far outside the SQL command timeout (30 s), which would fail the ingest first.
+    /// </remarks>
     public static readonly TimeSpan ClaimLease = TimeSpan.FromSeconds(60);
 
     private static readonly TimeSpan MinGap = TimeSpan.FromSeconds(InjectBurstPacing.MinGapSeconds);

@@ -70,6 +70,20 @@ public sealed class InjectItemPost : IExerciseScoped
     /// </summary>
     public DateTimeOffset? ClaimedAt { get; set; }
 
+    /// <summary>
+    /// When a CONTROLLER action (fire / retry) made the claim: the pre-assigned <c>EventId</c> of that action's one
+    /// <c>inject_action</c> event. Whichever save resolves the claim — the normal record, a give-up, or a later
+    /// reconcile — emits the event under this id, so the database primary key makes it exactly once (XC-004).
+    /// <c>null</c> for a runner claim, which emits no action event.
+    /// </summary>
+    public string? ClaimEventId { get; set; }
+
+    /// <summary>The controller action that made the claim (<c>fire</c> / <c>retry</c>), or <c>null</c> for the runner.</summary>
+    public string? ClaimAction { get; set; }
+
+    /// <summary>The staff user whose action made the claim, or <c>null</c> for the runner.</summary>
+    public Guid? ClaimActorId { get; set; }
+
     /// <summary>The post the funnel created for this child.</summary>
     public Guid? FiredPostId { get; set; }
 

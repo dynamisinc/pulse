@@ -87,7 +87,9 @@ internal sealed class InjectTestHost : IAsyncDisposable
         string connectionString,
         IBurstJitterSource? jitter = null,
         Func<IServiceProvider, IInjectPostPublisher>? publisher = null,
-        IFeedBroadcaster? broadcaster = null)
+        IFeedBroadcaster? broadcaster = null,
+        bool hostedRunner = false,
+        InjectBurstRunnerOptions? runnerOptions = null)
     {
         var caller = new CallerHolder();
         var time = new ManualTimeProvider(DateTimeOffset.UtcNow);
@@ -110,16 +112,28 @@ internal sealed class InjectTestHost : IAsyncDisposable
 
         builder.Services.AddInjects();
 
-        // Drive pacing by hand: drop the hosted loop, keep a directly callable runner over the same services.
         var hosted = builder.Services
             .Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(InjectBurstRunner))
             .ToList();
         hosted.Should().ContainSingle("AddInjects() must register the runner as a hosted service");
-        builder.Services.Remove(hosted[0]);
-        builder.Services.AddSingleton<InjectBurstRunner>();
 
-        builder.Services.RemoveAll<TimeProvider>();
-        builder.Services.AddSingleton<TimeProvider>(time);
+        if (hostedRunner)
+        {
+            // The real loop on the real clock (wake-up tests): leave the hosted service and TimeProvider.System in place.
+            if (runnerOptions is not null)
+            {
+                builder.Services.RemoveAll<InjectBurstRunnerOptions>();
+                builder.Services.AddSingleton(runnerOptions);
+            }
+        }
+        else
+        {
+            // Drive pacing by hand: drop the hosted loop, keep a directly callable runner over the same services.
+            builder.Services.Remove(hosted[0]);
+            builder.Services.AddSingleton<InjectBurstRunner>();
+            builder.Services.RemoveAll<TimeProvider>();
+            builder.Services.AddSingleton<TimeProvider>(time);
+        }
         builder.Services.RemoveAll<IBurstJitterSource>();
         builder.Services.AddSingleton(jitter ?? new FixedJitterSource());
 

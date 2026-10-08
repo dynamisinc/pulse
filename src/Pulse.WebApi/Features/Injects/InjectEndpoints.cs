@@ -51,6 +51,8 @@ public static class InjectEndpoints
 
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IBurstJitterSource, CryptoBurstJitterSource>();
+        services.TryAddSingleton<InjectRunnerSignal>();
+        services.TryAddSingleton(new InjectBurstRunnerOptions());
         services.TryAddScoped<IInjectPostPublisher, FunnelInjectPostPublisher>();
         services.TryAddScoped<InjectQueueService>();
         services.AddHostedService<InjectBurstRunner>();

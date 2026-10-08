@@ -53,8 +53,17 @@ public static class InjectTelemetry
     /// <param name="action">The action literal (<see cref="InjectActions"/>).</param>
     /// <param name="actingHumanId">The staff user who took the action (server-derived).</param>
     /// <param name="time">The one clock read shared with the state change.</param>
+    /// <param name="eventId">
+    /// A pre-assigned event id (a controller claim's), so the event can be emitted by whichever save resolves the claim
+    /// and never twice; <c>null</c> mints a fresh one.
+    /// </param>
     /// <returns>The telemetry row to add to the same unit of work.</returns>
-    public static TelemetryEvent ForItem(InjectItem item, string action, Guid actingHumanId, InjectEventTime time)
+    public static TelemetryEvent ForItem(
+        InjectItem item,
+        string action,
+        Guid actingHumanId,
+        InjectEventTime time,
+        string? eventId = null)
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentException.ThrowIfNullOrWhiteSpace(action);
@@ -62,6 +71,7 @@ public static class InjectTelemetry
 
         var itemId = item.Id.ToString();
         return Build(
+            eventId ?? Guid.NewGuid().ToString(),
             item.ExerciseId,
             actingHumanId,
             time,
@@ -80,6 +90,7 @@ public static class InjectTelemetry
         ArgumentNullException.ThrowIfNull(time);
 
         return Build(
+            Guid.NewGuid().ToString(),
             exerciseId,
             actingHumanId,
             time,
@@ -89,6 +100,7 @@ public static class InjectTelemetry
     }
 
     private static TelemetryEvent Build(
+        string eventId,
         Guid exerciseId,
         Guid actingHumanId,
         InjectEventTime time,
@@ -96,7 +108,7 @@ public static class InjectTelemetry
         TelemetryTarget target,
         InjectActionPayload payload) => new()
         {
-            EventId = Guid.NewGuid().ToString(),
+            EventId = eventId,
             SchemaVersion = "v0",
             ExerciseId = exerciseId,
             EventType = EventType,

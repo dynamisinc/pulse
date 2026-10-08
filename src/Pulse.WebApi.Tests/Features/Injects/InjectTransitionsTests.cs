@@ -309,6 +309,16 @@ public sealed class InjectTransitionsTests
     }
 
     [Fact]
+    public void Delete_WhileAPostIsBeingPublished_IsRefused_LikeEdit()
+    {
+        var item = Item(status: InjectStatuses.Held);
+        Children(item)[1].ClaimedAt = T0;
+
+        InjectTransitions.WhyNotDeletable(item).Should().Be(InjectTransitions.InFlightMessage);
+        InjectTransitions.WhyNotEditable(item).Should().Be(InjectTransitions.InFlightMessage);
+    }
+
+    [Fact]
     public void Delete_IsRefusedOnlyWhileFiringOrFired()
     {
         foreach (var status in AllStatuses)
