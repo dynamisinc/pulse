@@ -141,7 +141,11 @@ describe('UsagePanel — WR-001: the usage scan is gated on OPEN, not on this co
     renderPanel(true)
 
     await screen.findByTestId('engine-usage-panel')
-    expect(engineUsageStore.getSnapshot(EXERCISE_ID).usage).not.toBeNull()
+    // The panel mounts as soon as it is open; the usage read resolves after. Wait for the store,
+    // not the panel, or a loaded runner reads the snapshot before the fetch lands (CI flake class).
+    await waitFor(() => {
+      expect(engineUsageStore.getSnapshot(EXERCISE_ID).usage).not.toBeNull()
+    })
   })
 })
 
