@@ -175,7 +175,8 @@ builder.Services.AddSocialFeedRead();      // #270 GET /api/feed, /api/threads/{
 builder.Services.AddSocialPostWrite();     // #271 POST /api/posts (sanitize + stamp + telemetry + broadcast)
 builder.Services.AddSocialPersonaRead();   // #273 GET /api/personas
 builder.Services.AddSocialRealtimeHub();   // #272 exercise-grouped hub + IFeedBroadcaster impl
-builder.Services.AddSocialModeration(); // demo-polish B6
+builder.Services.AddSocialModeration();    // demo-polish B6
+builder.Services.AddSocialThreads();       // demo-polish B2
 
 // Engine runtime — Wave 2 (feature/engine-runtime), orchestrator-wired. AddReactionLoopHost (#285)
 // registers the in-process reaction-loop BackgroundService + the IEnginePublishService publish funnel
