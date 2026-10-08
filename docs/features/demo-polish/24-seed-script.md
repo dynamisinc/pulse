@@ -1,7 +1,7 @@
 # Story: Seed script (demo content through the public APIs)
 
 **Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** CTL-001, COR-023 (backdated history), COR-024, XC-004  ·  **Design decisions:** plan §2.5 (seed late, through the product)  ·  **Issue:** —
+**Requirements:** CTL-001, COR-023 (backdated history), COR-024, XC-004  ·  **Design decisions:** plan §2.5 (seed late, through the product)  ·  **Issue:** #443
 **Story ID:** S1  ·  **Stack:** script (PowerShell 7)  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** seed (Fri 10/16 → Sun 10/18; written after the backend freeze)
 **Home story:** — (no existing backlog story; extends the `scripts/uat` toolbox).
 

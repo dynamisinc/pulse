@@ -1,7 +1,7 @@
 # Story: Client seam — PostCard split, contract v2, mocks, upload client
 
 **Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** In Progress
-**Requirements:** SOC-001, SOC-002, XC-002, XC-009, COR-053  ·  **Design decisions:** D1-011 (controls absent, not disabled)  ·  **Issue:** —
+**Requirements:** SOC-001, SOC-002, XC-002, XC-009, COR-053  ·  **Design decisions:** D1-011 (controls absent, not disabled)  ·  **Issue:** #422
 **Story ID:** F0  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** L (may run as two sub-tracks in one worktree)  ·  **Wave:** 1
 **Home story:** — (client seam for [`posts/01`](../posts/01-post-composition.md) and [`posts/02`](../posts/02-post-rendering-identity.md)).
 

@@ -1,7 +1,7 @@
 # Story: Live world column
 
 **Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** CTL-030, CTL-031 (lite), CTL-001, NFR-001, COR-001  ·  **Design decisions:** D5-016/D5-017 (continuous-watch surfaces get permanent space), CTL-033 (steering controls absent, not disabled)  ·  **Issue:** —
+**Requirements:** CTL-030, CTL-031 (lite), CTL-001, NFR-001, COR-001  ·  **Design decisions:** D5-016/D5-017 (continuous-watch surfaces get permanent space), CTL-033 (steering controls absent, not disabled)  ·  **Issue:** #437
 **Story ID:** C2  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** 3
 **Home stories:** [`live-monitoring/01`](../live-monitoring/01-monitoring-board.md), [`/02`](../live-monitoring/02-watchlist-columns.md) (lite).
 

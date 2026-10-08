@@ -1,7 +1,7 @@
 # Story: Media pipeline — upload, store, read SAS, staff library
 
 **Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** SOC-001, XC-009, COR-002, NFR-004, NFR-009, XC-001  ·  **Design decisions:** DP-3, DP-11, DP-12 (see implementation.md §0)  ·  **Issue:** —
+**Requirements:** SOC-001, XC-009, COR-002, NFR-004, NFR-009, XC-001  ·  **Design decisions:** DP-3, DP-11, DP-12 (see implementation.md §0)  ·  **Issue:** #424
 **Story ID:** BM  ·  **Stack:** backend  ·  **Priority:** Must  ·  **Effort:** L  ·  **Wave:** 1b  ·  **Review:** Tier-2 (Tom)
 **Home story:** [`posts/01`](../posts/01-post-composition.md) (the "inline video" AC the home story deferred).
 

@@ -1,7 +1,7 @@
 # Story: Preview-as-participant shows the real feed, and StartEx/EndEx (Could)
 
 **Feature:** Demo polish  ·  **Epic:** E1 / E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-041, COR-054, COR-032, NFR-001  ·  **Design decisions:** D7-007 (preview), D1-011  ·  **Issue:** —
+**Requirements:** COR-041, COR-054, COR-032, NFR-001  ·  **Design decisions:** D7-007 (preview), D1-011  ·  **Issue:** #442
 **Story ID:** C6  ·  **Stack:** frontend  ·  **Priority:** Could  ·  **Effort:** S  ·  **Wave:** 3 slot (cut first if time is short)
 **Home stories:** [`staff-shell/04`](../staff-shell/04-preview-as-participant.md), [`exercise-configuration/03`](../exercise-configuration/03-exercise-lifecycle.md).
 

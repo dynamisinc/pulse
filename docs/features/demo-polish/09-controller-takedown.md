@@ -1,7 +1,7 @@
 # Story: Controller takedown (soft delete + PostRemoved)
 
 **Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** CTL-025, XC-010, COR-001, XC-002  ·  **Design decisions:** DP-9 (implementation.md §0), D1-009  ·  **Issue:** —
+**Requirements:** CTL-025, XC-010, COR-001, XC-002  ·  **Design decisions:** DP-9 (implementation.md §0), D1-009  ·  **Issue:** #428
 **Story ID:** B6  ·  **Stack:** backend  ·  **Priority:** Should  ·  **Effort:** S  ·  **Wave:** 1b
 **Home story:** [`world-steering/05`](../world-steering/05-content-takedown.md) (slice: soft delete + broadcast; category in telemetry only; no Director notification).
 

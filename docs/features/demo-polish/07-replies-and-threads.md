@@ -1,7 +1,7 @@
 # Story: Replies and real threads
 
 **Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** SOC-010, SOC-011, SOC-012, SOC-005, COR-001, XC-010  ·  **Design decisions:** D1-006 (flattened), D1-009 (tombstones in threads only)  ·  **Issue:** —
+**Requirements:** SOC-010, SOC-011, SOC-012, SOC-005, COR-001, XC-010  ·  **Design decisions:** D1-006 (flattened), D1-009 (tombstones in threads only)  ·  **Issue:** #426
 **Story ID:** B2  ·  **Stack:** backend  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** 1b
 **Home stories:** [`threads-replies/01`](../threads-replies/01-flattened-thread-view.md), [`/02`](../threads-replies/02-reply-counts-and-open.md), [`/03`](../threads-replies/03-persona-participant-replies.md).
 

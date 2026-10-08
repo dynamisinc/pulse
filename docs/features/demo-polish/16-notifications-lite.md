@@ -1,7 +1,7 @@
 # Story: Notifications, derived client-side (Could)
 
 **Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** SOC-070 (lite), SOC-071 (aggregation), NFR-001, COR-053  ·  **Design decisions:** D1-005 (aggregate under load), D1-011  ·  **Issue:** —
+**Requirements:** SOC-070 (lite), SOC-071 (aggregation), NFR-001, COR-053  ·  **Design decisions:** D1-005 (aggregate under load), D1-011  ·  **Issue:** #435
 **Story ID:** F7  ·  **Stack:** frontend  ·  **Priority:** Could  ·  **Effort:** M  ·  **Wave:** 3 slot (after F1 merged)  ·  **Cut line 2:** first thing cut
 **Home story:** [`notifications/01`](../notifications/01-notification-center.md) (lite).
 
