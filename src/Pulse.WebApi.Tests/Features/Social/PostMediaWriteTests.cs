@@ -11,10 +11,12 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Social;
+using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Tests.Data;
 using static Pulse.WebApi.Tests.Features.Social.PostMediaSeed;
 
@@ -517,6 +519,174 @@ public class PostMediaWriteTests
         var refused = await service.IngestAsync(reply, attribution);
         refused.Outcome.Should().Be(PostIngestOutcome.Invalid, "with no resolver, a non-empty parentPostId is a 400");
         (await CountRowsAsync(_fixture, exerciseId)).Posts.Should().Be(1);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Gate-1 M-1 — a projection failure after the commit never fails the write
+    // ---------------------------------------------------------------------------------------------
+
+    [RequiresDockerFact]
+    public async Task AThrowingProjector_AfterTheCommit_StillAnswers201_Broadcasts_AndWritesExactlyOnePost()
+    {
+        var world = await SeedWorldAsync(_fixture);
+        var parent = await SeedPostAsync(_fixture, world.Exercise, world.ParticipantPersona, BaseScenarioTime);
+        var image = await SeedAssetAsync(_fixture, world.Exercise, MediaKinds.Image, "any-uploader");
+
+        await using var factory = new PostMediaWebApplicationFactory(_fixture.ConnectionString!, throwingProjector: true);
+        using var client = factory.CreateClientFor(world.Host, world.StaffToken);
+
+        var response = await client.PostAsync(PostsUri, Json(StaffBody(
+            world,
+            text: "PROJECTION-FAILS",
+            media: new[] { Item(image.Id) },
+            parentPostId: parent.Id.ToString(),
+            engagementBaseline: new { like = 50 })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "the post is committed — a 500 would make the client retry and duplicate it");
+        using var document = await ReadJsonAsync(response);
+        document.RootElement.GetProperty("counts").GetProperty("like").GetInt32().Should().Be(50, "the fallback keeps the baseline counts");
+        document.RootElement.GetProperty("inReplyTo").GetProperty("postId").GetString().Should().Be(parent.Id.ToString());
+
+        var broadcast = factory.Broadcaster.Calls.Should().ContainSingle("the committed post is still broadcast").Subject.Post;
+        broadcast.Text.Should().Be("PROJECTION-FAILS");
+        broadcast.Counts.Should().Be(new ParticipantPostCounts(0, 0, 50));
+        broadcast.InReplyTo.Should().Be(new PostInReplyToDto(parent.Id.ToString(), $"p_{world.ParticipantPersona:N}"),
+            "the fallback carries the inReplyTo resolved before the commit");
+        broadcast.Media.Should().BeNull("the fallback mints no URLs");
+        broadcast.Viewer.Should().BeNull();
+
+        await using var read = _fixture.CreateContext();
+        (await read.Posts.IgnoreQueryFilters().CountAsync(p => p.Body == "PROJECTION-FAILS" && p.ExerciseId == world.Exercise))
+            .Should().Be(1, "exactly one post row");
+        (await CountRowsAsync(_fixture, world.Exercise)).Should().Be((2, 1, 1), "the seeded parent, plus the new post, its item and its event");
+    }
+
+    [RequiresDockerFact]
+    public async Task AProjectionFailure_IsLoggedAsAWarning_ButCancellationStillPropagates()
+    {
+        var exerciseId = Guid.NewGuid();
+        var parent = await SeedPostAsync(_fixture, exerciseId, Guid.NewGuid(), BaseScenarioTime);
+        var scope = new ExerciseContext { CurrentExerciseId = exerciseId };
+        var attribution = new PostAttribution { AuthorPersonaId = Guid.NewGuid(), Origin = "engine", ActingHumanId = string.Empty };
+        CreatePostRequest Reply(string text) => new()
+        {
+            Text = text,
+            ScenarioTime = "2033-06-14T09:00:00-05:00",
+            TimeZone = "America/Chicago",
+            ParentPostId = parent.Id.ToString(),
+        };
+
+        await using (var context = _fixture.CreateContext(scope))
+        {
+            var logger = new CapturingLogger<PostIngestService>();
+            var service = new PostIngestService(
+                context, scope, new FakeFeedBroadcaster(), null, logger,
+                new FakeReplyParentResolver(context, new ResolverProbe()), new ThrowingProjector(new InvalidOperationException("db gone")));
+
+            var result = await service.IngestAsync(Reply("logged"), attribution);
+
+            result.Outcome.Should().Be(PostIngestOutcome.Created);
+            result.ParticipantView!.InReplyTo!.PostId.Should().Be(parent.Id.ToString());
+            logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.EventId.Id == 3)
+                .Which.Message.Should().Contain(result.Post!.Id.ToString());
+        }
+
+        await using (var context = _fixture.CreateContext(scope))
+        {
+            var service = new PostIngestService(
+                context, scope, new FakeFeedBroadcaster(), null, null,
+                new FakeReplyParentResolver(context, new ResolverProbe()), new ThrowingProjector(new OperationCanceledException()));
+
+            var ingest = () => service.IngestAsync(Reply("cancelled"), attribution);
+
+            await ingest.Should().ThrowAsync<OperationCanceledException>("cancellation is never swallowed as a projection fault");
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Gate-1 L-1 — a post with no media and no parent skips the projector, with identical output
+    // ---------------------------------------------------------------------------------------------
+
+    [RequiresDockerFact]
+    public async Task ATextOnlyPost_SkipsTheProjector_AndItsPayloadIsIdenticalToTheProjectorsOutput()
+    {
+        var exerciseId = Guid.NewGuid();
+        var scope = new ExerciseContext { CurrentExerciseId = exerciseId };
+        await using var context = _fixture.CreateContext(scope);
+        var projector = new CountingProjector(new ParticipantPostProjector(
+            context, scope, new ZeroPostEngagementReader(), new FakeMediaUrlSigner(scope, new SignerProbe())));
+        var broadcaster = new FakeFeedBroadcaster();
+        var service = new PostIngestService(
+            context, scope, broadcaster, null, null, new FakeReplyParentResolver(context, new ResolverProbe()), projector);
+
+        var staff = new PostAttribution { AuthorPersonaId = Guid.NewGuid(), Origin = "controller-as-persona", ActingHumanId = "staff-1" };
+        var textOnly = await service.IngestAsync(
+            new CreatePostRequest
+            {
+                Text = "text only, with a baseline",
+                ScenarioTime = "2033-06-14T09:00:00-05:00",
+                TimeZone = "America/Chicago",
+                EngagementBaseline = new EngagementBaselineRequest(Like: 1450, Repost: 999, Reply: 12),
+            },
+            staff);
+
+        textOnly.Outcome.Should().Be(PostIngestOutcome.Created);
+        projector.Calls.Should().Be(0, "nothing to sign and no parent to name — the projector's queries would buy nothing");
+
+        var projected = (await projector.ProjectAsync([textOnly.Post!], new PostProjectionOptions(), default))[0];
+        JsonSerializer.Serialize(broadcaster.Calls.Single().Post).Should().Be(
+            JsonSerializer.Serialize(projected), "the skipped path is byte-identical to what the projector would have produced");
+        JsonSerializer.Serialize(textOnly.ParticipantView).Should().Be(JsonSerializer.Serialize(projected));
+
+        // A reply still goes through the projector.
+        var reply = await service.IngestAsync(
+            new CreatePostRequest
+            {
+                Text = "a reply",
+                ScenarioTime = "2033-06-14T09:05:00-05:00",
+                TimeZone = "America/Chicago",
+                ParentPostId = textOnly.Post!.Id.ToString(),
+            },
+            staff);
+        reply.Outcome.Should().Be(PostIngestOutcome.Created);
+        projector.Calls.Should().Be(2, "the reply was projected (plus the one direct call above)");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Gate-1 M-2 — markup that a single strip pass would rebuild, in the body AND the alt text
+    // ---------------------------------------------------------------------------------------------
+
+    [RequiresDockerFact]
+    public async Task TagRebuildingPayloads_InTheBodyAndTheAlt_AreStrippedUntilInert()
+    {
+        var world = await SeedWorldAsync(_fixture);
+        var image = await SeedAssetAsync(_fixture, world.Exercise, MediaKinds.Image, world.ParticipantHuman);
+
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClientFor(world.Host, world.ParticipantToken);
+
+        const string rebuildImg = "<<b>img src=x onerror=alert(1)>";
+        const string rebuildSvg = "<<i></i>svg onload=alert(2)>";
+        var response = await client.PostAsync(PostsUri, Json(Body(
+            text: $"Body {rebuildImg} and {rebuildSvg} end",
+            media: new[] { Item(image.Id, alt: $"Alt {rebuildImg} and {rebuildSvg} end") })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        using var document = await ReadJsonAsync(response);
+        var postId = Guid.Parse(document.RootElement.GetProperty("id").GetString()!);
+
+        await using var read = _fixture.CreateContext();
+        var stored = await read.Posts.IgnoreQueryFilters().SingleAsync(p => p.Id == postId);
+        var alt = (await read.PostMediaItems.IgnoreQueryFilters().SingleAsync(i => i.PostId == postId)).Alt;
+
+        foreach (var (name, value) in new[] { ("body", stored.Body), ("alt", alt) })
+        {
+            value.Should().NotContain("<", "no tag may be rebuilt in the stored {0}", name);
+            value.Should().NotContain("onerror").And.NotContain("onload");
+        }
+
+        stored.Body.Should().Be("Body  and  end");
+        alt.Should().Be("Alt  and  end");
     }
 
     private PostMediaWebApplicationFactory CreateFactory()

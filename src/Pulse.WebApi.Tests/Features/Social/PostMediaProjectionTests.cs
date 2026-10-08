@@ -290,6 +290,39 @@ public class PostMediaProjectionTests
         (await projector.ProjectAsync([], new PostProjectionOptions(), default)).Should().BeEmpty();
     }
 
+    [RequiresDockerFact]
+    public async Task MediaTheSignerReturnedNoUrlFor_IsDroppedOrItsPosterOmitted_AndLoggedWithTheAssetId()
+    {
+        // Gate-1 L-4: never served without a URL, and never dropped silently.
+        var exerciseId = Guid.NewGuid();
+        var post = await SeedPostAsync(_fixture, exerciseId, Guid.NewGuid(), BaseScenarioTime);
+        var unsigned = await SeedAssetAsync(_fixture, exerciseId, MediaKinds.Image, "h");
+        var poster = await SeedAssetAsync(_fixture, exerciseId, MediaKinds.Image, "h");
+        var video = await SeedAssetAsync(_fixture, exerciseId, MediaKinds.Video, "h", posterId: poster.Id);
+        await SeedMediaItemAsync(_fixture, exerciseId, post.Id, video.Id, 0, alt: "clip");
+
+        var second = await SeedPostAsync(_fixture, exerciseId, Guid.NewGuid(), BaseScenarioTime.AddMinutes(1));
+        await SeedMediaItemAsync(_fixture, exerciseId, second.Id, unsigned.Id, 0, alt: "photo");
+
+        var scope = new Pulse.WebApi.Data.ExerciseContext { CurrentExerciseId = exerciseId };
+        await using var db = _fixture.CreateContext(scope);
+        var logger = new CapturingLogger<ParticipantPostProjector>();
+        var projector = new ParticipantPostProjector(
+            db, scope, new FakePostEngagementReader(), new OmittingMediaUrlSigner(unsigned.Id, poster.Id), logger);
+
+        var projected = await projector.ProjectAsync([post, second], new PostProjectionOptions(), default);
+
+        var videoItem = projected[0].Media.Should().ContainSingle().Subject;
+        videoItem.Url.Should().Be(FakeMediaUrlSigner.UrlFor(video.Id));
+        videoItem.PosterUrl.Should().BeNull("a poster with no URL is omitted, not served broken");
+        projected[1].Media.Should().BeNull("an item with no URL is dropped rather than served without one");
+
+        var warnings = logger.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning).ToArray();
+        warnings.Should().HaveCount(2);
+        warnings.Should().ContainSingle(e => e.Message.Contains(unsigned.Id.ToString()) && e.Message.Contains(second.Id.ToString()));
+        warnings.Should().ContainSingle(e => e.Message.Contains(poster.Id.ToString()) && e.Message.Contains(post.Id.ToString()));
+    }
+
     private static string Id(JsonElement item) => item.GetProperty("id").GetString()!;
 
     private static async Task<JsonElement[]> GetFeedAsync(System.Net.Http.HttpClient client, Uri uri)

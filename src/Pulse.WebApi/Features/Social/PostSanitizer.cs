@@ -46,14 +46,35 @@ public static partial class PostSanitizer
     /// <summary>
     /// Strips HTML markup from <paramref name="input"/> so the stored text can never parse as executable
     /// markup, while preserving the author's literal characters. A stored <c>&lt;script&gt;…&lt;/script&gt;</c>
-    /// or <c>&lt;img onerror=…&gt;</c> is removed entirely. Applied exactly once, at the ingest boundary.
+    /// or <c>&lt;img onerror=…&gt;</c> is removed entirely. Applied at the ingest boundary.
     /// </summary>
+    /// <remarks>
+    /// <b>Strips until stable (demo-polish BP, Gate-1 M-2).</b> One pass can REBUILD a tag out of the pieces
+    /// around the one it removed: <c>&lt;&lt;b&gt;img src=x onerror=…&gt;</c> loses <c>&lt;b&gt;</c> and becomes
+    /// <c>&lt;img src=x onerror=…&gt;</c>. So the strip repeats until a pass removes nothing. Every pass that
+    /// changes the text makes it strictly shorter, so the loop always terminates.
+    /// </remarks>
     /// <param name="input">The raw post text to sanitize.</param>
     /// <returns>The stripped, inert plain text (never entity-encoded).</returns>
     public static string Sanitize(string input)
     {
         ArgumentNullException.ThrowIfNull(input);
 
+        var current = input;
+        string previous;
+        do
+        {
+            previous = current;
+            current = StripOnce(previous);
+        }
+        while (!string.Equals(current, previous, StringComparison.Ordinal));
+
+        return current;
+    }
+
+    /// <summary>One strip pass: script/style blocks with their contents, then any remaining tag.</summary>
+    private static string StripOnce(string input)
+    {
         var withoutBlocks = ScriptStyleBlockRegex().Replace(input, string.Empty);
         return HtmlTagRegex().Replace(withoutBlocks, string.Empty);
     }

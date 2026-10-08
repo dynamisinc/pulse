@@ -113,8 +113,9 @@ public sealed partial class PostIngestService
     /// <c>parentPostId</c> is refused with a 400 — never written as a silent top-level post.
     /// </param>
     /// <param name="projector">
-    /// Builds the participant projection for the broadcast and the response. Optional: when absent, the
-    /// pre-demo <see cref="ParticipantPostDto.FromPost"/> shape is used, exactly as before.
+    /// Builds the participant projection for the broadcast and the response. Optional: when absent, the baseline
+    /// view is used — <see cref="ParticipantPostDto.FromPost"/>'s fields with the seeded baseline counts, which is
+    /// byte-identical to the pre-demo shape for every caller that sets no baseline and no parent.
     /// </param>
     public PostIngestService(
         PulseDbContext dbContext,
@@ -243,15 +244,20 @@ public sealed partial class PostIngestService
             return PostIngestResult.Invalid(mediaError);
         }
 
-        Guid? parentPostId = null;
+        // The parent's author handle is resolved now, with the parent, so the post-commit fallback projection can
+        // still carry inReplyTo without another read.
+        ResolvedParent? parent = null;
         if (!string.IsNullOrEmpty(request.ParentPostId))
         {
-            parentPostId = await ResolveParentAsync(request.ParentPostId, exerciseId, cancellationToken);
-            if (parentPostId is null)
+            parent = await ResolveParentAsync(request.ParentPostId, exerciseId, cancellationToken);
+            if (parent is null)
             {
                 return PostIngestResult.Invalid(ParentNotFoundMessage);
             }
         }
+
+        var parentPostId = parent?.Id;
+        var inReplyTo = parent?.InReplyTo;
 
         // 3. Sanitize server-side (NFR-004) — strip, never encode.
         var body = PostSanitizer.Sanitize(request.Text);
@@ -358,13 +364,67 @@ public sealed partial class PostIngestService
 
         // 7. Fan out the participant-safe projection only (XC-002 — the broadcast never carries provenance or a
         //    baseline). No viewer state: one payload goes to every member of the exercise group.
-        var participantView = _projector is null
-            ? ParticipantPostDto.FromPost(post)
-            : (await _projector.ProjectAsync([post], new PostProjectionOptions(), cancellationToken))[0];
+        var participantView = await ProjectCommittedPostAsync(post, mediaItems.Count > 0, inReplyTo, cancellationToken);
         await _broadcaster.BroadcastPostAsync(exerciseId, participantView, cancellationToken);
 
         // 8. Hand the full post (and its projection) back to the endpoint, which shapes the response by caller role.
         return PostIngestResult.Created(post, participantView);
+    }
+
+    /// <summary>
+    /// Builds the participant projection of a post that has ALREADY COMMITTED, for the broadcast and the 201.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A post with no media and no parent skips the projector (Gate-1 L-1): its projection is exactly the baseline
+    /// view built here — a new post has no real engagement, no media to sign and no parent to name — so the
+    /// projector's queries would buy nothing. The same view is used when no projector is registered.
+    /// </para>
+    /// <para>
+    /// <b>A projection failure never fails the write (Gate-1 M-1).</b> The post is committed and observers have
+    /// been told, so a throw here would leave it unbroadcast, answer the caller 500 (whose retry duplicates the
+    /// post) and abort an engine burst mid-loop. Any failure except cancellation is logged and answered with the
+    /// baseline view instead: counts = baseline, the already-resolved <c>inReplyTo</c>, and no media.
+    /// </para>
+    /// </remarks>
+    private async Task<ParticipantPostDto> ProjectCommittedPostAsync(
+        Post post, bool hasMedia, PostInReplyToDto? inReplyTo, CancellationToken cancellationToken)
+    {
+        if (_projector is null || (!hasMedia && inReplyTo is null))
+        {
+            return BaselineView(post, inReplyTo);
+        }
+
+        try
+        {
+            return (await _projector.ProjectAsync([post], new PostProjectionOptions(), cancellationToken))[0];
+        }
+#pragma warning disable CA1031 // A projection fault must never fail a post that has already committed.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogProjectionFailed(ex, post.Id);
+            return BaselineView(post, inReplyTo);
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>
+    /// The participant view of a just-committed post without the projector: <see cref="ParticipantPostDto.FromPost"/>'s
+    /// participant-safe fields, counts = the seeded baseline (a new post has no real engagement), and
+    /// <paramref name="inReplyTo"/>. No provenance and no baseline field (XC-002).
+    /// </summary>
+    private static ParticipantPostDto BaselineView(Post post, PostInReplyToDto? inReplyTo)
+    {
+        var view = ParticipantPostDto.FromPost(post);
+        return new ParticipantPostDto
+        {
+            Id = view.Id,
+            AuthorPersonaId = view.AuthorPersonaId,
+            Text = view.Text,
+            ScenarioTime = view.ScenarioTime,
+            Counts = new ParticipantPostCounts(post.BaselineReplyCount, post.BaselineRepostCount, post.BaselineLikeCount),
+            InReplyTo = inReplyTo,
+        };
     }
 
     /// <summary>
@@ -520,10 +580,12 @@ public sealed partial class PostIngestService
 
     /// <summary>
     /// Resolves a non-empty <c>parentPostId</c> through the <see cref="IReplyParentResolver"/> seam (DP-8).
-    /// Returns the parent id, or <c>null</c> for every refusal: no resolver, not resolved, or a resolved parent
-    /// that is somehow outside this exercise or soft-deleted (defense in depth over the resolver, DP-16).
+    /// Returns the parent's id and <c>inReplyTo</c> (author handle with no leading <c>@</c>), or <c>null</c> for
+    /// every refusal: no resolver, not resolved, or a resolved parent that is somehow outside this exercise or
+    /// soft-deleted (defense in depth over the resolver, DP-16).
     /// </summary>
-    private async Task<Guid?> ResolveParentAsync(string parentPostId, Guid exerciseId, CancellationToken cancellationToken)
+    private async Task<ResolvedParent?> ResolveParentAsync(
+        string parentPostId, Guid exerciseId, CancellationToken cancellationToken)
     {
         if (_replyParentResolver is null)
         {
@@ -539,7 +601,16 @@ public sealed partial class PostIngestService
             return null;
         }
 
-        return parent.Id;
+        // The author handle, through the central filter (an out-of-scope persona is simply absent). The same
+        // rule as the projector: a missing author row yields an empty handle rather than refusing the reply.
+        var handle = await _dbContext.Personas
+            .AsNoTracking()
+            .Where(persona => persona.Id == parent.AuthorPersonaId)
+            .Select(persona => persona.Handle)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new ResolvedParent(
+            parent.Id, new PostInReplyToDto(parent.Id.ToString(), (handle ?? string.Empty).TrimStart('@')));
     }
 
     /// <summary>
@@ -577,6 +648,12 @@ public sealed partial class PostIngestService
         Message = "Ignored {Count} legacy media placeholder(s) with no mediaId in exercise {ExerciseId} (DP-6); the post is written as text.")]
     private partial void LogLegacyMediaIgnored(int count, Guid exerciseId);
 
+    [LoggerMessage(
+        EventId = 3,
+        Level = LogLevel.Warning,
+        Message = "Participant projection failed for committed post {PostId}; broadcasting the baseline view instead.")]
+    private partial void LogProjectionFailed(Exception exception, Guid postId);
+
     /// <summary>One validated attachment: the asset, its optional poster override, and the sanitized alt text.</summary>
     private sealed record RequestedMedia(Guid AssetId, Guid? PosterId, string Alt);
 
@@ -593,6 +670,9 @@ public sealed partial class PostIngestService
     {
         public static BaselineResolution Zero { get; } = new(0, 0, 0, null);
     }
+
+    /// <summary>A resolved, in-scope reply parent and the <c>inReplyTo</c> a reply to it carries.</summary>
+    private sealed record ResolvedParent(Guid Id, PostInReplyToDto InReplyTo);
 
     /// <summary>The opaque XC-004 payload of a <c>reply</c> event.</summary>
     private sealed record ReplyTelemetryPayload([property: JsonPropertyName("parentPostId")] string ParentPostId);

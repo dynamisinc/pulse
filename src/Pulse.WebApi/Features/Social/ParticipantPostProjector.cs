@@ -1,6 +1,8 @@
 namespace Pulse.WebApi.Features.Social;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Media;
@@ -30,23 +32,26 @@ using Pulse.WebApi.Features.Social.Engagement;
 /// query for reply parents with their authors (skipped when no post is a reply), and one engagement read.
 /// </para>
 /// </remarks>
-public sealed class ParticipantPostProjector : IParticipantPostProjector
+public sealed partial class ParticipantPostProjector : IParticipantPostProjector
 {
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly IPostEngagementReader _engagementReader;
     private readonly IMediaUrlSigner _mediaUrlSigner;
+    private readonly ILogger<ParticipantPostProjector> _logger;
 
     /// <summary>Creates the projector over the scoped persistence context and its read seams.</summary>
     /// <param name="dbContext">The request-scoped context whose global filter confines every lookup (COR-001).</param>
     /// <param name="exerciseContext">The resolved exercise scope; posts outside it are refused.</param>
     /// <param name="engagementReader">Real engagement counts and viewer state (B3, or the zero fallback).</param>
     /// <param name="mediaUrlSigner">Mints read URLs for in-scope media (BM, or the unconfigured fallback).</param>
+    /// <param name="logger">Diagnostics for media the signer returned no URL for; optional.</param>
     public ParticipantPostProjector(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         IPostEngagementReader engagementReader,
-        IMediaUrlSigner mediaUrlSigner)
+        IMediaUrlSigner mediaUrlSigner,
+        ILogger<ParticipantPostProjector>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -57,6 +62,7 @@ public sealed class ParticipantPostProjector : IParticipantPostProjector
         _exerciseContext = exerciseContext;
         _engagementReader = engagementReader;
         _mediaUrlSigner = mediaUrlSigner;
+        _logger = logger ?? NullLogger<ParticipantPostProjector>.Instance;
     }
 
     /// <inheritdoc />
@@ -103,7 +109,7 @@ public sealed class ParticipantPostProjector : IParticipantPostProjector
     /// The single participant-safe mapping. Reads only the post's id, author, body, scenario time, baseline
     /// counts (summed into <c>counts</c>) and parent id — never its provenance (XC-002).
     /// </summary>
-    private static ParticipantPostDto Project(
+    private ParticipantPostDto Project(
         Post post,
         IEnumerable<MediaRow> mediaRows,
         IReadOnlyDictionary<Guid, string> urls,
@@ -147,19 +153,21 @@ public sealed class ParticipantPostProjector : IParticipantPostProjector
 
     /// <summary>
     /// Maps one media row to the participant shape: the asset id, kind, URL, alt and display hints only — no
-    /// storage or uploader detail. A row whose URL was not minted is dropped rather than served without one.
+    /// storage or uploader detail. A row whose URL was not minted is dropped rather than served without one, and
+    /// a poster with no URL is omitted; both are logged with the asset id (Gate-1 L-4).
     /// </summary>
-    private static PostMediaDto? ToMediaDto(MediaRow row, IReadOnlyDictionary<Guid, string> urls)
+    private PostMediaDto? ToMediaDto(MediaRow row, IReadOnlyDictionary<Guid, string> urls)
     {
         if (!urls.TryGetValue(row.Asset.Id, out var url))
         {
+            LogMediaDropped(row.Asset.Id, row.PostId);
             return null;
         }
 
         string? posterUrl = null;
-        if (row.Poster is { } poster)
+        if (row.Poster is { } poster && !urls.TryGetValue(poster.Id, out posterUrl))
         {
-            posterUrl = urls.GetValueOrDefault(poster.Id);
+            LogPosterOmitted(poster.Id, row.PostId);
         }
 
         return new PostMediaDto(
@@ -244,6 +252,18 @@ public sealed class ParticipantPostProjector : IParticipantPostProjector
             parent => parent.Id,
             parent => (parent.Handle ?? string.Empty).TrimStart('@'));
     }
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Warning,
+        Message = "The signer returned no URL for media asset {AssetId} on post {PostId}; the item is dropped from the projection.")]
+    private partial void LogMediaDropped(Guid assetId, Guid postId);
+
+    [LoggerMessage(
+        EventId = 2,
+        Level = LogLevel.Warning,
+        Message = "The signer returned no URL for poster asset {AssetId} on post {PostId}; posterUrl is omitted.")]
+    private partial void LogPosterOmitted(Guid assetId, Guid postId);
 
     /// <summary>One media item with its asset and effective poster.</summary>
     private sealed record MediaRow(Guid PostId, int Order, string Alt, MediaAsset Asset, MediaAsset? Poster);

@@ -16,10 +16,12 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Media;
 using Pulse.WebApi.Features.Realtime;
+using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Threads;
 using Pulse.WebApi.Tests.Data;
@@ -41,13 +43,15 @@ public sealed class PostMediaWebApplicationFactory : WebApplicationFactory<Progr
 
     private readonly bool _keepFallbackSigner;
     private readonly bool _keepFallbackResolver;
+    private readonly bool _throwingProjector;
 
     public PostMediaWebApplicationFactory(
-        string connectionString, bool keepFallbackSigner = false, bool keepFallbackResolver = false)
+        string connectionString, bool keepFallbackSigner = false, bool keepFallbackResolver = false, bool throwingProjector = false)
     {
         Environment.SetEnvironmentVariable(ConnectionStringEnvVar, connectionString);
         _keepFallbackSigner = keepFallbackSigner;
         _keepFallbackResolver = keepFallbackResolver;
+        _throwingProjector = throwingProjector;
     }
 
     /// <summary>Every <c>PostReceived</c> broadcast.</summary>
@@ -99,6 +103,12 @@ public sealed class PostMediaWebApplicationFactory : WebApplicationFactory<Progr
                 services.AddScoped<IReplyParentResolver>(sp =>
                     new FakeReplyParentResolver(sp.GetRequiredService<PulseDbContext>(), Resolver));
             }
+
+            if (_throwingProjector)
+            {
+                services.RemoveAll<IParticipantPostProjector>();
+                services.AddSingleton<IParticipantPostProjector>(new ThrowingProjector(new InvalidOperationException("projection exploded")));
+            }
         });
     }
 
@@ -107,6 +117,75 @@ public sealed class PostMediaWebApplicationFactory : WebApplicationFactory<Progr
         base.Dispose(disposing);
         Environment.SetEnvironmentVariable(ConnectionStringEnvVar, null);
     }
+}
+
+/// <summary>A projector that always throws the given exception.</summary>
+public sealed class ThrowingProjector : IParticipantPostProjector
+{
+    private readonly Exception _exception;
+
+    public ThrowingProjector(Exception exception) => _exception = exception;
+
+    public int Calls { get; private set; }
+
+    public Task<IReadOnlyList<ParticipantPostDto>> ProjectAsync(
+        IReadOnlyCollection<Post> posts, PostProjectionOptions options, CancellationToken cancellationToken)
+    {
+        Calls++;
+        throw _exception;
+    }
+}
+
+/// <summary>Wraps a real projector and counts how often the ingest funnel reaches it.</summary>
+public sealed class CountingProjector : IParticipantPostProjector
+{
+    private readonly IParticipantPostProjector _inner;
+
+    public CountingProjector(IParticipantPostProjector inner) => _inner = inner;
+
+    public int Calls { get; private set; }
+
+    public Task<IReadOnlyList<ParticipantPostDto>> ProjectAsync(
+        IReadOnlyCollection<Post> posts, PostProjectionOptions options, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return _inner.ProjectAsync(posts, options, cancellationToken);
+    }
+}
+
+/// <summary>A signer that mints nothing for the listed assets (the rest get the fake URL).</summary>
+public sealed class OmittingMediaUrlSigner : IMediaUrlSigner
+{
+    private readonly HashSet<Guid> _omit;
+
+    public OmittingMediaUrlSigner(params Guid[] omit) => _omit = [.. omit];
+
+    public Task<string> GetReadUrlAsync(MediaAsset asset, CancellationToken cancellationToken) =>
+        Task.FromResult(FakeMediaUrlSigner.UrlFor(asset.Id));
+
+    public Task<IReadOnlyDictionary<Guid, string>> GetReadUrlsAsync(
+        IReadOnlyCollection<MediaAsset> assets, CancellationToken cancellationToken)
+    {
+        IReadOnlyDictionary<Guid, string> urls = assets
+            .Where(asset => !_omit.Contains(asset.Id))
+            .ToDictionary(asset => asset.Id, asset => FakeMediaUrlSigner.UrlFor(asset.Id));
+        return Task.FromResult(urls);
+    }
+}
+
+/// <summary>Captures log entries (level, event id, rendered message) for assertions.</summary>
+public sealed class CapturingLogger<T> : ILogger<T>
+{
+    public ConcurrentQueue<(LogLevel Level, EventId EventId, string Message, Exception? Exception)> Entries { get; } = new();
+
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+        LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+        Entries.Enqueue((logLevel, eventId, formatter(state, exception), exception));
 }
 
 /// <summary>Counts signer calls and the assets each one received.</summary>

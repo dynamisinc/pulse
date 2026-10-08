@@ -72,6 +72,9 @@ public class PostSanitizerTests
     [InlineData("<a href=\"javascript:alert(1)\">go</a>")]
     [InlineData("<body onload=alert(1)>")]
     [InlineData("<div onclick=\"alert(1)\">click</div>")]
+    [InlineData("<<b>img src=x onerror=alert(1)>")]
+    [InlineData("<<i></i>svg onload=alert(1)>")]
+    [InlineData("<<<b>b>img src=x onerror=alert(1)>")]
     public void Sanitize_ClassicStoredXssPayloads_LeaveNoExecutableMarkup(string payload)
     {
         // The same property the isolation suite proves at the read boundary (exercise-isolation/07,
@@ -81,6 +84,19 @@ public class PostSanitizerTests
 
         result.Should().NotContain("<", "no character sequence that could open an HTML/script tag may survive sanitization");
         result.Should().NotContain(">");
+    }
+
+    [Theory]
+    [InlineData("<<b>img src=x onerror=alert(1)>", "Body ", " end")]
+    [InlineData("<<i></i>svg onload=alert(1)>", "Body ", " end")]
+    public void Sanitize_TagRebuildingPayloads_AreStrippedUntilStable_NotRebuiltByOnePass(string payload, string before, string after)
+    {
+        // Gate-1 M-2: a single pass removes <b> (or <i></i>) and REBUILDS <img onerror> / <svg onload> from the
+        // pieces around it. The sanitizer repeats until a pass removes nothing.
+        var result = PostSanitizer.Sanitize(before + payload + after);
+
+        result.Should().Be(before + after, "the rebuilt tag is stripped on the next pass, leaving the author's text");
+        result.Should().NotContain("onerror").And.NotContain("onload");
     }
 
     [Fact]
