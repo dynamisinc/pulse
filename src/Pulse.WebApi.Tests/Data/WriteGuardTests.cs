@@ -265,4 +265,134 @@ public class WriteGuardTests
         (await verifyContext.SharedCredentials.IgnoreQueryFilters().CountAsync(c => c.Id == credentialId)).Should().Be(
             1, "the validly-scoped SharedCredential must have actually reached the database");
     }
+
+    // --- demo-polish B1: MediaAsset / PostMediaItem / PostReaction (all IExerciseScoped) ------------------
+    // Each rejection asserts the GUARD's exception type, so it cannot pass on a foreign-key failure: the guard
+    // throws before base.SaveChangesAsync, i.e. before the database ever sees the (unseeded) parent ids.
+
+    [RequiresDockerFact]
+    public async Task SaveChangesAsync_RejectsMediaAssetWithEmptyExerciseId_AndWritesNoRow()
+    {
+        var mediaAssetId = Guid.NewGuid();
+
+        await using var writeContext = _fixture.CreateContext();
+        writeContext.MediaAssets.Add(NewMediaAsset(mediaAssetId, Guid.Empty));
+
+        var act = async () => await writeContext.SaveChangesAsync();
+
+        await act.Should().ThrowAsync<ExerciseScopeViolationException>(
+            "the write-time guard must reject a scoped MediaAsset with a default ExerciseId before it reaches the database");
+
+        await using var verifyContext = _fixture.CreateContext();
+        (await verifyContext.MediaAssets.IgnoreQueryFilters().CountAsync(m => m.Id == mediaAssetId)).Should().Be(
+            0, "the rejected MediaAsset must never have been written to the database");
+    }
+
+    [RequiresDockerFact]
+    public async Task SaveChangesAsync_RejectsPostMediaItemWithEmptyExerciseId_AndWritesNoRow()
+    {
+        var itemId = Guid.NewGuid();
+
+        await using var writeContext = _fixture.CreateContext();
+        writeContext.PostMediaItems.Add(NewPostMediaItem(itemId, Guid.Empty, Guid.NewGuid(), Guid.NewGuid()));
+
+        var act = async () => await writeContext.SaveChangesAsync();
+
+        await act.Should().ThrowAsync<ExerciseScopeViolationException>(
+            "the write-time guard must reject a scoped PostMediaItem with a default ExerciseId before it reaches the database");
+
+        await using var verifyContext = _fixture.CreateContext();
+        (await verifyContext.PostMediaItems.IgnoreQueryFilters().CountAsync(i => i.Id == itemId)).Should().Be(
+            0, "the rejected PostMediaItem must never have been written to the database");
+    }
+
+    [RequiresDockerFact]
+    public async Task SaveChangesAsync_RejectsPostReactionWithEmptyExerciseId_AndWritesNoRow()
+    {
+        var reactionId = Guid.NewGuid();
+
+        await using var writeContext = _fixture.CreateContext();
+        writeContext.PostReactions.Add(NewPostReaction(reactionId, Guid.Empty, Guid.NewGuid()));
+
+        var act = async () => await writeContext.SaveChangesAsync();
+
+        await act.Should().ThrowAsync<ExerciseScopeViolationException>(
+            "the write-time guard must reject a scoped PostReaction with a default ExerciseId before it reaches the database");
+
+        await using var verifyContext = _fixture.CreateContext();
+        (await verifyContext.PostReactions.IgnoreQueryFilters().CountAsync(r => r.Id == reactionId)).Should().Be(
+            0, "the rejected PostReaction must never have been written to the database");
+    }
+
+    [RequiresDockerFact]
+    public async Task SaveChangesAsync_Succeeds_WhenMediaAssetPostMediaItemAndPostReactionHaveValidExerciseId()
+    {
+        var exerciseId = Guid.NewGuid();
+        var postId = Guid.NewGuid();
+        var mediaAssetId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var reactionId = Guid.NewGuid();
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            writeContext.Posts.Add(new Post
+            {
+                Id = postId,
+                ExerciseId = exerciseId,
+                AuthorPersonaId = Guid.NewGuid(),
+                Body = "A post carrying media and a reaction.",
+                CreatedScenarioTime = DateTimeOffset.UtcNow,
+                Origin = "participant",
+                ActingHumanId = "human-test",
+                CreatedWallClock = new DateTimeOffset(2033, 9, 4, 13, 15, 0, TimeSpan.Zero),
+            });
+            writeContext.MediaAssets.Add(NewMediaAsset(mediaAssetId, exerciseId));
+            writeContext.PostMediaItems.Add(NewPostMediaItem(itemId, exerciseId, postId, mediaAssetId));
+            writeContext.PostReactions.Add(NewPostReaction(reactionId, exerciseId, postId));
+
+            var act = async () => await writeContext.SaveChangesAsync();
+
+            await act.Should().NotThrowAsync(
+                "scoped demo-polish rows with a real, non-empty ExerciseId are the positive control");
+        }
+
+        await using var verifyContext = _fixture.CreateContext();
+        (await verifyContext.MediaAssets.IgnoreQueryFilters().CountAsync(m => m.Id == mediaAssetId)).Should().Be(1);
+        (await verifyContext.PostMediaItems.IgnoreQueryFilters().CountAsync(i => i.Id == itemId)).Should().Be(1);
+        (await verifyContext.PostReactions.IgnoreQueryFilters().CountAsync(r => r.Id == reactionId)).Should().Be(1);
+    }
+
+    private static MediaAsset NewMediaAsset(Guid id, Guid exerciseId) => new()
+    {
+        Id = id,
+        ExerciseId = exerciseId,
+        Kind = MediaKinds.Image,
+        ContentType = "image/png",
+        BlobName = $"{exerciseId:D}/{id:N}.png",
+        Bytes = 2048,
+        OriginalFileName = "photo.png",
+        UploadedByHumanId = "human-test",
+        CreatedScenarioTime = new DateTimeOffset(2033, 9, 4, 13, 0, 0, TimeSpan.Zero),
+        CreatedWallClock = new DateTimeOffset(2033, 9, 4, 13, 15, 0, TimeSpan.Zero),
+    };
+
+    private static PostMediaItem NewPostMediaItem(Guid id, Guid exerciseId, Guid postId, Guid mediaAssetId) => new()
+    {
+        Id = id,
+        ExerciseId = exerciseId,
+        PostId = postId,
+        MediaAssetId = mediaAssetId,
+        Alt = "A flooded street.",
+        Order = 0,
+    };
+
+    private static PostReaction NewPostReaction(Guid id, Guid exerciseId, Guid postId) => new()
+    {
+        Id = id,
+        ExerciseId = exerciseId,
+        PostId = postId,
+        PersonaId = Guid.NewGuid(),
+        Kind = ReactionKinds.Like,
+        CreatedScenarioTime = new DateTimeOffset(2033, 9, 4, 13, 5, 0, TimeSpan.Zero),
+    };
 }
