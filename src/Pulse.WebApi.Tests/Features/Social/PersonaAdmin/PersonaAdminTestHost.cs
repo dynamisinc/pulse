@@ -346,6 +346,29 @@ public static class PersonaAdminHttp
         return client.SendAsync(request);
     }
 
+    /// <summary>
+    /// Sends <c>PATCH /api/staff/personas/{personaId}</c> with raw <paramref name="body"/> bytes (e.g. invalid UTF-8),
+    /// and <paramref name="contentType"/> as the exact <c>Content-Type</c> header, or none when it is <c>null</c>.
+    /// </summary>
+    /// <param name="client">The client.</param>
+    /// <param name="personaId">The persona id.</param>
+    /// <param name="body">The raw bytes.</param>
+    /// <param name="contentType">The exact Content-Type header value, or <c>null</c> to send none.</param>
+    /// <returns>The response.</returns>
+    public static Task<HttpResponseMessage> PatchBytesAsync(
+        HttpClient client, Guid personaId, byte[] body, string? contentType = MergePatchContentType)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        var content = new ByteArrayContent(body);
+        if (contentType is not null)
+        {
+            content.Headers.TryAddWithoutValidation("Content-Type", contentType);
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Patch, PersonaUri(personaId)) { Content = content };
+        return client.SendAsync(request);
+    }
+
     /// <summary>Serializes <paramref name="body"/> (an anonymous object or dictionary) and PATCHes it.</summary>
     /// <param name="client">The client.</param>
     /// <param name="personaId">The persona id.</param>

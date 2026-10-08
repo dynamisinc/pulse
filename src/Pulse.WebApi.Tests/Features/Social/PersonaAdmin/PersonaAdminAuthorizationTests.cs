@@ -142,6 +142,25 @@ public sealed class PersonaAdminAuthorizationTests
         (await PatchAsync(evaluatorClient, personaId, body)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
+    [RequiresDockerFact]
+    public async Task RefusedCaller_WithANonJsonContentType_GetsTheAuthStatus_Not415()
+    {
+        // The content-type check (Gate-1 L-1) sits inside the handler, after every gate.
+        var exercise = await _seed.SeedExerciseAsync();
+        var personaId = await _seed.SeedPersonaAsync(exercise.Id);
+        var participant = await _seed.SeedParticipantSessionAsync(exercise.Id);
+        var evaluator = await _seed.SeedStaffSessionAsync(exercise.Id, [(exercise.Id, "evaluator")]);
+
+        await using var factory = _seed.CreateFactory();
+        using var anonymousClient = factory.CreateClientFor(exercise.Host, bearerToken: null);
+        using var participantClient = factory.CreateClientFor(exercise.Host, participant);
+        using var evaluatorClient = factory.CreateClientFor(exercise.Host, evaluator);
+
+        (await PatchAsync(anonymousClient, personaId, ValidPatch, "text/plain")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await PatchAsync(participantClient, personaId, ValidPatch, "text/plain")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await PatchAsync(evaluatorClient, personaId, ValidPatch, "text/plain")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
     private async Task AssertRefusedAsync(string host, string? token, Guid personaId, HttpStatusCode expected, string because)
     {
         var before = await _seed.ReadPersonaAsync(personaId);

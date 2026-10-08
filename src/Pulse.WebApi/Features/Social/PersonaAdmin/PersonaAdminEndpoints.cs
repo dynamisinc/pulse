@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Social.PersonaAdmin;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -27,9 +28,10 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 /// </para>
 /// <para>
 /// <b>Responses.</b> 200 with the updated <see cref="StaffPersonaResponseDto"/> (signed <c>avatarUrl</c> /
-/// <c>bannerUrl</c>). 400 (plain JSON string) for an invalid body, see <see cref="PersonaAdminMessages"/>.
-/// 404 when the persona id is unknown or belongs to another exercise; the response is identical in both cases
-/// (COR-001, DP-16).
+/// <c>bannerUrl</c>). 400 (plain JSON string) for an invalid body, see <see cref="PersonaAdminMessages"/>;
+/// that includes a body whose text is not valid UTF-8 / UTF-16 (a half emoji). 404 when the persona id is unknown
+/// or belongs to another exercise; the response is identical in both cases (COR-001, DP-16). 415 (plain JSON
+/// string) unless the <c>Content-Type</c> is <c>application/json</c> or <c>application/merge-patch+json</c>.
 /// </para>
 /// <para>
 /// <b>Lifecycle.</b> <c>/api/staff/**</c> is not in <c>ExerciseLifecycleGatedRoutes</c>, so a controller can edit
@@ -49,6 +51,12 @@ public static class PersonaAdminEndpoints
     /// and two ids); the cap bounds the sanitizer's work on an oversized body.
     /// </summary>
     public const int MaxBodyBytes = 16 * 1024;
+
+    /// <summary>The plain JSON media type (accepted).</summary>
+    public const string JsonContentType = "application/json";
+
+    /// <summary>The RFC 7396 merge-patch media type (accepted).</summary>
+    public const string MergePatchContentType = "application/merge-patch+json";
 
     /// <summary>
     /// Registers <see cref="PersonaProfileEditService"/> (Scoped, matching the request's <c>PulseDbContext</c>).
@@ -111,7 +119,7 @@ public static class PersonaAdminEndpoints
     /// <param name="user">The server-resolved session principal (the acting staff user, for the log line only).</param>
     /// <param name="service">The edit service.</param>
     /// <param name="cancellationToken">The request-aborted token.</param>
-    /// <returns>200, 400, 401 or 404.</returns>
+    /// <returns>200, 400, 401, 404 or 415.</returns>
     private static async Task<IResult> PatchPersonaAsync(
         Guid personaId,
         HttpRequest request,
@@ -119,6 +127,13 @@ public static class PersonaAdminEndpoints
         [FromServices] PersonaProfileEditService service,
         CancellationToken cancellationToken)
     {
+        // Gate-1 L-1: only a JSON body is a merge-patch. Checked after the auth gates (they run first), before
+        // anything is read.
+        if (!HasAcceptedContentType(request))
+        {
+            return Results.Json(PersonaAdminMessages.UnsupportedContentType, statusCode: StatusCodes.Status415UnsupportedMediaType);
+        }
+
         var body = await ReadBodyAsync(request, cancellationToken);
         if (body.TooLarge)
         {
@@ -135,9 +150,13 @@ public static class PersonaAdminEndpoints
                 return Results.BadRequest(error);
             }
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
-            // Missing, empty or malformed JSON. The parser exception text is never echoed.
+            // Missing, empty or malformed JSON (JsonException), or text that is not valid UTF-8 / UTF-16 — invalid
+            // bytes, or a lone-surrogate escape such as a half emoji cut by .slice() — which System.Text.Json only
+            // reports when a name or string value is read (InvalidOperationException; Gate-1 M-1). Only the parse
+            // and the pure parser run in this block, so nothing else can raise these here. The exception text is
+            // never echoed.
             return Results.BadRequest(PersonaAdminMessages.BodyNotObject);
         }
 
@@ -160,6 +179,25 @@ public static class PersonaAdminEndpoints
             // Unreachable: every outcome is handled above. Fail closed rather than fall through to a 200.
             _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
         };
+    }
+
+    /// <summary>
+    /// Whether the request declares <see cref="JsonContentType"/> or <see cref="MergePatchContentType"/>
+    /// (parameters such as <c>charset</c> allowed; media type compared case-insensitively). A missing or
+    /// unparseable <c>Content-Type</c> is not accepted.
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <returns><c>true</c> when the content type is one of the two accepted JSON types.</returns>
+    private static bool HasAcceptedContentType(HttpRequest request)
+    {
+        if (!MediaTypeHeaderValue.TryParse(request.ContentType, out var contentType))
+        {
+            return false;
+        }
+
+        var mediaType = contentType.MediaType.Value;
+        return string.Equals(mediaType, JsonContentType, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mediaType, MergePatchContentType, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

@@ -1,7 +1,9 @@
 namespace Pulse.WebApi.Tests.Features.Social.PersonaAdmin;
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text.Json;
 using FluentAssertions;
 using Pulse.WebApi.Data.Entities;
@@ -270,7 +272,7 @@ public sealed class PersonaProfilePatchParserTests
     {
         foreach (var value in new[] { "", "   ", "<b></b>" })
         {
-            var patch = ParseValid(JsonSerializer.Serialize(new System.Collections.Generic.Dictionary<string, string> { [field] = value }));
+            var patch = ParseValid(JsonSerializer.Serialize(new Dictionary<string, string> { [field] = value }));
             var parsed = field == "bio" ? patch.Bio : patch.Location;
             parsed.Should().Be(new PatchField<string?>(true, null), $"an empty {field} is the same as clearing it, so the wire never carries \"\"");
         }
@@ -320,6 +322,118 @@ public sealed class PersonaProfilePatchParserTests
         persona.Kind.Should().Be("org");
         persona.PersonaType.Should().Be("agency");
         persona.ExerciseId.Should().Be(exerciseId);
+    }
+
+    [Theory]
+    [InlineData("displayName", 100, PersonaAdminMessages.DisplayNameLength)]
+    [InlineData("bio", 512, PersonaAdminMessages.BioLength)]
+    [InlineData("location", 100, PersonaAdminMessages.LocationLength)]
+    public void RawValueOverFourTimesItsBound_IsRefusedBeforeSanitizing(string field, int bound, string expected)
+    {
+        // Gate-1 S-1. The value is almost all markup, so AFTER sanitizing it would be one character and pass. It is
+        // refused anyway: the raw pre-check runs first, so the super-linear sanitizer never sees it.
+        var raw = "x" + string.Concat(Enumerable.Repeat("<b>", ((bound * PersonaProfilePatchParser.RawLengthFactor) / 3) + 1));
+        raw.Length.Should().BeGreaterThan(bound * PersonaProfilePatchParser.RawLengthFactor);
+
+        ParseInvalid(JsonSerializer.Serialize(new Dictionary<string, string> { [field] = raw })).Should().Be(expected);
+    }
+
+    [Fact]
+    public void RawValueAtFourTimesItsBound_IsSanitizedThenMeasured()
+    {
+        var raw = new string('b', 512) + string.Concat(Enumerable.Repeat("<i></i>", 219)) + "<b>";
+        raw.Length.Should().Be(512 * PersonaProfilePatchParser.RawLengthFactor);
+
+        ParseValid(JsonSerializer.Serialize(new { bio = raw })).Bio.Value.Should().Be(new string('b', 512));
+    }
+
+    [Theory]
+    [InlineData("​")]
+    [InlineData("​‌‍")]
+    [InlineData("﻿⁠")]
+    [InlineData("ㅤㅤ")]
+    [InlineData("⠀")]
+    [InlineData("ᅟᅠﾠ")]
+    [InlineData("́̂")]
+    [InlineData("​   ‌")]
+    public void DisplayName_WithNoVisibleCharacter_IsRefused(string value)
+    {
+        // Gate-1 S-2: zero-width, format, combining-only and blank "filler" names pass 1..100 but render as nothing.
+        ParseInvalid(JsonSerializer.Serialize(new { displayName = value })).Should().Be(PersonaAdminMessages.DisplayNameInvisible);
+    }
+
+    [Theory]
+    [InlineData("Fulcо EM")] // Cyrillic о
+    [InlineData("Fulton Cоunty ЕМ")] // Cyrillic о, Е, М
+    [InlineData("FuIcoEM")] // capital I for l
+    [InlineData("Ful​co EM")] // a zero-width space INSIDE a visible name
+    [InlineData("\U0001F6A8")] // an emoji alone is visible
+    [InlineData("福尔顿")] // CJK
+    public void DisplayName_LookalikesAndOtherScripts_StayAllowed(string value)
+    {
+        // SOC-052: impersonation training needs lookalike names. Only invisibility and control/bidi are refused.
+        ParseValid(JsonSerializer.Serialize(new { displayName = value })).DisplayName.Value.Should().Be(value);
+    }
+
+    [Theory]
+    [InlineData("\u0000")]
+    [InlineData("\u0007")]
+    [InlineData("\u001B")]
+    [InlineData("\u007F")]
+    [InlineData("\u0085")]
+    [InlineData("\u009F")]
+    [InlineData("‪")]
+    [InlineData("‮")]
+    [InlineData("⁦")]
+    [InlineData("⁩")]
+    public void ControlAndBidiOverrideCharacters_AreRefused_InEveryTextField(string bad)
+    {
+        var value = "Ful" + bad + "co";
+
+        ParseInvalid(JsonSerializer.Serialize(new { displayName = value })).Should().Be(PersonaAdminMessages.DisplayNameForbiddenCharacter);
+        ParseInvalid(JsonSerializer.Serialize(new { bio = value })).Should().Be(PersonaAdminMessages.BioForbiddenCharacter);
+        ParseInvalid(JsonSerializer.Serialize(new { location = value })).Should().Be(PersonaAdminMessages.LocationForbiddenCharacter);
+    }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r")]
+    [InlineData("\t")]
+    public void LineBreaksAndTabs_AreAllowedInBioOnly(string separator)
+    {
+        var value = "First line" + separator + "second line";
+
+        ParseValid(JsonSerializer.Serialize(new { bio = value })).Bio.Value.Should().Be(value, "a multi-line bio is legitimate");
+        ParseInvalid(JsonSerializer.Serialize(new { displayName = value })).Should().Be(PersonaAdminMessages.DisplayNameForbiddenCharacter);
+        ParseInvalid(JsonSerializer.Serialize(new { location = value })).Should().Be(PersonaAdminMessages.LocationForbiddenCharacter);
+    }
+
+    [Fact]
+    public void EchoedName_IsNeverCutInsideASurrogatePair()
+    {
+        // Gate-1 S-3: the 64-unit cut lands between the halves of an emoji; it must back off one unit.
+        var name = new string('a', 63) + "\U0001F600" + "tail";
+
+        var message = ParseInvalid(JsonSerializer.Serialize(new Dictionary<string, int> { [name] = 1 }));
+
+        message.Should().Be(PersonaAdminMessages.UnknownField(name));
+        message.Should().Contain(new string('a', 63) + "…'");
+        for (var i = 0; i < message.Length; i++)
+        {
+            if (char.IsHighSurrogate(message[i]))
+            {
+                (i + 1 < message.Length && char.IsLowSurrogate(message[i + 1])).Should().BeTrue("a lone high surrogate is not valid text");
+            }
+        }
+    }
+
+    [Fact]
+    public void EchoedName_KeepsAWholeSurrogatePairThatFitsTheCap()
+    {
+        var name = new string('a', 62) + "\U0001F600" + "tail";
+
+        ParseInvalid(JsonSerializer.Serialize(new Dictionary<string, int> { [name] = 1 }))
+            .Should().Contain(new string('a', 62) + "\U0001F600" + "…'");
     }
 
     private static PersonaProfilePatch ParseValid(string json)

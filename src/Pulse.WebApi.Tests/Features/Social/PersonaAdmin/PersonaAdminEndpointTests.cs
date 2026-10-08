@@ -473,7 +473,137 @@ public sealed class PersonaAdminEndpointTests
         await duplicate.Should().ThrowAsync<DbUpdateException>("IX_Personas_ExerciseId_Handle is unique and case-insensitive");
     }
 
-    private async Task AssertRefused400Async(string json, string expectedMessage)
+    [RequiresDockerFact]
+    public async Task InvalidUtf8BytesInAValue_Returns400_Not500_AndChangesNothing()
+    {
+        // Gate-1 M-1: System.Text.Json reports invalid UTF-8 only when the string is read (InvalidOperationException).
+        byte[] body = [.. Encoding.UTF8.GetBytes("{\"bio\":\"broken "), 0xFF, 0xFE, 0xC3, .. Encoding.UTF8.GetBytes("\"}")];
+
+        await AssertRefusedAsync(
+            (client, personaId) => PatchBytesAsync(client, personaId, body), HttpStatusCode.BadRequest, PersonaAdminMessages.BodyNotObject);
+    }
+
+    [RequiresDockerFact]
+    public async Task InvalidUtf8BytesInAFieldName_Returns400_Not500_AndChangesNothing()
+    {
+        byte[] body = [.. Encoding.UTF8.GetBytes("{\"bi"), 0xC3, 0x28, .. Encoding.UTF8.GetBytes("o\":\"x\"}")];
+
+        await AssertRefusedAsync(
+            (client, personaId) => PatchBytesAsync(client, personaId, body), HttpStatusCode.BadRequest, PersonaAdminMessages.BodyNotObject);
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("""{"bio":"broken emoji \uD83D"}""")]
+    [InlineData("""{"displayName":"\uDE00 half"}""")]
+    [InlineData("""{"bio\uD83D":"x"}""")]
+    public async Task LoneSurrogateEscape_Returns400_Not500_AndChangesNothing(string json)
+    {
+        // The JSON text carries a literal "\uD83D" ESCAPE (as JSON.stringify of a .slice()-cut emoji does).
+        json.Should().Contain("\\uD", "the body carries the escape text, not a decoded character");
+
+        await AssertRefusedAsync(
+            (client, personaId) => PatchAsync(client, personaId, json), HttpStatusCode.BadRequest, PersonaAdminMessages.BodyNotObject);
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("application/json")]
+    [InlineData("application/merge-patch+json")]
+    [InlineData("application/json; charset=utf-8")]
+    [InlineData("Application/Merge-Patch+JSON; charset=utf-8")]
+    public async Task JsonContentTypes_AreAccepted(string contentType)
+    {
+        var exercise = await _seed.SeedExerciseAsync();
+        var personaId = await _seed.SeedPersonaAsync(exercise.Id);
+        var controller = await _seed.SeedControllerSessionAsync(exercise.Id);
+
+        await using var factory = _seed.CreateFactory();
+        using var client = factory.CreateClientFor(exercise.Host, controller);
+
+        var response = await PatchBytesAsync(client, personaId, Encoding.UTF8.GetBytes("""{ "location": "Fulton, OH" }"""), contentType);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await _seed.ReadPersonaAsync(personaId)).Location.Should().Be("Fulton, OH");
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("text/plain")]
+    [InlineData("text/plain; charset=utf-8")]
+    [InlineData("application/x-www-form-urlencoded")]
+    [InlineData("application/xml")]
+    [InlineData("application/problem+json")]
+    [InlineData(null)]
+    public async Task NonJsonOrMissingContentType_Returns415_AndChangesNothing(string? contentType)
+    {
+        // Gate-1 L-1: a well-formed patch is still refused when it is not declared as JSON.
+        await AssertRefusedAsync(
+            (client, personaId) => PatchBytesAsync(client, personaId, Encoding.UTF8.GetBytes("""{ "displayName": "Should not apply" }"""), contentType),
+            HttpStatusCode.UnsupportedMediaType,
+            PersonaAdminMessages.UnsupportedContentType);
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("displayName", 100, PersonaAdminMessages.DisplayNameLength)]
+    [InlineData("bio", 512, PersonaAdminMessages.BioLength)]
+    [InlineData("location", 100, PersonaAdminMessages.LocationLength)]
+    public async Task RawTextOverFourTimesItsBound_Returns400BeforeSanitizing_AndChangesNothing(string field, int bound, string expected)
+    {
+        // Gate-1 S-1: nested markup that would sanitize down to one character is refused on its raw length.
+        var raw = "x" + string.Concat(Enumerable.Repeat("<b>", ((bound * PersonaProfilePatchParser.RawLengthFactor) / 3) + 1));
+        var json = JsonSerializer.Serialize(new Dictionary<string, string> { [field] = raw });
+        Encoding.UTF8.GetByteCount(json).Should().BeLessThan(PersonaAdminEndpoints.MaxBodyBytes, "this is the length rule, not the body cap");
+
+        await AssertRefused400Async(json, expected);
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("​​")]
+    [InlineData("ㅤ")]
+    [InlineData("﻿ ‍")]
+    public async Task InvisibleDisplayName_Returns400_AndChangesNothing(string value)
+    {
+        // Gate-1 S-2.
+        await AssertRefused400Async(JsonSerializer.Serialize(new { displayName = value }), PersonaAdminMessages.DisplayNameInvisible);
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("displayName", "Fulco‮ME", PersonaAdminMessages.DisplayNameForbiddenCharacter)]
+    [InlineData("displayName", "Ful\u0000co", PersonaAdminMessages.DisplayNameForbiddenCharacter)]
+    [InlineData("bio", "Official ⁦updates⁩", PersonaAdminMessages.BioForbiddenCharacter)]
+    [InlineData("bio", "Bell\u0007", PersonaAdminMessages.BioForbiddenCharacter)]
+    [InlineData("location", "Fulton\u0000, OH", PersonaAdminMessages.LocationForbiddenCharacter)]
+    [InlineData("location", "‫Fulton", PersonaAdminMessages.LocationForbiddenCharacter)]
+    public async Task ControlOrBidiOverrideCharacter_Returns400_AndChangesNothing(string field, string value, string expected)
+    {
+        // Gate-1 S-2: NUL and U+202E (and friends) are never stored.
+        await AssertRefused400Async(JsonSerializer.Serialize(new Dictionary<string, string> { [field] = value }), expected);
+    }
+
+    [RequiresDockerFact]
+    public async Task LookalikeDisplayName_AndAMultiLineBio_AreStoredExactly()
+    {
+        // SOC-052: the impersonation lookalike (Cyrillic о and Е) must stay possible; a bio may span lines.
+        var exercise = await _seed.SeedExerciseAsync();
+        var personaId = await _seed.SeedPersonaAsync(exercise.Id);
+        var controller = await _seed.SeedControllerSessionAsync(exercise.Id);
+
+        await using var factory = _seed.CreateFactory();
+        using var client = factory.CreateClientFor(exercise.Host, controller);
+
+        const string lookalike = "Fulcо ЕM";
+        const string bio = "Not the county.\nJust here to help.";
+        var response = await PatchAsync(client, personaId, new { displayName = lookalike, bio });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var after = await _seed.ReadPersonaAsync(personaId);
+        after.DisplayName.Should().Be(lookalike);
+        after.Bio.Should().Be(bio);
+    }
+
+    private Task AssertRefused400Async(string json, string expectedMessage) =>
+        AssertRefusedAsync((client, personaId) => PatchAsync(client, personaId, json), HttpStatusCode.BadRequest, expectedMessage);
+
+    private async Task AssertRefusedAsync(
+        Func<HttpClient, Guid, Task<HttpResponseMessage>> send, HttpStatusCode expectedStatus, string expectedMessage)
     {
         var exercise = await _seed.SeedExerciseAsync();
         var avatar = await _seed.SeedMediaAsync(exercise.Id);
@@ -484,9 +614,9 @@ public sealed class PersonaAdminEndpointTests
         await using var factory = _seed.CreateFactory();
         using var client = factory.CreateClientFor(exercise.Host, controller);
 
-        var response = await PatchAsync(client, personaId, json);
+        var response = await send(client, personaId);
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        response.StatusCode.Should().Be(expectedStatus);
         (await ReadMessageAsync(response)).Should().Be(expectedMessage);
         var after = await _seed.ReadPersonaAsync(personaId);
         AssertEditableUnchanged(before, after);
