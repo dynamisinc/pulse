@@ -43,6 +43,23 @@
  *                          `scope` param is added for the default case, so
  *                          that path stays byte-identical.
  *
+ *                          CONTRACT v2 (demo-polish F0, DP-5): an optional
+ *                          second argument `{ includeReplies }` adds
+ *                          `includeReplies=true` to `GET /api/feed` — the
+ *                          profile "Posts & replies" tab's reply source. The
+ *                          default (`false`/omitted) sends NO param, so every
+ *                          existing call is byte-identical, and the feed stays
+ *                          TOP-LEVEL ONLY: replies (posts carrying `inReplyTo`)
+ *                          are excluded unless asked for. The mock adapter
+ *                          applies the same rule to `postStore`.
+ *
+ *   - `toPostView()`       The ONE place a participant-safe view + its resolved
+ *                          author become the presentational `PostView` (carries
+ *                          media / inReplyTo / viewer / linkPreview). Shared by
+ *                          `assembleFeedView`, `Feed`'s live-arrivals prepend and
+ *                          `ThreadView`, so a v2 member can't be dropped by one
+ *                          call site.
+ *
  *   - `assembleFeedView()` The CONVERGENCE this story owns (see
  *                          docs/features/feeds-discovery/01). Pure function:
  *                          narrows each `Post` to its participant-safe view via
@@ -75,7 +92,8 @@ import type { AxiosAdapter, AxiosRequestConfig } from 'axios'
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { toParticipantView, type Post } from '@/features/social'
-import type { PostView } from '@/features/social'
+import type { ParticipantPostView, PostView } from '@/features/social'
+import { hasWellFormedV2Members } from './postService'
 import type { Persona } from '@/features/personas'
 import { postStore } from './postStore'
 import {
@@ -139,11 +157,16 @@ export function setMockFollowingForTests(personaIds: readonly string[] | undefin
  * behavior).
  */
 const mockAdapter: AxiosAdapter = config => {
-  const params = config.params as { scope?: FeedScope } | undefined
-  const all = postStore.getPosts()
+  const params = config.params as { scope?: FeedScope; includeReplies?: boolean } | undefined
+  // Top-level only unless replies are asked for (DP-5) — a reply is a post that
+  // carries `inReplyTo`, exactly what the live feed read keys on.
+  const topLevelOrAll = params?.includeReplies === true
+    ? postStore.getPosts()
+    : postStore.getPosts().filter(post => post.inReplyTo === undefined)
+  const followed = mockFollowedSet(MOCK_VIEWER_PERSONA_ID)
   const data = params?.scope === 'following'
-    ? all.filter(post => mockFollowedSet(MOCK_VIEWER_PERSONA_ID).has(post.authorPersonaId))
-    : all
+    ? topLevelOrAll.filter(post => followed.has(post.authorPersonaId))
+    : topLevelOrAll
 
   return Promise.resolve({
     data,
@@ -168,12 +191,25 @@ function isPost(value: unknown): value is Post {
     !!p.counts && typeof p.counts === 'object' &&
     typeof p.counts.reply === 'number' &&
     typeof p.counts.repost === 'number' &&
-    typeof p.counts.like === 'number'
+    typeof p.counts.like === 'number' &&
+    // Contract v2: media / inReplyTo / viewer are optional but, when present,
+    // must be well-formed (fail closed at the seam, not in the render tree).
+    hasWellFormedV2Members(p)
   )
 }
 
 function isPostArray(data: unknown): data is Post[] {
   return Array.isArray(data) && data.every(isPost)
+}
+
+/** Options for {@link resolveFeed} beyond the scope. */
+export interface ResolveFeedOptions {
+  /**
+   * Include REPLIES (posts carrying `inReplyTo`) alongside top-level posts
+   * (DP-5; `GET /api/feed?includeReplies=true`). Default `false`: the feed is
+   * top-level only. The profile "Posts & replies" tab is the consumer.
+   */
+  readonly includeReplies?: boolean
 }
 
 /**
@@ -189,9 +225,19 @@ function isPostArray(data: unknown): data is Post[] {
  * to the unfiltered feed. Calling this with NO argument (every story-01
  * caller) builds the EXACT SAME request as before this story — no `params`
  * key at all — so the All Posts path is byte-identical.
+ *
+ * `options.includeReplies` (DP-5) adds `includeReplies=true`; omitted or
+ * `false` adds nothing, so the default request is unchanged.
  */
-export async function resolveFeed(scope: FeedScope = 'all'): Promise<Post[]> {
-  const params = scope === 'following' ? { scope } : undefined
+export async function resolveFeed(
+  scope: FeedScope = 'all',
+  options: ResolveFeedOptions = {},
+): Promise<Post[]> {
+  const query = {
+    ...(scope === 'following' ? { scope } : {}),
+    ...(options.includeReplies === true ? { includeReplies: true } : {}),
+  }
+  const params = Object.keys(query).length > 0 ? query : undefined
   const requestConfig: AxiosRequestConfig | undefined = USE_MOCK_FEED
     ? { adapter: mockAdapter, ...(params !== undefined ? { params } : {}) }
     : params !== undefined ? { params } : undefined
@@ -223,6 +269,28 @@ export function compareNewestFirst(a: string, b: string): number {
 }
 
 /**
+ * Builds the presentational `PostView` `<PostCard>` renders from a participant-
+ * safe view and its resolved author. The single mapping every call site shares
+ * (see the module header): it carries every contract-v2 member — media,
+ * inReplyTo, viewer — plus linkPreview, each only when present, so an absent
+ * member stays genuinely absent. Never widens: the input is already narrowed
+ * (XC-002), so no provenance can reach the result.
+ */
+export function toPostView(view: ParticipantPostView, author: Persona): PostView {
+  return {
+    id: view.id,
+    author,
+    text: view.text,
+    counts: view.counts,
+    scenarioTime: view.scenarioTime,
+    ...(view.media !== undefined ? { media: view.media } : {}),
+    ...(view.inReplyTo !== undefined ? { inReplyTo: view.inReplyTo } : {}),
+    ...(view.linkPreview !== undefined ? { linkPreview: view.linkPreview } : {}),
+    ...(view.viewer !== undefined ? { viewer: view.viewer } : {}),
+  }
+}
+
+/**
  * THE CONVERGENCE (story 01). Maps each `Post` to the participant-safe
  * `PostView` `<PostCard>` renders — narrowing away provenance (XC-002) and
  * resolving the author persona — then sorts newest-first by `scenarioTime`.
@@ -245,15 +313,7 @@ export function assembleFeedView(
     const author = personaById.get(safe.authorPersonaId)
     if (!author) continue // missing author → skip, never crash the feed.
 
-    views.push({
-      id: safe.id,
-      author,
-      text: safe.text,
-      counts: safe.counts,
-      scenarioTime: safe.scenarioTime,
-      ...(safe.media !== undefined ? { media: safe.media } : {}),
-      ...(safe.linkPreview !== undefined ? { linkPreview: safe.linkPreview } : {}),
-    })
+    views.push(toPostView(safe, author))
   }
 
   return views.sort((a, b) => compareNewestFirst(a.scenarioTime, b.scenarioTime))

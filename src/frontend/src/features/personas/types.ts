@@ -165,6 +165,17 @@ export interface Persona {
   readonly avatarColor: string
   readonly initials: string
   readonly bio?: string
+  /**
+   * Profile image + header banner (contract v2, demo-polish §1.5.6; COR-024).
+   * Read URLs the server mints for the persona's `AvatarMediaId`/`BannerMediaId`;
+   * ABSENT when the persona has none — the monogram/silhouette (R-004) is then
+   * the avatar fallback and the banner is a plain brand-tinted block. Treated as
+   * opaque strings; never built client-side. Participant-safe (no archetype tell).
+   */
+  readonly avatarUrl?: string
+  readonly bannerUrl?: string
+  /** Free-text profile location (<= 100 chars, sanitized server-side). Absent when unset. */
+  readonly location?: string
   readonly audienceBand: AudienceBand
   /** Derived from `audienceBand` at seed time (COR-021, SOC-054) — never authored directly.
    * This is the DISPLAYED count (magnitude + real inbound follow edges, backend story 07). */

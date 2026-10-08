@@ -41,6 +41,15 @@
  * this feature's own bug report — and a divergence only visible in UAT, never
  * in the test suite, since every seedCast test runs mock-shaped by
  * construction.
+ *
+ * PROFILE DECORATION (demo-polish F0, implementation.md §5 item 6): a seeded
+ * instance also carries contract-v2 `avatarUrl` / `bannerUrl` / `location` for
+ * the handles listed in `MOCK_PROFILE_DECOR` below (files served from
+ * `public/mock-media/**`) so the no-backend feed looks finished and the
+ * F2/F5 avatar, banner and profile-meta work has something to render. The
+ * verified utility and its unverified lookalike get near-identical avatars
+ * (SOC-052); ONE persona (`tbrandt41`) deliberately has none, to exercise the
+ * monogram fallback; exactly TWO carry a `location`.
  */
 
 import type { Cast } from './casts'
@@ -50,6 +59,46 @@ import {
   type PersonaTemplate,
   type StaffPersona,
 } from './types'
+
+/** The contract-v2 profile decoration one mock persona carries. */
+interface ProfileDecor {
+  readonly avatarUrl?: string
+  readonly bannerUrl?: string
+  readonly location?: string
+}
+
+const MOCK_MEDIA_BASE = '/mock-media'
+
+/**
+ * MOCK ONLY — keyed by LOWER-CASED handle. Handles absent from this map (here:
+ * `tbrandt41`) get no decoration at all, which is what the "no avatar" fallback
+ * path needs. Assets live in `src/frontend/public/mock-media/{avatars,banners}`.
+ */
+const MOCK_PROFILE_DECOR: Readonly<Record<string, ProfileDecor>> = {
+  fairhavenwater: {
+    avatarUrl: `${MOCK_MEDIA_BASE}/avatars/fairhavenwater.svg`,
+    bannerUrl: `${MOCK_MEDIA_BASE}/banners/fairhavenwater.svg`,
+  },
+  // The lookalike (SOC-052): a near-identical lockup, nothing flags it.
+  fairhavenwaterupd: {
+    avatarUrl: `${MOCK_MEDIA_BASE}/avatars/fairhavenwaterupd.svg`,
+    bannerUrl: `${MOCK_MEDIA_BASE}/banners/fairhavenwaterupd.svg`,
+  },
+  fulcoem: {
+    avatarUrl: `${MOCK_MEDIA_BASE}/avatars/fulcoem.svg`,
+    bannerUrl: `${MOCK_MEDIA_BASE}/banners/fulcoem.svg`,
+    location: 'Fulton County',
+  },
+  newsline7: {
+    avatarUrl: `${MOCK_MEDIA_BASE}/avatars/newsline7.svg`,
+    bannerUrl: `${MOCK_MEDIA_BASE}/banners/newsline7.svg`,
+    location: 'Fairhaven',
+  },
+  thescoophq: { avatarUrl: `${MOCK_MEDIA_BASE}/avatars/thescoophq.svg` },
+  mvega_fh: { avatarUrl: `${MOCK_MEDIA_BASE}/avatars/mvega_fh.svg` },
+  kwardfh: { avatarUrl: `${MOCK_MEDIA_BASE}/avatars/kwardfh.svg` },
+  dreyes_fh: { avatarUrl: `${MOCK_MEDIA_BASE}/avatars/dreyes_fh.svg` },
+}
 
 /** Approximate follower floor per audience-magnitude band (SOC-054). */
 const BAND_BASE: Record<AudienceBand, number> = {
@@ -127,6 +176,7 @@ export function seedCast(
       avatarColor: template.avatarColor,
       initials: template.initials,
       bio: template.bio,
+      ...MOCK_PROFILE_DECOR[template.handle.toLowerCase()],
       audienceBand: template.audienceBand,
       // A freshly seeded instance has NO real follow edges yet, so the
       // composed displayed count (magnitude + real edges) is just the

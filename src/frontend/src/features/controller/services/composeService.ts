@@ -35,7 +35,7 @@
  * built here.
  */
 
-import { createPost, type Post, type PostMedia } from '@/features/social'
+import { createPost, type CreatePostMedia, type Post } from '@/features/social'
 
 /**
  * Input to {@link composeAsPersona}. Mirrors the participant-safe subset of
@@ -57,7 +57,8 @@ export interface ComposeAsPersonaInput {
   /** The operating controller behind the shared persona (COR-018). */
   readonly actingHumanId: string
   readonly text: string
-  readonly media?: PostMedia[]
+  /** Assets the controller already uploaded (contract v2); each needs alt text. */
+  readonly media?: CreatePostMedia[]
 }
 
 /**

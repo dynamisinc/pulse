@@ -223,7 +223,9 @@ describe('toParticipantView (XC-002)', () => {
   it('preserves every participant-safe field', () => {
     const post = createPost(
       validInput({
-        media: [{ kind: 'image', alt: 'test image' }],
+        // v2: an attachment is an uploaded asset's id + alt; the mock `createPost`
+        // resolves it through the mock media registry (a canned library item).
+        media: [{ mediaId: 'mock-media-canned-flood', alt: 'test image' }],
         linkPreview: { title: 'Title', domain: 'example.news' },
       }),
     )

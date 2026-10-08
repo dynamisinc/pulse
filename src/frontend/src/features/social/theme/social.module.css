@@ -1,16 +1,26 @@
 /*
  * features/social/theme/social.module.css
  * ---------------------------------------------------------------------------
- * Scoped styles for the Pulse "Social" (D1) component set (currently:
- * PostCard + Avatar). This is a CSS Module — every class below is locally
- * scoped by the build; nothing here leaks a global class name, and this file
- * carries NO COBRA/MUI dependency (participant world, never staff chrome).
+ * The Pulse "Social" (D1) SHARED TOKEN sheet. This is a CSS Module — every class
+ * below is locally scoped by the build; nothing here leaks a global class name,
+ * and this file carries NO COBRA/MUI dependency (participant world, never staff
+ * chrome).
+ *
+ * SPLIT (demo-polish F0): this file used to hold the whole PostCard stylesheet
+ * (418 lines). It now keeps ONLY `.tokens` and the shared custom-property
+ * declarations below; every layout rule moved into a per-part module beside its
+ * component — `components/post/{PostCard,PostHeader,PostBody,PostMediaSlot,
+ * PostLinkCard,PostActions,PostReplyContext}.module.css` — so no two Wave-2
+ * stories share a CSS file. `.tokens` is still consumed directly by
+ * `QuoteComposer` and `QuotePostCard`, and composed onto the card root by
+ * `PostCard.module.css`.
  *
  * Theming model (see D1 README "Design Tokens" + DECISIONS.md D1-003/R-001):
- *  - `.postCard` is the token ROOT: it declares the light-mode palette as CSS
- *    custom properties, then every other rule in this file reads those vars
- *    (`var(--pc-*)`) rather than hardcoding a color. A component mounts this
- *    class on its outermost element and everything beneath it is themed.
+ *  - `.tokens` (composed onto `.postCard`) is the token ROOT: it declares the
+ *    light-mode palette as CSS custom properties, then every per-part module
+ *    reads those vars (`var(--pc-*)`) rather than hardcoding a color. A
+ *    component mounts the class on its outermost element and everything beneath
+ *    it is themed.
  *  - Dark mode has TWO independent triggers, per the story brief: the OS-level
  *    `prefers-color-scheme: dark` media query (the default, no-provider path),
  *    AND a `[data-theme="dark"]` attribute a host can set on the card root
@@ -28,10 +38,10 @@
  * sync by hand if either changes (a CSS Module cannot import a `.ts` file's
  * values directly).
  *
- * `.tokens` (Wave-S3.1 orchestrator extraction) is the token-only slice of
- * `.postCard` — the same custom-property declarations (light default + both
- * dark triggers) WITHOUT any layout rule. `.postCard` composes it so nothing
- * here changes for `<PostCard>` itself; other participant-world components
+ * `.tokens` (Wave-S3.1 orchestrator extraction) is the token-only slice the
+ * card root uses — the custom-property declarations (light default + both
+ * dark triggers) WITHOUT any layout rule. `PostCard.module.css`'s `.postCard`
+ * composes it so nothing changes for `<PostCard>` itself; other participant-world components
  * that sit alongside (not inside) a `<PostCard>` — e.g. `<QuotePostCard>`'s
  * inline-styled roots, `<QuoteComposer>` — apply `.tokens` directly so their
  * `var(--pc-*)` reads resolve to the SAME palette/dark-mode/`--pulse-ac`
@@ -72,347 +82,4 @@
   --pc-ink: #e9eef1;
   --pc-ink-muted: #8aa0ac;
   --pc-hover: rgba(255, 255, 255, .05);
-}
-
-.postCard {
-  composes: tokens;
-
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  box-sizing: border-box;
-  width: 100%;
-  max-width: 600px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--pc-line);
-  background: var(--pc-bg);
-  color: var(--pc-ink);
-  font-family: 'Figtree', system-ui, sans-serif;
-  text-align: left;
-}
-
-/* --------------------------------------------------------------------------
- * Avatar layout slot — `Avatar.tsx` itself is self-contained (inline styles,
- * no CSS Module dependency, so the staff console can reuse it without
- * pulling in this stylesheet); this class only positions it within the card.
- * ------------------------------------------------------------------------ */
-
-.avatarWrap {
-  flex: none;
-}
-
-/* --------------------------------------------------------------------------
- * Post card anatomy
- * ------------------------------------------------------------------------ */
-
-.content {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.openable {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  border-radius: 12px;
-}
-
-/*
- * The open-region overlay button (WR-001, NFR-001 — Gate-2 fix). A real,
- * non-nested `<button>` (see `PostCard.tsx`) absolutely positioned to fill
- * `.openable`'s box — the "stretched-link" pattern, so tapping ANYWHERE in
- * the card body (header/text/media/link-preview) opens the thread without
- * that region itself being a `role="button"` ancestor of the linkified
- * hashtag anchors. Fully transparent: it is a hit target only, never a
- * visible layer. `z-index: 1` is deliberately LOWER than the hashtag anchor's
- * (`PostCard.tsx`'s `HASHTAG_LINK_STYLE`, `z-index: 2`) so a hashtag tap
- * reaches its own link instead of this overlay.
- */
-.openTarget {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 12px;
-  background: none;
-  cursor: pointer;
-}
-
-.openTarget:focus-visible {
-  outline: 2px solid var(--pc-accent);
-  outline-offset: 2px;
-}
-
-.header {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  min-width: 0;
-}
-
-/*
- * The author identity group (display name + verified mark + handle). Mirrors
- * `.header`'s own flex/baseline/wrap settings so grouping the three changes no
- * visual layout — it exists to give the author tap-through overlay
- * (`.authorTarget`) a positioning box of exactly the identity's extent.
- */
-.author {
-  position: relative;
-  display: inline-flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  min-width: 0;
-}
-
-/*
- * The author tap-through overlay (profiles-social-graph integration, SOC-050,
- * NFR-001). The SAME stretched-link pattern as `.openTarget`, scoped to the
- * identity group instead of the whole card body, and rendered ONLY when
- * `onOpenProfile` is wired (`PostCard.tsx`). `z-index: 2` puts it ABOVE the
- * card's `.openTarget` (z-index 1) — the same tier the hashtag anchors use —
- * so an author tap opens the profile while every other part of the body still
- * opens the thread. It is a hit target only: fully transparent, never a
- * visible layer, and never an ancestor of the name/seal/handle it covers.
- */
-.authorTarget {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: none;
-  cursor: pointer;
-}
-
-.authorTarget:focus-visible {
-  outline: 2px solid var(--pc-accent);
-  outline-offset: 2px;
-}
-
-/* Hover/keyboard affordance — the overlay is invisible, so the underline on
- * the name it covers is what tells a reader the identity is tappable. The
- * selectors only match when the overlay exists, so an unwired card renders
- * with no affordance at all (WR-002). */
-.authorTarget:hover ~ .name,
-.authorTarget:focus-visible ~ .name {
-  text-decoration: underline;
-}
-
-.name {
-  max-width: 100%;
-  overflow: hidden;
-  color: var(--pc-ink);
-  font-size: 15px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.verifiedMark {
-  flex: none;
-  align-self: center;
-}
-
-.handle,
-.time {
-  overflow: hidden;
-  max-width: 100%;
-  color: var(--pc-ink-muted);
-  font-size: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dot {
-  color: var(--pc-ink-muted);
-  font-size: 14px;
-}
-
-.text {
-  margin: 0;
-  overflow-wrap: break-word;
-  color: var(--pc-ink);
-  font-size: 15px;
-  line-height: 1.4;
-  white-space: pre-wrap;
-}
-
-.media {
-  display: grid;
-  gap: 4px;
-  overflow: hidden;
-  border-radius: 14px;
-}
-
-.mediaPlaceholder {
-  display: flex;
-  min-height: 160px;
-  align-items: center;
-  justify-content: center;
-  padding: 8px;
-  border: 1px solid var(--pc-line);
-  border-radius: 14px;
-  background: var(--pc-panel);
-  color: var(--pc-ink-muted);
-  font-size: 13px;
-  text-align: center;
-}
-
-.linkCard {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--pc-line);
-  border-radius: 14px;
-}
-
-.linkCardImage {
-  display: flex;
-  min-height: 120px;
-  align-items: center;
-  justify-content: center;
-  background: var(--pc-panel);
-  color: var(--pc-ink-muted);
-  font-size: 13px;
-}
-
-.linkCardBody {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 12px;
-}
-
-.linkTitle {
-  margin: 0;
-  color: var(--pc-ink);
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.linkDomain {
-  margin: 0;
-  color: var(--pc-ink-muted);
-  font-size: 13px;
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 20px;
-  margin-top: 4px;
-}
-
-.actionButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  padding: 4px 6px;
-  border: none;
-  border-radius: 999px;
-  background: none;
-  color: var(--pc-ink-muted);
-  font-family: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.actionButton:hover,
-.actionButton:focus-visible {
-  background: var(--pc-hover);
-  color: var(--pc-accent);
-}
-
-/*
- * The viewer's own "liked" state (reactions story 01, SOC-030). Color is
- * paired with a font-weight change on the count (below) AND `aria-pressed` +
- * an "…, liked" accessible-name suffix on the button itself, so the state is
- * never color-only (NFR-001).
- */
-.actionButtonActive {
-  color: var(--pc-accent);
-}
-
-.actionButtonActive .actionCount {
-  font-weight: 700;
-}
-
-/*
- * The quote trigger — a small, separate control next to the canonical
- * "repost" action (amplification story 01, SOC-020). Kept OUT of the
- * `actions.map` canonical set (never a `data-action` attribute) so the
- * reply/repost/like(/share) order + count stays exactly R-002's contract;
- * this is reachable as its own sibling control instead of overloading the
- * repost button with a second meaning.
- */
-.quoteTrigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  padding: 4px 6px;
-  border: none;
-  border-radius: 999px;
-  background: none;
-  color: var(--pc-ink-muted);
-  cursor: pointer;
-}
-
-.quoteTrigger:hover,
-.quoteTrigger:focus-visible {
-  background: var(--pc-hover);
-  color: var(--pc-accent);
-}
-
-.actionInert {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--pc-ink-muted);
-  font-size: 13px;
-}
-
-.actionIcon {
-  width: 15px;
-  height: 15px;
-}
-
-.actionCount {
-  min-width: 1ch;
-}
-
-.srOnly {
-  position: absolute;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  border: 0;
-  white-space: nowrap;
-}
-
-@media (max-width: 420px) {
-  .postCard {
-    gap: 8px;
-    padding: 10px 12px;
-  }
-
-  .actions {
-    gap: 12px;
-  }
 }

@@ -1,0 +1,17 @@
+/*
+ * features/social/components/FeedSkeleton.module.css
+ * ---------------------------------------------------------------------------
+ * Styles for the feed loading state (demo-polish F0 stub). Today it is the same
+ * calm, centred "Loading posts…" line `Feed.module.css`'s `.state` painted before
+ * the split; F5 (brand & profile finish) owns this file and replaces it with
+ * shimmering skeleton rows. Reads the `--fd-*` tokens declared on the feed page
+ * root (`Feed.module.css`'s `.feed`), which this component is always rendered
+ * inside.
+ */
+
+.state {
+  padding: 32px 16px;
+  color: var(--fd-ink-muted);
+  font-size: 15px;
+  text-align: center;
+}

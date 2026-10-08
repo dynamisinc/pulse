@@ -22,6 +22,9 @@
 // --- story 02: rendering & author identity (presentational) ---
 export { PostCard } from './components/PostCard'
 export type { PostCardProps, PostView, PostMediaView, PostLinkPreviewView } from './components/PostCard'
+// demo-polish F0: the card is decomposed into parts under `components/post/`
+// (`PostCard.tsx` is a re-export shim). Wave-2 stories import the part they own by
+// path; this barrel is FROZEN after F0 (implementation.md §4.3).
 
 export { VerifiedMark } from './components/VerifiedMark'
 export type { VerifiedMarkProps } from './components/VerifiedMark'
@@ -34,9 +37,17 @@ export type {
   Post,
   PostOrigin,
   PostMedia,
+  PostInReplyTo,
+  PostViewerState,
   PostLinkPreview,
   PostCounts,
   ParticipantPostView,
+  // contract v2 write side + shared staff/participant pure data (F0)
+  CreatePostMedia,
+  EngagementBaseline,
+  StaffPostView,
+  CreatedPostView,
+  ReplyTarget,
 } from './types/post'
 
 export {

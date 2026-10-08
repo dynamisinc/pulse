@@ -1,0 +1,16 @@
+/*
+ * features/social/components/post/PostBody.module.css
+ * ---------------------------------------------------------------------------
+ * The post text block. Split out of `theme/social.module.css` by demo-polish F0.
+ * (The linkified-hashtag styling is inline in `PostBody.tsx` — it must read the
+ * per-exercise `--pc-accent` and sit above the open overlay's z-index.)
+ */
+
+.text {
+  margin: 0;
+  overflow-wrap: break-word;
+  color: var(--pc-ink);
+  font-size: 15px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
