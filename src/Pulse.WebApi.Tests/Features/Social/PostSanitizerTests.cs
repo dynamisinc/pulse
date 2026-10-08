@@ -1,6 +1,11 @@
 namespace Pulse.WebApi.Tests.Features.Social;
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Pulse.WebApi.Features.Social;
 
@@ -15,8 +20,11 @@ using Pulse.WebApi.Features.Social;
 /// static function — so these run locally as plain <see cref="FactAttribute"/>s, unlike the
 /// <see cref="RequiresDockerFactAttribute"/>-gated integration tests in this folder.
 /// </summary>
-public class PostSanitizerTests
+public partial class PostSanitizerTests
 {
+    /// <summary>The tag shape no sanitized output may contain (the old implementation's tag regex).</summary>
+    private static readonly Regex AnyTag = TagRegex();
+
     [Fact]
     public void Sanitize_ScriptTag_StripsTagAndExecutableContents()
     {
@@ -156,4 +164,184 @@ public class PostSanitizerTests
 
         act.Should().Throw<ArgumentNullException>();
     }
+
+    // ---- Wave 1b DoS fix: one linear pass, still strip-until-stable --------------------------------------------
+
+    [Theory]
+    [InlineData("nested-rebuild")]
+    [InlineData("unclosed-script-openers")]
+    [InlineData("openers-without-close")]
+    [InlineData("nested-script-rebuild")]
+    public void Sanitize_A64KiBAdversarialInput_IsLinear_WellUnderHalfASecond(string shape)
+    {
+        // The old repeat-until-stable regexes were quadratic on these (2.4 s for 32 KB of nested tags, measured);
+        // the post route allows 64 KiB and the anonymous login path sanitizes a username too.
+        var input = Adversarial(shape, 64 * 1024);
+        PostSanitizer.Sanitize("<<b>warm-up>"); // JIT outside the measurement
+
+        var stopwatch = Stopwatch.StartNew();
+        var result = PostSanitizer.Sanitize(input);
+        stopwatch.Stop();
+
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromMilliseconds(500), "sanitizing is linear ({0})", shape);
+        AnyTag.IsMatch(result).Should().BeFalse("no tag survives ({0})", shape);
+        ReferenceSanitize(result).Should().Be(result, "the output is stable: stripping it again changes nothing ({0})", shape);
+    }
+
+    [Fact]
+    public void Sanitize_DeeplyNestedRebuildingTags_AreAllStripped()
+    {
+        var depth = 5_000;
+        var payload = new string('<', depth) + string.Concat(Enumerable.Repeat("b>", depth - 1)) + "img src=x onerror=alert(1)>";
+
+        PostSanitizer.Sanitize("Before " + payload + " after").Should().Be("Before  after");
+    }
+
+    [Theory]
+    [InlineData("<<b>script>alert(1)</script>")]
+    [InlineData("<scr<b>ipt>alert(1)</script>")]
+    [InlineData("<a<b>c>")]
+    [InlineData("<<b>i <c>>")]
+    [InlineData("</<b>a>x")]
+    [InlineData("<script>never closed <b>bold</b>")]
+    [InlineData("<STYLE type=x>body{}</style >after")]
+    [InlineData("<scripts>not a block</scripts>")]
+    public void Sanitize_OverlappingAndRebuiltFragments_LeaveNoTag_AndAreStable(string payload)
+    {
+        var result = PostSanitizer.Sanitize(payload);
+
+        AnyTag.IsMatch(result).Should().BeFalse("no sequence that parses as a tag may survive: {0}", result);
+        ReferenceSanitize(result).Should().Be(result, "stripping the output again changes nothing");
+        PostSanitizer.Sanitize(result).Should().Be(result, "the sanitizer is idempotent");
+    }
+
+    [Fact]
+    public void Sanitize_RealisticMarkup_IsIdenticalToTheOldRepeatUntilStableRegexes()
+    {
+        // Differential check against the previous implementation (kept below as the reference oracle): for ordinary
+        // text mixed with well-formed tags, script/style blocks, entities and literal < and >, the linear pass gives
+        // byte-identical output. Deterministic seed, so a failure reproduces.
+        var random = new Random(20261008);
+        for (var sample = 0; sample < 3_000; sample++)
+        {
+            var input = RealisticMarkup(random);
+
+            PostSanitizer.Sanitize(input).Should().Be(ReferenceSanitize(input), "for input: {0}", input);
+        }
+    }
+
+    [Fact]
+    public void Sanitize_RandomAdversarialFragments_NeverLeaveATag_AndAreStable()
+    {
+        var random = new Random(4242);
+        const string alphabet = "<<<>>//abisSCRIPTstyle x=\"'";
+        for (var sample = 0; sample < 20_000; sample++)
+        {
+            var chars = new char[random.Next(1, 40)];
+            for (var i = 0; i < chars.Length; i++)
+            {
+                chars[i] = alphabet[random.Next(alphabet.Length)];
+            }
+
+            var input = new string(chars);
+            var result = PostSanitizer.Sanitize(input);
+
+            AnyTag.IsMatch(result).Should().BeFalse("no tag may survive: {0} → {1}", input, result);
+            ReferenceSanitize(result).Should().Be(result, "the output is stable: {0} → {1}", input, result);
+        }
+    }
+
+    private static string Adversarial(string shape, int size)
+    {
+        var builder = new StringBuilder(size + 64);
+        switch (shape)
+        {
+            case "nested-rebuild":
+                var depth = size / 3;
+                builder.Append('<', depth);
+                for (var i = 0; i < depth; i++)
+                {
+                    builder.Append("b>");
+                }
+
+                break;
+            case "unclosed-script-openers":
+                while (builder.Length < size)
+                {
+                    builder.Append("<script>");
+                }
+
+                break;
+            case "openers-without-close":
+                while (builder.Length < size)
+                {
+                    builder.Append("<a");
+                }
+
+                break;
+            default:
+                var levels = size / 16;
+                builder.Append('<', levels);
+                for (var i = 0; i < levels; i++)
+                {
+                    builder.Append("b>");
+                }
+
+                while (builder.Length < size)
+                {
+                    builder.Append("script>x</script>");
+                }
+
+                break;
+        }
+
+        return builder.ToString();
+    }
+
+    private static string RealisticMarkup(Random random)
+    {
+        string[] words = ["Shelter", "in", "place", "Route 9", "don't", "\"stay calm\"", "&", "5 < 10", "10 > 5", "a<b", "x > y", "#Flood", "@EMA"];
+        string[] tags = ["<b>", "</b>", "<i>", "</i>", "<a href=\"https://x.test\">", "</a>", "<img src=x onerror=alert(1)>", "<br/>", "<p class='x'>", "</p>", "<svg onload=alert(1)>"];
+        string[] blocks = ["<script>alert('x')</script>", "<SCRIPT type=\"text/javascript\">evil()</SCRIPT>", "<style>body{display:none}</style>", "<style >p{}</style >"];
+
+        var builder = new StringBuilder();
+        var parts = random.Next(1, 12);
+        for (var i = 0; i < parts; i++)
+        {
+            var roll = random.Next(10);
+            builder.Append(roll switch
+            {
+                < 5 => words[random.Next(words.Length)],
+                < 8 => tags[random.Next(tags.Length)],
+                _ => blocks[random.Next(blocks.Length)],
+            });
+            if (random.Next(3) == 0)
+            {
+                builder.Append(' ');
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>The PREVIOUS implementation (repeat two regexes until stable), kept as the reference oracle.</summary>
+    private static string ReferenceSanitize(string input)
+    {
+        var current = input;
+        string previous;
+        do
+        {
+            previous = current;
+            current = TagRegex().Replace(ScriptStyleBlockRegex().Replace(previous, string.Empty), string.Empty);
+        }
+        while (!string.Equals(current, previous, StringComparison.Ordinal));
+
+        return current;
+    }
+
+    [GeneratedRegex(@"<(script|style)\b[^>]*>[\s\S]*?</\1\s*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ScriptStyleBlockRegex();
+
+    [GeneratedRegex(@"</?[a-zA-Z][^>]*>")]
+    private static partial Regex TagRegex();
 }

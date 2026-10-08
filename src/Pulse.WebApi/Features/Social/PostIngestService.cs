@@ -79,6 +79,26 @@ public sealed partial class PostIngestService
     private const int MaxEngagementBaseline = 1_000_000;
 
     /// <summary>
+    /// A generous ceiling on a post's text: about seven times the 280-character composer default (the run-sheet
+    /// and seed-pack formats cap post text at 280 as well). It is not enforced on the sanitized text; it sizes
+    /// <see cref="MaxRawTextLength"/> and the <c>POST /api/posts</c> body limit.
+    /// </summary>
+    public const int TextLengthCeiling = 2_000;
+
+    /// <summary>
+    /// The longest RAW <c>text</c> accepted (4 × <see cref="TextLengthCeiling"/>). Anything longer is a 400 BEFORE
+    /// the sanitizer runs (Wave 1b DoS fix): the bound applies to every caller, the in-process engine publish
+    /// included, which the HTTP body limit never sees.
+    /// </summary>
+    public const int MaxRawTextLength = 4 * TextLengthCeiling;
+
+    /// <summary>The longest RAW media <c>alt</c> accepted (4 × <see cref="PostMediaItem.MaxAltLength"/>), checked before sanitizing.</summary>
+    public const int MaxRawAltLength = 4 * PostMediaItem.MaxAltLength;
+
+    /// <summary>The 400 for alt text that is too long, raw or sanitized (the same message for both).</summary>
+    private const string AltTooLongMessage = "alt text must be at most 1000 characters.";
+
+    /// <summary>
     /// The ONE message for any attachment id that does not resolve to a usable asset: unparseable, unknown, in
     /// another exercise, or (for a participant) uploaded by someone else. Identical text, so the response never
     /// confirms that another exercise's or another participant's asset exists (COR-001, DP-16).
@@ -199,6 +219,12 @@ public sealed partial class PostIngestService
         if (request.Text is null)
         {
             return PostIngestResult.Invalid("text is required.");
+        }
+
+        // DoS guard: the sanitizer's cost grows with its input, so an oversized raw body is refused before it runs.
+        if (request.Text.Length > MaxRawTextLength)
+        {
+            return PostIngestResult.Invalid($"text must be at most {MaxRawTextLength} characters.");
         }
 
         if (string.IsNullOrEmpty(request.TimeZone))
@@ -520,7 +546,13 @@ public sealed partial class PostIngestService
                 posterId = parsedPosterId;
             }
 
-            // NFR-004 strip-not-encode, then NFR-001: alt text is required on every attachment.
+            // DoS guard first (the raw alt is bounded before the sanitizer runs), then NFR-004 strip-not-encode, then
+            // NFR-001: alt text is required on every attachment.
+            if (entry.Alt is { Length: > MaxRawAltLength })
+            {
+                return MediaResolution.Invalid(AltTooLongMessage);
+            }
+
             var alt = PostSanitizer.Sanitize(entry.Alt ?? string.Empty).Trim();
             if (alt.Length == 0)
             {
@@ -529,7 +561,7 @@ public sealed partial class PostIngestService
 
             if (alt.Length > PostMediaItem.MaxAltLength)
             {
-                return MediaResolution.Invalid("alt text must be at most 1000 characters.");
+                return MediaResolution.Invalid(AltTooLongMessage);
             }
 
             items.Add(new RequestedMedia(assetId, posterId, alt));
