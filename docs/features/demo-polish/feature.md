@@ -51,7 +51,7 @@ Order = wave order. Priorities and effort are the plan's (§5). *Home story* is 
 | 11 | [Media display: grid, video player, viewer](11-media-display.md) | F2 | Must | frontend | 2 | SOC-001, XC-009, NFR-001, NFR-008 | In Review | #430 |
 | 12 | [Engagement: persisted likes and reposts](12-engagement.md) | F3 | Must | frontend | 2 | SOC-030, SOC-020, SOC-021 | In Review | #431 |
 | 13 | [Threads and composer: replies, attach, instant post](13-threads-composer.md) | F4 | Must | frontend | 2 | SOC-001, SOC-010, SOC-011, SOC-012 | In Review | #432 |
-| 14 | [Brand and profile finish](14-brand-profile-finish.md) | F5 | Must | frontend | 2 | SOC-050, SOC-002, COR-030, NFR-001 | In Progress | #433 |
+| 14 | [Brand and profile finish](14-brand-profile-finish.md) | F5 | Must | frontend | 2 | SOC-050, SOC-002, COR-030, NFR-001 | In Review | #433 |
 | 15 | [Explore: trending, search, hashtag polish](15-explore.md) | F6 | Should | frontend | 2 | SOC-040, SOC-041, SOC-082 | In Review | #434 |
 | 16 | [Notifications, derived client-side](16-notifications-lite.md) | F7 | Could | frontend | 3 | SOC-070 | Not Started | #435 |
 | 17 | [Post as persona v2](17-post-as-persona-v2.md) | C1 | Must | frontend | 3 | CTL-001, CTL-003, SOC-012 | Not Started | #436 |
