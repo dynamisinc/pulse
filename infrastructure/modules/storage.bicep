@@ -60,6 +60,17 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01'
   parent: storageAccount
   name: 'default'
   properties: {
+    // Soft delete (Gate-1 L-2): the API identity can delete blobs, so a bug in a delete path (or a misused
+    // identity) must not permanently destroy media kept as after-action evidence (XC-010). 7 days is enough
+    // to notice and restore; it costs only the retained bytes.
+    deleteRetentionPolicy: {
+      enabled: true
+      days: 7
+    }
+    containerDeleteRetentionPolicy: {
+      enabled: true
+      days: 7
+    }
     cors: {
       corsRules: empty(corsAllowedOrigins) ? [] : [
         {
