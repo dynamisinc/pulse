@@ -34,8 +34,9 @@ using Pulse.WebApi.Tests.Helpers;
 /// </summary>
 /// <remarks>
 /// The doubles stand in for slices that build in parallel (BM's signer, B3's engagement reader, B2's resolver)
-/// and for the SignalR fan-out. Each can be left as the registered fail-closed fallback instead, to prove the
-/// branch runs alone.
+/// and for the SignalR fan-out. The signer and resolver can be swapped for BP's fail-closed fallback instead, to
+/// prove the branch runs alone. The fallback is INSTALLED explicitly, not merely left in place: on the integrated
+/// host (Wave 1b Gate 2) B2's and BM's real registrations win over BP's <c>TryAdd</c> fallbacks.
 /// </remarks>
 public sealed class PostMediaWebApplicationFactory : WebApplicationFactory<Program>
 {
@@ -106,16 +107,25 @@ public sealed class PostMediaWebApplicationFactory : WebApplicationFactory<Progr
                 services.RemoveAll<IMediaUrlSigner>();
                 services.AddSingleton<IMediaUrlSigner>(new ThrowingMediaUrlSigner(failure));
             }
-            else if (!_keepFallbackSigner)
+            else if (_keepFallbackSigner)
+            {
+                services.RemoveAll<IMediaUrlSigner>();
+                services.AddSingleton<IMediaUrlSigner, Pulse.WebApi.Features.Social.UnconfiguredMediaUrlSigner>();
+            }
+            else
             {
                 services.RemoveAll<IMediaUrlSigner>();
                 services.AddScoped<IMediaUrlSigner>(sp =>
                     new FakeMediaUrlSigner(sp.GetRequiredService<IExerciseContext>(), Signer));
             }
 
-            if (!_keepFallbackResolver)
+            services.RemoveAll<IReplyParentResolver>();
+            if (_keepFallbackResolver)
             {
-                services.RemoveAll<IReplyParentResolver>();
+                services.AddSingleton<IReplyParentResolver, UnavailableReplyParentResolver>();
+            }
+            else
+            {
                 services.AddScoped<IReplyParentResolver>(sp =>
                     new FakeReplyParentResolver(sp.GetRequiredService<PulseDbContext>(), Resolver));
             }

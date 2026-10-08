@@ -169,11 +169,16 @@ builder.Services.AddOpsBootstrap(builder.Configuration);
 builder.Services.AddOrgAdminSeed(builder.Environment, builder.Configuration);
 
 // Social API (Phase B1, feature/social-api) — orchestrator-wired composition root. Each story exposes its
-// own Add*/Map* extension (never edits this file itself); these five DI calls register the read/write
+// own Add*/Map* extension (never edits this file itself); the first four DI calls register the read/write
 // services, the persona read, and the SignalR realtime host. AddSocialRealtimeHub also registers
 // IFeedBroadcaster -> SignalRFeedBroadcaster (which PostIngestService calls after a successful persist) and
 // AddSignalR(); it must be present alongside AddSocialPostWrite so the write path's broadcast resolves.
-builder.Services.AddSocialFeedRead();      // #270 GET /api/feed, /api/threads/{id}
+// demo-polish Wave 1b (orchestrator-wired at Gate 2) adds the four `// demo-polish …` lines after them: B6
+// takedown, B2 threads + the REAL IReplyParentResolver, B3 reactions + the REAL IPostEngagementReader, and BM
+// media + the REAL IMediaStore/IMediaUrlSigner. BP's AddSocialFeedRead/AddSocialPostWrite/AddSocialPersonaRead
+// TryAdd fail-closed fallbacks for those three seams; B2/B3/BM register with a plain Add*, so the real
+// implementations win in any order (Wave1bIntegrationTests asserts none of the fallbacks resolves on this host).
+builder.Services.AddSocialFeedRead();      // #270 GET /api/feed (+ BP's projector and the seam fallbacks)
 builder.Services.AddSocialPostWrite();     // #271 POST /api/posts (sanitize + stamp + telemetry + broadcast)
 builder.Services.AddSocialPersonaRead();   // #273 GET /api/personas
 builder.Services.AddSocialRealtimeHub();   // #272 exercise-grouped hub + IFeedBroadcaster impl
@@ -362,7 +367,10 @@ app.MapControllers();
 
 // Social API endpoints + realtime hub (Phase B1) — the orchestrator-owned endpoint mappings paired with the
 // DI registrations above. Provenance is projected out server-side (XC-002) inside each endpoint; scope comes
-// only from the resolved IExerciseContext (COR-001), never a client-supplied exerciseId.
+// only from the resolved IExerciseContext (COR-001), never a client-supplied exerciseId. The demo-polish
+// Wave 1b mappings are tagged: B3's participant reaction WRITES sit inside DenyReadOnlySessions() (COR-015);
+// B6's takedown and BM's staff library carry their own staff filters; BM's POST /api/media applies
+// DenyReadOnlySessions() inside its own Map extension.
 app.MapSocialFeedEndpoints();     // #270 GET /api/feed
 app.MapSocialThreadEndpoints();   // #270 GET /api/threads/{postId}
 // #271 POST /api/posts — the one existing sim WRITE. Wrapped in a DenyReadOnlySessions() group

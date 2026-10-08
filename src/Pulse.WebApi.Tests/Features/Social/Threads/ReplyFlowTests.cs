@@ -27,8 +27,8 @@ using Pulse.WebApi.Tests.Helpers;
 /// <summary>
 /// End-to-end reply flow (demo-polish B2 Technical Notes; AC-4, AC-5): <c>POST /api/posts</c> with a
 /// <c>parentPostId</c> → <c>GET /api/threads/{id}</c> lists it → <c>GET /api/feed</c> excludes it. These tests need
-/// BP's ingest (and, for counts, B3's reader), so they use <see cref="Gate2FactAttribute"/>: they are reported as
-/// Skipped in B2's own worktree and start running automatically at Gate 2, once those stories merge.
+/// BP's ingest and B3's engagement reader on the same host, so they only run on the integrated Wave 1b umbrella
+/// (Gate-2 integration, B2 M-3): plain <see cref="RequiresDockerFactAttribute"/> tests from then on.
 /// </summary>
 /// <remarks>
 /// Drives the GENUINE pipeline with real sessions and real tokens (host → exercise resolution, session
@@ -48,7 +48,7 @@ public class ReplyFlowTests
         _fixture = fixture;
     }
 
-    [Gate2Fact(Gate2Capability.ReplyIngest)]
+    [RequiresDockerFact]
     public async Task PostedReply_IsInTheThread_HasItsParentAsAncestor_AndTheDefaultFeedExcludesIt()
     {
         var world = await SeedWorldAsync();
@@ -85,7 +85,7 @@ public class ReplyFlowTests
         feedIds.Should().NotContain(replyId.ToString(), "the default feed is top-level only");
     }
 
-    [Gate2Fact(Gate2Capability.ReplyIngest)]
+    [RequiresDockerFact]
     public async Task ReplyToAnotherExercisesPost_Is400_IdenticalToAnUnknownParent_AndWritesNothing()
     {
         // DP-16 end to end: exercise B's REAL post id, sent as a parent under scope A.
@@ -95,10 +95,13 @@ public class ReplyFlowTests
         var deletedInA = ThreadSeed.NewPost(worldA.Exercise, "deleted parent", ThreadSeed.Anchor, authorPersonaId: worldA.OtherPersona, deletedAt: ThreadSeed.Anchor.AddMinutes(1));
         await SeedAsync(postInB, deletedInA);
 
-        var before = await CountRowsAsync(worldA.Exercise, worldB.Exercise);
-
         await using var factory = new ReplyFlowWebApplicationFactory(ConnectionString);
         using var client = factory.CreateClientFor(worldA.Host, worldA.ParticipantToken);
+
+        // Snapshot AFTER the host has booted: on the first real-host boot of a fresh test database, the
+        // Development-only OrgAdminSeed hosted service grants orgAdmin for every exercise in the organization and
+        // writes one staff.org_admin_seeded event per exercise. Only the three rejected replies are under test.
+        var before = await CountRowsAsync(worldA.Exercise, worldB.Exercise);
 
         var crossExercise = await client.PostAsync(PostsUri, Json(ReplyBody(worldA.ParticipantPersona, "x", postInB.Id.ToString())));
         var unknown = await client.PostAsync(PostsUri, Json(ReplyBody(worldA.ParticipantPersona, "x", Guid.NewGuid().ToString())));
@@ -114,7 +117,7 @@ public class ReplyFlowTests
         (await CountRowsAsync(worldA.Exercise, worldB.Exercise)).Should().Be(before, "a rejected reply writes no post and no telemetry in either exercise");
     }
 
-    [Gate2Fact(Gate2Capability.ReplyIngest | Gate2Capability.EngagementReader)]
+    [RequiresDockerFact]
     public async Task ReplyCount_EqualsTheVisibleReplies_AndATakedownDecrementsIt()
     {
         var world = await SeedWorldAsync();

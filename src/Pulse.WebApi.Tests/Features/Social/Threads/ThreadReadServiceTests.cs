@@ -18,8 +18,9 @@ using Pulse.WebApi.Tests.Data;
 /// <summary>
 /// <see cref="ThreadReadService"/> against real SQL Server (demo-polish B2, AC-2/AC-3/AC-4): ancestor order, the
 /// depth cap and the cycle guard, reply order by scenario time, tombstones, and that the projector's output is
-/// passed through unchanged. The projector is <see cref="RecordingPostProjector"/> because BP's real one lands in
-/// parallel; the no-projector fallback is covered too.
+/// passed through unchanged. The projector is <see cref="RecordingPostProjector"/> so the service is isolated from
+/// BP's real one; the real projector is exercised end to end by <c>ReplyFlowTests</c>. The projector is a required
+/// dependency, so there is no no-projector fallback to cover (Gate-2 integration, B2 M-2).
 /// </summary>
 [Collection(MsSqlCollection.Name)]
 public class ThreadReadServiceTests
@@ -208,24 +209,6 @@ public class ThreadReadServiceTests
         var anonymous = new RecordingPostProjector();
         await ReadAsync(exercise, focused.Id.ToString(), anonymous, new StubSessionPersonaAccessor());
         anonymous.Calls.Single().Options.Should().Be(new PostProjectionOptions());
-    }
-
-    [RequiresDockerFact]
-    public async Task WithNoProjectorRegistered_FallsBackToFromPost()
-    {
-        var exercise = Guid.NewGuid();
-        var focused = ThreadSeed.NewPost(exercise, "focused", ThreadSeed.Anchor);
-        var reply = ThreadSeed.NewPost(exercise, "reply", ThreadSeed.Anchor.AddMinutes(1), focused.Id);
-        await SeedAsync(focused, reply);
-
-        await using var context = Scoped(exercise);
-        var service = new ThreadReadService(context, new ExerciseContext { CurrentExerciseId = exercise }, new StubSessionPersonaAccessor());
-
-        var thread = await service.GetThreadAsync(focused.Id.ToString(), CancellationToken.None);
-
-        thread.Focused!.Counts.Should().Be(new ParticipantPostCounts(0, 0, 0));
-        thread.Focused.Media.Should().BeNull();
-        thread.Replies.Should().ContainSingle().Which.Text.Should().Be("reply");
     }
 
     [RequiresDockerFact]

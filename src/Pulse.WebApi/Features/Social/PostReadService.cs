@@ -6,9 +6,10 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Social.Follows;
 
 /// <summary>
-/// The participant read path behind <c>GET /api/feed</c> and <c>GET /api/threads/{postId}</c> (SOC-080,
-/// SOC-010). Queries <see cref="PulseDbContext.Posts"/> — which the central exercise-scoping global query
-/// filter confines to the current run automatically (COR-001) — and narrows every row through the FROZEN
+/// The participant feed read behind <c>GET /api/feed</c> (SOC-080, SOC-081; the thread read is
+/// <c>Threads.ThreadReadService</c>). Queries <see cref="PulseDbContext.Posts"/> — which the central
+/// exercise-scoping global query filter confines to the current run automatically (COR-001) — and narrows every
+/// row through the FROZEN
 /// <see cref="ParticipantPostDto.FromPost"/>, the sole server-side XC-002 projection. Provenance
 /// (<c>origin</c>/<c>actingHumanId</c>/<c>createdWallClock</c>/<c>injectId</c>) is dropped BEFORE
 /// serialization, not merely unread by the client — this is the retirement of finding S2-2: a bypassed or
@@ -148,31 +149,6 @@ public sealed class PostReadService
             .ToListAsync(cancellationToken);
 
         return await _projector.ProjectAsync(posts, ViewerOptionsFor(sessionPersona, scope), cancellationToken);
-    }
-
-    /// <summary>
-    /// Reads the focused post of a thread — the in-scope, non-soft-deleted post with id
-    /// <paramref name="postId"/>, narrowed to <see cref="ParticipantPostDto"/>, or <c>null</c> when no such
-    /// post is in scope. B1 has NO parent/reply model (a <see cref="Data.Entities.Post"/> is post-only this
-    /// phase), so the thread's ancestors and replies are always empty; the endpoint assembles them around
-    /// this focused value. The lookup runs through the global query filter (a LINQ predicate, NOT
-    /// <c>DbSet.Find</c>), so a cross-exercise id is simply not found — indistinguishable from an unknown id.
-    /// </summary>
-    /// <param name="postId">The focused post id.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The participant-safe focused post, or <c>null</c> if it is not in scope.</returns>
-    public async Task<ParticipantPostDto?> GetThreadAsync(Guid postId, CancellationToken cancellationToken)
-    {
-        if (_exerciseContext.CurrentExerciseId is null)
-        {
-            return null;
-        }
-
-        var post = await _dbContext.Posts
-            .AsNoTracking()
-            .FirstOrDefaultAsync(candidate => candidate.Id == postId && candidate.DeletedAt == null, cancellationToken);
-
-        return post is null ? null : ParticipantPostDto.FromPost(post);
     }
 
     /// <summary>

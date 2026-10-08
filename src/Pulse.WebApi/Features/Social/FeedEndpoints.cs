@@ -24,10 +24,10 @@ public static class FeedEndpoints
     private const string FollowingFeedScope = "following";
 
     /// <summary>
-    /// Registers the participant read path (<see cref="PostReadService"/>) with a Scoped lifetime — matching
-    /// the request-scoped <see cref="PulseDbContext"/> and <see cref="IExerciseContext"/> it depends on. Both
-    /// <see cref="MapSocialFeedEndpoints"/> and <see cref="ThreadEndpoints.MapSocialThreadEndpoints"/>
-    /// resolve the same service, so this is the single registration for the feature's read surface.
+    /// Registers the participant feed read (<see cref="PostReadService"/>) with a Scoped lifetime — matching
+    /// the request-scoped <see cref="PulseDbContext"/> and <see cref="IExerciseContext"/> it depends on — plus the
+    /// projector and seam fallbacks the feed and the thread read (<see cref="ThreadEndpoints.AddSocialThreads"/>)
+    /// both project through.
     /// </summary>
     /// <param name="services">The service collection to register into.</param>
     /// <returns>The same collection, for chaining.</returns>

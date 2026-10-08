@@ -25,6 +25,8 @@ bin/
 obj/
 *.user
 appsettings.Local.json
+# Development-only Local media store (demo-polish BM; Azure:BlobStorage:LocalRootPath = ./.local-media)
+.local-media/
 
 # ---- Editors / OS ----
 .vscode/*

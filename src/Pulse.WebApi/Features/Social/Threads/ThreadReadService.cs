@@ -24,8 +24,9 @@ using Pulse.WebApi.Features.Social.Follows;
 /// <see cref="IParticipantPostProjector.ProjectAsync"/> call, which supplies media, counts (baseline + real),
 /// <c>inReplyTo</c> and, for a participant session with a bound persona, <c>viewer</c>. Tombstones are NOT
 /// projected (<see cref="ThreadReplyDto.TakenDown"/>), so the projector never reads a taken-down post's media or
-/// engagement. The projector is optional: until BP's implementation is registered, posts are narrowed with
-/// <see cref="ParticipantPostDto.FromPost"/> (zero counts, no media), the shape the thread read used before.
+/// engagement. The projector is a required dependency (Gate-2 integration, B2 M-2): there is no
+/// <see cref="ParticipantPostDto.FromPost"/> fallback, so a thread can never be served with zero counts and no media
+/// while the feed serves the real ones.
 /// </para>
 /// <para>
 /// <b>Time.</b> Replies are ordered by <see cref="Post.CreatedScenarioTime"/> (COR-053), never wall-clock, with
@@ -51,25 +52,23 @@ public sealed class ThreadReadService
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentSessionPersonaAccessor _sessionPersonaAccessor;
-    private readonly IParticipantPostProjector? _projector;
+    private readonly IParticipantPostProjector _projector;
 
     /// <summary>Creates the service over the request's persistence context, scope, session and projector.</summary>
     /// <param name="dbContext">The persistence context whose global query filter scopes every read.</param>
     /// <param name="exerciseContext">The resolved exercise scope (COR-001), the only source of scope.</param>
     /// <param name="sessionPersonaAccessor">Resolves the caller's session-bound persona for <c>viewer</c> state.</param>
-    /// <param name="projector">
-    /// The participant projector (BP). Optional so the thread read keeps working in a host where it is not
-    /// registered yet; when absent, posts fall back to <see cref="ParticipantPostDto.FromPost"/>.
-    /// </param>
+    /// <param name="projector">The participant projector (BP) every ancestor, focused post and visible reply goes through.</param>
     public ThreadReadService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         ICurrentSessionPersonaAccessor sessionPersonaAccessor,
-        IParticipantPostProjector? projector = null)
+        IParticipantPostProjector projector)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(sessionPersonaAccessor);
+        ArgumentNullException.ThrowIfNull(projector);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
@@ -199,10 +198,7 @@ public sealed class ThreadReadService
         return nearestFirst;
     }
 
-    /// <summary>
-    /// Projects <paramref name="posts"/> in one batch through the registered projector, or through
-    /// <see cref="ParticipantPostDto.FromPost"/> when none is registered.
-    /// </summary>
+    /// <summary>Projects <paramref name="posts"/> in one batch through the participant projector.</summary>
     /// <param name="posts">The non-deleted posts to project.</param>
     /// <param name="exerciseId">The resolved exercise scope, matched against the session's own exercise.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -211,11 +207,6 @@ public sealed class ThreadReadService
     private async Task<IReadOnlyList<ParticipantPostDto>> ProjectAsync(
         List<Post> posts, Guid exerciseId, CancellationToken cancellationToken)
     {
-        if (_projector is null)
-        {
-            return posts.Select(ParticipantPostDto.FromPost).ToList();
-        }
-
         var options = await BuildProjectionOptionsAsync(exerciseId, cancellationToken);
         var projected = await _projector.ProjectAsync(posts, options, cancellationToken);
 

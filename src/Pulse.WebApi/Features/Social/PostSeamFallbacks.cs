@@ -30,8 +30,8 @@ internal static class PostSeamFallbacks
 {
     /// <summary>
     /// <c>TryAdd</c>s the three seam fallbacks and the participant projector. Idempotent, so each Social
-    /// registration method (<c>AddSocialFeedRead</c>, <c>AddSocialPostWrite</c>, <c>AddSocialPersonaRead</c>) can
-    /// call it and none of them depends on another having run first.
+    /// registration method (<c>AddSocialFeedRead</c>, <c>AddSocialPostWrite</c>, <c>AddSocialPersonaRead</c>,
+    /// <c>AddSocialThreads</c>) can call it and none of them depends on another having run first.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The same collection, for chaining.</returns>

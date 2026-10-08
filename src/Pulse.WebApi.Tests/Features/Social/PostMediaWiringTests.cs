@@ -31,7 +31,8 @@ public sealed class PostMediaWiringTests
         Register(services, registration);
 
         Single<IPostEngagementReader>(services).ImplementationType.Should().Be(typeof(ZeroPostEngagementReader));
-        Single<IMediaUrlSigner>(services).ImplementationType.Should().Be(typeof(UnconfiguredMediaUrlSigner));
+        // Fully qualified: BM's Pulse.WebApi.Features.Media.UnconfiguredMediaUrlSigner shares the simple name.
+        Single<IMediaUrlSigner>(services).ImplementationType.Should().Be(typeof(Pulse.WebApi.Features.Social.UnconfiguredMediaUrlSigner));
         Single<IReplyParentResolver>(services).ImplementationType.Should().Be(typeof(UnavailableReplyParentResolver));
         Single<IParticipantPostProjector>(services).ImplementationType.Should().Be(typeof(ParticipantPostProjector));
     }
@@ -89,7 +90,7 @@ public sealed class PostMediaWiringTests
             OriginalFileName = "x",
             UploadedByHumanId = "h",
         };
-        var signer = new UnconfiguredMediaUrlSigner();
+        var signer = new Pulse.WebApi.Features.Social.UnconfiguredMediaUrlSigner();
         await signer.Invoking(s => s.GetReadUrlsAsync([asset], CancellationToken.None))
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*not configured*");
         await signer.Invoking(s => s.GetReadUrlAsync(asset, CancellationToken.None))

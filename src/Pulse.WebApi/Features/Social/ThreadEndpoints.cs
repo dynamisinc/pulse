@@ -31,8 +31,11 @@ public static class ThreadEndpoints
     /// </para>
     /// <para>
     /// <c>ICurrentSessionPersonaAccessor</c> is <c>TryAdd</c>ed (as the feed and post-write slices do) so this slice
-    /// does not depend on another slice having registered it first. <see cref="IParticipantPostProjector"/> is not
-    /// registered here: it belongs to BP, and <see cref="ThreadReadService"/> takes it as an optional dependency.
+    /// does not depend on another slice having registered it first. <see cref="ThreadReadService"/> REQUIRES
+    /// <see cref="IParticipantPostProjector"/> (Gate-2 integration, B2 M-2), which BP owns: like every other Social
+    /// registration, this one calls BP's idempotent <c>TryAddPostSeamFallbacks</c>, so the projector is present
+    /// whichever Social extension runs first, and the real resolver, reader and signer still win (they are plain
+    /// <c>Add*</c> registrations).
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection.</param>
@@ -45,6 +48,7 @@ public static class ThreadEndpoints
         services.TryAddScoped<ICurrentSessionPersonaAccessor, CurrentSessionPersonaAccessor>();
 
         services.AddScoped<IReplyParentResolver, ReplyParentResolver>();
+        services.TryAddPostSeamFallbacks();
         services.TryAddScoped<ThreadReadService>();
 
         return services;

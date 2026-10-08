@@ -41,6 +41,8 @@ public sealed class ThreadCompositionRootWiringTests
             "Program.cs must call AddSocialThreads(), or BP's ingest rejects every reply");
         scope.ServiceProvider.GetRequiredService<ThreadReadService>().Should().NotBeNull(
             "the thread handler's service must resolve from the real composition root, or the route 500s");
+        scope.ServiceProvider.GetRequiredService<IParticipantPostProjector>().Should().BeOfType<ParticipantPostProjector>(
+            "ThreadReadService requires the REAL projector (B2 M-2), so threads carry the same counts and media as the feed");
     }
 
     [Fact]
@@ -60,7 +62,8 @@ public sealed class ThreadCompositionRootWiringTests
             using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
             using var scope = provider.CreateScope();
             scope.ServiceProvider.GetRequiredService<IReplyParentResolver>().Should().BeOfType<ReplyParentResolver>();
-            scope.ServiceProvider.GetRequiredService<ThreadReadService>().Should().NotBeNull();
+            scope.ServiceProvider.GetRequiredService<ThreadReadService>().Should().NotBeNull(
+                "AddSocialThreads alone supplies the projector ThreadReadService requires (TryAddPostSeamFallbacks)");
         }
     }
 
