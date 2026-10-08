@@ -328,7 +328,7 @@ describe('Feed — the reply button opens the thread to reply; the body just ope
     expect(consumeReplyFocus('post-seed-mvega-question')).toBe(false)
   })
 
-  it('without onOpenThread the reply button is inert and records nothing', async () => {
+  it('without onOpenThread Reply is inert text (no focusable no-op) and records nothing', async () => {
     const user = userEvent.setup()
     renderFeed()
     await screen.findAllByTestId('post-card')
@@ -336,7 +336,12 @@ describe('Feed — the reply button opens the thread to reply; the body just ope
     if (row === undefined) throw new Error('no rows')
     const postId = row.getAttribute('data-post-id') ?? ''
 
-    await user.click(within(row).getByRole('button', { name: /^Reply, \d+$/ }))
+    // F3 + the Wave 1 Copilot rule: an unwired action renders as an inert span, never a button.
+    expect(within(row).queryByRole('button', { name: /^Reply, \d+$/ })).toBeNull()
+    const reply = row.querySelector('[data-action="reply"]')
+    if (reply === null) throw new Error('no reply action')
+    expect(reply.tagName).toBe('SPAN')
+    await user.click(reply)
 
     expect(consumeReplyFocus(postId)).toBe(false)
   })
