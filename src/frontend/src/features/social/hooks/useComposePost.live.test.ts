@@ -31,7 +31,7 @@
  * gotcha this sidesteps).
  */
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { AxiosError } from 'axios'
+import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
@@ -39,7 +39,13 @@ import type { Session } from '@/core/auth'
 import { uploadPickedMedia } from '@/core/media'
 import { fakeFile, installFakeUploader, type FakeUploader } from '@/test/fakeMediaUploader'
 import type { CreatedPostView, ParticipantPostView } from '@/features/social'
-import { publishFailedMessage, publishUnconfirmedMessage, useComposePost } from './useComposePost'
+import {
+  publishFailedMessage,
+  publishRateLimitedMessage,
+  publishRefusedMessage,
+  publishUnconfirmedMessage,
+  useComposePost,
+} from './useComposePost'
 
 vi.mock('@/core/config/mockData', () => ({ USE_MOCK_DATA: false }))
 
@@ -114,6 +120,18 @@ function writableSession(): Session {
 }
 
 let uploader: FakeUploader
+
+/** An axios failure as the shared client raises it: with a response when the server answered. */
+function axiosFailure(status?: number): AxiosError {
+  if (status === undefined) return new AxiosError('Network Error', 'ERR_NETWORK')
+  return new AxiosError(
+    `Request failed with status code ${status}`,
+    'ERR_BAD_REQUEST',
+    undefined,
+    undefined,
+    { status } as AxiosResponse,
+  )
+}
 
 beforeEach(() => {
   mockedUseExerciseContext.mockReturnValue(scope())
@@ -249,6 +267,8 @@ describe('useComposePost — a FAILED publish keeps the draft (never silently dr
     act(() => result.current.publish())
 
     await waitFor(() => expect(result.current.publishError).toBe(publishFailedMessage(false)))
+    // A request that never landed created nothing: Retry is safe to offer.
+    expect(result.current.publishErrorKind).toBe('failed')
     // Nothing was lost.
     expect(result.current.text).toBe('Roads are closed.')
     expect(result.current.attachments).toHaveLength(1)
@@ -292,7 +312,59 @@ describe('useComposePost — a FAILED publish keeps the draft (never silently dr
 
     await waitFor(() => expect(result.current.publishError).toBe(publishUnconfirmedMessage(false)))
     expect(result.current.publishError).toMatch(/check the feed/i)
+    // The post may already exist and there is no idempotency key: NO Retry (H-1).
+    expect(result.current.publishErrorKind).toBe('unconfirmed')
     expect(result.current.text).toBe('Maybe sent.')
+    // The author may still press Post deliberately - the draft is not locked out.
+    expect(result.current.canPublish).toBe(true)
+  })
+
+  it.each([400, 403, 409])('a %i is a REFUSAL: its own wording, no Retry kind, draft kept (M-5)', async status => {
+    vi.mocked(publishPost).mockRejectedValueOnce(axiosFailure(status))
+    const { result } = renderHook(() => useComposePost())
+
+    act(() => result.current.setText('Refused.'))
+    act(() => result.current.publish())
+
+    await waitFor(() => expect(result.current.publishErrorKind).toBe('refused'))
+    expect(result.current.publishError).toBe(publishRefusedMessage(false))
+    expect(result.current.publishError).not.toBe(publishFailedMessage(false))
+    expect(result.current.text).toBe('Refused.')
+    expect(result.current.canPublish).toBe(true)
+  })
+
+  it.each([500, 503])('a %i did not land: "failed", Retry kind (M-5)', async status => {
+    vi.mocked(publishPost).mockRejectedValueOnce(axiosFailure(status))
+    const { result } = renderHook(() => useComposePost())
+
+    act(() => result.current.setText('Server trouble.'))
+    act(() => result.current.publish())
+
+    await waitFor(() => expect(result.current.publishErrorKind).toBe('failed'))
+    expect(result.current.publishError).toBe(publishFailedMessage(false))
+  })
+
+  it('a 429 is "failed" with its own rate-limit wording', async () => {
+    vi.mocked(publishPost).mockRejectedValueOnce(axiosFailure(429))
+    const { result } = renderHook(() => useComposePost())
+
+    act(() => result.current.setText('Too fast.'))
+    act(() => result.current.publish())
+
+    await waitFor(() => expect(result.current.publishErrorKind).toBe('failed'))
+    expect(result.current.publishError).toBe(publishRateLimitedMessage(false))
+  })
+
+  it('editing the draft clears a refusal, and a successful publish clears the kind', async () => {
+    vi.mocked(publishPost).mockRejectedValueOnce(axiosFailure(409))
+    const { result } = renderHook(() => useComposePost())
+    act(() => result.current.setText('Try.'))
+    act(() => result.current.publish())
+    await waitFor(() => expect(result.current.publishErrorKind).toBe('refused'))
+
+    act(() => result.current.setText('Try again.'))
+    expect(result.current.publishErrorKind).toBeUndefined()
+    expect(result.current.publishError).toBeUndefined()
   })
 
   it('editing the draft after a failure clears the error banner', async () => {

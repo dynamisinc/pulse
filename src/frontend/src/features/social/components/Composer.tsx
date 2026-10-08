@@ -30,9 +30,22 @@
  * described, and a visible sentence says which of those is outstanding (a
  * disabled button is never left unexplained).
  *
- * A FAILED PUBLISH keeps the draft: an inline alert states what happened and a
- * Retry button re-sends the same draft. While a publish is in flight the fields
- * lock. After a successful one, a visually-hidden polite status announces it.
+ * A FAILED PUBLISH keeps the draft: an inline alert states what happened. A Retry
+ * button is offered ONLY when the failure proves nothing was created ('failed':
+ * network / 5xx / rate limit). After a server refusal ('refused', 4xx) a retry of the
+ * same draft would be refused again, and after an unreadable 2xx ('unconfirmed') the
+ * post may already exist and there is no idempotency key - so neither gets a Retry;
+ * the draft and the message stay, and the author may press Post deliberately.
+ *
+ * KEYBOARD FOCUS (NFR-001). While a publish is in flight Post is `aria-disabled`
+ * (not `disabled`), so the key the author just pressed keeps focus and a second
+ * press is ignored; Retry hands focus to Post for the same reason; after a
+ * successful publish focus moves to the text area (Post is disabled again with the
+ * cleared draft, and focus must not fall to the page). Removing / cancelling a tray
+ * row moves focus to a neighbouring row, or the attach button when none is left.
+ *
+ * While a publish is in flight the fields lock. After a successful one, a
+ * visually-hidden polite status announces it.
  *
  * OBSERVER MODE (COR-015 / D1-011): when the session is read-only the whole
  * composer is ABSENT — this component returns `null`, it does not render a
@@ -48,7 +61,7 @@
  * rendering, the "Posting as" org chip, and quote-post stay out of scope.
  */
 
-import { useId, type FormEvent, type ReactNode, type Ref } from 'react'
+import { useEffect, useId, useRef, type FormEvent, type ReactNode, type Ref } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import {
@@ -113,6 +126,8 @@ export interface ComposerFormProps {
   readonly header?: ReactNode
   /** A ref to the text area (the thread focuses it from a card's reply button). */
   readonly inputRef?: Ref<HTMLTextAreaElement>
+  /** `id` of an element that describes the text area (the reply box's "Replying to" line). */
+  readonly inputDescribedBy?: string
   /** Rows of the text area. */
   readonly rows?: number
   /** Show "Posting isn't available on this account." when the session has no persona. */
@@ -133,20 +148,47 @@ export function ComposerForm({
   postedNotice,
   header,
   inputRef,
+  inputDescribedBy,
   rows = 3,
   showNoPersonaNote = false,
 }: ComposerFormProps) {
   const hintId = useId()
+  const formRef = useRef<HTMLFormElement>(null)
+  const postButtonRef = useRef<HTMLButtonElement>(null)
+  const attachButtonRef = useRef<HTMLButtonElement>(null)
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    // Post is aria-disabled (still focusable) while in flight: ignore the press.
+    if (compose.isPublishing) return
     compose.publish()
   }
+
+  // Retry unmounts its own alert as soon as the new attempt starts; hand focus to
+  // Post (aria-disabled while in flight) first so it does not fall to the page.
+  const handleRetry = () => {
+    postButtonRef.current?.focus()
+    compose.publish()
+  }
+
+  // After a successful publish Post is disabled again (the draft is cleared), which
+  // would drop focus to the page: move it to the text area - but only if focus was
+  // still in this form (or nowhere), never stealing it from where the author went.
+  useEffect(() => {
+    if (!compose.posted) return
+    const form = formRef.current
+    if (form === null) return
+    const active = document.activeElement
+    if (active === null || active === document.body || form.contains(active)) {
+      form.querySelector<HTMLTextAreaElement>('textarea')?.focus()
+    }
+  }, [compose.posted])
 
   const hasHint = compose.mediaBlockReason !== undefined && compose.attachments.length > 0
 
   return (
     <form
+      ref={formRef}
       className={styles.composer}
       data-testid={testId}
       aria-busy={compose.isPublishing}
@@ -161,6 +203,7 @@ export function ComposerForm({
         onChange={e => compose.setText(e.target.value)}
         placeholder={placeholder}
         aria-label={textLabel}
+        aria-describedby={inputDescribedBy}
         readOnly={compose.isPublishing}
         rows={rows}
       />
@@ -168,6 +211,7 @@ export function ComposerForm({
       <ComposerMediaTray
         attachments={compose.attachments}
         disabled={compose.isPublishing}
+        fallbackFocusRef={attachButtonRef}
         onAltChange={compose.setAttachmentAlt}
         onCancel={compose.cancelAttachment}
         onRemove={compose.removeAttachment}
@@ -183,20 +227,28 @@ export function ComposerForm({
             <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" />
             <span>{compose.publishError}</span>
           </p>
-          <button
-            type="button"
-            className={styles.retryButton}
-            disabled={compose.isPublishing}
-            onClick={compose.publish}
-          >
-            Retry
-          </button>
+          {/* Retry only when nothing was created. After a refusal or an unreadable
+              2xx a Retry would be refused again / could double-post (see header). */}
+          {compose.publishErrorKind === 'failed' && (
+            <button
+              type="button"
+              className={styles.retryButton}
+              disabled={compose.isPublishing}
+              onClick={handleRetry}
+            >
+              Retry
+            </button>
+          )}
         </div>
       )}
 
       <div className={styles.toolbar}>
         <div className={styles.tools}>
-          <AttachButton onPick={compose.attachFiles} disabled={compose.isPublishing} />
+          <AttachButton
+            buttonRef={attachButtonRef}
+            onPick={compose.attachFiles}
+            disabled={compose.isPublishing}
+          />
         </div>
 
         <div className={styles.meta}>
@@ -209,9 +261,11 @@ export function ComposerForm({
             isOverLimit={compose.isOverLimit}
           />
           <button
+            ref={postButtonRef}
             type="submit"
             className={styles.postButton}
-            disabled={!compose.canPublish}
+            disabled={!compose.canPublish && !compose.isPublishing}
+            aria-disabled={compose.isPublishing ? true : undefined}
             aria-label={submitLabel}
             aria-describedby={hasHint ? hintId : undefined}
           >

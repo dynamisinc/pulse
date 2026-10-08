@@ -23,10 +23,12 @@
  * this guard is belt-and-braces.
  *
  * FOCUS. `inputRef` is the text area, so the thread can move focus here when a
- * card's reply button was the way in (see `services/replyIntent`).
+ * card's reply button was the way in (see `services/replyIntent`). The text area is
+ * `aria-describedby` the "Replying to @handle" line, so a screen reader that lands
+ * in it hears who is being answered.
  */
 
-import type { Ref } from 'react'
+import { useId, type Ref } from 'react'
 import { useComposePost, type UseComposePostOptions } from '../hooks/useComposePost'
 import { ComposerForm } from './Composer'
 import styles from './ReplyComposer.module.css'
@@ -51,6 +53,7 @@ export function ReplyComposer({
   onPosted,
   inputRef,
 }: ReplyComposerProps) {
+  const contextId = useId()
   const compose = useComposePost({
     parentPostId,
     ...(charLimit !== undefined ? { charLimit } : {}),
@@ -69,9 +72,10 @@ export function ReplyComposer({
       submitLabel="Reply"
       postedNotice="Reply published."
       inputRef={inputRef}
+      inputDescribedBy={contextId}
       rows={2}
       header={
-        <p className={styles.context} data-testid="reply-composer-context">
+        <p id={contextId} className={styles.context} data-testid="reply-composer-context">
           {`Replying to @${parentHandle}`}
         </p>
       }

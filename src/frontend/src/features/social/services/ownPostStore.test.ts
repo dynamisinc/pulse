@@ -10,7 +10,9 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CreatedPostView, ParticipantPostView, StaffPostView } from '../types/post'
+import { narrowMedia } from './narrowMedia'
 import { OWN_POST_CAP, narrowCreatedPost, ownPostStore } from './ownPostStore'
+import { narrowMedia as narrowMediaFromPostService } from './postService'
 
 function view(id: string): ParticipantPostView {
   return {
@@ -77,6 +79,38 @@ describe('ownPostStore', () => {
     expect(all).toHaveLength(OWN_POST_CAP)
     expect(all[0]?.id).toBe(`p${OWN_POST_CAP + 4}`)
     expect(ownPostStore.has('p0')).toBe(false)
+  })
+})
+
+describe('ownPostStore.reset — own posts die with the session (M-4)', () => {
+  it('forgets every own post and wakes subscribers once', () => {
+    ownPostStore.add(view('a'))
+    ownPostStore.add(view('b'))
+    const listener = vi.fn()
+    ownPostStore.subscribe(listener)
+
+    ownPostStore.reset()
+
+    expect(ownPostStore.getAll()).toEqual([])
+    expect(ownPostStore.has('a')).toBe(false)
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps its subscribers (a mounted feed stays subscribed) and is a quiet no-op when empty', () => {
+    const listener = vi.fn()
+    ownPostStore.subscribe(listener)
+
+    ownPostStore.reset()
+    expect(listener).not.toHaveBeenCalled()
+
+    ownPostStore.add(view('c'))
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('one XC-002 media narrowing (S-1)', () => {
+  it('postService re-exports the very function ownPostStore uses', () => {
+    expect(narrowMediaFromPostService).toBe(narrowMedia)
   })
 })
 

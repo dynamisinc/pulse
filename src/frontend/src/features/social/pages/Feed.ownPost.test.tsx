@@ -33,7 +33,7 @@ import { personaIdForHandle } from '@/features/personas'
 import { toParticipantView, type Post } from '@/features/social'
 import { Composer } from '../components/Composer'
 import { ownPostStore } from '../services/ownPostStore'
-import { consumeReplyFocus, resetReplyIntentForTests } from '../services/replyIntent'
+import { consumeReplyFocus, resetReplyIntent } from '../services/replyIntent'
 import { postStore } from '../services/postStore'
 import { Feed, type FeedProps } from './Feed'
 
@@ -85,7 +85,7 @@ function rowIds(): (string | null)[] {
 
 beforeEach(() => {
   resetTelemetryBuffer()
-  resetReplyIntentForTests()
+  resetReplyIntent()
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T16:00:00.000Z') })
 })
 
@@ -252,6 +252,35 @@ describe('Feed — what an own post is NOT merged into', () => {
 
     await act(async () => {})
     expect(rowIds()).not.toContain('post-own-reply')
+  })
+
+  it('merges only posts authored by THIS session\'s persona (a leftover from another session is not shown) (M-4)', async () => {
+    renderFeed()
+    await screen.findAllByTestId('post-card')
+
+    act(() => {
+      ownPostStore.add(toParticipantView(ownPost('post-mine')))
+      ownPostStore.add(
+        toParticipantView(ownPost('post-previous-session', {
+          authorPersonaId: personaIdForHandle('FulcoEM'),
+        })),
+      )
+    })
+
+    await waitFor(() => expect(rowIds()[0]).toBe('post-mine'))
+    expect(rowIds()).not.toContain('post-previous-session')
+  })
+
+  it('forgets own posts when the session ends: the mounted feed drops the row (M-4)', async () => {
+    renderFeed()
+    await screen.findAllByTestId('post-card')
+    act(() => ownPostStore.add(toParticipantView(ownPost('post-mine'))))
+    await waitFor(() => expect(rowIds()[0]).toBe('post-mine'))
+
+    act(() => ownPostStore.reset())
+
+    await waitFor(() => expect(rowIds()).not.toContain('post-mine'))
+    expect(screen.getAllByTestId('post-card')).toHaveLength(SEEDED_COUNT)
   })
 
   it('a Following mount merges nothing of its own (your post is not "from someone you follow")', async () => {

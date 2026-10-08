@@ -8,15 +8,23 @@
  *    the participant-safe view of the created post;
  *  - a FAILED publish keeps the draft and shows an inline alert with a Retry button
  *    — the text is never silently dropped; Retry re-sends the same draft;
+ *  - Retry is offered ONLY when the failure proves nothing was created (network /
+ *    5xx / rate limit). After a server REFUSAL (400/403/409) or an unreadable 2xx
+ *    ("could not confirm" - the post may already exist, and there is no idempotency
+ *    key) there is NO Retry, the draft and the message stay, and the author can still
+ *    press Post deliberately (H-1, M-5);
  *  - while the request is in flight the form is locked (`aria-busy`, read-only text,
- *    Post disabled) so a second press or an edit cannot race the success.
+ *    Post `aria-disabled`) so a second press or an edit cannot race the success;
+ *  - keyboard focus is never lost (M-3, NFR-001): Post keeps focus while in flight
+ *    (it is aria-disabled, not disabled), Retry hands focus to Post, and a successful
+ *    publish moves focus to the text area.
  *
  * Own file: `vi.mock('@/core/config/mockData')` is module-wide (see
  * `useComposePost.live.test.ts`), and the exercise/session hooks are mocked directly.
  */
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { AxiosError } from 'axios'
+import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
@@ -55,6 +63,18 @@ const CREATED: CreatedPostView = {
   text: 'Water is back on.',
   counts: { reply: 0, repost: 0, like: 0 },
   scenarioTime: '2033-09-04T14:00:00Z',
+}
+
+/** An axios failure as the shared client raises it: with a response when the server answered. */
+function axiosFailure(status?: number): AxiosError {
+  if (status === undefined) return new AxiosError('Network Error', 'ERR_NETWORK')
+  return new AxiosError(
+    `Request failed with status code ${status}`,
+    'ERR_BAD_REQUEST',
+    undefined,
+    undefined,
+    { status } as AxiosResponse,
+  )
 }
 
 beforeEach(() => {
@@ -108,7 +128,7 @@ describe('Composer — LIVE mode', () => {
     expect(screen.getByLabelText('Post text')).toHaveValue('')
   })
 
-  it('locks the form while the request is in flight', async () => {
+  it('locks the form while the request is in flight, WITHOUT dropping keyboard focus (M-3)', async () => {
     let finish: (view: CreatedPostView) => void = () => {}
     vi.mocked(publishPost).mockReturnValue(new Promise<CreatedPostView>(resolve => {
       finish = resolve
@@ -121,12 +141,128 @@ describe('Composer — LIVE mode', () => {
 
     const form = screen.getByTestId('composer')
     await waitFor(() => expect(form).toHaveAttribute('aria-busy', 'true'))
-    expect(screen.getByRole('button', { name: 'Post' })).toBeDisabled()
+    const post = screen.getByRole('button', { name: 'Post' })
+    // aria-disabled, NOT disabled: a disabled button would drop focus to the page.
+    expect(post).toHaveAttribute('aria-disabled', 'true')
+    expect(post).not.toBeDisabled()
+    expect(post).toHaveFocus()
     expect(screen.getByLabelText('Post text')).toHaveAttribute('readonly')
     expect(screen.getByRole('button', { name: 'Add photos or video' })).toBeDisabled()
+
+    // A second press while in flight is ignored.
+    await user.click(post)
+    await user.keyboard('{Enter}')
+    expect(publishPost).toHaveBeenCalledTimes(1)
 
     finish(CREATED)
     await waitFor(() => expect(form).toHaveAttribute('aria-busy', 'false'))
     expect(screen.getByLabelText('Post text')).not.toHaveAttribute('readonly')
+  })
+
+  it('moves focus to the text area after a successful publish (M-3)', async () => {
+    const user = userEvent.setup()
+    render(<Composer />)
+
+    await user.type(screen.getByLabelText('Post text'), 'Water is back on.')
+    await user.click(screen.getByRole('button', { name: 'Post' }))
+
+    await screen.findByText('Post published.')
+    // Post is disabled again with the cleared draft; focus must not fall to <body>.
+    expect(screen.getByRole('button', { name: 'Post' })).toBeDisabled()
+    expect(screen.getByLabelText('Post text')).toHaveFocus()
+  })
+
+  it('does not steal focus a successful publish if the author moved it elsewhere', async () => {
+    let finish: (view: CreatedPostView) => void = () => {}
+    vi.mocked(publishPost).mockReturnValue(new Promise<CreatedPostView>(resolve => {
+      finish = resolve
+    }))
+    const user = userEvent.setup()
+    render(
+      <>
+        <Composer />
+        <button type="button">Elsewhere</button>
+      </>,
+    )
+    await user.type(screen.getByLabelText('Post text'), 'Slow one.')
+    await user.click(screen.getByRole('button', { name: 'Post' }))
+    await user.click(screen.getByRole('button', { name: 'Elsewhere' }))
+
+    finish(CREATED)
+
+    await screen.findByText('Post published.')
+    expect(screen.getByRole('button', { name: 'Elsewhere' })).toHaveFocus()
+  })
+})
+
+describe('Composer — what Retry may offer (H-1, M-5)', () => {
+  async function failOnce(failure: unknown) {
+    vi.mocked(publishPost).mockRejectedValueOnce(failure)
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.type(screen.getByLabelText('Post text'), 'Roads are closed.')
+    await user.click(screen.getByRole('button', { name: 'Post' }))
+    const alert = await screen.findByTestId('composer-publish-error')
+    return { user, alert }
+  }
+
+  it('a NETWORK failure offers Retry', async () => {
+    const { alert } = await failOnce(axiosFailure())
+
+    expect(within(alert).getByRole('button', { name: 'Retry' })).toBeEnabled()
+    expect(alert).toHaveTextContent(/couldn.t be sent/i)
+  })
+
+  it('a 5xx offers Retry', async () => {
+    const { alert } = await failOnce(axiosFailure(503))
+
+    expect(within(alert).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
+  it('a 2xx the client could not read says "could not confirm" and offers NO Retry (no double-post)', async () => {
+    const { user, alert } = await failOnce(new Error('publishPost: the server returned a malformed post'))
+
+    expect(alert).toHaveTextContent(/couldn.t confirm your post went out/i)
+    expect(alert).toHaveTextContent(/check the feed/i)
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    // The draft is kept, and the author may still press Post deliberately.
+    expect(screen.getByLabelText('Post text')).toHaveValue('Roads are closed.')
+    expect(screen.getByRole('button', { name: 'Post' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Post' }))
+    await waitFor(() => expect(publishPost).toHaveBeenCalledTimes(2))
+  })
+
+  it.each([400, 403, 409])('a %i refusal says it was not accepted, with NO Retry', async status => {
+    const { alert } = await failOnce(axiosFailure(status))
+
+    expect(alert).toHaveTextContent(/wasn.t accepted/i)
+    expect(alert).not.toHaveTextContent(/connection/i)
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Post text')).toHaveValue('Roads are closed.')
+  })
+
+  it('editing the draft after a refusal clears the message', async () => {
+    const { user } = await failOnce(axiosFailure(409))
+
+    await user.type(screen.getByLabelText('Post text'), '!')
+
+    expect(screen.queryByTestId('composer-publish-error')).not.toBeInTheDocument()
+  })
+
+  it('Retry hands focus to Post (its own alert goes away when the attempt starts)', async () => {
+    const { user, alert } = await failOnce(axiosFailure())
+    let finish: (view: CreatedPostView) => void = () => {}
+    vi.mocked(publishPost).mockReturnValue(new Promise<CreatedPostView>(resolve => {
+      finish = resolve
+    }))
+
+    await user.click(within(alert).getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(screen.queryByTestId('composer-publish-error')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Post' })).toHaveFocus()
+
+    finish(CREATED)
+    await screen.findByText('Post published.')
+    expect(screen.getByLabelText('Post text')).toHaveFocus()
   })
 })

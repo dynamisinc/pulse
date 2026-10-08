@@ -31,7 +31,11 @@
  * `toParticipantView`.
  *
  * ISOLATION (COR-001): no `exerciseId` anywhere; the entries are the author's own
- * session's posts, in memory, in this tab, and die with the page.
+ * session's posts, in memory, in this tab. They also die with the SESSION:
+ * `core/auth/endSession` calls {@link ownPostStore.reset}, so the next sign-in on the
+ * same tab never inherits them, and `<Feed>` additionally merges only posts authored
+ * by the session's own persona (defence in depth). This module therefore stays a
+ * LEAF (type imports + `./narrowMedia` only): `core/auth` imports it.
  *
  * SHAPE. `getAll()` returns a REFERENTIALLY-STABLE snapshot (the array identity
  * only changes on `add`/`resetForTests`), newest-registered first, so a
@@ -44,29 +48,12 @@ import type {
   ParticipantPostView,
   PostInReplyTo,
   PostLinkPreview,
-  PostMedia,
   PostViewerState,
 } from '../types/post'
+import { narrowMedia } from './narrowMedia'
 
 /** How many own posts one session keeps (a session posts a handful, never hundreds). */
 export const OWN_POST_CAP = 50
-
-/**
- * Rebuilds one media item from its contract keys only; an optional member that is
- * `null` on the wire is treated as absent (mirrors `postService.narrowMedia`).
- */
-function narrowMedia(item: PostMedia): PostMedia {
-  return {
-    id: item.id,
-    kind: item.kind,
-    url: item.url,
-    alt: item.alt,
-    ...(item.posterUrl != null ? { posterUrl: item.posterUrl } : {}),
-    ...(item.width != null ? { width: item.width } : {}),
-    ...(item.height != null ? { height: item.height } : {}),
-    ...(item.durationSec != null ? { durationSec: item.durationSec } : {}),
-  }
-}
 
 function narrowInReplyTo(value: PostInReplyTo): PostInReplyTo {
   return { postId: value.postId, authorHandle: value.authorHandle }
@@ -150,6 +137,18 @@ function subscribe(listener: () => void): () => void {
   }
 }
 
+/**
+ * Forgets every own post and tells subscribers (a mounted feed drops the rows). The
+ * sign-out path (`core/auth/endSession`) calls this so a post made in one session is
+ * never merged into the next session's feed on the same tab. Listeners stay: they are
+ * the mounted components', which unmount themselves.
+ */
+function reset(): void {
+  if (ownPosts.length === 0) return
+  ownPosts = []
+  notify()
+}
+
 /** Test-only: forgets every own post and drops all listeners. */
 function resetForTests(): void {
   ownPosts = []
@@ -162,5 +161,6 @@ export const ownPostStore = {
   has,
   add,
   subscribe,
+  reset,
   resetForTests,
 }

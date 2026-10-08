@@ -15,7 +15,10 @@
  *    nothing (no scroll), renders its time in SCENARIO time, and a reply to a
  *    different post / a top-level post does not append;
  *  - the reply button on the focused card focuses the composer; on any other card it
- *    opens that post's thread with its composer focused (`onOpenThread` + intent).
+ *    opens that post's thread with its composer focused (`onOpenThread` + intent);
+ *  - a11y (NFR-001): the polite "N new replies" region exists from the first (loading)
+ *    render and is the same node afterwards; the reply text area is described by the
+ *    "Replying to @handle" line; after a reply is posted focus is in the text area.
  *
  * Drives the real default arrival source (`postStore` under mock data) so the whole
  * append -> narrow -> subscribe -> overlay path is exercised.
@@ -26,6 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
+import { api } from '@/core/services/api'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { personaIdForHandle } from '@/features/personas'
 import {
@@ -36,7 +40,7 @@ import type { Post } from '@/features/social'
 import { DEMO_IDS } from '../services/mockFixtures'
 import { postStore } from '../services/postStore'
 import { ownPostStore } from '../services/ownPostStore'
-import { consumeReplyFocus, resetReplyIntentForTests } from '../services/replyIntent'
+import { consumeReplyFocus, resetReplyIntent } from '../services/replyIntent'
 import { ThreadView } from './ThreadView'
 
 const FOCUS = 'post-seed-mvega-question'
@@ -93,7 +97,7 @@ function focusedCard(): HTMLElement {
 
 beforeEach(() => {
   resetTelemetryBuffer()
-  resetReplyIntentForTests()
+  resetReplyIntent()
 })
 
 afterEach(() => {
@@ -171,6 +175,56 @@ describe('ThreadView — the reply composer (D1-006, SOC-011)', () => {
     expect(screen.getByTestId('thread-live-region')).toHaveTextContent('')
     // The composer cleared.
     expect(screen.getByLabelText('Reply text')).toHaveValue('')
+  })
+})
+
+describe('ThreadView — accessibility of the reply box (NFR-001)', () => {
+  it('describes the reply text area by the "Replying to @handle" line (L-4)', async () => {
+    await renderLoaded()
+
+    const input = screen.getByLabelText('Reply text')
+    expect(input).toHaveAccessibleDescription('Replying to @mvega_fh')
+  })
+
+  it('mounts the polite live region from the FIRST render and keeps the same node (L-1)', async () => {
+    // Hold the thread GET so the loading state is observable deterministically.
+    const realGet = api.get.bind(api)
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => {
+      release = resolve
+    })
+    vi.spyOn(api, 'get').mockImplementation(async (url: string, config?: Parameters<typeof api.get>[1]) => {
+      if (url.startsWith('/threads/')) await held
+      return realGet(url, config)
+    })
+    try {
+      renderThread()
+      // Loading: the region is already there, empty, polite.
+      const loadingRegion = await screen.findByTestId('thread-live-region')
+      expect(screen.getByText('Loading thread…')).toBeInTheDocument()
+      expect(loadingRegion).toHaveAttribute('aria-live', 'polite')
+      expect(loadingRegion).toHaveTextContent('')
+
+      release()
+      await screen.findByTestId('thread-focused')
+
+      // Loaded: the SAME element - so a later change is announced, not a fresh mount.
+      expect(screen.getByTestId('thread-live-region')).toBe(loadingRegion)
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('moves focus to the reply text area after a reply is posted (M-3)', async () => {
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.type(screen.getByLabelText('Reply text'), 'We are looking into it.')
+    await user.click(screen.getByRole('button', { name: 'Reply' }))
+
+    await screen.findByText('Reply published.')
+    expect(screen.getByRole('button', { name: 'Reply' })).toBeDisabled()
+    expect(screen.getByLabelText('Reply text')).toHaveFocus()
   })
 })
 

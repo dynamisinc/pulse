@@ -339,6 +339,66 @@ describe('useThread — appendReply (the viewer\'s own reply) and its echo', () 
   })
 })
 
+describe('useThread — appendReply is bound to the thread focused NOW (M-1)', () => {
+  it('ignores a reply whose parent is not the current focus, by inReplyTo', async () => {
+    const source = new FakeSource()
+    const { result } = renderHook(
+      ({ id }: { id: string }) => useThread(id, { live: true, source }),
+      { initialProps: { id: FOCUS } },
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    const fetched = result.current.replies
+
+    // A reply that belongs to ANOTHER thread (a late 201 from before navigation).
+    act(() => result.current.appendReply(replyView('elsewhere', {
+      inReplyTo: { postId: 'post-seed-fw-advisory', authorHandle: 'FairhavenWater' },
+    })))
+
+    expect(result.current.replies).toBe(fetched)
+  })
+
+  it('ignores a reply whose NAMED parent is not the current focus, even if inReplyTo says otherwise', async () => {
+    const source = new FakeSource()
+    const { result } = renderHook(() => useThread(FOCUS, { live: true, source }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    const fetched = result.current.replies
+
+    act(() => result.current.appendReply(replyView('named-elsewhere'), 'post-seed-fw-advisory'))
+
+    expect(result.current.replies).toBe(fetched)
+  })
+
+  it('a stable appendReply captured before navigation does not append into the NEW thread', async () => {
+    const source = new FakeSource()
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) => useThread(id, { live: true, source }),
+      { initialProps: { id: FOCUS } },
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    const appendInA = result.current.appendReply
+
+    rerender({ id: 'post-seed-fw-advisory' })
+    await waitFor(() => expect(result.current.focused?.id).toBe('post-seed-fw-advisory'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    const before = result.current.replies
+
+    act(() => appendInA(replyView('late-from-a'), FOCUS))
+
+    expect(result.current.replies).toBe(before)
+    expect(result.current.replies.map(r => r.id)).not.toContain('late-from-a')
+  })
+
+  it('appends when the named parent IS the current focus', async () => {
+    const source = new FakeSource()
+    const { result } = renderHook(() => useThread(FOCUS, { live: true, source }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    act(() => result.current.appendReply(replyView('mine'), FOCUS))
+
+    expect(result.current.replies.map(r => r.id)).toContain('mine')
+  })
+})
+
 describe('useThread — XC-002', () => {
   it('a live reply carries no provenance keys', async () => {
     const source = new FakeSource()

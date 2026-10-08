@@ -20,6 +20,7 @@
 import type { ReactNode } from 'react'
 import { createElement } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
@@ -28,6 +29,11 @@ import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetr
 import type { ParticipantPostView } from '@/features/social'
 import { fakeFile } from '@/test/fakeMediaUploader'
 import {
+  classifyPublishFailure,
+  publishFailedMessage,
+  publishRateLimitedMessage,
+  publishRefusedMessage,
+  publishUnconfirmedMessage,
   MEDIA_MIXED_MESSAGE,
   MEDIA_TOO_MANY_IMAGES_MESSAGE,
   MEDIA_TOO_MANY_VIDEOS_MESSAGE,
@@ -210,6 +216,62 @@ describe('effectiveAlt / toCreatePostMedia — alt is mandatory after sanitizati
 
   it('is an empty list for an empty tray', () => {
     expect(toCreatePostMedia([])).toEqual([])
+  })
+})
+
+/** An axios failure as the shared client raises it: with a response when the server answered. */
+function axiosFailure(status?: number): AxiosError {
+  if (status === undefined) return new AxiosError('Network Error', 'ERR_NETWORK')
+  return new AxiosError(
+    `Request failed with status code ${status}`,
+    'ERR_BAD_REQUEST',
+    undefined,
+    undefined,
+    { status, data: 'server text that must never be shown' } as AxiosResponse,
+  )
+}
+
+describe('classifyPublishFailure — what a failure proves decides what the UI may offer (H-1, M-5)', () => {
+  it('no response (network down / timeout) and 5xx: the request did not land -> "failed" (Retry is safe)', () => {
+    for (const status of [undefined, 500, 502, 503]) {
+      expect(classifyPublishFailure(axiosFailure(status), false)).toEqual({
+        kind: 'failed',
+        message: publishFailedMessage(false),
+      })
+    }
+  })
+
+  it('429 and 408 are also "failed" (nothing was created), with their own wording for 429', () => {
+    expect(classifyPublishFailure(axiosFailure(429), false)).toEqual({
+      kind: 'failed',
+      message: publishRateLimitedMessage(false),
+    })
+    expect(classifyPublishFailure(axiosFailure(408), false).kind).toBe('failed')
+  })
+
+  it('400 / 403 / 409 (and any other 4xx): the server refused -> "refused" (no Retry)', () => {
+    for (const status of [400, 401, 403, 404, 409, 422]) {
+      expect(classifyPublishFailure(axiosFailure(status), false)).toEqual({
+        kind: 'refused',
+        message: publishRefusedMessage(false),
+      })
+    }
+  })
+
+  it('a non-axios error (a 2xx body that could not be read): the post may exist -> "unconfirmed" (no Retry)', () => {
+    expect(classifyPublishFailure(new Error('publishPost: malformed post'), false)).toEqual({
+      kind: 'unconfirmed',
+      message: publishUnconfirmedMessage(false),
+    })
+    expect(classifyPublishFailure('boom', true).kind).toBe('unconfirmed')
+  })
+
+  it('never shows the server\'s own text, and says "reply" for a reply', () => {
+    const refused = classifyPublishFailure(axiosFailure(409), true)
+
+    expect(refused.message).not.toContain('server text')
+    expect(refused.message).toMatch(/reply/i)
+    expect(refused.message).not.toMatch(/paused|exercise|lifecycle|StartEx|read-only/i)
   })
 })
 

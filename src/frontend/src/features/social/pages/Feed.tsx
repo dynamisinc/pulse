@@ -379,16 +379,22 @@ export function Feed({
 
   // The viewer's own TOP-LEVEL posts as renderable views (a reply is not a feed
   // item). Not merged under Following - your post is not "from someone you follow".
+  // Only posts authored by THIS session's persona are merged: `ownPostStore` is also
+  // reset on sign-out (`core/auth/endSession`), and this is the second line of defence
+  // if a post made as another persona ever survived into this session.
   // Memoized so the rows keep their identity (NFR-002/SOC-071).
+  const viewerPersonaId = session.personaId
   const ownViews = useMemo(
-    () => isFollowing
+    () => isFollowing || viewerPersonaId === undefined
       ? []
       : resolveLiveViews(
-        ownPosts.filter(post => post.inReplyTo == null),
+        ownPosts.filter(
+          post => post.inReplyTo == null && post.authorPersonaId === viewerPersonaId,
+        ),
         personaById,
         new Set(posts.map(post => post.id)),
       ),
-    [isFollowing, ownPosts, personaById, posts],
+    [isFollowing, viewerPersonaId, ownPosts, personaById, posts],
   )
 
   // Ids already on screen (own + loaded-live + frozen baseline) — a loaded buffered

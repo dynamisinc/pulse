@@ -46,10 +46,18 @@
  *   (also in LIVE mode — it used to be mock-only) and the draft clears.
  *
  * A FAILED PUBLISH KEEPS THE DRAFT. `publishPost` rejections are no longer
- * swallowed: the text and the tray stay exactly as they were, `publishError` carries
- * an in-fiction message, and calling `publish()` again is the Retry. A 2xx body the
- * client could not parse (a plain `Error`, not an axios failure) is worded
- * differently — the post may already exist — so the author checks before retrying.
+ * swallowed: the text and the tray stay exactly as they were and `publishError`
+ * carries an in-fiction message. What the UI may OFFER depends on what the failure
+ * proves (`publishErrorKind`, from {@link classifyPublishFailure}):
+ *   - 'failed'      the request did not land (network down, 5xx, 408/429): safe to
+ *                   offer RETRY — `publish()` again re-sends the same draft;
+ *   - 'refused'     the server answered 4xx (400/403/409: lifecycle gate, read-only,
+ *                   media not yours, …): the same draft would be refused again, so NO
+ *                   Retry; the message says so and editing the draft clears it;
+ *   - 'unconfirmed' the server answered 2xx but the body could not be read (a plain
+ *                   `Error`, not an axios failure): the post may ALREADY exist and
+ *                   there is no idempotency key, so a Retry could double-post — NO
+ *                   Retry; the author checks the feed (and may press Post deliberately).
  * While a publish is in flight the form locks (`isPublishing`), so nothing typed
  * after pressing Post can be cleared by the success.
  *
@@ -121,15 +129,64 @@ export const MEDIA_MIXED_MESSAGE = 'Attach up to 4 photos or 1 video, not both.'
 export const MEDIA_TOO_MANY_IMAGES_MESSAGE = `You can attach up to ${MAX_IMAGES} photos.`
 export const MEDIA_TOO_MANY_VIDEOS_MESSAGE = 'You can attach only 1 video.'
 
-/** Shown with Retry when the request itself failed (network down, refused, 5xx). */
+/** Shown WITH Retry when the request did not land (network down, 5xx). */
 export function publishFailedMessage(isReply: boolean): string {
   return `Your ${isReply ? 'reply' : 'post'} couldn't be sent. Check your connection and try again.`
 }
 
-/** Shown with Retry when the server answered 2xx but the body could not be read. */
+/** Shown WITH Retry when the server asked the client to slow down (429/408). */
+export function publishRateLimitedMessage(isReply: boolean): string {
+  return `Too many ${isReply ? 'replies' : 'posts'} right now. Wait a moment, then try again.`
+}
+
+/**
+ * Shown WITHOUT Retry when the server refused the request (4xx): a Retry of the same
+ * draft would be refused again. Deliberately says nothing about why — the cause can
+ * be exercise control (not open yet, paused), read-only, or an attachment that is not
+ * yours — and none of that belongs in the fiction.
+ */
+export function publishRefusedMessage(isReply: boolean): string {
+  return `Your ${isReply ? 'reply' : 'post'} wasn't accepted right now. ` +
+    'Change it if you like, then try posting again.'
+}
+
+/**
+ * Shown WITHOUT Retry when the server answered 2xx but the body could not be read:
+ * the post may already exist, so the author checks before posting again.
+ */
 export function publishUnconfirmedMessage(isReply: boolean): string {
   return `We couldn't confirm your ${isReply ? 'reply' : 'post'} went out. ` +
     'Check the feed before you try again.'
+}
+
+/** What a failed publish proves, hence what the UI may offer (see the module header). */
+export type PublishErrorKind = 'failed' | 'refused' | 'unconfirmed'
+
+/** A classified publish failure: the kind and its in-fiction message. */
+export interface PublishFailure {
+  readonly kind: PublishErrorKind
+  readonly message: string
+}
+
+/**
+ * Classifies a `publishPost` rejection. An axios failure with no response (network,
+ * timeout) or a 5xx/408/429 response did not create a post -> 'failed' (Retry is
+ * safe). Any other 4xx -> 'refused' (no Retry). Anything that is NOT an axios failure
+ * - `publishPost` throws a plain `Error` for a 2xx body it could not parse - ->
+ * 'unconfirmed' (no Retry: the post may exist).
+ */
+export function classifyPublishFailure(failure: unknown, isReply: boolean): PublishFailure {
+  if (!isAxiosError(failure)) {
+    return { kind: 'unconfirmed', message: publishUnconfirmedMessage(isReply) }
+  }
+  const status = failure.response?.status
+  if (status === 429 || status === 408) {
+    return { kind: 'failed', message: publishRateLimitedMessage(isReply) }
+  }
+  if (status !== undefined && status >= 400 && status < 500) {
+    return { kind: 'refused', message: publishRefusedMessage(isReply) }
+  }
+  return { kind: 'failed', message: publishFailedMessage(isReply) }
 }
 
 /**
@@ -288,8 +345,14 @@ export interface UseComposePostResult {
   readonly isUploading: boolean
   /** True while a publish request is in flight (the form is locked). */
   readonly isPublishing: boolean
-  /** In-fiction reason the last publish failed, or `undefined`. `publish()` again = Retry. */
+  /** In-fiction reason the last publish failed, or `undefined`. */
   readonly publishError: string | undefined
+  /**
+   * What the last failure proves (see the module header): only 'failed' may offer
+   * Retry (`publish()` again); 'refused' and 'unconfirmed' must not, or a Retry could
+   * be refused again / double-post. `undefined` when there is no error.
+   */
+  readonly publishErrorKind: PublishErrorKind | undefined
   /** True from a successful publish until the next edit (drives the SR "posted" notice). */
   readonly posted: boolean
   readonly hashtags: readonly string[]
@@ -333,7 +396,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
   const [items, setItems] = useState<readonly ComposerAttachment[]>([])
   const [mediaError, setMediaError] = useState<string | undefined>(undefined)
   const [isPublishing, setIsPublishing] = useState(false)
-  const [publishError, setPublishError] = useState<string | undefined>(undefined)
+  const [publishFailure, setPublishFailure] = useState<PublishFailure | undefined>(undefined)
   const [posted, setPosted] = useState(false)
 
   // The tray is mirrored in a ref so a batch pick and the async upload callbacks
@@ -405,7 +468,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
 
   /** Any edit to the draft clears the last outcome (failure banner, "posted" notice). */
   const noteEdit = useCallback(() => {
-    setPublishError(undefined)
+    setPublishFailure(undefined)
     setPosted(false)
   }, [])
 
@@ -508,7 +571,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
       setTextState('')
       commit([])
       setMediaError(undefined)
-      setPublishError(undefined)
+      setPublishFailure(undefined)
       setPosted(true)
     }
 
@@ -525,15 +588,16 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
         const stored = postStore.getPosts().find(candidate => candidate.id === post.id) ?? post
         finish(toParticipantView(stored))
       } catch {
-        // Only a mock-mode media rejection (unknown id / no alt) can throw here.
-        setPublishError(publishFailedMessage(isReply))
+        // Only a mock-mode media rejection (unknown id / no alt) can throw here; the
+        // same draft would throw again, so it is a refusal, not a Retry.
+        setPublishFailure({ kind: 'refused', message: publishRefusedMessage(isReply) })
       }
       return
     }
 
     publishingRef.current = true
     setIsPublishing(true)
-    setPublishError(undefined)
+    setPublishFailure(undefined)
     publishPost(input)
       .then(created => {
         finish(narrowCreatedPost(created))
@@ -541,11 +605,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
       .catch((failure: unknown) => {
         if (!mountedRef.current) return
         // The draft is untouched: this is what makes Retry safe and lossless.
-        setPublishError(
-          isAxiosError(failure)
-            ? publishFailedMessage(isReply)
-            : publishUnconfirmedMessage(isReply),
-        )
+        setPublishFailure(classifyPublishFailure(failure, isReply))
       })
       .finally(() => {
         publishingRef.current = false
@@ -574,7 +634,8 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     mediaError,
     isUploading,
     isPublishing,
-    publishError,
+    publishError: publishFailure?.message,
+    publishErrorKind: publishFailure?.kind,
     posted,
     hashtags,
     mentions,

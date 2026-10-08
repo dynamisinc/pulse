@@ -15,7 +15,10 @@
  *    untouched; the old "Inline video is coming soon" message is GONE;
  *  - failures are words + icon in an alert; the failed row must be removed;
  *  - publishing sends the described media and the post appears; a stored `<script>` /
- *    `<img onerror>` typed into a description stays inert text.
+ *    `<img onerror>` typed into a description stays inert text;
+ *  - keyboard (NFR-001): Enter in a description field does NOT submit the form, and
+ *    removing / cancelling a row moves focus to a neighbouring row's control, or the
+ *    attach button once the tray is empty.
  *
  * jsdom has no `URL.createObjectURL`, so thumbnails are asserted with a stub that is
  * installed for the one test that needs it.
@@ -380,5 +383,87 @@ describe('Composer attach — publishing media (mock mode)', () => {
     expect((window as unknown as { __altXss2?: number }).__altXss2).toBeUndefined()
     // The field itself never rendered the markup as elements.
     expect(document.querySelector('img[onerror]')).toBeNull()
+  })
+})
+
+describe('Composer attach — keyboard (NFR-001)', () => {
+  it('Enter in a description field does not submit the form', async () => {
+    const onPosted = vi.fn<(view: ParticipantPostView) => void>()
+    const user = userEvent.setup()
+    await renderComposer(onPosted)
+    await user.type(screen.getByLabelText('Post text'), 'Ready to go.')
+    pick(png('plant.png'))
+    uploader.byName('plant.png').resolve()
+    const alt = await screen.findByLabelText('Describe photo (required)')
+
+    // A complete, publishable draft: Enter in the description must still not post it.
+    await user.type(alt, 'The plant entrance{Enter}')
+
+    expect(screen.getByRole('button', { name: 'Post' })).toBeEnabled()
+    expect(onPosted).not.toHaveBeenCalled()
+    expect(alt).toHaveValue('The plant entrance')
+    expect(screen.getByTestId('composer-media')).toBeInTheDocument()
+  })
+
+  it('removing a row moves focus to the NEXT row\'s control', async () => {
+    const user = userEvent.setup()
+    await renderComposer()
+    pick(png('a.png'), png('b.png'), png('c.png'))
+    for (const name of ['a.png', 'b.png', 'c.png']) uploader.byName(name).resolve()
+    await waitFor(() => expect(screen.getAllByText('Uploaded')).toHaveLength(3))
+
+    await user.click(screen.getByRole('button', { name: 'Remove a.png' }))
+
+    expect(screen.getByRole('button', { name: 'Remove b.png' })).toHaveFocus()
+  })
+
+  it('removing the LAST row moves focus to the previous row\'s control', async () => {
+    const user = userEvent.setup()
+    await renderComposer()
+    pick(png('a.png'), png('b.png'))
+    uploader.byName('a.png').resolve()
+    uploader.byName('b.png').resolve()
+    await waitFor(() => expect(screen.getAllByText('Uploaded')).toHaveLength(2))
+
+    await user.click(screen.getByRole('button', { name: 'Remove b.png' }))
+
+    expect(screen.getByRole('button', { name: 'Remove a.png' })).toHaveFocus()
+  })
+
+  it('removing the only row moves focus to the attach button', async () => {
+    const user = userEvent.setup()
+    await renderComposer()
+    pick(png('a.png'))
+    uploader.byName('a.png').resolve()
+    await screen.findByText('Uploaded')
+
+    await user.click(screen.getByRole('button', { name: 'Remove a.png' }))
+
+    expect(screen.queryByTestId('composer-media')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add photos or video' })).toHaveFocus()
+  })
+
+  it('cancelling an upload in flight also re-homes focus', async () => {
+    const user = userEvent.setup()
+    await renderComposer()
+    pick(png('a.png'))
+    await screen.findByTestId('composer-attachment')
+
+    await user.click(screen.getByRole('button', { name: 'Cancel upload of a.png' }))
+
+    expect(screen.getByRole('button', { name: 'Add photos or video' })).toHaveFocus()
+  })
+
+  it('does not move focus when a row changes for any other reason (upload completes)', async () => {
+    const user = userEvent.setup()
+    await renderComposer()
+    pick(png('a.png'))
+    const alt = await screen.findByLabelText('Describe photo (required)')
+    await user.click(alt)
+
+    uploader.byName('a.png').resolve()
+    await screen.findByText('Uploaded')
+
+    expect(alt).toHaveFocus()
   })
 })

@@ -28,13 +28,28 @@
  * rules (type, size, mixed image + video, too many) is announced by the form as an
  * alert; "MP4 (H.264)" rides in the unsupported-type message.
  *
+ * KEYBOARD (NFR-001): Enter inside a description field does NOT submit the form (it
+ * would post a half-described draft - or nothing - from a text box that looks like a
+ * label); removing or cancelling a row moves focus to the next row's control (the
+ * previous one at the end), or to the attach button once the tray is empty, so focus
+ * never falls to the page.
+ *
  * A11Y: every control is a real `<button>`/`<input>` with a label; the thumbnails
  * are decorative (`alt=""`, `aria-hidden` video) because the description field
  * next to each IS the text alternative being authored; status is words + icons,
  * never colour alone.
  */
 
-import { useEffect, useId, useRef, useState, type ChangeEvent } from 'react'
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type Ref,
+  type RefObject,
+} from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faCheck,
@@ -83,12 +98,14 @@ function usePreviewUrl(file: File): string | undefined {
 export interface AttachButtonProps {
   /** Receives the files the author picked (the hook validates + uploads them). */
   readonly onPick: (files: File[]) => void
+  /** A ref to the button, so the tray can hand it focus when its last row goes. */
+  readonly buttonRef?: Ref<HTMLButtonElement>
   /** Locks the button (a publish is in flight). */
   readonly disabled?: boolean
 }
 
 /** The toolbar's "Add photos or video" button and its hidden file input. */
-export function AttachButton({ onPick, disabled = false }: AttachButtonProps) {
+export function AttachButton({ onPick, buttonRef, disabled = false }: AttachButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -101,6 +118,7 @@ export function AttachButton({ onPick, disabled = false }: AttachButtonProps) {
   return (
     <>
       <button
+        ref={buttonRef}
         type="button"
         className={styles.attachButton}
         onClick={() => inputRef.current?.click()}
@@ -131,6 +149,8 @@ export interface ComposerMediaTrayProps {
   readonly onRemove: (key: string) => void
   /** Locks every control (a publish is in flight). */
   readonly disabled?: boolean
+  /** Where focus goes when the LAST row is removed (the attach button). */
+  readonly fallbackFocusRef?: RefObject<HTMLButtonElement | null>
 }
 
 /** The attach tray; renders nothing when empty. */
@@ -140,11 +160,37 @@ export function ComposerMediaTray({
   onCancel,
   onRemove,
   disabled = false,
+  fallbackFocusRef,
 }: ComposerMediaTrayProps) {
+  const listRef = useRef<HTMLUListElement>(null)
+  // The index of the row the author just removed/cancelled, until focus is re-homed.
+  const removedIndexRef = useRef<number | null>(null)
+
+  // A removed row takes its focused button with it: put focus on the row now at the
+  // same index (the next one; the previous at the end), or on the fallback when the
+  // tray is empty. Runs only after a remove/cancel the AUTHOR made.
+  useEffect(() => {
+    const removed = removedIndexRef.current
+    if (removed === null) return
+    removedIndexRef.current = null
+    const buttons = listRef.current?.querySelectorAll<HTMLButtonElement>(
+      'button[data-attachment-action]',
+    )
+    const target = buttons !== undefined && buttons.length > 0
+      ? buttons[Math.min(removed, buttons.length - 1)]
+      : fallbackFocusRef?.current
+    target?.focus()
+  }, [attachments, fallbackFocusRef])
+
   if (attachments.length === 0) return null
 
   return (
-    <ul className={styles.mediaList} data-testid="composer-media" aria-label="Attachments">
+    <ul
+      ref={listRef}
+      className={styles.mediaList}
+      data-testid="composer-media"
+      aria-label="Attachments"
+    >
       {attachments.map((item, index) => (
         <AttachmentRow
           key={item.key}
@@ -153,12 +199,23 @@ export function ComposerMediaTray({
           count={attachments.length}
           disabled={disabled}
           onAltChange={onAltChange}
-          onCancel={onCancel}
-          onRemove={onRemove}
+          onCancel={key => {
+            removedIndexRef.current = index
+            onCancel(key)
+          }}
+          onRemove={key => {
+            removedIndexRef.current = index
+            onRemove(key)
+          }}
         />
       ))}
     </ul>
   )
+}
+
+/** Enter in a single-line description must not implicitly submit the compose form. */
+function preventEnterSubmit(event: KeyboardEvent<HTMLInputElement>): void {
+  if (event.key === 'Enter') event.preventDefault()
 }
 
 interface AttachmentRowProps {
@@ -237,6 +294,7 @@ function AttachmentRow({
           aria-describedby={statusId}
           readOnly={disabled}
           onChange={event => onAltChange(item.key, event.target.value)}
+          onKeyDown={preventEnterSubmit}
           onBlur={() => setTouched(true)}
         />
 
@@ -274,6 +332,7 @@ function AttachmentRow({
       <button
         type="button"
         className={styles.remove}
+        data-attachment-action={uploading ? 'cancel' : 'remove'}
         disabled={disabled}
         aria-label={
           uploading ? `Cancel upload of ${item.file.name}` : `Remove ${item.file.name}`

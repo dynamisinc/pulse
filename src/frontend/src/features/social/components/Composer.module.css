@@ -244,7 +244,8 @@
   outline-offset: 2px;
 }
 
-.postButton:disabled {
+.postButton:disabled,
+.postButton[aria-disabled='true'] {
   opacity: .5;
   cursor: not-allowed;
 }

@@ -72,7 +72,7 @@
  * a reload is the recovery path. Not in this story's scope.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
@@ -135,8 +135,14 @@ export interface UseThreadResult {
    * bumps the focused post's reply count — once. A no-op if that reply (by id) is
    * already in the thread, so the realtime echo of it, arriving before or after,
    * can never duplicate it.
+   *
+   * It is also a no-op unless the reply belongs to the thread that is focused NOW:
+   * a 201 can land after the reader has moved on to another thread, and appending it
+   * there would show a reply under the wrong post. The parent is `parentPostId` when
+   * the caller names it (the composer knows which post it replied to), else the
+   * reply's own `inReplyTo.postId`; with neither, it is appended.
    */
-  readonly appendReply: (reply: ParticipantPostView) => void
+  readonly appendReply: (reply: ParticipantPostView, parentPostId?: string) => void
 }
 
 /** Options for {@link useThread}. */
@@ -474,7 +480,10 @@ export function useThread(focusedPostId: string, options: UseThreadOptions = {})
     const unsubscribe = source.subscribe(post => {
       if (post.inReplyTo?.postId !== focusedPostId) return
       // The viewer's own reply is appended (silently) by `appendReply`; if its
-      // echo wins that race it is still not "new" to them.
+      // echo wins that race it is still not "new" to them. (The test is the viewer's
+      // PERSONA, so a reply by someone else operating the same shared org persona
+      // from another session is appended but not announced either - a deliberate,
+      // accepted simplification: it still appears, only the announcement is skipped.)
       addLiveReply(post, post.authorPersonaId !== viewerPersonaId)
     })
     void source.start().catch(() => {})
@@ -484,8 +493,19 @@ export function useThread(focusedPostId: string, options: UseThreadOptions = {})
     }
   }, [live, source, focusedPostId, viewerPersonaId, addLiveReply])
 
+  // The thread focused RIGHT NOW, readable from a callback that outlives a render
+  // (`appendReply` is called from a publish that can resolve after navigation).
+  const focusedPostIdRef = useRef(focusedPostId)
+  useEffect(() => {
+    focusedPostIdRef.current = focusedPostId
+  }, [focusedPostId])
+
   const appendReply = useCallback(
-    (reply: ParticipantPostView) => addLiveReply(reply, false),
+    (reply: ParticipantPostView, parentPostId?: string) => {
+      const parent = parentPostId ?? reply.inReplyTo?.postId
+      if (parent !== undefined && parent !== focusedPostIdRef.current) return
+      addLiveReply(reply, false)
+    },
     [addLiveReply],
   )
 

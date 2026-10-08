@@ -188,14 +188,27 @@ export function ThreadView({
   const focusComposer = useCallback(() => {
     composerInputRef.current?.focus()
   }, [])
-  // Ready = loaded FOR THIS post: when the host re-centers the view on another post
-  // without a remount, the previous thread is briefly still in state.
-  const threadReady = !loading && !error && focused?.id === focusedPostId
+
+  // The reply intent is spent only when it can be honoured. "Loaded" is not enough:
+  // the composer needs the focused author's persona too (`usePersonas` is a separate
+  // fetch that can land after the thread GET), so wait until the composer is actually
+  // mounted. A thread that FAILED to load never will, so the request is dropped then
+  // (it must not linger and fire on a later visit). Where no composer will ever
+  // exist (read-only / persona-less) it is consumed and ignored.
+  const loadedId = focused?.id
+  const loadedAuthorId = focused?.authorPersonaId
+  const composerMountable = loadedAuthorId !== undefined && personaMap.has(loadedAuthorId)
   useEffect(() => {
-    if (!threadReady) return
-    // Always consume (even with no composer to focus) so a stale request never lingers.
+    if (loading) return
+    if (error || loadedId === undefined) {
+      consumeReplyFocus(focusedPostId)
+      return
+    }
+    // Still holding the PREVIOUS thread (the host re-centered without a remount).
+    if (loadedId !== focusedPostId) return
+    if (canReply && !composerMountable) return
     if (consumeReplyFocus(focusedPostId) && canReply) composerInputRef.current?.focus()
-  }, [threadReady, focusedPostId, canReply])
+  }, [loading, error, loadedId, focusedPostId, canReply, composerMountable])
 
   // Reply on ANOTHER post's card: open that post's thread to reply there.
   const openThreadToReply = useCallback((postId: string) => {
@@ -225,9 +238,26 @@ export function ThreadView({
     })
   }, [focusedPostId, exerciseId, timeZone, session.accountId])
 
+  // The polite "N new replies" region is the FIRST child of the one <section> in every
+  // state, so it is the same DOM node from the first render (loading included) and a
+  // later change is announced. Nothing below depends on its position.
+  const liveRegion = (
+    <p
+      className={styles.srOnly}
+      role="status"
+      aria-live="polite"
+      data-testid="thread-live-region"
+    >
+      {newReplyCount === 0
+        ? ''
+        : `${newReplyCount} new ${newReplyCount === 1 ? 'reply' : 'replies'}`}
+    </p>
+  )
+
   if (loading) {
     return (
       <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
+        {liveRegion}
         <p className={styles.status}>Loading thread…</p>
       </section>
     )
@@ -236,6 +266,7 @@ export function ThreadView({
   if (error || !focused) {
     return (
       <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
+        {liveRegion}
         <p className={styles.status}>Unable to load this thread.</p>
       </section>
     )
@@ -245,6 +276,8 @@ export function ThreadView({
 
   return (
     <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
+      {liveRegion}
+
       {ancestors.map(ancestor => {
         const view = resolvePostView(ancestor, personaMap)
         return view
@@ -276,28 +309,18 @@ export function ThreadView({
 
       {canReply && focusedView && (
         <div className={styles.composerWrap} data-testid="thread-reply-composer">
+          {/* Keyed by the thread: moving to another post gives a fresh composer (and
+              its draft), and a publish still in flight from the old one is bound to
+              ITS thread, so a late 201 can never append under the wrong post. */}
           <ReplyComposer
+            key={focused.id}
             parentPostId={focused.id}
             parentHandle={focusedView.author.handle}
-            onPosted={appendReply}
+            onPosted={view => appendReply(view, focused.id)}
             inputRef={composerInputRef}
           />
         </div>
       )}
-
-      {/* Polite live region for replies that arrive while the thread is open. It is
-          mounted from the first render (empty) so the later change is announced;
-          the reply itself is appended BELOW, so nothing under the reader moves. */}
-      <p
-        className={styles.srOnly}
-        role="status"
-        aria-live="polite"
-        data-testid="thread-live-region"
-      >
-        {newReplyCount === 0
-          ? ''
-          : `${newReplyCount} new ${newReplyCount === 1 ? 'reply' : 'replies'}`}
-      </p>
 
       {replies.map(reply => (
         <ThreadReply
