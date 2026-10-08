@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.44.1.10279",
-      "templateHash": "14215197543380728326"
+      "version": "0.48.1.52935",
+      "templateHash": "1514170551885006311"
     }
   },
   "parameters": {
@@ -266,7 +266,9 @@
     "generationStandardTierModel": "[variables('generationAmbientModelName')]",
     "generationLive": "[and(parameters('deployAi'), parameters('generationProviderLive'))]",
     "generationProvider": "[if(variables('generationLive'), 'AzureOpenAI', 'Fake')]",
-    "generationResidency": "[parameters('location')]"
+    "generationResidency": "[parameters('location')]",
+    "blobServiceUri": "[format('https://{0}.blob.{1}', variables('storageName'), environment().suffixes.storage)]",
+    "blobStorageContainerName": "post-media"
   },
   "resources": [
     {
@@ -286,6 +288,11 @@
           "storageAccountName": {
             "value": "[variables('storageName')]"
           },
+          "postMediaContainerName": {
+            "value": "[variables('blobStorageContainerName')]"
+          },
+          "backendPrincipalId": "[if(variables('deployWebApp'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', 'webAppDeploy'), '2025-04-01').outputs.principalId.value), createObject('value', ''))]",
+          "corsAllowedOrigins": "[if(empty(parameters('frontendUrl')), createObject('value', createArray()), createObject('value', createArray(parameters('frontendUrl'))))]",
           "tags": {
             "value": "[variables('tags')]"
           }
@@ -296,21 +303,51 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "7406684124626262867"
+              "version": "0.48.1.52935",
+              "templateHash": "2098586939775038034"
             }
           },
           "parameters": {
             "location": {
-              "type": "string"
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the storage account."
+              }
             },
             "storageAccountName": {
-              "type": "string"
+              "type": "string",
+              "metadata": {
+                "description": "Storage account name, e.g. stpulseuat (3-24 lowercase letters/digits, globally unique)."
+              }
+            },
+            "postMediaContainerName": {
+              "type": "string",
+              "defaultValue": "post-media",
+              "metadata": {
+                "description": "Private blob container for post media. main.bicep passes the same local to webapp.bicep (Azure:BlobStorage:ContainerName), so the container and the app setting cannot drift apart."
+              }
+            },
+            "backendPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Object (principal) id of the API's system-assigned managed identity (webapp.bicep output principalId). Granted Storage Blob Data Contributor at account scope. Empty -> the role assignment is skipped."
+              }
+            },
+            "corsAllowedOrigins": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Browser origins allowed to read blobs cross-origin (GET/HEAD/OPTIONS) — the SWA origin, for video range requests and future WebVTT tracks. Empty -> no CORS rule."
+              }
             },
             "tags": {
               "type": "object",
               "defaultValue": {}
             }
+          },
+          "variables": {
+            "storageBlobDataContributorRoleId": "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
           },
           "resources": [
             {
@@ -326,11 +363,59 @@
                 "minimumTlsVersion": "TLS1_2",
                 "supportsHttpsTrafficOnly": true,
                 "allowBlobPublicAccess": false,
+                "allowSharedKeyAccess": false,
                 "allowCrossTenantReplication": false,
                 "accessTier": "Hot",
                 "largeFileSharesState": "Enabled"
               },
               "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', parameters('storageAccountName'), 'default')]",
+              "properties": {
+                "deleteRetentionPolicy": {
+                  "enabled": true,
+                  "days": 7
+                },
+                "containerDeleteRetentionPolicy": {
+                  "enabled": true,
+                  "days": 7
+                },
+                "cors": {
+                  "corsRules": "[if(empty(parameters('corsAllowedOrigins')), createArray(), createArray(createObject('allowedOrigins', parameters('corsAllowedOrigins'), 'allowedMethods', createArray('GET', 'HEAD', 'OPTIONS'), 'allowedHeaders', createArray('Range'), 'exposedHeaders', createArray('Content-Length', 'Content-Range', 'Accept-Ranges'), 'maxAgeInSeconds', 3600)))]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}/{2}', parameters('storageAccountName'), 'default', parameters('postMediaContainerName'))]",
+              "properties": {
+                "publicAccess": "None"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccountName'), 'default')]"
+              ]
+            },
+            {
+              "condition": "[not(equals(parameters('backendPrincipalId'), ''))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), parameters('backendPrincipalId'), variables('storageBlobDataContributorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageBlobDataContributorRoleId'))]",
+                "principalId": "[parameters('backendPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+              ]
             }
           ],
           "outputs": {
@@ -341,14 +426,13 @@
             "name": {
               "type": "string",
               "value": "[parameters('storageAccountName')]"
-            },
-            "connectionString": {
-              "type": "string",
-              "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};EndpointSuffix={1};AccountKey={2}', parameters('storageAccountName'), environment().suffixes.storage, listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-05-01').keys[0].value)]"
             }
           }
         }
-      }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'webAppDeploy')]"
+      ]
     },
     {
       "condition": "[parameters('deployMonitoring')]",
@@ -377,8 +461,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "8176310687062720761"
+              "version": "0.48.1.52935",
+              "templateHash": "17695261568616444672"
             }
           },
           "parameters": {
@@ -455,8 +539,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "15661898861708488269"
+              "version": "0.48.1.52935",
+              "templateHash": "6661599638949542106"
             }
           },
           "parameters": {
@@ -557,8 +641,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "3833234360622930342"
+              "version": "0.48.1.52935",
+              "templateHash": "2550716366246340240"
             }
           },
           "parameters": {
@@ -714,8 +798,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "11314243978282698946"
+              "version": "0.48.1.52935",
+              "templateHash": "17729815836790064014"
             }
           },
           "parameters": {
@@ -800,8 +884,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "1776216743045022001"
+              "version": "0.48.1.52935",
+              "templateHash": "4358075538240010694"
             }
           },
           "parameters": {
@@ -911,7 +995,11 @@
           },
           "appInsightsConnectionString": "[if(parameters('deployMonitoring'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy'), '2025-04-01').outputs.connectionString.value), createObject('value', ''))]",
           "sqlConnectionString": "[if(parameters('deployDatabase'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', 'databaseDeploy'), '2025-04-01').outputs.connectionString.value), createObject('value', ''))]",
-          "storageConnectionString": "[if(parameters('deployStorage'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', 'storageDeploy'), '2025-04-01').outputs.connectionString.value), createObject('value', ''))]",
+          "blobStorageProvider": "[if(parameters('deployStorage'), createObject('value', 'Azure'), createObject('value', 'None'))]",
+          "blobServiceUri": "[if(parameters('deployStorage'), createObject('value', variables('blobServiceUri')), createObject('value', ''))]",
+          "blobStorageContainerName": {
+            "value": "[variables('blobStorageContainerName')]"
+          },
           "signalRConnectionString": "[if(parameters('deploySignalR'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', 'signalRDeploy'), '2025-04-01').outputs.connectionString.value), createObject('value', ''))]",
           "frontendUrl": {
             "value": "[parameters('frontendUrl')]"
@@ -954,8 +1042,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "8255843193723026470"
+              "version": "0.48.1.52935",
+              "templateHash": "2751581238498265085"
             }
           },
           "parameters": {
@@ -972,9 +1060,6 @@
               "type": "string"
             },
             "sqlConnectionString": {
-              "type": "string"
-            },
-            "storageConnectionString": {
               "type": "string"
             },
             "signalRConnectionString": {
@@ -994,11 +1079,27 @@
             },
             "blobStorageProvider": {
               "type": "string",
-              "defaultValue": "Azure"
+              "defaultValue": "None",
+              "allowedValues": [
+                "Azure",
+                "None"
+              ],
+              "metadata": {
+                "description": "Azure:BlobStorage:Provider — Azure | None for an App Service (Local is Development-only; docs/features/demo-polish/implementation.md §1.7). Defaults to None (uploads answer 503; fail closed); main.bicep passes Azure only when storage is deployed."
+              }
+            },
+            "blobServiceUri": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure:BlobStorage:ServiceUri — the blob service endpoint, e.g. https://stpulseuat.blob.core.windows.net. No key, no SAS. Supplied by main.bicep as a plain local (not a storage-module output, which would be a module cycle); empty when storage is not deployed."
+              }
             },
             "blobStorageContainerName": {
               "type": "string",
-              "defaultValue": "post-media"
+              "defaultValue": "post-media",
+              "metadata": {
+                "description": "Azure:BlobStorage:ContainerName — the private post-media container (the same local main.bicep passes to modules/storage.bicep)."
+              }
             },
             "emailConnectionString": {
               "type": "securestring",
@@ -1216,7 +1317,7 @@
                   "http20Enabled": false,
                   "webSocketsEnabled": true,
                   "cors": "[if(not(equals(parameters('frontendUrl'), '')), createObject('allowedOrigins', createArray(parameters('frontendUrl')), 'supportCredentials', true()), null())]",
-                  "appSettings": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ASPNETCORE_ENVIRONMENT', 'value', parameters('aspnetcoreEnvironment')), createObject('name', 'ConnectionStrings__DefaultConnection', 'value', parameters('sqlConnectionString')), createObject('name', 'Azure__BlobStorage__ConnectionString', 'value', parameters('storageConnectionString')), createObject('name', 'Azure__BlobStorage__PhotoContainerName', 'value', parameters('blobStorageContainerName')), createObject('name', 'Azure__BlobStorage__Provider', 'value', parameters('blobStorageProvider')), createObject('name', 'Azure__SignalR__ConnectionString', 'value', parameters('signalRConnectionString')), createObject('name', 'Email__Provider', 'value', parameters('emailProvider')), createObject('name', 'Email__ConnectionString', 'value', parameters('emailConnectionString')), createObject('name', 'Email__DefaultSenderAddress', 'value', parameters('emailDefaultSenderAddress')), createObject('name', 'Email__DefaultSenderName', 'value', parameters('emailDefaultSenderName')), createObject('name', 'Email__SupportAddress', 'value', parameters('emailSupportAddress')), createObject('name', 'Authentication__FrontendBaseUrl', 'value', parameters('frontendUrl')), createObject('name', 'Authentication__Jwt__AccessTokenMinutes', 'value', string(parameters('jwtAccessTokenMinutes'))), createObject('name', 'Authentication__Jwt__RefreshTokenHours', 'value', string(parameters('jwtRefreshTokenHours'))), createObject('name', 'Authentication__Jwt__RememberMeDays', 'value', string(parameters('jwtRememberMeDays'))), createObject('name', 'Authentication__Jwt__SecretKey', 'value', parameters('jwtSecretKey')), createObject('name', 'Authentication__Bootstrap__Secret', 'value', parameters('bootstrapSecret')), createObject('name', 'Authentication__Cookie__SameSite', 'value', 'None')), variables('staffAccountSettings'), variables('generationSettings'))]"
+                  "appSettings": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ASPNETCORE_ENVIRONMENT', 'value', parameters('aspnetcoreEnvironment')), createObject('name', 'ConnectionStrings__DefaultConnection', 'value', parameters('sqlConnectionString')), createObject('name', 'Azure__BlobStorage__Provider', 'value', parameters('blobStorageProvider')), createObject('name', 'Azure__BlobStorage__ServiceUri', 'value', parameters('blobServiceUri')), createObject('name', 'Azure__BlobStorage__ContainerName', 'value', parameters('blobStorageContainerName')), createObject('name', 'Azure__SignalR__ConnectionString', 'value', parameters('signalRConnectionString')), createObject('name', 'Email__Provider', 'value', parameters('emailProvider')), createObject('name', 'Email__ConnectionString', 'value', parameters('emailConnectionString')), createObject('name', 'Email__DefaultSenderAddress', 'value', parameters('emailDefaultSenderAddress')), createObject('name', 'Email__DefaultSenderName', 'value', parameters('emailDefaultSenderName')), createObject('name', 'Email__SupportAddress', 'value', parameters('emailSupportAddress')), createObject('name', 'Authentication__FrontendBaseUrl', 'value', parameters('frontendUrl')), createObject('name', 'Authentication__Jwt__AccessTokenMinutes', 'value', string(parameters('jwtAccessTokenMinutes'))), createObject('name', 'Authentication__Jwt__RefreshTokenHours', 'value', string(parameters('jwtRefreshTokenHours'))), createObject('name', 'Authentication__Jwt__RememberMeDays', 'value', string(parameters('jwtRememberMeDays'))), createObject('name', 'Authentication__Jwt__SecretKey', 'value', parameters('jwtSecretKey')), createObject('name', 'Authentication__Bootstrap__Secret', 'value', parameters('bootstrapSecret')), createObject('name', 'Authentication__Cookie__SameSite', 'value', 'None')), variables('staffAccountSettings'), variables('generationSettings'))]"
                 }
               },
               "tags": "[parameters('tags')]"
@@ -1243,8 +1344,7 @@
         "[resourceId('Microsoft.Resources/deployments', 'appServicePlanDeploy')]",
         "[resourceId('Microsoft.Resources/deployments', 'communicationDeploy')]",
         "[resourceId('Microsoft.Resources/deployments', 'databaseDeploy')]",
-        "[resourceId('Microsoft.Resources/deployments', 'signalRDeploy')]",
-        "[resourceId('Microsoft.Resources/deployments', 'storageDeploy')]"
+        "[resourceId('Microsoft.Resources/deployments', 'signalRDeploy')]"
       ]
     },
     {
@@ -1278,8 +1378,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "5609287693729823483"
+              "version": "0.48.1.52935",
+              "templateHash": "1458563846395692879"
             }
           },
           "parameters": {
@@ -1439,8 +1539,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "10000910330878569651"
+              "version": "0.48.1.52935",
+              "templateHash": "752890639234710602"
             }
           },
           "parameters": {
@@ -1554,8 +1654,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "3098237698232909347"
+              "version": "0.48.1.52935",
+              "templateHash": "2999512333910923492"
             }
           },
           "parameters": {
@@ -1694,8 +1794,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "12467853218879225376"
+              "version": "0.48.1.52935",
+              "templateHash": "1944602992015684687"
             }
           },
           "parameters": {
