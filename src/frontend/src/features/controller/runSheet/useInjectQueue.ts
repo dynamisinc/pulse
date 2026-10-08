@@ -41,6 +41,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { InjectConflictError } from './injectErrors'
 import { getInjectService } from './injectService'
+import type { InjectQueueRead } from './injectGuards'
 import type {
   InjectItemDto,
   InjectItemWrite,
@@ -71,6 +72,12 @@ export const REORDER_LOCK = '*reorder'
 export interface UseInjectQueueResult {
   /** Every item in `order`; empty until the first read lands. */
   readonly items: readonly InjectItemDto[]
+  /**
+   * Ids of queue items the server sent that this build could not render (malformed data). They
+   * are DROPPED from `items`; the panel shows a staff-only warning so a shorter sheet is never
+   * mistaken for "nothing scripted". Empty when every item rendered.
+   */
+  readonly droppedItemIds: readonly string[]
   /** The pause tier the server reported (`running` until the first read lands). */
   readonly pauseTier: InjectQueueDto['pauseTier']
   /** True until the first read resolves (success or failure). */
@@ -96,12 +103,13 @@ export interface UseInjectQueueResult {
     body: InjectItemWrite,
     version: number,
   ) => Promise<ActionOutcome<InjectItemDto>>
-  readonly reorder: (ids: string[]) => Promise<ActionOutcome<InjectQueueDto>>
+  readonly reorder: (ids: string[]) => Promise<ActionOutcome<InjectQueueRead>>
 }
 
 const byOrder = (a: InjectItemDto, b: InjectItemDto): number => a.order - b.order
 
 const EMPTY_ITEMS: readonly InjectItemDto[] = []
+const NO_DROPPED: readonly string[] = []
 
 export function useInjectQueue(): UseInjectQueueResult {
   const { exerciseId } = useExerciseContext()
@@ -122,7 +130,7 @@ export function useInjectQueue(): UseInjectQueueResult {
   /** Puts a fresher item in the cache (or adds a new one); never moves a row backwards. */
   const applyItem = useCallback(
     (item: InjectItemDto): void => {
-      queryClient.setQueryData<InjectQueueDto>(queueKey, previous => {
+      queryClient.setQueryData<InjectQueueRead>(queueKey, previous => {
         if (!previous) return previous
         const index = previous.items.findIndex(candidate => candidate.id === item.id)
         if (index === -1) {
@@ -139,7 +147,7 @@ export function useInjectQueue(): UseInjectQueueResult {
 
   const dropItem = useCallback(
     (id: string): void => {
-      queryClient.setQueryData<InjectQueueDto>(queueKey, previous =>
+      queryClient.setQueryData<InjectQueueRead>(queueKey, previous =>
         previous
           ? { ...previous, items: previous.items.filter(candidate => candidate.id !== id) }
           : previous,
@@ -207,7 +215,7 @@ export function useInjectQueue(): UseInjectQueueResult {
   })
   const { mutateAsync: reorderAsync } = useMutation({
     mutationFn: (ids: string[]) => getInjectService().reorder(ids),
-    onSuccess: (queue: InjectQueueDto) => queryClient.setQueryData(queueKey, queue),
+    onSuccess: (queue: InjectQueueRead) => queryClient.setQueryData(queueKey, queue),
     onSettled: refreshNow,
   })
 
@@ -271,6 +279,7 @@ export function useInjectQueue(): UseInjectQueueResult {
 
   return {
     items: data?.items ?? EMPTY_ITEMS,
+    droppedItemIds: data?.droppedItemIds ?? NO_DROPPED,
     pauseTier: data?.pauseTier ?? 'running',
     isLoading: query.isPending,
     isError: query.isError && data === undefined,

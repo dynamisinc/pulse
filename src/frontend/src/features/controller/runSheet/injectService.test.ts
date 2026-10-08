@@ -227,7 +227,7 @@ describe('live service — errors', () => {
   it('a 2xx that is not the contract rejects instead of rendering garbage', async () => {
     getMock.mockResolvedValue({ data: '<html>SPA fallback</html>' })
     await expect(service.list()).rejects.toThrow(/Unrecognised inject queue/)
-    getMock.mockResolvedValue({ data: { items: [{ id: 'x', status: 'exploded' }], pauseTier: 'running' } })
+    getMock.mockResolvedValue({ data: { items: 'not a list', pauseTier: 'running' } })
     await expect(service.list()).rejects.toThrow(/Unrecognised inject queue/)
     getMock.mockResolvedValue({ data: { items: [], pauseTier: 'melted' } })
     await expect(service.list()).rejects.toThrow(/Unrecognised inject queue/)
@@ -235,10 +235,27 @@ describe('live service — errors', () => {
     await expect(service.fire('inj-1')).rejects.toThrow(/Unrecognised inject item/)
   })
 
-  it('an item with a MALFORMED CHILD is never rendered: the read rejects, and a 409 item is dropped', async () => {
-    const malformed = makeItem({ posts: [makePost({ personaId: '' })] })
+  it('an item with a MALFORMED CHILD is never rendered: a read DROPS it (and warns once), a 409 item is dropped', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const malformed = makeItem({ id: 'inj-bad', posts: [makePost({ personaId: '' })] })
     getMock.mockResolvedValue({ data: { items: [item, malformed], pauseTier: 'running' } })
-    await expect(service.list()).rejects.toThrow(/Unrecognised inject queue/)
+    const queue = await service.list()
+    expect(queue.items.map(i => i.id)).toEqual([item.id]) // the rest keeps working
+    expect(queue.droppedItemIds).toEqual(['inj-bad'])
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]?.[0])).toContain('inj-bad')
+    // The same poll again does NOT repeat the warning (it would spam every 3 s)...
+    await service.list()
+    expect(warn).toHaveBeenCalledTimes(1)
+    // ...but a DIFFERENT set of dropped ids does, and a clean read resets it.
+    getMock.mockResolvedValue({
+      data: { items: [item, makeItem({ id: 'inj-bad-2', posts: [makePost({ id: '' })] })], pauseTier: 'running' },
+    })
+    await service.list()
+    expect(warn).toHaveBeenCalledTimes(2)
+    getMock.mockResolvedValue({ data: { items: [item], pauseTier: 'running' } })
+    expect(await service.list()).not.toHaveProperty('droppedItemIds')
+    warn.mockRestore()
 
     postMock.mockResolvedValue({ data: malformed })
     await expect(service.fire('inj-1')).rejects.toThrow(/Unrecognised inject item/)

@@ -174,6 +174,57 @@ describe('RunSheetPanel — the list', () => {
     expect(rowTitles()).toEqual(['Alpha', 'Bravo', 'Charlie', 'Delta'])
   })
 
+  it('a dropped (malformed) item shows a staff-only warning and the rest of the sheet keeps working', async () => {
+    const real = injectMock.list.bind(injectMock)
+    vi.spyOn(injectMock, 'list').mockImplementation(async () => ({
+      ...(await real()),
+      droppedItemIds: ['inj-broken'],
+    }))
+    await mountPanel()
+    const warning = await screen.findByTestId('banner-dropped')
+    expect(warning).toHaveAttribute('role', 'status')
+    expect(warning).toHaveTextContent("1 item couldn't be displayed (malformed data)")
+    // Everything else renders and still works.
+    expect(rowTitles()).toEqual(['Alpha', 'Bravo', 'Charlie', 'Delta'])
+    press('Fire Alpha')
+    await waitFor(() => expect(chipOf('Alpha')).toBe('Fired'))
+  })
+
+  it('the warning counts several dropped items; no warning when nothing was dropped', async () => {
+    const real = injectMock.list.bind(injectMock)
+    const spy = vi.spyOn(injectMock, 'list').mockImplementation(async () => ({
+      ...(await real()),
+      droppedItemIds: ['a', 'b', '(no id)'],
+    }))
+    const { queryClient } = await mountPanel()
+    expect(await screen.findByTestId('banner-dropped')).toHaveTextContent(
+      "3 items couldn't be displayed (malformed data)",
+    )
+    spy.mockImplementation(real)
+    await act(async () => {
+      await queryClient.invalidateQueries()
+    })
+    await waitFor(() => expect(screen.queryByTestId('banner-dropped')).toBeNull())
+  })
+
+  it('when EVERY item was dropped the sheet does not claim to be empty', async () => {
+    vi.spyOn(injectMock, 'list').mockResolvedValue({
+      items: [],
+      pauseTier: 'running',
+      droppedItemIds: ['x', 'y'],
+    })
+    renderRunSheet(<RunSheetPanel />)
+    expect(await screen.findByTestId('banner-dropped')).toHaveTextContent('2 items')
+    expect(screen.queryByTestId('run-sheet-empty')).toBeNull()
+  })
+
+  it('a malformed top-level read is still an error state, not a blank sheet', async () => {
+    vi.spyOn(injectMock, 'list').mockRejectedValue(new Error('Unrecognised inject queue'))
+    renderRunSheet(<RunSheetPanel />)
+    expect(await screen.findByTestId('banner-load-failed')).toBeInTheDocument()
+    expect(screen.queryByTestId('banner-dropped')).toBeNull()
+  })
+
   it('keys its server state by the exercise (a cache key only — never sent)', async () => {
     const { queryClient } = await mountPanel()
     const keys = queryClient.getQueryCache().getAll().map(q => q.queryKey)
