@@ -25,7 +25,8 @@
  *    a re-read (asserted with a real `PersonaComposer` publish, and with direct
  *    appends: de-duplicated, other personas' posts ignored);
  *  - a persona with no voice-notes template reads "No voice notes authored"
- *    (muted, in the staff secondary-text token), never "unavailable";
+ *    (muted #6b6b69 — AA at 12px, not the 3.75:1 shared token), never
+ *    "unavailable";
  *  - `actionsSlot` mounts a sibling story's control and, absent, renders nothing.
  *
  * Renders through the REAL `ExerciseContextProvider` (resolves via the
@@ -378,6 +379,8 @@ describe('PersonaContextPanel — real data (demo-polish C4)', () => {
       setExerciseClock({ scenarioNow: () => new Date('2026-07-16T14:00:00Z') })
     })
 
+    // 20s per-test budget: types into a real PersonaComposer — slow when the run is
+    // loaded (cf. personaDraftDiscard).
     it('shows a post the controller just PUBLISHED as this persona, with no re-read of the feed', async () => {
       mockedResolveFeed.mockResolvedValue([])
       const user = userEvent.setup()
@@ -407,7 +410,7 @@ describe('PersonaContextPanel — real data (demo-polish C4)', () => {
       expect(screen.queryByTestId('persona-context-recents-empty')).not.toBeInTheDocument()
       // Merged from the store: the feed was NOT read again.
       expect(mockedResolveFeed.mock.calls.length).toBe(readsBefore)
-    })
+    }, 20000)
 
     it('puts the new post first (newest), ahead of what the feed read returned', async () => {
       mockedResolveFeed.mockResolvedValue([
@@ -461,19 +464,50 @@ describe('PersonaContextPanel — real data (demo-polish C4)', () => {
       expect(screen.queryByText('not this persona')).not.toBeInTheDocument()
     })
 
-    it('stops listening once unmounted (a later append neither throws nor warns)', async () => {
+    it('releases its postStore subscription on a persona change and on unmount', async () => {
       mockedResolveFeed.mockResolvedValue([])
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-      const { unmount } = await renderPanel(<PersonaContextPanel persona={buildPersona()} />)
-      await screen.findByTestId('persona-context-recents-empty')
-      unmount()
-
-      act(() => {
-        postStore.appendPost(buildPost({ id: 'after', scenarioTime: '2026-07-16T13:59:00Z' }))
+      // Wrap the REAL subscribe so each returned unsubscribe can be observed.
+      const realSubscribe = postStore.subscribe
+      const unsubscribes: Array<ReturnType<typeof vi.fn>> = []
+      const subscribeSpy = vi.spyOn(postStore, 'subscribe').mockImplementation(listener => {
+        const unsubscribe = vi.fn(realSubscribe(listener))
+        unsubscribes.push(unsubscribe)
+        return unsubscribe
       })
+      try {
+        const { rerender, unmount } = await renderPanel(
+          <PersonaContextPanel persona={buildPersona()} />,
+        )
+        await screen.findByTestId('persona-context-recents-empty')
+        expect(subscribeSpy).toHaveBeenCalledTimes(1)
+        expect(unsubscribes[0]).not.toHaveBeenCalled()
 
-      expect(errorSpy).not.toHaveBeenCalled()
-      errorSpy.mockRestore()
+        // A different persona: the first subscription is released, a second begins.
+        rerender(
+          <ExerciseContextProvider>
+            <PersonaContextPanel
+              persona={buildPersona({ id: 'persona-fulcoem', displayName: 'Fulton County EM' })}
+            />
+          </ExerciseContextProvider>,
+        )
+        await waitFor(() => expect(subscribeSpy).toHaveBeenCalledTimes(2))
+        expect(unsubscribes[0]).toHaveBeenCalledTimes(1)
+        expect(unsubscribes[1]).not.toHaveBeenCalled()
+
+        unmount()
+        expect(unsubscribes[1]).toHaveBeenCalledTimes(1)
+        expect(unsubscribes[0]).toHaveBeenCalledTimes(1)
+
+        // And nothing is left listening: a later append neither throws nor warns.
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        act(() => {
+          postStore.appendPost(buildPost({ id: 'after', scenarioTime: '2026-07-16T13:59:00Z' }))
+        })
+        expect(errorSpy).not.toHaveBeenCalled()
+        errorSpy.mockRestore()
+      } finally {
+        subscribeSpy.mockRestore()
+      }
     })
   })
 

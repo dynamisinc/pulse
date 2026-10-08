@@ -183,6 +183,8 @@ const REPLY_TARGET: ReplyTarget = {
 }
 
 describe('ControllerConsole — main-area slots', () => {
+  // 20s per-test budget: first render of the full console (cold imports when the run
+  // is loaded).
   it('renders each slot inside a labelled section, passing a ConsoleSlotContext', async () => {
     const liveWorldSlot = vi.fn((ctx: ConsoleSlotContext) => {
       void ctx
@@ -205,7 +207,7 @@ describe('ControllerConsole — main-area slots', () => {
     expect(runSheetSlot.mock.calls[0]?.[0]).toEqual({ openComposer: expect.any(Function) })
     // With slots supplied the "nothing connected" line is gone.
     expect(screen.queryByTestId('console-slots-status')).not.toBeInTheDocument()
-  })
+  }, 20000)
 
   it('with NO slot supplied shows one concise status line and no placeholder panels', async () => {
     renderConsole()
@@ -312,7 +314,9 @@ describe('ControllerConsole — main-area slots', () => {
   })
 })
 
-describe('ControllerConsole — ConsoleSlotContext.openComposer', () => {
+// 20s per-test budget for every flow here: real user-event + palette/dock renders
+// are slow when the whole suite runs in parallel (cf. personaDraftDiscard).
+describe('ControllerConsole — ConsoleSlotContext.openComposer', { timeout: 20000 }, () => {
   it('selects the requested persona and opens ITS composer (nothing was active)', async () => {
     const user = userEvent.setup()
     renderConsole({

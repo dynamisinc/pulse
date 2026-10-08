@@ -141,6 +141,8 @@ async function switchExercise(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('ControllerConsole — persona memory across an exercise switch', () => {
+  // 20s per-test budget: heavy emotion/MUI render + user-event when the run is loaded
+  // (cf. personaDraftDiscard).
   it('closes the open dock when the exercise changes, and does not revive it on switching back', async () => {
     if (!PERSONA) throw new Error('seeded cast is empty')
     const user = userEvent.setup()
@@ -163,8 +165,10 @@ describe('ControllerConsole — persona memory across an exercise switch', () =>
     await switchExercise(user)
     await waitFor(() => expect(mockResolve).toHaveBeenCalledTimes(3))
     expect(screen.queryByTestId('persona-dock-host')).not.toBeInTheDocument()
-  })
+  }, 20000)
 
+  // 20s per-test budget: heavy emotion/MUI render + user-event when the run is loaded
+  // (cf. personaDraftDiscard).
   it('refuses to open a dock for a persona of the exercise just left: the palette opens instead', async () => {
     if (!PERSONA) throw new Error('seeded cast is empty')
     const user = userEvent.setup()
@@ -181,5 +185,5 @@ describe('ControllerConsole — persona memory across an exercise switch', () =>
 
     expect(await screen.findByRole('dialog', { name: /command palette/i })).toBeInTheDocument()
     expect(screen.queryByTestId('persona-dock-host')).not.toBeInTheDocument()
-  })
+  }, 20000)
 })
