@@ -12,6 +12,8 @@
  * KEYBOARD / FOCUS (NFR-001)
  *  - Focus is TRAPPED (`useFocusTrap`): Tab/Shift+Tab cycle inside, focus moves
  *    into the dialog on open and RETURNS to the thumbnail (`returnFocusTo`) on close.
+ *    While the shell's overlay (or any other modal) is mounted the viewer stands aside
+ *    completely — trap AND keys — so the overlay always wins.
  *  - Esc closes. ←/→ move across the post's images (no wrap; the buttons also
  *    work, and use `aria-disabled` rather than `disabled` at the ends so focus is
  *    never dropped out of the trap). A player inside handles its own ←/→ (seek)
@@ -41,6 +43,7 @@ import type { CSSProperties, MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faChevronLeft, faChevronRight, faXmark } from '@fortawesome/free-solid-svg-icons'
+import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { SHELL_Z } from '@/features/participant-shell/mountContract'
 import type { PostMedia } from '../../types/post'
 import { MediaFallbackTile } from './MediaFallbackTile'
@@ -126,10 +129,15 @@ export function MediaViewer({
     }
   }, [])
 
-  // Esc closes; ←/→ page. Document-level so it works wherever focus sits inside the trap.
+  // Esc closes; ←/→ page. Document-level so it works wherever focus sits inside the trap —
+  // but ONLY while the viewer is the top modal: with the shell overlay up, the keys belong to
+  // it (paging the hidden viewer would announce from under the overlay; Esc would close it and
+  // lose the focus-return target).
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
       if (event.altKey || event.ctrlKey || event.metaKey) return
+      const dialog = dialogRef.current
+      if (dialog !== null && hasOtherModalMounted(dialog)) return
       if (event.key === 'Escape') {
         event.stopPropagation()
         onClose()

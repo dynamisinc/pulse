@@ -99,13 +99,22 @@ export function isSafeMediaUrl(raw: unknown, options?: SafeMediaUrlOptions): boo
 }
 
 /**
- * Appends the media-fragment `#t=<seconds>` so a player opened from another player
- * (the modal fallback) resumes at the same position. Leaves a URL that already carries
- * a fragment untouched; a non-positive or non-finite time is a no-op.
+ * Sets the media-fragment start time `#t=<seconds>` so a player opened from another
+ * player (the modal fallback) resumes at the same position. An existing `t=` component
+ * of the fragment is REPLACED (a stale `#t=5` must not silently win over the hand-over
+ * position); other fragment components are kept. A non-positive or non-finite time is a
+ * no-op.
  */
 export function withStartTime(url: string, seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0 || url.includes('#')) return url
-  return `${url}#t=${seconds.toFixed(1)}`
+  if (!Number.isFinite(seconds) || seconds <= 0) return url
+  const time = `t=${seconds.toFixed(1)}`
+  const hashIndex = url.indexOf('#')
+  if (hashIndex === -1) return `${url}#${time}`
+  const kept = url
+    .slice(hashIndex + 1)
+    .split('&')
+    .filter(component => component !== '' && !component.startsWith('t='))
+  return `${url.slice(0, hashIndex)}#${[...kept, time].join('&')}`
 }
 
 /**

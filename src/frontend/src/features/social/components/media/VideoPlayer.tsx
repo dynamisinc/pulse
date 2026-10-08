@@ -50,8 +50,13 @@
  *    player cannot be PREVENTED, only left immediately, so it can flash for a moment.
  *  - PAUSE/ENDEX/BREAK-FICTION: when the shell overlay becomes active
  *    (`useOverlayState`, the shell's own public state hook — social imports the shell,
- *    never the reverse) the playing video is paused, and a `play` while it is active is
- *    paused straight away: nothing plays behind the overlay.
+ *    never the reverse) the playing video is paused, a `play` while it is active is
+ *    paused straight away, and the player does not enter fullscreen (Expand / F are
+ *    no-ops) — nothing plays or goes fullscreen behind the overlay. A fullscreen element
+ *    paints ABOVE everything, so one that is already up when the overlay activates would
+ *    hide break-fiction's "REAL-WORLD MESSAGE": the SHELL leaves any fullscreen itself
+ *    (`useLeaveFullscreenWhileActive`, document APIs only, covering every channel), and
+ *    this player also exits if its own wrapper holds it (belt and braces).
  *  - EXPAND: native fullscreen on the wrapper; when the API is missing or
  *    refuses it asks the owner (`onRequestModal`, with the playback position) to open
  *    the modal viewer, which resumes at that position (paused — it never autoplays).
@@ -83,7 +88,7 @@ import {
   faVolumeXmark,
 } from '@fortawesome/free-solid-svg-icons'
 import { isWatermarkRequired, useChromeConfig } from '@/features/participant-shell/chromeConfig'
-import { useOverlayState } from '@/features/participant-shell/components/OverlayLayer/overlayState'
+import { useOverlayState } from '@/features/participant-shell/components/OverlayLayer'
 import type { PostMedia } from '../../types/post'
 import { formatDuration } from './formatDuration'
 import {
@@ -145,9 +150,9 @@ export function VideoPlayer({
   const [metadataDuration, setMetadataDuration] = useState<number | undefined>(undefined)
 
   // The latest fullscreen-fallback inputs, read from event handlers that must not re-subscribe.
-  const latestRef = useRef({ variant, onRequestModal })
+  const latestRef = useRef({ variant, onRequestModal, overlayActive })
   useEffect(() => {
-    latestRef.current = { variant, onRequestModal }
+    latestRef.current = { variant, onRequestModal, overlayActive }
   })
 
   /**
@@ -156,9 +161,11 @@ export function VideoPlayer({
    * its position over. A no-op in the already-expanded variant or without an owner.
    */
   const openInModal = useCallback(() => {
-    const { variant: currentVariant, onRequestModal: open } = latestRef.current
+    const latest = latestRef.current
+    const { variant: currentVariant, onRequestModal: open, overlayActive: covered } = latest
     const wrapper = wrapperRef.current
-    if (currentVariant !== 'inline' || open === undefined || wrapper === null) return
+    // Never open a modal under (or fullscreen over) a Pause / EndEx / break-fiction overlay.
+    if (covered || currentVariant !== 'inline' || open === undefined || wrapper === null) return
     const video = videoRef.current
     const at = video !== null && Number.isFinite(video.currentTime) ? video.currentTime : 0
     video?.pause()
@@ -186,9 +193,16 @@ export function VideoPlayer({
     }
   }, [openInModal])
 
-  // Pause whatever is playing the moment the shell overlay takes over the screen.
+  // The shell overlay takes over the screen: pause whatever is playing, and — belt and braces
+  // beside the shell's own `useLeaveFullscreenWhileActive` — leave fullscreen if THIS player's
+  // wrapper holds it (a fullscreen element paints above the overlay, hiding break-fiction).
   useEffect(() => {
-    if (overlayActive) pauseActivePlayback()
+    if (!overlayActive) return
+    pauseActivePlayback()
+    const fullscreenElement = getFullscreenElement()
+    if (fullscreenElement !== null && fullscreenElement === wrapperRef.current) {
+      void exitFullscreen()
+    }
   }, [overlayActive])
 
   // Track THIS player's fullscreen state, and police how it got there.
@@ -239,6 +253,8 @@ export function VideoPlayer({
       await exitFullscreen()
       return
     }
+    // A Pause / EndEx / break-fiction overlay is up: do not enter fullscreen over it.
+    if (latestRef.current.overlayActive) return
     const entered = await requestElementFullscreen(wrapper)
     // No usable native fullscreen (e.g. iPhone Safari): fall back to the modal viewer.
     if (!entered) openInModal()

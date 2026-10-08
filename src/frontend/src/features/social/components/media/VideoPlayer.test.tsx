@@ -74,8 +74,10 @@ beforeEach(() => {
 
 afterEach(() => {
   // Undo any simulated Fullscreen API state (jsdom implements none of it).
-  Reflect.deleteProperty(document, 'fullscreenElement')
-  Reflect.deleteProperty(document, 'exitFullscreen')
+  for (const key of ['fullscreenElement', 'webkitFullscreenElement', 'exitFullscreen']) {
+    Reflect.deleteProperty(document, key)
+  }
+  vi.unstubAllGlobals()
 })
 
 /** Simulates the browser entering fullscreen on `element` (or leaving, with `null`). */
@@ -83,6 +85,17 @@ function setFullscreenElement(element: Element | null) {
   Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => element })
   act(() => {
     document.dispatchEvent(new Event('fullscreenchange'))
+  })
+}
+
+/** The same through the legacy WebKit-prefixed API (older Safari). */
+function setWebkitFullscreenElement(element: Element | null) {
+  Object.defineProperty(document, 'webkitFullscreenElement', {
+    configurable: true,
+    get: () => element,
+  })
+  act(() => {
+    document.dispatchEvent(new Event('webkitfullscreenchange'))
   })
 }
 
@@ -674,6 +687,194 @@ describe('VideoPlayer — fullscreen never drops EXERCISE (NFR-008, Gate-1 H-2)'
       el.dispatchEvent(new Event('webkitbeginfullscreen'))
     })).not.toThrow()
     expect(onRequestModal).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('VideoPlayer — listeners and the legacy WebKit API (L-A)', () => {
+  it('tracks fullscreen through the webkit-prefixed change event too', () => {
+    const { wrapper } = mount()
+    expect(screen.getByTestId('media-watermark-slot')).toBeEmptyDOMElement()
+
+    setWebkitFullscreenElement(wrapper)
+
+    expect(screen.getByTestId('media-watermark-slot')).toHaveTextContent('EXERCISE')
+    expect(screen.getByRole('button', { name: 'Exit full screen' })).toBeInTheDocument()
+
+    setWebkitFullscreenElement(null)
+    expect(screen.getByTestId('media-watermark-slot')).toBeEmptyDOMElement()
+  })
+
+  it('routes a webkit-prefixed fullscreen of the BARE <video> to the modal as well', () => {
+    const onRequestModal = vi.fn()
+    const exit = vi.fn()
+    Object.defineProperty(document, 'webkitExitFullscreen', { configurable: true, value: exit })
+    const { wrapper, el } = mount(video(), { onRequestModal })
+
+    setWebkitFullscreenElement(el)
+
+    expect(exit).toHaveBeenCalledTimes(1)
+    expect(onRequestModal).toHaveBeenCalledWith(wrapper)
+    Reflect.deleteProperty(document, 'webkitExitFullscreen')
+  })
+
+  it('the fullscreen and webkitbeginfullscreen listeners are INERT after unmount', () => {
+    const onRequestModal = vi.fn()
+    const exit = vi.fn().mockResolvedValue(undefined)
+    const webkitExit = vi.fn()
+    document.exitFullscreen = exit
+    const { el, unmount } = mount(video(), { onRequestModal })
+    Object.defineProperty(el, 'webkitExitFullscreen', { configurable: true, value: webkitExit })
+    unmount()
+
+    // The old (detached) <video> "enters fullscreen" / begins iOS fullscreen: nobody is listening.
+    setFullscreenElement(el)
+    setWebkitFullscreenElement(el)
+    act(() => {
+      el.dispatchEvent(new Event('webkitbeginfullscreen'))
+    })
+
+    expect(exit).not.toHaveBeenCalled()
+    expect(webkitExit).not.toHaveBeenCalled()
+    expect(onRequestModal).not.toHaveBeenCalled()
+  })
+
+  it('iOS hardening: re-checks webkitDisplayingFullscreen on the next frame and retries once', () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+    const { el } = mount(video(), { onRequestModal: vi.fn() })
+    const webkitExit = vi.fn()
+    Object.defineProperty(el, 'webkitExitFullscreen', { configurable: true, value: webkitExit })
+    Object.defineProperty(el, 'webkitDisplayingFullscreen', { configurable: true, value: true })
+
+    act(() => {
+      el.dispatchEvent(new Event('webkitbeginfullscreen'))
+    })
+
+    // Once immediately, once more because the native player was still up a frame later — no more.
+    expect(webkitExit).toHaveBeenCalledTimes(2)
+  })
+
+  it('iOS hardening: does not retry when the first exit worked', () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+    const { el } = mount(video(), { onRequestModal: vi.fn() })
+    const webkitExit = vi.fn()
+    Object.defineProperty(el, 'webkitExitFullscreen', { configurable: true, value: webkitExit })
+    Object.defineProperty(el, 'webkitDisplayingFullscreen', { configurable: true, value: false })
+
+    act(() => {
+      el.dispatchEvent(new Event('webkitbeginfullscreen'))
+    })
+
+    expect(webkitExit).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('VideoPlayer — no fullscreen over the shell overlay (re-review HI-1)', () => {
+  it('exits when the overlay becomes active while this player\'s wrapper is fullscreen', () => {
+    const exit = vi.fn().mockResolvedValue(undefined)
+    document.exitFullscreen = exit
+    const { rerender, wrapper } = mount()
+    setFullscreenElement(wrapper)
+    expect(exit).not.toHaveBeenCalled()
+
+    overlay.state = 'broadcast'
+    rerender(<VideoPlayer media={video()} />)
+
+    expect(exit).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['pause', 'endex', 'broadcast'] as const)('also for the %s overlay', state => {
+    const exit = vi.fn().mockResolvedValue(undefined)
+    document.exitFullscreen = exit
+    const { rerender, wrapper } = mount()
+    setFullscreenElement(wrapper)
+
+    overlay.state = state
+    rerender(<VideoPlayer media={video()} />)
+
+    expect(exit).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not exit when ANOTHER element (not this wrapper) is the fullscreen one', () => {
+    const exit = vi.fn().mockResolvedValue(undefined)
+    document.exitFullscreen = exit
+    const { rerender } = mount()
+    setFullscreenElement(document.body)
+
+    overlay.state = 'pause'
+    rerender(<VideoPlayer media={video()} />)
+
+    expect(exit).not.toHaveBeenCalled()
+  })
+
+  it('Expand and the F key do NOT request fullscreen while the overlay is active', () => {
+    overlay.state = 'broadcast'
+    const { wrapper } = mount(video(), { onRequestModal: vi.fn() })
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined)
+    wrapper.requestFullscreen = requestFullscreen
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }))
+    fireEvent.keyDown(wrapper, { key: 'f' })
+
+    // Decided synchronously: `toggleFullscreen` returns before it ever calls the browser
+    // (without the guard `requestFullscreen` would have been called by now: it is the first
+    // thing awaited).
+    expect(requestFullscreen).not.toHaveBeenCalled()
+  })
+
+  it('the same Expand DOES request fullscreen once the overlay is gone', () => {
+    const { wrapper } = mount()
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined)
+    wrapper.requestFullscreen = requestFullscreen
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }))
+
+    expect(requestFullscreen).toHaveBeenCalledTimes(1)
+  })
+
+  it('still lets the player LEAVE fullscreen under the overlay (the exit path is not blocked)', async () => {
+    const exit = vi.fn().mockResolvedValue(undefined)
+    document.exitFullscreen = exit
+    const { rerender, wrapper } = mount()
+    setFullscreenElement(wrapper)
+    exit.mockClear()
+    overlay.state = 'pause'
+    rerender(<VideoPlayer media={video()} />)
+    exit.mockClear()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Exit full screen' }))
+
+    await waitFor(() => expect(exit).toHaveBeenCalledTimes(1))
+  })
+
+  it('a bare-<video> fullscreen under the overlay is exited but does NOT open a modal under it', () => {
+    overlay.state = 'broadcast'
+    const onRequestModal = vi.fn()
+    const exit = vi.fn().mockResolvedValue(undefined)
+    document.exitFullscreen = exit
+    const { el } = mount(video(), { onRequestModal })
+
+    setFullscreenElement(el)
+
+    expect(exit).toHaveBeenCalledTimes(1)
+    expect(onRequestModal).not.toHaveBeenCalled()
+  })
+
+  it('works again once the overlay clears (Expand falls back to the modal as before)', async () => {
+    overlay.state = 'pause'
+    const onRequestModal = vi.fn()
+    const { rerender } = mount(video(), { onRequestModal })
+    overlay.state = 'none'
+    rerender(<VideoPlayer media={video()} onRequestModal={onRequestModal} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }))
+
+    await waitFor(() => expect(onRequestModal).toHaveBeenCalledTimes(1))
   })
 })
 

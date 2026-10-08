@@ -9,6 +9,7 @@
  * later story's content ever adds one), and deactivation restores whatever
  * was focused before the trap engaged.
  */
+import type { RefObject } from 'react'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { useOverlayFocusTrap } from './useOverlayFocusTrap'
@@ -143,10 +144,14 @@ describe('useOverlayFocusTrap — Tab handling', () => {
 })
 
 /**
- * Gate-1 H-1 (demo-polish F2): the overlay trap must YIELD to any other modal. A
- * channel's own `aria-modal` surface (the social media viewer) can be open when the
- * Pause / EndEx / break-fiction overlay mounts; two traps that each pull focus back
- * inside ping-pong until the stack overflows and focus ends up under the overlay.
+ * Gate-1 H-1 / M-A (demo-polish F2): the overlay ALWAYS wins. A channel can have its own
+ * `aria-modal` surface open — the social media viewer — when the Pause / EndEx /
+ * break-fiction overlay mounts. The priority is one-way: the overlay trap pulls focus back
+ * from everywhere outside itself (channel modals included), the channel trap stands aside
+ * while the overlay is mounted, and the overlay only backs off for another SHELL layer
+ * (`data-shell-layer`). So there is no ping-pong, and focus never sits in the channel modal
+ * under the overlay. Also: the trap re-engages when the overlay's root element is swapped
+ * (`layerKey`), and a Tab from outside enters the overlay.
  */
 function OverlayWithModalSibling({ overlayActive }: { overlayActive: boolean }) {
   const containerRef = useOverlayFocusTrap<HTMLDivElement>(overlayActive)
@@ -161,6 +166,7 @@ function OverlayWithModalSibling({ overlayActive }: { overlayActive: boolean }) 
           role="dialog"
           aria-modal="true"
           tabIndex={-1}
+          data-shell-layer="overlay"
           data-testid="overlay-modal"
         >
           Paused
@@ -170,62 +176,79 @@ function OverlayWithModalSibling({ overlayActive }: { overlayActive: boolean }) 
   )
 }
 
-function SecondTrap() {
+function ShellLayerTrap({ id }: { id: string }) {
   const containerRef = useOverlayFocusTrap<HTMLDivElement>(true)
   return (
-    <div ref={containerRef} role="dialog" aria-modal="true" tabIndex={-1} data-testid="second-trap">
-      <button data-testid="second-button">Second</button>
+    <div
+      ref={containerRef}
+      role="dialog"
+      aria-modal="true"
+      tabIndex={-1}
+      data-shell-layer="overlay"
+      data-testid={`${id}-trap`}
+    >
+      <button data-testid={`${id}-button`}>{id}</button>
     </div>
   )
 }
 
-function TwoTraps() {
+/** The overlay swaps its ROOT ELEMENT between pause and break-fiction while staying active. */
+function SwappingOverlay({ kind }: { kind: 'pause' | 'broadcast' }) {
+  const containerRef = useOverlayFocusTrap<HTMLElement>(true, kind)
+  return kind === 'pause'
+    ? <div ref={containerRef as RefObject<HTMLDivElement>} role="dialog" aria-modal="true" tabIndex={-1} data-testid="ov-pause">P</div>
+    : <section ref={containerRef as RefObject<HTMLElement>} role="alertdialog" aria-modal="true" tabIndex={-1} data-testid="ov-broadcast">B</section>
+}
+
+function OverlayWithButtons() {
   const containerRef = useOverlayFocusTrap<HTMLDivElement>(true)
   return (
-    <div>
-      <div ref={containerRef} role="dialog" aria-modal="true" tabIndex={-1} data-testid="first-trap">
-        <button data-testid="first-button">First</button>
-      </div>
-      <SecondTrap />
+    <div ref={containerRef} role="dialog" aria-modal="true" tabIndex={-1} data-testid="ov-buttons">
+      <button data-testid="ov-a">A</button>
+      <button data-testid="ov-b">B</button>
     </div>
   )
 }
 
-describe('useOverlayFocusTrap — yields to another modal (H-1)', () => {
-  it('does not pull focus back from a focus move into a DIFFERENT aria-modal element', () => {
+const activeId = () =>
+  (document.activeElement as HTMLElement | null)?.getAttribute('data-testid') ?? document.activeElement?.tagName
+
+describe('useOverlayFocusTrap — the overlay always wins (H-1 / M-A)', () => {
+  it('PULLS focus back from a CHANNEL aria-modal element (no back-off for channel modals)', () => {
     render(<OverlayWithModalSibling overlayActive={true} />)
     const overlay = screen.getByTestId('overlay-modal')
     expect(document.activeElement).toBe(overlay)
 
-    const channelButton = screen.getByTestId('channel-modal-button')
-    channelButton.focus()
+    screen.getByTestId('channel-modal-button').focus()
 
-    // The channel modal's own trap owns this focus; the overlay trap stays out of it.
-    expect(document.activeElement).toBe(channelButton)
+    expect(document.activeElement).toBe(overlay)
   })
 
-  it('still pulls focus back from ordinary page content (a non-modal outside element)', () => {
+  it('still pulls focus back from ordinary page content', () => {
     render(
       <>
         <button data-testid="page-button">page</button>
         <OverlayWithModalSibling overlayActive={true} />
       </>,
     )
-    const overlay = screen.getByTestId('overlay-modal')
 
     screen.getByTestId('page-button').focus()
 
-    expect(document.activeElement).toBe(overlay)
+    expect(document.activeElement).toBe(screen.getByTestId('overlay-modal'))
   })
 
-  it('two overlay traps active at once settle (no focus ping-pong / stack overflow)', () => {
-    render(<TwoTraps />)
+  it('backs off for ANOTHER SHELL layer, so two shell layers settle (no ping-pong)', () => {
+    render(
+      <>
+        <ShellLayerTrap id="first" />
+        <ShellLayerTrap id="second" />
+      </>,
+    )
     const first = screen.getByTestId('first-button')
     const second = screen.getByTestId('second-button')
 
-    // Count the focus moves each `.focus()` triggers: a ping-pong between the two traps
-    // fires thousands of `focusin`s before the stack overflows; settled traps fire a
-    // handful at most.
+    // Count the focus moves each `.focus()` triggers: a ping-pong fires thousands of
+    // `focusin`s before the stack overflows; settled traps fire a handful at most.
     let focusIns = 0
     const count = () => {
       focusIns += 1
@@ -240,5 +263,64 @@ describe('useOverlayFocusTrap — yields to another modal (H-1)', () => {
     }
 
     expect(focusIns).toBeLessThan(12)
+    expect(document.activeElement).toBe(first)
+  })
+
+  it('re-engages on the NEW root when the overlay element is swapped while active (layerKey)', () => {
+    const { rerender } = render(<SwappingOverlay kind="pause" />)
+    expect(activeId()).toBe('ov-pause')
+
+    rerender(<SwappingOverlay kind="broadcast" />)
+
+    expect(activeId()).toBe('ov-broadcast')
+    // ... and the NEW root is the one that traps now.
+    const outside = document.createElement('button')
+    document.body.appendChild(outside)
+    outside.focus()
+    expect(activeId()).toBe('ov-broadcast')
+    outside.remove()
+  })
+
+  it('remembers the focus from BEFORE the overlay across a root swap, and restores it once at the end', () => {
+    function Scene({ kind, mounted }: { kind: 'pause' | 'broadcast', mounted: boolean }) {
+      return (
+        <>
+          <button data-testid="before">before</button>
+          {mounted && <SwappingOverlay kind={kind} />}
+        </>
+      )
+    }
+    const { rerender } = render(<Scene kind="pause" mounted={false} />)
+    screen.getByTestId('before').focus()
+
+    rerender(<Scene kind="pause" mounted={true} />)
+    rerender(<Scene kind="broadcast" mounted={true} />)
+    expect(activeId()).toBe('ov-broadcast')
+
+    rerender(<Scene kind="broadcast" mounted={false} />)
+    expect(activeId()).toBe('before')
+  })
+
+  it('a Tab pressed while focus is on <body> ENTERS the overlay (first control; Shift+Tab: last)', () => {
+    render(
+      <>
+        <button data-testid="page-button">page</button>
+        <OverlayWithButtons />
+      </>,
+    )
+    ;(document.activeElement as HTMLElement).blur()
+    expect(document.activeElement).toBe(document.body)
+
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    document.body.dispatchEvent(tab)
+    expect(tab.defaultPrevented).toBe(true)
+    expect(activeId()).toBe('ov-a')
+
+    ;(document.activeElement as HTMLElement).blur()
+    const shiftTab = new KeyboardEvent('keydown', {
+      key: 'Tab', shiftKey: true, bubbles: true, cancelable: true,
+    })
+    document.body.dispatchEvent(shiftTab)
+    expect(activeId()).toBe('ov-b')
   })
 })

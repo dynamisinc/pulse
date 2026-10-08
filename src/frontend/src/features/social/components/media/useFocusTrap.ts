@@ -16,14 +16,17 @@
  *    The explicit target matters: Safari does not focus a `<button>` on click, so
  *    `document.activeElement` at open time is `<body>` there.
  *
- * YIELDS TO ANY OTHER MODAL (Gate-1 H-1). The shell's Pause / EndEx / break-fiction
- * overlay (`participant-shell`'s `useOverlayFocusTrap`) can mount while the viewer
- * is open and must win — it paints above the viewer. Every handler here returns
- * early when focus is inside a different `[aria-modal="true"]` element
- * (`core/a11y/otherModal`), and the shell's trap applies the same rule, so the two
- * can never ping-pong focus (that loop overflowed the stack and left focus under the
- * overlay). A viewer that opens while another modal already holds focus does not
- * steal it, and does not take focus back from it when it closes.
+ * STANDS ASIDE COMPLETELY WHILE ANOTHER MODAL IS MOUNTED (Gate-1 H-1 / M-A). The
+ * shell's Pause / EndEx / break-fiction overlay (`participant-shell`'s
+ * `useOverlayFocusTrap`) can mount while the viewer is open and ALWAYS wins — it paints
+ * above the viewer. Priority is ONE-WAY (`core/a11y/modalPriority`): while any other
+ * `[aria-modal="true"]` element (not inside the viewer, not hosting it) is in the
+ * document, this trap does nothing — no focus on mount, no pull-back, no Tab cycling, no
+ * focus restore on unmount — and the overlay's own trap pulls focus back from the viewer
+ * if it ever lands there. When the overlay clears the shell hands focus back to the
+ * viewer and this trap resumes. (The first cut only backed off for a focus target that
+ * was already inside the other modal, which let focus sit in the viewer UNDER the
+ * overlay; that loop is also what overflowed the stack originally.)
  *
  * Mirrors `participant-shell`'s `useOverlayFocusTrap` (kept separate: that hook
  * restores only the previously-focused element and is private to the shell).
@@ -32,7 +35,7 @@
 
 import { useEffect, useRef } from 'react'
 import type { RefObject } from 'react'
-import { isInsideOtherModal } from '@/core/a11y/otherModal'
+import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 
 const FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -72,22 +75,22 @@ export function useFocusTrap(
       ? document.activeElement
       : null
 
-    // Do not steal focus from another modal that already holds it (e.g. the shell overlay).
-    if (!isInsideOtherModal(document.activeElement, container)) container.focus()
+    // Another modal (e.g. the shell overlay) is up: it owns focus; do not take any.
+    if (!hasOtherModalMounted(container)) container.focus()
 
     function handleFocusIn(event: FocusEvent): void {
       const target = event.target
       if (container === null || !(target instanceof Node) || container.contains(target)) return
-      // A focus move into ANOTHER modal belongs to that modal's own trap (H-1).
-      if (isInsideOtherModal(target, container)) return
+      // Another modal is mounted: stand aside completely (H-1 / M-A).
+      if (hasOtherModalMounted(container)) return
       const [first] = getFocusable(container)
       ;(first ?? container).focus()
     }
 
     function handleKeyDown(event: KeyboardEvent): void {
       if (event.key !== 'Tab' || container === null) return
-      // Another modal owns the keyboard right now: do not cycle, do not pull focus (H-1).
-      if (isInsideOtherModal(document.activeElement, container)) return
+      // Another modal owns the keyboard right now: do not cycle, do not pull focus (H-1 / M-A).
+      if (hasOtherModalMounted(container)) return
       const focusable = getFocusable(container)
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
@@ -118,7 +121,7 @@ export function useFocusTrap(
       document.removeEventListener('focusin', handleFocusIn)
       document.removeEventListener('keydown', handleKeyDown)
       // Never take focus back from another modal that is on top of us now.
-      if (container !== null && isInsideOtherModal(document.activeElement, container)) return
+      if (container !== null && hasOtherModalMounted(container)) return
       const preferred = returnTargetRef.current
       if (preferred !== null && preferred.isConnected) preferred.focus()
       else if (openedFrom !== null && openedFrom.isConnected) openedFrom.focus()

@@ -111,10 +111,21 @@ describe('withStartTime', () => {
     expect(withStartTime('https://s/a.mp4?sig=x', 3)).toBe('https://s/a.mp4?sig=x#t=3.0')
   })
 
-  it('is a no-op for a zero / negative / non-finite time or a URL that already has a fragment', () => {
+  it('REPLACES an existing t= fragment instead of silently dropping the resume (L-C)', () => {
+    expect(withStartTime('/a.mp4#t=5', 9)).toBe('/a.mp4#t=9.0')
+    expect(withStartTime('/a.mp4#t=5,10', 9)).toBe('/a.mp4#t=9.0')
+    expect(withStartTime('/a.mp4#t=0.1', 2.25)).toBe('/a.mp4#t=2.3')
+  })
+
+  it('keeps other fragment components alongside the new t=', () => {
+    expect(withStartTime('/a.mp4#track=audio&t=5', 9)).toBe('/a.mp4#track=audio&t=9.0')
+    expect(withStartTime('/a.mp4#track=audio', 9)).toBe('/a.mp4#track=audio&t=9.0')
+  })
+
+  it('is a no-op for a zero / negative / non-finite time (an existing fragment is left alone)', () => {
     expect(withStartTime('/a.mp4', 0)).toBe('/a.mp4')
     expect(withStartTime('/a.mp4', -1)).toBe('/a.mp4')
     expect(withStartTime('/a.mp4', Number.NaN)).toBe('/a.mp4')
-    expect(withStartTime('/a.mp4#t=5', 9)).toBe('/a.mp4#t=5')
+    expect(withStartTime('/a.mp4#t=5', 0)).toBe('/a.mp4#t=5')
   })
 })

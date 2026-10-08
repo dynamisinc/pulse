@@ -26,7 +26,7 @@
  * real focus-trap wiring (its own unit coverage lives in
  * `useOverlayFocusTrap.test.tsx`).
  */
-import { act, render, screen, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OverlayLayer } from './OverlayLayer'
 import { useOverlayState } from './overlayState'
@@ -349,5 +349,97 @@ describe('OverlayLayer — NFR-008 watermark slot (in-fiction-only, chrome-off f
     render(<OverlayLayer />)
 
     expect(screen.queryByTestId('pulse-overlay-watermark-slot')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * HI-1 + M-A (demo-polish F2 re-review): the layer leaves any fullscreen when it becomes
+ * active (a fullscreen element paints above the overlay), every root is a SHELL layer
+ * (`data-shell-layer`, so the overlay's trap beats a channel modal), and a pause ->
+ * break-fiction root swap re-engages the focus trap on the new root.
+ */
+describe('OverlayLayer — priority over the channel (F2)', () => {
+  function mockFullscreen() {
+    const exit = vi.fn().mockResolvedValue(undefined)
+    document.exitFullscreen = exit
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: () => document.body,
+    })
+    return exit
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(document, 'fullscreenElement')
+    Reflect.deleteProperty(document, 'exitFullscreen')
+  })
+
+  it.each([
+    ['pause', 'in-fiction', 'pulse-overlay-pause-in-fiction'],
+    ['pause', 'out-of-fiction', 'pulse-overlay-pause-out-of-fiction'],
+    ['endex', 'in-fiction', 'pulse-overlay-endex-in-fiction'],
+    ['broadcast', 'in-fiction', 'pulse-overlay-break-fiction'],
+  ] as const)('exits a channel fullscreen when the %s (%s) overlay becomes active', (state, register, testId) => {
+    const exit = mockFullscreen()
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'none' }))
+    const { rerender } = render(<OverlayLayer />)
+    expect(exit).not.toHaveBeenCalled()
+
+    mockUseOverlayState.mockReturnValue(overlayState({ state, register, message: 'm' }))
+    rerender(<OverlayLayer />)
+
+    expect(screen.getByTestId(testId)).toBeInTheDocument()
+    expect(exit).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-takes focus once fullscreen is left (while fullscreen the page behind could keep it)', async () => {
+    // Emulates the browser: leaving fullscreen leaves nothing focused (the overlay's own
+    // focus() during fullscreen was refused), so without the re-take the page behind keeps focus.
+    document.exitFullscreen = vi.fn(async () => {
+      ;(document.activeElement as HTMLElement | null)?.blur()
+    })
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: () => document.body,
+    })
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'm' }))
+
+    render(<OverlayLayer />)
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByTestId('pulse-overlay-break-fiction')))
+  })
+
+  it('does not touch fullscreen while no overlay is active', () => {
+    const exit = mockFullscreen()
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'none' }))
+
+    render(<OverlayLayer />)
+
+    expect(exit).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['pause', 'in-fiction', 'pulse-overlay-pause-in-fiction'],
+    ['pause', 'out-of-fiction', 'pulse-overlay-pause-out-of-fiction'],
+    ['endex', 'out-of-fiction', 'pulse-overlay-endex-out-of-fiction'],
+    ['broadcast', 'in-fiction', 'pulse-overlay-break-fiction'],
+  ] as const)('marks the %s (%s) root as a shell layer', (state, register, testId) => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state, register, message: 'm' }))
+
+    render(<OverlayLayer />)
+
+    expect(screen.getByTestId(testId)).toHaveAttribute('data-shell-layer', 'overlay')
+  })
+
+  it('re-engages the focus trap on the NEW root when pause swaps to break-fiction', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'in-fiction' }))
+    const { rerender } = render(<OverlayLayer />)
+    expect(document.activeElement).toBe(screen.getByTestId('pulse-overlay-pause-in-fiction'))
+
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'm' }))
+    rerender(<OverlayLayer />)
+
+    expect(document.activeElement).toBe(screen.getByTestId('pulse-overlay-break-fiction'))
   })
 })

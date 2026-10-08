@@ -8,16 +8,22 @@
  * focus to the thumbnail that opened it. Also the safe-URL fallback, the scroll
  * lock, and the video-in-viewer (modal fallback) path.
  */
-import { useState } from 'react'
+import { useReducer, useState } from 'react'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { OverlayLayer } from '@/features/participant-shell/components/OverlayLayer'
 import { useOverlayFocusTrap } from '@/features/participant-shell/components/OverlayLayer/useOverlayFocusTrap'
 import type { ChromeConfig } from '@/features/participant-shell/mountContract'
 import type { PostMedia } from '../../types/post'
 import { MediaViewer } from './MediaViewer'
 import { installMediaElementStubs } from './mediaTestUtils'
 import { resetPlaybackForTests } from './playbackCoordinator'
+
+const overlayCtl = vi.hoisted(() => ({
+  state: 'none' as 'none' | 'pause' | 'endex' | 'broadcast',
+  register: 'in-fiction' as 'in-fiction' | 'out-of-fiction',
+}))
 
 vi.mock('@/features/participant-shell/chromeConfig', async importOriginal => {
   const actual = await importOriginal<typeof import('@/features/participant-shell/chromeConfig')>()
@@ -29,7 +35,11 @@ vi.mock('@/features/participant-shell/chromeConfig', async importOriginal => {
 })
 
 vi.mock('@/features/participant-shell/components/OverlayLayer/overlayState', () => ({
-  useOverlayState: () => ({ state: 'none', register: 'in-fiction', message: '' }),
+  useOverlayState: () => ({
+    state: overlayCtl.state,
+    register: overlayCtl.register,
+    message: 'REAL-WORLD MESSAGE',
+  }),
 }))
 
 function image(n: number, overrides: Partial<PostMedia> = {}): PostMedia {
@@ -50,6 +60,8 @@ beforeEach(() => {
   installMediaElementStubs()
   resetPlaybackForTests()
   document.body.style.overflow = ''
+  overlayCtl.state = 'none'
+  overlayCtl.register = 'in-fiction'
 })
 
 /** A thumbnail button that opens the viewer, like the post's grid does. */
@@ -403,113 +415,246 @@ describe('MediaViewer — a video (the fullscreen modal fallback)', () => {
 })
 
 /**
- * Gate-1 H-1. The shell's Pause / EndEx / break-fiction overlay mounts as a sibling
- * of the channel, traps focus with its own `useOverlayFocusTrap`, and paints ABOVE
- * the viewer. The two traps used to fight (each pulled focus back to itself) until
- * the stack overflowed, leaving focus under the overlay. Now they yield to each other.
+ * Gate-1 H-1 / M-A / M-B. The shell's Pause / EndEx / break-fiction overlay mounts as a
+ * sibling of the channel, traps focus with its own `useOverlayFocusTrap`, and paints ABOVE
+ * the viewer. The priority is ONE-WAY — the overlay always wins: the viewer's trap AND its
+ * Esc / ←/→ keys stand aside while the overlay is mounted, and the overlay pulls focus back
+ * from the viewer. These tests render the REAL `OverlayLayer` (its state mocked) and assert
+ * WHERE focus ends up, not just that no loop occurred.
  */
-function OverlayHarness({ overlayActive }: { overlayActive: boolean }) {
-  const containerRef = useOverlayFocusTrap<HTMLDivElement>(overlayActive)
-  if (!overlayActive) return null
-  return (
-    <div
-      ref={containerRef}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Exercise paused"
-      tabIndex={-1}
-      data-testid="shell-overlay"
-    >
-      <button type="button">Refresh</button>
-      <button type="button">Help</button>
-    </div>
-  )
-}
+const activeId = () =>
+  (document.activeElement as HTMLElement | null)?.getAttribute('data-testid')
+  ?? document.activeElement?.tagName
 
-function ViewerUnderOverlay() {
-  const [overlayActive, setOverlayActive] = useState(false)
+/**
+ * The channel + shell stage. The overlay's (mocked) state and the viewer's mount are driven
+ * through tabIndex=-1 control buttons clicked with `.click()` (which does not move focus), so
+ * nothing is reassigned during render and focus stays exactly where the scenario put it.
+ */
+function Stage({
+  viewerOpen: initialOpen = true,
+  onClose,
+}: { viewerOpen?: boolean, onClose?: () => void }) {
+  const [, force] = useReducer((n: number) => n + 1, 0)
+  const [viewerOpen, setViewerOpen] = useState(initialOpen)
+  const setOverlay = (state: typeof overlayCtl.state, register: typeof overlayCtl.register) => {
+    overlayCtl.state = state
+    overlayCtl.register = register
+    force()
+  }
   return (
     <>
-      <button type="button" onClick={() => setOverlayActive(true)}>Pause the exercise</button>
-      <MediaViewer items={THREE} onClose={vi.fn()} />
-      <OverlayHarness overlayActive={overlayActive} />
+      <button tabIndex={-1} data-testid="ctl-none" onClick={() => setOverlay('none', 'in-fiction')} />
+      <button tabIndex={-1} data-testid="ctl-pause" onClick={() => setOverlay('pause', 'in-fiction')} />
+      <button
+        tabIndex={-1}
+        data-testid="ctl-pause-out"
+        onClick={() => setOverlay('pause', 'out-of-fiction')}
+      />
+      <button
+        tabIndex={-1}
+        data-testid="ctl-broadcast"
+        onClick={() => setOverlay('broadcast', 'in-fiction')}
+      />
+      <button tabIndex={-1} data-testid="ctl-open" onClick={() => setViewerOpen(true)} />
+      <button tabIndex={-1} data-testid="ctl-close" onClick={() => setViewerOpen(false)} />
+      {viewerOpen && (
+        <MediaViewer
+          items={THREE}
+          onClose={() => {
+            onClose?.()
+            setViewerOpen(false)
+          }}
+        />
+      )}
+      <OverlayLayer />
     </>
   )
 }
 
-describe('MediaViewer — yields to the shell overlay (H-1)', () => {
-  it('the overlay keeps focus when it mounts over an open viewer; Tab cycles inside the overlay and never throws', async () => {
-    const user = userEvent.setup()
-    render(<ViewerUnderOverlay />)
-    const viewer = screen.getByTestId('media-viewer')
-    expect(viewer).toHaveFocus()
+type Control = 'none' | 'pause' | 'pause-out' | 'broadcast' | 'open' | 'close'
 
-    // The shell overlay becomes active while the viewer is open.
+function mountStage(props: { viewerOpen?: boolean, onClose?: () => void } = {}) {
+  const utils = render(<Stage {...props} />)
+  const press = (control: Control) =>
     act(() => {
-      screen.getByRole('button', { name: 'Pause the exercise' }).click()
+      screen.getByTestId(`ctl-${control}`).click()
     })
-    const overlay = screen.getByTestId('shell-overlay')
-    expect(overlay).toHaveFocus()
+  return { ...utils, press }
+}
 
-    // Tab: previously `RangeError: Maximum call stack size exceeded` and focus under the overlay.
+describe('MediaViewer — the shell overlay always wins (H-1 / M-A)', () => {
+  it('the overlay takes focus when it mounts over an open viewer; Tab / Shift+Tab never leave it', async () => {
+    const user = userEvent.setup()
+    const { press } = mountStage()
+    expect(activeId()).toBe('media-viewer')
+
+    press('pause')
+    expect(activeId()).toBe('pulse-overlay-pause-in-fiction')
+
     for (let i = 0; i < 5; i += 1) {
       await user.tab()
-      expect(overlay).toContainElement(document.activeElement as HTMLElement)
-      expect(viewer).not.toContainElement(document.activeElement as HTMLElement)
+      expect(activeId()).toBe('pulse-overlay-pause-in-fiction')
     }
     for (let i = 0; i < 5; i += 1) {
       await user.tab({ shift: true })
-      expect(overlay).toContainElement(document.activeElement as HTMLElement)
+      expect(activeId()).toBe('pulse-overlay-pause-in-fiction')
     }
   })
 
-  it('settles (no focus ping-pong) even if something programmatically focuses the viewer under an active overlay', async () => {
+  it('a pause -> break-fiction ROOT SWAP with the viewer open keeps focus in the overlay (not <body>, not the viewer)', async () => {
     const user = userEvent.setup()
-    render(<ViewerUnderOverlay />)
-    act(() => {
-      screen.getByRole('button', { name: 'Pause the exercise' }).click()
-    })
-    const close = within(screen.getByTestId('media-viewer')).getByRole('button', { name: 'Close' })
+    const { press } = mountStage()
 
-    // Each trap yields to the other's modal, so a stray focus move into the viewer fires a
-    // handful of `focusin`s at most — the old pull-back loop fired thousands and overflowed.
-    let focusIns = 0
-    const count = () => {
-      focusIns += 1
+    press('pause')
+    expect(activeId()).toBe('pulse-overlay-pause-in-fiction')
+    press('broadcast')
+
+    expect(activeId()).toBe('pulse-overlay-break-fiction')
+    await user.tab()
+    expect(activeId()).toBe('pulse-overlay-break-fiction')
+    await user.tab({ shift: true })
+    expect(activeId()).toBe('pulse-overlay-break-fiction')
+  })
+
+  it('the in-fiction -> out-of-fiction register swap re-engages the trap on the new root too', () => {
+    const { press } = mountStage()
+
+    press('pause')
+    expect(activeId()).toBe('pulse-overlay-pause-in-fiction')
+    press('pause-out')
+
+    expect(activeId()).toBe('pulse-overlay-pause-out-of-fiction')
+  })
+
+  it('programmatic focus into the viewer while the overlay is up is PULLED BACK to the overlay', () => {
+    const { press } = mountStage()
+    press('broadcast')
+    expect(activeId()).toBe('pulse-overlay-break-fiction')
+
+    within(screen.getByTestId('media-viewer')).getByRole('button', { name: 'Close' }).focus()
+
+    expect(activeId()).toBe('pulse-overlay-break-fiction')
+  })
+
+  it('a Tab from <body> while the overlay is up lands in the overlay, never in the viewer', async () => {
+    const user = userEvent.setup()
+    const { press } = mountStage()
+    press('pause')
+    ;(document.activeElement as HTMLElement).blur()
+    expect(document.activeElement).toBe(document.body)
+
+    await user.tab()
+
+    expect(activeId()).toBe('pulse-overlay-pause-in-fiction')
+  })
+
+  it('an overlay WITH focusable children: a Tab from <body> enters it and stays in it', async () => {
+    const user = userEvent.setup()
+    function OverlayWithButtons() {
+      const containerRef = useOverlayFocusTrap<HTMLDivElement>(true)
+      return (
+        <div
+          ref={containerRef}
+          role="dialog"
+          aria-modal="true"
+          tabIndex={-1}
+          data-shell-layer="overlay"
+          data-testid="ov-buttons"
+        >
+          <button data-testid="ov-a">A</button>
+          <button data-testid="ov-b">B</button>
+        </div>
+      )
     }
-    document.addEventListener('focusin', count)
-    try {
-      close.focus()
+    render(<><MediaViewer items={THREE} onClose={vi.fn()} /><OverlayWithButtons /></>)
+    ;(document.activeElement as HTMLElement).blur()
+    expect(document.activeElement).toBe(document.body)
+
+    await user.tab()
+    expect(activeId()).toBe('ov-a')
+    for (let i = 0; i < 4; i += 1) {
       await user.tab()
-      await user.tab({ shift: true })
-    } finally {
-      document.removeEventListener('focusin', count)
+      expect(['ov-a', 'ov-b']).toContain(activeId())
     }
-
-    expect(focusIns).toBeLessThan(12)
+    await user.tab({ shift: true })
+    expect(['ov-a', 'ov-b']).toContain(activeId())
   })
 
   it('a viewer that opens while the overlay already holds focus does not steal it', () => {
-    function OverlayThenViewer() {
-      const [viewerOpen, setViewerOpen] = useState(false)
-      return (
-        <>
-          <button type="button" onClick={() => setViewerOpen(true)}>Open viewer</button>
-          <OverlayHarness overlayActive={true} />
-          {viewerOpen && <MediaViewer items={THREE} onClose={vi.fn()} />}
-        </>
-      )
-    }
-    render(<OverlayThenViewer />)
-    const overlay = screen.getByTestId('shell-overlay')
-    expect(overlay).toHaveFocus()
+    const { press } = mountStage({ viewerOpen: false })
+    press('pause')
+    expect(activeId()).toBe('pulse-overlay-pause-in-fiction')
 
-    act(() => {
-      screen.getByRole('button', { name: 'Open viewer', hidden: true }).click()
-    })
+    press('open')
 
     expect(screen.getByTestId('media-viewer')).toBeInTheDocument()
-    expect(overlay).toHaveFocus()
+    expect(activeId()).toBe('pulse-overlay-pause-in-fiction')
+  })
+
+  it('the viewer closing under the overlay does not take focus back from it', () => {
+    const { press } = mountStage()
+    press('broadcast')
+    expect(activeId()).toBe('pulse-overlay-break-fiction')
+
+    press('close')
+
+    expect(screen.queryByTestId('media-viewer')).not.toBeInTheDocument()
+    expect(activeId()).toBe('pulse-overlay-break-fiction')
+  })
+
+  it('when the overlay clears, focus goes back INTO the viewer and its trap resumes', async () => {
+    const user = userEvent.setup()
+    const { press } = mountStage()
+    press('pause')
+
+    press('none')
+
+    const viewer = screen.getByTestId('media-viewer')
+    expect(viewer).toHaveFocus()
+    // The viewer's own trap works again: Tab cycles inside it.
+    for (let i = 0; i < 4; i += 1) {
+      await user.tab()
+      expect(viewer).toContainElement(document.activeElement as HTMLElement)
+    }
+  })
+})
+
+describe('MediaViewer — its keys stand aside while the overlay is up (M-B)', () => {
+  it('ArrowRight does not page, and the live region does not announce, under the overlay', () => {
+    const { press } = mountStage()
+    press('pause')
+    const status = screen.getByTestId('media-viewer-status')
+    expect(status).toHaveTextContent('Image 1 of 3')
+
+    fireEvent.keyDown(document.activeElement as Element, { key: 'ArrowRight' })
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' })
+
+    expect(status).toHaveTextContent('Image 1 of 3')
+  })
+
+  it('Escape does not close the viewer under the overlay (the return target is not lost)', () => {
+    const onClose = vi.fn()
+    const { press } = mountStage({ onClose })
+    press('broadcast')
+
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' })
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByTestId('media-viewer')).toBeInTheDocument()
+  })
+
+  it('Escape and the arrows work again once the overlay clears', () => {
+    const onClose = vi.fn()
+    const { press } = mountStage({ onClose })
+    press('pause')
+    press('none')
+
+    fireEvent.keyDown(document.activeElement as Element, { key: 'ArrowRight' })
+    expect(screen.getByTestId('media-viewer-status')).toHaveTextContent('Image 2 of 3')
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
 
