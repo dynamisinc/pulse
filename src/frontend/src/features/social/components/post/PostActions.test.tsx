@@ -416,6 +416,23 @@ describe('PostActions — Reply is a button only when it is wired (WR-002, F3)',
     expect(onReply).toHaveBeenCalledWith('post-r')
   })
 
+  it('leaves NO focusable element in the row but the wired controls (Repost and Like)', async () => {
+    await renderActions(
+      <PostActions
+        post={buildPost({ counts: { reply: 1, repost: 2, like: 3, share: 4 } })}
+        variant="full"
+      />,
+    )
+
+    const region = screen.getByTestId('post-actions')
+    // Reply is unwired and Share/Quote are hidden: only the two toggles are controls.
+    expect(within(region).getAllByRole('button').map(b => b.getAttribute('data-action'))).toEqual([
+      'repost',
+      'like',
+    ])
+    expect(region.querySelectorAll('[tabindex]')).toHaveLength(0)
+  })
+
   it('an unwired Reply is inert text: not a button, not focusable, count still readable', async () => {
     const user = userEvent.setup()
     await renderActions(<PostActions post={buildPost()} variant="full" />)
@@ -429,7 +446,9 @@ describe('PostActions — Reply is a button only when it is wired (WR-002, F3)',
 
     // Tab order skips it entirely: the first stop is Repost.
     await user.tab()
+    expect(reply).not.toHaveFocus()
     expect(screen.getByRole('button', { name: /^repost/i })).toHaveFocus()
+    expect(document.activeElement).toHaveAttribute('data-action', 'repost')
   })
 })
 

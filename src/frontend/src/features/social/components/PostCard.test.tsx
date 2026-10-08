@@ -396,6 +396,17 @@ describe('PostCard — reply count & thread-open affordance (SOC-011, threads-re
     expect(onReply).toHaveBeenCalledWith('post-reply-2')
   })
 
+  it('still shows the reply count, as inert text, when onReply is not supplied', async () => {
+    await renderWithExerciseContext(
+      <PostCard post={buildPost({ counts: { reply: 9, repost: 1, like: 2 } })} />,
+    )
+
+    expect(screen.queryByRole('button', { name: /^reply/i })).not.toBeInTheDocument()
+    expect(
+      screen.getByTestId('post-actions').querySelector('[data-action="reply"]'),
+    ).toHaveTextContent('9')
+  })
+
   it('renders Reply as inert text, not a focusable no-op button, when onReply is not supplied', async () => {
     await renderWithExerciseContext(<PostCard post={buildPost()} />)
 
@@ -545,12 +556,14 @@ describe('PostCard — action buttons carry an accessible name including their c
 describe('PostCard — action row is a sibling of the open target, never nested (NFR-001)', () => {
   it('does not fire onOpen when an action button is clicked', async () => {
     const onOpen = vi.fn()
+    const onReply = vi.fn()
     await renderWithExerciseContext(
-      <PostCard post={buildPost()} onOpen={onOpen} onReply={vi.fn()} />,
+      <PostCard post={buildPost()} onOpen={onOpen} onReply={onReply} />,
     )
 
     screen.getByRole('button', { name: /^reply/i }).click()
 
+    expect(onReply).toHaveBeenCalledTimes(1)
     expect(onOpen).not.toHaveBeenCalled()
   })
 

@@ -27,6 +27,20 @@ export const IMAGE_MAX_BYTES = 5 * 1024 * 1024
 /** Videos: <= 100 MiB (mp4/webm). Mirrors the server's streamed limits. */
 export const VIDEO_MAX_BYTES = 100 * 1024 * 1024
 
+/**
+ * The server's accepted range for the client's size hints: `width` / `height` are
+ * integers 1..{@link MEDIA_MAX_DIMENSION} (implementation.md §1.5.1). Shared by the
+ * response guard (`mediaGuards`) so the two can never disagree.
+ */
+export const MEDIA_MAX_DIMENSION = 16384
+
+/**
+ * The server rejects durations over an hour: `durationSec` is a double with
+ * 0 < x <= {@link MEDIA_MAX_DURATION_SEC} (fractional seconds are valid — it is
+ * `video.duration`). Shared by `captureVideoPoster` and the response guard.
+ */
+export const MEDIA_MAX_DURATION_SEC = 3600
+
 /** Shown wherever a video is requested — Safari will not play non-H.264 MP4. */
 export const VIDEO_FORMAT_HINT = 'MP4 (H.264)'
 

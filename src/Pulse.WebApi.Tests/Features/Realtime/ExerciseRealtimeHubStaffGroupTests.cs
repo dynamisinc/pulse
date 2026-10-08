@@ -8,6 +8,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseResolution;
@@ -223,7 +224,7 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
 
         // No exercise scope: the hub's SignalR DI scope never carries the request's IExerciseContext.
         await using var dbContext = _fixture.CreateContext();
-        var hub = new ExerciseRealtimeHub(dbContext) { Context = callerContext.Object, Groups = groups.Object };
+        var hub = new ExerciseRealtimeHub(dbContext, NullLogger<ExerciseRealtimeHub>.Instance) { Context = callerContext.Object, Groups = groups.Object };
 
         await hub.OnConnectedAsync();
 

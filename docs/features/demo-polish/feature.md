@@ -40,7 +40,7 @@ Order = wave order. Priorities and effort are the plan's (§5). *Home story* is 
 |---|-------|----|-----|-------|------|----------------|--------|-------|
 | 01 | [Keyless Blob storage for media](01-blob-storage-keyless.md) | I1 | Must | infra | 1 | XC-009, COR-002, NFR-004 | In Review | #420 |
 | 02 | [Schema: media, replies, reactions, avatars (one migration)](02-schema-media-replies-reactions.md) | B1 | Must | backend | 1 | SOC-001, SOC-010, SOC-030, COR-001, COR-020, XC-010 | In Review | #421 |
-| 03 | [Client seam: PostCard split, contract v2, mocks, upload client](03-client-seam-contract-v2.md) | F0 | Must | frontend | 1 | SOC-001, SOC-002, XC-002, XC-009, COR-053 | In Progress | #422 |
+| 03 | [Client seam: PostCard split, contract v2, mocks, upload client](03-client-seam-contract-v2.md) | F0 | Must | frontend | 1 | SOC-001, SOC-002, XC-002, XC-009, COR-053 | In Review | #422 |
 | 04 | [Role-scoped realtime groups](04-role-scoped-realtime-groups.md) | B5 | Should | backend | 1 | XC-002, SOC-052, COR-001 | In Review | #423 |
 | 05 | [Media pipeline: upload, store, SAS, library](05-media-pipeline.md) | BM | Must | backend | 1b | SOC-001, XC-009, COR-002, NFR-004, NFR-009 | In Progress | #424 |
 | 06 | [Post v2 read/write](06-post-v2-read-write.md) | BP | Must | backend | 1b | SOC-001, SOC-002, SOC-054, XC-002, COR-024 | In Progress | #425 |
@@ -57,7 +57,7 @@ Order = wave order. Priorities and effort are the plan's (§5). *Home story* is 
 | 17 | [Post as persona v2](17-post-as-persona-v2.md) | C1 | Must | frontend | 3 | CTL-001, CTL-003, SOC-012 | Not Started | #436 |
 | 18 | [Live world column](18-live-world-column.md) | C2 | Must | frontend | 3 | CTL-030, CTL-031 | Not Started | #437 |
 | 19 | [Run sheet](19-run-sheet.md) | C3 | Must | frontend | 3 | CTL-010, CTL-011, CTL-013 | Not Started | #438 |
-| 20 | [Console cleanup](20-console-cleanup.md) | C4 | Must | frontend | 3 | CTL-002, CTL-003 | In Progress | #439 |
+| 20 | [Console cleanup](20-console-cleanup.md) | C4 | Must | frontend | 3 | CTL-002, CTL-003 | In Review | #439 |
 | 21 | [Persona profile edit](21-persona-profile-edit.md) | PE | Should | fullstack | 2 (BE) / 3 (FE) | COR-020, COR-022, COR-024 | Not Started | #440 |
 | 22 | [Takedown UI and live feed removal](22-takedown-ui.md) | C5 | Should | frontend | 3 | CTL-025, XC-010 | Not Started | #441 |
 | 23 | [Preview-as-participant and StartEx/EndEx](23-preview-and-startex.md) | C6 | Could | frontend | 3 | COR-041, COR-054 | Not Started | #442 |

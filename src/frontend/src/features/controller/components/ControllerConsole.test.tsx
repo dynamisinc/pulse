@@ -15,7 +15,7 @@
  *
  * Rendered inside the real exercise scope + toolstrip provider + the shipped
  * `<Toolstrip>` dock, so the registration is exercised end-to-end against the
- * shipped seam (not a re-implemented fixture). `usePersonas()` resolves the
+ * shipped seam (not a re-implemented fixture). `useStaffPersonas()` resolves the
  * seeded cast via its wired mock adapter, so the badge count is a real,
  * exercise-scoped number.
  */
@@ -27,6 +27,7 @@ import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { ToolstripProvider } from '@/features/staffShell/toolRegistry'
 import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
+import { ActivePersonaProvider } from '../hooks/useActivePersona'
 import { ControllerConsole } from './ControllerConsole'
 
 function renderConsole() {
@@ -34,8 +35,10 @@ function renderConsole() {
     <ThemeProvider theme={cobraTheme}>
       <ExerciseContextProvider>
         <ToolstripProvider>
-          <ControllerConsole />
-          <Toolstrip />
+          <ActivePersonaProvider>
+            <ControllerConsole />
+            <Toolstrip />
+          </ActivePersonaProvider>
         </ToolstripProvider>
       </ExerciseContextProvider>
     </ThemeProvider>,

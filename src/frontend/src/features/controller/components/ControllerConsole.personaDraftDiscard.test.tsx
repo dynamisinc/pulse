@@ -33,6 +33,7 @@ import { engineControlStore } from '../engine/hooks/useEngineControl'
 import { engineSettingsStore } from '../engine/hooks/useEngineSettings'
 import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { PersonaComposer } from './PersonaComposer'
+import { ActivePersonaProvider } from '../hooks/useActivePersona'
 import { ControllerConsole } from './ControllerConsole'
 
 /** The fixed exercise id `ExerciseContextProvider`'s mock resolver returns. */
@@ -75,27 +76,29 @@ function renderConsole() {
     <ThemeProvider theme={cobraTheme}>
       <ExerciseContextProvider>
         <ToolstripProvider>
-          <ControllerConsole
-            renderPersonaResults={({ onSelectPersona }) => (
-              <button
-                type="button"
-                data-testid="pick-persona"
-                onClick={() => onSelectPersona(ACTIVE_PERSONA.id)}
-              >
-                pick Fairhaven Water
-              </button>
-            )}
-            dockSlots={{
-              composer: (
-                <PersonaComposer
-                  activePersona={ACTIVE_PERSONA}
-                  actingHumanId="human-ctl-7"
-                  callSign="SIMCELL-1"
-                />
-              ),
-            }}
-          />
-          <Toolstrip />
+          <ActivePersonaProvider>
+            <ControllerConsole
+              renderPersonaResults={({ onSelectPersona }) => (
+                <button
+                  type="button"
+                  data-testid="pick-persona"
+                  onClick={() => onSelectPersona(ACTIVE_PERSONA.id)}
+                >
+                  pick Fairhaven Water
+                </button>
+              )}
+              dockSlots={{
+                composer: (
+                  <PersonaComposer
+                    activePersona={ACTIVE_PERSONA}
+                    actingHumanId="human-ctl-7"
+                    callSign="SIMCELL-1"
+                  />
+                ),
+              }}
+            />
+            <Toolstrip />
+          </ActivePersonaProvider>
         </ToolstripProvider>
       </ExerciseContextProvider>
     </ThemeProvider>,

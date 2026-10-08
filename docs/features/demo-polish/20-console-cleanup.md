@@ -1,6 +1,6 @@
 # Story: Console cleanup
 
-**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** CTL-002, CTL-003, CTL-004 (honesty only), NFR-001  ·  **Design decisions:** D5-016, D5-017 (permanent watch surfaces), D5-014/2.4  ·  **Issue:** #439
 **Story ID:** C4  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** S  ·  **Wave:** 3
 **Home story:** [`console-shell/01`](../console-shell/01-toolstrip-flyouts.md) (slice).

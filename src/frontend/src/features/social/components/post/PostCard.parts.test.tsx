@@ -59,7 +59,6 @@ describe('PostCard — composition and DOM hooks', () => {
         })}
         onOpen={vi.fn()}
         onOpenProfile={vi.fn()}
-        onReply={vi.fn()}
       />,
     )
 
@@ -81,7 +80,8 @@ describe('PostCard — composition and DOM hooks', () => {
     expect(before(link, actions)).toBe(true)
     expect(screen.getByTestId('post-open-target')).toBeInTheDocument()
     expect(screen.getByTestId('post-author-target')).toHaveAttribute('data-persona-id', 'persona-fulcoem')
-    expect(card.querySelectorAll('button[data-action]')).toHaveLength(3)
+    // The canonical set; Reply is inert here (no `onReply`), so count by `data-action`.
+    expect(card.querySelectorAll('[data-action]')).toHaveLength(3)
   })
 
   it('shows "Replying to @handle" for a reply and nothing for a plain post', async () => {

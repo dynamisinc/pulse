@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Realtime;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -80,23 +81,38 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// <c>Exercise</c>), never <see cref="IExerciseScoped"/> content, and runs only for a staff-kind principal —
 /// a participant connection performs no database work here.
 /// </para>
+/// <para>
+/// <b>A staff check that cannot complete ABORTS the connection — it is never rethrown (Gate-2 L-1).</b> The
+/// check reads the database, which can fail transiently (e.g. a serverless SQL database resuming from
+/// auto-pause). An exception escaping <see cref="OnConnectedAsync"/> makes SignalR close the connection with
+/// <c>allowReconnect: false</c>, which the JS client does NOT retry — the controller console would silently lose
+/// its live review pushes until a page refresh. The failure is therefore logged and the connection aborted
+/// instead: still fail-closed (the staff join is never reached), but dropped the way the client's automatic
+/// reconnect treats as transient, so the next attempt re-runs the check. Cancellation caused by the
+/// connection's OWN abort is not a check failure and is left to propagate.
+/// </para>
 /// </remarks>
-public sealed class ExerciseRealtimeHub : Hub
+public sealed partial class ExerciseRealtimeHub : Hub
 {
     /// <summary>The session kind that may be considered for the staff group.</summary>
     private const string StaffSessionKind = "staff";
 
     private readonly PulseDbContext _dbContext;
+    private readonly ILogger<ExerciseRealtimeHub> _logger;
 
     /// <summary>Creates the hub over the persistence context its staff-membership check reads through.</summary>
     /// <param name="dbContext">
     /// The hub-scope persistence context. Used ONLY to verify a staff-kind connection's session and assignment
     /// (unscoped access records); never touched for a participant, read-only or anonymous connection.
     /// </param>
-    public ExerciseRealtimeHub(PulseDbContext dbContext)
+    /// <param name="logger">Diagnostics logger (a failed staff check is logged; never token material).</param>
+    public ExerciseRealtimeHub(PulseDbContext dbContext, ILogger<ExerciseRealtimeHub> logger)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _dbContext = dbContext;
+        _logger = logger;
     }
 
     /// <summary>
@@ -145,10 +161,25 @@ public sealed class ExerciseRealtimeHub : Hub
         // queries and must not delay it.
         await Groups.AddToGroupAsync(Context.ConnectionId, GroupNameFor(exerciseId.Value));
 
-        // Only a connection the check positively verifies ever reaches the staff join. A failed check (e.g. a
-        // database error) propagates out of OnConnectedAsync BEFORE the staff join: SignalR then closes the
-        // connection and removes it from every group it joined, so a failure never yields staff membership.
-        var isVerifiedStaff = await IsVerifiedStaffForExerciseAsync(httpContext, exerciseId.Value, Context.ConnectionAborted);
+        // Only a connection the check positively verifies ever reaches the staff join. A check that cannot
+        // complete (e.g. a transient database error) is logged and the connection ABORTED — never rethrown, and
+        // never treated as verified. Rethrowing would make SignalR close with allowReconnect:false, which the JS
+        // client does not retry; an abort is a drop it reconnects from, re-running this check. Aborting also
+        // removes the connection from the exercise-wide group joined above. Cancellation caused by the
+        // connection's own abort is not a check failure and propagates untouched.
+        var connectionAborted = Context.ConnectionAborted;
+        bool isVerifiedStaff;
+        try
+        {
+            isVerifiedStaff = await IsVerifiedStaffForExerciseAsync(httpContext, exerciseId.Value, connectionAborted);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !connectionAborted.IsCancellationRequested)
+        {
+            LogStaffCheckFailed(Context.ConnectionId, exerciseId.Value, ex);
+            Context.Abort(); // fail closed AND reconnectable: no staff group, no close-without-reconnect
+            return;
+        }
+
         if (isVerifiedStaff)
         {
             // Same exercise id as the join above — the staff group can never point at another exercise.
@@ -191,6 +222,12 @@ public sealed class ExerciseRealtimeHub : Hub
         // comparison EngineCockpitStaffAuthorizationFilter makes against the resolved scope.
         return assignments.Any(a => Guid.TryParse(a.ExerciseId, out var assignedExerciseId) && assignedExerciseId == exerciseId);
     }
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Warning,
+        Message = "Staff-group verification failed for hub connection {ConnectionId} on exercise {ExerciseId}; aborting the connection (fail closed, no staff group) so the client reconnects and retries.")]
+    private partial void LogStaffCheckFailed(string connectionId, Guid exerciseId, Exception exception);
 
     /// <summary>
     /// A connection-bound <see cref="ICurrentStaffSessionAccessor"/>: the same "live, non-revoked, unexpired,

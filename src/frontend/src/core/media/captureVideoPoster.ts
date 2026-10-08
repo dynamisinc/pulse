@@ -9,7 +9,9 @@
  *
  * It also reports `width`/`height`/`durationSec` — the hints the upload sends so
  * the player can reserve the right aspect ratio and show a duration badge (a
- * media LENGTH, not a clock — COR-053 is unaffected).
+ * media LENGTH, not a clock — COR-053 is unaffected). `width`/`height` are the
+ * VIDEO's natural size; the poster JPEG may be smaller, so its own size is
+ * reported separately as `posterWidth`/`posterHeight` (the poster upload's hints).
  *
  * Rejects when the browser cannot decode the file (for instance an HEVC MP4 on
  * a browser without an HEVC decoder). The caller (`uploadVideoWithPoster`)
@@ -33,16 +35,29 @@
  * World-neutral (`core/`): DOM APIs only, no React, no theme.
  */
 
-import { createAbortError } from './mediaErrors'
+import { MEDIA_MAX_DURATION_SEC, createAbortError } from './mediaErrors'
 
 /** What {@link captureVideoPoster} resolves with. */
 export interface CapturedVideoPoster {
   /** The poster frame, JPEG. */
   readonly poster: Blob
-  /** The VIDEO's natural width (not the poster's, which may be downscaled). */
+  /**
+   * The VIDEO's natural width — the hint the VIDEO upload sends. NOT the poster's:
+   * the poster is downscaled to at most {@link POSTER_MAX_WIDTH} px (see
+   * {@link CapturedVideoPoster.posterWidth}).
+   */
   readonly width: number
-  /** The VIDEO's natural height. */
+  /** The VIDEO's natural height (the video upload's hint; see `width`). */
   readonly height: number
+  /**
+   * The POSTER JPEG's actual width in px (the canvas it was drawn to), which is
+   * `width` scaled down to at most {@link POSTER_MAX_WIDTH}. The POSTER upload
+   * must send this, never the video's `width`, or the recorded size would not
+   * match the stored image.
+   */
+  readonly posterWidth: number
+  /** The POSTER JPEG's actual height in px (the canvas it was drawn to). */
+  readonly posterHeight: number
   /** Media length in seconds (0 < x <= 3600, the server's accepted range). */
   readonly durationSec: number
 }
@@ -52,9 +67,6 @@ export const POSTER_MAX_WIDTH = 1280
 
 /** Seconds into the clip to take the frame from (clamped for very short clips). */
 const POSTER_SEEK_SECONDS = 0.5
-
-/** The server rejects durations over an hour. */
-const MAX_DURATION_SEC = 3600
 
 /** JPEG quality of the exported poster. */
 const POSTER_JPEG_QUALITY = 0.82
@@ -132,7 +144,7 @@ export function captureVideoPoster(
 
     video.onloadedmetadata = () => {
       const duration = video.duration
-      if (!Number.isFinite(duration) || duration <= 0 || duration > MAX_DURATION_SEC) {
+      if (!Number.isFinite(duration) || duration <= 0 || duration > MEDIA_MAX_DURATION_SEC) {
         fail('That video has an unsupported length.')
         return
       }
@@ -168,7 +180,16 @@ export function captureVideoPoster(
             fail('A poster frame could not be captured.')
             return
           }
-          finish(() => resolve({ poster: blob, width, height, durationSec }))
+          finish(() =>
+            resolve({
+              poster: blob,
+              width,
+              height,
+              posterWidth: canvas.width,
+              posterHeight: canvas.height,
+              durationSec,
+            }),
+          )
         },
         'image/jpeg',
         POSTER_JPEG_QUALITY,

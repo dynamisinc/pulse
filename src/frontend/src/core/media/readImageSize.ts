@@ -11,8 +11,18 @@
  * mock upload adapter hands out — those are never revoked.) Rejects when the
  * browser cannot decode the file; callers treat the size as a best-effort hint.
  *
+ * ABORTABLE: it honours an `AbortSignal` (the upload's), mirroring
+ * `captureVideoPoster`. A cancelled or superseded upload must not leave the
+ * promise pending and the object URL alive until the browser eventually fires
+ * load/error, so an abort rejects with the module's `AbortError` and releases the
+ * handlers + revokes the URL immediately; an already-aborted signal rejects up
+ * front without creating a URL; the abort listener is removed on normal
+ * completion.
+ *
  * World-neutral (`core/`): no React, no theme.
  */
+
+import { createAbortError } from './mediaErrors'
 
 /** Natural pixel dimensions of an image. */
 export interface ImageSize {
@@ -20,17 +30,43 @@ export interface ImageSize {
   readonly height: number
 }
 
-/** Resolves the file's natural size, or rejects when it cannot be decoded. */
-export function readImageSize(file: File): Promise<ImageSize> {
+/** Options for {@link readImageSize}. */
+export interface ReadImageSizeOptions {
+  /** Aborting rejects with an `AbortError` and releases the handlers + object URL at once. */
+  readonly signal?: AbortSignal
+}
+
+/**
+ * Resolves the file's natural size, or rejects when it cannot be decoded or the
+ * signal aborts (an `AbortError`, see the module header). Settles at most once;
+ * the abort listener, the handlers and the temporary object URL are released on
+ * every path.
+ */
+export function readImageSize(file: File, options: ReadImageSizeOptions = {}): Promise<ImageSize> {
+  const { signal } = options
+
   return new Promise<ImageSize>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError())
+      return
+    }
+
     const objectUrl = URL.createObjectURL(file)
     const image = new Image()
 
     const release = () => {
+      signal?.removeEventListener('abort', onAbort)
       image.onload = null
       image.onerror = null
       URL.revokeObjectURL(objectUrl)
     }
+    // After this the load/error handlers are null, so nothing can settle twice.
+    function onAbort() {
+      release()
+      reject(createAbortError())
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true })
 
     image.onload = () => {
       const width = image.naturalWidth

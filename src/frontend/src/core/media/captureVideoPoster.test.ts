@@ -3,8 +3,10 @@
  * ---------------------------------------------------------------------------
  * `captureVideoPoster` against stubbed `<video>` / `<canvas>` elements (jsdom
  * cannot decode video): the happy path returns a JPEG poster blob plus the
- * video's natural size and duration, a wide frame is downscaled, an unreadable
- * or out-of-range video rejects, and the temporary object URL is always revoked.
+ * video's natural size and duration; a wide frame is downscaled, and the POSTER's
+ * own size (`posterWidth`/`posterHeight`, what the poster upload must send) is
+ * reported separately from the video's; an unreadable or out-of-range video
+ * rejects, and the temporary object URL is always revoked.
  *
  * NEVER HANGS (fake timers): a video that fires neither `loadedmetadata` nor
  * `error` rejects after the capture timeout, so `uploadVideoWithPoster` falls
@@ -135,6 +137,9 @@ describe('captureVideoPoster', () => {
     expect(result.poster).toBeInstanceOf(Blob)
     expect(result.width).toBe(640)
     expect(result.height).toBe(360)
+    // Not wider than the poster maximum, so the poster is the video's size.
+    expect(result.posterWidth).toBe(640)
+    expect(result.posterHeight).toBe(360)
     expect(result.durationSec).toBe(4)
     expect(toBlobCalls[0]?.type).toBe('image/jpeg')
     expect(drawImage).toHaveBeenCalledTimes(1)
@@ -150,6 +155,31 @@ describe('captureVideoPoster', () => {
     expect(lastCanvas?.height).toBe(720)
     expect(result.width).toBe(3840)
     expect(result.height).toBe(2160)
+  })
+
+  it('reports the downscaled POSTER size separately from the video size (the canvas it drew)', async () => {
+    spec = { duration: 10, videoWidth: 3840, videoHeight: 2160 }
+
+    const result = await captureVideoPoster(file)
+
+    expect(result.posterWidth).toBe(POSTER_MAX_WIDTH)
+    expect(result.posterHeight).toBe(720)
+    expect(result.posterWidth).toBe(lastCanvas?.width)
+    expect(result.posterHeight).toBe(lastCanvas?.height)
+    // The video's own size is untouched.
+    expect(result.width).toBe(3840)
+    expect(result.height).toBe(2160)
+  })
+
+  it('rounds the downscaled poster height to a whole pixel', async () => {
+    spec = { duration: 10, videoWidth: 2000, videoHeight: 1001 }
+
+    const result = await captureVideoPoster(file)
+
+    // 1280 / 2000 = 0.64; 1001 * 0.64 = 640.64 -> 641.
+    expect(result.posterWidth).toBe(POSTER_MAX_WIDTH)
+    expect(result.posterHeight).toBe(641)
+    expect(Number.isInteger(result.posterHeight)).toBe(true)
   })
 
   it('rejects a video the browser cannot decode, revoking the URL', async () => {
