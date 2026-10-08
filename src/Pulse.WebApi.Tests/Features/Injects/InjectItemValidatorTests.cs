@@ -1,0 +1,262 @@
+namespace Pulse.WebApi.Tests.Features.Injects;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using FluentAssertions;
+using Pulse.WebApi.Features.Injects;
+using Xunit;
+
+/// <summary>
+/// The validation matrix (story 06 AC "Author and edit"): every field rule as a readable 400, code-point counting,
+/// write-side sanitization (NFR-004), and the reference rules where a cross-exercise id reads EXACTLY like an unknown
+/// one (COR-001).
+/// </summary>
+public sealed class InjectItemValidatorTests
+{
+    private static readonly Guid Persona = Guid.NewGuid();
+
+    [Fact]
+    public void AValidPost_Parses()
+    {
+        var parse = InjectItemValidator.Parse(PostItem());
+
+        parse.Error.Should().BeNull();
+        parse.Draft!.Kind.Should().Be(InjectKinds.Post);
+        parse.Draft.BurstWindowSeconds.Should().BeNull("a post has no window");
+        parse.Draft.Posts.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void ABurstWithNoWindow_DefaultsTo90Seconds()
+    {
+        var parse = InjectItemValidator.Parse(BurstItem(3));
+
+        parse.Draft!.BurstWindowSeconds.Should().Be(90);
+    }
+
+    public static TheoryData<string, InjectItemWriteRequest, string> Invalid() => new()
+    {
+        { "missing kind", PostItem(kind: null), "kind must be" },
+        { "unknown kind", PostItem(kind: "thread"), "kind must be" },
+        { "empty title", PostItem(title: "  "), "title must be between 1 and 120" },
+        { "long title", PostItem(title: new string('t', 121)), "title must be between 1 and 120" },
+        { "long notes", PostItem(notes: new string('n', 501)), "notes must be at most 500" },
+        { "negative minute", PostItem(plannedMinute: -1), "plannedMinute" },
+        { "bad assignee", PostItem(assigneeId: "not-a-guid"), "assigneeId does not name" },
+        { "no posts", PostItem(posts: []), "posts is required" },
+        { "post with two", PostItem(posts: [Post(), Post()]), "exactly 1 post" },
+        { "burst of one", BurstItem(1), "between 2 and 20" },
+        { "burst of 21", BurstItem(21, window: 600), "between 2 and 20" },
+        { "window 29", BurstItem(2, window: 29), "between 30 and 600" },
+        { "window 601", BurstItem(2, window: 601), "between 30 and 600" },
+        { "window too short for the gaps", BurstItem(20, window: 56), "at least 57 seconds" },
+        { "null post", PostItem(posts: [null]), "Post 1: a post object is required" },
+        { "bad persona id", PostItem(posts: [Post(personaId: "nope")]), "Post 1: personaId does not name a persona" },
+        { "empty text", PostItem(posts: [Post(text: "")]), "Post 1: text must be between 1 and 280" },
+        { "text 281", PostItem(posts: [Post(text: new string('x', 281))]), "Post 1: text must be between 1 and 280" },
+        { "five media", PostItem(posts: [Post(media: Media(5))]), "at most 4 media" },
+        { "media without id", PostItem(posts: [Post(media: [new InjectMediaWriteRequest { Alt = "a" }])]), "needs a mediaId" },
+        { "duplicate media", PostItem(posts: [Post(media: [M("m1"), M("m1")])]), "attached twice" },
+        { "empty alt", PostItem(posts: [Post(media: [M("m1", alt: " ")])]), "alt text of 1 to 1000" },
+        { "alt 1001", PostItem(posts: [Post(media: [M("m1", alt: new string('a', 1001))])]), "alt text of 1 to 1000" },
+        { "replyTo both", PostItem(posts: [Post(replyTo: new() { InjectPostId = G(), PostId = G() })]), "exactly one of" },
+        { "replyTo neither", PostItem(posts: [Post(replyTo: new())]), "exactly one of" },
+        { "replyTo bad inject id", PostItem(posts: [Post(replyTo: new() { InjectPostId = "x" })]), "does not name a scripted post" },
+        { "replyTo bad post id", PostItem(posts: [Post(replyTo: new() { PostId = "x" })]), "replyTo.postId must be a post id" },
+        { "baseline negative", PostItem(posts: [Post(baseline: new() { Like = -1 })]), "engagementBaseline" },
+        { "baseline too big", PostItem(posts: [Post(baseline: new() { Repost = 1_000_001 })]), "engagementBaseline" },
+        { "second post bad", BurstItem(2, second: Post(text: "")), "Post 2: text" },
+    };
+
+    [Theory]
+    [MemberData(nameof(Invalid))]
+    public void AnInvalidField_IsAReadable400(string because, InjectItemWriteRequest request, string expected)
+    {
+        var parse = InjectItemValidator.Parse(request);
+
+        parse.Draft.Should().BeNull(because);
+        parse.Error.Should().Contain(expected, because);
+    }
+
+    [Fact]
+    public void ANullBody_IsAReadable400()
+    {
+        InjectItemValidator.Parse(null).Error.Should().Be("A JSON body is required.");
+    }
+
+    [Fact]
+    public void Lengths_CountCodePoints_NotUtf16Units()
+    {
+        // 280 astral emoji = 560 UTF-16 units but 280 characters to a controller.
+        var emoji = string.Concat(Enumerable.Repeat("\U0001F6B0", 280));
+
+        InjectItemValidator.Parse(PostItem(posts: [Post(text: emoji)])).Error.Should().BeNull();
+        InjectItemValidator.Parse(PostItem(posts: [Post(text: emoji + "\U0001F6B0")])).Error.Should().Contain("280");
+        InjectItemValidator.CodePoints(emoji).Should().Be(280);
+    }
+
+    [Fact]
+    public void FreeText_IsSanitizedOnWrite_StripNotEncode()
+    {
+        var parse = InjectItemValidator.Parse(PostItem(
+            title: "<b>Beat 3</b>",
+            notes: "<script>alert(1)</script>cue on PIO",
+            posts: [Post(text: "Brown water <img src=x onerror=alert(1)>again", media: [M("m1", alt: "<i>tap</i> water")])]));
+
+        parse.Error.Should().BeNull();
+        parse.Draft!.Title.Should().Be("Beat 3");
+        parse.Draft.Notes.Should().Be("cue on PIO");
+        parse.Draft.Posts[0].Text.Should().Be("Brown water again");
+        parse.Draft.Posts[0].Media[0].Alt.Should().Be("tap water");
+    }
+
+    [Fact]
+    public void TextThatSanitizesToNothing_IsRefused()
+    {
+        InjectItemValidator.Parse(PostItem(posts: [Post(text: "<script>x</script>")])).Error.Should().Contain("text");
+    }
+
+    [Fact]
+    public void ABurstOfTwentyAtTheMinimumWindow_IsAccepted()
+    {
+        InjectItemValidator.Parse(BurstItem(20, window: 57)).Error.Should().BeNull();
+    }
+
+    // ---- references (phase 2) ----
+
+    [Fact]
+    public void AnUnknownPersona_AndAnotherExercisesPersona_GetTheSameMessage()
+    {
+        var draft = InjectItemValidator.Parse(PostItem()).Draft!;
+
+        // Neither id is in the in-scope set — the service only ever puts ids it found INSIDE the scope there, so an
+        // unknown id and a cross-exercise id are the same input to this check, by construction.
+        var message = InjectItemValidator.CheckReferences(draft, Facts(personas: []));
+
+        message.Should().Be("Post 1: personaId does not name a persona in this exercise.");
+    }
+
+    [Fact]
+    public void AnAssigneeOffTheRoster_IsRefused()
+    {
+        var assignee = Guid.NewGuid();
+        var draft = InjectItemValidator.Parse(PostItem(assigneeId: assignee.ToString())).Draft!;
+
+        InjectItemValidator.CheckReferences(draft, Facts(roster: [])).Should().Contain("assigneeId does not name");
+        InjectItemValidator.CheckReferences(draft, Facts(roster: [assignee])).Should().BeNull();
+    }
+
+    [Fact]
+    public void AReplyToAScriptedPostInAnotherLiveItem_IsAccepted_AndAnUnknownOneIsNot()
+    {
+        var target = Guid.NewGuid();
+        var draft = InjectItemValidator.Parse(PostItem(posts: [Post(replyTo: new() { InjectPostId = target.ToString() })])).Draft!;
+
+        InjectItemValidator.CheckReferences(draft, Facts(targets: new() { [target] = Guid.NewGuid() })).Should().BeNull();
+        InjectItemValidator.CheckReferences(draft, Facts()).Should()
+            .Be("Post 1: replyTo.injectPostId does not name a scripted post in this exercise.");
+    }
+
+    [Fact]
+    public void OnEdit_AReplyToAnEarlierSibling_IsAccepted_ButNotToItselfOrALaterOne()
+    {
+        var itemId = Guid.NewGuid();
+        var siblings = new List<Guid> { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
+        var targets = siblings.ToDictionary(id => id, _ => itemId);
+
+        InjectItemDraft DraftReplyingAt(int position, Guid target)
+        {
+            var posts = Enumerable.Range(0, 3)
+                .Select(index => index == position ? Post(replyTo: new() { InjectPostId = target.ToString() }) : Post())
+                .ToArray();
+            return InjectItemValidator.Parse(BurstItem(posts)).Draft!;
+        }
+
+        var facts = Facts(targets: targets, editedItemId: itemId, editedChildren: siblings);
+
+        InjectItemValidator.CheckReferences(DraftReplyingAt(2, siblings[0]), facts).Should().BeNull("an earlier sibling");
+        InjectItemValidator.CheckReferences(DraftReplyingAt(1, siblings[1]), facts).Should().Contain("earlier post");
+        InjectItemValidator.CheckReferences(DraftReplyingAt(0, siblings[2]), facts).Should().Contain("earlier post");
+    }
+
+    [Fact]
+    public void OnEdit_AReplyToASoftDeletedPositionOfTheSameItem_IsUnknown()
+    {
+        var itemId = Guid.NewGuid();
+        var removed = Guid.NewGuid();
+        var draft = InjectItemValidator.Parse(PostItem(posts: [Post(replyTo: new() { InjectPostId = removed.ToString() })])).Draft!;
+
+        var facts = Facts(targets: new() { [removed] = itemId }, editedItemId: itemId, editedChildren: [Guid.NewGuid()]);
+
+        InjectItemValidator.CheckReferences(draft, facts).Should().Contain("does not name a scripted post");
+    }
+
+    // ---- builders ----
+
+    private static InjectReferenceFacts Facts(
+        Guid[]? personas = null,
+        Guid[]? roster = null,
+        Dictionary<Guid, Guid>? targets = null,
+        Guid? editedItemId = null,
+        List<Guid>? editedChildren = null) =>
+        new(
+            (personas ?? [Persona]).ToHashSet(),
+            (roster ?? []).ToHashSet(),
+            targets ?? [],
+            editedItemId,
+            editedChildren ?? []);
+
+    private static string G() => Guid.NewGuid().ToString();
+
+    private static InjectItemWriteRequest PostItem(
+        string? kind = InjectKinds.Post,
+        string? title = "Beat 3 photo",
+        string? notes = null,
+        int? plannedMinute = 12,
+        string? assigneeId = null,
+        InjectPostWriteRequest?[]? posts = null) => new()
+        {
+            Kind = kind,
+            Title = title,
+            Notes = notes,
+            PlannedMinute = plannedMinute,
+            AssigneeId = assigneeId,
+            Posts = posts ?? [Post()],
+        };
+
+    private static InjectItemWriteRequest BurstItem(int count, int? window = null, InjectPostWriteRequest? second = null) => new()
+    {
+        Kind = InjectKinds.Burst,
+        Title = "Pile-on",
+        BurstWindowSeconds = window,
+        Posts = Enumerable.Range(0, count).Select(index => index == 1 && second is not null ? second : Post()).ToArray(),
+    };
+
+    private static InjectItemWriteRequest BurstItem(params InjectPostWriteRequest[] posts) => new()
+    {
+        Kind = InjectKinds.Burst,
+        Title = "Pile-on",
+        Posts = posts,
+    };
+
+    private static InjectPostWriteRequest Post(
+        string? personaId = null,
+        string? text = "The water from my tap is BROWN #WaterIssues",
+        InjectMediaWriteRequest?[]? media = null,
+        InjectReplyToWriteRequest? replyTo = null,
+        InjectEngagementBaselineWriteRequest? baseline = null) => new()
+        {
+            PersonaId = personaId ?? Persona.ToString(),
+            Text = text,
+            Media = media,
+            ReplyTo = replyTo,
+            EngagementBaseline = baseline,
+        };
+
+    private static InjectMediaWriteRequest M(string id, string alt = "Brown tap water in a glass") =>
+        new() { MediaId = id, Alt = alt };
+
+    private static InjectMediaWriteRequest?[] Media(int count) =>
+        Enumerable.Range(0, count).Select(index => (InjectMediaWriteRequest?)M($"m{index}")).ToArray();
+}
