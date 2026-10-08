@@ -1,6 +1,8 @@
 namespace Pulse.WebApi.Features.Social;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Media;
@@ -17,13 +19,16 @@ using Pulse.WebApi.Features.Social.Follows;
 /// <b>Profile images (demo-polish BP).</b> Each persona's avatar and banner (<see cref="Persona.AvatarMediaId"/>
 /// / <see cref="Persona.BannerMediaId"/>) are signed into <c>avatarUrl</c> / <c>bannerUrl</c>: ONE scoped asset
 /// lookup and ONE signer call per read, both skipped when no persona has an image. An image id that does not
-/// resolve in scope yields no URL (DP-16: another exercise's asset is never signed).
+/// resolve in scope yields no URL (DP-16: another exercise's asset is never signed). A signing FAILURE degrades
+/// the read to personas without <c>avatarUrl</c>/<c>bannerUrl</c>, never a 500 (see
+/// <see cref="SignProfileImagesAsync"/>).
 /// </remarks>
-public sealed class PersonaReadService
+public sealed partial class PersonaReadService
 {
     private readonly PulseDbContext _dbContext;
     private readonly FollowService _followService;
     private readonly IMediaUrlSigner _mediaUrlSigner;
+    private readonly ILogger<PersonaReadService> _logger;
 
     /// <summary>Creates the service with the injected persistence context, follow-graph read and URL signer.</summary>
     /// <param name="dbContext">The scoped EF Core context (already bound to the request's exercise scope).</param>
@@ -35,7 +40,12 @@ public sealed class PersonaReadService
     /// here avoids the second, client-sequenced round trip a dedicated follow-summary endpoint would force.
     /// </param>
     /// <param name="mediaUrlSigner">Signs the avatar/banner read URLs (BM, or the unconfigured fallback).</param>
-    public PersonaReadService(PulseDbContext dbContext, FollowService followService, IMediaUrlSigner mediaUrlSigner)
+    /// <param name="logger">Diagnostics for a signing failure the read degrades around; optional.</param>
+    public PersonaReadService(
+        PulseDbContext dbContext,
+        FollowService followService,
+        IMediaUrlSigner mediaUrlSigner,
+        ILogger<PersonaReadService>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(followService);
@@ -44,6 +54,7 @@ public sealed class PersonaReadService
         _dbContext = dbContext;
         _followService = followService;
         _mediaUrlSigner = mediaUrlSigner;
+        _logger = logger ?? NullLogger<PersonaReadService>.Instance;
     }
 
     /// <summary>
@@ -128,6 +139,16 @@ public sealed class PersonaReadService
     /// Signs every avatar and banner on the page: one scoped asset query and one signer call, both skipped when
     /// no persona has an image (so a host with no media storage never reaches the signer).
     /// </summary>
+    /// <remarks>
+    /// <b>A signing failure degrades the read, never fails it</b> — the same rule as
+    /// <c>ParticipantPostProjector.SignAsync</c>. A storage hiccup (a delegation-key fetch that fails or times out,
+    /// RBAC not yet propagated, an unconfigured provider while persona images exist) must not 500
+    /// <c>GET /api/personas</c>, which every participant author/handle lookup resolves against. The failure is
+    /// logged ONCE (the exception and the asset count; never a URL or blob name) and answered with an empty URL
+    /// map, so <c>avatarUrl</c>/<c>bannerUrl</c> are omitted while the personas are still served. Two exceptions
+    /// are NOT absorbed: cancellation, and <see cref="ExerciseScopeViolationException"/> — a scope mismatch is an
+    /// isolation signal and must fail closed. All three reads (participant, staff list, staff single) come here.
+    /// </remarks>
     private async Task<IReadOnlyDictionary<Guid, string>> SignProfileImagesAsync(
         IReadOnlyCollection<Persona> personas, CancellationToken cancellationToken)
     {
@@ -152,7 +173,17 @@ public sealed class PersonaReadService
             return new Dictionary<Guid, string>();
         }
 
-        return await _mediaUrlSigner.GetReadUrlsAsync(assets, cancellationToken);
+        try
+        {
+            return await _mediaUrlSigner.GetReadUrlsAsync(assets, cancellationToken);
+        }
+#pragma warning disable CA1031 // A storage fault must degrade the read to image-less personas, never fail it.
+        catch (Exception ex) when (ex is not OperationCanceledException and not ExerciseScopeViolationException)
+        {
+            LogProfileImageSigningFailed(ex, assets.Count);
+            return new Dictionary<Guid, string>();
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>The one scoped entity read both projections share (central query filter only, COR-001).</summary>
@@ -162,4 +193,10 @@ public sealed class PersonaReadService
         _dbContext.Personas
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Warning,
+        Message = "Signing {AssetCount} profile image asset(s) failed; the personas are served without avatarUrl/bannerUrl.")]
+    private partial void LogProfileImageSigningFailed(Exception exception, int assetCount);
 }

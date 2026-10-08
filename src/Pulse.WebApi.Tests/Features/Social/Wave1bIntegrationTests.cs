@@ -61,8 +61,8 @@ public sealed class Wave1bIntegrationCompositionTests
 
         var signer = provider.GetRequiredService<IMediaUrlSigner>();
         signer.Should().BeOfType(expectedSigner, "a configured provider must mint real read URLs");
-        signer.Should().NotBeOfType<Pulse.WebApi.Features.Social.UnconfiguredMediaUrlSigner>("BP's signer fallback must never win (checklist 1)");
-        signer.Should().NotBeOfType<Pulse.WebApi.Features.Media.UnconfiguredMediaUrlSigner>("the provider is configured (checklist 25)");
+        signer.Should().NotBeOfType<UnconfiguredMediaUrlSigner>(
+            "neither BP's signer fallback nor BM's provider-None signer may win when a provider is configured (checklist 1, 25)");
         provider.GetRequiredService<IMediaStore>().Should().BeOfType(expectedStore);
 
         provider.GetRequiredService<IReplyParentResolver>().Should().BeOfType<ReplyParentResolver>(
@@ -377,6 +377,58 @@ public sealed class Wave1bIntegrationTests
 
         // The taken-down reply's own thread is the not-found shape, byte-identical to an unknown id's.
         (await participant.GetStringAsync(ThreadUri(takenDown))).Should().Be(await participant.GetStringAsync(ThreadUri(unknownId)));
+    }
+
+    /// <summary>
+    /// Checklist 8, orchestrator decision: a reply to a taken-down PARENT keeps <c>inReplyTo</c> with the parent's id
+    /// and handle (as X does: the reply still reads "Replying to @handle"; the parent itself is the tombstone). The
+    /// taken-down parent never comes back: it is out of every feed, omitted from the reply's ancestors, and its own
+    /// thread is the not-found shape.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task TakenDownParent_ItsReplyKeepsInReplyTo_WithTheParentsHandle_InTheFeedAndTheThread()
+    {
+        var world = await SeedWorldAsync();
+        var parent = NewPost(world.Exercise.ExerciseId, world.AuthorPersona, "the parent");
+        await using (var db = _fixture.CreateContext())
+        {
+            db.Posts.Add(parent);
+            await db.SaveChangesAsync();
+        }
+
+        await using var host = NewHost();
+        using var participant = host.CreateClientFor(world.Exercise.Host, world.Participant.Token);
+        using var staff = host.CreateClientFor(world.Exercise.Host, world.Staff.Token);
+
+        using var created = await participant.PostAsync(PostsUri, Json(PostBody("my reply", parentPostId: parent.Id.ToString())));
+        created.StatusCode.Should().Be(HttpStatusCode.Created, await created.Content.ReadAsStringAsync());
+        var replyId = Guid.Parse(JsonNode.Parse(await created.Content.ReadAsStringAsync())!["id"]!.GetValue<string>());
+
+        using (var removed = await staff.DeleteAsync(new Uri($"/api/staff/posts/{parent.Id}?category=other", UriKind.Relative)))
+        {
+            removed.StatusCode.Should().Be(HttpStatusCode.NoContent, await removed.Content.ReadAsStringAsync());
+        }
+
+        var parentHandle = $"p_{world.AuthorPersona:N}";
+
+        var withReplies = await GetJsonAsync(participant, FeedWithRepliesUri);
+        withReplies.AsArray().Select(Id).Should().NotContain(parent.Id.ToString(), "the taken-down parent is out of every feed");
+        var feedReply = FindPost(withReplies, replyId);
+        feedReply["inReplyTo"]!["postId"]!.GetValue<string>().Should().Be(parent.Id.ToString(), "the reply still says what it replied to");
+        feedReply["inReplyTo"]!["authorHandle"]!.GetValue<string>().Should().Be(parentHandle);
+        feedReply["text"]!.GetValue<string>().Should().Be("my reply");
+
+        (await GetJsonAsync(participant, FeedUri)).AsArray().Select(Id).Should().NotContain(
+            new[] { parent.Id.ToString(), replyId.ToString() }, "the default feed is top-level only, and the parent is down");
+
+        var thread = await GetJsonAsync(participant, ThreadUri(replyId));
+        thread["focused"]!["id"]!.GetValue<string>().Should().Be(replyId.ToString());
+        thread["focused"]!["inReplyTo"]!["postId"]!.GetValue<string>().Should().Be(parent.Id.ToString());
+        thread["focused"]!["inReplyTo"]!["authorHandle"]!.GetValue<string>().Should().Be(parentHandle);
+        thread["ancestors"]!.AsArray().Should().BeEmpty("a taken-down ancestor is omitted from the chain");
+
+        (await participant.GetStringAsync(ThreadUri(parent.Id))).Should().Be(
+            await participant.GetStringAsync(ThreadUri(Guid.NewGuid())), "the taken-down parent's own thread is the not-found shape");
     }
 
     private static async Task AssertSameResponseAsync(HttpResponseMessage actual, HttpResponseMessage unknown, HttpStatusCode expected)

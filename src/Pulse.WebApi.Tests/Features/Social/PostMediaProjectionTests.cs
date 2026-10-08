@@ -6,7 +6,9 @@ using System.Net;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Media;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Tests.Data;
 using static Pulse.WebApi.Tests.Features.Social.PostMediaSeed;
@@ -222,6 +224,11 @@ public class PostMediaProjectionTests
 
         await using var factory = new PostMediaWebApplicationFactory(_fixture.ConnectionString!, keepFallbackSigner: true);
         using var client = factory.CreateClientFor(world.Host, world.ParticipantToken);
+        using (var scope = factory.Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<IMediaUrlSigner>().Should().BeOfType<UnconfiguredMediaUrlSigner>(
+                "this test exercises BP's fail-closed fallback signer, not a real one");
+        }
 
         (await client.PostAsync(PostsUri, Json(Body()))).StatusCode.Should().Be(HttpStatusCode.Created);
         (await client.GetAsync(FeedUri)).StatusCode.Should().Be(HttpStatusCode.OK, "the unconfigured signer throws only if reached");

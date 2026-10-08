@@ -2,7 +2,6 @@ namespace Pulse.WebApi.Features.Social;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Media;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Threads;
@@ -24,6 +23,10 @@ using Pulse.WebApi.Features.Social.Threads;
 /// </para>
 /// <para>
 /// Each fallback fails CLOSED: no engagement is invented, no URL is minted, and no reply parent ever resolves.
+/// The signer fallback is BM's own <see cref="UnconfiguredMediaUrlSigner"/> (the one <c>AddMedia</c> selects
+/// for provider <c>None</c>), so there is exactly one unconfigured-signer type: it answers an empty batch with
+/// an empty map, refuses an out-of-scope asset, and otherwise throws <see cref="MediaStoreUnavailableException"/>.
+/// It is Scoped because it reads the request's <c>IExerciseContext</c>, the same lifetime as BM's real signers.
 /// </para>
 /// </remarks>
 internal static class PostSeamFallbacks
@@ -40,7 +43,7 @@ internal static class PostSeamFallbacks
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddSingleton<IPostEngagementReader, ZeroPostEngagementReader>();
-        services.TryAddSingleton<IMediaUrlSigner, UnconfiguredMediaUrlSigner>();
+        services.TryAddScoped<IMediaUrlSigner, UnconfiguredMediaUrlSigner>();
         services.TryAddSingleton<IReplyParentResolver, UnavailableReplyParentResolver>();
         services.TryAddScoped<IParticipantPostProjector, ParticipantPostProjector>();
 
@@ -66,28 +69,6 @@ public sealed class ZeroPostEngagementReader : IPostEngagementReader
         // An absent id reads as zero engagement (the projector's contract), so an empty map is "all zero".
         return Task.FromResult(Empty);
     }
-}
-
-/// <summary>
-/// The <see cref="IMediaUrlSigner"/> used until the media slice (BM) registers the real one. The projector and
-/// the persona read only call a signer when there is a stored asset to sign, so this is reached only when a
-/// media row exists but no storage is configured. It then THROWS: a missing URL must be a loud configuration
-/// fault, never a silently-broken image. It never mints anything (COR-002).
-/// </summary>
-public sealed class UnconfiguredMediaUrlSigner : IMediaUrlSigner
-{
-    /// <summary>The message every call throws with.</summary>
-    public const string NotConfiguredMessage =
-        "Media storage is not configured: no IMediaUrlSigner is registered (demo-polish BM), so no read URL can be minted.";
-
-    /// <inheritdoc />
-    public Task<string> GetReadUrlAsync(MediaAsset asset, CancellationToken cancellationToken) =>
-        throw new InvalidOperationException(NotConfiguredMessage);
-
-    /// <inheritdoc />
-    public Task<IReadOnlyDictionary<Guid, string>> GetReadUrlsAsync(
-        IReadOnlyCollection<MediaAsset> assets, CancellationToken cancellationToken) =>
-        throw new InvalidOperationException(NotConfiguredMessage);
 }
 
 /// <summary>

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Media;
 using Pulse.WebApi.Features.Social;
@@ -31,8 +32,9 @@ public sealed class PostMediaWiringTests
         Register(services, registration);
 
         Single<IPostEngagementReader>(services).ImplementationType.Should().Be(typeof(ZeroPostEngagementReader));
-        // Fully qualified: BM's Pulse.WebApi.Features.Media.UnconfiguredMediaUrlSigner shares the simple name.
-        Single<IMediaUrlSigner>(services).ImplementationType.Should().Be(typeof(Pulse.WebApi.Features.Social.UnconfiguredMediaUrlSigner));
+        var signer = Single<IMediaUrlSigner>(services);
+        signer.ImplementationType.Should().Be(typeof(UnconfiguredMediaUrlSigner), "the fallback is BM's own unconfigured signer — one type");
+        signer.Lifetime.Should().Be(ServiceLifetime.Scoped, "it reads the request's IExerciseContext, like BM's real signers");
         Single<IReplyParentResolver>(services).ImplementationType.Should().Be(typeof(UnavailableReplyParentResolver));
         Single<IParticipantPostProjector>(services).ImplementationType.Should().Be(typeof(ParticipantPostProjector));
     }
@@ -82,19 +84,27 @@ public sealed class PostMediaWiringTests
         var engagement = await new ZeroPostEngagementReader().GetAsync([Guid.NewGuid()], Guid.NewGuid(), CancellationToken.None);
         engagement.Should().BeEmpty("no real engagement is invented");
 
+        var exerciseId = Guid.NewGuid();
+        var assetId = Guid.NewGuid();
         var asset = new MediaAsset
         {
+            Id = assetId,
+            ExerciseId = exerciseId,
             Kind = MediaKinds.Image,
             ContentType = "image/png",
-            BlobName = "x",
+            BlobName = MediaBlobNames.Build(exerciseId, assetId, "png"),
             OriginalFileName = "x",
             UploadedByHumanId = "h",
         };
-        var signer = new Pulse.WebApi.Features.Social.UnconfiguredMediaUrlSigner();
+        var signer = new UnconfiguredMediaUrlSigner(new ExerciseContext { CurrentExerciseId = exerciseId });
+        (await signer.GetReadUrlsAsync([], CancellationToken.None)).Should().BeEmpty("nothing to sign mints nothing and throws nothing");
         await signer.Invoking(s => s.GetReadUrlsAsync([asset], CancellationToken.None))
-            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*not configured*");
+            .Should().ThrowAsync<MediaStoreUnavailableException>("an in-scope asset with no storage is a loud fault, never a URL");
         await signer.Invoking(s => s.GetReadUrlAsync(asset, CancellationToken.None))
-            .Should().ThrowAsync<InvalidOperationException>();
+            .Should().ThrowAsync<MediaStoreUnavailableException>();
+        var foreign = new UnconfiguredMediaUrlSigner(new ExerciseContext { CurrentExerciseId = Guid.NewGuid() });
+        await foreign.Invoking(s => s.GetReadUrlsAsync([asset], CancellationToken.None))
+            .Should().ThrowAsync<ExerciseScopeViolationException>("an out-of-scope asset is refused before anything else");
 
         var resolver = new UnavailableReplyParentResolver();
         (await resolver.ResolveAsync(null, CancellationToken.None)).Outcome.Should().Be(ReplyParentOutcome.None);

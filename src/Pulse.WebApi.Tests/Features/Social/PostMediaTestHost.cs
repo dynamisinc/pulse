@@ -36,7 +36,8 @@ using Pulse.WebApi.Tests.Helpers;
 /// The doubles stand in for slices that build in parallel (BM's signer, B3's engagement reader, B2's resolver)
 /// and for the SignalR fan-out. The signer and resolver can be swapped for BP's fail-closed fallback instead, to
 /// prove the branch runs alone. The fallback is INSTALLED explicitly, not merely left in place: on the integrated
-/// host (Wave 1b Gate 2) B2's and BM's real registrations win over BP's <c>TryAdd</c> fallbacks.
+/// host (Wave 1b Gate 2) B2's and BM's real registrations win over BP's <c>TryAdd</c> fallbacks. The installed
+/// registrations mirror <c>TryAddPostSeamFallbacks</c> exactly (type and lifetime).
 /// </remarks>
 public sealed class PostMediaWebApplicationFactory : WebApplicationFactory<Program>
 {
@@ -110,7 +111,7 @@ public sealed class PostMediaWebApplicationFactory : WebApplicationFactory<Progr
             else if (_keepFallbackSigner)
             {
                 services.RemoveAll<IMediaUrlSigner>();
-                services.AddSingleton<IMediaUrlSigner, Pulse.WebApi.Features.Social.UnconfiguredMediaUrlSigner>();
+                services.AddScoped<IMediaUrlSigner, UnconfiguredMediaUrlSigner>();
             }
             else
             {
