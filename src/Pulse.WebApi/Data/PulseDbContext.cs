@@ -159,6 +159,12 @@ public class PulseDbContext : DbContext
     /// <summary>Persisted server-side sessions (COR-012). NOT exercise-scoped — looked up by opaque token pre-scope-resolution.</summary>
     public DbSet<Session> Sessions => Set<Session>();
 
+    /// <summary>The scripted-post queue items (inject-queue/06). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<InjectItem> InjectItems => Set<InjectItem>();
+
+    /// <summary>The scripted posts inside each queue item (inject-queue/06). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<InjectItemPost> InjectItemPosts => Set<InjectItemPost>();
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -570,6 +576,51 @@ public class PulseDbContext : DbContext
 
             // Bound exercise is a plain column; indexed for the story-07 revoke-all-by-exercise query.
             entity.HasIndex(e => e.ExerciseId);
+        });
+
+        // ==========================================================================================
+        // inject-queue/06 — the server-side scripted-post queue. Both entities are IExerciseScoped, so the
+        // reflection loop below gives them the central read filter and the write guard covers them; nothing
+        // here scopes them by hand. Text columns are sized in UTF-16 code units: the code-point limits the
+        // service validates (title 120, notes 500, text 280) fit with room for astral characters.
+        // ==========================================================================================
+        modelBuilder.Entity<InjectItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.HasIndex(e => e.ExerciseId);
+
+            // The runner's cross-exercise discovery sweep reads (ExerciseId, Id) of firing items only.
+            entity.HasIndex(e => e.Status);
+
+            entity.Property(e => e.Kind).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(256);
+            entity.Property(e => e.Notes).HasMaxLength(1024);
+            entity.Property(e => e.Error).HasMaxLength(1024);
+
+            // IQ-9: the one optimistic-concurrency token for the whole item aggregate.
+            entity.Property(e => e.Version).IsConcurrencyToken();
+
+            entity.HasMany(e => e.Posts)
+                .WithOne()
+                .HasForeignKey(post => post.InjectItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<InjectItemPost>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.HasIndex(e => e.ExerciseId);
+
+            entity.Property(e => e.Text).IsRequired().HasMaxLength(1024);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.Error).HasMaxLength(1024);
+
+            entity.OwnsMany(e => e.Media, media => media.ToJson());
         });
 
         // ------------------------------------------------------------------------------------------
