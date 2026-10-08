@@ -185,6 +185,28 @@ public sealed class TakedownEndpointTests
     }
 
     [RequiresDockerFact]
+    public async Task TakeDown_RunningClockEarlierThanThePost_StampsTheClocksTime_Unclamped()
+    {
+        // B3 Gate-1 M-1 (applied to B6): a running clock is authoritative. A post's CreatedScenarioTime can still
+        // come from the client this phase, so a post stamped ahead of the clock must not drag DeletedAt forward.
+        // The stored time is later than both, so this also shows the clock wins over the fallback.
+        var exercise = await _seed.SeedExerciseAsync(currentScenarioTime: ModerationSeeder.PostCreatedAt.AddDays(1));
+        var postId = await _seed.SeedPostAsync(exercise.Id);
+        var controller = await _seed.SeedControllerSessionAsync(exercise.Id);
+
+        using var factory = new ModerationWebApplicationFactory(_seed.ConnectionString);
+        var clockTime = StartFrozenClock(factory, exercise.Id, start: ModerationSeeder.PostCreatedAt.AddHours(-3));
+        using var client = factory.CreateClientFor(exercise.Host, controller);
+
+        var response = await client.DeleteAsync(new Uri($"/api/staff/posts/{postId}", UriKind.Relative));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        clockTime.Should().BeBefore(ModerationSeeder.PostCreatedAt, "precondition: the running clock is behind the post");
+        (await _seed.ReadSurvivingPostAsync(postId)).DeletedAt.Should().Be(
+            clockTime, "a running exercise clock is stamped as is, never clamped to the post's scenario time");
+    }
+
+    [RequiresDockerFact]
     public async Task TakeDown_StaleStoredScenarioTimeEarlierThanThePost_IsClampedToThePostsScenarioTime()
     {
         // Gate-1 L-2: only the seed writes Exercise.CurrentScenarioTime, so it can lag behind the posts. A
@@ -297,10 +319,11 @@ public sealed class TakedownEndpointTests
     /// Starts <paramref name="exerciseId"/>'s clock on the host's real singleton <see cref="IExerciseClock"/> and
     /// freezes it, so its scenario time is constant for the test. Returns that instant.
     /// </summary>
-    private static DateTimeOffset StartFrozenClock(ModerationWebApplicationFactory factory, Guid exerciseId)
+    private static DateTimeOffset StartFrozenClock(
+        ModerationWebApplicationFactory factory, Guid exerciseId, DateTimeOffset? start = null)
     {
         var clock = factory.Services.GetRequiredService<IExerciseClock>();
-        clock.Start(exerciseId, ClockStart, TimeZoneInfo.Utc);
+        clock.Start(exerciseId, start ?? ClockStart, TimeZoneInfo.Utc);
         clock.Freeze(exerciseId);
         return clock.CurrentScenarioTime(exerciseId)
             ?? throw new InvalidOperationException("The exercise clock did not start.");

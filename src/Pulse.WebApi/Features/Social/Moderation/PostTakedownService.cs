@@ -32,12 +32,14 @@ using Pulse.WebApi.Features.Realtime;
 /// </para>
 /// <para>
 /// <b>Scenario time (COR-053), never the wall clock.</b> <c>DeletedAt</c> follows the <c>FollowService</c>
-/// pattern: the running exercise clock (<see cref="IExerciseClock"/>, COR-050), then the exercise's stored
-/// <c>CurrentScenarioTime</c>. Where <c>FollowService</c> would fall back to the server clock, this falls back to
-/// the post's own <c>CreatedScenarioTime</c>. Whatever the source, the result is then clamped so it is never
-/// earlier than the post's <c>CreatedScenarioTime</c>. No API writes the stored value (only the seed sets it),
-/// so it can be stale, and a takedown recorded before its post would mislead the after-action record. The
-/// stamped value is always a scenario instant, never <c>DateTimeOffset.UtcNow</c>.
+/// pattern. A RUNNING exercise clock (<see cref="IExerciseClock"/>, COR-050) is authoritative and is used as
+/// is, never clamped: a post's <c>CreatedScenarioTime</c> can still come from the client in this phase, so
+/// clamping the clock to it would let a post stamped ahead of the clock push the takedown forward. Without a
+/// running clock, the fallback is the exercise's stored <c>CurrentScenarioTime</c>, then (where
+/// <c>FollowService</c> would use the server clock) the post's own <c>CreatedScenarioTime</c>. Only this
+/// fallback is clamped to be no earlier than the post's <c>CreatedScenarioTime</c>, because no API writes the
+/// stored value (only the seed sets it), so it can be stale. The stamped value is always a scenario instant,
+/// never <c>DateTimeOffset.UtcNow</c>.
 /// </para>
 /// <para>
 /// <b>A failed broadcast never fails the takedown.</b> Once the update has committed, the takedown has
@@ -178,12 +180,12 @@ public sealed partial class PostTakedownService
     }
 
     /// <summary>
-    /// The scenario instant to stamp for <paramref name="exerciseId"/>: the first available of the running
-    /// exercise clock, the exercise's stored <c>CurrentScenarioTime</c>, or <paramref name="postScenarioTime"/>,
-    /// clamped so it is never earlier than <paramref name="postScenarioTime"/>. Never the wall clock (COR-053).
+    /// The scenario instant to stamp for <paramref name="exerciseId"/>: the running exercise clock, unclamped;
+    /// otherwise the exercise's stored <c>CurrentScenarioTime</c> (or <paramref name="postScenarioTime"/> when
+    /// unset), clamped to be no earlier than <paramref name="postScenarioTime"/>. Never the wall clock (COR-053).
     /// </summary>
     /// <param name="exerciseId">The resolved exercise scope.</param>
-    /// <param name="postScenarioTime">The post's own creation instant (scenario time): the final fallback and the floor.</param>
+    /// <param name="postScenarioTime">The post's own creation instant (scenario time): the last fallback, and the floor for the fallbacks only.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The scenario instant to stamp on <c>Post.DeletedAt</c>.</returns>
     private async Task<DateTimeOffset> ResolveScenarioTimeAsync(
@@ -191,13 +193,17 @@ public sealed partial class PostTakedownService
         DateTimeOffset postScenarioTime,
         CancellationToken cancellationToken)
     {
-        var scenarioTime = _exerciseClock.CurrentScenarioTime(exerciseId)
-            ?? await ReadStoredScenarioTimeAsync(exerciseId, cancellationToken)
-            ?? postScenarioTime;
+        // A running clock is authoritative: never clamp it to the post's (possibly client-supplied) time.
+        var clockTime = _exerciseClock.CurrentScenarioTime(exerciseId);
+        if (clockTime is not null)
+        {
+            return clockTime.Value;
+        }
 
-        // A takedown cannot precede its post. The stored value in particular can be stale (only the seed writes
-        // it), so never record a takedown earlier than the post it removed.
-        return scenarioTime < postScenarioTime ? postScenarioTime : scenarioTime;
+        // Fallback only: the stored value can be stale (only the seed writes it), so never record a takedown
+        // earlier than the post it removed.
+        var fallback = await ReadStoredScenarioTimeAsync(exerciseId, cancellationToken) ?? postScenarioTime;
+        return fallback < postScenarioTime ? postScenarioTime : fallback;
     }
 
     /// <summary>The exercise's stored <c>CurrentScenarioTime</c>, or <c>null</c>.</summary>
