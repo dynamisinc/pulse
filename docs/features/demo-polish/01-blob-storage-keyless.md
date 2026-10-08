@@ -1,7 +1,7 @@
 # Story: Keyless Blob storage for media
 
-**Feature:** Demo polish  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** XC-009, COR-002, NFR-004  ·  **Design decisions:** none  ·  **Issue:** —
+**Feature:** Demo polish  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+**Requirements:** XC-009, COR-002, NFR-004  ·  **Design decisions:** none  ·  **Issue:** #420
 **Story ID:** I1  ·  **Stack:** infra  ·  **Priority:** Must  ·  **Effort:** S  ·  **Wave:** 1  ·  **Review:** Tier-2 (Tom)
 **Home story:** — (no existing backlog story; the plan creates it). Related: [`posts/01`](../posts/01-post-composition.md) (video AC).
 
@@ -33,8 +33,8 @@ copies into an app setting — both go away.
       `Azure__BlobStorage__ServiceUri`, `Azure__BlobStorage__ContainerName=post-media`, and **no longer** emits
       `Azure__BlobStorage__ConnectionString` or `__PhotoContainerName`; `storageConnectionString` is removed
       from the module's params.
-- [ ] **CORS.** The blob service allows `GET, HEAD, OPTIONS` from `corsAllowedOrigins` (param, default `[]`),
-      exposes `Content-Length, Content-Range, Accept-Ranges`, `maxAgeInSeconds: 3600` (video range requests and
+- [ ] **CORS.** The blob service allows `GET, HEAD, OPTIONS` and the request header `Range` from
+      `corsAllowedOrigins` (param, default `[]`), exposes `Content-Length, Content-Range, Accept-Ranges`, `maxAgeInSeconds: 3600` (video range requests and
       future WebVTT).
 - [ ] **UAT toggle.** `parameters/uat.bicepparam` sets `deployStorage = true`. Each touched module passes `az
       bicep build --file <module>`; after the orchestrator's `main.bicep` plumbing commit (implementation.md

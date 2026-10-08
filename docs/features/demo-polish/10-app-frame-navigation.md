@@ -1,7 +1,7 @@
 # Story: App frame and navigation
 
 **Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-004, SOC-053, SOC-083, XC-007, NFR-001  ·  **Design decisions:** D1-013 (frame), D1-011 (absent, not disabled), D1-R1 ("Who to follow")  ·  **Issue:** —
+**Requirements:** COR-004, SOC-053, SOC-083, XC-007, NFR-001  ·  **Design decisions:** D1-013 (frame), D1-011 (absent, not disabled), D1-R1 ("Who to follow")  ·  **Issue:** #429
 **Story ID:** F1  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** L  ·  **Wave:** 2
 **Home stories:** D1-013 ([`D1-social-app/README.md`](../../design/D1-social-app/README.md)), [`participant-shell/03`](../participant-shell/03-channel-nav.md), [`app-shell/01`](../app-shell/01-global-nav.md).
 
@@ -36,6 +36,13 @@ left-anchored. Desktop-first (plan decision 5); the mobile bottom tab bar is Cou
       moves into it from the feed column (titled exactly **Who to follow** — never "official", D1-R1);
       in-channel opens (thread, profile, hashtag) are `navigate()` calls supplied to
       `Feed`/`ThreadView`/`HashtagFeed`/`PostCard` through `useSocialNavigation()`.
+- [ ] **Navigation adapter (for C6).** All in-channel navigation and route matching go through
+      `useSocialNavigation()` from a `SocialNavigationProvider`:
+      - The default provider wraps React Router (real URLs, Back).
+      - `MemorySocialNavigationProvider` keeps the location in memory and never touches browser history.
+      - `SocialRoutes` matches against the adapter's location (`<Routes location={…}>`), so the channel
+        never reads or writes `window.location` directly. C6's staff preview mounts the channel under the
+        memory provider.
 - [ ] **Accessibility (NFR-001).** Landmarks `nav[aria-label=Primary]`, `main`, `aside[aria-label=Sidebar]`; a
       "Skip to main content" link; on every route change focus moves to the main region heading (replaces the
       old feed↔detail focus effect); all controls keyboard-operable with visible focus; nothing is conveyed by

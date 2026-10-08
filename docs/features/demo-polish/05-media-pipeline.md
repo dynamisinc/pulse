@@ -1,7 +1,7 @@
 # Story: Media pipeline — upload, store, read SAS, staff library
 
 **Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** SOC-001, XC-009, COR-002, NFR-004, NFR-009, XC-001  ·  **Design decisions:** DP-3, DP-11, DP-12 (see implementation.md §0)  ·  **Issue:** —
+**Requirements:** SOC-001, XC-009, COR-002, NFR-004, NFR-009, XC-001  ·  **Design decisions:** DP-3, DP-11, DP-12 (see implementation.md §0)  ·  **Issue:** #424
 **Story ID:** BM  ·  **Stack:** backend  ·  **Priority:** Must  ·  **Effort:** L  ·  **Wave:** 1b  ·  **Review:** Tier-2 (Tom)
 **Home story:** [`posts/01`](../posts/01-post-composition.md) (the "inline video" AC the home story deferred).
 
@@ -47,7 +47,7 @@ h) — COR-002's "access-checked" is met at *mint* time. Tom signs off on this.
       (`fileName`, `uploadedAtScenario`, signed `url`, `posterUrl` for videos), excluding assets that are some
       video's poster. Assigned staff only (401 for anonymous/participant/shared sessions — no staff session; 403
       for staff not assigned to the resolved exercise); another exercise's media is never returned.
-- [ ] **Abuse resistance and gating (NFR-009).** Named policy `media-upload` partitions by **session** (not IP),
+- [ ] **Abuse resistance and gating (NFR-009).** Named policy `media-upload` partitions by **account**: the authenticated principal's stable id (participant `AccountId`, staff user id), never the session id or IP, so a fresh sign-in can't reset the quota (NFR-009 is per account),
       default 30/min (`Media:Upload:PermitPerMinute`), answers 429 with `Retry-After`; `POST /api/media` is
       mapped inside `DenyReadOnlySessions()` (read-only → 403); `/api/media` is added to
       `ExerciseLifecycleGatedRoutes.Paths` (archived/build → 403 for participants); participant uploads require

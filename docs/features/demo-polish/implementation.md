@@ -31,6 +31,7 @@ storyline (plan §3). Every story that is affected cites its decision ID.
 | DP-11 | `COR-002` is satisfied by *minting* (a SAS is only ever minted for in-scope media) not by *per-request access checks* on the blob. A leaked SAS is readable by anyone until expiry (≤ 13 h). | Plan §4 "Why read SAS". Direct-to-Blob URLs cannot be access-checked per request. Flagged for Tom's Tier-2 sign-off on BM; mitigations: GUID blob names, single-blob read-only SAS, HTTPS-only, bucketed short expiry, private container. |
 | DP-12 | Video captions are not in the contract (no `captionsUrl`). The WebVTT CORS rule in I1 is future-proofing only. | Plan ships no caption path; flagged as an NFR-001 gap (WCAG 1.2.2) for the stock demo clips. Mitigation: alt/description is required on every video. |
 | DP-13 | Wave-2 backend capacity (idle) builds **PE-BE** so the PATCH lands well before the 10/15 backend freeze; PE-FE stays in Wave 3. | Plan puts PE in Wave 3 but requires the backend half before the freeze. |
+| DP-15 | `PostReaction` is soft-deleted: `DeletedAt` (nullable), plus a unique index filtered on `DeletedAt IS NULL`. Un-like or un-repost sets `DeletedAt`; re-like inserts a new active row; counts and `viewer` state read active rows only. | XC-010 ("soft delete everywhere; nothing is hard-deleted during a live exercise"). The first draft's unlike had to hard-delete. Found by Copilot on #418 and folded into B1 while it was building. The inactive rows also give the AAR a like/unlike history. |
 | DP-14 | Call-site wiring of like/repost (`Feed.tsx` row, `ThreadView.tsx` `ThreadCard`) moves **from F3 to F0**; `Feed.tsx` ownership in Wave 2 is **F4** (F5 ships `FeedSkeleton.tsx` only). | Plan §6 gave F3/F4/F5 overlapping edits to `Feed.tsx`/`ThreadView.tsx`. Resolved by sequencing, see §4.3. |
 
 ## 1. Frozen contract
@@ -52,7 +53,7 @@ storyline (plan §3). Every story that is affected cites its decision ID.
 - **Participant payloads never contain**: `origin`, `actingHumanId`, `createdWallClock`, `injectId`,
   `uploadedByHumanId`, `blobName`, `contentType`, `bytes`, `originalFileName`, the baseline fields,
   `personaType`, `castable`. Staff-only fields appear only on `Staff*` DTOs (XC-002).
-- Soft delete only (XC-010): no hard-delete path is added anywhere in this push.
+- Soft delete only (XC-010): no hard-delete path is added anywhere in this push. That includes reactions: un-liking or un-reposting sets `PostReaction.DeletedAt` (DP-15).
 
 ### 1.2 Entities (`src/Pulse.WebApi/Data/Entities/`, created/edited by B1)
 
@@ -100,6 +101,7 @@ public sealed class PostReaction : IExerciseScoped
     public Guid PersonaId { get; set; }                       // logical ref (like Follow); resolved through the scoped Personas set
     public required string Kind { get; set; }                 // "like" | "repost"; nvarchar(16)
     public DateTimeOffset CreatedScenarioTime { get; set; }   // exercise clock (COR-053)
+    public DateTimeOffset? DeletedAt { get; set; }            // DP-15; null = active; set by un-like/un-repost; never hard-deleted (XC-010)
 }
 
 // EDIT — Post.cs (additive)
@@ -120,7 +122,7 @@ public string? Location { get; set; }                         // DP-4; nvarchar(
 |---|---|
 | `MediaAsset` | DbSet `MediaAssets`; key `Id`; `ExerciseId` required + index; unique `IX_MediaAssets_BlobName`; lengths as above; FK `PosterMediaAssetId -> MediaAssets.Id` `OnDelete(Restrict)`. Central exercise filter via the existing `IExerciseScoped` reflection loop (no per-entity filter code). |
 | `PostMediaItem` | DbSet `PostMediaItems`; unique `IX_PostMediaItems_PostId_Order` `(PostId, Order)`; `IX_PostMediaItems_ExerciseId`; FKs `PostId`, `MediaAssetId`, `PosterMediaAssetId` all `Restrict`. No navigation properties (explicit joins; avoids filter/fix-up surprises). |
-| `PostReaction` | DbSet `PostReactions`; unique `IX_PostReactions_PostId_PersonaId_Kind`; `IX_PostReactions_ExerciseId`; FK `PostId` `Restrict`; `PersonaId` has no FK (house style, see `Follow`). |
+| `PostReaction` | DbSet `PostReactions`; **filtered** unique `IX_PostReactions_PostId_PersonaId_Kind` `HasFilter("[DeletedAt] IS NULL")` (at most one ACTIVE reaction per persona per kind; inactive history rows accumulate; re-like inserts a new row) (DP-15); `IX_PostReactions_ExerciseId`; FK `PostId` `Restrict`; `PersonaId` has no FK (house style, see `Follow`). |
 | `Post` | `BaselineLikeCount/RepostCount/ReplyCount` `IsRequired().HasDefaultValue(0)`; `HasOne<Post>().WithMany().HasForeignKey(ParentPostId).OnDelete(Restrict)`; `IX_Posts_ParentPostId`. |
 | `Persona` | `Location` `HasMaxLength(100)`; `AvatarMediaId`/`BannerMediaId` FKs to `MediaAssets` `Restrict`. |
 
@@ -389,7 +391,7 @@ Participant writes (`/api/media`, reactions) are mapped inside `MapGroup(string.
 | `Azure:BlobStorage:ContainerName` | private container | `post-media` |
 | `Azure:BlobStorage:LocalRootPath` | Development only | `./.local-media` |
 | `Media:Upload:ImageMaxBytes` / `VideoMaxBytes` | streamed limits | 5 242 880 / 104 857 600 |
-| `Media:Upload:PermitPerMinute` | NFR-009 per-**session** limit | 30 |
+| `Media:Upload:PermitPerMinute` | NFR-009 per-**account** limit: partitioned by the participant `AccountId` / staff user id, never the session id (a new sign-in must not reset it) | 30 |
 | `Media:Sas:BucketMinutes` / `Media:Sas:LifetimeHours` | bucket width / minimum remaining life | 60 / 12 |
 
 `Azure__BlobStorage__ConnectionString` and `Azure__BlobStorage__PhotoContainerName` are **removed** by I1
@@ -567,7 +569,7 @@ Every path below was verified to exist at P2 time unless marked **new**.
   `Data/ExerciseScopeViolationException.cs`, `Data/Entities/{Post,Persona,Follow,TelemetryEvent}.cs`,
   `Data/Migrations/`.
 - Rate limiting — `Program.cs` has one `app.UseRateLimiter()`; every `Add*` registers its own named policy (see
-  `Features/Identity/**/*Endpoints.cs`). Partition by session, not IP (App Service proxy collapses IPs).
+  `Features/Identity/**/*Endpoints.cs`). Partition by the stable account id (participant `AccountId` / staff user id), never the session id (NFR-009 is per account) and not IP (the App Service proxy collapses IPs).
 - Lifecycle gate — `Features/ExerciseConfiguration/Lifecycle/ExerciseLifecycleGatingMiddleware.cs`
   (`ExerciseLifecycleGatedRoutes.Paths`).
 - Persona names/handles — `Features/Ops/EngineContentSeed/PersonaCastSeeder.cs` (read-only reference; handles
@@ -666,7 +668,7 @@ rebases C3.
 | Seam | File(s) | Rule |
 |------|---------|------|
 | API composition root | `src/Pulse.WebApi/Program.cs` | Orchestrator adds, after each backend merge, exactly: `AddMedia(config)`/`MapMedia()` + the Development-only `/dev-media` static-file mapping (BM); `AddSocialThreads()` (B2, **before** the first reply is posted); `AddSocialReactions()`/`MapSocialReactionEndpoints()` inside the `DenyReadOnlySessions()` group (B3); `AddSocialModeration()`/`MapSocialModerationEndpoints()` (B6); `AddPersonaAdmin()`/`MapPersonaAdminEndpoints()` (PE-BE). After every merge: **grep `Program.cs` for the new line** and confirm the route answers 401 (not 404) unauthenticated — the #310→#317 lesson. Builders add their own `*CompositionRootWiringTests`-style test files; the orchestrator makes them pass. |
-| Bicep composition root | `infrastructure/main.bicep` | After I1 merges: (1) add local `blobServiceUri = 'https://${storageName}.blob.${environment().suffixes.storage}'` (a plain local, **not** a module output — webApp↔storage would otherwise form a cycle, same reason as the `ai` module); (2) pass `blobServiceUri` and `blobStorageContainerName` to `webApp`; (3) delete the `storageConnectionString:` line from the `webApp` call; (4) pass `backendPrincipalId: deployWebApp ? webApp.outputs.principalId! : ''` and `corsAllowedOrigins: empty(frontendUrl) ? [] : [frontendUrl]` to `storage`; (5) `az bicep build` + `build-params` locally. 🧑 Tom then runs **Deploy Infrastructure**. `infrastructure/main.json` is a stale committed artifact — do not hand-edit. |
+| Bicep composition root | `infrastructure/main.bicep` | **Delegated to I1 for Wave 1** (no other story touches infra). (1) add local `blobServiceUri = 'https://${storageName}.blob.${az.environment().suffixes.storage}'`. It must be `az.environment()`: `main.bicep`'s `environment` parameter shadows the function (BCP265). It is a plain local, **not** a module output — webApp↔storage would otherwise form a cycle, same reason as the `ai` module); (2) pass `blobServiceUri` and `blobStorageContainerName` to `webApp`; (3) delete the `storageConnectionString:` line from the `webApp` call; (4) pass `backendPrincipalId: deployWebApp ? webApp.outputs.principalId! : ''` and `corsAllowedOrigins: empty(frontendUrl) ? [] : [frontendUrl]` to `storage`; (4a) pass `blobStorageProvider: deployStorage ? 'Azure' : 'None'` (fail closed where no storage exists); (5) `az bicep build` + `build-params` locally. 🧑 Tom then runs **Deploy Infrastructure**. `infrastructure/main.json` is a stale committed artifact — do not hand-edit. |
 | Participant app root | `App.tsx`, `features/app-shell/**`, `features/participant-shell/**` | **No change expected**: F1's router sits inside `SocialChannel` under the existing `*` catch-all, so the location-blindness test stays valid. Orchestrator-only if needed: hiding the duplicate `ParticipantSignOutControl` row in `participant-shell/ShellLayout.tsx` once F1's account card ships. |
 | Right-rail slot mounts | `features/social/layout/RightRailContent.tsx` | F1 creates it with "Who to follow" only. After F1 **and** F6 merge, the orchestrator adds `<SearchBox/>` and `<TrendingPanel/>` (one-file edit). |
 | Console slot wiring | `features/controller/ControllerConsoleRoute.tsx` | After C1–C4 merge the orchestrator: passes `liveWorldSlot`/`runSheetSlot`; holds the `replyTo: ReplyTarget \| null` state and passes it to `PersonaComposer` through `dockSlots`; maps `LiveWorldColumn.onReplyAs` → `ctx.openComposer({ replyTo })`; passes `actionsSlot={<PersonaEditButton persona={activePersona}/>}` to `PersonaContextPanel`; after C5, passes `renderRowActions={post => <TakedownAction post={post}/>}`. |

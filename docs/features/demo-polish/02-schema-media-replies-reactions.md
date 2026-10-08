@@ -1,7 +1,7 @@
 # Story: Schema — media, replies, reactions, avatars (one migration)
 
-**Feature:** Demo polish  ·  **Epic:** E1 / E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** SOC-001, SOC-010, SOC-030, COR-001, COR-020, COR-024, XC-010  ·  **Design decisions:** none  ·  **Issue:** —
+**Feature:** Demo polish  ·  **Epic:** E1 / E2  ·  **Phase:** 1  ·  **Status:** In Progress
+**Requirements:** SOC-001, SOC-010, SOC-030, COR-001, COR-020, COR-024, XC-010  ·  **Design decisions:** none  ·  **Issue:** #421
 **Story ID:** B1  ·  **Stack:** backend  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** 1 (merges first)  ·  **Review:** Tier-2 (Tom)
 **Home story:** [`posts/01`](../posts/01-post-composition.md), [`persona-management/05`](../persona-management/05-avatar-library.md); also seeds [`reactions/01`](../reactions/01-like.md), [`threads-replies/01`](../threads-replies/01-flattened-thread-view.md).
 
@@ -20,7 +20,7 @@ DP-1…DP-4 and DP-7 (extra columns `MediaAsset.CreatedScenarioTime`, `MediaAsse
       `IExerciseScoped`, non-nullable `ExerciseId`); `Post` gains `ParentPostId` +
       `BaselineLike/Repost/ReplyCount`; `Persona` gains `AvatarMediaId`, `BannerMediaId`, `Location` — names,
       types, nullability, lengths per §1.2.
-- [ ] **EF config per §1.3.** Unique `(PostId, PersonaId, Kind)` on reactions, unique `(PostId, Order)` on media
+- [ ] **EF config per §1.3.** **Filtered** unique `(PostId, PersonaId, Kind) WHERE DeletedAt IS NULL` on reactions (`PostReaction.DeletedAt`, DP-15), unique `(PostId, Order)` on media
       items, unique `BlobName`, `IX_Posts_ParentPostId`; every FK is `Restrict`/`NoAction` (no cascade path; no
       hard-delete path — XC-010).
 - [ ] **Isolation (always-Critical, COR-001/XC-001).** Given rows for exercises A and B, then under scope A none

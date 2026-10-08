@@ -1,7 +1,7 @@
 # Feature: Demo polish (participant-first demo)
 
 **Epic:** E1 Platform Core & Isolation · E2 Social Network · E7 Controller Command Surface (sliced)  ·  **Phase:** 1  ·  **Feature ref:** cross-feature demo slice (no single `F{n}.{m}`)
-**World:** both — participant (F-stories) and staff (C-stories, PE)  ·  **Issue:** —
+**World:** both — participant (F-stories) and staff (C-stories, PE)  ·  **Issue:** #419
 
 ## Summary
 A time-boxed push (**ready Mon 2026-10-19, demo Tue 2026-10-20**) that makes the participant social app look and
@@ -38,31 +38,31 @@ Order = wave order. Priorities and effort are the plan's (§5). *Home story* is 
 
 | # | Story | ID | Pri | Stack | Wave | Requirement(s) | Status | Issue |
 |---|-------|----|-----|-------|------|----------------|--------|-------|
-| 01 | [Keyless Blob storage for media](01-blob-storage-keyless.md) | I1 | Must | infra | 1 | XC-009, COR-002, NFR-004 | Not Started | — |
-| 02 | [Schema: media, replies, reactions, avatars (one migration)](02-schema-media-replies-reactions.md) | B1 | Must | backend | 1 | SOC-001, SOC-010, SOC-030, COR-001, COR-020, XC-010 | Not Started | — |
-| 03 | [Client seam: PostCard split, contract v2, mocks, upload client](03-client-seam-contract-v2.md) | F0 | Must | frontend | 1 | SOC-001, SOC-002, XC-002, XC-009, COR-053 | Not Started | — |
-| 04 | [Role-scoped realtime groups](04-role-scoped-realtime-groups.md) | B5 | Should | backend | 1 | XC-002, SOC-052, COR-001 | Not Started | — |
-| 05 | [Media pipeline: upload, store, SAS, library](05-media-pipeline.md) | BM | Must | backend | 1b | SOC-001, XC-009, COR-002, NFR-004, NFR-009 | Not Started | — |
-| 06 | [Post v2 read/write](06-post-v2-read-write.md) | BP | Must | backend | 1b | SOC-001, SOC-002, SOC-054, XC-002, COR-024 | Not Started | — |
-| 07 | [Replies and real threads](07-replies-and-threads.md) | B2 | Must | backend | 1b | SOC-010, SOC-011, SOC-012, SOC-005 | Not Started | — |
-| 08 | [Reactions (like, repost) and engagement reader](08-reactions.md) | B3 | Must | backend | 1b | SOC-030, SOC-020, XC-004 | Not Started | — |
-| 09 | [Controller takedown (soft delete + PostRemoved)](09-controller-takedown.md) | B6 | Should | backend | 1b | CTL-025, XC-010 | Not Started | — |
-| 10 | [App frame and navigation](10-app-frame-navigation.md) | F1 | Must | frontend | 2 | SOC-083, COR-004, NFR-001 | Not Started | — |
-| 11 | [Media display: grid, video player, viewer](11-media-display.md) | F2 | Must | frontend | 2 | SOC-001, XC-009, NFR-001, NFR-008 | Not Started | — |
-| 12 | [Engagement: persisted likes and reposts](12-engagement.md) | F3 | Must | frontend | 2 | SOC-030, SOC-020, SOC-021 | Not Started | — |
-| 13 | [Threads and composer: replies, attach, instant post](13-threads-composer.md) | F4 | Must | frontend | 2 | SOC-001, SOC-010, SOC-011, SOC-012 | Not Started | — |
-| 14 | [Brand and profile finish](14-brand-profile-finish.md) | F5 | Must | frontend | 2 | SOC-050, SOC-002, COR-030, NFR-001 | Not Started | — |
-| 15 | [Explore: trending, search, hashtag polish](15-explore.md) | F6 | Should | frontend | 2 | SOC-040, SOC-041, SOC-082 | Not Started | — |
-| 16 | [Notifications, derived client-side](16-notifications-lite.md) | F7 | Could | frontend | 3 | SOC-070 | Not Started | — |
-| 17 | [Post as persona v2](17-post-as-persona-v2.md) | C1 | Must | frontend | 3 | CTL-001, CTL-003, SOC-012 | Not Started | — |
-| 18 | [Live world column](18-live-world-column.md) | C2 | Must | frontend | 3 | CTL-030, CTL-031 | Not Started | — |
-| 19 | [Run sheet](19-run-sheet.md) | C3 | Must | frontend | 3 | CTL-010, CTL-011, CTL-013 | Not Started | — |
-| 20 | [Console cleanup](20-console-cleanup.md) | C4 | Must | frontend | 3 | CTL-002, CTL-003 | Not Started | — |
-| 21 | [Persona profile edit](21-persona-profile-edit.md) | PE | Should | fullstack | 2 (BE) / 3 (FE) | COR-020, COR-022, COR-024 | Not Started | — |
-| 22 | [Takedown UI and live feed removal](22-takedown-ui.md) | C5 | Should | frontend | 3 | CTL-025, XC-010 | Not Started | — |
-| 23 | [Preview-as-participant and StartEx/EndEx](23-preview-and-startex.md) | C6 | Could | frontend | 3 | COR-041, COR-054 | Not Started | — |
-| 24 | [Seed script](24-seed-script.md) | S1 | Must | script | seed | CTL-001, COR-023 | Not Started | — |
-| 25 | [Content pack authoring](25-content-pack-authoring.md) | S2 | Must | content | seed | COR-023, XC-009 | Not Started | — |
+| 01 | [Keyless Blob storage for media](01-blob-storage-keyless.md) | I1 | Must | infra | 1 | XC-009, COR-002, NFR-004 | In Progress | #420 |
+| 02 | [Schema: media, replies, reactions, avatars (one migration)](02-schema-media-replies-reactions.md) | B1 | Must | backend | 1 | SOC-001, SOC-010, SOC-030, COR-001, COR-020, XC-010 | In Progress | #421 |
+| 03 | [Client seam: PostCard split, contract v2, mocks, upload client](03-client-seam-contract-v2.md) | F0 | Must | frontend | 1 | SOC-001, SOC-002, XC-002, XC-009, COR-053 | In Progress | #422 |
+| 04 | [Role-scoped realtime groups](04-role-scoped-realtime-groups.md) | B5 | Should | backend | 1 | XC-002, SOC-052, COR-001 | In Progress | #423 |
+| 05 | [Media pipeline: upload, store, SAS, library](05-media-pipeline.md) | BM | Must | backend | 1b | SOC-001, XC-009, COR-002, NFR-004, NFR-009 | Not Started | #424 |
+| 06 | [Post v2 read/write](06-post-v2-read-write.md) | BP | Must | backend | 1b | SOC-001, SOC-002, SOC-054, XC-002, COR-024 | Not Started | #425 |
+| 07 | [Replies and real threads](07-replies-and-threads.md) | B2 | Must | backend | 1b | SOC-010, SOC-011, SOC-012, SOC-005 | Not Started | #426 |
+| 08 | [Reactions (like, repost) and engagement reader](08-reactions.md) | B3 | Must | backend | 1b | SOC-030, SOC-020, XC-004 | Not Started | #427 |
+| 09 | [Controller takedown (soft delete + PostRemoved)](09-controller-takedown.md) | B6 | Should | backend | 1b | CTL-025, XC-010 | Not Started | #428 |
+| 10 | [App frame and navigation](10-app-frame-navigation.md) | F1 | Must | frontend | 2 | SOC-083, COR-004, NFR-001 | Not Started | #429 |
+| 11 | [Media display: grid, video player, viewer](11-media-display.md) | F2 | Must | frontend | 2 | SOC-001, XC-009, NFR-001, NFR-008 | Not Started | #430 |
+| 12 | [Engagement: persisted likes and reposts](12-engagement.md) | F3 | Must | frontend | 2 | SOC-030, SOC-020, SOC-021 | Not Started | #431 |
+| 13 | [Threads and composer: replies, attach, instant post](13-threads-composer.md) | F4 | Must | frontend | 2 | SOC-001, SOC-010, SOC-011, SOC-012 | Not Started | #432 |
+| 14 | [Brand and profile finish](14-brand-profile-finish.md) | F5 | Must | frontend | 2 | SOC-050, SOC-002, COR-030, NFR-001 | Not Started | #433 |
+| 15 | [Explore: trending, search, hashtag polish](15-explore.md) | F6 | Should | frontend | 2 | SOC-040, SOC-041, SOC-082 | Not Started | #434 |
+| 16 | [Notifications, derived client-side](16-notifications-lite.md) | F7 | Could | frontend | 3 | SOC-070 | Not Started | #435 |
+| 17 | [Post as persona v2](17-post-as-persona-v2.md) | C1 | Must | frontend | 3 | CTL-001, CTL-003, SOC-012 | Not Started | #436 |
+| 18 | [Live world column](18-live-world-column.md) | C2 | Must | frontend | 3 | CTL-030, CTL-031 | Not Started | #437 |
+| 19 | [Run sheet](19-run-sheet.md) | C3 | Must | frontend | 3 | CTL-010, CTL-011, CTL-013 | Not Started | #438 |
+| 20 | [Console cleanup](20-console-cleanup.md) | C4 | Must | frontend | 3 | CTL-002, CTL-003 | Not Started | #439 |
+| 21 | [Persona profile edit](21-persona-profile-edit.md) | PE | Should | fullstack | 2 (BE) / 3 (FE) | COR-020, COR-022, COR-024 | Not Started | #440 |
+| 22 | [Takedown UI and live feed removal](22-takedown-ui.md) | C5 | Should | frontend | 3 | CTL-025, XC-010 | Not Started | #441 |
+| 23 | [Preview-as-participant and StartEx/EndEx](23-preview-and-startex.md) | C6 | Could | frontend | 3 | COR-041, COR-054 | Not Started | #442 |
+| 24 | [Seed script](24-seed-script.md) | S1 | Must | script | seed | CTL-001, COR-023 | Not Started | #443 |
+| 25 | [Content pack authoring](25-content-pack-authoring.md) | S2 | Must | content | seed | COR-023, XC-009 | Not Started | #444 |
 
 Wave-0 prep items P1 (CI flake fix) and P3 (Tom picks stock clips) are in the plan, not stories here. P2 is this
 folder.

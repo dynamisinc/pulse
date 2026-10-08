@@ -1,7 +1,7 @@
 # Story: Engagement — persisted likes and reposts
 
 **Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** SOC-030, SOC-020 (repost toggle), SOC-021, NFR-001, COR-015  ·  **Design decisions:** D1-011 (absent, not disabled)  ·  **Issue:** —
+**Requirements:** SOC-030, SOC-020 (repost toggle), SOC-021, NFR-001, COR-015  ·  **Design decisions:** D1-011 (absent, not disabled)  ·  **Issue:** #431
 **Story ID:** F3  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** 2
 **Home stories:** [`reactions/01`](../reactions/01-like.md), [`amplification/01`](../amplification/01-repost-quote.md).
 

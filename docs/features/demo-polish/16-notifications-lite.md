@@ -1,7 +1,7 @@
 # Story: Notifications, derived client-side (Could)
 
 **Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** SOC-070 (lite), SOC-071 (aggregation), NFR-001, COR-053  ·  **Design decisions:** D1-005 (aggregate under load), D1-011  ·  **Issue:** —
+**Requirements:** SOC-070 (lite), SOC-071 (aggregation), NFR-001, COR-053  ·  **Design decisions:** D1-005 (aggregate under load), D1-011  ·  **Issue:** #435
 **Story ID:** F7  ·  **Stack:** frontend  ·  **Priority:** Could  ·  **Effort:** M  ·  **Wave:** 3 slot (after F1 merged)  ·  **Cut line 2:** first thing cut
 **Home story:** [`notifications/01`](../notifications/01-notification-center.md) (lite).
 
@@ -23,8 +23,10 @@ were deliberately *absent* from F1's nav; this story adds only Notifications.
 - [ ] **Page.** `/notifications` lists items newest-first in **scenario time**, each with a typed icon **and**
       text label (reply / mention / like), opening the relevant thread on activation; "Mark all read" persists
       per persona in `sessionStorage` under an exercise-scoped key and clears the badge.
-- [ ] **Live and calm.** New items arrive through the existing realtime feed subscription with a polite
-      live-region announcement; under a burst, items are aggregated (same post, same type) so the page stays
+- [ ] **Live and calm.** Reply and mention items arrive through the existing realtime feed subscription
+      (`PostReceived`). **Like items come from count changes on the viewer's own posts**, detected by
+      refetching the feed every 30 s while the tab is visible: B3 adds no reaction broadcast, and
+      `PostReceived` never carries a like. New items get a polite live-region announcement; under a burst, items are aggregated (same post, same type) so the page stays
       legible (D1-005/SOC-071).
 - [ ] **Isolation.** The derivation reads only the session's exercise-scoped feed; the storage key includes the
       exercise id; nothing is read from another persona.

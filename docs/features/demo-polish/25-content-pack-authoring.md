@@ -1,7 +1,7 @@
 # Story: Content pack authoring (human + Claude)
 
 **Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-023, COR-024, XC-009, NFR-004 (rights/safety of media)  ·  **Design decisions:** plan decisions 2 and 6 (stock media; fictional county; names by 10/14)  ·  **Issue:** —
+**Requirements:** COR-023, COR-024, XC-009, NFR-004 (rights/safety of media)  ·  **Design decisions:** plan decisions 2 and 6 (stock media; fictional county; names by 10/14)  ·  **Issue:** #444
 **Story ID:** S2  ·  **Stack:** content (🧑 Tom + Claude; no builder agent)  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** seed (starts Fri 10/16; names fixed by Wed 10/14)
 **Home story:** — (content for [`persona-management/04`](../persona-management/04-pre-exercise-post-history.md)'s "background noise" idea, but authored as a pack).
 

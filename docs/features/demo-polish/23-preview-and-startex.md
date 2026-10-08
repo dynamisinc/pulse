@@ -1,7 +1,7 @@
 # Story: Preview-as-participant shows the real feed, and StartEx/EndEx (Could)
 
 **Feature:** Demo polish  ·  **Epic:** E1 / E7  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-041, COR-054, COR-032, NFR-001  ·  **Design decisions:** D7-007 (preview), D1-011  ·  **Issue:** —
+**Requirements:** COR-041, COR-054, COR-032, NFR-001  ·  **Design decisions:** D7-007 (preview), D1-011  ·  **Issue:** #442
 **Story ID:** C6  ·  **Stack:** frontend  ·  **Priority:** Could  ·  **Effort:** S  ·  **Wave:** 3 slot (cut first if time is short)
 **Home stories:** [`staff-shell/04`](../staff-shell/04-preview-as-participant.md), [`exercise-configuration/03`](../exercise-configuration/03-exercise-lifecycle.md).
 
@@ -17,7 +17,10 @@ it keeps the labelled "PREVIEW AS PARTICIPANT — READ-ONLY" strip and a neutral
 ## Acceptance Criteria
 - [ ] **Real channel in the preview.** `PreviewAsParticipant` mounts the participant `SocialChannel` (inside
       `BrandThemeProvider` and `ShellContextProvider` with `variant: 'preview'`, scenario time from the chosen
-      moment) instead of `PortalStub`; the staff label strip, moment picker and Exit control are unchanged.
+      moment) instead of `PortalStub`. It mounts under F1's **`MemorySocialNavigationProvider`**: in-memory
+      location, no browser-history writes. So a thread, profile or hashtag link inside the preview never
+      navigates the staff page, and an unknown path stays inside the preview (depends on F1's
+      navigation-adapter AC); the staff label strip, moment picker and Exit control are unchanged.
 - [ ] **Read-only.** In the `preview` variant the composer, follow, like/repost and compose-modal controls are
       absent (`affordancesAvailable` false) — no write can be issued from the preview; the feed it shows is the
       exercise's real feed.
