@@ -187,13 +187,15 @@ public sealed class LocalMediaUrlSigner : IMediaUrlSigner
     {
         ArgumentNullException.ThrowIfNull(assets);
 
+        // Nothing to sign needs no scope; any non-empty batch is checked in full before anything is minted.
+        if (assets.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyDictionary<Guid, string>>(new Dictionary<Guid, string>());
+        }
+
         MediaScopeGuard.EnsureInScope(_exerciseContext, assets);
 
         var urls = new Dictionary<Guid, string>(assets.Count);
-        if (assets.Count == 0)
-        {
-            return Task.FromResult<IReadOnlyDictionary<Guid, string>>(urls);
-        }
 
         var request = _httpContextAccessor.HttpContext?.Request
             ?? throw new InvalidOperationException("The Development media signer needs the current request to build an absolute URL.");

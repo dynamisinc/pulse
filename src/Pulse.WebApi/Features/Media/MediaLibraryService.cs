@@ -51,7 +51,8 @@ public sealed class MediaLibraryResult
 
 /// <summary>
 /// <c>GET /api/staff/media</c>'s service (demo-polish BM AC "Staff library"): the RESOLVED exercise's assets,
-/// newest first by scenario time, with signed URLs — excluding images that are some video's poster (DP-3). The
+/// newest first by upload time (<see cref="MediaAsset.CreatedWallClock"/>, the one consistent time base), with
+/// signed URLs — excluding images that are some video's poster (DP-3). The
 /// staff/assignment gate is the endpoint filter's job (<c>EngineCockpitStaffAuthorizationFilter</c>); scope comes
 /// only from <see cref="IExerciseContext"/> (COR-001), so another exercise's media is never returned.
 /// </summary>
@@ -124,9 +125,12 @@ public sealed class MediaLibraryService
             query = query.Where(asset => asset.Kind == kind);
         }
 
+        // Newest first by the WALL clock — the authoritative upload order. CreatedScenarioTime may come from three
+        // different time bases (running clock / persisted scenario time / wall clock: the DP-18 staff-metadata
+        // exception documented on MediaUploadService), so sorting by it could interleave them; it is only DISPLAYED
+        // (uploadedAtScenario). Id breaks ties deterministically.
         var assets = await query
-            .OrderByDescending(asset => asset.CreatedScenarioTime)
-            .ThenByDescending(asset => asset.CreatedWallClock)
+            .OrderByDescending(asset => asset.CreatedWallClock)
             .ThenBy(asset => asset.Id)
             .Take(pageSize)
             .ToListAsync(cancellationToken);

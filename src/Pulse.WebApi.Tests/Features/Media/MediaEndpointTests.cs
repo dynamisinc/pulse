@@ -107,6 +107,28 @@ public sealed class MediaEndpointTests
         rows.Single(asset => asset.Kind == MediaKinds.Video).PosterMediaAssetId.Should().Be(Guid.Parse(posterId));
     }
 
+    /// <summary>Gate-1 L-5 — a staff session whose assignment was revoked cannot upload into its selected exercise.</summary>
+    [RequiresDockerFact]
+    public async Task StaffNotAssignedToTheExercise_Is403_AndNothingIsWritten()
+    {
+        MediaSeed.SeededExercise exercise;
+        MediaSeed.SeededSession unassigned;
+        await using (var db = _fixture.CreateContext())
+        {
+            exercise = MediaSeed.NewExercise(db);
+            unassigned = MediaSeed.Staff(db, exercise, assigned: false);
+            await db.SaveChangesAsync();
+        }
+
+        await using var host = NewHost();
+        using var client = host.CreateClientFor(exercise.Host, unassigned.Token);
+
+        using var response = await client.PostAsync(new Uri("/api/media", UriKind.Relative), MediaTestFiles.Form(MediaTestFiles.Png(), "p.png"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "staff must be assigned to the resolved exercise (COR-005)");
+        await AssertNoMediaAsync(exercise, host);
+    }
+
     // ---- AC "Types by magic bytes only" (HTTP) -------------------------------------------------------------
 
     [RequiresDockerFact]
@@ -259,6 +281,10 @@ public sealed class MediaEndpointTests
 
     // ---- AC "Staff library" --------------------------------------------------------------------------------
 
+    /// <summary>
+    /// Newest first by UPLOAD time (<c>CreatedWallClock</c>, Gate-1 H-1) — the scenario stamps are deliberately seeded in
+    /// the OPPOSITE order, so a sort on the mixed-base scenario column would fail this.
+    /// </summary>
     [RequiresDockerFact]
     public async Task Library_ReturnsTheExercisesAssetsNewestFirst_HidesPosters_AndSignsPosterUrls()
     {
@@ -268,15 +294,17 @@ public sealed class MediaEndpointTests
         MediaAsset newer;
         MediaAsset poster;
         MediaAsset video;
+        var uploadedAt = new DateTimeOffset(2026, 10, 9, 18, 0, 0, TimeSpan.Zero);
         await using (var db = _fixture.CreateContext())
         {
             exercise = MediaSeed.NewExercise(db);
             staff = MediaSeed.Staff(db, exercise, role: "evaluator");
-            older = MediaSeed.Asset(db, exercise, scenarioTime: MediaSeed.ScenarioTime.AddMinutes(-30), fileName: "older.png");
-            newer = MediaSeed.Asset(db, exercise, scenarioTime: MediaSeed.ScenarioTime.AddMinutes(10), fileName: "newer.png");
-            poster = MediaSeed.Asset(db, exercise, scenarioTime: MediaSeed.ScenarioTime.AddMinutes(19));
+            older = MediaSeed.Asset(db, exercise, scenarioTime: MediaSeed.ScenarioTime.AddMinutes(60), fileName: "older.png", wallClock: uploadedAt);
+            newer = MediaSeed.Asset(db, exercise, scenarioTime: MediaSeed.ScenarioTime.AddMinutes(30), fileName: "newer.png", wallClock: uploadedAt.AddMinutes(1));
+            poster = MediaSeed.Asset(db, exercise, scenarioTime: MediaSeed.ScenarioTime.AddMinutes(-50), wallClock: uploadedAt.AddMinutes(2));
             await db.SaveChangesAsync();
-            video = MediaSeed.Asset(db, exercise, MediaKinds.Video, scenarioTime: MediaSeed.ScenarioTime.AddMinutes(20), posterId: poster.Id);
+            video = MediaSeed.Asset(
+                db, exercise, MediaKinds.Video, scenarioTime: MediaSeed.ScenarioTime.AddMinutes(-60), posterId: poster.Id, wallClock: uploadedAt.AddMinutes(3));
             await db.SaveChangesAsync();
         }
 
@@ -289,10 +317,12 @@ public sealed class MediaEndpointTests
 
         all.Select(item => item.GetProperty("id").GetString()).Should().Equal(
             [video.Id.ToString(), newer.Id.ToString(), older.Id.ToString()],
-            "newest first by scenario time, and the poster image is hidden because it is a video's poster (DP-3)");
+            "newest first by UPLOAD (wall-clock) time — not by the scenario stamps, seeded in the opposite order — and the "
+            + "poster image is hidden because it is a video's poster (DP-3)");
         var videoItem = all[0];
         videoItem.GetProperty("posterUrl").GetString().Should().EndWith($"/dev-media/{poster.BlobName}");
-        videoItem.GetProperty("uploadedAtScenario").GetString().Should().Be(MediaSeed.ScenarioTime.AddMinutes(20).ToString("O"));
+        videoItem.GetProperty("uploadedAtScenario").GetString().Should().Be(
+            MediaSeed.ScenarioTime.AddMinutes(-60).ToString("O"), "the scenario stamp is still what is DISPLAYED");
         all[1].GetProperty("fileName").GetString().Should().Be("newer.png");
         all[1].TryGetProperty("posterUrl", out _).Should().BeFalse();
         all[1].GetProperty("url").GetString().Should().EndWith($"/dev-media/{newer.BlobName}");

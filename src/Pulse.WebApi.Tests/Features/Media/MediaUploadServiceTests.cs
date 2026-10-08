@@ -157,16 +157,63 @@ public sealed class MediaUploadServiceTests
     }
 
     [Fact]
-    public async Task OversizeVideo_Is413_UnderTheVideoCeiling_NotTheImageOne()
+    public async Task EachKindIsHeldToItsOwnCeiling_WithProductionShapedLimits()
     {
-        using var harness = new UploadHarness(options: new MediaUploadOptions { ImageMaxBytes = 100_000, VideoMaxBytes = 2000 });
+        // Production-shaped: the video ceiling is LARGER than the image one (the old version of this test swapped
+        // them, which hid the oversize-video 400 — Gate-1 H-2).
+        using var harness = new UploadHarness(options: new MediaUploadOptions { ImageMaxBytes = 1000, VideoMaxBytes = 2000 });
 
-        var tooBig = await harness.UploadAsync(MediaTestFiles.Form(MediaTestFiles.Mp4(2001), "big.mp4", "video/mp4"));
-        var image = await harness.UploadAsync(MediaTestFiles.Form(MediaTestFiles.Jpeg(50_000), "ok.jpg", "image/jpeg"));
+        var bigVideo = await harness.UploadAsync(MediaTestFiles.Form(MediaTestFiles.Mp4(2001), "big.mp4", "video/mp4"));
+        var bigImage = await harness.UploadAsync(MediaTestFiles.Form(MediaTestFiles.Jpeg(1001), "big.jpg", "image/jpeg"));
+        var videoAboveTheImageCeiling = await harness.UploadAsync(MediaTestFiles.Form(MediaTestFiles.Mp4(1500), "ok.mp4", "video/mp4"));
 
-        tooBig.Outcome.Should().Be(MediaUploadOutcome.TooLarge, "a video is held to the VIDEO ceiling");
-        image.Outcome.Should().Be(MediaUploadOutcome.Created, "an image is held to the IMAGE ceiling, which is larger here");
-        harness.AllAssets().Should().ContainSingle().Which.Kind.Should().Be(MediaKinds.Image);
+        bigVideo.Outcome.Should().Be(MediaUploadOutcome.TooLarge, "a video is held to the VIDEO ceiling");
+        bigImage.Outcome.Should().Be(MediaUploadOutcome.TooLarge, "an image is held to the IMAGE ceiling");
+        videoAboveTheImageCeiling.Outcome.Should().Be(MediaUploadOutcome.Created, "a video may exceed the IMAGE ceiling");
+        harness.AllAssets().Should().ContainSingle().Which.Kind.Should().Be(MediaKinds.Video);
+        harness.Recording.Blobs.Keys.Should().ContainSingle("the two oversize uploads left nothing behind");
+    }
+
+    /// <summary>
+    /// Gate-1 H-2 — under the SHIPPED defaults (5 MiB image / 100 MiB video), an oversize video must be 413, not the
+    /// multipart reader's 400. The overshoots cover a single byte, a 64 KiB read that straddles the ceiling (the
+    /// reviewer's repro), and a whole MiB. Bodies are generated, never held.
+    /// </summary>
+    [Theory]
+    [InlineData("video", 1)]
+    [InlineData("video", 64 * 1024)]
+    [InlineData("video", 1024 * 1024)]
+    [InlineData("image", 1)]
+    [InlineData("image", 64 * 1024)]
+    public async Task OversizeUpload_UnderTheShippedDefaults_Is413_WithNoBlobAndNoRow(string kind, int overshoot)
+    {
+        var drain = new DrainingMediaStore();
+        using var harness = new UploadHarness(store: drain);
+        var ceiling = kind == "video" ? harness.Options.VideoMaxBytes : harness.Options.ImageMaxBytes;
+        using var body = new GeneratedUploadBody(kind == "video" ? MediaTestFiles.Mp4(64) : MediaTestFiles.Png(64), ceiling + overshoot);
+
+        var result = await harness.Service.UploadAsync(body.ContentType, body);
+
+        result.Outcome.Should().Be(MediaUploadOutcome.TooLarge, "an oversize {0} is a 413 under the shipped limits (+{1} bytes)", kind, overshoot);
+        drain.Completed.Should().BeEmpty("no blob was completed");
+        drain.Deletes.Should().ContainSingle("the store deleted its own partial");
+        harness.AllAssets().Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("video")]
+    [InlineData("image")]
+    public async Task UploadExactlyAtTheShippedCeiling_Is201(string kind)
+    {
+        var drain = new DrainingMediaStore();
+        using var harness = new UploadHarness(store: drain);
+        var ceiling = kind == "video" ? harness.Options.VideoMaxBytes : harness.Options.ImageMaxBytes;
+        using var body = new GeneratedUploadBody(kind == "video" ? MediaTestFiles.Mp4(64) : MediaTestFiles.Png(64), ceiling);
+
+        var result = await harness.Service.UploadAsync(body.ContentType, body);
+
+        result.Outcome.Should().Be(MediaUploadOutcome.Created, "a {0} of exactly its ceiling is allowed", kind);
+        harness.AllAssets().Single().Bytes.Should().Be(ceiling);
     }
 
     [Fact]
@@ -251,6 +298,57 @@ public sealed class MediaUploadServiceTests
         harness.AllAssets().Single().CreatedScenarioTime.Should().Be(clockStart, "the native exercise clock wins (COR-050/053)");
     }
 
+    /// <summary>
+    /// Gate-1 H-1 — the pinned fallback order for the staff-only <c>CreatedScenarioTime</c> (the DP-18 staff-metadata
+    /// exception): the running exercise clock wins; else the exercise's persisted scenario time; else the server wall
+    /// clock, in which case it equals <c>CreatedWallClock</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("running-clock")]
+    [InlineData("stored-scenario-time")]
+    [InlineData("wall-clock")]
+    public async Task CreatedScenarioTime_FallsBack_Clock_ThenStored_ThenWallClock(string source)
+    {
+        using var harness = new UploadHarness(exerciseHasScenarioTime: source != "wall-clock");
+        var clockStart = new DateTimeOffset(2033, 9, 5, 6, 0, 0, TimeSpan.Zero);
+        if (source == "running-clock")
+        {
+            harness.Clock.Start(harness.ExerciseId, clockStart, TimeZoneInfo.Utc);
+        }
+
+        (await harness.UploadAsync(MediaTestFiles.Form(MediaTestFiles.Png(), "p.png"))).Outcome.Should().Be(MediaUploadOutcome.Created);
+
+        var asset = harness.AllAssets().Single();
+        var expected = source switch
+        {
+            "running-clock" => clockStart,
+            "stored-scenario-time" => UploadHarness.ExerciseScenarioTime,
+            _ => UploadHarness.WallClockNow,
+        };
+        asset.CreatedScenarioTime.Should().Be(expected, "the {0} is the source here", source);
+        asset.CreatedWallClock.Should().Be(UploadHarness.WallClockNow, "the wall clock is always the server's");
+        if (source == "wall-clock")
+        {
+            asset.CreatedScenarioTime.Should().Be(asset.CreatedWallClock, "with no clock and no stored time the two coincide");
+        }
+    }
+
+    [Fact]
+    public void NoParticipantFacingMediaShape_CarriesTheUploadTimes()
+    {
+        // The participant 201 (MediaAssetView) and the frozen post-media projection (PostMediaDto) — their wire
+        // names are exactly the participant-safe set; uploadedAtScenario lives only on StaffMediaAssetView.
+        static string[] WireNames(Type type) => type.GetProperties()
+            .Select(property => property.GetCustomAttributes(typeof(System.Text.Json.Serialization.JsonPropertyNameAttribute), false)
+                .Cast<System.Text.Json.Serialization.JsonPropertyNameAttribute>().Single().Name)
+            .ToArray();
+
+        WireNames(typeof(MediaAssetView)).Should().BeEquivalentTo(["id", "kind", "url", "posterUrl", "width", "height", "durationSec"]);
+        WireNames(typeof(Pulse.WebApi.Features.Social.PostMediaDto)).Should().BeEquivalentTo(
+            ["id", "kind", "url", "alt", "posterUrl", "width", "height", "durationSec"]);
+        WireNames(typeof(StaffMediaAssetView)).Should().Contain("uploadedAtScenario", "the scenario stamp is staff-only metadata");
+    }
+
     [Fact]
     public async Task StaffUpload_IsAttributedToTheStaffUser()
     {
@@ -307,6 +405,87 @@ public sealed class MediaUploadServiceTests
         (await harness.UploadAsync(MediaTestFiles.Form(MediaTestFiles.Png(), "p.png"))).Outcome
             .Should().Be(MediaUploadOutcome.StoreUnavailable);
         harness.AllAssets().Should().BeEmpty();
+    }
+
+    /// <summary>Gate-1 L-5 — staff are re-checked against their assignments (COR-005) before anything is read.</summary>
+    [Fact]
+    public async Task StaffNoLongerAssignedToTheExercise_Is403_BeforeAnythingIsStored()
+    {
+        using var harness = new UploadHarness(participantKind: null, staffUserId: Guid.NewGuid(), staffAssigned: false);
+
+        var result = await harness.UploadAsync(MediaTestFiles.Form(MediaTestFiles.Png(), "p.png"));
+
+        result.Outcome.Should().Be(MediaUploadOutcome.Forbidden, "a revoked assignment cannot upload into the exercise it selected earlier");
+        harness.Recording.SaveAttempts.Should().BeEmpty();
+        harness.AllAssets().Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Gate-1 L-2 — a store that refuses because the name already EXISTS (Local <c>CreateNew</c>, Azure 409/412) must not
+    /// have that existing blob deleted by the service: only a blob whose save COMPLETED is the service's to clean up.
+    /// </summary>
+    [Fact]
+    public async Task AStoreRefusingAnExistingName_NeverHasThatBlobDeleted()
+    {
+        var store = new NameAlreadyExistsMediaStore();
+        using var harness = new UploadHarness(store: store);
+
+        // The refusal surfaces as a failed outcome or an exception, depending on the store's exception type (a Local
+        // IOException maps to a 4xx here, an Azure RequestFailedException propagates) — either way it is not a success.
+        MediaUploadResult? result = null;
+        try
+        {
+            result = await harness.UploadAsync(MediaTestFiles.Form(MediaTestFiles.Png(), "p.png"));
+        }
+        catch (IOException)
+        {
+        }
+
+        result?.Outcome.Should().NotBe(MediaUploadOutcome.Created);
+        store.Deletes.Should().BeEmpty("the blob that already exists is not this upload's to delete");
+        harness.AllAssets().Should().BeEmpty();
+    }
+
+    /// <summary>Gate-1 L-6 — the 415 never echoes the client's kind text, and the log line names the account.</summary>
+    [Fact]
+    public async Task KindMismatch_UsesAFixedMessage_ThatNeverEchoesClientInput()
+    {
+        using var harness = new UploadHarness();
+
+        var before = await harness.UploadAsync(MediaTestFiles.Form(
+            MediaTestFiles.Png(), "p.png", fields: [MediaTestFiles.Field("kind", "<script>alert(1)</script>")], fieldsFirst: true));
+        var after = await harness.UploadAsync(MediaTestFiles.Form(
+            MediaTestFiles.Png(), "p.png", fields: [MediaTestFiles.Field("kind", "<b>video</b>")], fieldsFirst: false));
+
+        before.Outcome.Should().Be(MediaUploadOutcome.UnsupportedMediaType);
+        after.Outcome.Should().Be(MediaUploadOutcome.UnsupportedMediaType);
+        before.Error.Should().Be("The file's contents do not match the 'kind' hint.");
+        after.Error.Should().Be(before.Error, "one fixed text, whatever the client sent");
+    }
+
+    [Fact]
+    public async Task UploadLogLine_NamesTheAccount_TheSameKeyTheRateLimitUses()
+    {
+        var accountId = Guid.NewGuid().ToString();
+        var httpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = Pulse.WebApi.Features.Identity.Sessions.SessionPrincipal.Create(new Pulse.WebApi.Features.Identity.Sessions.AuthenticatedSession
+            {
+                SessionId = Guid.NewGuid(),
+                ExerciseId = Guid.NewGuid(),
+                Kind = "participant",
+                PrincipalId = accountId,
+                ActingHumanId = "human-logged",
+            }),
+        };
+        var logger = new CapturingLogger<MediaUploadService>();
+        using var harness = new UploadHarness(
+            httpContextAccessor: new Microsoft.AspNetCore.Http.HttpContextAccessor { HttpContext = httpContext }, logger: logger);
+
+        await harness.UploadAsync(MediaTestFiles.Form(MediaTestFiles.Png(), "p.png"));
+
+        logger.Messages.Should().ContainSingle(message => message.Contains($"participant:{accountId}", StringComparison.Ordinal),
+            "abuse forensics: the upload log names the ACCOUNT (§1.8), matching the media-upload rate-limit partition");
     }
 
     // ---- hint validation -----------------------------------------------------------------------------------

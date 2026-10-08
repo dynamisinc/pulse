@@ -7,7 +7,9 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
@@ -17,6 +19,7 @@ using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Media;
 using Pulse.WebApi.Features.Social.Follows;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Tests.Helpers;
 
 /// <summary>
 /// An in-memory <see cref="IMediaStore"/> that honours the frozen contract exactly like the real stores: it enforces
@@ -121,7 +124,11 @@ internal sealed class UploadHarness : IDisposable
         Guid? staffUserId = null,
         bool storeConfigured = true,
         MediaUploadOptions? options = null,
-        IMediaStore? store = null)
+        IMediaStore? store = null,
+        bool staffAssigned = true,
+        bool exerciseHasScenarioTime = true,
+        IHttpContextAccessor? httpContextAccessor = null,
+        ILogger<MediaUploadService>? logger = null)
     {
         ExerciseId = Guid.NewGuid();
         ExerciseContext = new ExerciseContext { CurrentExerciseId = scopeResolved ? ExerciseId : null };
@@ -141,16 +148,34 @@ internal sealed class UploadHarness : IDisposable
                 OrganizationId = Organization.DefaultOrganizationId,
                 Name = "media harness",
                 Status = "live",
-                CurrentScenarioTime = ExerciseScenarioTime,
+                CurrentScenarioTime = exerciseHasScenarioTime ? ExerciseScenarioTime : null,
             });
+
+            if (staffUserId is { } staffId)
+            {
+                seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffId));
+                if (staffAssigned)
+                {
+                    seed.StaffAssignments.Add(new StaffAssignment
+                    {
+                        Id = Guid.NewGuid(),
+                        StaffUserId = staffId,
+                        ExerciseId = ExerciseId,
+                        Role = "controller",
+                        CreatedAt = WallClockNow,
+                    });
+                }
+            }
+
             seed.SaveChanges();
         }
 
         Db = CreateContext(ExerciseContext);
+        var staffAccessor = new FakeStaffSessionAccessor(staffUserId);
         Service = new MediaUploadService(
             Db,
             ExerciseContext,
-            new FakeStaffSessionAccessor(staffUserId),
+            staffAccessor,
             new FakeSessionPersonaAccessor(participantKind is null
                 ? null
                 : new CurrentSessionPersona
@@ -161,12 +186,14 @@ internal sealed class UploadHarness : IDisposable
                     ExerciseId = ExerciseId,
                     ActingHumanId = ActingHumanId,
                 }),
+            new StaffAssignmentService(Db, staffAccessor),
+            httpContextAccessor ?? new HttpContextAccessor(),
             Store,
             Signer,
             Clock,
             Time,
             Microsoft.Extensions.Options.Options.Create(Options),
-            NullLogger<MediaUploadService>.Instance);
+            logger ?? NullLogger<MediaUploadService>.Instance);
     }
 
     public Guid ExerciseId { get; }
@@ -214,4 +241,178 @@ internal sealed class UploadHarness : IDisposable
     }
 
     public void Dispose() => Db.Dispose();
+}
+
+/// <summary>
+/// A store that streams through the production <see cref="MaxLengthReadStream"/> into nothing — so a test can push a
+/// production-sized (100 MiB) upload without holding it. Honours the contract: its own partial is "deleted" (recorded)
+/// on failure.
+/// </summary>
+internal sealed class DrainingMediaStore : IMediaStore
+{
+    public bool IsConfigured => true;
+
+    public List<string> Completed { get; } = [];
+
+    public List<string> Deletes { get; } = [];
+
+    public async Task<long> SaveAsync(string blobName, string contentType, Stream content, long maxBytes, CancellationToken cancellationToken)
+    {
+        var limited = new MaxLengthReadStream(content, maxBytes);
+        try
+        {
+            await limited.CopyToAsync(Stream.Null, 64 * 1024, cancellationToken);
+        }
+        catch
+        {
+            Deletes.Add(blobName);
+            throw;
+        }
+
+        Completed.Add(blobName);
+        return limited.BytesRead;
+    }
+
+    public Task DeleteAsync(string blobName, CancellationToken cancellationToken)
+    {
+        Deletes.Add(blobName);
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// A store that refuses every save the way a no-overwrite store refuses an EXISTING name (Local <c>CreateNew</c>,
+/// Azure 409/412) — the blob it names belongs to someone else, so nobody may delete it.
+/// </summary>
+internal sealed class NameAlreadyExistsMediaStore : IMediaStore
+{
+    public bool IsConfigured => true;
+
+    public List<string> Deletes { get; } = [];
+
+    public Task<long> SaveAsync(string blobName, string contentType, Stream content, long maxBytes, CancellationToken cancellationToken) =>
+        throw new IOException($"The blob '{blobName}' already exists.");
+
+    public Task DeleteAsync(string blobName, CancellationToken cancellationToken)
+    {
+        Deletes.Add(blobName);
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// A lazily generated multipart body — one <c>file</c> part whose payload is <paramref name="head"/> followed by
+/// filler up to <c>payloadLength</c> — produced in bulk spans, so a 100 MiB body costs no memory.
+/// </summary>
+internal sealed class GeneratedUploadBody : Stream
+{
+    private readonly byte[] _prefix;
+    private readonly byte[] _head;
+    private readonly long _payloadLength;
+    private readonly byte[] _suffix;
+    private long _position;
+
+    public GeneratedUploadBody(byte[] head, long payloadLength, string fileName = "upload.bin")
+    {
+        Boundary = $"generated-{Guid.NewGuid():N}";
+        _prefix = System.Text.Encoding.ASCII.GetBytes(
+            $"--{Boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{fileName}\"\r\n"
+            + "Content-Type: application/octet-stream\r\n\r\n");
+        _head = head;
+        _payloadLength = payloadLength;
+        _suffix = System.Text.Encoding.ASCII.GetBytes($"\r\n--{Boundary}--\r\n");
+    }
+
+    public string Boundary { get; }
+
+    public string ContentType => $"multipart/form-data; boundary={Boundary}";
+
+    public override bool CanRead => true;
+
+    public override bool CanSeek => false;
+
+    public override bool CanWrite => false;
+
+    public override long Length => throw new NotSupportedException();
+
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+    public override int Read(Span<byte> buffer)
+    {
+        var payloadStart = (long)_prefix.Length;
+        var payloadEnd = payloadStart + _payloadLength;
+        var end = payloadEnd + _suffix.Length;
+        var written = 0;
+
+        while (written < buffer.Length && _position < end)
+        {
+            var destination = buffer[written..];
+            int take;
+            if (_position < payloadStart)
+            {
+                take = (int)Math.Min(destination.Length, payloadStart - _position);
+                _prefix.AsSpan((int)_position, take).CopyTo(destination);
+            }
+            else if (_position < payloadEnd)
+            {
+                var payloadIndex = _position - payloadStart;
+                if (payloadIndex < _head.Length)
+                {
+                    take = (int)Math.Min(destination.Length, Math.Min(_head.Length - payloadIndex, _payloadLength - payloadIndex));
+                    _head.AsSpan((int)payloadIndex, take).CopyTo(destination);
+                }
+                else
+                {
+                    take = (int)Math.Min(destination.Length, payloadEnd - _position);
+                    destination[..take].Fill(0x5A);
+                }
+            }
+            else
+            {
+                take = (int)Math.Min(destination.Length, end - _position);
+                _suffix.AsSpan((int)(_position - payloadEnd), take).CopyTo(destination);
+            }
+
+            written += take;
+            _position += take;
+        }
+
+        return written;
+    }
+
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(Read(buffer.Span));
+
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+        Task.FromResult(Read(buffer, offset, count));
+
+    public override void Flush()
+    {
+    }
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+}
+
+/// <summary>Captures formatted log messages.</summary>
+internal sealed class CapturingLogger<T> : ILogger<T>
+{
+    public List<string> Messages { get; } = [];
+
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+        Messages.Add(formatter(state, exception));
 }

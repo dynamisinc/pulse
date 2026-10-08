@@ -47,7 +47,11 @@ public sealed record MediaAssetView(
 /// <param name="Kind"><c>image</c> or <c>video</c>.</param>
 /// <param name="Url">The signed read URL.</param>
 /// <param name="FileName">The sanitized original file name.</param>
-/// <param name="UploadedAtScenario">The SCENARIO instant of the upload, round-trip ISO-8601 (COR-053).</param>
+/// <param name="UploadedAtScenario">
+/// The SCENARIO instant of the upload, round-trip ISO-8601 (COR-053). Staff-only metadata: when no scenario clock
+/// existed at upload (e.g. seeding during <c>build</c>) it is the server wall clock — the DP-18 staff-metadata
+/// exception; it is never on a participant payload.
+/// </param>
 /// <param name="PosterUrl">The signed poster URL, for a video with a poster.</param>
 /// <param name="Width">Pixel width, when known.</param>
 /// <param name="Height">Pixel height, when known.</param>

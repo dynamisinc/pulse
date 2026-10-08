@@ -81,12 +81,13 @@ public sealed class UnconfiguredMediaUrlSigner : IMediaUrlSigner
     {
         ArgumentNullException.ThrowIfNull(assets);
 
-        MediaScopeGuard.EnsureInScope(_exerciseContext, assets);
+        // Nothing to sign needs no scope and no store — the projector asks this for every media-less feed read.
         if (assets.Count == 0)
         {
             return Task.FromResult<IReadOnlyDictionary<Guid, string>>(new Dictionary<Guid, string>());
         }
 
+        MediaScopeGuard.EnsureInScope(_exerciseContext, assets);
         throw new MediaStoreUnavailableException();
     }
 }

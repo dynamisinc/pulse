@@ -91,8 +91,24 @@ public sealed class MediaUploadResult
 /// else's image all get the SAME 400 text, and nothing is written (the already-streamed blob is deleted).
 /// </para>
 /// <para>
+/// <b>Staff must be assigned (COR-005).</b> A staff caller is re-checked against its own assignments
+/// (<see cref="StaffAssignmentService"/>, the same read <c>EngineCockpitStaffAuthorizationFilter</c> uses for the
+/// library's 403), so a staff member whose assignment was revoked after selecting the exercise is refused before
+/// anything is read or stored.
+/// </para>
+/// <para>
+/// <b>Scenario time — the DP-18 staff-metadata exception.</b> <see cref="MediaAsset.CreatedScenarioTime"/> is
+/// stamped <c>running exercise clock ?? the exercise's persisted CurrentScenarioTime ?? the server wall clock</c>.
+/// The wall-clock fallback is deliberate here and ONLY here: an asset has no post to anchor to, the column is
+/// staff-only metadata (the library's <c>uploadedAtScenario</c>; no participant payload carries it), and S1 seeds
+/// media during <c>build</c> when no clock runs, so refusing the upload would break demo prep.
+/// <see cref="MediaAsset.CreatedWallClock"/> is the authoritative upload ORDER (the library sorts by it, never by the
+/// mixed-base scenario column).
+/// </para>
+/// <para>
 /// <b>Telemetry.</b> None — an upload is not a meaningful exercise action on its own (implementation.md §1.8); it
-/// is logged (account kind, kind, bytes). The post that later attaches it emits the XC-004 event.
+/// is logged (the ACCOUNT — the same key the <c>media-upload</c> rate limit partitions on — kind and bytes) for
+/// abuse forensics. The post that later attaches it emits the XC-004 event.
 /// </para>
 /// </remarks>
 public sealed partial class MediaUploadService
@@ -123,6 +139,9 @@ public sealed partial class MediaUploadService
     private const string PosterField = "posterMediaId";
     private const string PosterRejection = "posterMediaId does not name an image you uploaded in this exercise.";
 
+    /// <summary>The fixed 415 text for a <c>kind</c> hint that disagrees — never echoes client input.</summary>
+    private const string KindMismatchRejection = "The file's contents do not match the 'kind' hint.";
+
     private static readonly HashSet<string> TextFields = new(StringComparer.Ordinal)
     {
         KindField, WidthField, HeightField, DurationField, PosterField,
@@ -132,6 +151,8 @@ public sealed partial class MediaUploadService
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentStaffSessionAccessor _staffSessionAccessor;
     private readonly ICurrentSessionPersonaAccessor _sessionPersonaAccessor;
+    private readonly StaffAssignmentService _staffAssignments;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IMediaStore _store;
     private readonly IMediaUrlSigner _signer;
     private readonly IExerciseClock _exerciseClock;
@@ -144,6 +165,8 @@ public sealed partial class MediaUploadService
     /// <param name="exerciseContext">The resolved exercise scope — the ONLY scoping source.</param>
     /// <param name="staffSessionAccessor">Identifies a staff caller.</param>
     /// <param name="sessionPersonaAccessor">Identifies a persona-bound participant caller.</param>
+    /// <param name="staffAssignments">The staff caller's own assignments (COR-005 re-check).</param>
+    /// <param name="httpContextAccessor">The current request (its principal names the account for the log line).</param>
     /// <param name="store">The media store.</param>
     /// <param name="signer">The read-URL signer.</param>
     /// <param name="exerciseClock">The native per-exercise scenario clock (COR-050).</param>
@@ -155,6 +178,8 @@ public sealed partial class MediaUploadService
         IExerciseContext exerciseContext,
         ICurrentStaffSessionAccessor staffSessionAccessor,
         ICurrentSessionPersonaAccessor sessionPersonaAccessor,
+        StaffAssignmentService staffAssignments,
+        IHttpContextAccessor httpContextAccessor,
         IMediaStore store,
         IMediaUrlSigner signer,
         IExerciseClock exerciseClock,
@@ -166,6 +191,8 @@ public sealed partial class MediaUploadService
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(staffSessionAccessor);
         ArgumentNullException.ThrowIfNull(sessionPersonaAccessor);
+        ArgumentNullException.ThrowIfNull(staffAssignments);
+        ArgumentNullException.ThrowIfNull(httpContextAccessor);
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(signer);
         ArgumentNullException.ThrowIfNull(exerciseClock);
@@ -177,6 +204,8 @@ public sealed partial class MediaUploadService
         _exerciseContext = exerciseContext;
         _staffSessionAccessor = staffSessionAccessor;
         _sessionPersonaAccessor = sessionPersonaAccessor;
+        _staffAssignments = staffAssignments;
+        _httpContextAccessor = httpContextAccessor;
         _store = store;
         _signer = signer;
         _exerciseClock = exerciseClock;
@@ -203,8 +232,9 @@ public sealed partial class MediaUploadService
 
         var exerciseId = scope.Value;
 
-        // 2. Who is uploading — staff first (a staff session may carry a persona too), then a POSITIVE allowlist
-        //    on the participant kind. Anything else is authenticated but has nobody to upload as.
+        // 2. Who is uploading — staff first (a staff session may carry a persona too; staff must be ASSIGNED to this
+        //    exercise), then a POSITIVE allowlist on the participant kind. Anything else is authenticated but has
+        //    nobody to upload as.
         var uploader = await ResolveUploaderAsync(exerciseId, cancellationToken);
         if (uploader is null)
         {
@@ -246,7 +276,9 @@ public sealed partial class MediaUploadService
             var asset = await PersistAsync(upload, hints, exerciseId, uploader.HumanId, cancellationToken);
             upload.Committed = true;
 
-            LogUploaded(asset.Id, exerciseId, uploader.AccountKind, asset.Kind, asset.Bytes);
+            // Hoisted so the log argument is a plain local read (CA1873).
+            var account = AccountKey();
+            LogUploaded(asset.Id, exerciseId, account, asset.Kind, asset.Bytes);
 
             var toSign = hints.Poster is null ? new[] { asset } : new[] { asset, hints.Poster };
             var urls = await _signer.GetReadUrlsAsync(toSign, cancellationToken);
@@ -257,7 +289,9 @@ public sealed partial class MediaUploadService
         {
             if (upload.Stored is not null && !upload.Committed)
             {
-                // Zero rows written → no blob left behind either (best effort; never masks the outcome).
+                // Zero rows written → no blob left behind either (best effort; never masks the outcome). Stored is set
+                // only once SaveAsync COMPLETED, so this can never delete a pre-existing blob a store refused to
+                // overwrite; a store cleans up its own partial on failure.
                 await _store.DeleteAsync(upload.Stored.BlobName, CancellationToken.None);
             }
         }
@@ -268,11 +302,16 @@ public sealed partial class MediaUploadService
     private async Task<MediaUploadResult?> ReadBodyAsync(
         string boundary, Stream body, Guid exerciseId, UploadState upload, CancellationToken cancellationToken)
     {
+        // BodyLengthLimit is a backstop for runaway (unknown/text) sections, NOT the file ceiling: it is the whole
+        // request's own limit (largest kind + multipart overhead), so it sits a full MiB above every per-kind ceiling.
+        // One read off the reader never returns more than its ReadBufferBytes buffer, so MaxLengthReadStream always
+        // sees the crossing read first and the answer is the exact per-kind 413 — never the reader's
+        // InvalidDataException (which a ceiling of "largest + 1" used to raise for an oversize video: a 400).
         var reader = new MultipartReader(boundary, body, ReadBufferBytes)
         {
             HeadersCountLimit = 8,
             HeadersLengthLimit = 4 * 1024,
-            BodyLengthLimit = Math.Max(_options.ImageMaxBytes, _options.VideoMaxBytes) + 1,
+            BodyLengthLimit = _options.MaxRequestBodyBytes(),
         };
 
         try
@@ -312,9 +351,9 @@ public sealed partial class MediaUploadService
                     upload.Fields[name] = value.Trim();
 
                     // Fail fast on a kind hint that disagrees with a file already sniffed.
-                    if (name == KindField && upload.Stored is not null && !KindHintMatches(upload))
+                    if (name == KindField && upload.Sniffed is not null && !KindHintMatches(upload))
                     {
-                        return MediaUploadResult.Failed(MediaUploadOutcome.UnsupportedMediaType, KindMismatchMessage(upload));
+                        return MediaUploadResult.Failed(MediaUploadOutcome.UnsupportedMediaType, KindMismatchRejection);
                     }
                 }
                 else
@@ -331,6 +370,12 @@ public sealed partial class MediaUploadService
         catch (BadHttpRequestException exception) when (exception.StatusCode == StatusCodes.Status413PayloadTooLarge)
         {
             // The endpoint's own request-size limit tripped (Kestrel) — same answer as the per-kind ceiling.
+            return TooLarge(upload);
+        }
+        catch (InvalidDataException) when (upload.FileStreaming)
+        {
+            // Inside a section body the reader raises InvalidDataException only for its length limit, so while the
+            // file is streaming this is "too large" — answered as the per-kind 413, never a misleading 400.
             return TooLarge(upload);
         }
         catch (InvalidDataException)
@@ -379,23 +424,26 @@ public sealed partial class MediaUploadService
         upload.Sniffed = sniffed;
         if (!KindHintMatches(upload))
         {
-            return MediaUploadResult.Failed(MediaUploadOutcome.UnsupportedMediaType, KindMismatchMessage(upload));
+            return MediaUploadResult.Failed(MediaUploadOutcome.UnsupportedMediaType, KindMismatchRejection);
         }
 
         var maxBytes = sniffed.Kind == MediaKinds.Video ? _options.VideoMaxBytes : _options.ImageMaxBytes;
         var assetId = Guid.NewGuid();
         var blobName = MediaBlobNames.Build(exerciseId, assetId, sniffed.Extension);
 
-        // From here on a (possibly partial) blob may exist: the caller's finally deletes it unless committed.
-        upload.Stored = new StoredFile(assetId, blobName, 0);
         upload.OriginalFileName = SanitizeFileName(
             HeaderUtilities.RemoveQuotes(disposition.FileNameStar).Value
             ?? HeaderUtilities.RemoveQuotes(disposition.FileName).Value,
             sniffed.Extension);
 
+        // A store that fails mid-save deletes its OWN partial (IMediaStore contract) — and a store that refuses an
+        // existing name must not have that blob deleted by us. So the blob becomes ours to clean up (the caller's
+        // finally, unless the row commits) only once SaveAsync has COMPLETED.
         var content = new PrefixedReadStream(head.AsMemory(0, headLength), section.Body);
+        upload.FileStreaming = true;
         var bytes = await _store.SaveAsync(blobName, sniffed.ContentType, content, maxBytes, cancellationToken);
-        upload.Stored = upload.Stored with { Bytes = bytes };
+        upload.FileStreaming = false;
+        upload.Stored = new StoredFile(assetId, blobName, bytes);
         return null;
     }
 
@@ -405,7 +453,7 @@ public sealed partial class MediaUploadService
     {
         if (!KindHintMatches(upload))
         {
-            return ValidatedHints.Fail(MediaUploadResult.Failed(MediaUploadOutcome.UnsupportedMediaType, KindMismatchMessage(upload)));
+            return ValidatedHints.Fail(MediaUploadResult.Failed(MediaUploadOutcome.UnsupportedMediaType, KindMismatchRejection));
         }
 
         var isVideo = upload.Sniffed!.Kind == MediaKinds.Video;
@@ -497,6 +545,8 @@ public sealed partial class MediaUploadService
             DurationSec = hints.DurationSec,
             OriginalFileName = upload.OriginalFileName!,
             UploadedByHumanId = uploaderHumanId,
+            // DP-18 staff-metadata exception (see the class remarks): clock ?? persisted scenario time ?? wall clock.
+            // Never participant-visible; CreatedWallClock is the authoritative upload order.
             CreatedScenarioTime = _exerciseClock.CurrentScenarioTime(exerciseId) ?? exerciseScenarioTime ?? now,
             CreatedWallClock = now,
             PosterMediaAssetId = hints.Poster?.Id,
@@ -513,6 +563,16 @@ public sealed partial class MediaUploadService
         var staff = await _staffSessionAccessor.GetCurrentStaffSessionAsync(cancellationToken);
         if (staff is not null)
         {
+            // COR-005: the staff caller must be assigned to THIS exercise — re-checked explicitly, exactly as
+            // EngineCockpitStaffAuthorizationFilter does for the library, never trusted from the active selection.
+            var assignments = await _staffAssignments.GetAssignmentsAsync(cancellationToken);
+            var assigned = assignments?.Any(
+                assignment => Guid.TryParse(assignment.ExerciseId, out var assignedExerciseId) && assignedExerciseId == exerciseId) == true;
+            if (!assigned)
+            {
+                return null;
+            }
+
             // Same value PostAttributionResolver stamps as a staff post's ActingHumanId (COR-018).
             return new Uploader("staff", staff.StaffUserId.ToString());
         }
@@ -529,6 +589,15 @@ public sealed partial class MediaUploadService
         return null;
     }
 
+    /// <summary>
+    /// The uploading ACCOUNT for the log line — the same key the <c>media-upload</c> rate limit partitions on
+    /// (<c>participant:{AccountId}</c> / <c>staff:{StaffUserId}</c>), so a log search lines up with a 429.
+    /// </summary>
+    private string AccountKey() =>
+        _httpContextAccessor.HttpContext is { } httpContext
+            ? MediaUploadRateLimiterPolicy.PartitionKeyFor(httpContext)
+            : "unknown";
+
     private static MediaUploadResult TooLarge(UploadState upload) =>
         MediaUploadResult.Failed(
             MediaUploadOutcome.TooLarge,
@@ -540,9 +609,6 @@ public sealed partial class MediaUploadService
         upload.Sniffed is null
         || !upload.Fields.TryGetValue(KindField, out var hint)
         || string.Equals(hint, upload.Sniffed.Kind, StringComparison.Ordinal);
-
-    private static string KindMismatchMessage(UploadState upload) =>
-        $"The file's contents are not a {upload.Fields.GetValueOrDefault(KindField)}.";
 
     private static bool TryParseDimension(UploadState upload, string field, out int? value)
     {
@@ -628,8 +694,8 @@ public sealed partial class MediaUploadService
     [LoggerMessage(
         EventId = 1,
         Level = LogLevel.Information,
-        Message = "Media uploaded: asset {AssetId} in exercise {ExerciseId} by a {AccountKind} account — {Kind}, {Bytes} bytes.")]
-    private partial void LogUploaded(Guid assetId, Guid exerciseId, string accountKind, string kind, long bytes);
+        Message = "Media uploaded: asset {AssetId} in exercise {ExerciseId} by account {Account} — {Kind}, {Bytes} bytes.")]
+    private partial void LogUploaded(Guid assetId, Guid exerciseId, string account, string kind, long bytes);
 
     /// <summary>The uploading human and the kind of account behind them.</summary>
     private sealed record Uploader(string AccountKind, string HumanId);
@@ -657,5 +723,8 @@ public sealed partial class MediaUploadService
         public string? OriginalFileName { get; set; }
 
         public bool Committed { get; set; }
+
+        /// <summary>True only while the file part is being streamed into the store.</summary>
+        public bool FileStreaming { get; set; }
     }
 }

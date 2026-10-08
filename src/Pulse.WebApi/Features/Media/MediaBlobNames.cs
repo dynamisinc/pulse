@@ -22,6 +22,16 @@ public static partial class MediaBlobNames
         return $"{exerciseId:D}/{assetId:N}.{extension}";
     }
 
+    /// <summary>
+    /// Whether <paramref name="blobName"/> lives under <paramref name="exerciseId"/>'s own prefix
+    /// (<c>{exerciseId:D}/</c>) — a row in exercise A must never point at a blob under exercise B's prefix.
+    /// </summary>
+    /// <param name="exerciseId">The asset's exercise.</param>
+    /// <param name="blobName">The asset's blob name.</param>
+    /// <returns><c>true</c> when the blob name starts with the exercise's own prefix.</returns>
+    public static bool IsUnderExercisePrefix(Guid exerciseId, string? blobName) =>
+        blobName is not null && blobName.StartsWith($"{exerciseId:D}/", StringComparison.Ordinal);
+
     /// <summary>Whether <paramref name="blobName"/> has the exact shape <see cref="Build"/> produces.</summary>
     /// <param name="blobName">The candidate blob name.</param>
     /// <returns><c>true</c> for a well-formed media blob name.</returns>
@@ -36,13 +46,18 @@ public static partial class MediaBlobNames
 /// <summary>
 /// The signer-side isolation check every <see cref="IMediaUrlSigner"/> runs BEFORE minting anything (COR-001 /
 /// COR-002, DP-11): a URL is only ever minted for an asset whose <see cref="MediaAsset.ExerciseId"/> equals the
-/// request's resolved scope. An unresolved scope fails closed too.
+/// request's resolved scope AND whose <see cref="MediaAsset.BlobName"/> sits under that same exercise's prefix
+/// (defense in depth next to <see cref="MediaBlobNames.IsValid"/>). An unresolved scope fails closed too.
 /// </summary>
+/// <remarks>
+/// Signers return an empty map for an EMPTY batch before calling this, so a feed with no media never needs a scope;
+/// any non-empty batch is checked in full.
+/// </remarks>
 public static class MediaScopeGuard
 {
     /// <summary>
-    /// Throws <see cref="ExerciseScopeViolationException"/> unless every asset belongs to the current scope.
-    /// Checks the WHOLE batch first, so a mixed batch mints nothing at all.
+    /// Throws <see cref="ExerciseScopeViolationException"/> unless every asset belongs to the current scope and is
+    /// stored under its own exercise's prefix. Checks the WHOLE batch first, so a mixed batch mints nothing at all.
     /// </summary>
     /// <param name="exerciseContext">The request's resolved scope.</param>
     /// <param name="assets">The assets about to be signed.</param>
@@ -67,6 +82,13 @@ public static class MediaScopeGuard
                 // Never names the other exercise — the message must not disclose anything about it.
                 throw new ExerciseScopeViolationException(
                     "Refusing to mint a media URL for an asset outside the current exercise scope (COR-001/COR-002).");
+            }
+
+            if (!MediaBlobNames.IsUnderExercisePrefix(asset.ExerciseId, asset.BlobName))
+            {
+                // An in-scope row whose blob path points into another exercise's prefix would expose that blob.
+                throw new ExerciseScopeViolationException(
+                    "Refusing to mint a media URL for a blob outside its exercise's own prefix (COR-001/COR-002).");
             }
         }
     }

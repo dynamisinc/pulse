@@ -174,7 +174,8 @@ internal static class MediaSeed
         string uploadedBy = "seed-human",
         DateTimeOffset? scenarioTime = null,
         Guid? posterId = null,
-        string? fileName = null)
+        string? fileName = null,
+        DateTimeOffset? wallClock = null)
     {
         var id = Guid.NewGuid();
         var extension = kind == MediaKinds.Image ? "png" : "mp4";
@@ -192,7 +193,7 @@ internal static class MediaSeed
             OriginalFileName = fileName ?? $"seed-{id:N}.{extension}",
             UploadedByHumanId = uploadedBy,
             CreatedScenarioTime = scenarioTime ?? ScenarioTime,
-            CreatedWallClock = DateTimeOffset.UtcNow,
+            CreatedWallClock = wallClock ?? DateTimeOffset.UtcNow,
             PosterMediaAssetId = posterId,
         };
         context.MediaAssets.Add(asset);

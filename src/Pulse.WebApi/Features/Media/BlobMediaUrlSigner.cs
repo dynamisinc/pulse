@@ -214,14 +214,16 @@ public sealed class BlobMediaUrlSigner : IMediaUrlSigner
     {
         ArgumentNullException.ThrowIfNull(assets);
 
+        // Nothing to sign needs no scope (a feed with no media must not fail on an unresolved scope).
+        if (assets.Count == 0)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
         // The whole batch is checked before ANY URL is minted.
         MediaScopeGuard.EnsureInScope(_exerciseContext, assets);
 
         var urls = new Dictionary<Guid, string>(assets.Count);
-        if (assets.Count == 0)
-        {
-            return urls;
-        }
 
         // One clock read per call, so every URL in a batch shares the same bucket.
         var expiresOn = MediaSasExpiry.ExpiresOn(_timeProvider.GetUtcNow(), _sasOptions);

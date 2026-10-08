@@ -123,6 +123,57 @@ public sealed class MediaUrlSignerTests
         await mint.Should().ThrowAsync<ExerciseScopeViolationException>();
     }
 
+    /// <summary>
+    /// Gate-1 L-3 — an IN-SCOPE row whose blob name points under ANOTHER exercise's prefix is refused (defense in depth
+    /// next to <see cref="MediaBlobNames.IsValid"/>), by the Azure and the Development signer alike, before any key.
+    /// </summary>
+    [Fact]
+    public async Task AnInScopeAssetWhoseBlobLivesUnderAnotherExercisesPrefix_IsRefused()
+    {
+        var harness = new SignerHarness();
+        var smuggled = harness.Asset("png");
+        smuggled.BlobName = MediaBlobNames.Build(Guid.NewGuid(), smuggled.Id, "png");
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Scheme = "http";
+        httpContext.Request.Host = new HostString("localhost");
+        var local = new LocalMediaUrlSigner(
+            new ExerciseContext { CurrentExerciseId = harness.ExerciseId }, new HttpContextAccessor { HttpContext = httpContext });
+
+        var azure = () => harness.Signer.GetReadUrlAsync(smuggled, CancellationToken.None);
+        var development = () => local.GetReadUrlAsync(smuggled, CancellationToken.None);
+
+        await azure.Should().ThrowAsync<ExerciseScopeViolationException>("the blob is not under {0:D}/", harness.ExerciseId);
+        await development.Should().ThrowAsync<ExerciseScopeViolationException>();
+        harness.Keys.Calls.Should().Be(0, "nothing is minted, and no key is even fetched");
+    }
+
+    /// <summary>
+    /// Gate-1 L-4 — an EMPTY batch needs no scope (a media-less feed read must not fail), on every signer; a non-empty
+    /// batch with no scope still fails closed.
+    /// </summary>
+    [Fact]
+    public async Task AnEmptyBatchReturnsEmpty_EvenWithNoScope_ButANonEmptyBatchStillFailsClosed()
+    {
+        var unscoped = new ExerciseContext { CurrentExerciseId = null };
+        var harness = new SignerHarness(scopeResolved: false);
+        IMediaUrlSigner[] signers =
+        [
+            harness.Signer,
+            new LocalMediaUrlSigner(unscoped, new HttpContextAccessor()),
+            new UnconfiguredMediaUrlSigner(unscoped),
+        ];
+
+        foreach (var signer in signers)
+        {
+            (await signer.GetReadUrlsAsync([], CancellationToken.None)).Should().BeEmpty("{0}: nothing to sign needs no scope", signer.GetType().Name);
+
+            var nonEmpty = () => signer.GetReadUrlsAsync([harness.Asset("png")], CancellationToken.None);
+            await nonEmpty.Should().ThrowAsync<ExerciseScopeViolationException>("{0}: a real batch with no scope fails closed", signer.GetType().Name);
+        }
+
+        harness.Keys.Calls.Should().Be(0);
+    }
+
     [Fact]
     public async Task BatchMint_SignsEveryAssetWithTheSameExpiry()
     {
