@@ -40,7 +40,6 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
-import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import { postStore } from '@/features/social/services/postStore'
 import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { PersonaComposer } from './PersonaComposer'
@@ -200,8 +199,8 @@ describe('PersonaContextPanel (persona-operation/03)', () => {
     expect(notes).toHaveTextContent('No voice notes authored')
     expect(notes).not.toHaveTextContent(/unavailable/i)
     expect(notes).toHaveStyle({ fontStyle: 'italic' })
-    // Muted with the staff secondary-text TOKEN, not a hard-coded colour.
-    expect(notes).toHaveStyle({ color: staffShellTokens.accent.secondaryText })
+    // Muted, but AA-legible at 12px (the shared secondary-text token is ~3.75:1, below AA).
+    expect(notes).toHaveStyle({ color: '#6b6b69' })
   })
 
   it('is a labelled, keyboard/screen-reader reachable section with no interactive controls', async () => {

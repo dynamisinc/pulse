@@ -68,7 +68,6 @@ import { formatScenarioTime } from '@/core/clock'
 import type { Post } from '@/features/social'
 import { resolveFeed, type FeedScope } from '@/features/social/services/feedService'
 import { postStore } from '@/features/social/services/postStore'
-import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import type { Persona, StaffPersona } from '@/features/personas'
 import { audienceBandLabel, categoryChipLabel, resolveVoiceNotes } from '../services/personaVoice'
 
@@ -91,10 +90,15 @@ export interface PersonaContextPanelProps {
 
 const DEFAULT_MAX_RECENTS = 3
 
-/** Secondary text for an honest "nothing here" state — muted, never alarming. */
+/**
+ * Secondary text for an honest "nothing here" state — muted, never alarming.
+ * NOT `staffShellTokens.accent.secondaryText` (#848482, ~3.75:1 on white): that fails WCAG AA
+ * for 12px text. #6b6b69 is ~5.4:1. Retuning the shared token is a separate staff-shell decision.
+ */
+const MUTED_NOTE_COLOR = '#6b6b69'
 const MUTED_NOTE_SX = {
   fontSize: 12,
-  color: staffShellTokens.accent.secondaryText,
+  color: MUTED_NOTE_COLOR,
   fontStyle: 'italic',
 }
 
