@@ -102,7 +102,7 @@ export interface InjectItemWrite {
   notes?: string                                          // <= 500
   plannedMinute?: number                                  // integer >= 0; display + sort hint only
   assigneeId?: string | null                              // a staff user assigned to this exercise
-  burstWindowSeconds?: number                             // burst only; 30..600; default 90
+  burstWindowSeconds?: number                             // burst only; 30..600 AND >= 3 x (posts - 1); default 90
   posts: InjectPostWrite[]                                // post: exactly 1; burst: 2..20
 }
 export interface InjectPostDto extends InjectPostWrite {
@@ -146,6 +146,17 @@ child carrying the `id` of an existing child of the same item keeps that child's
 and any `replyTo` pointing at it). A child without an `id` is new. An `id` from another item, or an unknown one, is
 a 400. An unfired child left out is removed. This lets a burst's replies point at an earlier sibling at create time
 (`{ sequence }`) and survive edits.
+
+**As built (06, 2026-10-08).**
+- 400 and 404 responses are also ProblemDetails, with a readable `detail`.
+- `{ sequence }` replies are normalised to `{ injectPostId }` on write, so responses always return `injectPostId`.
+  The console treats a sibling's `injectPostId` as a sibling reply.
+- No two posts of an item publish less than 3 s apart (`InjectItem.LastPublishedAt`). This holds even after an edit
+  or a Fire after a hold.
+- Editing a held or failed item that already published is allowed. Published posts must be echoed unchanged, and
+  `kind` can't change after the first fire (both 409). No edit or delete while a post is mid-publish (409).
+- Queue actions (hold, skip, edit, …) stay allowed under FREEZE. Only `fire` and `retry` are refused, so controllers
+  can prepare the script while the world is frozen.
 
 **Telemetry (IQ-8).** One server event per action, in the same unit of work as the state change:
 `eventType: 'inject_action'`, `channel: 'system'`, `actor { kind: 'system', actingHumanId }`, `injectId: <item id>`,
