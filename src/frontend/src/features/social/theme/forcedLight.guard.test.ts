@@ -26,13 +26,13 @@
  * NON-VACUITY. The detector is proven to bite on literal dark-mode CSS before it
  * is trusted, and the scan must see the real sheets.
  *
- * PENDING SWEEP. The sheets owned by the other Wave-2 stories (F1, F4, F6) were
- * not in this story's branch when it was written, so they still carry their
- * dark-mode blocks. They are listed in {@link PENDING_SWEEP} and reported as
- * SKIPPED (visible in the run, not silently excluded). The F5 integration merge
- * ("merges last") sweeps them and empties the list; a stale entry (a sheet that
- * no longer has a dark rule, or no longer exists) FAILS, so the list can only
- * shrink. The AC is met when `PENDING_SWEEP` is empty.
+ * SWEPT. F5 integrated the whole Wave 2 umbrella (F1, F2, F3, F4, F6) and swept the
+ * sheets that still carried dark rules (F4's Feed, Composer and ThreadView); F1's, F2's and
+ * F6's sheets arrived clean. {@link PENDING_SWEEP} is therefore EMPTY and must stay so: a
+ * test pins that. The mechanism is kept for the next story that lands a sheet late — list
+ * the file there with its owner and it is reported as SKIPPED (visible, not silently
+ * excluded); a stale entry (a sheet that no longer has a dark rule, or no longer exists)
+ * FAILS, so the list can only shrink.
  */
 import { describe, expect, it } from 'vitest'
 import { readSrcFile } from '@/test/readSource'
@@ -42,7 +42,7 @@ import { readSrcFile } from '@/test/readSource'
  * floor, not an exact count: later stories add sheets). If the glob ever matches fewer,
  * the guard is no longer looking at the real tree and must fail rather than pass.
  */
-const MIN_SHEETS_SCANNED = 21
+const MIN_SHEETS_SCANNED = 39
 
 /**
  * A glob key -> its path from `features/social/`:
@@ -74,13 +74,7 @@ const sources = import.meta.glob(['../**/*.{ts,tsx}', '!../**/*.test.{ts,tsx}'],
  * Sheets still carrying a dark-mode rule because another Wave-2 story owns them.
  * Path (from `features/social/`) -> owning story. EMPTY at integration.
  */
-const PENDING_SWEEP: Readonly<Record<string, string>> = {
-  'SocialChannel.module.css': 'F1',
-  'components/Composer.module.css': 'F4',
-  'components/ThreadView.module.css': 'F4',
-  'pages/Feed.module.css': 'F4',
-  'pages/HashtagFeed.module.css': 'F6',
-}
+const PENDING_SWEEP: Readonly<Record<string, string>> = {}
 
 function stripCssComments(css: string): string {
   return css.replace(/\/\*[\s\S]*?\*\//g, '')
@@ -131,6 +125,23 @@ describe('forced light — the detector is real', () => {
     expect(Object.entries(sheets).filter(([, css]) => css.trim().length === 0)).toEqual([])
     expect(paths).toContain('theme/social.module.css')
     expect(paths).toContain('pages/Profile.module.css')
+    // The sheets the Wave 2 stories added (F1's frame, F2's media, F6's explore) are in the
+    // scan too, so each is proven clean by the per-file tests below.
+    for (const added of [
+      'explore/ExplorePage.module.css',
+      'explore/SearchBox.module.css',
+      'explore/SearchResultRows.module.css',
+      'explore/TrendingPanel.module.css',
+      'layout/NavRail.module.css',
+      'layout/RightRail.module.css',
+      'layout/ComposeModal.module.css',
+      'layout/routes/HomeView.module.css',
+      'components/media/MediaGrid.module.css',
+      'components/media/MediaViewer.module.css',
+      'components/media/MediaTabGrid.module.css',
+    ]) {
+      expect(paths).toContain(added)
+    }
     // And the four orphan modules this story sweeps.
     for (const orphan of ['FollowerList', 'WhoToFollow', 'NewPostsPill', 'FollowButton']) {
       expect(paths).toContain(`components/${orphan}.module.css`)
@@ -155,6 +166,10 @@ describe('forced light — no dark-mode rule in any features/social stylesheet',
       })
     }
   }
+
+  it('PENDING_SWEEP is empty: every sheet under features/social has been swept', () => {
+    expect(Object.keys(PENDING_SWEEP)).toEqual([])
+  })
 
   it('every PENDING_SWEEP entry is still real: the sheet exists AND still has a dark rule', () => {
     for (const path of Object.keys(PENDING_SWEEP)) {

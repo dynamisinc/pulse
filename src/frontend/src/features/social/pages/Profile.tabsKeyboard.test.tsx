@@ -14,6 +14,7 @@
  *     in the content even when it has no focusable control.
  * Driven with real `userEvent` keyboard input against the real page.
  */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -30,16 +31,21 @@ const OWN_ID = 'persona-dreyes_fh'
 const TAB_NAMES = ['Posts', 'Posts & replies', 'Media', 'Likes'] as const
 
 function renderProfile() {
+  // A QueryClient: the Likes tab renders video cards, and F2's VideoPlayer reads
+  // `useChromeConfig()` (React Query) for the exercise watermark.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <ExerciseContextProvider>
-      <SessionProvider>
-        <ShellContextProvider
-          value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
-        >
-          <Profile personaId={OWN_ID} />
-        </ShellContextProvider>
-      </SessionProvider>
-    </ExerciseContextProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ExerciseContextProvider>
+        <SessionProvider>
+          <ShellContextProvider
+            value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+          >
+            <Profile personaId={OWN_ID} />
+          </ShellContextProvider>
+        </SessionProvider>
+      </ExerciseContextProvider>
+    </QueryClientProvider>,
   )
 }
 

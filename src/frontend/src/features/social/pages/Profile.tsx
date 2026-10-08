@@ -92,10 +92,10 @@
  * stay fully visible; only the interactive reply/repost/like affordances go.
  *
  * REPLY (Gate-2 items 7/15). When the host supplies `onOpenThread`, every card also
- * gets `onReply`, which opens that post's thread (and, once F4's reply-intent seam
- * is merged, asks for the composer to be focused there — see the `TODO(F4-merge)`
- * in `replyToPost`). Without `onOpenThread` the card's Reply stays inert text by
- * design: `PostActions` renders no focusable no-op (WR-002).
+ * gets `onReply`, which records F4's reply intent (`requestReplyFocus`) and opens that
+ * post's thread, so the thread opens with the reply composer focused. Without
+ * `onOpenThread` the card's Reply stays inert text by design: `PostActions` renders no
+ * focusable no-op (WR-002).
  */
 
 import {
@@ -117,6 +117,7 @@ import { FeedSkeleton } from '../components/FeedSkeleton'
 import { ProfileSkeleton } from '../components/ProfileSkeleton'
 import { MediaTabGrid } from '../components/media/MediaTabGrid'
 import { resolveFollowers, resolveFollowing } from '../services/followService'
+import { requestReplyFocus } from '../services/replyIntent'
 import {
   useShellContext,
   affordancesAvailable,
@@ -295,12 +296,12 @@ export function Profile({ personaId, onOpenThread, onHashtagOpen, onOpenProfile 
   // URL that failed (not a boolean) so a changed `bannerUrl` gets a fresh attempt.
   const [failedBannerUrl, setFailedBannerUrl] = useState<string | undefined>(undefined)
 
-  // REPLY (Gate-2 items 7/15): Reply opens the post's thread. Only offered when the
-  // host can open a thread; otherwise PostActions renders Reply as inert text.
+  // REPLY (Gate-2 items 7/15): Reply opens the post's thread with the reply composer
+  // focused. The intent is recorded BEFORE navigating (F4's one-shot handoff, which
+  // `ThreadView` consumes once its composer is mounted). Only offered when the host can
+  // open a thread; otherwise PostActions renders Reply as inert text.
   const replyToPost = useCallback((postId: string) => {
-    // TODO(F4-merge): call F4's `requestReplyFocus(postId)` (services/replyIntent.ts)
-    // HERE, before opening the thread, so the thread opens with the composer focused.
-    // F4's file is not in this branch yet; until then Reply just opens the thread.
+    requestReplyFocus(postId)
     onOpenThread?.(postId)
   }, [onOpenThread])
   const onReply = onOpenThread !== undefined ? replyToPost : undefined

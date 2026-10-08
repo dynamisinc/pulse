@@ -20,6 +20,7 @@
  * The mock viewer is `persona-dreyes_fh` ("Dana Reyes"): her OWN profile is the one
  * that shows Likes.
  */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { AxiosRequestConfig } from 'axios'
@@ -32,6 +33,7 @@ import { resetTelemetryBuffer } from '@/core/telemetry'
 import { personaById } from '@/features/personas'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import { resetMockReactions } from '../services/reactionService'
+import { consumeReplyFocus, resetReplyIntent } from '../services/replyIntent'
 import { postStore } from '../services/postStore'
 import { Profile, type ProfileProps } from './Profile'
 
@@ -47,16 +49,21 @@ const LIKED_GRID = 'post-fx-grid1' // viewer.liked, by Fulco
 const LIKED_VIDEO = 'post-fx-video-poster' // viewer.liked + reposted, by Newsline
 
 function renderProfile(personaId: string, handlers: Partial<ProfileProps> = {}) {
+  // A QueryClient: the Likes tab renders video cards, and F2's VideoPlayer reads
+  // `useChromeConfig()` (React Query) for the exercise watermark.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <ExerciseContextProvider>
-      <SessionProvider>
-        <ShellContextProvider
-          value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
-        >
-          <Profile personaId={personaId} {...handlers} />
-        </ShellContextProvider>
-      </SessionProvider>
-    </ExerciseContextProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ExerciseContextProvider>
+        <SessionProvider>
+          <ShellContextProvider
+            value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+          >
+            <Profile personaId={personaId} {...handlers} />
+          </ShellContextProvider>
+        </SessionProvider>
+      </ExerciseContextProvider>
+    </QueryClientProvider>,
   )
 }
 
@@ -78,6 +85,7 @@ function repliesReads(getSpy: { mock: { calls: unknown[][] } }): number {
 beforeEach(() => {
   resetTelemetryBuffer()
   resetMockReactions()
+  resetReplyIntent()
   postStore.resetForTests({ withDemoFixtures: true })
   vi.spyOn(api, 'post').mockResolvedValue({
     data: {}, status: 200, statusText: 'OK', headers: {}, config: {},
@@ -88,6 +96,7 @@ afterEach(() => {
   resetExerciseClock()
   postStore.resetForTests()
   resetMockReactions()
+  resetReplyIntent()
   vi.restoreAllMocks()
 })
 
@@ -403,6 +412,45 @@ describe('Profile — forwards navigation to its cards', () => {
     await user.click(within(first).getByRole('button', { name: /^reply, /i }))
     expect(onOpenThread).toHaveBeenCalledTimes(2)
     expect(onOpenThread).toHaveBeenLastCalledWith(OWN2)
+  })
+
+  it('Reply records the reply-focus intent (so the thread opens with the composer focused)', async () => {
+    const user = userEvent.setup()
+    const onOpenThread = vi.fn()
+    renderProfile(OWN_ID, { onOpenThread })
+    await screen.findByRole('heading', { name: 'Dana Reyes' })
+    await waitFor(() => expect(cardIds()).toEqual([OWN2, OWN1]))
+    const [first] = screen.getAllByTestId('post-card')
+    if (!first) throw new Error('expected a card')
+
+    // A plain card-body open is NOT a reply: it records nothing.
+    await user.click(within(first).getByTestId('post-open-target'))
+    expect(consumeReplyFocus(OWN2)).toBe(false)
+
+    await user.click(within(first).getByRole('button', { name: /^reply, /i }))
+
+    expect(onOpenThread).toHaveBeenLastCalledWith(OWN2)
+    // One-shot, keyed by post id: ThreadView for THIS post consumes it exactly once.
+    expect(consumeReplyFocus(OWN1)).toBe(false)
+    expect(consumeReplyFocus(OWN2)).toBe(true)
+    expect(consumeReplyFocus(OWN2)).toBe(false)
+  })
+
+  it('records the intent BEFORE navigating (ThreadView may read it as soon as it mounts)', async () => {
+    const user = userEvent.setup()
+    let recordedAtNavigation: boolean | undefined
+    const onOpenThread = vi.fn((postId: string) => {
+      recordedAtNavigation = consumeReplyFocus(postId)
+    })
+    renderProfile(OWN_ID, { onOpenThread })
+    await screen.findByRole('heading', { name: 'Dana Reyes' })
+    await waitFor(() => expect(cardIds()).toEqual([OWN2, OWN1]))
+    const [first] = screen.getAllByTestId('post-card')
+    if (!first) throw new Error('expected a card')
+
+    await user.click(within(first).getByRole('button', { name: /^reply, /i }))
+
+    expect(recordedAtNavigation).toBe(true)
   })
 
   it('without onOpenThread, cards are not openable and Reply is inert text (no focusable no-op)', async () => {

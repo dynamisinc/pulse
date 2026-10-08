@@ -16,9 +16,11 @@
  * — a wrapper-only technique so `<PostCard>` (which sets fixed px font sizes
  * internally) never needs to be forked to know about a "large" variant.
  *
- * Tokens mirror `theme/social.module.css`'s palette variables so this file's
- * few own rules (status text, "Replying to" label, the interim tombstone)
- * stay visually consistent with the rest of the Social skin, light + dark.
+ * Tokens mirror `theme/social.module.css`'s palette values so this file's few
+ * own rules (status text, the interim tombstone) stay visually consistent with
+ * the rest of the Social skin. LIGHT ONLY (demo-polish F5): the former OS and
+ * `data-theme` dark-mode overrides were removed; `theme/forcedLight.guard.test.ts`
+ * keeps it that way.
  */
 
 .thread {
@@ -34,16 +36,6 @@
   margin: 16px;
   color: #61707a;
   font-size: 14px;
-}
-
-@media (prefers-color-scheme: dark) {
-  .status {
-    color: #8aa0ac;
-  }
-}
-
-:global([data-theme='dark']) .status {
-  color: #8aa0ac;
 }
 
 /* The focused post renders enlarged (D1-006) via a wrapper-only transform -
@@ -98,18 +90,4 @@
   color: #61707a;
   font-size: 14px;
   font-style: italic;
-}
-
-@media (prefers-color-scheme: dark) {
-  .tombstone {
-    border-color: #233039;
-    background: #161e25;
-    color: #8aa0ac;
-  }
-}
-
-:global([data-theme='dark']) .tombstone {
-  border-color: #233039;
-  background: #161e25;
-  color: #8aa0ac;
 }

@@ -151,7 +151,8 @@ describe('Avatar — fallback to the monogram / silhouette', () => {
       'javascript:alert(1)',
       'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>',
       '//evil.example/a.png',
-      'relative/a.png',
+      'https://user:pw@cdn.example/a.png',
+      'ftp://host/a.png',
       '   ',
     ]) {
       const { unmount } = render(<Avatar persona={{ ...ORG_PERSONA, avatarUrl }} />)
@@ -162,11 +163,11 @@ describe('Avatar — fallback to the monogram / silhouette', () => {
     }
   })
 
-  it('accepts https, http, blob and root-relative urls', () => {
+  it('accepts what the shared media allow-list accepts (https, loopback http in dev, same-origin blob and paths)', () => {
     for (const avatarUrl of [
       'https://cdn.example/a.png?sig=abc',
-      'http://127.0.0.1:10000/a.png',
-      'blob:http://localhost/abc',
+      'http://127.0.0.1:10000/a.png', // Azurite; allowed in a dev build (this run)
+      `blob:${window.location.origin}/abc`,
       '/mock-media/avatars/a.svg',
     ]) {
       const { unmount } = render(<Avatar persona={{ ...ORG_PERSONA, avatarUrl }} />)

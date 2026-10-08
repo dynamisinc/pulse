@@ -8,8 +8,8 @@
  * profile is opened by that persona's id -- ids stay opaque, nothing is parsed.
  *
  * STATES.
- *  - directory still loading: a "Loading profile..." status (never a premature
- *    "doesn't exist").
+ *  - directory still loading: the `<ProfileSkeleton>` placeholder, a polite "Loading
+ *    profile" status (never a premature "doesn't exist", and not bare text).
  *  - handle matches no persona: `<Profile>` is mounted with an id that cannot
  *    match anything, which renders its own existing "This account doesn't exist."
  *    state -- the same copy and semantics the profile page has always had.
@@ -25,12 +25,13 @@
  */
 
 import { useParams } from 'react-router-dom'
+import { ProfileSkeleton } from '../../components/ProfileSkeleton'
 import { Profile } from '../../pages/Profile'
 import { DetailHeader } from '../DetailHeader'
 import { useSocialDirectory } from '../socialDirectory'
 import { HOME_PATH, isReservedSegment } from '../socialNavigation'
+import { useSocialOpeners } from '../useSocialOpeners'
 import { SocialRedirect } from './SocialRedirect'
-import styles from './routes.module.css'
 
 /** A persona id no cast can contain: drives `<Profile>`'s own "doesn't exist" state. */
 const UNRESOLVED_PERSONA_ID = 'unresolved-handle'
@@ -38,6 +39,9 @@ const UNRESOLVED_PERSONA_ID = 'unresolved-handle'
 export function ProfileRoute() {
   const { handle = '' } = useParams()
   const directory = useSocialDirectory()
+  // The profile's cards navigate like every other surface's: open a thread (card body,
+  // Reply, a Media-grid thumbnail), a hashtag, or another author's profile (Likes tab).
+  const { openThread, openHashtag, openProfile } = useSocialOpeners()
 
   if (handle === '' || isReservedSegment(handle)) return <SocialRedirect to={HOME_PATH} />
 
@@ -49,13 +53,18 @@ export function ProfileRoute() {
         ? (
           <>
             <DetailHeader title="Profile" />
-            <p className={styles.status} role="status">Loading profile…</p>
+            <ProfileSkeleton />
           </>
         )
         : (
           <>
             <DetailHeader {...(persona === undefined ? { title: 'Profile' } : {})} />
-            <Profile personaId={persona?.id ?? UNRESOLVED_PERSONA_ID} />
+            <Profile
+              personaId={persona?.id ?? UNRESOLVED_PERSONA_ID}
+              onOpenThread={openThread}
+              onHashtagOpen={openHashtag}
+              onOpenProfile={openProfile}
+            />
           </>
         )}
     </div>

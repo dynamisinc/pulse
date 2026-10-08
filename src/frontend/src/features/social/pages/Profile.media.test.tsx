@@ -10,6 +10,7 @@
  * nothing) or F2's real grid. A separate file because `vi.mock` is hoisted over
  * the whole module and `Profile.test.tsx` mounts the real component.
  */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -40,16 +41,21 @@ const FW_ID = 'persona-fairhavenwater' // authored a post with NO media
 const DREYES_ID = 'persona-dreyes_fh' // the mock viewer: text-only posts, plus a reply
 
 function renderProfile(personaId: string, onOpenThread?: (postId: string) => void) {
+  // A QueryClient: the Posts tab renders Newsline's video card, and F2's VideoPlayer reads
+  // `useChromeConfig()` (React Query) for the exercise watermark.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <ExerciseContextProvider>
-      <SessionProvider>
-        <ShellContextProvider
-          value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
-        >
-          <Profile personaId={personaId} onOpenThread={onOpenThread} />
-        </ShellContextProvider>
-      </SessionProvider>
-    </ExerciseContextProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ExerciseContextProvider>
+        <SessionProvider>
+          <ShellContextProvider
+            value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
+          >
+            <Profile personaId={personaId} onOpenThread={onOpenThread} />
+          </ShellContextProvider>
+        </SessionProvider>
+      </ExerciseContextProvider>
+    </QueryClientProvider>,
   )
 }
 
