@@ -1,3 +1,42 @@
+/*
+ * index.css (global, app-wide).
+ *
+ * FONT (demo-polish F5). `@fontsource-variable/figtree` (imported once from main.tsx) registers
+ * the variable face under the family name 'Figtree Variable'. Nearly every social stylesheet
+ * (and a few staff components) spells its stack `'Figtree', system-ui, sans-serif`, a name
+ * nothing used to register, so the real font never loaded. Rather than edit ~30 files that other
+ * stories own, register the SAME woff2 files a second time under the plain name 'Figtree'. The
+ * browser fetches each file once (identical URL); both names now resolve.
+ * The canonical stack for new code is `FONT_FAMILY` in features/social/theme/tokens.ts.
+ *
+ * This sheet deliberately does NOT change the root font-family: the staff (COBRA) world sets
+ * its own type through its MUI theme, and the social column sets Figtree on its own root.
+ *
+ * LIGHT ONLY (demo-polish F5): the app is forced light. `color-scheme: light` keeps native
+ * controls and scrollbars light under a dark OS, and no social stylesheet reacts to the OS
+ * colour scheme (guarded by features/social/theme/forcedLight.guard.test.ts).
+ */
+
+/* figtree-latin-ext */
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 900;
+  src: url('@fontsource-variable/figtree/files/figtree-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* figtree-latin */
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 900;
+  src: url('@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
   font-family: Roboto, Arial, sans-serif;
   line-height: 1.5;

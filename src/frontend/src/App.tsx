@@ -68,6 +68,7 @@ import { BrandThemeProvider } from './features/participant-shell/BrandThemeProvi
 import { ShellLayout } from './features/participant-shell/ShellLayout'
 import { ParticipantLandingGuard } from '@/features/participant-shell'
 import { SocialChannel } from './features/social'
+import { SocialBrandScope } from './features/social/theme/SocialBrandScope'
 import { ExerciseSwitcherSlot, STAFF_ROUTE_REGISTRY } from '@/features/staff'
 import { createRoleAwareRoutes } from './features/app-shell'
 
@@ -97,7 +98,10 @@ const router = createBrowserRouter(
     participantSurface: (
       <BrandThemeProvider>
         <ShellLayout>
-          <SocialChannel />
+          {/* Sets `--pulse-ac` from the resolved brand for the whole channel (F5, #433). */}
+          <SocialBrandScope>
+            <SocialChannel />
+          </SocialBrandScope>
         </ShellLayout>
       </BrandThemeProvider>
     ),

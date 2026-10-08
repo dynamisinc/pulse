@@ -8,12 +8,11 @@
  *
  * Theming mirrors the sibling social modules (`./FollowerList.module.css`,
  * `../theme/social.module.css`) so the module reads as part of the same feed/
- * profile frame it appears in: `.whoToFollow` declares the light-mode palette
- * as CSS custom properties and rules read `var(--wtf-*)`. Dark mode has the
- * same TWO independent triggers — the OS `prefers-color-scheme: dark` media
- * query AND a host-set `[data-theme="dark"]` on the root or any ancestor —
- * neither dependent on a React theme provider. Values mirror
- * `../theme/tokens.ts`'s LIGHT/DARK_PALETTE; keep them in sync by hand.
+ * profile frame it appears in: `.whoToFollow` declares the light palette as CSS
+ * custom properties and rules read `var(--wtf-*)`. LIGHT ONLY (demo-polish F5):
+ * the former OS and `data-theme` dark-mode blocks were removed — the Social skin
+ * has no dark palette, and `theme/forcedLight.guard.test.ts` keeps it that way.
+ * Values mirror `../theme/tokens.ts`'s LIGHT_PALETTE; keep them in sync by hand.
  *
  * The heading ("Who to follow") carries no decoration implying rank or
  * authority (D1-R1) — it is plain, bold text, nothing else. Every row's
@@ -22,7 +21,7 @@
  */
 
 .whoToFollow {
-  /* Light-mode palette (default) — mirrors tokens.ts LIGHT_PALETTE. */
+  /* Light palette (the only palette) — mirrors tokens.ts LIGHT_PALETTE. */
   --wtf-bg: #fff;
   --wtf-line: #e5e8ea;
   --wtf-ink: #0e1518;
@@ -38,27 +37,6 @@
   color: var(--wtf-ink);
   font-family: 'Figtree', system-ui, sans-serif;
   text-align: left;
-}
-
-/* OS-level dark mode (no host override). */
-@media (prefers-color-scheme: dark) {
-  .whoToFollow {
-    --wtf-bg: #0c1116;
-    --wtf-line: #233039;
-    --wtf-ink: #e9eef1;
-    --wtf-ink-muted: #8aa0ac;
-    --wtf-hover: rgba(255, 255, 255, .05);
-  }
-}
-
-/* Host-forced dark mode — `data-theme="dark"` on the root OR an ancestor. */
-:global([data-theme='dark']) .whoToFollow,
-.whoToFollow:global([data-theme='dark']) {
-  --wtf-bg: #0c1116;
-  --wtf-line: #233039;
-  --wtf-ink: #e9eef1;
-  --wtf-ink-muted: #8aa0ac;
-  --wtf-hover: rgba(255, 255, 255, .05);
 }
 
 /* --------------------------------------------------------------------------

@@ -258,8 +258,11 @@ describe('ThreadView — content sanitization (NFR-004)', () => {
     const { container } = await renderThread('post-xss-focused')
 
     // A `dangerouslySetInnerHTML` render would parse this into a real (if
-    // inert-in-jsdom) <img> element; a plain-text React child never does.
-    expect(container.querySelector('img')).not.toBeInTheDocument()
+    // inert-in-jsdom) <img> element; a plain-text React child never does. (The authors'
+    // avatar PHOTOS are legitimate <img>s since F5, so only a non-avatar <img> counts.)
+    const injected = Array.from(container.querySelectorAll('img'))
+      .filter(img => !img.closest('[data-testid="post-avatar"]'))
+    expect(injected).toHaveLength(0)
     expect(screen.getByText(maliciousText)).toBeInTheDocument()
   })
 })

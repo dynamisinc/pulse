@@ -8,13 +8,12 @@
  *
  * Theming model mirrors `../theme/social.module.css` exactly so the composer
  * and the PostCard share one look:
- *  - `.composer` is the token ROOT: it declares the light-mode palette as CSS
+ *  - `.composer` is the token ROOT: it declares the light palette as CSS
  *    custom properties, and every rule reads `var(--pc-*)` rather than
  *    hardcoding a color.
- *  - Dark mode has the same TWO independent triggers as the card: the OS
- *    `prefers-color-scheme: dark` media query AND a `[data-theme="dark"]`
- *    attribute on the composer root OR any ancestor. Neither needs a React
- *    provider — a plain CSS cascade.
+ *  - LIGHT ONLY (demo-polish F5): the former OS and `data-theme` dark-mode
+ *    blocks were removed — the Social skin has no dark palette, and
+ *    `theme/forcedLight.guard.test.ts` keeps it that way.
  *  - The accent reads the shared `--pulse-ac` per-exercise rebrand hook
  *    (COR-030) with the Cadence-navy default fallback — never a bare accent.
  *
@@ -26,7 +25,7 @@
  */
 
 .composer {
-  /* Light-mode palette (default) */
+  /* Light palette (the only palette) */
   --pc-bg: #fff;
   --pc-panel: #f3f5f6;
   --pc-line: #e5e8ea;
@@ -34,8 +33,8 @@
   --pc-ink-muted: #61707a;
   --pc-hover: rgba(14, 21, 24, .045);
   --pc-accent: var(--pulse-ac, #1e3a5f);
-  /* Counter state colors (D1-R5). Chosen to read on both light and dark bg;
-   * always paired with the visible count number, never the sole signal. */
+  /* Counter state colors (D1-R5). Always paired with the visible count number,
+   * never the sole signal. */
   --pc-low: #b26a00;
   --pc-over: #c02a2a;
 
@@ -51,33 +50,6 @@
   color: var(--pc-ink);
   font-family: 'Figtree', system-ui, sans-serif;
   text-align: left;
-}
-
-/* OS-level dark mode (no host override). */
-@media (prefers-color-scheme: dark) {
-  .composer {
-    --pc-bg: #0c1116;
-    --pc-panel: #161e25;
-    --pc-line: #233039;
-    --pc-ink: #e9eef1;
-    --pc-ink-muted: #8aa0ac;
-    --pc-hover: rgba(255, 255, 255, .05);
-    --pc-low: #e0952b;
-    --pc-over: #f0666b;
-  }
-}
-
-/* Host-forced dark mode — `data-theme="dark"` on the root OR an ancestor. */
-:global([data-theme='dark']) .composer,
-.composer:global([data-theme='dark']) {
-  --pc-bg: #0c1116;
-  --pc-panel: #161e25;
-  --pc-line: #233039;
-  --pc-ink: #e9eef1;
-  --pc-ink-muted: #8aa0ac;
-  --pc-hover: rgba(255, 255, 255, .05);
-  --pc-low: #e0952b;
-  --pc-over: #f0666b;
 }
 
 .input {
