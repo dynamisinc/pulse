@@ -42,7 +42,10 @@
  * ## Staff projections
  * `toLiveWorldPost` joins a view with its author persona into the flat
  * `LiveWorldPost` the row renders and `renderRowActions` receives (C5's
- * `TakedownActionProps` is `{ post: LiveWorldPost }`); `toReplyTarget` builds the
+ * `TakedownActionProps` is `{ post: LiveWorldPost }`). A post whose author the
+ * directory doesn't know is NEVER dropped — a controller sees every post — it is
+ * projected as "UNKNOWN AUTHOR · <short id>" with `authorUnknown: true`.
+ * `toReplyTarget` builds the
  * `ReplyTarget` handed to `onReplyAs` (excerpt <= 140 characters, as the composer
  * contract requires). No `exerciseId` appears anywhere in this module (COR-001):
  * the session binds the exercise server-side.
@@ -84,6 +87,12 @@ export interface LiveWorldPost {
   readonly authorHandle: string
   readonly authorDisplayName: string
   readonly authorVerified: boolean
+  /**
+   * True ONLY when the author is not in the persona directory (see
+   * {@link toLiveWorldPost}); then `authorDisplayName` is the staff label
+   * "UNKNOWN AUTHOR · <short id>" and `authorHandle` a placeholder. Absent otherwise.
+   */
+  readonly authorUnknown?: true
   readonly text: string
   /** Scenario ISO instant (COR-053). */
   readonly scenarioTime: string
@@ -292,8 +301,10 @@ export function decodeFilter(value: string): LiveWorldFilter {
 }
 
 /**
- * The distinct hashtags across `entries`, most-used first (ties alphabetical),
- * capped at {@link MAX_TAG_OPTIONS}. The picker offers only tags actually seen.
+ * The hashtags offered by the filter picker: the {@link MAX_TAG_OPTIONS} most-used
+ * tags across `entries`, listed ALPHABETICALLY. Alphabetical (not by usage) so the
+ * options don't reshuffle under the controller while they are choosing — usage
+ * only decides which tags make the cut. The picker offers only tags actually seen.
  */
 export function collectTags(entries: readonly LiveWorldEntry[]): string[] {
   const counts = new Map<string, number>()
@@ -304,6 +315,7 @@ export function collectTags(entries: readonly LiveWorldEntry[]): string[] {
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, MAX_TAG_OPTIONS)
     .map(([tag]) => tag)
+    .sort((a, b) => a.localeCompare(b))
 }
 
 // -----------------------------------------------------------------------------
@@ -315,14 +327,50 @@ function bareHandle(handle: string): string {
   return handle.startsWith('@') ? handle.slice(1) : handle
 }
 
-/** Joins a post view with its author into the flat staff-side {@link LiveWorldPost}. */
-export function toLiveWorldPost(view: ParticipantPostView, author: Persona): LiveWorldPost {
+/**
+ * A short, human-checkable form of a persona id for the UNKNOWN AUTHOR label: the
+ * first 8 characters, after dropping the mock cast's `persona-` prefix (which
+ * would otherwise be all an 8-character cut showed). A live id is a GUID, so its
+ * first 8 characters are already distinctive.
+ */
+export function shortAuthorId(personaId: string): string {
+  return personaId.replace(/^persona-/, '').slice(0, 8)
+}
+
+/** The staff label for a post whose author is not in the persona directory. */
+export function unknownAuthorLabel(personaId: string): string {
+  return `UNKNOWN AUTHOR · ${shortAuthorId(personaId)}`
+}
+
+/**
+ * Joins a post view with its author into the flat staff-side {@link LiveWorldPost}.
+ *
+ * A controller must see EVERY post: when `author` is `undefined` (the persona
+ * directory has not caught up with the post, or the author was removed) the post
+ * is still projected, labelled "UNKNOWN AUTHOR · <short id>" with `authorUnknown`
+ * set and a placeholder handle `unknown-<short id>` — never dropped.
+ */
+export function toLiveWorldPost(
+  view: ParticipantPostView,
+  author: Persona | undefined,
+): LiveWorldPost {
+  const identity = author !== undefined
+    ? {
+      authorPersonaId: author.id,
+      authorHandle: bareHandle(author.handle),
+      authorDisplayName: author.displayName,
+      authorVerified: author.verified,
+    }
+    : {
+      authorPersonaId: view.authorPersonaId,
+      authorHandle: `unknown-${shortAuthorId(view.authorPersonaId)}`,
+      authorDisplayName: unknownAuthorLabel(view.authorPersonaId),
+      authorVerified: false,
+      authorUnknown: true as const,
+    }
   return {
     id: view.id,
-    authorPersonaId: author.id,
-    authorHandle: bareHandle(author.handle),
-    authorDisplayName: author.displayName,
-    authorVerified: author.verified,
+    ...identity,
     text: view.text,
     scenarioTime: view.scenarioTime,
     counts: view.counts,

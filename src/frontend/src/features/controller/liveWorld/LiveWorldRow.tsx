@@ -25,9 +25,19 @@
  * COUNTS read through `formatMagnitude` (the shared compact formatter) for the
  * eye and `spokenMagnitude` for assistive technology: the visible figure is
  * `aria-hidden` and a visually-hidden "1.4 thousand likes" is read instead, so
- * a screen reader never hears "1.4K" mangled. `share` is optional on the wire;
- * when the post doesn't report it the cell shows "–" and is read as not reported
- * (a number is never invented).
+ * a screen reader never hears "1.4K" mangled. `share` is optional (the server
+ * never sends it): when the post doesn't report it there is NO share cell — a
+ * number is never invented.
+ *
+ * UNKNOWN AUTHOR. A controller must see every post. When the author is not in
+ * the persona directory the row still renders, named "UNKNOWN AUTHOR · <short id>"
+ * (no handle line, no VERIFIED) — see `toLiveWorldPost`.
+ *
+ * REMOVED (`isRowRemoved`). A taken-down post stays listed "for the record": a
+ * REMOVED marker (icon AND word, never colour alone) joins the author line,
+ * "Reply as…" is disabled and described by a visually-hidden explanation
+ * (`aria-describedby`), and the column's `R` shortcut is a no-op on the row. The
+ * row actions slot is still rendered (C5's own action shows its own state).
  *
  * KEYBOARD. The row is a roving-tabindex stop (`active` ⇒ tabIndex 0, others -1);
  * `J`/`K`/`R` are handled by the column on the list container. The row's own
@@ -44,6 +54,7 @@ import { memo, useId, useMemo, type ReactNode } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
+  faBan,
   faCircleCheck,
   faComment,
   faHeart,
@@ -76,7 +87,8 @@ const COUNT_DEFS: readonly CountDef[] = [
 
 export interface LiveWorldRowProps {
   readonly entry: LiveWorldEntry
-  readonly persona: Persona
+  /** The author; `undefined` when the persona directory doesn't know them (UNKNOWN AUTHOR). */
+  readonly persona: Persona | undefined
   /** The exercise's IANA zone for the scenario timestamp (COR-053). */
   readonly timeZone: string
   /** Whether this row is the roving-tabindex stop (tabIndex 0). */
@@ -85,6 +97,13 @@ export interface LiveWorldRowProps {
   readonly onReply: (post: LiveWorldPost) => void
   /** Optional per-row action slot (C5 mounts Take down here). */
   readonly renderRowActions?: (post: LiveWorldPost) => ReactNode
+  /**
+   * Whether the post has been taken down. Called during render, so a caller whose
+   * answer changes over time must pass a function with a NEW identity when it does
+   * (rows are memoized on their props). A removed row stays listed "for the record"
+   * with a REMOVED marker and a disabled Reply as….
+   */
+  readonly isRowRemoved?: (post: LiveWorldPost) => boolean
 }
 
 export const LiveWorldRow = memo(function LiveWorldRow({
@@ -94,6 +113,7 @@ export const LiveWorldRow = memo(function LiveWorldRow({
   active,
   onReply,
   renderRowActions,
+  isRowRemoved,
 }: LiveWorldRowProps) {
   const post = useMemo(() => toLiveWorldPost(entry.view, persona), [entry.view, persona])
   const when = useMemo(
@@ -102,7 +122,11 @@ export const LiveWorldRow = memo(function LiveWorldRow({
   )
   const metaId = useId()
   const bodyId = useId()
+  const removedNoteId = useId()
   const isReply = post.inReplyTo !== undefined
+  const removed = isRowRemoved?.(post) === true
+  // Share is optional on the wire (the server never sends it): no cell when absent.
+  const countDefs = COUNT_DEFS.filter(def => def.key !== 'share' || post.counts.share !== undefined)
 
   return (
     <Box
@@ -111,6 +135,8 @@ export const LiveWorldRow = memo(function LiveWorldRow({
       data-post-id={post.id}
       data-testid="live-world-row"
       data-kind={isReply ? 'reply' : 'post'}
+      data-removed={removed ? 'true' : undefined}
+      data-author-unknown={post.authorUnknown === true ? 'true' : undefined}
       tabIndex={active ? 0 : -1}
       aria-labelledby={metaId}
       aria-describedby={bodyId}
@@ -147,9 +173,11 @@ export const LiveWorldRow = memo(function LiveWorldRow({
         {/* Real spaces between the inline parts: the flex container ignores them
             visually, but the accessible name ("Name @handle VERIFIED time") needs them. */}
         {' '}
-        <Box component="span" sx={monoMeta}>
-          @{post.authorHandle}
-        </Box>
+        {post.authorUnknown !== true && (
+          <Box component="span" sx={monoMeta}>
+            @{post.authorHandle}
+          </Box>
+        )}
         {' '}
         {post.authorVerified && (
           <Box
@@ -167,6 +195,30 @@ export const LiveWorldRow = memo(function LiveWorldRow({
           >
             <FontAwesomeIcon icon={faCircleCheck} aria-hidden="true" />
             VERIFIED
+          </Box>
+        )}
+        {' '}
+        {removed && (
+          <Box
+            component="span"
+            data-testid="live-world-removed"
+            sx={{
+              ...monoMeta,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '3px',
+              px: '5px',
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              color: liveWorldTokens.ink,
+              border: `1px solid ${liveWorldTokens.danger}`,
+              borderRadius: '2px',
+            }}
+          >
+            <Box component="span" sx={{ color: liveWorldTokens.danger, display: 'inline-flex' }}>
+              <FontAwesomeIcon icon={faBan} aria-hidden="true" />
+            </Box>
+            REMOVED
           </Box>
         )}
         {' '}
@@ -213,8 +265,9 @@ export const LiveWorldRow = memo(function LiveWorldRow({
           data-testid="live-world-counts"
           sx={{ gap: '12px', listStyle: 'none', m: 0, p: 0 }}
         >
-          {COUNT_DEFS.map(def => {
+          {countDefs.map(def => {
             const value = post.counts[def.key]
+            if (value === undefined) return null // only `share` can be absent (filtered above)
             return (
               <Box
                 component="li"
@@ -223,23 +276,28 @@ export const LiveWorldRow = memo(function LiveWorldRow({
                 sx={{ ...monoMeta, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
               >
                 <FontAwesomeIcon icon={def.icon} aria-hidden="true" />
-                <span aria-hidden="true">{value === undefined ? '–' : formatMagnitude(value)}</span>
+                <span aria-hidden="true">{formatMagnitude(value)}</span>
                 <Box component="span" sx={srOnly}>
-                  {value === undefined
-                    ? `${def.noun} not reported`
-                    : `${spokenMagnitude(value)} ${def.noun}`}
+                  {`${spokenMagnitude(value)} ${def.noun}`}
                 </Box>
               </Box>
             )
           })}
         </Stack>
         <Box sx={{ flex: 1 }} />
+        {removed && (
+          <Box component="span" id={removedNoteId} sx={srOnly}>
+            This post was taken down. Replying to it is unavailable.
+          </Box>
+        )}
         <CobraLinkButton
           size="small"
           data-testid="live-world-reply-as"
-          aria-keyshortcuts="R"
+          disabled={removed}
+          aria-keyshortcuts={removed ? undefined : 'R'}
+          aria-describedby={removed ? removedNoteId : undefined}
           aria-label={`Reply as… to ${post.authorDisplayName}`}
-          title="Reply as… (R)"
+          title={removed ? 'Reply unavailable: this post was removed' : 'Reply as… (R)'}
           onClick={() => onReply(post)}
           sx={{
             minHeight: 0,

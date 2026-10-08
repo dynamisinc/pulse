@@ -257,7 +257,7 @@ describe('AC1 — mirror of the world', () => {
     expect(row.getAllByText('IMAGE')).toHaveLength(2)
   })
 
-  it('shows the counts compactly with spoken equivalents, and "–" for an unreported share', async () => {
+  it('shows the counts compactly with spoken equivalents, and NO share cell when none is reported', async () => {
     mockedResolveFeed.mockResolvedValue(feedFixture())
     renderColumn()
     await loadedRows()
@@ -269,9 +269,12 @@ describe('AC1 — mirror of the world', () => {
     expect(withShare.getByTestId('live-world-count-like')).toHaveTextContent('1.4 thousand likes')
     expect(withShare.getByTestId('live-world-count-share')).toHaveTextContent('120')
 
+    // The server never sends `share`: no cell at all (not a "0", not a dash).
     const noShare = within(rowFor('p-reply'))
-    expect(noShare.getByTestId('live-world-count-share')).toHaveTextContent('–')
-    expect(noShare.getByTestId('live-world-count-share')).toHaveTextContent('shares not reported')
+    expect(noShare.queryByTestId('live-world-count-share')).toBeNull()
+    expect(noShare.getAllByRole('listitem')).toHaveLength(3)
+    expect(noShare.getByTestId('live-world-counts')).not.toHaveTextContent(/share/i)
+    expect(noShare.getByTestId('live-world-counts')).not.toHaveTextContent('–')
   })
 
   it('renders post text as plain text, never as HTML', async () => {
@@ -305,14 +308,53 @@ describe('AC1 — mirror of the world', () => {
     }
   })
 
-  it('skips a post whose author is not in the cast instead of crashing the column', async () => {
+  it('LISTS a post whose author is not in the cast as UNKNOWN AUTHOR (a controller sees every post)', async () => {
     mockedResolveFeed.mockResolvedValue([
-      post('p-ghost', { authorPersonaId: 'persona-nobody', scenarioTime: at(50) }),
+      post('p-ghost', { authorPersonaId: '3f9a1c2b-7d4e-4a10-9c55-0a1b2c3d4e5f', scenarioTime: at(50) }),
+      post('p-mock', { authorPersonaId: 'persona-nobody', scenarioTime: at(40) }),
       post('p-ok', { scenarioTime: at(10) }),
     ])
     renderColumn()
     await loadedRows()
-    expect(rowIds()).toEqual(['p-ok'])
+
+    expect(rowIds()).toEqual(['p-ghost', 'p-mock', 'p-ok'])
+    const ghost = within(rowFor('p-ghost'))
+    // First 8 characters of the id, as a staff label — text, not colour.
+    expect(ghost.getByTestId('live-world-author')).toHaveTextContent('UNKNOWN AUTHOR · 3f9a1c2b')
+    expect(rowFor('p-ghost')).toHaveAttribute('data-author-unknown', 'true')
+    expect(ghost.queryByTestId('live-world-verified')).toBeNull()
+    expect(ghost.queryByText(/^@/)).toBeNull() // no invented handle line
+    // The mock cast's `persona-` prefix is dropped so the 8 characters mean something.
+    expect(within(rowFor('p-mock')).getByTestId('live-world-author'))
+      .toHaveTextContent('UNKNOWN AUTHOR · nobody')
+    // The rest of the row still works: text, counts, Reply as….
+    expect(ghost.getByText('text of p-ghost')).toBeInTheDocument()
+    expect(ghost.getByTestId('live-world-reply-as')).toBeEnabled()
+    // A known author is unaffected.
+    expect(within(rowFor('p-ok')).getByText('Fairhaven Water Utility')).toBeInTheDocument()
+  })
+
+  it('hands renderRowActions an unknown-author post flagged authorUnknown (placeholder handle)', async () => {
+    const renderRowActions = vi.fn(() => null)
+    mockedResolveFeed.mockResolvedValue([post('p-ghost', { authorPersonaId: 'persona-nobody' })])
+    renderColumn({ renderRowActions })
+    await loadedRows()
+    expect(renderRowActions).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'p-ghost',
+      authorUnknown: true,
+      authorDisplayName: 'UNKNOWN AUTHOR · nobody',
+      authorHandle: 'unknown-nobody',
+      authorVerified: false,
+    }))
+  })
+
+  it('counts unknown-author arrivals in "N new" too', async () => {
+    mockedResolveFeed.mockResolvedValue(feedFixture())
+    renderColumn()
+    await loadedRows()
+    scrollListTo(90)
+    act(() => source.emit(view('u1', { authorPersonaId: 'persona-nobody', scenarioTime: at(55) })))
+    expect(await screen.findByTestId('live-world-new')).toHaveTextContent('1 new')
   })
 })
 
@@ -354,6 +396,56 @@ describe('AC2 — unmistakably staff', () => {
     const handle = within(rowFor('p-video')).getByText('@FairhavenWater')
     expect(getComputedStyle(handle).fontFamily).toMatch(/monospace|Menlo|Consolas/i)
     expect(screen.getByTestId('live-world-column').querySelector('[class*="avatar" i]')).toBeNull()
+  })
+})
+
+describe('visually-hidden text (M-1) and list containment', () => {
+  it('srOnly is a true 1px clip box under MUI sx (not 100% x 100% / -8px)', async () => {
+    mockedResolveFeed.mockResolvedValue(feedFixture())
+    renderColumn()
+    await loadedRows()
+
+    const announcer = screen.getByTestId('live-world-announcer')
+    const style = getComputedStyle(announcer)
+    expect(style.position).toBe('absolute')
+    expect(style.width).toBe('1px')
+    expect(style.height).toBe('1px')
+    expect(style.marginTop).toBe('-1px')
+    expect(style.overflow).toBe('hidden')
+  })
+
+  it('no absolutely-positioned box inside the log is larger than 1px (they would inflate the column)', async () => {
+    mockedResolveFeed.mockResolvedValue(feedFixture())
+    renderColumn()
+    await loadedRows()
+
+    const list = screen.getByTestId('live-world-list')
+    // (The decorative, aria-hidden play badge on a video thumbnail is the one
+    // legitimate absolutely-positioned box; everything else is sr-only text.)
+    const absolute = Array.from(list.querySelectorAll<HTMLElement>('*'))
+      .filter(el => getComputedStyle(el).position === 'absolute')
+      .filter(el => el.getAttribute('aria-hidden') !== 'true')
+    expect(absolute.length).toBeGreaterThanOrEqual(10) // the sr-only text on every row
+    for (const el of absolute) {
+      expect(getComputedStyle(el).width).toBe('1px')
+      expect(getComputedStyle(el).height).toBe('1px')
+    }
+  })
+
+  it('the log is the positioned scroller that contains every row\'s hidden text', async () => {
+    mockedResolveFeed.mockResolvedValue(feedFixture())
+    renderColumn()
+    await loadedRows()
+
+    const list = screen.getByTestId('live-world-list')
+    expect(getComputedStyle(list).position).toBe('relative')
+    expect(getComputedStyle(list).overflowY).toBe('auto')
+    for (const row of screen.getAllByTestId('live-world-row')) {
+      for (const hidden of Array.from(row.querySelectorAll<HTMLElement>('*'))
+        .filter(el => getComputedStyle(el).position === 'absolute')) {
+        expect(list).toContainElement(hidden)
+      }
+    }
   })
 })
 
@@ -423,7 +515,15 @@ describe('AC3 — real time without disorientation', () => {
     expect(rowIds()).toEqual(['n2', 'n1', 'p-lookalike', 'p-reply', 'p-video'])
     expect(screen.queryByTestId('live-world-new')).toBeNull()
     expect(screen.getByTestId('live-world-list').scrollTop).toBe(0)
-    expect(rowFor('n2')).toHaveFocus() // keyboard users land on the newest row
+
+    // A MOUSE click leaves the list live: focus is not dragged into it (which would
+    // count as "reading" and hold the next arrival behind "N new" again).
+    expect(screen.getByTestId('live-world-list')).not.toContainElement(
+      document.activeElement as HTMLElement,
+    )
+    act(() => source.emit(view('n3', { scenarioTime: at(53) })))
+    await waitFor(() => expect(rowIds()[0]).toBe('n3'))
+    expect(screen.queryByTestId('live-world-new')).toBeNull()
   })
 
   it('counts a single arrival as "1 new" and keeps counting as more arrive', async () => {
@@ -447,6 +547,22 @@ describe('AC3 — real time without disorientation', () => {
 
     await waitFor(() => expect(rowIds()[0]).toBe('n1'))
     expect(screen.queryByTestId('live-world-new')).toBeNull()
+  })
+
+  it('holds arrivals while focus is on the FIRST row too: the focused row is not pushed down', async () => {
+    await loaded()
+    const first = rowFor('p-lookalike')
+    first.focus()
+
+    act(() => source.emit(view('n1', { scenarioTime: at(51) })))
+    expect(await screen.findByTestId('live-world-new')).toHaveTextContent('1 new')
+    act(() => source.emit(view('n2', { scenarioTime: at(52) })))
+    await waitFor(() => expect(screen.getByTestId('live-world-new')).toHaveTextContent('2 new'))
+
+    // Two batches later the focused row is still the first row, still focused, in place.
+    expect(rowIds()).toEqual(['p-lookalike', 'p-reply', 'p-video'])
+    expect(first).toHaveFocus()
+    expect(screen.getByTestId('live-world-list').firstElementChild).toBe(first)
   })
 
   it('also holds arrivals while keyboard focus is on a row below the top, and merges on leaving', async () => {
@@ -567,6 +683,7 @@ describe('AC3 — real time without disorientation', () => {
   it('does not announce arrivals (the log is aria-live="off"; only filters announce)', async () => {
     await loaded()
     const announcer = screen.getByTestId('live-world-announcer')
+    await waitFor(() => expect(announcer).toHaveTextContent('3 posts shown'))
     const before = announcer.textContent
     act(() => source.emit(view('n1', { scenarioTime: at(59) })))
     await waitFor(() => expect(rowIds()[0]).toBe('n1'))
@@ -669,6 +786,59 @@ describe('AC4 — filters', () => {
     expect(await screen.findByTestId('live-world-new')).toHaveTextContent('1 new')
   })
 
+  it('lists the hashtag options ALPHABETICALLY, and keeps them put as usage changes', async () => {
+    mockedResolveFeed.mockResolvedValue([
+      post('t1', { text: '#zulu #zulu-ish #alpha', scenarioTime: at(1) }),
+      post('t2', { text: '#zulu', scenarioTime: at(2) }),
+      post('t3', { text: '#mike', scenarioTime: at(3) }),
+    ])
+    renderColumn()
+    await loadedRows()
+    const tagOptions = () => within(screen.getByTestId('live-world-filter')).getAllByRole('option')
+      .map(option => option.textContent ?? '')
+      .filter(text => text.startsWith('#'))
+
+    // 'zulu' is the most used, 'alpha' the least: the order is alphabetical regardless.
+    expect(tagOptions()).toEqual(['#alpha', '#mike', '#zulu'])
+
+    act(() => source.emit(view('t4', { text: '#alpha #alpha #beta', scenarioTime: at(4) })))
+    await waitFor(() => expect(tagOptions()).toContain('#beta'))
+    expect(tagOptions()).toEqual(['#alpha', '#beta', '#mike', '#zulu'])
+  })
+
+  it('keeps an active hashtag selectable, in alphabetical position, after its posts scroll out', async () => {
+    await loaded()
+    await userEvent.setup().selectOptions(screen.getByTestId('live-world-filter'), '#boil')
+    const select = screen.getByTestId('live-world-filter') as HTMLSelectElement
+    expect(select.value).toBe('tag:boil')
+    expect(within(select).getByRole('option', { name: '#boil' })).toBeInTheDocument()
+  })
+
+  it('clears the polite region before writing, so an identical announcement is spoken again', async () => {
+    await loaded()
+    const announcer = screen.getByTestId('live-world-announcer')
+    // Record every value the region takes (timing-independent: no snapshot races).
+    const seen: string[] = []
+    const observer = new MutationObserver(() => seen.push(announcer.textContent ?? ''))
+    observer.observe(announcer, { childList: true, characterData: true, subtree: true })
+    const user = userEvent.setup()
+
+    await user.selectOptions(screen.getByTestId('live-world-filter'), '#boil')
+    await waitFor(() => expect(announcer).toHaveTextContent('1 post matches #boil'))
+    await user.click(screen.getByRole('button', { name: /clear filter #boil/i }))
+    await waitFor(() => expect(announcer).toHaveTextContent('3 posts shown'))
+    // The very same text as before, announced a second time.
+    await user.selectOptions(screen.getByTestId('live-world-filter'), '#boil')
+    await waitFor(() => expect(seen.filter(v => v === '1 post matches #boil')).toHaveLength(2))
+    observer.disconnect()
+
+    // Every announcement was PRECEDED by an empty region: a change a screen reader speaks.
+    const texts = seen.map((value, i) => ({ value, prev: seen[i - 1] }))
+      .filter(({ value }) => value !== '')
+    expect(texts.length).toBeGreaterThanOrEqual(3)
+    for (const { prev } of texts) expect(prev ?? '').toBe('') // (undefined: the first write)
+  })
+
   it('says so when nothing matches, rather than showing a blank list', async () => {
     await loaded()
     await userEvent.setup().selectOptions(
@@ -748,6 +918,87 @@ describe('AC5 — row actions', () => {
       expect(within(row).getAllByRole('button')).toHaveLength(1) // only Reply as…
       expect(within(row).queryByRole('button', { name: /take down/i })).toBeNull()
     }
+  })
+
+  describe('isRowRemoved — a taken-down post stays listed, marked, and unreplyable', () => {
+    const removedIds = (...ids: string[]) => (p: LiveWorldPost) => ids.includes(p.id)
+
+    it('marks only the removed row: REMOVED as icon + text, other rows untouched', async () => {
+      await loaded({ isRowRemoved: removedIds('p-reply') })
+
+      const removed = within(rowFor('p-reply'))
+      const marker = removed.getByTestId('live-world-removed')
+      expect(marker).toHaveTextContent('REMOVED')
+      expect(marker.querySelector('svg')).not.toBeNull() // never colour alone
+      expect(rowFor('p-reply')).toHaveAttribute('data-removed', 'true')
+      // It stays listed, in order, with its text (for the record).
+      expect(rowIds()).toEqual(['p-lookalike', 'p-reply', 'p-video'])
+      expect(removed.getByText('Is this safe for the baby?')).toBeInTheDocument()
+
+      for (const id of ['p-lookalike', 'p-video']) {
+        expect(within(rowFor(id)).queryByTestId('live-world-removed')).toBeNull()
+        expect(within(rowFor(id)).getByTestId('live-world-reply-as')).toBeEnabled()
+      }
+    })
+
+    it('names the marker in the row\'s accessible name', async () => {
+      await loaded({ isRowRemoved: removedIds('p-reply') })
+      expect(rowFor('p-reply')).toHaveAccessibleName(/REMOVED/)
+    })
+
+    it('disables Reply as… and explains why via aria-describedby; clicking does nothing', async () => {
+      const { onReplyAs } = await loaded({ isRowRemoved: removedIds('p-reply') })
+      const button = within(rowFor('p-reply')).getByTestId('live-world-reply-as')
+
+      expect(button).toBeDisabled()
+      expect(button).toHaveAccessibleDescription(
+        'This post was taken down. Replying to it is unavailable.',
+      )
+      expect(button).not.toHaveAttribute('aria-keyshortcuts')
+      // The disabled button has `pointer-events: none`; click through it anyway.
+      await userEvent.setup({ pointerEventsCheck: 0 }).click(button)
+      expect(onReplyAs).not.toHaveBeenCalled()
+    })
+
+    it('makes the R shortcut a no-op on the removed row, but not on its neighbours', async () => {
+      const { onReplyAs } = await loaded({ isRowRemoved: removedIds('p-reply') })
+      const user = userEvent.setup()
+
+      rowFor('p-reply').focus()
+      await user.keyboard('r')
+      expect(onReplyAs).not.toHaveBeenCalled()
+
+      await user.keyboard('j')
+      await user.keyboard('r')
+      expect(onReplyAs).toHaveBeenCalledTimes(1)
+      expect(onReplyAs.mock.calls[0]?.[0]).toMatchObject({ postId: 'p-video' })
+    })
+
+    it('still renders renderRowActions on a removed row (the action shows its own state)', async () => {
+      const renderRowActions = (p: LiveWorldPost) => (
+        <span data-testid="row-action">{`state of ${p.id}`}</span>
+      )
+      await loaded({ renderRowActions, isRowRemoved: removedIds('p-reply') })
+      expect(within(rowFor('p-reply')).getByTestId('row-action')).toBeInTheDocument()
+    })
+
+    it('updates when the caller passes a new function (the removed set changed)', async () => {
+      const { rerenderColumn } = await loaded({ isRowRemoved: removedIds() })
+      expect(screen.queryByTestId('live-world-removed')).toBeNull()
+
+      rerenderColumn({ isRowRemoved: removedIds('p-video') })
+      expect(within(rowFor('p-video')).getByTestId('live-world-removed')).toBeInTheDocument()
+      expect(within(rowFor('p-video')).getByTestId('live-world-reply-as')).toBeDisabled()
+
+      rerenderColumn({ isRowRemoved: removedIds() })
+      expect(screen.queryByTestId('live-world-removed')).toBeNull()
+      expect(within(rowFor('p-video')).getByTestId('live-world-reply-as')).toBeEnabled()
+    })
+
+    it('marks nothing when the prop is absent', async () => {
+      await loaded()
+      expect(screen.queryByTestId('live-world-removed')).toBeNull()
+    })
   })
 
   it('J / K move the row focus; they stop at the ends', async () => {
@@ -886,7 +1137,7 @@ describe('AC6 — isolation and scope', () => {
     expect(screen.queryByText(/no posts in this exercise yet/i)).toBeNull()
   })
 
-  it('shows an inline error with Retry when the persona directory fails — posts cannot be attributed', async () => {
+  it('shows an inline error with Retry when the persona directory fails — authors read UNKNOWN, no post hidden', async () => {
     mockedResolveFeed.mockResolvedValue(feedFixture())
     mockedUsePersonas.mockReturnValue({
       personas: [],
@@ -897,7 +1148,14 @@ describe('AC6 — isolation and scope', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('persona directory could not be loaded')
+    // Nothing is hidden because the directory failed: every post is listed, authors unknown.
+    await loadedRows()
+    expect(rowIds()).toEqual(['p-lookalike', 'p-reply', 'p-video'])
+    expect(within(rowFor('p-video')).getByTestId('live-world-author'))
+      .toHaveTextContent(/^UNKNOWN AUTHOR · /)
     expect(screen.queryByText(/no posts in this exercise yet/i)).toBeNull()
+    // ... and the failed directory is not hammered by the unknown-author refresh.
+    expect(mockedInvalidatePersonas).not.toHaveBeenCalled()
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }))
     expect(mockedInvalidatePersonas).toHaveBeenCalledTimes(1)

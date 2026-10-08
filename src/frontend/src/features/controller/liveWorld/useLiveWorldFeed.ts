@@ -36,7 +36,7 @@
  * (`isReading()` — scrolled down, or focus on a row below the top), and into
  * `rows` otherwise. Both collections are bounded (see `liveWorldModel`).
  *
- * ## Transport label and the polling-mode sweep
+ * ## Transport label, the polling-mode sweep, and the realtime count refresh
  * `FeedStreamSource.mode` is a plain getter, not a subscription, so it is read on
  * every applied batch and on a {@link MODE_SYNC_MS} timer. While the transport is
  * POLLING, the shared `realtimeFeed` polls the TOP-LEVEL feed only, which would
@@ -46,11 +46,19 @@
  * buffer-or-insert rule; known posts get fresh counts). A failed sweep is
  * silent: the transport is already shown as POLLING and the next tick retries.
  *
+ * While the transport is REALTIME the same merge-by-id sweep runs slowly
+ * ({@link COUNT_REFRESH_MS} +/- {@link COUNT_REFRESH_JITTER_MS}) so the counts on
+ * rows already listed keep moving (nothing pushes reaction counts). It stops on
+ * unmount or when the mode leaves REALTIME.
+ *
  * ## Lifetime
  * Unmounting stops the timers, drops the queue, unsubscribes and releases the
- * transport; a late response after unmount is ignored. The column keys its panel
- * by exercise, so an exercise switch is an unmount + fresh mount (nothing from
- * the old exercise survives).
+ * transport; a late response after unmount is ignored. `resolveFeed` takes no
+ * `AbortSignal` (it is the participant seam, F0's), so an in-flight read can't be
+ * cancelled on the wire — its result is simply discarded (`aliveRef`), and a
+ * single-flight guard stops a slow sweep from being stacked on itself. The
+ * column keys its panel by exercise, so an exercise switch is an unmount + fresh
+ * mount (nothing from the old exercise survives).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -79,6 +87,16 @@ export const POLLING_SWEEP_MS = 5000
 
 /** How often the (non-reactive) transport mode is re-read. */
 export const MODE_SYNC_MS = 1000
+
+/**
+ * Cadence of the slow COUNT-REFRESH sweep while the transport is REALTIME: nothing
+ * pushes reaction counts, so without it the engagement numbers on rows already
+ * listed would freeze at load time. Each delay is this plus or minus a random
+ * jitter of up to {@link COUNT_REFRESH_JITTER_MS}, so several consoles never sync
+ * their reads.
+ */
+export const COUNT_REFRESH_MS = 45_000
+export const COUNT_REFRESH_JITTER_MS = 15_000
 
 /** Progress of the first baseline read. */
 export type LiveWorldLoadStatus = 'loading' | 'ready' | 'error'
@@ -236,6 +254,24 @@ export function useLiveWorldFeed({
     }
     if (previous === 'polling' && mode === 'realtime') void load('sweep')
     return undefined
+  }, [mode, load])
+
+  // Slow count refresh while REALTIME (see the module header). A self-rescheduling
+  // timeout (not an interval) so every delay carries its own jitter.
+  useEffect(() => {
+    if (mode !== 'realtime') return undefined
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const schedule = () => {
+      const jitter = (Math.random() * 2 - 1) * COUNT_REFRESH_JITTER_MS
+      timer = setTimeout(() => {
+        void load('sweep')
+        schedule()
+      }, COUNT_REFRESH_MS + jitter)
+    }
+    schedule()
+    return () => {
+      if (timer !== null) clearTimeout(timer)
+    }
   }, [mode, load])
 
   const retry = useCallback(() => {

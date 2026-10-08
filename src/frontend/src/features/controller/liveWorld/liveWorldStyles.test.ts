@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest'
 import { contrastRatio } from '@/test/contrast'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
-import { liveWorldTokens, monoMeta } from './liveWorldStyles'
+import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 
 const NORMAL_TEXT = 4.5
 const NON_TEXT = 3
@@ -68,5 +68,23 @@ describe('liveWorldTokens provenance (staff world)', () => {
 
   it('is a monospaced metadata stack', () => {
     expect(liveWorldTokens.mono).toMatch(/monospace/)
+  })
+})
+
+describe('srOnly', () => {
+  it('uses pixel STRINGS: under MUI sx a bare 1 means 100% and margin -1 means -8px', () => {
+    expect(srOnly.width).toBe('1px')
+    expect(srOnly.height).toBe('1px')
+    expect(srOnly.margin).toBe('-1px')
+    for (const value of [srOnly.width, srOnly.height, srOnly.margin]) {
+      expect(typeof value).toBe('string')
+    }
+  })
+
+  it('is absolutely positioned, clipped and non-wrapping (visually hidden, still readable)', () => {
+    expect(srOnly.position).toBe('absolute')
+    expect(srOnly.overflow).toBe('hidden')
+    expect(srOnly.clip).toBe('rect(0 0 0 0)')
+    expect(srOnly.whiteSpace).toBe('nowrap')
   })
 })

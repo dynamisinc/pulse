@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveFeed } from '@/features/social/services/feedService'
 import {
   ARRIVAL_BATCH_MS,
+  COUNT_REFRESH_JITTER_MS,
+  COUNT_REFRESH_MS,
   MODE_SYNC_MS,
   POLLING_SWEEP_MS,
   useLiveWorldFeed,
@@ -254,7 +256,7 @@ describe('polling-mode sweep (replies would otherwise be missed)', () => {
     expect(mockedResolveFeed).toHaveBeenCalledTimes(1)
   })
 
-  it('does NOT sweep while realtime, and fills the gap ONCE when polling recovers', async () => {
+  it('does not run the 5s polling sweep while realtime, and fills the gap ONCE when polling recovers', async () => {
     source.mode = 'polling'
     const { result } = await mount()
     mockedResolveFeed.mockClear()
@@ -267,7 +269,111 @@ describe('polling-mode sweep (replies would otherwise be missed)', () => {
 
     mockedResolveFeed.mockClear()
     await advance(POLLING_SWEEP_MS * 3)
-    expect(mockedResolveFeed).not.toHaveBeenCalled() // realtime: no polling of our own
+    expect(mockedResolveFeed).not.toHaveBeenCalled() // realtime: no 5s polling of our own
+  })
+})
+
+describe('slow count refresh while REALTIME (L-3)', () => {
+  let random: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    random = vi.spyOn(Math, 'random').mockReturnValue(0.5) // zero jitter: exactly 45s
+  })
+
+  afterEach(() => {
+    random.mockRestore()
+  })
+
+  it('re-reads the baseline every ~45s so counts on listed rows keep moving, until unmount', async () => {
+    mockedResolveFeed.mockResolvedValue([post('a', { scenarioTime: at(1) })])
+    const { result, unmount } = await mount()
+    expect(mockedResolveFeed).toHaveBeenCalledTimes(1) // the baseline
+
+    mockedResolveFeed.mockResolvedValue([
+      post('a', { scenarioTime: at(1), counts: { reply: 2, repost: 3, like: 41 } }),
+    ])
+    await advance(COUNT_REFRESH_MS - 1)
+    expect(mockedResolveFeed).toHaveBeenCalledTimes(1)
+    expect(result.current.rows[0]?.view.counts.like).toBe(0)
+
+    await advance(1)
+    expect(mockedResolveFeed).toHaveBeenCalledTimes(2)
+    expect(mockedResolveFeed).toHaveBeenLastCalledWith('all', { includeReplies: true })
+    expect(result.current.rows[0]?.view.counts).toMatchObject({ reply: 2, repost: 3, like: 41 })
+
+    await advance(COUNT_REFRESH_MS) // ... and again
+    expect(mockedResolveFeed).toHaveBeenCalledTimes(3)
+
+    unmount()
+    expect(vi.getTimerCount()).toBe(0) // the refresh timer is gone
+    await advance(COUNT_REFRESH_MS * 3)
+    expect(mockedResolveFeed).toHaveBeenCalledTimes(3)
+  })
+
+  it('jitters each delay by +/- 15s around 45s', async () => {
+    mockedResolveFeed.mockResolvedValue([])
+    random.mockReturnValue(0) // the shortest delay: 45s - 15s
+    await mount()
+    mockedResolveFeed.mockClear()
+    await advance(COUNT_REFRESH_MS - COUNT_REFRESH_JITTER_MS - 1)
+    expect(mockedResolveFeed).not.toHaveBeenCalled()
+
+    random.mockReturnValue(1) // the NEXT delay is drawn when this one fires: the longest, 45s + 15s
+    await advance(1)
+    expect(mockedResolveFeed).toHaveBeenCalledTimes(1)
+
+    mockedResolveFeed.mockClear()
+    await advance(COUNT_REFRESH_MS + COUNT_REFRESH_JITTER_MS - 1)
+    expect(mockedResolveFeed).not.toHaveBeenCalled()
+    await advance(1)
+    expect(mockedResolveFeed).toHaveBeenCalledTimes(1)
+  })
+
+  it('merges by id through the same buffer-or-insert path: new posts are held while reading', async () => {
+    mockedResolveFeed.mockResolvedValue([post('a', { scenarioTime: at(1) })])
+    const { result } = await mount()
+    reading = true
+    mockedResolveFeed.mockResolvedValue([
+      post('new', { scenarioTime: at(30) }),
+      post('a', { scenarioTime: at(1), counts: { reply: 0, repost: 0, like: 9 } }),
+    ])
+    await advance(COUNT_REFRESH_MS)
+
+    expect(ids(result.current.rows)).toEqual(['a']) // the list did not shift
+    expect(result.current.rows[0]?.view.counts.like).toBe(9) // but the counts moved
+    expect(ids(result.current.pending)).toEqual(['new'])
+  })
+
+  it('does not run before the baseline has loaded, and a failed refresh is silent', async () => {
+    mockedResolveFeed.mockReturnValue(new Promise(() => {})) // the baseline never lands
+    await mount()
+    mockedResolveFeed.mockClear()
+    await advance(COUNT_REFRESH_MS * 2)
+    expect(mockedResolveFeed).not.toHaveBeenCalled()
+
+    mockedResolveFeed.mockResolvedValue([])
+    const second = await mount()
+    mockedResolveFeed.mockRejectedValue(new Error('flaky'))
+    await advance(COUNT_REFRESH_MS)
+    expect(second.result.current.status).toBe('ready')
+    expect(second.result.current.error).toBeUndefined()
+  })
+
+  it('hands over to the 5s polling sweep when the transport degrades, and back on recovery', async () => {
+    const { result } = await mount()
+    source.mode = 'polling'
+    await advance(MODE_SYNC_MS)
+    expect(result.current.mode).toBe('polling')
+
+    mockedResolveFeed.mockClear()
+    await advance(POLLING_SWEEP_MS)
+    expect(mockedResolveFeed).toHaveBeenCalledTimes(1) // the 5s polling sweep
+
+    source.mode = 'realtime'
+    await advance(MODE_SYNC_MS)
+    mockedResolveFeed.mockClear()
+    await advance(COUNT_REFRESH_MS)
+    expect(mockedResolveFeed).toHaveBeenCalledTimes(1) // the slow refresh, not the 5s one
   })
 })
 
