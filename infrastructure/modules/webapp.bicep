@@ -12,9 +12,9 @@ param aspnetcoreEnvironment string = 'Production'
 // Post media (demo-polish/01, story I1). KEYLESS: the API reaches the private container with its
 // system-assigned identity (below) through DefaultAzureCredential, which holds Storage Blob Data
 // Contributor on the account (modules/storage.bicep). No connection string or account key exists.
-@description('Azure:BlobStorage:Provider — Azure | Local | None (docs/features/demo-polish/implementation.md §1.7).')
+@description('Azure:BlobStorage:Provider — Azure | Local | None (docs/features/demo-polish/implementation.md §1.7). main.bicep passes None when storage is not deployed (uploads answer 503; fail closed).')
 param blobStorageProvider string = 'Azure'
-@description('Azure:BlobStorage:ServiceUri — the blob service endpoint, e.g. https://stpulseuat.blob.core.windows.net. No key, no SAS. Supplied by main.bicep as a plain local (not a storage-module output, which would be a module cycle).')
+@description('Azure:BlobStorage:ServiceUri — the blob service endpoint, e.g. https://stpulseuat.blob.core.windows.net. No key, no SAS. Supplied by main.bicep as a plain local (not a storage-module output, which would be a module cycle); empty when storage is not deployed.')
 param blobServiceUri string
 @description('Azure:BlobStorage:ContainerName — the private post-media container (the same local main.bicep passes to modules/storage.bicep).')
 param blobStorageContainerName string = 'post-media'

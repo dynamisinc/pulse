@@ -302,7 +302,9 @@ the OpenAI surface's `cognitiveservices.azure.com`), data-plane role **`Cognitiv
 - **App settings** (`webapp.bicep`): `Azure__BlobStorage__Provider = Azure`,
   `Azure__BlobStorage__ServiceUri = https://stpulseuat.blob.core.windows.net`,
   `Azure__BlobStorage__ContainerName = post-media`. The URI is a plain `main.bicep` local, not a
-  storage-module output (that would be a webApp↔storage cycle, as with `ai`).
+  storage-module output (that would be a webApp↔storage cycle, as with `ai`). With
+  `deployStorage = false` the app fails closed instead: `Provider = None` (uploads answer 503, the rest
+  of the API is unaffected) and an empty `ServiceUri`.
 - **Deploy prerequisite.** The grant is a `roleAssignments` write, so the deploy SP needs
   role-assignment write on the RG. This is the same prerequisite `deployAi` already has (see the
   `deployAi` section above).

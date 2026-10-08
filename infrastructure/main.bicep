@@ -347,7 +347,11 @@ module webApp 'modules/webapp.bicep' = if (deployWebApp) {
     sqlConnectionString: deployDatabase ? database.outputs.connectionString! : ''
     // Keyless post media (demo-polish/01): endpoint + container only, from the plain locals above —
     // no connection string or account key exists (storage.bicep sets allowSharedKeyAccess: false).
-    blobServiceUri: blobServiceUri
+    // FAIL CLOSED without storage: Provider = None (uploads answer 503, the rest of the API is
+    // unaffected — implementation.md §1.7) and no service URI, rather than pointing the app at an
+    // account that was never deployed.
+    blobStorageProvider: deployStorage ? 'Azure' : 'None'
+    blobServiceUri: deployStorage ? blobServiceUri : ''
     blobStorageContainerName: blobStorageContainerName
     // The SignalR hub is hosted IN this Web API (ServiceMode Default), so the host — not the Function
     // App — reads this connection string. Empty when SignalR isn't deployed.
