@@ -21,6 +21,7 @@ using Pulse.WebApi.Features.OrganizationResolution;
 using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
+using Pulse.WebApi.Features.Social.Reactions; // demo-polish B3
 
 // Pulse.WebApi — the first runtime for the Pulse.Core engine (docs/BACKEND_ROADMAP.md §4, Phase B0).
 // This composition root is orchestrator-owned from here on: only a story that adds a *new* DI
@@ -174,6 +175,7 @@ builder.Services.AddSocialFeedRead();      // #270 GET /api/feed, /api/threads/{
 builder.Services.AddSocialPostWrite();     // #271 POST /api/posts (sanitize + stamp + telemetry + broadcast)
 builder.Services.AddSocialPersonaRead();   // #273 GET /api/personas
 builder.Services.AddSocialRealtimeHub();   // #272 exercise-grouped hub + IFeedBroadcaster impl
+builder.Services.AddSocialReactions(); // demo-polish B3
 
 // Engine runtime — Wave 2 (feature/engine-runtime), orchestrator-wired. AddReactionLoopHost (#285)
 // registers the in-process reaction-loop BackgroundService + the IEnginePublishService publish funnel
@@ -365,6 +367,7 @@ app.MapSocialThreadEndpoints();   // #270 GET /api/threads/{postId}
 // /auth/logout, SignalR negotiate); each FUTURE sim-write (E2 reply/react/follow/DM) must apply the same
 // guard — tracked for a defense-in-depth backstop before E2 participant writes land.
 app.MapGroup(string.Empty).DenyReadOnlySessions().MapSocialPostEndpoints();
+app.MapGroup(string.Empty).DenyReadOnlySessions().MapSocialReactionEndpoints(); // demo-polish B3
 
 app.MapSocialPersonaEndpoints();  // #273 GET /api/personas
 app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
