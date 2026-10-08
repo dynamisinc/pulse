@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Social;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Media;
 using Pulse.WebApi.Features.Social.Follows;
 
 /// <summary>
@@ -12,12 +13,19 @@ using Pulse.WebApi.Features.Social.Follows;
 /// <see cref="PulseDbContext"/>'s central read-side global query filter (COR-001) — this service never
 /// applies or accepts its own <c>exerciseId</c> filter.
 /// </summary>
+/// <remarks>
+/// <b>Profile images (demo-polish BP).</b> Each persona's avatar and banner (<see cref="Persona.AvatarMediaId"/>
+/// / <see cref="Persona.BannerMediaId"/>) are signed into <c>avatarUrl</c> / <c>bannerUrl</c>: ONE scoped asset
+/// lookup and ONE signer call per read, both skipped when no persona has an image. An image id that does not
+/// resolve in scope yields no URL (DP-16: another exercise's asset is never signed).
+/// </remarks>
 public sealed class PersonaReadService
 {
     private readonly PulseDbContext _dbContext;
     private readonly FollowService _followService;
+    private readonly IMediaUrlSigner _mediaUrlSigner;
 
-    /// <summary>Creates the service with the injected persistence context and follow-graph read.</summary>
+    /// <summary>Creates the service with the injected persistence context, follow-graph read and URL signer.</summary>
     /// <param name="dbContext">The scoped EF Core context (already bound to the request's exercise scope).</param>
     /// <param name="followService">
     /// The follow graph (<c>profiles-social-graph/07</c>) the displayed counts compose from. Reading it at
@@ -26,13 +34,16 @@ public sealed class PersonaReadService
     /// <c>05-audience-magnitude</c>'s formula needs both figures wherever a profile renders — so composing
     /// here avoids the second, client-sequenced round trip a dedicated follow-summary endpoint would force.
     /// </param>
-    public PersonaReadService(PulseDbContext dbContext, FollowService followService)
+    /// <param name="mediaUrlSigner">Signs the avatar/banner read URLs (BM, or the unconfigured fallback).</param>
+    public PersonaReadService(PulseDbContext dbContext, FollowService followService, IMediaUrlSigner mediaUrlSigner)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(followService);
+        ArgumentNullException.ThrowIfNull(mediaUrlSigner);
 
         _dbContext = dbContext;
         _followService = followService;
+        _mediaUrlSigner = mediaUrlSigner;
     }
 
     /// <summary>
@@ -49,11 +60,14 @@ public sealed class PersonaReadService
     {
         var personas = await ReadScopedAsync(cancellationToken);
         var edges = await _followService.GetEdgeCountsAsync(cancellationToken);
+        var urls = await SignProfileImagesAsync(personas, cancellationToken);
 
         return personas.ConvertAll(persona => PersonaResponseDto.FromPersona(
             persona,
             edges.InboundFor(persona.Id),
-            edges.OutboundFor(persona.Id)));
+            edges.OutboundFor(persona.Id),
+            UrlFor(persona.AvatarMediaId, urls),
+            UrlFor(persona.BannerMediaId, urls)));
     }
 
     /// <summary>
@@ -68,11 +82,77 @@ public sealed class PersonaReadService
     {
         var personas = await ReadScopedAsync(cancellationToken);
         var edges = await _followService.GetEdgeCountsAsync(cancellationToken);
+        var urls = await SignProfileImagesAsync(personas, cancellationToken);
 
-        return personas.ConvertAll(persona => StaffPersonaResponseDto.FromPersona(
+        return personas.ConvertAll(persona => ToStaffDto(persona, edges, urls));
+    }
+
+    /// <summary>
+    /// Reads ONE persona in the caller's resolved exercise scope, projected to the STAFF shape (with signed
+    /// avatar/banner URLs) — the read-back the persona edit endpoint answers with. The lookup runs through the
+    /// central query filter, so another exercise's persona is indistinguishable from an unknown id.
+    /// </summary>
+    /// <param name="personaId">The persona instance id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The staff projection, or <c>null</c> when no such persona is in scope.</returns>
+    public async Task<StaffPersonaResponseDto?> GetStaffPersonaAsync(Guid personaId, CancellationToken cancellationToken)
+    {
+        var persona = await _dbContext.Personas
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == personaId, cancellationToken);
+
+        if (persona is null)
+        {
+            return null;
+        }
+
+        var edges = await _followService.GetEdgeCountsAsync(cancellationToken);
+        var urls = await SignProfileImagesAsync([persona], cancellationToken);
+
+        return ToStaffDto(persona, edges, urls);
+    }
+
+    private static StaffPersonaResponseDto ToStaffDto(
+        Persona persona, FollowEdgeCounts edges, IReadOnlyDictionary<Guid, string> urls) =>
+        StaffPersonaResponseDto.FromPersona(
             persona,
             edges.InboundFor(persona.Id),
-            edges.OutboundFor(persona.Id)));
+            edges.OutboundFor(persona.Id),
+            UrlFor(persona.AvatarMediaId, urls),
+            UrlFor(persona.BannerMediaId, urls));
+
+    private static string? UrlFor(Guid? mediaId, IReadOnlyDictionary<Guid, string> urls) =>
+        mediaId is { } id ? urls.GetValueOrDefault(id) : null;
+
+    /// <summary>
+    /// Signs every avatar and banner on the page: one scoped asset query and one signer call, both skipped when
+    /// no persona has an image (so a host with no media storage never reaches the signer).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<Guid, string>> SignProfileImagesAsync(
+        IReadOnlyCollection<Persona> personas, CancellationToken cancellationToken)
+    {
+        var mediaIds = personas
+            .SelectMany(persona => new[] { persona.AvatarMediaId, persona.BannerMediaId })
+            .OfType<Guid>()
+            .Distinct()
+            .ToArray();
+
+        if (mediaIds.Length == 0)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        var assets = await _dbContext.MediaAssets
+            .AsNoTracking()
+            .Where(asset => mediaIds.Contains(asset.Id))
+            .ToListAsync(cancellationToken);
+
+        if (assets.Count == 0)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        return await _mediaUrlSigner.GetReadUrlsAsync(assets, cancellationToken);
     }
 
     /// <summary>The one scoped entity read both projections share (central query filter only, COR-001).</summary>

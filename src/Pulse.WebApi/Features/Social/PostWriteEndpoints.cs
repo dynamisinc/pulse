@@ -1,6 +1,5 @@
 namespace Pulse.WebApi.Features.Social;
 
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -35,6 +34,12 @@ public static class PostWriteEndpoints
     /// slice owns it (<c>AddStaffIdentity</c>'s fail-closed default, <c>Replace</c>d by <c>AddSessions</c> with
     /// the real one), and a Social slice contributing its own would be a second opinion about who is staff.
     /// </para>
+    /// <para>
+    /// <b>demo-polish BP.</b> Also registers the participant projector the broadcast and the 201 body use, and
+    /// <c>TryAdd</c>s fail-closed fallbacks for the reply-parent resolver, engagement reader and URL signer
+    /// (<see cref="PostSeamFallbacks"/>). The real B2/B3/BM implementations, registered with a plain <c>Add*</c>,
+    /// replace them.
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <returns>The same collection, for chaining.</returns>
@@ -48,6 +53,7 @@ public static class PostWriteEndpoints
 
         services.AddScoped<PostAttributionResolver>();
         services.AddScoped<PostIngestService>();
+        services.TryAddPostSeamFallbacks();
 
         return services;
     }
@@ -141,9 +147,13 @@ public static class PostWriteEndpoints
                 return Results.BadRequest(result.ValidationError);
 
             case PostIngestOutcome.Created when result.Post is { } post:
+                // The participant body is the SAME projection that was broadcast (counts = baseline + real,
+                // media URLs, inReplyTo; no viewer, no provenance, no baseline field). The staff body borrows its
+                // media/inReplyTo and keeps the provenance the console reads off its own write.
+                var participantView = result.ParticipantView ?? ParticipantPostDto.FromPost(post);
                 return string.Equals(post.Origin, "participant", StringComparison.Ordinal)
-                    ? Results.Json(ParticipantPostDto.FromPost(post), statusCode: StatusCodes.Status201Created)
-                    : Results.Json(StaffPostDto.FromPost(post), statusCode: StatusCodes.Status201Created);
+                    ? Results.Json(participantView, statusCode: StatusCodes.Status201Created)
+                    : Results.Json(StaffPostDto.FromPost(post, participantView), statusCode: StatusCodes.Status201Created);
 
             default:
                 // Unreachable: a Created outcome always carries a post. Fail closed rather than emit a bare 200.
@@ -203,10 +213,23 @@ public sealed class CreatePostRequest
     public string? InjectId { get; init; }
 
     /// <summary>
-    /// Media attachments — ACCEPTED but NOT stored this phase (there is no media storage in B1). Bound as an
-    /// opaque element so any shape is tolerated on the wire without being persisted or re-served.
+    /// Media attachments (demo-polish BP): up to four images or exactly one video, never mixed. Each
+    /// <c>mediaId</c> must name an asset in the caller's exercise (a participant: one they uploaded), with alt
+    /// text. Legacy placeholders with no <c>mediaId</c> on ANY entry are ignored (DP-6).
     /// </summary>
-    public JsonElement? Media { get; init; }
+    public IReadOnlyList<CreatePostMediaRequest>? Media { get; init; }
+
+    /// <summary>
+    /// The post this one replies to. Resolved inside the caller's exercise through the reply-parent seam (DP-8);
+    /// a value that does not resolve is a 400, never a silent top-level post.
+    /// </summary>
+    public string? ParentPostId { get; init; }
+
+    /// <summary>
+    /// The seeded engagement baseline — honoured ONLY for a staff <c>controller-as-persona</c> write, ignored
+    /// for every other caller. Never echoed on a participant payload (XC-002).
+    /// </summary>
+    public EngagementBaselineRequest? EngagementBaseline { get; init; }
 }
 
 /// <summary>
@@ -239,7 +262,10 @@ public sealed class StaffPostDto
     [JsonPropertyName("text")]
     public required string Text { get; init; }
 
-    /// <summary>Engagement counts, seeded to zero for a freshly-created post (order reply · repost · like, R-002).</summary>
+    /// <summary>
+    /// Engagement counts for a freshly-created post: the seeded baseline plus zero real engagement (order reply ·
+    /// repost · like, R-002).
+    /// </summary>
     [JsonPropertyName("counts")]
     public required ParticipantPostCounts Counts { get; init; }
 
@@ -260,10 +286,30 @@ public sealed class StaffPostDto
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? InjectId { get; init; }
 
+    /// <summary>The post's media attachments with signed read URLs; omitted from the JSON when there are none.</summary>
+    [JsonPropertyName("media")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PostMediaDto>? Media { get; init; }
+
+    /// <summary>The post this one replies to; omitted from the JSON for a top-level post.</summary>
+    [JsonPropertyName("inReplyTo")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PostInReplyToDto? InReplyTo { get; init; }
+
     /// <summary>Projects a persisted staff-authored post to the staff response shape (provenance retained).</summary>
     /// <param name="post">The persisted post.</param>
     /// <returns>The staff-visible projection of <paramref name="post"/>.</returns>
-    public static StaffPostDto FromPost(Post post)
+    public static StaffPostDto FromPost(Post post) => FromPost(post, participantView: null);
+
+    /// <summary>
+    /// Projects a persisted staff-authored post to the staff response shape (provenance retained), taking
+    /// <c>media</c> and <c>inReplyTo</c> from the post's participant projection. <c>counts</c> is the seeded
+    /// baseline plus zero real engagement.
+    /// </summary>
+    /// <param name="post">The persisted post.</param>
+    /// <param name="participantView">The post's participant projection, or <c>null</c> for none.</param>
+    /// <returns>The staff-visible projection of <paramref name="post"/>.</returns>
+    public static StaffPostDto FromPost(Post post, ParticipantPostDto? participantView)
     {
         ArgumentNullException.ThrowIfNull(post);
 
@@ -274,11 +320,13 @@ public sealed class StaffPostDto
             AuthorPersonaId = post.AuthorPersonaId.ToString(),
             ActingHumanId = post.ActingHumanId,
             Text = post.Body,
-            Counts = new ParticipantPostCounts(0, 0, 0),
+            Counts = new ParticipantPostCounts(post.BaselineReplyCount, post.BaselineRepostCount, post.BaselineLikeCount),
             CreatedWallClock = post.CreatedWallClock.ToString("O"),
             ScenarioTime = post.CreatedScenarioTime.ToString("O"),
             Origin = post.Origin,
             InjectId = post.InjectId,
+            Media = participantView?.Media,
+            InReplyTo = participantView?.InReplyTo,
         };
     }
 }

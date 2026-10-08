@@ -1,11 +1,15 @@
 namespace Pulse.WebApi.Features.Social;
 
 using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Realtime;
+using Pulse.WebApi.Features.Social.Threads;
 
 /// <summary>
 /// The server-side realization of <c>createPost</c>'s "blessed ingest path" (<c>postService.ts:12-19</c>):
@@ -42,6 +46,14 @@ using Pulse.WebApi.Features.Realtime;
 /// <see cref="PostAttributionResolver"/> (only <c>participant</c> and <c>controller-as-persona</c> are
 /// reachable over HTTP at all).
 /// </para>
+/// <para>
+/// <b>Media, replies and the engagement baseline (demo-polish BP).</b> Attachments are validated against the
+/// caller's exercise (and, for a participant, against the caller's own uploads) and written as
+/// <see cref="PostMediaItem"/> rows in the SAME unit of work as the post and its event. A reply parent is
+/// resolved through the <see cref="IReplyParentResolver"/> seam (DP-8). The seeded engagement baseline is honoured
+/// only for a staff <c>controller-as-persona</c> write. The broadcast carries the participant projection
+/// (<see cref="IParticipantPostProjector"/>), without viewer state.
+/// </para>
 /// </remarks>
 public sealed partial class PostIngestService
 {
@@ -54,11 +66,38 @@ public sealed partial class PostIngestService
         "inject",
     };
 
+    /// <summary>The <c>origin</c> of a participant writing as their own bound persona.</summary>
+    private const string ParticipantOrigin = "participant";
+
+    /// <summary>The <c>origin</c> of a staff console operating a persona — the only one that may seed a baseline.</summary>
+    private const string ControllerAsPersonaOrigin = "controller-as-persona";
+
+    /// <summary>The most images one post may carry.</summary>
+    private const int MaxImagesPerPost = 4;
+
+    /// <summary>The largest seeded engagement baseline a staff write may set, per count.</summary>
+    private const int MaxEngagementBaseline = 1_000_000;
+
+    /// <summary>
+    /// The ONE message for any attachment id that does not resolve to a usable asset: unparseable, unknown, in
+    /// another exercise, or (for a participant) uploaded by someone else. Identical text, so the response never
+    /// confirms that another exercise's or another participant's asset exists (COR-001, DP-16).
+    /// </summary>
+    private const string MediaNotFoundMessage = "One or more media items could not be found.";
+
+    /// <summary>
+    /// The ONE message for a reply parent that does not resolve: unparseable, unknown, in another exercise, or
+    /// soft-deleted (COR-001, DP-16). Also the answer when no resolver is available.
+    /// </summary>
+    private const string ParentNotFoundMessage = "parentPostId does not name a post in this exercise.";
+
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly IFeedBroadcaster _broadcaster;
     private readonly IReadOnlyList<IPostPublishedObserver> _observers;
     private readonly ILogger<PostIngestService> _logger;
+    private readonly IReplyParentResolver? _replyParentResolver;
+    private readonly IParticipantPostProjector? _projector;
 
     /// <summary>Creates the ingest service with its persistence, scope, and broadcast collaborators.</summary>
     /// <param name="dbContext">The persistence context the post and its telemetry event are written through.</param>
@@ -69,12 +108,22 @@ public sealed partial class PostIngestService
     /// engine-runtime/06). Optional: DI supplies every registered observer, possibly none.
     /// </param>
     /// <param name="logger">Diagnostics logger for an observer that throws; optional.</param>
+    /// <param name="replyParentResolver">
+    /// Resolves a reply's <c>parentPostId</c> inside the scope (DP-8). Optional: when absent, a non-empty
+    /// <c>parentPostId</c> is refused with a 400 — never written as a silent top-level post.
+    /// </param>
+    /// <param name="projector">
+    /// Builds the participant projection for the broadcast and the response. Optional: when absent, the
+    /// pre-demo <see cref="ParticipantPostDto.FromPost"/> shape is used, exactly as before.
+    /// </param>
     public PostIngestService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         IFeedBroadcaster broadcaster,
         IEnumerable<IPostPublishedObserver>? observers = null,
-        ILogger<PostIngestService>? logger = null)
+        ILogger<PostIngestService>? logger = null,
+        IReplyParentResolver? replyParentResolver = null,
+        IParticipantPostProjector? projector = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -85,6 +134,8 @@ public sealed partial class PostIngestService
         _broadcaster = broadcaster;
         _observers = observers?.ToList() ?? [];
         _logger = logger ?? NullLogger<PostIngestService>.Instance;
+        _replyParentResolver = replyParentResolver;
+        _projector = projector;
     }
 
     /// <summary>
@@ -94,7 +145,8 @@ public sealed partial class PostIngestService
     /// </summary>
     /// <param name="request">
     /// The create-post request — read ONLY for <c>text</c> / <c>scenarioTime</c> / <c>timeZone</c> /
-    /// <c>injectId</c> / <c>media</c>. Any <c>exerciseId</c> it carries is ignored for scoping, and its
+    /// <c>injectId</c> / <c>media</c> / <c>parentPostId</c> / <c>engagementBaseline</c>. Any <c>exerciseId</c> it
+    /// carries is ignored for scoping, and its
     /// <c>authorPersonaId</c> / <c>origin</c> / <c>actingHumanId</c> are ignored entirely in favour of
     /// <paramref name="attribution"/>.
     /// </param>
@@ -177,6 +229,30 @@ public sealed partial class PostIngestService
             return PostIngestResult.Invalid("scenarioTime must be an ISO-8601 instant.");
         }
 
+        // 2b. demo-polish BP: the engagement baseline (staff only), the attachments and the reply parent. All of
+        //     them are settled BEFORE anything is added to the unit of work, so a refusal writes nothing.
+        var baseline = ValidateBaseline(request.EngagementBaseline, origin);
+        if (baseline.Error is { } baselineError)
+        {
+            return PostIngestResult.Invalid(baselineError);
+        }
+
+        var media = await ResolveMediaAsync(request.Media, exerciseId, origin, attribution.ActingHumanId, cancellationToken);
+        if (media.Error is { } mediaError)
+        {
+            return PostIngestResult.Invalid(mediaError);
+        }
+
+        Guid? parentPostId = null;
+        if (!string.IsNullOrEmpty(request.ParentPostId))
+        {
+            parentPostId = await ResolveParentAsync(request.ParentPostId, exerciseId, cancellationToken);
+            if (parentPostId is null)
+            {
+                return PostIngestResult.Invalid(ParentNotFoundMessage);
+            }
+        }
+
         // 3. Sanitize server-side (NFR-004) — strip, never encode.
         var body = PostSanitizer.Sanitize(request.Text);
 
@@ -210,7 +286,25 @@ public sealed partial class PostIngestService
             Origin = origin,
             ActingHumanId = actingHumanId,
             InjectId = injectId,
+            ParentPostId = parentPostId,
+            BaselineLikeCount = baseline.Like,
+            BaselineRepostCount = baseline.Repost,
+            BaselineReplyCount = baseline.Reply,
         };
+
+        // 4b. One PostMediaItem per attachment, in request order, stamped with the SAME scope as the post (DP-2).
+        var mediaItems = media.Items
+            .Select((item, order) => new PostMediaItem
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exerciseId,
+                PostId = post.Id,
+                MediaAssetId = item.AssetId,
+                PosterMediaAssetId = item.PosterId,
+                Alt = item.Alt,
+                Order = order,
+            })
+            .ToList();
 
         // 5. Exactly ONE XC-004 'post' event, server-side, against the locked v0 envelope. actor.kind is always
         //    'persona' — even an engine-/inject-origin post is attributed to the persona it was posted AS; `origin`
@@ -241,9 +335,18 @@ public sealed partial class PostIngestService
             EmittedAt = now,
         };
 
-        // Add the post AND its telemetry event, then persist ONCE — one unit of work. The write-guard validates
-        // ExerciseId != Guid.Empty on both scoped rows (COR-001), so exactly one telemetry row lands per post.
+        // A reply is the same single event, typed 'reply' and naming its parent (implementation.md §1.8).
+        if (parentPostId is { } parentId)
+        {
+            telemetryEvent.EventType = "reply";
+            telemetryEvent.Payload = JsonSerializer.Serialize(new ReplyTelemetryPayload(parentId.ToString()));
+        }
+
+        // Add the post, its media items AND its telemetry event, then persist ONCE — one unit of work. The
+        // write-guard validates ExerciseId != Guid.Empty on every scoped row (COR-001), so exactly one telemetry
+        // row lands per post, and the items land with it or not at all.
         _dbContext.Posts.Add(post);
+        _dbContext.PostMediaItems.AddRange(mediaItems);
         _dbContext.TelemetryEvents.Add(telemetryEvent);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
@@ -253,11 +356,190 @@ public sealed partial class PostIngestService
         //    outside the engine for good.
         NotifyObservers(exerciseId, post);
 
-        // 7. Fan out the participant-safe projection only (XC-002 — the broadcast never carries provenance).
-        await _broadcaster.BroadcastPostAsync(exerciseId, ParticipantPostDto.FromPost(post), cancellationToken);
+        // 7. Fan out the participant-safe projection only (XC-002 — the broadcast never carries provenance or a
+        //    baseline). No viewer state: one payload goes to every member of the exercise group.
+        var participantView = _projector is null
+            ? ParticipantPostDto.FromPost(post)
+            : (await _projector.ProjectAsync([post], new PostProjectionOptions(), cancellationToken))[0];
+        await _broadcaster.BroadcastPostAsync(exerciseId, participantView, cancellationToken);
 
-        // 8. Hand the full post back to the endpoint, which shapes the response by caller role.
-        return PostIngestResult.Created(post);
+        // 8. Hand the full post (and its projection) back to the endpoint, which shapes the response by caller role.
+        return PostIngestResult.Created(post, participantView);
+    }
+
+    /// <summary>
+    /// Validates the seeded engagement baseline. It is honoured ONLY for a staff <c>controller-as-persona</c>
+    /// write (the console seeding the fiction); for every other origin it is ignored entirely, so a participant
+    /// can neither set nor probe it. Each supplied value must be 0..1,000,000; an omitted value is 0.
+    /// </summary>
+    private static BaselineResolution ValidateBaseline(EngagementBaselineRequest? requested, string origin)
+    {
+        if (requested is null || !string.Equals(origin, ControllerAsPersonaOrigin, StringComparison.Ordinal))
+        {
+            return BaselineResolution.Zero;
+        }
+
+        if (!InBaselineRange(requested.Like) || !InBaselineRange(requested.Repost) || !InBaselineRange(requested.Reply))
+        {
+            return new BaselineResolution(0, 0, 0, "engagementBaseline values must be between 0 and 1000000.");
+        }
+
+        return new BaselineResolution(requested.Like ?? 0, requested.Repost ?? 0, requested.Reply ?? 0, null);
+    }
+
+    private static bool InBaselineRange(int? value) => value is null or (>= 0 and <= MaxEngagementBaseline);
+
+    /// <summary>
+    /// Validates the requested attachments and resolves them to in-scope assets: at most four images or exactly
+    /// one video (never mixed), no duplicate ids, sanitized alt text of 1..1000 characters, and every asset and
+    /// poster found in the CALLER's exercise. A participant may attach only assets they uploaded themselves.
+    /// </summary>
+    /// <remarks>
+    /// <b>DP-6 legacy placeholders.</b> The pre-demo frontend sends <c>media: [{kind, alt}]</c> with no
+    /// <c>mediaId</c>. When NO entry has a <c>mediaId</c>, the entries are ignored (logged) and the post is
+    /// written as text. A mix of entries with and without one is refused.
+    /// </remarks>
+    private async Task<MediaResolution> ResolveMediaAsync(
+        IReadOnlyList<CreatePostMediaRequest?>? requested,
+        Guid exerciseId,
+        string origin,
+        string actingHumanId,
+        CancellationToken cancellationToken)
+    {
+        if (requested is null || requested.Count == 0)
+        {
+            return MediaResolution.None;
+        }
+
+        var withMediaId = requested.Count(entry => !string.IsNullOrEmpty(entry?.MediaId));
+        if (withMediaId == 0)
+        {
+            LogLegacyMediaIgnored(requested.Count, exerciseId);
+            return MediaResolution.None;
+        }
+
+        if (withMediaId != requested.Count)
+        {
+            return MediaResolution.Invalid(
+                "Every media entry must carry a mediaId; entries without one cannot be mixed with attachments.");
+        }
+
+        if (requested.Count > MaxImagesPerPost)
+        {
+            return MediaResolution.Invalid(MediaCountMessage());
+        }
+
+        var items = new List<RequestedMedia>(requested.Count);
+        foreach (var entry in requested)
+        {
+            if (!TryParseId(entry!.MediaId, out var assetId))
+            {
+                return MediaResolution.Invalid(MediaNotFoundMessage);
+            }
+
+            Guid? posterId = null;
+            if (!string.IsNullOrEmpty(entry.PosterMediaId))
+            {
+                if (!TryParseId(entry.PosterMediaId, out var parsedPosterId))
+                {
+                    return MediaResolution.Invalid(MediaNotFoundMessage);
+                }
+
+                posterId = parsedPosterId;
+            }
+
+            // NFR-004 strip-not-encode, then NFR-001: alt text is required on every attachment.
+            var alt = PostSanitizer.Sanitize(entry.Alt ?? string.Empty).Trim();
+            if (alt.Length == 0)
+            {
+                return MediaResolution.Invalid("alt text is required on every media item.");
+            }
+
+            if (alt.Length > PostMediaItem.MaxAltLength)
+            {
+                return MediaResolution.Invalid("alt text must be at most 1000 characters.");
+            }
+
+            items.Add(new RequestedMedia(assetId, posterId, alt));
+        }
+
+        if (items.DistinctBy(item => item.AssetId).Count() != items.Count)
+        {
+            return MediaResolution.Invalid("The same mediaId cannot be attached twice.");
+        }
+
+        // ONE scoped lookup for every attachment and poster. The explicit ExerciseId predicate restates the
+        // central filter at the call site (defense in depth, DP-16): another exercise's asset is invisible here,
+        // exactly like an unknown id.
+        var ids = items
+            .Select(item => item.AssetId)
+            .Concat(items.Where(item => item.PosterId is not null).Select(item => item.PosterId!.Value))
+            .Distinct()
+            .ToArray();
+
+        var assets = await _dbContext.MediaAssets
+            .AsNoTracking()
+            .Where(asset => ids.Contains(asset.Id) && asset.ExerciseId == exerciseId)
+            .ToDictionaryAsync(asset => asset.Id, cancellationToken);
+
+        var participantOnly = string.Equals(origin, ParticipantOrigin, StringComparison.Ordinal);
+        foreach (var id in ids)
+        {
+            // A participant may attach only their OWN uploads. Same text as unknown, so another participant's
+            // asset id is not confirmed to exist either.
+            if (!assets.TryGetValue(id, out var asset)
+                || (participantOnly && !string.Equals(asset.UploadedByHumanId, actingHumanId, StringComparison.Ordinal)))
+            {
+                return MediaResolution.Invalid(MediaNotFoundMessage);
+            }
+        }
+
+        var videos = items.Count(item => assets[item.AssetId].Kind == MediaKinds.Video);
+        var images = items.Count(item => assets[item.AssetId].Kind == MediaKinds.Image);
+        if (videos + images != items.Count || (videos > 0 && items.Count != 1))
+        {
+            return MediaResolution.Invalid(MediaCountMessage());
+        }
+
+        foreach (var item in items.Where(item => item.PosterId is not null))
+        {
+            if (assets[item.AssetId].Kind != MediaKinds.Video || assets[item.PosterId!.Value].Kind != MediaKinds.Image)
+            {
+                return MediaResolution.Invalid("posterMediaId must name an image and is only valid on a video.");
+            }
+        }
+
+        return new MediaResolution(items, null);
+    }
+
+    private static string MediaCountMessage() =>
+        $"A post may carry up to {MaxImagesPerPost} images or exactly 1 video, never both.";
+
+    private static bool TryParseId(string? value, out Guid id) =>
+        Guid.TryParse(value, out id) && id != Guid.Empty;
+
+    /// <summary>
+    /// Resolves a non-empty <c>parentPostId</c> through the <see cref="IReplyParentResolver"/> seam (DP-8).
+    /// Returns the parent id, or <c>null</c> for every refusal: no resolver, not resolved, or a resolved parent
+    /// that is somehow outside this exercise or soft-deleted (defense in depth over the resolver, DP-16).
+    /// </summary>
+    private async Task<Guid?> ResolveParentAsync(string parentPostId, Guid exerciseId, CancellationToken cancellationToken)
+    {
+        if (_replyParentResolver is null)
+        {
+            return null;
+        }
+
+        var resolution = await _replyParentResolver.ResolveAsync(parentPostId, cancellationToken);
+        if (resolution is not { Outcome: ReplyParentOutcome.Resolved, Parent: { } parent }
+            || parent.Id == Guid.Empty
+            || parent.ExerciseId != exerciseId
+            || parent.DeletedAt is not null)
+        {
+            return null;
+        }
+
+        return parent.Id;
     }
 
     /// <summary>
@@ -288,6 +570,32 @@ public sealed partial class PostIngestService
         Level = LogLevel.Error,
         Message = "Post-published observer {Observer} failed for post {PostId}; the post itself was committed.")]
     private partial void LogObserverFailed(Exception exception, string observer, Guid postId);
+
+    [LoggerMessage(
+        EventId = 2,
+        Level = LogLevel.Information,
+        Message = "Ignored {Count} legacy media placeholder(s) with no mediaId in exercise {ExerciseId} (DP-6); the post is written as text.")]
+    private partial void LogLegacyMediaIgnored(int count, Guid exerciseId);
+
+    /// <summary>One validated attachment: the asset, its optional poster override, and the sanitized alt text.</summary>
+    private sealed record RequestedMedia(Guid AssetId, Guid? PosterId, string Alt);
+
+    /// <summary>The outcome of attachment validation: the items to write, or the 400 reason.</summary>
+    private sealed record MediaResolution(IReadOnlyList<RequestedMedia> Items, string? Error)
+    {
+        public static MediaResolution None { get; } = new([], null);
+
+        public static MediaResolution Invalid(string error) => new([], error);
+    }
+
+    /// <summary>The validated baseline counts, or the 400 reason.</summary>
+    private sealed record BaselineResolution(int Like, int Repost, int Reply, string? Error)
+    {
+        public static BaselineResolution Zero { get; } = new(0, 0, 0, null);
+    }
+
+    /// <summary>The opaque XC-004 payload of a <c>reply</c> event.</summary>
+    private sealed record ReplyTelemetryPayload([property: JsonPropertyName("parentPostId")] string ParentPostId);
 }
 
 /// <summary>The outcome kind of a <see cref="PostIngestService.IngestAsync"/> call.</summary>
@@ -311,11 +619,13 @@ public enum PostIngestOutcome
 /// </summary>
 public sealed class PostIngestResult
 {
-    private PostIngestResult(PostIngestOutcome outcome, Post? post, string? validationError)
+    private PostIngestResult(
+        PostIngestOutcome outcome, Post? post, string? validationError, ParticipantPostDto? participantView = null)
     {
         Outcome = outcome;
         Post = post;
         ValidationError = validationError;
+        ParticipantView = participantView;
     }
 
     /// <summary>Which outcome occurred.</summary>
@@ -326,6 +636,13 @@ public sealed class PostIngestResult
 
     /// <summary>The validation message — non-null only when <see cref="Outcome"/> is <see cref="PostIngestOutcome.Invalid"/>.</summary>
     public string? ValidationError { get; }
+
+    /// <summary>
+    /// The participant projection that was broadcast (no viewer state) — non-null only when <see cref="Outcome"/>
+    /// is <see cref="PostIngestOutcome.Created"/>. The endpoint answers a participant with it and borrows its
+    /// <c>media</c>/<c>inReplyTo</c> for the staff shape, so neither is projected twice.
+    /// </summary>
+    public ParticipantPostDto? ParticipantView { get; }
 
     /// <summary>The fail-closed result for an unresolved exercise scope.</summary>
     /// <returns>A <see cref="PostIngestOutcome.ScopeUnresolved"/> result.</returns>
@@ -344,6 +661,17 @@ public sealed class PostIngestResult
     public static PostIngestResult Created(Post post)
     {
         ArgumentNullException.ThrowIfNull(post);
-        return new PostIngestResult(PostIngestOutcome.Created, post, null);
+        return new PostIngestResult(PostIngestOutcome.Created, post, null, ParticipantPostDto.FromPost(post));
+    }
+
+    /// <summary>A successful ingest together with the participant projection that was broadcast.</summary>
+    /// <param name="post">The persisted post.</param>
+    /// <param name="participantView">The participant projection of <paramref name="post"/> (no viewer state).</param>
+    /// <returns>A <see cref="PostIngestOutcome.Created"/> result.</returns>
+    public static PostIngestResult Created(Post post, ParticipantPostDto participantView)
+    {
+        ArgumentNullException.ThrowIfNull(post);
+        ArgumentNullException.ThrowIfNull(participantView);
+        return new PostIngestResult(PostIngestOutcome.Created, post, null, participantView);
     }
 }
