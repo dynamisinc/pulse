@@ -108,6 +108,44 @@ describe('ownPostStore.reset — own posts die with the session (M-4)', () => {
   })
 })
 
+describe('ownPostStore generation — a late 201 cannot refill the store after sign-out (W-3)', () => {
+  it('reset() bumps the generation, even when the store was already empty', () => {
+    const before = ownPostStore.getGeneration()
+
+    ownPostStore.reset()
+
+    expect(ownPostStore.getGeneration()).toBe(before + 1)
+  })
+
+  it('add() with the generation read at publish start registers while the session lives', () => {
+    const generation = ownPostStore.getGeneration()
+
+    ownPostStore.add(view('a'), generation)
+
+    expect(ownPostStore.has('a')).toBe(true)
+  })
+
+  it('add() with a STALE generation (the session ended in between) is ignored and wakes nobody', () => {
+    const generation = ownPostStore.getGeneration()
+    ownPostStore.reset()
+    const listener = vi.fn()
+    ownPostStore.subscribe(listener)
+
+    ownPostStore.add(view('late'), generation)
+
+    expect(ownPostStore.getAll()).toEqual([])
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('add() without a generation always registers (the original contract)', () => {
+    ownPostStore.reset()
+
+    ownPostStore.add(view('a'))
+
+    expect(ownPostStore.has('a')).toBe(true)
+  })
+})
+
 describe('one XC-002 media narrowing (S-1)', () => {
   it('postService re-exports the very function ownPostStore uses', () => {
     expect(narrowMediaFromPostService).toBe(narrowMedia)

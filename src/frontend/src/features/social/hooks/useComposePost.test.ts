@@ -232,7 +232,7 @@ function axiosFailure(status?: number): AxiosError {
 }
 
 describe('classifyPublishFailure — what a failure proves decides what the UI may offer (H-1, M-5)', () => {
-  it('no response (network down / timeout) and 5xx: the request did not land -> "failed" (Retry is safe)', () => {
+  it('no response (network down / timeout) and 500/502/503: normally nothing was created -> "failed" (Retry offered)', () => {
     for (const status of [undefined, 500, 502, 503]) {
       expect(classifyPublishFailure(axiosFailure(status), false)).toEqual({
         kind: 'failed',
@@ -241,12 +241,35 @@ describe('classifyPublishFailure — what a failure proves decides what the UI m
     }
   })
 
-  it('429 and 408 are also "failed" (nothing was created), with their own wording for 429', () => {
+  it('429 ALONE gets the rate-limit wording; 408 falls through to the normal "failed" message + Retry (W-2)', () => {
     expect(classifyPublishFailure(axiosFailure(429), false)).toEqual({
       kind: 'failed',
       message: publishRateLimitedMessage(false),
     })
-    expect(classifyPublishFailure(axiosFailure(408), false).kind).toBe('failed')
+    expect(classifyPublishFailure(axiosFailure(408), false)).toEqual({
+      kind: 'failed',
+      message: publishFailedMessage(false),
+    })
+    expect(publishFailedMessage(false)).not.toBe(publishRateLimitedMessage(false))
+  })
+
+  it('504 (gateway timeout: the origin may have committed) is "unconfirmed", NOT "failed" (S-1)', () => {
+    expect(classifyPublishFailure(axiosFailure(504), false)).toEqual({
+      kind: 'unconfirmed',
+      message: publishUnconfirmedMessage(false),
+    })
+    // Its neighbours are unchanged.
+    expect(classifyPublishFailure(axiosFailure(502), false).kind).toBe('failed')
+    expect(classifyPublishFailure(axiosFailure(503), false).kind).toBe('failed')
+  })
+
+  it('an AxiosError carrying a 2xx response (an unusable success) is "unconfirmed" (S-1)', () => {
+    for (const status of [200, 201, 204]) {
+      expect(classifyPublishFailure(axiosFailure(status), false)).toEqual({
+        kind: 'unconfirmed',
+        message: publishUnconfirmedMessage(false),
+      })
+    }
   })
 
   it('400 / 403 / 409 (and any other 4xx): the server refused -> "refused" (no Retry)', () => {

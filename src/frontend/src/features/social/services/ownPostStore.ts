@@ -104,6 +104,13 @@ let ownPosts: readonly ParticipantPostView[] = []
 
 const listeners = new Set<() => void>()
 
+/**
+ * Bumped by every `reset()` (sign-out). A publish captures it when it starts and
+ * passes it back to `add`, so a 201 that arrives AFTER the session ended cannot
+ * refill the store the next sign-in on this tab reads.
+ */
+let generation = 0
+
 function notify(): void {
   for (const listener of [...listeners]) listener()
 }
@@ -118,12 +125,21 @@ function has(postId: string): boolean {
   return ownPosts.some(post => post.id === postId)
 }
 
+/** The current generation (see {@link ownPostStore.add}); changes on every `reset()`. */
+function getGeneration(): number {
+  return generation
+}
+
 /**
  * Registers a just-published post. Idempotent by id: a second `add` of the same id
  * is a no-op (the 201 and a retried publish can both name it), so subscribers are
  * not woken for nothing and the list never holds a duplicate.
+ *
+ * Pass the `generation` read when the publish STARTED: if the session has ended since
+ * (`reset()` bumped it) the post is ignored. Omitted, it always registers.
  */
-function add(view: ParticipantPostView): void {
+function add(view: ParticipantPostView, atGeneration?: number): void {
+  if (atGeneration !== undefined && atGeneration !== generation) return
   if (has(view.id)) return
   ownPosts = [view, ...ownPosts].slice(0, OWN_POST_CAP)
   notify()
@@ -141,9 +157,11 @@ function subscribe(listener: () => void): () => void {
  * Forgets every own post and tells subscribers (a mounted feed drops the rows). The
  * sign-out path (`core/auth/endSession`) calls this so a post made in one session is
  * never merged into the next session's feed on the same tab. Listeners stay: they are
- * the mounted components', which unmount themselves.
+ * the mounted components', which unmount themselves. It also bumps the generation, so
+ * a publish still in flight cannot re-add its post afterwards.
  */
 function reset(): void {
+  generation += 1
   if (ownPosts.length === 0) return
   ownPosts = []
   notify()
@@ -151,6 +169,7 @@ function reset(): void {
 
 /** Test-only: forgets every own post and drops all listeners. */
 function resetForTests(): void {
+  generation += 1
   ownPosts = []
   listeners.clear()
 }
@@ -159,6 +178,7 @@ function resetForTests(): void {
 export const ownPostStore = {
   getAll,
   has,
+  getGeneration,
   add,
   subscribe,
   reset,

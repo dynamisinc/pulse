@@ -49,17 +49,28 @@
  * swallowed: the text and the tray stay exactly as they were and `publishError`
  * carries an in-fiction message. What the UI may OFFER depends on what the failure
  * proves (`publishErrorKind`, from {@link classifyPublishFailure}):
- *   - 'failed'      the request did not land (network down, 5xx, 408/429): safe to
- *                   offer RETRY — `publish()` again re-sends the same draft;
+ *   - 'failed'      the request failed in a way that NORMALLY means nothing was
+ *                   created (network down, most 5xx, 408/429): offer RETRY - calling
+ *                   `publish()` again re-sends the same draft. Not a guarantee: a
+ *                   network drop or a 5xx can still have landed after the server
+ *                   committed, and there is no idempotency key yet (a filed follow-up),
+ *                   so Retry is a deliberate author action, never automatic;
  *   - 'refused'     the server answered 4xx (400/403/409: lifecycle gate, read-only,
- *                   media not yours, …): the same draft would be refused again, so NO
+ *                   media not yours, ...): the same draft would be refused again, so NO
  *                   Retry; the message says so and editing the draft clears it;
- *   - 'unconfirmed' the server answered 2xx but the body could not be read (a plain
- *                   `Error`, not an axios failure): the post may ALREADY exist and
- *                   there is no idempotency key, so a Retry could double-post — NO
- *                   Retry; the author checks the feed (and may press Post deliberately).
+ *   - 'unconfirmed' the post may ALREADY exist: the server answered 2xx but the body
+ *                   could not be read (a plain `Error`, or an axios failure that
+ *                   carries a 2xx response), or a 504 gateway timeout (the origin may
+ *                   have committed). With no idempotency key a Retry could double-post
+ *                   - NO Retry; the author checks the feed (and may press Post
+ *                   deliberately).
  * While a publish is in flight the form locks (`isPublishing`), so nothing typed
  * after pressing Post can be cleared by the success.
+ *
+ * A 201 THAT OUTLIVES THE SESSION has no effect. `publish()` captures the own-post
+ * store's generation when it starts; `core/auth/endSession` bumps it (`reset()`), so a
+ * response that lands after sign-out neither refills the store the next sign-in reads
+ * nor calls the host's `onPosted`.
  *
  * CONTENT SECURITY (NFR-004). The body and every alt go through `sanitizeText`
  * before they leave the hook (the server sanitizes again — it is the authoritative
@@ -129,12 +140,12 @@ export const MEDIA_MIXED_MESSAGE = 'Attach up to 4 photos or 1 video, not both.'
 export const MEDIA_TOO_MANY_IMAGES_MESSAGE = `You can attach up to ${MAX_IMAGES} photos.`
 export const MEDIA_TOO_MANY_VIDEOS_MESSAGE = 'You can attach only 1 video.'
 
-/** Shown WITH Retry when the request did not land (network down, 5xx). */
+/** Shown WITH Retry when the request normally created nothing (network down, 5xx). */
 export function publishFailedMessage(isReply: boolean): string {
   return `Your ${isReply ? 'reply' : 'post'} couldn't be sent. Check your connection and try again.`
 }
 
-/** Shown WITH Retry when the server asked the client to slow down (429/408). */
+/** Shown WITH Retry when the server asked the client to slow down (429). */
 export function publishRateLimitedMessage(isReply: boolean): string {
   return `Too many ${isReply ? 'replies' : 'posts'} right now. Wait a moment, then try again.`
 }
@@ -151,8 +162,8 @@ export function publishRefusedMessage(isReply: boolean): string {
 }
 
 /**
- * Shown WITHOUT Retry when the server answered 2xx but the body could not be read:
- * the post may already exist, so the author checks before posting again.
+ * Shown WITHOUT Retry when the post may already exist (an unreadable 2xx, a 504): the
+ * author checks the feed before posting again.
  */
 export function publishUnconfirmedMessage(isReply: boolean): string {
   return `We couldn't confirm your ${isReply ? 'reply' : 'post'} went out. ` +
@@ -169,21 +180,32 @@ export interface PublishFailure {
 }
 
 /**
- * Classifies a `publishPost` rejection. An axios failure with no response (network,
- * timeout) or a 5xx/408/429 response did not create a post -> 'failed' (Retry is
- * safe). Any other 4xx -> 'refused' (no Retry). Anything that is NOT an axios failure
- * - `publishPost` throws a plain `Error` for a 2xx body it could not parse - ->
- * 'unconfirmed' (no Retry: the post may exist).
+ * Classifies a `publishPost` rejection (see the module header for what each kind
+ * proves and offers):
+ *  - not an axios failure (`publishPost` throws a plain `Error` for a 2xx body it
+ *    could not parse), an axios failure carrying a 2xx response, or a 504 gateway
+ *    timeout -> 'unconfirmed' (no Retry: the post may exist);
+ *  - 429 -> 'failed' with the rate-limit wording; no response (network, timeout),
+ *    408 and the other 5xx -> 'failed' (Retry offered);
+ *  - any other 4xx -> 'refused' (no Retry).
  */
 export function classifyPublishFailure(failure: unknown, isReply: boolean): PublishFailure {
-  if (!isAxiosError(failure)) {
-    return { kind: 'unconfirmed', message: publishUnconfirmedMessage(isReply) }
+  const unconfirmed: PublishFailure = {
+    kind: 'unconfirmed',
+    message: publishUnconfirmedMessage(isReply),
   }
+  if (!isAxiosError(failure)) return unconfirmed
+
   const status = failure.response?.status
-  if (status === 429 || status === 408) {
+  // A 2xx the client could not use, or a gateway timeout: the origin may have committed.
+  if (status !== undefined && ((status >= 200 && status < 300) || status === 504)) {
+    return unconfirmed
+  }
+  if (status === 429) {
     return { kind: 'failed', message: publishRateLimitedMessage(isReply) }
   }
-  if (status !== undefined && status >= 400 && status < 500) {
+  // 408 (request timeout) is a retryable transport failure, not a refusal.
+  if (status !== undefined && status !== 408 && status >= 400 && status < 500) {
     return { kind: 'refused', message: publishRefusedMessage(isReply) }
   }
   return { kind: 'failed', message: publishFailedMessage(isReply) }
@@ -550,6 +572,9 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     if (body.length === 0 && media.length === 0) return
 
     const isReply = parentPostId !== undefined
+    // The own-post store's generation at the moment of pressing Post: a sign-out
+    // while this is in flight bumps it, and the late result is then discarded.
+    const generation = ownPostStore.getGeneration()
     const input: CreatePostInput = {
       exerciseId,
       timeZone,
@@ -563,9 +588,11 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     }
 
     const finish = (view: ParticipantPostView) => {
+      // The session ended while this was in flight: it belongs to nobody now.
+      if (generation !== ownPostStore.getGeneration()) return
       // A top-level post is the viewer's own (merged at the top of the feed, its
       // echo kept off the pill). A reply is not a feed item: the thread appends it.
-      if (!isReply) ownPostStore.add(view)
+      if (!isReply) ownPostStore.add(view, generation)
       onPostedRef.current?.(view)
       if (!mountedRef.current) return
       setTextState('')
@@ -581,7 +608,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
         // Register BEFORE appending so the mock stream's synchronous echo of this
         // post is already known to be the viewer's own (the live echo can beat the
         // 201, which `<Feed>` handles by discarding from the pill's buffer).
-        if (!isReply) ownPostStore.add(toParticipantView(post))
+        if (!isReply) ownPostStore.add(toParticipantView(post), generation)
         // The mock backend: `appendPost` links a reply to its parent (resolving
         // `inReplyTo`) and bumps the parent's reply count, so read the stored form.
         postStore.appendPost(post)

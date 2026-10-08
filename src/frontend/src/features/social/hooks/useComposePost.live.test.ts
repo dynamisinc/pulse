@@ -80,7 +80,9 @@ vi.mock('../services/postService', () => ({
 vi.mock('../services/livePostActions', () => ({
   publishPost: vi.fn(),
 }))
+vi.mock('@/core/auth/logout', () => ({ logout: vi.fn().mockResolvedValue(undefined) }))
 
+import { endSession } from '@/core/auth/endSession'
 import { createPost } from '../services/postService'
 import { publishPost } from '../services/livePostActions'
 import { ownPostStore } from '../services/ownPostStore'
@@ -252,6 +254,59 @@ describe('useComposePost — LIVE mode publish()', () => {
   })
 })
 
+describe('useComposePost — a 201 that outlives the session has no effect (W-3)', () => {
+  function deferredPublish(): { finish: (view: CreatedPostView) => void } {
+    const handle: { finish: (view: CreatedPostView) => void } = { finish: () => {} }
+    vi.mocked(publishPost).mockReturnValue(new Promise<CreatedPostView>(resolve => {
+      handle.finish = resolve
+    }))
+    return handle
+  }
+
+  it('start publish -> sign-out reset() -> resolve 201: the own-post store stays empty, onPosted is not called', async () => {
+    const onPosted = vi.fn<(view: ParticipantPostView) => void>()
+    const pending = deferredPublish()
+    const { result } = renderHook(() => useComposePost({ onPosted }))
+    act(() => result.current.setText('Posted just before sign-out.'))
+    act(() => result.current.publish())
+    expect(result.current.isPublishing).toBe(true)
+
+    act(() => ownPostStore.reset()) // what endSession() does
+    await act(async () => pending.finish(PUBLISHED_VIEW))
+
+    expect(ownPostStore.getAll()).toEqual([])
+    expect(ownPostStore.has('post-published-1')).toBe(false)
+    expect(onPosted).not.toHaveBeenCalled()
+    expect(result.current.isPublishing).toBe(false)
+  })
+
+  it('the same through the REAL endSession(): a late 201 does not refill the store', async () => {
+    const pending = deferredPublish()
+    const { result } = renderHook(() => useComposePost())
+    act(() => result.current.setText('Posted just before sign-out.'))
+    act(() => result.current.publish())
+
+    await act(async () => {
+      await endSession()
+    })
+    await act(async () => pending.finish(PUBLISHED_VIEW))
+
+    expect(ownPostStore.getAll()).toEqual([])
+  })
+
+  it('a publish that STARTS after the reset is a new session\'s and registers normally (control)', async () => {
+    ownPostStore.reset()
+    const onPosted = vi.fn<(view: ParticipantPostView) => void>()
+    const { result } = renderHook(() => useComposePost({ onPosted }))
+
+    act(() => result.current.setText('Fresh session.'))
+    act(() => result.current.publish())
+
+    await waitFor(() => expect(onPosted).toHaveBeenCalledTimes(1))
+    expect(ownPostStore.getAll().map(v => v.id)).toEqual(['post-published-1'])
+  })
+})
+
 describe('useComposePost — a FAILED publish keeps the draft (never silently drops text)', () => {
   it('keeps text + tray, exposes an in-fiction error, and Retry re-sends the same draft', async () => {
     vi.mocked(publishPost).mockRejectedValueOnce(new AxiosError('Network Error'))
@@ -331,6 +386,30 @@ describe('useComposePost — a FAILED publish keeps the draft (never silently dr
     expect(result.current.publishError).not.toBe(publishFailedMessage(false))
     expect(result.current.text).toBe('Refused.')
     expect(result.current.canPublish).toBe(true)
+  })
+
+  it('a 504 is "unconfirmed": the origin may have committed, so no Retry kind (S-1)', async () => {
+    vi.mocked(publishPost).mockRejectedValueOnce(axiosFailure(504))
+    const { result } = renderHook(() => useComposePost())
+
+    act(() => result.current.setText('Gateway timeout.'))
+    act(() => result.current.publish())
+
+    await waitFor(() => expect(result.current.publishErrorKind).toBe('unconfirmed'))
+    expect(result.current.publishError).toBe(publishUnconfirmedMessage(false))
+    expect(result.current.text).toBe('Gateway timeout.')
+  })
+
+  it('a 408 is the normal "failed" message with Retry, not the rate-limit wording (W-2)', async () => {
+    vi.mocked(publishPost).mockRejectedValueOnce(axiosFailure(408))
+    const { result } = renderHook(() => useComposePost())
+
+    act(() => result.current.setText('Timed out.'))
+    act(() => result.current.publish())
+
+    await waitFor(() => expect(result.current.publishErrorKind).toBe('failed'))
+    expect(result.current.publishError).toBe(publishFailedMessage(false))
+    expect(result.current.publishError).not.toBe(publishRateLimitedMessage(false))
   })
 
   it.each([500, 503])('a %i did not land: "failed", Retry kind (M-5)', async status => {
