@@ -7,7 +7,7 @@
  * the same Exercise / Session providers the channel uses.
  */
 import { useRef, useState } from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -257,6 +257,28 @@ describe('ComposeModal', () => {
       expect(post).not.toHaveFocus()
       expect(dialog).toContainElement(document.activeElement as HTMLElement)
       expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveFocus()
+    })
+  })
+
+  describe('under the shell overlay (core/a11y/modalPriority contract)', () => {
+    it('does not pull focus out of an already-active shell layer when it opens', async () => {
+      renderHost()
+      const overlay = document.createElement('div')
+      overlay.setAttribute('aria-modal', 'true')
+      overlay.setAttribute('data-shell-layer', 'overlay')
+      overlay.tabIndex = -1
+      document.body.appendChild(overlay)
+      try {
+        overlay.focus()
+        // fireEvent (not user.click) so the click itself does not move focus to the opener.
+        fireEvent.click(await screen.findByRole('button', { name: 'Open composer' }))
+        const dialog = await screen.findByRole('dialog')
+
+        expect(within(dialog).getByRole('textbox', { name: 'Post text' })).not.toHaveFocus()
+        expect(overlay).toHaveFocus()
+      } finally {
+        overlay.remove()
+      }
     })
   })
 })

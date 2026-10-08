@@ -57,6 +57,7 @@ import {
 } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faXmark } from '@fortawesome/free-solid-svg-icons'
+import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { Composer } from '../components/Composer'
 import styles from './ComposeModal.module.css'
 
@@ -120,7 +121,9 @@ export function ComposeModal({ onClose, returnFocusRef }: ComposeModalProps) {
       // Prefer the text box over the Close button, which is first in DOM order.
       const textBox = dialog.querySelector<HTMLElement>('textarea')
       const initial = textBox ?? first ?? dialog
-      initial.focus()
+      // Channel traps stand aside for the shell's overlay (core/a11y/modalPriority): never
+      // pull focus out from under a Pause/EndEx/break-fiction layer that is already up.
+      if (!hasOtherModalMounted(dialog)) initial.focus()
     }
     return () => {
       // Restore only if focus was lost with the dialog (fell to <body>); never steal it
