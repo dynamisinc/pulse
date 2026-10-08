@@ -15,13 +15,19 @@ so content work never collides with the backend freeze (plan §2.5). Pack format
 ## Acceptance Criteria
 - [ ] **Script and safety.** `scripts/uat/Seed-DemoContent.ps1` (`#Requires -Version 7.0`, dot-sources
       `Common.ps1`) takes `-PackPath` (default `docs/demo/pack/pack.json`), `-ApiHost`, `-SiteUrl`,
-      `-StaffUsername`, `-ScenarioAnchor` (default: now, UTC), `-RunSheetOut`, `-WhatIf`, `-Resume`; signs in
-      via `POST /api/auth/staff/login` using a secret from `$env:PULSE_STAFF_SECRET` or a hidden prompt (the
+      `-StaffUsername`, `-ScenarioAnchor` (default: now, UTC), `-RunSheetOut`, `-WhatIf`, `-Resume`; calls
+      the anonymous `GET /api/exercise-context` first (host-resolved `exerciseId` + `timeZone`), then signs in
+      via `POST /api/auth/staff/login` with `{username, secret, exerciseId}` (the request requires
+      `exerciseId`; single-exercise script, so no active-exercise switch), using a secret from `$env:PULSE_STAFF_SECRET` or a hidden prompt (the
       `Copy-StaffSecret.ps1` pattern) — **the secret and tokens are never printed, logged or written to disk**.
-- [ ] **Public APIs only.** It calls nothing but `/api/auth/staff/login`, `/api/staff/active-exercise` (only
-      when the staff user has several), `/api/exercise-context` (for the `timeZone` every post requires),
+- [ ] **Public APIs only.** It calls nothing but `/api/exercise-context` (for `exerciseId` and the `timeZone` every
+      post requires), `/api/auth/staff/login`, `/api/steering/pause-tier`,
       `/api/staff/media`, `/api/media`, `/api/personas`, `/api/staff/personas/{id}`, `/api/posts`, `/api/feed`;
       a test greps the script for any other `/api/` path or `sqlcmd`/SQL and fails.
+- [ ] **Engine paused by default (Decision 4).** After seeding, and unless `-LeaveEngineRunning` is passed, it
+      calls `POST /api/steering/pause-tier` with `{"tier":"engine"}` as the controller and reports the applied
+      tier. The tier lives in memory and every reset or restart sets it back to `running`, so the run-of-show
+      repeats this after any reset.
 - [ ] **Validate first, write nothing on error.** It validates the whole pack (§1.10 rules: unique keys,
       resolvable refs, replies after parents, text ≤ 280, alt on every media item, files present and within the
       server's limits) before the first request; `-WhatIf` prints the plan (counts per step) and exits 0 with no
@@ -52,7 +58,7 @@ seeding, a GUI.
   the machine, document a `-WhatIf` dry-run transcript instead), `docs/demo/pack/schema/**` (JSON Schema for
   `pack.json`). Follow the style of `New-DemoParticipant.ps1` (comment-based help, `-WhatIf`, secrets handled in
   memory).
-- Rate limit: `POST /api/media` allows ~30/min per session (BM) — ~25 media files fit in one run; the 429
+- Rate limit: `POST /api/media` allows ~30/min per account (BM) — ~25 media files fit in one run; the 429
   back-off is still required. Posts need a persona-bound id: staff post as the **chosen persona**
   (`authorPersonaId`), acting human = the staff user (server-derived).
 - Scenario time: the frontend's `scenarioNow()` currently tracks wall-clock (`core/clock/exerciseClock.ts`), so

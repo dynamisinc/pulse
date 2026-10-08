@@ -20,7 +20,7 @@ DP-1…DP-4 and DP-7 (extra columns `MediaAsset.CreatedScenarioTime`, `MediaAsse
       `IExerciseScoped`, non-nullable `ExerciseId`); `Post` gains `ParentPostId` +
       `BaselineLike/Repost/ReplyCount`; `Persona` gains `AvatarMediaId`, `BannerMediaId`, `Location` — names,
       types, nullability, lengths per §1.2.
-- [ ] **EF config per §1.3.** Unique `(PostId, PersonaId, Kind)` on reactions, unique `(PostId, Order)` on media
+- [ ] **EF config per §1.3.** **Filtered** unique `(PostId, PersonaId, Kind) WHERE DeletedAt IS NULL` on reactions (`PostReaction.DeletedAt`, DP-15), unique `(PostId, Order)` on media
       items, unique `BlobName`, `IX_Posts_ParentPostId`; every FK is `Restrict`/`NoAction` (no cascade path; no
       hard-delete path — XC-010).
 - [ ] **Isolation (always-Critical, COR-001/XC-001).** Given rows for exercises A and B, then under scope A none

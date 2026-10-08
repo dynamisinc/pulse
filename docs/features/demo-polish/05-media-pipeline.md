@@ -47,7 +47,7 @@ h) — COR-002's "access-checked" is met at *mint* time. Tom signs off on this.
       (`fileName`, `uploadedAtScenario`, signed `url`, `posterUrl` for videos), excluding assets that are some
       video's poster. Assigned staff only (401 for anonymous/participant/shared sessions — no staff session; 403
       for staff not assigned to the resolved exercise); another exercise's media is never returned.
-- [ ] **Abuse resistance and gating (NFR-009).** Named policy `media-upload` partitions by **session** (not IP),
+- [ ] **Abuse resistance and gating (NFR-009).** Named policy `media-upload` partitions by **account**: the authenticated principal's stable id (participant `AccountId`, staff user id), never the session id or IP, so a fresh sign-in can't reset the quota (NFR-009 is per account),
       default 30/min (`Media:Upload:PermitPerMinute`), answers 429 with `Retry-After`; `POST /api/media` is
       mapped inside `DenyReadOnlySessions()` (read-only → 403); `/api/media` is added to
       `ExerciseLifecycleGatedRoutes.Paths` (archived/build → 403 for participants); participant uploads require

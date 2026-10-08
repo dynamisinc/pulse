@@ -14,8 +14,8 @@ and the `IPostEngagementReader` that BP's projector consumes. Model the write on
 fold). Wire shapes: implementation.md §1.5.4.
 
 ## Acceptance Criteria
-- [ ] **Idempotent endpoints.** `PUT /api/posts/{postId:guid}/reactions/{kind}` creates and `DELETE …` removes
-      the reaction of the **session-bound persona** (never a body or route persona); `kind ∈ like|repost` else
+- [ ] **Idempotent endpoints.** `PUT /api/posts/{postId:guid}/reactions/{kind}` creates and `DELETE …`
+      **soft-deletes** (sets `DeletedAt`, DP-15; never a hard delete, XC-010) the active reaction of the **session-bound persona** (never a body or route persona); `kind ∈ like|repost` else
       400. Repeating either call returns 200 with the same state, creates no second row and emits **no second
       telemetry event**. The response is `ReactionStateDto` (`active`, post-change `counts` = baseline + real,
       `viewer {liked, reposted}`).
@@ -57,6 +57,7 @@ B1. Runs with BM, BP, B2, B6. BP consumes the reader at Gate 2; F3 depends on th
 ## Tests
 - **Isolation (first):** `Features/Social/Reactions/ReactionIsolationTests.cs` — cross-exercise post and
   persona, unresolved scope, reader scoping (real SQL).
+- Soft delete (DP-15): DELETE sets `DeletedAt` and leaves the row; re-like after un-like inserts a new active row; counts and `viewer` ignore soft-deleted rows.
 - Idempotency + single-event-per-change (PUT twice, DELETE twice), concurrent double-submit fold, authorization
   matrix (participant / staff / persona-less / read-only / anonymous / deleted post).
 - Reader: counts, viewer flags, batch (query count asserted), out-of-scope ids absent.

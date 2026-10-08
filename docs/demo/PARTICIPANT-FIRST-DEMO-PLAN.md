@@ -86,7 +86,10 @@ Also captured: [mobile feed](baseline-2026-10-07/participant-feed-mobile.png),
 ## 2. Strategy
 
 1. **Re-aim the demo at the participant experience.** The engine stays available: Paused by default,
-   optionally running as background chatter, plus a short teaser. Stop spending on engine verification
+   optionally running as background chatter, plus a short teaser. **Paused is an explicit step, not a
+   default.** The pause tier lives in memory, and every reset or restart sets it back to running. So S1,
+   and the rehearsal run-of-show after any reset, calls `POST /api/steering/pause-tier {"tier":"engine"}`
+   as the controller. Stop spending on engine verification
    and live AI (§8). The exception is Freeze (#350/#351): it is a non-AI control beat, so verify it in
    rehearsal.
 2. **Build the real thing where it shows; take shortcuts where it doesn't.** In order of how fast a viewer
@@ -403,9 +406,17 @@ Weekend days are agent build days with light human review. 🧑 marks a Tom touc
 
 ### Plan B for video
 
-If Blob isn't working by Sun 10/11, `IMediaStore` gets a third implementation that reads from the
-Static Web App (`/demo-media/*`, assets committed). The contract doesn't change, uploads are disabled,
-and S1 seeds by file path instead. It is worse but it keeps the video beats.
+If Blob isn't working by Sun 10/11, the same pipeline runs on the App Service's own persistent disk:
+
+- BM's `LocalFileMediaStore`, rooted under `/home`, which is persistent on Linux App Service.
+- A signer that serves `/media/*` through the API at HMAC-signed, expiring URLs, with the same bucketed
+  expiry as the SAS.
+- An explicit opt-in flag (`Azure:BlobStorage:AllowLocalOutsideDevelopment=true`), because `Local` is
+  otherwise Development-only.
+
+**Uploads, `MediaAsset` ids, the post contract and S1 are unchanged**; only the media URL's host differs.
+It costs about half a day of BM follow-up, and video bandwidth then flows through the API. It is worse,
+but it keeps the video beats. The story is written only if this is triggered.
 
 ---
 

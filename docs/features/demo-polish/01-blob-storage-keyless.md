@@ -33,8 +33,8 @@ copies into an app setting — both go away.
       `Azure__BlobStorage__ServiceUri`, `Azure__BlobStorage__ContainerName=post-media`, and **no longer** emits
       `Azure__BlobStorage__ConnectionString` or `__PhotoContainerName`; `storageConnectionString` is removed
       from the module's params.
-- [ ] **CORS.** The blob service allows `GET, HEAD, OPTIONS` from `corsAllowedOrigins` (param, default `[]`),
-      exposes `Content-Length, Content-Range, Accept-Ranges`, `maxAgeInSeconds: 3600` (video range requests and
+- [ ] **CORS.** The blob service allows `GET, HEAD, OPTIONS` and the request header `Range` from
+      `corsAllowedOrigins` (param, default `[]`), exposes `Content-Length, Content-Range, Accept-Ranges`, `maxAgeInSeconds: 3600` (video range requests and
       future WebVTT).
 - [ ] **UAT toggle.** `parameters/uat.bicepparam` sets `deployStorage = true`. Each touched module passes `az
       bicep build --file <module>`; after the orchestrator's `main.bicep` plumbing commit (implementation.md
