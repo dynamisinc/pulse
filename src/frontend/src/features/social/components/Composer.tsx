@@ -2,19 +2,37 @@
  * features/social/components/Composer.tsx
  * ---------------------------------------------------------------------------
  * The inline (feed-top) Pulse "Social" post composer (feature: posts, story
- * 01 — "Post composition"; SOC-001, D1-R5). Participant world (Pulse skin) —
- * plain semantic elements + the scoped `Composer.module.css` CSS Module, no
- * COBRA, no themed MUI, FontAwesome icons only.
+ * 01 — "Post composition"; SOC-001, D1-R5 — and demo-polish F4, story 13
+ * "Threads and composer"). Participant world (Pulse skin) — plain semantic
+ * elements + the scoped `Composer.module.css` CSS Module, no COBRA, no themed
+ * MUI, FontAwesome icons only.
  *
- * The X-familiarity target (D1): a text area, a photo-attach affordance, an
- * X-style DEPLETING RING character counter, and a Post button. All state + the
- * publish machine live in `useComposePost()`
- * (`../hooks/useComposePost`) — this component is the view.
+ * The X-familiarity target (D1): a text area, a photo/video attach affordance
+ * with its tray, an X-style DEPLETING RING character counter, and a Post button.
+ * All state + the publish machine live in `useComposePost()`
+ * (`../hooks/useComposePost`). This file holds two components:
+ *
+ *   <ComposerForm/>   the VIEW of a compose session — shared with the thread's
+ *                     `<ReplyComposer>` so the reply box and the post box are the
+ *                     same control (same ring, same attach tray, same errors).
+ *   <Composer/>       the inline top-level composer: `useComposePost()` +
+ *                     `<ComposerForm/>`.
  *
  * D1-R5 counter: the ring depletes as characters are used; the numeric count
  * appears only at ≤20 remaining, goes amber in the low zone, and red when
  * over the limit — at which point Post is blocked. The count NUMBER carries
  * the state alongside the color, so the cue is never color-only (NFR-001).
+ *
+ * ATTACH (F4). The toolbar's button opens a multi-file picker for up to 4 photos
+ * OR 1 video; the files upload as soon as they are picked and appear in the tray
+ * (`ComposerMedia.tsx`) with a preview, a required description, a progress bar
+ * and Cancel/Remove. Post stays disabled until every item is uploaded and
+ * described, and a visible sentence says which of those is outstanding (a
+ * disabled button is never left unexplained).
+ *
+ * A FAILED PUBLISH keeps the draft: an inline alert states what happened and a
+ * Retry button re-sends the same draft. While a publish is in flight the fields
+ * lock. After a successful one, a visually-hidden polite status announces it.
  *
  * OBSERVER MODE (COR-015 / D1-011): when the session is read-only the whole
  * composer is ABSENT — this component returns `null`, it does not render a
@@ -23,25 +41,30 @@
  * guard is belt-and-braces so the composer can never appear in a passive
  * session even if mis-mounted.
  *
- * CONTENT SECURITY (NFR-004): publishing routes through `createPost` (via the
- * hook), which sanitizes the text. Nothing here uses `dangerouslySetInnerHTML`.
+ * CONTENT SECURITY (NFR-004): publishing sanitizes the body and every alt (in the
+ * hook; the server sanitizes again). Nothing here uses `dangerouslySetInnerHTML`.
  *
- * SCOPE (S2): inline composer only. A MODAL composer variant is a documented
- * follow-up (D1) and is NOT built here. Author-identity rendering, the
- * "Posting as" org chip, quote-post, and rich-media states are out of scope.
+ * SCOPE: inline composer only — the MODAL wrapper is F1's. Author-identity
+ * rendering, the "Posting as" org chip, and quote-post stay out of scope.
  */
 
-import { useRef, type ChangeEvent, type FormEvent } from 'react'
+import { useId, type FormEvent, type ReactNode, type Ref } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faImage, faXmark } from '@fortawesome/free-solid-svg-icons'
-import { useComposePost, type UseComposePostOptions } from '../hooks/useComposePost'
+import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
+import {
+  useComposePost,
+  type UseComposePostOptions,
+  type UseComposePostResult,
+} from '../hooks/useComposePost'
+import { AttachButton, ComposerMediaTray } from './ComposerMedia'
 import styles from './Composer.module.css'
 
 export interface ComposerProps {
   /** Per-exercise character limit; defaults to 280 (SOC-001). */
   charLimit?: number
-  /** Called with the created post after a successful publish, so the host can
-   * refresh the feed. The composer never touches the feed itself. */
+  /** Called with the participant-safe view of the created post after a successful
+   * publish (live mode too), so the host can react — close a modal, refresh a
+   * list. The composer never touches the feed itself. */
   onPosted?: UseComposePostOptions['onPosted']
 }
 
@@ -56,78 +79,124 @@ export function Composer({ charLimit, onPosted }: ComposerProps) {
     ...(charLimit !== undefined ? { charLimit } : {}),
     ...(onPosted !== undefined ? { onPosted } : {}),
   })
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // COR-015 / D1-011: the composer is absent in a read-only session, never a
   // disabled form — a screen reader must not announce controls that can't be used.
   if (compose.isReadOnly) return null
+
+  return (
+    <ComposerForm
+      compose={compose}
+      testId="composer"
+      textLabel="Post text"
+      placeholder="What's happening?"
+      submitLabel="Post"
+      postedNotice="Post published."
+      showNoPersonaNote
+    />
+  )
+}
+
+export interface ComposerFormProps {
+  /** The compose session this form is the view of. */
+  readonly compose: UseComposePostResult
+  /** `data-testid` of the `<form>` root. */
+  readonly testId: string
+  /** Accessible name of the text area. */
+  readonly textLabel: string
+  readonly placeholder: string
+  /** Label of the submit button. */
+  readonly submitLabel: string
+  /** Text of the polite status announced after a successful publish. */
+  readonly postedNotice: string
+  /** Optional line above the text area (the reply composer's "Replying to @handle"). */
+  readonly header?: ReactNode
+  /** A ref to the text area (the thread focuses it from a card's reply button). */
+  readonly inputRef?: Ref<HTMLTextAreaElement>
+  /** Rows of the text area. */
+  readonly rows?: number
+  /** Show "Posting isn't available on this account." when the session has no persona. */
+  readonly showNoPersonaNote?: boolean
+}
+
+/**
+ * The compose form: text area, attach tray, ring counter, Post/Retry. Pure view
+ * over a {@link UseComposePostResult}; renders even when `canPost` is false (the
+ * host decides whether a persona-less session sees it at all).
+ */
+export function ComposerForm({
+  compose,
+  testId,
+  textLabel,
+  placeholder,
+  submitLabel,
+  postedNotice,
+  header,
+  inputRef,
+  rows = 3,
+  showNoPersonaNote = false,
+}: ComposerFormProps) {
+  const hintId = useId()
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     compose.publish()
   }
 
-  const handleFilesPicked = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files
-    if (files && files.length > 0) {
-      compose.attachImages(Array.from(files))
-    }
-    // Reset so re-picking the same file still fires a change event.
-    event.target.value = ''
-  }
+  const hasHint = compose.mediaBlockReason !== undefined && compose.attachments.length > 0
 
   return (
-    <form className={styles.composer} data-testid="composer" onSubmit={handleSubmit}>
+    <form
+      className={styles.composer}
+      data-testid={testId}
+      aria-busy={compose.isPublishing}
+      onSubmit={handleSubmit}
+    >
+      {header}
+
       <textarea
+        ref={inputRef}
         className={styles.input}
         value={compose.text}
         onChange={e => compose.setText(e.target.value)}
-        placeholder="What's happening?"
-        aria-label="Post text"
-        rows={3}
+        placeholder={placeholder}
+        aria-label={textLabel}
+        readOnly={compose.isPublishing}
+        rows={rows}
       />
 
-      {compose.media.length > 0 && (
-        <ul className={styles.mediaList} data-testid="composer-media">
-          {compose.media.map((item, index) => (
-            <li key={`${item.alt}-${index}`} className={styles.mediaChip}>
-              <span className={styles.mediaLabel}>{item.alt}</span>
-              <button
-                type="button"
-                className={styles.mediaRemove}
-                onClick={() => compose.removeMedia(index)}
-                aria-label={`Remove ${item.alt}`}
-              >
-                <FontAwesomeIcon icon={faXmark} aria-hidden="true" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <ComposerMediaTray
+        attachments={compose.attachments}
+        disabled={compose.isPublishing}
+        onAltChange={compose.setAttachmentAlt}
+        onCancel={compose.cancelAttachment}
+        onRemove={compose.removeAttachment}
+      />
 
       {compose.mediaError !== undefined && (
         <p className={styles.error} role="alert">{compose.mediaError}</p>
       )}
 
-      <div className={styles.toolbar}>
-        <div className={styles.tools}>
+      {compose.publishError !== undefined && (
+        <div className={styles.publishError} role="alert" data-testid="composer-publish-error">
+          <p className={styles.publishErrorText}>
+            <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" />
+            <span>{compose.publishError}</span>
+          </p>
           <button
             type="button"
-            className={styles.toolButton}
-            onClick={() => fileInputRef.current?.click()}
-            aria-label="Add photos"
+            className={styles.retryButton}
+            disabled={compose.isPublishing}
+            onClick={compose.publish}
           >
-            <FontAwesomeIcon icon={faImage} aria-hidden="true" />
+            Retry
           </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            hidden
-            data-testid="composer-file-input"
-            onChange={handleFilesPicked}
-          />
+        </div>
+      )}
+
+      <div className={styles.toolbar}>
+        <div className={styles.tools}>
+          <AttachButton onPick={compose.attachFiles} disabled={compose.isPublishing} />
         </div>
 
         <div className={styles.meta}>
@@ -143,16 +212,26 @@ export function Composer({ charLimit, onPosted }: ComposerProps) {
             type="submit"
             className={styles.postButton}
             disabled={!compose.canPublish}
-            aria-label="Post"
+            aria-label={submitLabel}
+            aria-describedby={hasHint ? hintId : undefined}
           >
-            Post
+            {submitLabel}
           </button>
         </div>
       </div>
 
-      {!compose.canPost && (
+      {/* Why Post is disabled, in words, when the cause is something the author
+          can fix in the tray (uploading / failed / no description). */}
+      {hasHint && <p id={hintId} className={styles.notice}>{compose.mediaBlockReason}</p>}
+
+      {showNoPersonaNote && !compose.canPost && (
         <p className={styles.notice} role="note">Posting isn't available on this account.</p>
       )}
+
+      {/* A polite, visually hidden confirmation: the new post appearing is the
+          sighted cue; this is the one for assistive tech. Always mounted so the
+          change is announced. */}
+      <p className={styles.srOnly} role="status">{compose.posted ? postedNotice : ''}</p>
     </form>
   )
 }
