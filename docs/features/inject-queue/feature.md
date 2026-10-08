@@ -1,7 +1,7 @@
 # Feature: Inject queue & conduct timeline
 
 **Epic:** E7 — Controller Command Surface  ·  **Phase:** 1  ·  **Feature ref:** F7.2
-**World:** staff  ·  **Issue:** #4  ·  **Status:** feature.md stub — decompose before build
+**World:** staff  ·  **Issue:** #4  ·  **Status:** Demo slice (06 + 07) In Progress; stories 01–05 Not Started
 
 ## Summary
 The conduct timeline: pre-authored Pulse content in scheduled order with fire/hold/skip/edit-then-
@@ -25,7 +25,14 @@ hold rumor wave / skip all). Author story 05 to the amended behavior.
 | 03 | Standalone native scheduler ("hold for conduct" against COR-050) | CTL-013 | Not Started | #21 |
 | 04 | Timed bursts — a bundle fires as a naturally-paced sequence | CTL-014 | Not Started | #22 |
 | 05 | Scenario-time-jump batch disposition (pause-first) | CTL-015 / D5-014/P4 | Not Started | #23 |
+| 06 | **Demo slice:** scripted posts, server-side inject queue (fire / hold / skip / edit, bursts, assignment) | CTL-010/011/014 (lite) | In Progress | #452 |
+| 07 | **Demo slice:** scripted posts console run sheet (Mine/All, live sync, PAUSE INJECTS live) | CTL-010/011/014 (lite), CTL-023 | Not Started | #453 |
 | — | Cadence-sourced injects render + fire-locked *(Phase 4 stub)* | CTL-012 | Not Started | — |
+
+> **Demo slice (2026-10-08).** Stories 06 + 07 build a server-side slice of 01/02/04 for the Oct 20 demo and
+> **replace** demo-polish C3 (#438, browser-only run sheet). Decisions IQ-1…IQ-10 and the frozen wire contract are in
+> [`implementation.md` § Demo slice](implementation.md#demo-slice--scripted-posts-server-side-stories-06--07--decided-2026-10-08).
+> Stories 01–05 stay the full post-demo target (timeline rail, scheduler, batch, time-jump).
 
 ## Dependencies
 E1 native exercise clock (COR-050/051), lifecycle; E2/E4/E5/E6 composers author the held content;

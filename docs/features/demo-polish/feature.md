@@ -56,7 +56,7 @@ Order = wave order. Priorities and effort are the plan's (§5). *Home story* is 
 | 16 | [Notifications, derived client-side](16-notifications-lite.md) | F7 | Could | frontend | 3 | SOC-070 | Not Started | #435 |
 | 17 | [Post as persona v2](17-post-as-persona-v2.md) | C1 | Must | frontend | 3 | CTL-001, CTL-003, SOC-012 | Not Started | #436 |
 | 18 | [Live world column](18-live-world-column.md) | C2 | Must | frontend | 3 | CTL-030, CTL-031 | Not Started | #437 |
-| 19 | [Run sheet](19-run-sheet.md) | C3 | Must | frontend | 3 | CTL-010, CTL-011, CTL-013 | Not Started | #438 |
+| 19 | [Run sheet](19-run-sheet.md) — **replaced by [inject-queue 06 + 07](../inject-queue/feature.md)** (server-side, 2026-10-08) | C3 | Must | frontend | 3 | CTL-010, CTL-011, CTL-013 | Dropped | #438 |
 | 20 | [Console cleanup](20-console-cleanup.md) | C4 | Must | frontend | 3 | CTL-002, CTL-003 | In Review | #439 |
 | 21 | [Persona profile edit](21-persona-profile-edit.md) | PE | Should | fullstack | 2 (BE) / 3 (FE) | COR-020, COR-022, COR-024 | Not Started | #440 |
 | 22 | [Takedown UI and live feed removal](22-takedown-ui.md) | C5 | Should | frontend | 3 | CTL-025, XC-010 | Not Started | #441 |
@@ -121,6 +121,7 @@ Also cut by P2 so nothing is built by accident (each is a recorded gap, not an o
   DP-9).
 - Controller reactions (DP-10); participant self-delete (SOC-005 participant half); reply threading beyond a
   flattened direct-reply view.
-- Persisted/server-side run sheet, scheduling, and Cadence-sourced items (the sheet is browser storage + JSON).
+- Scheduling (timed auto-release) and Cadence-sourced items. *(Amended 2026-10-08: the run sheet is now
+  **server-side**, see inject-queue 06 + 07, which replace C3.)*
 - Server-side search/trending (everything is computed client-side over the loaded newest-200 feed).
 - Dark mode (forced light for the demo, F5).

@@ -123,7 +123,8 @@ Also captured: [mobile feed](baseline-2026-10-07/participant-feed-mobile.png),
    - No malware scanning yet (Defender for Storage comes post-demo).
    - Trending and search are computed client-side over the loaded feed.
    - Counts = a seeded baseline (the fictional crowd) + real reactions.
-   - The run sheet lives in the controller's browser, with JSON import/export.
+   - ~~The run sheet lives in the controller's browser, with JSON import/export.~~ *Amended 2026-10-08: the run sheet
+     is server-side (inject-queue 06 + 07) so several controllers share it.*
 
 ---
 
@@ -297,7 +298,7 @@ Effort: S ≤ ½ day of agent time, M ≈ 1 day, L ≈ 2 days.
 |---|---|---|---|---|---|
 | C1 | **Must** | fe | **Post as persona v2.** Attach media by upload or from the **exercise media library**; **reply as persona**; an optional engagement baseline ("already has 2.3K likes"); a preview; **visible errors** (remove the swallowed `.catch`) | persona-operation, threads-replies/03 | M |
 | C2 | **Must** | fe | **Live world column** in the console main area: the real feed in COBRA-dense staff styling (never confusable with a participant view). Filters: All / #tag / persona. Per post: *Reply as…*, *Take down* (C5) | live-monitoring/01–02 (lite) | M |
-| C3 | **Must** | fe | **Run sheet.** Staged posts (persona, text, media from the library, intended scenario minute) authored in the console, kept in browser storage with **JSON import/export**. *Fire* / *Fire next* / *Skip*, with status and keyboard shortcuts. Uses the post endpoint, so it needs **no backend** | inject-queue/02–03 (lite) | M |
+| C3 | **Must** | ~~fe~~ **fullstack** | **Amended 2026-10-08 (Tom): now server-side, built as [inject-queue 06 + 07](../features/inject-queue/feature.md)** (shared across controllers, MSEL assignment, paced pile-on bursts, PAUSE INJECTS live). Original: **Run sheet.** Staged posts (persona, text, media from the library, intended scenario minute) authored in the console, kept in browser storage with **JSON import/export**. *Fire* / *Fire next* / *Skip*, with status and keyboard shortcuts. Uses the post endpoint, so it needs **no backend** | inject-queue/02–03 (lite) | M |
 | C4 | **Must** | fe | **Console cleanup.** Main-area layout with slots for C2 and C3; remove mock presence avatars and dev copy; unify the SimCell naming; fix the ⌘K placeholder; persona context panel shows the server bio and recent posts; relabel or hide PAUSE INJECTS | console-shell | S |
 | PE | Should | fullstack | **Persona profile edit** (staff): display name, bio, location, verified, avatar and banner upload. Backend `PATCH` before the freeze; UI in the persona picker / context panel | persona-management/03 (slice), /05 | M |
 | C5 | Should | fe | Takedown UI (needs B6) + participant feed removal on `PostRemoved`. *After F2 merges* (it shares `realtimeFeed.ts`) | world-steering/05 (slice) | S |
@@ -321,7 +322,7 @@ Effort: S ≤ ½ day of agent time, M ≈ 1 day, L ≈ 2 days.
 - DMs
 - Full notifications
 - PIO column mode
-- The timed inject queue and scheduler
+- The timed inject scheduler (auto-release at a scenario time). *The manual server-side inject queue is now in scope (inject-queue 06 + 07, 2026-10-08).*
 - Participant admin UI
 - Persona create/delete and handle edits
 - The "X reposted" fan-out
