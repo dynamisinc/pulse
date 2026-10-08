@@ -33,7 +33,9 @@
  * takes NO exercise id: the session binds the exercise and the server scopes the
  * query (COR-001). The fixture-era client guard is kept as defence in depth —
  * a post that DOES carry an `exerciseId` different from the persona's is dropped.
- * The feed is read once per persona (and on remount); it does not live-update.
+ * The feed is read once per persona (and on remount); posts the controller
+ * publishes afterwards are merged in from the shared `postStore`, so the panel
+ * is current right after posting.
  *
  * `actionsSlot` is the one place a sibling story mounts an action next to the
  * persona (persona-edit's "Edit persona" button, wired by the console route).
@@ -51,7 +53,7 @@
  * chrome, not on a historical post's own dateline).
  */
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Box, Chip, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -65,6 +67,8 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { formatScenarioTime } from '@/core/clock'
 import type { Post } from '@/features/social'
 import { resolveFeed, type FeedScope } from '@/features/social/services/feedService'
+import { postStore } from '@/features/social/services/postStore'
+import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import type { Persona, StaffPersona } from '@/features/personas'
 import { audienceBandLabel, categoryChipLabel, resolveVoiceNotes } from '../services/personaVoice'
 
@@ -88,7 +92,11 @@ export interface PersonaContextPanelProps {
 const DEFAULT_MAX_RECENTS = 3
 
 /** Secondary text for an honest "nothing here" state — muted, never alarming. */
-const MUTED_NOTE_SX = { fontSize: 12, color: '#6b6b69', fontStyle: 'italic' }
+const MUTED_NOTE_SX = {
+  fontSize: 12,
+  color: staffShellTokens.accent.secondaryText,
+  fontStyle: 'italic',
+}
 
 const SECTION_LABEL_SX = {
   fontSize: 10.5,
@@ -104,19 +112,28 @@ const SECTION_LABEL_SX = {
  * both before and after that signature lands in `feedService` — a function with
  * fewer parameters is assignable to this type, so until then the options argument
  * is simply ignored at runtime (top-level posts only; the pre-F0 feed has no
- * replies to include). Once `feedService` carries the options parameter this
- * alias can be replaced by a direct `resolveFeed(...)` call.
+ * replies to include). Once `feedService` carries the options parameter the
+ * local type can go and the call can pass the options directly.
  */
 type ResolveFeedWithOptions = (
   scope: FeedScope,
   options: { includeReplies: boolean },
 ) => Promise<Post[]>
-const readFeed: ResolveFeedWithOptions = resolveFeed
 
 /**
- * This persona's most recent posts from the LIVE exercise feed: authored by
- * `persona` (replies included — the read passes `includeReplies`), newest-first
- * by scenario time, capped at `maxRecents`. Pure over its inputs.
+ * The live exercise feed WITH replies. `resolveFeed` is looked up at CALL time
+ * (not captured into a module-level constant), so a spy or a replaced export is
+ * honoured.
+ */
+function readFeed(): Promise<Post[]> {
+  const resolve: ResolveFeedWithOptions = resolveFeed
+  return resolve('all', { includeReplies: true })
+}
+
+/**
+ * This persona's most recent posts from `posts`: authored by `persona` (replies
+ * included — the feed read passes `includeReplies`), newest-first by scenario
+ * time, capped at `maxRecents`. Pure over its inputs.
  *
  * The feed is already scoped to the session's exercise server-side (COR-001);
  * a post that nevertheless carries a DIFFERENT `exerciseId` than the persona's
@@ -142,6 +159,11 @@ function selectRecentPosts(
     .slice(0, maxRecents)
 }
 
+type FeedRead =
+  | { readonly status: 'loading' }
+  | { readonly status: 'error' }
+  | { readonly status: 'ready'; readonly posts: readonly Post[] }
+
 type RecentsState =
   | { readonly status: 'loading' }
   | { readonly status: 'error' }
@@ -152,39 +174,58 @@ type RecentsState =
  * posts. Re-reads whenever the persona changes; a stale response for a previous
  * persona is discarded. A failed read is its own state — never rendered as
  * "no posts yet", which would be a false statement about the persona.
+ *
+ * STAYS CURRENT AFTER POSTING. The feed read is a snapshot, but the controller
+ * publishes AS this persona with this panel open beside the composer — and the
+ * console route appends every post it publishes to the shared `postStore`
+ * (`onPublished`, in mock and live mode alike). So the hook also watches the
+ * store and MERGES any post that appears in it after mount, de-duplicated by id
+ * against the feed read. Merging (rather than re-reading) matters live: the
+ * server publish is fire-and-forget, so an immediate re-read could miss the post
+ * the controller just sent.
  */
 function usePersonaRecentPosts(
   persona: Pick<Persona, 'id' | 'exerciseId'>,
   maxRecents: number,
 ): RecentsState {
-  const [state, setState] = useState<RecentsState>({ status: 'loading' })
+  const [read, setRead] = useState<FeedRead>({ status: 'loading' })
+  const [arrived, setArrived] = useState<readonly Post[]>([])
   const personaId = persona.id
   const personaExerciseId = persona.exerciseId
 
   useEffect(() => {
     let cancelled = false
-    setState({ status: 'loading' })
-    readFeed('all', { includeReplies: true })
-      .then(feed => {
-        if (cancelled) return
-        // The selector takes just the two identity fields, so this effect's deps
-        // stay primitives (no per-render object identity to re-run on).
-        const posts = selectRecentPosts(
-          feed,
-          { id: personaId, exerciseId: personaExerciseId },
-          maxRecents,
-        )
-        setState({ status: 'ready', posts })
+    setRead({ status: 'loading' })
+    setArrived([])
+    // Posts already in the store at mount are the feed read's to supply; only
+    // what lands afterwards is "new".
+    const known = new Set(postStore.getPosts().map(post => post.id))
+    const unsubscribe = postStore.subscribe(() => {
+      if (cancelled) return
+      setArrived(postStore.getPosts().filter(post => !known.has(post.id)))
+    })
+    readFeed()
+      .then(posts => {
+        if (!cancelled) setRead({ status: 'ready', posts })
       })
       .catch(() => {
-        if (!cancelled) setState({ status: 'error' })
+        if (!cancelled) setRead({ status: 'error' })
       })
     return () => {
       cancelled = true
+      unsubscribe()
     }
-  }, [personaId, personaExerciseId, maxRecents])
+  }, [personaId, personaExerciseId])
 
-  return state
+  return useMemo<RecentsState>(() => {
+    if (read.status !== 'ready') return read
+    const fed = new Set(read.posts.map(post => post.id))
+    const merged = [...read.posts, ...arrived.filter(post => !fed.has(post.id))]
+    // The selector takes just the two identity fields, so the effect's deps stay
+    // primitives (no per-render object identity to re-run on).
+    const identity = { id: personaId, exerciseId: personaExerciseId }
+    return { status: 'ready', posts: selectRecentPosts(merged, identity, maxRecents) }
+  }, [read, arrived, personaId, personaExerciseId, maxRecents])
 }
 
 /**

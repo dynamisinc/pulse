@@ -20,8 +20,12 @@
  *    fixture: authored by THIS persona, replies included, newest first, capped
  *    at 3, in scenario time, with honest loading / error / empty states and no
  *    exercise id sent by the client (COR-001: the server scopes);
+ *  - the recents are CURRENT right after posting: a post the console route
+ *    appends to the shared `postStore` (its `onPublished`) is merged in without
+ *    a re-read (asserted with a real `PersonaComposer` publish, and with direct
+ *    appends: de-duplicated, other personas' posts ignored);
  *  - a persona with no voice-notes template reads "No voice notes authored"
- *    (muted), never "unavailable";
+ *    (muted, in the staff secondary-text token), never "unavailable";
  *  - `actionsSlot` mounts a sibling story's control and, absent, renders nothing.
  *
  * Renders through the REAL `ExerciseContextProvider` (resolves via the
@@ -31,8 +35,15 @@
  * read the seeded cast still do; the feed-specific tests override it per test.
  */
 import type { ReactNode } from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ThemeProvider } from '@mui/material/styles'
+import { cobraTheme } from '@/theme/cobraTheme'
+import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
+import { postStore } from '@/features/social/services/postStore'
+import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
+import { PersonaComposer } from './PersonaComposer'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { personaIdForHandle, type StaffPersona } from '@/features/personas'
@@ -49,6 +60,8 @@ const mockedResolveFeed = vi.mocked(resolveFeed)
 const realResolveFeed = mockedResolveFeed.getMockImplementation()
 
 beforeEach(() => {
+  postStore.resetForTests()
+  composeAsPersonaDraftStore.resetForTests()
   mockedResolveFeed.mockClear()
   if (realResolveFeed) mockedResolveFeed.mockImplementation(realResolveFeed)
 })
@@ -187,6 +200,8 @@ describe('PersonaContextPanel (persona-operation/03)', () => {
     expect(notes).toHaveTextContent('No voice notes authored')
     expect(notes).not.toHaveTextContent(/unavailable/i)
     expect(notes).toHaveStyle({ fontStyle: 'italic' })
+    // Muted with the staff secondary-text TOKEN, not a hard-coded colour.
+    expect(notes).toHaveStyle({ color: staffShellTokens.accent.secondaryText })
   })
 
   it('is a labelled, keyboard/screen-reader reachable section with no interactive controls', async () => {
@@ -355,6 +370,111 @@ describe('PersonaContextPanel — real data (demo-polish C4)', () => {
 
       expect(await screen.findByText('county em post')).toBeInTheDocument()
       expect(screen.queryByText('water utility post')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('stays current after posting (postStore merge)', () => {
+    beforeEach(() => {
+      // 14:00 scenario time, so a post stamped "now" reads "just now".
+      setExerciseClock({ scenarioNow: () => new Date('2026-07-16T14:00:00Z') })
+    })
+
+    it('shows a post the controller just PUBLISHED as this persona, with no re-read of the feed', async () => {
+      mockedResolveFeed.mockResolvedValue([])
+      const user = userEvent.setup()
+      // The console route's wiring: the composer beside the panel, whose
+      // `onPublished` appends to the shared store.
+      render(
+        <ThemeProvider theme={cobraTheme}>
+          <ExerciseContextProvider>
+            <PersonaContextPanel persona={buildPersona()} />
+            <PersonaComposer
+              activePersona={buildPersona()}
+              actingHumanId="human-ctl-7"
+              callSign="SIMCELL-1"
+              onPublished={post => postStore.appendPost(post)}
+            />
+          </ExerciseContextProvider>
+        </ThemeProvider>,
+      )
+      expect(await screen.findByTestId('persona-context-recents-empty')).toBeInTheDocument()
+      const readsBefore = mockedResolveFeed.mock.calls.length
+
+      await user.type(await screen.findByLabelText('Post text'), 'Boil water advisory lifted for Zone 2.')
+      await user.click(screen.getByRole('button', { name: 'Post' }))
+
+      const list = await screen.findByTestId('persona-context-recents')
+      expect(within(list).getByText('Boil water advisory lifted for Zone 2.')).toBeInTheDocument()
+      expect(screen.queryByTestId('persona-context-recents-empty')).not.toBeInTheDocument()
+      // Merged from the store: the feed was NOT read again.
+      expect(mockedResolveFeed.mock.calls.length).toBe(readsBefore)
+    })
+
+    it('puts the new post first (newest), ahead of what the feed read returned', async () => {
+      mockedResolveFeed.mockResolvedValue([
+        buildPost({ id: 'older', scenarioTime: '2026-07-16T12:00:00Z', text: 'older post' }),
+      ])
+      await renderPanel(<PersonaContextPanel persona={buildPersona()} />)
+      await screen.findByText('older post')
+
+      act(() => {
+        postStore.appendPost(
+          buildPost({ id: 'fresh', scenarioTime: '2026-07-16T13:59:30Z', text: 'fresh post' }),
+        )
+      })
+
+      const items = within(await screen.findByTestId('persona-context-recents')).getAllByRole('listitem')
+      expect(items.map(li => li.textContent)).toEqual(['fresh postjust now', 'older post2h ago'])
+    })
+
+    it('does not list a post twice when the feed read and the store both carry it', async () => {
+      const both = buildPost({ id: 'both', scenarioTime: '2026-07-16T13:00:00Z', text: 'in both places' })
+      mockedResolveFeed.mockResolvedValue([both])
+      await renderPanel(<PersonaContextPanel persona={buildPersona()} />)
+      await screen.findByText('in both places')
+
+      act(() => {
+        postStore.appendPost(both)
+      })
+
+      expect(
+        within(screen.getByTestId('persona-context-recents')).getAllByRole('listitem'),
+      ).toHaveLength(1)
+    })
+
+    it('ignores a new post by ANOTHER persona', async () => {
+      mockedResolveFeed.mockResolvedValue([])
+      await renderPanel(<PersonaContextPanel persona={buildPersona()} />)
+      await screen.findByTestId('persona-context-recents-empty')
+
+      act(() => {
+        postStore.appendPost(
+          buildPost({
+            id: 'theirs',
+            authorPersonaId: 'persona-someone-else',
+            scenarioTime: '2026-07-16T13:59:00Z',
+            text: 'not this persona',
+          }),
+        )
+      })
+
+      expect(screen.getByTestId('persona-context-recents-empty')).toBeInTheDocument()
+      expect(screen.queryByText('not this persona')).not.toBeInTheDocument()
+    })
+
+    it('stops listening once unmounted (a later append neither throws nor warns)', async () => {
+      mockedResolveFeed.mockResolvedValue([])
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      const { unmount } = await renderPanel(<PersonaContextPanel persona={buildPersona()} />)
+      await screen.findByTestId('persona-context-recents-empty')
+      unmount()
+
+      act(() => {
+        postStore.appendPost(buildPost({ id: 'after', scenarioTime: '2026-07-16T13:59:00Z' }))
+      })
+
+      expect(errorSpy).not.toHaveBeenCalled()
+      errorSpy.mockRestore()
     })
   })
 
