@@ -44,8 +44,12 @@
  * cleared draft, and focus must not fall to the page). Removing / cancelling a tray
  * row moves focus to a neighbouring row, or the attach button when none is left.
  *
- * While a publish is in flight the fields lock. After a successful one, a
- * visually-hidden polite status announces it.
+ * BUSY IS ANNOUNCED, NOT JUST DRAWN (NFR-001). While a publish is in flight the fields
+ * lock, the Post button's accessible name becomes "Posting..." ("Replying..." for the
+ * reply box) next to its `aria-disabled`, and the polite status paragraph says the
+ * same; when it lands the paragraph says "Post published.". The form deliberately does
+ * NOT carry `aria-busy`: that tells assistive tech to suppress live-region updates
+ * inside it, which would silence exactly these two announcements.
  *
  * OBSERVER MODE (COR-015 / D1-011): when the session is read-only the whole
  * composer is ABSENT — this component returns `null`, it does not render a
@@ -104,6 +108,7 @@ export function Composer({ charLimit, onPosted }: ComposerProps) {
       textLabel="Post text"
       placeholder="What's happening?"
       submitLabel="Post"
+      busyLabel="Posting…"
       postedNotice="Post published."
       showNoPersonaNote
     />
@@ -120,6 +125,12 @@ export interface ComposerFormProps {
   readonly placeholder: string
   /** Label of the submit button. */
   readonly submitLabel: string
+  /**
+   * The submit button's accessible name - and the polite status text - while a publish
+   * is in flight ("Posting…" / "Replying…"), so the busy state is announced, not just
+   * drawn.
+   */
+  readonly busyLabel: string
   /** Text of the polite status announced after a successful publish. */
   readonly postedNotice: string
   /** Optional line above the text area (the reply composer's "Replying to @handle"). */
@@ -145,6 +156,7 @@ export function ComposerForm({
   textLabel,
   placeholder,
   submitLabel,
+  busyLabel,
   postedNotice,
   header,
   inputRef,
@@ -191,7 +203,6 @@ export function ComposerForm({
       ref={formRef}
       className={styles.composer}
       data-testid={testId}
-      aria-busy={compose.isPublishing}
       onSubmit={handleSubmit}
     >
       {header}
@@ -266,10 +277,10 @@ export function ComposerForm({
             className={styles.postButton}
             disabled={!compose.canPublish && !compose.isPublishing}
             aria-disabled={compose.isPublishing ? true : undefined}
-            aria-label={submitLabel}
+            aria-label={compose.isPublishing ? busyLabel : submitLabel}
             aria-describedby={hasHint ? hintId : undefined}
           >
-            {submitLabel}
+            {compose.isPublishing ? busyLabel : submitLabel}
           </button>
         </div>
       </div>
@@ -282,10 +293,13 @@ export function ComposerForm({
         <p className={styles.notice} role="note">Posting isn't available on this account.</p>
       )}
 
-      {/* A polite, visually hidden confirmation: the new post appearing is the
-          sighted cue; this is the one for assistive tech. Always mounted so the
-          change is announced. */}
-      <p className={styles.srOnly} role="status">{compose.posted ? postedNotice : ''}</p>
+      {/* A polite, visually hidden status: "Posting…" while in flight, then the
+          confirmation - the new post appearing is the sighted cue; this is the one
+          for assistive tech. Always mounted, and NOT inside an aria-busy region, so
+          each change is announced. */}
+      <p className={styles.srOnly} role="status">
+        {compose.isPublishing ? busyLabel : compose.posted ? postedNotice : ''}
+      </p>
     </form>
   )
 }

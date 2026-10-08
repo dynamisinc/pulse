@@ -70,6 +70,7 @@ export function ReplyComposer({
       textLabel="Reply text"
       placeholder="Post your reply"
       submitLabel="Reply"
+      busyLabel="Replying…"
       postedNotice="Reply published."
       inputRef={inputRef}
       inputDescribedBy={contextId}
