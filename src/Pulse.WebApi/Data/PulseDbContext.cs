@@ -129,6 +129,15 @@ public class PulseDbContext : DbContext
     /// <summary>The REAL follow graph — directed persona→persona edges within a single exercise run (SOC-051).</summary>
     public DbSet<Follow> Follows => Set<Follow>();
 
+    /// <summary>Uploaded media files (images / videos) within a single exercise run (demo-polish B1). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
+
+    /// <summary>Ordered media attachments on posts, with their alt text (demo-polish B1, DP-2). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<PostMediaItem> PostMediaItems => Set<PostMediaItem>();
+
+    /// <summary>REAL like / repost reactions by personas on posts (SOC-030, demo-polish B1). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<PostReaction> PostReactions => Set<PostReaction>();
+
     /// <summary>The durable telemetry event store (XC-004).</summary>
     public DbSet<TelemetryEvent> TelemetryEvents => Set<TelemetryEvent>();
 
@@ -309,6 +318,19 @@ public class PulseDbContext : DbContext
                 .HasDefaultValue(Persona.DefaultAudienceBand);
             entity.Property(e => e.AudienceMagnitude).IsRequired().HasDefaultValue(0);
             entity.Property(e => e.JoinedAt).IsRequired().HasDefaultValue(Persona.DefaultJoinedAt);
+
+            // demo-polish B1 (DP-4, COR-020): optional, bounded profile location, and the avatar/banner images.
+            // Both media references are real foreign keys to MediaAssets with Restrict — no cascade path and no
+            // hard-delete path (XC-010). All three are nullable, so every pre-existing persona reads NULL.
+            entity.Property(e => e.Location).HasMaxLength(Persona.MaxLocationLength);
+            entity.HasOne<MediaAsset>()
+                .WithMany()
+                .HasForeignKey(e => e.AvatarMediaId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<MediaAsset>()
+                .WithMany()
+                .HasForeignKey(e => e.BannerMediaId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Post>(entity =>
@@ -321,6 +343,19 @@ public class PulseDbContext : DbContext
             // Provenance columns (Origin / ActingHumanId / CreatedWallClock — NOT NULL; InjectId — NULL)
             // likewise derive their nullability from their C# types (required / value type vs. string?), so
             // they need no explicit config either.
+
+            // demo-polish B1 (SOC-010 replies, SOC-030 seeded engagement). The baselines are
+            // required-WITH-DEFAULT so the migration adds them NOT NULL DEFAULT 0 to a table that already holds
+            // rows; ParentPostId is a nullable self foreign key (Restrict — no cascade, no hard delete, XC-010)
+            // with its own lookup index for the "direct replies of X" read.
+            entity.Property(e => e.BaselineLikeCount).IsRequired().HasDefaultValue(0);
+            entity.Property(e => e.BaselineRepostCount).IsRequired().HasDefaultValue(0);
+            entity.Property(e => e.BaselineReplyCount).IsRequired().HasDefaultValue(0);
+            entity.HasOne<Post>()
+                .WithMany()
+                .HasForeignKey(e => e.ParentPostId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.ParentPostId);
         });
 
         modelBuilder.Entity<Follow>(entity =>
@@ -342,6 +377,94 @@ public class PulseDbContext : DbContext
             // the read the profile surface performs per persona; the unique index above only serves the
             // outbound (follower-leading) direction.
             entity.HasIndex(e => new { e.ExerciseId, e.FolloweePersonaId });
+        });
+
+        // ==========================================================================================
+        // DEMO-POLISH B1 — media, replies, reactions (the push's ONE migration, implementation.md §1.2–§1.3).
+        // All three entities are IExerciseScoped (PostMediaItem too — DP-2), so the central filter loop and
+        // GuardExerciseScope below cover them with no per-entity code. EVERY foreign key is Restrict: no
+        // cascade path exists (so SQL Server's multiple-cascade-path error cannot occur) and no stray delete
+        // can remove history (XC-010). No navigation properties: readers join explicitly, which avoids
+        // query-filter / relationship fix-up surprises.
+        // ==========================================================================================
+        modelBuilder.Entity<MediaAsset>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // IExerciseScoped: required scope + the standard scoped lookup index (house style — Follow).
+            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.HasIndex(e => e.ExerciseId);
+
+            // Bounded (index-key eligible where indexed). BlobName is GLOBALLY unique: it embeds the exercise
+            // and the asset id, so two rows can never point at one blob. Case-insensitive under the model
+            // collation, which is harmless — blob names are lower-case GUID paths.
+            entity.Property(e => e.Kind).HasMaxLength(MediaAsset.MaxKindLength);
+            entity.Property(e => e.ContentType).HasMaxLength(MediaAsset.MaxContentTypeLength);
+            entity.Property(e => e.BlobName).HasMaxLength(MediaAsset.MaxBlobNameLength);
+            entity.HasIndex(e => e.BlobName).IsUnique();
+            entity.Property(e => e.OriginalFileName).HasMaxLength(MediaAsset.MaxOriginalFileNameLength);
+            entity.Property(e => e.UploadedByHumanId).HasMaxLength(MediaAsset.MaxUploadedByHumanIdLength);
+
+            // DP-3: a video's poster is another asset row (self foreign key).
+            entity.HasOne<MediaAsset>()
+                .WithMany()
+                .HasForeignKey(e => e.PosterMediaAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PostMediaItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // IExerciseScoped (DP-2): the item carries its own scope so the central filter covers this table
+            // directly — an unscoped child table would be a "forgot the filter" hazard on an always-Critical axis.
+            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.HasIndex(e => e.ExerciseId);
+
+            entity.Property(e => e.Alt).HasMaxLength(PostMediaItem.MaxAltLength);
+
+            // One item per display slot. `Order` is a SQL reserved word — EF brackets it; raw SQL must too.
+            entity.HasIndex(e => new { e.PostId, e.Order }).IsUnique();
+
+            entity.HasOne<Post>()
+                .WithMany()
+                .HasForeignKey(e => e.PostId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<MediaAsset>()
+                .WithMany()
+                .HasForeignKey(e => e.MediaAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<MediaAsset>()
+                .WithMany()
+                .HasForeignKey(e => e.PosterMediaAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PostReaction>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // IExerciseScoped: required scope + the standard scoped lookup index (house style — Follow).
+            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.HasIndex(e => e.ExerciseId);
+
+            entity.Property(e => e.Kind).HasMaxLength(PostReaction.MaxKindLength);
+
+            // At most ONE ACTIVE reaction per (post, persona, kind) — DP-15: soft delete, never hard delete
+            // (XC-010). The unique index is FILTERED to active rows, so un-liked history rows (DeletedAt set)
+            // accumulate while the database stays the last word on idempotency for the live state, even under a
+            // concurrent double-submit that beats the service's existence check. A re-like inserts a new row.
+            // PostId is a globally-unique GUID inside one exercise, so the key needs no scope prefix.
+            entity.HasIndex(e => new { e.PostId, e.PersonaId, e.Kind })
+                .IsUnique()
+                .HasFilter("[DeletedAt] IS NULL");
+
+            // PostId is a real foreign key; PersonaId is a LOGICAL reference with no FK (house style — Follow),
+            // resolved through the exercise-scoped Personas set.
+            entity.HasOne<Post>()
+                .WithMany()
+                .HasForeignKey(e => e.PostId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<TelemetryEvent>(entity =>

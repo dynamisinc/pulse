@@ -41,6 +41,9 @@ public class IdempotentMigrationScriptTests
     /// <summary>The last migration before the Organization tier — the shape UAT held when the 2026-08-03 deploy ran.</summary>
     private const string BeforeTenantTier = "20260725184424_FollowGraph";
 
+    /// <summary>The last migration before demo-polish B1 — the shape UAT holds when the demo backend deploys.</summary>
+    private const string BeforeDemoPolish = "20260802124443_ExerciseCreatedAt";
+
     private readonly MsSqlContainerFixture _fixture;
 
     public IdempotentMigrationScriptTests(MsSqlContainerFixture fixture)
@@ -84,6 +87,53 @@ public class IdempotentMigrationScriptTests
             .Should().Be(Organization.DefaultOrganizationId, "the backfill must run in the script, not just under Migrate()");
         (await database.ReadOrganizationIdAsync("StaffUsers", staffUserId))
             .Should().Be(Organization.DefaultOrganizationId);
+    }
+
+    [RequiresDockerFact]
+    public async Task TheDeployScript_BringsUpDemoPolish_OverLegacyPostsAndPersonas_AndReplaysAsANoOp()
+    {
+        // demo-polish B1 (lesson #413): the UAT shape on deploy day — Posts and Personas rows written before the
+        // media/reply/reaction schema existed — taken forward by the SCRIPT, batch by batch, as sqlcmd -b runs it.
+        await using var database = await ScriptDatabase.CreateAsync(_fixture);
+        await database.MigrateToAsync(BeforeDemoPolish);
+
+        var postId = await database.InsertLegacyPostAsync();
+        var personaId = await database.InsertLegacyPersonaAsync();
+        var script = database.GenerateIdempotentScript();
+
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(
+            database.AllMigrations(),
+            "the demo-polish batch must compile and run in the script, not just under Migrate()");
+        await AssertDemoPolishSchemaOverLegacyRowsAsync(database, postId, personaId);
+
+        // The deploy re-applies the same script on every merge: a second apply must be a no-op.
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(database.AllMigrations());
+        await AssertDemoPolishSchemaOverLegacyRowsAsync(database, postId, personaId);
+    }
+
+    private static async Task AssertDemoPolishSchemaOverLegacyRowsAsync(ScriptDatabase database, Guid postId, Guid personaId)
+    {
+        foreach (var table in new[] { "MediaAssets", "PostMediaItems", "PostReactions" })
+        {
+            (await database.TableExistsAsync(table)).Should().BeTrue("the script must create [{0}]", table);
+        }
+
+        var post = await database.ReadDemoPolishPostColumnsAsync(postId);
+        post.Body.Should().Be("Legacy post", "the legacy post must survive the migration untouched");
+        post.ParentPostId.Should().BeNull("a pre-existing post is a top-level post");
+        post.BaselineLike.Should().Be(0, "the NOT NULL baselines backfill to their DEFAULT 0 on existing rows");
+        post.BaselineRepost.Should().Be(0);
+        post.BaselineReply.Should().Be(0);
+
+        var persona = await database.ReadDemoPolishPersonaColumnsAsync(personaId);
+        persona.DisplayName.Should().Be("Legacy Persona", "the legacy persona must survive the migration untouched");
+        persona.AvatarMediaId.Should().BeNull("an existing persona has no avatar until one is set");
+        persona.BannerMediaId.Should().BeNull();
+        persona.Location.Should().BeNull();
     }
 
     /// <summary>
@@ -222,6 +272,91 @@ public class IdempotentMigrationScriptTests
             return value is Guid organizationId
                 ? organizationId
                 : throw new InvalidOperationException($"No [{table}] row for {id}, or a NULL tenant.");
+        }
+
+        /// <summary>Inserts one post via raw SQL in the pre-demo-polish schema (no reply/baseline columns).</summary>
+        public async Task<Guid> InsertLegacyPostAsync()
+        {
+            var id = Guid.NewGuid();
+            await ExecuteNonQueryAsync(ConnectionString, $"""
+                INSERT INTO [Posts] ([Id], [ExerciseId], [AuthorPersonaId], [Body], [CreatedScenarioTime], [Origin],
+                                     [ActingHumanId], [CreatedWallClock])
+                VALUES ('{id}', '{Guid.NewGuid()}', '{Guid.NewGuid()}', N'Legacy post', '2033-09-04T13:00:00+00:00',
+                        N'participant', N'human-legacy', SYSDATETIMEOFFSET());
+                """);
+            return id;
+        }
+
+        /// <summary>Inserts one persona via raw SQL in the pre-demo-polish schema (no avatar/banner/location).</summary>
+        public async Task<Guid> InsertLegacyPersonaAsync()
+        {
+            var id = Guid.NewGuid();
+            await ExecuteNonQueryAsync(ConnectionString, $"""
+                INSERT INTO [Personas] ([Id], [ExerciseId], [DisplayName], [Handle], [Kind], [Verified])
+                VALUES ('{id}', '{Guid.NewGuid()}', N'Legacy Persona', N'legacy_{id:N}', N'human', 0);
+                """);
+            return id;
+        }
+
+        /// <summary>Whether a user table exists.</summary>
+        public async Task<bool> TableExistsAsync(string table)
+        {
+            await using var connection = new SqlConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT OBJECT_ID(@table, N'U');";
+            command.Parameters.AddWithValue("@table", $"[{table}]");
+            return await command.ExecuteScalarAsync() is int;
+        }
+
+        /// <summary>Reads one post's demo-polish columns — raw SQL, independent of the entity model.</summary>
+        public async Task<(string Body, Guid? ParentPostId, int BaselineLike, int BaselineRepost, int BaselineReply)>
+            ReadDemoPolishPostColumnsAsync(Guid id)
+        {
+            await using var connection = new SqlConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT [Body], [ParentPostId], [BaselineLikeCount], [BaselineRepostCount], [BaselineReplyCount] " +
+                "FROM [Posts] WHERE [Id] = @id;";
+            command.Parameters.AddWithValue("@id", id);
+
+            await using var reader = await command.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+            {
+                throw new InvalidOperationException($"No [Posts] row for {id} — the legacy row did not survive.");
+            }
+
+            return (
+                reader.GetString(0),
+                reader.IsDBNull(1) ? null : reader.GetGuid(1),
+                reader.GetInt32(2),
+                reader.GetInt32(3),
+                reader.GetInt32(4));
+        }
+
+        /// <summary>Reads one persona's demo-polish columns — raw SQL, independent of the entity model.</summary>
+        public async Task<(string DisplayName, Guid? AvatarMediaId, Guid? BannerMediaId, string? Location)>
+            ReadDemoPolishPersonaColumnsAsync(Guid id)
+        {
+            await using var connection = new SqlConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT [DisplayName], [AvatarMediaId], [BannerMediaId], [Location] FROM [Personas] WHERE [Id] = @id;";
+            command.Parameters.AddWithValue("@id", id);
+
+            await using var reader = await command.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+            {
+                throw new InvalidOperationException($"No [Personas] row for {id} — the legacy row did not survive.");
+            }
+
+            return (
+                reader.GetString(0),
+                reader.IsDBNull(1) ? null : reader.GetGuid(1),
+                reader.IsDBNull(2) ? null : reader.GetGuid(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3));
         }
 
         public async ValueTask DisposeAsync()

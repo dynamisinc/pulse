@@ -25,6 +25,7 @@ import type { ReactNode } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
+import { SessionProvider } from '@/core/auth'
 import { resetExerciseClock, setExerciseClock, type IExerciseClock } from '@/core/clock'
 import { personaById, personaIdForHandle, type Persona } from '@/features/personas'
 import { PostCard, type PostCounts, type PostView } from './PostCard'
@@ -33,9 +34,19 @@ function fixedClock(instant: Date): IExerciseClock {
   return { scenarioNow: () => instant }
 }
 
-/** Renders a child through the real `ExerciseContextProvider`, awaiting resolution. */
+/** Every `<PostCard>` needs exercise context AND a session: `PostActions` self-wires
+ * the like/repost hooks (demo-polish F0, DP-14), which read both. */
+function Providers({ children }: { children: ReactNode }) {
+  return (
+    <ExerciseContextProvider>
+      <SessionProvider>{children}</SessionProvider>
+    </ExerciseContextProvider>
+  )
+}
+
+/** Renders a child through the real providers, awaiting resolution. */
 async function renderWithExerciseContext(children: ReactNode) {
-  const utils = render(<ExerciseContextProvider>{children}</ExerciseContextProvider>)
+  const utils = render(<Providers>{children}</Providers>)
   await waitFor(() => expect(screen.getByTestId('post-card')).toBeInTheDocument())
   return utils
 }
@@ -95,9 +106,9 @@ describe('PostCard — verified mark (SOC-002, D1-003, R-001)', () => {
 
     render(
       <div style={{ ['--pulse-ac' as string]: '#DB3A54' }}>
-        <ExerciseContextProvider>
+        <Providers>
           <PostCard post={buildPost({ author: verifiedAuthor })} />
-        </ExerciseContextProvider>
+        </Providers>
       </div>,
     )
     await waitFor(() => expect(screen.getByTestId('post-card')).toBeInTheDocument())
@@ -204,7 +215,12 @@ describe('PostCard — readOnly variant (COR-015, D1-011)', () => {
     await renderWithExerciseContext(<PostCard post={buildPost()} />)
 
     const actionsRegion = screen.getByTestId('post-actions')
-    expect(actionsRegion.querySelectorAll('button')).toHaveLength(3)
+    expect(actionsRegion.querySelectorAll('button[data-action]')).toHaveLength(3)
+    // PostActions self-wires the amplify hook (demo-polish F0, DP-14), so a writable
+    // session also gets the SEPARATE Quote trigger next to Repost. It is deliberately
+    // not a canonical `data-action` (R-002), hence the 3 above are unchanged.
+    expect(within(actionsRegion).getByTestId('post-quote-trigger')).toBeInTheDocument()
+    expect(actionsRegion.querySelectorAll('button')).toHaveLength(4)
   })
 })
 
@@ -427,9 +443,9 @@ describe('PostCard — reply count & thread-open affordance (SOC-011, threads-re
     expect(screen.getByRole('button', { name: 'Reply, 2' })).toBeInTheDocument()
 
     rerender(
-      <ExerciseContextProvider>
+      <Providers>
         <PostCard post={buildPost({ id: 'post-live', counts: { reply: 3, repost: 0, like: 0 } })} />
-      </ExerciseContextProvider>,
+      </Providers>,
     )
 
     expect(screen.getByRole('button', { name: 'Reply, 3' })).toBeInTheDocument()
@@ -441,7 +457,14 @@ describe('PostCard — media and link preview', () => {
   it('renders an accessible media placeholder for each attachment', async () => {
     await renderWithExerciseContext(
       <PostCard
-        post={buildPost({ media: [{ kind: 'image', alt: 'Photo of flooded Main Street' }] })}
+        post={buildPost({
+          media: [{
+            id: 'media-1',
+            kind: 'image',
+            url: '/mock-media/photos/flood-main-street.svg',
+            alt: 'Photo of flooded Main Street',
+          }],
+        })}
       />,
     )
 

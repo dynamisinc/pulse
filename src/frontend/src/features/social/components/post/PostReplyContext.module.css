@@ -1,0 +1,13 @@
+/*
+ * features/social/components/post/PostReplyContext.module.css
+ * ---------------------------------------------------------------------------
+ * The "Replying to @handle" line above a reply's text. A new module (demo-polish
+ * F0 stub); F4 (threads & composer) owns this file from here on. Reads the
+ * `--pc-*` tokens declared on the card root.
+ */
+
+.replyContext {
+  margin: 0;
+  color: var(--pc-ink-muted);
+  font-size: 13px;
+}

@@ -47,8 +47,11 @@
  *   5. Classification tag — `STAFF_CLASSIFICATION`, persistent, mono,
  *      config-driven in exactly one place (D7-010: no separate exercise bar).
  *   6. Staff presence — a row of avatars. CONTRACT SEAM: backed by
- *      `staffHeaderMocks.ts` (role/cell + presence) until E1's roles/presence
- *      API lands; see that file's TODOs.
+ *      `staffHeaderMocks.ts` until the live presence channel (CTL-004) exists.
+ *      That roster is EMPTY today (demo-polish C4: no invented colleagues), and
+ *      an empty roster renders NOTHING — not an empty labelled "Staff presence"
+ *      group a screen reader would announce with no members in it. The group
+ *      appears only when the seam returns at least one member.
  *   7. Preview-as-participant button — DRIVEN ENTIRELY by `previewActive` /
  *      `onTogglePreview`. This story renders the control only; the preview
  *      behavior itself (staging the participant shell, moment picker) is
@@ -216,10 +219,10 @@ export function StaffHeader({
   currentPath,
 }: StaffHeaderProps) {
   const { exerciseName, timeZone, status } = useExerciseContext()
-  // NOTE: this `role`/`cell` pair is the identity-badge's display mock (e.g.
-  // "CONTROLLER" / "SimCell-1", see staffHeaderMocks.ts) — a different thing
-  // from the launcher's `StaffSurfaceRole` prop above (renamed `launcherRole`
-  // to avoid shadowing it).
+  // NOTE: this `role`/`cell` pair is the identity-badge's display seam (e.g.
+  // "CONTROLLER" / "SIMCELL-1", derived from the controller identity's call sign —
+  // see staffHeaderMocks.ts) — a different thing from the launcher's
+  // `StaffSurfaceRole` prop above (renamed `launcherRole` to avoid shadowing it).
   const { role, cell } = useStaffRoleCell()
   const presence = useStaffPresence()
   const navigate = useNavigate()
@@ -407,36 +410,40 @@ export function StaffHeader({
         {STAFF_CLASSIFICATION}
       </Box>
 
-      {/* 6. Staff presence — contract seam, see staffHeaderMocks.ts. */}
-      <Stack
-        direction="row"
-        role="group"
-        aria-label="Staff presence"
-        data-testid="staff-header-presence"
-        sx={{ gap: 0.75, flex: 'none' }}
-      >
-        {presence.map(member => (
-          <Tooltip key={member.id} title={member.label}>
-            <Box
-              aria-label={member.label}
-              sx={{
-                width: 26,
-                height: 26,
-                borderRadius: '50%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 10,
-                fontWeight: 800,
-                color: '#fff',
-                background: member.color,
-              }}
-            >
-              {member.initials}
-            </Box>
-          </Tooltip>
-        ))}
-      </Stack>
+      {/* 6. Staff presence — contract seam, see staffHeaderMocks.ts. Rendered
+          only for a NON-EMPTY roster: no members means no group at all (no empty
+          labelled region, no placeholder avatars). */}
+      {presence.length > 0 && (
+        <Stack
+          direction="row"
+          role="group"
+          aria-label="Staff presence"
+          data-testid="staff-header-presence"
+          sx={{ gap: 0.75, flex: 'none' }}
+        >
+          {presence.map(member => (
+            <Tooltip key={member.id} title={member.label}>
+              <Box
+                aria-label={member.label}
+                sx={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 10,
+                  fontWeight: 800,
+                  color: '#fff',
+                  background: member.color,
+                }}
+              >
+                {member.initials}
+              </Box>
+            </Tooltip>
+          ))}
+        </Stack>
+      )}
 
       {/* 7. Preview-as-participant button — behavior is story 04's; renders
           the control only, driven entirely by props (COR-041). HANDLER-GATED:

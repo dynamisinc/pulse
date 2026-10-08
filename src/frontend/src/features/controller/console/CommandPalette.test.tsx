@@ -12,14 +12,17 @@
  *    Shift+Tab past the first wraps to the last.
  *  - Selecting a persona from the PERSONAS slot hands the id back
  *    (`onSelectPersona`) and closes the palette.
- *  - Without a persona-list slot (the fan-out state), the PERSONAS section
- *    shows a neutral placeholder — the seam persona-operation/02 fills.
+ *  - Without a persona-list slot, the PERSONAS section shows a short hint —
+ *    the seam persona-operation/02 fills.
+ *  - Honest copy (demo-polish C4): the search field's placeholder and
+ *    accessible name read "Search personas" (never "…and commands"), PERSONAS
+ *    is the ONLY section, and the palette offers no dead entry.
  *
  * Wrapped in the COBRA theme because `CobraTextField` reads COBRA palette
  * augmentations (`buttonPrimary`).
  */
 import { useState, type ReactNode } from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@mui/material/styles'
@@ -69,7 +72,33 @@ describe('CommandPalette', () => {
     const dialog = screen.getByRole('dialog', { name: /command palette/i })
     expect(dialog).toBeInTheDocument()
     expect(screen.getByTestId('command-palette-personas')).toBeInTheDocument()
-    expect(screen.getByLabelText('Search personas and commands')).toHaveFocus()
+    expect(screen.getByLabelText('Search personas')).toHaveFocus()
+  })
+
+  it('names itself honestly: placeholder + accessible name are "Search personas", no "commands"', async () => {
+    const user = userEvent.setup()
+    renderWithTheme(<PaletteHarness />)
+
+    await user.click(screen.getByTestId('trigger'))
+
+    const search = screen.getByRole('textbox', { name: 'Search personas' })
+    expect(search).toHaveAttribute('placeholder', 'Search personas…')
+    expect(screen.getByTestId('command-palette')).not.toHaveTextContent(/commands/i)
+    expect(search.getAttribute('aria-label')).not.toMatch(/commands/i)
+    expect(search.getAttribute('placeholder')).not.toMatch(/commands/i)
+  })
+
+  it('has PERSONAS as its only section and no dead entry (nothing focusable but the search field)', async () => {
+    const user = userEvent.setup()
+    renderWithTheme(<PaletteHarness />)
+
+    await user.click(screen.getByTestId('trigger'))
+
+    const palette = screen.getByTestId('command-palette')
+    expect(within(palette).getAllByRole('region')).toHaveLength(1)
+    expect(within(palette).getByRole('region', { name: 'Personas' })).toBeInTheDocument()
+    expect(within(palette).queryAllByRole('button')).toHaveLength(0)
+    expect(within(palette).queryAllByRole('option')).toHaveLength(0)
   })
 
   it('shows a placeholder in the PERSONAS section when no persona list is wired', async () => {
@@ -110,7 +139,7 @@ describe('CommandPalette', () => {
     )
 
     await user.click(screen.getByTestId('trigger'))
-    const search = screen.getByLabelText('Search personas and commands')
+    const search = screen.getByLabelText('Search personas')
     const option = screen.getByTestId('persona-option')
 
     expect(search).toHaveFocus()
@@ -135,7 +164,7 @@ describe('CommandPalette', () => {
     renderWithTheme(<PaletteHarness />)
 
     await user.click(screen.getByTestId('trigger'))
-    const search = screen.getByLabelText('Search personas and commands')
+    const search = screen.getByLabelText('Search personas')
     expect(search).toHaveFocus()
 
     await user.tab()

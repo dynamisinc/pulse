@@ -19,12 +19,23 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
+import { SessionProvider } from '@/core/auth'
 import { personaById, personaIdForHandle } from '@/features/personas'
 import { PostCard, type PostCounts, type PostView } from './PostCard'
 import type { ReactNode } from 'react'
 
+/** Every `<PostCard>` needs exercise context AND a session: `PostActions` self-wires
+ * the like/repost hooks (demo-polish F0, DP-14), which read both. */
+function Providers({ children }: { children: ReactNode }) {
+  return (
+    <ExerciseContextProvider>
+      <SessionProvider>{children}</SessionProvider>
+    </ExerciseContextProvider>
+  )
+}
+
 async function renderWithExerciseContext(children: ReactNode) {
-  const utils = render(<ExerciseContextProvider>{children}</ExerciseContextProvider>)
+  const utils = render(<Providers>{children}</Providers>)
   await waitFor(() => expect(screen.getByTestId('post-card')).toBeInTheDocument())
   return utils
 }

@@ -1,0 +1,28 @@
+/*
+ * features/social/components/post/PostMediaSlot.module.css
+ * ---------------------------------------------------------------------------
+ * The media slot. Split out of `theme/social.module.css` by demo-polish F0 with
+ * the pre-v2 placeholder styling UNCHANGED; F2 (media display) owns this file
+ * from here on and replaces the placeholder with the real grid/player styles.
+ */
+
+.media {
+  display: grid;
+  gap: 4px;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.mediaPlaceholder {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: 1px solid var(--pc-line);
+  border-radius: 14px;
+  background: var(--pc-panel);
+  color: var(--pc-ink-muted);
+  font-size: 13px;
+  text-align: center;
+}

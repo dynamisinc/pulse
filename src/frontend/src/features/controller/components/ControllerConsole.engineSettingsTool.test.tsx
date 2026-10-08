@@ -33,6 +33,7 @@ import { postStore } from '@/features/social/services/postStore'
 import { reviewStore } from '../engine/services/reviewStore'
 import { engineControlStore } from '../engine/hooks/useEngineControl'
 import { engineSettingsStore } from '../engine/hooks/useEngineSettings'
+import { ActivePersonaProvider } from '../hooks/useActivePersona'
 import { ControllerConsole } from './ControllerConsole'
 
 beforeEach(() => {
@@ -54,8 +55,10 @@ function renderConsole() {
     <ThemeProvider theme={cobraTheme}>
       <ExerciseContextProvider>
         <ToolstripProvider>
-          <ControllerConsole />
-          <Toolstrip />
+          <ActivePersonaProvider>
+            <ControllerConsole />
+            <Toolstrip />
+          </ActivePersonaProvider>
         </ToolstripProvider>
       </ExerciseContextProvider>
     </ThemeProvider>,
@@ -135,18 +138,20 @@ describe('ControllerConsole — the "ENGINE" settings tool', () => {
       <ThemeProvider theme={cobraTheme}>
         <ExerciseContextProvider>
           <ToolstripProvider>
-            <ControllerConsole
-              renderPersonaResults={({ onSelectPersona }) => (
-                <button
-                  type="button"
-                  data-testid="pick-persona"
-                  onClick={() => onSelectPersona('persona-1')}
-                >
-                  pick persona-1
-                </button>
-              )}
-            />
-            <Toolstrip />
+            <ActivePersonaProvider>
+              <ControllerConsole
+                renderPersonaResults={({ onSelectPersona }) => (
+                  <button
+                    type="button"
+                    data-testid="pick-persona"
+                    onClick={() => onSelectPersona('persona-1')}
+                  >
+                    pick persona-1
+                  </button>
+                )}
+              />
+              <Toolstrip />
+            </ActivePersonaProvider>
           </ToolstripProvider>
         </ExerciseContextProvider>
       </ThemeProvider>,

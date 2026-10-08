@@ -8,10 +8,11 @@ using '../main.bicep'
 //
 // Cost posture: Phase B0's backend (Pulse.WebApi + PulseDbContext) has landed, so this now deploys the
 // App Service host (app-pulse-api-uat), Azure SQL (sqldb-pulse-uat), and App Insights alongside the
-// Free-tier Static Web App. Storage (blob media) and Communication (email) stay gated off until a
-// feature needs them. Before running the Deploy Infrastructure workflow, ensure the SQL_ADMIN_PASSWORD,
-// JWT_SECRET_KEY, and (for login go-live, story login/06) BOOTSTRAP_SECRET + STAFF_IDENTITY_ACCOUNTS_JSON
-// GitHub secrets are set on the uat environment.
+// Free-tier Static Web App. Storage (keyless blob media, demo-polish/01) is on for the demo;
+// Communication (email) stays gated off until a feature needs it. Before running the Deploy
+// Infrastructure workflow, ensure the SQL_ADMIN_PASSWORD, JWT_SECRET_KEY, and (for login go-live,
+// story login/06) BOOTSTRAP_SECRET + STAFF_IDENTITY_ACCOUNTS_JSON GitHub secrets are set on the uat
+// environment.
 // ============================================================================
 
 param environment = 'uat'
@@ -19,9 +20,14 @@ param location = 'centralus'
 
 // --- Cost / feature toggles ---------------------------------------------------
 // Backend on (Phase B0 landed): App Insights + Azure SQL + App Service host now deploy.
-// Storage/Communication stay off until a feature needs blob media or email.
+// Storage on (demo-polish/01): stpulseuat with the PRIVATE post-media container, KEYLESS
+// (allowSharedKeyAccess: false — no connection string or account key exists), and the App Service's
+// managed identity granted Storage Blob Data Contributor at account scope. The grant needs the deploy
+// SP's role-assignment write (already required by deployAi) and takes minutes to propagate — do not
+// smoke-test media uploads in the first ~10 minutes after the deploy. Communication stays off until
+// a feature needs email.
 param deployMonitoring = true
-param deployStorage = false
+param deployStorage = true
 param deployDatabase = true
 param deployBackend = true
 param deployCommunication = false

@@ -120,6 +120,31 @@ public sealed class Persona : IExerciseScoped
     public DateTimeOffset JoinedAt { get; set; } = DefaultJoinedAt;
 
     /// <summary>
+    /// The persona's avatar image (COR-020) — a foreign key to an image <see cref="MediaAsset"/> in the same
+    /// exercise (<c>Restrict</c>, XC-010); null = the R-004 monogram/silhouette fallback.
+    /// </summary>
+    public Guid? AvatarMediaId { get; set; }
+
+    /// <summary>
+    /// The persona's profile banner image (COR-020) — a foreign key to an image <see cref="MediaAsset"/> in the
+    /// same exercise (<c>Restrict</c>, XC-010); null = no banner.
+    /// </summary>
+    public Guid? BannerMediaId { get; set; }
+
+    /// <summary>
+    /// Optional participant-visible profile location (DP-4) — free text, bounded by <see cref="MaxLocationLength"/>.
+    /// Null = none, omitted from the wire.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every write path MUST route this through <c>PostSanitizer.Sanitize</c> (NFR-004)</b>, exactly as
+    /// <see cref="Bio"/> requires — it renders on a participant profile.
+    /// </remarks>
+    public string? Location { get; set; }
+
+    /// <summary>The maximum stored <see cref="Location"/> length — the schema bound (DP-4).</summary>
+    public const int MaxLocationLength = 100;
+
+    /// <summary>
     /// The archetype a persona row carries when none was authored — the least presumptive of the frontend
     /// <c>PersonaType</c> union values. Also the SQL column default, so rows written before this column
     /// existed read back as a contract-valid value rather than an empty string.

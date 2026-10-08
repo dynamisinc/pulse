@@ -33,6 +33,9 @@ public class QueryFilterModelTests
     [InlineData(typeof(Persona))]
     [InlineData(typeof(Post))]
     [InlineData(typeof(TelemetryEvent))]
+    [InlineData(typeof(MediaAsset))]     // demo-polish B1
+    [InlineData(typeof(PostMediaItem))]  // demo-polish B1 (DP-2: scoped in its own right, not via Posts)
+    [InlineData(typeof(PostReaction))]   // demo-polish B1
     public void EveryExerciseScopedEntity_HasAGlobalQueryFilter(Type scopedType)
     {
         using var context = BuildModelOnlyContext();

@@ -116,20 +116,20 @@
  * superRefine, COR-015). `scenarioTime` is scenario `now`; `wallClockTime` is
  * the telemetry-only wall clock (never rendered).
  *
- * WAVE-S3.1 INTEGRATION (orchestrator-owned — reactions/01 + amplification/01
- * + hashtags-trending/01 "integration seam"): `FeedRow` now ALSO calls
- * `useReaction()` and `useAmplify()` per post — the same per-row-hook shape
- * `useReaction`'s own module header anticipates — and threads their state/
- * handlers into `<PostCard>` exactly like the pre-existing `onOpenThread`
- * wiring: `likedByViewer`/`onLike` (SOC-030), `onRepost` (SOC-020), and a
- * per-row "Quote" panel (`<QuoteComposer>`, opened via `onQuote`) that calls
- * `useAmplify().doQuote`. The row's `post.counts.like` is OVERRIDDEN by the
- * hook's own optimistic `likeCount` before it reaches `<PostCard>`, so a
- * toggle renders immediately without waiting on a feed refetch. `onHashtagOpen`
- * threads straight through to `<PostCard>` (the shell channel supplies it).
- * None of this touches the row's memoization: `FeedRow`'s OWN internal hook
- * state doesn't affect whether `React.memo` bails out on unchanged
- * `post`/`variant`/`onOpenThread`/`onHashtagOpen` props (NFR-002/SOC-071).
+ * ENGAGEMENT WIRING LIVES IN THE CARD (demo-polish F0, DP-14). Until F0, `FeedRow`
+ * called `useReaction()`/`useAmplify()` per post and threaded `likedByViewer`/
+ * `onLike`/`onRepost`/`onQuote` (+ a per-row `<QuoteComposer>`) into `<PostCard>`.
+ * That wiring moved INTO `PostActions` (a part of the card), which self-wires the
+ * same hooks — so this row passes only navigation/identity props and EVERY card on
+ * every surface (feed, thread, profile, hashtag) has live like/repost with no
+ * per-page wiring. Behaviour is unchanged: the like total still renders the hook's
+ * optimistic count immediately, telemetry is the same single event per toggle.
+ * `onHashtagOpen` threads straight through to `<PostCard>` (the shell channel
+ * supplies it). `FeedRow`'s memoization is unchanged (NFR-002/SOC-071): it is a
+ * pure function of `post`/`variant`/the stable callbacks.
+ *
+ * LOADING STATE: the "Loading posts…" line is `<FeedSkeleton>` (F0 stub -> F5
+ * fills in skeleton rows); this page only decides WHEN to show it.
  *
  * AUTHOR TAP-THROUGH (profiles-social-graph integration, SOC-050):
  * `onOpenProfile` threads straight through to each `<PostCard>`'s author
@@ -151,14 +151,12 @@ import {
   useShellContext,
   affordancesAvailable,
 } from '@/features/participant-shell/mountContract'
-import { compareNewestFirst, type FeedScope } from '../services/feedService'
+import { compareNewestFirst, toPostView, type FeedScope } from '../services/feedService'
 import { useFeed } from '../hooks/useFeed'
 import { useFeedStream } from '../hooks/useFeedStream'
 import { useFollowedSet } from '../hooks/useFollowedSet'
-import { useReaction } from '../hooks/useReaction'
-import { useAmplify } from '../hooks/useAmplify'
 import { NewPostsPill } from '../components/NewPostsPill'
-import { QuoteComposer } from '../components/QuoteComposer'
+import { FeedSkeleton } from '../components/FeedSkeleton'
 import styles from './Feed.module.css'
 
 type CardVariant = 'full' | 'readOnly'
@@ -191,15 +189,7 @@ function resolveLiveViews(
     if (alreadyRendered.has(view.id)) continue
     const author = personaById.get(view.authorPersonaId)
     if (author === undefined) continue
-    out.push({
-      id: view.id,
-      author,
-      text: view.text,
-      counts: view.counts,
-      scenarioTime: view.scenarioTime,
-      ...(view.media !== undefined ? { media: view.media } : {}),
-      ...(view.linkPreview !== undefined ? { linkPreview: view.linkPreview } : {}),
-    })
+    out.push(toPostView(view, author))
   }
   return out
 }
@@ -224,9 +214,8 @@ interface FeedRowProps {
  * A single feed row, memoized so an unchanged post does not re-render when the
  * feed page re-renders (the burst-legibility guarantee — NFR-002/SOC-071).
  * Props are primitives + a referentially-stable `PostView` (see `useFeed`), so
- * the default shallow comparison is correct here. Owns its OWN like/repost/
- * quote wiring (see module header) — that internal state doesn't affect the
- * memo comparison, which is prop-only.
+ * the default shallow comparison is correct here. The like/repost/quote state is
+ * owned by the card's `PostActions` (see the module header), not by the row.
  */
 const FeedRow = memo(function FeedRow({
   post,
@@ -235,45 +224,18 @@ const FeedRow = memo(function FeedRow({
   onHashtagOpen,
   onOpenProfile,
 }: FeedRowProps) {
-  const reaction = useReaction({ postId: post.id, initialLikeCount: post.counts.like })
-  const amplify = useAmplify({ postId: post.id })
-  const [quoting, setQuoting] = useState(false)
-
-  // Override the seeded like count with the hook's own optimistic total, so a
-  // toggle renders immediately (SOC-030) without waiting on a feed refetch.
-  const displayPost: PostView = useMemo(
-    () => ({ ...post, counts: { ...post.counts, like: reaction.likeCount } }),
-    [post, reaction.likeCount],
-  )
-
-  const handleQuoteSubmit = (commentary: string) => {
-    amplify.doQuote(commentary)
-    setQuoting(false)
-  }
-
   return (
     <li className={styles.row}>
       {/* Tapping the post body OR its reply affordance opens the flattened
           thread (SOC-011); the shell channel supplies onOpenThread. */}
       <PostCard
-        post={displayPost}
+        post={post}
         variant={variant}
         onOpen={onOpenThread}
         onReply={onOpenThread}
-        likedByViewer={reaction.likedByViewer}
-        onLike={reaction.canReact ? reaction.toggleLike : undefined}
-        onRepost={amplify.canAmplify ? amplify.doRepost : undefined}
-        onQuote={amplify.canAmplify ? () => setQuoting(true) : undefined}
         onHashtagOpen={onHashtagOpen}
         onOpenProfile={onOpenProfile}
       />
-      {quoting && (
-        <QuoteComposer
-          authorName={post.author.displayName}
-          onSubmit={handleQuoteSubmit}
-          onCancel={() => setQuoting(false)}
-        />
-      )}
     </li>
   )
 })
@@ -473,9 +435,7 @@ export function Feed({
         ))}
       </ul>
 
-      {loading && posts.length === 0 && (
-        <p className={styles.state} role="status">Loading posts…</p>
-      )}
+      {loading && posts.length === 0 && <FeedSkeleton />}
       {!loading && error !== undefined && posts.length === 0 && (
         <p className={styles.state} role="status">Posts aren’t available right now.</p>
       )}

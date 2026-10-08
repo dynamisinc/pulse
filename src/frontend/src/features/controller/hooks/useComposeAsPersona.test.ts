@@ -59,6 +59,15 @@ vi.mock('@/core/config/mockData', () => ({ USE_MOCK_DATA: false }))
 
 import { publishPost } from '@/features/social/services/livePostActions'
 
+/** A well-formed 201 body — `publishPost` now resolves with the parsed post. */
+const PUBLISHED_VIEW = {
+  id: 'post-published-1',
+  authorPersonaId: 'persona-dreyes_fh',
+  text: 'published',
+  counts: { reply: 0, repost: 0, like: 0 },
+  scenarioTime: '2033-09-04T14:00:00Z',
+}
+
 const mockedUseExerciseContext = vi.mocked(useExerciseContext)
 
 function scope(): ExerciseScope {
@@ -90,7 +99,7 @@ const ACTIVE_PERSONA: StaffPersona = {
 
 beforeEach(() => {
   mockedUseExerciseContext.mockReturnValue(scope())
-  vi.mocked(publishPost).mockReset().mockResolvedValue(undefined)
+  vi.mocked(publishPost).mockReset().mockResolvedValue(PUBLISHED_VIEW)
   // Gate-1 WR-103's persisted-draft store is a module singleton keyed by
   // (exerciseId, personaId) — several tests below reuse the SAME
   // persona/exercise, so reset it between tests.

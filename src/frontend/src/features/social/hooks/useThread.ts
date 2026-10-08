@@ -35,6 +35,15 @@
  * seeded posts for the same demo purpose. None of this is participant-safe
  * data yet — `toParticipantView` (posts/03) is the only sanctioned narrowing,
  * applied before this hook ever hands a value back (XC-002).
+ *
+ * CONTRACT v2 (demo-polish F0): the mock thread ALSO knows the v2 fixture thread
+ * from `services/mockFixtures.ts` (root -> question -> focused, whose focused post
+ * has three direct replies — one with media, one taken-down TOMBSTONE). It is
+ * resolved by id regardless of `DEMO_FIXTURES_ENABLED` (a thread is looked up, it
+ * is not a feed), walks ancestors via `inReplyTo` (depth-capped at 50, soft-deleted
+ * ancestors omitted), and returns a taken-down reply as a tombstone: `status:
+ * 'taken-down'`, empty `text`, no `media`, zero `counts`. The guards below accept
+ * the optional v2 members (`media`/`inReplyTo`/`viewer`) and reject malformed ones.
  */
 
 import { useEffect, useState } from 'react'
@@ -49,6 +58,8 @@ import {
   type Post,
   type PostCounts,
 } from '@/features/social'
+import { hasWellFormedV2Members } from '../services/postService'
+import { listDemoFixturePosts, listDemoTakenDownPosts } from '../services/mockFixtures'
 
 /**
  * A mock reply fixture — a full `Post` (so it narrows through
@@ -125,6 +136,7 @@ const MOCK_REPLIES_BY_PARENT: Readonly<Record<string, readonly MockReplyPost[]>>
       createdWallClock: SEED_WALL_CLOCK,
       scenarioTime: '2033-09-04T14:10:00Z',
       origin: 'participant',
+      inReplyTo: { postId: 'post-seed-mvega-question', authorHandle: 'mvega_fh' },
       replyToPersonaId: personaIdForHandle('mvega_fh'),
       status: 'visible',
     },
@@ -139,6 +151,7 @@ const MOCK_REPLIES_BY_PARENT: Readonly<Record<string, readonly MockReplyPost[]>>
       scenarioTime: '2033-09-04T14:12:00Z',
       origin: 'inject',
       injectId: '043',
+      inReplyTo: { postId: 'post-seed-mvega-question', authorHandle: 'mvega_fh' },
       replyToPersonaId: personaIdForHandle('mvega_fh'),
       // A controller/moderator took this one down mid-exercise (SOC-005) - the
       // in-thread tombstone (D1-009) is the only thing `<ThreadView>` renders
@@ -155,28 +168,86 @@ interface ThreadWireResponse {
   readonly replies: MockReplyPost[]
 }
 
+/** The parent of `postId`: the hand-authored legacy chain first, else `inReplyTo`. */
+function parentIdOf(postId: string, byId: ReadonlyMap<string, Post>): string | undefined {
+  return MOCK_ANCESTRY[postId] ?? byId.get(postId)?.inReplyTo?.postId
+}
+
+/** The server caps the ancestor walk at depth 50 (implementation.md §1.5.3). */
+const MAX_ANCESTOR_DEPTH = 50
+
 function buildAncestorChain(focusedPostId: string, byId: ReadonlyMap<string, Post>): Post[] {
   const chain: Post[] = []
   const seen = new Set<string>()
-  let parentId = MOCK_ANCESTRY[focusedPostId]
+  let parentId = parentIdOf(focusedPostId, byId)
 
-  while (parentId !== undefined && !seen.has(parentId)) {
+  while (parentId !== undefined && !seen.has(parentId) && chain.length < MAX_ANCESTOR_DEPTH) {
     seen.add(parentId)
+    // Soft-deleted ancestors are not in `byId` (visible posts only) -> the walk stops.
     const parent = byId.get(parentId)
     if (!parent) break
     chain.unshift(parent)
-    parentId = MOCK_ANCESTRY[parentId]
+    parentId = parentIdOf(parentId, byId)
   }
 
   return chain
 }
 
+/** Oldest first, by scenario time (the thread contract's reply order). */
+function byScenarioTimeAscending(a: Post, b: Post): number {
+  return Date.parse(a.scenarioTime) - Date.parse(b.scenarioTime)
+}
+
+/** A visible v2 fixture reply, shaped as a thread reply. */
+function toVisibleReply(post: Post): MockReplyPost {
+  return {
+    ...post,
+    replyToPersonaId: personaIdForHandle(post.inReplyTo?.authorHandle ?? ''),
+    status: 'visible',
+  }
+}
+
+/**
+ * A soft-deleted reply, shaped as the contract's TOMBSTONE: `status:
+ * 'taken-down'`, empty text, no media/link/viewer, zero counts. The original
+ * text, media and counts are deliberately NOT carried.
+ */
+function toTombstone(post: Post): MockReplyPost {
+  return {
+    id: post.id,
+    exerciseId: post.exerciseId,
+    authorPersonaId: post.authorPersonaId,
+    actingHumanId: post.actingHumanId,
+    text: '',
+    counts: { reply: 0, repost: 0, like: 0 },
+    createdWallClock: post.createdWallClock,
+    scenarioTime: post.scenarioTime,
+    origin: post.origin,
+    ...(post.injectId !== undefined ? { injectId: post.injectId } : {}),
+    ...(post.inReplyTo !== undefined ? { inReplyTo: post.inReplyTo } : {}),
+    replyToPersonaId: personaIdForHandle(post.inReplyTo?.authorHandle ?? ''),
+    status: 'taken-down',
+  }
+}
+
 function buildMockThreadResponse(focusedPostId: string): ThreadWireResponse {
-  const byId = new Map(listPosts().map(post => [post.id, post]))
+  // Visible posts only: a soft-deleted post is never an ancestor or a focus.
+  const byId = new Map<string, Post>(
+    [...listPosts(), ...listDemoFixturePosts()].map(post => [post.id, post]),
+  )
+  const replies: MockReplyPost[] = [
+    ...(MOCK_REPLIES_BY_PARENT[focusedPostId] ?? []),
+    ...[...byId.values()]
+      .filter(post => post.inReplyTo?.postId === focusedPostId)
+      .map(toVisibleReply),
+    ...listDemoTakenDownPosts()
+      .filter(post => post.inReplyTo?.postId === focusedPostId)
+      .map(toTombstone),
+  ]
   return {
     ancestors: buildAncestorChain(focusedPostId, byId),
     focused: byId.get(focusedPostId) ?? null,
-    replies: [...(MOCK_REPLIES_BY_PARENT[focusedPostId] ?? [])],
+    replies: replies.sort(byScenarioTimeAscending),
   }
 }
 
@@ -200,7 +271,10 @@ function isValidPost(value: unknown): value is Post {
     !!p.counts && typeof p.counts === 'object' &&
     typeof p.counts.reply === 'number' &&
     typeof p.counts.repost === 'number' &&
-    typeof p.counts.like === 'number'
+    typeof p.counts.like === 'number' &&
+    // Contract v2: optional media / inReplyTo / viewer must be well-formed when
+    // present (shared with `feedService.isPost`).
+    hasWellFormedV2Members(p)
   )
 }
 
