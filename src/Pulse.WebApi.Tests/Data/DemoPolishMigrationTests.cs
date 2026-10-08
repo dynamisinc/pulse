@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Data;
 
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
@@ -21,8 +22,9 @@ using Pulse.WebApi.Data.Entities;
 ///   <item><description>the three unique indexes reject duplicates — the ACTIVE reaction triple (filtered to
 ///   <c>[DeletedAt] IS NULL</c>, DP-15: an un-like then re-like is allowed), the media <c>(PostId, [Order])</c>
 ///   slot, and <c>BlobName</c>; and</description></item>
-///   <item><description>the foreign keys are <c>NO ACTION</c> at the server: a hard delete of a referenced row is
-///   refused and removes nothing (XC-010).</description></item>
+///   <item><description>the foreign keys are <c>NO ACTION</c> at the server: the migrated catalog
+///   (<c>sys.foreign_keys</c>) holds no cascading FK, and a hard delete of a referenced row is refused and removes
+///   nothing (XC-010).</description></item>
 /// </list>
 /// Every test is <see cref="RequiresDockerFactAttribute"/> (Gate-1 W-001). The structural (model-only) proofs
 /// are in <see cref="DemoPolishSchemaModelTests"/>.
@@ -256,6 +258,62 @@ public class DemoPolishMigrationTests
         (await verify.Posts.IgnoreQueryFilters().CountAsync(p => p.Id == postId || p.Id == replyId)).Should().Be(2);
         (await verify.PostMediaItems.IgnoreQueryFilters().CountAsync(i => i.PostId == postId)).Should().Be(1);
         (await verify.PostReactions.IgnoreQueryFilters().CountAsync(r => r.PostId == postId)).Should().Be(1);
+    }
+
+    [RequiresDockerFact]
+    public async Task TheMigratedSchema_HasNoCascadingForeignKey_AtTheServer()
+    {
+        // Gate-1 L-1: the DELETE test above is partly vacuous — the reply self-FK alone refuses that delete, so an
+        // ON DELETE CASCADE on FK_PostReactions_Posts_PostId / FK_PostMediaItems_Posts_PostId (or on any FK into
+        // MediaAssets, which no delete test touches) would still pass it. This reads the MIGRATED catalog directly:
+        // every foreign key in the database must be NO ACTION (delete_referential_action = 0) — XC-010.
+        var connectionString = _fixture.ConnectionString
+            ?? throw new InvalidOperationException("The shared MSSQL fixture has no connection string.");
+
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        var cascading = new List<string>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText =
+                "SELECT [name], [delete_referential_action_desc] FROM sys.foreign_keys " +
+                "WHERE [delete_referential_action] <> 0;";
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                cascading.Add($"{reader.GetString(0)} ({reader.GetString(1)})");
+            }
+        }
+
+        cascading.Should().BeEmpty(
+            "every foreign key is NO ACTION at the server: a CASCADE / SET NULL / SET DEFAULT delete would be a " +
+            "hard-delete (or history-rewriting) path, which XC-010 forbids");
+
+        // Non-vacuity: the zero above must be over the contracted FKs actually existing, not over an empty catalog.
+        var noAction = new List<string>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT [name] FROM sys.foreign_keys WHERE [delete_referential_action] = 0;";
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                noAction.Add(reader.GetString(0));
+            }
+        }
+
+        noAction.Should().Contain(
+            [
+                "FK_MediaAssets_MediaAssets_PosterMediaAssetId",
+                "FK_PostMediaItems_Posts_PostId",
+                "FK_PostMediaItems_MediaAssets_MediaAssetId",
+                "FK_PostMediaItems_MediaAssets_PosterMediaAssetId",
+                "FK_PostReactions_Posts_PostId",
+                "FK_Posts_Posts_ParentPostId",
+                "FK_Personas_MediaAssets_AvatarMediaId",
+                "FK_Personas_MediaAssets_BannerMediaId",
+            ],
+            "the migration creates all eight contracted foreign keys, each NO ACTION");
     }
 
     private static Post NewPost(Guid id, Guid exerciseId) => new()

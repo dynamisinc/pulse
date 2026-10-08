@@ -61,8 +61,13 @@ public sealed class PostReaction : IExerciseScoped
     public DateTimeOffset CreatedScenarioTime { get; set; }
 
     /// <summary>
-    /// Soft-delete marker (DP-15, XC-010). Null = active; set = un-liked / un-reposted. A reaction row is never
-    /// hard-deleted; only active rows count, and only active rows are held unique.
+    /// Soft-delete marker (DP-15, XC-010), in SCENARIO time — exactly like <see cref="Post.DeletedAt"/>. Null =
+    /// active; set = un-liked / un-reposted. A reaction row is never hard-deleted; only active rows count, and only
+    /// active rows are held unique.
     /// </summary>
+    /// <remarks>
+    /// <b>Clock (COR-053).</b> The un-like path MUST stamp this from the exercise's scenario clock (the same source
+    /// as <see cref="CreatedScenarioTime"/>), never <c>DateTimeOffset.UtcNow</c> or any other wall-clock read.
+    /// </remarks>
     public DateTimeOffset? DeletedAt { get; set; }
 }
