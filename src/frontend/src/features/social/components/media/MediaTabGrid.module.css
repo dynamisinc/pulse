@@ -1,0 +1,97 @@
+/*
+ * features/social/components/media/MediaTabGrid.module.css
+ * ---------------------------------------------------------------------------
+ * The profile Media tab: a 3-column grid of square thumbnails with a hairline gap.
+ * The tab sits outside a <PostCard>, so the root composes the shared `.tokens`.
+ */
+
+.grid {
+  composes: tokens from '../../theme/social.module.css';
+
+  display: grid;
+  margin: 0;
+  padding: 0;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  list-style: none;
+}
+
+.cell {
+  min-width: 0;
+}
+
+.tile {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: var(--pc-panel);
+}
+
+.tileButton {
+  cursor: pointer;
+}
+
+.tileButton:hover .thumb {
+  filter: brightness(0.92);
+}
+
+/* Drawn inside the clipped tile: outline (forced-colors) + a white/accent ring over the photo. */
+.tileButton:focus-visible {
+  outline: 3px solid var(--pc-accent);
+  outline-offset: -3px;
+}
+
+.tileButton:focus-visible::after {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 6px var(--pc-accent);
+  content: '';
+  pointer-events: none;
+}
+
+.thumb {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Icon + position, not colour alone, marks a video tile. */
+.playBadge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 1;
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 65%);
+  color: #fff;
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
