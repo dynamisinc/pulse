@@ -37,8 +37,9 @@ the existing funnel and projection.
       - Item fields: title (1..120), notes (≤ 500), planned minute (`plannedMinute`, integer ≥ 0, shown as T+N, a sort
         hint and display only, **no auto-fire**), and assignee (a staff user assigned to this exercise, or none).
       - Per child post: `personaId`, text (1..280 code points, sanitized server-side at fire through the funnel,
-        NFR-004), `media` (≤ 4 images **or** 1 video, `alt` 1..1000, never mixed), `replyTo` (`{injectPostId}` = another
-        scripted post, or `{postId}` = an existing post) and `engagementBaseline` (0..1,000,000 each).
+        NFR-004), `media` (≤ 4 images **or** 1 video, `alt` 1..1000, never mixed), `replyTo` (`{sequence}` = an earlier sibling in
+        this item, `{injectPostId}` = another scripted post, or `{postId}` = an existing post); on `PUT` a child echoing
+        its `id` keeps its identity and `engagementBaseline` (0..1,000,000 each).
       - Edits are accepted only while the item is `pending`, `held` or `failed`. A `fired`, `firing` or `skipped` item
         is read-only (409).
       - Every write carries the item's `version`; a stale version is a 409, so two controllers editing at once never
@@ -75,7 +76,7 @@ the existing funnel and projection.
       window with jitter: increasing, never two at the same instant, and no gap under 3 s.
       - The pacing runs in a hosted service (`InjectBurstRunner`), so it continues if every console closes.
       - Progress (`firedCount`/`total`) is in the read model.
-      - A child whose `replyTo.injectPostId` is an earlier child **waits** for that parent's post id. One whose parent
+      - A child whose reply parent is an earlier child (`{sequence}` or `{injectPostId}`) **waits** for that parent's post id. One whose parent
         is in another, unfired item fails with "Fire the parent first" (and can be retried).
       - The item moves to `fired` when every child is fired or skipped, and to `failed` if any child failed.
 - [ ] **Pause tiers (IQ-5).**

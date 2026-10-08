@@ -76,8 +76,9 @@ All routes require a live **staff** session assigned to the active exercise (the
 | `POST /api/injects/{id}/fire` | — | 200 `InjectItemDto` (`fired` / `firing` / `failed`) | 404 · 409 (not fireable · already fired · world frozen · reply parent not fired) |
 | `POST /api/injects/{id}/hold` · `/release` · `/skip` · `/unskip` · `/retry` | — | 200 `InjectItemDto` | 404 · 409 (transition not allowed; retry under freeze) |
 
-A 409 body is a ProblemDetails with `detail` (readable) and `extensions.item` (the current `InjectItemDto`, when the
-item exists) so the console can refresh the row without a second call.
+A 409 body is a ProblemDetails with `detail` (readable) and an `item` extension member (the current `InjectItemDto`,
+when the item exists). ASP.NET serialises ProblemDetails extensions at the **top level**, so the JSON is
+`{ type, title, status, detail, item }`. The console uses it to refresh the row without a second call.
 
 ```ts
 // src/frontend/src/features/controller/runSheet/types.ts  (07)  ⇄  Features/Injects/InjectDtos.cs  (06)
@@ -86,10 +87,13 @@ export type InjectStatus = 'pending' | 'held' | 'firing' | 'fired' | 'skipped' |
 export type InjectPostStatus = 'pending' | 'fired' | 'skipped' | 'failed'
 
 export interface InjectPostWrite {
+  id?: string                                             // PUT: echo an existing child's id to keep its identity; omit for a new child
   personaId: string
   text: string                                            // 1..280 code points
   media?: { mediaId: string; alt: string }[]              // <= 4 images OR exactly 1 video; alt 1..1000
-  replyTo?: { injectPostId: string } | { postId: string } // an earlier scripted post, or an existing post
+  replyTo?: { sequence: number }                          // an EARLIER sibling in this item (1-based, < own sequence); works at create time
+         | { injectPostId: string }                       // a scripted post in another item (or this one, by id)
+         | { postId: string }                             // an existing post
   engagementBaseline?: { like?: number; repost?: number; reply?: number }   // 0..1,000,000
 }
 export interface InjectItemWrite {
@@ -136,6 +140,12 @@ export interface InjectAssigneesDto {
   assignees: { id: string; displayName: string; role: string }[]
 }
 ```
+
+**Child identity on PUT (amended 2026-10-08).** Children are ordered by array position (`sequence`). On `PUT`, a
+child carrying the `id` of an existing child of the same item keeps that child's identity (status, fired post,
+and any `replyTo` pointing at it). A child without an `id` is new. An `id` from another item, or an unknown one, is
+a 400. An unfired child left out is removed. This lets a burst's replies point at an earlier sibling at create time
+(`{ sequence }`) and survive edits.
 
 **Telemetry (IQ-8).** One server event per action, in the same unit of work as the state change:
 `eventType: 'inject_action'`, `channel: 'system'`, `actor { kind: 'system', actingHumanId }`, `injectId: <item id>`,
