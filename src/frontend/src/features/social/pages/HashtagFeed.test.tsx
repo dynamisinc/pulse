@@ -106,13 +106,13 @@ describe('HashtagFeed — filters to the tagged posts only (SOC-040, COR-001)', 
     ])
   })
 
-  it('renders the hashtag heading with the leading "#"', async () => {
+  it('renders the heading with the leading "#", in the casing authors used', async () => {
     postStore.appendPost(buildPost({ id: 'post-ht-heading', text: 'About #Zone2 today.' }))
 
     renderHashtagFeed('zone2')
     await screen.findAllByTestId('post-card')
 
-    expect(screen.getByRole('heading', { name: '#zone2' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '#Zone2' })).toBeInTheDocument()
   })
 })
 
@@ -216,7 +216,7 @@ describe('HashtagFeed — Recent / Top tabs (SOC-040)', () => {
     renderHashtagFeed('zone2')
     await screen.findAllByTestId('post-card')
 
-    expect(screen.getByRole('tablist', { name: '#zone2 feed order' })).toBeInTheDocument()
+    expect(screen.getByRole('tablist', { name: '#Zone2 feed order' })).toBeInTheDocument()
     expect(screen.getAllByRole('tab')).toHaveLength(2)
   })
 
@@ -381,15 +381,17 @@ describe('HashtagFeed — shell variant drives card affordances (COR-015, D1-011
   })
 })
 
-describe('HashtagFeed — list is a live, labelled region (NFR-001)', () => {
-  it('exposes the matched post list as an aria-live tabpanel labelled with the active tab', async () => {
+describe('HashtagFeed — the post list is a labelled tabpanel (NFR-001)', () => {
+  it('labels the tabpanel with the active tab and is NOT a live region', async () => {
     postStore.appendPost(buildPost({ id: 'post-ht-live', text: 'About #Zone2.' }))
     renderHashtagFeed('zone2')
     await screen.findAllByTestId('post-card')
 
     const panel = screen.getByRole('tabpanel')
-    expect(panel).toHaveAttribute('aria-live', 'polite')
-    expect(panel).toHaveAttribute('aria-label', '#zone2, Recent')
+    // A whole list of cards re-announced on every tab switch would be noise (L7): the
+    // tabs' own selection state is what tells a screen reader the order changed.
+    expect(panel).not.toHaveAttribute('aria-live')
+    expect(panel).toHaveAttribute('aria-label', '#Zone2, Recent')
     expect(panel).toHaveAttribute('aria-labelledby', screen.getByRole('tab', { name: 'Recent' }).id)
     expect(within(panel).getAllByTestId('post-card')).toHaveLength(1)
   })

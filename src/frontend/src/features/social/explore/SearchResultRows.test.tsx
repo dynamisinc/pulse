@@ -15,7 +15,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { SEEDED_PERSONAS, toParticipantPersona, type Persona } from '@/features/personas'
 import type { PostView } from '../components/post/types'
-import { attributeNames, structureSignature } from './exploreTestUtils'
+import { attributeNames, attributeValues, structureSignature } from './exploreTestUtils'
 import { PersonResultRow, PostResultRow } from './SearchResultRows'
 
 const REAL: Persona = {
@@ -47,11 +47,16 @@ const FAKE: Persona = {
   followerCount: 900,
 }
 
+const noop = () => {}
+
+/** Words that would tell a participant (or a script) which account is the lookalike. */
+const TRUST_WORDS = /verif|official|trust|fake|imperson|warn|flag|suspect|authentic|genuine/i
+
 function renderPair(real: Persona, fake: Persona) {
   render(
     <ul>
-      <PersonResultRow persona={real} />
-      <PersonResultRow persona={fake} />
+      <PersonResultRow persona={real} onOpenProfile={noop} />
+      <PersonResultRow persona={fake} onOpenProfile={noop} />
     </ul>,
   )
   const [realRow, fakeRow] = screen.getAllByTestId('search-person')
@@ -83,9 +88,30 @@ describe('PersonResultRow — the lookalike pair renders identically except the 
     const realNames = attributeNames(realRow, sealWrapper ?? undefined)
     const fakeNames = attributeNames(fakeRow)
     expect([...realNames].sort()).toEqual([...fakeNames].sort())
-    for (const name of fakeNames) {
-      expect(name).not.toMatch(/verif|official|trust|fake|imperson|warn|flag|suspect/i)
+    for (const name of fakeNames) expect(name).not.toMatch(TRUST_WORDS)
+  })
+
+  it('carries no trust word in ANY attribute value either (ids, labels, classes, hrefs)', () => {
+    const { realRow, fakeRow } = renderPair(REAL, FAKE)
+    const sealWrapper = realRow.querySelector('[data-testid="verified-mark"]')?.parentElement
+    // The seal itself is the one thing allowed to say "Verified account".
+    for (const value of attributeValues(realRow, sealWrapper ?? undefined)) {
+      expect(value).not.toMatch(TRUST_WORDS)
     }
+    for (const value of attributeValues(fakeRow)) expect(value).not.toMatch(TRUST_WORDS)
+  })
+
+  it('describes the link by the handle, plus the seal when there is one', () => {
+    const { realRow, fakeRow } = renderPair(REAL, FAKE)
+    expect(within(realRow).getByRole('link')).toHaveAccessibleDescription(
+      '@FairhavenWater Verified account',
+    )
+    expect(within(fakeRow).getByRole('link')).toHaveAccessibleDescription('@FairhavenWaterUpd')
+    // Both rows use the same attribute; only the number of ids it lists differs.
+    const realIds = within(realRow).getByRole('link').getAttribute('aria-describedby')?.split(' ')
+    const fakeIds = within(fakeRow).getByRole('link').getAttribute('aria-describedby')?.split(' ')
+    expect(realIds).toHaveLength(2)
+    expect(fakeIds).toHaveLength(1)
   })
 
   it('carries no "official" / "unverified" / warning copy on either row', () => {
@@ -133,7 +159,7 @@ describe('PersonResultRow — the lookalike pair renders identically except the 
 
 describe('PersonResultRow — link behaviour and safety', () => {
   it('is one real link to the profile, named for the account', () => {
-    render(<PersonResultRow persona={REAL} />)
+    render(<PersonResultRow persona={REAL} onOpenProfile={noop} />)
     const link = screen.getByRole('link', { name: "View Fairhaven Water Utility's profile" })
     expect(link).toHaveAttribute('href', '/FairhavenWater')
     expect(screen.getAllByRole('link')).toHaveLength(1)
@@ -159,7 +185,7 @@ describe('PersonResultRow — link behaviour and safety', () => {
       displayName: '<img src=x onerror=alert(1)>',
       bio: '<script>alert(2)</script>',
     }
-    const { container } = render(<PersonResultRow persona={hostile} />)
+    const { container } = render(<PersonResultRow persona={hostile} onOpenProfile={noop} />)
     expect(container.querySelector('img[src="x"]')).toBeNull()
     expect(container.querySelector('script')).toBeNull()
     expect(container).toHaveTextContent('<script>alert(2)</script>')
@@ -174,7 +200,7 @@ const VIEW: PostView = {
   scenarioTime: '2033-09-04T13:15:00Z',
 }
 
-function renderPost(onOpenPost?: (id: string) => void) {
+function renderPost(onOpenPost: (id: string, handle?: string) => void = noop) {
   return render(
     <ul>
       <PostResultRow
@@ -200,13 +226,13 @@ describe('PostResultRow', () => {
     expect(within(row).getByRole('link')).toHaveTextContent(VIEW.text)
   })
 
-  it('links to the thread and hands the post id to the callback', () => {
+  it('links to the thread and hands the post id and author handle to the callback', () => {
     const onOpenPost = vi.fn()
     renderPost(onOpenPost)
     const link = screen.getByRole('link')
     expect(link).toHaveAttribute('href', '/FairhavenWater/status/post-1')
     fireEvent.click(link)
-    expect(onOpenPost).toHaveBeenCalledWith('post-1')
+    expect(onOpenPost).toHaveBeenCalledWith('post-1', 'FairhavenWater')
   })
 
   it('keeps the verified seal outside the link (not swallowed into its name)', () => {

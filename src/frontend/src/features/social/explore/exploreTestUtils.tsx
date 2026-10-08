@@ -4,9 +4,11 @@
  * Shared helpers for the Explore component tests (demo-polish F6). TEST-ONLY —
  * imported by `*.test.tsx` files in this directory, never by product code.
  *
- *  - `renderExplore` mounts a component under the real provider stack the
- *    participant surface uses (`ExerciseContextProvider` + `SessionProvider`;
- *    the mock exercise + the mock viewer session).
+ *  - `renderExplore` mounts a component under the provider stack the Social channel
+ *    gives it: the mock exercise + viewer session, F1's navigation adapter (in-memory,
+ *    with a `data-testid="where"` span showing the channel location) and
+ *    the persona directory. The shared Explore baseline is reset afterwards by
+ *    `resetExplore()`, which every Explore test file calls in `afterEach`.
  *  - `seedPost` appends a participant-visible post to the mock `postStore` (the
  *    store `useFeed` reads in mock mode), authored by a seeded persona handle.
  *  - `structureSignature` serialises an element's STRUCTURE — tag names, the SET
@@ -20,9 +22,14 @@ import type { ReactElement } from 'react'
 import { render, type RenderResult } from '@testing-library/react'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
+import { resetExerciseClock } from '@/core/clock'
 import { personaIdForHandle } from '@/features/personas'
 import type { Post } from '@/features/social'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
+import { MemorySocialNavigationProvider } from '../layout/SocialNavigationProvider'
 import { postStore } from '../services/postStore'
+import { exploreFeedStore } from './exploreFeedStore'
+import { Where } from './Where.testUtils'
 
 /** `items[index]`, or a clear failure — a lint-clean stand-in for `items[index]!`. */
 export function nth<T>(items: readonly T[], index: number): T {
@@ -31,13 +38,35 @@ export function nth<T>(items: readonly T[], index: number): T {
   return item
 }
 
-/** Renders `ui` inside the exercise-context + session providers. */
-export function renderExplore(ui: ReactElement): RenderResult {
+export interface RenderExploreOptions {
+  /** Memory-adapter history, oldest first. Default `['/explore']`. */
+  readonly initialEntries?: readonly string[]
+}
+
+/** Renders `ui` inside the channel's providers (see the module header). */
+export function renderExplore(
+  ui: ReactElement,
+  options: RenderExploreOptions = {},
+): RenderResult {
   return render(
     <ExerciseContextProvider>
-      <SessionProvider>{ui}</SessionProvider>
+      <SessionProvider>
+        <MemorySocialNavigationProvider initialEntries={options.initialEntries ?? ['/explore']}>
+          <SocialDirectoryProvider>
+            {ui}
+            <Where />
+          </SocialDirectoryProvider>
+        </MemorySocialNavigationProvider>
+      </SessionProvider>
     </ExerciseContextProvider>,
   )
+}
+
+/** Call in `afterEach`: empties the post store and the Explore baseline, restores the clock. */
+export function resetExplore(): void {
+  exploreFeedStore.reset()
+  postStore.resetForTests()
+  resetExerciseClock()
 }
 
 export interface SeedPostInput {
@@ -95,4 +124,16 @@ export function attributeNames(node: Element, skip?: Element): Set<string> {
   }
   visit(node)
   return names
+}
+
+/** Every attribute VALUE used anywhere in `node`'s subtree, except inside `skip`. */
+export function attributeValues(node: Element, skip?: Element): string[] {
+  const values: string[] = []
+  const visit = (element: Element) => {
+    if (element === skip) return
+    for (const name of element.getAttributeNames()) values.push(element.getAttribute(name) ?? '')
+    for (const child of Array.from(element.children)) visit(child)
+  }
+  visit(node)
+  return values
 }

@@ -4,47 +4,36 @@
  * The Trending panel (demo-polish F6, story 15-explore; SOC-041 client-side,
  * hashtags-trending/02 "lite", D1-R5). Participant world (Pulse Social skin):
  * plain semantic elements + a scoped CSS Module + FontAwesome only — NO COBRA, NO
- * themed MUI, NO `@mui/icons-material`.
+ * themed MUI.
  *
- * WHAT IT SHOWS. The top 5 (default; up to 10 via `limit`) hashtags over the
- * LOADED feed, ranked by recency-weighted activity in SCENARIO time. Each row has
- * a varied category line ("Trending", "Public safety · Trending"), the hashtag,
+ * WHAT IT SHOWS. The top 5 (default; up to 10 via `limit`) hashtags over the live
+ * Explore baseline, ranked by recency-weighted activity in SCENARIO time. Each row
+ * has a varied category line ("Trending", "Public safety · Trending"), the hashtag,
  * and a post-count line ("16 posts"). Nothing is declared by hand and nothing
  * carries an "official"/"promoted" cue — a trend is just a trend (D1-R5, SOC-041).
- * The ranking and its tie-break live in `trending.ts` (pure, memoized, unit
- * tested); the data comes from `useTrending()`, which reads the exercise-scoped
- * feed itself (no props from the host, COR-001).
+ * Ranking lives in `trending.ts`; the data in `useTrending()`, which reads the shared
+ * baseline (`exploreFeedStore`) — so the rail's panel keeps moving as posts arrive.
  *
- * SELF-CONTAINED + WIDTH-AGNOSTIC. It takes no data props, so the orchestrator can
- * drop `<TrendingPanel />` into F1's right-rail `trendingSlot` (~344px) and
- * `ExplorePage` can render it in the 600px main column; it fills whatever width
- * its container gives it.
+ * SELF-CONTAINED + WIDTH-AGNOSTIC. No data props: `<TrendingPanel />` mounts in the
+ * ~344px right rail and `ExplorePage` renders it in the 600px column; it fills
+ * whatever width it is given.
  *
- * NAVIGATION. Each row is a real `<a href="/hashtag/:tag">` (see
- * `exploreNavigation.ts`): activating it navigates to the hashtag feed — through
- * `onOpenHashtag` when the host supplies one (in-app, no reload), otherwise by
- * following the link. Rows are links, so they are natively keyboard-operable and
- * never a focusable no-op.
+ * NAVIGATION. Each row is a real `<a href="/hashtag/:tag">` (`exploreNavigation.ts`);
+ * activating it opens the hashtag feed in-app. Rows are links, so they are natively
+ * keyboard-operable.
  *
  * STATES (never colour-only, NFR-001). Loading: "Loading trends…" (a polite
- * `role="status"`). Error: "Trends aren’t available right now." Empty: "Nothing
- * is trending yet." — all text. The list is an ordered list (`<ol role="list">`:
- * the rank is the order; `role` restores list semantics that `list-style: none`
- * drops in Safari).
- *
- * SCENARIO TIME (COR-053): the panel renders no timestamp; its window is measured
- * from scenario "now" (`useTrending`). Wall-clock is never read.
+ * `role="status"`). Failed read: "Trends aren’t available right now." Empty:
+ * "Nothing is trending yet." The list is an ordered list (`<ol role="list">`: the
+ * rank is the order; `role` restores list semantics `list-style: none` drops in
+ * Safari).
  */
 
 import { useId } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowTrendUp } from '@fortawesome/free-solid-svg-icons'
-import {
-  activateLink,
-  hashtagHref,
-  useExploreOpeners,
-  type ExploreOpenerProps,
-} from './exploreNavigation'
+import { socialPaths } from '../layout/socialNavigation'
+import { activateLink, useExploreOpeners, type ExploreOpenerProps } from './exploreNavigation'
 import { useTrending } from './useTrending'
 import styles from './TrendingPanel.module.css'
 
@@ -65,10 +54,10 @@ export function TrendingPanel({
   ...openerProps
 }: TrendingPanelProps) {
   const { onOpenHashtag } = useExploreOpeners(openerProps)
-  const { topics, loading, error } = useTrending(limit)
+  const { topics, loading, failed } = useTrending(limit)
   const headingId = useId()
 
-  const isEmpty = !loading && error === undefined && topics.length === 0
+  const isEmpty = !loading && !failed && topics.length === 0
 
   return (
     <section
@@ -84,14 +73,9 @@ export function TrendingPanel({
             <li key={topic.tag} className={styles.row} data-testid="trending-row">
               <a
                 className={styles.link}
-                href={hashtagHref(topic.tag)}
+                href={socialPaths.hashtag(topic.tag)}
                 data-tag={topic.tag}
-                onClick={event =>
-                  activateLink(
-                    event,
-                    onOpenHashtag === undefined ? undefined : () => onOpenHashtag(topic.tag),
-                  )
-                }
+                onClick={event => activateLink(event, () => onOpenHashtag(topic.tag))}
               >
                 <span className={styles.category}>
                   <FontAwesomeIcon
@@ -112,7 +96,7 @@ export function TrendingPanel({
       {loading && topics.length === 0 && (
         <p className={styles.state} role="status">Loading trends…</p>
       )}
-      {!loading && error !== undefined && topics.length === 0 && (
+      {failed && topics.length === 0 && (
         <p className={styles.state} role="status">Trends aren’t available right now.</p>
       )}
       {isEmpty && <p className={styles.state}>Nothing is trending yet.</p>}

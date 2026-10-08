@@ -7,12 +7,14 @@
  * scenario-time windowing (the exercise clock, not the wall-clock), links that
  * navigate to `/hashtag/:tag`, and keyboard operation.
  */
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { resetExerciseClock, setExerciseClock } from '@/core/clock'
+import { setExerciseClock } from '@/core/clock'
+import { api } from '@/core/services/api'
 import { postStore } from '../services/postStore'
-import { nth, renderExplore, seedPost } from './exploreTestUtils'
+import { EXPLORE_ARRIVAL_BATCH_MS } from './exploreFeedStore'
+import { nth, renderExplore, resetExplore, seedPost } from './exploreTestUtils'
 import { TrendingPanel } from './TrendingPanel'
 
 /** Scenario "now" for these tests (2033 — nothing like the real wall-clock). */
@@ -23,8 +25,7 @@ function useScenarioNow(iso: string = NOW) {
 }
 
 afterEach(() => {
-  postStore.resetForTests()
-  resetExerciseClock()
+  resetExplore()
 })
 
 function seedOrganicFeed() {
@@ -107,6 +108,98 @@ describe('TrendingPanel — organic trends over the loaded feed', () => {
   })
 })
 
+describe('TrendingPanel — live, not a mount-time snapshot (M1)', () => {
+  it('moves a tag up when posts carrying it arrive AFTER mount, without a remount', async () => {
+    useScenarioNow()
+    seedOrganicFeed() // #WaterIssues leads, then #Shelter, then #RoadClosure
+    renderExplore(<TrendingPanel />)
+
+    const panel = await screen.findByTestId('trending-panel')
+    const tags = () =>
+      screen.getAllByTestId('trending-row').map(row =>
+        within(row).getByRole('link').getAttribute('data-tag'),
+      )
+    expect(tags()).toEqual(['waterissues', 'shelter', 'roadclosure'])
+
+    // A surge of #RoadClosure posts lands minutes later, as the demo's does.
+    for (let index = 0; index < 6; index += 1) {
+      seedPost({
+        id: `t-surge-${index}`,
+        text: `Another closure report #RoadClosure ${index}`,
+        at: `2033-09-04T15:5${index}:00Z`,
+      })
+    }
+
+    await waitFor(() => expect(tags()[0]).toBe('roadclosure'), {
+      timeout: EXPLORE_ARRIVAL_BATCH_MS * 8,
+    })
+    expect(tags()).toEqual(['roadclosure', 'waterissues', 'shelter'])
+    expect(within(nth(screen.getAllByTestId('trending-row'), 0)).getByText('7 posts')).toBeInTheDocument()
+    // The same panel element: it updated in place.
+    expect(screen.getByTestId('trending-panel')).toBe(panel)
+  })
+
+  it('surfaces a brand-new tag that arrives after mount', async () => {
+    useScenarioNow()
+    seedOrganicFeed()
+    renderExplore(<TrendingPanel />)
+    await screen.findAllByTestId('trending-row')
+    expect(screen.queryByText('#BoilWater')).not.toBeInTheDocument()
+
+    for (let index = 0; index < 4; index += 1) {
+      seedPost({
+        id: `t-boil-${index}`,
+        text: `Boil advisory update ${index} #BoilWater`,
+        at: `2033-09-04T15:4${index}:00Z`,
+      })
+    }
+
+    expect(
+      await screen.findByText('#BoilWater', {}, { timeout: EXPLORE_ARRIVAL_BATCH_MS * 8 }),
+    ).toBeInTheDocument()
+  })
+
+  it('does not list a reply that arrives, or a tag only a reply carries', async () => {
+    useScenarioNow()
+    seedOrganicFeed()
+    renderExplore(<TrendingPanel />)
+    await screen.findAllByTestId('trending-row')
+
+    postStore.appendPost({
+      id: 't-reply',
+      exerciseId: 'ex-mock-0001',
+      authorPersonaId: 'persona-fairhavenwater',
+      actingHumanId: 'human-simcell-test',
+      text: 'a reply with #OnlyInReplies',
+      counts: { reply: 0, repost: 0, like: 0 },
+      createdWallClock: '2026-07-01T00:00:00.000Z',
+      scenarioTime: '2033-09-04T15:58:00Z',
+      origin: 'controller-as-persona',
+      inReplyTo: { postId: 't-w1', authorHandle: 'FairhavenWater' },
+    })
+    await new Promise(resolve => setTimeout(resolve, EXPLORE_ARRIVAL_BATCH_MS * 2))
+
+    expect(screen.queryByText('#OnlyInReplies')).not.toBeInTheDocument()
+  })
+
+  it('shares ONE feed read between panels (rail + page)', async () => {
+    useScenarioNow()
+    seedOrganicFeed()
+    const get = vi.spyOn(api, 'get')
+    renderExplore(
+      <>
+        <TrendingPanel />
+        <TrendingPanel limit={10} />
+      </>,
+    )
+    await waitFor(() => expect(screen.getAllByTestId('trending-row').length).toBeGreaterThan(5))
+
+    const feedReads = get.mock.calls.filter(([url]) => url === '/feed')
+    expect(feedReads).toHaveLength(1)
+    get.mockRestore()
+  })
+})
+
 describe('TrendingPanel — scenario time, never the wall-clock (COR-053)', () => {
   it('windows from the exercise clock: posts older than the window do not trend', async () => {
     // "Now" is a day after the posts. Under the real wall-clock (2026) these 2033
@@ -137,6 +230,15 @@ describe('TrendingPanel — activating a trend opens the hashtag feed', () => {
 
     const link = await screen.findByRole('link', { name: /#WaterIssues/ })
     expect(link).toHaveAttribute('href', '/hashtag/waterissues')
+  })
+
+  it('navigates in-app to /hashtag/:tag by default (no reload)', async () => {
+    useScenarioNow()
+    seedOrganicFeed()
+    renderExplore(<TrendingPanel />)
+
+    await userEvent.click(await screen.findByRole('link', { name: /#WaterIssues/ }))
+    expect(screen.getByTestId('where')).toHaveTextContent('/hashtag/waterissues')
   })
 
   it('hands the normalized tag to onOpenHashtag on click', async () => {

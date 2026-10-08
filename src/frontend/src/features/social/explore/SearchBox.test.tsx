@@ -14,12 +14,19 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { resetExerciseClock, setExerciseClock } from '@/core/clock'
-import { postStore } from '../services/postStore'
-import { nth, renderExplore, seedPost, structureSignature } from './exploreTestUtils'
+import { setExerciseClock } from '@/core/clock'
+import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
+import {
+  nth,
+  renderExplore,
+  resetExplore,
+  seedPost,
+  structureSignature,
+} from './exploreTestUtils'
 import { SearchBox } from './SearchBox'
 
 beforeEach(() => {
+  resetTelemetryBuffer()
   // Scenario "now": 2033-09-04 14:00Z (nothing like the real wall-clock).
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:00.000Z') })
   seedPost({
@@ -47,8 +54,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  postStore.resetForTests()
-  resetExerciseClock()
+  resetExplore()
+  resetTelemetryBuffer()
 })
 
 async function renderBox(props: Parameters<typeof SearchBox>[0] = {}) {
@@ -240,16 +247,29 @@ describe('SearchBox — result counts are announced politely (NFR-001)', () => {
     expect(live).toBeEmptyDOMElement()
   })
 
-  it('announces the counts once the reader pauses, not on every keystroke', async () => {
+  it('announces a query-aware summary once the reader pauses', async () => {
     const { user, input } = await renderBox()
     await user.type(input, 'zephyr')
 
-    // Results are on screen, but the announcement is debounced...
     await screen.findByTestId('search-posts')
-    expect(screen.getByTestId('search-live')).toBeEmptyDOMElement()
-    // ...then it lands, once, as a single summary.
     await waitFor(
-      () => expect(screen.getByTestId('search-live')).toHaveTextContent('3 posts, 0 people.'),
+      () =>
+        expect(screen.getByTestId('search-live')).toHaveTextContent(
+          '3 posts and 0 people for “zephyr”.',
+        ),
+      { timeout: 3000 },
+    )
+  })
+
+  it('names the people too, and singularises one', async () => {
+    const { user, input } = await renderBox()
+    await user.type(input, 'tanker')
+
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('search-live')).toHaveTextContent(
+          '1 post and 0 people for “tanker”.',
+        ),
       { timeout: 3000 },
     )
   })
@@ -282,6 +302,79 @@ describe('SearchBox — result counts are announced politely (NFR-001)', () => {
       timeout: 3000,
     })
     expect(screen.queryByTestId('search-results')).not.toBeInTheDocument()
+  })
+})
+
+describe('SearchBox — one search event per settled query (XC-004)', () => {
+  const searches = () => getEmittedTelemetryEvents().filter(event => event.eventType === 'search')
+
+  it('records the settled query with its result counts, once', async () => {
+    const { user, input } = await renderBox()
+    await user.type(input, 'zephyr')
+
+    await waitFor(() => expect(searches()).toHaveLength(1), { timeout: 3000 })
+    const [event] = searches()
+    expect(event).toMatchObject({
+      eventType: 'search',
+      channel: 'social',
+      actor: { kind: 'participant', participantId: 'acct-dreyes' },
+      exerciseId: 'ex-mock-0001',
+      payload: { query: 'zephyr', postCount: 3, peopleCount: 0 },
+    })
+    // Scenario time rides the envelope; nothing identifies a persona or a post.
+    expect(event?.scenarioTime).toBe('2033-09-04T14:00:00.000Z')
+    expect(JSON.stringify(event?.payload)).not.toMatch(/persona|sb-\d/)
+    expect(event?.target).toBeUndefined()
+  })
+
+  it('does not record the keystrokes on the way (only the settled query)', async () => {
+    const { user, input } = await renderBox()
+    await user.type(input, 'zephyr')
+    await waitFor(() => expect(searches()).toHaveLength(1), { timeout: 3000 })
+
+    const queries = searches().map(event => event.payload?.query)
+    expect(queries).toEqual(['zephyr'])
+  })
+
+  it('records a new event for a changed query, and for a re-typed one after clearing', async () => {
+    const { user, input } = await renderBox()
+    await user.type(input, 'zephyr')
+    await waitFor(() => expect(searches()).toHaveLength(1), { timeout: 3000 })
+
+    await user.type(input, ' pharmacy')
+    await waitFor(() => expect(searches()).toHaveLength(2), { timeout: 3000 })
+    expect(searches().map(e => e.payload?.query)).toEqual(['zephyr', 'zephyr pharmacy'])
+
+    await user.clear(input)
+    await waitFor(() => expect(screen.getByTestId('search-live')).toBeEmptyDOMElement(), {
+      timeout: 3000,
+    })
+    await user.type(input, 'zephyr')
+    await waitFor(() => expect(searches()).toHaveLength(3), { timeout: 3000 })
+  })
+
+  it('records an empty-result search with zero counts', async () => {
+    const { user, input } = await renderBox()
+    await user.type(input, 'qqqzzz')
+
+    await waitFor(() => expect(searches()).toHaveLength(1), { timeout: 3000 })
+    expect(searches()[0]?.payload).toEqual({ query: 'qqqzzz', postCount: 0, peopleCount: 0 })
+  })
+
+  it('records nothing for an empty or unsearchable query', async () => {
+    const { user, input } = await renderBox()
+    await user.type(input, '  #')
+    await new Promise(resolve => setTimeout(resolve, 600))
+    expect(searches()).toHaveLength(0)
+  })
+
+  it('clamps a very long query', async () => {
+    const { user, input } = await renderBox()
+    await user.click(input)
+    await user.paste('x'.repeat(250))
+
+    await waitFor(() => expect(searches()).toHaveLength(1), { timeout: 3000 })
+    expect(String(searches()[0]?.payload?.query)).toHaveLength(100)
   })
 })
 
@@ -364,13 +457,35 @@ describe('SearchBox — opening results', () => {
     await user.type(input, 'vega')
     await user.click(await screen.findByRole('link', { name: /View .*profile/ }))
     expect(onOpenProfile).toHaveBeenCalledWith('persona-mvega_fh')
+    expect(screen.getByTestId('where')).toHaveTextContent('/explore') // the override ran instead
 
     await user.clear(input)
     await user.type(input, 'pharmacy')
     const postLink = await screen.findByRole('link', { name: /zephyr pharmacy/ })
     expect(postLink).toHaveAttribute('href', '/kwardFH/status/sb-3')
     await user.click(postLink)
-    expect(onOpenPost).toHaveBeenCalledWith('sb-3')
+    expect(onOpenPost).toHaveBeenCalledWith('sb-3', 'kwardFH')
+  })
+
+  it('navigates in-app by default: a thread, then a profile (no reload)', async () => {
+    const { user, input } = await renderBox()
+
+    await user.type(input, 'pharmacy')
+    await user.click(await screen.findByRole('link', { name: /zephyr pharmacy/ }))
+    expect(screen.getByTestId('where')).toHaveTextContent('/kwardFH/status/sb-3')
+
+    await user.clear(input)
+    await user.type(input, 'vega')
+    await user.click(await screen.findByRole('link', { name: /View .*profile/ }))
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/mvega_fh'))
+  })
+
+  it('caps the results panel in the rail variant', async () => {
+    const { user, input } = await renderBox({ variant: 'rail' })
+    await user.type(input, 'zephyr')
+
+    const results = await screen.findByTestId('search-results')
+    expect(results.className).toMatch(/resultsRail/)
   })
 
   it('reports when a search starts and ends', async () => {

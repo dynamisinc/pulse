@@ -4,55 +4,59 @@
  * The search box and its results (demo-polish F6, story 15-explore; SOC-042,
  * feeds-discovery/03 "lite", SOC-052, D1-008, NFR-001). Participant world (Pulse
  * Social skin): plain semantic elements + scoped CSS Modules + FontAwesome only —
- * NO COBRA, NO themed MUI, NO `@mui/icons-material`.
+ * NO COBRA, NO themed MUI.
  *
- * WHAT IT DOES. A search-as-you-type box that filters the LOADED posts (text and
- * hashtag match) and the persona cast (name, handle) — all client-side, no
- * endpoint (`search.ts` holds the pure matching/ordering). Results appear inline
- * directly under the box, so it works the same in the ~344px right rail and in
- * the 600px Explore column. Two sections:
- *   - PEOPLE — accounts, in relevance order. A verified agency and its unverified
+ * WHAT IT DOES. A search-as-you-type box that filters the loaded posts (text and
+ * hashtag match) and the persona cast (name, handle) — client-side, no endpoint
+ * (`search.ts` holds the pure matching/ordering). Results appear inline under the
+ * box. Two sections:
+ *   - PEOPLE — accounts in relevance order. A verified agency and its unverified
  *     lookalike sit side by side and render IDENTICALLY except for the seal: no
- *     "official"/"unverified" label, no machine-readable tell (SOC-052/D1-008 —
- *     the rule and its enforcement live in `SearchResultRows.tsx`).
- *   - POSTS — with a Recent / Top toggle (Recent = scenario time descending,
- *     Top = engagement descending). The toggle orders posts only; accounts have no
- *     time or engagement of their own.
+ *     "official"/"unverified" label, no machine-readable tell (SOC-052/D1-008; the
+ *     rule and its enforcement live in `SearchResultRows.tsx`).
+ *   - POSTS — with a Recent / Top toggle (scenario time descending / engagement
+ *     descending). The toggle orders posts only; accounts have no time or
+ *     engagement of their own.
+ * Each section caps at 8 people / 50 posts with a "Show all" button.
  *
- * SELF-CONTAINED. It reads the feed (`useFeed`) and the cast (`usePersonas`)
- * itself — no data props — so the orchestrator mounts `<SearchBox />` into F1's
- * right-rail `searchSlot` as-is. The optional `onOpen*` callbacks
- * (`exploreNavigation.ts`) navigate in-app; without them rows are real links.
+ * SELF-CONTAINED. Posts come from the shared, live Explore baseline
+ * (`useExploreFeed` — one feed read however many boxes are mounted, kept current by
+ * arrivals) and the cast from the channel's persona directory; no data props. A
+ * failed read of either is reported in ITS section ("Posts aren’t available right
+ * now.") while the other still works.
+ *
+ * `variant`: `'page'` (default) lets results flow inline; `'rail'` — the ~344px
+ * right-rail slot — caps the results panel's height and scrolls it, so a long list
+ * cannot push the rest of the sticky rail out of reach.
  *
  * ACCESSIBILITY (NFR-001).
- *  - The box is a `role="search"` landmark named by its VISIBLE label
- *    ("Search posts and people", `aria-labelledby`).
- *  - A polite, atomic live region (`role="status"`) is mounted from the start and
- *    announces the result counts ("12 posts, 2 people.") — debounced, so a reader
- *    typing hears one summary when they pause, not one per keystroke. "No
- *    results" is announced and also shown as TEXT with an icon (never colour).
- *  - Keyboard: Tab reaches the box, the Recent/Top radios and each result row (one
- *    stop per row). Down-arrow (or Enter) in the box jumps to the first result;
- *    Up/Down move between results; Up from the first result returns to the box;
- *    Escape in the results returns to the box, and in the box clears it. The
- *    radios use native arrow-key selection.
- *  - The selected sort option is marked by a check icon, a filled pill and bold
- *    text as well as `checked` — never colour alone.
- *  - Focus rings are a solid ink outline (>= 3:1).
+ *  - A `role="search"` landmark named by its VISIBLE label ("Search posts and
+ *    people", `aria-labelledby`).
+ *  - A polite, atomic live region (`role="status"`), mounted from the start,
+ *    announces a query-aware summary ("3 posts and 0 people for “zephyr”.") once the
+ *    reader pauses (400 ms), not per keystroke. "No results" is also shown as TEXT with
+ *    an icon, never colour.
+ *  - Keyboard: Down or Enter in the box jumps to the first result; Up/Down move
+ *    between results; Up from the first returns to the box; Escape in the results
+ *    returns to the box and in the box clears it. The radios keep native arrows.
+ *  - The selected sort option shows a check icon, a filled pill and bold text —
+ *    never colour alone. Focus rings are a solid ink outline (>= 3:1).
  *
- * SCENARIO TIME (COR-053): every result time renders from ONE `useScenarioTime`
- * snapshot in the exercise zone; wall-clock is never shown. The announcement
- * debounce is a UI timer only.
+ * TELEMETRY (XC-004). One `search` event per SETTLED non-empty query (the same 400 ms
+ * debounce as the announcement), with the query (trimmed, <= 100 chars) and the post /
+ * people counts as payload — no persona or post ids. The server emits no `search`
+ * event, so the client emits in both mock and live mode. Not emitted while loading or
+ * when a section failed (the counts would be wrong).
  *
- * CONTENT SECURITY (NFR-004): the query is only ever compared against already
- * sanitized text and echoed as a React text child (never as HTML).
- *
- * COR-001: the data comes from `useFeed`/`usePersonas`, which take no client
- * `exerciseId`; search cannot see another exercise's content.
+ * SCENARIO TIME (COR-053): result times render from ONE `useScenarioTime` snapshot in
+ * the exercise zone. The debounce is a UI timer only. CONTENT SECURITY (NFR-004): the
+ * query is only compared against already-sanitized text and echoed as a React text
+ * child. COR-001: no client `exerciseId` on the wire.
  */
 
 import {
   useDeferredValue,
+  useEffect,
   useId,
   useMemo,
   useRef,
@@ -63,21 +67,25 @@ import {
 } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCheck, faMagnifyingGlass, faXmark } from '@fortawesome/free-solid-svg-icons'
+import { useSession } from '@/core/auth'
+import { scenarioNow, useScenarioTime } from '@/core/clock'
 import { useExerciseContext } from '@/core/exerciseContext'
-import { useScenarioTime } from '@/core/clock'
-import { usePersonas } from '@/features/personas'
-import { useFeed } from '../hooks/useFeed'
+import { buildAndEmit } from '@/core/telemetry'
+import { wallClockNowIso } from '@/core/time/wallClock'
 import { useExploreOpeners, type ExploreOpenerProps } from './exploreNavigation'
 import { parseQuery, runSearch, type SearchSort } from './search'
 import { PersonResultRow, PostResultRow } from './SearchResultRows'
 import { useDebouncedValue } from './useDebouncedValue'
+import { useExploreFeed } from './useExploreFeed'
 import styles from './SearchBox.module.css'
 
-/** How long the query must rest before the live region announces counts. */
-const ANNOUNCE_DELAY_MS = 400
-/** Display caps (the true totals are still shown/announced). */
+/** How long the query must rest before it is announced and recorded. */
+const SETTLE_DELAY_MS = 400
+/** Display caps; "Show all" lifts them. */
 const MAX_PEOPLE = 8
 const MAX_POSTS = 50
+/** The longest query recorded in telemetry. */
+const MAX_TELEMETRY_QUERY = 100
 
 const SORT_OPTIONS: ReadonlyArray<{ readonly value: SearchSort; readonly label: string }> = [
   { value: 'recent', label: 'Recent' },
@@ -87,25 +95,72 @@ const SORT_OPTIONS: ReadonlyArray<{ readonly value: SearchSort; readonly label: 
 export interface SearchBoxProps extends ExploreOpenerProps {
   /**
    * Fires when a search starts or ends (the query becomes / stops being
-   * searchable). `ExplorePage` uses it to swap Trending for the results.
+   * searchable). `ExplorePage` uses it to hide Trending behind the results.
    */
   readonly onSearchingChange?: (searching: boolean) => void
+  /** `'page'` (default) = inline results; `'rail'` = height-capped, scrolling results. */
+  readonly variant?: 'page' | 'rail'
+}
+
+/** What the box has settled on: drives the announcement and the telemetry event. */
+interface Settled {
+  readonly query: string
+  readonly text: string
+  readonly ready: boolean
+  readonly postCount: number
+  readonly peopleCount: number
+}
+
+const NOT_SEARCHING: Settled = {
+  query: '',
+  text: '',
+  ready: false,
+  postCount: 0,
+  peopleCount: 0,
 }
 
 function plural(count: number, one: string, many: string): string {
   return `${count.toLocaleString('en-US')} ${count === 1 ? one : many}`
 }
 
-export function SearchBox({ onSearchingChange, ...openerProps }: SearchBoxProps) {
+interface SummaryInput {
+  readonly echoed: string
+  readonly loading: boolean
+  readonly postsFailed: boolean
+  readonly peopleFailed: boolean
+  readonly postCount: number
+  readonly peopleCount: number
+}
+
+/** The query-aware summary the live region announces. Empty while loading. */
+function summaryText(input: SummaryInput): string {
+  const { echoed, loading, postsFailed, peopleFailed, postCount, peopleCount } = input
+  if (loading) return ''
+  if (postsFailed && peopleFailed) return 'Search isn’t available right now.'
+  const tail = `for “${echoed}”.`
+  const posts = plural(postCount, 'post', 'posts')
+  const people = plural(peopleCount, 'person', 'people')
+  if (postsFailed) return `${people} ${tail} Posts aren’t available right now.`
+  if (peopleFailed) return `${posts} ${tail} People aren’t available right now.`
+  if (postCount === 0 && peopleCount === 0) return `No results ${tail}`
+  return `${posts} and ${people} ${tail}`
+}
+
+export function SearchBox({
+  onSearchingChange,
+  variant = 'page',
+  ...openerProps
+}: SearchBoxProps) {
   const { onOpenPost, onOpenProfile } = useExploreOpeners(openerProps)
-  const { timeZone } = useExerciseContext()
+  const { exerciseId, timeZone } = useExerciseContext()
+  const session = useSession()
   const { format } = useScenarioTime(timeZone)
-  const feed = useFeed()
-  const cast = usePersonas()
+  const feed = useExploreFeed()
 
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<SearchSort>('recent')
-  // Typing stays instant; matching 200 posts per keystroke runs at lower priority.
+  const [showAll, setShowAll] = useState({ people: false, posts: false })
+  // Typing stays instant; matching up to 200 posts per keystroke runs at lower priority.
   const deferredQuery = useDeferredValue(query)
 
   const inputRef = useRef<HTMLInputElement>(null)
@@ -118,42 +173,105 @@ export function SearchBox({ onSearchingChange, ...openerProps }: SearchBoxProps)
   const peopleHeadingId = `${baseId}-people`
   const postsHeadingId = `${baseId}-posts`
 
-  const loading = feed.loading || cast.loading
-  const failed =
-    (feed.error !== undefined || cast.error !== undefined) &&
-    feed.posts.length === 0 &&
-    cast.personas.length === 0
+  // Posts need their authors, so they wait for the cast as well as the feed.
+  const postsLoading = feed.loading || feed.peopleLoading
+  const peopleLoading = feed.peopleLoading
+  const postsFailed = feed.failed
+  const peopleFailed = feed.peopleFailed
 
   const results = useMemo(
-    () => runSearch({ posts: feed.posts, personas: cast.personas, query: deferredQuery, sort }),
-    [feed.posts, cast.personas, deferredQuery, sort],
+    () =>
+      runSearch({ posts: feed.views, personas: feed.personas, query: deferredQuery, sort }),
+    [feed.views, feed.personas, deferredQuery, sort],
   )
   const searching = results.query.kind !== 'empty'
+  const loading = postsLoading || peopleLoading
   const noResults = results.posts.length === 0 && results.people.length === 0
 
-  // The text the live region will announce (settled by the debounce below).
-  const summary = useMemo(() => {
-    if (!searching || loading) return ''
-    if (failed) return 'Search isn’t available right now.'
-    if (noResults) return `No results for “${deferredQuery.trim()}”.`
-    return `${plural(results.posts.length, 'post', 'posts')}, ${plural(
-      results.people.length,
-      'person',
-      'people',
-    )}.`
+  const visiblePeople = useMemo(
+    () => (showAll.people ? results.people : results.people.slice(0, MAX_PEOPLE)),
+    [results.people, showAll.people],
+  )
+  const visiblePosts = useMemo(
+    () => (showAll.posts ? results.posts : results.posts.slice(0, MAX_POSTS)),
+    [results.posts, showAll.posts],
+  )
+
+  // Result times: one `format` snapshot for the whole list, recomputed only when the
+  // visible posts or the clock snapshot change (not on every keystroke elsewhere).
+  const times = useMemo(
+    () =>
+      visiblePosts.map(post => ({
+        relative: format(post.scenarioTime, { format: 'relative' }),
+        absolute: format(post.scenarioTime, { format: 'absolute' }),
+      })),
+    [visiblePosts, format],
+  )
+
+  // The query as it is echoed (announcement, "no results") and recorded.
+  const echoed = deferredQuery.trim().replace(/\s+/g, ' ')
+
+  const current = useMemo<Settled>(() => {
+    if (!searching) return NOT_SEARCHING
+    const postCount = results.posts.length
+    const peopleCount = results.people.length
+    const text = summaryText({
+      echoed,
+      loading,
+      postsFailed,
+      peopleFailed,
+      postCount,
+      peopleCount,
+    })
+    return {
+      query: echoed,
+      text,
+      ready: !loading && !postsFailed && !peopleFailed,
+      postCount,
+      peopleCount,
+    }
   }, [
     searching,
     loading,
-    failed,
-    noResults,
-    deferredQuery,
+    postsFailed,
+    peopleFailed,
+    echoed,
     results.posts.length,
     results.people.length,
   ])
-  const announcement = useDebouncedValue(summary, ANNOUNCE_DELAY_MS)
+  const settled = useDebouncedValue(current, SETTLE_DELAY_MS)
+
+  // XC-004: one `search` event per settled, non-empty query (re-typing the same
+  // query after clearing the box is a new search).
+  const recordedQueryRef = useRef('')
+  useEffect(() => {
+    if (settled.query === '') {
+      recordedQueryRef.current = ''
+      return
+    }
+    if (!settled.ready || recordedQueryRef.current === settled.query) return
+    recordedQueryRef.current = settled.query
+    buildAndEmit({
+      exerciseId,
+      eventType: 'search',
+      channel: 'social',
+      actor: { kind: 'participant', participantId: session.accountId },
+      wallClockTime: wallClockNowIso(),
+      scenarioTime: scenarioNow().toISOString(),
+      timeZone,
+      payload: {
+        query: settled.query.slice(0, MAX_TELEMETRY_QUERY),
+        postCount: settled.postCount,
+        peopleCount: settled.peopleCount,
+      },
+    })
+  }, [settled, exerciseId, timeZone, session.accountId])
 
   const updateQuery = (next: string) => {
     setQuery(next)
+    setShowAll(previous =>
+      previous.people || previous.posts ? { people: false, posts: false } : previous,
+    )
     const active = parseQuery(next).kind !== 'empty'
     if (active !== searchingRef.current) {
       searchingRef.current = active
@@ -206,8 +324,10 @@ export function SearchBox({ onSearchingChange, ...openerProps }: SearchBoxProps)
     }
   }
 
-  const visiblePeople = results.people.slice(0, MAX_PEOPLE)
-  const visiblePosts = results.posts.slice(0, MAX_POSTS)
+  const bothFailed = postsFailed && peopleFailed
+  const showPeople = peopleFailed || visiblePeople.length > 0
+  const showPosts = postsFailed || visiblePosts.length > 0
+  const resultsClass = variant === 'rail' ? `${styles.results} ${styles.resultsRail}` : styles.results
 
   return (
     <div className={styles.root} data-testid="search-box">
@@ -258,28 +378,28 @@ export function SearchBox({ onSearchingChange, ...openerProps }: SearchBoxProps)
         aria-atomic="true"
         data-testid="search-live"
       >
-        {announcement}
+        {settled.text}
       </div>
 
       {searching && (
         <div
           ref={resultsRef}
-          className={styles.results}
+          className={resultsClass}
           data-testid="search-results"
           onKeyDown={handleResultsKeyDown}
         >
           {loading && <p className={styles.state}>Searching…</p>}
-          {!loading && failed && (
+          {!loading && bothFailed && (
             <p className={styles.state}>Search isn’t available right now.</p>
           )}
-          {!loading && !failed && noResults && (
+          {!loading && !postsFailed && !peopleFailed && noResults && (
             <p className={styles.state} data-testid="search-empty">
               <FontAwesomeIcon icon={faMagnifyingGlass} aria-hidden="true" />
-              {` No results for “${deferredQuery.trim()}”.`}
+              {` No results for “${echoed}”.`}
             </p>
           )}
 
-          {visiblePeople.length > 0 && (
+          {!loading && !bothFailed && showPeople && (
             <section
               className={styles.section}
               aria-labelledby={peopleHeadingId}
@@ -287,28 +407,40 @@ export function SearchBox({ onSearchingChange, ...openerProps }: SearchBoxProps)
             >
               <div className={styles.sectionHead}>
                 <h2 id={peopleHeadingId} className={styles.sectionTitle}>People</h2>
-                <span className={styles.sectionCount}>
-                  {plural(results.people.length, 'result', 'results')}
-                </span>
+                {!peopleFailed && (
+                  <span className={styles.sectionCount}>
+                    {plural(results.people.length, 'result', 'results')}
+                  </span>
+                )}
               </div>
-              <ul className={styles.list} role="list">
-                {visiblePeople.map(persona => (
-                  <PersonResultRow
-                    key={persona.id}
-                    persona={persona}
-                    onOpenProfile={onOpenProfile}
-                  />
-                ))}
-              </ul>
-              {results.people.length > visiblePeople.length && (
-                <p className={styles.note}>
-                  {`Showing the first ${visiblePeople.length} of ${results.people.length} people.`}
-                </p>
+              {peopleFailed
+                ? <p className={styles.state}>People aren’t available right now.</p>
+                : (
+                  <ul className={styles.list} role="list">
+                    {visiblePeople.map(persona => (
+                      <PersonResultRow
+                        key={persona.id}
+                        persona={persona}
+                        onOpenProfile={onOpenProfile}
+                      />
+                    ))}
+                  </ul>
+                )}
+              {!peopleFailed && results.people.length > MAX_PEOPLE && (
+                <button
+                  type="button"
+                  className={styles.showAll}
+                  aria-expanded={showAll.people}
+                  onClick={() =>
+                    setShowAll(previous => ({ ...previous, people: !previous.people }))}
+                >
+                  {showAll.people ? 'Show fewer' : `Show all ${results.people.length} people`}
+                </button>
               )}
             </section>
           )}
 
-          {visiblePosts.length > 0 && (
+          {!loading && !bothFailed && showPosts && (
             <section
               className={styles.section}
               aria-labelledby={postsHeadingId}
@@ -316,56 +448,72 @@ export function SearchBox({ onSearchingChange, ...openerProps }: SearchBoxProps)
             >
               <div className={styles.sectionHead}>
                 <h2 id={postsHeadingId} className={styles.sectionTitle}>Posts</h2>
-                <span className={styles.sectionCount}>
-                  {plural(results.posts.length, 'result', 'results')}
-                </span>
-                <fieldset className={styles.sort}>
-                  <legend className={styles.srOnly}>Sort posts by</legend>
-                  {SORT_OPTIONS.map(option => {
-                    const selected = sort === option.value
-                    return (
-                      <label
-                        key={option.value}
-                        className={
-                          selected ? `${styles.sortOption} ${styles.sortOptionOn}` : styles.sortOption
-                        }
-                      >
-                        <input
-                          type="radio"
-                          name={`${baseId}-sort`}
-                          value={option.value}
-                          checked={selected}
-                          className={styles.sortInput}
-                          onChange={() => setSort(option.value)}
-                        />
-                        {selected && (
-                          <FontAwesomeIcon
-                            icon={faCheck}
-                            className={styles.sortCheck}
-                            aria-hidden="true"
+                {!postsFailed && (
+                  <span className={styles.sectionCount}>
+                    {plural(results.posts.length, 'result', 'results')}
+                  </span>
+                )}
+                {!postsFailed && (
+                  <fieldset className={styles.sort}>
+                    <legend className={styles.srOnly}>Sort posts by</legend>
+                    {SORT_OPTIONS.map(option => {
+                      const selected = sort === option.value
+                      return (
+                        <label
+                          key={option.value}
+                          className={
+                            selected
+                              ? `${styles.sortOption} ${styles.sortOptionOn}`
+                              : styles.sortOption
+                          }
+                        >
+                          <input
+                            type="radio"
+                            name={`${baseId}-sort`}
+                            value={option.value}
+                            checked={selected}
+                            className={styles.sortInput}
+                            onChange={() => setSort(option.value)}
                           />
-                        )}
-                        <span>{option.label}</span>
-                      </label>
-                    )
-                  })}
-                </fieldset>
+                          {selected && (
+                            <FontAwesomeIcon
+                              icon={faCheck}
+                              className={styles.sortCheck}
+                              aria-hidden="true"
+                            />
+                          )}
+                          <span>{option.label}</span>
+                        </label>
+                      )
+                    })}
+                  </fieldset>
+                )}
               </div>
-              <ul className={styles.list} role="list">
-                {visiblePosts.map(post => (
-                  <PostResultRow
-                    key={post.id}
-                    post={post}
-                    relativeTime={format(post.scenarioTime, { format: 'relative' })}
-                    absoluteTime={format(post.scenarioTime, { format: 'absolute' })}
-                    onOpenPost={onOpenPost}
-                  />
-                ))}
-              </ul>
-              {results.posts.length > visiblePosts.length && (
-                <p className={styles.note}>
-                  {`Showing the first ${visiblePosts.length} of ${results.posts.length} posts.`}
-                </p>
+              {postsFailed
+                ? <p className={styles.state}>Posts aren’t available right now.</p>
+                : (
+                  <ul className={styles.list} role="list">
+                    {visiblePosts.map((post, index) => (
+                      <PostResultRow
+                        key={post.id}
+                        post={post}
+                        relativeTime={times[index]?.relative ?? ''}
+                        absoluteTime={times[index]?.absolute ?? ''}
+                        onOpenPost={onOpenPost}
+                      />
+                    ))}
+                  </ul>
+                )}
+              {!postsFailed && results.posts.length > MAX_POSTS && (
+                <button
+                  type="button"
+                  className={styles.showAll}
+                  aria-expanded={showAll.posts}
+                  onClick={() =>
+                    setShowAll(previous => ({ ...previous, posts: !previous.posts }))}
+                >
+                  {showAll.posts ? 'Show fewer' : `Show all ${results.posts.length} posts`}
+                </button>
               )}
             </section>
           )}

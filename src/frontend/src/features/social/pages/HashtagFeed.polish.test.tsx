@@ -12,9 +12,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
 import { resetExerciseClock } from '@/core/clock'
-import { resetTelemetryBuffer } from '@/core/telemetry'
+import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import { postStore } from '../services/postStore'
+import { consumeReplyFocus, resetReplyIntent } from '../services/replyIntent'
 import { seedPost } from '../explore/exploreTestUtils'
 import { HashtagFeed, type HashtagFeedProps } from './HashtagFeed'
 
@@ -36,6 +37,7 @@ afterEach(() => {
   postStore.resetForTests()
   resetExerciseClock()
   resetTelemetryBuffer()
+  resetReplyIntent()
 })
 
 function seedTagged(count: number) {
@@ -54,7 +56,7 @@ describe('HashtagFeed — header (tag + post count)', () => {
     renderFeed({ tag: 'polishtag' })
 
     await screen.findAllByTestId('post-card')
-    expect(screen.getByRole('heading', { level: 1, name: '#polishtag' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: '#PolishTag' })).toBeInTheDocument()
     expect(screen.getByTestId('hashtag-post-count')).toHaveTextContent('3 posts')
   })
 
@@ -138,10 +140,89 @@ describe('HashtagFeed — card actions stay wired', () => {
     const card = await screen.findByTestId('post-card')
     await user.click(within(card).getByRole('button', { name: /Reply/ }))
     expect(onOpenThread).toHaveBeenCalledWith('hp-reply')
+    // ...and the thread is told to focus its reply composer when it opens (F4's handoff).
+    expect(consumeReplyFocus('hp-reply')).toBe(true)
     first.unmount()
 
     renderFeed({ tag: 'polishtag' })
     const inertCard = await screen.findByTestId('post-card')
     expect(within(inertCard).queryByRole('button', { name: /Reply/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('HashtagFeed — the tag is normalised for matching, display and telemetry (M6)', () => {
+  function seedWater() {
+    seedPost({ id: 'hn-1', text: 'one #waterissues', at: '2033-09-04T10:00:00Z' })
+    seedPost({ id: 'hn-2', text: 'two #WaterIssues', at: '2033-09-04T11:00:00Z' })
+    seedPost({ id: 'hn-3', text: 'three #WaterIssues', at: '2033-09-04T12:00:00Z' })
+    seedPost({ id: 'hn-4', text: 'other #Shelter', at: '2033-09-04T12:30:00Z' })
+  }
+
+  it.each([
+    'waterissues',
+    'WaterIssues',
+    'WATERISSUES',
+    '#WaterIssues',
+    '%23WaterIssues',
+    '%57aterIssues',
+  ])('a deep link to /hashtag/%s finds the posts and reads "#WaterIssues"', async raw => {
+    seedWater()
+    renderFeed({ tag: raw })
+
+    await screen.findAllByTestId('post-card')
+    expect(screen.getAllByTestId('post-card')).toHaveLength(3)
+    expect(screen.getByRole('heading', { level: 1, name: '#WaterIssues' })).toBeInTheDocument()
+    expect(screen.getByTestId('hashtag-post-count')).toHaveTextContent('3 posts')
+    expect(screen.getByRole('tablist', { name: '#WaterIssues feed order' })).toBeInTheDocument()
+  })
+
+  it('keys the one `view` event on the normalised tag, whatever form arrived', async () => {
+    seedWater()
+    const first = renderFeed({ tag: '%23WaterIssues' })
+    await screen.findAllByTestId('post-card')
+    first.unmount()
+    renderFeed({ tag: 'waterissues' })
+    await screen.findAllByTestId('post-card')
+
+    const views = getEmittedTelemetryEvents().filter(event => event.eventType === 'view')
+    expect(views.map(event => event.target)).toEqual([
+      { entityType: 'hashtag', entityId: 'waterissues' },
+      { entityType: 'hashtag', entityId: 'waterissues' },
+    ])
+  })
+
+  it('does not re-emit when the same tag arrives in another form', async () => {
+    seedWater()
+    const utils = renderFeed({ tag: 'waterissues' })
+    await screen.findAllByTestId('post-card')
+
+    utils.rerender(
+      <ExerciseContextProvider>
+        <SessionProvider>
+          <ShellContextProvider
+            value={{ variant: 'full', scenarioNow: new Date('2033-09-04T16:00:00.000Z') }}
+          >
+            <HashtagFeed tag="#WaterIssues" />
+          </ShellContextProvider>
+        </SessionProvider>
+      </ExerciseContextProvider>,
+    )
+    await screen.findAllByTestId('post-card')
+    expect(getEmittedTelemetryEvents().filter(event => event.eventType === 'view')).toHaveLength(1)
+  })
+
+  it('shows the key (not a casing) when no post carries the tag yet', async () => {
+    renderFeed({ tag: '#NoSuchTag' })
+
+    expect(await screen.findByRole('heading', { level: 1, name: '#nosuchtag' })).toBeInTheDocument()
+    expect(await screen.findByTestId('hashtag-empty')).toHaveTextContent(
+      'No posts with #nosuchtag yet.',
+    )
+  })
+
+  it('survives a malformed escape: an honest empty state, not a crash', async () => {
+    renderFeed({ tag: '%E0%A4%A' })
+
+    expect(await screen.findByTestId('hashtag-empty')).toBeInTheDocument()
   })
 })

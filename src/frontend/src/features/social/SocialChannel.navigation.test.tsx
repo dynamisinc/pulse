@@ -103,12 +103,14 @@ describe('SocialChannel — hashtag feed navigation (hashtags-trending/01, SOC-0
 
     await user.click(screen.getByText('#Zone2'))
 
-    // The hashtag feed shows its NORMALIZED tag as the heading (lowercased).
-    expect(await screen.findByRole('heading', { name: '#zone2' })).toBeInTheDocument()
+    // The hashtag feed's heading reads as the posts do: the casing authors used (#Zone2),
+    // while the URL key stays the normalized tag.
+    expect(await screen.findByRole('heading', { name: '#Zone2' })).toBeInTheDocument()
     expect(screen.getByTestId('social-hashtag-region')).toBeInTheDocument()
     expect(screen.getByTestId('social-feed-region')).not.toBeVisible()
     // The fixture post carries the tag, so it re-renders inside the hashtag feed too.
-    expect(within(screen.getByTestId('social-hashtag-region')).getByText('#Zone2')).toBeInTheDocument()
+    const card = within(screen.getByTestId('social-hashtag-region')).getByTestId('post-card')
+    expect(within(card).getByText('#Zone2')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /^back$/i }))
 

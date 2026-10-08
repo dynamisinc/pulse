@@ -123,9 +123,43 @@
   margin-top: 8px;
 }
 
+/* In the right rail the results are a bordered, height-capped scrolling panel, so a
+ * long list can never push the rest of the sticky rail out of reach. */
+.resultsRail {
+  max-height: min(60dvh, 520px);
+  overflow-y: auto;
+  border: 1px solid var(--pc-line);
+  border-radius: 16px;
+}
+
 .section {
   display: flex;
   flex-direction: column;
+}
+
+/* "Show all N" / "Show fewer": one button, so focus stays put when it toggles. */
+.showAll {
+  align-self: flex-start;
+  min-height: 36px;
+  margin: 6px 8px 8px;
+  padding: 4px 14px;
+  border: 1px solid var(--ex-control-line);
+  border-radius: 999px;
+  background: var(--pc-bg);
+  color: var(--pc-ink);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.showAll:hover {
+  background: var(--pc-hover);
+}
+
+.showAll:focus-visible {
+  outline: 2px solid var(--pc-ink);
+  outline-offset: 2px;
 }
 
 .sectionHead {
@@ -228,12 +262,6 @@
   text-align: center;
 }
 
-.note {
-  margin: 0;
-  padding: 10px 8px;
-  color: var(--ex-muted);
-  font-size: 13px;
-}
 
 .srOnly {
   position: absolute;

@@ -1,59 +1,47 @@
 /**
  * features/social/explore/trending.ts
  * ---------------------------------------------------------------------------
- * ORGANIC TRENDING (demo-polish F6, story 15-explore; SOC-041 client-side half,
- * hashtags-trending/02 "lite", D1-R5). Participant world — a PURE, UI-free,
- * COBRA-free module: no React, no clock read, no network.
+ * ORGANIC TRENDING (demo-polish F6, story 15-explore; SOC-041 client-side,
+ * hashtags-trending/02 "lite", D1-R5). Participant world — a PURE, UI-free module:
+ * no React, no clock read, no network.
  *
- * WHAT IT COMPUTES. Given the posts the client has already loaded (the newest-200
- * top-level feed — see `useFeed`), it ranks hashtags by how much RECENT activity
- * they carry and returns the top N as `TrendingTopic`s for the Trending panel
- * (`TrendingPanel`) and the Explore page.
+ * WHAT IT COMPUTES. Given the posts the client has loaded (the live Explore
+ * baseline: newest-200 top-level posts), it ranks hashtags by RECENT activity and
+ * returns the top N as `TrendingTopic`s for `TrendingPanel`.
  *
- * NOTHING IS DECLARED. There is no list of "official" or "pinned" trends and no
- * input that can set one: a tag appears only because posts in the feed carry it,
- * and it ranks by their volume and recency. (The controller boost-weight lever,
- * SOC-041's other half, is out of scope for this story — when it lands it biases
- * this score and still renders as an ordinary organic trend.) The category label
- * is purely cosmetic and derived from the tag's own text (`categoryFor`); it
- * never says "official", "recommended" or anything authority-bearing (D1-R1/R5).
+ * NOTHING IS DECLARED. There is no list of "official" or "pinned" trends and no input
+ * that can set one: a tag appears only because posts carry it, ranked by their volume
+ * and recency. (The controller boost-weight lever, SOC-041's other half, is out of
+ * scope.) The category line is cosmetic, derived from the tag's own text
+ * (`categoryFor`), and never authority-bearing (D1-R1/R5).
  *
- * THE SCORE (recency-weighted, in SCENARIO time — COR-053):
- *   - A post is considered only if it is VISIBLE (a soft-deleted / taken-down
- *     post never contributes — `visibility.ts`) and its `scenarioTime` is within
- *     `windowMs` BEFORE `now` (default 12 scenario hours). `now` is a REQUIRED
- *     input — the caller passes `scenarioNow()`; this module never reads any
- *     clock, wall or scenario, so it is deterministic and trivially testable.
- *   - Each qualifying post adds `0.5 ^ (age / halfLifeMs)` to every DISTINCT
- *     hashtag it carries (an exponential decay: default half-life 3 scenario
- *     hours — a post from three hours ago counts half as much as one that just
- *     landed). A hashtag repeated within one post counts once for that post.
- *   - A post stamped AFTER `now` (clock skew, or a feed that is a tick ahead of
- *     the local clock) is not dropped: the feed has already decided it is
- *     visible, so its age is clamped to 0 and it counts at full weight.
- *   - `postCount` is the number of qualifying posts carrying the tag — the
- *     "N posts" line on the panel.
+ * THE SCORE (scenario time, COR-053):
+ *   - A post counts if it is VISIBLE (a soft-deleted / taken-down post never
+ *     contributes — `visibility.ts`) and its `scenarioTime` is within `windowMs`
+ *     BEFORE `now` (default 12 scenario hours). `now` is a REQUIRED input — the caller
+ *     passes the scenario "now"; this module reads no clock, so it is deterministic.
+ *   - A post stamped up to `futureToleranceMs` AHEAD of `now` (default 15 minutes:
+ *     skew, a feed a tick ahead of the local clock) is treated as brand new (age 0);
+ *     one stamped further ahead is skipped — it is not recent activity.
+ *   - Each qualifying post adds `0.5 ^ (age / halfLifeMs)` (default half-life 3 hours)
+ *     to every DISTINCT hashtag it carries; a tag repeated in one post counts once.
+ *   - `postCount` is the number of qualifying posts carrying the tag ("N posts").
  *
- * DETERMINISTIC TIE-BREAK. Ranking is a total order, so the same feed always
- * produces the same list regardless of input order: score (accumulated as exact
- * fixed-point integers in units of 1e-9, so summation order cannot change it or
- * reorder equals) descending, then
- * `postCount` descending, then the most recent post's time descending, then the
- * tag in plain code-unit order (never locale-dependent).
+ * DETERMINISTIC TIE-BREAK. A total order, so the same posts always give the same list
+ * whatever order they arrive in: score (exact fixed-point integers in units of 1e-9,
+ * so summation order cannot change it) descending, then `postCount` descending, then
+ * the newest post's time descending, then the tag in code-unit order (never
+ * locale-dependent).
  *
- * DISPLAY CASING comes from the data too: the most-used authored casing of the
- * tag (ties: most recent, then code-unit order), so `#WaterIssues` is shown as
- * written rather than the lowercased routing key (`tag`).
+ * DISPLAY CASING comes from the data: the most-used authored casing (ties: most recent,
+ * then code-unit order), so `#WaterIssues` shows as written, not the lowercase routing
+ * key. `pickDisplayCasing` exposes the same rule to the hashtag page.
  *
- * MEMOIZED. `trendingTopics` is the memoized entry point: results are cached per
- * `posts` array identity (a `WeakMap`, so a discarded feed array is collected)
- * and per resolved options, so re-rendering with the same loaded feed and the
- * same scenario minute returns the SAME array reference. It therefore treats
- * `posts` as immutable — `useFeed` hands out a stable, memoized array and never
- * mutates it. `computeTrending` is the uncached pure function it wraps.
- *
- * COR-001: this module only ever sees the already exercise-scoped feed the
- * caller hands it; it has no way to fetch or widen the set.
+ * MEMOIZED. `trendingTopics` is what components call: results are cached per `posts`
+ * array identity (a `WeakMap`, collected with the array) and per resolved options, so
+ * the same loaded posts and the same scenario minute return the SAME array. It treats
+ * `posts` as immutable; the Explore baseline publishes a new array per batch.
+ * `computeTrending` is the uncached pure function it wraps.
  */
 
 import { parseHashtags } from '../utils/hashtags'
@@ -67,6 +55,12 @@ export const TRENDING_HALF_LIFE_MS = 3 * 60 * 60 * 1000
 export const TRENDING_MAX_LIMIT = 10
 /** A tag needs at least this many qualifying posts to be listed. */
 export const TRENDING_MIN_POSTS = 1
+/**
+ * How far AHEAD of `now` a post may be stamped and still count (15 scenario
+ * minutes: clock skew, a feed a tick ahead of the local clock). A post further in
+ * the future is not "recent activity" and is skipped.
+ */
+export const TRENDING_FUTURE_TOLERANCE_MS = 15 * 60 * 1000
 
 /** The slice of a post trending reads (a `PostView` satisfies it structurally). */
 export interface TrendingPostInput extends VisibilityMarked {
@@ -87,6 +81,13 @@ export interface TrendingOptions {
   readonly limit?: number
   /** Minimum qualifying posts for a tag to be listed. Default 1. */
   readonly minPosts?: number
+  /**
+   * How far ahead of `now` a post may be stamped and still count; later posts are
+   * skipped. Default {@link TRENDING_FUTURE_TOLERANCE_MS}. `Infinity` disables the
+   * check (the dev mock, whose fixtures are dated 2033 against a wall-clock mock
+   * clock, passes it).
+   */
+  readonly futureToleranceMs?: number
 }
 
 export interface TrendingTopic {
@@ -110,6 +111,7 @@ interface ResolvedOptions {
   readonly halfLifeMs: number
   readonly limit: number
   readonly minPosts: number
+  readonly futureToleranceMs: number
 }
 
 const EMPTY: readonly TrendingTopic[] = Object.freeze([])
@@ -125,7 +127,11 @@ function resolveOptions(options: TrendingOptions): ResolvedOptions | undefined {
     Math.max(1, Math.floor(options.limit ?? TRENDING_MAX_LIMIT)),
   )
   const minPosts = Math.max(1, Math.floor(options.minPosts ?? TRENDING_MIN_POSTS))
-  return { nowMs, windowMs, halfLifeMs, limit, minPosts }
+  const futureToleranceMs = Math.max(
+    0,
+    options.futureToleranceMs ?? TRENDING_FUTURE_TOLERANCE_MS,
+  )
+  return { nowMs, windowMs, halfLifeMs, limit, minPosts, futureToleranceMs }
 }
 
 // -----------------------------------------------------------------------------
@@ -196,6 +202,16 @@ function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
+/** Records one use of the authored casing `raw` at `ms`. */
+function tallyCasing(casings: Map<string, CasingTally>, raw: string, ms: number): void {
+  const tally = casings.get(raw)
+  if (tally === undefined) casings.set(raw, { count: 1, latestMs: ms })
+  else {
+    tally.count += 1
+    if (ms > tally.latestMs) tally.latestMs = ms
+  }
+}
+
 /** Picks the display casing: most used, then most recent, then code-unit order. */
 function pickDisplay(casings: ReadonlyMap<string, CasingTally>): string {
   let best: { raw: string; tally: CasingTally } | undefined
@@ -225,13 +241,14 @@ function computeResolved(
   posts: readonly TrendingPostInput[],
   options: ResolvedOptions,
 ): readonly TrendingTopic[] {
-  const { nowMs, windowMs, halfLifeMs, limit, minPosts } = options
+  const { nowMs, windowMs, halfLifeMs, limit, minPosts, futureToleranceMs } = options
   const tags = new Map<string, TagAccumulator>()
 
   for (const post of posts) {
     if (!isVisiblePost(post)) continue
     const postMs = Date.parse(post.scenarioTime)
     if (Number.isNaN(postMs)) continue
+    if (postMs - nowMs > futureToleranceMs) continue // stamped too far ahead to be "recent"
     const age = Math.max(0, nowMs - postMs)
     if (age > windowMs) continue
     // Fixed-point: integer sums are exact, so the score (and the ranking) cannot
@@ -253,12 +270,7 @@ function computeResolved(
       entry.units += weight
       if (postMs > entry.latestMs) entry.latestMs = postMs
 
-      const tally = entry.casings.get(token.raw)
-      if (tally === undefined) entry.casings.set(token.raw, { count: 1, latestMs: postMs })
-      else {
-        tally.count += 1
-        if (postMs > tally.latestMs) tally.latestMs = postMs
-      }
+      tallyCasing(entry.casings, token.raw, postMs)
     }
   }
 
@@ -280,6 +292,29 @@ function computeResolved(
     category: categoryFor(tag),
     latestScenarioTime: new Date(entry.latestMs).toISOString(),
   }))
+}
+
+/**
+ * The display casing for `tag` among `posts`: the casing authors used most (ties:
+ * the most recent, then code-unit order), e.g. `#WaterIssues` for the routing key
+ * `waterissues`. The hashtag page's header uses this so it reads like the posts do;
+ * returns `undefined` when no post carries the tag. Takes no clock and ignores
+ * soft-deleted posts, like the ranking.
+ */
+export function pickDisplayCasing(
+  posts: readonly TrendingPostInput[],
+  tag: string,
+): string | undefined {
+  const casings = new Map<string, CasingTally>()
+  for (const post of posts) {
+    if (!isVisiblePost(post)) continue
+    const postMs = Date.parse(post.scenarioTime)
+    const ms = Number.isNaN(postMs) ? 0 : postMs
+    for (const token of parseHashtags(post.text)) {
+      if (token.type === 'hashtag' && token.tag === tag) tallyCasing(casings, token.raw, ms)
+    }
+  }
+  return casings.size === 0 ? undefined : pickDisplay(casings)
 }
 
 /**
@@ -318,7 +353,14 @@ export function trendingTopics(
   const resolved = resolveOptions(options)
   if (resolved === undefined) return EMPTY
 
-  const key = `${resolved.nowMs}|${resolved.windowMs}|${resolved.halfLifeMs}|${resolved.limit}|${resolved.minPosts}`
+  const key = [
+    resolved.nowMs,
+    resolved.windowMs,
+    resolved.halfLifeMs,
+    resolved.limit,
+    resolved.minPosts,
+    resolved.futureToleranceMs,
+  ].join('|')
   let variants = cache.get(posts)
   if (variants === undefined) {
     variants = new Map()

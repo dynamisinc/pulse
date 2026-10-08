@@ -14,11 +14,13 @@
 import { describe, expect, it } from 'vitest'
 import { nth } from './exploreTestUtils'
 import {
+  TRENDING_FUTURE_TOLERANCE_MS,
   TRENDING_HALF_LIFE_MS,
   TRENDING_MAX_LIMIT,
   TRENDING_WINDOW_MS,
   categoryFor,
   computeTrending,
+  pickDisplayCasing,
   trendingTopics,
   type TrendingPostInput,
 } from './trending'
@@ -69,10 +71,35 @@ describe('computeTrending — windowing in scenario time', () => {
     ])
   })
 
-  it('treats a post stamped after `now` as brand new (age clamped to 0), not dropped', () => {
+  it('treats a post stamped slightly after `now` as brand new (age clamped to 0)', () => {
     const [topic] = computeTrending([post('ahead #Skew', -5 * 60 * 1000)], { now: NOW })
     expect(topic?.tag).toBe('skew')
     expect(topic?.score).toBeCloseTo(1, 9)
+  })
+
+  it('skips a post stamped further ahead than the 15-minute tolerance', () => {
+    const justInside = post('inside #Inside', -TRENDING_FUTURE_TOLERANCE_MS)
+    const justOutside = post('outside #Outside', -TRENDING_FUTURE_TOLERANCE_MS - 1)
+    const farFuture = post('far #Far', -7 * 365 * 24 * HOUR) // a 2033 fixture vs a 2026 clock
+    expect(
+      computeTrending([justInside, justOutside, farFuture], { now: NOW }).map(t => t.tag),
+    ).toEqual(['inside'])
+  })
+
+  it('honours a custom tolerance, and Infinity disables the check (the dev mock)', () => {
+    const farFuture = post('far #Far', -30 * 24 * HOUR)
+    expect(computeTrending([farFuture], { now: NOW, futureToleranceMs: HOUR })).toEqual([])
+    const [topic] = computeTrending([farFuture], {
+      now: NOW,
+      futureToleranceMs: Number.POSITIVE_INFINITY,
+    })
+    expect(topic).toMatchObject({ tag: 'far', postCount: 1 })
+    expect(topic?.score).toBeCloseTo(1, 9) // clamped to age 0
+  })
+
+  it('treats a negative tolerance as zero', () => {
+    const slightlyAhead = post('ahead #Ahead', -1000)
+    expect(computeTrending([slightlyAhead], { now: NOW, futureToleranceMs: -5 })).toEqual([])
   })
 
   it('ignores posts whose scenarioTime is not a date', () => {
@@ -297,6 +324,40 @@ describe('trendingTopics — memoization', () => {
     const feed = [post('#Memo a', HOUR)]
     expect(trendingTopics(feed, { now: Number.NaN })).toEqual([])
     expect(trendingTopics(feed, { now: NOW })).toHaveLength(1)
+  })
+})
+
+describe('pickDisplayCasing — the casing authors use most', () => {
+  it('picks the most-used casing, then the most recent, then code-unit order', () => {
+    expect(
+      pickDisplayCasing(
+        [
+          post('#WaterIssues a', 3 * HOUR),
+          post('#WaterIssues b', 2 * HOUR),
+          post('#waterissues c', 10 * 60 * 1000),
+        ],
+        'waterissues',
+      ),
+    ).toBe('#WaterIssues')
+    // A tie on count goes to the more recent use.
+    expect(
+      pickDisplayCasing([post('#Zone2 a', 3 * HOUR), post('#ZONE2 b', HOUR)], 'zone2'),
+    ).toBe('#ZONE2')
+    // A tie on both goes to code-unit order (uppercase sorts first).
+    const at = HOUR
+    expect(pickDisplayCasing([post('#zone2', at), post('#Zone2', at)], 'zone2')).toBe('#Zone2')
+  })
+
+  it('returns undefined when no post carries the tag, and ignores soft-deleted posts', () => {
+    expect(pickDisplayCasing([post('no tags', HOUR)], 'waterissues')).toBeUndefined()
+    expect(
+      pickDisplayCasing([post('#Ghost', HOUR, { status: 'taken-down' })], 'ghost'),
+    ).toBeUndefined()
+  })
+
+  it('does not depend on the post order', () => {
+    const posts = [post('#A1 x', HOUR), post('#a1 y', 2 * HOUR), post('#A1 z', 3 * HOUR)]
+    expect(pickDisplayCasing([...posts].reverse(), 'a1')).toBe(pickDisplayCasing(posts, 'a1'))
   })
 })
 

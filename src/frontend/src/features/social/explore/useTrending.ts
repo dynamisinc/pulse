@@ -2,22 +2,25 @@
  * features/social/explore/useTrending.ts
  * ---------------------------------------------------------------------------
  * The Trending panel's data hook (demo-polish F6; SOC-041 client-side). Reads the
- * loaded feed itself (`useFeed()` — the same exercise-scoped, participant-safe
- * read the main feed uses, so there is no new endpoint and no client `exerciseId`,
- * COR-001) and runs it through the memoized, pure `trendingTopics`.
+ * shared, LIVE Explore baseline (`useExploreBaseline` — the newest-200 top-level
+ * posts, kept current by arrivals; one feed read however many panels are mounted)
+ * and ranks it with the memoized, pure `trendingTopics`.
  *
- * SCENARIO TIME (COR-053). The window is measured from the exercise clock's
- * "now" (`useScenarioTime()` → `scenarioNow()`), floored to the scenario MINUTE
- * so the ranking is stable between ticks and the memoized result is reused until
- * the minute (or the loaded feed) actually changes. No wall-clock is read.
+ * WHEN IT RECOMPUTES: when the baseline publishes a new batch of arrivals, or the
+ * scenario MINUTE changes — never per render. "Now" is the exercise clock's
+ * (`useScenarioTime()` → `scenarioNow()`), floored to the minute, so the window and
+ * decay are scenario time (COR-053); no wall-clock is read.
  *
- * `loading` is true until the feed AND the cast have resolved (`useFeed`'s own
- * contract), so the panel never flashes "nothing is trending" while posts load.
+ * FUTURE-DATED POSTS. Posts stamped more than 15 scenario minutes ahead of "now" are
+ * skipped (they are not recent activity). The one exception is the dev mock
+ * (`USE_MOCK_DATA`): its fixtures are dated 2033 while its clock mirrors the wall
+ * clock, so the tolerance is lifted there and the fixtures trend.
  */
 
 import { useMemo } from 'react'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { useScenarioTime } from '@/core/clock'
-import { useFeed } from '../hooks/useFeed'
+import { useExploreBaseline } from './useExploreFeed'
 import { trendingTopics, type TrendingTopic } from './trending'
 
 const MINUTE_MS = 60_000
@@ -25,20 +28,26 @@ const MINUTE_MS = 60_000
 export interface UseTrendingResult {
   readonly topics: readonly TrendingTopic[]
   readonly loading: boolean
-  readonly error: unknown
+  /** The baseline read failed (the store is retrying). */
+  readonly failed: boolean
 }
 
-/** The top `limit` organic trends over the loaded feed. See the module header. */
+/** The top `limit` organic trends over the live baseline. See the module header. */
 export function useTrending(limit?: number): UseTrendingResult {
-  const { posts, loading, error } = useFeed()
+  const { posts, loading, failed } = useExploreBaseline()
   // Only `now` is used; the zone is irrelevant to the window, so the default is fine.
   const { now } = useScenarioTime()
   const minute = Math.floor(now.getTime() / MINUTE_MS) * MINUTE_MS
 
   const topics = useMemo(
-    () => trendingTopics(posts, { now: minute, limit }),
+    () =>
+      trendingTopics(posts, {
+        now: minute,
+        limit,
+        ...(USE_MOCK_DATA ? { futureToleranceMs: Number.POSITIVE_INFINITY } : {}),
+      }),
     [posts, minute, limit],
   )
 
-  return { topics, loading, error }
+  return { topics, loading, failed }
 }

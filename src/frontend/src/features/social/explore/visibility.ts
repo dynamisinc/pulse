@@ -1,25 +1,19 @@
 /**
  * features/social/explore/visibility.ts
  * ---------------------------------------------------------------------------
- * The one definition of "does this post count?" for Explore's derived views
- * (trending and search; demo-polish F6, SOC-041/SOC-042). Participant world —
- * a pure, UI-free module.
+ * "Does this post count?" for Explore's derived views (demo-polish F6; trending and
+ * search). A pure, UI-free participant-world module.
  *
- * WHY THIS EXISTS. Trending and search are both COMPUTED CLIENT-SIDE over the
- * loaded newest-200 feed. That feed is normally already free of soft-deleted
- * posts (the server's feed read returns visible posts only, and the mock feed
- * does the same — a taken-down reply is only ever a thread TOMBSTONE). But a
- * derived view must never be the thing that resurrects a removed post: a
- * taken-down post that still carried a hashtag would otherwise keep inflating a
- * trend, or keep turning up in search results, after a controller removed it. So
- * both derivations filter through this predicate, defensively, regardless of
- * what the read above them did.
+ * The loaded feed is normally already free of soft-deleted posts (the server's feed
+ * read returns visible posts only; a taken-down reply is only ever a thread
+ * TOMBSTONE). A derived view must still never be what resurrects a removed post — a
+ * taken-down post that kept its hashtag would keep inflating a trend or turning up in
+ * search — so both filter through this predicate regardless of what the read did.
  *
- * VOCABULARY. The contract's tombstone marker is `status: 'taken-down'`
- * (implementation.md §1.5.3, `hooks/useThread.ts`); `'deleted'` is accepted too
- * so a future wire name for the same idea cannot silently start counting. A post
- * with NO status (every ordinary `PostView`, which has no such field at all) is
- * visible.
+ * The contract's tombstone marker is `status: 'taken-down'` (implementation.md
+ * §1.5.3, `hooks/useThread.ts`); `'deleted'` is accepted too so another wire name for
+ * the same idea cannot silently start counting. A post with NO status (every ordinary
+ * `PostView`, which has no such field) is visible.
  */
 
 /** A structural slice: anything that may carry the contract's removal marker. */

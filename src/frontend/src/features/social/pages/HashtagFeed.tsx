@@ -1,67 +1,46 @@
 /**
  * features/social/pages/HashtagFeed.tsx
  * ---------------------------------------------------------------------------
- * The hashtag feed — the posts carrying one hashtag, with a chronological
- * ("Recent") and an engagement-ranked ("Top") tab (feature: hashtags-trending,
- * story 01; demo-polish F6 story 15-explore polish; SOC-040, COR-001, COR-053,
- * XC-004, NFR-001). Participant world (Pulse Social skin): plain semantic
- * elements + a scoped CSS Module — NO COBRA, NO themed MUI, FontAwesome-only.
- *
- * DEMO-POLISH F6 (what changed over story 01). The page now has a HEADER (the
- * `#tag` title plus a post-count line, "16 posts" — shown once the posts have
- * loaded, never a premature "0 posts"), the tabs are labelled "Recent" / "Top"
- * (was "Latest"; same chronological / engagement orders, shared with Explore's
- * search toggle via `../explore/search`), and the empty state is an explicit,
- * honest text message with an icon. The CSS drops its dark-mode rules (the social
- * surface is forced light, F5) and reads the shared `--pc-*` tokens. Cards keep
- * their live actions — those come from `PostCard`, not from this page.
+ * The hashtag feed (`/hashtag/:tag`) — the posts carrying one hashtag, with a "Recent"
+ * (scenario time descending) and a "Top" (engagement descending) tab (feature:
+ * hashtags-trending/01; demo-polish F6; SOC-040, COR-001, COR-053, XC-004, NFR-001).
+ * Participant world (Pulse Social skin): plain semantic elements + a scoped CSS
+ * Module — NO COBRA, NO themed MUI, FontAwesome-only.
  *
  * WHAT IT DOES
- *  - Reuses the exercise's All Posts read (`useFeed()` — the same
- *    participant-safe, exercise-scoped convergence the main feed uses) and
- *    filters it to the posts whose text contains `tag`, via `extractHashtags`
- *    (`../utils/hashtags`, the one definition of "what a hashtag is"). Each
- *    surviving post renders through the keystone `<PostCard>` — identical card,
- *    identical scenario-time rendering — so this page is pure presentation +
- *    filtering, never a second post-rendering path.
- *  - Two tabs (SOC-040): "Recent" = chronological (scenario time descending),
- *    "Top" = ranked by engagement (like + repost + reply + share), newest-first
- *    as the tiebreak (both orders from `../explore/search`'s `sortPosts`). Tab
- *    state is local `useState` (no route — Phase 1 has no cross-channel router;
- *    see `SocialChannel`). The tablist follows the WAI-ARIA tabs pattern
- *    (NFR-001): each tab carries a unique `id` + `aria-controls` pointing at
- *    the panel, the panel carries an `id` + `aria-labelledby` pointing back at
- *    the active tab, and a roving tabindex (active tab `tabIndex=0`, inactive
- *    `tabIndex=-1`, Arrow/Home/End to move) keeps only the active tab in the
- *    natural Tab order — mirroring `Profile.tsx`'s tablist.
+ *  - Reads the exercise's All Posts feed (`useFeed()`, the same participant-safe,
+ *    exercise-scoped read the main feed uses) and keeps the posts whose text carries
+ *    the tag (`extractHashtags`, the one definition of "what a hashtag is"). Each one
+ *    renders through the keystone `<PostCard>` — identical card, identical
+ *    scenario-time rendering, live like/repost — so this page is filtering and
+ *    presentation only.
+ *  - HEADER: the tag as authors write it (`#WaterIssues`, the casing used most — the
+ *    URL key is lowercase) and a post count ("16 posts"), shown once the posts have
+ *    loaded, never a premature "0 posts". The `tag` prop may be any URL-ish form
+ *    (`WaterIssues`, `#waterissues`, `%23waterissues`); `tagKey` normalizes it.
+ *  - TABS (WAI-ARIA tabs pattern, NFR-001): unique `id` + `aria-controls`, a panel
+ *    labelled by the active tab, and a roving tabindex (Arrow/Home/End) so only the
+ *    active tab is in the natural Tab order — mirroring `Profile.tsx`. Tab state is
+ *    local. Both orders come from `../explore/search`'s `sortPosts`, shared with
+ *    Explore's search toggle; "Top" ties break newest-first.
+ *  - EMPTY / ERROR: an honest text state with an icon ("No posts with #tag yet."), and
+ *    a separate message when the posts could not be read (an outage is not an empty
+ *    hashtag). A soft-deleted post is neither listed nor counted.
+ *  - REPLY: a card's Reply opens its thread with the composer focused
+ *    (`requestReplyFocus` then `onOpenThread`); with no `onOpenThread` Reply renders
+ *    as inert text, never a no-op button.
  *
- * ISOLATION (COR-001). The post set comes from `useFeed()`, which takes NO
- * client `exerciseId` — the session binds the exercise and query scoping is
- * server-side. Filtering by hashtag happens over that already-scoped set, so a
- * hashtag feed can never surface another exercise's posts.
+ * ISOLATION (COR-001): `useFeed()` takes no client `exerciseId`; filtering happens
+ * over that already-scoped set. SCENARIO TIME (COR-053): this page renders no
+ * timestamp itself; each card does. Wall-clock is read once for the telemetry
+ * envelope only, never rendered.
  *
- * SCENARIO TIME (COR-053). This page renders no timestamp itself — every
- * `<PostCard>` self-renders its relative "2h ago" via `useScenarioTime()` in
- * the exercise zone. Wall-clock is read ONCE here for the telemetry envelope
- * only (`wallClockNowIso()`), never rendered.
+ * VARIANT (COR-015 / D1-011): cards render `full` or `readOnly` per the shell mount
+ * variant, so an observer sees inert counts with the controls ABSENT.
  *
- * VARIANT (COR-015 / D1-011). The shell mount variant is read via
- * `useShellContext()`; cards render `full` or `readOnly` exactly as the All
- * Posts feed does, so an observer session sees inert counts with the
- * interactive controls ABSENT. `onOpenThread` (supplied by the shell channel at
- * integration — Wave 2) opens a post's thread from a card tap or reply.
- *
- * TELEMETRY (XC-004). Emits exactly ONE `'view'` event per `tag` (a ref keyed
- * on the tag, mirroring `ThreadView`), targeting the hashtag entity — so a
- * different hashtag re-emits without a remount, but switching the Recent/Top
- * tab does not (a tab switch is not a new view).
- *
- * REACHABILITY NOTE. Wiring a hashtag TAP (in a `<PostCard>`) to open this page
- * is the shell-channel view-composition change owned by the Wave-2 orchestrator
- * pass (`SocialChannel`, alongside profile navigation) — see
- * docs/features/hashtags-trending/implementation.md. This page is built and
- * self-contained now; the `data-hashtag` seam the linkified anchors carry is
- * what that pass reads.
+ * TELEMETRY (XC-004): ONE `'view'` per tag (a ref keyed on the normalized tag,
+ * mirroring `ThreadView`), so a different hashtag re-emits without a remount, but a
+ * Recent/Top switch does not.
  */
 
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
@@ -78,8 +57,11 @@ import {
   affordancesAvailable,
 } from '@/features/participant-shell/mountContract'
 import { useFeed } from '../hooks/useFeed'
+import { normalizeHashtagParam } from '../layout/socialNavigation'
+import { requestReplyFocus } from '../services/replyIntent'
 import { extractHashtags } from '../utils/hashtags'
 import { sortPosts } from '../explore/search'
+import { pickDisplayCasing } from '../explore/trending'
 import { isVisiblePost } from '../explore/visibility'
 import styles from './HashtagFeed.module.css'
 
@@ -87,8 +69,11 @@ type CardVariant = 'full' | 'readOnly'
 type HashtagTab = 'recent' | 'top'
 
 export interface HashtagFeedProps {
-  /** The hashtag to show, NORMALIZED (lowercased, no leading `#`) — the same
-   * key `extractHashtags`/the linkified anchors produce. */
+  /**
+   * The hashtag to show, in any URL-ish form (`WaterIssues`, `#WaterIssues`,
+   * `%23waterissues`): the page decodes, strips `#` and lowercases it itself
+   * (`tagKey`) -- the same key `extractHashtags` and the linkified anchors produce.
+   */
   readonly tag: string
   /** Opens a post's flattened thread; the shell channel supplies it at
    * integration (Wave 2). Omitted in isolation — the feed still renders. */
@@ -133,15 +118,29 @@ const HashtagRow = memo(function HashtagRow({
 })
 
 /**
- * The Reply action on a card: opens the post's thread (the reader replies from
- * there). Kept as its own function so the one line F4 changes is obvious.
+ * The Reply action on a card: record the intent, then open the thread, whose reply
+ * composer takes focus on arrival (F4's `requestReplyFocus` handoff).
  */
 function openThreadForReply(id: string, onOpenThread: (id: string) => void): void {
-  // TODO(F4-merge): call F4's `requestReplyFocus(id)` (`../services/replyIntent`)
-  // HERE, before opening the thread, so the thread's reply composer takes focus:
-  //   requestReplyFocus(id)
-  //   onOpenThread(id)
+  requestReplyFocus(id)
   onOpenThread(id)
+}
+
+/**
+ * The routing key for whatever form of the tag arrived: URL-decoded (a malformed
+ * escape keeps the raw text), `#`-stripped, lowercased. F1's `normalizeHashtagParam`
+ * does the strip + lowercase + validation; a string it rejects (not a possible
+ * hashtag) still gets a best-effort key, so the page renders its honest empty state
+ * for it rather than throwing.
+ */
+function tagKey(raw: string): string {
+  let decoded = raw
+  try {
+    decoded = decodeURIComponent(raw)
+  } catch {
+    // keep the raw text
+  }
+  return normalizeHashtagParam(decoded) ?? decoded.replace(/^#+/, '').toLowerCase()
 }
 
 /** "1 post" / "16 posts". */
@@ -149,7 +148,8 @@ function postCountLabel(count: number): string {
   return `${count.toLocaleString('en-US')} ${count === 1 ? 'post' : 'posts'}`
 }
 
-export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedProps) {
+export function HashtagFeed({ tag: rawTag, onOpenThread, onOpenProfile }: HashtagFeedProps) {
+  const tag = useMemo(() => tagKey(rawTag), [rawTag])
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
   const { variant } = useShellContext()
@@ -169,6 +169,9 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
     [posts, tag],
   )
   const shown = useMemo(() => sortPosts(matched, tab), [matched, tab])
+  // How the tag reads on the page: the casing authors use most (`#WaterIssues`), else
+  // the routing key.
+  const label = useMemo(() => pickDisplayCasing(matched, tag) ?? `#${tag}`, [matched, tag])
 
   // The Reply action opens the thread. Stable identity so the memoized rows skip
   // re-render (NFR-002/SOC-071); absent when no thread opener was supplied, so
@@ -214,7 +217,7 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
   return (
     <section className={styles.page} aria-labelledby="hashtag-feed-heading">
       <header className={styles.header}>
-        <h1 id="hashtag-feed-heading" className={styles.title}>{`#${tag}`}</h1>
+        <h1 id="hashtag-feed-heading" className={styles.title}>{label}</h1>
         {/* The count appears once the posts are in (never a premature "0 posts"). */}
         {!loading && error === undefined && (
           <p className={styles.subtitle} data-testid="hashtag-post-count">
@@ -223,7 +226,7 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
         )}
       </header>
 
-      <div className={styles.tabs} role="tablist" aria-label={`#${tag} feed order`}>
+      <div className={styles.tabs} role="tablist" aria-label={`${label} feed order`}>
         <TabButton
           id="recent"
           label="Recent"
@@ -242,11 +245,10 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
 
       <ul
         className={styles.list}
-        aria-live="polite"
         role="tabpanel"
         id={`hashtag-tabpanel-${tab}`}
         aria-labelledby={`hashtag-tab-${tab}`}
-        aria-label={`#${tag}, ${tab === 'top' ? 'Top' : 'Recent'}`}
+        aria-label={`${label}, ${tab === 'top' ? 'Top' : 'Recent'}`}
       >
         {shown.map(post => (
           <HashtagRow
@@ -269,7 +271,7 @@ export function HashtagFeed({ tag, onOpenThread, onOpenProfile }: HashtagFeedPro
       {isEmpty && (
         <div className={styles.empty} data-testid="hashtag-empty">
           <FontAwesomeIcon icon={faHashtag} className={styles.emptyIcon} aria-hidden="true" />
-          <p className={styles.emptyText}>{`No posts with #${tag} yet.`}</p>
+          <p className={styles.emptyText}>{`No posts with ${label} yet.`}</p>
         </div>
       )}
     </section>
