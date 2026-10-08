@@ -1,11 +1,13 @@
 namespace Pulse.WebApi.Features.Social.Moderation;
 
+using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.Identity.Sessions;
 
 /// <summary>
 /// The controller takedown endpoint (demo-polish B6, implementation.md §1.5.5):
@@ -33,8 +35,9 @@ using Pulse.WebApi.Features.EngineRuntime;
 /// take a post down in any lifecycle state. That is intended.
 /// </para>
 /// <para>
-/// <b>No telemetry (DP-9).</b> The category is validated here and then discarded. It goes only into the
-/// console's <c>steering_action</c> event, which is the single record of the takedown.
+/// <b>No telemetry (DP-9).</b> The category is validated here and is never persisted. The console's
+/// <c>steering_action</c> event is the single analytic record of the takedown; the server only writes an
+/// operational log line (exercise, post, staff user, category) through <see cref="PostTakedownService"/>.
 /// </para>
 /// </remarks>
 public static class ModerationEndpoints
@@ -92,12 +95,14 @@ public static class ModerationEndpoints
     /// </summary>
     /// <param name="postId">The post to take down (route).</param>
     /// <param name="category">The incident category (query). Optional, defaults to <c>other</c>. Not persisted (DP-9).</param>
+    /// <param name="user">The server-resolved session principal (the acting staff user, for the log line only).</param>
     /// <param name="service">The takedown service.</param>
     /// <param name="cancellationToken">The request-aborted token.</param>
     /// <returns>204, 400, 401 or 404.</returns>
     private static async Task<IResult> TakeDownPostAsync(
         Guid postId,
         string? category,
+        ClaimsPrincipal user,
         PostTakedownService service,
         CancellationToken cancellationToken)
     {
@@ -106,7 +111,12 @@ public static class ModerationEndpoints
             return Results.BadRequest($"category must be one of: {string.Join(", ", TakedownCategories.All)}.");
         }
 
-        var result = await service.TakeDownAsync(postId, cancellationToken);
+        // The staff user id comes from the principal SessionAuthenticationMiddleware resolved server-side, never
+        // from the request. The filters have already verified it is a live, assigned controller session.
+        var staffUserId = SessionPrincipal.Read(user)?.StaffUserId;
+
+        var result = await service.TakeDownAsync(
+            postId, TakedownCategories.OrDefault(category), staffUserId, cancellationToken);
 
         return result.Outcome switch
         {

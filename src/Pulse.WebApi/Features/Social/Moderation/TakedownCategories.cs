@@ -36,4 +36,9 @@ public static class TakedownCategories
     /// <returns><c>true</c> when the value is absent, empty, or one of <see cref="All"/>.</returns>
     public static bool IsValid(string? category) =>
         string.IsNullOrEmpty(category) || All.Contains(category, StringComparer.Ordinal);
+
+    /// <summary>The category to record for a valid value: the value itself, or <see cref="Other"/> when absent or empty.</summary>
+    /// <param name="category">A value <see cref="IsValid"/> accepted.</param>
+    /// <returns>The effective category.</returns>
+    public static string OrDefault(string? category) => string.IsNullOrEmpty(category) ? Other : category;
 }

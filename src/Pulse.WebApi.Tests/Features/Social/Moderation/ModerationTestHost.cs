@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
@@ -45,28 +46,110 @@ public sealed class RecordingModerationBroadcaster : IFeedBroadcaster
 }
 
 /// <summary>
+/// An <see cref="IFeedBroadcaster"/> double whose <c>PostRemoved</c> send always fails, standing in for a SignalR
+/// outage after the takedown has committed (Gate-1 L-4).
+/// </summary>
+public sealed class ThrowingPostRemovedBroadcaster : IFeedBroadcaster
+{
+    /// <inheritdoc />
+    public Task BroadcastPostAsync(Guid exerciseId, ParticipantPostDto post, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    /// <inheritdoc />
+    public Task BroadcastPostRemovedAsync(Guid exerciseId, Guid postId, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException("Simulated SignalR failure while sending PostRemoved.");
+}
+
+/// <summary>One captured log entry, with its structured properties.</summary>
+/// <param name="Category">The logger category.</param>
+/// <param name="Level">The log level.</param>
+/// <param name="EventId">The event id.</param>
+/// <param name="Message">The formatted message.</param>
+/// <param name="Properties">The structured state (message-template values plus <c>{OriginalFormat}</c>).</param>
+/// <param name="Exception">The exception, if any.</param>
+public sealed record CapturedLog(
+    string Category,
+    LogLevel Level,
+    EventId EventId,
+    string Message,
+    IReadOnlyDictionary<string, object?> Properties,
+    Exception? Exception);
+
+/// <summary>Captures every log entry the host writes, keeping the structured state, for log assertions.</summary>
+public sealed class CapturingLoggerProvider : ILoggerProvider
+{
+    private readonly ConcurrentQueue<CapturedLog> _entries = new();
+
+    /// <summary>Everything logged so far, in order.</summary>
+    public IReadOnlyList<CapturedLog> Entries => _entries.ToArray();
+
+    /// <inheritdoc />
+    public ILogger CreateLogger(string categoryName) => new CapturingLogger(categoryName, _entries);
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        // Nothing to release: the queue is owned by the test.
+    }
+
+    private sealed class CapturingLogger(string category, ConcurrentQueue<CapturedLog> entries) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            ArgumentNullException.ThrowIfNull(formatter);
+
+            var properties = state is IEnumerable<KeyValuePair<string, object?>> pairs
+                ? pairs.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal)
+                : new Dictionary<string, object?>(StringComparer.Ordinal);
+
+            entries.Enqueue(new CapturedLog(category, logLevel, eventId, formatter(state, exception), properties, exception));
+        }
+    }
+}
+
+/// <summary>
 /// The REAL <c>Program</c> host over the shared migrated database, for the takedown suites. Identity is not faked:
 /// host resolution, session authentication, organization resolution, the default-deny gate and both staff filters
 /// all run as in production, driven by real persisted session tokens. The <see cref="IFeedBroadcaster"/> is
-/// replaced with <see cref="RecordingModerationBroadcaster"/> unless the caller asks for the real SignalR one.
+/// replaced with <see cref="RecordingModerationBroadcaster"/> (or a caller-supplied double) unless the caller asks
+/// for the real SignalR one. Every log entry is captured in <see cref="Logs"/>.
 /// </summary>
 public sealed class ModerationWebApplicationFactory : WebApplicationFactory<Program>
 {
     private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
 
     private readonly bool _useRealBroadcaster;
+    private readonly IFeedBroadcaster? _broadcasterOverride;
 
     /// <summary>Points the host at <paramref name="connectionString"/>.</summary>
     /// <param name="connectionString">The fixture's migrated database.</param>
     /// <param name="useRealBroadcaster"><c>true</c> to keep Program.cs's <c>SignalRFeedBroadcaster</c> (over-the-wire tests).</param>
-    public ModerationWebApplicationFactory(string connectionString, bool useRealBroadcaster = false)
+    /// <param name="broadcasterOverride">A double to use instead of <see cref="Broadcaster"/> (e.g. one that throws).</param>
+    public ModerationWebApplicationFactory(
+        string connectionString,
+        bool useRealBroadcaster = false,
+        IFeedBroadcaster? broadcasterOverride = null)
     {
         Environment.SetEnvironmentVariable(ConnectionStringEnvVar, connectionString);
         _useRealBroadcaster = useRealBroadcaster;
+        _broadcasterOverride = broadcasterOverride;
     }
 
-    /// <summary>The recording double (unused when the real broadcaster is kept).</summary>
+    /// <summary>The recording double (unused when the real broadcaster or an override is used).</summary>
     public RecordingModerationBroadcaster Broadcaster { get; } = new();
+
+    /// <summary>Every log entry the host has written.</summary>
+    public CapturingLoggerProvider Logs { get; } = new();
 
     /// <summary>A client whose base address sets the request host, presenting <paramref name="bearerToken"/> (or none).</summary>
     /// <param name="host">The request host (drives host → exercise resolution).</param>
@@ -88,6 +171,8 @@ public sealed class ModerationWebApplicationFactory : WebApplicationFactory<Prog
     {
         ArgumentNullException.ThrowIfNull(builder);
 
+        builder.ConfigureLogging(logging => logging.AddProvider(Logs));
+
         if (_useRealBroadcaster)
         {
             return;
@@ -96,7 +181,7 @@ public sealed class ModerationWebApplicationFactory : WebApplicationFactory<Prog
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IFeedBroadcaster>();
-            services.AddSingleton<IFeedBroadcaster>(Broadcaster);
+            services.AddSingleton<IFeedBroadcaster>(_broadcasterOverride ?? Broadcaster);
         });
     }
 
@@ -266,7 +351,19 @@ public sealed class ModerationSeeder
     public async Task<string> SeedStaffSessionAsync(
         Guid activeExerciseId,
         IReadOnlyList<(Guid ExerciseId, string Role)> assignments,
-        Action<Session>? configure = null)
+        Action<Session>? configure = null) =>
+        (await SeedStaffUserSessionAsync(activeExerciseId, assignments, configure)).Token;
+
+    /// <summary>A live staff session assigned to <paramref name="exerciseId"/> as controller; also returns the staff user id.</summary>
+    /// <param name="exerciseId">The exercise.</param>
+    /// <returns>The raw bearer token and the session's staff user id.</returns>
+    public Task<(string Token, Guid StaffUserId)> SeedControllerWithIdAsync(Guid exerciseId) =>
+        SeedStaffUserSessionAsync(exerciseId, [(exerciseId, "controller")], configure: null);
+
+    private async Task<(string Token, Guid StaffUserId)> SeedStaffUserSessionAsync(
+        Guid activeExerciseId,
+        IReadOnlyList<(Guid ExerciseId, string Role)> assignments,
+        Action<Session>? configure)
     {
         var token = $"takedown-staff-{Guid.NewGuid():N}";
         var staffUserId = Guid.NewGuid();
@@ -291,7 +388,7 @@ public sealed class ModerationSeeder
 
         seed.Sessions.Add(session);
         await seed.SaveChangesAsync();
-        return token;
+        return (token, staffUserId);
     }
 
     /// <summary>A live staff session assigned to <paramref name="exerciseId"/> as controller, active on it.</summary>
