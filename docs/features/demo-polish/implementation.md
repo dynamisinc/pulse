@@ -693,6 +693,7 @@ rebases C3.
 | `ThreadView.tsx` | F0 (W1 relocation), F4 (W2) | Sequence. |
 | `Profile.tsx`, `Avatar.tsx` | F5 only | F2 supplies `MediaTabGrid` (F0 stub → F2 content), F5 imports it. |
 | `HashtagFeed.tsx` | F6 only | F1 passes callbacks from its route elements. |
+| `controller/services/composeService.ts` (+ its tests) | F0 (W1, type-only), C1 (W3) | **Already changed by F0:** `ComposeAsPersonaInput.media` is `CreatePostMedia[]`. In live mode, `createPost` skips media it can't resolve, and only the mock adapter throws (F0 M-1). C1 inherits this; don't revert it. |
 | `realtimeFeed.ts` | F2 (W2), C5 (W3) | Sequence. F4 depends only on the *type* of `inReplyTo` (F0); the runtime parser retention is F2's — verified at Gate 2. |
 | `feedStreamSource.ts` | F4 only | Reply filtering for the pill. |
 | `PostHeader.tsx`, `PostBody.tsx`, `PostCard.tsx`, `post/types.ts` | none after F0 | **Frozen after F0** (plan gave `PostHeader` to F3; no F3 AC needs it). F0 already mounts every slot (`PostMediaSlot`, `PostReplyContext`, `PostActions`). A Wave-2 builder who needs a change asks the orchestrator. |

@@ -40,7 +40,7 @@ Order = wave order. Priorities and effort are the plan's (§5). *Home story* is 
 |---|-------|----|-----|-------|------|----------------|--------|-------|
 | 01 | [Keyless Blob storage for media](01-blob-storage-keyless.md) | I1 | Must | infra | 1 | XC-009, COR-002, NFR-004 | In Review | #420 |
 | 02 | [Schema: media, replies, reactions, avatars (one migration)](02-schema-media-replies-reactions.md) | B1 | Must | backend | 1 | SOC-001, SOC-010, SOC-030, COR-001, COR-020, XC-010 | In Review | #421 |
-| 03 | [Client seam: PostCard split, contract v2, mocks, upload client](03-client-seam-contract-v2.md) | F0 | Must | frontend | 1 | SOC-001, SOC-002, XC-002, XC-009, COR-053 | In Progress | #422 |
+| 03 | [Client seam: PostCard split, contract v2, mocks, upload client](03-client-seam-contract-v2.md) | F0 | Must | frontend | 1 | SOC-001, SOC-002, XC-002, XC-009, COR-053 | In Review | #422 |
 | 04 | [Role-scoped realtime groups](04-role-scoped-realtime-groups.md) | B5 | Should | backend | 1 | XC-002, SOC-052, COR-001 | In Review | #423 |
 | 05 | [Media pipeline: upload, store, SAS, library](05-media-pipeline.md) | BM | Must | backend | 1b | SOC-001, XC-009, COR-002, NFR-004, NFR-009 | In Progress | #424 |
 | 06 | [Post v2 read/write](06-post-v2-read-write.md) | BP | Must | backend | 1b | SOC-001, SOC-002, SOC-054, XC-002, COR-024 | In Progress | #425 |
