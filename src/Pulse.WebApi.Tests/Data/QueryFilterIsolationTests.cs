@@ -403,6 +403,183 @@ public class QueryFilterIsolationTests
             "if injection failed, the empty scope would return zero rows and this assertion would fail");
     }
 
+    // --- demo-polish B1: MediaAsset / PostMediaItem / PostReaction (all IExerciseScoped) -------------------
+    // The always-Critical proof for the three new tables, at the database: exercise A's scope sees only A's
+    // rows (itemised, by id, and in aggregate); an unresolved scope sees ZERO; and IgnoreQueryFilters shows the
+    // other exercise's rows really exist, so every zero below is the filter closing the door.
+
+    [RequiresDockerFact]
+    public async Task MediaAssetQuery_InExerciseA_ReturnsOnlyExerciseARows()
+    {
+        var a = await SeedDemoPolishRowsAsync(Guid.NewGuid());
+        var b = await SeedDemoPolishRowsAsync(Guid.NewGuid());
+
+        await using var readA = _fixture.CreateContext(ScopeFor(a.ExerciseId));
+
+        var visible = await readA.MediaAssets
+            .Where(m => m.Id == a.MediaAssetId || m.Id == b.MediaAssetId)
+            .Select(m => m.Id)
+            .ToListAsync();
+        visible.Should().ContainSingle().Which.Should().Be(
+            a.MediaAssetId, "a query in exercise A must see only exercise A's media asset, never exercise B's");
+
+        (await readA.MediaAssets.FindAsync(b.MediaAssetId)).Should().BeNull(
+            "FindAsync by exercise B's real media id (IDOR) must not resolve under exercise A's scope");
+        (await readA.MediaAssets.SingleOrDefaultAsync(m => m.BlobName == b.BlobName)).Should().BeNull(
+            "a lookup by exercise B's blob name must be filtered out under exercise A's scope too");
+        (await readA.MediaAssets.FindAsync(a.MediaAssetId)).Should().NotBeNull(
+            "the caller's own exercise A asset must still resolve — the null above is isolation, not a broken Find");
+        (await readA.MediaAssets.CountAsync()).Should().Be(
+            1, "an unfiltered count under exercise A's scope must equal A's row count only, never A+B");
+        (await readA.MediaAssets.IgnoreQueryFilters()
+                .CountAsync(m => m.Id == a.MediaAssetId || m.Id == b.MediaAssetId)).Should().Be(
+            2, "ignoring the filter reveals BOTH rows exist — the scoping is the filter, not missing data");
+    }
+
+    [RequiresDockerFact]
+    public async Task PostMediaItemQuery_InExerciseA_ReturnsOnlyExerciseARows()
+    {
+        var a = await SeedDemoPolishRowsAsync(Guid.NewGuid());
+        var b = await SeedDemoPolishRowsAsync(Guid.NewGuid());
+
+        await using var readA = _fixture.CreateContext(ScopeFor(a.ExerciseId));
+
+        var visible = await readA.PostMediaItems
+            .Where(i => i.Id == a.PostMediaItemId || i.Id == b.PostMediaItemId)
+            .Select(i => i.Id)
+            .ToListAsync();
+        visible.Should().ContainSingle().Which.Should().Be(
+            a.PostMediaItemId, "a query in exercise A must see only exercise A's media item, never exercise B's");
+
+        (await readA.PostMediaItems.Where(i => i.PostId == b.PostId).ToListAsync()).Should().BeEmpty(
+            "asking for exercise B's post's attachments by its real post id must return nothing under scope A — " +
+            "the item table is filtered in its own right (DP-2), not only through a join to Posts");
+        (await readA.PostMediaItems.FindAsync(b.PostMediaItemId)).Should().BeNull(
+            "FindAsync by exercise B's real media-item id (IDOR) must not resolve under exercise A's scope");
+        (await readA.PostMediaItems.FindAsync(a.PostMediaItemId)).Should().NotBeNull(
+            "the caller's own exercise A item must still resolve");
+        (await readA.PostMediaItems.CountAsync()).Should().Be(
+            1, "an unfiltered count under exercise A's scope must equal A's row count only, never A+B");
+        (await readA.PostMediaItems.IgnoreQueryFilters()
+                .CountAsync(i => i.Id == a.PostMediaItemId || i.Id == b.PostMediaItemId)).Should().Be(
+            2, "ignoring the filter reveals BOTH rows exist — the scoping is the filter, not missing data");
+    }
+
+    [RequiresDockerFact]
+    public async Task PostReactionQuery_InExerciseA_ReturnsOnlyExerciseARows()
+    {
+        var a = await SeedDemoPolishRowsAsync(Guid.NewGuid());
+        var b = await SeedDemoPolishRowsAsync(Guid.NewGuid());
+
+        await using var readA = _fixture.CreateContext(ScopeFor(a.ExerciseId));
+
+        var visible = await readA.PostReactions
+            .Where(r => r.Id == a.PostReactionId || r.Id == b.PostReactionId)
+            .Select(r => r.Id)
+            .ToListAsync();
+        visible.Should().ContainSingle().Which.Should().Be(
+            a.PostReactionId, "a query in exercise A must see only exercise A's reaction, never exercise B's");
+
+        (await readA.PostReactions.CountAsync(r => r.PostId == b.PostId)).Should().Be(
+            0, "a per-post engagement count for exercise B's post must read zero under scope A — an aggregate " +
+               "must not leak another exercise's engagement");
+        (await readA.PostReactions.FindAsync(b.PostReactionId)).Should().BeNull(
+            "FindAsync by exercise B's real reaction id (IDOR) must not resolve under exercise A's scope");
+        (await readA.PostReactions.FindAsync(a.PostReactionId)).Should().NotBeNull(
+            "the caller's own exercise A reaction must still resolve");
+        (await readA.PostReactions.CountAsync()).Should().Be(
+            1, "an unfiltered count under exercise A's scope must equal A's row count only, never A+B");
+        (await readA.PostReactions.IgnoreQueryFilters()
+                .CountAsync(r => r.Id == a.PostReactionId || r.Id == b.PostReactionId)).Should().Be(
+            2, "ignoring the filter reveals BOTH rows exist — the scoping is the filter, not missing data");
+    }
+
+    [RequiresDockerFact]
+    public async Task DemoPolishEntities_UnresolvedScope_ReturnZeroRows_FailClosed()
+    {
+        var seeded = await SeedDemoPolishRowsAsync(Guid.NewGuid());
+
+        // All three unresolved input shapes: no accessor at all, an accessor with a null CurrentExerciseId, and
+        // an explicit Guid.Empty. Each must see NOTHING — never every exercise.
+        var unresolvedScopes = new (string Shape, IExerciseContext? Context)[]
+        {
+            ("null accessor", null),
+            ("null CurrentExerciseId", new ExerciseContext()),
+            ("explicit Guid.Empty", new ExerciseContext { CurrentExerciseId = Guid.Empty }),
+        };
+
+        foreach (var (shape, context) in unresolvedScopes)
+        {
+            await using var read = _fixture.CreateContext(context);
+
+            (await read.MediaAssets.CountAsync(m => m.Id == seeded.MediaAssetId)).Should().Be(
+                0, "an unresolved scope ({0}) must match zero MediaAssets — fail closed", shape);
+            (await read.PostMediaItems.CountAsync(i => i.Id == seeded.PostMediaItemId)).Should().Be(
+                0, "an unresolved scope ({0}) must match zero PostMediaItems — fail closed", shape);
+            (await read.PostReactions.CountAsync(r => r.Id == seeded.PostReactionId)).Should().Be(
+                0, "an unresolved scope ({0}) must match zero PostReactions — fail closed", shape);
+        }
+
+        await using var unfiltered = _fixture.CreateContext();
+        (await unfiltered.MediaAssets.IgnoreQueryFilters().CountAsync(m => m.Id == seeded.MediaAssetId)).Should().Be(1);
+        (await unfiltered.PostMediaItems.IgnoreQueryFilters().CountAsync(i => i.Id == seeded.PostMediaItemId)).Should().Be(1);
+        (await unfiltered.PostReactions.IgnoreQueryFilters().CountAsync(r => r.Id == seeded.PostReactionId)).Should().Be(1);
+    }
+
+    /// <summary>The ids of one exercise's worth of demo-polish rows.</summary>
+    private sealed record DemoPolishRows(
+        Guid ExerciseId, Guid PostId, Guid MediaAssetId, string BlobName, Guid PostMediaItemId, Guid PostReactionId);
+
+    /// <summary>
+    /// Seeds, in one exercise: a post, an image asset, the post's one media item, and one like on the post. The
+    /// foreign keys are real, so the parent rows are seeded alongside (EF orders the inserts).
+    /// </summary>
+    private async Task<DemoPolishRows> SeedDemoPolishRowsAsync(Guid exerciseId)
+    {
+        var postId = Guid.NewGuid();
+        var mediaAssetId = Guid.NewGuid();
+        var blobName = $"{exerciseId:D}/{mediaAssetId:N}.png";
+        var itemId = Guid.NewGuid();
+        var reactionId = Guid.NewGuid();
+
+        await using var seed = _fixture.CreateContext();
+        seed.Posts.Add(NewPost(postId, exerciseId));
+        seed.MediaAssets.Add(new MediaAsset
+        {
+            Id = mediaAssetId,
+            ExerciseId = exerciseId,
+            Kind = MediaKinds.Image,
+            ContentType = "image/png",
+            BlobName = blobName,
+            Bytes = 1024,
+            OriginalFileName = "photo.png",
+            UploadedByHumanId = "human-test",
+            CreatedScenarioTime = new DateTimeOffset(2033, 9, 4, 13, 0, 0, TimeSpan.Zero),
+            CreatedWallClock = new DateTimeOffset(2033, 9, 4, 13, 15, 0, TimeSpan.Zero),
+        });
+        seed.PostMediaItems.Add(new PostMediaItem
+        {
+            Id = itemId,
+            ExerciseId = exerciseId,
+            PostId = postId,
+            MediaAssetId = mediaAssetId,
+            Alt = "A flooded street.",
+            Order = 0,
+        });
+        seed.PostReactions.Add(new PostReaction
+        {
+            Id = reactionId,
+            ExerciseId = exerciseId,
+            PostId = postId,
+            PersonaId = Guid.NewGuid(),
+            Kind = ReactionKinds.Like,
+            CreatedScenarioTime = new DateTimeOffset(2033, 9, 4, 13, 5, 0, TimeSpan.Zero),
+        });
+        await seed.SaveChangesAsync();
+
+        return new DemoPolishRows(exerciseId, postId, mediaAssetId, blobName, itemId, reactionId);
+    }
+
     /// <summary>Seeds one scoped row of each entity type in one exercise; returns their ids.</summary>
     private async Task<(Guid PersonaId, Guid PostId, string EventId)> SeedOneOfEachAsync()
     {
