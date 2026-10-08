@@ -214,7 +214,7 @@ These items are deliberately not stated as fact in this brief:
 - **Whether Microsoft's jailbreak detection blocks a request or only flags it by default.** [M11] lists
   it; Microsoft's classic content-filter page [M12] calls it optional.
 - **The live Azure state of `aif-pulse-uat`:** role assignment, key-based access setting, region and
-  current model versions. There was no Azure access from the session that wrote this brief (see Open item 2).
+  current model versions were not checked against Azure for this brief (see Open item 2).
 - **Per-attack results of the live injection test** (Open item 5).
-- **Whether any Dynamis-level security documents** (for example, from COBRA) apply to Pulse. Tom to
-  confirm.
+- **Whether any Dynamis-level security documents** (for example, from COBRA) apply to Pulse. Dynamis
+  will confirm.
