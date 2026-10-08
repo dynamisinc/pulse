@@ -116,7 +116,9 @@ public sealed class OrganizationScopeSweepTests
     /// </summary>
     private static readonly IReadOnlyDictionary<string, int> ExpectedExemptionCounts = new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        ["ResolvedScope"] = 20,
+        // demo-polish B3: +1 for ReactionService, which reads the resolved exercise's CurrentScenarioTime and
+        // TimeZone (the FollowService scenario-time fallback, implementation.md §1.8) by the IExerciseContext id.
+        ["ResolvedScope"] = 21,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and
