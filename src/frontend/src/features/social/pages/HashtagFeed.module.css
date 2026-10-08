@@ -1,58 +1,42 @@
 /*
  * features/social/pages/HashtagFeed.module.css
  * ---------------------------------------------------------------------------
- * Scoped styles for the hashtag feed page (feature: hashtags-trending, story
- * 01; SOC-040). CSS Module — every class is locally scoped; nothing leaks a
- * global name and this file carries NO COBRA/MUI dependency (participant world,
- * Pulse skin).
+ * Scoped styles for the hashtag feed page (feature: hashtags-trending, story 01;
+ * demo-polish F6 polish; SOC-040). CSS Module — every class is locally scoped;
+ * nothing leaks a global name and this file carries NO COBRA/MUI dependency
+ * (participant world, Pulse skin).
  *
- * Mirrors `Feed.module.css` exactly: a LEFT-ANCHORED single column (~600px,
- * matching the PostCard max-width), the same light/dark palette custom
- * properties (`--fd-*`) with the same TWO dark-mode triggers (OS
- * `prefers-color-scheme: dark` AND a host-set `[data-theme="dark"]`), so the
- * hashtag feed frame tracks the post cards and the All Posts feed identically.
- * Values mirror `tokens.ts`'s LIGHT/DARK_PALETTE; keep both in sync by hand.
+ * LIGHT ONLY. The social surface is forced light (demo-polish F5), so this file
+ * has no theme-switching rules of any kind (the previous revision carried two
+ * OS/host triggers; both are removed). `.page` COMPOSES the shared `.tokens` class, so
+ * every colour is a `var(--pc-*)` read from the same palette the post cards use,
+ * plus the per-exercise accent hook (`--pc-accent`, COR-030).
  *
- * The one thing this page adds over the All Posts feed is the header (the
- * `#tag` title) and the chronological/top tablist. The active tab is marked by
- * the per-exercise accent (`--pulse-ac`, COR-030) AND a text-weight change +
- * `aria-selected` — never color alone (NFR-001).
+ * Mirrors `Feed.module.css`: a LEFT-ANCHORED single column (~600px, matching the
+ * PostCard max-width). The page adds the header (the `#tag` title and the post
+ * count) and the Recent / Top tablist. The active tab is marked by an accent
+ * underline AND heavier text AND `aria-selected` — never colour alone (NFR-001).
+ *
+ * Contrast (WCAG 2.1 AA, ratios computed): ink #0e1518 on white 18.4:1; the
+ * page's own muted text uses `--ex-muted` #56656f: 6.0:1 on white, 5.5:1 on the
+ * hover tint. The focus ring is the ink colour. The accent appears only as the
+ * tab underline (non-text), never as text.
  */
 
 .page {
-  /* Light-mode palette (default) */
-  --fd-bg: #fff;
-  --fd-ink: #0e1518;
-  --fd-ink-muted: #61707a;
-  --fd-line: #e5e8ea;
-  --fd-accent: var(--pulse-ac, #1e3a5f);
+  composes: tokens from '../theme/social.module.css';
+
+  --ex-muted: #56656f;
 
   box-sizing: border-box;
   width: 100%;
   max-width: 600px;
   /* Left-anchored (D1-013) — no auto side margins, sits at the content edge. */
   margin: 0;
-  background: var(--fd-bg);
-  color: var(--fd-ink);
+  background: var(--pc-bg);
+  color: var(--pc-ink);
   font-family: 'Figtree', system-ui, sans-serif;
   text-align: left;
-}
-
-@media (prefers-color-scheme: dark) {
-  .page {
-    --fd-bg: #0c1116;
-    --fd-ink: #e9eef1;
-    --fd-ink-muted: #8aa0ac;
-    --fd-line: #233039;
-  }
-}
-
-:global([data-theme='dark']) .page,
-.page:global([data-theme='dark']) {
-  --fd-bg: #0c1116;
-  --fd-ink: #e9eef1;
-  --fd-ink-muted: #8aa0ac;
-  --fd-line: #233039;
 }
 
 .header {
@@ -60,60 +44,58 @@
   flex-direction: column;
   gap: 2px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--fd-line);
+  border-bottom: 1px solid var(--pc-line);
 }
 
 .title {
   margin: 0;
   overflow-wrap: anywhere;
-  color: var(--fd-ink);
+  color: var(--pc-ink);
   font-size: 20px;
   font-weight: 800;
 }
 
 .subtitle {
   margin: 0;
-  color: var(--fd-ink-muted);
+  color: var(--ex-muted);
   font-size: 13px;
 }
 
 .tabs {
   display: flex;
   gap: 0;
-  border-bottom: 1px solid var(--fd-line);
+  border-bottom: 1px solid var(--pc-line);
 }
 
 .tab {
   flex: 1 1 auto;
   padding: 12px 8px;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-bottom: 3px solid transparent;
   background: none;
-  color: var(--fd-ink-muted);
+  color: var(--ex-muted);
   font-family: inherit;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
 }
 
-.tab:hover,
+.tab:hover {
+  background: var(--pc-hover);
+}
+
 .tab:focus-visible {
-  background: rgba(14, 21, 24, .045);
+  outline: 2px solid var(--pc-ink);
+  outline-offset: -2px;
+  background: var(--pc-hover);
 }
 
-@media (prefers-color-scheme: dark) {
-  .tab:hover,
-  .tab:focus-visible {
-    background: rgba(255, 255, 255, .05);
-  }
-}
-
-/* Active tab: accent color + heavier weight + underline bar — three cues, so
- * the selection is never conveyed by color alone (NFR-001); aria-selected in
+/* Active tab: ink text + heavier weight + an accent underline bar — three cues,
+ * so the selection is never conveyed by color alone (NFR-001); aria-selected in
  * the TSX carries it to assistive tech. */
 .tabActive {
-  border-bottom-color: var(--fd-accent);
-  color: var(--fd-accent);
+  border-bottom-color: var(--pc-accent);
+  color: var(--pc-ink);
   font-weight: 800;
 }
 
@@ -129,22 +111,31 @@
   display: block;
 }
 
-/* Calm, in-fiction loading/empty state — no exercise/admin language. */
+/* Calm, in-fiction loading / error state — no exercise/admin language. */
 .state {
   padding: 32px 16px;
-  color: var(--fd-ink-muted);
+  color: var(--ex-muted);
   font-size: 15px;
   text-align: center;
 }
 
-.srOnly {
-  position: absolute;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  border: 0;
-  white-space: nowrap;
+/* The honest empty state: an icon plus a plain sentence (text, not colour). */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 16px;
+  color: var(--ex-muted);
+  text-align: center;
+}
+
+.emptyIcon {
+  font-size: 28px;
+}
+
+.emptyText {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 15px;
 }

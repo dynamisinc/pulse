@@ -1,0 +1,239 @@
+/*
+ * features/social/components/ComposerMedia.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the composer's attach tray (demo-polish F4, story 13). A CSS
+ * Module — every class is locally scoped by the build; nothing leaks a global
+ * class and this file carries NO COBRA/MUI dependency (participant world).
+ *
+ * The tray renders INSIDE a composer form, whose root (`Composer.module.css`'s
+ * `.composer`) declares the `--pc-*` palette (light default, OS dark, and the
+ * `[data-theme="dark"]` host override) and the `--pc-low` / `--pc-over` state
+ * colours, so every rule here just reads `var(--pc-*)` and tracks the skin and
+ * dark mode with no theme provider.
+ *
+ * NFR-001: no state is carried by colour alone. An upload's progress has a numeric
+ * percentage next to the bar, "Uploaded" and every failure are words with an icon,
+ * and a missing description is announced in text (the field is `aria-invalid` and
+ * the composer says why Post is disabled), not just tinted.
+ */
+
+.mediaList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attachment {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--pc-line);
+  border-radius: 14px;
+  background: var(--pc-panel);
+  color: var(--pc-ink);
+}
+
+.thumb {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--pc-line);
+  color: var(--pc-ink-muted);
+}
+
+.thumbMedia {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* A word + an icon marks a video thumbnail: it is not just "a picture". */
+.videoBadge {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(14, 21, 24, .78);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.attachBody {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* Leave room for the remove button in the corner. */
+  padding-right: 28px;
+}
+
+.altLabel {
+  color: var(--pc-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.altInput {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--pc-line);
+  border-radius: 8px;
+  background: var(--pc-bg);
+  color: var(--pc-ink);
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.altInput::placeholder {
+  color: var(--pc-ink-muted);
+}
+
+.altInput:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 1px;
+}
+
+/* Only after the field was left empty: the red border is paired with the
+ * composer's written reason, never the sole cue. */
+.altInput[aria-invalid='true'] {
+  border-color: var(--pc-over);
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+  font-size: 12px;
+}
+
+.progressTrack {
+  flex: 1 1 auto;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--pc-line);
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--pc-accent);
+  transition: width .12s linear;
+}
+
+.progressText {
+  flex: none;
+  min-width: 3ch;
+  color: var(--pc-ink-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.readyText {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pc-ink-muted);
+}
+
+.itemError {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--pc-over);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--pc-ink-muted);
+  cursor: pointer;
+}
+
+.remove:hover,
+.remove:focus-visible {
+  background: var(--pc-hover);
+  color: var(--pc-ink);
+}
+
+.remove:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 1px;
+}
+
+.remove:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* The attach button lives in the composer toolbar; this module owns it so the
+ * hidden file input and its trigger stay together. */
+.attachButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--pc-accent);
+  cursor: pointer;
+}
+
+.attachButton:hover,
+.attachButton:focus-visible {
+  background: var(--pc-hover);
+}
+
+.attachButton:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 1px;
+}
+
+.attachButton:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 420px) {
+  .thumb {
+    width: 56px;
+    height: 56px;
+  }
+}

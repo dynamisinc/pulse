@@ -1,28 +1,26 @@
 /*
  * features/social/components/post/PostMediaSlot.module.css
  * ---------------------------------------------------------------------------
- * The media slot. Split out of `theme/social.module.css` by demo-polish F0 with
- * the pre-v2 placeholder styling UNCHANGED; F2 (media display) owns this file
- * from here on and replaces the placeholder with the real grid/player styles.
+ * The media slot wrapper (demo-polish F2). The image grid, the player and the
+ * viewer have their own modules under `../media/`; this file owns only the
+ * stacking contract with the card's open-the-thread overlay:
+ *
+ *   z-index tiers (PostCard.module.css): 1 = `.openTarget` overlay button;
+ *   2 = interactive media (here), the author overlay and the hashtag anchors.
+ *
+ * `.media` is lifted ABOVE the overlay (`position: relative; z-index: 2`) so a
+ * tile/player is independently clickable, but it is `pointer-events: none` so a
+ * non-interactive child (a dead-image placeholder) lets the tap fall through to the
+ * overlay and open the thread. Interactive children turn pointer events back on.
+ * No `overflow: hidden` here: it would clip the players' keyboard focus rings; the
+ * grid and the player clip their own rounded corners.
  */
 
 .media {
+  position: relative;
+  z-index: 2;
   display: grid;
   gap: 4px;
-  overflow: hidden;
-  border-radius: 14px;
-}
-
-.mediaPlaceholder {
-  display: flex;
-  min-height: 160px;
-  align-items: center;
-  justify-content: center;
-  padding: 8px;
-  border: 1px solid var(--pc-line);
-  border-radius: 14px;
-  background: var(--pc-panel);
-  color: var(--pc-ink-muted);
-  font-size: 13px;
-  text-align: center;
+  margin-top: 4px;
+  pointer-events: none;
 }

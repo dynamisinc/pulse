@@ -2,13 +2,16 @@
  * features/social/components/post/PostParts.test.tsx
  * ---------------------------------------------------------------------------
  * The small presentational parts in isolation (demo-polish F0): `PostReplyContext`,
- * `PostMediaSlot`, `PostLinkCard` and `PostBody` — none needs a provider. Pins the
- * "renders nothing without its input" contract the frozen `PostCard` relies on.
+ * `PostMediaSlot`, `PostLinkCard` and `PostBody` — none needs a provider for the
+ * cases below (a VIDEO in the media slot does since F2: its player reads the chrome
+ * config; that is covered in `PostMediaSlot.test.tsx` under the real providers). Pins
+ * the "renders nothing without its input" contract the frozen `PostCard` relies on.
  */
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { PostBody } from './PostBody'
+import type { PostMediaView } from './types'
 import { PostLinkCard } from './PostLinkCard'
 import { PostMediaSlot } from './PostMediaSlot'
 import { PostReplyContext } from './PostReplyContext'
@@ -33,20 +36,33 @@ describe('PostMediaSlot', () => {
     expect(render(<PostMediaSlot postId="p" media={[]} />).container).toBeEmptyDOMElement()
   })
 
-  it('renders one labelled placeholder per attachment, in order', () => {
+  it('renders one labelled tile per image attachment, in order', () => {
     render(
       <PostMediaSlot
         postId="p"
         media={[
           { id: 'a', kind: 'image', url: '/a', alt: 'First' },
-          { id: 'b', kind: 'video', url: '/b', alt: 'Second', posterUrl: '/p' },
+          { id: 'b', kind: 'image', url: '/b', alt: 'Second' },
         ]}
       />,
     )
 
     const items = screen.getAllByRole('img')
-    expect(items.map(i => i.getAttribute('aria-label'))).toEqual(['First', 'Second'])
+    expect(items.map(i => i.getAttribute('alt'))).toEqual(['First', 'Second'])
     expect(screen.getByTestId('post-media')).toBeInTheDocument()
+  })
+
+  it('keeps the F0 accessible placeholder for a legacy { kind, alt } attachment with no url', () => {
+    render(
+      <PostMediaSlot
+        postId="p"
+        media={[{ id: 'a', kind: 'image', alt: 'First' } as unknown as PostMediaView]}
+      />,
+    )
+
+    const [placeholder] = screen.getAllByRole('img')
+    expect(placeholder?.getAttribute('aria-label')).toBe('First')
+    expect(placeholder).toHaveTextContent('First')
   })
 
   it('keys by media id, so two attachments with the same alt both render', () => {

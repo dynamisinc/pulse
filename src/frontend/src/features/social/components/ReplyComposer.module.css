@@ -1,0 +1,17 @@
+/*
+ * features/social/components/ReplyComposer.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the thread's reply composer (demo-polish F4, story 13). A CSS
+ * Module — locally scoped, NO COBRA/MUI (participant world). The form itself is the
+ * shared `ComposerForm` (`Composer.module.css`), so the reply box looks and behaves
+ * like the post box; this file only styles what the reply box adds: the
+ * "Replying to @handle" line above the text area. It renders INSIDE the composer
+ * root, which declares the `--pc-*` palette (and its dark-mode triggers), so the
+ * colours here track the skin with no theme provider.
+ */
+
+.context {
+  margin: 0;
+  color: var(--pc-ink-muted);
+  font-size: 14px;
+}

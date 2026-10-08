@@ -47,12 +47,12 @@ Order = wave order. Priorities and effort are the plan's (§5). *Home story* is 
 | 07 | [Replies and real threads](07-replies-and-threads.md) | B2 | Must | backend | 1b | SOC-010, SOC-011, SOC-012, SOC-005 | In Progress | #426 |
 | 08 | [Reactions (like, repost) and engagement reader](08-reactions.md) | B3 | Must | backend | 1b | SOC-030, SOC-020, XC-004 | In Progress | #427 |
 | 09 | [Controller takedown (soft delete + PostRemoved)](09-controller-takedown.md) | B6 | Should | backend | 1b | CTL-025, XC-010 | In Progress | #428 |
-| 10 | [App frame and navigation](10-app-frame-navigation.md) | F1 | Must | frontend | 2 | SOC-083, COR-004, NFR-001 | In Progress | #429 |
-| 11 | [Media display: grid, video player, viewer](11-media-display.md) | F2 | Must | frontend | 2 | SOC-001, XC-009, NFR-001, NFR-008 | In Progress | #430 |
+| 10 | [App frame and navigation](10-app-frame-navigation.md) | F1 | Must | frontend | 2 | SOC-083, COR-004, NFR-001 | In Review | #429 |
+| 11 | [Media display: grid, video player, viewer](11-media-display.md) | F2 | Must | frontend | 2 | SOC-001, XC-009, NFR-001, NFR-008 | In Review | #430 |
 | 12 | [Engagement: persisted likes and reposts](12-engagement.md) | F3 | Must | frontend | 2 | SOC-030, SOC-020, SOC-021 | In Review | #431 |
-| 13 | [Threads and composer: replies, attach, instant post](13-threads-composer.md) | F4 | Must | frontend | 2 | SOC-001, SOC-010, SOC-011, SOC-012 | In Progress | #432 |
+| 13 | [Threads and composer: replies, attach, instant post](13-threads-composer.md) | F4 | Must | frontend | 2 | SOC-001, SOC-010, SOC-011, SOC-012 | In Review | #432 |
 | 14 | [Brand and profile finish](14-brand-profile-finish.md) | F5 | Must | frontend | 2 | SOC-050, SOC-002, COR-030, NFR-001 | In Progress | #433 |
-| 15 | [Explore: trending, search, hashtag polish](15-explore.md) | F6 | Should | frontend | 2 | SOC-040, SOC-041, SOC-082 | In Progress | #434 |
+| 15 | [Explore: trending, search, hashtag polish](15-explore.md) | F6 | Should | frontend | 2 | SOC-040, SOC-041, SOC-082 | In Review | #434 |
 | 16 | [Notifications, derived client-side](16-notifications-lite.md) | F7 | Could | frontend | 3 | SOC-070 | Not Started | #435 |
 | 17 | [Post as persona v2](17-post-as-persona-v2.md) | C1 | Must | frontend | 3 | CTL-001, CTL-003, SOC-012 | Not Started | #436 |
 | 18 | [Live world column](18-live-world-column.md) | C2 | Must | frontend | 3 | CTL-030, CTL-031 | Not Started | #437 |

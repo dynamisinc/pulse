@@ -1,154 +1,102 @@
 /*
  * features/social/SocialChannel.module.css
  * ---------------------------------------------------------------------------
- * Scoped styles for the Social channel shell (the composer + feed + thread
- * composition, `SocialChannel.tsx`). CSS Module — locally scoped, no global
- * leak, NO COBRA/MUI dependency (participant world).
+ * The Social channel's APP FRAME (demo-polish F1; D1-013): a left-anchored
+ * three-column grid -- 240px nav rail | 600px main | 344px right rail. CSS Module,
+ * locally scoped, NO COBRA / MUI (participant world).
  *
- * Theming mirrors `social.module.css` / `Composer.module.css`: a token root on
- * `.channel` reading the shared per-exercise accent `var(--pulse-ac)` (COR-030)
- * with the Cadence-navy fallback, plus the two dark-mode triggers
- * (`prefers-color-scheme` OR a host `[data-theme="dark"]`). Left-anchored
- * single column (D1-013), width-matched to `<PostCard>`/`<Composer>` (600px).
+ * MOBILE-FIRST, three states, every width mirrored in `layout/frameMetrics.ts`
+ * (`SocialChannel.layout.test.tsx` checks the two agree):
+ *
+ *   base            68px icon rail + main (flexible, max 600px)
+ *   >= 840px        240px nav rail + main                (= NAV_EXPANDED_MIN_WIDTH)
+ *   >= 1184px       240px nav rail + main + 344px sidebar (= FRAME_MIN_WIDTH)
+ *
+ * The right rail hides first (`display: none` in `RightRail.module.css`), then the
+ * nav rail collapses to icons (`NavRail.module.css`); the grid below just gives each
+ * state its tracks. The main track is `minmax(0, 600px)`: `0` so long unbroken text
+ * or media can never force the track wider than the viewport, and `overflow-x:
+ * clip` on `.main` (clip, not hidden, so the sticky headers inside still stick to
+ * the viewport) guarantees the page never scrolls horizontally from 390 to 1440px.
+ *
+ * LEFT-ANCHORED (D1-013): `justify-content: start` and no auto margins -- at 1440px
+ * the frame hugs the left edge and the remainder is blank, exactly as designed.
+ *
+ * TOKENS. The root composes the shared `.tokens` class, which declares the `--pc-*`
+ * palette and `--pc-accent: var(--pulse-ac, ...)` (the per-exercise accent hook,
+ * COR-030) for the whole frame; the rail / header / modal modules read from it.
+ * Light only here -- F5 owns the tokens sweep. (`.tokens` still carries the dark
+ * triggers F5 will remove; this module adds none of its own.)
  */
 
 .channel {
-  /* Light-mode palette (default) — mirrors the sibling social modules. */
-  --sc-line: #e5e8ea;
-  --sc-ink: #0e1518;
-  --sc-ink-muted: #61707a;
-  --sc-hover: rgba(14, 21, 24, .045);
-  --sc-accent: var(--pulse-ac, #1e3a5f);
+  composes: tokens from './theme/social.module.css';
 
+  position: relative;
   box-sizing: border-box;
   width: 100%;
-  max-width: 600px;
-  margin: 0; /* left-anchored (D1-013) */
-  color: var(--sc-ink);
+  background: var(--pc-bg);
+  color: var(--pc-ink);
   font-family: 'Figtree', system-ui, sans-serif;
   text-align: left;
+  overflow-x: clip;
 }
 
-/* OS-level dark mode (no host override). */
-@media (prefers-color-scheme: dark) {
-  .channel {
-    --sc-line: #233039;
-    --sc-ink: #e9eef1;
-    --sc-ink-muted: #8aa0ac;
-    --sc-hover: rgba(255, 255, 255, .05);
+.frame {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 600px);
+  justify-content: start;
+  align-items: start;
+  width: 100%;
+}
+
+@media (min-width: 840px) {
+  .frame {
+    grid-template-columns: 240px minmax(0, 600px);
   }
 }
 
-/* Host-forced dark mode — `data-theme="dark"` on the root OR an ancestor. */
-:global([data-theme='dark']) .channel,
-.channel:global([data-theme='dark']) {
-  --sc-line: #233039;
-  --sc-ink: #e9eef1;
-  --sc-ink-muted: #8aa0ac;
-  --sc-hover: rgba(255, 255, 255, .05);
+@media (min-width: 1184px) {
+  .frame {
+    grid-template-columns: 240px minmax(0, 600px) 344px;
+  }
 }
 
-/*
- * Feed / thread region wrapper. Sets NO `display` so the `hidden` attribute
- * (the feed region carries it while a thread is open) keeps its `display:none`.
- * `tabIndex={-1}` makes each region a programmatic focus target for the view
- * swap; `outline:none` because that focus is programmatic, not a keyboard tab
- * stop (the region is never in the tab order).
- */
-.region {
+/* The main column: bordered on both sides like the platforms this mimics. */
+.main {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: calc(100vh - var(--pulse-chrome-top, 0px) - var(--pulse-chrome-bottom, 0px));
+  border-right: 1px solid var(--pc-line);
+  border-left: 1px solid var(--pc-line);
+  overflow-x: clip;
+  /* Focus lands here only as a fallback (no heading yet) or via the skip link;
+     it is programmatic, never a tab stop. */
   outline: none;
 }
 
-/* "Back to feed" — a plain in-fiction text button (never a COBRA control). */
-.back {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 12px;
-  padding: 8px 12px;
-  border: none;
+/*
+ * "Skip to main content": the first focusable control in the channel. Parked
+ * off-screen until it takes keyboard focus, then pinned just under the top banner
+ * AND any active alert so it is never hidden behind either.
+ */
+.skipLink {
+  position: fixed;
+  top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px) + 8px);
+  left: 8px;
+  z-index: 60;
+  padding: 10px 16px;
   border-radius: 999px;
-  background: none;
-  color: var(--sc-accent);
-  font-family: inherit;
+  background: var(--pc-accent);
+  color: #fff;
   font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
+  font-weight: 700;
+  text-decoration: none;
+  transform: translateY(-300%);
 }
 
-.back:hover,
-.back:focus-visible {
-  background: var(--sc-hover);
-}
-
-.backIcon {
-  width: 14px;
-  height: 14px;
-}
-
-/*
- * "View my profile" (Wave-S3.1 — profiles-social-graph/01 reachability) — a
- * real, standalone control above the feed, never nested inside a
- * `<PostCard>`. Same visual treatment as `.back` (an in-fiction text link,
- * never a COBRA control).
- */
-.viewProfileLink {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 12px 0;
-  padding: 8px 12px;
-  border: none;
-  border-radius: 999px;
-  background: none;
-  color: var(--sc-accent);
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.viewProfileLink:hover,
-.viewProfileLink:focus-visible {
-  background: var(--sc-hover);
-}
-
-/*
- * All Posts / Following tablist (SOC-080/SOC-081). Visual idiom mirrors
- * `HashtagFeed.module.css`'s Latest/Top tabs so the two feed switchers in the
- * channel read as one control language.
- */
-.feedTabs {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--sc-line);
-}
-
-.feedTab {
-  flex: 1 1 auto;
-  padding: 12px 8px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: none;
-  color: var(--sc-ink-muted);
-  font-family: inherit;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.feedTab:hover,
-.feedTab:focus-visible {
-  background: var(--sc-hover);
-}
-
-/*
- * The selected tab: accent color + heavier weight + an underline bar — three
- * cues, so the selection is NEVER conveyed by color alone (NFR-001);
- * `aria-selected` in the TSX carries the same state to assistive tech.
- */
-.feedTabActive {
-  border-bottom-color: var(--sc-accent);
-  color: var(--sc-accent);
-  font-weight: 800;
+.skipLink:focus {
+  transform: none;
+  outline: 2px solid var(--pc-ink);
+  outline-offset: 2px;
 }

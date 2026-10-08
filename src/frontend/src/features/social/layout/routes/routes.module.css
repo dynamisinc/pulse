@@ -1,0 +1,14 @@
+/*
+ * features/social/layout/routes/routes.module.css
+ * ---------------------------------------------------------------------------
+ * Small shared styles for the route elements: the plain status line shown while a
+ * route is resolving. Reads the channel's `--pc-*` palette; light only (F5 owns
+ * the tokens sweep). No COBRA / MUI.
+ */
+
+.status {
+  margin: 0;
+  padding: 24px 16px;
+  color: var(--pc-ink-muted);
+  font-size: 15px;
+}

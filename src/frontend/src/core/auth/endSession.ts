@@ -20,6 +20,14 @@
  *      (tokens + axios only — no react-query import); this composer is where
  *      the cache concern is added, keeping that separation clean.
  *
+ *   3. FORGET THE PARTICIPANT COMPOSER'S SESSION-SCOPED STATE (demo-polish F4): the
+ *      viewer's own just-published posts (`ownPostStore`, merged at the top of the
+ *      feed) and any pending "open the thread to reply" intent. Both are module
+ *      singletons that live as long as the TAB, not the session, so without this a
+ *      post made as one persona would be merged into the next sign-in's feed on the
+ *      same tab. Both modules are leaves (no imports beyond types) so this adds
+ *      nothing to `core/auth`'s dependency graph.
+ *
  * NAVIGATION is the CALLER's job (the control does `void endSession()` then
  * `navigate(LOGIN_PATH)`) — this module has no router dependency, mirroring
  * `logout()`. Both `clear()` and the token clear run SYNCHRONOUSLY before
@@ -30,6 +38,8 @@
  * World: platform/foundation. No UI, no COBRA. Never logs a token.
  */
 import { queryClient } from '../services/queryClient'
+import { ownPostStore } from '@/features/social/services/ownPostStore'
+import { resetReplyIntent } from '@/features/social/services/replyIntent'
 import { logout } from './logout'
 
 /**
@@ -40,5 +50,7 @@ import { logout } from './logout'
  */
 export async function endSession(): Promise<void> {
   queryClient.clear()
+  ownPostStore.reset()
+  resetReplyIntent()
   await logout()
 }

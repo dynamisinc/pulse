@@ -25,8 +25,30 @@
  * Tombstone (SOC-005/D1-009): the canonical `<Tombstone>` component (posts/05)
  * does not exist yet. A taken-down reply renders a MINIMAL, INTERIM inline
  * element here instead — plainly commented, not a reusable component — reading
- * exactly "This post is unavailable." Replace this with the real `<Tombstone>`
- * once posts/05 lands.
+ * exactly "This post is unavailable." (a `role="note"`, icon + words, never colour
+ * alone). Replace this with the real `<Tombstone>` once posts/05 lands.
+ *
+ * REPLY CONTEXT (demo-polish F4). Every card that is itself a reply — the focused
+ * post, an ancestor, each direct reply — shows its OWN "Replying to @handle" line
+ * (`post/PostReplyContext`, driven by the card's `inReplyTo`). `ThreadReply` used to
+ * print a separate label above each reply and blank the card's `inReplyTo` to avoid
+ * a duplicate; that is gone, so there is exactly one line. (A reply without
+ * `inReplyTo` — a legacy body — gets one derived from `replyToPersonaId`.)
+ *
+ * THE REPLY COMPOSER (F4). Under the focused post, `<ReplyComposer>` ("Replying to
+ * @handle", ring counter, attach tray) — ABSENT, not disabled, for a read-only or
+ * persona-less session (D1-011). A reply you post is appended to this thread at
+ * once (`useThread().appendReply`, de-duplicated against its realtime echo). The
+ * reply button on the focused card focuses the composer; on any other card it opens
+ * that post's thread (`onOpenThread`) with its composer focused (`replyIntent`).
+ *
+ * LIVE REPLIES (F4). For sessions that stream, `useThread` appends a reply that
+ * arrives over realtime for the focused post BELOW the existing ones — no scroll
+ * movement — raises the focused post's reply count, and a visually-hidden polite
+ * live region announces "1 new reply" (it is mounted from the first render so the
+ * change is announced). Replies never reach the feed's "new posts" pill; they land
+ * here. An observer / read-only session does not stream (the same D1-011 rule that
+ * hides the pill).
  *
  * Telemetry (XC-004): emits exactly one `'view'` event on mount (and again if
  * `focusedPostId` changes without a remount) via `buildAndEmit` — never the
@@ -63,7 +85,9 @@
  * handlers' functional no-op.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faBan } from '@fortawesome/free-solid-svg-icons'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import { scenarioNow } from '@/core/clock'
@@ -76,7 +100,9 @@ import {
   affordancesAvailable,
 } from '@/features/participant-shell/mountContract'
 import { toPostView } from '../services/feedService'
+import { consumeReplyFocus, requestReplyFocus } from '../services/replyIntent'
 import { useThread, type ThreadReplyView } from '../hooks/useThread'
+import { ReplyComposer } from './ReplyComposer'
 import styles from './ThreadView.module.css'
 
 /** Mirrors `Feed.tsx`'s local `CardVariant` — the two `<PostCard>` render
@@ -97,6 +123,13 @@ export interface ThreadViewProps {
    * inert text (no focusable no-op, WR-002).
    */
   readonly onOpenProfile?: (personaId: string) => void
+  /**
+   * Opens ANOTHER post's thread - an ancestor or a reply tapped inside this one.
+   * The shell supplies it. Omitted in isolation: those cards then have no open
+   * target, and their reply button stays inert (the focused post's reply button
+   * still focuses the composer).
+   */
+  readonly onOpenThread?: (id: string) => void
 }
 
 /** Builds the `PostView` `<PostCard>` renders from a participant-safe post
@@ -113,9 +146,12 @@ function resolvePostView(
   return toPostView(view, author)
 }
 
-export function ThreadView({ focusedPostId, onHashtagOpen, onOpenProfile }: ThreadViewProps) {
-  const { ancestors, focused, replies, loading, error } = useThread(focusedPostId)
-  const { personas } = usePersonas()
+export function ThreadView({
+  focusedPostId,
+  onHashtagOpen,
+  onOpenProfile,
+  onOpenThread,
+}: ThreadViewProps) {
   const session = useSession()
   const { exerciseId, timeZone } = useExerciseContext()
 
@@ -124,12 +160,62 @@ export function ThreadView({ focusedPostId, onHashtagOpen, onOpenProfile }: Thre
   // focused post, replies) gets the interactive action row or the
   // absent-controls/inert-counts read-only treatment.
   const { variant } = useShellContext()
-  const cardVariant: CardVariant = affordancesAvailable(variant) ? 'full' : 'readOnly'
+  const affordances = affordancesAvailable(variant)
+  const cardVariant: CardVariant = affordances ? 'full' : 'readOnly'
+
+  // The reply box exists only for a session that can write AS a persona (D1-011:
+  // absent, never disabled).
+  const canReply = affordances && !session.isReadOnly && session.personaId !== undefined
+
+  // Live reply append streams for the same sessions the feed's pill does.
+  const { ancestors, focused, replies, loading, error, newReplyCount, appendReply } = useThread(
+    focusedPostId,
+    {
+      live: affordances,
+      ...(session.personaId !== undefined ? { viewerPersonaId: session.personaId } : {}),
+    },
+  )
+  const { personas } = usePersonas()
 
   const personaMap = useMemo(
     () => new Map(personas.map(persona => [persona.id, persona])),
     [personas],
   )
+
+  // The reply composer's text area: focused when a card's reply button was the way
+  // into this thread (`replyIntent`), and by the focused card's own reply button.
+  const composerInputRef = useRef<HTMLTextAreaElement>(null)
+  const focusComposer = useCallback(() => {
+    composerInputRef.current?.focus()
+  }, [])
+
+  // The reply intent is spent only when it can be honoured. "Loaded" is not enough:
+  // the composer needs the focused author's persona too (`usePersonas` is a separate
+  // fetch that can land after the thread GET), so wait until the composer is actually
+  // mounted. A thread that FAILED to load never will, so the request is dropped then
+  // (it must not linger and fire on a later visit). Where no composer will ever
+  // exist (read-only / persona-less) it is consumed and ignored.
+  const loadedId = focused?.id
+  const loadedAuthorId = focused?.authorPersonaId
+  const composerMountable = loadedAuthorId !== undefined && personaMap.has(loadedAuthorId)
+  useEffect(() => {
+    if (loading) return
+    if (error || loadedId === undefined) {
+      consumeReplyFocus(focusedPostId)
+      return
+    }
+    // Still holding the PREVIOUS thread (the host re-centered without a remount).
+    if (loadedId !== focusedPostId) return
+    if (canReply && !composerMountable) return
+    if (consumeReplyFocus(focusedPostId) && canReply) composerInputRef.current?.focus()
+  }, [loading, error, loadedId, focusedPostId, canReply, composerMountable])
+
+  // Reply on ANOTHER post's card: open that post's thread to reply there.
+  const openThreadToReply = useCallback((postId: string) => {
+    if (onOpenThread === undefined) return
+    requestReplyFocus(postId)
+    onOpenThread(postId)
+  }, [onOpenThread])
 
   // Emit-once-per-focused-post guard (mirrors Feed.tsx): the effect double-
   // invokes under React StrictMode (dev) and re-runs whenever any dep changes,
@@ -152,9 +238,26 @@ export function ThreadView({ focusedPostId, onHashtagOpen, onOpenProfile }: Thre
     })
   }, [focusedPostId, exerciseId, timeZone, session.accountId])
 
+  // The polite "N new replies" region is the FIRST child of the one <section> in every
+  // state, so it is the same DOM node from the first render (loading included) and a
+  // later change is announced. Nothing below depends on its position.
+  const liveRegion = (
+    <p
+      className={styles.srOnly}
+      role="status"
+      aria-live="polite"
+      data-testid="thread-live-region"
+    >
+      {newReplyCount === 0
+        ? ''
+        : `${newReplyCount} new ${newReplyCount === 1 ? 'reply' : 'replies'}`}
+    </p>
+  )
+
   if (loading) {
     return (
       <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
+        {liveRegion}
         <p className={styles.status}>Loading thread…</p>
       </section>
     )
@@ -163,6 +266,7 @@ export function ThreadView({ focusedPostId, onHashtagOpen, onOpenProfile }: Thre
   if (error || !focused) {
     return (
       <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
+        {liveRegion}
         <p className={styles.status}>Unable to load this thread.</p>
       </section>
     )
@@ -172,6 +276,8 @@ export function ThreadView({ focusedPostId, onHashtagOpen, onOpenProfile }: Thre
 
   return (
     <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
+      {liveRegion}
+
       {ancestors.map(ancestor => {
         const view = resolvePostView(ancestor, personaMap)
         return view
@@ -180,6 +286,8 @@ export function ThreadView({ focusedPostId, onHashtagOpen, onOpenProfile }: Thre
               key={view.id}
               post={view}
               variant={cardVariant}
+              onOpen={onOpenThread}
+              onReply={onOpenThread !== undefined ? openThreadToReply : undefined}
               onHashtagOpen={onHashtagOpen}
               onOpenProfile={onOpenProfile}
             />
@@ -192,8 +300,24 @@ export function ThreadView({ focusedPostId, onHashtagOpen, onOpenProfile }: Thre
           <PostCard
             post={focusedView}
             variant={cardVariant}
+            onReply={canReply ? focusComposer : undefined}
             onHashtagOpen={onHashtagOpen}
             onOpenProfile={onOpenProfile}
+          />
+        </div>
+      )}
+
+      {canReply && focusedView && (
+        <div className={styles.composerWrap} data-testid="thread-reply-composer">
+          {/* Keyed by the thread: moving to another post gives a fresh composer (and
+              its draft), and a publish still in flight from the old one is bound to
+              ITS thread, so a late 201 can never append under the wrong post. */}
+          <ReplyComposer
+            key={focused.id}
+            parentPostId={focused.id}
+            parentHandle={focusedView.author.handle}
+            onPosted={view => appendReply(view, focused.id)}
+            inputRef={composerInputRef}
           />
         </div>
       )}
@@ -202,8 +326,11 @@ export function ThreadView({ focusedPostId, onHashtagOpen, onOpenProfile }: Thre
         <ThreadReply
           key={reply.id}
           reply={reply}
+          focusedPostId={focused.id}
           personaMap={personaMap}
           variant={cardVariant}
+          onOpenThread={onOpenThread}
+          onReply={onOpenThread !== undefined ? openThreadToReply : undefined}
           onHashtagOpen={onHashtagOpen}
           onOpenProfile={onOpenProfile}
         />
@@ -214,45 +341,54 @@ export function ThreadView({ focusedPostId, onHashtagOpen, onOpenProfile }: Thre
 
 interface ThreadReplyProps {
   readonly reply: ThreadReplyView
+  /** The thread's focused post: what a reply without `inReplyTo` is replying to. */
+  readonly focusedPostId: string
   readonly personaMap: ReadonlyMap<string, Persona>
   /** WR-003: threaded through to the reply's `<PostCard>` (COR-015/D1-011). */
   readonly variant: CardVariant
+  readonly onOpenThread?: (id: string) => void
+  readonly onReply?: (id: string) => void
   readonly onHashtagOpen?: (tag: string) => void
   readonly onOpenProfile?: (personaId: string) => void
 }
 
-/** One reply row: the "Replying to @handle" label, then either the reply's
- * `<PostCard>` or - if it was taken down (SOC-005/D1-009) - the interim
- * in-thread tombstone (which never mounts a card — there is nothing to react to). */
+/** One reply row: the reply's `<PostCard>` - which carries its own "Replying to
+ * @handle" line - or, if it was taken down (SOC-005/D1-009), the interim in-thread
+ * tombstone (which never mounts a card: there is nothing to react to). */
 function ThreadReply({
   reply,
+  focusedPostId,
   personaMap,
   variant,
+  onOpenThread,
+  onReply,
   onHashtagOpen,
   onOpenProfile,
 }: ThreadReplyProps) {
-  const repliedToAuthor = personaMap.get(reply.replyToPersonaId)
-  const view = resolvePostView(reply, personaMap)
+  const resolved = resolvePostView(reply, personaMap)
+  // Contract replies carry `inReplyTo`; for a body that does not, name the replied-to
+  // author from `replyToPersonaId` so the card still shows its context line.
+  const repliedToHandle = personaMap.get(reply.replyToPersonaId)?.handle
+  const view = resolved !== undefined && resolved.inReplyTo === undefined && repliedToHandle
+    ? { ...resolved, inReplyTo: { postId: focusedPostId, authorHandle: repliedToHandle } }
+    : resolved
 
   return (
     <div className={styles.replyGroup} data-testid="thread-reply">
-      {repliedToAuthor && (
-        <p className={styles.replyingTo}>{`Replying to @${repliedToAuthor.handle}`}</p>
-      )}
       {reply.status === 'taken-down' ? (
         // INTERIM tombstone - `<Tombstone>` (posts/05) does not exist yet.
         // Replace this element with the real component once it lands.
-        <div className={styles.tombstone} data-testid="thread-tombstone">
-          This post is unavailable.
+        <div className={styles.tombstone} data-testid="thread-tombstone" role="note">
+          <FontAwesomeIcon icon={faBan} aria-hidden="true" />
+          <span>This post is unavailable.</span>
         </div>
       ) : (
         view && (
-          // This row already shows its own "Replying to @handle" label above, so the
-          // card's `inReplyTo` context line is suppressed to avoid a duplicate
-          // (F4 unifies the two).
           <PostCard
-            post={{ ...view, inReplyTo: undefined }}
+            post={view}
             variant={variant}
+            onOpen={onOpenThread}
+            onReply={onReply}
             onHashtagOpen={onHashtagOpen}
             onOpenProfile={onOpenProfile}
           />

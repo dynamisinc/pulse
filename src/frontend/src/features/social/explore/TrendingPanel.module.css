@@ -1,0 +1,113 @@
+/*
+ * features/social/explore/TrendingPanel.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the Trending panel (demo-polish F6). CSS Module — every class
+ * is locally scoped and this file carries NO COBRA/MUI dependency (participant
+ * world, Pulse skin). LIGHT ONLY: the social surface is forced light (F5), so
+ * there are no theme-switching rules here.
+ *
+ * `.panel` COMPOSES the shared `.tokens` class, so every `var(--pc-*)` below is
+ * the same palette the post cards use (and the per-exercise accent hook).
+ *
+ * WIDTH-AGNOSTIC: no fixed width. It fills its container — the ~344px right rail
+ * or the 600px Explore column — and long hashtags wrap (`overflow-wrap`).
+ *
+ * Contrast (WCAG 2.1 AA, ratios computed): ink #0e1518 on the panel #f3f5f6 is
+ * 16.9:1 (15.4:1 on the hover tint). The shared muted ink (#61707a, 4.7:1 on the
+ * panel) drops to 4.3:1 on the hover tint, so this module uses its own slightly
+ * deeper `--ex-muted` (#56656f): 5.5:1 on the panel, 5.0:1 on the hover tint.
+ */
+
+.panel {
+  composes: tokens from '../theme/social.module.css';
+
+  /* Muted text that still clears 4.5:1 on the hover tint (see the header). */
+  --ex-muted: #56656f;
+
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--pc-panel);
+  color: var(--pc-ink);
+  font-family: 'Figtree', system-ui, sans-serif;
+  text-align: left;
+}
+
+.heading {
+  margin: 0;
+  padding: 12px 16px;
+  color: var(--pc-ink);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: block;
+}
+
+.link {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 10px 16px;
+  color: var(--pc-ink);
+  text-decoration: none;
+}
+
+.link:hover {
+  background: var(--pc-hover);
+}
+
+/* Keyboard focus: a solid ink ring (always >= 3:1 against the panel), inset so the
+ * panel's rounded `overflow: hidden` never clips it. */
+.link:focus-visible {
+  outline: 2px solid var(--pc-ink);
+  outline-offset: -2px;
+  background: var(--pc-hover);
+}
+
+.category {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ex-muted);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.categoryIcon {
+  flex: none;
+  font-size: 11px;
+}
+
+.tag {
+  overflow-wrap: anywhere;
+  color: var(--pc-ink);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.count {
+  color: var(--ex-muted);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+/* Calm, in-fiction loading / error / empty text — never alarmist. */
+.state {
+  margin: 0;
+  padding: 16px;
+  color: var(--ex-muted);
+  font-size: 15px;
+}
