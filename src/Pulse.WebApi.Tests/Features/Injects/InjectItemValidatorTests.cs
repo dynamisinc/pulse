@@ -61,6 +61,12 @@ public sealed class InjectItemValidatorTests
         { "empty alt", PostItem(posts: [Post(media: [M("m1", alt: " ")])]), "alt text of 1 to 1000" },
         { "alt 1001", PostItem(posts: [Post(media: [M("m1", alt: new string('a', 1001))])]), "alt text of 1 to 1000" },
         { "replyTo both", PostItem(posts: [Post(replyTo: new() { InjectPostId = G(), PostId = G() })]), "exactly one of" },
+        { "replyTo id and sequence", BurstItem(Post(), Post(replyTo: new() { Sequence = 1, PostId = G() })), "exactly one of" },
+        { "replyTo sequence to itself", BurstItem(Post(), Post(replyTo: new() { Sequence = 2 })), "Post 2: replyTo.sequence must name an earlier post" },
+        { "replyTo sequence to a later post", BurstItem(Post(replyTo: new() { Sequence = 2 }), Post()), "Post 1: replyTo.sequence must name an earlier post" },
+        { "replyTo sequence zero", BurstItem(Post(), Post(replyTo: new() { Sequence = 0 })), "replyTo.sequence" },
+        { "bad child id", PostItem(posts: [Post(id: "nope")]), "Post 1: id does not name a post of this item" },
+        { "duplicate child id", BurstItem(Post(id: SharedId), Post(id: SharedId)), "Post 2: the same post appears twice" },
         { "replyTo neither", PostItem(posts: [Post(replyTo: new())]), "exactly one of" },
         { "replyTo bad inject id", PostItem(posts: [Post(replyTo: new() { InjectPostId = "x" })]), "does not name a scripted post" },
         { "replyTo bad post id", PostItem(posts: [Post(replyTo: new() { PostId = "x" })]), "replyTo.postId must be a post id" },
@@ -118,6 +124,16 @@ public sealed class InjectItemValidatorTests
     }
 
     [Fact]
+    public void AReplyToAnEarlierSiblingBySequence_Parses()
+    {
+        var parse = InjectItemValidator.Parse(BurstItem(Post(), Post(replyTo: new() { Sequence = 1 })));
+
+        parse.Error.Should().BeNull();
+        parse.Draft!.Posts[1].ReplyToSequence.Should().Be(1);
+        parse.Draft.Posts[1].ReplyToInjectPostId.Should().BeNull();
+    }
+
+    [Fact]
     public void ABurstOfTwentyAtTheMinimumWindow_IsAccepted()
     {
         InjectItemValidator.Parse(BurstItem(20, window: 57)).Error.Should().BeNull();
@@ -159,37 +175,67 @@ public sealed class InjectItemValidatorTests
     }
 
     [Fact]
-    public void OnEdit_AReplyToAnEarlierSibling_IsAccepted_ButNotToItselfOrALaterOne()
+    public void OnEdit_AReplyToAnEchoedSibling_MustComeEarlierInTheNewOrder()
     {
         var itemId = Guid.NewGuid();
         var siblings = new List<Guid> { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
-        var targets = siblings.ToDictionary(id => id, _ => itemId);
+        var facts = Facts(targets: siblings.ToDictionary(id => id, _ => itemId), editedItemId: itemId, editedChildren: [.. siblings]);
 
-        InjectItemDraft DraftReplyingAt(int position, Guid target)
-        {
-            var posts = Enumerable.Range(0, 3)
-                .Select(index => index == position ? Post(replyTo: new() { InjectPostId = target.ToString() }) : Post())
-                .ToArray();
-            return InjectItemValidator.Parse(BurstItem(posts)).Draft!;
-        }
+        // The new order is siblings 2, 0, 1 — so sibling 2 is now FIRST.
+        InjectItemDraft Draft(int replyingPosition, Guid target) => InjectItemValidator.Parse(BurstItem(
+            Enumerable.Range(0, 3)
+                .Select(index => Post(
+                    id: siblings[(index + 2) % 3].ToString(),
+                    replyTo: index == replyingPosition ? new() { InjectPostId = target.ToString() } : null))
+                .ToArray())).Draft!;
 
-        var facts = Facts(targets: targets, editedItemId: itemId, editedChildren: siblings);
-
-        InjectItemValidator.CheckReferences(DraftReplyingAt(2, siblings[0]), facts).Should().BeNull("an earlier sibling");
-        InjectItemValidator.CheckReferences(DraftReplyingAt(1, siblings[1]), facts).Should().Contain("earlier post");
-        InjectItemValidator.CheckReferences(DraftReplyingAt(0, siblings[2]), facts).Should().Contain("earlier post");
+        InjectItemValidator.CheckReferences(Draft(1, siblings[2]), facts).Should().BeNull("sibling 2 moved to position 1");
+        InjectItemValidator.CheckReferences(Draft(0, siblings[0]), facts).Should().Contain("earlier post", "sibling 0 is now second");
+        InjectItemValidator.CheckReferences(Draft(1, siblings[0]), facts).Should().Contain("earlier post", "a post cannot reply to itself");
     }
 
     [Fact]
-    public void OnEdit_AReplyToASoftDeletedPositionOfTheSameItem_IsUnknown()
+    public void OnEdit_AReplyToASiblingThisEditRemoves_IsUnknown()
     {
         var itemId = Guid.NewGuid();
+        var kept = Guid.NewGuid();
         var removed = Guid.NewGuid();
-        var draft = InjectItemValidator.Parse(PostItem(posts: [Post(replyTo: new() { InjectPostId = removed.ToString() })])).Draft!;
+        var draft = InjectItemValidator.Parse(BurstItem(
+            Post(id: kept.ToString()),
+            Post(replyTo: new() { InjectPostId = removed.ToString() }))).Draft!;
 
-        var facts = Facts(targets: new() { [removed] = itemId }, editedItemId: itemId, editedChildren: [Guid.NewGuid()]);
+        var facts = Facts(
+            targets: new() { [kept] = itemId, [removed] = itemId },
+            editedItemId: itemId,
+            editedChildren: [kept, removed]);
 
         InjectItemValidator.CheckReferences(draft, facts).Should().Contain("does not name a scripted post");
+    }
+
+    [Fact]
+    public void OnEdit_AReplyToAPreviouslySoftDeletedPositionOfTheSameItem_IsUnknown()
+    {
+        var itemId = Guid.NewGuid();
+        var softDeleted = Guid.NewGuid();
+        var draft = InjectItemValidator.Parse(PostItem(posts: [Post(replyTo: new() { InjectPostId = softDeleted.ToString() })])).Draft!;
+
+        var facts = Facts(targets: new() { [softDeleted] = itemId }, editedItemId: itemId, editedChildren: [Guid.NewGuid()]);
+
+        InjectItemValidator.CheckReferences(draft, facts).Should().Contain("does not name a scripted post");
+    }
+
+    [Fact]
+    public void AChildId_ThatIsNotALiveChildOfThisItem_GetsOneMessage_OnCreateOrEdit()
+    {
+        var foreign = Guid.NewGuid();
+        var draft = InjectItemValidator.Parse(PostItem(posts: [Post(id: foreign.ToString())])).Draft!;
+        const string Expected = "Post 1: id does not name a post of this item.";
+
+        InjectItemValidator.CheckReferences(draft, Facts()).Should().Be(Expected, "on create no child exists yet");
+        InjectItemValidator.CheckReferences(draft, Facts(editedItemId: Guid.NewGuid(), editedChildren: [Guid.NewGuid()]))
+            .Should().Be(Expected, "another item's child, or nothing at all, reads the same (COR-001)");
+        InjectItemValidator.CheckReferences(draft, Facts(editedItemId: Guid.NewGuid(), editedChildren: [foreign]))
+            .Should().BeNull("this item's own child keeps its identity");
     }
 
     // ---- builders ----
@@ -199,13 +245,15 @@ public sealed class InjectItemValidatorTests
         Guid[]? roster = null,
         Dictionary<Guid, Guid>? targets = null,
         Guid? editedItemId = null,
-        List<Guid>? editedChildren = null) =>
+        HashSet<Guid>? editedChildren = null) =>
         new(
             (personas ?? [Persona]).ToHashSet(),
             (roster ?? []).ToHashSet(),
             targets ?? [],
             editedItemId,
             editedChildren ?? []);
+
+    private static readonly string SharedId = Guid.NewGuid().ToString();
 
     private static string G() => Guid.NewGuid().ToString();
 
@@ -242,11 +290,13 @@ public sealed class InjectItemValidatorTests
 
     private static InjectPostWriteRequest Post(
         string? personaId = null,
+        string? id = null,
         string? text = "The water from my tap is BROWN #WaterIssues",
         InjectMediaWriteRequest?[]? media = null,
         InjectReplyToWriteRequest? replyTo = null,
         InjectEngagementBaselineWriteRequest? baseline = null) => new()
         {
+            Id = id,
             PersonaId = personaId ?? Persona.ToString(),
             Text = text,
             Media = media,

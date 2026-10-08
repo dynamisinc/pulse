@@ -100,6 +100,26 @@ public sealed class InjectBurstPlannerTests
         fired.Zip(fired.Skip(1), (a, b) => b - a).Should().OnlyContain(gap => gap >= InjectBurstPacing.MinGapSeconds);
     }
 
+    [Fact]
+    public void AScheduleThatGoesBackwards_StillNeverPublishesUnderThreeSecondsApart()
+    {
+        // An edit to a started burst can leave a later post with an EARLIER offset; the last-publish gate holds the gap.
+        var fired = Simulate(Released(Item(childCount: 4), T0, 0, 20, 5, 6), until: 120, paused: _ => false);
+
+        fired.Should().Equal([0, 20, 23, 26], "posts 3 and 4 were already overdue, so each waits only for the 3 s gap");
+    }
+
+    [Fact]
+    public void ThePostRightAfterAPublish_WaitsForTheMinimumGap()
+    {
+        var item = Released(Item(), T0, 0, 1, 20);
+        Fire(Children(item)[0]);
+        item.LastPublishedAt = T0;
+
+        InjectBurstPlanner.Next(item, T0.AddSeconds(2), NoParents).Kind.Should().Be(InjectStepKind.Wait);
+        InjectBurstPlanner.Next(item, T0.AddSeconds(3), NoParents).Kind.Should().Be(InjectStepKind.Publish);
+    }
+
     // ---- reply parents ----
 
     [Fact]
@@ -239,6 +259,7 @@ public sealed class InjectBurstPlannerTests
             {
                 Fire(step.Child!);
                 item.ShiftSeconds += step.LatenessSeconds;
+                item.LastPublishedAt = T0.AddSeconds(t);
                 fired.Add(t);
             }
         }

@@ -162,6 +162,16 @@ public static class InjectItemValidator
             drafts.Add(parsed.Draft!);
         }
 
+        var duplicate = drafts
+            .Select((draft, index) => (draft.Id, Position: index + 1))
+            .Where(entry => entry.Id is not null)
+            .GroupBy(entry => entry.Id)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+        {
+            return InjectDraftParse.Fail($"{Label(duplicate.Skip(1).First().Position)}: the same post appears twice.");
+        }
+
         return InjectDraftParse.Ok(new InjectItemDraft(
             request.Kind, title, notes, request.PlannedMinute, assigneeId, window, drafts));
     }
@@ -183,6 +193,20 @@ public static class InjectItemValidator
             return UnknownAssigneeMessage;
         }
 
+        // A child id names an existing live child of THIS item; on create there is none, so any id is refused. An id
+        // of another item's child, or of nothing at all, gets the same message (COR-001).
+        var echoed = new List<Guid?>(draft.Posts.Count);
+        for (var index = 0; index < draft.Posts.Count; index++)
+        {
+            var id = draft.Posts[index].Id;
+            if (id is { } childId && !facts.EditedItemChildIds.Contains(childId))
+            {
+                return $"{Label(index + 1)}: id does not name a post of this item.";
+            }
+
+            echoed.Add(id);
+        }
+
         for (var index = 0; index < draft.Posts.Count; index++)
         {
             var post = draft.Posts[index];
@@ -198,7 +222,8 @@ public static class InjectItemValidator
                 continue;
             }
 
-            var siblingPosition = IndexOf(facts.EditedItemChildIds, target);
+            // A sibling named by id: it must stay in the item AND come earlier in the NEW order.
+            var siblingPosition = echoed.IndexOf(target);
             if (siblingPosition >= 0)
             {
                 if (siblingPosition >= index)
@@ -209,9 +234,10 @@ public static class InjectItemValidator
                 continue;
             }
 
-            // A reference into ANOTHER live item. A child of the item being edited that is not at a live position
-            // (a soft-deleted position) is not a valid target either, so the owning item must differ.
-            if (!facts.ReplyTargetsInScope.TryGetValue(target, out var owningItem)
+            // Otherwise it must be a post of ANOTHER live item. A child of the edited item that this edit removes (or
+            // that was removed earlier) is not a valid target, so the owning item must differ.
+            if (facts.EditedItemChildIds.Contains(target)
+                || !facts.ReplyTargetsInScope.TryGetValue(target, out var owningItem)
                 || (facts.EditedItemId is { } edited && owningItem == edited))
             {
                 return $"{label}: replyTo.injectPostId does not name a scripted post in this exercise.";
@@ -246,6 +272,17 @@ public static class InjectItemValidator
         if (post is null)
         {
             return (null, $"{label}: a post object is required.");
+        }
+
+        Guid? id = null;
+        if (!string.IsNullOrWhiteSpace(post.Id))
+        {
+            if (!Guid.TryParse(post.Id, out var parsedId) || parsedId == Guid.Empty)
+            {
+                return (null, $"{label}: id does not name a post of this item.");
+            }
+
+            id = parsedId;
         }
 
         if (!Guid.TryParse(post.PersonaId, out var personaId) || personaId == Guid.Empty)
@@ -293,16 +330,27 @@ public static class InjectItemValidator
 
         Guid? replyToInjectPostId = null;
         Guid? replyToPostId = null;
+        int? replyToSequence = null;
         if (post.ReplyTo is { } replyTo)
         {
             var hasInject = !string.IsNullOrWhiteSpace(replyTo.InjectPostId);
             var hasPost = !string.IsNullOrWhiteSpace(replyTo.PostId);
-            if (hasInject == hasPost)
+            var hasSequence = replyTo.Sequence is not null;
+            if ((hasInject ? 1 : 0) + (hasPost ? 1 : 0) + (hasSequence ? 1 : 0) != 1)
             {
-                return (null, $"{label}: replyTo must name exactly one of injectPostId or postId.");
+                return (null, $"{label}: replyTo must name exactly one of injectPostId, postId or sequence.");
             }
 
-            if (hasInject)
+            if (hasSequence)
+            {
+                if (replyTo.Sequence is not { } sequence || sequence < 1 || sequence >= position)
+                {
+                    return (null, $"{label}: replyTo.sequence must name an earlier post in this item.");
+                }
+
+                replyToSequence = sequence;
+            }
+            else if (hasInject)
             {
                 if (!Guid.TryParse(replyTo.InjectPostId, out var parsed) || parsed == Guid.Empty)
                 {
@@ -330,11 +378,13 @@ public static class InjectItemValidator
         }
 
         return (new InjectPostDraft(
+            id,
             personaId,
             text,
             media,
             replyToInjectPostId,
             replyToPostId,
+            replyToSequence,
             baseline?.Like,
             baseline?.Repost,
             baseline?.Reply), null);
@@ -343,19 +393,6 @@ public static class InjectItemValidator
     private static bool OutOfRange(int? value) => value is < 0 or > MaxBaseline;
 
     private static string Label(int position) => string.Create(CultureInfo.InvariantCulture, $"Post {position}");
-
-    private static int IndexOf(IReadOnlyList<Guid> ids, Guid target)
-    {
-        for (var index = 0; index < ids.Count; index++)
-        {
-            if (ids[index] == target)
-            {
-                return index;
-            }
-        }
-
-        return -1;
-    }
 
     /// <summary>Sanitizes (NFR-004) and trims free text; <c>null</c> when nothing is left.</summary>
     private static string? Clean(string? value)
@@ -404,20 +441,24 @@ public sealed record InjectItemDraft(
     IReadOnlyList<InjectPostDraft> Posts);
 
 /// <summary>A validated, sanitized child post write.</summary>
+/// <param name="Id">The existing child this write keeps (PUT), or <c>null</c> for a new child.</param>
 /// <param name="PersonaId">The persona id.</param>
 /// <param name="Text">The sanitized text.</param>
 /// <param name="Media">The media references.</param>
-/// <param name="ReplyToInjectPostId">The scripted reply target, or <c>null</c>.</param>
+/// <param name="ReplyToInjectPostId">The scripted reply target by id, or <c>null</c>.</param>
 /// <param name="ReplyToPostId">The existing-post reply target, or <c>null</c>.</param>
+/// <param name="ReplyToSequence">The earlier-sibling reply target by 1-based position, or <c>null</c>.</param>
 /// <param name="BaselineLike">Seeded likes, or <c>null</c>.</param>
 /// <param name="BaselineRepost">Seeded reposts, or <c>null</c>.</param>
 /// <param name="BaselineReply">Seeded replies, or <c>null</c>.</param>
 public sealed record InjectPostDraft(
+    Guid? Id,
     Guid PersonaId,
     string Text,
     IReadOnlyList<InjectMediaDraft> Media,
     Guid? ReplyToInjectPostId,
     Guid? ReplyToPostId,
+    int? ReplyToSequence,
     int? BaselineLike,
     int? BaselineRepost,
     int? BaselineReply);
@@ -435,10 +476,10 @@ public sealed record InjectMediaDraft(string MediaId, string Alt);
 /// <param name="Roster">The staff user ids assigned to this exercise.</param>
 /// <param name="ReplyTargetsInScope">The draft's scripted reply targets that exist in a live item of this exercise, mapped to their item.</param>
 /// <param name="EditedItemId">The item being edited, or <c>null</c> on create.</param>
-/// <param name="EditedItemChildIds">The edited item's live child ids by position (index 0 = sequence 1); empty on create.</param>
+/// <param name="EditedItemChildIds">The edited item's live child ids; empty on create.</param>
 public sealed record InjectReferenceFacts(
     IReadOnlySet<Guid> PersonasInScope,
     IReadOnlySet<Guid> Roster,
     IReadOnlyDictionary<Guid, Guid> ReplyTargetsInScope,
     Guid? EditedItemId,
-    IReadOnlyList<Guid> EditedItemChildIds);
+    IReadOnlySet<Guid> EditedItemChildIds);

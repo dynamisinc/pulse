@@ -94,6 +94,13 @@ public sealed class InjectItem : IExerciseScoped
     /// </summary>
     public double ShiftSeconds { get; set; }
 
+    /// <summary>
+    /// Server wall-clock instant of the item's last SUCCESSFUL publish. The pacer never publishes the next post less
+    /// than 3 s after it, so the minimum-gap guarantee (IQ-4) survives anything that perturbs the schedule — an edit
+    /// that reorders a started burst, or a Fire right after a hold.
+    /// </summary>
+    public DateTimeOffset? LastPublishedAt { get; set; }
+
     /// <summary>The readable reason a <c>failed</c> item failed (the first failed child's message), else <c>null</c>.</summary>
     public string? Error { get; set; }
 

@@ -18,8 +18,8 @@ using Pulse.WebApi.Data.Entities;
 ///   <item><c>unskip</c>: <c>skipped → pending</c>, or <c>→ held</c> when anything already went out.</item>
 ///   <item><c>retry</c>: <c>failed →</c> re-fire the failed posts.</item>
 ///   <item><c>fire</c>: <c>pending|held →</c> publishing (a held item may be fired directly: release + fire).</item>
-///   <item>edit: only while <c>pending|held|failed</c> and before any post has gone out; delete: only while
-///   <c>pending|held|skipped|failed</c>.</item>
+///   <item>edit: only while <c>pending|held|failed</c> and no post is in flight (posts that already went out are
+///   immutable and must be kept); delete: only while <c>pending|held|skipped|failed</c>.</item>
 /// </list>
 /// <para><c>fired</c> is terminal: a published post is corrected with a takedown, never here.</para>
 /// <para>
@@ -59,10 +59,60 @@ public static class InjectTransitions
             return $"This item is {item.Status} and is read-only.";
         }
 
-        // A child that went out (or is in flight) cannot be rewritten: the post already exists on the feed.
-        if (LiveChildren(item).Any(post => post.Status == InjectPostStatuses.Fired || post.ClaimedAt is not null))
+        // A post being published right now cannot be edited around; the next poll will show its outcome. (Posts that
+        // already went out stay editable-around but are themselves immutable — see InjectQueueService.UpdateAsync.)
+        if (LiveChildren(item).Any(post => post.ClaimedAt is not null))
         {
-            return "This item has already published posts and is read-only; retry or skip it instead.";
+            return "A post of this item is being published right now. Try again in a moment.";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Why applying <paramref name="draft"/> would rewrite what participants already saw, or <c>null</c> when it would
+    /// not. Once an item has fired its kind is fixed, and every published child must be echoed back (by id) with its
+    /// content unchanged — a published post is corrected with a takedown, never by editing its record (<c>409</c>).
+    /// Unpublished children may be changed, reordered or removed freely.
+    /// </summary>
+    /// <param name="item">The item, with its children loaded.</param>
+    /// <param name="draft">The validated edit.</param>
+    /// <returns>A refusal message or <c>null</c>.</returns>
+    public static string? WhyEditWouldRewriteHistory(InjectItem item, InjectItemDraft draft)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(draft);
+
+        if (HasStarted(item) && draft.Kind != item.Kind)
+        {
+            return "An item's kind cannot change once it has fired.";
+        }
+
+        var echoed = draft.Posts.Select(post => post.Id).ToList();
+        foreach (var published in LiveChildren(item).Where(post => post.Status == InjectPostStatuses.Fired))
+        {
+            var index = echoed.IndexOf(published.Id);
+            if (index < 0)
+            {
+                return $"Post {published.Sequence} was already published and cannot be removed.";
+            }
+
+            var source = draft.Posts[index];
+            var replyTo = source.ReplyToInjectPostId
+                ?? (source.ReplyToSequence is { } sequence ? echoed[sequence - 1] ?? Guid.NewGuid() : null);
+            var unchanged = source.PersonaId == published.PersonaId
+                && source.Text == published.Text
+                && source.Media.Select(media => (media.MediaId, media.Alt))
+                    .SequenceEqual(published.Media.Select(media => (media.MediaId, media.Alt)))
+                && replyTo == published.ReplyToInjectPostId
+                && source.ReplyToPostId == published.ReplyToPostId
+                && source.BaselineLike == published.BaselineLike
+                && source.BaselineRepost == published.BaselineRepost
+                && source.BaselineReply == published.BaselineReply;
+            if (!unchanged)
+            {
+                return $"Post {index + 1} was already published and cannot be changed.";
+            }
         }
 
         return null;
