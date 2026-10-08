@@ -44,7 +44,7 @@
  * World: staff routing glue. No COBRA and no participant skin is mounted here —
  * `StaffRouteTree` itself imports neither (the hand-off above it owns the theme).
  */
-import { useEffect } from 'react'
+import { useLayoutEffect } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -95,7 +95,10 @@ let badgeMounts = 0
  */
 function SurfaceScopeBadge() {
   const scope = useExerciseContext()
-  useEffect(() => {
+  // A layout effect, not a passive one: a passive effect can still be pending
+  // when findByTestId resolves under CI load, so the mount count read straight
+  // after it would be 0 (CI run 257). A layout effect runs inside the commit.
+  useLayoutEffect(() => {
     badgeMounts += 1
   }, [])
   return <span data-testid="surface-scope-badge">{scope.exerciseName}</span>

@@ -175,6 +175,14 @@ design briefs/amendments (`docs/design/`). GitHub mirroring is an Epic → Featu
 hierarchy — see [`docs/GITHUB_TRACKER.md`](docs/GITHUB_TRACKER.md) and
 [`docs/FEATURE_ORCHESTRATION_PLAYBOOK.md`](docs/FEATURE_ORCHESTRATION_PLAYBOOK.md).
 
+## Pull requests
+
+- **Request a GitHub Copilot review on every PR** as soon as it opens (GitHub MCP `request_copilot_review`,
+  or add Copilot as a reviewer in the UI). Request it again after a push that changes code substantially.
+  It is Tier-1 review alongside the `code-review` agent
+  ([`docs/ORCHESTRATION_MECHANICS.md` §3](docs/ORCHESTRATION_MECHANICS.md)). Fold its findings before
+  merge: fix them, or reply on the thread with why not.
+
 ## Common tasks
 
 **Verify the frontend compiles** without killing a running dev server:
