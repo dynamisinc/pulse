@@ -72,7 +72,7 @@ All routes require a live **staff** session assigned to the active exercise (the
 | `POST /api/injects` | `InjectItemWrite` | 201 `InjectItemDto` | 400 |
 | `PUT /api/injects/{id}` | `InjectItemWrite & { version }` | 200 `InjectItemDto` | 400 · 404 · 409 (stale version / not editable) |
 | `DELETE /api/injects/{id}?version=n` | — | 204 (soft delete) | 404 · 409 (fired/firing; stale version) |
-| `POST /api/injects/reorder` | `{ ids: string[] }` (the full new order) | 200 `InjectQueueDto` | 400 (unknown/missing ids) |
+| `POST /api/injects/reorder` | `{ ids: string[] }` (the full new order) | 200 `InjectQueueDto` | 400 (unknown/missing ids) · 409 (the set changed concurrently; no `item`) |
 | `POST /api/injects/{id}/fire` | — | 200 `InjectItemDto` (`fired` / `firing` / `failed`) | 404 · 409 (not fireable · already fired · world frozen · reply parent not fired) |
 | `POST /api/injects/{id}/hold` · `/release` · `/skip` · `/unskip` · `/retry` | — | 200 `InjectItemDto` | 404 · 409 (transition not allowed; retry under freeze) |
 
