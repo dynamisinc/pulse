@@ -7,9 +7,10 @@
  *
  * Theming mirrors the sibling social modules (`NewPostsPill.module.css`): the
  * per-exercise accent `var(--pulse-ac)` (COR-030) with the Cadence-navy
- * fallback drives both states (filled "Follow" / outlined "Following"), so no
- * separate dark-mode palette is needed here — the accent variable is the only
- * color input and it is supplied by the ancestor brand theme in both modes.
+ * fallback drives both states (filled "Follow" / outlined "Following"). The
+ * accent variable is the only color input and it is supplied by the ancestor
+ * brand scope (`theme/SocialBrandScope`). LIGHT ONLY (demo-polish F5): there is
+ * no dark palette anywhere in the Social skin.
  *
  * The "Following" state is deliberately NOT a color-only change (NFR-001):
  * it swaps to an outlined treatment (no filled background) AND the component

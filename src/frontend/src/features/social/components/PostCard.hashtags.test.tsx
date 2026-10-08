@@ -246,7 +246,11 @@ describe('PostCard — hashtag content security (NFR-004)', () => {
       <PostCard post={buildPost({ text: maliciousText })} onHashtagOpen={vi.fn()} />,
     )
 
-    expect(container.querySelector('img')).not.toBeInTheDocument()
+    // The author's avatar PHOTO is a legitimate <img> (F5); what must never exist is an
+    // <img> parsed out of the text.
+    const injected = Array.from(container.querySelectorAll('img'))
+      .filter(img => !img.closest('[data-testid="post-avatar"]'))
+    expect(injected).toHaveLength(0)
     expect(screen.getByText('#Advisory')).toHaveAttribute('data-hashtag', 'advisory')
   })
 })

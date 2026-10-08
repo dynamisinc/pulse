@@ -6,22 +6,41 @@
  * + a scoped CSS Module — NO COBRA, NO themed MUI, FontAwesome-only icons.
  *
  * WHAT IT DOES
- *  - Renders one persona's identity hero: an accent-tinted banner (COR-030,
- *    via `--pulse-ac`), the R-004 avatar treatment (reused `<Avatar>` — duotone
- *    silhouette for humans, monogram for orgs), display name + the fixed
+ *  - Renders one persona's identity hero: a banner (the persona's `bannerUrl`
+ *    photo over an accent-tinted fallback, COR-030, via `--pulse-ac`), the
+ *    avatar (reused `<Avatar>` — the persona's photo, else the R-004 duotone
+ *    silhouette for humans / monogram for orgs), display name + the fixed
  *    seal-blue `<VerifiedMark>` when `persona.verified` (the trainable trust
  *    signal, SOC-052/story 03 — rendered by presence/absence only, never a
- *    substitute "unverified" badge), handle, bio, a meta row (joined date;
- *    location/link render here once the Phase-1 persona model carries them —
- *    see note below), and the follower/following counts.
- *  - Renders four tabs (Posts / Posts & replies / Media / Likes), each showing
- *    the exercise-scoped post set through the keystone `<PostCard>`.
+ *    substitute "unverified" badge), handle, bio, a meta row (location when the
+ *    persona has one; joined date, in scenario time), and the follower/following
+ *    counts.
+ *  - Renders four REAL tabs (demo-polish F5), each over the exercise-scoped
+ *    post set, cards through the keystone `<PostCard>`:
+ *      Posts            authored, top-level            (`useFeed()`)
+ *      Posts & replies  authored, replies included     (`resolveFeed('all',
+ *                       { includeReplies: true })` via `useFeedWithReplies`, DP-5)
+ *      Media            authored posts that carry media, as a thumbnail grid
+ *                       (F2's `<MediaTabGrid>`; a card list is not used here)
+ *      Likes            OWN profile only: the posts the viewer has liked
+ *                       (`viewer.liked` on the includeReplies set). Anyone
+ *                       else's profile says "Likes are private." — never fake
+ *                       entries (D1-012).
+ *    Replies/Likes are fetched lazily, the first time one of those tabs opens.
+ *  - Forwards `onOpenThread` / `onHashtagOpen` (and, optionally, `onOpenProfile`)
+ *    to every card, and wires Reply to open the thread (see REPLY below).
  *
- * PURE CONSUMER: this page composes `<PostCard>`/`<VerifiedMark>`/`<Avatar>` and
- * reuses the shipped read seams (`useFeed`, `usePersonas`) — it defines no new
- * data model. It is rendered standalone with a `personaId` (Wave-1); reaching a
- * profile from a post tap is a later orchestrator-owned `SocialChannel` wiring
- * pass, NOT this story.
+ * LIKES IN MOCK MODE: the own-profile Likes tab reads `viewer.liked` from the
+ * feed response. In live mode that is the server's per-persona truth. In dev
+ * (mock) the reactions adapter persists a tap in its own store and does NOT write
+ * `postStore.viewer`, so a like made in this session shows up here only for posts
+ * seeded as liked; it is not reflected until the mock store learns the like. Known
+ * and accepted for the demo (the live path is correct).
+ *
+ * PURE CONSUMER: this page composes `<PostCard>`/`<VerifiedMark>`/`<Avatar>`/
+ * `<MediaTabGrid>` and reuses the shipped read seams (`useFeed`, `usePersonas`) —
+ * it defines no new data model. It is rendered with a `personaId`; reaching a
+ * profile from a post tap is the host's wiring (`onOpenProfile` upstream).
  *
  * SCENARIO TIME (COR-053): the joined date renders via `useScenarioTime()` bound
  * to `useExerciseContext().timeZone` — scenario time, never wall-clock. Backdated
@@ -44,14 +63,11 @@
  * the session `accountId`, present for read-only sessions too — satisfies the
  * view superRefine). `wallClockTime` is telemetry-only and never rendered.
  *
- * MODEL NOTE — location/link + following count: the Phase-1 `Persona` model
- * (persona-management) carries neither a location/website nor an outbound-follow
- * count. The meta row therefore renders the joined date only (location/link
- * slots are ready for when the model gains them, R-004/COR-024 follow-on), and
- * the "Following" count defaults to 0 — the seeded cast has no outbound follow
- * edges yet; the real following count is supplied once the follow graph lands
- * (story 02). Follower magnitude BANDING is story 05; this story renders the raw
- * `followerCount`.
+ * MODEL NOTE — location/link + following count: `Persona` now carries an optional
+ * `location` (rendered in the meta row when present; no website/link field exists
+ * yet) and `bannerUrl`. The "Following" count is the persona's real outbound
+ * edge count (`followingCount`, story 07), 0 only for a fixture that predates it.
+ * Follower magnitude BANDING is story 05 (`formatMagnitude`).
  *
  * FOLLOW CONTROL (story 02 integration, SOC-051 — CR-002/CR-003):
  *  - The viewer's own follow state is RESOLVED here (`resolveFollowing(session
@@ -74,13 +90,19 @@
  * observer/read-only session therefore sees the SAME "controls absent, counts
  * inert" treatment here that `<Feed>` already gave it — counts and post content
  * stay fully visible; only the interactive reply/repost/like affordances go.
+ *
+ * REPLY (Gate-2 items 7/15). When the host supplies `onOpenThread`, every card also
+ * gets `onReply`, which opens that post's thread (and, once F4's reply-intent seam
+ * is merged, asks for the composer to be focused there — see the `TODO(F4-merge)`
+ * in `replyToPost`). Without `onOpenThread` the card's Reply stays inert text by
+ * design: `PostActions` renders no focusable no-op (WR-002).
  */
 
 import {
   memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent,
 } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCalendarDay } from '@fortawesome/free-solid-svg-icons'
+import { faCalendarDay, faLocationDot, faLock } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { scenarioNow, useScenarioTime } from '@/core/clock'
@@ -91,12 +113,17 @@ import {
 } from '@/features/social'
 import { usePersonas } from '@/features/personas'
 import { FollowButton } from '../components/FollowButton'
+import { FeedSkeleton } from '../components/FeedSkeleton'
+import { ProfileSkeleton } from '../components/ProfileSkeleton'
+import { MediaTabGrid } from '../components/media/MediaTabGrid'
 import { resolveFollowers, resolveFollowing } from '../services/followService'
 import {
   useShellContext,
   affordancesAvailable,
 } from '@/features/participant-shell/mountContract'
 import { useFeed } from '../hooks/useFeed'
+import { useFeedWithReplies } from '../hooks/useFeedWithReplies'
+import { safeImageUrl } from '../utils/safeImageUrl'
 import styles from './Profile.module.css'
 
 /** Mirrors `Feed.tsx`'s local `CardVariant` — the two `<PostCard>` render
@@ -125,31 +152,52 @@ const PROFILE_TABS: readonly ProfileTabSpec[] = [
 
 interface ProfilePostListProps {
   readonly posts: readonly PostView[]
+  /** The calm in-fiction line shown when the tab is loaded and has nothing. */
   readonly emptyLabel: string
+  /** True while the tab's posts are still loading and there is nothing to show yet. */
+  readonly loading: boolean
   /** WR-003: threaded from the shell variant (COR-015/D1-011) into every
    * `<PostCard>` this list renders. */
   readonly variant: CardVariant
+  /** Forwarded to each card; every one is optional and absent-means-inert. */
+  readonly onOpenThread?: (postId: string) => void
+  readonly onReply?: (postId: string) => void
+  readonly onHashtagOpen?: (tag: string) => void
+  readonly onOpenProfile?: (personaId: string) => void
 }
 
 /**
  * A tab's post list, memoized on its inputs so switching tabs (or a parent
  * re-render) doesn't needlessly re-render an unchanged list under burst
- * (NFR-002/SOC-071). Renders the calm in-fiction empty state when the tab has
+ * (NFR-002/SOC-071). While loading it shows the feed skeleton (never "Loading…"
+ * text); once loaded it renders the calm in-fiction empty state when the tab has
  * no posts — never exercise/admin language.
  */
 const ProfilePostList = memo(function ProfilePostList({
   posts,
   emptyLabel,
+  loading,
   variant,
+  onOpenThread,
+  onReply,
+  onHashtagOpen,
+  onOpenProfile,
 }: ProfilePostListProps) {
   if (posts.length === 0) {
-    return <p className={styles.state}>{emptyLabel}</p>
+    return loading ? <FeedSkeleton /> : <p className={styles.state}>{emptyLabel}</p>
   }
   return (
     <ul className={styles.list}>
       {posts.map(post => (
         <li key={post.id} className={styles.row}>
-          <PostCard post={post} variant={variant} />
+          <PostCard
+            post={post}
+            variant={variant}
+            onOpen={onOpenThread}
+            onReply={onReply}
+            onHashtagOpen={onHashtagOpen}
+            onOpenProfile={onOpenProfile}
+          />
         </li>
       ))}
     </ul>
@@ -159,6 +207,19 @@ const ProfilePostList = memo(function ProfilePostList({
 export interface ProfileProps {
   /** The persona INSTANCE id to render a profile for (`persona-<handle>`). */
   readonly personaId: string
+  /**
+   * Opens a post's thread (card body, Media-grid thumbnail, and — see REPLY in the
+   * module header — the card's Reply action). Optional: omit it and the cards are
+   * not openable and Reply stays inert text.
+   */
+  readonly onOpenThread?: (postId: string) => void
+  /** Opens the hashtag feed for a tapped `#tag` (no leading `#`). Optional. */
+  readonly onHashtagOpen?: (tag: string) => void
+  /**
+   * Opens another author's profile from a card's author identity (the Likes tab
+   * shows other people's posts). Optional; absent means the identity is plain text.
+   */
+  readonly onOpenProfile?: (personaId: string) => void
 }
 
 /**
@@ -166,7 +227,7 @@ export interface ProfileProps {
  * exercise-scoped cast and the persona's posts from the exercise-scoped feed;
  * both reads are server-side isolated (COR-001).
  */
-export function Profile({ personaId }: ProfileProps) {
+export function Profile({ personaId, onOpenThread, onHashtagOpen, onOpenProfile }: ProfileProps) {
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
   const { personas, loading: personasLoading, error: personasError } = usePersonas()
@@ -186,16 +247,60 @@ export function Profile({ personaId }: ProfileProps) {
     [personas, personaId],
   )
 
+  // Likes are visible on the viewer's OWN profile only (the likes graph is private): an
+  // interactive session bound to a persona, looking at that persona's page. Everyone else
+  // (another account's page, a persona-less session, a read-only/observer session, which
+  // has no `viewer` state of its own) gets the honest "Likes are private" state — never
+  // fake entries. Same `!isReadOnly && personaId !== undefined` predicate as the feed.
+  const isOwnProfile =
+    !session.isReadOnly && session.personaId !== undefined && session.personaId === personaId
+
   // Posts authored by this persona, already narrowed to participant-safe views
-  // and exercise-scoped by `useFeed` (COR-001/XC-002).
+  // and exercise-scoped by `useFeed` (COR-001/XC-002). `useFeed()` is the TOP-LEVEL
+  // feed, so these are the persona's original posts; the `inReplyTo` check is
+  // belt-and-braces against a source that ever returns a reply here.
   const authoredPosts = useMemo(
-    () => posts.filter(p => p.author.id === personaId),
+    () => posts.filter(p => p.author.id === personaId && p.inReplyTo === undefined),
     [posts, personaId],
   )
+  // Media tab: the persona's authored top-level posts that carry media. (A reply's
+  // photo appears under "Posts & replies", with its context.)
   const mediaPosts = useMemo(
     () => authoredPosts.filter(p => p.media !== undefined && p.media.length > 0),
     [authoredPosts],
   )
+
+  // "Posts & replies" and the own-profile "Likes" read the includeReplies superset
+  // (DP-5), fetched lazily the first time one of those tabs is open and refreshed on
+  // each return to one, so a like made on another tab is reflected.
+  const repliesFeedActive = activeTab === 'replies' || (activeTab === 'likes' && isOwnProfile)
+  const {
+    posts: allPostsWithReplies,
+    loading: repliesLoading,
+    error: repliesError,
+  } = useFeedWithReplies(repliesFeedActive, personas)
+  const authoredWithReplies = useMemo(
+    () => allPostsWithReplies.filter(p => p.author.id === personaId),
+    [allPostsWithReplies, personaId],
+  )
+  const likedPosts = useMemo(
+    () => (isOwnProfile ? allPostsWithReplies.filter(p => p.viewer?.liked === true) : []),
+    [allPostsWithReplies, isOwnProfile],
+  )
+
+  // Banner photo: the persona's `bannerUrl` over the accent-tint fallback. Tracks the
+  // URL that failed (not a boolean) so a changed `bannerUrl` gets a fresh attempt.
+  const [failedBannerUrl, setFailedBannerUrl] = useState<string | undefined>(undefined)
+
+  // REPLY (Gate-2 items 7/15): Reply opens the post's thread. Only offered when the
+  // host can open a thread; otherwise PostActions renders Reply as inert text.
+  const replyToPost = useCallback((postId: string) => {
+    // TODO(F4-merge): call F4's `requestReplyFocus(postId)` (services/replyIntent.ts)
+    // HERE, before opening the thread, so the thread opens with the composer focused.
+    // F4's file is not in this branch yet; until then Reply just opens the thread.
+    onOpenThread?.(postId)
+  }, [onOpenThread])
+  const onReply = onOpenThread !== undefined ? replyToPost : undefined
 
   // XC-004: one 'view' event per persona.id. The ref stores the LAST-EMITTED
   // persona id (mirroring HashtagFeed's tag-keyed ref) so a re-render /
@@ -328,7 +433,7 @@ export function Profile({ personaId }: ProfileProps) {
   if (personasLoading && !persona) {
     return (
       <section className={styles.profile}>
-        <p className={styles.state} role="status">Loading profile…</p>
+        <ProfileSkeleton />
       </section>
     )
   }
@@ -363,25 +468,38 @@ export function Profile({ personaId }: ProfileProps) {
   // fixture that predates the field; the live API and the seeded mock both always send it.
   const followingCount = formatMagnitude(persona.followingCount ?? 0)
 
-  const postsByTab: Record<ProfileTabId, readonly PostView[]> = {
-    posts: authoredPosts,
-    // No distinct participant-visible reply-authorship model in Phase 1, so
-    // "Posts & replies" shows the persona's authored set (a superset once a
-    // reply model lands). Kept exercise-scoped through the same feed read.
-    replies: authoredPosts,
-    media: mediaPosts,
-    // No like-authorship data exists participant-side in Phase 1 (SOC-050 scopes
-    // out the likes graph) — the tab renders an honest empty state, never fake
-    // entries (D1-012).
-    likes: [],
-  }
+  const bannerSrc = safeImageUrl(persona.bannerUrl)
+  const bannerImage =
+    bannerSrc !== undefined && bannerSrc !== failedBannerUrl ? bannerSrc : undefined
+  const location = persona.location?.trim()
 
-  const emptyByTab: Record<ProfileTabId, string> = {
-    posts: postsLoading ? 'Loading posts…' : 'No posts yet.',
-    replies: postsLoading ? 'Loading posts…' : 'No posts or replies yet.',
-    media: postsLoading ? 'Loading posts…' : 'No media yet.',
-    likes: 'No likes to show.',
+  // What each LIST tab shows. (Media renders a thumbnail grid and Likes may be the
+  // private state, so those two are handled in the panel below; their entries here
+  // supply the data + empty copy they fall back on.)
+  const repliesUnavailable = repliesError !== undefined && authoredWithReplies.length === 0
+  const tabContent: Record<ProfileTabId, {
+    readonly posts: readonly PostView[]
+    readonly loading: boolean
+    readonly emptyLabel: string
+  }> = {
+    posts: { posts: authoredPosts, loading: postsLoading, emptyLabel: 'No posts yet.' },
+    replies: {
+      posts: authoredWithReplies,
+      loading: repliesLoading,
+      emptyLabel: repliesUnavailable
+        ? 'Posts aren’t available right now.'
+        : 'No posts or replies yet.',
+    },
+    media: { posts: mediaPosts, loading: postsLoading, emptyLabel: 'No media yet.' },
+    likes: {
+      posts: likedPosts,
+      loading: repliesLoading,
+      emptyLabel: repliesError !== undefined && likedPosts.length === 0
+        ? 'Posts aren’t available right now.'
+        : 'You haven’t liked any posts yet.',
+    },
   }
+  const activeContent = tabContent[activeTab]
 
   // Roving arrow-key navigation across the tablist (NFR-001 keyboard support).
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
@@ -402,7 +520,20 @@ export function Profile({ personaId }: ProfileProps) {
 
   return (
     <section className={styles.profile} aria-labelledby="profile-name">
-      <div className={styles.banner} data-testid="profile-banner" aria-hidden="true" />
+      {/* Decorative (the name/handle carry identity): the accent tint is the base, the
+          persona's banner photo covers it, and a failed load simply uncovers the tint. */}
+      <div className={styles.banner} data-testid="profile-banner" aria-hidden="true">
+        {bannerImage !== undefined && (
+          <img
+            className={styles.bannerImage}
+            data-testid="profile-banner-image"
+            src={bannerImage}
+            alt=""
+            decoding="async"
+            onError={() => setFailedBannerUrl(bannerImage)}
+          />
+        )}
+      </div>
 
       <div className={styles.identity} data-testid="profile-identity">
         <span className={styles.avatarRing}>
@@ -422,6 +553,16 @@ export function Profile({ personaId }: ProfileProps) {
         {persona.bio && <p className={styles.bio}>{persona.bio}</p>}
 
         <div className={styles.meta}>
+          {location !== undefined && location.length > 0 && (
+            <span className={styles.metaItem} data-testid="profile-location">
+              <FontAwesomeIcon
+                icon={faLocationDot}
+                aria-hidden="true"
+                className={styles.metaIcon}
+              />
+              <span>{location}</span>
+            </span>
+          )}
           <span className={styles.metaItem}>
             <FontAwesomeIcon icon={faCalendarDay} aria-hidden="true" className={styles.metaIcon} />
             <span>
@@ -510,11 +651,26 @@ export function Profile({ personaId }: ProfileProps) {
         id={`profile-tabpanel-${activeTab}`}
         aria-labelledby={`profile-tab-${activeTab}`}
       >
-        <ProfilePostList
-          posts={postsByTab[activeTab]}
-          emptyLabel={emptyByTab[activeTab]}
-          variant={cardVariant}
-        />
+        {activeTab === 'likes' && !isOwnProfile ? (
+          // Honest, not empty-by-accident: someone else's likes are not shown to anyone.
+          <div className={styles.state} data-testid="profile-likes-private">
+            <FontAwesomeIcon icon={faLock} aria-hidden="true" className={styles.stateIcon} />
+            <p className={styles.stateText}>Likes are private.</p>
+          </div>
+        ) : activeTab === 'media' && mediaPosts.length > 0 ? (
+          <MediaTabGrid posts={mediaPosts} onOpenPost={onOpenThread} />
+        ) : (
+          <ProfilePostList
+            posts={activeContent.posts}
+            emptyLabel={activeContent.emptyLabel}
+            loading={activeContent.loading}
+            variant={cardVariant}
+            onOpenThread={onOpenThread}
+            onReply={onReply}
+            onHashtagOpen={onHashtagOpen}
+            onOpenProfile={onOpenProfile}
+          />
+        )}
       </div>
     </section>
   )

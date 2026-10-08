@@ -10,21 +10,29 @@
  * the PostCard max-width, mobile-first (full-bleed below the column width).
  *
  * Theming model mirrors `../theme/social.module.css` exactly so the profile
- * frame tracks the post cards it stacks: `.profile` declares the light-mode
- * palette as CSS custom properties, then rules read `var(--pf-*)`. Dark mode
- * has the same TWO independent triggers — the OS `prefers-color-scheme: dark`
- * media query AND a host-set `[data-theme="dark"]` on the root or any ancestor
- * — neither dependent on a React theme provider. Values mirror `tokens.ts`'s
- * LIGHT/DARK_PALETTE; keep both in sync by hand.
+ * frame tracks the post cards it stacks: `.profile` declares the light palette
+ * as CSS custom properties, then rules read `var(--pf-*)`. LIGHT ONLY
+ * (demo-polish F5): the former OS and `data-theme` dark-mode blocks were removed
+ * — the Social skin has no dark palette, and `theme/forcedLight.guard.test.ts`
+ * keeps it that way. Values mirror `tokens.ts`'s LIGHT_PALETTE; keep both in
+ * sync by hand.
  *
- * ACCENT (COR-030): the banner is accent-tinted via the shared `--pulse-ac`
- * custom property (the per-exercise rebrand hook) with the Cadence-navy default
- * fallback — never a bare hardcoded accent. The verified mark is deliberately
- * NOT themed here (it uses the fixed seal-blue directly in <VerifiedMark>).
+ * ACCENT (COR-030): the banner FALLBACK is accent-tinted via the shared
+ * `--pulse-ac` custom property (the per-exercise rebrand hook, set from the
+ * resolved brand by `SocialBrandScope`) with the Cadence-navy default fallback —
+ * never a bare hardcoded accent. A persona's own `bannerUrl` image, when present,
+ * is laid over the tint (`.bannerImage`). The verified mark is deliberately NOT
+ * themed here (it uses the fixed seal-blue directly in <VerifiedMark>).
+ *
+ * CONTRAST (NFR-001). The active-tab underline and every focus ring paint
+ * `--pf-accent` on the white canvas (non-text contrast needs 3:1); `--pulse-ac`
+ * is made >= 4.5:1 on white by `theme/accent.ts`. No text is ever laid over the
+ * banner (the avatar overlaps it, inside its own white ring), so there is no
+ * banner-overlay text contrast to satisfy and none to break by swapping images.
  */
 
 .profile {
-  /* Light-mode palette (default) — mirrors tokens.ts LIGHT_PALETTE. */
+  /* Light palette (the only palette) — mirrors tokens.ts LIGHT_PALETTE. */
   --pf-bg: #fff;
   --pf-panel: #f3f5f6;
   --pf-line: #e5e8ea;
@@ -45,39 +53,30 @@
   text-align: left;
 }
 
-/* OS-level dark mode (no host override). */
-@media (prefers-color-scheme: dark) {
-  .profile {
-    --pf-bg: #0c1116;
-    --pf-panel: #161e25;
-    --pf-line: #233039;
-    --pf-ink: #e9eef1;
-    --pf-ink-muted: #8aa0ac;
-    --pf-hover: rgba(255, 255, 255, .05);
-  }
-}
-
-/* Host-forced dark mode — `data-theme="dark"` on the root OR an ancestor. */
-:global([data-theme='dark']) .profile,
-.profile:global([data-theme='dark']) {
-  --pf-bg: #0c1116;
-  --pf-panel: #161e25;
-  --pf-line: #233039;
-  --pf-ink: #e9eef1;
-  --pf-ink-muted: #8aa0ac;
-  --pf-hover: rgba(255, 255, 255, .05);
-}
-
 /* --------------------------------------------------------------------------
  * Header: accent-tinted banner + overlapping avatar
  * ------------------------------------------------------------------------ */
 
 .banner {
-  /* Accent-tinted (COR-030) — a soft gradient of the per-exercise accent so a
-   * rebrand recolors the profile hero from the one --pulse-ac variable. */
+  /* Accent-tinted fallback (COR-030) — a soft gradient of the per-exercise accent
+   * so a rebrand recolors the profile hero from the one --pulse-ac variable. It is
+   * what shows when the persona has no banner image, while one loads, and if it
+   * fails to load. Fixed height: the image arriving never moves the page. */
+  position: relative;
   height: 150px;
+  overflow: hidden;
   background:
     linear-gradient(135deg, var(--pf-accent) 0%, color-mix(in srgb, var(--pf-accent) 70%, #000 30%) 100%);
+}
+
+/* The persona's banner photo (`bannerUrl`), covering the tint. Decorative. */
+.bannerImage {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .identity {
@@ -137,7 +136,7 @@
 }
 
 /* --------------------------------------------------------------------------
- * Meta row (joined; location/link render here when the model carries them)
+ * Meta row (location when the persona has one, then the joined date)
  * ------------------------------------------------------------------------ */
 
 .meta {
@@ -198,7 +197,7 @@
 }
 
 .statButton:focus-visible {
-  outline: 2px solid var(--pulse-ac);
+  outline: 2px solid var(--pf-accent);
   outline-offset: 3px;
   border-radius: 3px;
 }
@@ -284,6 +283,18 @@
   color: var(--pf-ink-muted);
   font-size: 15px;
   text-align: center;
+}
+
+/* "Likes are private": the lock icon + the words carry the state (never colour). */
+.stateIcon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 0 auto 8px;
+}
+
+.stateText {
+  margin: 0;
 }
 
 .srOnly {

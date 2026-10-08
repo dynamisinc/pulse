@@ -57,7 +57,6 @@ import { Profile } from './Profile'
 const MOCK_TIME_ZONE = 'America/New_York'
 const FW_ID = 'persona-fairhavenwater' // verified org, authored post-seed-fw-advisory
 const FWUPD_ID = 'persona-fairhavenwaterupd' // unverified lookalike (SOC-052)
-const NEWSLINE_ID = 'persona-newsline7' // authored a post WITH media
 const TBRANDT_ID = 'persona-tbrandt41' // seeded persona with NO posts
 
 function fixedClock(instant: Date): IExerciseClock {
@@ -194,29 +193,18 @@ describe('Profile — tabs (SOC-050, COR-001, NFR-001)', () => {
     expect(cards[0]).toHaveAttribute('data-post-id', 'post-seed-fw-advisory')
   })
 
-  it('shows an honest empty state on the Likes tab (never fabricated entries)', async () => {
+  it('shows an honest "Likes are private" state on someone else’s Likes tab (never fabricated entries)', async () => {
     const user = userEvent.setup()
     renderProfile(FW_ID)
     await screen.findByRole('heading', { name: 'Fairhaven Water Utility' })
 
     await user.click(screen.getByRole('tab', { name: 'Likes' }))
-    expect(screen.getByText('No likes to show.')).toBeInTheDocument()
+    expect(screen.getByText('Likes are private.')).toBeInTheDocument()
     expect(screen.queryByTestId('post-card')).not.toBeInTheDocument()
   })
 
-  it('shows only posts with media on the Media tab', async () => {
-    const user = userEvent.setup()
-    renderProfile(NEWSLINE_ID)
-    await screen.findByRole('heading', { name: 'Newsline 7' })
-
-    await user.click(screen.getByRole('tab', { name: 'Media' }))
-    const cards = await screen.findAllByTestId('post-card')
-    expect(cards).toHaveLength(1)
-    const [mediaCard] = cards
-    if (!mediaCard) throw new Error('expected a media post card')
-    expect(mediaCard).toHaveAttribute('data-post-id', 'post-seed-newsline7-breaking')
-    expect(within(mediaCard).getByTestId('post-media')).toBeInTheDocument()
-  })
+  // The Media tab (a thumbnail grid, F2's <MediaTabGrid>) is covered in
+  // `Profile.media.test.tsx`, which mocks the grid to pin the props it is given.
 
   it('shows an empty state for a persona with no posts', async () => {
     renderProfile(TBRANDT_ID)
