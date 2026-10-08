@@ -47,6 +47,13 @@ public sealed class InjectItemWriteRequest
 /// <summary>One child post in an <see cref="InjectItemWriteRequest"/> — the frozen <c>InjectPostWrite</c>.</summary>
 public sealed class InjectPostWriteRequest
 {
+    /// <summary>
+    /// PUT only: the id of an existing child of THIS item, whose identity (id, status, published post, and the
+    /// replies that point at it) the edit keeps. Absent for a new child. Any other id is a <c>400</c>.
+    /// </summary>
+    [JsonPropertyName("id")]
+    public string? Id { get; init; }
+
     /// <summary>The authoring persona instance id; must name a persona in this exercise.</summary>
     [JsonPropertyName("personaId")]
     public string? PersonaId { get; init; }
@@ -80,7 +87,11 @@ public sealed class InjectMediaWriteRequest
     public string? Alt { get; init; }
 }
 
-/// <summary>A reply target: <c>{ injectPostId }</c> (another scripted post) or <c>{ postId }</c> (an existing post).</summary>
+/// <summary>
+/// A reply target — exactly one of <c>{ injectPostId }</c> (a scripted post of another item, or of this item by id),
+/// <c>{ postId }</c> (an existing post) or <c>{ sequence }</c> (an EARLIER sibling in this item, by 1-based position —
+/// usable at create, before children have ids).
+/// </summary>
 public sealed class InjectReplyToWriteRequest
 {
     /// <summary>Another scripted post in this exercise (an earlier one if it is in the same item).</summary>
@@ -90,6 +101,10 @@ public sealed class InjectReplyToWriteRequest
     /// <summary>An existing post id.</summary>
     [JsonPropertyName("postId")]
     public string? PostId { get; init; }
+
+    /// <summary>An earlier sibling in this item, by 1-based position in the request's <c>posts</c> array.</summary>
+    [JsonPropertyName("sequence")]
+    public int? Sequence { get; init; }
 }
 
 /// <summary>Seeded engagement counts for a scripted post.</summary>

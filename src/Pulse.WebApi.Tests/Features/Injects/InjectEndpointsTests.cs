@@ -260,11 +260,12 @@ public sealed class InjectEndpointsTests
             {
                 new
                 {
+                    id = item.Posts[0].Id,
                     personaId = seeded.PersonaIds[1].ToString(),
                     text = "first, revised",
                     media = new[] { new { mediaId = "beat3-photo", alt = "Brown tap water" } },
                 },
-                new { personaId = seeded.PersonaIds[2].ToString(), text = "replying to the first", replyTo = new { injectPostId = item.Posts[0].Id } },
+                new { id = item.Posts[1].Id, personaId = seeded.PersonaIds[2].ToString(), text = "replying to the first", replyTo = new { injectPostId = item.Posts[0].Id } },
                 Post(seeded.PersonaIds[0], "a new third"),
             },
         });
@@ -274,8 +275,9 @@ public sealed class InjectEndpointsTests
         edited.Version.Should().Be(item.Version + 1);
         edited.Title.Should().Be("Pile-on (revised)");
         edited.Posts.Select(p => p.Text).Should().Equal("first, revised", "replying to the first", "a new third");
-        edited.Posts[0].Id.Should().Be(item.Posts[0].Id, "children keep their ids by position, so replies survive edits");
+        edited.Posts[0].Id.Should().Be(item.Posts[0].Id, "a child that echoes its id keeps its identity");
         edited.Posts[1].Id.Should().Be(item.Posts[1].Id);
+        edited.Posts[2].Id.Should().NotBe(item.Posts[0].Id).And.NotBe(item.Posts[1].Id, "a child without an id is new");
         await using (var db = host.Db(seeded.ExerciseId))
         {
             var first = await db.InjectItemPosts.SingleAsync(p => p.Id == Guid.Parse(item.Posts[0].Id));
@@ -300,15 +302,110 @@ public sealed class InjectEndpointsTests
             kind = "post",
             title = "Just one",
             version = item.Version,
-            posts = new[] { Post(seeded.PersonaIds[0]) },
+            posts = new[] { new { id = item.Posts[1].Id, personaId = seeded.PersonaIds[0].ToString(), text = "the survivor" } },
         });
 
         var edited = (await InjectTestHost.ReadItemAsync(response))!;
         edited.Kind.Should().Be("post");
         edited.Total.Should().Be(1);
+        edited.Posts.Single().Id.Should().Be(item.Posts[1].Id, "the echoed child survives; the others are removed");
+        edited.Posts.Single().Sequence.Should().Be(1, "sequence is array position");
         await using var db = host.Db(seeded.ExerciseId);
         (await db.InjectItemPosts.CountAsync(p => p.InjectItemId == item.Guid && p.DeletedAt != null))
             .Should().Be(2, "removed positions are soft-deleted (XC-010), not erased");
+    }
+
+    [RequiresDockerFact]
+    public async Task Create_ASequenceReply_IsStoredAndReturnedAsTheSiblingsInjectPostId()
+    {
+        await using var host = await StartAsync();
+        var seeded = await ActAsControllerAsync(host);
+
+        var created = await host.CreateOkAsync(new
+        {
+            kind = "burst",
+            title = "Beat 3 pile-on",
+            posts = new object[]
+            {
+                Post(seeded.PersonaIds[0], "the photo"),
+                new { personaId = seeded.PersonaIds[1].ToString(), text = "omg", replyTo = new { sequence = 1 } },
+            },
+        });
+
+        var response = await host.Client.GetAsync(new Uri("/api/injects", UriKind.Relative));
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var replyTo = json.RootElement.GetProperty("items")[0].GetProperty("posts")[1].GetProperty("replyTo");
+        replyTo.GetProperty("injectPostId").GetString().Should().Be(
+            created.Posts[0].Id, "{sequence} is normalised on write to the sibling's id, the one stored and returned form");
+        replyTo.TryGetProperty("sequence", out _).Should().BeFalse();
+    }
+
+    [RequiresDockerFact]
+    public async Task Edit_AChildIdOfAnotherItem_OrOfNothing_Is400()
+    {
+        await using var host = await StartAsync();
+        var seeded = await ActAsControllerAsync(host);
+        var item = await host.CreateOkAsync(InjectTestHost.PostItem(seeded.PersonaIds[0]));
+        var other = await host.CreateOkAsync(InjectTestHost.PostItem(seeded.PersonaIds[1]));
+
+        foreach (var foreignId in new[] { other.Posts[0].Id, Guid.NewGuid().ToString() })
+        {
+            var response = await host.PutAsync(item.Id, new
+            {
+                kind = "post",
+                title = "x",
+                version = item.Version,
+                posts = new[] { new { id = foreignId, personaId = seeded.PersonaIds[0].ToString(), text = "x" } },
+            });
+
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await InjectTestHost.ReadProblemAsync(response)).Detail.Should().Be("Post 1: id does not name a post of this item.");
+        }
+    }
+
+    [RequiresDockerFact]
+    public async Task Edit_AFailedBurst_KeepsItsPublishedPost_FixesTheFailedOne_AndRetryPublishesIt()
+    {
+        var toggle = new PublisherToggle();
+        await using var host = await StartAsync(publisher: sp => new ToggleablePublisher(toggle, sp.GetRequiredService<PostIngestService>()));
+        var seeded = await ActAsControllerAsync(host);
+        var item = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 2));
+        var fired = await host.ActionOkAsync(item.Guid, "fire");
+        toggle.Refuse = true;
+        host.Time.Advance(TimeSpan.FromSeconds(10));
+        await host.Runner.RunTickAsync();
+        var failed = (await host.GetQueueAsync()).Items.Single();
+        failed.Status.Should().Be("failed");
+        var published = failed.Posts[0];
+
+        object Keep(string? text = null) => new { id = published.Id, personaId = published.PersonaId, text = text ?? published.Text };
+        object Fix() => new { id = failed.Posts[1].Id, personaId = failed.Posts[1].PersonaId, text = "fixed copy #WaterIssues" };
+        object Body(params object[] posts) => new { kind = "burst", title = "Pile-on", burstWindowSeconds = 90, version = failed.Version, posts };
+
+        var dropped = await host.PutAsync(item.Id, Body(Fix(), Post(seeded.PersonaIds[2])));
+        dropped.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await InjectTestHost.ReadProblemAsync(dropped)).Detail.Should().Be("Post 1 was already published and cannot be removed.");
+
+        var rewritten = await host.PutAsync(item.Id, Body(Keep("rewriting history"), Fix()));
+        rewritten.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await InjectTestHost.ReadProblemAsync(rewritten)).Detail.Should().Be("Post 1 was already published and cannot be changed.");
+
+        var edited = await host.PutAsync(item.Id, Body(Keep(), Fix()));
+        edited.StatusCode.Should().Be(HttpStatusCode.OK, await edited.Content.ReadAsStringAsync());
+        var after = (await InjectTestHost.ReadItemAsync(edited))!;
+        after.Status.Should().Be("failed", "an edit changes content, never status — retry re-fires");
+        after.Posts[0].Status.Should().Be("fired");
+        after.Posts[0].FiredPostId.Should().Be(fired.Posts[0].FiredPostId, "the published post keeps its identity and record");
+        after.Posts[1].Text.Should().Be("fixed copy #WaterIssues");
+
+        toggle.Refuse = false;
+        (await host.ActionOkAsync(item.Guid, "retry")).Status.Should().Be("firing");
+        await host.Runner.RunTickAsync();
+        var settled = (await host.GetQueueAsync()).Items.Single();
+        settled.Status.Should().Be("fired");
+        await using var db = host.Db(seeded.ExerciseId);
+        (await db.Posts.Where(p => p.InjectId == item.Id).Select(p => p.Body).ToListAsync())
+            .Should().BeEquivalentTo([published.Text, "fixed copy #WaterIssues"], "the fixed copy is what went out");
     }
 
     [RequiresDockerFact]

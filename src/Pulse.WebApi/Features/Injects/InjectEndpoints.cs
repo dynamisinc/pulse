@@ -27,7 +27,8 @@ using Pulse.WebApi.Features.EngineRuntime;
 /// <para>
 /// <b>Errors are ProblemDetails.</b> <c>400</c>/<c>404</c>/<c>409</c> carry a readable <c>detail</c>; a <c>409</c> also
 /// carries the item's current state as the <c>item</c> extension member (when it exists) so the console can refresh
-/// the row without a second call. A cross-exercise id is a <c>404</c> identical to an unknown one (COR-001).
+/// the row without a second call — ASP.NET serializes extensions at the TOP level, so it is <c>body.item</c>. A
+/// cross-exercise id is a <c>404</c> identical to an unknown one (COR-001).
 /// </para>
 /// </remarks>
 public static class InjectEndpoints

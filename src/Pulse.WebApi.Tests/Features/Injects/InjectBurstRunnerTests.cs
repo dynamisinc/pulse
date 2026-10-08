@@ -263,6 +263,11 @@ public sealed class InjectBurstRunnerTests
         var retried = await host.ActionOkAsync(item, "retry");
         retried.Status.Should().Be("firing");
         await host.Runner.RunTickAsync();
+        (await FiredCountAsync(host, seeded, item)).Should().Be(
+            2, "post 3 went out this very second; the retried post still keeps the 3 s minimum gap");
+
+        host.Time.Advance(TimeSpan.FromSeconds(InjectBurstPacing.MinGapSeconds));
+        await host.Runner.RunTickAsync();
 
         var settled = await ItemAsync(host, seeded, item);
         settled.Status.Should().Be("fired");
@@ -309,7 +314,7 @@ public sealed class InjectBurstRunnerTests
         await using var host = await StartAsync();
         var (seeded, item, released) = await FireBurstAsync(host, beforeFire: async (h, created) =>
         {
-            // Sibling ids exist only after create, so the reply is wired by an edit (children keep ids by position).
+            // An edit that echoes the children's ids (keeping their identity) and wires the reply by sibling sequence.
             var response = await h.PutAsync(created.Id, new
             {
                 kind = "burst",
@@ -318,9 +323,9 @@ public sealed class InjectBurstRunnerTests
                 version = created.Version,
                 posts = new object[]
                 {
-                    new { personaId = created.Posts[0].PersonaId, text = "the photo" },
-                    new { personaId = created.Posts[1].PersonaId, text = "replying", replyTo = new { injectPostId = created.Posts[0].Id } },
-                    new { personaId = created.Posts[2].PersonaId, text = "standalone" },
+                    new { id = created.Posts[0].Id, personaId = created.Posts[0].PersonaId, text = "the photo" },
+                    new { id = created.Posts[1].Id, personaId = created.Posts[1].PersonaId, text = "replying", replyTo = new { sequence = 1 } },
+                    new { id = created.Posts[2].Id, personaId = created.Posts[2].PersonaId, text = "standalone" },
                 },
             });
             response.StatusCode.Should().Be(HttpStatusCode.OK);

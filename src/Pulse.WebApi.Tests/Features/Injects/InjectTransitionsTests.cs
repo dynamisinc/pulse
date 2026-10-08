@@ -223,14 +223,81 @@ public sealed class InjectTransitionsTests
     }
 
     [Fact]
-    public void Edit_AnItemThatAlreadyPublished_IsRefusedEvenWhileHeld()
+    public void Edit_AHeldBurstThatAlreadyPublished_IsAllowed_ItsPublishedPostsAreGuardedSeparately()
     {
         var item = Released(Item(), T0, 0, 10, 20);
         Fire(Children(item)[0]);
         item.Status = InjectStatuses.Held;
 
-        InjectTransitions.WhyNotEditable(item).Should().Contain("already published");
+        InjectTransitions.WhyNotEditable(item).Should().BeNull();
     }
+
+    // ---- published posts are history ----
+
+    [Fact]
+    public void AnEdit_ThatKeepsEveryPublishedPostUnchanged_IsAllowed_AndMayChangeTheRest()
+    {
+        var (item, published) = HeldAfterFirstPost();
+        var draft = Draft(item.Kind, Keep(published), Changed(Children(item)[2]));
+
+        InjectTransitions.WhyEditWouldRewriteHistory(item, draft).Should().BeNull("unpublished posts may change or go");
+    }
+
+    [Fact]
+    public void AnEdit_ThatDropsAPublishedPost_IsRefused()
+    {
+        var (item, _) = HeldAfterFirstPost();
+        var draft = Draft(item.Kind, Changed(Children(item)[1]), Changed(Children(item)[2]));
+
+        InjectTransitions.WhyEditWouldRewriteHistory(item, draft).Should().Be("Post 1 was already published and cannot be removed.");
+    }
+
+    [Fact]
+    public void AnEdit_ThatRewritesAPublishedPost_IsRefused()
+    {
+        var (item, published) = HeldAfterFirstPost();
+        var draft = Draft(item.Kind, Changed(Children(item)[2]), Changed(published));
+
+        InjectTransitions.WhyEditWouldRewriteHistory(item, draft).Should().Be(
+            "Post 2 was already published and cannot be changed.", "moving it is fine; changing its text is not");
+    }
+
+    [Fact]
+    public void AnEdit_MayReorderAPublishedPost_Unchanged()
+    {
+        var (item, published) = HeldAfterFirstPost();
+        var draft = Draft(item.Kind, Changed(Children(item)[2]), Keep(published));
+
+        InjectTransitions.WhyEditWouldRewriteHistory(item, draft).Should().BeNull();
+    }
+
+    [Fact]
+    public void AnEdit_ThatChangesTheKindOfAFiredItem_IsRefused_ButNotBeforeItFired()
+    {
+        var (item, published) = HeldAfterFirstPost();
+        InjectTransitions.WhyEditWouldRewriteHistory(item, Draft(InjectKinds.Post, Keep(published)))
+            .Should().Contain("kind cannot change");
+
+        var fresh = Item(status: InjectStatuses.Held);
+        InjectTransitions.WhyEditWouldRewriteHistory(fresh, Draft(InjectKinds.Post, Changed(Children(fresh)[0]))).Should().BeNull();
+    }
+
+    private static (InjectItem Item, InjectItemPost Published) HeldAfterFirstPost()
+    {
+        var item = Released(Item(), T0, 0, 10, 20);
+        var published = Fire(Children(item)[0]);
+        item.Status = InjectStatuses.Held;
+        return (item, published);
+    }
+
+    private static InjectItemDraft Draft(string kind, params InjectPostDraft[] posts) =>
+        new(kind, "t", null, null, null, kind == InjectKinds.Burst ? 90 : null, posts);
+
+    private static InjectPostDraft Keep(InjectItemPost child) =>
+        new(child.Id, child.PersonaId, child.Text, [], child.ReplyToInjectPostId, child.ReplyToPostId, null, null, null, null);
+
+    private static InjectPostDraft Changed(InjectItemPost child) =>
+        new(child.Id, child.PersonaId, child.Text + " (edited)", [], null, null, null, null, null, null);
 
     [Fact]
     public void Edit_AnItemWithAPostInFlight_IsRefused()

@@ -208,8 +208,10 @@ public sealed partial class InjectQueueService
 
     /// <summary>
     /// <c>PUT /api/injects/{id}</c>: replaces an item's content while it is <c>pending</c>, <c>held</c> or <c>failed</c>
-    /// and before any of its posts went out. The body's <c>version</c> must match (IQ-9). Children keep their ids by
-    /// position, so a reply that names one of them survives the edit.
+    /// and no post is in flight. The body's <c>version</c> must match (IQ-9). A child that echoes the <c>id</c> of an
+    /// existing child keeps its identity (id, status, published post, and the replies pointing at it); a child without
+    /// an <c>id</c> is new; an existing child not echoed is removed (soft-deleted). Posts that already went out must be
+    /// echoed unchanged — a published post is corrected with a takedown, never by rewriting the record (<c>409</c>).
     /// </summary>
     /// <param name="itemId">The item id.</param>
     /// <param name="request">The untrusted write body, including <c>version</c>.</param>
@@ -258,6 +260,11 @@ public sealed partial class InjectQueueService
         if (referenceError is not null)
         {
             return InjectResult.Invalid<InjectItemDto>(referenceError);
+        }
+
+        if (InjectTransitions.WhyEditWouldRewriteHistory(item, draft) is { } rewritesHistory)
+        {
+            return InjectResult.Conflict<InjectItemDto>(rewritesHistory, await ProjectAsync(item, facts, cancellationToken));
         }
 
         var time = TimeFor(caller.ExerciseId, facts);
@@ -743,6 +750,11 @@ public sealed partial class InjectQueueService
 
             outcome.ApplyTo(child);
             child.ClaimedAt = null;
+            if (outcome.IsPublished)
+            {
+                item.LastPublishedAt = time.WallClock;
+            }
+
             InjectTransitions.Settle(item);
 
             if (await TrySaveAsync(item, action, actingHumanId, time, CancellationToken.None))
@@ -776,6 +788,7 @@ public sealed partial class InjectQueueService
         {
             var actor = Guid.TryParse(orphan.ActingHumanId, out var human) ? human : attributedHuman;
             ChildOutcome.Published(orphan, actor).ApplyTo(child);
+            item.LastPublishedAt = time.WallClock;
             LogClaimReconciled(item.Id, child.Id, orphan.Id);
         }
 
@@ -1036,7 +1049,7 @@ public sealed partial class InjectQueueService
             roster.Select(entry => entry.StaffUserId).ToHashSet(),
             replyTargets,
             editedItem?.Id,
-            editedItem is null ? [] : InjectTransitions.LiveChildren(editedItem).Select(post => post.Id).ToList());
+            editedItem is null ? [] : InjectTransitions.LiveChildren(editedItem).Select(post => post.Id).ToHashSet());
 
         return InjectItemValidator.CheckReferences(draft, referenceFacts);
     }
@@ -1126,58 +1139,88 @@ public sealed partial class InjectQueueService
     }
 
     /// <summary>
-    /// Writes the draft's posts onto the item, preserving each live child's id at its position (so a reply that
-    /// names it survives the edit), adding new positions and soft-deleting removed ones.
+    /// Writes the draft's posts onto the item. A post echoing an existing child's <c>id</c> keeps that child (its
+    /// identity, status and published post); a post without one becomes a new child; an existing child not echoed is
+    /// soft-deleted (XC-010). Sequence is array position. <c>replyTo.sequence</c> is normalised to the sibling's id
+    /// here, so the stored (and returned) form is always <c>injectPostId</c>. Published children are left untouched —
+    /// <see cref="InjectTransitions.WhyEditWouldRewriteHistory"/> has already proven the draft does not change them.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A new child on an ALREADY-TRACKED item is added to the context explicitly: discovered only through the
     /// navigation, a child whose Guid key is preset would be taken for an existing row and UPDATEd (0 rows → a
     /// spurious concurrency conflict). On create the item is not tracked yet, and adding it adds the whole graph.
+    /// </para>
+    /// <para>
+    /// A new child of an item that has ALREADY fired is scheduled after the existing pacing (3 s apart); before the
+    /// first fire, offsets are laid out by Fire itself.
+    /// </para>
     /// </remarks>
     private void ApplyChildren(InjectItem item, InjectItemDraft draft, DateTimeOffset now)
     {
         var tracked = _dbContext.Entry(item).State != EntityState.Detached;
-        var live = InjectTransitions.LiveChildren(item);
+        var live = InjectTransitions.LiveChildren(item).ToDictionary(post => post.Id);
+        var started = InjectTransitions.HasStarted(item);
+        var nextOffset = (live.Values.Max(post => post.DueOffsetSeconds) ?? 0) + InjectBurstPacing.MinGapSeconds;
 
+        // Pass 1: resolve every position to its child (kept or new), so a {sequence} reply can name a new sibling.
+        var children = new InjectItemPost[draft.Posts.Count];
+        for (var index = 0; index < draft.Posts.Count; index++)
+        {
+            if (draft.Posts[index].Id is { } keptId)
+            {
+                children[index] = live[keptId];
+                continue;
+            }
+
+            var child = new InjectItemPost
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = item.ExerciseId,
+                InjectItemId = item.Id,
+                Text = draft.Posts[index].Text,
+                Status = InjectPostStatuses.Pending,
+            };
+            if (started)
+            {
+                child.DueOffsetSeconds = nextOffset;
+                nextOffset += InjectBurstPacing.MinGapSeconds;
+            }
+
+            item.Posts.Add(child);
+            if (tracked)
+            {
+                _dbContext.InjectItemPosts.Add(child);
+            }
+
+            children[index] = child;
+        }
+
+        // Pass 2: content and order.
         for (var index = 0; index < draft.Posts.Count; index++)
         {
             var source = draft.Posts[index];
-            InjectItemPost child;
-            if (index < live.Count)
+            var child = children[index];
+            child.Sequence = index + 1;
+            if (child.Status == InjectPostStatuses.Fired)
             {
-                child = live[index];
-            }
-            else
-            {
-                child = new InjectItemPost
-                {
-                    Id = Guid.NewGuid(),
-                    ExerciseId = item.ExerciseId,
-                    InjectItemId = item.Id,
-                    Text = source.Text,
-                    Status = InjectPostStatuses.Pending,
-                };
-                item.Posts.Add(child);
-                if (tracked)
-                {
-                    _dbContext.InjectItemPosts.Add(child);
-                }
+                continue;
             }
 
-            child.Sequence = index + 1;
             child.PersonaId = source.PersonaId;
             child.Text = source.Text;
             child.Media = source.Media.Select(media => new InjectMediaRef { MediaId = media.MediaId, Alt = media.Alt }).ToList();
-            child.ReplyToInjectPostId = source.ReplyToInjectPostId;
+            child.ReplyToInjectPostId = source.ReplyToInjectPostId
+                ?? (source.ReplyToSequence is { } sequence ? children[sequence - 1].Id : null);
             child.ReplyToPostId = source.ReplyToPostId;
             child.BaselineLike = source.BaselineLike;
             child.BaselineRepost = source.BaselineRepost;
             child.BaselineReply = source.BaselineReply;
         }
 
-        for (var index = draft.Posts.Count; index < live.Count; index++)
+        foreach (var removed in live.Values.Where(post => !children.Contains(post)))
         {
-            live[index].DeletedAt = now;
+            removed.DeletedAt = now;
         }
     }
 
@@ -1228,6 +1271,8 @@ public sealed partial class InjectQueueService
         public static ChildOutcome Published(Post post, Guid attributedHuman) => new(post, attributedHuman, null);
 
         public static ChildOutcome Refused(string error) => new(null, Guid.Empty, error);
+
+        public bool IsPublished => _post is not null;
 
         public void ApplyTo(InjectItemPost child)
         {

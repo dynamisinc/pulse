@@ -62,6 +62,8 @@ public static class InjectBurstPlanner
     /// </summary>
     public static readonly TimeSpan ClaimLease = TimeSpan.FromSeconds(60);
 
+    private static readonly TimeSpan MinGap = TimeSpan.FromSeconds(InjectBurstPacing.MinGapSeconds);
+
     /// <summary>The readable failure for a reply whose scripted parent was never published.</summary>
     public const string ParentNotFiredMessage =
         "Fire the parent first: the scripted post this one replies to has not been published.";
@@ -98,6 +100,13 @@ public static class InjectBurstPlanner
 
         var due = DueAt(item, next, now);
         if (due > now)
+        {
+            return new InjectStep(InjectStepKind.Wait, next);
+        }
+
+        // The minimum gap holds against the LAST ACTUAL publish too, so nothing that perturbs the schedule (an edit
+        // that reorders a started burst, a Fire right after a hold) can put two posts closer than 3 s.
+        if (item.LastPublishedAt is { } last && now - last < MinGap)
         {
             return new InjectStep(InjectStepKind.Wait, next);
         }
