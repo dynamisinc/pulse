@@ -31,6 +31,12 @@
  *     `freeze` makes fire/retry a 409 ("The world is frozen") and suspends bursts;
  *     `engine` has no effect. Set it with `setPauseTier` (the queue read reports it
  *     as `pauseTier`, exactly like the server).
+ *   - STATUS CODES mirror story 06 (`InjectQueueService` / `InjectTransitions` /
+ *     `InjectItemValidator`): 400 = the write is invalid (shape, ranges, the burst-window rule,
+ *     unknown / foreign / repeated ids, bad reply references); 409 = the item's current state
+ *     refuses it (stale version, not editable, an edit that would change what already fired:
+ *     kind after release, or removing / changing a published post); 404 = unknown item.
+ *     The order of checks is the server's. Fire accepts `pending` OR `held`.
  *   - CHILD IDENTITY (contract amendment): on edit a child echoing its `id` keeps its
  *     identity; no `id` = new; an unfired child left out is removed. `replyTo: { sequence }`
  *     points at an EARLIER sibling (works at create) and is stored as that sibling's id.
@@ -49,7 +55,7 @@
 import { scenarioNow } from '@/core/clock'
 import { personaIdForHandle } from '@/features/personas/types'
 import { InjectConflictError, InjectNotFoundError, InjectValidationError } from './injectErrors'
-import { validateWrite } from './injectRules'
+import { INJECT_LIMITS, minimumBurstWindow, validateWrite } from './injectRules'
 import type { InjectService } from './injectService'
 import type {
   InjectAssigneesDto,
@@ -65,7 +71,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 /** No two burst posts closer than this (IQ-4, SOC-071 burst legibility). */
-export const MIN_BURST_GAP_SECONDS = 3
+export const MIN_BURST_GAP_SECONDS = INJECT_LIMITS.minGapSeconds
 
 /** A tiny deterministic PRNG (mulberry32) so jitter is stable across runs and tests. */
 function mulberry32(seed: number): () => number {
@@ -89,25 +95,25 @@ function hashString(text: string): number {
 }
 
 /**
- * Offsets (seconds from release) for `count` posts spread over `windowSeconds` with
- * +/-25% jitter: the first is 0, the rest strictly increasing with every gap
- * >= `MIN_BURST_GAP_SECONDS`. When the window is too tight for the count (20 posts
- * in 30 s) the 3-second floor wins and the burst simply runs longer than the window,
- * which is the safe direction (legibility over speed).
+ * Offsets (seconds after release) for `count` posts, the server's algorithm (story 06,
+ * `InjectBurstPacing`): the window's SLACK (window minus the mandatory 3 s per gap) is split at
+ * `count - 1` sorted uniform cut points, and post `k` is due at `3 * k + cut(k - 1)`. So the first
+ * is 0, offsets strictly increase, every gap is 3 s plus a non-negative share of the slack, and
+ * the last is due no later than the window. The write validator refuses a window that cannot hold
+ * the gaps (`minimumBurstWindow`); if one slips through (a direct call), the 3 s floor still
+ * wins and the burst runs longer than the window (legibility over speed).
  */
 export function planBurstOffsets(count: number, windowSeconds: number, seed = 1): number[] {
   const offsets: number[] = [0]
   if (count <= 1) return offsets
   const rand = mulberry32(seed)
-  const step = Math.max(MIN_BURST_GAP_SECONDS, windowSeconds / (count - 1))
-  // Accumulate in whole milliseconds so no gap ever rounds BELOW the 3 s floor.
-  let elapsedMs = 0
-  for (let i = 1; i < count; i++) {
-    const jitter = 1 + (rand() * 2 - 1) * 0.25
-    const gapMs = Math.max(MIN_BURST_GAP_SECONDS * 1000, Math.round(step * jitter * 1000))
-    elapsedMs += gapMs
-    offsets.push(elapsedMs / 1000)
-  }
+  const slack = Math.max(0, windowSeconds - minimumBurstWindow(count))
+  const cuts = Array.from({ length: count - 1 }, () => Math.floor(rand() * (slack + 1))).sort(
+    (a, b) => a - b,
+  )
+  cuts.forEach((cut, k) => {
+    offsets.push((k + 1) * MIN_BURST_GAP_SECONDS + cut)
+  })
   return offsets
 }
 
@@ -145,6 +151,10 @@ export interface InjectMock extends InjectService {
   /** Stops the runner timer (test cleanup). */
   dispose(): void
 }
+
+/** The server's readable refusals (story 06), so a detail shown in the console reads the same. */
+const FROZEN_MESSAGE = 'The world is frozen. Resume the exercise before firing.'
+const STALE_MESSAGE = 'Changed by someone else. Refresh to see the latest version.'
 
 /** Matches `resolveMockControllerIdentity('ex-mock-0001')` so "Mine" works in `npm run dev`. */
 export const MOCK_ME = 'human-controller-01'
@@ -349,9 +359,10 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
    * ordered by ARRAY POSITION (`sequence`). A write carrying the `id` of an existing child of
    * THIS item keeps that child's identity (status, fired post, replies pointing at it); one
    * without an `id` is new; an unknown / repeated / foreign `id` is a 400. An unfired child
-   * left out is removed; a fired one cannot be (400). A fired child is immutable ("corrected
-   * with takedown"). `replyTo: { sequence }` (an EARLIER sibling) resolves to that sibling's
-   * id here, so it survives later reorders, and works at CREATE time when no ids exist yet.
+   * left out is removed. A fired child is immutable ("corrected with takedown"): `doUpdate` has
+   * ALREADY refused (409) any edit that removes or changes one, so it is returned as is here.
+   * `replyTo: { sequence }` (an EARLIER sibling) resolves to that sibling's id here, so it
+   * survives later reorders, and works at CREATE time when no ids exist yet.
    */
   const buildPosts = (
     writes: InjectPostWrite[],
@@ -380,12 +391,6 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
       if (old?.status === 'failed') post.error = old.error
       return post
     })
-
-    if (existing.some(post => post.status === 'fired' && !claimed.has(post.id))) {
-      throw new InjectValidationError("A fired post can't be removed", {
-        posts: "A fired post can't be removed",
-      })
-    }
 
     built.forEach((post, index) => {
       const reply = post.replyTo
@@ -462,12 +467,13 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
 
   const doFire = (id: string, actorId: string): InjectItemDto => {
     const item = findItem(id)
-    if (pauseTier === 'freeze') throw conflict('The world is frozen', item)
-    if (item.status === 'fired' || item.status === 'firing') {
-      throw conflict('Already fired', item)
-    }
-    if (item.status !== 'pending') {
-      throw conflict(`A ${item.status} item can't be fired`, item)
+    if (pauseTier === 'freeze') throw conflict(FROZEN_MESSAGE, item)
+    // The server fires a `pending` OR a `held` item (a held item is released + fired directly);
+    // the console's UI still offers Release for a held row, but the API accepts both.
+    if (item.status === 'fired') throw conflict('This item has already been fired.', item)
+    if (item.status === 'firing') throw conflict('This item is already firing.', item)
+    if (item.status !== 'pending' && item.status !== 'held') {
+      throw conflict(`This item is ${item.status} and cannot be fired.`, item)
     }
     // A single post whose reply parent has not fired is refused up front (409).
     const only = item.posts[0]
@@ -475,7 +481,8 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
       const parent = findPost(only.replyTo.injectPostId)
       if (parent && parent.post.status !== 'fired') throw conflict('Fire the parent first', item)
     }
-    item.firedByHumanId = actorId
+    // Who pressed Fire the FIRST time stays on the item (a re-fired held burst keeps its starter).
+    item.firedByHumanId ??= actorId
     if (item.kind === 'post') {
       if (only) publish(item, only, actorId)
       settle(item)
@@ -483,7 +490,9 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
       release(item, actorId)
     }
     const first = item.posts.find(post => post.status === 'fired')
-    if (first?.firedScenarioTime) item.firedScenarioTime = first.firedScenarioTime
+    if (first?.firedScenarioTime && !item.firedScenarioTime) {
+      item.firedScenarioTime = first.firedScenarioTime
+    }
     touch(item)
     return view(item)
   }
@@ -491,7 +500,7 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
   const doHold = (id: string): InjectItemDto => {
     const item = findItem(id)
     if (item.status !== 'pending' && item.status !== 'firing') {
-      throw conflict(`A ${item.status} item can't be held`, item)
+      throw conflict(`This item is ${item.status} and cannot be held.`, item)
     }
     item.status = 'held'
     touch(item)
@@ -500,7 +509,7 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
 
   const doRelease = (id: string): InjectItemDto => {
     const item = findItem(id)
-    if (item.status !== 'held') throw conflict(`A ${item.status} item isn't held`, item)
+    if (item.status !== 'held') throw conflict(`This item is ${item.status} and is not held.`, item)
     const started = runtime.has(item.id) || item.firedCount > 0
     item.status = started ? 'firing' : 'pending'
     if (started) ensureTimer()
@@ -511,7 +520,7 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
   const doSkip = (id: string): InjectItemDto => {
     const item = findItem(id)
     if (item.status !== 'pending' && item.status !== 'held') {
-      throw conflict(`A ${item.status} item can't be skipped`, item)
+      throw conflict(`This item is ${item.status} and cannot be skipped.`, item)
     }
     for (const post of item.posts) if (post.status === 'pending') post.status = 'skipped'
     item.status = 'skipped'
@@ -523,7 +532,9 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
 
   const doUnskip = (id: string): InjectItemDto => {
     const item = findItem(id)
-    if (item.status !== 'skipped') throw conflict(`A ${item.status} item isn't skipped`, item)
+    if (item.status !== 'skipped') {
+      throw conflict(`This item is ${item.status} and is not skipped.`, item)
+    }
     for (const post of item.posts) if (post.status === 'skipped') post.status = 'pending'
     item.status = item.firedCount > 0 ? 'held' : 'pending'
     recount(item)
@@ -533,8 +544,10 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
 
   const doRetry = (id: string, actorId: string): InjectItemDto => {
     const item = findItem(id)
-    if (pauseTier === 'freeze') throw conflict('The world is frozen', item)
-    if (item.status !== 'failed') throw conflict(`A ${item.status} item can't be retried`, item)
+    if (pauseTier === 'freeze') throw conflict(FROZEN_MESSAGE, item)
+    if (item.status !== 'failed') {
+      throw conflict(`Only a failed item can be retried; this one is ${item.status}.`, item)
+    }
     for (const post of item.posts) {
       if (post.status === 'failed') {
         post.status = 'pending'
@@ -556,19 +569,120 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
 
   // ----- create / update / delete / reorder -------------------------------
 
-  const check = (write: InjectItemWrite): void => {
+  /**
+   * PHASE 1 (400): shape, ranges and lengths (the shared validator, incl. the burst-window rule),
+   * and a child id repeated in one write. Server: `InjectItemValidator.Parse`.
+   */
+  const parseWrite = (write: InjectItemWrite): void => {
     const errors = validateWrite(write)
     const first = Object.values(errors)[0]
     if (first) throw new InjectValidationError(first, errors)
-    if (write.assigneeId && !assignees.some(a => a.id === write.assigneeId)) {
-      throw new InjectValidationError('Assignee is not assigned to this exercise', {
-        assigneeId: 'Assignee is not assigned to this exercise',
-      })
+    const seen = new Set<string>()
+    write.posts.forEach((post, index) => {
+      if (post.id === undefined) return
+      if (seen.has(post.id)) {
+        const message = `Post ${index + 1}: the same post appears twice.`
+        throw new InjectValidationError(message, { [`posts.${index}.id`]: message })
+      }
+      seen.add(post.id)
+    })
+  }
+
+  /**
+   * PHASE 2 (400): the ids the write names, against what exists in this exercise — the assignee,
+   * each child `id` (an existing child of THIS item; on create there is none, so any id is refused;
+   * a foreign or unknown id gets the same message), and each `{ injectPostId }` reply (a sibling
+   * echoed EARLIER in the write, or a post of ANOTHER live item). Server: `CheckReferences`.
+   */
+  const checkReferences = (write: InjectItemWrite, edited?: InjectItemDto): void => {
+    const refuse = (field: string, message: string): never => {
+      throw new InjectValidationError(message, { [field]: message })
     }
+    if (write.assigneeId && !assignees.some(a => a.id === write.assigneeId)) {
+      refuse('assigneeId', 'assigneeId does not name a staff member assigned to this exercise.')
+    }
+    const echoed = write.posts.map(post => post.id)
+    write.posts.forEach((post, index) => {
+      const label = `Post ${index + 1}`
+      if (post.id !== undefined && !edited?.posts.some(child => child.id === post.id)) {
+        refuse(`posts.${index}.id`, `${label}: id does not name a post of this item.`)
+      }
+      const reply = post.replyTo
+      if (!reply || !('injectPostId' in reply)) return
+      const sibling = echoed.indexOf(reply.injectPostId)
+      if (sibling >= 0) {
+        if (sibling >= index) {
+          refuse(
+            `posts.${index}.replyTo`,
+            `${label}: replyTo.injectPostId must name an earlier post when it is in the same item.`,
+          )
+        }
+        return
+      }
+      const target = findPost(reply.injectPostId)
+      if (!target || target.item.id === edited?.id) {
+        refuse(
+          `posts.${index}.replyTo`,
+          `${label}: replyTo.injectPostId does not name a scripted post in this exercise.`,
+        )
+      }
+    })
+  }
+
+  /** What a write's `replyTo` points at, as ids (a `{ sequence }` becomes its sibling's id). */
+  const resolveReply = (
+    write: InjectItemWrite,
+    index: number,
+  ): { inject?: string; post?: string } => {
+    const reply = write.posts[index]?.replyTo
+    if (!reply) return {}
+    if ('postId' in reply) return { post: reply.postId }
+    if ('injectPostId' in reply) return { inject: reply.injectPostId }
+    return { inject: write.posts[reply.sequence - 1]?.id }
+  }
+
+  /**
+   * PHASE 3 (409): would this edit rewrite what participants already saw? Once an item has fired
+   * (been released) its kind is fixed, and every published child must be echoed back by id with
+   * its content unchanged — a published post is corrected with a takedown, never by editing it.
+   * Unpublished children may be changed, reordered or removed freely. Server:
+   * `InjectTransitions.WhyEditWouldRewriteHistory`.
+   */
+  const whyEditWouldRewriteHistory = (
+    item: InjectItemDto,
+    write: InjectItemWrite,
+  ): string | undefined => {
+    if (item.firedByHumanId !== undefined && write.kind !== item.kind) {
+      return "An item's kind cannot change once it has fired."
+    }
+    const echoed = write.posts.map(post => post.id)
+    for (const published of item.posts.filter(post => post.status === 'fired')) {
+      const index = echoed.indexOf(published.id)
+      if (index < 0) {
+        return `Post ${published.sequence} was already published and cannot be removed.`
+      }
+      const source = write.posts[index]
+      const reply = resolveReply(write, index)
+      const stored = published.replyTo
+      const media = (list?: { mediaId: string; alt: string }[]): string =>
+        JSON.stringify((list ?? []).map(m => [m.mediaId, m.alt]))
+      const unchanged =
+        source?.personaId === published.personaId &&
+        source.text === published.text &&
+        media(source.media) === media(published.media) &&
+        reply.inject === (stored && 'injectPostId' in stored ? stored.injectPostId : undefined) &&
+        reply.post === (stored && 'postId' in stored ? stored.postId : undefined) &&
+        source.engagementBaseline?.like === published.engagementBaseline?.like &&
+        source.engagementBaseline?.repost === published.engagementBaseline?.repost &&
+        source.engagementBaseline?.reply === published.engagementBaseline?.reply
+      if (!unchanged) return `Post ${index + 1} was already published and cannot be changed.`
+    }
+    return undefined
   }
 
   const doCreate = (write: InjectItemWrite, actorId: string): InjectItemDto => {
-    check(write)
+    parseWrite(write)
+    checkReferences(write)
     const posts = buildPosts(write.posts)
     const item: InjectItemDto = {
       id: nextId('inj'),
@@ -591,14 +705,23 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     return view(item)
   }
 
+  /**
+   * The server's order of checks (`InjectQueueService.UpdateAsync`): unknown item 404 -> invalid
+   * write 400 -> stale version 409 -> not editable 409 -> bad references 400 -> would rewrite
+   * history 409. (A post "being published right now" cannot be simulated: the mock publishes
+   * synchronously, so there is never a claim in flight.)
+   */
   const doUpdate = (id: string, write: InjectItemWrite, version: number): InjectItemDto => {
     const item = findItem(id)
-    if (item.version !== version) throw conflict('This item was changed by someone else', item)
+    parseWrite(write)
+    if (item.version !== version) throw conflict(STALE_MESSAGE, item)
     if (item.status !== 'pending' && item.status !== 'held' && item.status !== 'failed') {
-      throw conflict(`A ${item.status} item can't be edited`, item)
+      throw conflict(`This item is ${item.status} and is read-only.`, item)
     }
-    check(write)
-    // Build (and validate) the children BEFORE touching the item: a 400 changes nothing.
+    checkReferences(write, item)
+    const history = whyEditWouldRewriteHistory(item, write)
+    if (history) throw conflict(history, item)
+    // Build the children BEFORE touching the item, so a refusal changes nothing.
     const posts = buildPosts(write.posts, item.posts)
     item.kind = write.kind
     item.title = write.title.trim()
@@ -618,12 +741,13 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     return view(item)
   }
 
+  /** Deletable: pending, held, skipped or failed (never fired / firing). Stale version first. */
   const doRemove = (id: string, version: number): void => {
     const item = findItem(id)
+    if (item.version !== version) throw conflict(STALE_MESSAGE, item)
     if (item.status === 'fired' || item.status === 'firing') {
-      throw conflict(`A ${item.status} item can't be deleted`, item)
+      throw conflict(`This item is ${item.status} and cannot be deleted.`, item)
     }
-    if (item.version !== version) throw conflict('This item was changed by someone else', item)
     items = items.filter(candidate => candidate.id !== id)
     runtime.delete(id)
     renumber()
@@ -636,7 +760,7 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
       new Set(ids).size === ids.length &&
       ids.every(id => known.has(id))
     if (!valid) {
-      throw new InjectValidationError('The new order must list every item exactly once')
+      throw new InjectValidationError('ids must list every item in the queue exactly once.')
     }
     ids.forEach((id, index) => {
       findItem(id).order = index + 1

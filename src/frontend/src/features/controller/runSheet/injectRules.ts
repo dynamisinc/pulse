@@ -25,7 +25,13 @@
  * No `exerciseId` anywhere: the server scopes everything (COR-001).
  */
 
-import type { InjectItemDto, InjectItemWrite, InjectPostDto, InjectStatus } from './types'
+import type {
+  InjectItemDto,
+  InjectItemWrite,
+  InjectPostDto,
+  InjectPostStatus,
+  InjectStatus,
+} from './types'
 
 /** Authoring limits (story 06 "Author and edit"). Mirrors the server; never loosens it. */
 export const INJECT_LIMITS = {
@@ -37,6 +43,8 @@ export const INJECT_LIMITS = {
   windowMin: 30,
   windowMax: 600,
   windowDefault: 90,
+  /** No two burst posts closer than this (IQ-4); a window must be able to hold every gap. */
+  minGapSeconds: 3,
   mediaMax: 4,
   altMax: 1000,
   baselineMax: 1_000_000,
@@ -63,6 +71,20 @@ export const INJECT_STATUSES: readonly InjectStatus[] = [
   'skipped',
   'failed',
 ]
+
+/**
+ * The shortest window that holds `postCount` posts at the minimum gap: `3 x (posts - 1)` seconds
+ * (story 06's rule: 20 posts need at least 57 s). Only binds above the 30 s floor (12..20 posts).
+ */
+export function minimumBurstWindow(postCount: number): number {
+  return Math.max(0, postCount - 1) * INJECT_LIMITS.minGapSeconds
+}
+
+export function isInjectPostStatus(value: unknown): value is InjectPostStatus {
+  return typeof value === 'string' && (POST_STATUSES as readonly string[]).includes(value)
+}
+
+const POST_STATUSES: readonly InjectPostStatus[] = ['pending', 'fired', 'skipped', 'failed']
 
 export function isInjectStatus(value: unknown): value is InjectStatus {
   return typeof value === 'string' && (INJECT_STATUSES as readonly string[]).includes(value)
@@ -242,6 +264,10 @@ export function validateWrite(write: InjectItemWrite): Record<string, string> {
     const w = write.burstWindowSeconds
     if (w !== undefined && (!isInteger(w) || w < L.windowMin || w > L.windowMax)) {
       errors.burstWindowSeconds = `Window must be ${L.windowMin} to ${L.windowMax} seconds`
+    } else if (w !== undefined && w < minimumBurstWindow(count)) {
+      // Story 06: the no-gap-under-3-s guarantee is only satisfiable if the window holds every gap.
+      errors.burstWindowSeconds =
+        `A ${count}-post burst needs at least ${minimumBurstWindow(count)} seconds`
     }
   }
 

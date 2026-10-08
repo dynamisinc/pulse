@@ -52,7 +52,13 @@ import {
   type Draft,
   type DraftPost,
 } from './injectDraft'
-import { INJECT_LIMITS, countCodePoints, excerpt, plannedLabel } from './injectRules'
+import {
+  INJECT_LIMITS,
+  countCodePoints,
+  excerpt,
+  minimumBurstWindow,
+  plannedLabel,
+} from './injectRules'
 import type { InjectAssigneesDto, InjectItemDto, InjectItemWrite, InjectKind } from './types'
 
 export type EditorMode = 'create' | 'edit' | 'view'
@@ -132,6 +138,10 @@ export function InjectItemEditor({
   const rootRef = useRef<HTMLDivElement>(null)
 
   const burst = draft.kind === 'burst'
+  // Once an item has been released (any child fired, or Fire was pressed), its kind is fixed: the
+  // server answers a kind change with 409 (it would rewrite what participants saw).
+  const kindLocked =
+    mode === 'edit' && (draft.posts.some(post => post.fired === true) || Boolean(item?.firedByHumanId))
   const shownPosts = burst ? draft.posts : draft.posts.slice(0, 1)
   const changedUnderYou =
     mode === 'edit' && item !== undefined && liveItem !== undefined && liveItem.version !== item.version
@@ -197,7 +207,7 @@ export function InjectItemEditor({
 
   const setKind = (kind: InjectKind): void =>
     setDraft(previous => {
-      if (kind === previous.kind) return previous
+      if (kind === previous.kind || kindLocked) return previous
       // Posts typed in the other mode are kept; a burst needs at least two.
       const posts = [...previous.posts]
       while (kind === 'burst' && posts.length < INJECT_LIMITS.burstMinPosts) posts.push(blankPost())
@@ -326,7 +336,7 @@ export function InjectItemEditor({
           <FormControlLabel
             key={kind}
             value={kind}
-            disabled={readOnly}
+            disabled={readOnly || kindLocked}
             sx={{ m: 0, '& .MuiFormControlLabel-label': { fontSize: 12.5, color: chrome.ink } }}
             control={
               <Radio
@@ -338,6 +348,11 @@ export function InjectItemEditor({
           />
         ))}
       </RadioGroup>
+      {kindLocked && !readOnly ? (
+        <Box data-testid="kind-locked-note" sx={{ fontSize: 11.5, color: chrome.inkMuted }}>
+          The item type is fixed once it has fired.
+        </Box>
+      ) : null}
 
       <RunSheetField
         id={`${ID}-title`}
@@ -403,7 +418,7 @@ export function InjectItemEditor({
           onChange={value => patch({ windowSeconds: value })}
           disabled={readOnly}
           error={errors.burstWindowSeconds}
-          hint={`${INJECT_LIMITS.windowMin} to ${INJECT_LIMITS.windowMax}; posts spread across it, 3 s apart at least`}
+          hint={`${Math.max(INJECT_LIMITS.windowMin, minimumBurstWindow(draft.posts.length))} to ${INJECT_LIMITS.windowMax}; posts are at least 3 s apart`}
           inputProps={{ min: INJECT_LIMITS.windowMin, max: INJECT_LIMITS.windowMax, step: 1 }}
         />
       ) : null}

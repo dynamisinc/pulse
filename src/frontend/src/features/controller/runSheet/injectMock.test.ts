@@ -82,9 +82,18 @@ describe('planBurstOffsets', () => {
     expect(new Set(gaps.map(g => g.toFixed(2))).size).toBeGreaterThan(1)
   })
 
-  it('a window too tight for the count is floored at 3 s per gap (legibility over speed)', () => {
+  it('a window too tight for the count is floored at 3 s per gap (a direct call; the write is refused)', () => {
     const offsets = planBurstOffsets(20, 30, 1)
     expect((offsets[19] ?? 0)).toBeGreaterThanOrEqual(19 * MIN_BURST_GAP_SECONDS)
+  })
+
+  it('the last post is due no later than the window; a window with no slack is exactly 3 s apart', () => {
+    for (const [count, window] of [[2, 30], [6, 90], [12, 40], [20, 57], [20, 600]] as const) {
+      const offsets = planBurstOffsets(count, window, 11)
+      expect(offsets[offsets.length - 1] ?? 0).toBeLessThanOrEqual(window)
+    }
+    // 20 posts need at least 57 s: with exactly 57 there is no slack, so every gap is exactly 3 s.
+    expect(planBurstOffsets(20, 57, 4)).toEqual(Array.from({ length: 20 }, (_, k) => k * 3))
   })
 
   it('is deterministic for a seed and a single post is just [0]', () => {
@@ -250,9 +259,17 @@ describe('fire + the state machine', () => {
     await conflictOf(mock.hold(fired.id)) // fired is terminal
     await conflictOf(mock.skip(fired.id))
     await conflictOf(mock.fire(fired.id))
-    await mock.hold(pending.id)
-    await conflictOf(mock.fire(pending.id)) // held items are released, not fired
     await expect(mock.fire('ghost')).rejects.toBeInstanceOf(InjectNotFoundError)
+  })
+
+  it('fire accepts a HELD item (the server releases + fires it directly), though the UI offers Release', async () => {
+    const mock = makeMock([single('A')])
+    const [first] = mock.snapshot().items
+    if (!first) throw new Error('seed missing')
+    await mock.hold(first.id)
+    const fired = await mock.fire(first.id)
+    expect(fired.status).toBe('fired')
+    expect(fired.firedByHumanId).toBe(mock.me)
   })
 
   it('every state change bumps the version', async () => {
@@ -429,7 +446,7 @@ describe('burst pacing (fake timers)', () => {
 
     mock.setPauseTier('freeze')
     const conflict = await conflictOf(mock.fire(a.id))
-    expect(conflict.detail).toBe('The world is frozen')
+    expect(conflict.detail).toContain('The world is frozen')
     await conflictOf(mock.retry(a.id))
     vi.advanceTimersByTime(300_000)
     expect(item(mock, b.id).firedCount).toBe(during) // suspended
@@ -628,35 +645,237 @@ describe('child identity on PUT + sibling replies (contract amendment)', () => {
     expect(unchanged.posts.map(p => p.id)).toEqual(created.posts.map(p => p.id))
   })
 
-  it('a fired child is immutable and cannot be left out (400)', async () => {
+  /** A 3-post burst released and held mid-way: `one` has fired, the rest are pending (editable). */
+  async function heldMidBurst() {
     const mock = makeMock()
     const created = await mock.create(three())
-    const [p1, p2, p3] = created.posts
-    if (!p1 || !p2 || !p3) throw new Error('fixture')
     await mock.fire(created.id) // releases the burst: `one` fires immediately
-    await mock.hold(created.id) // held mid-burst, so it is editable again
+    await mock.hold(created.id)
     const held = item(mock, created.id)
     expect(held.posts[0]?.status).toBe('fired')
+    const [p1, p2, p3] = held.posts
+    if (!p1 || !p2 || !p3) throw new Error('fixture')
+    // The write that changes nothing: every child echoed with its content as stored.
+    const unchanged = (): InjectItemWrite => ({
+      ...three(),
+      posts: [
+        { ...post('one'), id: p1.id },
+        { ...post('two'), id: p2.id, replyTo: { sequence: 1 } },
+        { ...post('three'), id: p3.id },
+      ],
+    })
+    return { mock, held, p1, p2, p3, unchanged }
+  }
 
-    const omitted = await mock
-      .update(created.id, { ...three(), posts: [{ ...post('two'), id: p2.id }, { ...post('three'), id: p3.id }] }, held.version)
-      .catch((e: unknown) => e)
-    expect(omitted).toBeInstanceOf(InjectValidationError)
+  it('a published post cannot be REMOVED by an edit: 409 carrying the current item', async () => {
+    const { mock, held, p2, p3 } = await heldMidBurst()
+    const conflict = await conflictOf(
+      mock.update(
+        held.id,
+        { ...three(), posts: [{ ...post('two'), id: p2.id }, { ...post('three'), id: p3.id }] },
+        held.version,
+      ),
+    )
+    expect(conflict.detail).toBe('Post 1 was already published and cannot be removed.')
+    expect(conflict.item?.version).toBe(held.version) // the item did not change
+    expect(item(mock, held.id).posts).toHaveLength(3)
+    mock.dispose()
+  })
 
-    const edited = await mock.update(
-      created.id,
+  it('a published post cannot be CHANGED by an edit (text, persona, media, reply, baseline): 409', async () => {
+    const { mock, held, p1, unchanged } = await heldMidBurst()
+    const changes: ((write: InjectItemWrite) => void)[] = [
+      write => {
+        write.posts[0] = { ...post('TAMPERED'), id: p1.id }
+      },
+      write => {
+        write.posts[0] = { ...post('one'), id: p1.id, personaId: 'persona-newsline7' }
+      },
+      write => {
+        write.posts[0] = { ...post('one'), id: p1.id, media: [{ mediaId: 'm', alt: 'a' }] }
+      },
+      write => {
+        write.posts[0] = { ...post('one'), id: p1.id, replyTo: { postId: 'some-post' } }
+      },
+      write => {
+        write.posts[0] = { ...post('one'), id: p1.id, engagementBaseline: { like: 5 } }
+      },
+    ]
+    for (const change of changes) {
+      const write = unchanged()
+      change(write)
+      const conflict = await conflictOf(mock.update(held.id, write, held.version))
+      expect(conflict.detail).toBe('Post 1 was already published and cannot be changed.')
+    }
+    expect(item(mock, held.id).posts[0]?.text).toBe('one')
+    mock.dispose()
+  })
+
+  it('echoing every published post unchanged is fine, and unpublished posts may change freely', async () => {
+    const { mock, held, p1, p2, p3 } = await heldMidBurst()
+    const updated = await mock.update(
+      held.id,
       {
         ...three(),
         posts: [
-          { ...post('TAMPERED'), id: p1.id },
-          { ...post('two'), id: p2.id, replyTo: { sequence: 1 } },
-          { ...post('three'), id: p3.id },
+          { ...post('one'), id: p1.id },
+          { ...post('three, edited'), id: p3.id },
+          { ...post('two, moved'), id: p2.id },
+          post('a new one'),
         ],
       },
       held.version,
     )
-    expect(edited.posts[0]?.text).toBe('one') // the fired post is not rewritten
-    expect(edited.posts[0]?.status).toBe('fired')
-    mock.dispose() // the release above started the (real-timer) burst runner
+    expect(updated.posts.map(p => p.text)).toEqual(['one', 'three, edited', 'two, moved', 'a new one'])
+    expect(updated.posts[0]?.status).toBe('fired')
+    mock.dispose()
+  })
+
+  it('the KIND cannot change once the item has fired (409); before release it can', async () => {
+    const { mock, held, unchanged } = await heldMidBurst()
+    const asSingle: InjectItemWrite = { ...unchanged(), kind: 'post', posts: unchanged().posts.slice(0, 1) }
+    const conflict = await conflictOf(mock.update(held.id, asSingle, held.version))
+    expect(conflict.detail).toBe("An item's kind cannot change once it has fired.")
+    mock.dispose()
+
+    const fresh = makeMock([single('Solo')])
+    const [solo] = fresh.snapshot().items
+    if (!solo) throw new Error('seed missing')
+    const asBurst = await fresh.update(
+      solo.id,
+      { ...burst(2, 60), posts: [post('a'), post('b')] },
+      solo.version,
+    )
+    expect(asBurst.kind).toBe('burst') // never released: the kind is still editable
+  })
+
+  it('a failed first release counts as released: its kind is fixed too (409)', async () => {
+    const mock = makeMock([single('Solo')])
+    const [solo] = mock.snapshot().items
+    if (!solo) throw new Error('seed missing')
+    mock.failNextPublish('Media asset not found')
+    const failed = await mock.fire(solo.id)
+    expect(failed.status).toBe('failed')
+    await conflictOf(
+      mock.update(failed.id, { ...burst(2, 60), posts: [post('a'), post('b')] }, failed.version),
+    )
+  })
+})
+
+describe('status codes mirror story 06 (400 = invalid write, 409 = the item refuses it)', () => {
+  const body = (): InjectItemWrite => single('Item')
+  const inject = (id: string): InjectPostWrite => post('reply', { replyTo: { injectPostId: id } })
+
+  it('checks in the server order: invalid write 400 before stale version 409 before not-editable 409', async () => {
+    const mock = makeMock([single('A')])
+    const [first] = mock.snapshot().items
+    if (!first) throw new Error('seed missing')
+    // Invalid AND stale: the server validates first, so it is a 400.
+    const invalid = await mock
+      .update(first.id, { ...body(), title: '' }, first.version + 9)
+      .catch((e: unknown) => e)
+    expect(invalid).toBeInstanceOf(InjectValidationError)
+    // Stale AND not editable (fired): the version is checked first, so the stale message wins.
+    await mock.fire(first.id)
+    const stale = await conflictOf(mock.update(first.id, body(), 1))
+    expect(stale.detail).toMatch(/Changed by someone else/)
+    // Current version but fired: read-only.
+    const readOnly = await conflictOf(mock.update(first.id, body(), item(mock, first.id).version))
+    expect(readOnly.detail).toBe('This item is fired and is read-only.')
+  })
+
+  it('a stale delete is a 409; delete is refused for fired/firing and ALLOWED for failed (as on the server)', async () => {
+    const mock = makeMock([single('Fired'), single('Failed'), single('Pending')])
+    const [fired, failed, pending] = mock.snapshot().items
+    if (!fired || !failed || !pending) throw new Error('seed missing')
+    await mock.fire(fired.id)
+    mock.failNextPublish('boom')
+    await mock.fire(failed.id)
+    const stale = await conflictOf(mock.remove(pending.id, pending.version + 3))
+    expect(stale.detail).toMatch(/Changed by someone else/)
+    const refused = await conflictOf(mock.remove(fired.id, item(mock, fired.id).version))
+    expect(refused.detail).toBe('This item is fired and cannot be deleted.')
+    await expect(mock.remove(failed.id, item(mock, failed.id).version)).resolves.toBeUndefined()
+  })
+
+  it('bad references are 400 (not 409): a foreign child id, an unknown assignee, a dangling or later reply', async () => {
+    const mock = makeMock([single('Other')])
+    const created = await mock.create(burst(3, 60))
+    const [p1, p2] = created.posts
+    if (!p1 || !p2) throw new Error('fixture')
+    const attempts: Record<string, InjectItemWrite> = {
+      assignee: { ...body(), assigneeId: 'not-staff' },
+      dangling: { ...burst(2, 60), posts: [post('a'), inject('ghost')] },
+      // A sibling named by id must come EARLIER in the new order.
+      later: {
+        ...burst(2, 60),
+        posts: [{ ...inject(p2.id), id: p1.id }, { ...post('b'), id: p2.id }],
+      },
+    }
+    for (const [name, write] of Object.entries(attempts)) {
+      const error = await mock.update(created.id, write, created.version).catch((e: unknown) => e)
+      expect(error, name).toBeInstanceOf(InjectValidationError)
+    }
+    // On CREATE there are no children yet, so any id is refused.
+    await expect(mock.create({ ...body(), posts: [{ ...post('x'), id: 'whatever' }] }))
+      .rejects.toBeInstanceOf(InjectValidationError)
+    // A reply to a post of ANOTHER item is fine; to a child this edit removes is not.
+    const other = mock.snapshot().items.find(i => i.title === 'Other')
+    const otherPost = other?.posts[0]?.id
+    if (!otherPost) throw new Error('fixture')
+    await expect(
+      mock.update(created.id, { ...burst(2, 60), posts: [post('a'), inject(otherPost)] }, created.version),
+    ).resolves.toBeDefined()
+    const removed = await mock
+      .update(
+        created.id,
+        { ...burst(2, 60), posts: [post('a'), inject(p1.id)] },
+        item(mock, created.id).version,
+      )
+      .catch((e: unknown) => e)
+    expect(removed).toBeInstanceOf(InjectValidationError)
+  })
+
+  it('an unknown item is 404; a bad reorder is 400', async () => {
+    const mock = makeMock([single('A')])
+    await expect(mock.update('ghost', body(), 1)).rejects.toBeInstanceOf(InjectNotFoundError)
+    await expect(mock.remove('ghost', 1)).rejects.toBeInstanceOf(InjectNotFoundError)
+    await expect(mock.reorder([])).rejects.toBeInstanceOf(InjectValidationError)
+  })
+})
+
+describe('the burst window must hold every 3 s gap (story 06: window >= 3 x (posts - 1))', () => {
+  const n = (count: number, window?: number): InjectItemWrite => ({
+    kind: 'burst',
+    title: 'B',
+    ...(window === undefined ? {} : { burstWindowSeconds: window }),
+    posts: Array.from({ length: count }, (_, i) => post(`p${i}`)),
+  })
+
+  it('20 posts need at least 57 s: 56 is a 400 with a clear message, 57 is accepted', async () => {
+    const mock = makeMock()
+    const error = (await mock.create(n(20, 56)).catch((e: unknown) => e)) as InjectValidationError
+    expect(error).toBeInstanceOf(InjectValidationError)
+    expect(error.fieldErrors.burstWindowSeconds).toBe('A 20-post burst needs at least 57 seconds')
+    await expect(mock.create(n(20, 57))).resolves.toBeDefined()
+  })
+
+  it('binds only above the 30 s floor: 11 posts fit in 30 s, 12 need 33', async () => {
+    const mock = makeMock()
+    await expect(mock.create(n(11, 30))).resolves.toBeDefined()
+    await expect(mock.create(n(12, 32))).rejects.toBeInstanceOf(InjectValidationError)
+    await expect(mock.create(n(12, 33))).resolves.toBeDefined()
+  })
+
+  it('the default window (90 s) always holds a full burst', async () => {
+    const mock = makeMock()
+    await expect(mock.create(n(20))).resolves.toBeDefined()
+  })
+
+  it('is enforced on edit as well', async () => {
+    const mock = makeMock()
+    const created = await mock.create(n(20, 60))
+    await expect(mock.update(created.id, n(20, 40), created.version))
+      .rejects.toBeInstanceOf(InjectValidationError)
   })
 })
