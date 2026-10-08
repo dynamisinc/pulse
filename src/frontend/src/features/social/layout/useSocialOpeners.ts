@@ -26,14 +26,20 @@
  * parsed into one), so it asks the shared directory. A card renders its author from
  * the cast its OWN `usePersonas()` read, which can settle a beat before the
  * directory's -- so a tap in that window is not dropped: while the directory is
- * still loading the request is remembered and completed the moment it resolves. A
- * persona the settled directory does not know is a no-op (no fabricated URL).
+ * still loading the request is remembered and completed the moment it resolves --
+ * but ONLY if the user has not navigated since: the tap is stamped with the
+ * adapter's current location key and discarded on a mismatch, so a late-resolving
+ * directory can never yank the user to a profile they have already left the page
+ * for. A persona the settled directory does not know is a no-op (no fabricated
+ * URL), and so is one whose handle is RESERVED (`home`, `staff`, ...): such a
+ * handle would resolve to a redirect, not a profile, so linking to it would only
+ * bounce (COR-004).
  *
  * World: participant. No COBRA, no MUI.
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import { socialPaths, useSocialNavigate } from './socialNavigation'
+import { isReservedSegment, socialPaths, useSocialNavigate } from './socialNavigation'
 import { useSocialDirectory, type SocialDirectory } from './socialDirectory'
 
 export interface SocialOpeners {
@@ -46,7 +52,7 @@ export interface SocialOpeners {
 }
 
 export function useSocialOpeners(): SocialOpeners {
-  const { navigate } = useSocialNavigate()
+  const { navigate, getLocationKey } = useSocialNavigate()
   const directory = useSocialDirectory()
 
   const directoryRef = useRef<SocialDirectory>(directory)
@@ -54,15 +60,19 @@ export function useSocialOpeners(): SocialOpeners {
     directoryRef.current = directory
   })
 
-  // A profile tap that arrived while the directory was still loading (see header).
-  const pendingProfileId = useRef<string | undefined>(undefined)
+  // A profile tap that arrived while the directory was still loading, stamped with the
+  // location it was made on (see the module header).
+  const pendingProfile = useRef<{ personaId: string; locationKey: string } | undefined>(undefined)
   useEffect(() => {
-    const pending = pendingProfileId.current
+    const pending = pendingProfile.current
     if (pending === undefined || directory.loading) return
-    pendingProfileId.current = undefined
-    const persona = directory.findById(pending)
-    if (persona !== undefined) navigate(socialPaths.profile(persona.handle))
-  }, [directory, navigate])
+    pendingProfile.current = undefined
+    if (pending.locationKey !== getLocationKey()) return // the user has moved on
+    const persona = directory.findById(pending.personaId)
+    if (persona !== undefined && !isReservedSegment(persona.handle)) {
+      navigate(socialPaths.profile(persona.handle))
+    }
+  }, [directory, navigate, getLocationKey])
 
   return useMemo<SocialOpeners>(
     () => ({
@@ -70,11 +80,14 @@ export function useSocialOpeners(): SocialOpeners {
       openProfile: personaId => {
         const current = directoryRef.current
         const persona = current.findById(personaId)
-        if (persona !== undefined) navigate(socialPaths.profile(persona.handle))
-        else if (current.loading) pendingProfileId.current = personaId
+        if (persona !== undefined) {
+          if (!isReservedSegment(persona.handle)) navigate(socialPaths.profile(persona.handle))
+        } else if (current.loading) {
+          pendingProfile.current = { personaId, locationKey: getLocationKey() }
+        }
       },
       openHashtag: tag => navigate(socialPaths.hashtag(tag)),
     }),
-    [navigate],
+    [navigate, getLocationKey],
   )
 }

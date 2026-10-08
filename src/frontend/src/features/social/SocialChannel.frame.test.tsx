@@ -20,8 +20,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetExerciseClock } from '@/core/clock'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
-import { RouterProbe } from './layout/RouterProbe'
-import { renderChannel } from './layout/testHarness'
+import { RouterProbe } from './layout/RouterProbe.testUtils'
+import { renderChannel } from './layout/renderChannel.testUtils'
 
 const endSessionMock = vi.hoisted(() => vi.fn<() => Promise<void>>())
 vi.mock('@/core/auth', async importOriginal => ({
@@ -162,6 +162,42 @@ describe('compose modal from the Post button', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
+  it('closes when the route changes under it, and focus goes to the NEW page heading (L7)', async () => {
+    const user = userEvent.setup()
+    // Two entries so browser Back has somewhere to go; the dialog is opened on the second.
+    renderChannel({ entries: ['/home', '/explore'], beside: <RouterProbe /> })
+    await screen.findByTestId('explore-page')
+
+    const post = await screen.findByTestId('nav-post-button')
+    await user.click(post)
+    await screen.findByRole('dialog')
+    // A half-written draft: route-change closing is unconditional, unlike Esc/backdrop.
+    await user.type(screen.getByRole('textbox', { name: 'Post text' }), 'unsent')
+
+    await user.click(screen.getByTestId('probe-back'))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Home' })).toHaveFocus())
+    // The frame is no longer inert and the modal did not pull focus back onto Post.
+    expect(post.closest('[inert]')).toBeNull()
+    expect(post).not.toHaveFocus()
+  })
+
+  it('does not reopen when the user comes back to the page it was opened on', async () => {
+    const user = userEvent.setup()
+    renderChannel({ entries: ['/home', '/explore'], beside: <RouterProbe /> })
+    await screen.findByTestId('explore-page')
+    await user.click(await screen.findByTestId('nav-post-button'))
+    await screen.findByRole('dialog')
+
+    await user.click(screen.getByTestId('probe-back'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await user.click(screen.getByTestId('probe-forward'))
+    await screen.findByTestId('explore-page')
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
   it('has NO Post button in a read-only mount (absent, never disabled)', async () => {
     renderChannel({ variant: 'readOnly' })
     await feedReady()
@@ -183,6 +219,14 @@ describe('account card', () => {
     const card = await screen.findByTestId('account-card')
     expect(within(card).getByText('Dana Reyes')).toBeInTheDocument()
     expect(within(card).getByText('@dreyes_fh')).toBeInTheDocument()
+  })
+
+  it('never flashes a bare Sign-out-only card while the persona is still loading', async () => {
+    renderChannel()
+    // The FIRST card to appear is already the full one: no bare card swapped out later.
+    const card = await screen.findByTestId('account-card')
+    expect(card).toHaveAttribute('data-has-persona', 'true')
+    expect(within(card).getByText('Dana Reyes')).toBeInTheDocument()
   })
 
   it('a read-only mount still offers Sign out (only a staff preview must not)', async () => {

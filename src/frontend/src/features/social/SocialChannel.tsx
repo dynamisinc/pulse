@@ -44,6 +44,14 @@
  *    (`useRouteFocus`) -- this replaces the old feed<->detail focus effect.
  *  - While the compose modal is open, the frame behind it is `inert`.
  *
+ * ONE SIGN OUT. The shell renders a generic `ParticipantSignOutControl` row above
+ * every channel. This channel has its own (the account card), so while the card is
+ * on screen it CLAIMS the shell's account control (`useClaimShellAccountControl`)
+ * and the shell drops its row: one Sign out on the social channel, and the channel
+ * no longer starts a strip lower than it has to. Other channels make no claim and
+ * keep the shell's row. A `preview` / `kiosk` mount shows no account card, so it
+ * makes no claim either.
+ *
  * ABSENT, NOT DISABLED (COR-015 / D1-011). The **Post** button exists only when the
  * shell variant grants interactive affordances AND the session can post; the account
  * card exists only in a `full` / `readOnly` mount (never a staff `preview`); the
@@ -59,6 +67,7 @@
 import { useCallback, useRef, useState, type MouseEvent } from 'react'
 import { useSession } from '@/core/auth'
 import {
+  useClaimShellAccountControl,
   useShellContext,
   affordancesAvailable,
 } from '@/features/participant-shell/mountContract'
@@ -99,7 +108,7 @@ export function SocialChannel() {
 function SocialFrame() {
   const { variant } = useShellContext()
   const session = useSession()
-  const { self } = useSocialDirectory()
+  const { self, loading: directoryLoading } = useSocialDirectory()
   const { location, kind } = useSocialNavigation()
 
   const mainRef = useRef<HTMLElement>(null)
@@ -117,6 +126,25 @@ function SocialFrame() {
   // A staff `preview` / `kiosk` mount must never expose a sign-out (it would sign
   // the STAFF user out); only a real participant mount gets the account card.
   const showAccount = variant === 'full' || variant === 'readOnly'
+  // The account card IS this channel's sign-out: tell the shell not to add its own.
+  useClaimShellAccountControl(showAccount)
+  // A persona-bound session whose cast has not loaded yet has no name/avatar to show;
+  // drawing the bare Sign-out-only card for those few frames and then swapping it for
+  // the full one would flash and shift the rail (and remount the button under a
+  // pointer). Hold the card back until the persona resolves. If the cast FAILS to
+  // load (`loading` false, `self` still unknown) the bare card is the right fallback.
+  const awaitingSelf = session.personaId !== undefined && self === undefined && directoryLoading
+
+  // The dialog belongs to the page it was opened on: if the route changes under it
+  // (browser Back / Forward are the only way, the frame behind it being inert) it
+  // closes in the SAME render -- adjusted during render, not in an effect, so it
+  // never commits on the new page (where it would make the frame inert and swallow
+  // the focus the route-change rule is about to move onto the new heading).
+  const [composePathname, setComposePathname] = useState(location.pathname)
+  if (composePathname !== location.pathname) {
+    setComposePathname(location.pathname)
+    if (composeOpen) setComposeOpen(false)
+  }
 
   const openCompose = useCallback(() => setComposeOpen(true), [])
   const closeCompose = useCallback(() => setComposeOpen(false), [])
@@ -140,7 +168,7 @@ function SocialFrame() {
           {...(canCompose ? { onCompose: openCompose } : {})}
           postButtonRef={postButtonRef}
           self={self}
-          showAccount={showAccount}
+          showAccount={showAccount && !awaitingSelf}
         />
 
         <main

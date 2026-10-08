@@ -1,5 +1,5 @@
 /**
- * features/social/layout/testHarness.tsx
+ * features/social/layout/renderChannel.testUtils.tsx
  * ---------------------------------------------------------------------------
  * TEST-ONLY render helpers shared by the F1 layout suites (it ships in no
  * runtime import path; only `*.test.tsx` files import it). It assembles the same
@@ -11,7 +11,7 @@
  *
  * A FIXED scenario clock keeps relative times deterministic (COR-053). The
  * `MemoryRouter` stands in for the app's browser router; `RouterProbe`
- * (`./RouterProbe.tsx`, passed via `beside`) exposes its REAL location and two
+ * (`./RouterProbe.testUtils.tsx`, passed via `beside`) exposes its REAL location and two
  * buttons that drive the router's history the way the browser's own Back / Forward
  * buttons would, so a suite can tell "the channel moved" from "the real address bar
  * moved".

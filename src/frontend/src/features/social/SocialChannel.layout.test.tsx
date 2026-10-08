@@ -186,39 +186,64 @@ describe('breakpoint order: the right rail hides first, then the nav rail collap
   })
 })
 
-describe('sticky / fixed offsets honour the shell chrome insets', () => {
-  const top = 'var(--pulse-chrome-top, 0px)'
+describe('sticky / fixed offsets honour the shell chrome insets AND the alert bar', () => {
+  const chromeTop = 'var(--pulse-chrome-top, 0px)'
+  const alert = 'var(--pulse-alert-height, 0px)'
   const bottom = 'var(--pulse-chrome-bottom, 0px)'
+  /** Banner + alert: where anything pinned to the viewport top must start. */
+  const topOffset = `calc(${chromeTop} + ${alert})`
 
-  it('nav rail: sticky below the top banner, height clear of both', () => {
+  it('nav rail: the links group sticks below banner + alert', () => {
     const text = squash(baseRules(css.navRail))
-    expect(text).toContain('position: sticky')
-    expect(text).toContain(`top: ${top}`)
-    expect(text).toContain(`calc(100dvh - ${top} - ${bottom})`)
+    expect(text).toMatch(/\.top \{[^}]*position: sticky/)
+    expect(text).toContain(`top: ${topOffset}`)
   })
 
-  it('right rail: sticky below the top banner, height clear of both', () => {
+  it('nav rail: the account card sticks ABOVE the bottom banner (visible at scroll 0)', () => {
+    const text = squash(baseRules(css.navRail))
+    expect(text).toMatch(/\.bottom \{[^}]*position: sticky/)
+    expect(text).toMatch(/\.bottom \{[^}]*bottom: var\(--pulse-chrome-bottom, 0px\)/)
+    // The rail is a stretched column, not a viewport-height box whose bottom edge
+    // sits below the fold when the shell stacks rows above the channel (M2).
+    expect(text).toMatch(/\.rail \{[^}]*align-self: stretch/)
+    expect(text).not.toMatch(/\.rail \{[^}]*\bheight:/)
+  })
+
+  it('right rail: sticky below banner + alert, max-height clear of all three', () => {
     const text = squash(mediaBlock(css.rightRail, `min-width: ${FRAME_MIN_WIDTH}px`))
     expect(text).toContain('position: sticky')
-    expect(text).toContain(`top: ${top}`)
-    expect(text).toContain(`calc(100dvh - ${top} - ${bottom})`)
+    expect(text).toContain(`top: ${topOffset}`)
+    expect(text).toContain(`calc(100dvh - ${chromeTop} - ${alert} - ${bottom})`)
   })
 
-  it('detail header sticks below the top banner', () => {
-    expect(squash(css.detail)).toContain(`top: ${top}`)
+  it('detail header sticks below banner + alert', () => {
+    expect(squash(css.detail)).toContain(`top: ${topOffset}`)
   })
 
-  it('compose backdrop is fixed BETWEEN the two banners', () => {
+  it('compose backdrop is fixed BETWEEN the banners and BELOW an active alert', () => {
     const text = squash(css.compose)
     expect(text).toContain('position: fixed')
-    expect(text).toContain(`top: ${top}`)
+    expect(text).toContain(`top: ${topOffset}`)
     expect(text).toContain(`bottom: ${bottom}`)
   })
 
-  it('the skip link surfaces below the top banner, not behind it', () => {
-    expect(squash(css.channel)).toMatch(
-      /\.skipLink \{[^}]*top: calc\(var\(--pulse-chrome-top, 0px\) \+ 8px\)/,
+  it('the skip link surfaces below banner + alert, not behind either', () => {
+    expect(squash(css.channel)).toContain(`top: calc(${chromeTop} + ${alert} + 8px)`)
+  })
+
+  it('EVERY stylesheet that pins to the top banner also consumes the alert height', () => {
+    const pinned = (Object.keys(STYLESHEETS) as StylesheetName[]).filter(name =>
+      css[name].includes('--pulse-chrome-top'),
     )
+    // Non-vacuity: the rails, header, modal and channel root all pin.
+    expect(pinned.sort()).toEqual(
+      ['channel', 'compose', 'detail', 'navRail', 'rightRail'].sort(),
+    )
+    for (const name of pinned) {
+      // The channel root's `.main` min-height is a viewport-fit estimate, not a pin.
+      const text = squash(css[name])
+      expect(text, name).toContain('--pulse-alert-height')
+    }
   })
 })
 

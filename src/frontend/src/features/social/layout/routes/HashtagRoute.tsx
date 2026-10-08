@@ -15,21 +15,16 @@
 import { useParams } from 'react-router-dom'
 import { HashtagFeed } from '../../pages/HashtagFeed'
 import { DetailHeader } from '../DetailHeader'
-import { HOME_PATH } from '../socialNavigation'
+import { HOME_PATH, normalizeHashtagParam } from '../socialNavigation'
 import { useSocialOpeners } from '../useSocialOpeners'
 import { SocialRedirect } from './SocialRedirect'
-
-/** `#WaterIssues` / `WaterIssues` -> `waterissues`. */
-function normalizeTag(raw: string): string {
-  return raw.replace(/^#+/, '').toLowerCase()
-}
 
 export function HashtagRoute() {
   const { tag = '' } = useParams()
   const { openThread, openProfile } = useSocialOpeners()
 
-  const normalized = normalizeTag(tag)
-  if (normalized === '') return <SocialRedirect to={HOME_PATH} />
+  const normalized = normalizeHashtagParam(tag)
+  if (normalized === undefined) return <SocialRedirect to={HOME_PATH} />
 
   return (
     <div data-testid="social-hashtag-region">

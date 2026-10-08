@@ -2,14 +2,16 @@
  * features/social/layout/DetailHeader.module.css
  * ---------------------------------------------------------------------------
  * Sticky header for detail routes (thread / profile / hashtag): Back button +
- * optional title. Reads the `--pc-*` palette composed onto the channel root
+ * optional title. It sticks below the top EXERCISE banner AND an active alert
+ * (`--pulse-alert-height`, published by the shell's fixed alert bar; `0px` when
+ * none), so the Back button and the page `<h1>` are never under the alert. Reads the `--pc-*` palette composed onto the channel root
  * (`SocialChannel.module.css`); light only (F5 owns the tokens sweep). No
  * COBRA / MUI.
  */
 
 .header {
   position: sticky;
-  top: var(--pulse-chrome-top, 0px);
+  top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px));
   z-index: 2;
   display: flex;
   align-items: center;

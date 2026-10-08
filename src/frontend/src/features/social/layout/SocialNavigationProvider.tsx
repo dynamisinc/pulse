@@ -86,9 +86,11 @@ export function SocialNavigationProvider({ children }: SocialNavigationProviderP
   // their identity never changes (see "STABILITY" in the module header).
   const navigateRef = useRef(routerNavigate)
   const canGoBackRef = useRef(canGoBack)
+  const locationKeyRef = useRef(routerLocation.key)
   useLayoutEffect(() => {
     navigateRef.current = routerNavigate
     canGoBackRef.current = canGoBack
+    locationKeyRef.current = routerLocation.key
   })
 
   const actions = useMemo<SocialNavigationActions>(
@@ -102,6 +104,7 @@ export function SocialNavigationProvider({ children }: SocialNavigationProviderP
         if (canGoBackRef.current) navigateRef.current(-1)
         else navigateRef.current(fallback, { replace: true })
       },
+      getLocationKey: () => locationKeyRef.current,
     }),
     [],
   )
@@ -218,12 +221,17 @@ export function MemorySocialNavigationProvider({
   const back = useCallback((fallback: string = HOME_PATH) => {
     dispatch({ type: 'back', fallback })
   }, [])
+  const location = history.entries[history.index] ?? toLocation(HOME_PATH, 'mem-fallback')
+  const locationKeyRef = useRef(location.key)
+  useLayoutEffect(() => {
+    locationKeyRef.current = location.key
+  })
+  const getLocationKey = useCallback(() => locationKeyRef.current, [])
   const actions = useMemo<SocialNavigationActions>(
-    () => ({ kind: 'memory', navigate, back }),
-    [navigate, back],
+    () => ({ kind: 'memory', navigate, back, getLocationKey }),
+    [navigate, back, getLocationKey],
   )
 
-  const location = history.entries[history.index] ?? toLocation(HOME_PATH, 'mem-fallback')
   const canGoBack = history.index > 0
   const state = useMemo<SocialLocationState>(
     () => ({ location, canGoBack }),

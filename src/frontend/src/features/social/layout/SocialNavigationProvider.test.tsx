@@ -25,7 +25,7 @@ import {
   useSocialNavigation,
   type SocialNavigation,
 } from './socialNavigation'
-import { RouterProbe } from './RouterProbe'
+import { RouterProbe } from './RouterProbe.testUtils'
 
 /** Captures the latest adapter value so a test can drive and inspect it. */
 function Capture({ onValue }: { onValue: (nav: SocialNavigation) => void }) {
@@ -96,11 +96,23 @@ describe('SocialNavigationProvider (default: React Router)', () => {
 
   it('keeps navigate / back stable across navigations (memoized rows depend on it)', () => {
     const ref = setup()
-    const { navigate, back } = latest(ref)
+    const { navigate, back, getLocationKey } = latest(ref)
     act(() => navigate('/explore'))
     act(() => navigate('/hashtag/a'))
     expect(latest(ref).navigate).toBe(navigate)
     expect(latest(ref).back).toBe(back)
+    expect(latest(ref).getLocationKey).toBe(getLocationKey)
+  })
+
+  it('getLocationKey() always reads the CURRENT entry\'s key, through a stable function', () => {
+    const ref = setup()
+    const { getLocationKey, navigate } = latest(ref)
+    const first = getLocationKey()
+    expect(first).toBe(latest(ref).location.key)
+
+    act(() => navigate('/explore'))
+    expect(getLocationKey()).toBe(latest(ref).location.key)
+    expect(getLocationKey()).not.toBe(first)
   })
 })
 
@@ -201,10 +213,23 @@ describe('MemorySocialNavigationProvider (no browser history)', () => {
 
   it('keeps navigate / back stable across navigations', () => {
     const ref = setup()
-    const { navigate, back } = latest(ref)
+    const { navigate, back, getLocationKey } = latest(ref)
     act(() => navigate('/explore'))
     expect(latest(ref).navigate).toBe(navigate)
     expect(latest(ref).back).toBe(back)
+    expect(latest(ref).getLocationKey).toBe(getLocationKey)
+  })
+
+  it('getLocationKey() reads the current entry\'s key, and a back changes it', () => {
+    const ref = setup()
+    const { getLocationKey, navigate, back } = latest(ref)
+    const home = getLocationKey()
+    act(() => navigate('/explore'))
+    const explore = getLocationKey()
+    expect(explore).toBe(latest(ref).location.key)
+    expect(explore).not.toBe(home)
+    act(() => back())
+    expect(getLocationKey()).toBe(home)
   })
 
   it('supplies its own router when the host has none (no ancestor <Router>)', () => {

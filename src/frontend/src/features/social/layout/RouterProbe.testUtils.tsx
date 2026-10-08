@@ -1,10 +1,10 @@
 /**
- * features/social/layout/RouterProbe.tsx
+ * features/social/layout/RouterProbe.testUtils.tsx
  * ---------------------------------------------------------------------------
  * TEST-ONLY probe for the F1 layout suites: shows the surrounding router's REAL
  * location and drives its history like the browser's Back / Forward buttons, so a
  * suite can tell "the channel moved" from "the real address bar moved". Split out of
- * `testHarness.tsx` because a file may export components OR helpers, not both
+ * `renderChannel.testUtils.tsx` because a file may export components OR helpers, not both
  * (`react-refresh/only-export-components`).
  *
  * World: participant test scaffolding -- no COBRA, no MUI.
