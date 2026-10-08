@@ -14,10 +14,12 @@
  *
  * WHAT IT DOES. Reads the resolved brand through `useBrand()` and renders ONE
  * wrapper that sets, for every descendant:
- *   - `--pulse-ac`  = the brand accent, made WCAG-AA-safe on white by
- *                     `accessibleAccent()` (passed through unchanged when it
- *                     already clears 4.5:1, nudged darker only when it does not;
- *                     see `./accent.ts` for why);
+ *   - `--pulse-ac`  = the brand accent, made WCAG-AA-safe in every state it is drawn
+ *                     in by `accessibleAccent()` (passed through unchanged when it
+ *                     already clears 4.5:1 on white, the panel, the hover tint and
+ *                     as a hovered Follow fill; nudged darker only when it does not;
+ *                     an unmeasurable value falls back to the default navy; see
+ *                     `./accent.ts` for why);
  *   - `font-family` = {@link FONT_FAMILY} (Figtree), so text with no module rule
  *                     of its own still lands in the Pulse type face.
  *
@@ -25,8 +27,9 @@
  * `SEAL_BLUE` (`#2D9CDB`): `VerifiedMark` paints it straight from `tokens.ts` as
  * an SVG fill and never reads `--pulse-ac`, so no brand — however it is set
  * here — can recolor the trust signal trainees are learning to read (SOC-052,
- * D1-003/R-001). The raw, unadjusted brand colour remains available to any
- * decoration that is not text (the profile banner tint) as `--pulse-brand-accent`.
+ * D1-003/R-001). The profile banner tint reads the same (nudged) `--pulse-ac`, so a
+ * rebrand recolours it from the one variable. The raw, unadjusted brand colour stays
+ * available as the shell's `--pulse-brand-accent` for anything that wants it.
  *
  * `display: contents` keeps the wrapper out of the box tree (the same device
  * `BrandThemeProvider` uses), so mounting this changes no layout. Custom

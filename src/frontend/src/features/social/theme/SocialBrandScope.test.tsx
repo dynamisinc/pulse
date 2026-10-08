@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BrandThemeProvider } from '@/features/participant-shell/BrandThemeProvider'
 import { useBrandConfig, type BrandTokens } from '@/features/participant-shell/brandTokens'
 import { VerifiedMark } from '../components/VerifiedMark'
-import { MIN_ACCENT_CONTRAST, contrastOnWhite } from './accent'
+import { MIN_ACCENT_CONTRAST, accentStateContrasts } from './accent'
 import { SocialBrandScope } from './SocialBrandScope'
 import { ACCENT_CSS_VAR, DEFAULT_ACCENT, FONT_FAMILY, SEAL_BLUE } from './tokens'
 
@@ -130,12 +130,30 @@ describe('SocialBrandScope — --pulse-ac is set from the resolved brand accent'
 })
 
 describe('SocialBrandScope — the accent stays legible (NFR-001, WCAG 1.4.3)', () => {
-  it('darkens the default amber so hashtag text and the Follow label clear 4.5:1 on white', () => {
+  it('darkens the default amber so every state it is drawn in clears 4.5:1 (text, hover, fill)', () => {
     renderScope(AMBER_DEFAULT)
 
     const set = screen.getByTestId('social-brand-scope').style.getPropertyValue(ACCENT_CSS_VAR)
     expect(set).not.toBe('#d97706')
-    expect(contrastOnWhite(set)).toBeGreaterThanOrEqual(MIN_ACCENT_CONTRAST)
+    const states = accentStateContrasts(set)
+    if (!states) throw new Error(`expected a measurable accent, got ${set}`)
+    for (const [state, value] of Object.entries(states)) {
+      expect(value, state).toBeGreaterThanOrEqual(MIN_ACCENT_CONTRAST)
+    }
+  })
+
+  it('falls back to the default navy for an accent it cannot measure (rgb(), a name)', () => {
+    for (const accent of ['rgb(255, 200, 0)', 'gold']) {
+      const { unmount } = renderScope({
+        ...SECTOR_SEVEN,
+        colors: { ...SECTOR_SEVEN.colors, accent },
+      })
+
+      expect(
+        screen.getByTestId('social-brand-scope').style.getPropertyValue(ACCENT_CSS_VAR),
+      ).toBe(DEFAULT_ACCENT)
+      unmount()
+    }
   })
 
   it('does not alter an accent that already passes', () => {
@@ -147,7 +165,9 @@ describe('SocialBrandScope — the accent stays legible (NFR-001, WCAG 1.4.3)', 
 
   it('the social default (no scope at all) is the Cadence navy, which already passes', () => {
     expect(DEFAULT_ACCENT).toBe('#1e3a5f')
-    expect(contrastOnWhite(DEFAULT_ACCENT)).toBeGreaterThanOrEqual(MIN_ACCENT_CONTRAST)
+    expect(accentStateContrasts(DEFAULT_ACCENT)?.hoverFill).toBeGreaterThanOrEqual(
+      MIN_ACCENT_CONTRAST,
+    )
   })
 })
 

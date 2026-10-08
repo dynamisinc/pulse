@@ -1,18 +1,22 @@
 /**
  * features/social/theme/forcedLight.darkOs.test.tsx
  * ---------------------------------------------------------------------------
- * Story 14 (F5), "Forced light" AC — the dark-OS emulation test. Under a dark-mode
- * OS the page must be fully light.
+ * TRIPWIRE: no JS branch in the social tree reacts to the OS colour scheme.
  *
- * WHAT CAN AND CANNOT BE PROVEN IN JSDOM. jsdom applies no stylesheets, so "the
- * computed background is white" is not observable here. The CSS half is proven by
- * `forcedLight.guard.test.ts` (no stylesheet under features/social/** contains a
- * `prefers-color-scheme` / `[data-theme]` rule, so a dark OS has nothing to switch)
- * and `documentHead.test.ts` (the document pins `color-scheme: light`). THIS file
- * proves the remaining half: with `matchMedia` reporting a dark OS, a rendered
- * social tree (the profile page, the feed skeleton, the brand scope) neither asks
- * the browser about the OS scheme nor sets a theme attribute anywhere. Together:
- * no CSS rule and no JS branch reacts to a dark OS.
+ * What this is NOT: proof that the page is light under a dark OS. The original defect
+ * was CSS-only (per-module `@media (prefers-color-scheme: dark)` / `[data-theme]`
+ * blocks), jsdom applies no stylesheets, and this test passes on the pre-fix tree too
+ * (Gate-1 M-1). The REAL proof of "forced light" is `forcedLight.guard.test.ts`, which
+ * reads every stylesheet under features/social/** off disk and fails on any dark-mode
+ * rule, plus `documentHead.test.ts` (the document pins `color-scheme: light`). A manual
+ * dark-OS check is a Gate-2 item.
+ *
+ * What it DOES guard: with `matchMedia` reporting a dark OS, a rendered social tree (the
+ * profile page, the feed skeleton, the brand scope) neither asks the browser about the
+ * OS scheme nor sets a theme attribute anywhere. If someone later adds a JS-driven
+ * dark mode (a `matchMedia('(prefers-color-scheme: dark)')` listener, a `data-theme`
+ * toggle), this fails. Together with the guard: no CSS rule and no JS branch reacts to
+ * a dark OS.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
@@ -57,7 +61,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('dark OS emulation', () => {
+describe('tripwire: no JS branch reacts to a dark OS', () => {
   it('really reports a dark OS (so the checks below are meaningful)', () => {
     expect(window.matchMedia('(prefers-color-scheme: dark)').matches).toBe(true)
     expect(window.matchMedia('(prefers-color-scheme: light)').matches).toBe(false)

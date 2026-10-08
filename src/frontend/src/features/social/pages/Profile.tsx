@@ -241,6 +241,9 @@ export function Profile({ personaId, onOpenThread, onHashtagOpen, onOpenProfile 
   const cardVariant: CardVariant = affordancesAvailable(variant) ? 'full' : 'readOnly'
 
   const [activeTab, setActiveTab] = useState<ProfileTabId>('posts')
+  // The four tab buttons, so the arrow/Home/End keys can MOVE FOCUS with the selection
+  // (WAI-ARIA tabs with automatic activation: the focused tab is the selected tab).
+  const tabRefs = useRef<Partial<Record<ProfileTabId, HTMLButtonElement | null>>>({})
 
   const persona = useMemo(
     () => personas.find(p => p.id === personaId),
@@ -501,7 +504,11 @@ export function Profile({ personaId, onOpenThread, onHashtagOpen, onOpenProfile 
   }
   const activeContent = tabContent[activeTab]
 
-  // Roving arrow-key navigation across the tablist (NFR-001 keyboard support).
+  // Roving arrow-key navigation across the tablist (NFR-001 keyboard support). Selection
+  // follows focus, and focus MOVES to the newly selected tab: without the `.focus()` the
+  // selection changed under a keyboard user whose focus stayed on the old tab, so the next
+  // arrow key navigated from the wrong place. Every tab button is always mounted (only the
+  // panel is conditional), so the target ref is set by the time the key is handled.
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     const currentIndex = PROFILE_TABS.findIndex(t => t.id === activeTab)
     if (currentIndex < 0) return
@@ -515,7 +522,9 @@ export function Profile({ personaId, onOpenThread, onHashtagOpen, onOpenProfile 
     if (nextIndex === null) return
     event.preventDefault()
     const next = PROFILE_TABS[nextIndex]
-    if (next) setActiveTab(next.id)
+    if (!next) return
+    setActiveTab(next.id)
+    tabRefs.current[next.id]?.focus()
   }
 
   return (
@@ -633,8 +642,10 @@ export function Profile({ personaId, onOpenThread, onHashtagOpen, onOpenProfile 
               type="button"
               role="tab"
               id={`profile-tab-${tab.id}`}
+              ref={node => { tabRefs.current[tab.id] = node }}
               aria-selected={selected}
-              aria-controls={`profile-tabpanel-${tab.id}`}
+              // Only the SELECTED tab's panel is in the DOM, so only it may be referenced.
+              aria-controls={selected ? `profile-tabpanel-${tab.id}` : undefined}
               tabIndex={selected ? 0 : -1}
               className={selected ? `${styles.tab} ${styles.tabActive}` : styles.tab}
               onClick={() => setActiveTab(tab.id)}
@@ -646,10 +657,15 @@ export function Profile({ personaId, onOpenThread, onHashtagOpen, onOpenProfile 
         })}
       </div>
 
+      {/* `tabIndex={0}`: the panel is a tab stop so Tab from the tablist lands in the
+          content even when the panel holds no focusable control (an empty state, the
+          private-likes notice, a loading skeleton). WAI-ARIA tabs pattern. */}
       <div
         role="tabpanel"
+        className={styles.tabpanel}
         id={`profile-tabpanel-${activeTab}`}
         aria-labelledby={`profile-tab-${activeTab}`}
+        tabIndex={0}
       >
         {activeTab === 'likes' && !isOwnProfile ? (
           // Honest, not empty-by-accident: someone else's likes are not shown to anyone.
