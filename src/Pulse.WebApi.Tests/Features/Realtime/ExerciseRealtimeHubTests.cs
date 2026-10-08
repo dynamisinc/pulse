@@ -14,6 +14,8 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.ExerciseResolution;
@@ -60,6 +62,8 @@ public class ExerciseRealtimeHubTests
 {
     private const string ConnectionId = "test-connection-1";
 
+    private static readonly ILogger<ExerciseRealtimeHub> NullHubLogger = NullLogger<ExerciseRealtimeHub>.Instance;
+
     [Fact]
     public async Task OnConnectedAsync_ResolvedScope_JoinsExactlyTheExercisesGroup_AndDoesNotAbort()
     {
@@ -67,7 +71,7 @@ public class ExerciseRealtimeHubTests
         var context = BuildHubContext(hostResolvedExerciseId: exerciseId);
         var groups = new Mock<IGroupManager>();
 
-        var hub = new ExerciseRealtimeHub(NoDatabaseContext())
+        var hub = new ExerciseRealtimeHub(NoDatabaseContext(), NullHubLogger)
         {
             Context = context.Object,
             Groups = groups.Object,
@@ -90,7 +94,7 @@ public class ExerciseRealtimeHubTests
         var context = BuildHubContext(hostResolvedExerciseId: null);
         var groups = new Mock<IGroupManager>();
 
-        var hub = new ExerciseRealtimeHub(NoDatabaseContext())
+        var hub = new ExerciseRealtimeHub(NoDatabaseContext(), NullHubLogger)
         {
             Context = context.Object,
             Groups = groups.Object,
@@ -115,7 +119,7 @@ public class ExerciseRealtimeHubTests
         context.SetupGet(c => c.Features).Returns(new FeatureCollection());
         var groups = new Mock<IGroupManager>();
 
-        var hub = new ExerciseRealtimeHub(NoDatabaseContext())
+        var hub = new ExerciseRealtimeHub(NoDatabaseContext(), NullHubLogger)
         {
             Context = context.Object,
             Groups = groups.Object,
@@ -138,7 +142,7 @@ public class ExerciseRealtimeHubTests
         var context = BuildHubContext(hostResolvedExerciseId: Guid.Empty);
         var groups = new Mock<IGroupManager>();
 
-        var hub = new ExerciseRealtimeHub(NoDatabaseContext())
+        var hub = new ExerciseRealtimeHub(NoDatabaseContext(), NullHubLogger)
         {
             Context = context.Object,
             Groups = groups.Object,
@@ -171,7 +175,7 @@ public class ExerciseRealtimeHubTests
                 .Callback<string, string, CancellationToken>((_, groupName, _) => capturedGroup = groupName)
                 .Returns(Task.CompletedTask);
 
-            var hub = new ExerciseRealtimeHub(NoDatabaseContext()) { Context = context.Object, Groups = groups.Object };
+            var hub = new ExerciseRealtimeHub(NoDatabaseContext(), NullHubLogger) { Context = context.Object, Groups = groups.Object };
             await hub.OnConnectedAsync();
             return capturedGroup;
         }
@@ -212,7 +216,7 @@ public class ExerciseRealtimeHubTests
         var context = BuildHubContext(exerciseId, http => http.User = SessionPrincipal.Create(Session(exerciseId, kind)));
         var groups = new RecordingGroupManager();
 
-        var hub = new ExerciseRealtimeHub(NoDatabaseContext()) { Context = context.Object, Groups = groups };
+        var hub = new ExerciseRealtimeHub(NoDatabaseContext(), NullHubLogger) { Context = context.Object, Groups = groups };
         await hub.OnConnectedAsync();
 
         groups.Joined.Should().Equal(
@@ -230,7 +234,7 @@ public class ExerciseRealtimeHubTests
         var context = BuildHubContext(hostResolvedExerciseId: exerciseId);
         var groups = new RecordingGroupManager();
 
-        var hub = new ExerciseRealtimeHub(NoDatabaseContext()) { Context = context.Object, Groups = groups };
+        var hub = new ExerciseRealtimeHub(NoDatabaseContext(), NullHubLogger) { Context = context.Object, Groups = groups };
         await hub.OnConnectedAsync();
 
         groups.Joined.Should().Equal(new[] { $"exercise:{exerciseId}" }, "an anonymous connection is never staff");
@@ -262,7 +266,7 @@ public class ExerciseRealtimeHubTests
         });
         var groups = new RecordingGroupManager();
 
-        var hub = new ExerciseRealtimeHub(NoDatabaseContext()) { Context = context.Object, Groups = groups };
+        var hub = new ExerciseRealtimeHub(NoDatabaseContext(), NullHubLogger) { Context = context.Object, Groups = groups };
         await hub.OnConnectedAsync();
 
         groups.Joined.Should().Equal(
@@ -282,7 +286,7 @@ public class ExerciseRealtimeHubTests
         var context = BuildHubContext(exerciseId, http => http.User = forged);
         var groups = new RecordingGroupManager();
 
-        var hub = new ExerciseRealtimeHub(NoDatabaseContext()) { Context = context.Object, Groups = groups };
+        var hub = new ExerciseRealtimeHub(NoDatabaseContext(), NullHubLogger) { Context = context.Object, Groups = groups };
         await hub.OnConnectedAsync();
 
         groups.Joined.Should().Equal(new[] { $"exercise:{exerciseId}" }, "a non-session identity is never staff");
@@ -297,7 +301,7 @@ public class ExerciseRealtimeHubTests
         var context = BuildHubContext(exerciseId, http => http.User = SessionPrincipal.Create(Session(exerciseId, "staff")));
         var groups = new RecordingGroupManager();
 
-        var hub = new ExerciseRealtimeHub(NoDatabaseContext()) { Context = context.Object, Groups = groups };
+        var hub = new ExerciseRealtimeHub(NoDatabaseContext(), NullHubLogger) { Context = context.Object, Groups = groups };
         await hub.OnConnectedAsync();
 
         groups.Joined.Should().Equal(new[] { $"exercise:{exerciseId}" }, "a staff session with no staff user is never staff");
@@ -313,7 +317,7 @@ public class ExerciseRealtimeHubTests
             http => http.User = SessionPrincipal.Create(Session(Guid.NewGuid(), "staff", staffUserId: Guid.NewGuid())));
         var groups = new RecordingGroupManager();
 
-        var hub = new ExerciseRealtimeHub(NoDatabaseContext()) { Context = context.Object, Groups = groups };
+        var hub = new ExerciseRealtimeHub(NoDatabaseContext(), NullHubLogger) { Context = context.Object, Groups = groups };
         await hub.OnConnectedAsync();
 
         context.Verify(c => c.Abort(), Times.Once, "an unresolved host must abort the connection — fail closed");
@@ -321,32 +325,78 @@ public class ExerciseRealtimeHubTests
     }
 
     [Fact]
-    public async Task OnConnectedAsync_StaffCheckFails_JoinsTheExerciseGroupFirst_NeverTheStaffGroup_AndPropagates()
+    public async Task OnConnectedAsync_StaffCheckFails_JoinsTheExerciseGroupFirst_NeverTheStaffGroup_LogsAndAborts_DoesNotPropagate()
     {
         // Ordering (Gate-1 L-5): the exercise-wide join happens BEFORE the staff check, so PostReceived timing is
-        // never held up by it. A staff-kind principal sends the check to the database, which here throws on open.
-        // The check must fail CLOSED: the error propagates out of OnConnectedAsync (SignalR then closes the
-        // connection and removes it from every group) and the staff join is never reached.
+        // never held up by it. Failure handling (Gate-2 L-1): a staff-kind principal sends the check to the
+        // database, which here throws on open (as a serverless SQL database resuming from auto-pause can). The
+        // check must fail CLOSED — the staff join is never reached — AND the connection must be ABORTED rather
+        // than the error rethrown: an exception escaping OnConnectedAsync makes SignalR close with
+        // allowReconnect:false, which the JS client never retries, silently starving the console of pushes.
         var exerciseId = Guid.NewGuid();
         var context = BuildHubContext(
             exerciseId,
             http => http.User = SessionPrincipal.Create(Session(exerciseId, "staff", staffUserId: Guid.NewGuid())));
         var groups = new RecordingGroupManager();
+        var logger = new RecordingLogger<ExerciseRealtimeHub>();
 
-        var hub = new ExerciseRealtimeHub(NoDatabaseContext()) { Context = context.Object, Groups = groups };
+        var hub = new ExerciseRealtimeHub(NoDatabaseContext(), logger) { Context = context.Object, Groups = groups };
         var connect = async () => await hub.OnConnectedAsync();
 
-        await connect.Should().ThrowAsync<InvalidOperationException>(
-            "a staff check that cannot complete must propagate, never be treated as verified");
+        await connect.Should().NotThrowAsync(
+            "a failed staff check is handled by aborting the connection — rethrowing would close it non-reconnectably");
+        context.Verify(c => c.Abort(), Times.Once, "a staff check that cannot complete must drop the connection (reconnectable)");
         groups.Joined.Should().Equal(
             new[] { $"exercise:{exerciseId}" },
             "the exercise-wide join precedes the check; a failed check never joins exercise:{id}:staff");
+        logger.Entries.Should().ContainSingle(
+                entry => entry.Level == LogLevel.Warning && entry.Exception is InvalidOperationException,
+                "the swallowed failure must still be logged, with its exception")
+            .Which.Message.Should().Contain(exerciseId.ToString()).And.Contain(ConnectionId);
+    }
+
+    [Fact]
+    public async Task OnConnectedAsync_CancelledByTheConnectionsOwnAbort_PropagatesCancellation_NotTreatedAsACheckFailure()
+    {
+        // The L-1 carve-out: cancellation caused by the connection's OWN abort token is not a staff-check failure.
+        // It propagates untouched — not logged as a failure, no extra Abort() — and the staff group is never joined.
+        var exerciseId = Guid.NewGuid();
+        using var aborted = new CancellationTokenSource();
+        await aborted.CancelAsync();
+        var context = BuildHubContext(
+            exerciseId,
+            http => http.User = SessionPrincipal.Create(Session(exerciseId, "staff", staffUserId: Guid.NewGuid())));
+        context.SetupGet(c => c.ConnectionAborted).Returns(aborted.Token);
+        var groups = new RecordingGroupManager();
+        var logger = new RecordingLogger<ExerciseRealtimeHub>();
+
+        var hub = new ExerciseRealtimeHub(
+            NoDatabaseContext(() => new OperationCanceledException(aborted.Token)), logger)
+        {
+            Context = context.Object,
+            Groups = groups,
+        };
+        var connect = async () => await hub.OnConnectedAsync();
+
+        await connect.Should().ThrowAsync<OperationCanceledException>(
+            "the connection's own abort is not a check failure and must not be swallowed");
+        context.Verify(c => c.Abort(), Times.Never, "the hub adds no abort of its own for a connection already aborting");
+        logger.Entries.Should().BeEmpty("a cancellation from the connection's own abort is not logged as a check failure");
+        groups.Joined.Should().Equal(new[] { $"exercise:{exerciseId}" }, "a cancelled check never joins the staff group");
     }
 
     [Fact]
     public void Constructor_NullDbContext_Throws()
     {
-        var act = () => new ExerciseRealtimeHub(null!);
+        var act = () => new ExerciseRealtimeHub(null!, NullHubLogger);
+
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void Constructor_NullLogger_Throws()
+    {
+        var act = () => new ExerciseRealtimeHub(NoDatabaseContext(), null!);
 
         act.Should().Throw<ArgumentNullException>();
     }
@@ -364,14 +414,16 @@ public class ExerciseRealtimeHubTests
 
     /// <summary>
     /// A <see cref="PulseDbContext"/> that can be CONSTRUCTED (the hub requires one) but never queried: any
-    /// attempt to open its connection throws. A non-staff connection must decide its groups without the
-    /// database, so these Docker-free tests fail loudly if that ever stops being true.
+    /// attempt to open its connection throws (an <see cref="InvalidOperationException"/> by default, or whatever
+    /// <paramref name="onOpen"/> builds). A non-staff connection must decide its groups without the database,
+    /// so these Docker-free tests fail loudly if that ever stops being true.
     /// </summary>
-    private static PulseDbContext NoDatabaseContext()
+    private static PulseDbContext NoDatabaseContext(Func<Exception>? onOpen = null)
     {
         var options = new DbContextOptionsBuilder<PulseDbContext>()
             .UseSqlServer("Server=hub-unit-tests-never-connect;Database=pulse;")
-            .AddInterceptors(new ThrowOnOpenConnectionInterceptor())
+            .AddInterceptors(new ThrowOnOpenConnectionInterceptor(
+                onOpen ?? (() => new InvalidOperationException("This hub path must not touch the database."))))
             .Options;
 
         return new PulseDbContext(options);
@@ -427,15 +479,34 @@ public class ExerciseRealtimeHubTests
     /// <summary>Fails any attempt to open a database connection (see <see cref="NoDatabaseContext"/>).</summary>
     private sealed class ThrowOnOpenConnectionInterceptor : DbConnectionInterceptor
     {
+        private readonly Func<Exception> _onOpen;
+
+        public ThrowOnOpenConnectionInterceptor(Func<Exception> onOpen) => _onOpen = onOpen;
+
         public override InterceptionResult ConnectionOpening(
             DbConnection connection, ConnectionEventData eventData, InterceptionResult result)
-            => throw new InvalidOperationException("This hub path must not touch the database.");
+            => throw _onOpen();
 
         public override ValueTask<InterceptionResult> ConnectionOpeningAsync(
             DbConnection connection,
             ConnectionEventData eventData,
             InterceptionResult result,
             CancellationToken cancellationToken = default)
-            => throw new InvalidOperationException("This hub path must not touch the database.");
+            => throw _onOpen();
+    }
+
+    /// <summary>Captures every log entry (level, rendered message, exception) the hub writes.</summary>
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add((logLevel, formatter(state, exception), exception));
     }
 }
