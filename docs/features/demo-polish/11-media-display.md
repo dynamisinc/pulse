@@ -1,6 +1,6 @@
 # Story: Media display — grid, inline video, viewer
 
-**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** SOC-001, XC-009, NFR-001, NFR-004, NFR-008, COR-002  ·  **Design decisions:** NFR-008 watermark slot; DP-12 (no captions)  ·  **Issue:** #430
 **Story ID:** F2  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** L  ·  **Wave:** 2
 **Home stories:** [`posts/01`](../posts/01-post-composition.md) (video AC), [`posts/04`](../posts/04-link-previews.md) (card image).
