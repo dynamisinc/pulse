@@ -25,8 +25,8 @@ hold rumor wave / skip all). Author story 05 to the amended behavior.
 | 03 | Standalone native scheduler ("hold for conduct" against COR-050) | CTL-013 | Not Started | #21 |
 | 04 | Timed bursts — a bundle fires as a naturally-paced sequence | CTL-014 | Not Started | #22 |
 | 05 | Scenario-time-jump batch disposition (pause-first) | CTL-015 / D5-014/P4 | Not Started | #23 |
-| 06 | **Demo slice:** scripted posts, server-side inject queue (fire / hold / skip / edit, bursts, assignment) | CTL-010/011/014 (lite) | In Progress | #452 |
-| 07 | **Demo slice:** scripted posts console run sheet (Mine/All, live sync, PAUSE INJECTS live) | CTL-010/011/014 (lite), CTL-023 | Not Started | #453 |
+| 06 | **Demo slice:** scripted posts, server-side inject queue (fire / hold / skip / edit, bursts, assignment) | CTL-010/011/014 (lite) | In Review | #452 |
+| 07 | **Demo slice:** scripted posts console run sheet (Mine/All, live sync, PAUSE INJECTS live) | CTL-010/011/014 (lite), CTL-023 | In Progress | #453 |
 | — | Cadence-sourced injects render + fire-locked *(Phase 4 stub)* | CTL-012 | Not Started | — |
 
 > **Demo slice (2026-10-08).** Stories 06 + 07 build a server-side slice of 01/02/04 for the Oct 20 demo and

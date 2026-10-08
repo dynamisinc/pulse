@@ -1,6 +1,6 @@
 # Story: Scripted posts — console run sheet (demo slice)
 
-**Feature:** Inject queue & conduct timeline  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Inject queue & conduct timeline  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Progress (part 1 PR #457; mount + Pause injects after #449, media picker after C1)
 **Requirements:** CTL-010 (lite), CTL-011, CTL-014 (lite), CTL-023 (injects tier), CTL-034, COR-001, XC-002, NFR-001  ·  **Design decisions:** IQ-1…IQ-10 (implementation.md § Demo slice)  ·  **Issue:** #453
 **Story ID:** IQ-F  ·  **Stack:** frontend  ·  **Priority:** Must (Oct 20 demo)  ·  **Effort:** M
 **Home stories:** [`01`](01-conduct-timeline.md), [`02`](02-fire-hold-skip-edit.md), [`04`](04-timed-bursts.md) (slices). **Replaces** demo-polish [`C3`](../demo-polish/19-run-sheet.md) (#438) and keeps its mount seam (`RunSheetPanel` in C4's `runSheetSlot`).

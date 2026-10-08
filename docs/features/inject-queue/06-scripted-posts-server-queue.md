@@ -1,6 +1,6 @@
 # Story: Scripted posts — server-side inject queue (demo slice)
 
-**Feature:** Inject queue & conduct timeline  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Inject queue & conduct timeline  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Review (PR #458, draft until #449)
 **Requirements:** CTL-010 (lite), CTL-011, CTL-014 (lite), COR-001, COR-018, COR-053, XC-002, XC-004, XC-010, NFR-004  ·  **Design decisions:** IQ-1…IQ-10 (implementation.md § Demo slice)  ·  **Issue:** #452
 **Story ID:** IQ-B  ·  **Stack:** backend  ·  **Priority:** Must (Oct 20 demo)  ·  **Effort:** L
 **Home stories:** [`01`](01-conduct-timeline.md) (list + status, no timeline rail), [`02`](02-fire-hold-skip-edit.md) (single-item fire/hold/skip/edit; no multi-select batch), [`04`](04-timed-bursts.md) (bursts, fixed ~90 s window). **Replaces** demo-polish [`C3`](../demo-polish/19-run-sheet.md)'s browser-only run sheet (#438).
