@@ -26,10 +26,28 @@
  *  - On deactivation (state clears — a SERVER push, never a user dismiss),
  *    restores focus to whatever was focused before, if it's still attached.
  *
+ * THE OVERLAY ALWAYS WINS (demo-polish F2 Gate-1 H-1 / M-A). A channel can have its
+ * own `aria-modal` surface open — the social media viewer — when this overlay mounts,
+ * and the overlay paints above it. The priority is ONE-WAY: this trap pulls focus back
+ * from EVERYWHERE outside itself (channel modals included) and never backs off for a
+ * channel modal; the channel's trap (`core/a11y/modalPriority`'s `hasOtherModalMounted`)
+ * stands aside completely while this overlay is mounted, so the two cannot ping-pong and
+ * focus can never sit in the viewer under the overlay. The only thing this trap backs off
+ * for is another SHELL-level layer (an element marked `data-shell-layer`), so two shell
+ * layers cannot fight either.
+ *
+ * `layerKey` re-engages the trap when the overlay's ROOT ELEMENT is swapped while it
+ * stays active (pause -> break-fiction, in-fiction -> out-of-fiction register): without it
+ * the listeners kept holding the removed element and focus fell to `<body>`. The focus
+ * to restore on deactivation is remembered ONCE, at activation, across such swaps.
+ * A Tab while focus is outside the overlay (e.g. on `<body>`) enters the overlay at its
+ * first/last control instead of wandering through the page underneath.
+ *
  * World: participant. Pure behavior hook, no UI, no COBRA.
  */
 
 import { useEffect, useRef } from 'react'
+import { isInsideOtherShellLayer } from '@/core/a11y/modalPriority'
 
 const FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -47,34 +65,44 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
 /**
  * Traps focus inside the returned ref's element while `active` is `true`.
  * The consumer attaches the ref to the overlay's root element and gives that
- * element `tabIndex={-1}` so it is programmatically focusable.
+ * element `tabIndex={-1}` so it is programmatically focusable. Pass a `layerKey` that
+ * changes whenever the root element is replaced while `active` stays true.
  */
-export function useOverlayFocusTrap<T extends HTMLElement>(active: boolean) {
+export function useOverlayFocusTrap<T extends HTMLElement>(active: boolean, layerKey = '') {
   const containerRef = useRef<T | null>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
 
+  // Remember what to restore ONCE per activation (not per root swap). Declared BEFORE the
+  // engage effect below so it records the focus from before the overlay took it.
+  useEffect(() => {
+    if (!active) return
+    returnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+  }, [active])
+
+  // Engage the CURRENT root element: focus it, pull focus back, cycle Tab.
   useEffect(() => {
     if (!active) return undefined
 
     const container = containerRef.current
     if (!container) return undefined
 
-    const previouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
-
     container.focus()
 
     function handleFocusIn(event: FocusEvent): void {
       const target = event.target
       if (!container || !(target instanceof Node) || container.contains(target)) return
-      // Focus escaped the overlay (e.g. landed on hidden page chrome/content
-      // still in the DOM underneath) — pull it back inside.
+      // Another SHELL layer owns this focus; anything else — page content, a channel's
+      // own modal — is pulled back: the overlay always wins.
+      if (isInsideOtherShellLayer(target, container)) return
       const [first] = getFocusable(container)
       ;(first ?? container).focus()
     }
 
     function handleKeyDown(event: KeyboardEvent): void {
       if (event.key !== 'Tab' || !container) return
+      if (isInsideOtherShellLayer(document.activeElement, container)) return
       const focusable = getFocusable(container)
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
@@ -87,10 +115,15 @@ export function useOverlayFocusTrap<T extends HTMLElement>(active: boolean) {
         return
       }
 
-      if (event.shiftKey && document.activeElement === first) {
+      const current = document.activeElement
+      if (!container.contains(current)) {
+        // Focus is outside the overlay (e.g. on <body>): enter it, never walk the page behind.
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+      } else if (event.shiftKey && current === first) {
         event.preventDefault()
         last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
+      } else if (!event.shiftKey && current === last) {
         event.preventDefault()
         first.focus()
       }
@@ -102,8 +135,17 @@ export function useOverlayFocusTrap<T extends HTMLElement>(active: boolean) {
     return () => {
       document.removeEventListener('focusin', handleFocusIn)
       document.removeEventListener('keydown', handleKeyDown)
-      // Overlays clear on a server push, never a user dismiss — restore
-      // whatever had focus before the trap engaged, if it's still attached.
+    }
+  }, [active, layerKey])
+
+  // Restore on deactivation or unmount — overlays clear on a server push, never a user dismiss.
+  // Declared AFTER the engage effect so (cleanups run in declaration order) the trap's listeners
+  // are already removed when focus is handed back.
+  useEffect(() => {
+    if (!active) return undefined
+    return () => {
+      const previouslyFocused = returnFocusRef.current
+      returnFocusRef.current = null
       if (previouslyFocused && document.contains(previouslyFocused)) {
         previouslyFocused.focus()
       }

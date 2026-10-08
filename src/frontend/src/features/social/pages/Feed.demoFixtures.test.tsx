@@ -10,6 +10,7 @@
  * six) is covered by `Feed.test.tsx`.
  */
 import { render, screen, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
@@ -27,16 +28,21 @@ const TOP_LEVEL_IDS = [
 const REPLY_IDS = listDemoFixturePosts().filter(p => p.inReplyTo !== undefined).map(p => p.id)
 
 function renderFeed() {
+  // F2: the video fixtures mount an inline player, which reads `useChromeConfig()` (a
+  // React Query hook) for the NFR-008 watermark — the real shell provides the client.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <ExerciseContextProvider>
-      <SessionProvider>
-        <ShellContextProvider
-          value={{ variant: 'full', scenarioNow: new Date('2033-09-04T16:00:00.000Z') }}
-        >
-          <Feed />
-        </ShellContextProvider>
-      </SessionProvider>
-    </ExerciseContextProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ExerciseContextProvider>
+        <SessionProvider>
+          <ShellContextProvider
+            value={{ variant: 'full', scenarioNow: new Date('2033-09-04T16:00:00.000Z') }}
+          >
+            <Feed />
+          </ShellContextProvider>
+        </SessionProvider>
+      </ExerciseContextProvider>
+    </QueryClientProvider>,
   )
 }
 
@@ -81,15 +87,17 @@ describe('Feed over the v2 demo fixtures', () => {
     renderFeed()
 
     // Scoped to the media slot: a verified author's seal is also a role="img".
-    const attachments = async (id: string) =>
-      within(within(await findCard(id)).getByTestId('post-media')).getAllByRole('img')
-    expect(await attachments(DEMO_IDS.grid1)).toHaveLength(1)
-    expect(await attachments(DEMO_IDS.grid2)).toHaveLength(2)
-    expect(await attachments(DEMO_IDS.grid3)).toHaveLength(3)
-    expect(await attachments(DEMO_IDS.grid4)).toHaveLength(4)
+    const slot = async (id: string) => within(await findCard(id)).getByTestId('post-media')
+    const photos = async (id: string) => within(await slot(id)).getAllByRole('img')
+    expect(await photos(DEMO_IDS.grid1)).toHaveLength(1)
+    expect(await photos(DEMO_IDS.grid2)).toHaveLength(2)
+    expect(await photos(DEMO_IDS.grid3)).toHaveLength(3)
+    expect(await photos(DEMO_IDS.grid4)).toHaveLength(4)
+    // F2: a video plays inline — a focusable player group named by its alt text.
     for (const id of [DEMO_IDS.videoPoster, DEMO_IDS.videoNoPoster]) {
-      const [placeholder] = await attachments(id)
-      expect(placeholder?.getAttribute('aria-label')?.length).toBeGreaterThan(10)
+      const player = await waitFor(async () => within(await slot(id)).getByRole('group'))
+      expect(player.getAttribute('aria-label')?.length).toBeGreaterThan(10)
+      expect(player.querySelector('video')).toHaveAttribute('controls')
     }
   })
 
