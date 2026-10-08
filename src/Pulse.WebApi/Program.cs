@@ -23,6 +23,7 @@ using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Moderation; // demo-polish B6
+using Pulse.WebApi.Features.Social.PersonaAdmin; // demo-polish PE-BE
 using Pulse.WebApi.Features.Social.Reactions;  // demo-polish B3
 
 // Pulse.WebApi — the first runtime for the Pulse.Core engine (docs/BACKEND_ROADMAP.md §4, Phase B0).
@@ -186,6 +187,7 @@ builder.Services.AddSocialModeration();    // demo-polish B6
 builder.Services.AddSocialThreads();       // demo-polish B2
 builder.Services.AddSocialReactions();     // demo-polish B3
 builder.Services.AddMedia(builder.Configuration); // demo-polish BM
+builder.Services.AddPersonaAdmin();       // demo-polish PE-BE
 
 // Engine runtime — Wave 2 (feature/engine-runtime), orchestrator-wired. AddReactionLoopHost (#285)
 // registers the in-process reaction-loop BackgroundService + the IEnginePublishService publish funnel
@@ -387,6 +389,7 @@ app.MapSocialPersonaEndpoints();  // #273 GET /api/personas
 app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
 app.MapSocialModerationEndpoints(); // demo-polish B6
 app.MapMedia(); // demo-polish BM
+app.MapPersonaAdminEndpoints(); // demo-polish PE-BE (staff + controller + read-only gates inside)
 
 // Participant-shell config reads — the six GET endpoints the frozen frontend shell seams call
 // (shell-state, chrome-config, brand-tokens, channel-nav-config, alerts, overlay-state). Fixes the UAT
