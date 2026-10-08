@@ -1,10 +1,10 @@
 /*
  * features/social/components/post/PostActions.module.css
  * ---------------------------------------------------------------------------
- * The action row (reply · repost · like (· share)), the separate Quote trigger,
- * the inert read-only counts and the inline quote panel. Split out of
- * `theme/social.module.css` by demo-polish F0; F3 (engagement) owns this file
- * from here on.
+ * The action row (reply · repost · like), the inert read-only / no-persona
+ * counts, and the inline failure notice. Split out of `theme/social.module.css`
+ * by demo-polish F0; F3 (engagement) owns this file. The Quote trigger and its
+ * inline panel styles are gone — the feature is hidden (absent, not disabled).
  */
 
 .actions {
@@ -37,44 +37,35 @@
 }
 
 /*
- * The viewer's own "liked" state (reactions story 01, SOC-030). Color is
- * paired with a font-weight change on the count (below) AND `aria-pressed` +
- * an "…, liked" accessible-name suffix on the button itself, so the state is
- * never color-only (NFR-001).
+ * The RESTING icon is an outline and the ON icon is filled. The glyphs are the
+ * same FontAwesome solid paths either way (no second icon pack): a stroke with no
+ * fill reads as an outline at this size, and the active rule swaps it back to a
+ * solid fill. This is one of the four non-colour cues of an ON toggle (NFR-001).
+ */
+.actionIcon path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 44px;
+  stroke-linejoin: round;
+}
+
+/*
+ * The viewer's own ON state (liked / reposted; SOC-030, SOC-020). Colour is
+ * paired with (1) the FILLED icon, (2) a heavier count, (3) `aria-pressed` and
+ * (4) an "…, liked" / "…, reposted" accessible-name suffix on the button itself,
+ * so the state is never colour-only (NFR-001).
  */
 .actionButtonActive {
   color: var(--pc-accent);
 }
 
+.actionButtonActive .actionIcon path {
+  fill: currentColor;
+  stroke: none;
+}
+
 .actionButtonActive .actionCount {
   font-weight: 700;
-}
-
-/*
- * The quote trigger — a small, separate control next to the canonical
- * "repost" action (amplification story 01, SOC-020). Kept OUT of the
- * `actions.map` canonical set (never a `data-action` attribute) so the
- * reply/repost/like(/share) order + count stays exactly R-002's contract;
- * this is reachable as its own sibling control instead of overloading the
- * repost button with a second meaning.
- */
-.quoteTrigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  padding: 4px 6px;
-  border: none;
-  border-radius: 999px;
-  background: none;
-  color: var(--pc-ink-muted);
-  cursor: pointer;
-}
-
-.quoteTrigger:hover,
-.quoteTrigger:focus-visible {
-  background: var(--pc-hover);
-  color: var(--pc-accent);
 }
 
 .actionInert {
@@ -107,17 +98,33 @@
 }
 
 /*
- * The inline quote panel wrapper (demo-polish F0). `QuoteComposer` carries its
- * own outer margin (`0 16px 12px 56px`), sized for when it sat BELOW the whole
- * card row; mounted here, inside the content column, that margin would double-
- * indent it. Reset it to sit flush in the column. (F3 removes the quote feature.)
+ * The brief inline failure notice under the row (a rolled-back like / repost).
+ * The element is an ALWAYS-PRESENT polite live region, so it takes no space while
+ * empty; text + an icon carry the message, the left rule is decoration only
+ * (never colour-only, NFR-001). The text stays on the ink colour for contrast in
+ * both light and dark.
  */
-.quotePanel {
-  margin-top: 4px;
+.notice {
+  font-size: 13px;
+  color: var(--pc-ink);
 }
 
-.quotePanel > form {
-  margin: 0;
+.notice:not(:empty) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--pc-ink-muted);
+  border-radius: 4px;
+  background: var(--pc-panel);
+}
+
+.noticeIcon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--pc-ink);
 }
 
 @media (max-width: 420px) {

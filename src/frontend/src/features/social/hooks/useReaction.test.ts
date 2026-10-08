@@ -9,8 +9,8 @@
  *     payload that distinguishes an add from a remove;
  *   - `useReaction` seeds the count/own-state, and `toggleLike` likes then
  *     unlikes — the count moves ±1, `likedByViewer` reflects the viewer's own
- *     state, and each toggle emits exactly ONE `'reaction'` event stamped with
- *     the injected SCENARIO instant (never wall-clock);
+ *     state, and each confirmed toggle emits exactly ONE `'reaction'` event
+ *     (mock mode) stamped with the injected SCENARIO instant (never wall-clock);
  *   - `initiallyLiked` seeds an already-liked post.
  *
  * (The observer-mode "like control is ABSENT" AC — COR-015/D1-011 — lives in
@@ -30,6 +30,7 @@ import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
 import { resetExerciseClock, setExerciseClock, type IExerciseClock } from '@/core/clock'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
+import { resetMockReactions, setMockReactionFailure } from '../services/reactionService'
 import { buildLikeTelemetryInput, useReaction } from './useReaction'
 
 function fixedClock(instant: Date): IExerciseClock {
@@ -50,10 +51,12 @@ function reactionEvents() {
 
 beforeEach(() => {
   resetTelemetryBuffer()
+  resetMockReactions()
 })
 
 afterEach(() => {
   resetExerciseClock()
+  resetMockReactions()
 })
 
 describe('buildLikeTelemetryInput (XC-004 reaction envelope)', () => {
@@ -114,11 +117,13 @@ describe('useReaction — like/unlike + count + own state (SOC-030)', () => {
 
     act(() => result.current.toggleLike())
 
+    // Optimistic: applied synchronously, before the write settles.
     expect(result.current.likeCount).toBe(77)
     expect(result.current.likedByViewer).toBe(true)
 
+    // Mock mode: ONE event per confirmed toggle, emitted when the write resolves.
+    await waitFor(() => expect(reactionEvents()).toHaveLength(1))
     const events = reactionEvents()
-    expect(events).toHaveLength(1)
     expect(events[0]?.channel).toBe('social')
     expect(events[0]?.actor.kind).toBe('persona')
     expect(events[0]?.actor.personaId).toBe('persona-dreyes_fh')
@@ -137,13 +142,14 @@ describe('useReaction — like/unlike + count + own state (SOC-030)', () => {
     await waitFor(() => expect(result.current.canReact).toBe(true))
 
     act(() => result.current.toggleLike())
+    await waitFor(() => expect(result.current.pending).toBe(false))
     act(() => result.current.toggleLike())
+    await waitFor(() => expect(reactionEvents()).toHaveLength(2))
 
     expect(result.current.likeCount).toBe(76)
     expect(result.current.likedByViewer).toBe(false)
 
     const events = reactionEvents()
-    expect(events).toHaveLength(2)
     expect(events[1]?.payload).toEqual({ reaction: 'like', liked: false })
   })
 
@@ -160,5 +166,44 @@ describe('useReaction — like/unlike + count + own state (SOC-030)', () => {
 
     expect(result.current.likeCount).toBe(9)
     expect(result.current.likedByViewer).toBe(false)
+  })
+})
+
+describe('useReaction — failed write (rollback, F3)', () => {
+  it('reverts the count and own-state exactly, surfaces the message, emits no event', async () => {
+    const { result } = renderHook(
+      () => useReaction({ postId: 'post-fail', initialLikeCount: 76 }),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.canReact).toBe(true))
+
+    setMockReactionFailure(true)
+    act(() => result.current.toggleLike())
+    expect(result.current.likeCount).toBe(77)
+    expect(result.current.likedByViewer).toBe(true)
+
+    await waitFor(() => expect(result.current.errorMessage).toMatch(/couldn't update your like/i))
+    expect(result.current.likeCount).toBe(76)
+    expect(result.current.likedByViewer).toBe(false)
+    expect(result.current.pending).toBe(false)
+    expect(reactionEvents()).toHaveLength(0)
+  })
+
+  it('a second tap while the first write is pending is a no-op (no double count)', async () => {
+    const { result } = renderHook(
+      () => useReaction({ postId: 'post-dbl', initialLikeCount: 76 }),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.canReact).toBe(true))
+
+    act(() => {
+      result.current.toggleLike()
+      result.current.toggleLike()
+    })
+
+    await waitFor(() => expect(result.current.pending).toBe(false))
+    expect(result.current.likeCount).toBe(77)
+    expect(result.current.likedByViewer).toBe(true)
+    expect(reactionEvents()).toHaveLength(1)
   })
 })

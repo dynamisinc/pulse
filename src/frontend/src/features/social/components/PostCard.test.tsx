@@ -8,7 +8,7 @@
  *  - an unverified lookalike persona (SOC-052) renders a complete, plausible
  *    card with NO mark and no substitute "unverified" label;
  *  - no platform-added editorial badge text ever renders;
- *  - the action row renders in canonical reply/repost/like(/share) order
+ *  - the action row renders in canonical reply/repost/like order (no Share, F3)
  *    with correct counts, and `readOnly` hides the interactive controls
  *    while keeping the counts visible as inert text (COR-015);
  *  - post text renders as inert text, never parsed HTML (NFR-004);
@@ -169,7 +169,7 @@ describe('PostCard — action row (R-002)', () => {
     expect(buttons[2]).toHaveTextContent('42')
   })
 
-  it('appends share, in order, when present', async () => {
+  it('never renders a Share action, even when counts carry a share figure (F3)', async () => {
     await renderWithExerciseContext(
       <PostCard post={buildPost({ counts: { reply: 1, repost: 2, like: 3, share: 4 } })} />,
     )
@@ -181,9 +181,8 @@ describe('PostCard — action row (R-002)', () => {
       'reply',
       'repost',
       'like',
-      'share',
     ])
-    expect(buttons[3]).toHaveTextContent('4')
+    expect(screen.queryByRole('button', { name: /share/i })).not.toBeInTheDocument()
   })
 
   it('omits share entirely when not present in counts', async () => {
@@ -216,11 +215,10 @@ describe('PostCard — readOnly variant (COR-015, D1-011)', () => {
 
     const actionsRegion = screen.getByTestId('post-actions')
     expect(actionsRegion.querySelectorAll('button[data-action]')).toHaveLength(3)
-    // PostActions self-wires the amplify hook (demo-polish F0, DP-14), so a writable
-    // session also gets the SEPARATE Quote trigger next to Repost. It is deliberately
-    // not a canonical `data-action` (R-002), hence the 3 above are unchanged.
-    expect(within(actionsRegion).getByTestId('post-quote-trigger')).toBeInTheDocument()
-    expect(actionsRegion.querySelectorAll('button')).toHaveLength(4)
+    // The Quote trigger is hidden (absent, not disabled; demo-polish F3), so the
+    // three canonical controls are the whole row.
+    expect(within(actionsRegion).queryByTestId('post-quote-trigger')).not.toBeInTheDocument()
+    expect(actionsRegion.querySelectorAll('button')).toHaveLength(3)
   })
 })
 

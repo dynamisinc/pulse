@@ -43,6 +43,17 @@
  * its telemetry envelope — never as a client query-scoping param (query
  * isolation stays server-side; WAVE0-REVIEW precedent 13).
  *
+ * DEMO-POLISH F3 — WHAT CHANGED. The repost button is now a PERSISTED toggle
+ * (`PUT`/`DELETE /api/posts/{id}/reactions/repost`, `reactionService.ts`) driven
+ * by `useAmplify`. In LIVE mode the server emits the XC-004 `repost` event
+ * (`payload { reposted }`, one per state change — implementation.md §1.8), so
+ * the client emits nothing; in MOCK mode `useAmplify` calls
+ * {@link emitRepostToggle} once per confirmed toggle, producing the same event
+ * shape. Quote-posting is HIDDEN in the UI (the Quote trigger and panel are not
+ * mounted, F3), but `quotePost()` and `useAmplify().doQuote` are kept intact for
+ * the later quote story; the standalone `repost()` below likewise stays for its
+ * own tests/back-compat and is no longer called by the UI.
+ *
  * SCOPE (story 01): this module produces the amplification record + its
  * telemetry only. Wiring the record INTO the live feed (append to `postStore`)
  * and INTO the `<PostCard>` action row is the orchestrator's serial Wave-2
@@ -126,7 +137,11 @@ export interface QuotePostRecord extends AmplificationRecordBase {
  * carries the provenance distinction, and `actingHumanId` satisfies the
  * schema's conditional 'controller-as-persona' attribution (COR-018).
  */
-function emitAmplification(eventType: AmplificationKind, input: AmplifyInputBase): void {
+function emitAmplification(
+  eventType: AmplificationKind,
+  input: AmplifyInputBase,
+  payload?: Record<string, unknown>,
+): void {
   buildAndEmit({
     exerciseId: input.exerciseId,
     eventType,
@@ -143,6 +158,7 @@ function emitAmplification(eventType: AmplificationKind, input: AmplifyInputBase
     scenarioTime: input.scenarioTime,
     timeZone: input.timeZone,
     target: { entityType: 'post', entityId: input.originalPostId },
+    payload,
   })
 }
 
@@ -162,6 +178,24 @@ export function repost(input: RepostInput): RepostRecord {
     originalPostId: input.originalPostId,
     scenarioTime: input.scenarioTime,
   }
+}
+
+/** Input to {@link emitRepostToggle}: a repost context plus the toggle's RESULTING state. */
+export interface RepostToggleInput extends AmplifyInputBase {
+  /** The state AFTER the toggle — `true` = reposted, `false` = repost undone. */
+  readonly reposted: boolean
+}
+
+/**
+ * Emits the one XC-004 `'repost'` event for a CONFIRMED repost / undo, with the
+ * server's own payload shape (`{ reposted: true|false }`, implementation.md
+ * §1.8) so the mock-mode event is indistinguishable from the live server's.
+ * MOCK MODE ONLY: the live server is authoritative and the caller (`useAmplify`)
+ * must not call this when `USE_MOCK_DATA` is false. Never throws (caller-safe
+ * `buildAndEmit`).
+ */
+export function emitRepostToggle(input: RepostToggleInput): void {
+  emitAmplification('repost', input, { reposted: input.reposted })
 }
 
 /**
