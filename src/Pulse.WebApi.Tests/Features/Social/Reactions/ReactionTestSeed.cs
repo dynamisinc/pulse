@@ -46,8 +46,18 @@ internal sealed class ReactionWorld
 
     public required string TimeZone { get; init; }
 
-    /// <summary>The exercise's persisted <c>CurrentScenarioTime</c> (the clock fallback when no clock is running).</summary>
-    public required DateTimeOffset ScenarioTime { get; init; }
+    /// <summary>
+    /// The exercise's persisted <c>CurrentScenarioTime</c> (the clock fallback when no clock is running), or
+    /// <c>null</c> when the world was seeded with none.
+    /// </summary>
+    public required DateTimeOffset? StoredScenarioTime { get; init; }
+
+    /// <summary>The persisted scenario instant the default tests assert against (= <see cref="StoredScenarioTime"/>).</summary>
+    public DateTimeOffset ScenarioTime => StoredScenarioTime
+        ?? throw new InvalidOperationException("this world was seeded with no stored scenario time");
+
+    /// <summary>The post's own <c>CreatedScenarioTime</c> (the last scenario-time fallback, and the clamp floor).</summary>
+    public required DateTimeOffset PostScenarioTime { get; init; }
 }
 
 /// <summary>Seeding and read-back helpers shared by the reaction test classes (real SQL only).</summary>
@@ -66,12 +76,19 @@ internal static class ReactionTestSeed
         return new FollowTestHost(fixture.ConnectionString!);
     }
 
-    /// <summary>Seeds one exercise world. The post carries the given baseline (staff-seeded engagement).</summary>
+    /// <summary>
+    /// Seeds one exercise world. The post carries the given baseline (staff-seeded engagement). By default the exercise
+    /// stores <see cref="ExerciseScenarioTime"/> and the post is created at the same instant; pass
+    /// <paramref name="storeScenarioTime"/> = <c>false</c> to store none, or override either instant.
+    /// </summary>
     public static async Task<ReactionWorld> SeedWorldAsync(
         MsSqlContainerFixture fixture,
         int baselineReply = 0,
         int baselineRepost = 0,
-        int baselineLike = 0)
+        int baselineLike = 0,
+        bool storeScenarioTime = true,
+        DateTimeOffset? storedScenarioTime = null,
+        DateTimeOffset? postScenarioTime = null)
     {
         var exerciseId = Guid.NewGuid();
         var token = $"reaction-token-{Guid.NewGuid():N}";
@@ -89,7 +106,8 @@ internal static class ReactionTestSeed
             SessionId = session.Id,
             ActingHumanId = session.ActingHumanId,
             TimeZone = "America/Chicago",
-            ScenarioTime = ExerciseScenarioTime,
+            StoredScenarioTime = storeScenarioTime ? storedScenarioTime ?? ExerciseScenarioTime : null,
+            PostScenarioTime = postScenarioTime ?? ExerciseScenarioTime,
         };
 
         await using var seed = fixture.CreateContext();
@@ -101,11 +119,18 @@ internal static class ReactionTestSeed
             Hostname = world.Host,
             TimeZone = world.TimeZone,
             Status = "active",
-            CurrentScenarioTime = world.ScenarioTime,
+            CurrentScenarioTime = world.StoredScenarioTime,
         });
         seed.Personas.Add(NewPersona(world.Persona, exerciseId));
         seed.Personas.Add(NewPersona(world.OtherPersona, exerciseId));
-        seed.Posts.Add(NewPost(world.Post, exerciseId, world.OtherPersona, baselineReply, baselineRepost, baselineLike));
+        seed.Posts.Add(NewPost(
+            world.Post,
+            exerciseId,
+            world.OtherPersona,
+            baselineReply,
+            baselineRepost,
+            baselineLike,
+            createdScenarioTime: world.PostScenarioTime));
         seed.Sessions.Add(session);
         await seed.SaveChangesAsync();
 
@@ -144,13 +169,14 @@ internal static class ReactionTestSeed
         int baselineRepost = 0,
         int baselineLike = 0,
         Guid? parentPostId = null,
-        DateTimeOffset? deletedAt = null) => new()
+        DateTimeOffset? deletedAt = null,
+        DateTimeOffset? createdScenarioTime = null) => new()
         {
             Id = id,
             ExerciseId = exerciseId,
             AuthorPersonaId = authorPersonaId,
             Body = $"post {id:N}",
-            CreatedScenarioTime = ExerciseScenarioTime,
+            CreatedScenarioTime = createdScenarioTime ?? ExerciseScenarioTime,
             CreatedWallClock = DateTimeOffset.UtcNow,
             Origin = "participant",
             ActingHumanId = "human-test",

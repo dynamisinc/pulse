@@ -413,4 +413,60 @@ public class ReactionEndpointTests
         (await ReadEventsAsync(_fixture, world.Exercise, "reaction")).Should().HaveCount(2)
             .And.OnlyContain(e => e.ScenarioTime == clockTime, "the events carry the clock's scenario time");
     }
+
+    [RequiresDockerFact]
+    public async Task React_NoClockAndNoStoredScenarioTime_StampsThePostsOwnScenarioTime_NeverTheWallClock()
+    {
+        // No running clock and NO persisted CurrentScenarioTime: the last fallback is the post's own scenario instant,
+        // never DateTimeOffset.UtcNow (DP-15). The post instant is deliberately in the PAST, years before the wall
+        // clock: a wall-clock fallback would then be LATER than the post, so the never-before-the-post clamp could not
+        // mask it, and the stamp would visibly differ.
+        var postScenarioTime = new DateTimeOffset(2019, 6, 1, 14, 15, 0, TimeSpan.Zero);
+        var world = await SeedWorldAsync(_fixture, storeScenarioTime: false, postScenarioTime: postScenarioTime);
+        world.StoredScenarioTime.Should().BeNull("this test needs an exercise with no stored scenario time");
+
+        await using var host = CreateHost(_fixture);
+        host.Services.GetRequiredService<IExerciseClock>().CurrentScenarioTime(world.Exercise).Should().BeNull(
+            "this test needs an exercise with no running clock");
+        using var client = host.CreateClientFor(world.Host, world.Token);
+
+        (await client.PutAsync(ReactionUri(world.Post, "like"), content: null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.DeleteAsync(ReactionUri(world.Post, "like"))).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var row = (await ReadReactionsAsync(_fixture, world.Post)).Should().ContainSingle().Subject;
+        row.CreatedScenarioTime.Should().Be(postScenarioTime, "the new row falls back to the post's scenario instant");
+        row.DeletedAt.Should().Be(postScenarioTime, "the un-like falls back to the post's scenario instant, never UtcNow");
+
+        var events = await ReadEventsAsync(_fixture, world.Exercise, "reaction");
+        events.Should().HaveCount(2).And.OnlyContain(
+            e => e.ScenarioTime == postScenarioTime, "the events' scenario time falls back to the post's instant");
+        events.Should().OnlyContain(
+            e => (DateTimeOffset.UtcNow - e.WallClockTime).Duration() < TimeSpan.FromMinutes(5),
+            "the wall clock still lands in the envelope's wallClockTime, and only there");
+    }
+
+    [RequiresDockerFact]
+    public async Task React_AStaleStoredScenarioTimeEarlierThanThePost_IsClampedToThePostsOwnScenarioTime()
+    {
+        // The stored CurrentScenarioTime is written only by the seed, so it can be stale and EARLIER than a post made
+        // since. A reaction or un-like can never predate its post: the stamp is clamped to the post's instant.
+        var staleStored = new DateTimeOffset(2033, 9, 4, 9, 30, 0, TimeSpan.Zero);
+        var postScenarioTime = new DateTimeOffset(2033, 9, 4, 15, 0, 0, TimeSpan.Zero);
+        var world = await SeedWorldAsync(
+            _fixture, storedScenarioTime: staleStored, postScenarioTime: postScenarioTime);
+
+        await using var host = CreateHost(_fixture);
+        using var client = host.CreateClientFor(world.Host, world.Token);
+
+        (await client.PutAsync(ReactionUri(world.Post, "repost"), content: null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.DeleteAsync(ReactionUri(world.Post, "repost"))).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var row = (await ReadReactionsAsync(_fixture, world.Post)).Should().ContainSingle().Subject;
+        row.CreatedScenarioTime.Should().Be(
+            postScenarioTime, "the stale stored instant ({0}) is earlier than the post, so it is clamped", staleStored);
+        row.DeletedAt.Should().Be(postScenarioTime, "the un-like is clamped the same way");
+
+        (await ReadEventsAsync(_fixture, world.Exercise, "repost")).Should().HaveCount(2).And.OnlyContain(
+            e => e.ScenarioTime == postScenarioTime, "the events carry the clamped scenario time too");
+    }
 }

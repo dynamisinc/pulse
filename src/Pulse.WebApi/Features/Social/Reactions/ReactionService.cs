@@ -50,9 +50,13 @@ using Pulse.WebApi.Features.Social.Follows;
 /// </para>
 /// <para>
 /// <b>Scenario time (COR-053).</b> The new row's <see cref="PostReaction.CreatedScenarioTime"/>, the soft delete's
-/// <see cref="PostReaction.DeletedAt"/> and the event's scenario instant are ONE value, resolved server-side by
-/// the <see cref="FollowService"/> rule (implementation.md §1.8): the exercise's running clock, else its persisted
-/// <c>CurrentScenarioTime</c>, else the server clock. Wall-clock time is used only for the telemetry envelope.
+/// <see cref="PostReaction.DeletedAt"/> and the event's scenario instant are ONE value, resolved server-side: the
+/// exercise's running clock, else its persisted <c>CurrentScenarioTime</c>, else the reacted-to post's own
+/// <see cref="Post.CreatedScenarioTime"/> (always a scenario instant). The result is then CLAMPED to be no earlier
+/// than the post's own scenario instant, because a reaction cannot precede its post and the stored
+/// <c>CurrentScenarioTime</c> can be a stale seed value. The wall clock is NEVER stamped into scenario time (DP-15,
+/// the same order the takedown uses); it is used only for the telemetry envelope's <c>wallClockTime</c> /
+/// <c>emittedAt</c>.
 /// </para>
 /// </remarks>
 public sealed class ReactionService
@@ -188,7 +192,7 @@ public sealed class ReactionService
             .AsNoTracking()
             .Where(post => post.Id == postId && post.ExerciseId == exerciseId && post.DeletedAt == null)
             .Select(post => new ReactionBaseline(
-                post.BaselineReplyCount, post.BaselineRepostCount, post.BaselineLikeCount))
+                post.BaselineReplyCount, post.BaselineRepostCount, post.BaselineLikeCount, post.CreatedScenarioTime))
             .FirstOrDefaultAsync(cancellationToken);
         if (baseline is null)
         {
@@ -203,7 +207,9 @@ public sealed class ReactionService
                 await ReadStateAsync(postId, personaId, kind, baseline, cancellationToken));
         }
 
-        // 6. One wall-clock read shared by the envelope, and ONE scenario instant shared by the row and its event.
+        // 6. One wall-clock read for the telemetry envelope ONLY, and ONE scenario instant shared by the row and its
+        //    event. Scenario time is never the wall clock (DP-15): the last fallback is the post's own scenario
+        //    instant, which a reaction to it cannot precede.
         var now = DateTimeOffset.UtcNow;
         // org-scope-exempt(ResolvedScope): exerciseId comes from TryGetScope (IExerciseContext) at step 1 and is
         // never a request field; it only supplies the scenario-time fallback and the telemetry time zone.
@@ -212,9 +218,15 @@ public sealed class ReactionService
             .Where(candidate => candidate.Id == exerciseId)
             .Select(candidate => new { candidate.CurrentScenarioTime, candidate.TimeZone })
             .FirstOrDefaultAsync(cancellationToken);
-        var scenarioTime = _exerciseClock.CurrentScenarioTime(exerciseId)
+        var resolvedScenarioTime = _exerciseClock.CurrentScenarioTime(exerciseId)
             ?? exercise?.CurrentScenarioTime
-            ?? now;
+            ?? baseline.PostScenarioTime;
+
+        // A reaction or un-like can never predate its post. The stored CurrentScenarioTime is written only by the
+        // seed, so it can be stale and earlier than a post made since; clamp to the post's own scenario instant.
+        var scenarioTime = resolvedScenarioTime < baseline.PostScenarioTime
+            ? baseline.PostScenarioTime
+            : resolvedScenarioTime;
         var timeZone = string.IsNullOrWhiteSpace(exercise?.TimeZone) ? FallbackTimeZone : exercise.TimeZone;
 
         var telemetryEvent = BuildTelemetryEvent(
@@ -441,8 +453,11 @@ public sealed class ReactionService
         return scope is not null && exerciseId != Guid.Empty;
     }
 
-    /// <summary>The post's seeded engagement baseline (staff-only on the wire; used here only to add to the real counts).</summary>
-    private sealed record ReactionBaseline(int Reply, int Repost, int Like);
+    /// <summary>
+    /// What the reaction path reads off the post: its seeded engagement baseline (staff-only on the wire; used here only
+    /// to add to the real counts) and its own scenario instant (the last scenario-time fallback).
+    /// </summary>
+    private sealed record ReactionBaseline(int Reply, int Repost, int Like, DateTimeOffset PostScenarioTime);
 }
 
 /// <summary>The outcome kind of a <see cref="ReactionService"/> call.</summary>
