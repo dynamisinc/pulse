@@ -45,7 +45,7 @@ Order = wave order. Priorities and effort are the plan's (§5). *Home story* is 
 | 05 | [Media pipeline: upload, store, SAS, library](05-media-pipeline.md) | BM | Must | backend | 1b | SOC-001, XC-009, COR-002, NFR-004, NFR-009 | In Progress | #424 |
 | 06 | [Post v2 read/write](06-post-v2-read-write.md) | BP | Must | backend | 1b | SOC-001, SOC-002, SOC-054, XC-002, COR-024 | In Review | #425 |
 | 07 | [Replies and real threads](07-replies-and-threads.md) | B2 | Must | backend | 1b | SOC-010, SOC-011, SOC-012, SOC-005 | In Review | #426 |
-| 08 | [Reactions (like, repost) and engagement reader](08-reactions.md) | B3 | Must | backend | 1b | SOC-030, SOC-020, XC-004 | In Progress | #427 |
+| 08 | [Reactions (like, repost) and engagement reader](08-reactions.md) | B3 | Must | backend | 1b | SOC-030, SOC-020, XC-004 | In Review | #427 |
 | 09 | [Controller takedown (soft delete + PostRemoved)](09-controller-takedown.md) | B6 | Should | backend | 1b | CTL-025, XC-010 | In Review | #428 |
 | 10 | [App frame and navigation](10-app-frame-navigation.md) | F1 | Must | frontend | 2 | SOC-083, COR-004, NFR-001 | Not Started | #429 |
 | 11 | [Media display: grid, video player, viewer](11-media-display.md) | F2 | Must | frontend | 2 | SOC-001, XC-009, NFR-001, NFR-008 | Not Started | #430 |
