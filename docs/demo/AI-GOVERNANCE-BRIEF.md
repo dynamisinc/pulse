@@ -19,16 +19,18 @@ without it.
 
 **What we do**
 
-- **Where the AI runs.** One Azure AI Foundry resource in commercial Azure, Central US. It hosts
-  `gpt-5.4-mini` (2026-03-17) and `gpt-5.4` (2026-03-05) [R2][R3][M5]. All of Pulse is hosted in
+- **Where the AI runs.** One Azure AI Foundry resource in commercial Azure, Central US. Our
+  infrastructure code requests `gpt-5.4-mini` (2026-03-17) and `gpt-5.4` (2026-03-05) [R2][R3][M5].
+  Auto-upgrade is on, so the live versions may differ (Open item 3). All of Pulse is hosted in
   commercial Azure [R3].
 - **US-only processing.** We use Microsoft's "Data Zone Standard" deployment type. For a US resource,
   "prompts and responses may be processed anywhere within the United States", and stored data stays in
   the resource's geography [M1][M4]. Microsoft may add regions to the US zone without notice [M4].
 - **No training.** Microsoft states prompts and completions are "NOT available to OpenAI" and "NOT used to
   train any generative AI foundation models without your permission or instruction" [M1][M13].
-- **No keys, but no private network.** Key access is disabled. Pulse signs in with its own Azure managed
-  identity ("Cognitive Services OpenAI User" role). Public network access is enabled (Entra ID sign-in is
+- **Key sign-in disabled; no private network.** Key-based access to the resource is disabled
+  (`disableLocalAuth`), so calls must use Entra ID. Pulse signs in with its own Azure managed identity
+  ("Cognitive Services OpenAI User" role) and holds no API key. Public network access is enabled (Entra ID sign-in is
   still required), and there is no private endpoint [R2].
 - **What goes to the model** [R4][R5]:
   - fixed instructions;
@@ -39,7 +41,7 @@ without it.
 
   A slot exists for recent exercise posts. **Today it is always sent as "no recent world activity"**.
 - **What never goes to the model** [R4][R5]: participant or staff names, usernames, emails or passwords;
-  exercise IDs; direct messages; evaluator data; telemetry; API keys (none exist). Pulse matches official responses (for
+  exercise IDs; direct messages; evaluator data; telemetry; API keys (Pulse holds none). Pulse matches official responses (for
   example, a PIO's post) to storylines itself, without sending them to the model.
 
 **What remains for your approval**
@@ -97,8 +99,9 @@ without it.
 
 **What we do**
 
-- **A person approves each post.** Exercises start in **Suggest** mode. Every draft waits in the review
-  queue to be approved, edited, vetoed or regenerated [R8].
+- **A person decides on each burst.** Exercises start in **Suggest** mode. Each draft burst (a few posts
+  from different personas) waits in the review queue. A controller approves, vetoes or regenerates it as
+  a unit, or rewrites its lead post and publishes it in the same action [R8].
 - **Two automated checks first.**
   - **Microsoft's default safety policy** applies, because Pulse sets no custom one. It screens prompts and
     outputs for hate, violence, sexual and self-harm content at "Medium" severity, and lists jailbreak
@@ -149,8 +152,8 @@ hand, and participants use the same feed. The engine can run on the offline gene
 ## Open items (beyond those above)
 
 1. The Pulse server has never sent live AI traffic, because the sign-off is unsigned [R1][R11].
-2. The repository has no record of the post-deployment Azure check that keys are off, the role is
-   assigned and the region is correct ([R1] §8).
+2. The repository has no record of the post-deployment Azure check: key-based access disabled, role
+   assigned, region correct and live model versions as tested ([R1] §6, §8).
 3. Model versions can auto-upgrade, so the July results apply only to the versions tested. Pin them
    before approval [R1][R2].
 4. Kill-switch and swamped-mode changes are not logged yet. Settings and cut/restore log entries are
@@ -210,8 +213,8 @@ These items are deliberately not stated as fact in this brief:
 - **Azure Government onboarding and eligibility**, and whether the abuse-monitoring opt-out exists there.
 - **Whether Microsoft's jailbreak detection blocks a request or only flags it by default.** [M11] lists
   it; Microsoft's classic content-filter page [M12] calls it optional.
-- **The live Azure state of `aif-pulse-uat`:** role assignment, disabled keys, region and current model
-  versions. There was no Azure access from the session that wrote this brief (see Open item 2).
+- **The live Azure state of `aif-pulse-uat`:** role assignment, key-based access setting, region and
+  current model versions. There was no Azure access from the session that wrote this brief (see Open item 2).
 - **Per-attack results of the live injection test** (Open item 5).
 - **Whether any Dynamis-level security documents** (for example, from COBRA) apply to Pulse. Tom to
   confirm.
