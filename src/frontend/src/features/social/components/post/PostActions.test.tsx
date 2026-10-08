@@ -9,8 +9,10 @@
  * optimistic like with exactly one XC-004 `reaction` event per toggle; the viewer's
  * initial liked state from `post.viewer`; repost emits one `repost` event and does
  * not touch the count; the SEPARATE Quote trigger opens an inline panel that emits
- * one `quote` event and closes; `onReply`; and the read-only variant (controls
- * ABSENT, counts inert — COR-015/D1-011).
+ * one `quote` event and closes; `onReply`; the read-only variant (controls
+ * ABSENT, counts inert — COR-015/D1-011); and NO FOCUSABLE NO-OPS: an action with
+ * nothing wired to it (Reply without `onReply`, Share always) is the same inert
+ * span markup — not a button, not a tab stop — with `data-action` kept.
  */
 import type { ReactNode } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
@@ -60,7 +62,7 @@ afterEach(() => {
 
 describe('PostActions — anatomy (R-002, NFR-001)', () => {
   it('renders reply, repost, like in canonical order with "<Label>, <count>" names', async () => {
-    await renderActions(<PostActions post={buildPost()} variant="full" />)
+    await renderActions(<PostActions post={buildPost()} variant="full" onReply={vi.fn()} />)
 
     const buttons = screen.getByTestId('post-actions').querySelectorAll('button[data-action]')
     expect(Array.from(buttons).map(b => b.getAttribute('data-action'))).toEqual([
@@ -81,8 +83,9 @@ describe('PostActions — anatomy (R-002, NFR-001)', () => {
       />,
     )
 
+    // `[data-action]`: Share has no handler, so it is an inert span, not a button.
     const keys = Array.from(
-      screen.getByTestId('post-actions').querySelectorAll('button[data-action]'),
+      screen.getByTestId('post-actions').querySelectorAll('[data-action]'),
     ).map(b => b.getAttribute('data-action'))
     expect(keys).toEqual(['reply', 'repost', 'like', 'share'])
   })
@@ -155,7 +158,8 @@ describe('PostActions — self-wired repost and quote (SOC-020, NFR-004)', () =>
 
     const trigger = screen.getByTestId('post-quote-trigger')
     expect(trigger).not.toHaveAttribute('data-action')
-    expect(screen.getByTestId('post-actions').querySelectorAll('button[data-action]')).toHaveLength(3)
+    // Repost + Like only: Reply (no `onReply`) is inert, and Quote has no `data-action`.
+    expect(screen.getByTestId('post-actions').querySelectorAll('button[data-action]')).toHaveLength(2)
   })
 
   it('opens an inline quote panel, submits one quote event, then closes it', async () => {
@@ -197,12 +201,84 @@ describe('PostActions — onReply', () => {
 
     expect(onReply).toHaveBeenCalledWith('post-r')
   })
+})
 
-  it('is an inert-until-wired button without onReply', async () => {
+describe('PostActions — no focusable no-ops (unwired actions are inert, not dead buttons)', () => {
+  it('renders an unwired Reply (no onReply) as an inert span: not a button, not focusable', async () => {
     const user = userEvent.setup()
     await renderActions(<PostActions post={buildPost()} variant="full" />)
 
-    await expect(user.click(screen.getByRole('button', { name: /^reply/i }))).resolves.toBeUndefined()
+    expect(screen.queryByRole('button', { name: /^reply/i })).not.toBeInTheDocument()
+    const reply = screen.getByTestId('post-actions').querySelector('[data-action="reply"]')
+    expect(reply?.tagName).toBe('SPAN')
+    expect(reply).not.toHaveAttribute('tabindex')
+    // The same inert markup the read-only branch uses: count + visually-hidden label.
+    expect(reply).toHaveTextContent('3')
+    expect(within(reply as HTMLElement).getByText('Reply')).toBeInTheDocument()
+
+    // Tabbing from the document start lands on a real control, never on Reply.
+    await user.tab()
+    expect(reply).not.toHaveFocus()
+    expect(screen.getByTestId('post-actions').contains(document.activeElement)).toBe(true)
+    expect(document.activeElement).toHaveAttribute('data-action', 'repost')
+  })
+
+  it('renders Share (never wired) as an inert span: not a button, not focusable', async () => {
+    await renderActions(
+      <PostActions
+        post={buildPost({ counts: { reply: 1, repost: 2, like: 3, share: 4 } })}
+        variant="full"
+        onReply={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: /share/i })).not.toBeInTheDocument()
+    const share = screen.getByTestId('post-actions').querySelector('[data-action="share"]')
+    expect(share?.tagName).toBe('SPAN')
+    expect(share).not.toHaveAttribute('tabindex')
+    expect(share).toHaveTextContent('4')
+    expect(within(share as HTMLElement).getByText('Share')).toBeInTheDocument()
+  })
+
+  it('leaves NO focusable element in the row but the wired controls', async () => {
+    await renderActions(
+      <PostActions
+        post={buildPost({ counts: { reply: 1, repost: 2, like: 3, share: 4 } })}
+        variant="full"
+      />,
+    )
+
+    const region = screen.getByTestId('post-actions')
+    // Repost, Quote and Like only — Reply and Share are inert.
+    expect(within(region).getAllByRole('button').map(b => b.getAttribute('data-action'))).toEqual([
+      'repost',
+      null,
+      'like',
+    ])
+    expect(region.querySelectorAll('[tabindex]')).toHaveLength(0)
+  })
+
+  it('renders a WIRED Reply as a button that fires onReply', async () => {
+    const onReply = vi.fn()
+    const user = userEvent.setup()
+    await renderActions(
+      <PostActions post={buildPost({ id: 'post-wired' })} variant="full" onReply={onReply} />,
+    )
+
+    const reply = screen.getByRole('button', { name: 'Reply, 3' })
+    expect(reply).toHaveAttribute('data-action', 'reply')
+    await user.click(reply)
+
+    expect(onReply).toHaveBeenCalledTimes(1)
+    expect(onReply).toHaveBeenCalledWith('post-wired')
+  })
+
+  it('keeps wired Like and Repost as buttons and the Quote trigger alongside them', async () => {
+    await renderActions(<PostActions post={buildPost()} variant="full" />)
+
+    expect(screen.getByRole('button', { name: 'Like, 42' })).toHaveAttribute('data-action', 'like')
+    expect(screen.getByRole('button', { name: 'Repost, 7' })).toHaveAttribute('data-action', 'repost')
+    expect(screen.getByRole('button', { name: 'Quote' })).toBeInTheDocument()
   })
 })
 
