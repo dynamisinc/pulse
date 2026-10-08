@@ -44,15 +44,24 @@ public sealed class PostMediaWebApplicationFactory : WebApplicationFactory<Progr
     private readonly bool _keepFallbackSigner;
     private readonly bool _keepFallbackResolver;
     private readonly bool _throwingProjector;
+    private readonly Exception? _signerFailure;
 
     public PostMediaWebApplicationFactory(
-        string connectionString, bool keepFallbackSigner = false, bool keepFallbackResolver = false, bool throwingProjector = false)
+        string connectionString,
+        bool keepFallbackSigner = false,
+        bool keepFallbackResolver = false,
+        bool throwingProjector = false,
+        Exception? signerFailure = null)
     {
         Environment.SetEnvironmentVariable(ConnectionStringEnvVar, connectionString);
         _keepFallbackSigner = keepFallbackSigner;
         _keepFallbackResolver = keepFallbackResolver;
         _throwingProjector = throwingProjector;
+        _signerFailure = signerFailure;
     }
+
+    /// <summary>Every log entry the host writes, by category.</summary>
+    public CapturingLoggerProvider Logs { get; } = new();
 
     /// <summary>Every <c>PostReceived</c> broadcast.</summary>
     public FakeFeedBroadcaster Broadcaster { get; } = new();
@@ -82,6 +91,8 @@ public sealed class PostMediaWebApplicationFactory : WebApplicationFactory<Progr
     {
         ArgumentNullException.ThrowIfNull(builder);
 
+        builder.ConfigureLogging(logging => logging.AddProvider(Logs));
+
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IFeedBroadcaster>();
@@ -90,7 +101,12 @@ public sealed class PostMediaWebApplicationFactory : WebApplicationFactory<Progr
             services.RemoveAll<IPostEngagementReader>();
             services.AddSingleton<IPostEngagementReader>(Engagement);
 
-            if (!_keepFallbackSigner)
+            if (_signerFailure is { } failure)
+            {
+                services.RemoveAll<IMediaUrlSigner>();
+                services.AddSingleton<IMediaUrlSigner>(new ThrowingMediaUrlSigner(failure));
+            }
+            else if (!_keepFallbackSigner)
             {
                 services.RemoveAll<IMediaUrlSigner>();
                 services.AddScoped<IMediaUrlSigner>(sp =>
@@ -170,6 +186,52 @@ public sealed class OmittingMediaUrlSigner : IMediaUrlSigner
             .Where(asset => !_omit.Contains(asset.Id))
             .ToDictionary(asset => asset.Id, asset => FakeMediaUrlSigner.UrlFor(asset.Id));
         return Task.FromResult(urls);
+    }
+}
+
+/// <summary>A signer whose every call throws the given exception (a storage outage, or a scope violation).</summary>
+public sealed class ThrowingMediaUrlSigner : IMediaUrlSigner
+{
+    private readonly Exception _exception;
+
+    public ThrowingMediaUrlSigner(Exception exception) => _exception = exception;
+
+    public Task<string> GetReadUrlAsync(MediaAsset asset, CancellationToken cancellationToken) => throw _exception;
+
+    public Task<IReadOnlyDictionary<Guid, string>> GetReadUrlsAsync(
+        IReadOnlyCollection<MediaAsset> assets, CancellationToken cancellationToken) => throw _exception;
+}
+
+/// <summary>A logger provider that records every entry the host writes, with its category.</summary>
+public sealed class CapturingLoggerProvider : ILoggerProvider
+{
+    public ConcurrentQueue<(string Category, LogLevel Level, EventId EventId, string Message, Exception? Exception)> Entries { get; } = new();
+
+    public ILogger CreateLogger(string categoryName) => new CategoryLogger(categoryName, Entries);
+
+    public void Dispose()
+    {
+    }
+
+    private sealed class CategoryLogger : ILogger
+    {
+        private readonly string _category;
+        private readonly ConcurrentQueue<(string, LogLevel, EventId, string, Exception?)> _entries;
+
+        public CategoryLogger(string category, ConcurrentQueue<(string, LogLevel, EventId, string, Exception?)> entries)
+        {
+            _category = category;
+            _entries = entries;
+        }
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            _entries.Enqueue((_category, logLevel, eventId, formatter(state, exception), exception));
     }
 }
 

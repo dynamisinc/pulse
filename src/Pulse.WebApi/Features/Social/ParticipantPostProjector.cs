@@ -204,6 +204,14 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
     /// One signer call for every asset and poster on the page. The signer is reached ONLY when there is
     /// something to sign, so a host with no media storage and no media never touches it.
     /// </summary>
+    /// <remarks>
+    /// <b>A signing failure degrades the page, never fails it.</b> A storage hiccup (a delegation-key fetch
+    /// that fails or times out, RBAC not yet propagated, an unconfigured provider while media rows exist) must not
+    /// blank the whole feed. Such a failure is logged ONCE and answered with an empty URL map, so every item is
+    /// dropped (and logged) by the existing no-URL path while the posts themselves are still served. Two
+    /// exceptions are NOT absorbed: cancellation, and <see cref="ExerciseScopeViolationException"/> — a scope
+    /// mismatch is an isolation signal and must fail closed.
+    /// </remarks>
     private async Task<IReadOnlyDictionary<Guid, string>> SignAsync(
         List<MediaRow> media, CancellationToken cancellationToken)
     {
@@ -218,7 +226,17 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
             .DistinctBy(asset => asset.Id)
             .ToArray();
 
-        return await _mediaUrlSigner.GetReadUrlsAsync(assets, cancellationToken);
+        try
+        {
+            return await _mediaUrlSigner.GetReadUrlsAsync(assets, cancellationToken);
+        }
+#pragma warning disable CA1031 // A storage fault must degrade the page to media-less posts, never fail it.
+        catch (Exception ex) when (ex is not OperationCanceledException and not ExerciseScopeViolationException)
+        {
+            LogSigningFailed(ex, assets.Length);
+            return new Dictionary<Guid, string>();
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>
@@ -264,6 +282,12 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
         Level = LogLevel.Warning,
         Message = "The signer returned no URL for poster asset {AssetId} on post {PostId}; posterUrl is omitted.")]
     private partial void LogPosterOmitted(Guid assetId, Guid postId);
+
+    [LoggerMessage(
+        EventId = 3,
+        Level = LogLevel.Warning,
+        Message = "Signing {AssetCount} media asset(s) failed; the posts are served without their media.")]
+    private partial void LogSigningFailed(Exception exception, int assetCount);
 
     /// <summary>One media item with its asset and effective poster.</summary>
     private sealed record MediaRow(Guid PostId, int Order, string Alt, MediaAsset Asset, MediaAsset? Poster);
