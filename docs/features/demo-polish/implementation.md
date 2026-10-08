@@ -241,7 +241,7 @@ public sealed record MediaAssetView(                    // OMIT null members
     [property: JsonPropertyName("url")] string Url,
     string? PosterUrl = null, int? Width = null, int? Height = null, double? DurationSec = null);
 
-// GET /api/staff/media?kind=image|video&take=100   (take 1..200)  -> StaffMediaAssetView[] newest first by CreatedScenarioTime.
+// GET /api/staff/media?kind=image|video&take=100   (take 1..200)  -> StaffMediaAssetView[] newest first by CreatedWallClock, then Id (DP-18a).
 // Excludes assets that are some video's poster. Staff-only; the participant shape never includes the extra members.
 public sealed record StaffMediaAssetView(
     string Id, string Kind, string Url, string FileName, string UploadedAtScenario,     // "fileName", "uploadedAtScenario" (O)
