@@ -3,13 +3,24 @@ param webAppName string
 param appServicePlanId string
 param appInsightsConnectionString string
 param sqlConnectionString string
-param storageConnectionString string
 @secure()
 @description('Azure SignalR connection string for the Web-API-hosted real-time hub (social-api/03). Empty when SignalR is not deployed.')
 param signalRConnectionString string = ''
 param frontendUrl string = ''
 param aspnetcoreEnvironment string = 'Production'
-param blobStorageProvider string = 'Azure'
+
+// Post media (demo-polish/01, story I1). KEYLESS: the API reaches the private container with its
+// system-assigned identity (below) through DefaultAzureCredential, which holds Storage Blob Data
+// Contributor on the account (modules/storage.bicep). No connection string or account key exists.
+@description('Azure:BlobStorage:Provider — Azure | None for an App Service (Local is Development-only; docs/features/demo-polish/implementation.md §1.7). Defaults to None (uploads answer 503; fail closed); main.bicep passes Azure only when storage is deployed.')
+@allowed([
+  'Azure'
+  'None'
+])
+param blobStorageProvider string = 'None'
+@description('Azure:BlobStorage:ServiceUri — the blob service endpoint, e.g. https://stpulseuat.blob.core.windows.net. No key, no SAS. Supplied by main.bicep as a plain local (not a storage-module output, which would be a module cycle); empty when storage is not deployed.')
+param blobServiceUri string
+@description('Azure:BlobStorage:ContainerName — the private post-media container (the same local main.bicep passes to modules/storage.bicep).')
 param blobStorageContainerName string = 'post-media'
 @secure()
 param emailConnectionString string = ''
@@ -183,7 +194,8 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
   // DefaultAzureCredential presents to the AI Foundry data plane (aif-pulse-*, disableLocalAuth: true —
   // there is no key), so the runtime path needs NO API key and NO developer az-login credential. Its
   // principalId is exported below and consumed by main.bicep to grant the Cognitive Services OpenAI
-  // User role in modules/ai.bicep. One-directional: this module never reads module ai's outputs.
+  // User role in modules/ai.bicep and Storage Blob Data Contributor in modules/storage.bicep
+  // (demo-polish/01). One-directional: this module never reads module ai's or storage's outputs.
   identity: {
     type: 'SystemAssigned'
   }
@@ -231,18 +243,18 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'ConnectionStrings__DefaultConnection'
           value: sqlConnectionString
         }
-        // Blob Storage
-        {
-          name: 'Azure__BlobStorage__ConnectionString'
-          value: storageConnectionString
-        }
-        {
-          name: 'Azure__BlobStorage__PhotoContainerName'
-          value: blobStorageContainerName
-        }
+        // Blob Storage (post media) — keyless: endpoint + container only; auth is the managed identity.
         {
           name: 'Azure__BlobStorage__Provider'
           value: blobStorageProvider
+        }
+        {
+          name: 'Azure__BlobStorage__ServiceUri'
+          value: blobServiceUri
+        }
+        {
+          name: 'Azure__BlobStorage__ContainerName'
+          value: blobStorageContainerName
         }
         // Azure SignalR (real-time feed fan-out; social-api/03). Read by AddSignalR().AddAzureSignalR()
         // via config key Azure:SignalR:ConnectionString. Empty until deploySignalR = true.
@@ -326,5 +338,6 @@ output defaultHostname string = webApp.properties.defaultHostName
 // Object (principal) id of the App Service's system-assigned identity. main.bicep passes this to
 // modules/ai.bicep as backendPrincipalId so the role assignment (Cognitive Services OpenAI User) targets
 // the app itself — closing the keyless-auth gap that previously forced the measured spike to run as a
-// developer az login (engine-runtime/05; infrastructure/README.md follow-up).
+// developer az login (engine-runtime/05; infrastructure/README.md follow-up). main.bicep passes the same
+// id to modules/storage.bicep for the Storage Blob Data Contributor grant (demo-polish/01).
 output principalId string = webApp.identity.principalId
