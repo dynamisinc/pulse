@@ -1,14 +1,21 @@
 namespace Pulse.WebApi.Features.Realtime;
 
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.ExerciseResolution;
+using Pulse.WebApi.Features.Identity.Sessions;
+using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
 /// The exercise-scoped SignalR hub that fans a newly-persisted post out to every currently-connected
 /// participant session in the SAME exercise run (SOC-083) — closing the cross-session gap the in-memory
-/// pub/sub could never span. A connection joins exactly one group, keyed by the exercise the connection's own
-/// host resolves to (COR-001), and NEVER a group named by a client-supplied value.
+/// pub/sub could never span — and carries the staff-only pushes (the review cockpit's
+/// <c>ReviewItemChanged</c>) to that exercise's verified staff connections only. Every connection joins the
+/// exercise-wide group keyed by the exercise the connection's own host resolves to (COR-001); a verified staff
+/// connection ALSO joins that exercise's staff group (demo-polish B5). Neither group is ever named by a
+/// client-supplied value.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -20,6 +27,32 @@ using Pulse.WebApi.Features.ExerciseResolution;
 /// client cannot join, or receive a broadcast for, any exercise but its own. When no host resolved (the id is
 /// <c>null</c> or <see cref="Guid.Empty"/>) the connection is aborted rather than joined to any group — an
 /// absent scope is a closed door, never a default or an unscoped join.
+/// </para>
+/// <para>
+/// <b>Role-scoped staff group (demo-polish B5, home story social-api/05, XC-002).</b> Participant and staff
+/// connections share this hub, so a staff-only event sent to the exercise-wide group would land in every
+/// participant's browser (unpublished engine drafts in devtools — a two-worlds leak). A connection therefore
+/// joins <see cref="StaffGroupNameFor"/> as well ONLY when the server has verified, at connect time, that it
+/// belongs to a live <c>staff</c>-kind session assigned to the SAME host-resolved exercise the exercise-wide
+/// join used. "Staff" is decided from the connection's AUTHENTICATED SESSION alone — the principal
+/// <see cref="SessionAuthenticationMiddleware"/> resolved server-side from the presented token and assigned to
+/// the connection request's <c>HttpContext.User</c> — and is then re-verified against the persisted
+/// <c>Session</c> row and the caller's <c>StaffAssignment</c> set. No query value, header or client message is
+/// ever consulted. Participant, shared read-only, anonymous, expired, revoked, unassigned or cross-tenant
+/// connections never join the staff group; staff-only broadcasters target it (see
+/// <c>EngineReviewBroadcaster</c>) while participant-safe broadcasters keep targeting
+/// <see cref="GroupNameFor"/>.
+/// </para>
+/// <para>
+/// <b>Why the staff check does not use the registered <see cref="ICurrentStaffSessionAccessor"/>.</b> That
+/// accessor reads the token from the <c>Authorization</c> header only (see the trap documented on
+/// <see cref="SessionTokenExtractor"/>), and a browser WebSocket presents its token only as
+/// <c>?access_token=</c> — so it would report "no staff session" for every real console connection. The hub
+/// instead keys the same checks (live, non-revoked, unexpired, <c>staff</c>-kind, bound to a
+/// <c>StaffUser</c>) off the session id the connection's server-resolved principal carries, and reuses
+/// <see cref="StaffAssignmentService.GetAssignmentsAsync"/> — the own-only, tenant-bounded assignment read the
+/// review cockpit's <c>EngineCockpitStaffAuthorizationFilter</c> gates on — rather than inventing a second
+/// notion of "is staff".
 /// </para>
 /// <para>
 /// <b>A live session is required to reach this hub at all (identity-auth-roles/11).</b> Host-derived group
@@ -41,11 +74,31 @@ using Pulse.WebApi.Features.ExerciseResolution;
 /// of the "handshake then immediate server close, no live pushes" bug. <c>Context.GetHttpContext()</c> instead
 /// returns the original connection request's <c>HttpContext</c> — the very request the middleware ran on — so
 /// the same server-side, host-derived exercise id the HTTP endpoints resolve is available here. This keeps the
-/// scope server-authoritative (COR-001); do not reintroduce the injected-context read.
+/// scope server-authoritative (COR-001); do not reintroduce the injected-context read. The injected
+/// <see cref="PulseDbContext"/> lives in that same hub scope (its exercise filter is therefore unset); the
+/// staff check reads only unscoped access records (<c>Session</c>, <c>StaffUser</c>, <c>StaffAssignment</c>,
+/// <c>Exercise</c>), never <see cref="IExerciseScoped"/> content, and runs only for a staff-kind principal —
+/// a participant connection performs no database work here.
 /// </para>
 /// </remarks>
 public sealed class ExerciseRealtimeHub : Hub
 {
+    /// <summary>The session kind that may be considered for the staff group.</summary>
+    private const string StaffSessionKind = "staff";
+
+    private readonly PulseDbContext _dbContext;
+
+    /// <summary>Creates the hub over the persistence context its staff-membership check reads through.</summary>
+    /// <param name="dbContext">
+    /// The hub-scope persistence context. Used ONLY to verify a staff-kind connection's session and assignment
+    /// (unscoped access records); never touched for a participant, read-only or anonymous connection.
+    /// </param>
+    public ExerciseRealtimeHub(PulseDbContext dbContext)
+    {
+        ArgumentNullException.ThrowIfNull(dbContext);
+        _dbContext = dbContext;
+    }
+
     /// <summary>
     /// The SignalR group name for an exercise run — the single source of truth shared with
     /// <see cref="SignalRFeedBroadcaster"/> so the join side and the broadcast side can never drift apart.
@@ -56,24 +109,134 @@ public sealed class ExerciseRealtimeHub : Hub
     internal static string GroupNameFor(Guid exerciseId) => $"exercise:{exerciseId}";
 
     /// <summary>
-    /// Resolves this connection's exercise scope from the connection's host-resolved <c>HttpContext</c> and
-    /// joins the corresponding group. A <c>null</c> or empty scope aborts the connection (fail closed) rather
-    /// than joining any group.
+    /// The SignalR group name for an exercise run's VERIFIED STAFF connections — the single source of truth
+    /// shared with the staff-only broadcasters (<c>EngineReviewBroadcaster</c>) so the join side and the
+    /// broadcast side can never drift apart. Derived from the same server-resolved exercise id as
+    /// <see cref="GroupNameFor"/>; never built from client input. Disjoint from every
+    /// <see cref="GroupNameFor"/> value (no exercise-wide group name carries the <c>:staff</c> suffix).
     /// </summary>
+    /// <param name="exerciseId">The owning exercise run.</param>
+    /// <returns>The group name, <c>exercise:{exerciseId}:staff</c>.</returns>
+    internal static string StaffGroupNameFor(Guid exerciseId) => $"{GroupNameFor(exerciseId)}:staff";
+
+    /// <summary>
+    /// Resolves this connection's exercise scope from the connection's host-resolved <c>HttpContext</c> and
+    /// joins the corresponding group — plus that exercise's staff group when, and only when, the connection's
+    /// authenticated session is a live staff session assigned to that exercise. A <c>null</c> or empty scope
+    /// aborts the connection (fail closed) rather than joining any group.
+    /// </summary>
+    /// <returns>A task that completes when the connection's group membership is established.</returns>
     public override async Task OnConnectedAsync()
     {
         // SignalR runs OnConnectedAsync in its OWN DI scope, so the scoped IExerciseContext the
         // UseExerciseResolution middleware populated on the connection REQUEST never reaches this hub
         // instance (it would read a fresh, null one and abort every connection). Read the host-resolved
         // exercise off the connection's HttpContext, where the middleware also stashed it.
-        var exerciseId = Context.GetHttpContext()?.GetHostResolvedExerciseId();
-        if (exerciseId is null || exerciseId.Value == Guid.Empty)
+        var httpContext = Context.GetHttpContext();
+        var exerciseId = httpContext?.GetHostResolvedExerciseId();
+        if (httpContext is null || exerciseId is null || exerciseId.Value == Guid.Empty)
         {
             Context.Abort(); // fail closed: never join an ambient/empty exercise group
             return;
         }
 
+        // Decide staff membership BEFORE joining anything, so a failed verification (e.g. a database error,
+        // which propagates and closes the connection) never leaves a half-joined connection behind.
+        var isVerifiedStaff = await IsVerifiedStaffForExerciseAsync(httpContext, exerciseId.Value, Context.ConnectionAborted);
+
         await Groups.AddToGroupAsync(Context.ConnectionId, GroupNameFor(exerciseId.Value));
+
+        if (isVerifiedStaff)
+        {
+            // Same exercise id as the join above — the staff group can never point at another exercise.
+            await Groups.AddToGroupAsync(Context.ConnectionId, StaffGroupNameFor(exerciseId.Value));
+        }
+
         await base.OnConnectedAsync();
+    }
+
+    /// <summary>
+    /// Whether the connection's authenticated session is a live <c>staff</c>-kind session whose staff user is
+    /// assigned to <paramref name="exerciseId"/>. Fails closed (<c>false</c>) on anything else.
+    /// </summary>
+    /// <param name="httpContext">The connection request's context (its <c>User</c> is the server-resolved principal).</param>
+    /// <param name="exerciseId">The host-resolved exercise the connection's exercise-wide join used.</param>
+    /// <param name="cancellationToken">The connection-aborted token.</param>
+    /// <returns><c>true</c> only for a verified staff connection on its assigned exercise.</returns>
+    private async Task<bool> IsVerifiedStaffForExerciseAsync(HttpContext httpContext, Guid exerciseId, CancellationToken cancellationToken)
+    {
+        // The principal is assigned ONLY by SessionAuthenticationMiddleware, ONLY for a token it resolved to a
+        // live persisted session; Read() yields null for an anonymous / foreign / malformed principal. The kind
+        // and staff-user id are therefore server facts, never client assertions. A non-staff principal returns
+        // here, before any database work.
+        var identity = SessionPrincipal.Read(httpContext.User);
+        if (identity is null ||
+            !string.Equals(identity.Kind, StaffSessionKind, StringComparison.Ordinal) ||
+            identity.StaffUserId is not { } staffUserId)
+        {
+            return false;
+        }
+
+        var staffSession = new ConnectionStaffSessionAccessor(_dbContext, identity.SessionId, staffUserId);
+        var assignments = await new StaffAssignmentService(_dbContext, staffSession).GetAssignmentsAsync(cancellationToken);
+        if (assignments is null)
+        {
+            return false;
+        }
+
+        // COR-005: the staff user must be assigned to the very exercise this connection joined — the same
+        // comparison EngineCockpitStaffAuthorizationFilter makes against the resolved scope.
+        return assignments.Any(a => Guid.TryParse(a.ExerciseId, out var assignedExerciseId) && assignedExerciseId == exerciseId);
+    }
+
+    /// <summary>
+    /// A connection-bound <see cref="ICurrentStaffSessionAccessor"/>: the same "live, non-revoked, unexpired,
+    /// <c>staff</c>-kind session bound to a <c>StaffUser</c>" decision the request-time
+    /// <c>CurrentStaffSessionAccessor</c> makes, keyed by the session id on the connection's server-resolved
+    /// principal instead of a re-read of the raw token (which, for a browser WebSocket, arrived only in the
+    /// query string). Lets the hub reuse <see cref="StaffAssignmentService"/> unchanged.
+    /// </summary>
+    private sealed class ConnectionStaffSessionAccessor : ICurrentStaffSessionAccessor
+    {
+        private readonly PulseDbContext _dbContext;
+        private readonly Guid _sessionId;
+        private readonly Guid _staffUserId;
+
+        /// <summary>Creates the accessor for one connection's authenticated session.</summary>
+        /// <param name="dbContext">The hub-scope persistence context (<c>Session</c> is unscoped).</param>
+        /// <param name="sessionId">The session id the connection's server-resolved principal carries.</param>
+        /// <param name="staffUserId">The staff-user id the same principal carries.</param>
+        public ConnectionStaffSessionAccessor(PulseDbContext dbContext, Guid sessionId, Guid staffUserId)
+        {
+            ArgumentNullException.ThrowIfNull(dbContext);
+
+            _dbContext = dbContext;
+            _sessionId = sessionId;
+            _staffUserId = staffUserId;
+        }
+
+        /// <inheritdoc />
+        public async Task<CurrentStaffSession?> GetCurrentStaffSessionAsync(CancellationToken cancellationToken = default)
+        {
+            var session = await _dbContext.Sessions
+                .AsNoTracking()
+                .SingleOrDefaultAsync(s => s.Id == _sessionId, cancellationToken);
+
+            // Fail closed on anything that is not (still) a live staff session bound to the SAME staff user the
+            // principal named.
+            if (session is null ||
+                !session.IsLive(DateTimeOffset.UtcNow) ||
+                !string.Equals(session.Kind, StaffSessionKind, StringComparison.Ordinal) ||
+                session.StaffUserId != _staffUserId)
+            {
+                return null;
+            }
+
+            return new CurrentStaffSession
+            {
+                SessionId = session.Id,
+                StaffUserId = _staffUserId,
+            };
+        }
     }
 }
