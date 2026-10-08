@@ -7,7 +7,12 @@
  * injected, so the matrix does not depend on the test runner's environment.
  */
 import { describe, expect, it } from 'vitest'
-import { isSafeMediaUrl, resolveSafeMediaUrl, withFirstFrameHint } from './safeMediaUrl'
+import {
+  isSafeMediaUrl,
+  resolveSafeMediaUrl,
+  withFirstFrameHint,
+  withStartTime,
+} from './safeMediaUrl'
 
 const PAGE = 'https://pulse.example.org/social'
 const prod = { baseUrl: PAGE, allowDevHttp: false } as const
@@ -57,6 +62,9 @@ describe('resolveSafeMediaUrl — rejected (the NFR-004 matrix)', () => {
     ['a protocol-relative URL (another origin)', '//evil.example.net/a.png'],
     ['a backslash protocol-relative URL', '/\\evil.example.net/a.png'],
     ['a double-backslash URL', '\\\\evil.example.net\\a.png'],
+    ['a blob: URL for ANOTHER origin', 'blob:https://evil.example.net/6f8b9d1c-aaaa-bbbb-cccc-0123456789ab'],
+    ['a blob: URL on another port', 'blob:https://pulse.example.org:8443/6f8b9d1c'],
+    ['a malformed blob: URL', 'blob:not-a-url'],
     ['an empty string', ''],
     ['whitespace only', '   '],
   ])('rejects %s', (_label, url) => {
@@ -94,5 +102,19 @@ describe('withFirstFrameHint', () => {
 
   it('leaves a URL that already has a fragment alone', () => {
     expect(withFirstFrameHint('/a.mp4#t=5')).toBe('/a.mp4#t=5')
+  })
+})
+
+describe('withStartTime', () => {
+  it('appends #t=<seconds> to one decimal', () => {
+    expect(withStartTime('/a.mp4', 12.5)).toBe('/a.mp4#t=12.5')
+    expect(withStartTime('https://s/a.mp4?sig=x', 3)).toBe('https://s/a.mp4?sig=x#t=3.0')
+  })
+
+  it('is a no-op for a zero / negative / non-finite time or a URL that already has a fragment', () => {
+    expect(withStartTime('/a.mp4', 0)).toBe('/a.mp4')
+    expect(withStartTime('/a.mp4', -1)).toBe('/a.mp4')
+    expect(withStartTime('/a.mp4', Number.NaN)).toBe('/a.mp4')
+    expect(withStartTime('/a.mp4#t=5', 9)).toBe('/a.mp4#t=5')
   })
 })

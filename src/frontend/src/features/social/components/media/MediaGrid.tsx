@@ -50,7 +50,8 @@ export interface MediaGridProps {
 }
 
 export function MediaGrid({ media, onOpen }: MediaGridProps) {
-  // Which tiles' <img> errored (keyed so a re-render with the same items keeps the state).
+  // Which tiles' <img> errored, keyed by item AND URL: a re-render with the same URL keeps the
+  // placeholder, but a re-minted URL (a fresh SAS link) for the same item is a new key and retries.
   const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set())
 
   const items = media.slice(0, MAX_GRID_IMAGES)
@@ -73,8 +74,9 @@ export function MediaGrid({ media, onOpen }: MediaGridProps) {
         const tileKey = `${item.id}:${index}`
         const alt = mediaAlt(item)
         const src = resolveSafeMediaUrl(item.url)
+        const failKey = `${tileKey}:${src ?? ''}`
 
-        if (src === undefined || failed.has(tileKey)) {
+        if (src === undefined || failed.has(failKey)) {
           return (
             <div key={tileKey} className={styles.cell}>
               <MediaFallbackTile alt={alt} />
@@ -90,7 +92,7 @@ export function MediaGrid({ media, onOpen }: MediaGridProps) {
             loading="lazy"
             decoding="async"
             draggable={false}
-            onError={() => setFailed(previous => new Set(previous).add(tileKey))}
+            onError={() => setFailed(previous => new Set(previous).add(failKey))}
           />
         )
 

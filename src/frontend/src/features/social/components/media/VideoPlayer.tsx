@@ -34,17 +34,27 @@
  *  - EXERCISE WATERMARK SLOT (NFR-008): `data-testid="media-watermark-slot"` is
  *    ALWAYS in the DOM, in the overlay's top row, with the SAME flexible width
  *    whether empty or filled (so toggling never shifts the layout). It renders the
- *    text "EXERCISE" exactly when
- *    `isWatermarkRequired(useChromeConfig())` — i.e. when the compliance chrome is
- *    off — and is an empty, invisible slot otherwise. We fullscreen the WRAPPER
- *    (not the bare `<video>`), the native fullscreen button is removed in
- *    Chromium (`controlsList="nofullscreen"`) and PiP is disabled, so the
- *    watermark cannot be dropped by a native fullscreen path. (Known gap: iOS
- *    Safari has no element fullscreen, so Expand opens the modal viewer there —
- *    which keeps the watermark — but its own native fullscreen button, if the
- *    user taps it, shows the bare video.)
+ *    text "EXERCISE" when `isWatermarkRequired(useChromeConfig())` (the compliance
+ *    chrome is off) AND ALSO whenever this player is fullscreen: fullscreen hides the
+ *    compliance banners, so without that the default chrome-ON exercise would show a
+ *    full-screen video with no EXERCISE marking anywhere (the invariant is "chrome and
+ *    watermark are never BOTH off"). It is an empty, invisible slot otherwise.
+ *  - NO PATH SHOWS THE BARE VIDEO. We fullscreen the WRAPPER (so the watermark child
+ *    is on screen), `controlsList="nofullscreen nodownload noremoteplayback"` +
+ *    `disablePictureInPicture` + `disableRemotePlayback` remove Chromium's fullscreen,
+ *    Download and Cast, and the rest is policed at runtime: a `fullscreenchange` whose
+ *    element is the bare `<video>` (Firefox / desktop Safari ignore `controlsList`;
+ *    double-click) is exited at once and routed to the in-app modal viewer, and on iOS
+ *    (native `<video>`-only fullscreen, which cannot be overlaid) `webkitbeginfullscreen`
+ *    triggers `webkitExitFullscreen()` and the same modal. RESIDUAL iOS RISK: the native
+ *    player cannot be PREVENTED, only left immediately, so it can flash for a moment.
+ *  - PAUSE/ENDEX/BREAK-FICTION: when the shell overlay becomes active
+ *    (`useOverlayState`, the shell's own public state hook — social imports the shell,
+ *    never the reverse) the playing video is paused, and a `play` while it is active is
+ *    paused straight away: nothing plays behind the overlay.
  *  - EXPAND: native fullscreen on the wrapper; when the API is missing or
- *    refuses it asks the owner (`onRequestModal`) to open the modal viewer.
+ *    refuses it asks the owner (`onRequestModal`, with the playback position) to open
+ *    the modal viewer, which resumes at that position (paused — it never autoplays).
  *  - UNPLAYABLE: the server cannot tell an MP4's codec, so a `<video>` `error`
  *    swaps the frame for "This video can't be played in this browser" plus the
  *    alt text — never a blank box. A URL the allow-list rejects
@@ -73,19 +83,21 @@ import {
   faVolumeXmark,
 } from '@fortawesome/free-solid-svg-icons'
 import { isWatermarkRequired, useChromeConfig } from '@/features/participant-shell/chromeConfig'
+import { useOverlayState } from '@/features/participant-shell/components/OverlayLayer/overlayState'
 import type { PostMedia } from '../../types/post'
 import { formatDuration } from './formatDuration'
 import {
   FULLSCREEN_CHANGE_EVENTS,
   exitFullscreen,
+  exitVideoFullscreenIOS,
   getFullscreenElement,
   requestElementFullscreen,
 } from './fullscreen'
 import { MediaFallbackTile } from './MediaFallbackTile'
 import { UNPLAYABLE_VIDEO_MESSAGE } from './mediaCopy'
 import { SEEK_STEP_SECONDS, mediaAlt, singleMediaAspectRatio } from './mediaLayout'
-import { claimPlayback, releasePlayback } from './playbackCoordinator'
-import { resolveSafeMediaUrl, withFirstFrameHint } from './safeMediaUrl'
+import { claimPlayback, pauseActivePlayback, releasePlayback } from './playbackCoordinator'
+import { resolveSafeMediaUrl, withFirstFrameHint, withStartTime } from './safeMediaUrl'
 import styles from './VideoPlayer.module.css'
 
 export interface VideoPlayerProps {
@@ -97,10 +109,14 @@ export interface VideoPlayerProps {
    */
   readonly variant?: 'inline' | 'expanded'
   /**
-   * Called (with the player wrapper, for focus return) when native fullscreen is
-   * unavailable or refused, so the owner can open the modal viewer instead.
+   * Called (with the player wrapper, for focus return, and — when it had started — the
+   * playback position) when fullscreen has to happen IN THE APP instead: the browser has
+   * no element-fullscreen API, refused it, or took the bare `<video>` fullscreen by its
+   * own route (which would drop the watermark). The owner opens the modal viewer.
    */
-  readonly onRequestModal?: (trigger: HTMLElement) => void
+  readonly onRequestModal?: (trigger: HTMLElement, startAt?: number) => void
+  /** Resume position in seconds (the modal fallback carries it over). Default: the start. */
+  readonly startAt?: number
 }
 
 /** Starts playback without leaking a rejected promise (autoplay policy, abort). */
@@ -108,34 +124,92 @@ function safePlay(video: HTMLVideoElement): void {
   void Promise.resolve(video.play()).catch(() => undefined)
 }
 
-export function VideoPlayer({ media, variant = 'inline', onRequestModal }: VideoPlayerProps) {
+export function VideoPlayer({
+  media,
+  variant = 'inline',
+  onRequestModal,
+  startAt,
+}: VideoPlayerProps) {
   const alt = mediaAlt(media)
   const watermarkRequired = isWatermarkRequired(useChromeConfig())
+  // A shell Pause / EndEx / break-fiction overlay covers the channel: media must stop.
+  const overlayActive = useOverlayState().state !== 'none'
 
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [muted, setMuted] = useState(false)
-  const [failed, setFailed] = useState(false)
+  // The URL that errored (not a boolean): a re-minted SAS URL is a different `src` and retries.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
   const [metadataDuration, setMetadataDuration] = useState<number | undefined>(undefined)
 
-  // Page-wide "one video at a time": give up the claim if this player unmounts mid-play.
+  // The latest fullscreen-fallback inputs, read from event handlers that must not re-subscribe.
+  const latestRef = useRef({ variant, onRequestModal })
   useEffect(() => {
+    latestRef.current = { variant, onRequestModal }
+  })
+
+  /**
+   * Fullscreen has to happen IN THE APP (the modal viewer keeps the EXERCISE watermark;
+   * a native fullscreen of the bare `<video>` cannot). Pauses the inline video and hands
+   * its position over. A no-op in the already-expanded variant or without an owner.
+   */
+  const openInModal = useCallback(() => {
+    const { variant: currentVariant, onRequestModal: open } = latestRef.current
+    const wrapper = wrapperRef.current
+    if (currentVariant !== 'inline' || open === undefined || wrapper === null) return
     const video = videoRef.current
-    return () => {
-      if (video !== null) releasePlayback(video)
-    }
+    const at = video !== null && Number.isFinite(video.currentTime) ? video.currentTime : 0
+    video?.pause()
+    if (at > 0) open(wrapper, at)
+    else open(wrapper)
   }, [])
 
-  // Track whether THIS player's wrapper is the fullscreen element (for the Expand label).
+  // Ref callback (not an effect that captured the element once): the `<video>` element is
+  // replaced when a failed URL is retried, so the "one at a time" claim and the iOS
+  // listener must follow the element, not the component. React 19 runs the returned cleanup
+  // when the element goes away.
+  const attachVideo = useCallback((video: HTMLVideoElement | null) => {
+    videoRef.current = video
+    if (video === null) return undefined
+    // iOS Safari presents its own native fullscreen for a `<video>` (no page overlay, so no
+    // watermark): leave it the instant it begins and use the in-app viewer instead.
+    const handleBeginFullscreen = () => {
+      exitVideoFullscreenIOS(video)
+      openInModal()
+    }
+    video.addEventListener('webkitbeginfullscreen', handleBeginFullscreen)
+    return () => {
+      video.removeEventListener('webkitbeginfullscreen', handleBeginFullscreen)
+      releasePlayback(video)
+    }
+  }, [openInModal])
+
+  // Pause whatever is playing the moment the shell overlay takes over the screen.
   useEffect(() => {
-    const sync = () => setFullscreen(getFullscreenElement() === wrapperRef.current)
+    if (overlayActive) pauseActivePlayback()
+  }, [overlayActive])
+
+  // Track THIS player's fullscreen state, and police how it got there.
+  useEffect(() => {
+    const sync = () => {
+      const current = getFullscreenElement()
+      setFullscreen(current !== null && current === wrapperRef.current)
+      if (current !== null && current === videoRef.current) {
+        // The browser's own fullscreen path (Firefox / desktop Safari ignore `controlsList`;
+        // so does a double-click) took the BARE <video> — no watermark, no overlay. Leave it
+        // and route to the in-app viewer. There is no user activation in this handler, so
+        // re-requesting fullscreen on the wrapper here would be refused.
+        void exitFullscreen()
+        openInModal()
+      }
+    }
     for (const name of FULLSCREEN_CHANGE_EVENTS) document.addEventListener(name, sync)
     return () => {
       for (const name of FULLSCREEN_CHANGE_EVENTS) document.removeEventListener(name, sync)
     }
-  }, [])
+  }, [openInModal])
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current
@@ -166,12 +240,9 @@ export function VideoPlayer({ media, variant = 'inline', onRequestModal }: Video
       return
     }
     const entered = await requestElementFullscreen(wrapper)
-    if (!entered && variant === 'inline' && onRequestModal !== undefined) {
-      // No usable native fullscreen (e.g. iPhone Safari): fall back to the modal viewer.
-      videoRef.current?.pause()
-      onRequestModal(wrapper)
-    }
-  }, [onRequestModal, variant])
+    // No usable native fullscreen (e.g. iPhone Safari): fall back to the modal viewer.
+    if (!entered) openInModal()
+  }, [openInModal])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.altKey || event.ctrlKey || event.metaKey) return
@@ -226,14 +297,22 @@ export function VideoPlayer({ media, variant = 'inline', onRequestModal }: Video
     )
   }
 
+  const failed = failedSrc === src
   const posterSrc = resolveSafeMediaUrl(media.posterUrl)
-  // No poster: ask for the frame at 0.1 s so Safari has something to paint.
-  const videoSrc = posterSrc === undefined ? withFirstFrameHint(src) : src
+  // Resuming (the modal fallback) seeks to the hand-over position; with no poster, ask for
+  // the frame at 0.1 s so Safari has something to paint.
+  const videoSrc = startAt !== undefined && startAt > 0
+    ? withStartTime(src, startAt)
+    : posterSrc === undefined ? withFirstFrameHint(src) : src
 
   const knownDuration = typeof media.durationSec === 'number'
     && Number.isFinite(media.durationSec) && media.durationSec > 0
     ? media.durationSec
     : metadataDuration
+  // NFR-008: chrome off => watermark. Fullscreen hides the compliance banners, so the in-content
+  // watermark is ALSO required while this player is fullscreen — "chrome and watermark are never
+  // both off" must hold in fullscreen too, not only when an exercise runs chrome-less.
+  const showWatermark = watermarkRequired || fullscreen
   const ratio = singleMediaAspectRatio(media.width, media.height)
   const frameStyle = { aspectRatio: ratio, '--vp-ratio': ratio } as CSSProperties
 
@@ -266,16 +345,22 @@ export function VideoPlayer({ media, variant = 'inline', onRequestModal }: Video
         </div>
       ) : (
         <video
-          ref={videoRef}
+          ref={attachVideo}
           className={styles.video}
           src={videoSrc}
           poster={posterSrc}
           controls
-          controlsList="nofullscreen"
+          controlsList="nofullscreen nodownload noremoteplayback"
           disablePictureInPicture
+          disableRemotePlayback
           playsInline
           preload="metadata"
           onPlay={event => {
+            if (overlayActive) {
+              // Nothing plays behind a Pause / EndEx / break-fiction overlay.
+              event.currentTarget.pause()
+              return
+            }
             setPlaying(true)
             claimPlayback(event.currentTarget)
           }}
@@ -291,7 +376,7 @@ export function VideoPlayer({ media, variant = 'inline', onRequestModal }: Video
           onLoadedMetadata={handleLoadedMetadata}
           onError={() => {
             setPlaying(false)
-            setFailed(true)
+            setFailedSrc(src)
           }}
         />
       )}
@@ -307,9 +392,9 @@ export function VideoPlayer({ media, variant = 'inline', onRequestModal }: Video
           <time
             className={styles.duration}
             dateTime={`PT${Math.round(knownDuration)}S`}
-            title="Video length"
             data-testid="video-duration"
           >
+            <span className={styles.srOnly}>Video length </span>
             {formatDuration(knownDuration)}
           </time>
         )}
@@ -319,10 +404,10 @@ export function VideoPlayer({ media, variant = 'inline', onRequestModal }: Video
         <div
           className={styles.watermark}
           data-testid="media-watermark-slot"
-          role={watermarkRequired ? 'note' : undefined}
-          aria-label={watermarkRequired ? 'Exercise watermark' : undefined}
+          role={showWatermark ? 'note' : undefined}
+          aria-label={showWatermark ? 'Exercise watermark' : undefined}
         >
-          {watermarkRequired ? <span className={styles.watermarkText}>EXERCISE</span> : null}
+          {showWatermark ? <span className={styles.watermarkText}>EXERCISE</span> : null}
         </div>
 
         {!failed && (

@@ -26,10 +26,20 @@
  *  - On deactivation (state clears — a SERVER push, never a user dismiss),
  *    restores focus to whatever was focused before, if it's still attached.
  *
+ * YIELDS TO ANOTHER MODAL (demo-polish F2 Gate-1 H-1). A channel can have its own
+ * `aria-modal` surface open — the social media viewer — when this overlay mounts.
+ * If both traps "pull focus back inside", each re-focuses its container in answer to
+ * the other's focus move and the loop overflows the stack, leaving focus UNDER the
+ * overlay. So the `focusin` pull-back ignores a focus that has landed inside a
+ * DIFFERENT `[aria-modal="true"]` element (`core/a11y/otherModal`, shared with the
+ * channel's trap, which applies the same rule). Activation still moves focus into
+ * the overlay explicitly, so the overlay wins on mount; nothing else changes.
+ *
  * World: participant. Pure behavior hook, no UI, no COBRA.
  */
 
 import { useEffect, useRef } from 'react'
+import { isInsideOtherModal } from '@/core/a11y/otherModal'
 
 const FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -67,6 +77,9 @@ export function useOverlayFocusTrap<T extends HTMLElement>(active: boolean) {
     function handleFocusIn(event: FocusEvent): void {
       const target = event.target
       if (!container || !(target instanceof Node) || container.contains(target)) return
+      // Focus moved into ANOTHER modal (e.g. a channel's viewer): that modal's own trap
+      // owns it — pulling it back from here would ping-pong with that trap forever.
+      if (isInsideOtherModal(target, container)) return
       // Focus escaped the overlay (e.g. landed on hidden page chrome/content
       // still in the DOM underneath) — pull it back inside.
       const [first] = getFocusable(container)

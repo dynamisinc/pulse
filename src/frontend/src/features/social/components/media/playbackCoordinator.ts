@@ -21,6 +21,16 @@ export function claimPlayback(element: HTMLMediaElement): void {
   if (previous !== null && previous !== element) previous.pause()
 }
 
+/**
+ * Pauses whichever video is playing right now (no-op when none). Used when something
+ * above the channel takes over the screen — the shell's Pause / EndEx / break-fiction
+ * overlay — so media never keeps playing (and sounding) behind it. The element's own
+ * `pause` event releases the claim.
+ */
+export function pauseActivePlayback(): void {
+  active?.pause()
+}
+
 /** Clears the claim if `element` still holds it. */
 export function releasePlayback(element: HTMLMediaElement): void {
   if (active === element) active = null

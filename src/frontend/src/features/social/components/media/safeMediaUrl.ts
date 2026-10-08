@@ -14,7 +14,9 @@
  *   - same-origin paths (`/mock-media/...`, `media/x.png`) — but NOT
  *     protocol-relative (`//host/x`) or backslash tricks (`/\host/x`), which
  *     resolve to another origin and are caught by the origin comparison;
- *   - `blob:` object URLs (the mock upload adapter / optimistic previews);
+ *   - SAME-ORIGIN `blob:` object URLs (the mock upload adapter / optimistic previews;
+ *     `URL.createObjectURL` always mints `blob:<page origin>/<uuid>`, so a blob URL
+ *     naming another origin is never ours);
  *   - `http://localhost` and `http://127.0.0.1` ONLY in a dev build (Azurite,
  *     the Vite dev server) — never in production.
  *
@@ -74,7 +76,8 @@ export function resolveSafeMediaUrl(
       case 'https:':
         return parsed.username === '' && parsed.password === '' ? candidate : undefined
       case 'blob:':
-        return candidate
+        // `new URL('blob:https://host/id').origin` is the embedded origin ('null' if malformed).
+        return parsed.origin === base.origin ? candidate : undefined
       case 'http:':
         return allowDevHttp && DEV_HTTP_HOSTS.has(parsed.hostname)
           && parsed.username === '' && parsed.password === ''
@@ -93,6 +96,16 @@ export function resolveSafeMediaUrl(
 /** True when {@link resolveSafeMediaUrl} accepts `raw`. */
 export function isSafeMediaUrl(raw: unknown, options?: SafeMediaUrlOptions): boolean {
   return resolveSafeMediaUrl(raw, options) !== undefined
+}
+
+/**
+ * Appends the media-fragment `#t=<seconds>` so a player opened from another player
+ * (the modal fallback) resumes at the same position. Leaves a URL that already carries
+ * a fragment untouched; a non-positive or non-finite time is a no-op.
+ */
+export function withStartTime(url: string, seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0 || url.includes('#')) return url
+  return `${url}#t=${seconds.toFixed(1)}`
 }
 
 /**

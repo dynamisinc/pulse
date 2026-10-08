@@ -59,6 +59,20 @@ describe('PostLinkCard — preview image', () => {
     expect(screen.getByText('Advisory graphic')).toBeInTheDocument()
   })
 
+  it('retries when imageUrl changes after a failure, and keeps the label for the same URL', () => {
+    const { rerender } = render(
+      <PostLinkCard linkPreview={{ ...PREVIEW, imageUrl: '/mock-media/old.png' }} />,
+    )
+    fireEvent.error(screen.getByTestId('post-link-image'))
+    expect(screen.getByText('Advisory graphic')).toBeInTheDocument()
+
+    rerender(<PostLinkCard linkPreview={{ ...PREVIEW, imageUrl: '/mock-media/old.png' }} />)
+    expect(screen.queryByTestId('post-link-image')).not.toBeInTheDocument()
+
+    rerender(<PostLinkCard linkPreview={{ ...PREVIEW, imageUrl: '/mock-media/new.png' }} />)
+    expect(screen.getByTestId('post-link-image')).toHaveAttribute('src', '/mock-media/new.png')
+  })
+
   it('keeps the F0 label card when there is no imageUrl', () => {
     render(<PostLinkCard linkPreview={PREVIEW} />)
     expect(screen.getByText('Advisory graphic')).toBeInTheDocument()

@@ -17,8 +17,10 @@
  *    never dropped out of the trap). A player inside handles its own ←/→ (seek)
  *    and stops them, so they never also page.
  *  - Clicking the dimmed area outside the media closes it.
- *  - Alt text reaches assistive tech twice: it is the image's `alt`, and the live
- *    region announces it as the user pages.
+ *  - Alt text reaches assistive tech three ways: it is the image's `alt`; the live
+ *    region announces it as the user pages; and the dialog is `aria-describedby` that
+ *    same status line, so it is read when the viewer OPENS (a live region present at
+ *    mount is not announced on its own).
  *
  * STACKING — deliberately NOT above the shell. The viewer is portalled to
  * `<body>` (a `position: fixed` element inside a feed card would be broken by the
@@ -60,15 +62,18 @@ export interface MediaViewerProps {
   readonly onClose: () => void
   /** Where focus returns on close (the thumbnail the user activated). */
   readonly returnFocusTo?: HTMLElement | null
+  /** For a video opened from the inline player's fallback: resume at this position (seconds). */
+  readonly startAt?: number
 }
 
 /** One image in the stage; a load error swaps in the alt-text placeholder. */
 function ViewerImage({ item }: { readonly item: PostMedia }) {
-  const [failed, setFailed] = useState(false)
+  // Keyed by the URL that failed: a re-minted URL for the same item retries.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const alt = mediaAlt(item)
   const src = resolveSafeMediaUrl(item.url)
 
-  if (src === undefined || failed) {
+  if (src === undefined || failedSrc === src) {
     return (
       <div className={styles.fallbackBox}>
         <MediaFallbackTile alt={alt} />
@@ -82,17 +87,24 @@ function ViewerImage({ item }: { readonly item: PostMedia }) {
       alt={alt}
       decoding="async"
       draggable={false}
-      onError={() => setFailed(true)}
+      onError={() => setFailedSrc(src)}
     />
   )
 }
 
-export function MediaViewer({ items, startIndex = 0, onClose, returnFocusTo }: MediaViewerProps) {
+export function MediaViewer({
+  items,
+  startIndex = 0,
+  onClose,
+  returnFocusTo,
+  startAt,
+}: MediaViewerProps) {
   const lastIndex = Math.max(0, items.length - 1)
   const [index, setIndex] = useState(() => Math.min(Math.max(0, startIndex), lastIndex))
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const stageRef = useRef<HTMLDivElement | null>(null)
   const labelId = useId()
+  const statusId = useId()
 
   useFocusTrap(dialogRef, { returnFocusTo })
 
@@ -153,6 +165,7 @@ export function MediaViewer({ items, startIndex = 0, onClose, returnFocusTo }: M
       role="dialog"
       aria-modal="true"
       aria-labelledby={labelId}
+      aria-describedby={statusId}
       tabIndex={-1}
       data-testid="media-viewer"
       onClick={handleBackdropClick}
@@ -161,7 +174,12 @@ export function MediaViewer({ items, startIndex = 0, onClose, returnFocusTo }: M
 
       <div ref={stageRef} className={styles.stage}>
         {current.kind === 'video' ? (
-          <VideoPlayer key={`${current.id}-${index}`} media={current} variant="expanded" />
+          <VideoPlayer
+            key={`${current.id}-${index}`}
+            media={current}
+            variant="expanded"
+            startAt={startAt}
+          />
         ) : (
           <ViewerImage key={`${current.id}-${index}`} item={current} />
         )}
@@ -210,7 +228,7 @@ export function MediaViewer({ items, startIndex = 0, onClose, returnFocusTo }: M
       </div>
 
       {/* Announces the item as the user pages (polite: it never interrupts). */}
-      <p className={styles.srOnly} role="status" data-testid="media-viewer-status">
+      <p id={statusId} className={styles.srOnly} role="status" data-testid="media-viewer-status">
         {`${kindLabel} ${index + 1} of ${total}: ${alt}`}
       </p>
     </div>,

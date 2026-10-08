@@ -141,3 +141,104 @@ describe('useOverlayFocusTrap — Tab handling', () => {
     expect(document.activeElement).toBe(last)
   })
 })
+
+/**
+ * Gate-1 H-1 (demo-polish F2): the overlay trap must YIELD to any other modal. A
+ * channel's own `aria-modal` surface (the social media viewer) can be open when the
+ * Pause / EndEx / break-fiction overlay mounts; two traps that each pull focus back
+ * inside ping-pong until the stack overflows and focus ends up under the overlay.
+ */
+function OverlayWithModalSibling({ overlayActive }: { overlayActive: boolean }) {
+  const containerRef = useOverlayFocusTrap<HTMLDivElement>(overlayActive)
+  return (
+    <div>
+      <div role="dialog" aria-modal="true" tabIndex={-1} data-testid="channel-modal">
+        <button data-testid="channel-modal-button">Close</button>
+      </div>
+      {overlayActive && (
+        <div
+          ref={containerRef}
+          role="dialog"
+          aria-modal="true"
+          tabIndex={-1}
+          data-testid="overlay-modal"
+        >
+          Paused
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SecondTrap() {
+  const containerRef = useOverlayFocusTrap<HTMLDivElement>(true)
+  return (
+    <div ref={containerRef} role="dialog" aria-modal="true" tabIndex={-1} data-testid="second-trap">
+      <button data-testid="second-button">Second</button>
+    </div>
+  )
+}
+
+function TwoTraps() {
+  const containerRef = useOverlayFocusTrap<HTMLDivElement>(true)
+  return (
+    <div>
+      <div ref={containerRef} role="dialog" aria-modal="true" tabIndex={-1} data-testid="first-trap">
+        <button data-testid="first-button">First</button>
+      </div>
+      <SecondTrap />
+    </div>
+  )
+}
+
+describe('useOverlayFocusTrap — yields to another modal (H-1)', () => {
+  it('does not pull focus back from a focus move into a DIFFERENT aria-modal element', () => {
+    render(<OverlayWithModalSibling overlayActive={true} />)
+    const overlay = screen.getByTestId('overlay-modal')
+    expect(document.activeElement).toBe(overlay)
+
+    const channelButton = screen.getByTestId('channel-modal-button')
+    channelButton.focus()
+
+    // The channel modal's own trap owns this focus; the overlay trap stays out of it.
+    expect(document.activeElement).toBe(channelButton)
+  })
+
+  it('still pulls focus back from ordinary page content (a non-modal outside element)', () => {
+    render(
+      <>
+        <button data-testid="page-button">page</button>
+        <OverlayWithModalSibling overlayActive={true} />
+      </>,
+    )
+    const overlay = screen.getByTestId('overlay-modal')
+
+    screen.getByTestId('page-button').focus()
+
+    expect(document.activeElement).toBe(overlay)
+  })
+
+  it('two overlay traps active at once settle (no focus ping-pong / stack overflow)', () => {
+    render(<TwoTraps />)
+    const first = screen.getByTestId('first-button')
+    const second = screen.getByTestId('second-button')
+
+    // Count the focus moves each `.focus()` triggers: a ping-pong between the two traps
+    // fires thousands of `focusin`s before the stack overflows; settled traps fire a
+    // handful at most.
+    let focusIns = 0
+    const count = () => {
+      focusIns += 1
+    }
+    document.addEventListener('focusin', count)
+    try {
+      first.focus()
+      second.focus()
+      first.focus()
+    } finally {
+      document.removeEventListener('focusin', count)
+    }
+
+    expect(focusIns).toBeLessThan(12)
+  })
+})

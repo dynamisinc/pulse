@@ -127,6 +127,21 @@ describe('MediaGrid — error tile', () => {
   })
 })
 
+describe('MediaGrid — error tile retries a re-minted URL', () => {
+  it('keeps the tile for the same URL but tries a different URL again', () => {
+    const { rerender } = render(<MediaGrid media={[image(1, { url: '/mock-media/photos/old.svg' })]} />)
+    fireEvent.error(screen.getByRole('img'))
+    expect(screen.getByTestId('media-fallback')).toBeInTheDocument()
+
+    rerender(<MediaGrid media={[image(1, { url: '/mock-media/photos/old.svg' })]} />)
+    expect(screen.getByTestId('media-fallback')).toBeInTheDocument()
+
+    rerender(<MediaGrid media={[image(1, { url: '/mock-media/photos/new.svg' })]} />)
+    expect(screen.queryByTestId('media-fallback')).not.toBeInTheDocument()
+    expect(screen.getByRole('img')).toHaveAttribute('src', '/mock-media/photos/new.svg')
+  })
+})
+
 describe('MediaGrid — safe URLs only (NFR-004)', () => {
   const unsafe = [
     'javascript:alert(1)',
@@ -156,12 +171,20 @@ describe('MediaGrid — safe URLs only (NFR-004)', () => {
         media={[
           image(1, { url: 'https://store.blob.core.windows.net/m/a.jpg?sig=x' }),
           image(2, { url: '/mock-media/photos/b.svg' }),
-          image(3, { url: 'blob:http://localhost/1234-5678' }),
+          image(3, { url: `blob:${window.location.origin}/1234-5678` }),
         ]}
       />,
     )
     expect(screen.getAllByRole('img')).toHaveLength(3)
     expect(screen.queryByTestId('media-fallback')).not.toBeInTheDocument()
+  })
+
+  it('rejects a blob: URL minted for ANOTHER origin (ours are always same-origin)', () => {
+    const { container } = render(
+      <MediaGrid media={[image(1, { url: 'blob:https://evil.example.net/1234-5678' })]} />,
+    )
+    expect(container.querySelector('img')).toBeNull()
+    expect(screen.getByTestId('media-fallback')).toBeInTheDocument()
   })
 
   it('renders a legacy { kind, alt } item (no url) as the accessible placeholder', () => {

@@ -33,7 +33,8 @@ export interface PostLinkCardProps {
 }
 
 export function PostLinkCard({ linkPreview }: PostLinkCardProps) {
-  const [imageFailed, setImageFailed] = useState(false)
+  // The URL that errored (not a boolean): a different `imageUrl` retries.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
 
   if (linkPreview === undefined) return null
 
@@ -41,7 +42,7 @@ export function PostLinkCard({ linkPreview }: PostLinkCardProps) {
 
   return (
     <div className={styles.linkCard} data-testid="post-link-preview">
-      {imageSrc !== undefined && !imageFailed ? (
+      {imageSrc !== undefined && failedSrc !== imageSrc ? (
         <div className={styles.linkCardPhotoFrame}>
           <img
             className={styles.linkCardPhoto}
@@ -51,7 +52,7 @@ export function PostLinkCard({ linkPreview }: PostLinkCardProps) {
             decoding="async"
             draggable={false}
             data-testid="post-link-image"
-            onError={() => setImageFailed(true)}
+            onError={() => setFailedSrc(imageSrc)}
           />
         </div>
       ) : (

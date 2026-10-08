@@ -26,18 +26,36 @@
   pointer-events: auto;
 }
 
-/* Inside the modal viewer: as large as the stage allows while keeping the ratio. */
+/*
+ * Inside the modal viewer: as large as the stage allows while keeping the ratio. The
+ * viewer is inset by the compliance-chrome banners and carries a ~64px bottom toolbar, so
+ * the height budget is the DYNAMIC viewport minus both banner insets minus 140px (toolbar +
+ * stage padding) — a landscape phone with the banners on must not push the player over
+ * Close. `vh` first as the fallback for browsers without `dvh`.
+ */
 .expanded {
-  width: min(100%, calc((100vh - 140px) * var(--vp-ratio, 1.7778)));
+  width: min(
+    100%,
+    calc((100vh - var(--pulse-chrome-top, 0px) - var(--pulse-chrome-bottom, 0px) - 140px) * var(--vp-ratio, 1.7778))
+  );
+  width: min(
+    100%,
+    calc((100dvh - var(--pulse-chrome-top, 0px) - var(--pulse-chrome-bottom, 0px) - 140px) * var(--vp-ratio, 1.7778))
+  );
   max-width: 100%;
   margin: 0 auto;
   border-radius: 12px;
 }
 
+/*
+ * Keyboard focus ring: a white 2px ring against the player, then a DARK 3px ring outside it
+ * — neutral on purpose (no brand accent: a light accent on a light page, or a dark one on a
+ * dark page, would vanish). Light page: the dark ring shows; dark page: the white ring shows.
+ */
 .player:focus-visible {
-  outline: 3px solid #fff;
+  outline: 3px solid #0e1518;
   outline-offset: 2px;
-  box-shadow: 0 0 0 5px var(--pc-accent);
+  box-shadow: 0 0 0 2px #fff;
 }
 
 .video {
@@ -218,6 +236,19 @@
   font-size: 13px;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+}
+
+/* Visually hidden, still read by assistive tech (the duration badge's "Video length"). */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {

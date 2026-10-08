@@ -28,6 +28,7 @@
 .stage {
   position: relative;
   display: flex;
+  overflow: hidden;
   min-height: 0;
   flex: 1 1 auto;
   align-items: center;
@@ -53,6 +54,8 @@
 }
 
 .toolbar {
+  position: relative;
+  z-index: 3;
   display: flex;
   flex: none;
   align-items: center;

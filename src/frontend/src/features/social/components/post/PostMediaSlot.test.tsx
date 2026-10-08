@@ -155,6 +155,23 @@ describe('PostMediaSlot — video', () => {
     expect(player).toHaveFocus()
   })
 
+  it('resumes the modal at the inline playback position (the Expand fallback carries it over)', async () => {
+    const user = userEvent.setup()
+    await mount([CLIP])
+    const player = screen.getByRole('group', { name: 'A crew explains the advisory' })
+    const inline = player.querySelector('video')
+    if (inline === null) throw new Error('no inline video')
+    inline.currentTime = 2.5
+
+    await user.click(within(player).getByRole('button', { name: 'Expand' }))
+
+    const dialog = await screen.findByRole('dialog')
+    const expanded = dialog.querySelector('video')
+    expect(expanded?.getAttribute('src')).toBe('/mock-media/video/water-update.mp4#t=2.5')
+    expect(expanded?.paused).toBe(true)
+    expect(inline.paused).toBe(true)
+  })
+
   it('renders a mixed post (grid first, then the player) rather than failing', async () => {
     await mount([image(1), CLIP])
 

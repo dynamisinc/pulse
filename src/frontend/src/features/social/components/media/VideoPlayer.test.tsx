@@ -11,12 +11,19 @@
  * message and the unsafe-URL placeholder.
  *
  * `useChromeConfig` is mocked at the module boundary (`isWatermarkRequired` stays
- * real) so the watermark is driven through the real derivation.
+ * real) so the watermark is driven through the real derivation; `useOverlayState` is
+ * mocked the same way so the Pause/EndEx behaviour can be driven.
+ *
+ * Gate-1 additions: the EXERCISE watermark also shows whenever the player is FULLSCREEN
+ * (chrome on, banners hidden); a fullscreen of the bare `<video>` (Firefox / desktop
+ * Safari / double-click) and iOS's native video fullscreen are exited and routed to the
+ * modal; Download / Cast are disabled; media pauses behind the shell overlay; a failed
+ * URL retries when it is re-minted; the modal fallback carries the position over.
  */
 import type { ComponentProps } from 'react'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChromeConfig } from '@/features/participant-shell/mountContract'
 import type { PostMedia } from '../../types/post'
 import { installMediaElementStubs, renderWithMediaProviders } from './mediaTestUtils'
@@ -25,6 +32,7 @@ import { resetPlaybackForTests } from './playbackCoordinator'
 import { VideoPlayer } from './VideoPlayer'
 
 const chrome = vi.hoisted(() => ({ enabled: true }))
+const overlay = vi.hoisted(() => ({ state: 'none' as 'none' | 'pause' | 'endex' | 'broadcast' }))
 
 vi.mock('@/features/participant-shell/chromeConfig', async importOriginal => {
   const actual = await importOriginal<typeof import('@/features/participant-shell/chromeConfig')>()
@@ -34,6 +42,10 @@ vi.mock('@/features/participant-shell/chromeConfig', async importOriginal => {
     useChromeConfig: (): ChromeConfig => ({ enabled: chrome.enabled, top: banner, bottom: banner }),
   }
 })
+
+vi.mock('@/features/participant-shell/components/OverlayLayer/overlayState', () => ({
+  useOverlayState: () => ({ state: overlay.state, register: 'in-fiction', message: '' }),
+}))
 
 const ALT = 'A Fairhaven Water crew explains the boil-water advisory'
 
@@ -55,9 +67,24 @@ let stubs: MediaElementStubs
 
 beforeEach(() => {
   chrome.enabled = true
+  overlay.state = 'none'
   stubs = installMediaElementStubs()
   resetPlaybackForTests()
 })
+
+afterEach(() => {
+  // Undo any simulated Fullscreen API state (jsdom implements none of it).
+  Reflect.deleteProperty(document, 'fullscreenElement')
+  Reflect.deleteProperty(document, 'exitFullscreen')
+})
+
+/** Simulates the browser entering fullscreen on `element` (or leaving, with `null`). */
+function setFullscreenElement(element: Element | null) {
+  Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => element })
+  act(() => {
+    document.dispatchEvent(new Event('fullscreenchange'))
+  })
+}
 
 type PlayerProps = Partial<ComponentProps<typeof VideoPlayer>>
 
@@ -100,8 +127,16 @@ describe('VideoPlayer — element', () => {
 
   it('keeps the native fullscreen button out of the way so the watermark cannot be dropped', () => {
     const { el } = mount()
-    expect(el).toHaveAttribute('controlslist', 'nofullscreen')
+    expect(el).toHaveAttribute('controlslist', expect.stringContaining('nofullscreen'))
     expect(el).toHaveAttribute('disablepictureinpicture')
+  })
+
+  it('also removes Chromium\'s Download and Cast, which would carry the footage past the watermark (M-2)', () => {
+    const { el } = mount()
+
+    const tokens = (el.getAttribute('controlslist') ?? '').split(/\s+/)
+    expect(tokens).toEqual(expect.arrayContaining(['nofullscreen', 'nodownload', 'noremoteplayback']))
+    expect(el).toHaveAttribute('disableremoteplayback')
   })
 
   it('is a focusable role="group" named by the alt text', () => {
@@ -141,6 +176,14 @@ describe('VideoPlayer — duration badge', () => {
     fireEvent.loadedMetadata(el)
 
     expect(screen.getByTestId('video-duration')).toHaveTextContent('1:05')
+  })
+
+  it('gives the badge an accessible "Video length" (not a bare "0:24")', () => {
+    mount(video({ durationSec: 24 }))
+
+    const badge = screen.getByTestId('video-duration')
+    expect(badge).toHaveTextContent('Video length 0:24')
+    expect(screen.getByText('0:24')).toBe(badge)
   })
 
   it('shows no wall-clock anywhere in the player', () => {
@@ -485,13 +528,207 @@ describe('VideoPlayer — Expand (native fullscreen, modal fallback)', () => {
   })
 
   it('F inside the modal variant never re-opens a modal', async () => {
+    // Two players side by side, neither with a Fullscreen API. The inline one MUST fall back to
+    // the modal (an observable signal that the async fullscreen attempt has fully settled), so
+    // waiting on it proves the expanded one — which went first — has settled too.
+    const inlineOpen = vi.fn()
+    const expandedOpen = vi.fn()
+    render(
+      <>
+        <VideoPlayer media={video({ id: 'a', alt: 'Inline clip' })} onRequestModal={inlineOpen} />
+        <VideoPlayer
+          media={video({ id: 'b', alt: 'Expanded clip' })}
+          variant="expanded"
+          onRequestModal={expandedOpen}
+        />
+      </>,
+    )
+
+    fireEvent.keyDown(screen.getByRole('group', { name: 'Expanded clip' }), { key: 'f' })
+    fireEvent.keyDown(screen.getByRole('group', { name: 'Inline clip' }), { key: 'f' })
+
+    await waitFor(() => expect(inlineOpen).toHaveBeenCalledTimes(1))
+    expect(expandedOpen).not.toHaveBeenCalled()
+  })
+
+  it('hands the playback position to the modal (resumes there, paused) — L-8', async () => {
+    const user = userEvent.setup()
     const onRequestModal = vi.fn()
-    const { wrapper } = mount(video(), { variant: 'expanded', onRequestModal })
+    const { wrapper, el } = mount(video(), { onRequestModal })
+    el.currentTime = 12.5
 
-    fireEvent.keyDown(wrapper, { key: 'f' })
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await user.click(screen.getByRole('button', { name: 'Expand' }))
 
+    expect(onRequestModal).toHaveBeenCalledWith(wrapper, 12.5)
+  })
+
+  it('resumes at startAt in the expanded player (a #t= fragment; still never autoplays)', () => {
+    const { el } = mount(video(), { variant: 'expanded', startAt: 12.5 })
+
+    expect(el.getAttribute('src')).toBe('/mock-media/video/water-update.mp4#t=12.5')
+    expect(stubs.play).not.toHaveBeenCalled()
+  })
+})
+
+describe('VideoPlayer — fullscreen never drops EXERCISE (NFR-008, Gate-1 H-2)', () => {
+  it('shows the EXERCISE watermark whenever the player is FULLSCREEN, even with the chrome ON', () => {
+    chrome.enabled = true
+    const { wrapper } = mount()
+    const slot = screen.getByTestId('media-watermark-slot')
+    expect(slot).toBeEmptyDOMElement()
+
+    setFullscreenElement(wrapper)
+
+    expect(slot).toHaveTextContent('EXERCISE')
+    expect(slot).toHaveAttribute('role', 'note')
+    expect(screen.getByRole('button', { name: 'Exit full screen' })).toBeInTheDocument()
+
+    setFullscreenElement(null)
+
+    expect(slot).toBeEmptyDOMElement()
+    expect(screen.getByRole('button', { name: 'Expand' })).toBeInTheDocument()
+  })
+
+  it('does not treat ANOTHER element\'s fullscreen as this player being fullscreen', () => {
+    const { wrapper } = mount()
+    const other = document.createElement('div')
+    document.body.appendChild(other)
+
+    setFullscreenElement(other)
+
+    expect(screen.getByTestId('media-watermark-slot')).toBeEmptyDOMElement()
+    expect(wrapper).toBeInTheDocument()
+    other.remove()
+  })
+
+  it('exits a fullscreen of the BARE <video> and routes to the modal (Firefox / Safari / double-click)', () => {
+    const onRequestModal = vi.fn()
+    const exit = vi.fn().mockResolvedValue(undefined)
+    document.exitFullscreen = exit
+    const { wrapper, el } = mount(video(), { onRequestModal })
+
+    setFullscreenElement(el)
+
+    expect(exit).toHaveBeenCalledTimes(1)
+    expect(onRequestModal).toHaveBeenCalledTimes(1)
+    expect(onRequestModal).toHaveBeenCalledWith(wrapper)
+    // The inline video is paused for the hand-over; the wrapper is not "fullscreen".
+    expect(stubs.pause).toHaveBeenCalled()
+    expect(screen.getByTestId('media-watermark-slot')).toBeEmptyDOMElement()
+  })
+
+  it('carries the position over when the bare <video> goes fullscreen mid-play', () => {
+    const onRequestModal = vi.fn()
+    document.exitFullscreen = vi.fn().mockResolvedValue(undefined)
+    const { wrapper, el } = mount(video(), { onRequestModal })
+    el.currentTime = 3.2
+
+    setFullscreenElement(el)
+
+    expect(onRequestModal).toHaveBeenCalledWith(wrapper, 3.2)
+  })
+
+  it('in the already-expanded variant it only exits (never opens a second modal)', () => {
+    const onRequestModal = vi.fn()
+    const exit = vi.fn().mockResolvedValue(undefined)
+    document.exitFullscreen = exit
+    const { el } = mount(video(), { variant: 'expanded', onRequestModal })
+
+    setFullscreenElement(el)
+
+    expect(exit).toHaveBeenCalledTimes(1)
     expect(onRequestModal).not.toHaveBeenCalled()
+  })
+
+  it('leaves a fullscreen of the WRAPPER alone (that path keeps the watermark)', () => {
+    const onRequestModal = vi.fn()
+    const exit = vi.fn().mockResolvedValue(undefined)
+    document.exitFullscreen = exit
+    const { wrapper } = mount(video(), { onRequestModal })
+
+    setFullscreenElement(wrapper)
+
+    expect(exit).not.toHaveBeenCalled()
+    expect(onRequestModal).not.toHaveBeenCalled()
+  })
+
+  it('iOS: leaves the native video fullscreen the moment it begins and opens the modal', () => {
+    const onRequestModal = vi.fn()
+    const { wrapper, el } = mount(video(), { onRequestModal })
+    const webkitExitFullscreen = vi.fn()
+    Object.defineProperty(el, 'webkitExitFullscreen', { configurable: true, value: webkitExitFullscreen })
+
+    act(() => {
+      el.dispatchEvent(new Event('webkitbeginfullscreen'))
+    })
+
+    expect(webkitExitFullscreen).toHaveBeenCalledTimes(1)
+    expect(onRequestModal).toHaveBeenCalledWith(wrapper)
+  })
+
+  it('iOS: tolerates a browser with no webkitExitFullscreen (best effort, still opens the modal)', () => {
+    const onRequestModal = vi.fn()
+    const { el } = mount(video(), { onRequestModal })
+
+    expect(() => act(() => {
+      el.dispatchEvent(new Event('webkitbeginfullscreen'))
+    })).not.toThrow()
+    expect(onRequestModal).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('VideoPlayer — nothing plays behind the shell overlay (Gate-1 M-3)', () => {
+  it('pauses the playing video the moment a Pause / EndEx / break-fiction overlay becomes active', () => {
+    const { rerender, el } = mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    expect(el.paused).toBe(false)
+
+    overlay.state = 'pause'
+    rerender(<VideoPlayer media={video()} />)
+
+    expect(el.paused).toBe(true)
+    expect(screen.getByRole('button', { name: 'Play' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it.each(['pause', 'endex', 'broadcast'] as const)('also for the %s overlay', state => {
+    const { rerender, el } = mount()
+    fireEvent.play(el)
+
+    overlay.state = state
+    rerender(<VideoPlayer media={video()} />)
+
+    expect(stubs.pause).toHaveBeenCalled()
+  })
+
+  it('does not pause a playing video while no overlay is active', () => {
+    const { rerender } = mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    stubs.pause.mockClear()
+
+    rerender(<VideoPlayer media={video()} />)
+
+    expect(stubs.pause).not.toHaveBeenCalled()
+  })
+
+  it('a play that starts while the overlay is active is stopped at once', () => {
+    overlay.state = 'pause'
+    const { el } = mount()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+
+    expect(el.paused).toBe(true)
+    expect(screen.getByRole('button', { name: 'Play' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('pauses the EXPANDED player (the modal viewer\'s) too', () => {
+    const { rerender, el } = mount(video(), { variant: 'expanded' })
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    expect(el.paused).toBe(false)
+
+    overlay.state = 'broadcast'
+    rerender(<VideoPlayer media={video()} variant="expanded" />)
+
+    expect(el.paused).toBe(true)
   })
 })
 
@@ -508,6 +745,40 @@ describe('VideoPlayer — unplayable and unsafe', () => {
     // The group (and its accessible name) survives; the dead controls are gone.
     expect(screen.getByRole('group', { name: ALT })).toBe(wrapper)
     expect(screen.queryByRole('button', { name: 'Play' })).not.toBeInTheDocument()
+  })
+
+  it('retries when the URL is re-minted (a fresh SAS link is a different src), and keeps the failure for the same one', () => {
+    const { rerender, el } = mount(video({ url: 'https://store.blob.core.windows.net/m/a.mp4?sig=old' }))
+    fireEvent.error(el)
+    expect(screen.getByTestId('video-unplayable')).toBeInTheDocument()
+
+    // A re-render with the SAME url keeps the failure ...
+    rerender(<VideoPlayer media={video({ url: 'https://store.blob.core.windows.net/m/a.mp4?sig=old' })} />)
+    expect(screen.getByTestId('video-unplayable')).toBeInTheDocument()
+
+    // ... a freshly signed URL is tried again.
+    rerender(<VideoPlayer media={video({ url: 'https://store.blob.core.windows.net/m/a.mp4?sig=new' })} />)
+    expect(screen.queryByTestId('video-unplayable')).not.toBeInTheDocument()
+    const retried = document.querySelector('video')
+    expect(retried?.getAttribute('src')).toContain('sig=new')
+    expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument()
+  })
+
+  it('the "one at a time" claim follows the retried <video> element and is released with it', () => {
+    const { rerender, el } = mount(video({ url: '/mock-media/a.mp4' }))
+    fireEvent.error(el)
+    rerender(<VideoPlayer media={video({ url: '/mock-media/b.mp4' })} />)
+    const retried = document.querySelector('video')
+    if (retried === null) throw new Error('no retried video')
+    expect(retried).not.toBe(el)
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    expect(retried.paused).toBe(false)
+
+    // Another player starting must pause the RETRIED element (it holds the claim).
+    render(<VideoPlayer media={video({ id: 'other', alt: 'Other clip' })} />)
+    fireEvent.click(within(screen.getByRole('group', { name: 'Other clip' })).getByRole('button', { name: 'Play' }))
+
+    expect(retried.paused).toBe(true)
   })
 
   it('keeps the watermark slot even when the video cannot play', () => {

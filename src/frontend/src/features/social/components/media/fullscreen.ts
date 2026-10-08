@@ -16,6 +16,10 @@ interface PrefixedElement extends HTMLElement {
   webkitRequestFullscreen?: () => Promise<void> | void
 }
 
+interface WebkitVideoElement extends HTMLVideoElement {
+  webkitExitFullscreen?: () => void
+}
+
 interface PrefixedDocument extends Document {
   webkitFullscreenElement?: Element | null
   webkitExitFullscreen?: () => Promise<void> | void
@@ -56,6 +60,18 @@ export async function exitFullscreen(): Promise<void> {
     }
   } catch {
     // Already out (or the browser refused) — nothing to recover.
+  }
+}
+
+/**
+ * Leaves iOS Safari's NATIVE video fullscreen (the `<video>`-only presentation that
+ * the page cannot overlay). Best effort: a missing method or a throw is ignored.
+ */
+export function exitVideoFullscreenIOS(video: HTMLVideoElement): void {
+  try {
+    (video as WebkitVideoElement).webkitExitFullscreen?.()
+  } catch {
+    // Not in iOS native fullscreen (or the browser refused) — nothing to recover.
   }
 }
 

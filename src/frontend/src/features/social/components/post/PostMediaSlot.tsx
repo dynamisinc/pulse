@@ -50,6 +50,8 @@ interface ViewerState {
   readonly items: readonly PostMedia[]
   readonly index: number
   readonly trigger: HTMLElement | null
+  /** Resume position for a video handed over from the inline player (seconds). */
+  readonly startAt?: number
 }
 
 export function PostMediaSlot({ postId, media }: PostMediaSlotProps) {
@@ -77,7 +79,8 @@ export function PostMediaSlot({ postId, media }: PostMediaSlotProps) {
         <VideoPlayer
           key={`${postId}-video-${video.id}-${index}`}
           media={video}
-          onRequestModal={trigger => setViewer({ items: [video], index: 0, trigger })}
+          onRequestModal={(trigger, startAt) =>
+            setViewer({ items: [video], index: 0, trigger, startAt })}
         />
       ))}
       {viewer !== null && (
@@ -85,6 +88,7 @@ export function PostMediaSlot({ postId, media }: PostMediaSlotProps) {
           items={viewer.items}
           startIndex={viewer.index}
           returnFocusTo={viewer.trigger}
+          startAt={viewer.startAt}
           onClose={() => setViewer(null)}
         />
       )}
