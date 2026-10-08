@@ -1,6 +1,6 @@
 # Story: Keyless Blob storage for media
 
-**Feature:** Demo polish  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Demo polish  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** XC-009, COR-002, NFR-004  ·  **Design decisions:** none  ·  **Issue:** #420
 **Story ID:** I1  ·  **Stack:** infra  ·  **Priority:** Must  ·  **Effort:** S  ·  **Wave:** 1  ·  **Review:** Tier-2 (Tom)
 **Home story:** — (no existing backlog story; the plan creates it). Related: [`posts/01`](../posts/01-post-composition.md) (video AC).

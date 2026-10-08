@@ -1,6 +1,6 @@
 # Story: Reactions (like, repost) and the engagement reader
 
-**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** SOC-030, SOC-020 (repost toggle only), SOC-021, XC-004, COR-001, COR-015  ·  **Design decisions:** DP-10 (implementation.md §0)  ·  **Issue:** #427
 **Story ID:** B3  ·  **Stack:** backend  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** 1b  ·  **Review:** Tier-2 (Tom — reaction isolation)
 **Home stories:** [`reactions/01`](../reactions/01-like.md), [`amplification/01`](../amplification/01-repost-quote.md) (repost as a toggle; quote is cut).
