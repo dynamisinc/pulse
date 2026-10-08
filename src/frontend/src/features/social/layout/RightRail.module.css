@@ -6,9 +6,10 @@
  * + 344) the frame grows a third column and the rail shows. Width mirrors
  * `frameMetrics.ts` (checked by `SocialChannel.layout.test.tsx`).
  *
- * STICKY OFFSETS: pinned below the shell's top EXERCISE banner and above the
- * bottom one (`--pulse-chrome-top` / `--pulse-chrome-bottom`, `0px` when chrome is
- * off), scrolling inside itself if its modules outgrow the viewport. Reads the
+ * STICKY OFFSETS: pinned below the shell's top EXERCISE banner AND an active alert
+ * (`--pulse-chrome-top` + `--pulse-alert-height`) and above the bottom banner
+ * (`--pulse-chrome-bottom`) -- every var is `0px` when its element is absent --
+ * scrolling inside itself if its modules outgrow the viewport. Reads the
  * channel's `--pc-*` palette; light only (F5 owns the tokens sweep). No COBRA / MUI.
  */
 
@@ -19,14 +20,14 @@
 @media (min-width: 1184px) {
   .rail {
     position: sticky;
-    top: var(--pulse-chrome-top, 0px);
+    top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px));
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
     gap: 16px;
     width: 344px;
-    max-height: calc(100vh - var(--pulse-chrome-top, 0px) - var(--pulse-chrome-bottom, 0px));
-    max-height: calc(100dvh - var(--pulse-chrome-top, 0px) - var(--pulse-chrome-bottom, 0px));
+    max-height: calc(100vh - var(--pulse-chrome-top, 0px) - var(--pulse-alert-height, 0px) - var(--pulse-chrome-bottom, 0px));
+    max-height: calc(100dvh - var(--pulse-chrome-top, 0px) - var(--pulse-alert-height, 0px) - var(--pulse-chrome-bottom, 0px));
     padding: 12px 16px 16px;
     overflow-y: auto;
     background: var(--pc-bg);

@@ -44,7 +44,13 @@
  * contract module (types + a React context), not UI.
  */
 
-import { createContext, createElement, useContext, type ReactNode } from 'react'
+import {
+  createContext,
+  createElement,
+  useContext,
+  useLayoutEffect,
+  type ReactNode,
+} from 'react'
 
 /**
  * The shell mount variants a channel can be rendered under (D7-008,
@@ -145,6 +151,56 @@ export function useShellContext(): ShellMountProps {
 }
 
 // -----------------------------------------------------------------------------
+// Account-control claim (a channel that renders its own account / sign-out UI)
+// -----------------------------------------------------------------------------
+
+/**
+ * Registers one claim and returns its release function. Provided by
+ * `ShellLayout`; consumed through {@link useClaimShellAccountControl}.
+ */
+type ClaimShellAccountControl = () => () => void
+
+const ShellAccountControlClaimContext = createContext<ClaimShellAccountControl | undefined>(
+  undefined,
+)
+
+export interface ShellAccountControlClaimProviderProps {
+  value: ClaimShellAccountControl
+  children: ReactNode
+}
+
+/** Binds the claim function for the channel subtree. `ShellLayout` is the only caller. */
+export function ShellAccountControlClaimProvider({
+  value,
+  children,
+}: ShellAccountControlClaimProviderProps) {
+  return createElement(ShellAccountControlClaimContext.Provider, { value }, children)
+}
+
+/**
+ * A channel that renders its OWN account control (avatar + a Sign out) calls
+ * this with `true` while that control is on screen, and the shell stops
+ * rendering its generic `ParticipantSignOutControl` row -- so the participant
+ * sees exactly ONE Sign out, in the place the channel's design puts it, instead
+ * of a duplicate strip stacked above the channel. A channel that does not call
+ * it (every other channel) keeps the shell's row: the shell remains the
+ * fallback sign-out, the channel is the opt-in override.
+ *
+ * Release is automatic: the claim ends when `active` turns false or the channel
+ * unmounts, and the shell's row returns. A layout effect, so the swap happens
+ * before the first paint (no frame with two Sign outs). A no-op outside a
+ * `ShellLayout` (a channel rendered on its own in a test, or hosted by a staff
+ * preview that has no shell row to hide).
+ */
+export function useClaimShellAccountControl(active: boolean): void {
+  const claim = useContext(ShellAccountControlClaimContext)
+  useLayoutEffect(() => {
+    if (!active || claim === undefined) return
+    return claim()
+  }, [active, claim])
+}
+
+// -----------------------------------------------------------------------------
 // Inset contract (SHELL-CONTRACT.md §1 "Content region"; D7-008 chrome-off)
 // -----------------------------------------------------------------------------
 
@@ -160,6 +216,22 @@ export const SHELL_CHROME_TOP_VAR = '--pulse-chrome-top'
 
 /** Same contract as {@link SHELL_CHROME_TOP_VAR}, for the bottom banner. */
 export const SHELL_CHROME_BOTTOM_VAR = '--pulse-chrome-bottom'
+
+/**
+ * CSS custom-property NAME the alert bar (story 02) sets on `:root` to its
+ * rendered height in px (`0px` when no alert is active; removed when the last
+ * alert bar unmounts).
+ *
+ * The alert bar is `position: fixed` directly below the top banner and, being
+ * fixed, reserves no space in flow -- so anything a channel pins to the top of
+ * the viewport (`position: sticky; top: ...`, a modal backdrop, a skip link)
+ * would slide UNDER an active alert. Such a channel offsets by
+ * `calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px))`; the
+ * `0px` fallbacks mean a shell with no alert bar leaves no gap. The alert is
+ * the shell's most important element (PRT-010): the channel moves out of its
+ * way, never the reverse.
+ */
+export const SHELL_ALERT_HEIGHT_VAR = '--pulse-alert-height'
 
 // -----------------------------------------------------------------------------
 // Z-order contract (SHELL-CONTRACT.md §3 "Overlay layer contract")

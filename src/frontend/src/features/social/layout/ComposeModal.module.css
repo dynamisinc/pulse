@@ -3,7 +3,9 @@
  * ---------------------------------------------------------------------------
  * The compose dialog. The backdrop is fixed to the viewport BETWEEN the shell's
  * two EXERCISE banners (`--pulse-chrome-top` / `--pulse-chrome-bottom`, `0px`
- * when chrome is off), so the modal never covers either banner. It lives inside
+ * when chrome is off) and BELOW the alert bar (`--pulse-alert-height`, `0px` when
+ * none), so the modal never covers either banner nor an active alert -- an
+ * expanded emergency band cannot sit over the Close button. It lives inside
  * the shell's content-region stacking context, so no z-index here can climb above
  * the banners or the alert bar. Reads the channel's `--pc-*` palette; light only
  * (F5 owns the tokens sweep). No COBRA / MUI.
@@ -11,7 +13,9 @@
 
 .backdrop {
   position: fixed;
-  top: var(--pulse-chrome-top, 0px);
+  /* Between the two EXERCISE banners AND below an active alert (the fixed alert bar
+     publishes its height; 0px when none). */
+  top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px));
   right: 0;
   bottom: var(--pulse-chrome-bottom, 0px);
   left: 0;
@@ -77,4 +81,58 @@
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* The inline "Discard this draft?" question (shown over a non-empty draft). */
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--pc-line);
+  border-bottom: 1px solid var(--pc-line);
+  background: var(--pc-panel);
+}
+
+.confirmText {
+  margin: 0;
+  color: var(--pc-ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.confirmActions {
+  display: flex;
+  gap: 8px;
+}
+
+.keepEditing,
+.discard {
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Safe choice = filled; destructive choice = outlined. The words carry the meaning. */
+.keepEditing {
+  border: 1px solid var(--pc-accent);
+  background: var(--pc-accent);
+  color: #fff;
+}
+
+.discard {
+  border: 1px solid var(--pc-ink-muted);
+  background: none;
+  color: var(--pc-ink);
+}
+
+.keepEditing:focus-visible,
+.discard:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 2px;
 }

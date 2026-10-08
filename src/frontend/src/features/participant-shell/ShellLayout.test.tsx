@@ -33,15 +33,16 @@
  * (`components/ParticipantSignOutControl.test.tsx`), not re-tested here —
  * none of the suites below click it.
  */
-import type { CSSProperties, ReactNode } from 'react'
+import { useState, type CSSProperties, type ReactNode } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock, type IExerciseClock } from '@/core/clock'
 import { ShellLayout } from './ShellLayout'
-import { SHELL_Z, useShellContext } from './mountContract'
+import { SHELL_Z, useClaimShellAccountControl, useShellContext } from './mountContract'
 
 function fixedClock(instant: Date): IExerciseClock {
   return { scenarioNow: () => instant }
@@ -222,5 +223,52 @@ describe('ShellLayout — exercise-scoped, no leak into the content region (AC4,
     for (const forbidden of ['exercise', 'picker', 'admin', 'switcher', 'simulation-status']) {
       expect(regionHtml).not.toContain(forbidden)
     }
+  })
+})
+
+describe('ShellLayout — account-control claim (demo-polish F1 M2)', () => {
+  /** A channel that renders its own account control and says so. */
+  function ClaimingChannel() {
+    useClaimShellAccountControl(true)
+    return <p data-testid="own-account-control">the channel's own Sign out</p>
+  }
+
+  /** Lets a test unmount the claiming channel without re-rendering the shell. */
+  function DroppableClaim() {
+    const [mounted, setMounted] = useState(true)
+    return (
+      <>
+        <button type="button" onClick={() => setMounted(false)}>drop channel</button>
+        {mounted && <ClaimingChannel />}
+      </>
+    )
+  }
+
+  it('keeps the shell\'s sign-out row for a channel that makes no claim', async () => {
+    setExerciseClock(fixedClock(new Date('2026-06-01T00:00:00Z')))
+    renderShell(<span data-testid="probe">content</span>)
+    await waitFor(() => expect(screen.getByTestId('probe')).toBeInTheDocument())
+
+    expect(screen.getAllByRole('button', { name: 'Sign out' })).toHaveLength(1)
+  })
+
+  it('does not render the shell row while a mounted channel owns the account control', async () => {
+    setExerciseClock(fixedClock(new Date('2026-06-01T00:00:00Z')))
+    renderShell(<ClaimingChannel />)
+    await waitFor(() => expect(screen.getByTestId('own-account-control')).toBeInTheDocument())
+
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument()
+  })
+
+  it('brings the shell row back when the claiming channel unmounts', async () => {
+    const user = userEvent.setup()
+    setExerciseClock(fixedClock(new Date('2026-06-01T00:00:00Z')))
+    renderShell(<DroppableClaim />)
+    await waitFor(() => expect(screen.getByTestId('own-account-control')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'drop channel' }))
+
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
   })
 })

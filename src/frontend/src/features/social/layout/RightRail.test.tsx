@@ -10,7 +10,7 @@ import { render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { resetExerciseClock } from '@/core/clock'
 import { RightRail } from './RightRail'
-import { renderChannel } from './testHarness'
+import { renderChannel } from './renderChannel.testUtils'
 
 afterEach(() => {
   resetExerciseClock()

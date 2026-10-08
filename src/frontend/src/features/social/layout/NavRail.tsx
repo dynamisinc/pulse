@@ -31,9 +31,11 @@
  * ICON RAIL. Below 840px the rail collapses to icons: every label stays in the DOM
  * (visually hidden), so each control keeps its accessible name at every width.
  *
- * The rail is `position: sticky` below the shell's compliance banner
- * (`--pulse-chrome-top`) and above the bottom one (`--pulse-chrome-bottom`) so it
- * can never slide under either EXERCISE banner.
+ * The logo/links/Post group is `sticky` below the shell's compliance banner and any
+ * active alert (`--pulse-chrome-top` + `--pulse-alert-height`); the account card is
+ * `sticky` above the bottom banner (`--pulse-chrome-bottom`) -- so neither can slide
+ * under an EXERCISE banner or the alert, and the card (with Sign out) is on screen
+ * at scroll 0 whatever the shell stacks above the channel. See `NavRail.module.css`.
  *
  * World: participant. CSS Module + FontAwesome only -- no COBRA, no MUI.
  */
@@ -119,48 +121,54 @@ export function NavRail({ onCompose, postButtonRef, self, showAccount }: NavRail
 
   return (
     <nav className={styles.rail} aria-label="Primary" data-testid="nav-rail">
-      <a
-        className={styles.logo}
-        href={HOME_PATH}
-        aria-label="Pulse home"
-        onClick={event => handleLinkClick(event, HOME_PATH)}
-      >
-        <PulseLogo size={32} />
-      </a>
-
-      <ul className={styles.list}>
-        {items.map(item => {
-          const active = isActive(item)
-          return (
-            <li key={item.id}>
-              <a
-                className={active ? `${styles.link} ${styles.linkActive}` : styles.link}
-                href={item.path}
-                aria-current={active ? 'page' : undefined}
-                onClick={event => handleLinkClick(event, item.path)}
-              >
-                <FontAwesomeIcon icon={item.icon} aria-hidden="true" className={styles.icon} />
-                <span className={styles.label}>{item.label}</span>
-              </a>
-            </li>
-          )
-        })}
-      </ul>
-
-      {onCompose !== undefined && (
-        <button
-          ref={postButtonRef}
-          type="button"
-          className={styles.post}
-          data-testid="nav-post-button"
-          onClick={onCompose}
+      <div className={styles.top}>
+        <a
+          className={styles.logo}
+          href={HOME_PATH}
+          aria-label="Pulse home"
+          onClick={event => handleLinkClick(event, HOME_PATH)}
         >
-          <FontAwesomeIcon icon={faFeatherPointed} aria-hidden="true" className={styles.postIcon} />
-          <span className={styles.postLabel}>Post</span>
-        </button>
-      )}
+          <PulseLogo size={32} />
+        </a>
 
-      {showAccount && <AccountCard persona={self} />}
+        <ul className={styles.list}>
+          {items.map(item => {
+            const active = isActive(item)
+            return (
+              <li key={item.id}>
+                <a
+                  className={active ? `${styles.link} ${styles.linkActive}` : styles.link}
+                  href={item.path}
+                  aria-current={active ? 'page' : undefined}
+                  onClick={event => handleLinkClick(event, item.path)}
+                >
+                  <FontAwesomeIcon icon={item.icon} aria-hidden="true" className={styles.icon} />
+                  <span className={styles.label}>{item.label}</span>
+                </a>
+              </li>
+            )
+          })}
+        </ul>
+
+        {onCompose !== undefined && (
+          <button
+            ref={postButtonRef}
+            type="button"
+            className={styles.post}
+            data-testid="nav-post-button"
+            onClick={onCompose}
+          >
+            <FontAwesomeIcon icon={faFeatherPointed} aria-hidden="true" className={styles.postIcon} />
+            <span className={styles.postLabel}>Post</span>
+          </button>
+        )}
+      </div>
+
+      {showAccount && (
+        <div className={styles.bottom}>
+          <AccountCard persona={self} />
+        </div>
+      )}
     </nav>
   )
 }

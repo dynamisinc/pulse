@@ -7,12 +7,21 @@
  * Widths mirror `frameMetrics.ts` -- `SocialChannel.layout.test.tsx` checks the
  * numbers against it.
  *
- * STICKY OFFSETS. The rail pins to the viewport but must clear the shell's two
- * fixed EXERCISE banners: `top` and the height both subtract
- * `--pulse-chrome-top` / `--pulse-chrome-bottom` (published by the shell's
- * compliance chrome; `0px` when chrome is off). `100dvh` is declared after a
- * `100vh` fallback so mobile browser toolbars don't push the account card off
- * screen.
+ * TWO STICKY GROUPS, NOT ONE FIXED-HEIGHT BOX. The rail itself is just a tall
+ * column that stretches to the full height of the grid row. Inside it:
+ *   - `.top` (logo, links, Post) is `sticky; top: <banner + alert>` -- it pins just
+ *     below the shell's top EXERCISE banner AND an active alert
+ *     (`--pulse-chrome-top` + `--pulse-alert-height`, each `0px` when absent);
+ *   - `.bottom` (the account card) is `sticky; bottom: <bottom banner>`.
+ * The earlier design sized the rail `100dvh - banners` and pinned it as one box, but
+ * the shell lays its channel strip and sign-out row IN FLOW above the channel, so at
+ * scroll 0 that box started ~70px down the page and its bottom edge -- the account
+ * card, with Sign out -- sat below the viewport, under the bottom banner. A sticky
+ * BOTTOM offset has no such dependency: whatever is stacked above the channel, the
+ * card is held `--pulse-chrome-bottom` above the viewport's bottom edge from the
+ * first frame, and settles at the end of the rail when the page is scrolled to the
+ * bottom. (On a viewport too short to hold both groups they overlap -- the card is
+ * painted over the links -- rather than the card leaving the screen.)
  *
  * Colors come from the `--pc-*` palette composed onto the channel root; the
  * accent is the per-exercise `--pulse-ac` via `--pc-accent`. Light only (F5 owns
@@ -20,21 +29,33 @@
  */
 
 .rail {
-  position: sticky;
-  top: var(--pulse-chrome-top, 0px);
   box-sizing: border-box;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 68px;
+  padding: 4px 8px 0;
+  background: var(--pc-bg);
+  color: var(--pc-ink);
+}
+
+.top {
+  position: sticky;
+  top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px));
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  width: 68px;
-  height: calc(100vh - var(--pulse-chrome-top, 0px) - var(--pulse-chrome-bottom, 0px));
-  height: calc(100dvh - var(--pulse-chrome-top, 0px) - var(--pulse-chrome-bottom, 0px));
-  padding: 4px 8px 12px;
-  overflow-x: hidden;
-  overflow-y: auto;
+  padding-bottom: 8px;
   background: var(--pc-bg);
-  color: var(--pc-ink);
+}
+
+.bottom {
+  position: sticky;
+  bottom: var(--pulse-chrome-bottom, 0px);
+  padding: 8px 0 12px;
+  background: var(--pc-bg);
 }
 
 .logo {
@@ -156,9 +177,12 @@
 
 @media (min-width: 840px) {
   .rail {
-    align-items: stretch;
     width: 240px;
-    padding: 4px 12px 12px;
+    padding: 4px 12px 0;
+  }
+
+  .top {
+    align-items: stretch;
   }
 
   .logo {

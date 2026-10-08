@@ -30,6 +30,8 @@
  *                        `fallback` (default `/home`) so "Back" never leaves the
  *                        app and never dead-ends.
  *  - `canGoBack`    whether `back()` has a real previous entry.
+ *  - `getLocationKey()`  the current entry's key, read lazily (no re-render), so
+ *                        queued work can detect that the user has since moved on.
  *  - `kind`         `'browser'` | `'memory'`. Only the browser kind may touch the
  *                   window (scroll restoration is browser-only, for instance).
  *
@@ -43,7 +45,7 @@
  * ROUTE VOCABULARY lives here too (`socialPaths`, `matchSocialRoute`,
  * `SOCIAL_RESERVED_SEGMENTS`), so path construction and classification have one
  * home. `SocialRoutes` builds its `<Route path>`s from `SOCIAL_ROUTE_PATTERNS`,
- * and `socialRoutes.test.tsx` proves `matchSocialRoute` and the rendered
+ * and `SocialRoutes.test.tsx` proves `matchSocialRoute` and the rendered
  * `<Routes>` agree on a battery of paths -- they cannot drift silently.
  *
  * Plain `.ts` (the provider is built with `createElement`), mirroring
@@ -141,18 +143,58 @@ export const socialPaths = {
  */
 export type SocialRouteKind = 'home' | 'explore' | 'hashtag' | 'thread' | 'profile' | 'redirect'
 
+/** The shape of a hashtag the channel will route: letters, digits and `_`, 1-100 of them. */
+const HASHTAG_PARAM_PATTERN = /^[\p{L}\p{N}_]{1,100}$/u
+
+/**
+ * Normalizes the `:tag` URL parameter exactly the way `HashtagFeed` keys its feed --
+ * strip leading `#`s, lowercase -- and validates it. Returns the normalized tag, or
+ * `undefined` for anything that cannot be a hashtag (empty, whitespace, punctuation,
+ * over 100 characters): the route then redirects Home instead of rendering a feed
+ * for a string no post can carry, and an arbitrary URL segment never reaches
+ * `HashtagFeed`, the telemetry target, or the heading as free text (NFR-004).
+ *
+ * `HashtagRoute` and `matchSocialRoute` both call this, so the router and the
+ * classifier cannot disagree about whether `/hashtag/x` is a feed.
+ */
+export function normalizeHashtagParam(raw: string): string | undefined {
+  const tag = raw.replace(/^#+/, '').toLowerCase()
+  return HASHTAG_PARAM_PATTERN.test(tag) ? tag : undefined
+}
+
+/**
+ * Decodes a URL parameter the way `<Routes>` does before a route element sees it
+ * (`useParams` is decoded; the bare `matchPath` used by the classifier below is not),
+ * falling back to the raw value on malformed encoding. Without this the classifier
+ * would call `/%73taff` a profile while the router, which decodes it to `staff`,
+ * redirects it Home.
+ */
+function decodeParam(value: string | undefined): string {
+  if (value === undefined) return ''
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
 /** Pure classifier mirroring the `<Routes>` table (see the module header). */
 export function matchSocialRoute(pathname: string): SocialRouteKind {
   if (matchPath(SOCIAL_ROUTE_PATTERNS.home, pathname)) return 'home'
   if (matchPath(SOCIAL_ROUTE_PATTERNS.explore, pathname)) return 'explore'
-  if (matchPath(SOCIAL_ROUTE_PATTERNS.hashtag, pathname)) return 'hashtag'
+  const hashtag = matchPath(SOCIAL_ROUTE_PATTERNS.hashtag, pathname)
+  if (hashtag) {
+    return normalizeHashtagParam(decodeParam(hashtag.params.tag)) === undefined
+      ? 'redirect'
+      : 'hashtag'
+  }
   const thread = matchPath(SOCIAL_ROUTE_PATTERNS.thread, pathname)
   if (thread) {
-    return isThreadHandle(thread.params.handle ?? '') ? 'thread' : 'redirect'
+    return isThreadHandle(decodeParam(thread.params.handle)) ? 'thread' : 'redirect'
   }
   const profile = matchPath(SOCIAL_ROUTE_PATTERNS.profile, pathname)
   if (profile) {
-    return isReservedSegment(profile.params.handle ?? '') ? 'redirect' : 'profile'
+    return isReservedSegment(decodeParam(profile.params.handle)) ? 'redirect' : 'profile'
   }
   return 'redirect'
 }
@@ -187,6 +229,12 @@ export interface SocialNavigationActions {
    * leaves the app and never dead-ends.
    */
   readonly back: (fallback?: string) => void
+  /**
+   * The key of the CURRENT history entry, read at call time (a function, so it never
+   * re-renders a caller). Lets deferred work -- e.g. a profile tap waiting on the
+   * persona directory -- tell whether the user has navigated since it was queued.
+   */
+  readonly getLocationKey: () => string
 }
 
 /** The changing half: re-published on every navigation. */

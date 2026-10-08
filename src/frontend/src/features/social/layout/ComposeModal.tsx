@@ -14,11 +14,23 @@
  *  - FOCUS IS TRAPPED: Tab / Shift+Tab wrap inside the dialog. (The host also
  *    marks the rest of the frame `inert` while this is open; the trap is the
  *    belt to that braces, and is what makes the behavior testable in jsdom.)
- *  - ESC CLOSES, as does the Close button and a press on the dim backdrop.
+ *  - ESC CLOSES, as does the Close button and a press on the dim backdrop -- but
+ *    NOT silently over a draft: with text (or attachment chips) in the box, those
+ *    three first ask "Discard this draft?" inline (Keep editing is focused and is
+ *    what Esc picks). A successful post closes with no question (the draft is
+ *    gone), and so does the HOST closing the dialog because the route changed.
  *  - FOCUS COMES BACK: on close, focus returns to the control that opened it --
  *    `returnFocusRef` (the Post button) when the host supplies it, else whatever
  *    was focused when the dialog opened. Some browsers (Safari) do not focus a
  *    button on click, so "whatever was focused" alone is not reliable; the ref is.
+ *    It only does so if focus has actually been LOST (it fell to <body> when the
+ *    dialog left the DOM): if something else already took it -- the route-change
+ *    rule moved it to the new page's heading -- it is left there.
+ *  - The trap and the initial focus consider only controls that are really
+ *    RENDERED: not inside `[hidden]` or an `inert` subtree, and not
+ *    `checkVisibility()`-false (a `display:none` / `visibility:hidden` input such
+ *    as a hidden file picker). A Tab stop on something unrendered would let focus
+ *    escape the dialog.
  *
  * AUTO-CLOSE. `onPosted` closes the dialog after a successful publish. In MOCK
  * mode `useComposePost` fires it today. In LIVE mode it does not yet (the post
@@ -38,6 +50,7 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
   type KeyboardEvent,
   type MouseEvent,
   type RefObject,
@@ -64,15 +77,35 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
 
+/**
+ * Whether `element` is actually rendered and operable: not within `[hidden]` or
+ * `inert`, and (where the browser supports `checkVisibility()`) not
+ * `display:none` / `visibility:hidden` / `content-visibility` hidden. Where
+ * `checkVisibility` is absent (older engines, jsdom) the structural checks stand
+ * alone.
+ */
+function isRendered(element: HTMLElement): boolean {
+  if (element.closest('[hidden], [inert]') !== null) return false
+  return element.checkVisibility?.({ visibilityProperty: true }) !== false
+}
+
 function focusableWithin(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-    element => element.closest('[hidden]') === null,
-  )
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(isRendered)
+}
+
+/** Whether the composer inside `dialog` holds text or attachment chips worth keeping. */
+function hasUnsentDraft(dialog: HTMLElement): boolean {
+  const textBox = dialog.querySelector<HTMLTextAreaElement>('textarea')
+  if (textBox !== null && textBox.value.trim() !== '') return true
+  return dialog.querySelector('[data-testid="composer-media"] li') !== null
 }
 
 export function ComposeModal({ onClose, returnFocusRef }: ComposeModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
+  const keepEditingRef = useRef<HTMLButtonElement>(null)
   const titleId = useId()
+  // True while the inline "Discard this draft?" question is showing.
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
 
   // Focus in on open; focus back on close. Runs once per open (the modal is
   // mounted only while open).
@@ -90,15 +123,38 @@ export function ComposeModal({ onClose, returnFocusRef }: ComposeModalProps) {
       initial.focus()
     }
     return () => {
-      if (opener !== null && opener.isConnected) opener.focus()
+      // Restore only if focus was lost with the dialog (fell to <body>); never steal it
+      // back from something that took it deliberately, e.g. the new route's heading.
+      const lost = document.activeElement === null || document.activeElement === document.body
+      if (lost && opener !== null && opener.isConnected) opener.focus()
     }
   }, [returnFocusRef])
+
+  // Put focus on the SAFE choice when the question appears.
+  useEffect(() => {
+    if (confirmingDiscard) keepEditingRef.current?.focus()
+  }, [confirmingDiscard])
+
+  /** Esc / Close / backdrop: close now, or ask first if there is a draft to lose. */
+  const requestClose = () => {
+    if (confirmingDiscard) return
+    const dialog = dialogRef.current
+    if (dialog !== null && hasUnsentDraft(dialog)) setConfirmingDiscard(true)
+    else onClose()
+  }
+
+  const keepEditing = () => {
+    setConfirmingDiscard(false)
+    dialogRef.current?.querySelector<HTMLElement>('textarea')?.focus()
+  }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault()
       event.stopPropagation()
-      onClose()
+      // Esc on the question means "never mind", not "discard".
+      if (confirmingDiscard) keepEditing()
+      else requestClose()
       return
     }
     if (event.key !== 'Tab') return
@@ -125,7 +181,7 @@ export function ComposeModal({ onClose, returnFocusRef }: ComposeModalProps) {
 
   const handleBackdropMouseDown = (event: MouseEvent<HTMLDivElement>) => {
     // Only a press on the dim backdrop itself -- never one that bubbled from the dialog.
-    if (event.target === event.currentTarget) onClose()
+    if (event.target === event.currentTarget) requestClose()
   }
 
   return (
@@ -145,12 +201,35 @@ export function ComposeModal({ onClose, returnFocusRef }: ComposeModalProps) {
         onKeyDown={handleKeyDown}
       >
         <div className={styles.header}>
-          <button type="button" className={styles.close} aria-label="Close" onClick={onClose}>
+          <button type="button" className={styles.close} aria-label="Close" onClick={requestClose}>
             <FontAwesomeIcon icon={faXmark} aria-hidden="true" />
           </button>
           <h2 id={titleId} className={styles.title}>New post</h2>
         </div>
-        <Composer onPosted={onClose} />
+
+        {confirmingDiscard && (
+          <div className={styles.confirm} data-testid="compose-discard-confirm">
+            <p className={styles.confirmText} role="alert">Discard this draft?</p>
+            <div className={styles.confirmActions}>
+              <button
+                ref={keepEditingRef}
+                type="button"
+                className={styles.keepEditing}
+                onClick={keepEditing}
+              >
+                Keep editing
+              </button>
+              <button type="button" className={styles.discard} onClick={onClose}>
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* `inert` while the question shows: the draft cannot change under it. */}
+        <div inert={confirmingDiscard}>
+          <Composer onPosted={onClose} />
+        </div>
       </div>
     </div>
   )

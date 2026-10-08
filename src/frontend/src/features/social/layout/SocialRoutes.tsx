@@ -31,9 +31,25 @@
  * preview mounts the channel under a staff route such as `/staff/console`, where a
  * memory location of `/home` would throw. Providing a root `RouteContext` around
  * the `<Routes>` makes it a top-level matcher -- the memory location is then the
- * only pathname that matters. (`UNSAFE_RouteContext` is React Router's documented
- * escape hatch for this; `socialRoutes.test.tsx` mounts the channel under a nested
- * parent route to pin the behavior.)
+ * only pathname that matters. `SocialRoutes.test.tsx` mounts the channel under a
+ * nested parent route to pin the behavior.
+ *
+ * CAVEAT -- THIS IS AN INTERNAL, NOT A DOCUMENTED, API. `UNSAFE_RouteContext` is
+ * exported by React Router precisely because it is not covered by its stability
+ * promise (the `UNSAFE_` prefix is that warning): it is the context `<Routes>`
+ * itself reads, and nothing in the router's docs recommends resetting it. It works
+ * on 7.x and is pinned by tests, but a router upgrade could change it.
+ *
+ * TODO(C6): before the staff preview ships, replace `<Routes location>` + this reset
+ * with the pure `matchRoutes(routes, { pathname })` (documented, stable, needs no
+ * Router ancestor and no parent-route assumption) over the same
+ * `SOCIAL_ROUTE_PATTERNS`, rendering the matched route's element inside a small
+ * params context that `useParams` consumers read instead. The route table, the
+ * adapter and every test stay as they are. Until then, keep every OTHER router hook
+ * out of this feature: `socialRouterImports.test.ts` bans `Link` / `NavLink` /
+ * `Navigate` / `useNavigate` / `useLocation` / `useHref` outside the provider and
+ * `AccountCard`, because each of them reads the REAL router -- which, under the
+ * memory provider, is the staff app's.
  *
  * HOME STAYS MOUNTED. Returning to `/home` with Back must keep the feed's frozen
  * baseline, an unsent compose draft, and the scroll position, with no refetch and

@@ -16,8 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetExerciseClock } from '@/core/clock'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { matchSocialRoute } from './socialNavigation'
-import { RouterProbe } from './RouterProbe'
-import { renderChannel } from './testHarness'
+import { RouterProbe } from './RouterProbe.testUtils'
+import { renderChannel } from './renderChannel.testUtils'
 
 /** A real seeded post id, so `useThread` can resolve a thread for it. */
 const THREADABLE_POST_ID = 'post-seed-fw-advisory'
@@ -67,6 +67,11 @@ describe('SocialRoutes — each route renders its page', () => {
     expect(screen.getByTestId('social-hashtag-region')).toBeInTheDocument()
   })
 
+  it('/hashtag/:tag accepts a non-ASCII letter tag', async () => {
+    renderChannel({ entries: ['/hashtag/Caf%C3%A9'] })
+    expect(await screen.findByRole('heading', { name: '#café' })).toBeInTheDocument()
+  })
+
   it('/:handle renders that persona\'s profile', async () => {
     renderChannel({ entries: ['/FulcoEM'] })
     expect(await screen.findByRole('heading', { name: /Fulton County EM/ })).toBeInTheDocument()
@@ -94,10 +99,13 @@ describe('SocialRoutes — unknown and staff-like paths render Home (COR-004)', 
   it.each([
     '/staff/console',
     '/staff',
+    '/%73taff',
     '/staff/status/1',
     '/login',
     '/hashtag',
     '/hashtag/%23',
+    '/hashtag/a%20b',
+    '/hashtag/%3Cscript%3E',
     '/nonsense/a/b/c/d',
     '/FulcoEM/followers',
   ])('%s lands on /home with the feed showing', async path => {
@@ -181,11 +189,15 @@ describe('SocialRoutes — matchSocialRoute agrees with the rendered <Routes> ta
     '/home',
     '/explore',
     '/hashtag/zone2',
+    '/hashtag/%23WaterIssues',
+    '/hashtag/%23',
+    '/hashtag/a%20b',
     '/FulcoEM',
     `/FulcoEM/status/${THREADABLE_POST_ID}`,
     `/i/status/${THREADABLE_POST_ID}`,
     '/',
     '/staff',
+    '/%73taff',
     '/staff/console',
     '/login',
     '/hashtag',
