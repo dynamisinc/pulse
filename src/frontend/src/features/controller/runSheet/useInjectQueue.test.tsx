@@ -243,6 +243,30 @@ describe('useInjectQueue — mutations', () => {
     expect(fire).toHaveBeenCalledTimes(2)
   })
 
+  it('the in-flight lock is released after a FAILED mutation: the next press fires again', async () => {
+    const fire = vi.spyOn(injectMock, 'fire')
+    fire.mockRejectedValueOnce(new Error('boom'))
+    const { result } = await mount()
+    await settle()
+    const first = result.current.items[0]
+    if (!first) throw new Error('no items')
+
+    let failed: Awaited<ReturnType<typeof result.current.fire>> | undefined
+    await act(async () => {
+      failed = await result.current.fire(first.id)
+    })
+    expect(failed?.status).toBe('error')
+    expect(result.current.busyIds.size).toBe(0)
+
+    let again: Awaited<ReturnType<typeof result.current.fire>> | undefined
+    await act(async () => {
+      again = await result.current.fire(first.id)
+    })
+    expect(again?.status).toBe('ok') // not `busy`: the failed press did not leave the row locked
+    expect(fire).toHaveBeenCalledTimes(2)
+    expect(result.current.items[0]?.status).toBe('fired')
+  })
+
   it('a row is released after the action, so a later press works (and a failed one too)', async () => {
     const { result } = await mount()
     await settle()

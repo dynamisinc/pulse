@@ -16,7 +16,7 @@
  * it is never sent in a request (COR-001).
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { DEFAULT_FILTERS, parseStoredFilters, type RunSheetFilters } from './injectRules'
 
 export const FILTERS_STORAGE_PREFIX = 'pulse.runsheet.filters.v1.'
@@ -48,14 +48,16 @@ export function useRunSheetFilters(
   exerciseId: string,
 ): readonly [RunSheetFilters, (patch: Partial<RunSheetFilters>) => void] {
   const [filters, setFilters] = useState<RunSheetFilters>(() => readStoredFilters(exerciseId))
+  // The latest choice, so the write happens in the setter wrapper (an event handler) and NOT
+  // inside a state updater: updaters must be pure (StrictMode runs them twice).
+  const latest = useRef(filters)
 
   const update = useCallback(
     (patch: Partial<RunSheetFilters>) => {
-      setFilters(previous => {
-        const next = { ...previous, ...patch }
-        writeStoredFilters(exerciseId, next)
-        return next
-      })
+      const next = { ...latest.current, ...patch }
+      latest.current = next
+      setFilters(next)
+      writeStoredFilters(exerciseId, next)
     },
     [exerciseId],
   )

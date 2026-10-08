@@ -209,6 +209,8 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
   const editorKey = useRef(0)
+  // The latest polled items, for decisions made AFTER an await (a render closure would be stale).
+  const latestItems = useRef<readonly InjectItemDto[]>([])
   const rowRefs = useRef(new Map<string, HTMLLIElement>())
 
   const { items, pauseTier } = queue
@@ -238,12 +240,18 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
     : editor.mode === 'edit' && liveEditing && !isEditable(liveEditing.status)
       ? 'view'
       : editor.mode
+  // A read-only view follows the LIVE polled item (so a burst's "Firing n/m" keeps advancing); an
+  // edit form keeps the snapshot it was seeded from, so the controller's typing is never reset.
   const editorSnapshot =
     editor && editor.mode !== 'create'
-      ? editorMode === 'view' && liveEditing && editor.mode === 'edit'
+      ? editorMode === 'view' && liveEditing
         ? liveEditing
         : editor.base
       : undefined
+
+  useEffect(() => {
+    latestItems.current = items
+  }, [items])
 
   // The item being edited was deleted by another controller: close the editor, say so.
   useEffect(() => {
@@ -364,14 +372,25 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
       return { ok: false, form: error.detail || undefined, fields: error.fieldErrors }
     }
     if (error instanceof InjectConflictError && editor.mode !== 'create') {
-      // Stale version (or no longer editable): say so, reload, and show the FRESH item.
+      // The server's current copy: the 409's own `item`, else the polled one (a 409 without an
+      // item must not leave us retrying a dead version forever).
+      const known =
+        error.item ?? latestItems.current.find(candidate => candidate.id === editor.itemId)
+
+      // The version did NOT move: nobody changed the item, the server refused THIS EDIT (an edit
+      // that would rewrite a published post, a kind change after release, a post being published
+      // right now...). Say why on the form and KEEP the draft: reloading would throw the work away.
+      if (known && known.version === editor.base.version) {
+        return { ok: false, form: error.detail || 'The server refused this edit.' }
+      }
+
+      // The version moved (stale save, or the item stopped being editable): reload the fresh copy.
       setNotice(MESSAGES.changedByOthers)
-      const fresh = error.item
-      if (fresh) {
+      if (known) {
         setEditor({
-          mode: isEditable(fresh.status) ? 'edit' : 'view',
-          itemId: fresh.id,
-          base: fresh,
+          mode: isEditable(known.status) ? 'edit' : 'view',
+          itemId: known.id,
+          base: known,
           key: ++editorKey.current,
         })
       }

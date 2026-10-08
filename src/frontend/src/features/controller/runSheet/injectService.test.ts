@@ -18,7 +18,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { InjectConflictError, InjectNotFoundError, InjectValidationError } from './injectErrors'
-import { makeItem } from './runSheetTestHarness'
+import { makeItem, makePost } from './runSheetTestHarness'
 import type { InjectItemWrite } from './types'
 
 const getMock = vi.fn()
@@ -233,6 +233,21 @@ describe('live service — errors', () => {
     await expect(service.list()).rejects.toThrow(/Unrecognised inject queue/)
     postMock.mockResolvedValue({ data: { nope: true } })
     await expect(service.fire('inj-1')).rejects.toThrow(/Unrecognised inject item/)
+  })
+
+  it('an item with a MALFORMED CHILD is never rendered: the read rejects, and a 409 item is dropped', async () => {
+    const malformed = makeItem({ posts: [makePost({ personaId: '' })] })
+    getMock.mockResolvedValue({ data: { items: [item, malformed], pauseTier: 'running' } })
+    await expect(service.list()).rejects.toThrow(/Unrecognised inject queue/)
+
+    postMock.mockResolvedValue({ data: malformed })
+    await expect(service.fire('inj-1')).rejects.toThrow(/Unrecognised inject item/)
+
+    postMock.mockRejectedValue(axiosError(409, { detail: 'Already fired', item: malformed }))
+    const error = (await service.fire('inj-1').catch((e: unknown) => e)) as InjectConflictError
+    expect(error).toBeInstanceOf(InjectConflictError)
+    expect(error.detail).toBe('Already fired')
+    expect(error.item).toBeUndefined()
   })
 })
 

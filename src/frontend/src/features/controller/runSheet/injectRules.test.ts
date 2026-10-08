@@ -27,6 +27,7 @@ import {
   filterItems,
   firstPending,
   isEditable,
+  minimumBurstWindow,
   parseStoredFilters,
   plannedLabel,
   statusText,
@@ -103,6 +104,29 @@ describe('validateWrite', () => {
     expect(burst(601)).toBeDefined()
     expect(burst(90.5)).toBeDefined()
     expect(validateWrite(validWrite({ burstWindowSeconds: 5 })).burstWindowSeconds).toBeUndefined()
+  })
+
+  it('a burst window must hold every 3 s gap: >= 3 x (posts - 1), e.g. 20 posts need 57 s', () => {
+    const burstOf = (count: number, burstWindowSeconds?: number) =>
+      validateWrite(
+        validWrite({
+          kind: 'burst',
+          posts: Array.from({ length: count }, () => validPost),
+          ...(burstWindowSeconds === undefined ? {} : { burstWindowSeconds }),
+        }),
+      ).burstWindowSeconds
+    expect(minimumBurstWindow(20)).toBe(57)
+    expect(minimumBurstWindow(2)).toBe(3)
+    expect(burstOf(20, 56)).toBe('A 20-post burst needs at least 57 seconds')
+    expect(burstOf(20, 57)).toBeUndefined()
+    expect(burstOf(12, 32)).toBe('A 12-post burst needs at least 33 seconds')
+    expect(burstOf(12, 33)).toBeUndefined()
+    // Below 12 posts the 30 s floor is already enough.
+    expect(burstOf(11, 30)).toBeUndefined()
+    // The plain range error still wins when the window is outside 30..600.
+    expect(burstOf(20, 29)).toBe('Window must be 30 to 600 seconds')
+    // No explicit window: the 90 s default always holds a full burst.
+    expect(burstOf(20)).toBeUndefined()
   })
 
   it('requires a persona and text, and caps text at 280 CODE POINTS', () => {

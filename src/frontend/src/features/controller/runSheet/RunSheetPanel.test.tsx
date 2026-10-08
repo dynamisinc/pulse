@@ -359,6 +359,18 @@ describe('RunSheetPanel — Fire, Fire next', () => {
     await waitFor(() => expect(chipOf('Alpha')).toBe('Fired'))
   })
 
+  it('after a FAILED fire the row is usable again: the message shows, and the next press fires', async () => {
+    const fire = vi.spyOn(injectMock, 'fire')
+    fire.mockRejectedValueOnce(new Error('boom'))
+    await mountPanel()
+    press('Fire Alpha')
+    expect(await screen.findByText("Couldn't fire: boom")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Fire Alpha' })).toBeEnabled())
+    press('Fire Alpha')
+    await waitFor(() => expect(chipOf('Alpha')).toBe('Fired'))
+    expect(fire).toHaveBeenCalledTimes(2)
+  })
+
   it('a concurrent fire by another controller reads "Already fired by {name}" and refreshes the row', async () => {
     await mountPanel()
     // The peer fires Alpha; this console has not polled yet and still shows Pending.
@@ -702,6 +714,89 @@ describe('RunSheetPanel — authoring (inline editor, never a modal)', () => {
     expect(within(editor).getByLabelText(/^Title/)).toHaveValue('Echo')
   })
 
+  it('a save 409 where the version did NOT move shows the reason on the form and KEEPS the draft', async () => {
+    await mountPanel()
+    press('Edit Alpha')
+    const editor = await screen.findByTestId('inject-editor')
+    fireEvent.change(within(editor).getByLabelText(/^Title/), { target: { value: 'My unsaved title' } })
+    // The server refused THIS edit (not a stale version): the current item is the one we opened.
+    vi.spyOn(injectMock, 'update').mockRejectedValueOnce(
+      new InjectConflictError(
+        'A post of this item is being published right now. Try again in a moment.',
+        itemOf('Alpha'),
+      ),
+    )
+    fireEvent.click(within(editor).getByTestId('editor-save'))
+
+    expect(await within(editor).findByTestId('editor-form-error')).toHaveTextContent(
+      'being published right now',
+    )
+    // Not reloaded: the typed text is still there and no "reloaded" message was shown.
+    expect(screen.getByLabelText(/^Title/)).toHaveValue('My unsaved title')
+    expect(screen.queryByText('Changed by someone else. Reloaded.')).toBeNull()
+    expect(screen.getAllByTestId('inject-editor')).toHaveLength(1)
+  })
+
+  it('a save 409 WITHOUT an item falls back to the polled copy: unchanged -> keep the draft and say why', async () => {
+    await mountPanel()
+    press('Edit Alpha')
+    const editor = await screen.findByTestId('inject-editor')
+    fireEvent.change(within(editor).getByLabelText(/^Title/), { target: { value: 'Still mine' } })
+    vi.spyOn(injectMock, 'update').mockRejectedValueOnce(new InjectConflictError('Try again later'))
+    fireEvent.click(within(editor).getByTestId('editor-save'))
+    expect(await within(editor).findByTestId('editor-form-error')).toHaveTextContent('Try again later')
+    expect(screen.getByLabelText(/^Title/)).toHaveValue('Still mine')
+  })
+
+  it('a save 409 WITHOUT an item reloads from the polled copy when its version moved, so a retry works', async () => {
+    const { queryClient } = await mountPanel()
+    press('Edit Alpha')
+    const editor = await screen.findByTestId('inject-editor')
+    // Another controller edits Alpha, and this console polls it: the live copy is now newer.
+    await act(async () => {
+      const current = itemOf('Alpha')
+      await injectMock.as(PEER).update(
+        current.id,
+        { ...single('Alpha (peer edit)'), assigneeId: ME },
+        current.version,
+      )
+      await queryClient.invalidateQueries()
+    })
+    await within(editor).findByTestId('editor-stale-note')
+    fireEvent.change(within(editor).getByLabelText(/^Title/), { target: { value: 'Mine' } })
+    // The server answers 409 but names no item this time.
+    vi.spyOn(injectMock, 'update').mockRejectedValueOnce(
+      new InjectConflictError('Changed by someone else. Refresh to see the latest version.'),
+    )
+    fireEvent.click(within(editor).getByTestId('editor-save'))
+    expect(await screen.findByText('Changed by someone else. Reloaded.')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByLabelText(/^Title/)).toHaveValue('Alpha (peer edit)'),
+    )
+
+    // The retry carries the NEW version and goes through (not a 409 forever).
+    fireEvent.change(screen.getByLabelText(/^Title/), { target: { value: 'Mine, retried' } })
+    fireEvent.click(screen.getByTestId('editor-save'))
+    await waitFor(() => expect(screen.queryByTestId('inject-editor')).toBeNull())
+    expect(injectMock.snapshot().items[0]?.title).toBe('Mine, retried')
+  })
+
+  it('the item type is locked in the editor once the item has fired (a held burst)', async () => {
+    await mountPanel()
+    press('Fire Delta')
+    await waitFor(() => expect(chipOf('Delta')).toMatch(/^Firing/))
+    press('Hold Delta')
+    await waitFor(() => expect(chipOf('Delta')).toBe('Held'))
+    press('Edit Delta')
+    const editor = await screen.findByTestId('inject-editor')
+    expect(within(editor).getByRole('radio', { name: 'Single post' })).toBeDisabled()
+    expect(within(editor).getByRole('radio', { name: 'Burst (pile-on)' })).toBeDisabled()
+    expect(within(editor).getByTestId('kind-locked-note')).toBeInTheDocument()
+    // The published post is locked; the rest are editable.
+    expect(within(editor).getByLabelText(/^Post 1 text/)).toBeDisabled()
+    expect(within(editor).getByLabelText(/^Post 2 text/)).toBeEnabled()
+  })
+
   it('Cancel closes the editor without saving', async () => {
     await mountPanel()
     press('Add item')
@@ -1014,6 +1109,27 @@ describe('RunSheetPanel — live sync (fake timers)', () => {
     expect(chipOf('Alpha')).toBe('Fired')
     expect(within(rowOf('Alpha')).getByTestId('row-fired')).toHaveTextContent('by Jordan Ames')
     expect(screen.getByTestId('run-sheet-announcer')).toHaveTextContent('Alpha: Fired')
+  })
+
+  it('a read-only view follows the LIVE item: "Firing n/m" advances inside the open view', async () => {
+    await mountFake()
+    fireEvent.click(screen.getByRole('button', { name: 'Fire Delta' }))
+    await flush(10)
+    fireEvent.click(screen.getByRole('button', { name: 'View Delta' }))
+    await flush(10)
+    const view = screen.getByTestId('inject-editor')
+    expect(view).toHaveAttribute('data-mode', 'view')
+    const chip = (): string => within(view).getByTestId('status-text').textContent ?? ''
+    expect(chip()).toBe('Firing 1/4')
+
+    const seen = new Set<string>([chip()])
+    for (let second = 0; second < 150; second++) {
+      await flush(1000)
+      seen.add(chip())
+    }
+    expect([...seen].some(text => /^Firing [23]\/4$/.test(text))).toBe(true)
+    expect(chip()).toBe('Fired')
+    expect(within(view).getByTestId('editor-readonly-note')).toHaveTextContent('This item is fired')
   })
 
   it('another controller\'s hold, skip and edit show up on the next poll', async () => {

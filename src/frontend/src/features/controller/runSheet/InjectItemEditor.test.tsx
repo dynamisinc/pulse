@@ -312,6 +312,82 @@ describe('InjectItemEditor — burst mode: 2..20 posts and the window', () => {
   })
 })
 
+describe('InjectItemEditor — the type is fixed once the item has fired', () => {
+  const partlyFired = makeItem({
+    id: 'inj-fired',
+    kind: 'burst',
+    status: 'held',
+    firedByHumanId: ME,
+    posts: [
+      makePost({ id: 'a', sequence: 1, status: 'fired' }),
+      makePost({ id: 'b', sequence: 2, status: 'pending' }),
+    ],
+    total: 2,
+    firedCount: 1,
+  })
+
+  it('locks the kind radios (with a note) when a child has fired', () => {
+    renderEditor({ mode: 'edit', item: partlyFired, items: [partlyFired] })
+    expect(screen.getByRole('radio', { name: 'Single post' })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: 'Burst (pile-on)' })).toBeDisabled()
+    expect(screen.getByTestId('kind-locked-note')).toHaveTextContent('fixed once it has fired')
+  })
+
+  it('also locks it once Fire was pressed even if nothing published (a failed first release)', () => {
+    const failed = makeItem({ id: 'inj-failed', status: 'failed', firedByHumanId: ME })
+    renderEditor({ mode: 'edit', item: failed, items: [failed] })
+    expect(screen.getByRole('radio', { name: 'Single post' })).toBeDisabled()
+    expect(screen.getByTestId('kind-locked-note')).toBeInTheDocument()
+  })
+
+  it('does NOT lock it for an item that was never released, or for a new item', () => {
+    const fresh = makeItem({ id: 'inj-fresh' })
+    const { unmount } = renderEditor({ mode: 'edit', item: fresh, items: [fresh] })
+    expect(screen.getByRole('radio', { name: 'Single post' })).toBeEnabled()
+    expect(screen.getByRole('radio', { name: 'Burst (pile-on)' })).toBeEnabled()
+    expect(screen.queryByTestId('kind-locked-note')).toBeNull()
+    unmount()
+    renderEditor()
+    expect(screen.getByRole('radio', { name: 'Burst (pile-on)' })).toBeEnabled()
+  })
+
+  it('a locked kind cannot be switched by a click', () => {
+    renderEditor({ mode: 'edit', item: partlyFired, items: [partlyFired] })
+    fireEvent.click(screen.getByRole('radio', { name: 'Single post' }))
+    expect(screen.getAllByTestId('post-editor')).toHaveLength(2)
+    expect(screen.getByRole('radio', { name: 'Burst (pile-on)' })).toBeChecked()
+  })
+})
+
+describe('InjectItemEditor — the window must hold every 3 s gap', () => {
+  const twelve = makeItem({
+    id: 'inj-twelve',
+    kind: 'burst',
+    burstWindowSeconds: 60,
+    posts: Array.from({ length: 12 }, (_, i) =>
+      makePost({ id: `p${i + 1}`, sequence: i + 1, text: `post ${i + 1}` }),
+    ),
+    total: 12,
+  })
+
+  it('refuses a window below 3 x (posts - 1) with a clear message, and accepts the minimum', async () => {
+    const { onSubmit } = renderEditor({ mode: 'edit', item: twelve, items: [twelve] })
+    // The hint states the real minimum for this many posts.
+    expect(screen.getByText(/33 to 600/)).toBeInTheDocument()
+    change(/^Burst window/, '32')
+    save()
+    expect(await screen.findByTestId('inject-editor-window-error')).toHaveTextContent(
+      'A 12-post burst needs at least 33 seconds',
+    )
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    change(/^Burst window/, '33')
+    save()
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(submitted(onSubmit).burstWindowSeconds).toBe(33)
+  }, 60_000)
+})
+
 describe('InjectItemEditor — reply-to', () => {
   const earlier = [
     makeItem({
