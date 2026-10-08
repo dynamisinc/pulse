@@ -43,9 +43,31 @@
  * `DraftTimerDriver`'s module header for the full composition). The persona
  * "post as persona" flow above is UNCHANGED by this integration.
  *
- * SCOPE GUARD: this still does NOT build the MSEL rail, live-world columns,
- * storylines, rumor tracker, trainee monitor, break-fiction, or pause tiers —
- * those remain separate features/stories.
+ * SCOPE GUARD: this does NOT build the MSEL rail, storylines, rumor tracker,
+ * trainee monitor or break-fiction — those remain separate features/stories.
+ * The live world and the run sheet are mounted INTO the main area through the
+ * `liveWorldSlot` / `runSheetSlot` render props below (demo-polish C4); this
+ * component owns only their layout.
+ *
+ * ## MAIN-AREA SLOTS (demo-polish C4, docs/features/demo-polish/20-console-cleanup.md)
+ * Below the header, shortcut strip and world-steering controls the main region
+ * is a two-column split — LIVE WORLD | RUN SHEET — at viewport widths >= 1280px,
+ * and the two stacked (live world first) below that. Each column is a labelled
+ * `section` landmark that hosts whatever its slot renders. The grid takes the
+ * height left under the steering controls (`flex: 1; minHeight: 0`, rows of at
+ * least 320px) and each section is a shrinkable flex column, so a slot root using
+ * `flex: 1; minHeight: 0; overflow: auto` scrolls INSIDE its own panel; the slot
+ * still owns its title and internals. Each slot is a render prop receiving a
+ * {@link ConsoleSlotContext} whose `openComposer` selects a persona (into the
+ * route's active-persona state) and opens the persona dock. With NEITHER slot
+ * supplied the area shows one concise status line (not placeholder panels); with
+ * ONE supplied, that column takes the full width.
+ *
+ * `ControllerConsoleRoute` (orchestrator-owned) supplies the slots and the
+ * reply-target state; this file never imports the live-world or run-sheet code.
+ * The console must be mounted inside the route's `<ActivePersonaProvider>`
+ * (`useActivePersona()` throws otherwise): `openComposer` selects into it so the
+ * dock the route derives from the active persona is the persona that was asked for.
  *
  * ## ENGINE SETTINGS tool (feature: autonomy-safety, story 06)
  * A sibling "ENGINE" surface tool, registered the same way as "Personas"
@@ -86,11 +108,17 @@
  * surface (XC-002).
  */
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Box, Stack, Typography } from '@mui/material'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Box, Stack, Typography, useMediaQuery } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faChartLine, faGear, faMasksTheater, faTowerBroadcast } from '@fortawesome/free-solid-svg-icons'
-import { usePersonas } from '@/features/personas'
+import {
+  faChartLine,
+  faGear,
+  faKeyboard,
+  faMasksTheater,
+  faTowerBroadcast,
+} from '@fortawesome/free-solid-svg-icons'
+import { useStaffPersonas, type StaffPersona } from '@/features/personas'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useRegisterSurfaceTool, useToolstrip } from '@/features/staffShell/toolRegistry'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
@@ -104,6 +132,7 @@ import { CommandPalette, type CommandPalettePersonaSlot } from '../console/Comma
 import { PersonaDockHost } from '../console/personaDockHost.tsx'
 import { PERSONAS_TOOL_ID, type PersonaDockSlots } from '../console/personaDockHost'
 import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
+import { useActivePersona } from '../hooks/useActivePersona'
 import { EscalationDial } from './steering/EscalationDial'
 import { PausePill } from './steering/PausePill'
 import {
@@ -125,6 +154,110 @@ import {
 
 /** The docked review-queue column's fixed width (D5 §6 "336px, sole tenant"). */
 const REVIEW_QUEUE_WIDTH_PX = 336
+
+/** Viewport width at which Live world | Run sheet sit side by side (C4 AC). */
+const SLOT_SPLIT_MIN_WIDTH_PX = 1280
+
+/** Smallest height a main-area slot row is given before the region scrolls. */
+const SLOT_MIN_HEIGHT_PX = 320
+
+/**
+ * A slot's section: a flex column that may shrink below its content
+ * (`minHeight: 0`), so a slot root using `flex: 1; minHeight: 0; overflow: auto`
+ * scrolls inside its own panel instead of stretching the console.
+ */
+const SLOT_SECTION_SX = {
+  display: 'flex',
+  flexDirection: 'column',
+  minWidth: 0,
+  minHeight: 0,
+} as const
+
+/** A keycap in the shortcut strip. */
+const KBD_SX = {
+  fontFamily: staffShellTokens.classificationTag.fontFamily,
+  fontSize: 11,
+  fontWeight: 700,
+  color: staffShellTokens.header.background,
+  border: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
+  borderRadius: '4px',
+  bgcolor: staffShellTokens.toolstrip.background,
+  px: 0.75,
+  py: 0.125,
+} as const
+
+/**
+ * A post being replied to, as the live-world column hands it to the composer
+ * (implementation.md §1.11, owned by demo-polish F0). Declared LOCALLY, behind
+ * the frozen shape, until F0 is merged and this can be imported from
+ * `@/features/social`; the two are structurally identical, so swapping the
+ * import later changes nothing for callers. `excerpt` is at most 140 chars.
+ */
+export interface ReplyTarget {
+  readonly postId: string
+  readonly authorHandle: string
+  readonly authorDisplayName: string
+  readonly excerpt: string
+}
+
+/**
+ * What the console hands to each main-area slot (implementation.md §1.11).
+ *
+ * `openComposer` opens the persona dock AS A PERSONA, and the dock content is
+ * whatever the route derives from the shared active persona — so the console
+ * makes the two agree by selecting the persona in `ActivePersonaProvider` first
+ * (the same `selectPersona` the ⌘K picker calls) and only then opening the dock:
+ *  - `personaId` given: that persona, looked up in this exercise's staff persona
+ *    list;
+ *  - no `personaId`: the persona already active (the one last worked with).
+ * If the persona cannot be resolved — unknown id, none active, the list not yet
+ * loaded, or a persona left over from another exercise — the ⌘K palette opens
+ * instead so the controller picks who to post as. An empty dock, or a dock
+ * showing a DIFFERENT persona's composer than the one requested, is never
+ * opened: that is how a post goes out as the wrong persona.
+ *
+ * `replyTo` is accepted so a slot can pass its target through one call; the
+ * console itself does not hold it — the route owns the reply-target state and
+ * feeds the composer through `dockSlots` (implementation.md §4.2).
+ *
+ * The function identity is stable for the life of the console, so a slot that
+ * lists it as an effect/memo dependency is not re-run on every console render.
+ */
+export interface ConsoleSlotContext {
+  openComposer(opts?: { personaId?: string; replyTo?: ReplyTarget }): void
+}
+
+/**
+ * The persona with `personaId` from the exercise's staff persona list, or
+ * `undefined`. A persona that carries an `exerciseId` different from the
+ * current exercise is rejected (defence in depth for a list or an active
+ * persona left over from before an exercise switch); the live wire may omit it,
+ * which is accepted.
+ */
+function findExercisePersona(
+  personas: readonly StaffPersona[],
+  personaId: string,
+  exerciseId: string,
+): StaffPersona | undefined {
+  return personas.find(persona => {
+    if (persona.id !== personaId) return false
+    const personaExerciseId: string | undefined = persona.exerciseId
+    return personaExerciseId === undefined || personaExerciseId === exerciseId
+  })
+}
+
+/**
+ * A callback with a STABLE identity that always runs the latest `fn`. The ref is
+ * refreshed in a layout effect (never during render), so what a stable caller
+ * invokes is the closure of the most recent committed render.
+ */
+function useStableCallback<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  const latest = useRef(fn)
+  useLayoutEffect(() => {
+    latest.current = fn
+  })
+  return useCallback((...args: A) => latest.current(...args), [])
+}
 
 /** Narrows a `CountingDown` item down to one guaranteed to carry a countdown. */
 function hasCountdown(
@@ -154,10 +287,21 @@ export interface ControllerConsoleProps {
    * inert (mirrors `ReviewQueue`'s own standalone behavior).
    */
   reviewEditSlot?: (props: ReviewQueueEditSlotProps) => ReactNode
+  /**
+   * The LIVE WORLD column (demo-polish C2's `LiveWorldColumn`) — supplied by the
+   * `/console` route. Left column of the main-area split. Absent = not rendered.
+   */
+  liveWorldSlot?: (ctx: ConsoleSlotContext) => ReactNode
+  /**
+   * The RUN SHEET panel (demo-polish C3's `RunSheetPanel`) — supplied by the
+   * `/console` route. Right column of the main-area split. Absent = not rendered.
+   */
+  runSheetSlot?: (ctx: ConsoleSlotContext) => ReactNode
 }
 
 export function ControllerConsole(
-  { renderPersonaResults, dockSlots, reviewEditSlot }: ControllerConsoleProps = {},
+  { renderPersonaResults, dockSlots, reviewEditSlot, liveWorldSlot, runSheetSlot }:
+  ControllerConsoleProps = {},
 ) {
   const identity = useControllerIdentity()
   const { exerciseId, timeZone } = useExerciseContext()
@@ -178,17 +322,19 @@ export function ControllerConsole(
   const countingDownItems = useMemo(() => items.filter(hasCountdown), [items])
 
   // Phase-1 badge: the count of personas available to post as, exercise-scoped
-  // via `usePersonas()` (COR-001). The badge's COUNT is what the shell's
+  // via `useStaffPersonas()` (COR-001). The badge's COUNT is what the shell's
   // Toolstrip renders as visible text (never color-only, NFR-001); its
   // `escalating` flag is a pass-through the shell renders as a red pulse ON TOP
   // of that text — left `false` here until a later story wires an attention
   // source (e.g. queued persona posts). The badge is omitted while empty.
-  // The PARTICIPANT read is deliberate here: this badge needs only a COUNT,
-  // never `personaType`, so it declares the narrower contract both worlds
-  // share (`usePersonas`) rather than the staff-only projection. Anything that
-  // reads the archetype must use `useStaffPersonas()` (SOC-052/D1-008).
-  const { personas } = usePersonas()
+  // The STAFF read (one fetch, shared with `openComposer`'s persona lookup
+  // below): selecting a persona into the route's `ActivePersonaProvider` takes a
+  // `StaffPersona` (SOC-052/D1-008), and this is the staff console.
+  const { personas } = useStaffPersonas()
   const personaCount = personas.length
+  // The shared "operating as" seam the route mounts above this console. The
+  // console selects into it when a slot opens the composer (see `openComposer`).
+  const { activePersona, selectPersona } = useActivePersona()
 
   useRegisterSurfaceTool({
     id: PERSONAS_TOOL_ID,
@@ -258,10 +404,33 @@ export function ControllerConsole(
   // The persona-dock host opens once a persona is selected (from the palette,
   // or — at integration — from the picker). Persona content mounts into its
   // slots at integration; empty here.
-  const [dockPersonaId, setDockPersonaId] = useState<string | null>(null)
-  const handleSelectPersona = useCallback((personaId: string) => {
-    setDockPersonaId(personaId)
-  }, [])
+  //
+  // The dock persona is remembered WITH the exercise it was opened in, and only
+  // counts while that is still the current exercise: the console does not
+  // remount on an exercise switch (the scope commits in place), so persona
+  // memory keyed on nothing would survive into the next exercise. Deriving
+  // `dockPersonaId` closes the dock in the same render the scope changes; the
+  // effect below drops the stale memory so switching back never revives it.
+  const [dockState, setDockState] = useState<{ exerciseId: string; personaId: string } | null>(
+    null,
+  )
+  const dockPersonaId =
+    dockState !== null && dockState.exerciseId === exerciseId ? dockState.personaId : null
+  const setDockPersonaId = useCallback(
+    (personaId: string | null) => {
+      setDockState(personaId === null ? null : { exerciseId, personaId })
+    },
+    [exerciseId],
+  )
+  useEffect(() => {
+    setDockState(current =>
+      current !== null && current.exerciseId !== exerciseId ? null : current,
+    )
+  }, [exerciseId])
+  const handleSelectPersona = useCallback(
+    (personaId: string) => setDockPersonaId(personaId),
+    [setDockPersonaId],
+  )
   // The EXPLICIT close (Esc/X on the dock) is the operator choosing to
   // discard whatever draft was in progress — so this ALSO clears the
   // persisted-draft store (`useComposeAsPersona`'s Gate-1 WR-103 mirror),
@@ -276,7 +445,7 @@ export function ControllerConsole(
       composeAsPersonaDraftStore.discardDraft(exerciseId, dockPersonaId)
     }
     setDockPersonaId(null)
-  }, [dockPersonaId, exerciseId])
+  }, [dockPersonaId, exerciseId, setDockPersonaId])
 
   // The persona-dock host's `open` (`dockPersonaId !== null`) is independent
   // of the toolstrip's one-flyout-at-a-time `activeToolId` — activating
@@ -303,7 +472,52 @@ export function ControllerConsole(
   const dockPersonaOpen = dockPersonaId !== null && !engineSettingsOpen && !engineUsageOpen
   useEffect(() => {
     if (engineSettingsOpen || engineUsageOpen) setDockPersonaId(null)
-  }, [engineSettingsOpen, engineUsageOpen])
+  }, [engineSettingsOpen, engineUsageOpen, setDockPersonaId])
+
+  // The context every main-area slot receives. `openComposer` is the ONE way a
+  // slot (live-world "Reply as…", a run-sheet row, …) opens the persona dock:
+  //   - resolve WHO: the requested `personaId`, else the persona already active,
+  //     looked up in THIS exercise's staff persona list;
+  //   - resolved: SELECT it into the route's active-persona state (the very
+  //     persona the dock content is derived from — so the composer that opens is
+  //     the requested persona's, even if another was active), then open the dock
+  //     for it. Unlike the ⌘K picker, which selects inside the picker itself and
+  //     only then reports the id, nothing selects for a slot — so this must;
+  //   - NOT resolved (unknown id, none active, list still loading, a persona from
+  //     another exercise): open the ⌘K palette so the controller picks. Never an
+  //     empty dock, never a dock showing someone else's composer;
+  //   - an open ENGINE/USAGE flyout is closed first (one flyout at a time, and
+  //     the dock is gated off while either is open — see `dockPersonaOpen`).
+  // `replyTo` is not held here (see `ConsoleSlotContext`). The identity is stable
+  // (`useStableCallback`), so slots can depend on it freely.
+  const openComposer = useStableCallback<
+    Parameters<ConsoleSlotContext['openComposer']>,
+    void
+  >(opts => {
+    const requestedId = opts?.personaId ?? activePersona?.id
+    const persona =
+      requestedId === undefined ? undefined : findExercisePersona(personas, requestedId, exerciseId)
+    if (persona === undefined) {
+      if (!isActive(PERSONAS_TOOL_ID)) toggleTool(PERSONAS_TOOL_ID)
+      return
+    }
+    closeEngineSettings()
+    closeEngineUsage()
+    selectPersona(persona)
+    handleSelectPersona(persona.id)
+  })
+  const slotContext = useMemo<ConsoleSlotContext>(() => ({ openComposer }), [openComposer])
+
+  // Live world | Run sheet side by side from 1280px, stacked below (C4 AC).
+  // `noSsr` reads the real viewport on the first render (this is a client-only
+  // SPA), so a wide screen never flashes the stacked layout.
+  const slotsSplit = useMediaQuery(`(min-width:${SLOT_SPLIT_MIN_WIDTH_PX}px)`, { noSsr: true })
+  const liveWorld = liveWorldSlot ? liveWorldSlot(slotContext) : null
+  const runSheet = runSheetSlot ? runSheetSlot(slotContext) : null
+  const hasSlots = Boolean(liveWorldSlot) || Boolean(runSheetSlot)
+  // Two columns only when BOTH panels exist and the viewport is wide enough — a
+  // lone panel takes the full width instead of sitting in half a split.
+  const slotsTwoColumn = slotsSplit && Boolean(liveWorldSlot) && Boolean(runSheetSlot)
 
   return (
     <Box
@@ -325,7 +539,11 @@ export function ControllerConsole(
           {/* Main content region — the existing header/⌘K hint/persona-dock
               host mount, unchanged by this integration. */}
           <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
-            <Stack sx={{ gap: 1.5, p: '18px 22px', minHeight: '100%' }}>
+            {/* Fixed to the work area's height (not just a minimum) so the slot
+                grid below can take the REMAINING height and each slot can own
+                its own scroll; if the area is too short, this box overflows and
+                the region itself scrolls instead. */}
+            <Stack sx={{ gap: 1.5, p: '18px 22px', height: '100%', boxSizing: 'border-box' }}>
               <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
                 <FontAwesomeIcon
                   icon={faTowerBroadcast}
@@ -356,13 +574,26 @@ export function ControllerConsole(
                 </Typography>
               </Stack>
 
-              <Typography sx={{ fontSize: 12, color: staffShellTokens.accent.secondaryText }}>
-                Press <Box component="kbd" sx={{ fontWeight: 700 }}>⌘K</Box> (or Ctrl+K), or open the
-                Personas tool, to post as a persona. The engine review queue is docked to the
-                right; the live world and other surfaces dock here as they land.
-              </Typography>
+              {/* Shortcut strip — the one place the console says how to start. */}
+              <Stack
+                direction="row"
+                data-testid="console-shortcut-strip"
+                sx={{
+                  alignItems: 'center',
+                  gap: 1,
+                  flexWrap: 'wrap',
+                  fontSize: 12,
+                  color: staffShellTokens.accent.secondaryText,
+                }}
+              >
+                <FontAwesomeIcon icon={faKeyboard} aria-hidden="true" />
+                <Box component="kbd" sx={KBD_SX}>⌘K</Box>
+                <Box component="span">/</Box>
+                <Box component="kbd" sx={KBD_SX}>Ctrl+K</Box>
+                <Box component="span">Post as a persona</Box>
+              </Stack>
 
-              {/* World-steering (E7 Wave 1): the tiered-pause control + the
+              {/* World-steering (world-steering feature): the tiered-pause control + the
                   storyline escalation dial. PausePill drives usePauseState (the
                   header state pill reflects the tier); EscalationDial sets the
                   storyline target the engine will follow (loop deferred). Both
@@ -374,6 +605,59 @@ export function ControllerConsole(
                 <PausePill />
                 <EscalationDial />
               </Stack>
+
+              {/* Main-area slots: Live world | Run sheet (split >= 1280px,
+                  stacked below). Nothing supplied = one status line, never
+                  placeholder panels. */}
+              {hasSlots ? (
+                <Box
+                  data-testid="console-slots"
+                  data-layout={slotsTwoColumn ? 'split' : 'stacked'}
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: slotsTwoColumn
+                      ? 'repeat(2, minmax(0, 1fr))'
+                      : 'minmax(0, 1fr)',
+                    // Rows share the remaining height, never below a usable floor.
+                    gridAutoRows: `minmax(${SLOT_MIN_HEIGHT_PX}px, 1fr)`,
+                    gap: 2,
+                    alignItems: 'stretch',
+                    // Fill the height left under the steering controls, and be
+                    // allowed to shrink to it (a slot can then own its scroll).
+                    flex: 1,
+                    minHeight: 0,
+                    mt: 0.5,
+                  }}
+                >
+                  {liveWorldSlot && (
+                    <Box
+                      component="section"
+                      aria-label="Live world"
+                      data-testid="console-slot-live-world"
+                      sx={SLOT_SECTION_SX}
+                    >
+                      {liveWorld}
+                    </Box>
+                  )}
+                  {runSheetSlot && (
+                    <Box
+                      component="section"
+                      aria-label="Run sheet"
+                      data-testid="console-slot-run-sheet"
+                      sx={SLOT_SECTION_SX}
+                    >
+                      {runSheet}
+                    </Box>
+                  )}
+                </Box>
+              ) : (
+                <Typography
+                  data-testid="console-slots-status"
+                  sx={{ fontSize: 12, color: staffShellTokens.accent.secondaryText }}
+                >
+                  Live world and run sheet are not connected to this console.
+                </Typography>
+              )}
             </Stack>
           </Box>
 

@@ -38,4 +38,18 @@ describe('StaffHeader — shipped default (real ExerciseContextProvider, DEV moc
     expect(screen.getByTestId('staff-header-state-pill')).toHaveTextContent('LIVE')
     expect(screen.getByTestId('staff-header-state-pill-dot')).toBeInTheDocument()
   })
+
+  it('shows the controller call sign as the cell (one source, demo-polish C4) and no faked presence', async () => {
+    render(
+      <MemoryRouter>
+        <ExerciseContextProvider>
+          <StaffHeader surfaceName="Controller Console" />
+        </ExerciseContextProvider>
+      </MemoryRouter>,
+    )
+
+    const badge = await screen.findByTestId('staff-header-identity-badge')
+    expect(badge).toHaveTextContent('CONTROLLER · SIMCELL-1')
+    expect(screen.queryByTestId('staff-header-presence')).not.toBeInTheDocument()
+  })
 })
