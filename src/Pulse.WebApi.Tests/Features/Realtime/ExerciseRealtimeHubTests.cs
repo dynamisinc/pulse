@@ -321,6 +321,29 @@ public class ExerciseRealtimeHubTests
     }
 
     [Fact]
+    public async Task OnConnectedAsync_StaffCheckFails_JoinsTheExerciseGroupFirst_NeverTheStaffGroup_AndPropagates()
+    {
+        // Ordering (Gate-1 L-5): the exercise-wide join happens BEFORE the staff check, so PostReceived timing is
+        // never held up by it. A staff-kind principal sends the check to the database, which here throws on open.
+        // The check must fail CLOSED: the error propagates out of OnConnectedAsync (SignalR then closes the
+        // connection and removes it from every group) and the staff join is never reached.
+        var exerciseId = Guid.NewGuid();
+        var context = BuildHubContext(
+            exerciseId,
+            http => http.User = SessionPrincipal.Create(Session(exerciseId, "staff", staffUserId: Guid.NewGuid())));
+        var groups = new RecordingGroupManager();
+
+        var hub = new ExerciseRealtimeHub(NoDatabaseContext()) { Context = context.Object, Groups = groups };
+        var connect = async () => await hub.OnConnectedAsync();
+
+        await connect.Should().ThrowAsync<InvalidOperationException>(
+            "a staff check that cannot complete must propagate, never be treated as verified");
+        groups.Joined.Should().Equal(
+            new[] { $"exercise:{exerciseId}" },
+            "the exercise-wide join precedes the check; a failed check never joins exercise:{id}:staff");
+    }
+
+    [Fact]
     public void Constructor_NullDbContext_Throws()
     {
         var act = () => new ExerciseRealtimeHub(null!);

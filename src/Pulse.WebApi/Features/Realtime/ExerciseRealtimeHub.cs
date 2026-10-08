@@ -140,12 +140,15 @@ public sealed class ExerciseRealtimeHub : Hub
             return;
         }
 
-        // Decide staff membership BEFORE joining anything, so a failed verification (e.g. a database error,
-        // which propagates and closes the connection) never leaves a half-joined connection behind.
-        var isVerifiedStaff = await IsVerifiedStaffForExerciseAsync(httpContext, exerciseId.Value, Context.ConnectionAborted);
-
+        // The exercise-wide join comes FIRST, so a staff connection receives participant-safe pushes
+        // (PostReceived) as promptly as a participant connection does — the staff check below costs a few
+        // queries and must not delay it.
         await Groups.AddToGroupAsync(Context.ConnectionId, GroupNameFor(exerciseId.Value));
 
+        // Only a connection the check positively verifies ever reaches the staff join. A failed check (e.g. a
+        // database error) propagates out of OnConnectedAsync BEFORE the staff join: SignalR then closes the
+        // connection and removes it from every group it joined, so a failure never yields staff membership.
+        var isVerifiedStaff = await IsVerifiedStaffForExerciseAsync(httpContext, exerciseId.Value, Context.ConnectionAborted);
         if (isVerifiedStaff)
         {
             // Same exercise id as the join above — the staff group can never point at another exercise.

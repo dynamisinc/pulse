@@ -42,11 +42,15 @@ using Pulse.WebApi.Tests.Helpers;
 /// </para>
 /// <para>
 /// <b>Readiness before broadcasting.</b> SignalR completes the client handshake BEFORE the hub's
-/// <c>OnConnectedAsync</c> runs, and a staff connection's join waits on its session/assignment check, so a push
-/// sent the instant <c>StartAsync</c> returns can precede the join. Each test therefore first waits until the
-/// connection has provably joined the group under test (a nonce probe sent to that group by name, outside the
-/// recorded frames): the staff group for a connection expected to be staff — itself a positive proof — and the
-/// exercise-wide group otherwise (the staff decision is made before that join, so it is complete by then).
+/// <c>OnConnectedAsync</c> runs, and the staff decision (a session/assignment check) runs AFTER the
+/// exercise-wide join, so a push sent the instant <c>StartAsync</c> returns can precede either join. Every
+/// connection therefore first clears an exact <c>OnConnectedAsync</c>-completed barrier: SignalR dispatches a
+/// connection's client invocations only after <c>OnConnectedAsync</c> returns, so the error completion of an
+/// invocation of a method the hub does not have proves every group decision — staff or not — has been made.
+/// Without it a NEGATIVE assertion ("never receives ReviewItemChanged") could pass vacuously against a hub that
+/// joined the staff group late. Each test then also confirms the group under test by a nonce probe sent to it by
+/// name (outside the recorded frames): the staff group for a connection expected to be staff — itself a positive
+/// proof — and the exercise-wide group otherwise.
 /// </para>
 /// <para>
 /// Long polling is the only transport <c>TestServer</c> supports end to end; the browser's WebSocket path
@@ -116,11 +120,13 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
     [RequiresDockerFact]
     public async Task StaffConnectionForExerciseA_NeverReceivesExerciseBsStaffOrParticipantEvents()
     {
-        // B5 AC5 (COR-001): the staff user is assigned to BOTH exercises, so only the host-derived group keeps B
-        // out — the staff group comes from the connection's host-resolved exercise, never the assignment set.
+        // B5 AC2/AC5 (COR-001): the staff user is assigned to BOTH exercises and the session is ACTIVE ON B, yet
+        // the connection is on A's host — so only the host-derived group keeps B out. The staff group comes from
+        // the connection's host-resolved exercise (the same id as its exercise-wide join), never from the
+        // assignment set and never from the session's active exercise.
         var exerciseA = await SeedExerciseAsync();
         var exerciseB = await SeedExerciseAsync();
-        var staffToken = await SeedStaffSessionAsync(activeExerciseId: exerciseA.Id, assignedTo: [exerciseA.Id, exerciseB.Id]);
+        var staffToken = await SeedStaffSessionAsync(activeExerciseId: exerciseB.Id, assignedTo: [exerciseA.Id, exerciseB.Id]);
 
         using var host = new RealtimeRoleHost(_fixture.ConnectionString!);
         await using var staffOnA = await ConnectAsync(host, exerciseA.Hostname, staffToken);
@@ -136,7 +142,8 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
 
         staffOnA.Frames.Should().Equal(
             new[] { (ReviewItemChanged, draftA), (PostReceived, postA) },
-            "a staff connection on exercise A receives only A's staff and participant events — never B's");
+            "a staff connection on exercise A's host receives only A's staff and participant events — never "
+            + "B's, even though its session is active on B");
     }
 
     [RequiresDockerFact]
@@ -227,6 +234,7 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
         var recording = new RecordingConnection(connection);
         await connection.StartAsync();
         connection.State.Should().Be(HubConnectionState.Connected, "a live session on a provisioned host connects");
+        await recording.WaitUntilOnConnectedCompletedAsync();
         return recording;
     }
 
@@ -360,6 +368,9 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
         /// <summary>Test-only readiness event; never recorded in <see cref="Frames"/>.</summary>
         private const string ReadinessProbe = "B5ReadinessProbe";
 
+        /// <summary>A hub method name that does not exist — invoked only as the OnConnectedAsync barrier.</summary>
+        private const string OnConnectedBarrierMethod = "B5OnConnectedBarrierNoSuchMethod";
+
         private readonly HubConnection _connection;
         private readonly List<(string Event, string Id)> _frames = new();
         private readonly ConcurrentDictionary<string, byte> _probesReceived = new(StringComparer.Ordinal);
@@ -370,6 +381,22 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
             _connection.On<JsonElement>(ReviewItemChanged, payload => Record(ReviewItemChanged, payload, "draftId"));
             _connection.On<JsonElement>(PostReceived, payload => Record(PostReceived, payload, "id"));
             _connection.On<string>(ReadinessProbe, nonce => _probesReceived.TryAdd(nonce, 0));
+        }
+
+        /// <summary>
+        /// Waits until the hub's <c>OnConnectedAsync</c> has RETURNED for this connection — i.e. every group join
+        /// (exercise-wide and, if verified, staff) has been decided and made. SignalR reads a connection's
+        /// invocations only after <c>OnConnectedAsync</c> completes, so the server's error completion for a
+        /// method the hub does not expose cannot arrive earlier. The connection stays open afterwards.
+        /// </summary>
+        public async Task WaitUntilOnConnectedCompletedAsync()
+        {
+            var barrier = async () => await _connection.InvokeAsync(OnConnectedBarrierMethod);
+
+            (await barrier.Should().ThrowAsync<HubException>(
+                    "the hub exposes no client-invocable method, so the barrier invocation completes with an error"))
+                .WithMessage("*Method does not exist*");
+            _connection.State.Should().Be(HubConnectionState.Connected, "a failed invocation does not close the connection");
         }
 
         /// <summary>

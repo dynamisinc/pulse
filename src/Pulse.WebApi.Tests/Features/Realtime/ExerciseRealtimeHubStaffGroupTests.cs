@@ -73,18 +73,22 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
     [RequiresDockerFact]
     public async Task StaffAssignedToTwoExercises_JoinsOnlyTheHostResolvedExercisesGroups_NeverTheOther()
     {
-        // B5 AC5 / COR-001: the staff group derives from the HOST-RESOLVED exercise, never from the assignment
-        // set — a staff user assigned to both A and B, connecting on A, never joins any of B's groups.
+        // B5 AC2/AC5 / COR-001: the staff group derives from the HOST-RESOLVED exercise — the same id the
+        // exercise-wide join uses — never from the assignment set and never from the session's ACTIVE exercise.
+        // The staff user is assigned to both A and B and the session is ACTIVE ON B (SeedStaffAsync binds the
+        // session to the first assignment), yet the connection is on A's host: it must join A's groups only.
+        // A staff group keyed on the session's exercise would join exercise:B:staff here and fail.
         var exerciseA = await SeedExerciseAsync();
         var exerciseB = await SeedExerciseAsync();
-        var staff = await SeedStaffAsync(assignedTo: [exerciseA, exerciseB]);
+        var staff = await SeedStaffAsync(assignedTo: [exerciseB, exerciseA]);
 
         var joined = await ConnectAsync(exerciseA, staff.Principal);
 
         joined.Should().Equal(new[] { $"exercise:{exerciseA}", $"exercise:{exerciseA}:staff" });
         joined.Should().NotContain(
             group => group.Contains(exerciseB.ToString(), StringComparison.OrdinalIgnoreCase),
-            "a connection on exercise A's host never joins exercise B's participant or staff group");
+            "a connection on exercise A's host never joins exercise B's participant or staff group, even with "
+            + "the session active on B");
     }
 
     [RequiresDockerFact]
