@@ -35,6 +35,7 @@ import {
   ShellContextProvider,
   type ShellVariant,
 } from '@/features/participant-shell/mountContract'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { ThreadView } from './ThreadView'
 
 function fixedClock(instant: Date): IExerciseClock {
@@ -51,7 +52,9 @@ async function renderThread(focusedPostId: string, variant: ShellVariant = 'full
         <ShellContextProvider
           value={{ variant, scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <ThreadView focusedPostId={focusedPostId} />
+          <SocialDirectoryProvider>
+            <ThreadView focusedPostId={focusedPostId} />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,
@@ -175,7 +178,9 @@ describe('ThreadView — thread-open telemetry (XC-004)', () => {
             <ShellContextProvider
               value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
             >
-              <ThreadView focusedPostId={focusedPostId} />
+              <SocialDirectoryProvider>
+                <ThreadView focusedPostId={focusedPostId} />
+              </SocialDirectoryProvider>
             </ShellContextProvider>
           </SessionProvider>
         </ExerciseContextProvider>

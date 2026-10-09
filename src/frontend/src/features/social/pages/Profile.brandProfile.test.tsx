@@ -35,6 +35,7 @@ import { ShellContextProvider } from '@/features/participant-shell/mountContract
 import { resetMockReactions } from '../services/reactionService'
 import { consumeReplyFocus, resetReplyIntent } from '../services/replyIntent'
 import { postStore } from '../services/postStore'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { Profile, type ProfileProps } from './Profile'
 
 const OWN_ID = 'persona-dreyes_fh' // the mock session's persona
@@ -59,7 +60,9 @@ function renderProfile(personaId: string, handlers: Partial<ProfileProps> = {}) 
           <ShellContextProvider
             value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
           >
-            <Profile personaId={personaId} {...handlers} />
+            <SocialDirectoryProvider>
+              <Profile personaId={personaId} {...handlers} />
+            </SocialDirectoryProvider>
           </ShellContextProvider>
         </SessionProvider>
       </ExerciseContextProvider>

@@ -22,6 +22,7 @@ import { ShellContextProvider } from '@/features/participant-shell/mountContract
 import type { MediaTabGridProps } from '../components/media/MediaTabGrid'
 import { compareNewestFirst } from '../services/feedService'
 import { postStore } from '../services/postStore'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { Profile } from './Profile'
 
 vi.mock('../components/media/MediaTabGrid', () => ({
@@ -51,7 +52,9 @@ function renderProfile(personaId: string, onOpenThread?: (postId: string) => voi
           <ShellContextProvider
             value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
           >
-            <Profile personaId={personaId} onOpenThread={onOpenThread} />
+            <SocialDirectoryProvider>
+              <Profile personaId={personaId} onOpenThread={onOpenThread} />
+            </SocialDirectoryProvider>
           </ShellContextProvider>
         </SessionProvider>
       </ExerciseContextProvider>

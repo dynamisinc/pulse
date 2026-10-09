@@ -41,6 +41,7 @@ import { DEMO_IDS } from '../services/mockFixtures'
 import { postStore } from '../services/postStore'
 import { ownPostStore } from '../services/ownPostStore'
 import { consumeReplyFocus, resetReplyIntent } from '../services/replyIntent'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { ThreadView } from './ThreadView'
 
 const FOCUS = 'post-seed-mvega-question'
@@ -56,10 +57,12 @@ function renderThread(
         <ShellContextProvider
           value={{ variant, scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <ThreadView
-            focusedPostId={focusedPostId}
-            {...(onOpenThread !== undefined ? { onOpenThread } : {})}
-          />
+          <SocialDirectoryProvider>
+            <ThreadView
+              focusedPostId={focusedPostId}
+              {...(onOpenThread !== undefined ? { onOpenThread } : {})}
+            />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,

@@ -20,6 +20,7 @@ import { api } from '@/core/services/api'
 import { resetTelemetryBuffer } from '@/core/telemetry'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import { resetMockReactions } from '../services/reactionService'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { Profile } from './Profile'
 
 const FW_ID = 'persona-fairhavenwater'
@@ -31,7 +32,9 @@ function renderProfile() {
         <ShellContextProvider
           value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <Profile personaId={FW_ID} />
+          <SocialDirectoryProvider>
+            <Profile personaId={FW_ID} />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,

@@ -17,6 +17,7 @@ import { SessionProvider } from '@/core/auth'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import { DEMO_IDS } from '../services/mockFixtures'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { ThreadView } from './ThreadView'
 
 async function renderThread(focusedPostId: string) {
@@ -26,7 +27,9 @@ async function renderThread(focusedPostId: string) {
         <ShellContextProvider
           value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <ThreadView focusedPostId={focusedPostId} />
+          <SocialDirectoryProvider>
+            <ThreadView focusedPostId={focusedPostId} />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,

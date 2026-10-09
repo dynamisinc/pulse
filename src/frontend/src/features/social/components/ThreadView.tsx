@@ -17,10 +17,11 @@
  * post, and every visible reply — exactly the way a feed would: `useThread()`
  * hands back participant-safe view models (`ParticipantPostView`/
  * `ThreadReplyView`), and this component resolves each one's
- * `authorPersonaId` to a `Persona` via `usePersonas()` (the participant-safe
- * read path — never `personaById`/`SEEDED_PERSONAS`) before assembling the
- * `PostView` `<PostCard>` renders. `<PostCard>` itself is never forked; the
- * focused post is visually enlarged only via `.focusedWrap`'s wrapper CSS.
+ * `authorPersonaId` to a `Persona` through the channel's shared directory
+ * (`useSocialDirectory()`, which wraps the participant-safe `usePersonas()` read — never
+ * `personaById`/`SEEDED_PERSONAS`) before assembling the `PostView` `<PostCard>`
+ * renders. `<PostCard>` itself is never forked; the focused post is visually enlarged
+ * only via `.focusedWrap`'s wrapper CSS.
  *
  * Tombstone (SOC-005/D1-009): the canonical `<Tombstone>` component (posts/05)
  * does not exist yet. A taken-down reply renders a MINIMAL, INTERIM inline
@@ -62,6 +63,27 @@
  * wall-clock. The one wall-clock read here (`wallClockNowIso()`) is
  * telemetry-only, stamping the `view` event's `wallClockTime`, never rendered.
  *
+ * ONE CAST READ, SHARED WITH THE CHANNEL (Copilot review, PR #460). The cast comes from
+ * the channel's directory (`SocialChannel` mounts `SocialDirectoryProvider` above the
+ * frame, which resolves it once); this component never reads one of its own. It used to
+ * call `usePersonas()`, a per-caller fetch with no shared cache, which was a duplicate
+ * `GET /personas` on every thread open AND a visible blank: the thread GET and that
+ * private read are independent requests, so whenever the thread landed first `useThread`
+ * said "loaded" ("Loading thread…" went away) while no author could be resolved yet, and
+ * the whole body — ancestors, focused post, composer, replies — was empty, with no
+ * indicator, until the private read finished. With the directory already loaded (every
+ * in-app navigation to a thread) the cards render the moment the thread GET lands.
+ * `useSocialDirectory()` fails closed outside a Social channel, so `<ThreadView>` must be
+ * mounted under a `SocialDirectoryProvider`; in the app that is always so (its only mount
+ * is `ThreadRoute`), and a test that mounts it directly wraps it in the provider. A silent
+ * fallback to a private read was rejected on purpose: it is the very duplicate this
+ * removes.
+ * COLD DEEP LINK (a reload on a thread URL): the directory itself can still be loading when
+ * the thread GET lands. While the focused author cannot be resolved for that reason the
+ * thread keeps its "Loading thread…" state (never a blank body) and the cards render in the
+ * step that clears it; if the directory read FAILS instead, the loading state ends in the
+ * thread's existing "Unable to load this thread." state rather than spinning forever.
+ *
  * Isolation (COR-001/XC-002): `useExerciseContext().exerciseId` is read ONLY
  * to stamp the telemetry envelope, never as a query-scoping param — the
  * thread's actual scope is server-side (`useThread`'s resolution seam).
@@ -93,7 +115,7 @@ import { wallClockNowIso } from '@/core/time/wallClock'
 import { scenarioNow } from '@/core/clock'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
-import { usePersonas, type Persona } from '@/features/personas'
+import type { Persona } from '@/features/personas'
 import { PostCard, type ParticipantPostView, type PostView } from '@/features/social'
 import {
   useShellContext,
@@ -102,6 +124,7 @@ import {
 import { toPostView } from '../services/feedService'
 import { consumeReplyFocus, requestReplyFocus } from '../services/replyIntent'
 import { useThread, type ThreadReplyView } from '../hooks/useThread'
+import { useSocialDirectory } from '../layout/socialDirectory'
 import { ReplyComposer } from './ReplyComposer'
 import styles from './ThreadView.module.css'
 
@@ -175,7 +198,8 @@ export function ThreadView({
       ...(session.personaId !== undefined ? { viewerPersonaId: session.personaId } : {}),
     },
   )
-  const { personas } = usePersonas()
+  // The channel's shared cast (see ONE CAST READ in the module header): no read of its own.
+  const { personas, loading: directoryLoading, error: directoryError } = useSocialDirectory()
 
   const personaMap = useMemo(
     () => new Map(personas.map(persona => [persona.id, persona])),
@@ -190,11 +214,11 @@ export function ThreadView({
   }, [])
 
   // The reply intent is spent only when it can be honoured. "Loaded" is not enough:
-  // the composer needs the focused author's persona too (`usePersonas` is a separate
-  // fetch that can land after the thread GET), so wait until the composer is actually
-  // mounted. A thread that FAILED to load never will, so the request is dropped then
-  // (it must not linger and fire on a later visit). Where no composer will ever
-  // exist (read-only / persona-less) it is consumed and ignored.
+  // the composer needs the focused author's persona too (the directory is a separate
+  // read that, on a cold deep link, can still be loading when the thread GET lands), so
+  // wait until the composer is actually mounted. A thread that FAILED to load never will,
+  // so the request is dropped then (it must not linger and fire on a later visit). Where
+  // no composer will ever exist (read-only / persona-less) it is consumed and ignored.
   const loadedId = focused?.id
   const loadedAuthorId = focused?.authorPersonaId
   const composerMountable = loadedAuthorId !== undefined && personaMap.has(loadedAuthorId)
@@ -254,25 +278,33 @@ export function ThreadView({
     </p>
   )
 
-  if (loading) {
-    return (
-      <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
-        {liveRegion}
-        <p className={styles.status}>Loading thread…</p>
-      </section>
-    )
-  }
+  // A status-only thread (loading / unavailable): the SAME <section> and live region as the
+  // full render below, so the polite region is one DOM node across every state.
+  const statusOnly = (text: string) => (
+    <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
+      {liveRegion}
+      <p className={styles.status}>{text}</p>
+    </section>
+  )
 
-  if (error || !focused) {
-    return (
-      <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
-        {liveRegion}
-        <p className={styles.status}>Unable to load this thread.</p>
-      </section>
-    )
-  }
+  if (loading) return statusOnly('Loading thread…')
+
+  // A failed thread GET is reported at once: it is never held behind a directory that is
+  // still loading, which could not change the outcome.
+  if (error || !focused) return statusOnly('Unable to load this thread.')
 
   const focusedView = resolvePostView(focused, personaMap)
+
+  // COLD DEEP LINK (a reload on a thread URL): the directory is a separate read and can
+  // still be in flight when the thread GET lands, so no author can be resolved yet. That
+  // is still LOADING -- the same state the reader was already looking at -- not a blank
+  // body, so it holds until the cast lands and the cards then render in the step that
+  // clears it. If the cast read FAILS instead, the loading state ends (it must never spin)
+  // in this thread's existing "unavailable" state: with no cast there is no author to show.
+  if (focusedView === undefined) {
+    if (directoryLoading) return statusOnly('Loading thread…')
+    if (directoryError !== undefined) return statusOnly('Unable to load this thread.')
+  }
 
   return (
     <section className={styles.thread} data-testid="thread-view" aria-label="Thread">

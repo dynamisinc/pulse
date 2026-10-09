@@ -4,10 +4,11 @@
  * "Open the thread with the reply composer focused" must survive the real load
  * ordering (demo-polish F4 Gate-1 M-2, L-7; NFR-001):
  *
- *  - the persona cast is a SEPARATE fetch from the thread GET and can land after it.
- *    The composer needs the focused author's persona, so the reply intent must not be
- *    spent at "thread loaded" while the composer does not exist yet: focus must land
- *    in the composer once it mounts;
+ *  - the persona cast is a SEPARATE fetch from the thread GET and can land after it (a
+ *    cold deep link: the channel directory is still loading). The thread then keeps its
+ *    "Loading thread…" state rather than a blank body. The composer needs the focused
+ *    author's persona, so the reply intent must not be spent at "thread loaded" while the
+ *    composer does not exist yet: focus must land in the composer once it mounts;
  *  - a thread that fails to load drops the request, so it cannot fire on a later
  *    visit to the same post;
  *  - a request expires (see `replyIntent.test.ts`), so a thread opened long after a
@@ -16,7 +17,7 @@
  * `usePersonas` is replaced by a store the test controls (everything else in
  * `@/features/personas` stays real); own file because `vi.mock` is module-wide.
  */
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
@@ -30,6 +31,7 @@ import {
   requestReplyFocus,
   resetReplyIntent,
 } from '../services/replyIntent'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { ThreadView } from './ThreadView'
 
 interface PersonaSnapshot {
@@ -74,7 +76,9 @@ function renderThread() {
         <ShellContextProvider
           value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <ThreadView focusedPostId={FOCUS} />
+          <SocialDirectoryProvider>
+            <ThreadView focusedPostId={FOCUS} />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,
@@ -98,10 +102,24 @@ afterEach(() => {
 
 describe('ThreadView — the reply intent waits for the composer (M-2)', () => {
   it('focuses the composer when the personas land AFTER the thread has loaded', async () => {
+    // Flag the moment the thread GET resolves, so "the cast lands AFTER the thread" is
+    // asserted about a thread that really has landed (the loading text alone cannot say).
+    let threadLanded = false
+    const realGet = api.get.bind(api)
+    vi.spyOn(api, 'get').mockImplementation((url: string, config?: Parameters<typeof api.get>[1]) =>
+      url.startsWith('/threads/')
+        ? realGet(url, config).then(response => {
+          threadLanded = true
+          return response
+        })
+        : realGet(url, config))
     requestReplyFocus(FOCUS)
     renderThread()
-    await waitFor(() => expect(screen.queryByText('Loading thread…')).not.toBeInTheDocument())
-    // Thread loaded, cast still pending: no author to name, so no composer yet.
+    await waitFor(() => expect(threadLanded).toBe(true))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+    // Thread loaded, cast still pending: no author to name, so no composer yet -- and the
+    // body is the thread's loading state, not a blank (the cold-deep-link gap).
+    expect(screen.getByText('Loading thread…')).toBeInTheDocument()
     expect(screen.queryByLabelText('Reply text')).not.toBeInTheDocument()
     expect(document.body).toHaveFocus()
 
