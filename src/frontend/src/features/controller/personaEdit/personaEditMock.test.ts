@@ -399,14 +399,19 @@ describe('mock persona edit — initials are re-derived on rename (the server\'s
     expect((await patchPersona(WATER, { verified: false })).initials).toBe(before)
   })
 
-  it('initialsForDisplayName takes the first UTF-16 unit per word, like the server\'s w[0]', () => {
+  it('initialsForDisplayName takes the first letter or digit per word, like the server', () => {
     expect(initialsForDisplayName('Newsline 7')).toBe('N7')
     expect(initialsForDisplayName('  spaced   out  ')).toBe('SO')
     expect(initialsForDisplayName('ßeta gamma')).toBe('ßG') // .NET ToUpperInvariant keeps ß
     expect(initialsForDisplayName('')).toBe('')
-    // A word that starts with an astral character yields its lone high surrogate — the
-    // tracked backend quirk; the mock mirrors the rule, not a repair.
-    expect(initialsForDisplayName('🌊 Water')).toBe(`${'🌊'.charAt(0)}W`)
+    // Mirrors the server's PersonaResponseDtoTests cases: emoji and punctuation are
+    // skipped, never a lone surrogate; an all-emoji name has no initials.
+    expect(initialsForDisplayName('🌊 Fairhaven Water')).toBe('FW')
+    expect(initialsForDisplayName('🌊🌊')).toBe('')
+    expect(initialsForDisplayName('(Official) Fairhaven')).toBe('OF')
+    expect(initialsForDisplayName('Пожарная служба')).toBe('ПС')
+    expect(initialsForDisplayName('9th\tDistrict')).toBe('9D')
+    expect(initialsForDisplayName('\u{10428}ord x')).toBe('\u{10400}X') // astral letter stays whole
   })
 
   it('the avatar colour is derived from the HANDLE, so a rename leaves it alone', async () => {

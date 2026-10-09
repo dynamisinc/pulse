@@ -19,6 +19,11 @@
  *  - ⌘K GATING: with a run-sheet dialog open the chord does nothing; with no modal it opens.
  *  - TWO-COLUMN KEY SCOPING: the run sheet's F / N / S / E do NOT fire from the live-world
  *    column or from the composer; the live world's R does NOT fire from inside the run sheet.
+ *  - C5 TAKEDOWN (wired through `renderRowActions` + `isRowRemoved`): every row carries
+ *    "Take down"; taking one down marks THAT row REMOVED once, confirms the category, and
+ *    disables "Reply as..." on it.
+ *  - PE-FE PERSONA EDIT (wired through `PersonaContextPanel`'s `actionsSlot`): the dock's
+ *    persona panel offers "Edit persona", which opens the edit dialog for that persona.
  */
 import { render, screen, waitFor, within, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -29,6 +34,7 @@ import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { postStore } from '@/features/social/services/postStore'
+import { removedPosts } from '@/features/social/services/removedPosts'
 import { reviewStore } from './engine/services/reviewStore'
 import { engineControlStore } from './engine/hooks/useEngineControl'
 import { engineSettingsStore } from './engine/hooks/useEngineSettings'
@@ -51,6 +57,7 @@ beforeEach(() => {
   engineSettingsStore.resetForTests()
   composeAsPersonaDraftStore.resetForTests()
   resetTelemetryBuffer()
+  removedPosts.resetForTests()
   // jsdom has no matchMedia: a 1440px viewport puts Live world | Run sheet side by side.
   vi.stubGlobal('matchMedia', (query: string) => ({
     matches: 1440 >= Number(/min-width:\s*(\d+)px/.exec(query)?.[1] ?? Infinity),
@@ -70,6 +77,7 @@ afterEach(() => {
   postStore.resetForTests()
   engineSettingsStore.resetForTests()
   composeAsPersonaDraftStore.resetForTests()
+  removedPosts.resetForTests()
   vi.unstubAllGlobals()
 })
 
@@ -403,5 +411,47 @@ describe('two-column key scoping', () => {
     // No persona active -> the palette opens, carrying the reply.
     expect(await screen.findByTestId('command-palette')).toBeInTheDocument()
     expect(beatStatus('b1')).toHaveTextContent('Pending')
+  })
+})
+
+describe('C5 takedown is wired into the live world', () => {
+  it('offers "Take down" on every row; taking one down marks THAT row REMOVED and blocks replies to it', async () => {
+    seedTwoBeats()
+    const { user, rows } = await renderRoute()
+    for (const row of rows) {
+      expect(within(row).getByTestId('takedown-trigger')).toBeInTheDocument()
+    }
+    const target = rows[0]
+    const other = rows[1]
+    if (target === undefined || other === undefined) throw new Error('need two live-world rows')
+
+    await user.click(within(target).getByTestId('takedown-trigger'))
+    await user.click(await screen.findByRole('radio', { name: 'PII' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm take down' }))
+
+    expect(await within(target).findByTestId('live-world-removed')).toHaveTextContent('REMOVED')
+    expect(within(target).getAllByText(/^removed$/i)).toHaveLength(1)
+    expect(within(target).getByTestId('takedown-confirmation')).toHaveTextContent('Taken down · PII')
+    expect(within(target).getByTestId('live-world-reply-as')).toBeDisabled()
+    // A neighbour is untouched.
+    expect(within(other).queryByTestId('live-world-removed')).toBeNull()
+    expect(within(other).getByTestId('live-world-reply-as')).toBeEnabled()
+    expect(within(other).getByTestId('takedown-trigger')).toBeInTheDocument()
+  })
+})
+
+describe('PE-FE persona edit is wired into the dock', () => {
+  it('the persona panel offers "Edit persona", which opens the edit dialog', async () => {
+    seedTwoBeats()
+    const { user } = await renderRoute()
+    await pickPersona(user, FULCO)
+    await waitFor(() => expect(dock()).not.toBeNull())
+
+    await user.click(await screen.findByRole('button', { name: 'Edit persona' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('textbox', { name: /display name/i })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 })

@@ -82,10 +82,10 @@
  * identity (`useCallback` / `useMemo` / module level). The live-world column memoizes its
  * rows, so a new function identity would re-render them on every tick.
  *
- * STILL TO MERGE INTO THIS FILE (search for `INSERTION POINT`): C5's takedown
- * (`renderRowActions` + `isRowRemoved` on the live-world column) and PE-FE's persona edit
- * button (`actionsSlot` on `PersonaContextPanel`). Their files are not part of this branch yet,
- * so the points are marked with comments rather than stubs.
+ * C5's takedown rides the live-world column: `renderRowActions={renderTakedown}` (module
+ * level, stable) mounts "Take down" on each row, and `isRowRemoved` (from
+ * `useIsRowRemoved()`) marks removed rows REMOVED and disables "Reply as..." on them.
+ * PE-FE's persona edit button is the `actionsSlot` of `PersonaContextPanel` in the dock.
  *
  * Note: `SessionProvider` is deliberately NOT in this stack — the console's
  * operating identity is `useControllerIdentity()` (a Phase-1 mock; the one mock
@@ -110,7 +110,10 @@ import { PERSONAS_TOOL_ID, type PersonaDockSlots } from './console/personaDockHo
 import { useControllerIdentity } from './identity/controllerIdentity'
 import { ActivePersonaProvider, useActivePersona } from './hooks/useActivePersona'
 import { useReplyTarget } from './hooks/useReplyTarget'
-import { LiveWorldColumn } from './liveWorld'
+import { LiveWorldColumn, type LiveWorldPost } from './liveWorld'
+import { TakedownAction } from './liveWorld/TakedownAction'
+import { useIsRowRemoved } from './hooks/useRemovedPostIds'
+import { PersonaEditButton } from './personaEdit'
 import { RunSheetPanel } from './runSheet/RunSheetPanel'
 import { PersonaPicker } from './components/PersonaPicker'
 import { PersonaComposer } from './components/PersonaComposer'
@@ -122,6 +125,13 @@ import { PersonaContextPanel } from './components/PersonaContextPanel'
  * trivially stable identity.
  */
 const renderRunSheet = () => <RunSheetPanel />
+
+/**
+ * C5's per-row "Take down" control for the live-world column. MODULE-LEVEL so its
+ * identity never changes: the column's rows are memoized and the slot runs on every
+ * console render (review queue, swamped mode).
+ */
+const renderTakedown = (post: LiveWorldPost) => <TakedownAction post={post} />
 
 /**
  * The console content, inside the provider stack so it may read the controller
@@ -136,11 +146,10 @@ function ControllerConsoleContent() {
   const { isActive } = useToolstrip()
   const paletteOpen = isActive(PERSONAS_TOOL_ID)
 
-  // INSERTION POINT (C5, takedown): call C5's subscribing hook here, in the route
-  // component, so a takedown re-renders the live-world fold:
-  //   const isRowRemoved = useIsRowRemoved()
-  // and add `renderRowActions` / `isRowRemoved` to the `<LiveWorldColumn>` in
-  // `liveWorldSlot` below.
+  // C5: which live-world rows are taken down. A new predicate identity per removal (and
+  // only then), so the column re-renders on a takedown - from this console or another
+  // controller's `PostRemoved` - and disables "Reply as..." / R on the removed row.
+  const isRowRemoved = useIsRowRemoved()
 
   // The post being replied to ("Reply as..." in the live world), held here because the
   // console's `openComposer` does not keep it. See `useReplyTarget` for when it is dropped.
@@ -170,10 +179,7 @@ function ControllerConsoleContent() {
           contextPanel: (
             <PersonaContextPanel
               persona={activePersona}
-              // INSERTION POINT (PE-FE, persona edit): pass the edit button here -
-              //   actionsSlot={<PersonaEditButton persona={activePersona} />}
-              // (import it from `@/features/personas/personaEdit`; the panel gains the
-              // `actionsSlot` prop when PE-FE merges).
+              actionsSlot={<PersonaEditButton persona={activePersona} />}
             />
           ),
           composer: (
@@ -194,7 +200,8 @@ function ControllerConsoleContent() {
   // LIVE WORLD slot (C2). "Reply as..." sets the reply target AND opens the composer in one
   // go; `ctx.openComposer` selects the active persona and opens the dock, or opens the
   // palette when there is no persona to open it for (the target waits for the pick).
-  // Stable: `requestReply` never changes and `ctx` is stable for the life of the console.
+  // Stable between takedowns: `requestReply` never changes, `ctx` is stable for the life of the
+  // console, and `isRowRemoved` changes identity only when a post is taken down.
   const liveWorldSlot = useCallback(
     (ctx: ConsoleSlotContext) => (
       <LiveWorldColumn
@@ -202,17 +209,11 @@ function ControllerConsoleContent() {
           requestReply(target)
           ctx.openComposer({ replyTo: target })
         }}
-        // INSERTION POINT (C5, takedown): mount Take down on each row and fold removed rows:
-        //   renderRowActions={renderTakedown}
-        //   isRowRemoved={isRowRemoved}
-        // `renderTakedown` must be a MODULE-LEVEL function (stable identity), e.g.
-        //   const renderTakedown = (post: LiveWorldPost) => <TakedownAction post={post} />
-        // `isRowRemoved` comes from `useIsRowRemoved()` called above; add it to this
-        // callback's dependency list (rows re-render when the removed set changes because its
-        // identity changes - that is intended).
+        renderRowActions={renderTakedown}
+        isRowRemoved={isRowRemoved}
       />
     ),
-    [requestReply],
+    [requestReply, isRowRemoved],
   )
 
   // The docked review queue's edit composer — a stable render-prop identity so
