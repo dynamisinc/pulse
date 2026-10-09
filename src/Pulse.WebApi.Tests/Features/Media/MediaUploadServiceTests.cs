@@ -696,6 +696,10 @@ public sealed class MediaUploadServiceTests
     [InlineData("../../etc/passwd", "passwd")]
     [InlineData("<img src=x onerror=alert(1)>", "upload.png")]
     [InlineData("a\u0000b\u0007c.png", "abc.png")]
+    [InlineData("<\u0001img src=x onerror=alert(1)>.png", ".png")] // Gate-2 H-1: controls go BEFORE the sanitizer
+    [InlineData("<\u0000img src=x onerror=alert(1)>.png", ".png")]
+    [InlineData("<\timg src=x onerror=alert(1)>.png", ".png")]
+    [InlineData("x/<\u0001img src=x onerror=alert(1)>", "upload.png")]
     public void SanitizeFileName_StripsPathsMarkupAndControlCharacters(string? input, string expected) =>
         MediaUploadService.SanitizeFileName(input, "png").Should().Be(expected);
 

@@ -636,25 +636,45 @@ public sealed partial class MediaUploadService
     }
 
     /// <summary>
-    /// The stored original file name: the last path segment (either separator), markup stripped
-    /// (<see cref="PostSanitizer.Sanitize"/> — strip, never encode), control characters removed, bounded to the
-    /// column. Falls back to <c>upload.{ext}</c> when nothing is left. Staff-only; never used for typing.
+    /// The stored original file name: control characters removed, markup stripped
+    /// (<see cref="PostSanitizer.Sanitize"/> — strip, never encode), the last path segment (either separator),
+    /// bounded to the column. Falls back to <c>upload.{ext}</c> when nothing is left. Staff-only; never used for
+    /// typing.
     /// </summary>
+    /// <remarks>
+    /// <b>Control characters go FIRST (Wave 1b Gate-2 H-1).</b> Removing them after sanitizing could REBUILD a
+    /// tag the sanitizer had correctly left alone: <c>"&lt;\u0001img src=x onerror=…&gt;"</c> is not a tag (a
+    /// control character follows the <c>&lt;</c>), but deleting the <c>\u0001</c> afterwards stored a live
+    /// <c>&lt;img …&gt;</c>. A participant can send exactly that through
+    /// <c>filename*=UTF-8''%3C%01img…</c>. The steps are now repeated until a whole round changes nothing, so
+    /// the stored name is a fixed point: no step (path cut, trim, truncation) can expose a tag the sanitizer has
+    /// not already seen.
+    /// </remarks>
     /// <param name="fileName">The client's file name, if any.</param>
     /// <param name="extension">The sniffed extension for the fallback.</param>
     /// <returns>The sanitized name.</returns>
     public static string SanitizeFileName(string? fileName, string extension)
     {
-        // Markup first (a closing tag contains '/', which must not be mistaken for a path separator), then the
-        // path, then markup again in case the path cut exposed a fragment.
-        var name = PostSanitizer.Sanitize(fileName ?? string.Empty);
-        var lastSeparator = name.LastIndexOfAny(['/', '\\']);
-        if (lastSeparator >= 0)
+        var name = fileName ?? string.Empty;
+        string previous;
+        do
         {
-            name = name[(lastSeparator + 1)..];
+            previous = name;
+            name = NormalizeFileNameOnce(name);
         }
+        while (!string.Equals(name, previous, StringComparison.Ordinal));
 
-        name = PostSanitizer.Sanitize(name);
+        return name.Length == 0 ? $"upload.{extension}" : name;
+    }
+
+    /// <summary>
+    /// One normalization round: control characters out, markup stripped, the last path segment kept (markup first,
+    /// because a closing tag contains '/', which must not be mistaken for a path separator), markup stripped again
+    /// in case the cut exposed a fragment, trimmed, and bounded to the column. Every round that changes the name
+    /// makes it shorter, so <see cref="SanitizeFileName"/>'s loop terminates.
+    /// </summary>
+    private static string NormalizeFileNameOnce(string name)
+    {
         var builder = new StringBuilder(name.Length);
         foreach (var character in name)
         {
@@ -664,13 +684,26 @@ public sealed partial class MediaUploadService
             }
         }
 
-        name = builder.ToString().Trim();
+        name = PostSanitizer.Sanitize(builder.ToString());
+        var lastSeparator = name.LastIndexOfAny(['/', '\\']);
+        if (lastSeparator >= 0)
+        {
+            name = name[(lastSeparator + 1)..];
+        }
+
+        name = PostSanitizer.Sanitize(name).Trim();
         if (name.Length > MediaAsset.MaxOriginalFileNameLength)
         {
             name = name[..MediaAsset.MaxOriginalFileNameLength];
+
+            // Never keep half of a surrogate pair the cut split (it would serialize as U+FFFD).
+            if (char.IsHighSurrogate(name[^1]))
+            {
+                name = name[..^1];
+            }
         }
 
-        return name.Length == 0 ? $"upload.{extension}" : name;
+        return name;
     }
 
     /// <summary>The multipart boundary of a <c>multipart/form-data</c> content type, or <c>null</c>.</summary>

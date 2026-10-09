@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Social;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -17,6 +18,14 @@ using Pulse.WebApi.Features.Social.Follows;
 /// </summary>
 public static class PostWriteEndpoints
 {
+    /// <summary>
+    /// The largest request body <c>POST /api/posts</c> accepts: 64 KiB (Wave 1b DoS fix; Kestrel's default is about
+    /// 30 MB). The largest legitimate body — <see cref="PostIngestService.TextLengthCeiling"/> characters of text,
+    /// four media items each with a 1,000-character alt text, the reply/baseline fields and JSON overhead — is well
+    /// under it. A larger body is refused while it is read (413), before any of it is bound or sanitized.
+    /// </summary>
+    public const long MaxRequestBodyBytes = 64 * 1024;
+
     /// <summary>
     /// Registers the post-write funnel (<see cref="PostIngestService"/>) and the server-side attribution
     /// resolver (<see cref="PostAttributionResolver"/>) with a Scoped lifetime, matching the
@@ -65,7 +74,11 @@ public static class PostWriteEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        endpoints.MapPost("/api/posts", CreatePostAsync);
+        // The per-route body limit (IRequestSizeLimitMetadata, applied by endpoint routing to the server's
+        // IHttpMaxRequestBodySizeFeature before the JSON body is read). PostIngestService also caps the raw text and
+        // alt lengths, which covers the in-process engine publish that never comes through HTTP.
+        endpoints.MapPost("/api/posts", CreatePostAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes));
 
         return endpoints;
     }

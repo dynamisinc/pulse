@@ -36,6 +36,12 @@ using Pulse.WebApi.Features.Social;
 /// </remarks>
 public sealed class ParticipantLoginService
 {
+    /// <summary>
+    /// The longest RAW username a login accepts (4 × <see cref="AccountFieldRules.MaxUsernameLength"/>), checked
+    /// before sanitizing. Longer is a 400 (DoS guard on an anonymous endpoint).
+    /// </summary>
+    public const int MaxRawUsernameLength = 4 * AccountFieldRules.MaxUsernameLength;
+
     private const string ParticipantSessionKind = "participant";
     private const string ParticipantActorKind = "participant";
 
@@ -99,6 +105,14 @@ public sealed class ParticipantLoginService
         if (string.IsNullOrEmpty(request.Password) || request.Password.Length > AccountFieldRules.MaxPasswordLength)
         {
             return ParticipantLoginResult.Invalid($"password is required (1-{AccountFieldRules.MaxPasswordLength} characters).");
+        }
+
+        // DoS guard (Wave 1b Gate-2 M-1): this endpoint is ANONYMOUS, so the raw handle is bounded before the
+        // sanitizer sees it. A legitimate handle is at most MaxUsernameLength after sanitizing; four times that is
+        // generous for any markup it might carry.
+        if (rawUsername.Length > MaxRawUsernameLength)
+        {
+            return ParticipantLoginResult.Invalid($"username must be at most {AccountFieldRules.MaxUsernameLength} characters.");
         }
 
         var username = PostSanitizer.Sanitize(rawUsername).Trim();
