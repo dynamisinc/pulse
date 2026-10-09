@@ -21,6 +21,7 @@ import { api } from '@/core/services/api'
 import { resetTelemetryBuffer } from '@/core/telemetry'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import { postStore } from '../services/postStore'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { Profile } from './Profile'
 
 const OWN_ID = 'persona-dreyes_fh'
@@ -57,7 +58,9 @@ function renderOwnProfile() {
       <ShellContextProvider
         value={{ variant: 'readOnly', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
       >
-        <Profile personaId={OWN_ID} />
+        <SocialDirectoryProvider>
+          <Profile personaId={OWN_ID} />
+        </SocialDirectoryProvider>
       </ShellContextProvider>
     </ExerciseContextProvider>,
   )

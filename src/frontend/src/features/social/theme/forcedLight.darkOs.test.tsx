@@ -28,6 +28,7 @@ import { resetTelemetryBuffer } from '@/core/telemetry'
 import { BrandThemeProvider } from '@/features/participant-shell/BrandThemeProvider'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import { FeedSkeleton } from '../components/FeedSkeleton'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { Profile } from '../pages/Profile'
 import { SocialBrandScope } from './SocialBrandScope'
 
@@ -79,7 +80,9 @@ describe('tripwire: no JS branch reacts to a dark OS', () => {
                 <ShellContextProvider
                   value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
                 >
-                  <Profile personaId="persona-fairhavenwater" />
+                  <SocialDirectoryProvider>
+                    <Profile personaId="persona-fairhavenwater" />
+                  </SocialDirectoryProvider>
                 </ShellContextProvider>
               </SocialBrandScope>
             </BrandThemeProvider>

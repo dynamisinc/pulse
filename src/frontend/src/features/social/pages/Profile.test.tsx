@@ -52,6 +52,7 @@ import {
   type ShellVariant,
 } from '@/features/participant-shell/mountContract'
 import { formatMagnitude } from '../services/audience'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { Profile } from './Profile'
 
 const MOCK_TIME_ZONE = 'America/New_York'
@@ -73,7 +74,9 @@ function renderProfile(personaId: string, variant: ShellVariant = 'full') {
         <ShellContextProvider
           value={{ variant, scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <Profile personaId={personaId} />
+          <SocialDirectoryProvider>
+            <Profile personaId={personaId} />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,
@@ -266,7 +269,9 @@ describe('Profile — telemetry (XC-004)', () => {
           <ShellContextProvider
             value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
           >
-            <Profile personaId={TBRANDT_ID} />
+            <SocialDirectoryProvider>
+              <Profile personaId={TBRANDT_ID} />
+            </SocialDirectoryProvider>
           </ShellContextProvider>
         </SessionProvider>
       </ExerciseContextProvider>,
@@ -296,7 +301,9 @@ describe('Profile — telemetry (XC-004)', () => {
           <ShellContextProvider
             value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
           >
-            <Profile personaId={FW_ID} />
+            <SocialDirectoryProvider>
+              <Profile personaId={FW_ID} />
+            </SocialDirectoryProvider>
           </ShellContextProvider>
         </SessionProvider>
       </ExerciseContextProvider>,

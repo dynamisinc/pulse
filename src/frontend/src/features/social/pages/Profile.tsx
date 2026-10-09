@@ -17,7 +17,7 @@
  *    counts.
  *  - Renders four REAL tabs (demo-polish F5), each over the exercise-scoped
  *    post set, cards through the keystone `<PostCard>`:
- *      Posts            authored, top-level            (`useFeed()`)
+ *      Posts            authored, top-level            (`useFeedWithCast()`)
  *      Posts & replies  authored, replies included     (`resolveFeed('all',
  *                       { includeReplies: true })` via `useFeedWithReplies`, DP-5)
  *      Media            authored posts that carry media, as a thumbnail grid
@@ -38,9 +38,27 @@
  * and accepted for the demo (the live path is correct).
  *
  * PURE CONSUMER: this page composes `<PostCard>`/`<VerifiedMark>`/`<Avatar>`/
- * `<MediaTabGrid>` and reuses the shipped read seams (`useFeed`, `usePersonas`) —
- * it defines no new data model. It is rendered with a `personaId`; reaching a
- * profile from a post tap is the host's wiring (`onOpenProfile` upstream).
+ * `<MediaTabGrid>` and reuses the shipped read seams (`useFeedWithCast`, the channel's
+ * `useSocialDirectory()`) — it defines no new data model. It is rendered with a
+ * `personaId`; reaching a profile from a post tap is the host's wiring (`onOpenProfile`
+ * upstream).
+ *
+ * ONE CAST READ, SHARED WITH THE ROUTE (Copilot review, PR #460). The persona cast comes
+ * from the channel's SHARED DIRECTORY (`useSocialDirectory()`: `SocialChannel` mounts
+ * `SocialDirectoryProvider` above the frame, which resolves the cast once and
+ * `ProfileRoute` has already waited on it) — this page never resolves a cast of its own.
+ * `usePersonas()` is a per-caller fetch with no shared cache, so calling it here (as this
+ * page used to) meant a duplicate `GET /personas` on every profile visit AND a second
+ * skeleton painted right after the route's own, because the page's private copy of the
+ * cast starts out empty and "loading". Two consequences worth knowing:
+ *  - the post set is converged through `useFeedWithCast()` with the DIRECTORY's cast, not
+ *    `useFeed()` (which would call `usePersonas()` again, moving the duplicate one hook
+ *    down);
+ *  - `useSocialDirectory()` fails closed outside a Social channel, so `<Profile>` must
+ *    be mounted under a `SocialDirectoryProvider`. In the app that is always so (its
+ *    only mount is `ProfileRoute`); a test that mounts `<Profile>` directly wraps it in the
+ *    provider. A silent fallback to a private read was rejected on purpose: it would
+ *    be the very duplicate this removes, hidden behind a "safe" default.
  *
  * SCENARIO TIME (COR-053): the joined date renders via `useScenarioTime()` bound
  * to `useExerciseContext().timeZone` — scenario time, never wall-clock. Backdated
@@ -48,11 +66,11 @@
  * correctly through the same path. Each `<PostCard>` self-renders its own
  * relative post timestamp in scenario time.
  *
- * EXERCISE SCOPE (COR-001): the persona cast and the post set come from
- * `usePersonas()` / `useFeed()`, whose reads take NO client `exerciseId` — the
- * session binds the exercise and query isolation is enforced server-side. Every
- * tab filters that already-scoped set; nothing here can reach another exercise's
- * content.
+ * EXERCISE SCOPE (COR-001): the persona cast and the post set come from the
+ * directory (`usePersonas()` underneath) / `useFeedWithCast()`, whose reads take NO
+ * client `exerciseId` — the session binds the exercise and query isolation is enforced
+ * server-side. Every tab filters that already-scoped set; nothing here can reach another
+ * exercise's content.
  *
  * TELEMETRY (XC-004): emits exactly ONE `'view'` event per `persona.id` (a ref
  * storing the last-emitted persona id, mirroring `HashtagFeed`'s tag-keyed ref)
@@ -111,7 +129,6 @@ import { buildAndEmit } from '@/core/telemetry'
 import {
   PostCard, VerifiedMark, Avatar, FollowerList, formatMagnitude, type PostView,
 } from '@/features/social'
-import { usePersonas } from '@/features/personas'
 import { FollowButton } from '../components/FollowButton'
 import { FeedSkeleton } from '../components/FeedSkeleton'
 import { ProfileSkeleton } from '../components/ProfileSkeleton'
@@ -122,8 +139,9 @@ import {
   useShellContext,
   affordancesAvailable,
 } from '@/features/participant-shell/mountContract'
-import { useFeed } from '../hooks/useFeed'
+import { useFeedWithCast } from '../hooks/useFeed'
 import { useFeedWithReplies } from '../hooks/useFeedWithReplies'
+import { useSocialDirectory } from '../layout/socialDirectory'
 import { safeImageUrl } from '../utils/safeImageUrl'
 import styles from './Profile.module.css'
 
@@ -225,14 +243,20 @@ export interface ProfileProps {
 
 /**
  * Renders the profile page for `personaId`. Resolves the persona from the
- * exercise-scoped cast and the persona's posts from the exercise-scoped feed;
- * both reads are server-side isolated (COR-001).
+ * channel's exercise-scoped cast (the shared directory — see ONE CAST READ in the
+ * module header) and the persona's posts from the exercise-scoped feed; both
+ * reads are server-side isolated (COR-001). Must be mounted under a
+ * `SocialDirectoryProvider` (throws otherwise).
  */
 export function Profile({ personaId, onOpenThread, onHashtagOpen, onOpenProfile }: ProfileProps) {
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
-  const { personas, loading: personasLoading, error: personasError } = usePersonas()
-  const { posts, loading: postsLoading } = useFeed()
+  // The channel's shared cast (already resolved by `ProfileRoute`'s wait on it): no read
+  // of its own, so no duplicate request and no second skeleton. `useFeedWithCast` converges
+  // the posts against THIS cast rather than starting another read through `useFeed()`.
+  const directory = useSocialDirectory()
+  const { personas, loading: personasLoading, error: personasError } = directory
+  const { posts, loading: postsLoading } = useFeedWithCast('all', directory)
   const { format } = useScenarioTime(timeZone)
 
   // WR-003 (COR-015/D1-011): mirrors `<Feed>` exactly — the shell variant

@@ -54,6 +54,7 @@ import {
   resetMockFollowEdges,
   setMockFollowedSetForTests,
 } from '../services/followEdgeStore'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { Profile } from './Profile'
 
 /** Verified mid-band org (50,232) — magnitude-formatted, so a ±1 is invisible. */
@@ -71,7 +72,9 @@ function renderProfile(personaId: string, variant: ShellVariant = 'full') {
         <ShellContextProvider
           value={{ variant, scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <Profile personaId={personaId} />
+          <SocialDirectoryProvider>
+            <Profile personaId={personaId} />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,
@@ -208,7 +211,9 @@ describe('Profile — follow button reflects PERSISTED state (CR-002, story 02 A
           <ShellContextProvider
             value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
           >
-            <Profile personaId={TBRANDT_ID} />
+            <SocialDirectoryProvider>
+              <Profile personaId={TBRANDT_ID} />
+            </SocialDirectoryProvider>
           </ShellContextProvider>
         </SessionProvider>
       </ExerciseContextProvider>,

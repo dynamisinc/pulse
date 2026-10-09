@@ -86,7 +86,7 @@ function buildPosts(): PostView[] {
 }
 
 const useFeedMock = vi.hoisted(() => vi.fn<() => UseFeedResult>())
-vi.mock('./hooks/useFeed', () => ({ useFeed: useFeedMock }))
+vi.mock('./hooks/useFeed', () => ({ useFeed: useFeedMock, useFeedWithCast: useFeedMock }))
 
 function renderChannel() {
   setExerciseClock(fixedClock(SCENARIO_NOW))

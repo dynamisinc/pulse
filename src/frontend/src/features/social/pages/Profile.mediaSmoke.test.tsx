@@ -19,6 +19,7 @@ import { resetTelemetryBuffer } from '@/core/telemetry'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import { compareNewestFirst } from '../services/feedService'
 import { postStore } from '../services/postStore'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { Profile } from './Profile'
 
 const NEWSLINE_ID = 'persona-newsline7'
@@ -34,7 +35,9 @@ function renderProfile(onOpenThread: (postId: string) => void) {
           <ShellContextProvider
             value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
           >
-            <Profile personaId={NEWSLINE_ID} onOpenThread={onOpenThread} />
+            <SocialDirectoryProvider>
+              <Profile personaId={NEWSLINE_ID} onOpenThread={onOpenThread} />
+            </SocialDirectoryProvider>
           </ShellContextProvider>
         </SessionProvider>
       </ExerciseContextProvider>

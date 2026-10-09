@@ -19,6 +19,15 @@
  *      `personaById`/`SEEDED_PERSONAS` (mock-only, fail-open — banned on a
  *      shipped participant surface).
  *
+ * WHO READS THE CAST (`useFeedWithCast`). `usePersonas()` is a per-caller fetch with
+ * no shared cache, so every `useFeed()` costs its own `GET /personas`. That is fine for
+ * a surface that has no cast yet (`<Feed>`, `<HashtagFeed>`), but a surface that
+ * ALREADY holds the channel's cast (`<Profile>`, via `useSocialDirectory()`) would
+ * be paying for a second read -- and holding its own loading state open on it. The
+ * body therefore lives in `useFeedWithCast(scope, cast)`, which takes the cast from
+ * the caller; `useFeed(scope)` is exactly `useFeedWithCast(scope, usePersonas())`, so
+ * every existing `useFeed()` call site behaves identically.
+ *
  * SCOPE (story 02, SOC-081): `useFeed(scope)` defaults to `'all'` — every
  * existing call site (`useFeed()`) is unaffected. Passing `'following'` re-runs
  * the same load effect against the SAME seam with a different `scope`, so
@@ -84,7 +93,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useSession } from '@/core/auth'
-import { usePersonas } from '@/features/personas'
+import { usePersonas, type UsePersonasResult } from '@/features/personas'
 import type { PostView, Post } from '@/features/social'
 import { resolveFeed, assembleFeedView, type FeedScope } from '../services/feedService'
 
@@ -98,20 +107,39 @@ export interface UseFeedResult {
 }
 
 /**
+ * The persona cast a feed is converged against: the exact shape `usePersonas()` returns
+ * (and a superset of it is fine -- `SocialDirectory` is passed as-is). `loading` and
+ * `error` are folded into the feed's own, so a cast that has not landed yet never reads as
+ * an empty feed.
+ */
+export type FeedCast = UsePersonasResult
+
+/**
  * Resolves a feed for a component: raw posts (for `scope`, default `'all'`) +
  * the persona cast, converged into the `PostView[]` `<Feed>` renders. See the
  * module header — `<Feed>` still decides which scope to REQUEST (and owns the
  * labeling/telemetry that follows from it), but this hook enforces the
  * COR-015 "read-only/no-persona sessions never get 'following'" rule itself
  * too (WR-005 fold), so it cannot be sidestepped by a caller that skips
- * `<Feed>`.
+ * `<Feed>`. Reads the cast itself (`usePersonas()`); a caller that already holds
+ * one should use {@link useFeedWithCast} instead.
  */
 export function useFeed(scope: FeedScope = 'all'): UseFeedResult {
+  return useFeedWithCast(scope, usePersonas())
+}
+
+/**
+ * {@link useFeed} with the persona cast supplied by the caller rather than read by the
+ * hook: it issues no `GET /personas` of its own. The caller owns where the cast comes
+ * from (exercise-scoped by the session, COR-001); this hook only converges the posts
+ * against it and folds its `loading`/`error` into the result.
+ */
+export function useFeedWithCast(scope: FeedScope, cast: FeedCast): UseFeedResult {
+  const { personas, loading: personasLoading, error: personasError } = cast
   const [rawPosts, setRawPosts] = useState<readonly Post[]>([])
   const [postsLoading, setPostsLoading] = useState(true)
   const [postsError, setPostsError] = useState<unknown>(undefined)
 
-  const { personas, loading: personasLoading, error: personasError } = usePersonas()
   const session = useSession()
 
   // COR-015 (WR-005 fold): the SAME `!isReadOnly && personaId !== undefined`
