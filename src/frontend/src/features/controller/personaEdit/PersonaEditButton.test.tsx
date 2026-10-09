@@ -30,7 +30,7 @@
  */
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { uploadPickedMedia } from '@/core/media/uploadMedia'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { SEEDED_PERSONAS, type StaffPersona } from '@/features/personas'
@@ -215,15 +215,35 @@ describe('the dialog (AC "Dialog")', () => {
     expect(saveButton()).toBeEnabled()
   })
 
-  it('counts an emoji as ONE character (code points), and refuses a half-emoji', async () => {
+  it('counts like the SERVER (UTF-16 units): an emoji is TWO; hints say so; a half-emoji is refused', async () => {
     const user = userEvent.setup()
     await renderPersonaEdit(seeded(TOM_ID))
     await openDialog(user)
     const bio = field(/^bio/i)
+    expect(within(screen.getByRole('dialog')).getAllByText(/Emoji count as 2\./)).toHaveLength(3)
 
     fireEvent.change(bio, { target: { value: '😀'.repeat(3) } })
-    expect(screen.getByTestId('persona-edit-bio-counter')).toHaveTextContent('3/512')
+    expect(screen.getByTestId('persona-edit-bio-counter')).toHaveTextContent('6/512')
     expect(saveButton()).toBeEnabled()
+
+    // 256 emoji fill the 512-unit bio exactly; 257 do not.
+    fireEvent.change(bio, { target: { value: '😀'.repeat(256) } })
+    expect(screen.getByTestId('persona-edit-bio-counter')).toHaveTextContent('512/512')
+    expect(saveButton()).toBeEnabled()
+    fireEvent.change(bio, { target: { value: '😀'.repeat(257) } })
+    expect(screen.getByTestId('persona-edit-bio-counter')).toHaveTextContent('514/512')
+    expect(screen.getByText('Bio must be at most 512 characters (2 over).')).toBeInTheDocument()
+    expect(saveButton()).toBeDisabled()
+
+    // A display name of 60 waves is 120 units: refused client-side.
+    fireEvent.change(bio, { target: { value: 'fine' } })
+    fireEvent.change(field(/display name/i), { target: { value: '🌊'.repeat(60) } })
+    expect(screen.getByTestId('persona-edit-name-counter')).toHaveTextContent('120/100')
+    expect(screen.getByText('Display name must be at most 100 characters (20 over).'))
+      .toBeInTheDocument()
+    expect(saveButton()).toBeDisabled()
+    fireEvent.change(field(/display name/i), { target: { value: 'Tom Brandt' } })
+    fireEvent.change(bio, { target: { value: '' } })
 
     fireEvent.change(bio, { target: { value: `half ${'😀'.charAt(0)}` } })
     expect(screen.getByText(/Bio contains a broken character/)).toBeInTheDocument()
@@ -263,11 +283,11 @@ describe('the dialog (AC "Dialog")', () => {
     expect(screen.getByText(/Display name can't contain control characters/)).toBeInTheDocument()
     expect(saveButton()).toBeDisabled()
 
-    fireEvent.change(name, { target: { value: 'evil‮name' } })
+    fireEvent.change(name, { target: { value: 'evil\u202Ename' } })
     expect(screen.getByText(/Display name can't contain text-direction override characters/))
       .toBeInTheDocument()
 
-    fireEvent.change(name, { target: { value: '​​' } })
+    fireEvent.change(name, { target: { value: '\u200B\u200B' } })
     expect(screen.getByText('Display name needs at least one visible character.')).toBeInTheDocument()
     expect(saveButton()).toBeDisabled()
 
@@ -448,7 +468,7 @@ describe('success (AC "Refresh and telemetry")', () => {
     expect(personaEditEvents()).toHaveLength(1)
   })
 
-  it('selects the persona when none is active yet', async () => {
+  it('does NOT switch the console to the edited persona when none is active (L-7)', async () => {
     const user = userEvent.setup()
     await renderPersonaEdit(seeded(TOM_ID), { activePersona: null })
     expect(screen.getByTestId('active-persona')).toHaveTextContent('none')
@@ -456,10 +476,13 @@ describe('success (AC "Refresh and telemetry")', () => {
     await typeInto(user, /display name/i, 'Thomas Brandt')
     await user.click(saveButton())
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(JSON.parse(screen.getByTestId('active-persona').textContent ?? '')).toMatchObject({
-      id: TOM_ID,
-      displayName: 'Thomas Brandt',
-    })
+
+    // The console is left exactly as it was: still operating as nobody ...
+    expect(screen.getByTestId('active-persona')).toHaveTextContent('none')
+    // ... but the edit landed, the lists were re-read, and it was audited once.
+    expect(mockedInvalidate).toHaveBeenCalledTimes(1)
+    expect(personaEditEvents()).toHaveLength(1)
+    await waitFor(() => expect(screen.getByTestId('staff-directory')).toHaveTextContent('Thomas Brandt'))
   })
 })
 
@@ -690,11 +713,12 @@ describe('avatar and banner — upload', () => {
     const user = userEvent.setup()
     await renderPersonaEdit(seeded(TOM_ID))
     await openDialog(user)
+    // The staff DTO cannot tell "no avatar" from "its URL could not be signed" — so the copy
+    // does not claim either, and Remove stays available (L-3).
     expect(within(avatarGroup()).getByTestId('persona-edit-avatar-status')).toHaveTextContent(
-      'No avatar set — participants see the initials monogram.',
+      'No avatar image available — none is set, or its preview could not be loaded.',
     )
-    // A persona with no image offers nothing to remove.
-    expect(within(avatarGroup()).queryByRole('button', { name: /remove avatar/i })).not.toBeInTheDocument()
+    expect(within(avatarGroup()).getByRole('button', { name: /remove avatar/i })).toBeEnabled()
 
     await user.upload(avatarFile(), fakeFile('portrait.png', 'image/png'))
     await waitFor(() => expect(uploader.pending).toHaveLength(1))
@@ -789,7 +813,8 @@ describe('avatar and banner — upload', () => {
 
     act(() => uploader.byName('portrait.png').fail(new Error('That upload was not accepted.')))
     expect(await within(avatarGroup()).findByRole('alert')).toHaveTextContent('That upload was not accepted.')
-    expect(within(avatarGroup()).getByTestId('persona-edit-avatar-status')).toHaveTextContent('No avatar set')
+    expect(within(avatarGroup()).getByTestId('persona-edit-avatar-status'))
+      .toHaveTextContent('No avatar image available')
     expect(saveButton()).toBeEnabled()
   })
 
@@ -866,7 +891,8 @@ describe('avatar and banner — library (C1\'s MediaLibraryPicker, frozen props)
     expect(saveButton()).toBeEnabled()
     await openLibrary(user, group)
     await user.click(screen.getByRole('button', { name: 'pick nothing' }))
-    expect(within(group).getByTestId('persona-edit-avatar-status')).toHaveTextContent('No avatar set')
+    expect(within(group).getByTestId('persona-edit-avatar-status'))
+      .toHaveTextContent('No avatar image available')
     expect(saveButton()).toBeDisabled()
   })
 
@@ -928,5 +954,286 @@ describe('avatar and banner — library (C1\'s MediaLibraryPicker, frozen props)
     const group = screen.getByTestId('persona-edit-avatar')
     expect(within(group).queryByRole('img')).not.toBeInTheDocument()
     expect(group.querySelector('img')).toBeNull()
+  })
+})
+
+describe('dismissing a dialog that holds unsaved work (Gate-1 L-2)', () => {
+  const backdrop = () => {
+    const container = document.querySelector('.MuiDialog-container')
+    if (!(container instanceof HTMLElement)) throw new Error('no dialog container')
+    return container
+  }
+  const discardDialog = () => screen.findByRole('dialog', { name: 'Discard your changes?' })
+
+  it('a CLEAN dialog still closes on a backdrop click and on Esc', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+    await user.click(backdrop())
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByTestId('persona-edit-button')).toHaveFocus()
+
+    await openDialog(user)
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog', { name: 'Discard your changes?' })).not.toBeInTheDocument()
+  })
+
+  it('a backdrop click does NOT close a dirty dialog, and does not even ask', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+    await typeInto(user, /display name/i, 'Half-typed edit')
+
+    await user.click(backdrop())
+
+    expect(screen.getByRole('dialog', { name: 'Edit persona' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Discard your changes?' })).not.toBeInTheDocument()
+    expect(field(/display name/i)).toHaveValue('Half-typed edit')
+  })
+
+  it('Esc on a dirty dialog ASKS first; "Keep editing" (the default) returns to the draft intact', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+    await typeInto(user, /display name/i, 'Half-typed edit')
+
+    await user.keyboard('{Escape}')
+    const ask = await discardDialog()
+    expect(within(ask).getByText(/unsaved changes to @FairhavenWater/i)).toBeInTheDocument()
+    expect(within(ask).getByRole('button', { name: 'Keep editing' })).toHaveFocus()
+    expect(screen.getByRole('dialog', { name: 'Edit persona', hidden: true })).toBeInTheDocument()
+
+    await user.keyboard('{Enter}') // the focused default: keep editing
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Discard your changes?' }))
+      .not.toBeInTheDocument())
+    expect(screen.getByRole('dialog', { name: 'Edit persona' })).toBeInTheDocument()
+    expect(field(/display name/i)).toHaveValue('Half-typed edit')
+    expect(mockedPatch).not.toHaveBeenCalled()
+  })
+
+  it('Esc inside the question closes only the question', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+    await typeInto(user, /display name/i, 'Half-typed edit')
+    await user.keyboard('{Escape}')
+    await discardDialog()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Discard your changes?' }))
+      .not.toBeInTheDocument())
+    expect(field(/display name/i)).toHaveValue('Half-typed edit')
+  })
+
+  it('"Discard changes" throws the draft away: nothing sent, focus back on the button, next open is fresh', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+    await typeInto(user, /display name/i, 'Half-typed edit')
+    await user.keyboard('{Escape}')
+    const ask = await discardDialog()
+
+    await user.click(within(ask).getByRole('button', { name: 'Discard changes' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(mockedPatch).not.toHaveBeenCalled()
+    expect(personaEditEvents()).toHaveLength(0)
+    expect(screen.getByTestId('persona-edit-button')).toHaveFocus()
+    await openDialog(user)
+    expect(field(/display name/i)).toHaveValue('Fairhaven Water Utility')
+  })
+
+  it('an edit typed back to the original is clean again: Esc closes without asking', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+    await typeInto(user, /display name/i, 'Something else')
+    await typeInto(user, /display name/i, 'Fairhaven Water Utility')
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog', { name: 'Discard your changes?' })).not.toBeInTheDocument()
+  })
+
+  it('an upload in flight counts as unsaved work: Esc asks, backdrop is ignored', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(TOM_ID))
+    await openDialog(user)
+    await user.upload(screen.getByTestId('persona-edit-avatar-file'), fakeFile('p.png', 'image/png'))
+    await within(screen.getByTestId('persona-edit-avatar')).findByRole('progressbar')
+
+    await user.click(backdrop())
+    expect(screen.getByRole('dialog', { name: 'Edit persona' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await discardDialog()
+  })
+})
+
+describe('the console\'s global chords stay out of the dialogs (Gate-1 M-2)', () => {
+  // What ControllerConsole does: a window keydown listener toggles the command palette.
+  let palette: Mock<() => void>
+  const onWindowKeyDown = (event: KeyboardEvent) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') palette()
+  }
+  beforeEach(() => {
+    palette = vi.fn()
+    window.addEventListener('keydown', onWindowKeyDown)
+  })
+  afterEach(() => {
+    window.removeEventListener('keydown', onWindowKeyDown)
+  })
+
+  it('baseline: Ctrl+K on the page reaches the console listener', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    screen.getByTestId('persona-edit-button').focus()
+    await user.keyboard('{Control>}k{/Control}')
+    expect(palette).toHaveBeenCalledTimes(1)
+  })
+
+  it('Ctrl+K and Cmd+K typed in the edit dialog never reach it (no palette behind the modal)', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+
+    await user.keyboard('{Control>}k{/Control}')
+    await user.keyboard('{Meta>}K{/Meta}')
+    expect(palette).not.toHaveBeenCalled()
+    // ... and the browser's own Ctrl+K is cancelled too.
+    expect(fireEvent.keyDown(field(/display name/i), { key: 'k', ctrlKey: true })).toBe(false)
+    expect(palette).not.toHaveBeenCalled()
+    // Other keys are untouched.
+    expect(fireEvent.keyDown(field(/display name/i), { key: 'j', ctrlKey: true })).toBe(true)
+    expect(screen.getByRole('dialog', { name: 'Edit persona' })).toBeInTheDocument()
+  })
+
+  it('... nor from the Verified confirmation or the discard question', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+    await user.click(screen.getByRole('checkbox', { name: /verified/i }))
+    await screen.findByRole('dialog', { name: /verified mark/i })
+    await user.keyboard('{Control>}k{/Control}')
+    expect(palette).not.toHaveBeenCalled()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /verified mark/i }))
+      .not.toBeInTheDocument())
+
+    await typeInto(user, /display name/i, 'Half-typed edit')
+    await user.keyboard('{Escape}')
+    await screen.findByRole('dialog', { name: 'Discard your changes?' })
+    await user.keyboard('{Control>}k{/Control}')
+    expect(palette).not.toHaveBeenCalled()
+  })
+})
+
+describe('Enter on the Verified checkbox (Gate-1 L-6)', () => {
+  it('does not submit the form: it neither saves nor flips the mark', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(TOM_ID))
+    await openDialog(user)
+    await typeInto(user, /display name/i, 'Thomas Brandt') // dirty and valid: Save is enabled
+    expect(saveButton()).toBeEnabled()
+
+    const checkbox = screen.getByRole('checkbox', { name: /verified/i })
+    checkbox.focus()
+    await user.keyboard('{Enter}')
+
+    expect(mockedPatch).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Edit persona' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /verified mark/i })).not.toBeInTheDocument()
+    expect(checkbox).not.toBeChecked()
+    // Space still toggles it (and asks).
+    await user.keyboard(' ')
+    expect(await screen.findByRole('dialog', { name: /verified mark/i })).toBeInTheDocument()
+  })
+})
+
+describe('Remove does not depend on the preview URL (Gate-1 L-3)', () => {
+  it('a persona whose avatar URL is missing (signing failed) still offers Remove and sends null', async () => {
+    const user = userEvent.setup()
+    const { avatarUrl: _signingFailed, ...withoutUrl } = seeded(WATER_ID)
+    expect(withoutUrl).not.toHaveProperty('avatarUrl')
+    await renderPersonaEdit(withoutUrl)
+    await openDialog(user)
+
+    const group = screen.getByTestId('persona-edit-avatar')
+    // Honest copy: it does not claim "none is set".
+    expect(within(group).getByTestId('persona-edit-avatar-status')).toHaveTextContent(
+      'No avatar image available — none is set, or its preview could not be loaded.',
+    )
+    await user.click(within(group).getByRole('button', { name: /remove avatar/i }))
+    expect(within(group).getByTestId('persona-edit-avatar-status')).toHaveTextContent(
+      'Image will be removed when you save.',
+    )
+    await user.click(saveButton())
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    expect(lastPatch()).toEqual({ avatarMediaId: null })
+    expect(personaEditEvents().map(event => event.payload)).toEqual([
+      { action: 'persona_edit', fields: ['avatarMediaId'] },
+    ])
+    // The image really was cleared on the (mock) server.
+    expect(seeded(WATER_ID)).not.toHaveProperty('avatarUrl')
+  })
+
+  it('offers Remove for the banner too', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(TOM_ID))
+    await openDialog(user)
+    const group = screen.getByTestId('persona-edit-banner')
+    expect(within(group).getByTestId('persona-edit-banner-status')).toHaveTextContent(
+      'No banner image available — none is set, or its preview could not be loaded.',
+    )
+    await user.click(within(group).getByRole('button', { name: /remove banner/i }))
+    await user.click(saveButton())
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(lastPatch()).toEqual({ bannerMediaId: null })
+  })
+})
+
+describe('a cancelled upload is never applied (ImageChooser race)', () => {
+  it('a response that lands in the same tick as Cancel is dropped', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(TOM_ID))
+    await openDialog(user)
+    const group = screen.getByTestId('persona-edit-avatar')
+    await user.upload(screen.getByTestId('persona-edit-avatar-file'), fakeFile('late.png', 'image/png'))
+    await within(group).findByRole('progressbar')
+    const cancel = within(group).getByRole('button', { name: /cancel upload/i })
+
+    // The request finishes and Cancel is pressed in the same tick.
+    act(() => {
+      uploader.byName('late.png').resolve({ url: PLANT_URL })
+      fireEvent.click(cancel)
+    })
+
+    await waitFor(() => expect(within(group).queryByRole('progressbar')).not.toBeInTheDocument())
+    expect(within(group).queryByRole('img')).not.toBeInTheDocument()
+    expect(within(group).getByTestId('persona-edit-avatar-status'))
+      .toHaveTextContent('No avatar image available')
+    expect(saveButton()).toBeDisabled() // nothing was chosen
+  })
+
+  it('a second upload supersedes the first: only the newest result is applied', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(TOM_ID))
+    await openDialog(user)
+    const group = screen.getByTestId('persona-edit-avatar')
+    await user.upload(screen.getByTestId('persona-edit-avatar-file'), fakeFile('one.png', 'image/png'))
+    await within(group).findByRole('progressbar')
+    await user.click(within(group).getByRole('button', { name: /cancel upload/i }))
+    await user.upload(screen.getByTestId('persona-edit-avatar-file'), fakeFile('two.png', 'image/png'))
+    await waitFor(() => expect(uploader.pending).toHaveLength(2))
+    await within(group).findByRole('progressbar')
+
+    act(() => {
+      uploader.byName('one.png').resolve({ url: FLOOD_URL }) // the cancelled one answers late
+    })
+    act(() => {
+      uploader.byName('two.png').resolve({ url: PLANT_URL })
+    })
+    expect(await within(group).findByRole('img', { name: /avatar preview/i }))
+      .toHaveAttribute('src', PLANT_URL)
   })
 })

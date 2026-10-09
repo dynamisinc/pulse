@@ -17,9 +17,10 @@
  *      lookup — same browser in mock mode and the staff preview) re-resolves and
  *      picks up the new name / avatar / bio / verified mark;
  *   2. `selectPersona(updated)` — refreshes the console's ACTIVE-persona snapshot
- *      (`useActivePersona`), which the context panel and composer read. It is
- *      skipped only if the controller has meanwhile switched to a DIFFERENT
- *      persona (a stale save must not yank the console back);
+ *      (`useActivePersona`), which the context panel and composer read. It happens
+ *      ONLY while the edited persona is still the active one: if the controller has
+ *      switched to a different persona — or none is active any more — a stale save
+ *      must not yank the console onto (or back to) the edited account;
  *   3. emits exactly ONE `steering_action` telemetry event
  *        payload { action: 'persona_edit', fields }, target { persona, id },
  *        actor { kind: 'system', actingHumanId, role }
@@ -92,9 +93,7 @@ export function usePersonaEdit(persona: Pick<StaffPersona, 'id'>): UsePersonaEdi
         const updated = await patchPersona(personaId, patch)
 
         invalidatePersonas()
-        if (activeIdRef.current === undefined || activeIdRef.current === updated.id) {
-          selectPersona(updated)
-        }
+        if (activeIdRef.current === updated.id) selectPersona(updated)
         buildAndEmit({
           exerciseId,
           eventType: 'steering_action',

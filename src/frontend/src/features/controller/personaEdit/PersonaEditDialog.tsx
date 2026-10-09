@@ -39,15 +39,21 @@
  * ## Keyboard and focus (the controller console is fully keyboard-operable)
  * The dialog is a real `<form>` (Enter in a single-line field saves; Ctrl/Cmd+Enter
  * saves from anywhere, incl. the bio), focus starts on Display name, MUI's trap
- * keeps Tab inside, Esc cancels (not while a save is running — the request cannot
- * be taken back), and focus returns to the "Edit persona" button on close
- * (`PersonaEditButton`). After a failed save, focus returns to Save, not to
- * `<body>`.
+ * keeps Tab inside, and focus returns to the "Edit persona" button on close
+ * (`PersonaEditButton`). After a failed save, focus returns to Save, not to `<body>`.
+ * Dismissing: neither Esc nor the backdrop works while a save is running (the request
+ * cannot be taken back); a CLEAN dialog closes on Esc or a backdrop click; with
+ * UNSAVED work (an edited field, an upload in flight) a backdrop click is ignored and
+ * Esc asks "Discard your changes?" (`DiscardChangesDialog`, default "Keep editing");
+ * the Cancel button is an explicit decision and always closes. ⌘K / Ctrl+K is
+ * swallowed here so the console's command palette cannot open behind the modal
+ * (`consoleChords.ts`), and Enter on the Verified checkbox never submits the form.
  *
  * ## Text is never truncated
- * Lengths are COUNTED in code points and an over-long field shows its limit and
- * blocks Save; there is no `maxLength` and no `.slice()` anywhere (cutting through
- * a surrogate pair is a server 400 — `textRules.ts`).
+ * Lengths are COUNTED in UTF-16 units (the server's measure: an emoji is 2) and an
+ * over-long field shows its limit and blocks Save; there is no `maxLength` and no
+ * `.slice()` anywhere (cutting through a surrogate pair is a server 400 —
+ * `textRules.ts`).
  *
  * ## Content security (NFR-004)
  * Free text (name/bio/location) is sent as typed and sanitized by the SERVER —
@@ -92,6 +98,8 @@ import { useMediaUpload } from '@/core/media'
 import type { StaffPersona } from '@/features/personas'
 import CobraStyles from '@/theme/CobraStyles'
 import { CobraLinkButton, CobraPrimaryButton, CobraTextField } from '@/theme/styledComponents'
+import { swallowConsoleChord } from './consoleChords'
+import { DiscardChangesDialog } from './DiscardChangesDialog'
 import { ImageChooser } from './ImageChooser'
 import { VerifiedConfirmDialog } from './VerifiedConfirmDialog'
 import {
@@ -188,6 +196,7 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
 
   const [draft, setDraft] = useState<PersonaEditDraft>(() => draftFromPersona(persona))
   const [proposedVerified, setProposedVerified] = useState<boolean | null>(null)
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
   const avatarUpload = useMediaUpload()
   const bannerUpload = useMediaUpload()
   const { save, saving, error } = usePersonaEdit(persona)
@@ -238,6 +247,8 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     // Only keys pressed inside THIS dialog (React events also bubble out of portals).
     if (!event.currentTarget.contains(event.target as Node)) return
+    // The console's global ⌘K must not open its palette behind this modal (M-2).
+    if (swallowConsoleChord(event)) return
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault()
       void submit()
@@ -246,9 +257,18 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
 
   // Esc / backdrop. A save in flight cannot be taken back; dismissing now would hide its
   // outcome. (The banner of a failed save stays until the NEXT attempt, so the controller
-  // can keep reading it while fixing the field it names.)
-  const dismiss = () => {
-    if (!saving) onClose()
+  // can keep reading it while fixing the field it names.) With unsaved work — an edited
+  // field or an upload in flight — a backdrop click does nothing and Esc ASKS before
+  // throwing it away (L-2); a clean dialog closes on either. The Cancel button is an
+  // explicit decision and always closes.
+  const hasUnsavedWork = dirty || uploading
+  const dismiss = (_event: object, reason: 'backdropClick' | 'escapeKeyDown') => {
+    if (saving) return
+    if (!hasUnsavedWork) {
+      onClose()
+      return
+    }
+    if (reason === 'escapeKeyDown') setConfirmingDiscard(true)
   }
 
   const textReadOnly = saving ? { readOnly: true } : {}
@@ -324,7 +344,7 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
                 helperText={
                   <FieldHelp
                     problem={problems.displayName}
-                    hint="Shown on the account's posts and profile."
+                    hint="Shown on the account's posts and profile. Emoji count as 2."
                     length={countedLength(draft.displayName)}
                     max={DISPLAY_NAME_MAX}
                     counterTestId="persona-edit-name-counter"
@@ -350,7 +370,7 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
                 helperText={
                   <FieldHelp
                     problem={problems.bio}
-                    hint="Plain text. Leave empty for no bio."
+                    hint="Plain text. Leave empty for no bio. Emoji count as 2."
                     length={countedLength(draft.bio)}
                     max={BIO_MAX}
                     counterTestId="persona-edit-bio-counter"
@@ -373,7 +393,7 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
                 helperText={
                   <FieldHelp
                     problem={problems.location}
-                    hint="Optional, e.g. a town. Leave empty for none."
+                    hint="Optional, e.g. a town. Leave empty for none. Emoji count as 2."
                     length={countedLength(draft.location)}
                     max={LOCATION_MAX}
                     counterTestId="persona-edit-location-counter"
@@ -396,6 +416,11 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
                         input: {
                           'aria-describedby': verifiedHelpId,
                           'data-testid': 'persona-edit-verified',
+                          // Enter on a checkbox would implicitly SUBMIT the form (Chromium,
+                          // Firefox) — saving instead of asking the Verified confirmation (L-6).
+                          onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
+                            if (event.key === 'Enter') event.preventDefault()
+                          },
                         } as InputHTMLAttributes<HTMLInputElement>,
                       }}
                     />
@@ -502,6 +527,15 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
             setDraft(previous => ({ ...previous, verified: next }))
           }
           setProposedVerified(null)
+        }}
+      />
+      <DiscardChangesDialog
+        open={confirmingDiscard}
+        handle={persona.handle}
+        onKeepEditing={() => setConfirmingDiscard(false)}
+        onDiscard={() => {
+          setConfirmingDiscard(false)
+          onClose()
         }}
       />
     </>

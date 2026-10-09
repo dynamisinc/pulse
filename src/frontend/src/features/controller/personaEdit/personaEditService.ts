@@ -205,14 +205,17 @@ export function toPersonaEditError(failure: unknown): PersonaEditError {
 // Response
 // ---------------------------------------------------------------------------
 
-const AUDIENCE_BANDS: readonly string[] = ['nano', 'micro', 'mid', 'large', 'mega']
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0
+}
+
+/** Any string, INCLUDING the empty one (see `parseStaffPersonaResponse`). */
+function anyString(value: unknown): value is string {
+  return typeof value === 'string'
 }
 
 /** Absent or `null` (treated as absent), or a string. */
@@ -232,6 +235,26 @@ function optionalNumber(value: unknown): boolean {
  * participant-shaped body (no `personaType`) — the same guard
  * `resolveStaffPersonas` applies to a list read — and on an `id` other than the
  * persona that was edited.
+ *
+ * ## Validate what the console relies on — not more (Gate-1 H-1)
+ * The body is the server's `StaffPersonaResponseDto.FromPersona`, and several of its
+ * members are legitimately EMPTY STRINGS: `templateId` is `""` for every persona
+ * without a template (`PersonaTemplateId?.ToString() ?? string.Empty` — the entire
+ * seeded demo cast), and `initials` is documented "an empty string if none could be
+ * derived". A parser that demanded non-empty values for those turned every
+ * successful live save into "could not read" (no active-persona refresh, no
+ * telemetry). So:
+ *   - REQUIRED and non-empty: `id` (must equal the edited persona), `displayName`,
+ *     `handle` — what the console shows and keys on;
+ *   - REQUIRED and in vocabulary: `kind`, `personaType` (the staff projection's tell);
+ *   - REQUIRED and typed: `verified` (boolean), `followerCount` (number);
+ *   - ANY string, empty allowed: `exerciseId`, `avatarColor`, `initials`, `audienceBand`
+ *     (like the list read, which does not vocabulary-check it) and `joinedAt`;
+ *   - `templateId`: a string ("" for a template-less persona), or absent / `null`, which
+ *     means the same and is rebuilt as "";
+ *   - OPTIONAL, `null` treated as absent: `bio`, `avatarUrl`, `bannerUrl`, `location`
+ *     (strings), `followingCount`, `audienceMagnitude` (numbers). The server OMITS
+ *     the strings when unset or when signing an image URL failed.
  */
 export function parseStaffPersonaResponse(
   data: unknown,
@@ -245,18 +268,20 @@ export function parseStaffPersonaResponse(
   } = data
 
   if (id !== expectedId) return undefined
-  if (
-    !nonEmptyString(exerciseId) || !nonEmptyString(templateId) || !nonEmptyString(displayName) ||
-    !nonEmptyString(handle) || !nonEmptyString(avatarColor) || !nonEmptyString(initials) ||
-    !nonEmptyString(joinedAt)
-  ) {
-    return undefined
-  }
+  if (!nonEmptyString(displayName) || !nonEmptyString(handle)) return undefined
   if (kind !== 'human' && kind !== 'org') return undefined
   if (!isPersonaType(personaType)) return undefined
   if (typeof verified !== 'boolean') return undefined
-  if (typeof audienceBand !== 'string' || !AUDIENCE_BANDS.includes(audienceBand)) return undefined
   if (typeof followerCount !== 'number' || !Number.isFinite(followerCount)) return undefined
+  if (
+    !anyString(exerciseId) || !anyString(avatarColor) ||
+    !anyString(initials) || !anyString(audienceBand) || !anyString(joinedAt)
+  ) {
+    return undefined
+  }
+  // `templateId` is "" today for a template-less persona; should the server ever OMIT it (or
+  // send null) it still means "no template" — never a reason to refuse a saved edit.
+  if (!optionalString(templateId)) return undefined
   if (!optionalNumber(followingCount) || !optionalNumber(audienceMagnitude)) return undefined
   if (!optionalString(bio) || !optionalString(avatarUrl)) return undefined
   if (!optionalString(bannerUrl) || !optionalString(location)) return undefined
@@ -264,7 +289,7 @@ export function parseStaffPersonaResponse(
   return {
     id: expectedId,
     exerciseId,
-    templateId,
+    templateId: typeof templateId === 'string' ? templateId : '',
     displayName,
     handle,
     kind,

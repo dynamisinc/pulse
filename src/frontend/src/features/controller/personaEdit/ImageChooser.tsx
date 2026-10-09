@@ -17,12 +17,17 @@
  *     only through `./libraryPicker`, `kind="image"`, `max={1}`) — opened inline
  *     on demand, closed again once something is picked;
  *   - REMOVE the current image (sent as `null` on save) and UNDO any of the above.
+ *     Remove is offered whether or not a preview URL is present: the staff DTO has
+ *     only the signed URL (no media id, no has-image flag), and the URL is missing
+ *     both when no image is set AND when signing it failed — so the chooser never
+ *     claims "none is set", and never withholds Remove;
  *
  * Every state is said in WORDS next to the preview ("Current image", "New image
  * selected — takes effect when you save", "Image will be removed when you save",
- * "No avatar set — participants see ..."), never by a border colour or an icon
- * alone (NFR-001). Nothing here talks to the server about the persona: the chooser
- * only reports an `ImageChoice`; the dialog's Save turns it into the merge-patch.
+ * "No avatar image available — none is set, or its preview could not be loaded"),
+ * never by a border colour or an icon alone (NFR-001). Nothing here talks to the
+ * server about the persona: the chooser only reports an `ImageChoice`; the dialog's
+ * Save turns it into the merge-patch.
  *
  * Preview URLs are opaque strings (a SAS read URL live, a `blob:`/`/mock-media`
  * URL in mock mode): they pass through the app's one media allow-list
@@ -30,7 +35,7 @@
  * the text placeholder instead of a request.
  */
 
-import { useId, useRef, useState, type ChangeEvent } from 'react'
+import { useEffect, useId, useRef, useState, type ChangeEvent } from 'react'
 import { Box, LinearProgress, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -60,7 +65,11 @@ export interface ImageChooserProps {
   readonly handle: string
   /** The persona's initials, shown in the avatar placeholder. */
   readonly initials: string
-  /** The persisted image's read URL, or `undefined` when the persona has none. */
+  /**
+   * The persisted image's signed read URL, or `undefined` when the persona has none OR
+   * the server could not sign it. The staff DTO carries no media id and no has-image flag,
+   * so "no URL" is deliberately NOT read as "no image" (see `WORDS` and Remove below).
+   */
   readonly currentUrl: string | undefined
   readonly choice: ImageChoice
   readonly onChoose: (choice: ImageChoice) => void
@@ -68,14 +77,21 @@ export interface ImageChooserProps {
   readonly upload: UseMediaUploadResult
 }
 
+/**
+ * The words around each image. `unknown` is the honest status for "the persona has no
+ * read URL": that means none is set OR the image's URL could not be signed — the
+ * staff DTO cannot tell the two apart, so the copy must not claim either.
+ */
 const WORDS = {
   avatar: {
     label: 'Avatar',
-    none: 'No avatar set — participants see the initials monogram.',
+    unknown:
+      'No avatar image available — none is set, or its preview could not be loaded.',
   },
   banner: {
     label: 'Banner',
-    none: 'No banner set — participants see a plain block in the brand colour.',
+    unknown:
+      'No banner image available — none is set, or its preview could not be loaded.',
   },
 } as const
 
@@ -145,19 +161,27 @@ export function ImageChooser({
   onChoose,
   upload,
 }: ImageChooserProps) {
-  const { label, none } = WORDS[slot]
+  const { label, unknown } = WORDS[slot]
   const noun = label.toLowerCase()
   const statusId = useId()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [fileProblem, setFileProblem] = useState<string | undefined>(undefined)
+  // The upload whose result may still be applied. Cleared by Cancel and on unmount, replaced
+  // by a newer upload — so a response that lands in the same tick as a Cancel (the request
+  // finished, `cancel()` came a moment later) is dropped rather than applied.
+  const currentUploadRef = useRef<symbol | null>(null)
+  useEffect(() => () => {
+    currentUploadRef.current = null
+  }, [])
 
   const uploading = upload.state === 'uploading'
   const previewSource =
     choice.mode === 'set' ? choice.previewUrl : choice.mode === 'keep' ? currentUrl : undefined
   const previewUrl = resolveSafeMediaUrl(previewSource)
-  const hasImageToRemove =
-    choice.mode === 'set' || (choice.mode === 'keep' && currentUrl !== undefined)
+  // Remove never depends on `currentUrl`: when the URL is missing because signing failed,
+  // an image may still be set and the controller must still be able to clear it.
+  const canRemove = choice.mode === 'keep'
 
   const status =
     choice.mode === 'set'
@@ -166,7 +190,7 @@ export function ImageChooser({
         ? 'Image will be removed when you save.'
         : currentUrl !== undefined
           ? 'Current image.'
-          : none
+          : unknown
 
   const handleFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -185,9 +209,12 @@ export function ImageChooser({
       return
     }
     setLibraryOpen(false)
+    const token = Symbol('upload')
+    currentUploadRef.current = token
     upload
       .start(file)
       .then(asset => {
+        if (currentUploadRef.current !== token) return
         if (asset.kind !== 'image') {
           setFileProblem(`The ${noun} must be an image — JPEG, PNG, GIF or WebP.`)
           return
@@ -238,7 +265,7 @@ export function ImageChooser({
               aria-hidden
               sx={{ fontSize: slot === 'avatar' ? 20 : 11, fontWeight: 700, color: MUTED_TEXT }}
             >
-              {slot === 'avatar' ? initials : choice.mode === 'clear' ? 'Removed' : 'No banner'}
+              {slot === 'avatar' ? initials : choice.mode === 'clear' ? 'Removed' : 'No preview'}
             </Typography>
           )}
         </Box>
@@ -268,12 +295,11 @@ export function ImageChooser({
             >
               Choose from library
             </CobraSecondaryButton>
-            {hasImageToRemove ? (
+            {canRemove ? (
               <CobraLinkButton
                 size="small"
                 disabled={uploading}
-                onClick={() =>
-                  onChoose(currentUrl !== undefined ? { mode: 'clear' } : { mode: 'keep' })}
+                onClick={() => onChoose({ mode: 'clear' })}
                 startIcon={<FontAwesomeIcon icon={faTrashCan} />}
               >
                 Remove {noun}
@@ -312,7 +338,10 @@ export function ImageChooser({
               <Typography variant="caption">{Math.round(upload.progress * 100)}%</Typography>
               <CobraLinkButton
                 size="small"
-                onClick={upload.cancel}
+                onClick={() => {
+                  currentUploadRef.current = null
+                  upload.cancel()
+                }}
                 startIcon={<FontAwesomeIcon icon={faXmark} />}
               >
                 Cancel upload

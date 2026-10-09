@@ -16,6 +16,7 @@ import { api } from '@/core/services/api'
 import { resolvePersonas, resolveStaffPersonas, SEEDED_PERSONAS } from '@/features/personas'
 import {
   PERSONA_ADMIN_MESSAGES,
+  initialsForDisplayName,
   personaPatchMockAdapter,
   resetMockPersonaEdits,
 } from './personaEditMock'
@@ -257,11 +258,22 @@ describe('mock persona edit — PE-BE Gate-1 text hygiene', () => {
     expect((await raw(WATER, { bio: 'whole 😀' })).status).toBe(200)
   })
 
-  it('lengths are CODE POINTS: 512 emoji are a legal bio, 513 are not', async () => {
-    expect((await raw(WATER, { bio: '😀'.repeat(512) })).status).toBe(200)
-    expect(await refusal(WATER, { bio: '😀'.repeat(513) })).toBe('bio must be at most 512 characters.')
-    expect((await raw(WATER, { displayName: '😀'.repeat(100) })).status).toBe(200)
-    expect(await refusal(WATER, { displayName: '😀'.repeat(101) }))
+  it('lengths are UTF-16 UNITS like the server\'s string.Length: an emoji counts TWO', async () => {
+    // 256 emoji = 512 units (legal), 257 = 514 (refused) — NOT "512 emoji are legal".
+    expect((await raw(WATER, { bio: '😀'.repeat(256) })).status).toBe(200)
+    expect(await refusal(WATER, { bio: '😀'.repeat(257) })).toBe('bio must be at most 512 characters.')
+    expect(await refusal(WATER, { bio: '😀'.repeat(512) })).toBe('bio must be at most 512 characters.')
+    // A display name of 60 waves is 120 units: refused. 50 waves = 100: legal.
+    expect(await refusal(WATER, { displayName: '🌊'.repeat(60) }))
+      .toBe('displayName must be 1 to 100 characters.')
+    expect((await raw(WATER, { displayName: '🌊'.repeat(50) })).status).toBe(200)
+    expect(await refusal(WATER, { location: '📍'.repeat(51) }))
+      .toBe('location must be at most 100 characters.')
+    expect((await raw(WATER, { location: '📍'.repeat(50) })).status).toBe(200)
+  })
+
+  it('the raw 4x rule counts units too: 201 emoji (402 units) are refused before sanitizing', async () => {
+    expect(await refusal(WATER, { displayName: '🌊'.repeat(201) }))
       .toBe('displayName must be 1 to 100 characters.')
   })
 
@@ -318,7 +330,7 @@ describe('mock persona edit — PE-BE Gate-1 text hygiene', () => {
   })
 
   it('a displayName with no visible characters is refused', async () => {
-    expect(await refusal(WATER, { displayName: '​​' }))
+    expect(await refusal(WATER, { displayName: '\u200B\u200B' }))
       .toBe('displayName must contain at least one visible character.')
   })
 
@@ -365,5 +377,60 @@ describe('mock persona edit — it edits the mock DIRECTORY', () => {
       message: 'bio must be at most 512 characters.',
     })
     await expect(patchPersona('persona-does-not-exist', {})).rejects.toBeInstanceOf(PersonaEditError)
+  })
+})
+
+describe('mock persona edit — initials are re-derived on rename (the server\'s rule)', () => {
+  it('a rename recomputes the monogram from the new display name', async () => {
+    expect(seeded(WATER).initials).toBe('FW')
+    expect((await patchPersona(WATER, { displayName: 'Hartwell Municipal Water' })).initials).toBe('HM')
+    expect(seeded(WATER).initials).toBe('HM')
+  })
+
+  it('first letter of the first TWO words, upper-cased; extra spaces and one word are fine', async () => {
+    expect((await patchPersona(TOM, { displayName: 'marisol   vega' })).initials).toBe('MV')
+    expect((await patchPersona(TOM, { displayName: 'Cher' })).initials).toBe('C')
+    expect((await patchPersona(TOM, { displayName: 'one two three four' })).initials).toBe('OT')
+  })
+
+  it('is unchanged by an edit that does not rename', async () => {
+    const before = seeded(WATER).initials
+    expect((await patchPersona(WATER, { bio: 'Only the bio changes' })).initials).toBe(before)
+    expect((await patchPersona(WATER, { verified: false })).initials).toBe(before)
+  })
+
+  it('initialsForDisplayName takes the first UTF-16 unit per word, like the server\'s w[0]', () => {
+    expect(initialsForDisplayName('Newsline 7')).toBe('N7')
+    expect(initialsForDisplayName('  spaced   out  ')).toBe('SO')
+    expect(initialsForDisplayName('ßeta gamma')).toBe('ßG') // .NET ToUpperInvariant keeps ß
+    expect(initialsForDisplayName('')).toBe('')
+    // A word that starts with an astral character yields its lone high surrogate — the
+    // tracked backend quirk; the mock mirrors the rule, not a repair.
+    expect(initialsForDisplayName('🌊 Water')).toBe(`${'🌊'.charAt(0)}W`)
+  })
+
+  it('the avatar colour is derived from the HANDLE, so a rename leaves it alone', async () => {
+    const before = seeded(WATER).avatarColor
+    expect((await patchPersona(WATER, { displayName: 'Something Else' })).avatarColor).toBe(before)
+  })
+})
+
+describe('mock persona edit — display name visibility follows the server\'s rule', () => {
+  const BLANK_ONLY = [0x3164, 0x2800, 0x115F, 0x1160, 0xFFA0].map(cp => String.fromCodePoint(cp))
+  const COMBINING_ONLY = String.fromCodePoint(0x0301, 0x0302)
+
+  it('blank filler glyphs and combining-only names get the "no visible character" 400', async () => {
+    for (const filler of BLANK_ONLY) {
+      expect(await refusal(WATER, { displayName: filler.repeat(2) }))
+        .toBe('displayName must contain at least one visible character.')
+    }
+    expect(await refusal(WATER, { displayName: COMBINING_ONLY }))
+      .toBe('displayName must contain at least one visible character.')
+  })
+
+  it('a real letter next to blank glyphs is visible', async () => {
+    const zeroWidth = String.fromCodePoint(0x200B)
+    expect((await raw(WATER, { displayName: `Ful${zeroWidth}co EM` })).status).toBe(200)
+    expect((await raw(WATER, { displayName: `${BLANK_ONLY.join('')}A` })).status).toBe(200)
   })
 })

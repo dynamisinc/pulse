@@ -8,9 +8,10 @@
  * is never echoed (no `id`/`handle`/`avatarUrl` can appear); `{}` when nothing
  * changed; image `clear` is a no-op for a persona without an image; field NAMES
  * (telemetry `fields`) are in canonical order and carry no values. Validation
- * counts CODE POINTS on the trimmed text (a surrogate pair is one), refuses what
- * the server refuses (lone surrogate, controls, bidi overrides, invisible name,
- * raw text over 4x the bound) and never truncates.
+ * counts UTF-16 UNITS on the trimmed text — the server's `string.Length`, so an emoji
+ * is 2 — refuses what the server refuses (lone surrogate, controls, bidi overrides,
+ * invisible name by the server's own rule, raw text over 4x the bound) and never
+ * truncates. `clear` is always `null`, whether or not a preview URL is present.
  */
 import { describe, expect, it } from 'vitest'
 import type { StaffPersona } from '@/features/personas'
@@ -26,6 +27,7 @@ import {
   patchFieldNames,
   validateDraft,
 } from './personaEditForm'
+import { hasVisibleCharacter } from './textRules'
 import type { PersonaEditDraft } from './types'
 
 function persona(overrides: Partial<StaffPersona> = {}): StaffPersona {
@@ -107,7 +109,7 @@ describe('draftFromPersona / buildPersonaPatch — the merge-patch diff', () => 
     expect(buildPersonaPatch(off, draftWith({ verified: true }, off))).toEqual({ verified: true })
   })
 
-  it('maps image choices: set -> the media id; clear -> null (only if there is an image); keep -> absent', () => {
+  it('maps image choices: set -> the media id; clear -> null; keep -> absent', () => {
     const withImages = persona({ avatarUrl: '/a.svg', bannerUrl: '/b.svg' })
     expect(
       buildPersonaPatch(withImages, draftWith({
@@ -116,9 +118,12 @@ describe('draftFromPersona / buildPersonaPatch — the merge-patch diff', () => 
       }, withImages)),
     ).toEqual({ avatarMediaId: 'media-1', bannerMediaId: null })
 
-    // A persona with no avatar has nothing to clear: no request member at all.
+    // Remove never depends on the preview URL (Gate-1 L-3): the staff DTO has no media id and
+    // no has-image flag, and the URL is absent both for "none" and for "signing failed".
     const bare = persona()
-    expect(buildPersonaPatch(bare, draftWith({ avatar: { mode: 'clear' } }, bare))).toEqual({})
+    expect(bare.avatarUrl).toBeUndefined()
+    expect(buildPersonaPatch(bare, draftWith({ avatar: { mode: 'clear' } }, bare)))
+      .toEqual({ avatarMediaId: null })
     expect(buildPersonaPatch(bare, draftWith({ avatar: { mode: 'keep' } }, bare))).toEqual({})
   })
 
@@ -180,13 +185,30 @@ describe('validateDraft — mirrors the server, counts code points, never trunca
     expect(validateDraft(draftWith({ location: `  ${'l'.repeat(LOCATION_MAX)}  ` }))).toEqual({})
   })
 
-  it('counts CODE POINTS: an emoji is one character, so 512 emoji fit and 513 do not', () => {
+  it('counts UTF-16 UNITS like the server (.NET string.Length): an emoji is TWO', () => {
     const emoji = '😀' // one code point, two UTF-16 units
     expect(emoji.length).toBe(2)
-    expect(countedLength(emoji)).toBe(1)
-    expect(validateDraft(draftWith({ bio: emoji.repeat(BIO_MAX) }))).toEqual({})
-    expect(validateDraft(draftWith({ bio: emoji.repeat(BIO_MAX + 1) })).bio)
-      .toBe('Bio must be at most 512 characters (1 over).')
+    expect(countedLength(emoji)).toBe(2)
+    expect(countedLength(emoji.repeat(3))).toBe(6)
+    // 256 emoji = 512 units: exactly the bound. 257 = 514: two over.
+    expect(validateDraft(draftWith({ bio: emoji.repeat(256) }))).toEqual({})
+    expect(validateDraft(draftWith({ bio: emoji.repeat(257) })).bio)
+      .toBe('Bio must be at most 512 characters (2 over).')
+    expect(validateDraft(draftWith({ location: emoji.repeat(51) })).location)
+      .toBe('Location must be at most 100 characters (2 over).')
+  })
+
+  it('a display name of 60 wave emoji (120 units) is refused client-side; 50 fit', () => {
+    expect(validateDraft(draftWith({ displayName: '🌊'.repeat(60) })).displayName)
+      .toBe('Display name must be at most 100 characters (20 over).')
+    expect(validateDraft(draftWith({ displayName: '🌊'.repeat(50) }))).toEqual({})
+  })
+
+  it('the raw 4x rule is in UTF-16 units too (201 emoji = 402 > 400 for a display name)', () => {
+    const raw = `${' '.repeat(201)}x${' '.repeat(200)}`
+    expect(raw.length).toBe(402)
+    expect(validateDraft(draftWith({ displayName: raw })).displayName)
+      .toMatch(/^Display name must be at most 100 characters\. This text is 402 characters long/)
   })
 
   it('refuses raw text over 4x the bound even when the trimmed text is short', () => {
@@ -231,16 +253,56 @@ describe('validateDraft — mirrors the server, counts code points, never trunca
       }
     }
     // LRM / RLM are ordinary marks, not overrides.
-    expect(validateDraft(draftWith({ displayName: 'Name‎' }))).toEqual({})
+    expect(validateDraft(draftWith({ displayName: 'Name\u200E' }))).toEqual({})
   })
 
   it('refuses a display name with no VISIBLE character (zero-width / format only)', () => {
-    expect(validateDraft(draftWith({ displayName: '​​' })).displayName)
+    expect(validateDraft(draftWith({ displayName: '\u200B\u200B' })).displayName)
       .toBe('Display name needs at least one visible character.')
-    expect(validateDraft(draftWith({ displayName: '‍﻿' })).displayName)
+    expect(validateDraft(draftWith({ displayName: '\u200D\uFEFF' })).displayName)
       .toBe('Display name needs at least one visible character.')
     // The same characters in a bio/location are not a "no visible character" problem.
-    expect(validateDraft(draftWith({ bio: '​' }))).toEqual({})
+    expect(validateDraft(draftWith({ bio: '\u200B' }))).toEqual({})
+  })
+
+  // PARITY with the server's own cases (`PersonaProfilePatchParserTests`:
+  // DisplayName_WithNoVisibleCharacter_IsRefused / ..._LookalikesAndOtherScripts_StayAllowed,
+  // PE-BE Gate-1 S-2): the client must refuse exactly what the server refuses.
+  const SERVER_INVISIBLE_NAMES: readonly (readonly [string, string])[] = [
+    ['a zero-width space', '\u200B'],
+    ['zero-width space, non-joiner, joiner', '\u200B\u200C\u200D'],
+    ['BOM and word joiner', '\uFEFF\u2060'],
+    ['two Hangul fillers (U+3164)', 'ㅤㅤ'],
+    ['Braille blank (U+2800)', '⠀'],
+    ['choseong, jungseong and halfwidth fillers', 'ᅟᅠﾠ'],
+    ['combining marks only', '́̂'],
+    ['zero-width characters around spaces', '\u200B \u00A0 \u200C'],
+  ]
+  it.each(SERVER_INVISIBLE_NAMES)('server parity — refused as invisible: %s', (_label, value) => {
+    expect(hasVisibleCharacter(value)).toBe(false)
+    expect(validateDraft(draftWith({ displayName: value })).displayName)
+      .toBe('Display name needs at least one visible character.')
+  })
+
+  const SERVER_VISIBLE_NAMES: readonly (readonly [string, string])[] = [
+    ['Cyrillic о', 'Fulcо EM'],
+    ['Cyrillic о, Е, М', 'Fulton Cоunty ЕМ'],
+    ['capital I for l', 'FuIcoEM'],
+    ['a zero-width space INSIDE a visible name', 'Ful\u200Bco EM'],
+    ['an emoji alone', '\u{1F6A8}'],
+    ['CJK', '福尔顿'],
+  ]
+  it.each(SERVER_VISIBLE_NAMES)('server parity — allowed (SOC-052): %s', (_label, value) => {
+    expect(hasVisibleCharacter(value)).toBe(true)
+    expect(validateDraft(draftWith({ displayName: value }))).toEqual({})
+  })
+
+  it('blank "filler" glyphs are invisible although their category looks visible', () => {
+    for (const filler of ['ᅟ', 'ᅠ', 'ㅤ', 'ﾠ', '⠀']) {
+      expect(hasVisibleCharacter(filler)).toBe(false)
+      // ... and one real letter beside them makes the name visible again.
+      expect(hasVisibleCharacter(`${filler}A${filler}`)).toBe(true)
+    }
   })
 
   it('ALLOWS lookalike (homoglyph) names — a lookalike account is the point of SOC-052', () => {

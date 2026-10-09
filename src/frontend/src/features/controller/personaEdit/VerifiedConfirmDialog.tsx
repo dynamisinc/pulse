@@ -20,11 +20,13 @@
  * Esc closes only this one, not the edit dialog beneath it.
  */
 
+import { useId } from 'react'
 import { Dialog, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCircleCheck, faCircleXmark } from '@fortawesome/free-solid-svg-icons'
 import CobraStyles from '@/theme/CobraStyles'
 import { CobraLinkButton, CobraPrimaryButton } from '@/theme/styledComponents'
+import { swallowConsoleChord } from './consoleChords'
 
 export interface VerifiedConfirmDialogProps {
   /** The value being proposed: `true` = turn the mark ON, `false` = turn it OFF. */
@@ -42,18 +44,23 @@ export function VerifiedConfirmDialog({
   onCancel,
 }: VerifiedConfirmDialogProps) {
   const turningOn = proposed === true
+  const titleId = useId()
+  const bodyId = useId()
   return (
     <Dialog
       open={proposed !== null}
       onClose={onCancel}
+      onKeyDown={event => {
+        swallowConsoleChord(event)
+      }}
       maxWidth="xs"
       fullWidth
       transitionDuration={0}
-      aria-labelledby="persona-edit-verified-confirm-title"
-      aria-describedby="persona-edit-verified-confirm-body"
+      aria-labelledby={titleId}
+      aria-describedby={bodyId}
     >
       <DialogTitle
-        id="persona-edit-verified-confirm-title"
+        id={titleId}
         sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: 18, fontWeight: 700 }}
       >
         <FontAwesomeIcon icon={turningOn ? faCircleCheck : faCircleXmark} aria-hidden />
@@ -62,7 +69,7 @@ export function VerifiedConfirmDialog({
           : `Turn the verified mark OFF for @${handle}?`}
       </DialogTitle>
       <DialogContent sx={{ padding: CobraStyles.Padding.DialogContent }}>
-        <Typography id="persona-edit-verified-confirm-body" variant="body2">
+        <Typography id={bodyId} variant="body2">
           {turningOn
             ? 'Participants will see the verified seal next to this account on every post and '
               + 'profile. It is how they tell real accounts from lookalikes — only turn it on '

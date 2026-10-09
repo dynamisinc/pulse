@@ -7,6 +7,12 @@
  * checks module SPECIFIERS (comments stripped first, so prose that merely
  * mentions a module never trips it).
  *
+ * A specifier is judged by the module it RESOLVES to, whatever its spelling:
+ * `@/features/social/...` and `../../social/...` are the same import, so the
+ * relative form cannot slip past an alias-only pattern (Gate-1 L-9). Static
+ * imports, side-effect imports, dynamic `import()`, `require()` and RE-EXPORTS
+ * (`export { x } from '...'`, `export * from '...'`) are all edges.
+ *
  *  1. STAFF side stays staff: nothing here imports participant styling — no
  *     `.module.css`, no participant theme / Avatar / PostCard / shell, and no
  *     `@mui/icons-material`. The only `social` imports allowed are two pure,
@@ -19,9 +25,13 @@
  *     `maxLength` in the feature's source (a cut through a surrogate pair is a
  *     server 400 — see `textRules.ts`).
  *
- * The non-vacuity assertions require real files to have been scanned.
+ * The non-vacuity assertions require real files to have been scanned, and the
+ * extractor / resolver are self-tested on synthetic sources so a dead regex fails.
  */
 import { describe, expect, it } from 'vitest'
+
+/** Where this test (and so the `./` glob) lives, as a path under `src/`. */
+const THIS_DIR = 'features/controller/personaEdit'
 
 const ownFiles = import.meta.glob('./*.{ts,tsx}', { eager: true, query: '?raw', import: 'default' })
 const socialFiles = import.meta.glob('../../social/**/*.{ts,tsx}', {
@@ -67,7 +77,10 @@ function stripComments(source: string): string {
   )
 }
 
-/** Every module specifier (static, side-effect, dynamic, require) in `source`. */
+/**
+ * Every module specifier in `source`: static and type imports, side-effect imports,
+ * dynamic `import()`, `require()`, and `export ... from` / `export * from` re-exports.
+ */
 function specifiersOf(source: string): string[] {
   const scannable = stripComments(source)
   const found: string[] = []
@@ -76,6 +89,7 @@ function specifiersOf(source: string): string[] {
     /import\s+['"]([^'"]+)['"]/g,
     /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
     /require\(\s*['"]([^'"]+)['"]\s*\)/g,
+    /export\s+(?:type\s+)?(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s*from\s+['"]([^'"]+)['"]/g,
   ]) {
     for (const match of scannable.matchAll(pattern)) {
       if (match[1] !== undefined) found.push(match[1])
@@ -84,10 +98,99 @@ function specifiersOf(source: string): string[] {
   return found
 }
 
+/** `baseDir` + `relative` ('../x', './y/z') as a normalised path under `src/`. */
+function resolvePath(baseDir: string, relative: string): string {
+  const parts = baseDir.split('/').filter(part => part.length > 0)
+  for (const segment of relative.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') parts.pop()
+    else parts.push(segment)
+  }
+  return parts.join('/')
+}
+
+/** The directory (under `src/`) of a glob key like `../../social/a/B.tsx`. */
+function dirOfGlobKey(globKey: string): string {
+  const parts = globKey.split('/')
+  parts.pop()
+  return resolvePath(THIS_DIR, parts.join('/'))
+}
+
+/**
+ * The module a specifier points at, as a path under `src/` for anything inside the
+ * app (`@/x/y` and `../../x/y` both become `x/y`); a package name is returned as is.
+ */
+function resolveSpecifier(fileDir: string, specifier: string): string {
+  if (specifier.startsWith('@/')) return specifier.replace(/^@\//, '')
+  if (specifier.startsWith('.')) return resolvePath(fileDir, specifier)
+  return specifier
+}
+
+/** The only participant-tree modules the staff feature may import: pure and world-neutral. */
+const ALLOWED_SOCIAL_IMPORTS: readonly string[] = [
+  'features/social/components/media/safeMediaUrl',
+  'features/social/services/sanitize',
+]
+
+interface ForbiddenImport {
+  readonly why: string
+  /** `resolved` is the specifier resolved to a path under `src/` (or a package name). */
+  readonly test: (resolved: string) => boolean
+}
+
+const FORBIDDEN_IN_STAFF: readonly ForbiddenImport[] = [
+  { why: 'a CSS module (participant styling)', test: s => /\.module\.css$/.test(s) },
+  { why: 'icons-material (FontAwesome only)', test: s => s.startsWith('@mui/icons-material') },
+  { why: 'the participant shell', test: s => /^features\/participant-shell(\/|$)/.test(s) },
+  { why: 'the participant social theme', test: s => /^features\/social\/theme(\/|$)/.test(s) },
+  {
+    why: 'a participant social module other than the two pure helpers',
+    test: s => /^features\/social(\/|$)/.test(s) && !ALLOWED_SOCIAL_IMPORTS.includes(s),
+  },
+  {
+    why: 'the portal / news / press / weather participant surfaces',
+    test: s => /^features\/(portal|news|press|weather)(\/|$)/.test(s),
+  },
+]
+
+/** Every forbidden import in `files` (globKey -> source), described one per entry. */
+function staffViolations(files: Record<string, string>): string[] {
+  const violations: string[] = []
+  for (const [file, source] of Object.entries(files)) {
+    const fileDir = dirOfGlobKey(file)
+    for (const specifier of specifiersOf(source)) {
+      const resolved = resolveSpecifier(fileDir, specifier)
+      for (const rule of FORBIDDEN_IN_STAFF) {
+        if (rule.test(resolved)) {
+          violations.push(`${file} imports "${specifier}" (${resolved}) — ${rule.why}`)
+        }
+      }
+    }
+  }
+  return violations
+}
+
+/** Every import of this folder in `files` (globKey -> source). */
+function personaEditImporters(files: Record<string, string>): string[] {
+  const offenders: string[] = []
+  for (const [file, source] of Object.entries(files)) {
+    const fileDir = dirOfGlobKey(file)
+    for (const specifier of specifiersOf(source)) {
+      if (/^features\/controller\/personaEdit(\/|$)/.test(resolveSpecifier(fileDir, specifier))) {
+        offenders.push(`${file} imports "${specifier}"`)
+      }
+    }
+  }
+  return offenders
+}
+
 /** The names imported from `module` by `source` (named imports only). */
 function namedImportsFrom(source: string, module: string): string[] {
   const names: string[] = []
-  const pattern = new RegExp(`import\\s+(?:type\\s+)?\\{([^}]*)\\}\\s+from\\s+['"]${module}['"]`, 'g')
+  const pattern = new RegExp(
+    `import\\s+(?:type\\s+)?\\{([^}]*)\\}\\s+from\\s+['"]${module}['"]`,
+    'g',
+  )
   for (const match of stripComments(source).matchAll(pattern)) {
     for (const part of (match[1] ?? '').split(',')) {
       const name = part.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]?.trim()
@@ -97,57 +200,37 @@ function namedImportsFrom(source: string, module: string): string[] {
   return names
 }
 
-/** The only participant-tree modules the staff feature may import: pure and world-neutral. */
-const ALLOWED_SOCIAL_IMPORTS: readonly string[] = [
-  '@/features/social/components/media/safeMediaUrl',
-  '@/features/social/services/sanitize',
-]
-
-interface ForbiddenImport {
-  readonly why: string
-  readonly test: (specifier: string) => boolean
-}
-
-const FORBIDDEN_IN_STAFF: readonly ForbiddenImport[] = [
-  { why: 'a CSS module (participant styling)', test: s => /\.module\.css$/.test(s) },
-  { why: 'icons-material (FontAwesome only)', test: s => s.startsWith('@mui/icons-material') },
-  { why: 'the participant shell', test: s => s.includes('participant-shell') },
-  { why: 'the participant social theme', test: s => /social\/theme/.test(s) },
-  {
-    why: 'a participant social module other than the two pure helpers',
-    test: s => /(^|\/)features\/social(\/|$)/.test(s) && !ALLOWED_SOCIAL_IMPORTS.includes(s),
-  },
-  { why: 'the portal/news/press/weather participant surfaces', test: s => /features\/(portal|news|press|weather)(\/|$)/.test(s) },
+/** The component files that must be COBRA (buttons / fields from `styledComponents`). */
+const DIALOG_FILES = [
+  'PersonaEditDialog',
+  'ImageChooser',
+  'VerifiedConfirmDialog',
+  'DiscardChangesDialog',
+  'PersonaEditButton',
 ]
 
 describe('the persona edit stays in the STAFF world', () => {
   it('scans real files (cannot pass vacuously)', () => {
     expect(Object.keys(FEATURE_SOURCES).length).toBeGreaterThanOrEqual(8)
-    expect(Object.keys(FEATURE_SOURCES).some(path => path.endsWith('PersonaEditDialog.tsx'))).toBe(true)
+    expect(Object.keys(FEATURE_SOURCES).some(path => path.endsWith('PersonaEditDialog.tsx')))
+      .toBe(true)
     expect(Object.keys(PARTICIPANT_SOURCES).length).toBeGreaterThan(50)
   })
 
   it('imports no participant styling, no icons-material, and only two pure social helpers', () => {
-    const violations: string[] = []
-    for (const [file, source] of Object.entries(FEATURE_SOURCES)) {
-      for (const specifier of specifiersOf(source)) {
-        for (const rule of FORBIDDEN_IN_STAFF) {
-          if (rule.test(specifier)) violations.push(`${file} imports "${specifier}" — ${rule.why}`)
-        }
-      }
-    }
-    expect(violations).toEqual([])
+    expect(staffViolations(FEATURE_SOURCES)).toEqual([])
   })
 
   it('actually uses the allowed helpers it is permitted (the allow-list is not dead weight)', () => {
-    const all = Object.values(FEATURE_SOURCES).flatMap(specifiersOf)
-    for (const allowed of ALLOWED_SOCIAL_IMPORTS) expect(all).toContain(allowed)
+    const resolved = Object.entries(FEATURE_SOURCES).flatMap(([file, source]) =>
+      specifiersOf(source).map(specifier => resolveSpecifier(dirOfGlobKey(file), specifier)))
+    for (const allowed of ALLOWED_SOCIAL_IMPORTS) expect(resolved).toContain(allowed)
   })
 
-  it('the dialog is COBRA: styledComponents buttons + text fields, no bare MUI Button/TextField', () => {
+  it('the dialogs are COBRA: styledComponents buttons + fields, no bare MUI Button/TextField', () => {
     const dialogFiles = Object.entries(FEATURE_SOURCES).filter(([path]) =>
-      /(PersonaEditDialog|ImageChooser|VerifiedConfirmDialog|PersonaEditButton)\.tsx$/.test(path))
-    expect(dialogFiles).toHaveLength(4)
+      new RegExp(`(${DIALOG_FILES.join('|')})\\.tsx$`).test(path))
+    expect(dialogFiles).toHaveLength(5)
 
     const cobraNames = dialogFiles.flatMap(([, source]) =>
       namedImportsFrom(source, '@/theme/styledComponents'))
@@ -175,25 +258,101 @@ describe('the persona edit stays in the STAFF world', () => {
 })
 
 describe('participant surfaces never import the persona edit', () => {
-  it('finds no import of controller/personaEdit under any participant root', () => {
-    const offenders: string[] = []
-    for (const [file, source] of Object.entries(PARTICIPANT_SOURCES)) {
-      for (const specifier of specifiersOf(source)) {
-        if (/controller\/personaEdit/.test(specifier)) offenders.push(`${file} imports "${specifier}"`)
-      }
-    }
-    expect(offenders).toEqual([])
+  it('finds no import of controller/personaEdit — alias OR relative — under any participant root', () => {
+    expect(personaEditImporters(PARTICIPANT_SOURCES)).toEqual([])
+  })
+})
+
+describe('the guard itself (self-tests on synthetic sources)', () => {
+  // A synthetic file in this folder: relative paths resolve from features/controller/personaEdit.
+  const here = './Synthetic.tsx'
+
+  it('extracts static, type, side-effect, dynamic, require and RE-EXPORT specifiers; ignores comments', () => {
+    const sample = [
+      "import { A } from '@/features/social/components/Avatar'",
+      "import type { B } from '../../social/types/post'",
+      "import '../../social/theme/social.css'",
+      "const lazy = () => import('../../participant-shell/ShellLayout')",
+      "const legacy = require('../../portal/x')",
+      "export { C } from '../../social/components/PostCard'",
+      "export * from '../../news/all'",
+      "export type { D } from '@/features/weather/types'",
+      "export * as E from '../../press/ns'",
+      "// import { Z } from '../../social/commented'",
+      "/* export { Y } from '../../social/blockcommented' */",
+    ].join('\n')
+    expect([...specifiersOf(sample)].sort()).toEqual([
+      '@/features/social/components/Avatar',
+      '@/features/weather/types',
+      '../../news/all',
+      '../../participant-shell/ShellLayout',
+      '../../portal/x',
+      '../../press/ns',
+      '../../social/components/PostCard',
+      '../../social/theme/social.css',
+      '../../social/types/post',
+    ].sort())
   })
 
-  it('the extractor really finds a forbidden import (guard against a dead regex)', () => {
-    const sample = [
-      "import { PersonaEditButton } from '@/features/controller/personaEdit'",
-      "// import { x } from '@/features/controller/personaEdit/commented'",
-      "const lazy = () => import('../../controller/personaEdit/PersonaEditButton')",
-    ].join('\n')
-    expect(specifiersOf(sample)).toEqual([
-      '@/features/controller/personaEdit',
+  it('resolves relative and alias specifiers to the same module path', () => {
+    const dir = dirOfGlobKey(here)
+    expect(dir).toBe(THIS_DIR)
+    expect(resolveSpecifier(dir, '../../social/components/Avatar'))
+      .toBe('features/social/components/Avatar')
+    expect(resolveSpecifier(dir, '@/features/social/components/Avatar'))
+      .toBe('features/social/components/Avatar')
+    expect(resolveSpecifier(dir, './textRules')).toBe('features/controller/personaEdit/textRules')
+    expect(resolveSpecifier(dir, '@mui/material')).toBe('@mui/material')
+    // From a participant file, two levels up lands back on the controller tree.
+    expect(resolveSpecifier(
+      dirOfGlobKey('../../social/components/X.tsx'),
       '../../controller/personaEdit/PersonaEditButton',
+    )).toBe('features/controller/personaEdit/PersonaEditButton')
+  })
+
+  it('catches a RELATIVE participant import and a re-export, not just the alias form', () => {
+    const violations = staffViolations({
+      [here]: [
+        "import { Avatar } from '../../social/components/Avatar'",
+        "import styles from '../../social/components/PostCard.module.css'",
+        "export { SocialBrandScope } from '../../social/theme/SocialBrandScope'",
+        "export * from '../../participant-shell'",
+        "import { Icon } from '@mui/icons-material/Add'",
+        "import { Also } from '@/features/social'",
+      ].join('\n'),
+    })
+    const flagged = new Set(violations.map(violation => violation.split('"')[1]))
+    expect([...flagged].sort()).toEqual([
+      '../../participant-shell',
+      '../../social/components/Avatar',
+      '../../social/components/PostCard.module.css',
+      '../../social/theme/SocialBrandScope',
+      '@/features/social',
+      '@mui/icons-material/Add',
     ])
+  })
+
+  it('allows the two pure helpers in either spelling, and the feature\'s own / core imports', () => {
+    expect(staffViolations({
+      [here]: [
+        "import { resolveSafeMediaUrl } from '@/features/social/components/media/safeMediaUrl'",
+        "import { sanitizeText } from '../../social/services/sanitize'",
+        "import { x } from './textRules'",
+        "import { y } from '@/core/media'",
+        "import { z } from '@/theme/styledComponents'",
+      ].join('\n'),
+    })).toEqual([])
+  })
+
+  it('finds a participant file importing this folder — alias, relative and re-export', () => {
+    const offenders = personaEditImporters({
+      '../../social/a/One.tsx':
+        "import { PersonaEditButton } from '@/features/controller/personaEdit'",
+      '../../social/a/Two.tsx':
+        "import { PersonaEditButton } from '../../controller/personaEdit/PersonaEditButton'",
+      '../../portal/Three.tsx': "export { PersonaEditButton } from '../controller/personaEdit'",
+      '../../social/a/Four.tsx': "import { fine } from '../../controller/other'",
+    })
+    expect(offenders).toHaveLength(3)
   })
 })

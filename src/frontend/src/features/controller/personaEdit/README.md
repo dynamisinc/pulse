@@ -26,10 +26,11 @@ import { PersonaEditButton } from '@/features/controller/personaEdit'
 | `PersonaEditDialog.tsx` | The COBRA dialog (form; mounted only while open). |
 | `ImageChooser.tsx` | Avatar / banner: upload (`useMediaUpload`) or pick from the library; preview. |
 | `VerifiedConfirmDialog.tsx` | Confirmation when Verified is turned on or off (SOC-052). |
+| `DiscardChangesDialog.tsx` / `consoleChords.ts` | "Discard your changes?" on Esc; swallows the console's ⌘K. |
 | `usePersonaEdit.ts` | The save flow: PATCH, then `invalidatePersonas()`, `selectPersona(updated)`, ONE `steering_action`. |
 | `personaEditService.ts` | `patchPersona`, error mapping (400 text verbatim), response parser. |
 | `personaEditMock.ts` | Mock adapter: the contract's exact 400 texts; **edits the mock persona directory**. |
-| `personaEditForm.ts` / `textRules.ts` | Pure: validation, and the draft -> merge-patch diff. |
+| `personaEditForm.ts` / `textRules.ts` / `personaEditStyles.ts` | Pure: validation, the draft -> merge-patch diff, AA colours. |
 | `libraryPicker.ts` | The ONE import seam to C1's `MediaLibraryPicker`. |
 | `PersonaEditHarness.testUtils.tsx` | Test-only render harness. |
 
@@ -40,9 +41,18 @@ import { PersonaEditButton } from '@/features/controller/personaEdit'
   (never `""`); the persona is never echoed back; `{}` is valid but the dialog never sends it.
 - The server's 400 sentence is shown to the controller **verbatim**; 401 / 403 / 404 / 415 / 5xx / network
   have their own staff copy.
-- **Never truncate user text.** Lengths are counted in code points; an over-long field shows its limit and
-  blocks Save (a cut through a surrogate pair is a server 400). Control characters and bidi overrides are
-  refused (the bio may hold line breaks and tabs); lookalike names are allowed (SOC-052).
+- **Never truncate user text.** Lengths are counted in **UTF-16 units** — the server's `string.Length`, so an
+  emoji counts 2 (256 emoji fill the bio) — and an over-long field shows its limit and blocks Save (a cut
+  through a surrogate pair is a server 400). Control characters and bidi overrides are refused (the bio may
+  hold line breaks and tabs); a display name needs a visible character by the **server's own rule**
+  (`textRules.hasVisibleCharacter`: separators, controls, format, combining marks, surrogates, unassigned and
+  the five blank filler glyphs); lookalike names are allowed (SOC-052).
+- **The 200 body is the server's `FromPersona`.** `templateId` is `""` for every template-less persona (the
+  whole seeded cast) and the optional strings are *omitted*; the parser validates only what the console relies
+  on (`parseStaffPersonaResponse`). The staff DTO has **no media id / has-image flag**: a missing avatar URL
+  means "none set" *or* "signing failed", so Remove is always offered and the copy never claims "none is set".
+- **Dismissing:** a clean dialog closes on Esc / backdrop; with unsaved work the backdrop is ignored and Esc asks
+  "Discard your changes?"; ⌘K / Ctrl+K is swallowed so the console palette cannot open behind the modal.
 - Telemetry: the **console** emits `steering_action { action: 'persona_edit', fields }` (field **names**
   only), `target { persona, id }`, once per successful edit, in mock and live mode. The server emits none (DP-9).
 

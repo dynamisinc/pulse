@@ -25,7 +25,8 @@
  *   unknown persona       404 with an empty body
  *   Content-Type          application/merge-patch+json or application/json, else 415
  *
- * PE-BE Gate-1 fold (5cee307; text hygiene) — lengths are CODE POINTS and:
+ * PE-BE Gate-1 fold (5cee307; text hygiene) — lengths are UTF-16 UNITS (`.length`, the
+ * server's `string.Length`: an emoji counts 2) and:
  *   - raw text longer than 4x the field's bound (displayName > 400, bio > 2048,
  *     location > 400) is refused BEFORE sanitizing, with the field's ordinary
  *     length message;
@@ -55,8 +56,11 @@
  * sanctioned writer, and {@link resetMockPersonaEdits} puts every pristine seed
  * back (tests; also useful from a dev console).
  *
- * `initials` / `avatarColor` are left as seeded: the contract does not say the
- * server recomputes them on rename, so the mock does not invent that.
+ * `initials` are RE-DERIVED from the new display name on a rename, by the server's rule
+ * ({@link initialsForDisplayName}: the first UTF-16 unit of each of the first two
+ * space-separated words, upper-cased) — the real server derives them from the name on
+ * every read, so a rename changes the monogram live. `avatarColor` is derived from the
+ * HANDLE, which cannot change, so it stays as seeded.
  *
  * Sanitization (NFR-004): the real server strips markup from the three text
  * fields with `PostSanitizer`; the mock uses the client's equivalent
@@ -70,11 +74,11 @@ import { SEEDED_PERSONAS, type StaffPersona } from '@/features/personas'
 import { BIO_ALLOWS_LAYOUT_WHITESPACE } from './personaEditForm'
 import { sanitizeText } from '@/features/social/services/sanitize'
 import {
-  codePointLength,
   hasBidiOverride,
   hasControlCharacter,
   hasLoneSurrogate,
   hasVisibleCharacter,
+  textLength,
 } from './textRules'
 
 /** The server's refusal texts (`PersonaAdminMessages`) — verbatim. */
@@ -190,7 +194,7 @@ function textHygieneFailure(
   allowLayoutWhitespace: boolean,
 ): MockPatchFailure | undefined {
   if (hasLoneSurrogate(value)) return fail(PERSONA_ADMIN_MESSAGES.bodyNotObject)
-  if (codePointLength(value) > RAW_LENGTH_FACTOR * max) return fail(messages.tooLong)
+  if (textLength(value) > RAW_LENGTH_FACTOR * max) return fail(messages.tooLong)
   if (hasControlCharacter(value, allowLayoutWhitespace) || hasBidiOverride(value)) {
     return fail(messages.controlOrBidi)
   }
@@ -209,7 +213,7 @@ function parseClearableText(
   const refused = textHygieneFailure(value, max, messages, allowLayoutWhitespace)
   if (refused !== undefined) return refused
   const cleaned = cleanedText(value)
-  if (cleaned !== null && codePointLength(cleaned) > max) return fail(messages.tooLong)
+  if (cleaned !== null && textLength(cleaned) > max) return fail(messages.tooLong)
   return { ok: true, value: cleaned }
 }
 
@@ -258,7 +262,7 @@ function parseBody(
     )
     if (refused !== undefined) return refused
     const cleaned = cleanedText(value)
-    if (cleaned === null || codePointLength(cleaned) > 100) {
+    if (cleaned === null || textLength(cleaned) > 100) {
       return fail(PERSONA_ADMIN_MESSAGES.displayNameLength)
     }
     if (!hasVisibleCharacter(cleaned)) return fail(PERSONA_ADMIN_MESSAGES.displayNameInvisible)
@@ -347,6 +351,28 @@ function personaIdOf(url: string | undefined): string {
 }
 
 /**
+ * The server's `PersonaDerivedPresentation.InitialsForDisplayName`: split on spaces
+ * (trimming entries, dropping empty ones), take up to the first TWO words, and for
+ * each its first UTF-16 unit (`w[0]`) upper-cased invariantly. No grapheme handling,
+ * exactly like the server — so a word that starts with an emoji yields a lone
+ * high surrogate (a tracked backend issue; the browser draws it as a replacement mark).
+ */
+export function initialsForDisplayName(displayName: string): string {
+  const words = displayName
+    .split(' ')
+    .map(word => word.trim())
+    .filter(word => word.length > 0)
+  let initials = ''
+  for (let index = 0; index < words.length && index < 2; index += 1) {
+    const first = (words[index] ?? '').charAt(0)
+    // .NET's char.ToUpperInvariant maps one unit to one unit; JS may expand ('ß' -> 'SS').
+    const upper = first.toUpperCase()
+    initials += upper.length === 1 ? upper : first
+  }
+  return initials
+}
+
+/**
  * Applies a validated patch to `current`. `null` removes the optional member (the
  * server's response omits absent members — never `null`).
  */
@@ -363,6 +389,10 @@ function applyPatch(
   return {
     ...rest,
     displayName: patch.displayName ?? current.displayName,
+    initials:
+      patch.displayName !== undefined
+        ? initialsForDisplayName(patch.displayName)
+        : current.initials,
     verified: patch.verified ?? current.verified,
     ...(nextBio !== undefined ? { bio: nextBio } : {}),
     ...(nextLocation !== undefined ? { location: nextLocation } : {}),

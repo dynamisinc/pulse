@@ -20,8 +20,9 @@
  *
  * ## Limits and refusals mirror the server (PE-BE)
  * displayName 1..100, bio <= 512, location <= 100, measured on the TRIMMED text in
- * CODE POINTS (never UTF-16 units, and the text is never truncated — see
- * `textRules.ts`: a cut through a surrogate pair is a server 400). Also refused,
+ * UTF-16 code UNITS — the server's `string.Length`, so an emoji counts as 2 — and the
+ * text is never truncated (see `textRules.ts`: a cut through a surrogate pair is a
+ * server 400). Also refused,
  * as the server refuses them: raw text longer than 4x the bound (spaces and line
  * breaks count), a lone surrogate, C0/C1 control characters and bidi overrides in
  * any of the three fields, and a display name with no visible character. The
@@ -33,11 +34,11 @@
 
 import type { StaffPersona } from '@/features/personas'
 import {
-  codePointLength,
   hasBidiOverride,
   hasControlCharacter,
   hasLoneSurrogate,
   hasVisibleCharacter,
+  textLength,
 } from './textRules'
 import type {
   DraftProblems,
@@ -74,7 +75,7 @@ export const PERSONA_EDIT_FIELD_ORDER: readonly PersonaEditField[] = [
 /** The persona members the form reads. */
 export type EditablePersonaView = Pick<
   StaffPersona,
-  'displayName' | 'bio' | 'location' | 'verified' | 'avatarUrl' | 'bannerUrl'
+  'displayName' | 'bio' | 'location' | 'verified'
 >
 
 /** A fresh draft that reproduces `persona` exactly (so the initial diff is empty). */
@@ -110,14 +111,14 @@ function textProblem(raw: string, rule: TextRule): string | undefined {
     return `${label} can't contain text-direction override characters. Remove them to save.`
   }
 
-  const rawLength = codePointLength(raw)
+  const rawLength = textLength(raw)
   if (rawLength > RAW_LENGTH_FACTOR * max) {
     return `${label} must be at most ${max} characters. This text is ${rawLength} characters `
       + 'long counting spaces and line breaks.'
   }
 
   const trimmed = raw.trim()
-  const length = codePointLength(trimmed)
+  const length = textLength(trimmed)
   if (rule.requireVisible) {
     if (length === 0) return `${label} is required.`
     if (!hasVisibleCharacter(trimmed)) return `${label} needs at least one visible character.`
@@ -147,7 +148,7 @@ const LOCATION_RULE: TextRule = {
 
 /**
  * Field-level problems in `draft`. Empty object = the draft is valid. Counted on
- * the trimmed text in code points, like the server; the text is never cut.
+ * the trimmed text in UTF-16 units, like the server; the text is never cut.
  */
 export function validateDraft(draft: PersonaEditDraft): DraftProblems {
   const displayName = textProblem(draft.displayName, DISPLAY_NAME_RULE)
@@ -160,9 +161,9 @@ export function validateDraft(draft: PersonaEditDraft): DraftProblems {
   }
 }
 
-/** The length the counters show: the trimmed text, in code points. */
+/** The length the counters show: the trimmed text, in UTF-16 units (the server's measure). */
 export function countedLength(text: string): number {
-  return codePointLength(text.trim())
+  return textLength(text.trim())
 }
 
 /** True when {@link validateDraft} found nothing wrong. */
@@ -172,15 +173,17 @@ export function isDraftValid(draft: PersonaEditDraft): boolean {
 
 /**
  * The merge-patch value of an image choice, or `undefined` for "leave alone".
- * `clear` is only meaningful when the persona HAS an image to clear: a persona
- * without one has nothing to null, so no request member is produced.
+ * `clear` is ALWAYS `null` — never decided from `avatarUrl` / `bannerUrl`: the staff
+ * DTO carries only the signed read URL (no media id, no has-image flag), and the URL
+ * is absent when the persona has no image OR when signing it failed. A controller who
+ * explicitly chose Remove gets the `null` (idempotent on the server if nothing is set).
  */
-function imagePatchValue(choice: ImageChoice, personaHasImage: boolean): string | null | undefined {
+function imagePatchValue(choice: ImageChoice): string | null | undefined {
   switch (choice.mode) {
     case 'set':
       return choice.mediaId
     case 'clear':
-      return personaHasImage ? null : undefined
+      return null
     case 'keep':
       return undefined
   }
@@ -209,8 +212,8 @@ export function buildPersonaPatch(
   const displayName = draft.displayName.trim()
   const bio = textPatchValue(draft.bio, persona.bio)
   const location = textPatchValue(draft.location, persona.location)
-  const avatarMediaId = imagePatchValue(draft.avatar, persona.avatarUrl !== undefined)
-  const bannerMediaId = imagePatchValue(draft.banner, persona.bannerUrl !== undefined)
+  const avatarMediaId = imagePatchValue(draft.avatar)
+  const bannerMediaId = imagePatchValue(draft.banner)
 
   return {
     ...(displayName !== persona.displayName ? { displayName } : {}),

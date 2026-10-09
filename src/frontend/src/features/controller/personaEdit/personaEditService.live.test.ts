@@ -37,22 +37,33 @@ import {
 
 const ID = '7f1c0c0e-0000-4000-8000-0000000000aa'
 
+/**
+ * A body shaped EXACTLY like the server's `StaffPersonaResponseDto.FromPersona` for a
+ * persona WITHOUT a template — which is every persona `PersonaCastSeeder` creates, i.e.
+ * the whole demo cast (Gate-1 H-1):
+ *   - `templateId` is the EMPTY STRING (`PersonaTemplateId?.ToString() ?? string.Empty`);
+ *   - `bio`, `avatarUrl`, `bannerUrl`, `location` are OMITTED when null
+ *     (`JsonIgnoreCondition.WhenWritingNull`), never sent as `null`;
+ *   - `avatarColor` is a palette hex derived from the handle, `initials` come from the
+ *     display name, `joinedAt` is `yyyy-MM-ddTHH:mm:ss.fffZ`, and the three counts are
+ *     ints (`followingCount` is 0 with no follow edges).
+ */
 function wireBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: ID,
     exerciseId: '3d2c0c0e-0000-4000-8000-0000000000bb',
-    templateId: '9a1c0c0e-0000-4000-8000-0000000000cc',
+    templateId: '',
     displayName: 'Fairhaven Water',
     handle: 'FairhavenWater',
     kind: 'org',
     personaType: 'agency',
     verified: true,
-    avatarColor: '#19647e',
+    avatarColor: '#4C6EF5',
     initials: 'FW',
-    audienceBand: 'mid',
-    followerCount: 4200,
-    audienceMagnitude: 4200,
-    followingCount: 3,
+    audienceBand: 'nano',
+    followerCount: 0,
+    audienceMagnitude: 0,
+    followingCount: 0,
     joinedAt: '2033-08-01T00:00:00.000Z',
     ...overrides,
   }
@@ -106,32 +117,80 @@ describe('patchPersona (live) — the request', () => {
 })
 
 describe('patchPersona (live) — the 200 body', () => {
-  it('resolves with the staff persona rebuilt from the contract keys', async () => {
-    patchMock.mockResolvedValue({
-      data: wireBody({ bio: 'Hello', location: 'Fairhaven', avatarUrl: 'https://blob/a?sig=1', stray: 'x' }),
-    })
-    const updated = await patchPersona(ID, { bio: 'Hello' })
+  it('H-1: a TEMPLATE-LESS persona (templateId "", no optional keys) parses — the whole seeded cast', async () => {
+    const body = wireBody()
+    for (const absent of ['bio', 'avatarUrl', 'bannerUrl', 'location']) {
+      expect(body).not.toHaveProperty(absent)
+    }
+    patchMock.mockResolvedValue({ data: body })
+
+    const updated = await patchPersona(ID, { displayName: 'Fairhaven Water' })
+
     expect(updated).toEqual({
       id: ID,
       exerciseId: '3d2c0c0e-0000-4000-8000-0000000000bb',
-      templateId: '9a1c0c0e-0000-4000-8000-0000000000cc',
+      templateId: '',
       displayName: 'Fairhaven Water',
       handle: 'FairhavenWater',
       kind: 'org',
       personaType: 'agency',
       verified: true,
-      avatarColor: '#19647e',
+      avatarColor: '#4C6EF5',
       initials: 'FW',
-      audienceBand: 'mid',
-      followerCount: 4200,
-      audienceMagnitude: 4200,
-      followingCount: 3,
+      audienceBand: 'nano',
+      followerCount: 0,
+      audienceMagnitude: 0,
+      followingCount: 0,
       joinedAt: '2033-08-01T00:00:00.000Z',
+    })
+    for (const absent of ['bio', 'avatarUrl', 'bannerUrl', 'location']) {
+      expect(updated).not.toHaveProperty(absent)
+    }
+  })
+
+  it('resolves with the staff persona rebuilt from the contract keys (everything set)', async () => {
+    patchMock.mockResolvedValue({
+      data: wireBody({
+        templateId: '9a1c0c0e-0000-4000-8000-0000000000cc',
+        bio: 'Hello',
+        location: 'Fairhaven',
+        avatarUrl: 'https://blob/a?sig=1',
+        bannerUrl: 'https://blob/b?sig=2',
+        followerCount: 4200,
+        audienceMagnitude: 4200,
+        followingCount: 3,
+        stray: 'x',
+      }),
+    })
+    const updated = await patchPersona(ID, { bio: 'Hello' })
+    expect(updated).toMatchObject({
+      templateId: '9a1c0c0e-0000-4000-8000-0000000000cc',
       bio: 'Hello',
       location: 'Fairhaven',
       avatarUrl: 'https://blob/a?sig=1',
+      bannerUrl: 'https://blob/b?sig=2',
+      followerCount: 4200,
+      followingCount: 3,
     })
     expect(updated).not.toHaveProperty('stray')
+  })
+
+  it('accepts the other legitimately-empty or loose members the server can send', () => {
+    // initials: "an empty string if none could be derived" (PersonaDerivedPresentation).
+    expect(parseStaffPersonaResponse(wireBody({ initials: '' }), ID)).toMatchObject({ initials: '' })
+    // The list read does not vocabulary-check audienceBand either.
+    expect(parseStaffPersonaResponse(wireBody({ audienceBand: 'regional' }), ID)).toBeDefined()
+    // templateId: "" today; absent or null would mean the same, never "malformed".
+    const noTemplate = wireBody()
+    delete noTemplate.templateId
+    expect(parseStaffPersonaResponse(noTemplate, ID)).toMatchObject({ templateId: '' })
+    expect(parseStaffPersonaResponse(wireBody({ templateId: null }), ID))
+      .toMatchObject({ templateId: '' })
+    // followingCount / audienceMagnitude are optional numbers.
+    const lean = wireBody()
+    delete lean.followingCount
+    delete lean.audienceMagnitude
+    expect(parseStaffPersonaResponse(lean, ID)).toBeDefined()
   })
 
   it('treats a null optional as absent', () => {
@@ -151,8 +210,11 @@ describe('patchPersona (live) — the 200 body', () => {
       wireBody({ personaType: 'wizard' }),
       wireBody({ id: 'someone-else' }),
       wireBody({ verified: 'yes' }),
-      wireBody({ audienceBand: 'huge' }),
-      wireBody({ initials: '' }),
+      wireBody({ kind: 'robot' }),
+      wireBody({ displayName: '' }),
+      wireBody({ handle: '' }),
+      wireBody({ followerCount: 'many' }),
+      wireBody({ followerCount: undefined }),
       'ok',
       [],
       null,
