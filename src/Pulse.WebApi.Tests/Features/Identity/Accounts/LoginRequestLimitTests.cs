@@ -2,9 +2,11 @@ namespace Pulse.WebApi.Tests.Features.Identity.Accounts;
 
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -81,7 +83,7 @@ public sealed class LoginRequestLimitTests
     public LoginRequestLimitTests(MsSqlContainerFixture fixture) => _fixture = fixture;
 
     [RequiresDockerFact]
-    public async Task ParticipantLogin_OrdinaryIsUnchanged_OversizeRawUsernameIs400Fast_OversizeBodyIs413()
+    public async Task ParticipantLogin_OrdinaryIsUnchanged_OversizeRawUsernameIs400BeforeSanitizing_OversizeBodyIs413()
     {
         var (host, username) = await SeedAsync();
         await using var factory = KestrelFactory.Start(_fixture.ConnectionString!);
@@ -91,6 +93,8 @@ public sealed class LoginRequestLimitTests
         ordinary.StatusCode.Should().Be(HttpStatusCode.OK, "an ordinary login is unchanged: " + await ordinary.Content.ReadAsStringAsync());
         JsonDocument.Parse(await ordinary.Content.ReadAsStringAsync()).RootElement.EnumerateObject().Should().NotBeEmpty();
 
+        // The handle is pure markup, so it would SANITIZE to empty ("username is required."). Getting the length
+        // message instead is what proves the raw cap ran before the sanitizer.
         var stopwatch = Stopwatch.StartNew();
         using var oversizeRaw = await client.PostAsJsonAsync(
             "/api/auth/login",
@@ -98,28 +102,83 @@ public sealed class LoginRequestLimitTests
         stopwatch.Stop();
         oversizeRaw.StatusCode.Should().Be(HttpStatusCode.BadRequest, "a raw handle over 4x the maximum is refused before sanitizing");
         (await oversizeRaw.Content.ReadAsStringAsync()).Should().Contain($"username must be at most {AccountFieldRules.MaxUsernameLength} characters.");
-        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2));
+
+        // A coarse REGRESSION GUARD only, not the proof of the cap (the message above is): the linear sanitizer is
+        // quick on 1 KB either way. It trips if a refused login ever starts doing real work again (a KDF, a
+        // quadratic sanitizer), with headroom for a loaded CI runner.
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2), "regression guard: a refused login stays cheap");
 
         using var oversizeBody = await client.PostAsync("/api/auth/login", OversizeJsonBody("username"));
         oversizeBody.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge, "a body over 16 KiB is refused while it is read");
     }
 
     [RequiresDockerTheory]
-    [InlineData("/api/auth/staff/login", "username")]
-    [InlineData("/api/auth/shared", "password")]
-    public async Task TheOtherAnonymousLogins_RefuseAnOversizeBody_With413(string route, string field)
+    [InlineData("/api/auth/login", "username", false)]
+    [InlineData("/api/auth/login", "username", true)]
+    [InlineData("/api/auth/staff/login", "username", false)]
+    [InlineData("/api/auth/staff/login", "username", true)]
+    [InlineData("/api/auth/shared", "password", false)]
+    [InlineData("/api/auth/shared", "password", true)]
+    public async Task EveryAnonymousLogin_RefusesAnOversizeBody_With413_EvenChunked(string route, string field, bool chunked)
     {
+        // The chunked case sends NO Content-Length (Transfer-Encoding: chunked), so the limit has to be enforced while
+        // the body streams in rather than from the header (Wave 3 Gate-2 L-4).
         var (host, _) = await SeedAsync();
         await using var factory = KestrelFactory.Start(_fixture.ConnectionString!);
         using var client = factory.ClientFor(host);
 
-        using var response = await client.PostAsync(route, OversizeJsonBody(field));
+        var body = OversizeJsonBytes(field);
+        using var request = new HttpRequestMessage(HttpMethod.Post, route)
+        {
+            Content = chunked ? new UnknownLengthContent(body) : new ByteArrayContent(body),
+        };
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        if (chunked)
+        {
+            request.Headers.TransferEncodingChunked = true;
+        }
 
-        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge, "{0} is bounded at 16 KiB too", route);
+        using var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.RequestEntityTooLarge, "{0} is bounded at 16 KiB while the body is read (chunked: {1})", route, chunked);
+        request.Content.Headers.ContentLength.Should().Be(chunked ? null : (long?)body.Length, "precondition: chunked sends no Content-Length");
+    }
+
+    [RequiresDockerFact]
+    public async Task ParticipantLogin_AHandleOverTheMaximum_GetsTheSame400Text_BelowAndAboveTheRawCap()
+    {
+        // Wave 3 Gate-2 S-5: the raw cap (1,024) is 4x the stored maximum (256). Between the two, a handle reaches the
+        // normal validation (AccountFieldRules.TryNormalizeUsername, the rule accounts are created under) and gets
+        // the same text as one over the raw cap — never an ordinary 401 that a handle no account can have would earn.
+        var (host, _) = await SeedAsync();
+        await using var factory = KestrelFactory.Start(_fixture.ConnectionString!);
+        using var client = factory.ClientFor(host);
+        var tooLong = $"username must be at most {AccountFieldRules.MaxUsernameLength} characters.";
+
+        foreach (var length in new[]
+        {
+            AccountFieldRules.MaxUsernameLength + 1,
+            300,
+            ParticipantLoginService.MaxRawUsernameLength,
+            ParticipantLoginService.MaxRawUsernameLength + 1,
+        })
+        {
+            using var response = await client.PostAsJsonAsync("/api/auth/login", new { username = new string('u', length), password = Password });
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "a {0}-character handle is longer than any stored one", length);
+            (await response.Content.ReadAsStringAsync()).Should().Contain(tooLong, "one message on both sides of the raw cap ({0})", length);
+        }
+
+        using var atMaximum = await client.PostAsJsonAsync(
+            "/api/auth/login", new { username = new string('u', AccountFieldRules.MaxUsernameLength), password = Password });
+        atMaximum.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a handle at the maximum is a normal credential check (no such account)");
     }
 
     private static StringContent OversizeJsonBody(string field) =>
-        new($"{{\"{field}\":\"{new string('a', (int)LoginRequestLimits.MaxLoginRequestBodyBytes + 1024)}\"}}", Encoding.UTF8, "application/json");
+        new(Encoding.UTF8.GetString(OversizeJsonBytes(field)), Encoding.UTF8, "application/json");
+
+    private static byte[] OversizeJsonBytes(string field) =>
+        Encoding.UTF8.GetBytes($"{{\"{field}\":\"{new string('a', (int)LoginRequestLimits.MaxLoginRequestBodyBytes + 1024)}\"}}");
 
     private async Task<(string Host, string Username)> SeedAsync()
     {
@@ -148,6 +207,19 @@ public sealed class LoginRequestLimitTests
         });
         await seed.SaveChangesAsync();
         return (host, username);
+    }
+
+    /// <summary>A body whose length is not computed up front, so the client must send it chunked.</summary>
+    private sealed class UnknownLengthContent(byte[] bytes) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            stream.WriteAsync(bytes, 0, bytes.Length);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = -1;
+            return false;
+        }
     }
 
     /// <summary>The real <c>Program</c> host on Kestrel (dynamic port), nothing replaced.</summary>

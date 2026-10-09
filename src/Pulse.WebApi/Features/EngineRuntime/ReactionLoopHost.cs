@@ -761,7 +761,9 @@ public sealed partial class ReactionLoopDriver
 
         // Attribute each post to its persona by position — the burst is "one post per persona" (§5.2), so
         // post[i] is intent.Personas[i]; the persona's own handle is authoritative (a provider may return a
-        // placeholder handle). Bounded by the smaller of the two counts, defensively.
+        // placeholder handle). Bounded by the smaller of the two counts, defensively. Each text is fitted to the
+        // ingest ceiling here (Wave 3 Gate-2 M-1): a draft the funnel would refuse can never be approved or
+        // auto-sent, so an over-long model output is cut (whole graphemes + an ellipsis) before anyone sees it.
         var draftPosts = new List<EngineReviewDraftPost>();
         var count = System.Math.Min(posts.Count, intent.Personas.Count);
         for (var i = 0; i < count; i++)
@@ -770,7 +772,7 @@ public sealed partial class ReactionLoopDriver
             draftPosts.Add(new EngineReviewDraftPost
             {
                 PersonaHandle = intent.Personas[i].Handle,
-                Text = post.Text,
+                Text = EngineDraftText.FitToCeiling(post.Text),
                 Sentiment = post.Sentiment,
                 Hashtags = post.Hashtags.ToList(),
             });
