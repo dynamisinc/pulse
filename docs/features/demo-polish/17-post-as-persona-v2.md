@@ -1,6 +1,6 @@
 # Story: Post as persona v2
 
-**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** CTL-001, CTL-003, SOC-012, COR-018, XC-004, NFR-001, NFR-004  ·  **Design decisions:** D5-014/2.4 (POSTING AS chip, unchanged), D5-016 (dock flyout)  ·  **Issue:** #436
 **Story ID:** C1  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** 3
 **Home stories:** [`persona-operation/01`](../persona-operation/01-post-as-persona.md), [`threads-replies/03`](../threads-replies/03-persona-participant-replies.md).
