@@ -35,9 +35,10 @@ disabled option reading "No inject queue yet". It also builds the **slots** the 
       instead of `listPosts()`; with none, the empty state says so honestly; a missing voice-notes template
       reads "No voice notes authored" (muted) not "unavailable"; it gains `actionsSlot?: ReactNode` for PE's
       button.
-- [ ] **Pause tiers match what exists.** The disabled **Pause injects** option is removed from `PausePill` (the
-      tier stays in the type; re-enable when an inject queue exists); Pause engine and Freeze world behave
-      exactly as before and their tests stay green.
+- [ ] ~~**Pause tiers match what exists.** The disabled **Pause injects** option is removed from `PausePill`.~~
+      **Superseded 2026-10-08:** C4 (#449) removed the option, leaving a documented re-enable note. The inject queue is
+      now being built, and [`inject-queue/07`](../inject-queue/07-scripted-posts-console.md) **re-adds Pause injects as a
+      live control** in `PausePill.tsx`. No further C4 change is needed; Pause engine and Freeze world are unchanged.
 
 ## Out of Scope
 Building the live world or run sheet (C2/C3), real presence (CTL-004 SignalR presence), the inject queue, new ⌘K

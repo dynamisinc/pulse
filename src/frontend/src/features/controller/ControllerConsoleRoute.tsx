@@ -59,6 +59,15 @@
  * the shipped `createPost` with `origin: 'engine'` (sanitized, NFR-004) — there
  * is no second publish path here and no `'engine-edited'` origin.
  *
+ * SERIAL INTEGRATION — the RUN SHEET (inject-queue story 07, #453). `ControllerConsole`
+ * lays out a `runSheetSlot` (demo-polish C4); this composition root supplies it with the
+ * self-contained, prop-less `<RunSheetPanel />` (the server-side scripted-posts queue, which
+ * replaced C3's browser-only run sheet) plus `RunSheetMockPauseBridge` (mock mode only), so
+ * the panel is reachable at `/console`. Before this, the slot was NOT supplied at all and the
+ * console showed its "not connected" status line. `ControllerConsoleRoute.test.tsx` mounts the
+ * REAL route and proves the panel renders there and that PausePill's Pause injects / Freeze
+ * reach it.
+ *
  * Note: `SessionProvider` is deliberately NOT in this stack — the console's
  * operating identity is `useControllerIdentity()` (a Phase-1 mock; the one mock
  * session is a participant), exactly as the shipped `/evaluator` route mounts no
@@ -66,7 +75,7 @@
  * console story and is not wired here (Wave-1 scope guard).
  */
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, type ReactNode } from 'react'
 import { ToolstripProvider } from '@/features/staffShell/toolRegistry'
 import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
@@ -83,6 +92,25 @@ import { ActivePersonaProvider, useActivePersona } from './hooks/useActivePerson
 import { PersonaPicker } from './components/PersonaPicker'
 import { PersonaComposer } from './components/PersonaComposer'
 import { PersonaContextPanel } from './components/PersonaContextPanel'
+import { RunSheetMockPauseBridge, RunSheetPanel } from './runSheet'
+
+/**
+ * The console's RUN SHEET slot (inject-queue story 07, replacing demo-polish C3's
+ * browser-only run sheet): the server-side inject queue, mounted into
+ * `ControllerConsole`'s `runSheetSlot` — the SAME render-prop seam C4 defined for the live
+ * world. `RunSheetPanel` is self-contained (no props; it reads the exercise scope, the
+ * personas and the queue itself), so the slot context is not needed. `RunSheetMockPauseBridge`
+ * is mock-mode only (it renders nothing live): it hands the pause tier set through PausePill
+ * to the mock queue so PAUSE INJECTS / FREEZE work under `npm run dev`.
+ *
+ * A module-level function keeps the slot's identity stable across console renders.
+ */
+const renderRunSheetSlot = (): ReactNode => (
+  <>
+    <RunSheetPanel />
+    <RunSheetMockPauseBridge />
+  </>
+)
 
 /**
  * The console content, inside the provider stack so it may read the controller
@@ -135,6 +163,7 @@ function ControllerConsoleContent() {
       renderPersonaResults={renderPersonaResults}
       dockSlots={dockSlots}
       reviewEditSlot={reviewEditSlot}
+      runSheetSlot={renderRunSheetSlot}
     />
   )
 }

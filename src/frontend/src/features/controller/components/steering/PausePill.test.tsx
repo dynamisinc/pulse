@@ -3,10 +3,12 @@
  * ---------------------------------------------------------------------------
  * Covers `<PausePill>` (world-steering/03; CTL-023, D5-014/1.3, NFR-001):
  *  - the pill shows the active tier as TEXT + an icon, never colour-only;
- *  - opening the pill reveals the two offered pause tiers (Pause engine /
- *    Freeze world) + Cancel/Pause popover — there is NO "Pause injects" row
- *    (demo-polish C4: no inject queue exists, so nothing is offered, not even a
- *    disabled placeholder);
+ *  - opening the pill reveals the three pause tiers (Pause injects / Pause
+ *    engine / Freeze world) + Cancel/Pause popover. "Pause injects" is a LIVE
+ *    option again (inject-queue 07, IQ-5; demo-polish C4 had removed the
+ *    placeholder): enabled, listed first but NOT the default (the default stays
+ *    Pause ENGINE, as since #449), and applying it sets the existing `injects`
+ *    tier through `setTier` with no confirm step;
  *  - selecting Freeze routes through an explicit confirm step before the tier
  *    takes effect — "Back" returns to the tier list without pausing;
  *  - selecting a non-Freeze tier (engine) applies immediately, no confirm step;
@@ -110,13 +112,14 @@ describe('PausePill — active-tier display (NFR-001: text + icon, never colour-
 })
 
 describe('PausePill — the pause popover', () => {
-  it('opening the pill reveals the two tier options + a Pause action', async () => {
+  it('opening the pill reveals the three tier options + a Pause action', async () => {
     const user = userEvent.setup()
     mockedUsePauseState.mockReturnValue(stub('running'))
     renderWithTheme(<PausePill />)
 
     await user.click(screen.getByTestId('pause-pill'))
 
+    expect(screen.getByTestId('pause-tier-option-injects')).toBeInTheDocument()
     expect(screen.getByTestId('pause-tier-option-engine')).toBeInTheDocument()
     expect(screen.getByTestId('pause-tier-option-freeze')).toBeInTheDocument()
     expect(screen.getByTestId('pause-apply')).toHaveTextContent('Pause')
@@ -133,6 +136,21 @@ describe('PausePill — the pause popover', () => {
     await user.click(screen.getByTestId('pause-apply'))
 
     expect(setTier).toHaveBeenCalledWith('engine')
+    expect(setTier).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('pause-freeze-confirm')).not.toBeInTheDocument()
+  })
+
+  it('selecting Pause injects and applying calls setTier("injects") immediately (no confirm step)', async () => {
+    const user = userEvent.setup()
+    const setTier = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { setTier }))
+    renderWithTheme(<PausePill />)
+
+    await user.click(screen.getByTestId('pause-pill'))
+    await user.click(screen.getByTestId('pause-tier-option-injects'))
+    await user.click(screen.getByTestId('pause-apply'))
+
+    expect(setTier).toHaveBeenCalledWith('injects')
     expect(setTier).toHaveBeenCalledTimes(1)
     expect(screen.queryByTestId('pause-freeze-confirm')).not.toBeInTheDocument()
   })
@@ -161,28 +179,28 @@ describe('PausePill — the pause popover', () => {
   })
 })
 
-describe('PausePill — no "Pause injects" option (demo-polish C4)', () => {
-  // Supersedes the story-07 describe that pinned a DISABLED, INERT injects row
-  // ("No inject queue yet"). There is no inject queue, so the tier is no longer
-  // offered at all; the `injects` TIER still exists in the type/store (the
-  // header pill and server contract know it), only the radio is gone.
-  it('does not render the injects option, its reason text, or any disabled radio', async () => {
+describe('PausePill — Pause injects is a LIVE tier (inject-queue 07, IQ-5)', () => {
+  // Re-adds the option demo-polish C4 removed (its RE-ENABLE note): a REAL control
+  // now that the run sheet's inject queue exists. It is enabled, carries its hint as
+  // text, and drives the existing `injects` tier through the existing action.
+  it('renders an ENABLED Pause injects radio with its consequence text (never colour-only)', async () => {
     const user = userEvent.setup()
     mockedUsePauseState.mockReturnValue(stub('running'))
     renderWithTheme(<PausePill />)
 
     await user.click(screen.getByTestId('pause-pill'))
 
-    expect(screen.queryByTestId('pause-tier-option-injects')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('pause-tier-reason-injects')).not.toBeInTheDocument()
+    const option = screen.getByTestId('pause-tier-option-injects')
+    expect(option).toHaveTextContent('Pause injects')
+    expect(option).toHaveTextContent('World keeps living')
+    expect(option.querySelector('input')).toBeEnabled()
+    // Nothing in the popover is disabled, and the old placeholder copy is gone.
     const popover = screen.getByTestId('pause-popover')
-    expect(popover).not.toHaveTextContent(/pause injects/i)
     expect(popover).not.toHaveTextContent(/no inject queue/i)
-    expect(popover).not.toHaveTextContent(/unavailable/i)
     expect(within(popover).queryAllByRole('radio').filter(r => (r as HTMLInputElement).disabled)).toHaveLength(0)
   })
 
-  it('offers exactly Pause engine then Freeze world, in the tier group', async () => {
+  it('offers Pause injects, Pause engine, Freeze world — in that order — in the tier group', async () => {
     const user = userEvent.setup()
     mockedUsePauseState.mockReturnValue(stub('running'))
     renderWithTheme(<PausePill />)
@@ -190,37 +208,46 @@ describe('PausePill — no "Pause injects" option (demo-polish C4)', () => {
     await user.click(screen.getByTestId('pause-pill'))
 
     const tiers = within(screen.getByRole('radiogroup', { name: 'Pause tier' })).getAllByRole('radio')
-    expect(tiers.map(r => (r as HTMLInputElement).value)).toEqual(['engine', 'freeze'])
+    expect(tiers.map(r => (r as HTMLInputElement).value)).toEqual(['injects', 'engine', 'freeze'])
   })
 
-  it('pre-selects the first offered tier when running, so Pause is never a no-op by default', async () => {
+  it('still pre-selects Pause ENGINE when running: open the pill, press Pause -> the engine (as since #449)', async () => {
     const user = userEvent.setup()
     const setTier = vi.fn()
     mockedUsePauseState.mockReturnValue(stub('running', { setTier }))
     renderWithTheme(<PausePill />)
 
     await user.click(screen.getByTestId('pause-pill'))
+    // Pause injects is listed first but is NOT the default: the demo plan pauses the engine.
     expect(screen.getByTestId('pause-tier-option-engine').querySelector('input')).toBeChecked()
+    expect(screen.getByTestId('pause-tier-option-injects').querySelector('input')).not.toBeChecked()
     await user.click(screen.getByTestId('pause-apply'))
 
     expect(setTier).toHaveBeenCalledWith('engine')
+    expect(setTier).not.toHaveBeenCalledWith('injects')
     expect(setTier).toHaveBeenCalledTimes(1)
   })
 
-  it('still SHOWS an active injects tier on the pill (the tier stays in the type) and falls back to the default radio', async () => {
+  it('while INJECTS PAUSED the pill shows it, the radio is checked, and Resume returns to running', async () => {
     const user = userEvent.setup()
-    const setTier = vi.fn()
-    mockedUsePauseState.mockReturnValue(stub('injects', { setTier }))
+    const resume = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('injects', { resume }))
     renderWithTheme(<PausePill />)
 
     expect(screen.getByTestId('pause-pill')).toHaveTextContent('INJECTS PAUSED')
+    await user.click(screen.getByTestId('pause-pill'))
+    expect(screen.getByTestId('pause-tier-option-injects').querySelector('input')).toBeChecked()
+    await user.click(screen.getByTestId('pause-resume'))
+    expect(resume).toHaveBeenCalledTimes(1)
+  })
+
+  it('the engine / freeze tiers still pre-select when they are the active tier', async () => {
+    const user = userEvent.setup()
+    mockedUsePauseState.mockReturnValue(stub('engine'))
+    renderWithTheme(<PausePill />)
 
     await user.click(screen.getByTestId('pause-pill'))
-    // The radio group never ends up with a value that matches no visible radio.
     expect(screen.getByTestId('pause-tier-option-engine').querySelector('input')).toBeChecked()
-    await user.click(screen.getByTestId('pause-apply'))
-    expect(setTier).toHaveBeenCalledWith('engine')
-    expect(setTier).not.toHaveBeenCalledWith('injects')
   })
 })
 
@@ -287,12 +314,37 @@ describe('PausePill — fully keyboard-operable (NFR-001)', () => {
     await user.keyboard('{Enter}')
     expect(screen.getByTestId('pause-popover')).toBeInTheDocument()
 
-    // Roving radio focus: Tab lands on the checked tier (the default, Pause engine).
+    // Roving radio focus: the checked tier (the default, Pause engine) is the tab stop;
+    // arrow down to Freeze.
     const engineRadio = screen.getByTestId('pause-tier-option-engine').querySelector('input')
     expect(engineRadio).not.toBeNull()
     if (engineRadio) engineRadio.focus()
     await user.keyboard('{ArrowDown}')
     expect(screen.getByTestId('pause-tier-option-freeze').querySelector('input')).toBeChecked()
+  })
+
+  it('Pause injects is reachable and appliable by keyboard alone (focus, Space, Enter)', async () => {
+    const user = userEvent.setup()
+    const setTier = vi.fn()
+    mockedUsePauseState.mockReturnValue(stub('running', { setTier }))
+    renderWithTheme(<PausePill />)
+
+    await user.tab() // the pill
+    await user.keyboard('{Enter}')
+    expect(screen.getByTestId('pause-popover')).toBeInTheDocument()
+
+    // Move off it and back with the arrow keys, then select it with Space.
+    const engineRadio = screen.getByTestId('pause-tier-option-engine').querySelector('input')
+    if (engineRadio) engineRadio.focus()
+    await user.keyboard('{ArrowUp}') // arrow selection wraps to the previous tier: Pause injects
+    const injectsRadio = screen.getByTestId('pause-tier-option-injects').querySelector('input')
+    expect(injectsRadio).toBeChecked()
+    expect(injectsRadio).toHaveFocus()
+
+    screen.getByTestId('pause-apply').focus()
+    await user.keyboard('{Enter}')
+    expect(setTier).toHaveBeenCalledWith('injects')
+    expect(setTier).toHaveBeenCalledTimes(1)
   })
 
   it('the Freeze confirm step is reachable and dismissable by keyboard alone (Tab + Enter)', async () => {
