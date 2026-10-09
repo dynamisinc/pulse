@@ -20,6 +20,15 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { SEEDED_PERSONAS } from '@/features/personas'
+
+// The editor's media field reads F0's library hook (`useMediaLibrary`), which needs the exercise
+// + query providers. These tests drive the EDITOR, not the library, so the hook is stubbed with
+// an empty library (the paste-an-id path, behind "Use media id"); the real library UI is covered
+// by `InjectMediaField.test.tsx` and the console route test.
+vi.mock('@/core/media', async () => {
+  const actual = await vi.importActual<typeof import('@/core/media')>('@/core/media')
+  return { ...actual, useMediaLibrary: () => ({ data: [], isPending: false, isError: false }) }
+})
 import { InjectItemEditor, type InjectItemEditorProps } from './InjectItemEditor'
 import { makeItem, makePost } from './runSheetTestHarness'
 import type { InjectItemWrite } from './types'
@@ -54,6 +63,10 @@ function renderEditor(overrides: Partial<InjectItemEditorProps> = {}) {
 }
 
 const field = (label: RegExp | string): HTMLElement => screen.getByLabelText(label)
+/** Reveals the paste-a-media-id fallback (it sits behind a small toggle). */
+const openMediaIdInput = (): void => {
+  fireEvent.click(screen.getByRole('button', { name: 'Use media id' }))
+}
 const change = (label: RegExp | string, value: string): void => {
   fireEvent.change(field(label), { target: { value } })
 }
@@ -620,6 +633,7 @@ describe('InjectItemEditor — media (alt required) and baseline', () => {
   it('an attached media id with no alt text is refused on the alt field (NFR-001)', async () => {
     const { onSubmit } = renderEditor()
     fillSingle()
+    openMediaIdInput()
     change(/^Add media id/, 'media-123')
     fireEvent.click(screen.getByRole('button', { name: 'Add media' }))
     expect(screen.getByTestId('media-id')).toHaveTextContent('media-123')
@@ -638,6 +652,7 @@ describe('InjectItemEditor — media (alt required) and baseline', () => {
 
   it('Enter in the media id box adds it; a duplicate id is refused; Remove detaches it', () => {
     renderEditor()
+    openMediaIdInput()
     const input = field(/^Add media id/)
     fireEvent.change(input, { target: { value: 'm1' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -651,13 +666,15 @@ describe('InjectItemEditor — media (alt required) and baseline', () => {
 
   it('stops at 4 attached media', () => {
     renderEditor()
+    openMediaIdInput()
     for (const id of ['m1', 'm2', 'm3', 'm4']) {
       change(/^Add media id/, id)
       fireEvent.click(screen.getByRole('button', { name: 'Add media' }))
     }
     expect(screen.getAllByTestId('media-entry')).toHaveLength(4)
-    expect(field(/^Add media id/)).toBeDisabled()
+    change(/^Add media id/, 'm5')
     expect(screen.getByText('Limit of 4 reached')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add media' })).toBeDisabled()
   })
 
   it('an optional engagement baseline is off by default and submits whole numbers', async () => {
