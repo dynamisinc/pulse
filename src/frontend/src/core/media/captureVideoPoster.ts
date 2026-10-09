@@ -115,9 +115,13 @@ export function captureVideoPoster(
       video.onloadedmetadata = null
       video.onseeked = null
       video.onerror = null
-      video.removeAttribute('src')
-      video.load()
-      URL.revokeObjectURL(objectUrl)
+      try {
+        video.removeAttribute('src')
+        video.load()
+      } finally {
+        // Revoke even if stopping the element's load throws, so the blob is never retained.
+        URL.revokeObjectURL(objectUrl)
+      }
     }
     // Settles the promise AT MOST once, releasing resources first.
     const finish = (settle: () => void) => {

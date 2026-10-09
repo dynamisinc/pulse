@@ -314,5 +314,8 @@ describe('captureVideoPoster — never hangs', () => {
     await vi.advanceTimersByTimeAsync(POSTER_CAPTURE_TIMEOUT_MS)
 
     expect(((await result) as Error).message).toMatch(/took too long/)
+    // The object URL is still revoked when stopping the element's load throws.
+    expect(revokeObjectURL).toHaveBeenCalledTimes(1)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:temp-video')
   })
 })
