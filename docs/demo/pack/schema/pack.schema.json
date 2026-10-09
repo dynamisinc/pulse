@@ -1,0 +1,226 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:pulse:schema:pulse.demopack.v1",
+  "title": "Pulse demo content pack (pulse.demopack.v1)",
+  "description": "The seed pack scripts/uat/Seed-DemoContent.ps1 loads into an exercise (demo-polish implementation.md section 1.10). File paths are relative to the folder that holds pack.json. This schema covers the SHAPE. The seeder also enforces the rules a JSON Schema cannot express, before it sends anything: keys are unique, every ref resolves, a reply comes after its parent in the array and not earlier in scenario time, text is at most 280 code points (an emoji counts once), each file exists inside the pack folder, its first bytes are JPEG/PNG/GIF/WebP (images) or MP4/WebM (videos) and match its kind, images are at most 5 MiB and videos at most 100 MiB, a post carries up to 4 images or exactly 1 video (never both), beat ids/orders are unique and reply chains have no loops, and every handle exists in the exercise (checked after sign-in).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "personas", "media", "posts"],
+  "properties": {
+    "$schema": { "type": "string", "description": "Optional editor hint pointing at this file." },
+    "schema": { "const": "pulse.demopack.v1" },
+    "county": { "type": "string", "description": "Informational: the fictional county the pack depicts." },
+    "personas": {
+      "type": "array",
+      "description": "Profile edits for personas that ALREADY exist in the exercise (the seeder never creates personas). Absent field = unchanged; null clears bio, location, avatar or banner.",
+      "items": { "$ref": "#/definitions/persona" }
+    },
+    "media": {
+      "type": "array",
+      "description": "Every uploadable post attachment, by pack-local key.",
+      "items": { "$ref": "#/definitions/media" }
+    },
+    "posts": {
+      "type": "array",
+      "description": "The opening feed. Posted as controller-as-persona in scenario-time order (scenarioTime = anchor - minutesBeforeAnchor); ties keep array order.",
+      "items": { "$ref": "#/definitions/post" }
+    },
+    "runSheet": { "$ref": "#/definitions/runSheet" }
+  },
+  "definitions": {
+    "key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "A pack-local key: letters, digits, '_' and '-', 1 to 64 characters."
+    },
+    "handle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50,
+      "pattern": "^[^@\\s]+$",
+      "description": "A persona handle without '@' (e.g. FulcoEM). Matched case-insensitively against the exercise's personas."
+    },
+    "file": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)",
+      "description": "A path relative to the pack folder (e.g. media/water.jpg). It must stay inside the pack folder."
+    },
+    "alt": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "pattern": "\\S",
+      "description": "Alt text (NFR-001). Required, not blank, at most 1000 characters."
+    },
+    "postText": {
+      "type": "string",
+      "maxLength": 280,
+      "description": "At most 280 code points. The seeder counts code points; a schema validator may count differently for emoji."
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The staff-only seeded engagement (the fictional crowd). Integers 0 to 1,000,000.",
+      "properties": {
+        "like": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "repost": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "reply": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+      }
+    },
+    "persona": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["handle"],
+      "properties": {
+        "handle": { "$ref": "#/definitions/handle" },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "\\S",
+          "description": "1 to 100 characters, at least one visible; no control or bidirectional-override characters."
+        },
+        "bio": {
+          "type": ["string", "null"],
+          "maxLength": 512,
+          "description": "At most 512 characters; line breaks and tabs allowed; null clears it."
+        },
+        "location": {
+          "type": ["string", "null"],
+          "maxLength": 100,
+          "description": "At most 100 characters; null clears it."
+        },
+        "verified": { "type": "boolean" },
+        "avatar": {
+          "oneOf": [{ "$ref": "#/definitions/file" }, { "type": "null" }],
+          "description": "An image file (uploaded, then set as avatarMediaId); null clears the avatar."
+        },
+        "banner": {
+          "oneOf": [{ "$ref": "#/definitions/file" }, { "type": "null" }],
+          "description": "An image file (uploaded, then set as bannerMediaId); null clears the banner."
+        }
+      }
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "file", "kind", "alt"],
+      "properties": {
+        "key": { "$ref": "#/definitions/key" },
+        "file": { "$ref": "#/definitions/file" },
+        "kind": { "enum": ["image", "video"] },
+        "poster": {
+          "$ref": "#/definitions/file",
+          "description": "Videos only: an image uploaded first and passed as the video's posterMediaId."
+        },
+        "width": { "type": "integer", "minimum": 1, "maximum": 16384 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 16384 },
+        "durationSec": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 3600,
+          "description": "Videos only."
+        },
+        "alt": { "$ref": "#/definitions/alt" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "image" } } },
+          "then": { "not": { "anyOf": [{ "required": ["poster"] }, { "required": ["durationSec"] }] } }
+        }
+      ]
+    },
+    "postMedia": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref"],
+      "properties": {
+        "ref": { "$ref": "#/definitions/key" },
+        "alt": { "$ref": "#/definitions/alt", "description": "Overrides the media item's alt for this post." }
+      }
+    },
+    "post": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "persona", "text", "minutesBeforeAnchor"],
+      "properties": {
+        "key": { "$ref": "#/definitions/key" },
+        "persona": { "$ref": "#/definitions/handle" },
+        "text": { "$ref": "#/definitions/postText" },
+        "minutesBeforeAnchor": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "scenarioTime = anchor - this many minutes. The anchor defaults to the time of the run (-ScenarioAnchor overrides it)."
+        },
+        "media": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "$ref": "#/definitions/postMedia" },
+          "description": "Up to 4 images or exactly 1 video, never both."
+        },
+        "replyTo": {
+          "$ref": "#/definitions/key",
+          "description": "The key of the parent post, which must appear EARLIER in this array."
+        },
+        "baseline": { "$ref": "#/definitions/baseline" }
+      }
+    },
+    "beatMedia": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref"],
+      "properties": {
+        "ref": { "$ref": "#/definitions/key", "description": "A pack media key; exported as its uploaded mediaId." },
+        "alt": { "$ref": "#/definitions/alt", "description": "Defaults to the media item's alt." }
+      }
+    },
+    "beat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "order", "title", "scenarioMinute", "persona", "text"],
+      "description": "A pulse.runsheet.v1 beat (implementation.md section 1.9), except that media use pack keys (ref) and replyTo may name a pack post (postKey). The seeder rewrites both to real ids on export.",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,40}$" },
+        "order": { "type": "integer", "minimum": 1 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S" },
+        "scenarioMinute": { "type": "integer", "minimum": 0 },
+        "persona": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["handle"],
+          "properties": { "handle": { "$ref": "#/definitions/handle" } }
+        },
+        "text": { "$ref": "#/definitions/postText" },
+        "media": { "type": "array", "maxItems": 4, "items": { "$ref": "#/definitions/beatMedia" } },
+        "replyTo": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["beatId"],
+              "properties": { "beatId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,40}$" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["postKey"],
+              "properties": { "postKey": { "$ref": "#/definitions/key" } }
+            }
+          ]
+        },
+        "engagementBaseline": { "$ref": "#/definitions/baseline" },
+        "notes": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "runSheet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "beats"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S" },
+        "beats": { "type": "array", "maxItems": 200, "items": { "$ref": "#/definitions/beat" } }
+      }
+    }
+  }
+}
