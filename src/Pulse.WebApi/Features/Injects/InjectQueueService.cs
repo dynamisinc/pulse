@@ -1232,12 +1232,23 @@ public sealed partial class InjectQueueService
                 select new { post.Id, post.InjectItemId }).ToDictionaryAsync(
                     row => row.Id, row => row.InjectItemId, cancellationToken);
 
+        // Library media, resolved in scope (the explicit predicate restates the central filter, as the funnel does):
+        // another exercise's asset is invisible here, exactly like an unknown id. Kinds feed the 4-images-or-1-video rule.
+        var assetIds = draft.Posts.SelectMany(post => post.Media).Select(media => media.AssetId).Distinct().ToList();
+        var mediaKinds = assetIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _dbContext.MediaAssets
+                .AsNoTracking()
+                .Where(asset => assetIds.Contains(asset.Id) && asset.ExerciseId == exerciseId)
+                .ToDictionaryAsync(asset => asset.Id, asset => asset.Kind, cancellationToken);
+
         var referenceFacts = new InjectReferenceFacts(
             personasInScope.ToHashSet(),
             roster.Select(entry => entry.StaffUserId).ToHashSet(),
             replyTargets,
             editedItem?.Id,
-            editedItem is null ? [] : InjectTransitions.LiveChildren(editedItem).Select(post => post.Id).ToHashSet());
+            editedItem is null ? [] : InjectTransitions.LiveChildren(editedItem).Select(post => post.Id).ToHashSet(),
+            mediaKinds);
 
         return InjectItemValidator.CheckReferences(draft, referenceFacts);
     }
@@ -1391,7 +1402,7 @@ public sealed partial class InjectQueueService
 
             child.PersonaId = source.PersonaId;
             child.Text = source.Text;
-            child.Media = source.Media.Select(media => new InjectMediaRef { MediaId = media.MediaId, Alt = media.Alt }).ToList();
+            child.Media = source.Media.Select(media => new InjectMediaRef { MediaId = media.AssetId.ToString(), Alt = media.Alt }).ToList();
             child.ReplyToInjectPostId = source.ReplyToInjectPostId
                 ?? (source.ReplyToSequence is { } sequence ? children[sequence - 1].Id : null);
             child.ReplyToPostId = source.ReplyToPostId;

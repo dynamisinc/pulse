@@ -23,6 +23,7 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Injects;
+using Pulse.WebApi.Features.Media;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
@@ -103,6 +104,12 @@ internal sealed class InjectTestHost : IAsyncDisposable
         builder.Services.AddExerciseClock();
         builder.Services.AddPauseTierSteering();
         builder.Services.AddSocialPostWrite();
+
+        // As Program.cs wires them: B2's REAL reply-parent resolver (the funnel refuses every reply without it), and a
+        // deterministic stand-in for BM's URL signer (BP's own test double — the real one needs blob storage config).
+        builder.Services.AddSocialThreads();
+        builder.Services.RemoveAll<IMediaUrlSigner>();
+        builder.Services.AddScoped<IMediaUrlSigner>(sp => new FakeMediaUrlSigner(sp.GetRequiredService<IExerciseContext>(), new SignerProbe()));
 
         var recordingBroadcaster = new FakeFeedBroadcaster();
         builder.Services.AddSingleton(recordingBroadcaster);
@@ -225,6 +232,28 @@ internal sealed class InjectTestHost : IAsyncDisposable
         });
         await db.SaveChangesAsync();
         return staffUserId;
+    }
+
+    /// <summary>Seeds a library media asset in the exercise (as BM's upload would), uploaded by <paramref name="uploadedBy"/>.</summary>
+    public async Task<Guid> AddMediaAssetAsync(Guid exerciseId, string kind = MediaKinds.Image, string uploadedBy = "another-staff-user")
+    {
+        var id = Guid.NewGuid();
+        await using var db = Db(exerciseId);
+        db.MediaAssets.Add(new MediaAsset
+        {
+            Id = id,
+            ExerciseId = exerciseId,
+            Kind = kind,
+            ContentType = kind == MediaKinds.Video ? "video/mp4" : "image/jpeg",
+            BlobName = $"{exerciseId:N}/{id:N}",
+            Bytes = 1024,
+            OriginalFileName = kind == MediaKinds.Video ? "tap.mp4" : "brown-tap-water.jpg",
+            UploadedByHumanId = uploadedBy,
+            CreatedScenarioTime = DateTimeOffset.UtcNow,
+            CreatedWallClock = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        return id;
     }
 
     public async Task<Guid> AddPersonaAsync(Guid exerciseId)

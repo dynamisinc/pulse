@@ -105,8 +105,8 @@ public static class InjectTransitions
                 ?? (source.ReplyToSequence is { } sequence ? echoed[sequence - 1] ?? Guid.NewGuid() : null);
             var unchanged = source.PersonaId == published.PersonaId
                 && source.Text == published.Text
-                && source.Media.Select(media => (media.MediaId, media.Alt))
-                    .SequenceEqual(published.Media.Select(media => (media.MediaId, media.Alt)))
+                && source.Media.Select(media => (MediaId: media.AssetId.ToString(), media.Alt))
+                    .SequenceEqual(published.Media.Select(media => (MediaId: media.MediaId.ToLowerInvariant(), media.Alt)))
                 && replyTo == published.ReplyToInjectPostId
                 && source.ReplyToPostId == published.ReplyToPostId
                 && source.BaselineLike == published.BaselineLike

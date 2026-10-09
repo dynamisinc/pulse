@@ -151,6 +151,7 @@ public sealed class InjectEndpointsTests
         await using var host = await StartAsync();
         var seeded = await ActAsControllerAsync(host);
         var existingPost = Guid.NewGuid();
+        var photo = await host.AddMediaAssetAsync(seeded.ExerciseId);
 
         var response = await host.CreateAsync(new
         {
@@ -162,7 +163,7 @@ public sealed class InjectEndpointsTests
                 {
                     personaId = seeded.PersonaIds[0].ToString(),
                     text = "Look at this",
-                    media = new[] { new { mediaId = "beat3-photo", alt = "Brown tap water in a glass" } },
+                    media = new[] { new { mediaId = photo.ToString(), alt = "Brown tap water in a glass" } },
                     replyTo = new { postId = existingPost.ToString() },
                     engagementBaseline = new { like = 120, repost = 14 },
                 },
@@ -172,12 +173,43 @@ public sealed class InjectEndpointsTests
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var post = json.RootElement.GetProperty("posts")[0];
 
-        post.GetProperty("media")[0].GetProperty("mediaId").GetString().Should().Be("beat3-photo");
+        post.GetProperty("media")[0].GetProperty("mediaId").GetString().Should().Be(photo.ToString());
         post.GetProperty("media")[0].GetProperty("alt").GetString().Should().Be("Brown tap water in a glass");
         post.GetProperty("replyTo").GetProperty("postId").GetString().Should().Be(existingPost.ToString());
         post.GetProperty("replyTo").TryGetProperty("injectPostId", out _).Should().BeFalse();
         post.GetProperty("engagementBaseline").GetProperty("like").GetInt32().Should().Be(120);
         post.GetProperty("engagementBaseline").TryGetProperty("reply", out _).Should().BeFalse();
+    }
+
+    [RequiresDockerFact]
+    public async Task Create_MediaIsResolvedAgainstTheExercisesLibrary_WithTheFunnelsRules()
+    {
+        await using var host = await StartAsync();
+        var seeded = await ActAsControllerAsync(host);
+        var other = await host.SeedExerciseAsync();
+        var image = await host.AddMediaAssetAsync(seeded.ExerciseId);
+        var video = await host.AddMediaAssetAsync(seeded.ExerciseId, MediaKinds.Video);
+        var secondVideo = await host.AddMediaAssetAsync(seeded.ExerciseId, MediaKinds.Video);
+        var othersImage = await host.AddMediaAssetAsync(other.ExerciseId);
+
+        async Task<string?> DetailFor(params Guid[] media)
+        {
+            var response = await host.CreateAsync(new
+            {
+                kind = "post",
+                title = "media",
+                posts = new[] { new { personaId = seeded.PersonaIds[0].ToString(), text = "x", media = media.Select(id => new { mediaId = id.ToString(), alt = "alt" }).ToArray() } },
+            });
+            return response.StatusCode == HttpStatusCode.Created ? null : (await InjectTestHost.ReadProblemAsync(response)).Detail;
+        }
+
+        (await DetailFor(image)).Should().BeNull("a library image of this exercise");
+        (await DetailFor(video)).Should().BeNull("exactly one video");
+        (await DetailFor(othersImage)).Should().Be(
+            await DetailFor(Guid.NewGuid()), "another exercise's asset reads exactly like an unknown one (COR-001)")
+            .And.Be("Post 1: One or more media items could not be found.");
+        (await DetailFor(video, secondVideo)).Should().Be("Post 1: A post may carry up to 4 images or exactly 1 video, never both.");
+        (await DetailFor(image, video)).Should().Be("Post 1: A post may carry up to 4 images or exactly 1 video, never both.");
     }
 
     [RequiresDockerFact]
@@ -251,6 +283,7 @@ public sealed class InjectEndpointsTests
         await using var host = await StartAsync();
         var seeded = await ActAsControllerAsync(host);
         var item = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 2));
+        var photo = await host.AddMediaAssetAsync(seeded.ExerciseId);
 
         var response = await host.PutAsync(item.Id, new
         {
@@ -265,7 +298,7 @@ public sealed class InjectEndpointsTests
                     id = item.Posts[0].Id,
                     personaId = seeded.PersonaIds[1].ToString(),
                     text = "first, revised",
-                    media = new[] { new { mediaId = "beat3-photo", alt = "Brown tap water" } },
+                    media = new[] { new { mediaId = photo.ToString(), alt = "Brown tap water" } },
                 },
                 new { id = item.Posts[1].Id, personaId = seeded.PersonaIds[2].ToString(), text = "replying to the first", replyTo = new { injectPostId = item.Posts[0].Id } },
                 Post(seeded.PersonaIds[0], "a new third"),
@@ -283,7 +316,7 @@ public sealed class InjectEndpointsTests
         await using (var db = host.Db(seeded.ExerciseId))
         {
             var first = await db.InjectItemPosts.SingleAsync(p => p.Id == Guid.Parse(item.Posts[0].Id));
-            first.Media.Should().ContainSingle().Which.MediaId.Should().Be("beat3-photo", "the media column is rewritten on edit");
+            first.Media.Should().ContainSingle().Which.MediaId.Should().Be(photo.ToString(), "the media column is rewritten on edit");
             (await db.InjectItemPosts.SingleAsync(p => p.Id == Guid.Parse(item.Posts[1].Id))).ReplyToInjectPostId
                 .Should().Be(Guid.Parse(item.Posts[0].Id));
         }

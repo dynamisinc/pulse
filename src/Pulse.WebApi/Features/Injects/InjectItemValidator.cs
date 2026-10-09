@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Injects;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Social;
 
 /// <summary>
@@ -46,8 +47,17 @@ public static class InjectItemValidator
     /// <summary>The maximum media attachments per post.</summary>
     public const int MaxMedia = 4;
 
-    /// <summary>The maximum media id length (a GUID string fits comfortably).</summary>
-    public const int MaxMediaIdLength = 64;
+    /// <summary>
+    /// The ONE message for a media id that does not resolve to a library asset of this exercise — unparseable, unknown
+    /// or another exercise's (COR-001). The funnel's own text (PostIngestService), so authoring and fire agree.
+    /// </summary>
+    public const string MediaNotFoundMessage = "One or more media items could not be found.";
+
+    /// <summary>The media count/kind rule, in the funnel's own words: up to 4 images or exactly 1 video, never mixed.</summary>
+    public const string MediaCountMessage = "A post may carry up to 4 images or exactly 1 video, never both.";
+
+    /// <summary>The longest RAW alt text accepted before sanitizing — the funnel's DoS bound (4 × 1000).</summary>
+    private const int MaxRawAltLength = 4 * MaxAltLength;
 
     /// <summary>The smallest burst.</summary>
     public const int MinBurstPosts = 2;
@@ -217,6 +227,11 @@ public static class InjectItemValidator
                 return $"{label}: personaId does not name a persona in this exercise.";
             }
 
+            if (MediaError(post, facts.MediaKindsInScope) is { } mediaError)
+            {
+                return $"{label}: {mediaError}";
+            }
+
             if (post.ReplyToInjectPostId is not { } target)
             {
                 continue;
@@ -245,6 +260,34 @@ public static class InjectItemValidator
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The media rules that need the asset table, mirroring the funnel: every id must be a library asset of THIS
+    /// exercise (unknown and cross-exercise read the same), and the attachments are up to 4 images or exactly 1 video,
+    /// never mixed.
+    /// </summary>
+    private static string? MediaError(InjectPostDraft post, IReadOnlyDictionary<Guid, string> kindsInScope)
+    {
+        if (post.Media.Count == 0)
+        {
+            return null;
+        }
+
+        var kinds = new List<string>(post.Media.Count);
+        foreach (var media in post.Media)
+        {
+            if (!kindsInScope.TryGetValue(media.AssetId, out var kind))
+            {
+                return MediaNotFoundMessage;
+            }
+
+            kinds.Add(kind);
+        }
+
+        var videos = kinds.Count(kind => kind == MediaKinds.Video);
+        var images = kinds.Count(kind => kind == MediaKinds.Image);
+        return videos + images != kinds.Count || (videos > 0 && kinds.Count != 1) ? MediaCountMessage : null;
     }
 
     /// <summary>Counts the code points (runes) in <paramref name="value"/>.</summary>
@@ -299,32 +342,49 @@ public static class InjectItemValidator
         var media = new List<InjectMediaDraft>();
         if (post.Media is { Count: > 0 } requested)
         {
+            // The funnel's own rules and messages (PostIngestService.ResolveMediaAsync), so a script that passes here
+            // is not refused at fire for the same reason. Kinds (images vs one video) need the asset table: phase 2.
             if (requested.Count > MaxMedia)
             {
-                return (null, $"{label}: at most {MaxMedia} media items may be attached.");
+                return (null, $"{label}: {MediaCountMessage}");
             }
 
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seen = new HashSet<Guid>();
             foreach (var item in requested)
             {
-                var mediaId = item?.MediaId?.Trim();
-                if (string.IsNullOrEmpty(mediaId) || mediaId.Length > MaxMediaIdLength)
+                if (string.IsNullOrWhiteSpace(item?.MediaId))
                 {
                     return (null, $"{label}: every media item needs a mediaId.");
                 }
 
-                if (!seen.Add(mediaId))
+                if (!Guid.TryParse(item.MediaId.Trim(), out var assetId) || assetId == Guid.Empty)
                 {
-                    return (null, $"{label}: the same media item is attached twice.");
+                    return (null, $"{label}: {MediaNotFoundMessage}");
                 }
 
-                var alt = Clean(item!.Alt);
-                if (alt is null || CodePoints(alt) is < 1 or > MaxAltLength)
+                if (!seen.Add(assetId))
                 {
-                    return (null, $"{label}: every media item needs alt text of 1 to {MaxAltLength} characters.");
+                    return (null, $"{label}: The same mediaId cannot be attached twice.");
                 }
 
-                media.Add(new InjectMediaDraft(mediaId, alt));
+                // Alt length is UTF-16 units after sanitizing, exactly as the funnel measures it (NFR-001 + NFR-004).
+                if (item.Alt is { Length: > MaxRawAltLength })
+                {
+                    return (null, $"{label}: alt text must be at most {MaxAltLength} characters.");
+                }
+
+                var alt = Clean(item.Alt);
+                if (alt is null)
+                {
+                    return (null, $"{label}: alt text is required on every media item.");
+                }
+
+                if (alt.Length > MaxAltLength)
+                {
+                    return (null, $"{label}: alt text must be at most {MaxAltLength} characters.");
+                }
+
+                media.Add(new InjectMediaDraft(assetId, alt));
             }
         }
 
@@ -464,9 +524,9 @@ public sealed record InjectPostDraft(
     int? BaselineReply);
 
 /// <summary>A validated media reference.</summary>
-/// <param name="MediaId">The asset id.</param>
+/// <param name="AssetId">The library asset id.</param>
 /// <param name="Alt">The sanitized alt text.</param>
-public sealed record InjectMediaDraft(string MediaId, string Alt);
+public sealed record InjectMediaDraft(Guid AssetId, string Alt);
 
 /// <summary>
 /// The in-scope facts <see cref="InjectItemValidator.CheckReferences"/> checks a draft against. Every set holds only
@@ -477,9 +537,11 @@ public sealed record InjectMediaDraft(string MediaId, string Alt);
 /// <param name="ReplyTargetsInScope">The draft's scripted reply targets that exist in a live item of this exercise, mapped to their item.</param>
 /// <param name="EditedItemId">The item being edited, or <c>null</c> on create.</param>
 /// <param name="EditedItemChildIds">The edited item's live child ids; empty on create.</param>
+/// <param name="MediaKindsInScope">The draft's media asset ids found in this exercise's library, mapped to their kind.</param>
 public sealed record InjectReferenceFacts(
     IReadOnlySet<Guid> PersonasInScope,
     IReadOnlySet<Guid> Roster,
     IReadOnlyDictionary<Guid, Guid> ReplyTargetsInScope,
     Guid? EditedItemId,
-    IReadOnlySet<Guid> EditedItemChildIds);
+    IReadOnlySet<Guid> EditedItemChildIds,
+    IReadOnlyDictionary<Guid, string> MediaKindsInScope);
