@@ -147,6 +147,77 @@ public sealed class InjectRichPostFunnelTests
         args.Should().ContainSingle().Which.Should().BeOfType<ParticipantPostDto>("the participant-safe projection");
     }
 
+    // ---- W-2: the funnel still refuses at fire what changed after authoring --------------------------
+
+    [RequiresDockerFact]
+    public async Task AReplyParentTakenDownAfterAuthoring_FailsAtFire_WithTheFunnelsMessage_AndCanBeRetried()
+    {
+        _fixture.ConnectionString.Should().NotBeNull();
+        await using var host = await InjectTestHost.StartAsync(_fixture.ConnectionString!);
+        var seeded = await host.SeedExerciseAsync();
+        host.ActAs(seeded.ExerciseId, seeded.StaffUserId);
+        var parent = await host.AddPostAsync(seeded.ExerciseId, seeded.PersonaIds[1]);
+        var item = await host.CreateOkAsync(InjectTestHost.PostItem(seeded.PersonaIds[0], "@resident same here", new { postId = parent.ToString() }));
+
+        await host.SetPostTakenDownAsync(seeded.ExerciseId, parent, takenDown: true); // B6 takedown between save and fire
+        var fired = await host.ActionOkAsync(item.Guid, "fire");
+
+        fired.Status.Should().Be("failed", "nothing is marked fired that the funnel did not create");
+        fired.Error.Should().Be("parentPostId does not name a post in this exercise.", "B2's resolver refused it in the funnel");
+        fired.Posts.Single().Should().Match<WirePost>(p => p.Status == "failed" && p.FiredPostId == null);
+        (await PostCountAsync(host, seeded, item)).Should().Be(0, "no post was created");
+
+        await host.SetPostTakenDownAsync(seeded.ExerciseId, parent, takenDown: false);
+        var retried = await host.ActionOkAsync(item.Guid, "retry");
+        retried.Status.Should().Be("fired", "Retry is still possible once the parent is back");
+        await using var db = host.Db(seeded.ExerciseId);
+        (await db.Posts.SingleAsync(p => p.InjectId == item.Id)).ParentPostId.Should().Be(parent);
+    }
+
+    [RequiresDockerFact]
+    public async Task AMediaAssetGoneAtFire_FailsWithTheFunnelsMessage_AndCanBeRetried()
+    {
+        _fixture.ConnectionString.Should().NotBeNull();
+        await using var host = await InjectTestHost.StartAsync(_fixture.ConnectionString!);
+        var seeded = await host.SeedExerciseAsync();
+        host.ActAs(seeded.ExerciseId, seeded.StaffUserId);
+        var photo = await host.AddMediaAssetAsync(seeded.ExerciseId);
+        var item = await host.CreateOkAsync(new
+        {
+            kind = "post",
+            title = "photo",
+            posts = new[] { new { personaId = seeded.PersonaIds[0].ToString(), text = "look", media = new[] { new { mediaId = photo.ToString(), alt = "brown water" } } } },
+        });
+
+        MediaAsset removed;
+        await using (var db = host.Db(seeded.ExerciseId))
+        {
+            removed = await db.MediaAssets.AsNoTracking().SingleAsync(a => a.Id == photo);
+            db.MediaAssets.Remove(await db.MediaAssets.SingleAsync(a => a.Id == photo));
+            await db.SaveChangesAsync();
+        }
+
+        var fired = await host.ActionOkAsync(item.Guid, "fire");
+
+        fired.Status.Should().Be("failed");
+        fired.Error.Should().Be("One or more media items could not be found.", "the funnel's own media message");
+        (await PostCountAsync(host, seeded, item)).Should().Be(0);
+
+        await using (var db = host.Db(seeded.ExerciseId))
+        {
+            db.MediaAssets.Add(removed);
+            await db.SaveChangesAsync();
+        }
+
+        (await host.ActionOkAsync(item.Guid, "retry")).Status.Should().Be("fired", "Retry is still possible once the asset is back");
+    }
+
+    private static async Task<int> PostCountAsync(InjectTestHost host, SeededExercise seeded, WireItem item)
+    {
+        await using var db = host.Db(seeded.ExerciseId);
+        return await db.Posts.CountAsync(p => p.InjectId == item.Id);
+    }
+
     private sealed class RecordingClientProxy : IClientProxy
     {
         private readonly string _group;
