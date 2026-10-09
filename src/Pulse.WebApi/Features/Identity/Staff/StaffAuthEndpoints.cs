@@ -86,6 +86,7 @@ public static class StaffAuthEndpoints
         // below stay gated (they already fail closed via ICurrentStaffSessionAccessor, unchanged).
         endpoints.MapPost("/api/auth/staff/login", StaffLoginAsync)
             .RequireRateLimiting(StaffLoginRateLimitPolicy)
+            .WithLoginBodyLimit()
             .AllowAnonymousPreAuth();
         endpoints.MapGet("/api/staff/assignments", GetAssignmentsAsync);
         endpoints.MapPost("/api/staff/active-exercise", SetActiveExerciseAsync);

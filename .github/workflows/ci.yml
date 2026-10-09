@@ -10,7 +10,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    # Also gate STACKED PRs (a wave PR based on the previous wave's branch), so each layer of a stack
+    # gets Gate 0 before the one below it merges, not only once it is retargeted to main.
+    branches: [main, 'claude/**', 'feature/**']
   push:
     branches: [main]
 

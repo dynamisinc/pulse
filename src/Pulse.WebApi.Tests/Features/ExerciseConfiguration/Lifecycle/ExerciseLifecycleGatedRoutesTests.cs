@@ -21,6 +21,7 @@ public sealed class ExerciseLifecycleGatedRoutesTests
                 "/api/threads",
                 "/api/personas",
                 "/api/posts",
+                "/api/media",
                 "/api/shell-state",
                 "/api/chrome-config",
                 "/api/brand-tokens",
@@ -28,7 +29,8 @@ public sealed class ExerciseLifecycleGatedRoutesTests
                 "/api/alerts",
                 "/api/overlay-state",
             ],
-            "the covered set is implementation.md's 'participant-gating seam' list, verbatim");
+            "the covered set is implementation.md's 'participant-gating seam' list, verbatim, plus demo-polish BM's "
+            + "/api/media (implementation.md demo-polish §1.6)");
 
     /// <summary>AC3: every covered participant route matches, including the templated thread route.</summary>
     [Theory]
@@ -36,6 +38,7 @@ public sealed class ExerciseLifecycleGatedRoutesTests
     [InlineData("/api/threads/6b1f3e6c-2f60-4a3c-9d4a-2a4d1f7bd6d1")]
     [InlineData("/api/personas")]
     [InlineData("/api/posts")]
+    [InlineData("/api/media")]
     [InlineData("/api/shell-state")]
     [InlineData("/api/chrome-config")]
     [InlineData("/api/brand-tokens")]
@@ -61,6 +64,7 @@ public sealed class ExerciseLifecycleGatedRoutesTests
     [InlineData("/api/staff/exercise-settings")]
     [InlineData("/api/staff/exercise-lifecycle")]
     [InlineData("/api/staff/assignments")]
+    [InlineData("/api/staff/media")]
     [InlineData("/api/telemetry")]
     [InlineData("/api/ops/bootstrap-exercise")]
     [InlineData("/health")]
@@ -93,6 +97,8 @@ public sealed class ExerciseLifecycleGatedRoutesTests
     [InlineData("/api/personas-export", false)]
     [InlineData("/api/posts/123/react", true)]
     [InlineData("/api/feed/page/2", true)]
+    [InlineData("/api/media-library", false)]
+    [InlineData("/dev-media/x.png", false)]
     public void IsGated_MatchesWholeSegmentsNotStringPrefixes(string path, bool gated) =>
         ExerciseLifecycleGatedRoutes.IsGated(new PathString(path)).Should().Be(gated);
 }

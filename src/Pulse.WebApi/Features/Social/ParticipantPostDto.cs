@@ -17,15 +17,22 @@ using Pulse.WebApi.Data.Entities;
 /// frozen <c>feedService.ts</c> <c>isPost</c> guard (<c>id</c>, <c>authorPersonaId</c>, <c>text</c>,
 /// <c>scenarioTime</c>, <c>counts.{reply,repost,like}</c>); every property carries an explicit
 /// <see cref="JsonPropertyNameAttribute"/> so the shape is self-evident and independent of host serializer
-/// config. <c>media</c>/<c>linkPreview</c> are OMITTED this phase — they are optional in the frozen
-/// contract and there is no media storage in B1; feeds-discovery adds them later (absent optional fields
-/// are contract-valid).
+/// config. <c>linkPreview</c> is never sent by the server (optional in the frozen contract).
 /// <para>
 /// <b>demo-polish B1 skeleton (implementation.md §1.4).</b> The class is deliberately UNSEALED with a
 /// protected copy constructor so the thread read can derive its reply shape from it, and it carries the
 /// optional <see cref="Media"/> / <see cref="InReplyTo"/> / <see cref="Viewer"/> members — each OMITTED from the
 /// wire when null. <see cref="FromPost"/> never sets them, so its output is byte-identical to before; populating
 /// them is the participant projector's job, not this type's.
+/// </para>
+/// <para>
+/// <b>demo-polish BP.</b> <see cref="ParticipantPostProjector"/> is the read-side producer: counts = baseline +
+/// real, signed media URLs, <c>inReplyTo</c>, and <c>viewer</c> only for a persona-bound participant read. Every
+/// read surface (feed, thread, the ingest broadcast of a post with media or a parent) goes through it; the
+/// projector is always registered (<c>TryAddPostSeamFallbacks</c>). <see cref="FromPost"/> is the participant-safe
+/// narrowing the ingest path builds its baseline view on (a new post with no media and no parent, or a projection
+/// that failed after the commit), and the post-write endpoint's last-resort participant shape. A derived
+/// shape (DP-17) adds only participant-safe members and must be serialized through its derived declared type.
 /// </para>
 /// </remarks>
 public class ParticipantPostDto

@@ -56,6 +56,10 @@ public static class ExerciseLifecycleGatedRoutes
         "/api/personas",
         "/api/posts",
 
+        // demo-polish BM: the media upload (a participant-world write). Archived/build → 403 for participants;
+        // staff stay exempt like everywhere else on this list. /api/staff/media is NOT covered (staff surface).
+        "/api/media",
+
         // All six participant-shell config GETs.
         "/api/shell-state",
         "/api/chrome-config",

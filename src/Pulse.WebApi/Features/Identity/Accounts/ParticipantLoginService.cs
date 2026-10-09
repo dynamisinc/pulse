@@ -4,7 +4,6 @@ using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Sessions;
-using Pulse.WebApi.Features.Social;
 
 /// <summary>
 /// The participant credential-login funnel behind <c>POST /api/auth/login</c> (COR-011). It verifies a
@@ -36,6 +35,12 @@ using Pulse.WebApi.Features.Social;
 /// </remarks>
 public sealed class ParticipantLoginService
 {
+    /// <summary>
+    /// The longest RAW username a login accepts (4 × <see cref="AccountFieldRules.MaxUsernameLength"/>), checked
+    /// before sanitizing. Longer is a 400 (DoS guard on an anonymous endpoint).
+    /// </summary>
+    public const int MaxRawUsernameLength = 4 * AccountFieldRules.MaxUsernameLength;
+
     private const string ParticipantSessionKind = "participant";
     private const string ParticipantActorKind = "participant";
 
@@ -101,10 +106,21 @@ public sealed class ParticipantLoginService
             return ParticipantLoginResult.Invalid($"password is required (1-{AccountFieldRules.MaxPasswordLength} characters).");
         }
 
-        var username = PostSanitizer.Sanitize(rawUsername).Trim();
-        if (username.Length == 0)
+        // DoS guard (Wave 1b Gate-2 M-1): this endpoint is ANONYMOUS, so the raw handle is bounded before the
+        // sanitizer sees it. The raw cap is 4 × MaxUsernameLength on purpose: a handle that only LOOKS long because
+        // of markup still reaches the normal validation below, and a 257-1,024-character handle reaches it too and
+        // gets the SAME 400 text from AccountFieldRules.TryNormalizeUsername (the rule accounts are created under,
+        // so no stored handle is longer). The two refusals are indistinguishable by message (Wave 3 Gate-2 S-5).
+        if (rawUsername.Length > MaxRawUsernameLength)
         {
-            return ParticipantLoginResult.Invalid("username is required.");
+            return ParticipantLoginResult.Invalid($"username must be at most {AccountFieldRules.MaxUsernameLength} characters.");
+        }
+
+        // The same trim → sanitize → trim → length rule the account was stored under, so a legitimate handle
+        // round-trips to the stored value and an impossible one is a 400, not a credential check.
+        if (!AccountFieldRules.TryNormalizeUsername(rawUsername, out var username, out var usernameError))
+        {
+            return ParticipantLoginResult.Invalid(usernameError);
         }
 
         // 2. Scope comes ONLY from the resolved exercise context (host-resolved for this pre-auth request), never

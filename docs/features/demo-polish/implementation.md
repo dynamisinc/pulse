@@ -34,6 +34,8 @@ storyline (plan §3). Every story that is affected cites its decision ID.
 | DP-15 | `PostReaction` is soft-deleted: `DeletedAt` (nullable, **scenario time**, the exercise clock, like `Post.DeletedAt`; COR-053), plus a unique index filtered on `DeletedAt IS NULL`. Un-like or un-repost sets `DeletedAt`; re-like inserts a new active row; counts and `viewer` state read active rows only. | XC-010 ("soft delete everywhere; nothing is hard-deleted during a live exercise"). The first draft's unlike had to hard-delete. Found by Copilot on #418 and folded into B1 while it was building. The inactive rows also give the AAR a like/unlike history. |
 | DP-16 | **Cross-exercise references are enforced by the services, not the database.** The single-column FKs (as frozen) do not stop a `PostMediaItem`, `PostReaction`, reply parent, poster or persona avatar/banner in exercise A from naming a row in exercise B. Reads are already double-guarded: the central filter drops out-of-scope rows from joins, and `IMediaUrlSigner` throws on a scope mismatch. **Every consumer's Gate-1 (BP, B2, B3, BM, PE-BE) must include a test where exercise B's real id, written under scope A, gets the same 4xx as an unknown id, with zero rows written.** Composite `(ExerciseId, X)` FKs are a post-demo option. | B1 Gate-1 M-1. Composite FKs would change the frozen FK shapes, add alternate keys on `Posts` and `MediaAssets`, and make `ExerciseId` immutable, the day before the first backend deploy. 🧑 **Tom ratifies at Tier-2.** |
 | DP-17 | **Derived participant DTOs** (e.g. B2's `ThreadReplyDto : ParticipantPostDto`) add only participant-safe members (XC-002), and are serialized through their **derived declared type**. A typed `IReadOnlyList<ParticipantPostDto>` serializes by the base type and silently drops the derived members; SignalR and `Results.Json(object)` use the runtime type. | B1 Gate-1 L-3, advisory for BP and B2. |
+| DP-18 | **Server scenario-time stamping for anything that acts ON a post** (reactions, takedown, and any later server emitter: PE-BE etc.). Order: (1) the **running** exercise clock `IExerciseClock.CurrentScenarioTime(exerciseId)`, used **as-is** (authoritative, never clamped); otherwise (2) the stored `Exercise.CurrentScenarioTime`, otherwise (3) the post's own `CreatedScenarioTime`; the fallback result (2 or 3) is clamped to be **no earlier than** the post's `CreatedScenarioTime`. **Never the wall clock** — `UtcNow` goes only into `wallClockTime`/`emittedAt`. A deactivation (un-like, un-repost) is additionally clamped to no earlier than the active row's own `CreatedScenarioTime`. This supersedes the `?? now` fallback written in §1.8 and §3. | B3 Gate-1 M-1/L-1/S-2 and B6 Gate-1 L-2. The stored value is seed-only and can be stale; `Post.CreatedScenarioTime` can still be client-supplied in this phase, so clamping a running clock to it would let one skewed post push everyone's reaction times forward. |
+| DP-18a | **Staff-metadata exception to DP-18:** `MediaAsset.CreatedScenarioTime` (exposed only as the staff library's `uploadedAtScenario`, never on a participant wire) keeps `clock ?? exercise.CurrentScenarioTime ?? now`. A media asset has no post to anchor to, and S1 seeding uploads media while no clock runs. The staff library sorts by `CreatedWallClock` (one time base), never by `CreatedScenarioTime`. | BM Gate-1 H-1, ruled by the orchestrator. |
 | DP-14 | Call-site wiring of like/repost (`Feed.tsx` row, `ThreadView.tsx` `ThreadCard`) moves **from F3 to F0**; `Feed.tsx` ownership in Wave 2 is **F4** (F5 ships `FeedSkeleton.tsx` only). | Plan §6 gave F3/F4/F5 overlapping edits to `Feed.tsx`/`ThreadView.tsx`. Resolved by sequencing, see §4.3. |
 
 ## 1. Frozen contract
@@ -239,7 +241,7 @@ public sealed record MediaAssetView(                    // OMIT null members
     [property: JsonPropertyName("url")] string Url,
     string? PosterUrl = null, int? Width = null, int? Height = null, double? DurationSec = null);
 
-// GET /api/staff/media?kind=image|video&take=100   (take 1..200)  -> StaffMediaAssetView[] newest first by CreatedScenarioTime.
+// GET /api/staff/media?kind=image|video&take=100   (take 1..200)  -> StaffMediaAssetView[] newest first by CreatedWallClock, then Id (DP-18a).
 // Excludes assets that are some video's poster. Staff-only; the participant shape never includes the extra members.
 public sealed record StaffMediaAssetView(
     string Id, string Kind, string Url, string FileName, string UploadedAtScenario,     // "fileName", "uploadedAtScenario" (O)
@@ -412,8 +414,9 @@ Participant writes (`/api/media`, reactions) are mapped inside `MapGroup(string.
 
 In **live** mode the frontend must not also emit the events the server emits (no double count). In **mock** mode
 the frontend keeps emitting (`USE_MOCK_DATA`). Scenario time for server-emitted events:
-`IExerciseClock.CurrentScenarioTime(exerciseId) ?? exercise.CurrentScenarioTime ?? now` (the `FollowService`
-pattern).
+the **DP-18** order: the running clock as-is, else the stored `exercise.CurrentScenarioTime`, else the post's
+`CreatedScenarioTime`, with the fallback clamped to no earlier than the post. Never `?? now` (the old `FollowService`
+fallback); the wall clock goes only into `wallClockTime`/`emittedAt`.
 
 ### 1.9 Run-sheet file schema (C3 import/export) — `pulse.runsheet.v1`
 
@@ -566,7 +569,7 @@ Every path below was verified to exist at P2 time unless marked **new**.
   assigned), `EngineCockpitControllerRoleFilter.cs` (controller only),
   `Features/Identity/Staff/ICurrentStaffSessionAccessor.cs`.
 - Scenario clock — `Features/EngineRuntime/Clock/IExerciseClock.cs` (`CurrentScenarioTime(exerciseId)`);
-  fallback `exercise.CurrentScenarioTime ?? now`.
+  fallback per **DP-18** (stored time, then the post's time, clamped; never `?? now`).
 - Data — `Data/PulseDbContext.cs` (central filter loop + `GuardExerciseScope`), `Data/IExerciseScoped.cs`,
   `Data/ExerciseScopeViolationException.cs`, `Data/Entities/{Post,Persona,Follow,TelemetryEvent}.cs`,
   `Data/Migrations/`.
