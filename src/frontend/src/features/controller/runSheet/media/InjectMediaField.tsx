@@ -27,7 +27,12 @@
  *
  * THE RULE (`mediaRules.attachReason`, from the asset KIND the library reports): up to 4
  * images, OR exactly 1 video on its own, never mixed. A pasted id of unknown kind counts
- * toward the limit and cannot sit next to a video; its real kind is the server's call.
+ * toward the limit and cannot sit next to a video; its real kind is the server's call. The
+ * rule is also checked on the whole SET (`injectRules.mediaSetError`): once the kinds are
+ * known — including for ids pasted before the library loaded — a mixed set or a second video
+ * shows in the media error slot, and the editor's Save refuses it. An id that is not on the
+ * loaded library page (one page, the newest 100) reads "Kind unknown", not "not in the library".
+ * A thumbnail that fails to load (an expired read URL) falls back to the kind icon.
  *
  * CONTENT SECURITY (NFR-004). A media id is an opaque reference the server resolves in
  * scope (a cross-exercise id is an unknown id, COR-001). Thumbnails render only a URL the
@@ -38,12 +43,19 @@
 import { useState } from 'react'
 import { Box } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faFilm, faImage, faKey, faPlus, faXmark } from '@fortawesome/free-solid-svg-icons'
+import {
+  faCircleExclamation,
+  faFilm,
+  faImage,
+  faKey,
+  faPlus,
+  faXmark,
+} from '@fortawesome/free-solid-svg-icons'
 import { useMediaLibrary, type StaffMediaAssetView } from '@/core/media'
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { RunSheetButton, RunSheetIconButton } from '../RunSheetButtons'
 import { RunSheetField } from '../RunSheetField'
-import { INJECT_LIMITS, countCodePoints } from '../injectRules'
+import { INJECT_LIMITS, countCodePoints, mediaSetError } from '../injectRules'
 import { attachReason, safeImageUrl, type AttachKind } from './mediaRules'
 
 export interface InjectMediaValue {
@@ -62,6 +74,26 @@ export interface InjectMediaFieldProps {
    * `media.{i}.alt` — the editor passes its dotted errors with the post prefix stripped.
    */
   readonly errors?: Readonly<Record<string, string>>
+}
+
+/**
+ * The picture (or a video's poster) of an asset. If it fails to load (a read URL that has
+ * expired, a missing file) it falls back to the kind icon instead of a broken-image glyph.
+ */
+function ThumbImage({ src, kind }: { readonly src: string; readonly kind: AttachKind }) {
+  const [failed, setFailed] = useState(false)
+  return failed ? (
+    <FontAwesomeIcon icon={kind === 'video' ? faFilm : faImage} data-testid="media-thumb-fallback" />
+  ) : (
+    <img
+      src={src}
+      alt=""
+      width={40}
+      height={40}
+      style={{ objectFit: 'cover' }}
+      onError={() => setFailed(true)}
+    />
+  )
 }
 
 /** A 40 px square: the asset's picture (or a video's poster), else a kind icon. */
@@ -86,7 +118,8 @@ function Thumb({ asset }: { readonly asset: StaffMediaAssetView | undefined }) {
       }}
     >
       {src ? (
-        <img src={src} alt="" width={40} height={40} style={{ objectFit: 'cover' }} />
+        // Keyed by the URL: a new URL gets a fresh try even after an earlier one failed.
+        <ThumbImage key={src} src={src} kind={asset?.kind ?? 'unknown'} />
       ) : (
         <FontAwesomeIcon icon={asset?.kind === 'video' ? faFilm : faImage} />
       )}
@@ -94,8 +127,12 @@ function Thumb({ asset }: { readonly asset: StaffMediaAssetView | undefined }) {
   )
 }
 
+/**
+ * `unknown` is "Kind unknown", NOT "not in the library": the library read is one page (the
+ * newest 100), so an id that is not on it may well exist — the console just cannot tell its kind.
+ */
 const kindWord = (kind: AttachKind): string =>
-  kind === 'video' ? 'Video' : kind === 'image' ? 'Image' : 'Not in the library'
+  kind === 'video' ? 'Video' : kind === 'image' ? 'Image' : 'Kind unknown'
 
 export function InjectMediaField({
   idPrefix,
@@ -112,6 +149,10 @@ export function InjectMediaField({
   const assetOf = (mediaId: string): StaffMediaAssetView | undefined =>
     assets.find(asset => asset.id === mediaId)
   const attachedKinds: AttachKind[] = media.map(entry => assetOf(entry.mediaId)?.kind ?? 'unknown')
+  // SET-LEVEL kind rule, live: once the kinds are known (also for ids pasted BEFORE the library
+  // loaded) a mixed set, or more than one video, shows in the media error slot. The editor's
+  // Save refuses it too (it validates with the same library kinds).
+  const mediaError = errors.media ?? mediaSetError(attachedKinds)
 
   const attach = (mediaId: string): void => onChange([...media, { mediaId, alt: '' }])
   const setAlt = (index: number, alt: string): void =>
@@ -201,9 +242,9 @@ export function InjectMediaField({
         )
       })}
 
-      {errors.media ? (
+      {mediaError ? (
         <Box data-testid={`${idPrefix}-media-error`} sx={{ fontSize: 12, color: chrome.amber }}>
-          {errors.media}
+          <FontAwesomeIcon icon={faCircleExclamation} aria-hidden="true" /> {mediaError}
         </Box>
       ) : null}
 

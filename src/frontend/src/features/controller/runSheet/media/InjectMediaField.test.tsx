@@ -256,14 +256,15 @@ describe('InjectMediaField: "Use media id" (paste an id)', () => {
     expect(screen.getByLabelText('Add media id')).toBeInTheDocument()
   })
 
-  it('Enter adds a trimmed id; an id not in the library shows as "Not in the library"', async () => {
+  it('Enter adds a trimmed id; an id not on the loaded library page reads "Kind unknown"', async () => {
     await mountField()
     fireEvent.click(screen.getByRole('button', { name: 'Use media id' }))
     const input = screen.getByLabelText('Add media id')
     fireEvent.change(input, { target: { value: '  m-7  ' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(screen.getByTestId('media-id')).toHaveTextContent('m-7')
-    expect(screen.getByTestId('media-kind')).toHaveTextContent('Not in the library')
+    expect(screen.getByTestId('media-kind')).toHaveTextContent('Kind unknown')
+    expect(screen.getByTestId('media-kind')).not.toHaveTextContent(/not in the library/i)
     expect(screen.getByLabelText('Add media id')).toHaveValue('')
   })
 
@@ -301,6 +302,101 @@ describe('InjectMediaField: "Use media id" (paste an id)', () => {
       'A video must be the only attachment',
     )
     expect(screen.getByRole('button', { name: 'Add media' })).toBeDisabled()
+  })
+})
+
+describe('InjectMediaField: the set-level kind rule (WR-002)', () => {
+  it('a mixed set (image + video) shows in the media error slot once the kinds are known', async () => {
+    await mountField({
+      initial: [
+        { mediaId: FLOOD, alt: 'a' },
+        { mediaId: VIDEO, alt: 'b' },
+      ],
+    })
+    expect(await screen.findByTestId('m-media-error')).toHaveTextContent(
+      "A video can't be mixed with images",
+    )
+  })
+
+  it('more than one video shows in the media error slot', async () => {
+    registerMockMedia({
+      id: 'second-video',
+      kind: 'video',
+      url: '/mock-media/video/second.mp4',
+      fileName: 'second.mp4',
+      uploadedAtScenario: '2033-09-04T16:00:00.000Z',
+    })
+    await mountField({
+      initial: [
+        { mediaId: VIDEO, alt: 'a' },
+        { mediaId: 'second-video', alt: 'b' },
+      ],
+    })
+    expect(await screen.findByTestId('m-media-error')).toHaveTextContent(
+      'A post can carry only one video',
+    )
+  })
+
+  it('ids pasted BEFORE the library loaded are checked once it has: no error, then the error', async () => {
+    let release: () => void = () => undefined
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    stubLibrary(async real => {
+      await gate
+      return real()
+    })
+    await mountField({
+      initial: [
+        { mediaId: FLOOD, alt: 'a' },
+        { mediaId: VIDEO, alt: 'b' },
+      ],
+    })
+    // Library still loading: both kinds are unknown, so nothing can be said yet.
+    expect(await screen.findByTestId('media-library-loading')).toBeInTheDocument()
+    expect(screen.queryByTestId('m-media-error')).toBeNull()
+
+    await act(async () => release())
+    expect(await screen.findByTestId('m-media-error')).toHaveTextContent(
+      "A video can't be mixed with images",
+    )
+  })
+
+  it('a consistent set (images alone, a video alone, unknown ids) shows no error', async () => {
+    await mountField({ initial: [{ mediaId: FLOOD, alt: 'a' }, { mediaId: 'who-knows', alt: 'b' }] })
+    await screen.findAllByTestId('media-library-item')
+    expect(screen.queryByTestId('m-media-error')).toBeNull()
+  })
+
+  it('an error passed in by the editor takes the same slot', async () => {
+    await mountField({ initial: [{ mediaId: 'm1', alt: 'x' }], errors: { media: 'From the server' } })
+    expect(screen.getByTestId('m-media-error')).toHaveTextContent('From the server')
+  })
+})
+
+describe('InjectMediaField: a thumbnail that fails to load (SG-1)', () => {
+  it('falls back to the kind icon instead of a broken image (an expired read URL)', async () => {
+    await mountField({ initial: [{ mediaId: FLOOD, alt: 'a' }] })
+    await screen.findAllByTestId('media-library-item') // the library has loaded: the asset is known
+    const entry = screen.getByTestId('media-entry')
+    const img = within(entry).getByTestId('media-thumb').querySelector('img')
+    expect(img).not.toBeNull()
+    if (!img) return
+    fireEvent.error(img)
+    expect(within(entry).getByTestId('media-thumb').querySelector('img')).toBeNull()
+    expect(within(entry).getByTestId('media-thumb-fallback')).toBeInTheDocument()
+  })
+
+  it('also in the library list, per row, without disturbing the other rows', async () => {
+    await mountField()
+    const row = await libraryRow('water-plant.svg')
+    const img = row.querySelector('img')
+    if (!img) throw new Error('no thumbnail')
+    fireEvent.error(img)
+    expect(row.querySelector('img')).toBeNull()
+    expect(within(row).getByTestId('media-thumb-fallback')).toBeInTheDocument()
+    const other = await libraryRow('flood-main-street.svg')
+    expect(other.querySelector('img')).not.toBeNull()
   })
 })
 

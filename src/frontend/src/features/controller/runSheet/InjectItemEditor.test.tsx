@@ -15,7 +15,7 @@
  *
  * Presentational: it is driven here directly (no queue, no mock) through `onSubmit`.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
@@ -25,9 +25,15 @@ import { SEEDED_PERSONAS } from '@/features/personas'
 // + query providers. These tests drive the EDITOR, not the library, so the hook is stubbed with
 // an empty library (the paste-an-id path, behind "Use media id"); the real library UI is covered
 // by `InjectMediaField.test.tsx` and the console route test.
+const library = vi.hoisted(() => ({
+  state: { data: [] as unknown[] | undefined, isPending: false, isError: false },
+}))
 vi.mock('@/core/media', async () => {
   const actual = await vi.importActual<typeof import('@/core/media')>('@/core/media')
-  return { ...actual, useMediaLibrary: () => ({ data: [], isPending: false, isError: false }) }
+  return { ...actual, useMediaLibrary: () => library.state }
+})
+beforeEach(() => {
+  library.state = { data: [], isPending: false, isError: false }
 })
 import { InjectItemEditor, type InjectItemEditorProps } from './InjectItemEditor'
 import { makeItem, makePost } from './runSheetTestHarness'
@@ -675,6 +681,74 @@ describe('InjectItemEditor — media (alt required) and baseline', () => {
     change(/^Add media id/, 'm5')
     expect(screen.getByText('Limit of 4 reached')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add media' })).toBeDisabled()
+  })
+
+  const asset = (id: string, kind: 'image' | 'video') => ({
+    id,
+    kind,
+    url: `/mock-media/${id}`,
+    fileName: `${id}.bin`,
+    uploadedAtScenario: '2033-09-04T12:00:00.000Z',
+  })
+
+  /** Pastes `ids` (and fills their alt text) so the post carries them. */
+  const pasteMedia = (...ids: string[]): void => {
+    openMediaIdInput()
+    for (const id of ids) {
+      change(/^Add media id/, id)
+      fireEvent.click(screen.getByRole('button', { name: 'Add media' }))
+      change(new RegExp(`^Alt text for ${id}`), `alt for ${id}`)
+    }
+  }
+
+  it('ids pasted BEFORE the library loaded: once it has, Save refuses image + video', async () => {
+    // The library has not loaded: both kinds are unknown, so both ids can be pasted.
+    library.state = { data: undefined, isPending: true, isError: false }
+    const { onSubmit } = renderEditor()
+    fillSingle()
+    pasteMedia('img-1', 'vid-1')
+    expect(screen.getAllByTestId('media-entry')).toHaveLength(2)
+    expect(screen.queryByTestId('inject-editor-post-0-media-media-error')).toBeNull()
+
+    // The library loads and reports their kinds; the next render picks it up.
+    library.state = {
+      data: [asset('img-1', 'image'), asset('vid-1', 'video')],
+      isPending: false,
+      isError: false,
+    }
+    // (A real React Query hook re-renders its component itself; this stub does not, so touch the
+    // post: any change to it re-renders the memoised post editor.)
+    change(/^Text/, 'A boil-water advisory is in effect (loaded).')
+    expect(await screen.findByTestId('inject-editor-post-0-media-media-error')).toHaveTextContent(
+      "A video can't be mixed with images",
+    )
+
+    save()
+    await waitFor(() => expect(screen.getByTestId('inject-editor-post-0-media-media-error')).toBeInTheDocument())
+    expect(onSubmit).not.toHaveBeenCalled()
+    // Detaching the video makes the set consistent and Save goes through.
+    fireEvent.click(screen.getByRole('button', { name: /^Remove media vid-1/ }))
+    save()
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    expect(submitted(onSubmit).posts[0]?.media?.map(m => m.mediaId)).toEqual(['img-1'])
+  })
+
+  it('Save refuses more than one video', async () => {
+    library.state = { data: undefined, isPending: true, isError: false }
+    const { onSubmit } = renderEditor()
+    fillSingle()
+    pasteMedia('vid-1', 'vid-2')
+    library.state = {
+      data: [asset('vid-1', 'video'), asset('vid-2', 'video')],
+      isPending: false,
+      isError: false,
+    }
+    change(/^Text/, 'Two videos')
+    save()
+    expect(await screen.findByTestId('inject-editor-post-0-media-media-error')).toHaveTextContent(
+      'A post can carry only one video',
+    )
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 
   it('an optional engagement baseline is off by default and submits whole numbers', async () => {

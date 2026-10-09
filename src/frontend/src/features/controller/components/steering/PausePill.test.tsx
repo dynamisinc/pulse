@@ -6,8 +6,9 @@
  *  - opening the pill reveals the three pause tiers (Pause injects / Pause
  *    engine / Freeze world) + Cancel/Pause popover. "Pause injects" is a LIVE
  *    option again (inject-queue 07, IQ-5; demo-polish C4 had removed the
- *    placeholder): enabled, the default selection, and applying it sets the
- *    existing `injects` tier through `setTier` with no confirm step;
+ *    placeholder): enabled, listed first but NOT the default (the default stays
+ *    Pause ENGINE, as since #449), and applying it sets the existing `injects`
+ *    tier through `setTier` with no confirm step;
  *  - selecting Freeze routes through an explicit confirm step before the tier
  *    takes effect — "Back" returns to the tier list without pausing;
  *  - selecting a non-Freeze tier (engine) applies immediately, no confirm step;
@@ -210,17 +211,20 @@ describe('PausePill — Pause injects is a LIVE tier (inject-queue 07, IQ-5)', (
     expect(tiers.map(r => (r as HTMLInputElement).value)).toEqual(['injects', 'engine', 'freeze'])
   })
 
-  it('pre-selects Pause injects (the mildest tier) when running, so Pause is never a no-op by default', async () => {
+  it('still pre-selects Pause ENGINE when running: open the pill, press Pause -> the engine (as since #449)', async () => {
     const user = userEvent.setup()
     const setTier = vi.fn()
     mockedUsePauseState.mockReturnValue(stub('running', { setTier }))
     renderWithTheme(<PausePill />)
 
     await user.click(screen.getByTestId('pause-pill'))
-    expect(screen.getByTestId('pause-tier-option-injects').querySelector('input')).toBeChecked()
+    // Pause injects is listed first but is NOT the default: the demo plan pauses the engine.
+    expect(screen.getByTestId('pause-tier-option-engine').querySelector('input')).toBeChecked()
+    expect(screen.getByTestId('pause-tier-option-injects').querySelector('input')).not.toBeChecked()
     await user.click(screen.getByTestId('pause-apply'))
 
-    expect(setTier).toHaveBeenCalledWith('injects')
+    expect(setTier).toHaveBeenCalledWith('engine')
+    expect(setTier).not.toHaveBeenCalledWith('injects')
     expect(setTier).toHaveBeenCalledTimes(1)
   })
 
@@ -310,8 +314,8 @@ describe('PausePill — fully keyboard-operable (NFR-001)', () => {
     await user.keyboard('{Enter}')
     expect(screen.getByTestId('pause-popover')).toBeInTheDocument()
 
-    // Roving radio focus: the checked tier (the default, Pause injects) is the tab stop;
-    // here we start from Pause engine and arrow down to Freeze.
+    // Roving radio focus: the checked tier (the default, Pause engine) is the tab stop;
+    // arrow down to Freeze.
     const engineRadio = screen.getByTestId('pause-tier-option-engine').querySelector('input')
     expect(engineRadio).not.toBeNull()
     if (engineRadio) engineRadio.focus()
