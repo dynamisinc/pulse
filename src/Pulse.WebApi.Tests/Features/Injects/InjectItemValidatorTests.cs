@@ -70,7 +70,7 @@ public sealed class InjectItemValidatorTests
         { "duplicate child id", BurstItem(Post(id: SharedId), Post(id: SharedId)), "Post 2: the same post appears twice" },
         { "replyTo neither", PostItem(posts: [Post(replyTo: new())]), "exactly one of" },
         { "replyTo bad inject id", PostItem(posts: [Post(replyTo: new() { InjectPostId = "x" })]), "does not name a scripted post" },
-        { "replyTo bad post id", PostItem(posts: [Post(replyTo: new() { PostId = "x" })]), "replyTo.postId must be a post id" },
+        { "replyTo bad post id", PostItem(posts: [Post(replyTo: new() { PostId = "x" })]), "Post 1: replyTo.postId does not name a post in this exercise." },
         { "baseline negative", PostItem(posts: [Post(baseline: new() { Like = -1 })]), "engagementBaseline" },
         { "baseline too big", PostItem(posts: [Post(baseline: new() { Repost = 1_000_001 })]), "engagementBaseline" },
         { "second post bad", BurstItem(2, second: Post(text: "")), "Post 2: text" },
@@ -180,6 +180,34 @@ public sealed class InjectItemValidatorTests
         {
             error.Should().Be($"Post 1: {expected}", because);
         }
+    }
+
+    [Fact]
+    public void AReplyToAnExistingPost_MustBeALivePostOfThisExercise()
+    {
+        var live = Guid.NewGuid();
+        var draft = InjectItemValidator.Parse(PostItem(posts: [Post(replyTo: new() { PostId = live.ToString() })])).Draft!;
+
+        InjectItemValidator.CheckReferences(draft, Facts(posts: [live])).Should().BeNull();
+        InjectItemValidator.CheckReferences(draft, Facts(posts: [])).Should().Be(
+            "Post 1: replyTo.postId does not name a post in this exercise.",
+            "unknown, another exercise's and taken-down posts are all simply absent from the in-scope set");
+    }
+
+    [Fact]
+    public void APublishedChildEchoedInAnEdit_IsNotRevalidated_SoATakedownCannotLockTheItem()
+    {
+        var itemId = Guid.NewGuid();
+        var published = Guid.NewGuid();
+        var takenDown = Guid.NewGuid();
+        var draft = InjectItemValidator.Parse(BurstItem(
+            Post(id: published.ToString(), replyTo: new() { PostId = takenDown.ToString() }),
+            Post())).Draft!;
+
+        InjectItemValidator.CheckReferences(
+            draft,
+            Facts(editedItemId: itemId, editedChildren: [published], posts: [], published: [published]))
+            .Should().BeNull("its parent was taken down after it went out — history, not a new reference");
     }
 
     [Fact]
@@ -297,14 +325,18 @@ public sealed class InjectItemValidatorTests
         Dictionary<Guid, Guid>? targets = null,
         Guid? editedItemId = null,
         HashSet<Guid>? editedChildren = null,
-        Dictionary<Guid, string>? mediaKinds = null) =>
+        Dictionary<Guid, string>? mediaKinds = null,
+        HashSet<Guid>? posts = null,
+        HashSet<Guid>? published = null) =>
         new(
             (personas ?? [Persona]).ToHashSet(),
             (roster ?? []).ToHashSet(),
             targets ?? [],
             editedItemId,
             editedChildren ?? [],
-            mediaKinds ?? []);
+            mediaKinds ?? [],
+            posts ?? [],
+            published ?? []);
 
     private static readonly string SharedId = Guid.NewGuid().ToString();
 

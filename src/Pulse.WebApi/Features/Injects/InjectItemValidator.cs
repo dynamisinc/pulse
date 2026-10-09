@@ -53,6 +53,12 @@ public static class InjectItemValidator
     /// </summary>
     public const string MediaNotFoundMessage = "One or more media items could not be found.";
 
+    /// <summary>
+    /// The ONE message for a <c>replyTo.postId</c> that is not a live post of this exercise — unparseable, unknown,
+    /// another exercise's or taken down — mirroring B2's resolver and the funnel's own wording (COR-001, DP-16).
+    /// </summary>
+    public const string ReplyPostNotFoundMessage = "replyTo.postId does not name a post in this exercise.";
+
     /// <summary>The media count/kind rule, in the funnel's own words: up to 4 images or exactly 1 video, never mixed.</summary>
     public const string MediaCountMessage = "A post may carry up to 4 images or exactly 1 video, never both.";
 
@@ -227,9 +233,18 @@ public static class InjectItemValidator
                 return $"{label}: personaId does not name a persona in this exercise.";
             }
 
-            if (MediaError(post, facts.MediaKindsInScope) is { } mediaError)
+            // A published child echoed in an edit is history (immutable, checked separately): its media or parent post
+            // may since have been taken down, and that must not lock the rest of the item.
+            var published = post.Id is { } childId && facts.PublishedChildIds.Contains(childId);
+
+            if (!published && MediaError(post, facts.MediaKindsInScope) is { } mediaError)
             {
                 return $"{label}: {mediaError}";
+            }
+
+            if (!published && post.ReplyToPostId is { } parentPost && !facts.PostsInScope.Contains(parentPost))
+            {
+                return $"{label}: {ReplyPostNotFoundMessage}";
             }
 
             if (post.ReplyToInjectPostId is not { } target)
@@ -423,7 +438,7 @@ public static class InjectItemValidator
             {
                 if (!Guid.TryParse(replyTo.PostId, out var parsed) || parsed == Guid.Empty)
                 {
-                    return (null, $"{label}: replyTo.postId must be a post id.");
+                    return (null, $"{label}: {ReplyPostNotFoundMessage}");
                 }
 
                 replyToPostId = parsed;
@@ -538,10 +553,14 @@ public sealed record InjectMediaDraft(Guid AssetId, string Alt);
 /// <param name="EditedItemId">The item being edited, or <c>null</c> on create.</param>
 /// <param name="EditedItemChildIds">The edited item's live child ids; empty on create.</param>
 /// <param name="MediaKindsInScope">The draft's media asset ids found in this exercise's library, mapped to their kind.</param>
+/// <param name="PostsInScope">The draft's <c>replyTo.postId</c> targets that are live (not taken down) posts of this exercise.</param>
+/// <param name="PublishedChildIds">The edited item's children that already went out (exempt from re-validation); empty on create.</param>
 public sealed record InjectReferenceFacts(
     IReadOnlySet<Guid> PersonasInScope,
     IReadOnlySet<Guid> Roster,
     IReadOnlyDictionary<Guid, Guid> ReplyTargetsInScope,
     Guid? EditedItemId,
     IReadOnlySet<Guid> EditedItemChildIds,
-    IReadOnlyDictionary<Guid, string> MediaKindsInScope);
+    IReadOnlyDictionary<Guid, string> MediaKindsInScope,
+    IReadOnlySet<Guid> PostsInScope,
+    IReadOnlySet<Guid> PublishedChildIds);

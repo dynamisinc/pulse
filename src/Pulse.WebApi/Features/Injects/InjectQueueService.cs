@@ -1242,13 +1242,27 @@ public sealed partial class InjectQueueService
                 .Where(asset => assetIds.Contains(asset.Id) && asset.ExerciseId == exerciseId)
                 .ToDictionaryAsync(asset => asset.Id, asset => asset.Kind, cancellationToken);
 
+        // Existing-post reply targets, resolved the way B2's ReplyParentResolver resolves them at fire: live (not taken
+        // down) posts of THIS exercise. Unknown, cross-exercise and taken-down ids are all simply absent (COR-001).
+        var parentPostIds = draft.Posts.Select(post => post.ReplyToPostId).OfType<Guid>().Distinct().ToList();
+        var postsInScope = parentPostIds.Count == 0
+            ? []
+            : await _dbContext.Posts
+                .AsNoTracking()
+                .Where(post => parentPostIds.Contains(post.Id) && post.ExerciseId == exerciseId && post.DeletedAt == null)
+                .Select(post => post.Id)
+                .ToListAsync(cancellationToken);
+
+        var editedChildren = editedItem is null ? [] : InjectTransitions.LiveChildren(editedItem);
         var referenceFacts = new InjectReferenceFacts(
             personasInScope.ToHashSet(),
             roster.Select(entry => entry.StaffUserId).ToHashSet(),
             replyTargets,
             editedItem?.Id,
-            editedItem is null ? [] : InjectTransitions.LiveChildren(editedItem).Select(post => post.Id).ToHashSet(),
-            mediaKinds);
+            editedChildren.Select(post => post.Id).ToHashSet(),
+            mediaKinds,
+            postsInScope.ToHashSet(),
+            editedChildren.Where(post => post.Status == InjectPostStatuses.Fired).Select(post => post.Id).ToHashSet());
 
         return InjectItemValidator.CheckReferences(draft, referenceFacts);
     }

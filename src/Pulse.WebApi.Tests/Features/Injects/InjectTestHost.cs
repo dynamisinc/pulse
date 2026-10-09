@@ -256,6 +256,36 @@ internal sealed class InjectTestHost : IAsyncDisposable
         return id;
     }
 
+    /// <summary>Seeds an ordinary (participant) post in the exercise — a target for <c>replyTo.postId</c>.</summary>
+    public async Task<Guid> AddPostAsync(Guid exerciseId, Guid personaId, bool takenDown = false)
+    {
+        var id = Guid.NewGuid();
+        await using var db = Db(exerciseId);
+        db.Posts.Add(new Post
+        {
+            Id = id,
+            ExerciseId = exerciseId,
+            AuthorPersonaId = personaId,
+            Body = "Is anyone else's water brown?",
+            CreatedScenarioTime = DateTimeOffset.UtcNow,
+            CreatedWallClock = DateTimeOffset.UtcNow,
+            Origin = "participant",
+            ActingHumanId = "participant-human",
+            DeletedAt = takenDown ? DateTimeOffset.UtcNow : null,
+        });
+        await db.SaveChangesAsync();
+        return id;
+    }
+
+    /// <summary>Takes a post down (B6 soft delete) or restores it.</summary>
+    public async Task SetPostTakenDownAsync(Guid exerciseId, Guid postId, bool takenDown)
+    {
+        await using var db = Db(exerciseId);
+        var post = await db.Posts.SingleAsync(p => p.Id == postId);
+        post.DeletedAt = takenDown ? DateTimeOffset.UtcNow : null;
+        await db.SaveChangesAsync();
+    }
+
     public async Task<Guid> AddPersonaAsync(Guid exerciseId)
     {
         var id = Guid.NewGuid();
