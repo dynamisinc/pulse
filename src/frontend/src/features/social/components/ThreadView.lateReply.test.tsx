@@ -23,6 +23,7 @@ import { personaIdForHandle } from '@/features/personas'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import type { ParticipantPostView } from '@/features/social'
 import { postStore } from '../services/postStore'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { ThreadView } from './ThreadView'
 
 interface ProbeProps {
@@ -69,7 +70,9 @@ function tree(focusedPostId: string) {
         <ShellContextProvider
           value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <ThreadView focusedPostId={focusedPostId} />
+          <SocialDirectoryProvider>
+            <ThreadView focusedPostId={focusedPostId} />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>

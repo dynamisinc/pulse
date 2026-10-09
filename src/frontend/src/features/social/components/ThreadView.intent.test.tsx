@@ -30,6 +30,7 @@ import {
   requestReplyFocus,
   resetReplyIntent,
 } from '../services/replyIntent'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { ThreadView } from './ThreadView'
 
 interface PersonaSnapshot {
@@ -74,7 +75,9 @@ function renderThread() {
         <ShellContextProvider
           value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <ThreadView focusedPostId={FOCUS} />
+          <SocialDirectoryProvider>
+            <ThreadView focusedPostId={FOCUS} />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,

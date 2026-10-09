@@ -41,12 +41,12 @@ import { SessionProvider } from '@/core/auth'
 import { resetExerciseClock } from '@/core/clock'
 import { resetTelemetryBuffer } from '@/core/telemetry'
 import { api } from '@/core/services/api'
-import { resolvePersonas } from '@/features/personas'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import { ProfileRoute } from '../layout/routes/ProfileRoute'
 import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { SocialNavigationProvider } from '../layout/SocialNavigationProvider'
 import { SocialDirectoryContext, type SocialDirectory } from '../layout/socialDirectory'
+import { loadedDirectory } from '../layout/socialDirectory.testUtils'
 import { Profile } from './Profile'
 
 const FW_ID = 'persona-fairhavenwater' // verified org, authored post-seed-fw-advisory
@@ -63,21 +63,6 @@ afterEach(() => {
   resetExerciseClock()
   vi.restoreAllMocks()
 })
-
-/** A directory in the "already resolved" state the provider publishes once the cast lands. */
-async function loadedDirectory(): Promise<SocialDirectory> {
-  const personas = await resolvePersonas()
-  const byId = new Map(personas.map(p => [p.id, p] as const))
-  const byHandle = new Map(personas.map(p => [p.handle.toLowerCase(), p] as const))
-  return {
-    personas,
-    loading: false,
-    error: undefined,
-    self: undefined,
-    findByHandle: handle => byHandle.get(handle.toLowerCase()),
-    findById: id => byId.get(id),
-  }
-}
 
 /** `<Profile>` under a HAND-BUILT directory: no provider, hence no provider fetch. */
 function renderProfileUnder(directory: SocialDirectory, personaId: string = FW_ID) {

@@ -18,6 +18,7 @@ import { useSession } from '@/core/auth'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import { ReplyComposer } from './ReplyComposer'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { ThreadView } from './ThreadView'
 
 vi.mock('@/core/auth', async importOriginal => {
@@ -86,7 +87,9 @@ describe('ThreadView — no reply box for a read-only or persona-less session', 
         <ShellContextProvider
           value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <ThreadView focusedPostId="post-seed-mvega-question" />
+          <SocialDirectoryProvider>
+            <ThreadView focusedPostId="post-seed-mvega-question" />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </ExerciseContextProvider>,
     )
