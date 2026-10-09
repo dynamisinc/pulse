@@ -51,7 +51,7 @@ using Pulse.WebApi.Features.Social.Threads;
 /// caller's exercise (and, for a participant, against the caller's own uploads) and written as
 /// <see cref="PostMediaItem"/> rows in the SAME unit of work as the post and its event. A reply parent is
 /// resolved through the <see cref="IReplyParentResolver"/> seam (DP-8). The seeded engagement baseline is honoured
-/// only for a staff <c>controller-as-persona</c> write. The broadcast carries the participant projection
+/// only for a staff <c>controller-as-persona</c> write and a scripted <c>inject</c> post (IQ-10). The broadcast carries the participant projection
 /// (<see cref="IParticipantPostProjector"/>), without viewer state.
 /// </para>
 /// </remarks>
@@ -69,8 +69,14 @@ public sealed partial class PostIngestService
     /// <summary>The <c>origin</c> of a participant writing as their own bound persona.</summary>
     private const string ParticipantOrigin = "participant";
 
-    /// <summary>The <c>origin</c> of a staff console operating a persona — the only one that may seed a baseline.</summary>
+    /// <summary>The <c>origin</c> of a staff console operating a persona — it may seed a baseline.</summary>
     private const string ControllerAsPersonaOrigin = "controller-as-persona";
+
+    /// <summary>
+    /// The <c>origin</c> of a scripted post the inject queue publishes in-process (inject-queue/06) — it may seed a
+    /// baseline too (IQ-10): the script was authored by staff, exactly like a controller-as-persona write.
+    /// </summary>
+    private const string InjectOrigin = "inject";
 
     /// <summary>The most images one post may carry.</summary>
     private const int MaxImagesPerPost = 4;
@@ -489,13 +495,14 @@ public sealed partial class PostIngestService
     }
 
     /// <summary>
-    /// Validates the seeded engagement baseline. It is honoured ONLY for a staff <c>controller-as-persona</c>
-    /// write (the console seeding the fiction); for every other origin it is ignored entirely, so a participant
-    /// can neither set nor probe it. Each supplied value must be 0..1,000,000; an omitted value is 0.
+    /// Validates the seeded engagement baseline. It is honoured ONLY for staff-authored content — a
+    /// <c>controller-as-persona</c> write (the console seeding the fiction) or a scripted <c>inject</c> post
+    /// (IQ-10); for every other origin it is ignored entirely, so a participant can neither set nor probe it.
+    /// Each supplied value must be 0..1,000,000; an omitted value is 0.
     /// </summary>
     private static BaselineResolution ValidateBaseline(EngagementBaselineRequest? requested, string origin)
     {
-        if (requested is null || !string.Equals(origin, ControllerAsPersonaOrigin, StringComparison.Ordinal))
+        if (requested is null || origin is not (ControllerAsPersonaOrigin or InjectOrigin))
         {
             return BaselineResolution.Zero;
         }

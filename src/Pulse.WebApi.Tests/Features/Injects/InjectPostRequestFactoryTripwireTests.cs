@@ -1,0 +1,120 @@
+// =====================================================================================================================
+// TRIPWIRE (inject-queue/06, review finding M3). READ THIS BEFORE "FIXING" A FAILURE HERE.
+//
+// demo-polish BP gave CreatePostRequest typed ParentPostId / Media / EngagementBaseline members, and
+// InjectPostRequestFactory.Build maps a scripted post's media, resolved reply parent and baseline onto them (IQ-10).
+// This test is ARMED: it fails if any of those members exists and Build leaves it null — so a refactor cannot silently
+// ship scripted posts without their photo, their reply parent or their seeded engagement. (An opaque JsonElement?
+// `Media` placeholder, the pre-BP shape, would be exempt.)
+//
+// The fix is in InjectPostRequestFactory.Build, NEVER in this test. The stand-in tests prove the check really bites.
+// =====================================================================================================================
+namespace Pulse.WebApi.Tests.Features.Injects;
+
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Text.Json;
+using FluentAssertions;
+using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Injects;
+using Pulse.WebApi.Features.Social;
+using Xunit;
+using Xunit.Sdk;
+using static Pulse.WebApi.Tests.Features.Injects.InjectTestData;
+
+/// <summary>
+/// The BP-merge tripwire for the scripted-post funnel mapping (M3) — see the banner above. It inspects the REAL
+/// <see cref="CreatePostRequest"/> type, so its only possible failure is "BP's member exists and Build leaves it null";
+/// the stand-in tests pin both states: quiet before BP, and after BP failing until mapped, then passing.
+/// </summary>
+public sealed class InjectPostRequestFactoryTripwireTests
+{
+    private static readonly string[] BpTypedMembers = ["ParentPostId", "Media", "EngagementBaseline"];
+
+    private static readonly InjectEventTime Time = new(T0, T0, "UTC");
+
+    [Fact]
+    public void WhenCreatePostRequestGainsBpsTypedMembers_TheFactoryFillsThem()
+    {
+        var (request, _) = InjectPostRequestFactory.Build(
+            ItemWithEverything(out var child), child, parentPostId: Guid.NewGuid(), Guid.NewGuid(), Time);
+
+        AssertBpMembersMapped(typeof(CreatePostRequest), request);
+    }
+
+    [Fact]
+    public void TheTripwire_Bites_OnARequestTypeThatHasTheMembersButLeavesThemNull()
+    {
+        var unmapped = () => AssertBpMembersMapped(typeof(FutureCreatePostRequest), new FutureCreatePostRequest());
+
+        unmapped.Should().Throw<XunitException>("a typed member left null is exactly the silent BP-merge regression")
+            .WithMessage("*ParentPostId*");
+
+        var mapped = () => AssertBpMembersMapped(typeof(FutureCreatePostRequest), new FutureCreatePostRequest
+        {
+            ParentPostId = Guid.NewGuid().ToString(),
+            Media = [new object()],
+            EngagementBaseline = new object(),
+        });
+        mapped.Should().NotThrow("and it passes once the factory maps all three");
+    }
+
+    [Fact]
+    public void TheTripwire_IsQuiet_OnThePreBpShape()
+    {
+        // Today's shape: an opaque JsonElement? Media placeholder and no ParentPostId / EngagementBaseline — nothing to map.
+        var check = () => AssertBpMembersMapped(typeof(PreBpCreatePostRequest), new PreBpCreatePostRequest());
+
+        check.Should().NotThrow("the opaque placeholder is exempt and the absent members are not BP's yet");
+    }
+
+    /// <summary>For each BP member the request TYPE really has (typed, not the opaque placeholder), demands a value.</summary>
+    private static void AssertBpMembersMapped(Type requestType, object request)
+    {
+        foreach (var name in BpTypedMembers)
+        {
+            var property = requestType.GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+            if (property is null || IsOpaquePlaceholder(property))
+            {
+                continue;
+            }
+
+            property.GetValue(request).Should().NotBeNull(
+                "{0}.{1} exists, so InjectPostRequestFactory.Build must map it from the scripted post (IQ-10, M3)",
+                requestType.Name,
+                name);
+        }
+    }
+
+    private static bool IsOpaquePlaceholder(PropertyInfo property) =>
+        property.PropertyType == typeof(JsonElement) || property.PropertyType == typeof(JsonElement?);
+
+    private static InjectItem ItemWithEverything(out InjectItemPost child)
+    {
+        var item = Item(InjectKinds.Post, childCount: 1);
+        child = Children(item)[0];
+        child.Media = [new InjectMediaRef { MediaId = "beat3-photo", Alt = "Brown tap water" }];
+        child.ReplyToPostId = Guid.NewGuid();
+        child.BaselineLike = 120;
+        child.BaselineRepost = 14;
+        child.BaselineReply = 9;
+        return item;
+    }
+
+    /// <summary>A stand-in for TODAY's CreatePostRequest: the opaque media placeholder, nothing else of BP's.</summary>
+    private sealed class PreBpCreatePostRequest
+    {
+        public JsonElement? Media { get; init; }
+    }
+
+    /// <summary>A stand-in for BP's CreatePostRequest: the three typed members, left null unless set.</summary>
+    private sealed class FutureCreatePostRequest
+    {
+        public string? ParentPostId { get; init; }
+
+        public IReadOnlyList<object>? Media { get; init; }
+
+        public object? EngagementBaseline { get; init; }
+    }
+}

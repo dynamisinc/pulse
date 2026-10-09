@@ -13,6 +13,7 @@ using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
+using Pulse.WebApi.Features.Injects;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
 using Pulse.WebApi.Features.Ops.Bootstrap;
@@ -240,6 +241,7 @@ builder.Services.AddPauseTierSteering();        // #350 POST/GET /api/steering/p
 builder.Services.AddPauseParticipantOverlay();  // #351 REPLACES #350's no-op publisher AND decorates the
                                                 //      lifecycle overlay projection (MUST follow #103)
 builder.Services.AddStorylineSteering();        // #352 storyline target GET/POST
+builder.Services.AddInjects();                  // #452 scripted-post queue + InjectBurstRunner (needs the pause tier + post funnel above)
 
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
@@ -467,6 +469,7 @@ app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + 
 // only (above).
 app.MapPauseTierSteering();   // #350 pause tier (Freeze reaches the real clock)
 app.MapStorylineSteering();   // #352 storyline actual/target read + target set
+app.MapInjects();             // #452 /api/injects* (staff gate; mutations controller-only)
 
 app.Run();
 
