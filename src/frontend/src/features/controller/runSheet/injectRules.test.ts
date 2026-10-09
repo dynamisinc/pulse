@@ -27,6 +27,7 @@ import {
   filterItems,
   firstPending,
   isEditable,
+  mediaSetError,
   minimumBurstWindow,
   parseStoredFilters,
   plannedLabel,
@@ -201,6 +202,51 @@ describe('validateWrite', () => {
       windowDefault: 90,
       textMax: 280,
     })
+  })
+})
+
+describe('mediaSetError / validateWrite: the set-level media kind rule', () => {
+  const withMedia = (...ids: string[]): InjectItemWrite =>
+    validWrite({
+      posts: [{ ...validPost, media: ids.map(mediaId => ({ mediaId, alt: 'alt' })) }],
+    })
+  const kinds: Record<string, 'image' | 'video'> = { i1: 'image', i2: 'image', v1: 'video', v2: 'video' }
+  const mediaKindOf = (id: string) => kinds[id]
+
+  it('images alone, one video alone, and unknown kinds are fine', () => {
+    expect(mediaSetError([])).toBeUndefined()
+    expect(mediaSetError(['image', 'image', 'image', 'image'])).toBeUndefined()
+    expect(mediaSetError(['video'])).toBeUndefined()
+    expect(mediaSetError(['unknown', 'unknown'])).toBeUndefined()
+    // An unknown id can neither prove nor disprove a mix: that is the server's call.
+    expect(mediaSetError(['video', 'unknown'])).toBeUndefined()
+    expect(mediaSetError(['image', 'unknown'])).toBeUndefined()
+  })
+
+  it('refuses images mixed with a video, and more than one video', () => {
+    expect(mediaSetError(['image', 'video'])).toBe("A video can't be mixed with images")
+    expect(mediaSetError(['video', 'image', 'image'])).toBe("A video can't be mixed with images")
+    expect(mediaSetError(['video', 'video'])).toBe('A post can carry only one video')
+  })
+
+  it('validateWrite applies it per post, on the media slot, when kinds are supplied', () => {
+    expect(validateWrite(withMedia('i1', 'v1'), { mediaKindOf })['posts.0.media'])
+      .toBe("A video can't be mixed with images")
+    expect(validateWrite(withMedia('v1', 'v2'), { mediaKindOf })['posts.0.media'])
+      .toBe('A post can carry only one video')
+    expect(validateWrite(withMedia('i1', 'i2'), { mediaKindOf })['posts.0.media']).toBeUndefined()
+    expect(validateWrite(withMedia('v1'), { mediaKindOf })['posts.0.media']).toBeUndefined()
+    expect(validateWrite(withMedia('i1', 'not-in-library'), { mediaKindOf })['posts.0.media'])
+      .toBeUndefined()
+  })
+
+  it('without kinds the check is off (the server still enforces it)', () => {
+    expect(validateWrite(withMedia('i1', 'v1'))['posts.0.media']).toBeUndefined()
+  })
+
+  it('the count limit still wins over the kind check', () => {
+    const five = withMedia('i1', 'i2', 'x3', 'x4', 'x5')
+    expect(validateWrite(five, { mediaKindOf })['posts.0.media']).toBe('At most 4 media per post')
   })
 })
 

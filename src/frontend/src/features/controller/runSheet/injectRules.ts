@@ -223,6 +223,33 @@ export function excerpt(text: string, max: number): string {
 
 const isInteger = (n: number): boolean => Number.isInteger(n)
 
+/** What an attached asset is, as far as the console can tell (`unknown` = not on the page). */
+export type MediaSetKind = 'image' | 'video' | 'unknown'
+
+/**
+ * SET-LEVEL kind check for one post's media (story 06: "<= 4 images OR exactly 1 video, never
+ * mixed"). Only KNOWN kinds count: an `unknown` id (not in the loaded library page, or the
+ * library not loaded yet) is the server's call, so it can neither prove nor disprove a mix.
+ * Returns the message, or `undefined` when the known kinds are consistent.
+ */
+export function mediaSetError(kinds: readonly MediaSetKind[]): string | undefined {
+  const videos = kinds.filter(kind => kind === 'video').length
+  const images = kinds.filter(kind => kind === 'image').length
+  if (videos > 1) return 'A post can carry only one video'
+  if (videos === 1 && images > 0) return "A video can't be mixed with images"
+  return undefined
+}
+
+/** Options for `validateWrite`. */
+export interface ValidateWriteOptions {
+  /**
+   * The KIND of a media id, when the library knows it. Supplying it turns on the set-level kind
+   * check (mixed images + video, or more than one video). Absent = kinds are not checked (the
+   * server still does).
+   */
+  readonly mediaKindOf?: (mediaId: string) => 'image' | 'video' | undefined
+}
+
 /**
  * Validates an `InjectItemWrite` against the authoring limits and returns
  * `{ fieldPath: message }` (empty = valid). Paths are dotted and match the
@@ -235,7 +262,10 @@ const isInteger = (n: number): boolean => Number.isInteger(n)
  * 400 reads like the server's). The server remains authoritative: its messages are
  * shown on the field/form as well, and nothing here loosens a server rule.
  */
-export function validateWrite(write: InjectItemWrite): Record<string, string> {
+export function validateWrite(
+  write: InjectItemWrite,
+  options: ValidateWriteOptions = {},
+): Record<string, string> {
   const errors: Record<string, string> = {}
   const L = INJECT_LIMITS
 
@@ -281,6 +311,11 @@ export function validateWrite(write: InjectItemWrite): Record<string, string> {
 
     const media = post.media ?? []
     if (media.length > L.mediaMax) errors[`${at}.media`] = `At most ${L.mediaMax} media per post`
+    else if (options.mediaKindOf) {
+      const kindOf = options.mediaKindOf
+      const kindError = mediaSetError(media.map(m => kindOf(m.mediaId) ?? 'unknown'))
+      if (kindError) errors[`${at}.media`] = kindError
+    }
     media.forEach((m, j) => {
       if (m.mediaId.trim().length === 0) errors[`${at}.media.${j}.mediaId`] = 'Media id is required'
       if (m.alt.trim().length === 0) errors[`${at}.media.${j}.alt`] = 'Alt text is required'

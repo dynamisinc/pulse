@@ -879,3 +879,25 @@ describe('the burst window must hold every 3 s gap (story 06: window >= 3 x (pos
       .rejects.toBeInstanceOf(InjectValidationError)
   })
 })
+
+describe('the mock refuses a mixed or multi-video media set like the server (400)', () => {
+  const withMedia = (...ids: string[]): InjectItemWrite => ({
+    kind: 'post',
+    title: 'Media',
+    posts: [{ ...post('x'), media: ids.map(mediaId => ({ mediaId, alt: 'alt' })) }],
+  })
+
+  it('image + video is a 400 on the media field; images alone and a video alone are fine', async () => {
+    const mock = makeMock()
+    const error = (await mock
+      .create(withMedia('mock-media-canned-flood', 'mock-media-canned-video'))
+      .catch((e: unknown) => e)) as InjectValidationError
+    expect(error).toBeInstanceOf(InjectValidationError)
+    expect(error.fieldErrors['posts.0.media']).toBe("A video can't be mixed with images")
+    await expect(mock.create(withMedia('mock-media-canned-flood', 'mock-media-canned-plant')))
+      .resolves.toBeDefined()
+    await expect(mock.create(withMedia('mock-media-canned-video'))).resolves.toBeDefined()
+    // An id the registry does not know is the server's call, so the mock lets it through.
+    await expect(mock.create(withMedia('mock-media-canned-flood', 'who-knows'))).resolves.toBeDefined()
+  })
+})

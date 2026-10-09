@@ -34,7 +34,7 @@
  * text only), so there is nothing to strip here.
  */
 
-import { INJECT_LIMITS, validateWrite } from './injectRules'
+import { INJECT_LIMITS, validateWrite, type ValidateWriteOptions } from './injectRules'
 import type {
   InjectItemDto,
   InjectItemWrite,
@@ -226,8 +226,13 @@ export interface DraftResult {
   readonly errors: Readonly<Record<string, string>>
 }
 
-/** Builds the wire write from the form and validates it against the authoring limits. */
-export function draftToWrite(draft: Draft): DraftResult {
+/**
+ * Builds the wire write from the form and validates it against the authoring limits. Pass
+ * `options.mediaKindOf` (from the loaded media library) to also refuse a mixed or multi-video
+ * media set — it is read AT CALL TIME, so ids pasted before the library loaded are checked
+ * with the kinds known by the time of submit.
+ */
+export function draftToWrite(draft: Draft, options: ValidateWriteOptions = {}): DraftResult {
   const submitted = draft.kind === 'post' ? draft.posts.slice(0, 1) : draft.posts
   const posts = submitted.map((post, index) => postToWrite(post, index, submitted))
   const write: InjectItemWrite = { kind: draft.kind, title: draft.title.trim(), posts }
@@ -241,7 +246,7 @@ export function draftToWrite(draft: Draft): DraftResult {
     if (window !== undefined) write.burstWindowSeconds = window
   }
 
-  return { write, errors: validateWrite(write) }
+  return { write, errors: validateWrite(write, options) }
 }
 
 export const REPLY_TARGET_REMOVED = 'The post this replied to was removed, so the reply was cleared.'

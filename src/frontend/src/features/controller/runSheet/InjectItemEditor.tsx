@@ -38,6 +38,7 @@ import { Box, FormControlLabel, Radio, RadioGroup } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCircleExclamation, faFloppyDisk, faPlus, faXmark } from '@fortawesome/free-solid-svg-icons'
 import type { StaffPersona } from '@/features/personas'
+import { useMediaLibrary } from '@/core/media'
 import { consoleChrome as chrome } from '../consoleChrome'
 import { RunSheetButton, RunSheetIconButton } from './RunSheetButtons'
 import { RunSheetField } from './RunSheetField'
@@ -146,8 +147,23 @@ export function InjectItemEditor({
   const changedUnderYou =
     mode === 'edit' && item !== undefined && liveItem !== undefined && liveItem.version !== item.version
 
+  // The media library's kinds, for the set-level media rule (no mixing images with a video, one
+  // video at most). Read at validation time, so ids pasted BEFORE the library loaded are checked
+  // with the kinds known when the controller presses Save.
+  const library = useMediaLibrary()
+  const libraryAssets = library.data
+  const validateOptions = useMemo(
+    () => ({
+      mediaKindOf: (mediaId: string) => libraryAssets?.find(asset => asset.id === mediaId)?.kind,
+    }),
+    [libraryAssets],
+  )
+
   // Local validation, shown after a Save attempt; over-limit text shows immediately.
-  const validation = useMemo(() => draftToWrite(draft).errors, [draft])
+  const validation = useMemo(
+    () => draftToWrite(draft, validateOptions).errors,
+    [draft, validateOptions],
+  )
   const liveErrors = useMemo(() => liveOverLimit(draft), [draft])
   const errors: Readonly<Record<string, string>> = {
     ...(attempt > 0 ? validation : liveErrors),
@@ -253,7 +269,7 @@ export function InjectItemEditor({
     setServerForm(undefined)
     setServerFields({})
     setAttempt(count => count + 1)
-    const { write, errors: found } = draftToWrite(draft)
+    const { write, errors: found } = draftToWrite(draft, validateOptions)
     if (Object.keys(found).length > 0) return
     const result = await onSubmit(write)
     if (!result.ok) {

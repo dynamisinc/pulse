@@ -53,6 +53,7 @@
  */
 
 import { scenarioNow } from '@/core/clock'
+import { getMockMediaAsset } from '@/core/media'
 import { personaIdForHandle } from '@/features/personas/types'
 import { InjectConflictError, InjectNotFoundError, InjectValidationError } from './injectErrors'
 import { INJECT_LIMITS, minimumBurstWindow, validateWrite } from './injectRules'
@@ -574,7 +575,10 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
    * and a child id repeated in one write. Server: `InjectItemValidator.Parse`.
    */
   const parseWrite = (write: InjectItemWrite): void => {
-    const errors = validateWrite(write)
+    const errors = validateWrite(write, {
+      // The server knows each asset's kind; in mock mode the media registry does.
+      mediaKindOf: mediaId => getMockMediaAsset(mediaId)?.kind,
+    })
     const first = Object.values(errors)[0]
     if (first) throw new InjectValidationError(first, errors)
     const seen = new Set<string>()

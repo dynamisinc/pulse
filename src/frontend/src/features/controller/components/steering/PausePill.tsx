@@ -21,8 +21,10 @@
  * REAL control. It sets the existing `injects` tier through the existing
  * `usePauseState().setTier` action — no second path: while it is active the server
  * suspends running bursts (manual fire still works) and the run sheet shows "Injects
- * paused: bursts are suspended; manual fire still works". It is the FIRST option and
- * so the default selection: the least disruptive pause ("World keeps living").
+ * paused: bursts are suspended; manual fire still works". It is listed FIRST (mildest to
+ * strongest) but it is NOT the default selection: opening the pill and pressing Pause
+ * still pauses the ENGINE, exactly as it has since #449 (the demo plan's pause step is
+ * the engine). Pausing injects is a deliberate pick of its radio.
  *
  * THE PAUSE POPOVER (D5-014/1.3). Opening the pill reveals three radio tiers —
  * Pause injects / Pause engine / Freeze world. The footer has a **Cancel** link
@@ -110,8 +112,13 @@ const TIER_OPTIONS: readonly TierOption[] = [
   { value: 'freeze', label: 'Freeze world', hint: 'Participants notice — guarded', amber: true },
 ]
 
-/** The tier the popover pre-selects when running — the first offered option (Pause injects). */
-const DEFAULT_CHOICE: PauseChoice = TIER_OPTIONS[0]?.value ?? 'engine'
+/**
+ * The tier the popover pre-selects when running: Pause ENGINE, set explicitly rather than
+ * taken from the list order. "Open the pill, press Pause" has paused the engine since #449
+ * and the demo plan's pause step relies on it; Pause injects (listed first) is a deliberate
+ * choice, never the default.
+ */
+const DEFAULT_CHOICE: PauseChoice = 'engine'
 
 /**
  * The radio to pre-select for the active `tier`: the tier itself when it is
