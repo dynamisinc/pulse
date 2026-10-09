@@ -23,7 +23,10 @@ single editor of the ingest funnel and the read projection. Wire shapes: impleme
       `mediaId` on *any* entry), then the entries are ignored (logged) and the post is created as text; a mix of
       entries with and without `mediaId` is a 400.
 - [ ] **Baseline is staff-only.** `engagementBaseline {like, repost, reply}` (0..1,000,000) is honoured only for
-      a staff `controller-as-persona` write and stored on the post; for a participant session it is ignored;
+      a staff `controller-as-persona` write **or an in-process `inject` write** (amended 2026-10-08,
+      [`inject-queue` IQ-10](../inject-queue/implementation.md#decisions-iq-n)) and stored on the post. Media,
+      reply-parent and baseline handling live **inside `IngestAsync`**, so the inject fire path gets the same
+      validation as HTTP; for a participant session it is ignored;
       out-of-range from staff is 400. It never appears on any participant payload.
 - [ ] **Reply write via the seam.** A non-empty `parentPostId` is resolved through `IReplyParentResolver`;
       `NotFound` → 400 (same text for unknown/cross-exercise/deleted); `Resolved` → `Post.ParentPostId` set and
