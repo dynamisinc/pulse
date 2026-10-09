@@ -77,8 +77,12 @@
  * mounted under a `SocialDirectoryProvider`; in the app that is always so (its only mount
  * is `ThreadRoute`), and a test that mounts it directly wraps it in the provider. A silent
  * fallback to a private read was rejected on purpose: it is the very duplicate this
- * removes. (On a COLD deep link the directory itself can still be loading when the thread
- * lands; the composer guard below covers that ordering.)
+ * removes.
+ * COLD DEEP LINK (a reload on a thread URL): the directory itself can still be loading when
+ * the thread GET lands. While the focused author cannot be resolved for that reason the
+ * thread keeps its "Loading thread…" state (never a blank body) and the cards render in the
+ * step that clears it; if the directory read FAILS instead, the loading state ends in the
+ * thread's existing "Unable to load this thread." state rather than spinning forever.
  *
  * Isolation (COR-001/XC-002): `useExerciseContext().exerciseId` is read ONLY
  * to stamp the telemetry envelope, never as a query-scoping param — the
@@ -195,7 +199,7 @@ export function ThreadView({
     },
   )
   // The channel's shared cast (see ONE CAST READ in the module header): no read of its own.
-  const { personas } = useSocialDirectory()
+  const { personas, loading: directoryLoading, error: directoryError } = useSocialDirectory()
 
   const personaMap = useMemo(
     () => new Map(personas.map(persona => [persona.id, persona])),
@@ -274,25 +278,33 @@ export function ThreadView({
     </p>
   )
 
-  if (loading) {
-    return (
-      <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
-        {liveRegion}
-        <p className={styles.status}>Loading thread…</p>
-      </section>
-    )
-  }
+  // A status-only thread (loading / unavailable): the SAME <section> and live region as the
+  // full render below, so the polite region is one DOM node across every state.
+  const statusOnly = (text: string) => (
+    <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
+      {liveRegion}
+      <p className={styles.status}>{text}</p>
+    </section>
+  )
 
-  if (error || !focused) {
-    return (
-      <section className={styles.thread} data-testid="thread-view" aria-label="Thread">
-        {liveRegion}
-        <p className={styles.status}>Unable to load this thread.</p>
-      </section>
-    )
-  }
+  if (loading) return statusOnly('Loading thread…')
+
+  // A failed thread GET is reported at once: it is never held behind a directory that is
+  // still loading, which could not change the outcome.
+  if (error || !focused) return statusOnly('Unable to load this thread.')
 
   const focusedView = resolvePostView(focused, personaMap)
+
+  // COLD DEEP LINK (a reload on a thread URL): the directory is a separate read and can
+  // still be in flight when the thread GET lands, so no author can be resolved yet. That
+  // is still LOADING -- the same state the reader was already looking at -- not a blank
+  // body, so it holds until the cast lands and the cards then render in the step that
+  // clears it. If the cast read FAILS instead, the loading state ends (it must never spin)
+  // in this thread's existing "unavailable" state: with no cast there is no author to show.
+  if (focusedView === undefined) {
+    if (directoryLoading) return statusOnly('Loading thread…')
+    if (directoryError !== undefined) return statusOnly('Unable to load this thread.')
+  }
 
   return (
     <section className={styles.thread} data-testid="thread-view" aria-label="Thread">

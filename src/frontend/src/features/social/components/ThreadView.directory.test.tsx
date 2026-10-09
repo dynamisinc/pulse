@@ -24,6 +24,12 @@
  *    whole test, so a regression (a private read again) leaves the body blank at exactly
  *    the assertion that checks for it, rather than passing because a fast cast read
  *    happened to beat the thread.
+ *  - Cold deep link (a reload on a thread URL): the directory can still be LOADING when the
+ *    thread GET lands. The body must not be blank then either -- "Loading thread..." holds
+ *    until the cast lands, and the cards render in the step it clears. If the directory
+ *    instead FAILS, the loading state ends (it never spins) in the thread's existing
+ *    "Unable to load this thread." state; and a thread GET that fails is reported at once,
+ *    not held behind a directory that is still loading.
  *  - Fail-closed: outside a Social channel (no provider) `<ThreadView>` throws the
  *    directory's own guidance error rather than quietly starting a private cast read.
  *
@@ -154,6 +160,115 @@ describe('ThreadView — no blank frame once the directory is loaded', () => {
     expect(screen.getByLabelText('Reply text')).toBeInTheDocument()
 
     cast.release() // let a (regressed) private read settle so nothing dangles past the test
+  })
+})
+
+/** The whole tree for a given directory value; re-render it to "move" the directory on. */
+function threadTree(directory: SocialDirectory) {
+  return (
+    <ExerciseContextProvider>
+      <SessionProvider>
+        <ShellContextProvider value={SHELL}>
+          <SocialDirectoryContext.Provider value={directory}>
+            <ThreadView focusedPostId={FOCUS} />
+          </SocialDirectoryContext.Provider>
+        </ShellContextProvider>
+      </SessionProvider>
+    </ExerciseContextProvider>
+  )
+}
+
+/** A directory that has not landed yet: empty, `loading`, no error. */
+function pendingDirectory(loaded: SocialDirectory): SocialDirectory {
+  return {
+    ...loaded,
+    personas: [],
+    loading: true,
+    findById: () => undefined,
+    findByHandle: () => undefined,
+  }
+}
+
+/** A directory whose read FAILED: empty, settled, with the error. */
+function failedDirectory(loaded: SocialDirectory): SocialDirectory {
+  return { ...pendingDirectory(loaded), loading: false, error: new Error('cast unavailable') }
+}
+
+/**
+ * Lets the thread GET reach `useThread` while the directory is still pending, and returns once
+ * it has. The wrapped GET flags the moment the (real, mock-adapter) response resolves, then a
+ * macrotask lets React apply it -- so a test that goes on to assert "still loading" is
+ * asserting about a thread that HAS landed, not one that has not been fetched yet.
+ */
+async function landThreadFirst() {
+  let landed = false
+  const realGet = api.get.bind(api)
+  vi.spyOn(api, 'get').mockImplementation(
+    (url: string, config?: Parameters<typeof api.get>[1]) => url.startsWith('/threads/')
+      ? realGet(url, config).then(response => {
+        landed = true
+        return response
+      })
+      : realGet(url, config),
+  )
+  return async () => {
+    await waitFor(() => expect(landed).toBe(true))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+  }
+}
+
+describe('ThreadView — cold deep link: the directory is still loading', () => {
+  it('holds "Loading thread…" until the cast lands, then renders the cards (no blank frame)', async () => {
+    const loaded = await loadedDirectory()
+    const threadHasLanded = await landThreadFirst()
+
+    const view = render(threadTree(pendingDirectory(loaded)))
+    await threadHasLanded()
+
+    // The thread is in, the cast is not: no author can be named, so the body is NOT blank --
+    // it is still the loading state, and nothing (card, composer) is half-drawn.
+    expect(screen.getByText('Loading thread…')).toBeInTheDocument()
+    expect(screen.queryByTestId('thread-focused')).toBeNull()
+    expect(screen.queryByLabelText('Reply text')).toBeNull()
+
+    view.rerender(threadTree(loaded))
+    await waitFor(() => expect(screen.queryByText('Loading thread…')).toBeNull())
+
+    // The step that clears the loading text already carries the cards.
+    expect(screen.getByTestId('thread-focused')).toBeInTheDocument()
+    expect(screen.getAllByTestId('thread-reply').length).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Reply text')).toBeInTheDocument()
+  })
+
+  it('does not spin forever when the directory FAILS: it ends in the thread\'s error state', async () => {
+    const loaded = await loadedDirectory()
+    const threadHasLanded = await landThreadFirst()
+
+    const view = render(threadTree(pendingDirectory(loaded)))
+    await threadHasLanded()
+    expect(screen.getByText('Loading thread…')).toBeInTheDocument()
+
+    view.rerender(threadTree(failedDirectory(loaded)))
+
+    expect(await screen.findByText('Unable to load this thread.')).toBeInTheDocument()
+    expect(screen.queryByText('Loading thread…')).toBeNull()
+    expect(screen.queryByTestId('thread-focused')).toBeNull()
+    expect(screen.queryByLabelText('Reply text')).toBeNull()
+  })
+
+  it('reports a failed thread GET at once, not held behind the pending directory', async () => {
+    const loaded = await loadedDirectory()
+    const realGet = api.get.bind(api)
+    vi.spyOn(api, 'get').mockImplementation(
+      (url: string, config?: Parameters<typeof api.get>[1]) => url.startsWith('/threads/')
+        ? Promise.reject(new Error('network down'))
+        : realGet(url, config),
+    )
+
+    render(threadTree(pendingDirectory(loaded)))
+
+    expect(await screen.findByText('Unable to load this thread.')).toBeInTheDocument()
+    expect(screen.queryByText('Loading thread…')).toBeNull()
   })
 })
 
