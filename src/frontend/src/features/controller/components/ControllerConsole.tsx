@@ -568,9 +568,13 @@ export function ControllerConsole(
     <Box
       ref={rootRef}
       data-testid="controller-console"
+      // The last-resort home for focus (`CommandPalette`'s fallback when the layer it was opened
+      // over has closed): focusable by script only, no tab stop, no ring on a container.
+      data-console-root=""
+      tabIndex={-1}
       // Positioning context for the console's own flyouts (persona-dock host),
       // anchored to the work area's edges — mirrors the evaluator dashboard page.
-      sx={{ position: 'relative', height: '100%', overflow: 'hidden' }}
+      sx={{ position: 'relative', height: '100%', overflow: 'hidden', outline: 'none' }}
     >
       <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* The engine-control chrome strip — full width, top of the work area

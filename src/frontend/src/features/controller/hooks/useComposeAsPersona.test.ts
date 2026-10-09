@@ -27,6 +27,7 @@
  * `ControllerConsole`'s `closeDock` and is covered end-to-end in
  * `ControllerConsole.personaDraftDiscard.test.tsx`.
  */
+import { useLayoutEffect, useRef } from 'react'
 import { act, renderHook } from '@testing-library/react'
 import { AxiosError } from 'axios'
 import { toast } from 'react-toastify'
@@ -851,5 +852,49 @@ describe('useComposeAsPersona — the draft SURVIVES an unmount (Gate-1 WR-103)'
     // No-op when there is nothing to discard.
     expect(() => composeAsPersonaDraftStore.discardDraft('ex-live-0001', 'no-such-persona'))
       .not.toThrow()
+  })
+})
+
+describe('useComposeAsPersona — nothing the controller does in the first frame is wiped by mounting', () => {
+  // A passive effect can run a frame AFTER the DOM is on screen, so a file picked, a baseline typed
+  // or a post sent in that window must survive it. (The mount-time "re-seed and clear the tray"
+  // effect used to empty the tray then: PersonaComposer.upload / .v2 flaked at ~50% under CPU
+  // load. A layout effect runs BEFORE every passive effect, which makes the window deterministic.)
+  it('keeps a file picked, and a baseline typed, before the mount effects run', () => {
+    const { result } = renderHook(() => {
+      const compose = useComposeAsPersona(options())
+      const acted = useRef(false)
+      useLayoutEffect(() => {
+        if (acted.current) return
+        acted.current = true
+        compose.tray.addFiles([new File(['x'], 'early.png', { type: 'image/png' })])
+        compose.setBaselineField('like', '12')
+        compose.setText('typed early')
+      })
+      return compose
+    })
+
+    expect(result.current.tray.items.map(item => item.name)).toEqual(['early.png'])
+    expect(result.current.baselineFields.like).toBe('12')
+    expect(result.current.text).toBe('typed early')
+  })
+
+  it('still adopts the new target\'s state when the TARGET changes (persona switch)', () => {
+    const { result, rerender } = renderHook(
+      ({ persona }) => useComposeAsPersona(options({ activePersona: persona })),
+      { initialProps: { persona: ACTIVE_PERSONA } },
+    )
+    act(() => result.current.setText('for the first persona'))
+    act(() => {
+      result.current.tray.addFiles([new File(['x'], 'a.png', { type: 'image/png' })])
+      result.current.setBaselineField('like', '3')
+    })
+    expect(result.current.tray.items).toHaveLength(1)
+
+    rerender({ persona: OTHER_PERSONA })
+
+    expect(result.current.text).toBe('')
+    expect(result.current.tray.items).toHaveLength(0)
+    expect(result.current.baselineFields.like).toBe('')
   })
 })

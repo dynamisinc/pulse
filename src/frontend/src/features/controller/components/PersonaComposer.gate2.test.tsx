@@ -269,6 +269,10 @@ describe('M-2 - the remounted draft and its reply', () => {
     expect(notice).toHaveAttribute('role', 'alert')
     expect(notice).toHaveTextContent('This draft was a reply to @pio_jones')
     expect(notice).toHaveTextContent('Post is paused')
+    // Gate-2 A S-NEW-3: the cause is not guessed (a panel close, a persona switch and a cleared
+    // reply all end here), so the copy does not blame the panel.
+    expect(notice).toHaveTextContent('The reply is no longer set.')
+    expect(notice).not.toHaveTextContent(/dropped when the panel closed/)
     expect(within(notice).getByRole('button', { name: 'Reply to @pio_jones again' })).toBeDisabled()
     // A pending "did it go out?" question is not "kept as it is now" - only the discard is open.
     expect(within(notice).queryByRole('button', { name: /instead/ })).toBeNull()
@@ -386,5 +390,79 @@ describe('S-1 - "Reply as..." while the dock is open focuses the text field', ()
     await user.click(drop)
     expect(screen.queryByTestId('reply-banner')).toBeNull()
     expect(drop).toHaveFocus()
+  })
+})
+
+describe('S-NEW-1 - no alert is inserted before the restore has run', () => {
+  it('a remount whose restore succeeds never puts the notice in the DOM', async () => {
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(504))
+    const user = userEvent.setup()
+    const first = render(<Providers><ReplyHarness initial={TARGET_A} /></Providers>)
+    await user.type(screen.getByLabelText(POST_FIELD), '@pio_jones yes, it is safe')
+    await user.click(screen.getByRole('button', { name: 'Post' }))
+    await screen.findByTestId('publish-unconfirmed')
+    first.unmount()
+
+    let inserted = 0
+    const observer = new MutationObserver(records => {
+      for (const record of records) {
+        for (const node of Array.from(record.addedNodes)) {
+          if (!(node instanceof Element)) continue
+          if (node.matches('[data-testid="draft-reply-notice"]')
+            || node.querySelector('[data-testid="draft-reply-notice"]') !== null) inserted += 1
+        }
+      }
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
+    render(<Providers><ReplyHarness /></Providers>)
+    await screen.findByTestId('reply-banner')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    observer.disconnect()
+
+    expect(inserted).toBe(0)
+    expect(screen.queryByTestId('draft-reply-notice')).toBeNull()
+  })
+})
+
+describe('S-NEW-2 - "Post as a new post instead" when the original reply was taken down', () => {
+  async function questionAboutAReplyThenTakedown() {
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(504))
+    const user = userEvent.setup()
+    const first = render(<Providers><ReplyHarness initial={TARGET_A} /></Providers>)
+    await user.type(screen.getByLabelText(POST_FIELD), '@pio_jones yes, it is safe')
+    await user.click(screen.getByRole('button', { name: 'Post' }))
+    await screen.findByTestId('publish-unconfirmed')
+    first.unmount()
+    act(() => removedPosts.add(TARGET_A.postId))
+    // Reopened: the route restores A, which is gone - the composer says so and blocks.
+    render(<Providers><ReplyHarness /></Providers>)
+    const removedBanner = await screen.findByTestId('reply-banner-removed')
+    await user.click(within(removedBanner).getByRole('button', { name: 'Clear reply' }))
+    return { user }
+  }
+
+  it('offers it (and not "Reply to @x again", which can never work)', async () => {
+    await questionAboutAReplyThenTakedown()
+
+    const notice = await screen.findByTestId('draft-reply-notice')
+    expect(notice).toHaveTextContent('This draft was a reply to @pio_jones')
+    expect(notice).toHaveTextContent('The post it replied to was taken down')
+    expect(within(notice).queryByRole('button', { name: /Reply to @pio_jones again/ })).toBeNull()
+    expect(within(notice).getByRole('button', { name: 'Post as a new post instead' }))
+      .toBeEnabled()
+  })
+
+  it('choosing it unblocks the (still two-step) "post again", which then goes out top-level', async () => {
+    const { user } = await questionAboutAReplyThenTakedown()
+    vi.mocked(publishPost).mockResolvedValueOnce(CREATED)
+    const notice = await screen.findByTestId('draft-reply-notice')
+    expect(screen.getByRole('button', { name: 'Post again anyway…' })).toBeDisabled()
+
+    await user.click(within(notice).getByRole('button', { name: 'Post as a new post instead' }))
+
+    expect(screen.queryByTestId('draft-reply-notice')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Post again anyway…' }))
+    await user.click(screen.getByRole('button', { name: 'I checked the feed — post again' }))
+    expect(vi.mocked(publishPost).mock.calls[1]?.[0].parentPostId).toBeUndefined()
   })
 })

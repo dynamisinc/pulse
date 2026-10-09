@@ -9,6 +9,8 @@
  *       slot roots are `memo`ized with stable props. Counted with pass-through wrappers.
  *  S-3  C5's takedown step is non-modal, so Ctrl+K still opens the palette OVER it, the step
  *       closes, and focus lands in the palette (not on <body>).
+ *  L-NEW-3  Esc on the palette opened OVER the takedown step returns focus to that row's Take down
+ *       control (never <body>); the console root is the last-resort home.
  *  L-2  The pause-tier popover is a MUI modal and now says so (`aria-modal`), so Ctrl+K is inert
  *       while it is open instead of opening the palette hidden behind it.
  *  M-2  A "Post status unknown" reply survives the dock closing (the ENGINE flyout takes it over):
@@ -193,6 +195,34 @@ describe('S-3 - Ctrl+K works over the (non-modal) takedown step', () => {
     expect(within(screen.getByTestId('command-palette-search')).getByRole('textbox')).toHaveFocus()
     // Nothing was taken down by getting out of the way.
     expect(removedPosts.has(row.dataset.postId ?? '')).toBe(false)
+  })
+})
+
+describe('L-NEW-3 - Esc on the palette opened over the takedown step does not drop focus to <body>', () => {
+  it('returns focus to that row\'s Take down control', async () => {
+    const { user, rows } = await renderRoute()
+    const row = rows[0]
+    if (row === undefined) throw new Error('no live-world rows')
+    const takeDown = within(row).getByTestId('takedown-trigger')
+
+    await user.click(takeDown)
+    expect(await screen.findByTestId('takedown-dialog')).toBeInTheDocument()
+    await user.keyboard('{Control>}k{/Control}')
+    expect(await screen.findByRole('dialog', { name: /command palette/i })).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByTestId('takedown-dialog')).toBeNull())
+
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(palette()).toBeNull())
+    expect(document.activeElement).toBe(takeDown)
+    expect(document.activeElement).not.toBe(document.body)
+  })
+
+  it('the console root is a script-only focus target (no tab stop)', async () => {
+    await renderRoute()
+    const root = screen.getByTestId('controller-console')
+    expect(root).toHaveAttribute('data-console-root')
+    expect(root).toHaveAttribute('tabindex', '-1')
   })
 })
 

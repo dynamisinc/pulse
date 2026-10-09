@@ -112,7 +112,7 @@ import {
   type ReplyTarget,
 } from '@/features/social'
 import type { Persona } from '@/features/personas'
-import { useComposeAsPersona } from '../hooks/useComposeAsPersona'
+import { useComposeAsPersona, type ReplyMismatch } from '../hooks/useComposeAsPersona'
 import { useRemovedPostIds } from '../hooks/useRemovedPostIds'
 import { AttachmentTray } from '../media/AttachmentTray'
 import { MediaLibraryPicker } from '../media/MediaLibraryPicker'
@@ -157,6 +157,76 @@ function bareHandle(handle: string): string {
   return handle.startsWith('@') ? handle.slice(1) : handle
 }
 
+interface ReplyMismatchNoticeProps {
+  readonly mismatch: ReplyMismatch
+  /** The route can put the draft's reply back (`onRestoreReply` was supplied). */
+  readonly canRestore: boolean
+  readonly onMatch: () => void
+  readonly onKeepCurrent: () => void
+}
+
+/**
+ * "This draft was a reply to @x" - shown when a persisted draft's reply no longer matches the
+ * route's (see `useComposeAsPersona`). Post is paused until the controller chooses. The words say
+ * what the draft was and what is set now; the cause is not guessed (a panel close, a persona
+ * switch and a cleared reply all end here).
+ */
+function ReplyMismatchNotice({
+  mismatch,
+  canRestore,
+  onMatch,
+  onKeepCurrent,
+}: ReplyMismatchNoticeProps) {
+  const { original, current, originalRemoved, canKeepCurrent } = mismatch
+  const originalHandle = original !== undefined ? bareHandle(original.authorHandle) : ''
+  const currentHandle = current !== undefined ? bareHandle(current.authorHandle) : ''
+  let detail: string
+  if (original === undefined) detail = `A reply to @${currentHandle} is set now.`
+  else if (originalRemoved) detail = 'The post it replied to was taken down: it cannot be sent as that reply.'
+  else if (current !== undefined) detail = `A different reply (@${currentHandle}) is set now.`
+  else detail = 'The reply is no longer set.'
+  return (
+    <div className={styles.errorBanner} role="alert" data-testid="draft-reply-notice">
+      <FontAwesomeIcon icon={faReply} aria-hidden="true" />
+      <div className={styles.errorText}>
+        <span className={styles.errorTitle}>
+          {original !== undefined
+            ? `This draft was a reply to @${originalHandle}`
+            : 'This draft was a new post, not a reply'}
+        </span>
+        <span>{detail} Post is paused until it matches.</span>
+        <div className={styles.bannerActions}>
+          {!originalRemoved && (
+            <CobraSecondaryButton
+              type="button"
+              size="small"
+              sx={{ paddingLeft: '12px', paddingRight: '12px' }}
+              disabled={original !== undefined && !canRestore}
+              onClick={onMatch}
+            >
+              {original !== undefined
+                ? `Reply to @${originalHandle} again`
+                : 'Clear the reply target'}
+            </CobraSecondaryButton>
+          )}
+          {canKeepCurrent && (
+            <CobraSecondaryButton
+              type="button"
+              size="small"
+              sx={{ paddingLeft: '12px', paddingRight: '12px' }}
+              onClick={onKeepCurrent}
+            >
+              {current !== undefined
+                ? `Reply to @${currentHandle} instead`
+                : 'Post as a new post instead'}
+            </CobraSecondaryButton>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function PersonaComposer({
   activePersona,
   actingHumanId,
@@ -184,6 +254,7 @@ export function PersonaComposer({
     ...(onClearReply !== undefined ? { onClearReply } : {}),
     ...(onRestoreReply !== undefined ? { onRestoreReply } : {}),
     replyTargetRemoved,
+    removedPostIds,
   })
   const { tray } = compose
   const locked = compose.isPublishing
@@ -367,51 +438,12 @@ export function PersonaComposer({
       )}
 
       {compose.replyMismatch !== undefined && (
-        <div className={styles.errorBanner} role="alert" data-testid="draft-reply-notice">
-          <FontAwesomeIcon icon={faReply} aria-hidden="true" />
-          <div className={styles.errorText}>
-            <span className={styles.errorTitle}>
-              {compose.replyMismatch.original !== undefined
-                ? `This draft was a reply to @${bareHandle(compose.replyMismatch.original.authorHandle)}`
-                : 'This draft was a new post, not a reply'}
-            </span>
-            <span>
-              {compose.replyMismatch.original !== undefined
-                ? compose.replyMismatch.current !== undefined
-                  ? `A different reply (@${bareHandle(compose.replyMismatch.current.authorHandle)}) is set now.`
-                  : 'The reply was dropped when the panel closed.'
-                : `A reply to @${bareHandle(compose.replyMismatch.current?.authorHandle ?? '')} is set now.`}
-              {' '}Post is paused until it matches.
-            </span>
-            <div className={styles.bannerActions}>
-              <CobraSecondaryButton
-                type="button"
-                size="small"
-                sx={{ paddingLeft: '12px', paddingRight: '12px' }}
-                disabled={
-                  compose.replyMismatch.original !== undefined && onRestoreReply === undefined
-                }
-                onClick={compose.matchDraftReply}
-              >
-                {compose.replyMismatch.original !== undefined
-                  ? `Reply to @${bareHandle(compose.replyMismatch.original.authorHandle)} again`
-                  : 'Clear the reply target'}
-              </CobraSecondaryButton>
-              {!compose.awaitingDecision && (
-                <CobraSecondaryButton
-                  type="button"
-                  size="small"
-                  sx={{ paddingLeft: '12px', paddingRight: '12px' }}
-                  onClick={compose.keepCurrentReply}
-                >
-                  {compose.replyMismatch.current !== undefined
-                    ? `Reply to @${bareHandle(compose.replyMismatch.current.authorHandle)} instead`
-                    : 'Post as a new post instead'}
-                </CobraSecondaryButton>
-              )}
-            </div>
-          </div>
-        </div>
+        <ReplyMismatchNotice
+          mismatch={compose.replyMismatch}
+          canRestore={onRestoreReply !== undefined}
+          onMatch={compose.matchDraftReply}
+          onKeepCurrent={compose.keepCurrentReply}
+        />
       )}
 
       <CobraTextField

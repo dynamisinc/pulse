@@ -193,6 +193,12 @@ interface ConfirmPanelProps {
   /** The dialog element, owned by the caller so it can tell "another modal" from this one. */
   readonly panelRef: RefObject<HTMLDivElement | null>
   /**
+   * The id of the Take down control this step belongs to. Declared on the panel as
+   * `data-focus-return-to`, so the Ctrl+K palette - opened OVER the step, which then closes - can
+   * give focus back to that control (or its row) when the palette closes, instead of <body>.
+   */
+  readonly returnFocusId: string
+  /**
    * True from the moment the caller starts closing the step. The dialog is still in the document
    * until React commits the close, and the caller is about to move focus OUT of it - the trap must
    * not pull that focus straight back in.
@@ -214,6 +220,7 @@ interface ConfirmPanelProps {
  */
 function ConfirmPanel({
   panelRef,
+  returnFocusId,
   closingRef,
   authorName,
   category,
@@ -292,6 +299,7 @@ function ConfirmPanel({
     <Box
       ref={panelRef}
       role="dialog"
+      data-focus-return-to={returnFocusId}
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
       tabIndex={-1}
@@ -370,6 +378,7 @@ export function TakedownAction({ post }: TakedownActionProps) {
   const takedown = useTakedown(post.id)
 
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const triggerId = useId()
   const confirmationRef = useRef<HTMLSpanElement>(null)
   const retryRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -594,6 +603,7 @@ export function TakedownAction({ post }: TakedownActionProps) {
             in the Tab order, and simply ignores activation. */}
         <CobraLinkButton
           ref={triggerRef}
+          id={triggerId}
           size="small"
           data-testid="takedown-trigger"
           aria-haspopup="dialog"
@@ -646,6 +656,7 @@ export function TakedownAction({ post }: TakedownActionProps) {
             >
               <ConfirmPanel
                 panelRef={panelRef}
+                returnFocusId={triggerId}
                 closingRef={closingRef}
                 authorName={authorName}
                 category={category}

@@ -22,6 +22,7 @@
 import { useLayoutEffect, useMemo } from 'react'
 import { act, render } from '@testing-library/react'
 import { AxiosError } from 'axios'
+import { toast } from 'react-toastify'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { StaffPersona } from '@/features/personas'
@@ -29,6 +30,7 @@ import type { CreatedPostView, ReplyTarget } from '@/features/social'
 import {
   composeAsPersonaDraftStore,
   useComposeAsPersona,
+  type ReplyMismatch,
   type UseComposeAsPersonaResult,
 } from './useComposeAsPersona'
 import { useReplyTarget } from './useReplyTarget'
@@ -88,28 +90,37 @@ const h: {
   clear?: () => void
   compose?: UseComposeAsPersonaResult
   onClearReply?: ReturnType<typeof vi.fn>
-} = {}
+  onPublished?: ReturnType<typeof vi.fn>
+  /** The `replyMismatch` ANNOUNCED by every commit of the composer, in order (S-NEW-1). */
+  mismatchLog: (ReplyMismatch | undefined)[]
+} = { mismatchLog: [] }
 
 interface ComposerProps {
   readonly activePersona: StaffPersona
   readonly replyTo: ReplyTarget | undefined
   readonly onClearReply: () => void
   readonly onRestoreReply: ((target: ReplyTarget) => void) | undefined
-  readonly removed: boolean
+  readonly removedIds: ReadonlySet<string>
 }
+
+const onPublished = vi.fn()
 
 function Composer(props: ComposerProps) {
   const compose = useComposeAsPersona({
     activePersona: props.activePersona,
     actingHumanId: 'human-1',
+    onPublished,
     ...(props.replyTo !== undefined ? { replyTo: props.replyTo } : {}),
     onClearReply: props.onClearReply,
     ...(props.onRestoreReply !== undefined ? { onRestoreReply: props.onRestoreReply } : {}),
-    replyTargetRemoved: props.removed,
+    replyTargetRemoved: props.replyTo !== undefined && props.removedIds.has(props.replyTo.postId),
+    removedPostIds: props.removedIds,
   })
   // Published for the test to read after each `act` (a layout effect: never during render).
   useLayoutEffect(() => {
     h.compose = compose
+    h.onPublished = onPublished
+    h.mismatchLog.push(compose.replyMismatch)
   })
   return null
 }
@@ -118,11 +129,22 @@ interface RouteProps {
   readonly dockOpen: boolean
   readonly active?: StaffPersona
   readonly withRestore?: boolean
+  /** Shorthand: the reply target `A` has been taken down. */
   readonly removed?: boolean
+  readonly removedIds?: ReadonlySet<string>
 }
 
 /** The route: holds the reply target; the composer is mounted only while the dock is open. */
-function Route({ dockOpen, active = X, withRestore = true, removed = false }: RouteProps) {
+const NONE_REMOVED: ReadonlySet<string> = new Set()
+const A_REMOVED: ReadonlySet<string> = new Set([A.postId])
+
+function Route({
+  dockOpen,
+  active = X,
+  withRestore = true,
+  removed = false,
+  removedIds = removed ? A_REMOVED : NONE_REMOVED,
+}: RouteProps) {
   const { replyTo, requestReply, clearReply } = useReplyTarget({
     exerciseId: 'ex-1',
     activePersonaId: active.id,
@@ -142,7 +164,7 @@ function Route({ dockOpen, active = X, withRestore = true, removed = false }: Ro
       replyTo={replyTo ?? undefined}
       onClearReply={onClearReply}
       onRestoreReply={withRestore ? requestReply : undefined}
-      removed={removed}
+      removedIds={removedIds}
     />
   ) : null
 }
@@ -162,6 +184,10 @@ beforeEach(() => {
   } as never)
   composeAsPersonaDraftStore.resetForTests()
   vi.mocked(publishPost).mockReset()
+  vi.mocked(toast.error).mockClear()
+  vi.mocked(toast.warning).mockClear()
+  onPublished.mockClear()
+  h.mismatchLog = []
 })
 
 describe('M-1 - a stale success from an unmounted composer', () => {
@@ -490,5 +516,287 @@ describe('L-5 - sign-out forgets drafts, questions and reply contexts', () => {
 
     view.rerender(<Route dockOpen />)
     expect(h.compose?.text).toBe('')
+  })
+})
+
+describe('L-NEW-1 - a typed, never-sent reply comes back as a reply (the "GAP" probe)', () => {
+  /** Types a reply to A, then the ENGINE flyout takes the dock over: the draft is KEPT. */
+  function typedReplyThenEngineTakeover(options: Omit<RouteProps, 'dockOpen'> = {}) {
+    const view = render(<Route dockOpen {...options} />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('@a we are on it'))
+    closeDock(view, options) // unmount + onDockClose; NO discardDraft (that is the explicit Esc/X)
+    return view
+  }
+
+  it('reopened, the reply target is restored and Post goes out as THAT reply', async () => {
+    vi.mocked(publishPost).mockResolvedValue(VIEW)
+    const view = typedReplyThenEngineTakeover()
+    expect(h.reply).toBeNull()
+
+    view.rerender(<Route dockOpen />)
+
+    expect(h.compose?.text).toBe('@a we are on it')
+    expect(h.reply?.postId).toBe('post-A')
+    expect(h.compose?.replyMismatch).toBeUndefined()
+    expect(h.compose?.canPublish).toBe(true)
+    await act(async () => { h.compose?.publish() })
+    expect(vi.mocked(publishPost).mock.calls[0]?.[0].parentPostId).toBe('post-A')
+  })
+
+  it('with no way to restore it, the draft is BLOCKED (never a silent top-level post)', async () => {
+    vi.mocked(publishPost).mockResolvedValue(VIEW)
+    const view = typedReplyThenEngineTakeover({ withRestore: false })
+
+    view.rerender(<Route dockOpen withRestore={false} />)
+
+    expect(h.reply).toBeNull()
+    expect(h.compose?.replyMismatch).toMatchObject({ original: { postId: 'post-A' } })
+    expect(h.compose?.canPublish).toBe(false)
+    await act(async () => { h.compose?.publish() })
+    expect(publishPost).not.toHaveBeenCalled()
+    // The controller's choices: put it back, or accept a new post.
+    act(() => h.compose?.keepCurrentReply())
+    expect(h.compose?.canPublish).toBe(true)
+    await act(async () => { h.compose?.publish() })
+    expect(vi.mocked(publishPost).mock.calls[0]?.[0].parentPostId).toBeUndefined()
+  })
+
+  it('typing on a reopened, unresolved draft does not quietly accept the mismatch', () => {
+    const view = typedReplyThenEngineTakeover({ withRestore: false })
+    view.rerender(<Route dockOpen withRestore={false} />)
+    expect(h.compose?.replyMismatch).toBeDefined()
+
+    act(() => h.compose?.setText('@a we are on it, more'))
+
+    expect(h.compose?.replyMismatch?.original?.postId).toBe('post-A')
+    expect(h.compose?.canPublish).toBe(false)
+  })
+
+  it('"Reply as" on ANOTHER post while this composer stays open is a deliberate retarget (no block)', async () => {
+    vi.mocked(publishPost).mockResolvedValue(VIEW)
+    render(<Route dockOpen />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('wrong post, sorry'))
+
+    act(() => h.request?.(B))
+
+    expect(h.compose?.replyMismatch).toBeUndefined()
+    expect(h.compose?.canPublish).toBe(true)
+    await act(async () => { h.compose?.publish() })
+    expect(vi.mocked(publishPost).mock.calls[0]?.[0].parentPostId).toBe('post-B')
+  })
+
+  it('clearing the reply while the composer stays open makes it a plain draft again', async () => {
+    vi.mocked(publishPost).mockResolvedValue(VIEW)
+    const view = render(<Route dockOpen />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('actually a plain announcement'))
+    act(() => h.clear?.()) // the banner's (x)
+
+    // After a non-explicit close the draft does NOT come back as a reply it no longer is.
+    closeDock(view)
+    view.rerender(<Route dockOpen />)
+    expect(h.reply).toBeNull()
+    expect(h.compose?.replyMismatch).toBeUndefined()
+    expect(h.compose?.canPublish).toBe(true)
+    await act(async () => { h.compose?.publish() })
+    expect(vi.mocked(publishPost).mock.calls[0]?.[0].parentPostId).toBeUndefined()
+  })
+
+  it('emptying the text forgets the reply (nothing left to restore)', () => {
+    const view = render(<Route dockOpen />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('a'))
+    act(() => h.compose?.setText(''))
+    closeDock(view)
+
+    view.rerender(<Route dockOpen />)
+
+    expect(h.reply).toBeNull()
+    expect(h.compose?.replyMismatch).toBeUndefined()
+  })
+
+  it('an explicit discard (Esc / X on the dock) forgets the typed reply too', () => {
+    const view = render(<Route dockOpen />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('@a we are on it'))
+    composeAsPersonaDraftStore.discardDraft('ex-1', X.id)
+    closeDock(view)
+
+    view.rerender(<Route dockOpen />)
+
+    expect(h.reply).toBeNull()
+    expect(h.compose?.text).toBe('')
+  })
+
+  it('X -> Y -> X: the typed reply for X comes back for X only', () => {
+    const view = render(<Route dockOpen active={X} />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('reply from X'))
+
+    view.rerender(<Route dockOpen active={Y} />)
+    expect(h.reply).toBeNull()
+    expect(h.compose?.text).toBe('')
+    expect(h.compose?.replyMismatch).toBeUndefined()
+
+    view.rerender(<Route dockOpen active={X} />)
+    expect(h.compose?.text).toBe('reply from X')
+    expect(h.reply?.postId).toBe('post-A')
+  })
+})
+
+describe('L-NEW-2 - a response that lands after sign-out changes nothing (the "RACE" probe)', () => {
+  it('a FAILURE does not re-create the previous user\'s draft, question, reply or toast', async () => {
+    let fail: (error: unknown) => void = () => undefined
+    vi.mocked(publishPost).mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+    const view = render(<Route dockOpen />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('previous user text'))
+    act(() => h.compose?.publish())
+    view.unmount() // navigation to /login
+    await endSession() // sign-out: composer state is reset, the epoch moves on
+
+    await act(async () => { fail(httpError(504)) })
+
+    // The next user signs in on the same tab, same exercise and persona.
+    render(<Route dockOpen />)
+    expect(h.compose?.text).toBe('')
+    expect(h.compose?.awaitingDecision).toBe(false)
+    expect(h.compose?.replyMismatch).toBeUndefined()
+    expect(h.reply).toBeNull()
+    expect(toast.warning).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('a SUCCESS neither clears a reply target nor reports a publish for the previous session', async () => {
+    let resolve: (view: CreatedPostView) => void = () => undefined
+    vi.mocked(publishPost).mockReturnValueOnce(new Promise(res => { resolve = res }))
+    render(<Route dockOpen />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('previous user text'))
+    act(() => h.compose?.publish())
+    await endSession()
+    // The next user is (on this tab) replying to the same post, with the composer still mounted.
+    act(() => h.request?.(A))
+    h.onClearReply?.mockClear()
+    h.onPublished?.mockClear()
+
+    await act(async () => { resolve(VIEW) })
+
+    expect(h.onClearReply).not.toHaveBeenCalled()
+    expect(h.onPublished).not.toHaveBeenCalled()
+    expect(h.reply?.postId).toBe('post-A')
+    expect(h.compose?.lastPublished).toBeNull()
+  })
+
+  it('a request sent AFTER the sign-out is a normal one (the epoch is captured per send)', async () => {
+    vi.mocked(publishPost).mockResolvedValueOnce(VIEW)
+    render(<Route dockOpen />)
+    await endSession()
+    act(() => h.compose?.setText('second user'))
+
+    await act(async () => { h.compose?.publish() })
+
+    expect(h.onPublished).toHaveBeenCalledTimes(1)
+    expect(h.compose?.status).toBe('success')
+  })
+})
+
+describe('S-NEW-1 - the mismatch alert is not inserted before the restore has run', () => {
+  it('a remount whose restore succeeds never announces a mismatch', async () => {
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(504))
+    const view = render(<Route dockOpen />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('@a yes'))
+    await act(async () => { h.compose?.publish() })
+    closeDock(view)
+    h.mismatchLog = []
+
+    view.rerender(<Route dockOpen />)
+
+    expect(h.reply?.postId).toBe('post-A')
+    expect(h.mismatchLog.length).toBeGreaterThan(0)
+    expect(h.mismatchLog.every(announced => announced === undefined)).toBe(true)
+    // ... yet nothing could be sent in the window (the guard is not the announcement).
+    expect(h.compose?.canPublish).toBe(false) // still the pending question
+  })
+
+  it('a mismatch that CANNOT be restored is announced at once', () => {
+    const view = render(<Route dockOpen withRestore={false} />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('@a we are on it'))
+    closeDock(view, { withRestore: false })
+    h.mismatchLog = []
+
+    view.rerender(<Route dockOpen withRestore={false} />)
+
+    expect(h.mismatchLog[0]?.original?.postId).toBe('post-A')
+  })
+
+  it('a different reply set before reopening is announced at once (nothing to restore)', () => {
+    const view = render(<Route dockOpen />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('@a we are on it'))
+    closeDock(view)
+    act(() => h.request?.(B))
+    h.mismatchLog = []
+
+    view.rerender(<Route dockOpen />)
+
+    expect(h.mismatchLog[0]).toMatchObject({
+      original: { postId: 'post-A' },
+      current: { postId: 'post-B' },
+    })
+  })
+})
+
+describe('S-NEW-2 - a pending question about a reply whose post was taken down', () => {
+  async function questionThenTakedown() {
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(504)).mockResolvedValueOnce(VIEW)
+    const view = render(<Route dockOpen />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('@a yes'))
+    await act(async () => { h.compose?.publish() })
+    view.rerender(<Route dockOpen removed />) // A is taken down
+    act(() => h.clear?.()) // the removed banner's "Clear reply"
+    return view
+  }
+
+  it('offers "post as a new post instead": that request can never be re-sent', async () => {
+    await questionThenTakedown()
+
+    expect(h.compose?.replyMismatch).toMatchObject({
+      original: { postId: 'post-A' },
+      originalRemoved: true,
+      canKeepCurrent: true,
+    })
+    expect(h.compose?.awaitingDecision).toBe(true)
+
+    act(() => h.compose?.keepCurrentReply())
+    expect(h.compose?.replyMismatch).toBeUndefined()
+    // The question itself is still open: the two-step "post again anyway" follows, top-level.
+    expect(h.compose?.awaitingDecision).toBe(true)
+    expect(publishPost).toHaveBeenCalledTimes(1)
+    await act(async () => { h.compose?.repostAnyway() })
+    expect(vi.mocked(publishPost).mock.calls[1]?.[0].parentPostId).toBeUndefined()
+  })
+
+  it('a question about a reply whose post is still up stays pinned (not offered)', async () => {
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(504))
+    const view = render(<Route dockOpen />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('@a yes'))
+    await act(async () => { h.compose?.publish() })
+    closeDock(view)
+    act(() => h.request?.(B))
+    view.rerender(<Route dockOpen />)
+
+    expect(h.compose?.replyMismatch).toMatchObject({
+      originalRemoved: false,
+      canKeepCurrent: false,
+    })
+    act(() => h.compose?.keepCurrentReply())
+    expect(h.compose?.replyMismatch).toBeDefined()
   })
 })

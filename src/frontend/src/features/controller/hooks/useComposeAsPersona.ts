@@ -60,18 +60,31 @@
  * was set AFTER the post was sent - e.g. a fresh "Reply as" on another post - which an
  * old instance's late 201 must never wipe (it would turn that reply into a top-level post).
  *
- * A REPLY NEVER TURNS INTO A TOP-LEVEL POST ON REMOUNT. What persists across an unmount -
- * the "Post status unknown" question and the draft an off-screen failure restored - is
- * persisted TOGETHER WITH the reply it was sent for (`contextByKey`, which may say "no
- * reply"). The route drops its reply target when the dock closes or the persona changes,
- * so on a fresh mount the hook compares the two:
+ * A REPLY NEVER TURNS INTO A TOP-LEVEL POST ON REMOUNT. Everything that persists across an
+ * unmount - the "Post status unknown" question, the draft an off-screen failure restored, and a
+ * plain typed draft that survived a non-explicit close (the ENGINE / USAGE flyout taking the dock
+ * over) - is persisted TOGETHER WITH the reply it was written for (`contextByKey`, which may say
+ * "no reply"): recorded on every keystroke while a reply target is set, and at an unconfirmed /
+ * off-screen failure. While this composer stays on screen the record FOLLOWS the route's target
+ * (the controller choosing "Reply as" on another post is a deliberate retarget), except while a
+ * "did it go out?" question is open, which is pinned to the request it is about. The route drops
+ * its reply target when the dock closes or the persona changes, so on a fresh mount the hook
+ * compares the two:
  *   - route target absent -> it asks the route to put the draft's reply back
  *     (`onRestoreReply`; the "Replying to @x" banner shows again);
  *   - they still differ (no restore callback, a different "Reply as", the controller cleared
  *     it) -> `replyMismatch` is set, Post / "post again" are blocked, and the composer says
  *     what the draft was. `matchDraftReply()` puts the original setting back;
- *     `keepCurrentReply()` (not offered for a pending "did it go out?" question, whose
- *     re-send must be the SAME request) accepts what is on screen.
+ *     `keepCurrentReply()` accepts what is on screen - not offered for a pending "did it go
+ *     out?" question, whose re-send must be the SAME request, unless the post it replied to was
+ *     taken down (that request can never be re-sent, so "post as a new post instead" is the way
+ *     out; the two-step "post again anyway" still follows).
+ *
+ * A RESPONSE AFTER SIGN-OUT CHANGES NOTHING. `reset()` (sign-out) bumps a module-level session
+ * epoch and `send` captures it: a response that lands in a LATER epoch - the previous user's
+ * request resolving after `endSession` - persists nothing, raises no toast and calls neither
+ * `onClearReply` nor `onPublished`, so it can not re-create the previous user's draft, question
+ * or reply for the next sign-in on the same tab.
  *
  * INPUTS, NOT IMPORTS (Wave-1 parallel-build contract):
  *   - `activePersona` - the persona to post AS - is a PROP from persona-operation/02's
@@ -156,14 +169,20 @@ const unconfirmedByKey = new Map<string, PublishFailure>()
 /**
  * What a persisted draft was written FOR. `replyTo === undefined` means "a top-level post",
  * which is just as worth remembering: a draft written as a plain post must not become a
- * reply because the controller pressed "Reply as..." before reopening the dock. Only set
- * alongside an unconfirmed question or an off-screen-restored draft (see the module header);
- * absent = unknown (no guard).
+ * reply because the controller pressed "Reply as..." before reopening the dock. Set alongside
+ * an unconfirmed question, an off-screen-restored draft, and a typed draft while a reply
+ * target is set (see the module header); absent = unknown (no guard).
  */
 interface DraftContext {
   readonly replyTo: ReplyTarget | undefined
 }
 const contextByKey = new Map<string, DraftContext>()
+
+/**
+ * Bumped by {@link reset} (sign-out). A request captures it when it is sent; a response that lands
+ * after the epoch moved belongs to a previous session and is ignored (see the module header).
+ */
+let sessionEpoch = 0
 
 /** A handle with exactly one leading '@' stripped (the composer's banner adds its own). */
 function bareHandleOf(target: ReplyTarget): string {
@@ -206,6 +225,7 @@ function discardDraft(exerciseId: string, personaId: string): void {
  * the previous one's unsent text or unresolved question. Also the test reset.
  */
 function reset(): void {
+  sessionEpoch += 1
   draftByKey.clear()
   unconfirmedByKey.clear()
   contextByKey.clear()
@@ -221,7 +241,10 @@ export const composeAsPersonaDraftStore = { discardDraft, reset, resetForTests: 
 // singletons that live as long as the TAB, so without this the next staff user on the same tab
 // would inherit the previous one's unsent text and "Post status unknown" question. Registered
 // with `core/auth` (which cannot import this feature) rather than called from `endSession`.
-registerSessionReset(reset)
+//
+// The unregister is tied to Vite's hot replacement of THIS module, so a dev session does not
+// accumulate one stale reset per edit (Gate-2 A S-NEW-4).
+registerSessionReset(reset, import.meta.hot)
 
 // ---------------------------------------------------------------------------
 // Engagement baseline form state
@@ -270,6 +293,12 @@ export interface UseComposeAsPersonaOptions {
    * removed post can never succeed) and `blockers` says why. Route / composer supplied.
    */
   readonly replyTargetRemoved?: boolean
+  /**
+   * The ids of posts taken down in this session. Lets the hook tell that the post a persisted
+   * draft was written as a reply to is gone (`ReplyMismatch.originalRemoved`), so a pending
+   * "did it go out?" question about it can be answered with "post as a new post instead".
+   */
+  readonly removedPostIds?: ReadonlySet<string>
 }
 
 /**
@@ -279,6 +308,13 @@ export interface UseComposeAsPersonaOptions {
 export interface ReplyMismatch {
   readonly original: ReplyTarget | undefined
   readonly current: ReplyTarget | undefined
+  /** The post the draft replied to has been taken down: that request can never be re-sent. */
+  readonly originalRemoved: boolean
+  /**
+   * `keepCurrentReply()` is available: always, except for a pending "did it go out?" question
+   * whose original request could still be re-sent (see the module header).
+   */
+  readonly canKeepCurrent: boolean
 }
 
 /** Where the last publish attempt stands. */
@@ -356,6 +392,7 @@ export function useComposeAsPersona(
     onClearReply,
     onRestoreReply,
     replyTargetRemoved = false,
+    removedPostIds,
   } = options
   const { exerciseId, timeZone } = useExerciseContext()
   const personaId = activePersona.id
@@ -375,6 +412,9 @@ export function useComposeAsPersona(
   const [draftContext, setDraftContext] = useState<DraftContext | undefined>(() =>
     contextByKey.get(targetKey),
   )
+  // The target whose "put the draft's reply back" attempt has run (S-NEW-1: until it has, a
+  // restorable mismatch is not announced - the restore usually resolves it before paint).
+  const [restoreAttemptedFor, setRestoreAttemptedFor] = useState<string | null>(null)
 
   // The target a response belongs to must still be the one on screen when it lands.
   const targetRef = useRef(targetKey)
@@ -402,46 +442,102 @@ export function useComposeAsPersona(
   }, [onRestoreReply])
 
   // If the compose TARGET changes (a different exercise or persona - NOT merely a
-  // remount for the SAME one, which the lazy initializer above already handles),
+  // remount for the SAME one, which the lazy initializers above already handle),
   // adopt THAT target's own persisted draft instead of carrying over whatever was
   // mid-typed for the previous target, and drop every transient outcome (an error
   // banner or "Posted" line for persona A must not follow the controller to B). One
   // extra render on a genuine target change is an acceptable, standard trade for
   // staying lint-clean (`react-hooks/refs` forbids reading/writing a ref during
   // render, even for this "adjust state" pattern).
+  //
+  // NOT on the first run for the target this instance MOUNTED with: the lazy initializers
+  // seeded everything already, and a passive effect can run a frame AFTER the DOM is on screen
+  // (it did in tests, under load: `findBy*` resolved on the DOM, the file was picked, and then
+  // this effect emptied the tray - or reset a publish already in flight to 'idle'). Resetting
+  // state a user may already have changed is the bug, not the safety it was meant to be.
   const { clear: clearTray } = tray
+  const seededKeyRef = useRef(targetKey)
   useEffect(() => {
-    targetRef.current = draftKey(exerciseId, personaId)
-    // Deliberately re-seeds on every mount too (redundant with, but never in
-    // conflict with, the lazy initializer above - same value either way).
-    setTextState(getPersistedDraft(exerciseId, personaId))
-    // A post that may already be live comes back asking, not as a fresh draft.
-    const pending = unconfirmedByKey.get(draftKey(exerciseId, personaId))
-    setStatus(pending !== undefined ? 'error' : 'idle')
-    setFailure(pending)
-    setLastPublished(null)
-    setBaselineFields(EMPTY_BASELINE_FIELDS)
-    clearTray()
+    const key = draftKey(exerciseId, personaId)
+    targetRef.current = key
+    if (seededKeyRef.current !== key) {
+      seededKeyRef.current = key
+      setTextState(getPersistedDraft(exerciseId, personaId))
+      // A post that may already be live comes back asking, not as a fresh draft.
+      const pending = unconfirmedByKey.get(key)
+      setStatus(pending !== undefined ? 'error' : 'idle')
+      setFailure(pending)
+      setLastPublished(null)
+      setBaselineFields(EMPTY_BASELINE_FIELDS)
+      clearTray()
+      setDraftContext(contextByKey.get(key))
+    }
     // The draft comes back with the reply it was written for. The route dropped its target
     // when the dock closed / the persona changed, so ask it to put that target back (a
     // PASSIVE effect on purpose: the route's own bookkeeping of the active persona is only
     // current by now). If it cannot, `replyMismatch` blocks the send instead.
-    const context = contextByKey.get(draftKey(exerciseId, personaId))
-    setDraftContext(context)
+    const context = contextByKey.get(key)
     if (context?.replyTo !== undefined && latestReplyToRef.current === undefined) {
       onRestoreReplyRef.current?.(context.replyTo)
     }
+    setRestoreAttemptedFor(key)
   }, [exerciseId, personaId, clearTray])
 
   // Mirrors every keystroke into the persisted-draft store (Gate-1 WR-103) -
-  // see the module header. Cheap (a single Map write).
+  // see the module header. Cheap (a few Map writes). The reply the draft is being written FOR
+  // goes with it, so a typed reply that survives a non-explicit dock close comes back as one.
   const setText = useCallback(
     (value: string) => {
       setTextState(value)
       setPersistedDraft(exerciseId, personaId, value)
+      const key = draftKey(exerciseId, personaId)
+      // A pending "did it go out?" question owns its context.
+      if (unconfirmedByKey.has(key)) return
+      if (value === '') {
+        contextByKey.delete(key)
+        setDraftContext(undefined)
+        return
+      }
+      const current = latestReplyToRef.current
+      const recorded = contextByKey.get(key)
+      // Record when there is nothing yet, or refresh the same reply. A DIFFERENT recorded
+      // reply is an unresolved mismatch (a draft reopened under another "Reply as"): typing must
+      // not quietly accept it - that is the controller's choice in the notice.
+      const sameOrNone = recorded === undefined || recorded.replyTo?.postId === current?.postId
+      if (current !== undefined && sameOrNone) {
+        const next: DraftContext = { replyTo: current }
+        contextByKey.set(key, next)
+        setDraftContext(next)
+      }
     },
     [exerciseId, personaId],
   )
+
+  // While this composer STAYS on screen, a change of the route's reply target is the controller's
+  // own gesture ("Reply as" on another post, the clear control): the draft's recorded reply
+  // follows it. Adoption of a persisted draft (mount / persona / exercise change) is NOT followed -
+  // that is where a mismatch is detected - and neither is a change while a "did it go out?"
+  // question is open, which stays pinned to the request it is about.
+  const followedKeyRef = useRef(targetKey)
+  const followedReplyRef = useRef(replyTo?.postId)
+  useEffect(() => {
+    if (followedKeyRef.current !== targetKey) {
+      followedKeyRef.current = targetKey
+      followedReplyRef.current = replyTo?.postId
+      return
+    }
+    if (followedReplyRef.current === replyTo?.postId) return
+    followedReplyRef.current = replyTo?.postId
+    if (unconfirmedByKey.has(targetKey)) return
+    if (replyTo === undefined) {
+      contextByKey.delete(targetKey)
+      setDraftContext(undefined)
+    } else if (contextByKey.has(targetKey) || (draftByKey.get(targetKey) ?? '') !== '') {
+      const next: DraftContext = { replyTo }
+      contextByKey.set(targetKey, next)
+      setDraftContext(next)
+    }
+  }, [targetKey, replyTo])
 
   const setBaselineField = useCallback((field: BaselineField, value: string) => {
     setBaselineFields(current => ({ ...current, [field]: value }))
@@ -476,13 +572,31 @@ export function useComposeAsPersona(
   const awaitingDecision = status === 'error' && failure?.kind === 'unconfirmed'
   const hasContent = hasText || tray.items.length > 0
   // A persisted draft must go out with the reply setting it was written for (see header).
-  const replyMismatch = useMemo<ReplyMismatch | undefined>(
+  // `blockingMismatch` is the truth and gates every send; `replyMismatch` is what is ANNOUNCED
+  // - it holds back a mismatch the restore (the adoption effect, right after the first render) is
+  // about to resolve, so the alert is not inserted and removed in one commit (S-NEW-1).
+  const originalRemoved =
+    draftContext?.replyTo !== undefined && removedPostIds?.has(draftContext.replyTo.postId) === true
+  const blockingMismatch = useMemo<ReplyMismatch | undefined>(
     () =>
       draftContext !== undefined && draftContext.replyTo?.postId !== replyTo?.postId
-        ? { original: draftContext.replyTo, current: replyTo }
+        ? {
+          original: draftContext.replyTo,
+          current: replyTo,
+          originalRemoved,
+          canKeepCurrent: !awaitingDecision || originalRemoved,
+        }
         : undefined,
-    [draftContext, replyTo],
+    [draftContext, replyTo, originalRemoved, awaitingDecision],
   )
+  const restorePending =
+    blockingMismatch !== undefined
+    && onRestoreReply !== undefined
+    && blockingMismatch.original !== undefined
+    && blockingMismatch.current === undefined
+    && !originalRemoved
+    && restoreAttemptedFor !== targetKey
+  const replyMismatch = restorePending ? undefined : blockingMismatch
   const canPublish =
     hasContent &&
     !isOverLimit &&
@@ -490,7 +604,7 @@ export function useComposeAsPersona(
     parsedBaseline.valid &&
     !isPublishing &&
     !awaitingDecision &&
-    replyMismatch === undefined &&
+    blockingMismatch === undefined &&
     !replyTargetRemoved
 
   const blockers = useMemo<string[]>(() => {
@@ -539,7 +653,7 @@ export function useComposeAsPersona(
     if (inFlight.current.has(targetKey)) return
     if (awaitingDecision && !force) return
     if (force && !awaitingDecision) return
-    if (replyMismatch !== undefined || replyTargetRemoved) return
+    if (blockingMismatch !== undefined || replyTargetRemoved) return
     if (trayMedia === undefined) return
     if (text.trim().length === 0 && trayMedia.length === 0) return
     if ([...text].length > charLimit) return
@@ -560,9 +674,14 @@ export function useComposeAsPersona(
     const sentReplyTo = replyTo
     const handle = activePersona.handle
     const stillOnScreen = () => mountedRef.current && targetRef.current === targetKey
+    // The session this request belongs to. If the user signed out while it was in flight, its
+    // response is the PREVIOUS user's and must change nothing (see the module header).
+    const epoch = sessionEpoch
+    const fromAPreviousSession = () => epoch !== sessionEpoch
 
     const succeed = (post: Post) => {
       inFlight.current.delete(targetKey)
+      if (fromAPreviousSession()) return
       unconfirmedByKey.delete(targetKey)
       // The draft is gone whether or not the composer is still mounted - but only if
       // it is still what was sent (a remount may already hold a newer draft).
@@ -593,6 +712,7 @@ export function useComposeAsPersona(
 
     const fail = (error: unknown) => {
       inFlight.current.delete(targetKey)
+      if (fromAPreviousSession()) return
       const classified = classifyPublishFailure(error)
       // What a remounted composer must know about this request: the reply it carried (or
       // that it carried none).
@@ -663,7 +783,7 @@ export function useComposeAsPersona(
     parsedBaseline.valid,
     baseline,
     replyTo,
-    replyMismatch,
+    blockingMismatch,
     replyTargetRemoved,
     onClearReply,
     onPublished,
@@ -698,12 +818,17 @@ export function useComposeAsPersona(
     else onClearReply?.()
   }, [draftContext, onClearReply])
 
-  /** Accepts the current reply setting for the draft - never for a pending "did it go out?". */
+  /**
+   * Accepts the current reply setting for the draft. Refused for a pending "did it go out?"
+   * question - the re-send must be the SAME request - unless the post it replied to was taken
+   * down: that request can never be re-sent, so the way out is a new post. (The two-step "post
+   * again anyway" still follows; the question itself is not answered by this.)
+   */
   const keepCurrentReply = useCallback(() => {
-    if (awaitingDecision) return
+    if (awaitingDecision && !originalRemoved) return
     contextByKey.delete(targetKey)
     setDraftContext(undefined)
-  }, [awaitingDecision, targetKey])
+  }, [awaitingDecision, originalRemoved, targetKey])
 
   return {
     text,

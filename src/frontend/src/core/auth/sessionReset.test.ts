@@ -50,4 +50,26 @@ describe('sessionReset', () => {
     runSessionResets()
     expect(reset).not.toHaveBeenCalled()
   })
+
+  it('unregisters when the registering module is hot-replaced (Gate-2 A S-NEW-4)', () => {
+    const reset = vi.fn()
+    let onDispose: () => void = () => undefined
+    registerSessionReset(reset, { dispose: callback => { onDispose = callback } })
+
+    runSessionResets()
+    expect(reset).toHaveBeenCalledTimes(1)
+
+    // Vite replaces the module: it runs the dispose callbacks of the OLD one.
+    onDispose()
+    runSessionResets()
+    expect(reset).toHaveBeenCalledTimes(1)
+  })
+
+  it('works without a hot module (production: nothing to dispose)', () => {
+    const reset = vi.fn()
+    const off = registerSessionReset(reset, undefined)
+    runSessionResets()
+    expect(reset).toHaveBeenCalledTimes(1)
+    off()
+  })
 })

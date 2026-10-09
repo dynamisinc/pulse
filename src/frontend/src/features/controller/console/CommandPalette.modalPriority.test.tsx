@@ -105,3 +105,114 @@ describe('CommandPalette - stands aside for another modal', () => {
     expect(nested).toHaveFocus()
   })
 })
+
+describe('CommandPalette - focus returns to a stable place when its opener is gone (Gate-2 A L-NEW-3)', () => {
+  /**
+   * A console-like tree: the palette lives inside `[data-console-root]`; a popup layer (like C5's
+   * takedown step) names its home control with `data-focus-return-to`, and the control sits in a
+   * Live world row. The layer owns the focused element when the palette opens, then goes away.
+   */
+  function Tree({ palette: paletteOpen, layer }: { palette: boolean; layer: boolean }) {
+    return (
+      <div data-console-root="" tabIndex={-1} data-testid="console-root">
+        <div data-live-world-row="" tabIndex={-1} data-testid="row">
+          <button type="button" id="row-control">Take down</button>
+        </div>
+        {layer && (
+          <div role="dialog" data-focus-return-to="row-control" data-testid="layer">
+            <input aria-label="inside the layer" />
+          </div>
+        )}
+        <CommandPalette open={paletteOpen} onClose={vi.fn()} />
+      </div>
+    )
+  }
+
+  function openOverLayer() {
+    const view = renderWithTheme(<Tree palette={false} layer />)
+    screen.getByLabelText('inside the layer').focus()
+    view.rerender(
+      <ThemeProvider theme={cobraTheme}><Tree palette layer /></ThemeProvider>,
+    )
+    expect(screen.getByLabelText('Search personas')).toHaveFocus()
+    return view
+  }
+
+  const withTheme = (ui: ReactNode) => <ThemeProvider theme={cobraTheme}>{ui}</ThemeProvider>
+
+  it('CONTROL: an opener that is still there gets focus back, as before', () => {
+    const view = renderWithTheme(<Tree palette={false} layer />)
+    screen.getByLabelText('inside the layer').focus()
+    view.rerender(withTheme(<Tree palette layer />))
+    view.rerender(withTheme(<Tree palette={false} layer />))
+    expect(screen.getByLabelText('inside the layer')).toHaveFocus()
+  })
+
+  it('opener gone -> the control the layer names as its home', () => {
+    const view = openOverLayer()
+    // The layer closes (focus moved to the palette), then the palette closes.
+    view.rerender(withTheme(<Tree palette layer={false} />))
+    view.rerender(withTheme(<Tree palette={false} layer={false} />))
+    expect(document.getElementById('row-control')).toHaveFocus()
+  })
+
+  it('opener AND home control gone -> the row that held it', () => {
+    const view = openOverLayer()
+    document.getElementById('row-control')?.remove()
+    view.rerender(withTheme(<Tree palette layer={false} />))
+    view.rerender(withTheme(<Tree palette={false} layer={false} />))
+    expect(screen.getByTestId('row')).toHaveFocus()
+  })
+
+  it('opener, home control AND row gone -> the console root, never <body>', () => {
+    const view = openOverLayer()
+    screen.getByTestId('row').remove()
+    view.rerender(withTheme(<Tree palette layer={false} />))
+    view.rerender(withTheme(<Tree palette={false} layer={false} />))
+    expect(screen.getByTestId('console-root')).toHaveFocus()
+    expect(document.activeElement).not.toBe(document.body)
+  })
+
+  it('outside a console, with the opener gone and no home named, nothing is focused (and nothing throws)', () => {
+    function Plain({ layer, paletteOpen }: { layer: boolean; paletteOpen: boolean }) {
+      return (
+        <>
+          {layer && <div role="dialog"><input aria-label="lonely" /></div>}
+          <CommandPalette open={paletteOpen} onClose={vi.fn()} />
+        </>
+      )
+    }
+    const view = renderWithTheme(<Plain layer paletteOpen={false} />)
+    screen.getByLabelText('lonely').focus()
+    view.rerender(withTheme(<Plain layer paletteOpen />))
+    view.rerender(withTheme(<Plain layer={false} paletteOpen />))
+
+    expect(() => view.rerender(withTheme(<Plain layer={false} paletteOpen={false} />)))
+      .not.toThrow()
+    expect(document.activeElement).toBe(document.body)
+  })
+
+  it('remembers the opener from BEFORE the palette\'s own contents autofocus', () => {
+    // The persona picker inside the palette autofocuses its search field in the same commit the
+    // palette opens, so `document.activeElement` is already inside the palette by the time its
+    // open effect runs. The opener must still be the element that had focus before.
+    function Autofocusing({ paletteOpen }: { paletteOpen: boolean }) {
+      return (
+        <>
+          <button type="button">the opener</button>
+          <CommandPalette
+            open={paletteOpen}
+            onClose={vi.fn()}
+            renderPersonaResults={() => <input aria-label="picker search" autoFocus />}
+          />
+        </>
+      )
+    }
+    const view = renderWithTheme(<Autofocusing paletteOpen={false} />)
+    screen.getByRole('button', { name: 'the opener' }).focus()
+    view.rerender(withTheme(<Autofocusing paletteOpen />))
+    view.rerender(withTheme(<Autofocusing paletteOpen={false} />))
+
+    expect(screen.getByRole('button', { name: 'the opener' })).toHaveFocus()
+  })
+})
