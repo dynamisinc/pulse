@@ -53,12 +53,15 @@ describe('useRemovedPostIds', () => {
     expect(renders).toBe(rendersBefore + 1)
   })
 
-  it('reflects the sign-out reset', () => {
+  it('reflects the sign-out reset on its next render (the reset itself is silent)', () => {
     removedPosts.add('post-1')
-    const { result } = renderHook(() => useRemovedPostIds())
+    const { result, rerender } = renderHook(() => useRemovedPostIds())
     expect(result.current.has('post-1')).toBe(true)
 
     act(() => removedPosts.reset())
+    // Gate-2 B L-3: `reset()` notifies nobody - sign-out unmounts the consumers, and a blocking
+    // notify could repaint a taken-down post for a frame before the navigation commits.
+    rerender()
 
     expect(result.current.size).toBe(0)
   })

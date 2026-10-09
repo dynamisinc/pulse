@@ -104,11 +104,15 @@
  *
  * ## ⌘K yields to other modals (demo-polish integration, Wave 3 Gate-2 L-11)
  * The chord is IGNORED while any `[aria-modal="true"]` layer outside the console is
- * mounted - a run-sheet dialog, C5's takedown confirm, PE-FE's persona edit dialog, the
- * shell's Pause overlay (`core/a11y/modalPriority.ts` `hasOtherModalMounted`, measured
- * from the console root so the palette's own panel never counts). Opened over such a
- * layer the palette would sit hidden behind it (same z-index, earlier in the DOM) while
- * its focus-on-open fought that layer's focus trap.
+ * mounted - a run-sheet dialog, PE-FE's persona edit dialog, the pause-tier popover, any
+ * shell-level overlay that declares itself modal (`core/a11y/modalPriority.ts`
+ * `hasOtherModalMounted`, measured from the console root so the palette's own panel never
+ * counts). Opened over such a layer the palette would sit hidden behind it (same z-index,
+ * earlier in the DOM) while its focus-on-open fought that layer's focus trap. A layer that
+ * is deliberately NON-modal does not declare `aria-modal`, so ⌘K still works over it: C5's
+ * takedown step is one - the palette opens over it and focus landing there closes the step.
+ * (The shell's Pause / EndEx overlay is the participant `OverlayLayer`; it never mounts on
+ * /console, where the pause control is the pause-tier popover above.)
  *
  * ## `onDockClose` (the route's reply target)
  * `ControllerConsoleRoute` holds the reply target of "Reply as…" and feeds it to the
@@ -412,7 +416,7 @@ export function ControllerConsole(
   }, [isActive, toggleTool])
 
   // ⌘K / Ctrl+K toggles the palette - UNLESS another modal layer is up (a run-sheet
-  // dialog, the persona edit dialog, the takedown confirm, the shell's Pause overlay).
+  // dialog, the persona edit dialog, the pause-tier popover: anything declaring aria-modal).
   // The palette is a hand-built fixed layer at the same z-index as MUI's modals, so
   // opening it over one would put it BEHIND the dialog (hidden), while its focus-on-open
   // fought the dialog's focus trap (core/a11y/modalPriority.ts). The chord is still

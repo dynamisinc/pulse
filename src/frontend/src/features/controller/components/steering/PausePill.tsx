@@ -341,6 +341,10 @@ export function PausePill() {
         slotProps={{
           paper: {
             role: 'dialog',
+            // MUI's Popover is a modal (it aria-hides the app and traps focus), so it says so:
+            // the console's ⌘K stands aside while it is open instead of opening the palette
+            // hidden behind it (`core/a11y/modalPriority`; Gate-2 A L-2).
+            'aria-modal': true,
             'aria-label': 'Pause tiers',
             sx: {
               mt: 0.5,

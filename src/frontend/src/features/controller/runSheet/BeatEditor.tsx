@@ -4,8 +4,16 @@
  * The BEAT EDITOR dialog (demo-polish C3, story 19; CTL-010 lite). STAFF world -
  * COBRA components (`CobraTextField`, `CobraPrimaryButton`, `CobraLinkButton`),
  * FontAwesome icons only, MUI 9 `sx`-only. Dense and keyboard-operable: native
- * selects and inputs, `Tab` order top to bottom, `Esc` cancels (the dialog's own
+ * selects and inputs, `Tab` order top to bottom, `Esc` closes (the dialog's own
  * focus trap), `Ctrl/Cmd+Enter` saves, the first field takes focus on open.
+ *
+ * LEAVING WITH UNSAVED WORK (Wave 3 Gate-2 A L-7, matching the persona edit dialog). `Esc` or a
+ * click on the backdrop on a DIRTY beat (the draft differs from what the dialog opened with)
+ * does not throw the work away: it asks "Discard changes?" in place - an inline question with
+ * focus on "Keep editing", not a second dialog (two stacked `StaffDialog`s would each stand
+ * aside for the other's `aria-modal`). A clean beat closes at once, as before. The Cancel
+ * button is an explicit decision and always closes; Esc on the question itself means "keep
+ * editing".
  *
  * AUTHORING FIELDS (AC "Author beats"): title, persona (picker), text with a 280
  * code-point counter, media from the exercise library, intended scenario minute
@@ -33,7 +41,7 @@
  * by the server's ingest (and the mock `createPost`) when the beat is fired (NFR-004).
  */
 
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   Box,
   DialogActions,
@@ -49,7 +57,13 @@ import {
   faCircleExclamation,
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
-import { CobraLinkButton, CobraPrimaryButton, CobraTextField } from '@/theme/styledComponents'
+import {
+  CobraDeleteButton,
+  CobraLinkButton,
+  CobraPrimaryButton,
+  CobraSecondaryButton,
+  CobraTextField,
+} from '@/theme/styledComponents'
 import type { MediaKind, StaffMediaAssetView } from '@/core/media'
 import type { Persona } from '@/features/personas'
 // The ONE media-URL allow-list in the app (delegates to F2's `resolveSafeMediaUrl`): https,
@@ -117,6 +131,12 @@ export function BeatEditor({ data, beat, personas, library, onSave, onCancel }: 
   const [draft, setDraft] = useState<BeatDraft>(() =>
     beat === undefined ? emptyDraft() : draftFromBeat(beat, kindsOf(library)),
   )
+  // What the dialog opened with, to tell "unsaved work" from "nothing changed" (L-7).
+  const [openedWith] = useState(() => JSON.stringify(draft))
+  const dirty = JSON.stringify(draft) !== openedWith
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  const keepEditingRef = useRef<HTMLButtonElement | null>(null)
+  const askedFromRef = useRef<Element | null>(null)
   // Errors appear after the first failed save, then follow every edit.
   const [attempted, setAttempted] = useState(false)
   const [baselineOpen, setBaselineOpen] = useState(
@@ -171,11 +191,43 @@ export function BeatEditor({ data, beat, personas, library, onSave, onCancel }: 
     onSave(contentFromDraft(draft))
   }
 
+  // Esc / backdrop: a clean beat closes; a dirty one asks first (and Esc on the question
+  // means "keep editing"). The Cancel button below is the explicit "throw it away".
+  const handleDismiss = () => {
+    if (confirmingDiscard) {
+      keepEditing()
+      return
+    }
+    if (!dirty) {
+      onCancel()
+      return
+    }
+    askedFromRef.current = document.activeElement
+    setConfirmingDiscard(true)
+  }
+
+  function keepEditing() {
+    setConfirmingDiscard(false)
+    const from = askedFromRef.current
+    askedFromRef.current = null
+    // Back to where the controller was, or the title when that is gone.
+    window.setTimeout(() => {
+      if (from instanceof HTMLElement && from.isConnected) from.focus()
+      else document.querySelector<HTMLElement>('[data-testid="beat-editor"] [data-initial-focus]')?.focus()
+    }, 0)
+  }
+
+  // The question takes focus (on the SAFE choice) the moment it appears: a stray Enter keeps
+  // the work.
+  useEffect(() => {
+    if (confirmingDiscard) keepEditingRef.current?.focus()
+  }, [confirmingDiscard])
+
   return (
     <StaffDialog
       initialFocus="[data-initial-focus]"
       open
-      onClose={onCancel}
+      onClose={handleDismiss}
       fullWidth
       maxWidth="md"
       aria-labelledby={titleId}
@@ -520,9 +572,36 @@ export function BeatEditor({ data, beat, personas, library, onSave, onCancel }: 
           />
         </Stack>
       </DialogContent>
+      {confirmingDiscard && (
+        <Box
+          role="alert"
+          data-testid="beat-discard-question"
+          sx={{
+            mx: 3,
+            mb: 1,
+            p: 1.25,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.25,
+            flexWrap: 'wrap',
+            border: `1px solid ${runSheetTokens.hairline}`,
+            borderLeft: `4px solid ${runSheetTokens.navy}`,
+            borderRadius: '4px',
+          }}
+        >
+          <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" />
+          <Typography sx={{ flex: 1, fontSize: 13, fontWeight: 700, minWidth: 220 }}>
+            Discard changes? Your edits to this beat have not been saved.
+          </Typography>
+          <CobraSecondaryButton ref={keepEditingRef} onClick={keepEditing}>
+            Keep editing
+          </CobraSecondaryButton>
+          <CobraDeleteButton onClick={onCancel}>Discard changes</CobraDeleteButton>
+        </Box>
+      )}
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Typography sx={{ flex: 1, fontSize: 12, color: runSheetTokens.mutedText }}>
-          Ctrl+Enter saves, Esc cancels.
+          Ctrl+Enter saves. Esc closes (asks first if you have unsaved changes).
         </Typography>
         <CobraLinkButton onClick={onCancel}>Cancel</CobraLinkButton>
         <CobraPrimaryButton onClick={handleSave}>

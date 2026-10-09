@@ -8,10 +8,13 @@
  *    `useSyncExternalStore` read never loops, and an earlier snapshot is never mutated;
  *  - subscribers hear each change once; the unsubscribe stops it;
  *  - the store is bounded: past the cap the OLDEST id is forgotten, the newest survive;
- *  - `reset()` (sign-out) forgets everything and tells subscribers, once; a reset of an empty
- *    store wakes nobody;
+ *  - `reset()` (sign-out) forgets everything and tells NOBODY (Gate-2 B L-3: a notify here is a
+ *    blocking update that can repaint a taken-down post for a frame before the router's
+ *    transition navigates to /login); a reset of an empty store keeps the snapshot;
  *  - it holds ids and nothing else (no content to retain: XC-002).
  */
+import { useSyncExternalStore } from 'react'
+import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { REMOVED_POST_CAP, removedPosts } from './removedPosts'
 
@@ -107,17 +110,36 @@ describe('removedPosts - bounds and reset', () => {
     expect(removedPosts.has(`post-${REMOVED_POST_CAP + 4}`)).toBe(true)
   })
 
-  it('reset() forgets every id and tells subscribers exactly once', () => {
+  it('reset() forgets every id and tells NOBODY (Gate-2 B L-3)', () => {
     removedPosts.add('post-1')
     removedPosts.add('post-2')
     const heard = vi.fn()
     removedPosts.subscribe(heard)
+    heard.mockClear()
 
     removedPosts.reset()
 
     expect(removedPosts.has('post-1')).toBe(false)
     expect(removedPosts.getAll().size).toBe(0)
-    expect(heard).toHaveBeenCalledTimes(1)
+    expect(heard).not.toHaveBeenCalled()
+  })
+
+  it('reset() does not re-render a mounted consumer (so sign-out cannot repaint a removed post)', () => {
+    removedPosts.add('post-1')
+    let renders = 0
+    const view = renderHook(() => {
+      renders += 1
+      return useSyncExternalStore(removedPosts.subscribe, removedPosts.getAll)
+    })
+    expect(view.result.current.has('post-1')).toBe(true)
+    const before = renders
+
+    act(() => removedPosts.reset())
+
+    expect(renders).toBe(before)
+    // ... yet the NEXT render reads the new, empty snapshot (no stale set survives).
+    view.rerender()
+    expect(view.result.current.size).toBe(0)
   })
 
   it('reset() of an empty store wakes nobody and keeps the snapshot', () => {
@@ -137,7 +159,8 @@ describe('removedPosts - bounds and reset', () => {
     removedPosts.add('post-1')
     removedPosts.reset()
     removedPosts.add('post-2')
-    expect(heard).toHaveBeenCalledTimes(3)
+    // Two adds heard; the reset between them was silent.
+    expect(heard).toHaveBeenCalledTimes(2)
   })
 })
 

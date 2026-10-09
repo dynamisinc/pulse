@@ -85,6 +85,7 @@ import {
 import { IconButton } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
+  faBan,
   faCircleCheck,
   faCircleQuestion,
   faImages,
@@ -112,6 +113,7 @@ import {
 } from '@/features/social'
 import type { Persona } from '@/features/personas'
 import { useComposeAsPersona } from '../hooks/useComposeAsPersona'
+import { useRemovedPostIds } from '../hooks/useRemovedPostIds'
 import { AttachmentTray } from '../media/AttachmentTray'
 import { MediaLibraryPicker } from '../media/MediaLibraryPicker'
 import { useLibraryAssetLookup } from '../media/useLibraryAssetLookup'
@@ -143,6 +145,11 @@ export interface PersonaComposerProps {
   /** Asks the route to drop the reply target - from the (x) control, and after a
    * reply has been posted. Without it the (x) control is not offered. */
   onClearReply?: () => void
+  /** Asks the route to PUT BACK the reply target a remounted draft was written for (a
+   * "Post status unknown" question, or a draft an off-screen failure restored: the route
+   * dropped the target when the dock closed). Without it such a draft is blocked with an
+   * explanation instead of being restored. */
+  onRestoreReply?: (target: ReplyTarget) => void
 }
 
 /** Strips a leading '@' so a handle renders with exactly one. */
@@ -158,8 +165,15 @@ export function PersonaComposer({
   onPublished,
   replyTo,
   onClearReply,
+  onRestoreReply,
 }: PersonaComposerProps) {
   const { timeZone } = useExerciseContext()
+
+  // A reply to a post that has been taken down since the target was set can never succeed
+  // (the server refuses an unknown parent): say so in words and block Post, rather than
+  // letting the controller meet a bare 400 and a Retry that cannot work (Gate-2 A L-3).
+  const removedPostIds = useRemovedPostIds()
+  const replyTargetRemoved = replyTo !== undefined && removedPostIds.has(replyTo.postId)
 
   const compose = useComposeAsPersona({
     activePersona,
@@ -168,11 +182,14 @@ export function PersonaComposer({
     ...(charLimit !== undefined ? { charLimit } : {}),
     ...(replyTo !== undefined ? { replyTo } : {}),
     ...(onClearReply !== undefined ? { onClearReply } : {}),
+    ...(onRestoreReply !== undefined ? { onRestoreReply } : {}),
+    replyTargetRemoved,
   })
   const { tray } = compose
   const locked = compose.isPublishing
 
   const lookupLibraryAsset = useLibraryAssetLookup()
+  const formRef = useRef<HTMLFormElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const textInputRef = useRef<HTMLTextAreaElement | null>(null)
   const retryButtonRef = useRef<HTMLButtonElement | null>(null)
@@ -204,18 +221,27 @@ export function PersonaComposer({
   // lands on plain text instead of re-posting. The same happens when the controller
   // steps between "Post again anyway..." and "I checked the feed" - the new button is
   // one deliberate Tab away.
+  //
+  // Either way focus moves ONLY if it is lost (body / nothing / a detached or disabled
+  // control) or still inside this form. A response can land long after the controller
+  // moved on - to a run-sheet beat, the live-world filter, a field elsewhere - and a
+  // background outcome must never yank focus from there (WCAG 2.4.3 / 3.2.2; the same rule
+  // C5's takedown and C1's plain-error path follow). The banner is `role="alert"`, so the
+  // outcome is announced regardless (Gate-2 A M-4).
   const { status, lastPublished, failure, awaitingDecision } = compose
   useEffect(() => {
     if (status !== 'success' && status !== 'error') return
-    if (awaitingDecision) {
-      unconfirmedMessageRef.current?.focus()
-      return
-    }
     const active = document.activeElement
     const focusLost =
       active === null ||
       active === document.body ||
+      !active.isConnected ||
       (active instanceof HTMLButtonElement && active.disabled)
+    const focusInForm = formRef.current?.contains(active) === true
+    if (awaitingDecision) {
+      if (focusLost || focusInForm) unconfirmedMessageRef.current?.focus()
+      return
+    }
     if (!focusLost) return
     const retry = retryButtonRef.current
     const target = status === 'error' && retry !== null && !retry.disabled
@@ -228,6 +254,18 @@ export function PersonaComposer({
   useEffect(() => {
     setRepostArmed(false)
   }, [failure])
+
+  // "Reply as..." on a row while the dock is ALREADY open leaves focus on that live-world
+  // row: put it in the text field the reply is for, ready to type (Gate-2 A S-1). Only a
+  // target that CHANGES to a different post while this composer stays mounted - the first
+  // render (the dock just opened: the dock host places focus) and a cleared target do not.
+  const replyPostId = replyTo?.postId
+  const previousReplyPostId = useRef(replyPostId)
+  useEffect(() => {
+    const previous = previousReplyPostId.current
+    previousReplyPostId.current = replyPostId
+    if (replyPostId !== undefined && replyPostId !== previous) textInputRef.current?.focus()
+  }, [replyPostId])
 
   const armRepost = (armed: boolean) => {
     setRepostArmed(armed)
@@ -272,6 +310,7 @@ export function PersonaComposer({
 
   return (
     <form
+      ref={formRef}
       className={styles.composer}
       data-testid="persona-composer"
       onSubmit={handleSubmit}
@@ -281,7 +320,7 @@ export function PersonaComposer({
     >
       <PersonaIdentity persona={activePersona} />
 
-      {replyTo !== undefined && (
+      {replyTo !== undefined && !replyTargetRemoved && (
         <div className={styles.replyBanner} role="status" data-testid="reply-banner">
           <FontAwesomeIcon icon={faReply} aria-hidden="true" />
           <span className={styles.replyText}>
@@ -293,12 +332,85 @@ export function PersonaComposer({
             <IconButton
               size="small"
               aria-label="Clear reply target"
-              disabled={locked}
+              // Not while a post is in flight, nor while "did it go out?" is unanswered:
+              // that question is about THIS reply, and the re-send must be the same request.
+              disabled={locked || compose.awaitingDecision}
               onClick={onClearReply}
             >
               <FontAwesomeIcon icon={faXmark} size="sm" />
             </IconButton>
           )}
+        </div>
+      )}
+
+      {replyTo !== undefined && replyTargetRemoved && (
+        <div className={styles.replyBanner} role="alert" data-testid="reply-banner-removed">
+          <FontAwesomeIcon icon={faBan} aria-hidden="true" />
+          <span className={styles.replyText}>
+            The post you&apos;re replying to was taken down.
+          </span>
+          {onClearReply !== undefined && (
+            <CobraSecondaryButton
+              type="button"
+              size="small"
+              disabled={locked}
+              sx={{ paddingLeft: '12px', paddingRight: '12px' }}
+              onClick={() => {
+                onClearReply()
+                textInputRef.current?.focus()
+              }}
+            >
+              Clear reply
+            </CobraSecondaryButton>
+          )}
+        </div>
+      )}
+
+      {compose.replyMismatch !== undefined && (
+        <div className={styles.errorBanner} role="alert" data-testid="draft-reply-notice">
+          <FontAwesomeIcon icon={faReply} aria-hidden="true" />
+          <div className={styles.errorText}>
+            <span className={styles.errorTitle}>
+              {compose.replyMismatch.original !== undefined
+                ? `This draft was a reply to @${bareHandle(compose.replyMismatch.original.authorHandle)}`
+                : 'This draft was a new post, not a reply'}
+            </span>
+            <span>
+              {compose.replyMismatch.original !== undefined
+                ? compose.replyMismatch.current !== undefined
+                  ? `A different reply (@${bareHandle(compose.replyMismatch.current.authorHandle)}) is set now.`
+                  : 'The reply was dropped when the panel closed.'
+                : `A reply to @${bareHandle(compose.replyMismatch.current?.authorHandle ?? '')} is set now.`}
+              {' '}Post is paused until it matches.
+            </span>
+            <div className={styles.bannerActions}>
+              <CobraSecondaryButton
+                type="button"
+                size="small"
+                sx={{ paddingLeft: '12px', paddingRight: '12px' }}
+                disabled={
+                  compose.replyMismatch.original !== undefined && onRestoreReply === undefined
+                }
+                onClick={compose.matchDraftReply}
+              >
+                {compose.replyMismatch.original !== undefined
+                  ? `Reply to @${bareHandle(compose.replyMismatch.original.authorHandle)} again`
+                  : 'Clear the reply target'}
+              </CobraSecondaryButton>
+              {!compose.awaitingDecision && (
+                <CobraSecondaryButton
+                  type="button"
+                  size="small"
+                  sx={{ paddingLeft: '12px', paddingRight: '12px' }}
+                  onClick={compose.keepCurrentReply}
+                >
+                  {compose.replyMismatch.current !== undefined
+                    ? `Reply to @${bareHandle(compose.replyMismatch.current.authorHandle)} instead`
+                    : 'Post as a new post instead'}
+                </CobraSecondaryButton>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -443,6 +555,7 @@ export function PersonaComposer({
                     <CobraSecondaryButton
                       type="button"
                       size="small"
+                      disabled={compose.replyMismatch !== undefined}
                       sx={{ paddingLeft: '12px', paddingRight: '12px' }}
                       onClick={() => armRepost(true)}
                     >

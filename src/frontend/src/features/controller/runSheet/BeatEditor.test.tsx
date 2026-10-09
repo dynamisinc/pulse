@@ -4,10 +4,11 @@
  * The beat editor in isolation (demo-polish C3, AC "Author beats"): what it hands C1's
  * `MediaLibraryPicker` (the FROZEN props), media that is not in the library, an existing
  * video beat editing as a video, thumbnail URL safety, and its keyboard (Ctrl/Cmd+Enter
- * saves, Esc cancels). The full add / edit flows are covered through the panel in
+ * saves, Esc closes - asking first when the beat has unsaved changes, Gate-2 A L-7). The
+ * full add / edit flows are covered through the panel in
  * `RunSheetPanel.test.tsx`.
  */
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@mui/material/styles'
@@ -151,7 +152,7 @@ describe('BeatEditor', () => {
     expect(sources).toEqual(['/mock-media/p.svg'])
   })
 
-  it('saves with Ctrl+Enter from a field and cancels with Escape', async () => {
+  it('saves with Ctrl+Enter from a field and cancels (after asking) with Escape', async () => {
     const { user, onSave, onCancel } = renderEditor()
     const dialog = screen.getByRole('dialog', { name: 'New beat' })
     await user.type(within(dialog).getByLabelText(/^Title/), 'Quick save')
@@ -164,8 +165,12 @@ describe('BeatEditor', () => {
       text: 'Hello world',
     })
 
+    // The beat has unsaved changes, so Esc ASKS first (Gate-2 A L-7) instead of discarding.
     await user.keyboard('{Escape}')
-    expect(onCancel).toHaveBeenCalled()
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.getByTestId('beat-discard-question')).toHaveTextContent('Discard changes?')
+    await user.click(screen.getByRole('button', { name: 'Discard changes' }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
   })
 
   it('keeps an unknown persona handle visible and selectable instead of dropping it', () => {
@@ -180,5 +185,121 @@ describe('BeatEditor', () => {
   it('moves focus into the first field on open', () => {
     renderEditor()
     expect(screen.getByLabelText(/^Title/)).toHaveFocus()
+  })
+})
+
+describe('BeatEditor - leaving with unsaved changes (Gate-2 A L-7)', () => {
+  const question = () => screen.queryByTestId('beat-discard-question')
+  const backdrop = () => document.querySelector<HTMLElement>('.MuiBackdrop-root')
+
+  it('a CLEAN beat closes at once on Esc and on a backdrop click (as before)', async () => {
+    const first = renderEditor()
+    await first.user.keyboard('{Escape}')
+    expect(first.onCancel).toHaveBeenCalledTimes(1)
+    expect(question()).toBeNull()
+    first.unmount()
+
+    const second = renderEditor()
+    const target = backdrop()
+    if (target === null) throw new Error('no backdrop')
+    await second.user.click(target)
+    expect(second.onCancel).toHaveBeenCalledTimes(1)
+    expect(question()).toBeNull()
+  })
+
+  it('a clean EXISTING beat also closes at once (opening it is not "changing" it)', async () => {
+    const beat = beatFixture({ persona: { handle: 'FulcoEM' } })
+    const { user, onCancel } = renderEditor({ beat, data: sheetFixture([beat]) })
+    await user.keyboard('{Escape}')
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('Esc on a DIRTY beat asks "Discard changes?" with focus on "Keep editing"', async () => {
+    const { user, onCancel } = renderEditor()
+    await user.type(screen.getByLabelText(/^Title/), 'Half-written')
+
+    await user.keyboard('{Escape}')
+
+    const asked = question()
+    expect(asked).not.toBeNull()
+    expect(asked).toHaveAttribute('role', 'alert')
+    expect(asked).toHaveTextContent('Discard changes?')
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus()
+    expect(onCancel).not.toHaveBeenCalled()
+    // Still the same editor, with the typed text intact.
+    expect(screen.getByLabelText(/^Title/)).toHaveValue('Half-written')
+  })
+
+  it('a backdrop click on a DIRTY beat asks too, and never discards by itself', async () => {
+    const { user, onCancel } = renderEditor()
+    await user.type(screen.getByLabelText(/^Title/), 'Half-written')
+    const target = backdrop()
+    if (target === null) throw new Error('no backdrop')
+
+    await user.click(target)
+
+    expect(question()).not.toBeNull()
+    expect(onCancel).not.toHaveBeenCalled()
+  })
+
+  it('"Keep editing" (and Esc on the question) return to the work, which is intact', async () => {
+    const { user, onCancel } = renderEditor()
+    const title = screen.getByLabelText(/^Title/)
+    await user.type(title, 'Half-written')
+    await user.keyboard('{Escape}')
+
+    await user.click(screen.getByRole('button', { name: 'Keep editing' }))
+    expect(question()).toBeNull()
+    await waitFor(() => expect(title).toHaveFocus())
+    expect(title).toHaveValue('Half-written')
+
+    await user.keyboard('{Escape}')
+    expect(question()).not.toBeNull()
+    await user.keyboard('{Escape}')
+    expect(question()).toBeNull()
+    expect(onCancel).not.toHaveBeenCalled()
+  })
+
+  it('"Discard changes" closes the editor', async () => {
+    const { user, onCancel } = renderEditor()
+    await user.type(screen.getByLabelText(/^Title/), 'Half-written')
+    await user.keyboard('{Escape}')
+
+    await user.click(screen.getByRole('button', { name: 'Discard changes' }))
+
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('the Cancel button is an explicit decision: it closes without asking', async () => {
+    const { user, onCancel } = renderEditor()
+    await user.type(screen.getByLabelText(/^Title/), 'Half-written')
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(question()).toBeNull()
+  })
+
+  it('undoing the edit makes the beat clean again (no question)', async () => {
+    const { user, onCancel } = renderEditor()
+    const title = screen.getByLabelText(/^Title/)
+    await user.type(title, 'abc')
+    await user.clear(title)
+
+    await user.keyboard('{Escape}')
+
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(question()).toBeNull()
+  })
+
+  it('changing an existing beat counts as dirty', async () => {
+    const beat = beatFixture({ persona: { handle: 'FulcoEM' } })
+    const { user, onCancel } = renderEditor({ beat, data: sheetFixture([beat]) })
+    await user.type(screen.getByLabelText(/^Title/), ' (edited)')
+
+    await user.keyboard('{Escape}')
+
+    expect(question()).not.toBeNull()
+    expect(onCancel).not.toHaveBeenCalled()
   })
 })

@@ -443,7 +443,10 @@ describe('MediaLibraryPicker — states and scope', () => {
     release()
     await screen.findAllByRole('option')
     expect(screen.queryByTestId('media-library-loading')).not.toBeInTheDocument()
-  })
+    // An explicit, generous budget (Gate-2 A L-10): this is the first render in the file to pay
+    // for the picker's cold imports, and it timed out at the 5 s default under a loaded full run
+    // (it passes alone). 30 s matches the other full-render suites.
+  }, 30_000)
 
   it('says the library is empty', async () => {
     stubLibraryRequest(() => Promise.resolve({ data: [] } as AxiosResponse))

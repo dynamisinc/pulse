@@ -3,7 +3,8 @@
  * ---------------------------------------------------------------------------
  * The ⌘K palette follows the product's one-way modal rule (`core/a11y/modalPriority.ts`;
  * demo-polish Wave 3 Gate-2 check 22): while ANY OTHER `[aria-modal="true"]` element is
- * mounted - a dialog opened over it, the shell's Pause overlay - it STANDS ASIDE:
+ * mounted - a dialog opened over it, a shell-level overlay that declares itself modal - it
+ * STANDS ASIDE:
  *
  *  - focus-on-open: the search field is not focused (it would pull focus out of the other
  *    modal and fight its trap);

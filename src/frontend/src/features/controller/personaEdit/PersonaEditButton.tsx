@@ -48,10 +48,11 @@ export const SAVED_NOTE_MS = 4000
 
 /** "Edit persona" button + dialog. See the module header. */
 export function PersonaEditButton({ persona }: PersonaEditButtonProps) {
-  // The persona being edited, FIXED when the dialog opens. The console can switch its active
-  // persona while the dialog is up (a global shortcut still fires behind a modal), which
-  // changes this component's `persona` prop — the dialog must keep editing the persona
-  // the controller clicked Edit on, never silently retarget its draft at another account.
+  // The persona being edited, FIXED when the dialog opens. The console's active persona can
+  // still change while the dialog is up (the console's ⌘K is inert behind a modal, but a
+  // persona can be selected by other means, e.g. a "Reply as…" that names one), which changes
+  // this component's `persona` prop — the dialog must keep editing the persona the controller
+  // clicked Edit on, never silently retarget its draft at another account.
   const [target, setTarget] = useState<StaffPersona | null>(null)
   const open = target !== null
   const [saved, setSaved] = useState<{ readonly personaId: string; readonly count: number } | null>(

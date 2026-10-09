@@ -233,14 +233,14 @@ describe('PersonaComposer (live) — failure is visible, keeps the draft, never 
   })
 
   it('Retry re-sends the same draft; success replaces the banner with "Posted"', async () => {
-    vi.mocked(publishPost).mockRejectedValueOnce(httpError(503, { error: 'unavailable' }))
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(429, { error: 'rate_limited' }))
     const onPublished = vi.fn<(post: Post) => void>()
     const user = userEvent.setup()
     renderComposer({ onPublished })
     await user.type(screen.getByLabelText(POST_FIELD), 'Second time lucky.')
     await user.click(postButton())
     const banner = await screen.findByTestId('publish-error')
-    expect(banner).toHaveTextContent('The service is not available right now.')
+    expect(banner).toHaveTextContent('Too many requests right now. Wait a moment and try again.')
 
     await user.click(within(banner).getByRole('button', { name: 'Retry' }))
 
@@ -486,8 +486,8 @@ describe('PersonaComposer (live) — a post that MAY ALREADY BE LIVE (status unk
     expect(onClearReply).toHaveBeenCalledTimes(1)
   })
 
-  it('a plain failure (a 503 answer) keeps the ordinary Retry - the gate is only for "may be live"', async () => {
-    vi.mocked(publishPost).mockRejectedValueOnce(httpError(503, { error: 'unavailable' }))
+  it('a plain failure (a 429 answer) keeps the ordinary Retry - the gate is only for "may be live"', async () => {
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(429, { error: 'rate_limited' }))
     const user = userEvent.setup()
     renderComposer()
     await user.type(screen.getByLabelText(POST_FIELD), 'Server busy.')
@@ -495,11 +495,35 @@ describe('PersonaComposer (live) — a post that MAY ALREADY BE LIVE (status unk
     await user.click(postButton())
 
     const banner = await screen.findByTestId('publish-error')
-    expect(banner).toHaveTextContent('Post failed (HTTP 503)')
+    expect(banner).toHaveTextContent('Post failed (HTTP 429)')
     expect(within(banner).getByRole('button', { name: 'Retry' })).toBeEnabled()
     expect(screen.queryByTestId('publish-unconfirmed')).not.toBeInTheDocument()
     expect(postButton()).toBeEnabled()
   })
+
+  // Gate-2 A M-3: the server can commit a post and still answer 5xx, and the run sheet already
+  // calls the same response "Unconfirmed". A one-click Retry here would double-post.
+  it.each([500, 502, 503, 408])(
+    'a %i answer is "status unknown": no Retry, Post paused, two-step "Post again anyway..."',
+    async status => {
+      vi.mocked(publishPost).mockRejectedValueOnce(httpError(status, { error: 'unavailable' }))
+      const user = userEvent.setup()
+      renderComposer()
+      await user.type(screen.getByLabelText(POST_FIELD), 'Might be live.')
+
+      await user.click(postButton())
+
+      const banner = await screen.findByTestId('publish-unconfirmed')
+      expect(banner).toHaveTextContent(`Post status unknown (HTTP ${status})`)
+      expect(screen.queryByTestId('publish-error')).not.toBeInTheDocument()
+      expect(within(banner).queryByRole('button', { name: 'Retry' })).toBeNull()
+      expect(postButton()).toBeDisabled()
+      await user.click(within(banner).getByRole('button', { name: 'Post again anyway…' }))
+      expect(within(banner).getByRole('button', { name: 'I checked the feed — post again' }))
+        .toBeInTheDocument()
+      expect(publishPost).toHaveBeenCalledTimes(1)
+    },
+  )
 
   it('a remount (dock closed and reopened) still asks before it will post again', async () => {
     const { unmount } = await fireAndFailWith504()

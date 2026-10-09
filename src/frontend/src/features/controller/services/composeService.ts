@@ -189,10 +189,10 @@ export class ComposeUnconfirmedError extends Error {
 export type PublishFailureKind =
   /** The server (or mock) refused the request: the same draft would be refused again. */
   | 'rejected'
-  /** The server ANSWERED that it created nothing (5xx, 429, 408): retry is reasonable. */
+  /** The server ANSWERED that it created nothing (429 - rate limited): retry is reasonable. */
   | 'failed'
   /**
-   * The post may ALREADY exist: an unreadable 2xx, a 504, or NO response at all (a
+   * The post may ALREADY exist: an unreadable 2xx, a 408, ANY 5xx, or NO response at all (a
    * connection that drops after the request was sent looks exactly like one that never
    * connected). The console withholds a blind retry: the controller must first check
    * the feed and then choose to post again anyway, or to discard the draft.
@@ -225,11 +225,25 @@ const ERROR_CODE_TEXT: Readonly<Record<string, string>> = {
   service_unavailable: 'The service is not available right now.',
 }
 
+/**
+ * `text` cut to at most `max` UTF-16 units, never between the halves of a surrogate pair
+ * (a bare half would render as U+FFFD in the banner).
+ */
+function truncateWithoutSplittingSurrogates(text: string, max: number): string {
+  if (text.length <= max) return text
+  let end = max
+  const last = text.charCodeAt(end - 1)
+  const next = text.charCodeAt(end)
+  const splitsPair = last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff
+  if (splitsPair) end -= 1
+  return text.slice(0, end)
+}
+
 function cleanMessage(text: string): string | undefined {
   const cleaned = text.replace(CONTROL_CHARS, ' ').trim()
   if (cleaned === '') return undefined
   return cleaned.length > MAX_MESSAGE_LENGTH
-    ? `${cleaned.slice(0, MAX_MESSAGE_LENGTH)}...`
+    ? `${truncateWithoutSplittingSurrogates(cleaned, MAX_MESSAGE_LENGTH)}...`
     : cleaned
 }
 
@@ -261,10 +275,13 @@ function serverMessageOf(data: unknown): string | undefined {
  *  - {@link ComposeRejectedError} (the mock / pre-flight 400) and any other plain
  *    `Error` thrown by the MOCK adapter -> 'rejected' with its own message;
  *  - {@link ComposeUnconfirmedError} -> 'unconfirmed';
- *  - an axios failure with a 2xx response, a 504, or NO response at all (a connection
- *    dropped after the request was sent is indistinguishable from one that never
- *    connected) -> 'unconfirmed';
- *  - 408 / 429 / other 5xx -> 'failed' (the server answered that it took nothing);
+ *  - an axios failure with a 2xx response, a 408, ANY 5xx (500/502/503/504 ...), or NO
+ *    response at all (a connection dropped after the request was sent is indistinguishable
+ *    from one that never connected) -> 'unconfirmed'. This is the SAME rule as the run
+ *    sheet's (`runSheet/runSheetFire.ts`): the server can commit a post and still answer
+ *    5xx (the post-commit broadcast, a lost commit acknowledgement, a gateway that
+ *    recycles mid-request), so a 5xx never proves the post was not created;
+ *  - 429 -> 'failed' (rate limited BEFORE any work: retry is reasonable);
  *  - any other 4xx -> 'rejected', with the SERVER's message.
  * A plain `Error` from the MOCK pipeline has its engineering prefix (`createPost: `)
  * stripped, so the banner reads as a message and not as a stack fragment.
@@ -290,10 +307,10 @@ export function classifyPublishFailure(failure: unknown): PublishFailure {
       message: `The server did not answer, so the post may have gone out. ${UNCONFIRMED_MESSAGE}`,
     }
   }
-  if ((status >= 200 && status < 300) || status === 504) {
+  if ((status >= 200 && status < 300) || status === 408 || status >= 500) {
     return { kind: 'unconfirmed', status, message: UNCONFIRMED_MESSAGE }
   }
-  if (status === 408 || status === 429 || status >= 500) {
+  if (status === 429) {
     return {
       kind: 'failed',
       status,

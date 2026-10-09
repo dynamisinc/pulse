@@ -5,8 +5,8 @@
  * Gate-2 checks 22 / 26; C5 Gate-1 M-3; PE-FE Gate-1 M-2):
  *
  *  1. ⌘K / Ctrl+K YIELDS TO OTHER MODALS. While any `[aria-modal="true"]` layer outside the
- *     console is mounted (a run-sheet dialog, C5's takedown confirm, PE-FE's persona edit
- *     dialog - plain MUI Dialogs - or the shell's Pause overlay) the chord does nothing:
+ *     console is mounted (a run-sheet dialog, PE-FE's persona edit dialog - plain MUI
+ *     Dialogs - the pause-tier popover, or a shell-level overlay) the chord does nothing:
  *     opened over it, the palette would sit hidden behind the dialog while its focus-on-open
  *     fought the dialog's focus trap. With no other modal it still toggles the palette, and
  *     the palette's OWN panel (an `aria-modal` inside the console) never counts as "another".
@@ -185,7 +185,7 @@ describe('ControllerConsole - ⌘K yields to another modal', () => {
     expect(screen.queryByTestId('command-palette')).toBeNull()
   })
 
-  it('ignores the chord for any aria-modal layer, e.g. the shell\'s Pause overlay', async () => {
+  it('ignores the chord for any aria-modal layer, e.g. a shell-level overlay', async () => {
     const user = userEvent.setup({ delay: null })
     renderConsole({}, (
       <div role="dialog" aria-modal="true" aria-label="Exercise paused" data-shell-layer="">

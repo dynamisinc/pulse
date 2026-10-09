@@ -53,8 +53,25 @@
  * ("status unknown - check the feed" for this kind) and leaves the question waiting.
  *
  * A RESPONSE ONLY SETTLES ITS OWN REQUEST. In-flight bookkeeping is per target (a
- * set, not one slot), and a success clears the route's reply target only if it is
- * STILL the one the post answered - a newer "Reply as" survives an older post.
+ * set, not one slot), and a success clears the route's reply target only if (a) the
+ * composer that sent it is STILL the one on screen and (b) the target is STILL the one
+ * the post answered. (a) matters because the route's target outlives no dock: once the
+ * composer unmounts the route has already dropped the target, and anything it holds now
+ * was set AFTER the post was sent - e.g. a fresh "Reply as" on another post - which an
+ * old instance's late 201 must never wipe (it would turn that reply into a top-level post).
+ *
+ * A REPLY NEVER TURNS INTO A TOP-LEVEL POST ON REMOUNT. What persists across an unmount -
+ * the "Post status unknown" question and the draft an off-screen failure restored - is
+ * persisted TOGETHER WITH the reply it was sent for (`contextByKey`, which may say "no
+ * reply"). The route drops its reply target when the dock closes or the persona changes,
+ * so on a fresh mount the hook compares the two:
+ *   - route target absent -> it asks the route to put the draft's reply back
+ *     (`onRestoreReply`; the "Replying to @x" banner shows again);
+ *   - they still differ (no restore callback, a different "Reply as", the controller cleared
+ *     it) -> `replyMismatch` is set, Post / "post again" are blocked, and the composer says
+ *     what the draft was. `matchDraftReply()` puts the original setting back;
+ *     `keepCurrentReply()` (not offered for a pending "did it go out?" question, whose
+ *     re-send must be the SAME request) accepts what is on screen.
  *
  * INPUTS, NOT IMPORTS (Wave-1 parallel-build contract):
  *   - `activePersona` - the persona to post AS - is a PROP from persona-operation/02's
@@ -100,6 +117,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { scenarioNow } from '@/core/clock'
+import { registerSessionReset } from '@/core/auth/sessionReset'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import type { Persona } from '@/features/personas'
 import type { EngagementBaseline, Post, ReplyTarget } from '@/features/social'
@@ -135,6 +153,23 @@ const draftByKey = new Map<string, string>()
  */
 const unconfirmedByKey = new Map<string, PublishFailure>()
 
+/**
+ * What a persisted draft was written FOR. `replyTo === undefined` means "a top-level post",
+ * which is just as worth remembering: a draft written as a plain post must not become a
+ * reply because the controller pressed "Reply as..." before reopening the dock. Only set
+ * alongside an unconfirmed question or an off-screen-restored draft (see the module header);
+ * absent = unknown (no guard).
+ */
+interface DraftContext {
+  readonly replyTo: ReplyTarget | undefined
+}
+const contextByKey = new Map<string, DraftContext>()
+
+/** A handle with exactly one leading '@' stripped (the composer's banner adds its own). */
+function bareHandleOf(target: ReplyTarget): string {
+  return target.authorHandle.startsWith('@') ? target.authorHandle.slice(1) : target.authorHandle
+}
+
 function draftKey(exerciseId: string, personaId: string): string {
   return `${exerciseId}::${personaId}`
 }
@@ -162,16 +197,31 @@ function discardDraft(exerciseId: string, personaId: string): void {
   const key = draftKey(exerciseId, personaId)
   draftByKey.delete(key)
   unconfirmedByKey.delete(key)
+  contextByKey.delete(key)
 }
 
-/** Clears every persisted draft. Test-only - prevents cross-test pollution. */
-function resetForTests(): void {
+/**
+ * Forgets EVERY persisted draft, "did it go out?" question and reply context. Called when the
+ * session ends (`core/auth/endSession`): the next staff user on the same tab must not inherit
+ * the previous one's unsent text or unresolved question. Also the test reset.
+ */
+function reset(): void {
   draftByKey.clear()
   unconfirmedByKey.clear()
+  contextByKey.clear()
 }
 
-/** The module-singleton persisted-draft store. Exposed for the discard path + test reset. */
-export const composeAsPersonaDraftStore = { discardDraft, resetForTests }
+/**
+ * The module-singleton persisted-draft store. Exposed for the discard path, the sign-out reset
+ * and the test reset (`resetForTests` is the same operation under its older name).
+ */
+export const composeAsPersonaDraftStore = { discardDraft, reset, resetForTests: reset }
+
+// Sign-out forgets every draft, question and reply context (Gate-2 A L-5): they are module
+// singletons that live as long as the TAB, so without this the next staff user on the same tab
+// would inherit the previous one's unsent text and "Post status unknown" question. Registered
+// with `core/auth` (which cannot import this feature) rather than called from `endSession`.
+registerSessionReset(reset)
 
 // ---------------------------------------------------------------------------
 // Engagement baseline form state
@@ -209,6 +259,26 @@ export interface UseComposeAsPersonaOptions {
   readonly replyTo?: ReplyTarget
   /** Asks the route to drop the reply target (after a successful reply). */
   readonly onClearReply?: () => void
+  /**
+   * Asks the route to PUT BACK the reply target a persisted draft was written for (the route
+   * dropped it when the dock closed). Without it a remounted draft whose reply is missing is
+   * blocked (`replyMismatch`) instead of restored.
+   */
+  readonly onRestoreReply?: (target: ReplyTarget) => void
+  /**
+   * The current reply target was taken down after it was set: Post is blocked (a reply to a
+   * removed post can never succeed) and `blockers` says why. Route / composer supplied.
+   */
+  readonly replyTargetRemoved?: boolean
+}
+
+/**
+ * A persisted draft whose reply setting no longer matches the route's. `original` is what the
+ * draft was written for (`undefined` = a top-level post); `current` is what the route holds now.
+ */
+export interface ReplyMismatch {
+  readonly original: ReplyTarget | undefined
+  readonly current: ReplyTarget | undefined
 }
 
 /** Where the last publish attempt stands. */
@@ -240,6 +310,15 @@ export interface UseComposeAsPersonaResult {
   readonly repostAnyway: () => void
   /** "Discard draft (it went out)": drops the draft, the gate and the answered reply target. */
   readonly discardUnconfirmed: () => void
+  /**
+   * Set while a persisted draft's reply setting differs from the route's (see the module
+   * header). Post and "post again" are blocked until it is resolved.
+   */
+  readonly replyMismatch: ReplyMismatch | undefined
+  /** Puts the draft's ORIGINAL reply setting back (restores its target, or clears the current). */
+  readonly matchDraftReply: () => void
+  /** Accepts what is on screen as the draft's reply setting. A no-op while awaiting a decision. */
+  readonly keepCurrentReply: () => void
 
   /** The attach tray (uploads + library picks, alt text, limits). */
   readonly tray: UseAttachmentTrayResult
@@ -275,6 +354,8 @@ export function useComposeAsPersona(
     onPublished,
     replyTo,
     onClearReply,
+    onRestoreReply,
+    replyTargetRemoved = false,
   } = options
   const { exerciseId, timeZone } = useExerciseContext()
   const personaId = activePersona.id
@@ -290,6 +371,10 @@ export function useComposeAsPersona(
     unconfirmedByKey.get(targetKey),
   )
   const [lastPublished, setLastPublished] = useState<Post | null>(null)
+  // What the persisted draft (if any) was written for - see `contextByKey`.
+  const [draftContext, setDraftContext] = useState<DraftContext | undefined>(() =>
+    contextByKey.get(targetKey),
+  )
 
   // The target a response belongs to must still be the one on screen when it lands.
   const targetRef = useRef(targetKey)
@@ -311,9 +396,10 @@ export function useComposeAsPersona(
   useEffect(() => {
     latestReplyToRef.current = replyTo
   }, [replyTo])
-  // The reply an 'unconfirmed' attempt was sent for (so "discard, it went out" drops
-  // that target and no other).
-  const unconfirmedReplyRef = useRef<ReplyTarget | undefined>(undefined)
+  const onRestoreReplyRef = useRef(onRestoreReply)
+  useEffect(() => {
+    onRestoreReplyRef.current = onRestoreReply
+  }, [onRestoreReply])
 
   // If the compose TARGET changes (a different exercise or persona - NOT merely a
   // remount for the SAME one, which the lazy initializer above already handles),
@@ -336,6 +422,15 @@ export function useComposeAsPersona(
     setLastPublished(null)
     setBaselineFields(EMPTY_BASELINE_FIELDS)
     clearTray()
+    // The draft comes back with the reply it was written for. The route dropped its target
+    // when the dock closed / the persona changed, so ask it to put that target back (a
+    // PASSIVE effect on purpose: the route's own bookkeeping of the active persona is only
+    // current by now). If it cannot, `replyMismatch` blocks the send instead.
+    const context = contextByKey.get(draftKey(exerciseId, personaId))
+    setDraftContext(context)
+    if (context?.replyTo !== undefined && latestReplyToRef.current === undefined) {
+      onRestoreReplyRef.current?.(context.replyTo)
+    }
   }, [exerciseId, personaId, clearTray])
 
   // Mirrors every keystroke into the persisted-draft store (Gate-1 WR-103) -
@@ -380,18 +475,40 @@ export function useComposeAsPersona(
   // "discard, it went out". A single stray Enter must never double-post breaking news.
   const awaitingDecision = status === 'error' && failure?.kind === 'unconfirmed'
   const hasContent = hasText || tray.items.length > 0
+  // A persisted draft must go out with the reply setting it was written for (see header).
+  const replyMismatch = useMemo<ReplyMismatch | undefined>(
+    () =>
+      draftContext !== undefined && draftContext.replyTo?.postId !== replyTo?.postId
+        ? { original: draftContext.replyTo, current: replyTo }
+        : undefined,
+    [draftContext, replyTo],
+  )
   const canPublish =
     hasContent &&
     !isOverLimit &&
     tray.blocker === undefined &&
     parsedBaseline.valid &&
     !isPublishing &&
-    !awaitingDecision
+    !awaitingDecision &&
+    replyMismatch === undefined &&
+    !replyTargetRemoved
 
   const blockers = useMemo<string[]>(() => {
     const reasons: string[] = []
     if (awaitingDecision) {
       reasons.push('Post is paused: choose "Post again anyway" or "Discard draft" above.')
+    }
+    if (replyMismatch !== undefined) {
+      reasons.push(
+        replyMismatch.original !== undefined
+          ? `This draft was a reply to @${bareHandleOf(replyMismatch.original)}: restore that `
+            + 'reply (or choose what to do with the draft) above.'
+          : 'This draft was a new post, not a reply: clear the reply target (or choose what to '
+            + 'do with the draft) above.',
+      )
+    }
+    if (replyTargetRemoved) {
+      reasons.push('The post you are replying to was taken down. Clear the reply to post.')
     }
     if (isOverLimit) reasons.push(`Remove ${-remaining} characters to post.`)
     if (tray.blocker !== undefined) reasons.push(tray.blocker)
@@ -399,7 +516,15 @@ export function useComposeAsPersona(
       reasons.push('Fix the Starting engagement values: whole numbers from 0 to 1,000,000.')
     }
     return reasons
-  }, [awaitingDecision, isOverLimit, remaining, tray.blocker, parsedBaseline.valid])
+  }, [
+    awaitingDecision,
+    replyMismatch,
+    replyTargetRemoved,
+    isOverLimit,
+    remaining,
+    tray.blocker,
+    parsedBaseline.valid,
+  ])
 
   const { baseline } = parsedBaseline
   const trayMedia = tray.media
@@ -414,6 +539,7 @@ export function useComposeAsPersona(
     if (inFlight.current.has(targetKey)) return
     if (awaitingDecision && !force) return
     if (force && !awaitingDecision) return
+    if (replyMismatch !== undefined || replyTargetRemoved) return
     if (trayMedia === undefined) return
     if (text.trim().length === 0 && trayMedia.length === 0) return
     if ([...text].length > charLimit) return
@@ -442,6 +568,7 @@ export function useComposeAsPersona(
       // it is still what was sent (a remount may already hold a newer draft).
       if (getPersistedDraft(exerciseId, personaId) === text) discardDraft(exerciseId, personaId)
       if (stillOnScreen()) {
+        setDraftContext(contextByKey.get(targetKey))
         setTextState('')
         clearTray()
         setBaselineFields(EMPTY_BASELINE_FIELDS)
@@ -449,8 +576,16 @@ export function useComposeAsPersona(
         setLastPublished(post)
         setStatus('success')
       }
-      // Drop the reply target only if it is STILL the one this post answered.
-      if (sentReplyTo !== undefined && latestReplyToRef.current?.postId === sentReplyTo.postId) {
+      // Drop the route's reply target only if (a) THIS composer is still the one on screen
+      // and (b) the target is STILL the one this post answered. An unmounted instance's late
+      // success must not wipe a target the route holds NOW: the route already dropped the
+      // one this post answered when the dock closed or the persona changed, so whatever it
+      // holds was set later (Gate-2 A M-1).
+      if (
+        stillOnScreen()
+        && sentReplyTo !== undefined
+        && latestReplyToRef.current?.postId === sentReplyTo.postId
+      ) {
         onClearReply?.()
       }
       onPublished?.(post)
@@ -459,9 +594,12 @@ export function useComposeAsPersona(
     const fail = (error: unknown) => {
       inFlight.current.delete(targetKey)
       const classified = classifyPublishFailure(error)
+      // What a remounted composer must know about this request: the reply it carried (or
+      // that it carried none).
+      const sentContext: DraftContext = { replyTo: sentReplyTo }
       if (classified.kind === 'unconfirmed') {
         unconfirmedByKey.set(targetKey, classified)
-        unconfirmedReplyRef.current = sentReplyTo
+        contextByKey.set(targetKey, sentContext)
       } else {
         unconfirmedByKey.delete(targetKey)
       }
@@ -469,14 +607,21 @@ export function useComposeAsPersona(
       if (!stillOnScreen()) {
         // The composer is gone (dock closed / another persona on screen): nobody is
         // looking at an error banner, so make the failure impossible to miss and put
-        // the text back where a reopened composer will find it.
-        if (getPersistedDraft(exerciseId, personaId) === '') {
+        // the text back - WITH the reply it was written for - where a reopened composer
+        // will find it.
+        // (A draft that is still exactly what was sent - the dock was closed without discarding
+        // it, e.g. the ENGINE flyout took it over - is the same draft: it gets the context too.
+        // A DIFFERENT, newer draft is the controller's own and is left alone.)
+        const persisted = getPersistedDraft(exerciseId, personaId)
+        if (persisted === '' || persisted === text) {
           setPersistedDraft(exerciseId, personaId, text)
+          contextByKey.set(targetKey, sentContext)
         }
         const notify = classified.kind === 'unconfirmed' ? toast.warning : toast.error
         notify(describeOffscreenFailure(handle, classified), { autoClose: 10_000 })
         return
       }
+      if (classified.kind === 'unconfirmed') setDraftContext(sentContext)
       setFailure(classified)
       setLastPublished(null)
       setStatus('error')
@@ -518,6 +663,8 @@ export function useComposeAsPersona(
     parsedBaseline.valid,
     baseline,
     replyTo,
+    replyMismatch,
+    replyTargetRemoved,
     onClearReply,
     onPublished,
   ])
@@ -528,10 +675,11 @@ export function useComposeAsPersona(
   /** "Discard draft (it went out)": the controller checked the feed and the post is there. */
   const discardUnconfirmed = useCallback(() => {
     if (!awaitingDecision) return
-    const sentReplyTo = unconfirmedReplyRef.current
-    unconfirmedReplyRef.current = undefined
+    // The reply the unresolved request carried - survives a remount (it is persisted).
+    const sentReplyTo = contextByKey.get(targetKey)?.replyTo
     unconfirmedByKey.delete(targetKey)
     discardDraft(exerciseId, personaId)
+    setDraftContext(undefined)
     setTextState('')
     clearTray()
     setBaselineFields(EMPTY_BASELINE_FIELDS)
@@ -542,6 +690,20 @@ export function useComposeAsPersona(
       onClearReply?.()
     }
   }, [awaitingDecision, targetKey, exerciseId, personaId, clearTray, onClearReply])
+
+  /** Puts the draft's original reply setting back (see `ReplyMismatch`). */
+  const matchDraftReply = useCallback(() => {
+    if (draftContext === undefined) return
+    if (draftContext.replyTo !== undefined) onRestoreReplyRef.current?.(draftContext.replyTo)
+    else onClearReply?.()
+  }, [draftContext, onClearReply])
+
+  /** Accepts the current reply setting for the draft - never for a pending "did it go out?". */
+  const keepCurrentReply = useCallback(() => {
+    if (awaitingDecision) return
+    contextByKey.delete(targetKey)
+    setDraftContext(undefined)
+  }, [awaitingDecision, targetKey])
 
   return {
     text,
@@ -556,6 +718,9 @@ export function useComposeAsPersona(
     awaitingDecision,
     repostAnyway,
     discardUnconfirmed,
+    replyMismatch,
+    matchDraftReply,
+    keepCurrentReply,
     tray,
     baselineFields,
     baselineErrors: parsedBaseline.errors,

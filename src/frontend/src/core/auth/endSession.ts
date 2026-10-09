@@ -33,6 +33,11 @@
  *      reset the same way so a sign-in on the same tab never inherits the last session's.
  *      Also a leaf module (no imports).
  *
+ *   5. RUN THE FEATURES' REGISTERED RESETS (`./sessionReset`, Wave 3 Gate-2 A L-5): state a
+ *      feature keeps at module level for the life of the tab - the controller composer's unsent
+ *      drafts and its unresolved "did that post go out?" questions - registers its reset
+ *      there, so this module imports no feature for it (core stays world-neutral).
+ *
  * NAVIGATION is the CALLER's job (the control does `void endSession()` then
  * `navigate(LOGIN_PATH)`) — this module has no router dependency, mirroring
  * `logout()`. Both `clear()` and the token clear run SYNCHRONOUSLY before
@@ -47,6 +52,7 @@ import { ownPostStore } from '@/features/social/services/ownPostStore'
 import { removedPosts } from '@/features/social/services/removedPosts'
 import { resetReplyIntent } from '@/features/social/services/replyIntent'
 import { logout } from './logout'
+import { runSessionResets } from './sessionReset'
 
 /**
  * Fully tears down the client session: drops all cached server-state so no
@@ -59,5 +65,6 @@ export async function endSession(): Promise<void> {
   ownPostStore.reset()
   removedPosts.reset()
   resetReplyIntent()
+  runSessionResets()
   await logout()
 }

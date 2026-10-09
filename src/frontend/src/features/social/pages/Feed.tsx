@@ -422,16 +422,34 @@ export function Feed({
   // focused node and the browser would drop focus to <body>. The store notifies SYNCHRONOUSLY,
   // before React re-renders, so this listener still sees the focused card; it only records the
   // intent, and the layout effect below (after the row is gone) moves focus to the feed region.
+  //
+  // A second case (Gate-2 B L-2): the post's MEDIA VIEWER is open. It is mounted inside the row
+  // but portalled to <body>, so focus is in the viewer - outside `section` - and the card test
+  // above does not see it. When the row unmounts the viewer goes with it and focus would fall to
+  // <body>. So the listener also remembers WHATEVER held focus; after the removal commits, if that
+  // element was taken out of the document with the row (and focus has nowhere to be), the region
+  // gets it. An element that is still connected - the controller was elsewhere - is left alone.
   const refocusRegionRef = useRef(false)
+  const focusedAtRemovalRef = useRef<HTMLElement | null>(null)
   useEffect(() => removedPosts.subscribe(() => {
     const section = sectionRef.current
     const active = document.activeElement
-    if (section === null || !(active instanceof HTMLElement) || !section.contains(active)) return
+    if (section === null || !(active instanceof HTMLElement) || active === document.body) return
+    if (!section.contains(active)) {
+      focusedAtRemovalRef.current = active
+      return
+    }
     const postId = active.closest<HTMLElement>('[data-feed-post-id]')?.dataset.feedPostId
     if (postId !== undefined && removedPosts.has(postId)) refocusRegionRef.current = true
   }), [])
   useLayoutEffect(() => {
-    if (!refocusRegionRef.current) return
+    const remembered = focusedAtRemovalRef.current
+    focusedAtRemovalRef.current = null
+    const lostWithTheRow =
+      remembered !== null
+      && !remembered.isConnected
+      && (document.activeElement === null || document.activeElement === document.body)
+    if (!refocusRegionRef.current && !lostWithTheRow) return
     refocusRegionRef.current = false
     // The scroll position is the reader's: focusing must not move the viewport.
     sectionRef.current?.focus({ preventScroll: true })

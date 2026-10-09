@@ -42,7 +42,15 @@
  * zone (COR-053). The export's `exportedAt` is wall-clock metadata in the file only.
  */
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -137,11 +145,16 @@ function snapshotMediaIds(beats: readonly RunSheetBeat[]): readonly string[] {
   return [...ids]
 }
 
-/** Entry point. Keys the body by exercise so a switch cannot leave stale UI state behind. */
-export function RunSheetPanel() {
+/**
+ * Entry point. Keys the body by exercise so a switch cannot leave stale UI state behind.
+ * `memo`ized: it is prop-less, and the console re-renders its slots at 1 Hz or more (the review
+ * queue's tick, swamped mode) - without this every beat row (up to 200) re-rendered each time.
+ * It still re-renders on its own state, its queries and the exercise context.
+ */
+export const RunSheetPanel = memo(function RunSheetPanel() {
   const { exerciseId } = useExerciseContext()
   return <RunSheetPanelBody key={exerciseId} />
-}
+})
 
 function RunSheetPanelBody() {
   const sheet = useRunSheet()

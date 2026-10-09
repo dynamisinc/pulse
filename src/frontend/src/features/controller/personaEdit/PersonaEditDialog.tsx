@@ -250,6 +250,19 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault()
       void submit()
+      return
+    }
+    // A plain Enter on a RADIO or CHECKBOX would implicitly SUBMIT the form (Chromium and
+    // Firefox both do) - saving, and so going live to participants, from a control whose Enter
+    // means nothing (the Verified checkbox, and C1's picker filter radios inside the avatar /
+    // banner chooser). Enter is for the single-line text fields; Space toggles these.
+    if (
+      event.key === 'Enter'
+      && !event.altKey
+      && event.target instanceof HTMLInputElement
+      && (event.target.type === 'radio' || event.target.type === 'checkbox')
+    ) {
+      event.preventDefault()
     }
   }
 
@@ -417,15 +430,13 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
                       checked={draft.verified}
                       disabled={saving}
                       onChange={event => setProposedVerified(event.target.checked)}
+                      // (Enter on this checkbox must not submit the form - saving instead of
+                      // asking the Verified confirmation (L-6): the dialog's `handleKeyDown`
+                      // covers every radio and checkbox, this one included.)
                       slotProps={{
                         input: {
                           'aria-describedby': verifiedHelpId,
                           'data-testid': 'persona-edit-verified',
-                          // Enter on a checkbox would implicitly SUBMIT the form (Chromium,
-                          // Firefox) — saving instead of asking the Verified confirmation (L-6).
-                          onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
-                            if (event.key === 'Enter') event.preventDefault()
-                          },
                         } as InputHTMLAttributes<HTMLInputElement>,
                       }}
                     />

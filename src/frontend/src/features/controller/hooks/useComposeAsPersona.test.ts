@@ -280,8 +280,8 @@ describe('useComposeAsPersona — a failed publish is VISIBLE and keeps the draf
     expect(onClearReply).toHaveBeenCalledTimes(1)
   })
 
-  it('a 5xx / 429 answer is "failed" (retry is reasonable); an unreadable 2xx is "unconfirmed"', async () => {
-    vi.mocked(publishPost).mockRejectedValueOnce(httpError(503, { error: 'unavailable' }))
+  it('a 429 answer is "failed" (retry is reasonable); a 5xx and an unreadable 2xx are "unconfirmed"', async () => {
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(429, { error: 'rate_limited' }))
     const { result } = renderHook(() => useComposeAsPersona(options()))
     act(() => result.current.setText('Server busy.'))
     await act(async () => result.current.publish())
@@ -289,9 +289,21 @@ describe('useComposeAsPersona — a failed publish is VISIBLE and keeps the draf
     expect(result.current.awaitingDecision).toBe(false)
     expect(result.current.canPublish).toBe(true)
 
+    // Gate-2 A M-3: a 5xx may follow a commit, so it is gated exactly like a 504.
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(503, { error: 'unavailable' }))
+    await act(async () => result.current.publish())
+    expect(result.current.failure).toMatchObject({ kind: 'unconfirmed', status: 503 })
+    expect(result.current.awaitingDecision).toBe(true)
+    expect(result.current.canPublish).toBe(false)
+    expect(result.current.status).toBe('error')
+    expect(result.current.text).toBe('Server busy.')
+    expect(publishPost).toHaveBeenCalledTimes(2)
+
+    await act(async () => result.current.discardUnconfirmed())
     vi.mocked(publishPost).mockRejectedValueOnce(
       new Error('publishPost: the server returned a malformed post'),
     )
+    act(() => result.current.setText('Server busy.'))
     await act(async () => result.current.publish())
     expect(result.current.failure?.kind).toBe('unconfirmed')
     expect(result.current.status).toBe('error')
@@ -693,7 +705,7 @@ describe('useComposeAsPersona — a failure after the composer left the screen i
     const second = renderHook(() => useComposeAsPersona(options()))
     act(() => second.result.current.setText('A newer draft.'))
 
-    await act(async () => pending.reject(httpError(503, { error: 'unavailable' })))
+    await act(async () => pending.reject(httpError(429, { error: 'rate_limited' })))
 
     expect(toast.error).toHaveBeenCalledTimes(1)
     second.unmount()

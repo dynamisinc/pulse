@@ -14,6 +14,7 @@ import { logout } from './logout'
 import { queryClient } from '../services/queryClient'
 import { ownPostStore } from '@/features/social/services/ownPostStore'
 import { removedPosts } from '@/features/social/services/removedPosts'
+import { registerSessionReset } from './sessionReset'
 import {
   consumeReplyFocus,
   requestReplyFocus,
@@ -110,8 +111,9 @@ describe('endSession', () => {
 
     expect(removedPosts.has('post-taken-down')).toBe(false)
     expect(removedPosts.getAll().size).toBe(0)
-    // A mounted feed is told, so it can show whatever it had hidden.
-    expect(heard).toHaveBeenCalledTimes(1)
+    // Silent (Gate-2 B L-3): a notify is a blocking update that can repaint a taken-down post
+    // for a frame before the navigation to /login commits; the consumers are about to unmount.
+    expect(heard).not.toHaveBeenCalled()
   })
 
   it('clears the removed ids SYNCHRONOUSLY too, before awaiting logout()', async () => {
@@ -124,5 +126,44 @@ describe('endSession', () => {
     await endSession()
 
     expect(seenInsideLogout).toBe(0)
+  })
+})
+
+describe('endSession - features\' registered resets (Gate-2 A L-5)', () => {
+  it('runs every registered reset, synchronously and before awaiting logout()', async () => {
+    const reset = vi.fn()
+    const unregister = registerSessionReset(reset)
+    let calledBeforeLogout = false
+    mockLogout.mockImplementation(async () => {
+      calledBeforeLogout = reset.mock.calls.length === 1
+    })
+
+    await endSession()
+
+    expect(reset).toHaveBeenCalledTimes(1)
+    expect(calledBeforeLogout).toBe(true)
+    unregister()
+  })
+
+  it('isolates a throwing reset: the others and the logout still happen', async () => {
+    const after = vi.fn()
+    const unregisterBad = registerSessionReset(() => {
+      throw new Error('boom')
+    })
+    const unregisterAfter = registerSessionReset(after)
+
+    await expect(endSession()).resolves.toBeUndefined()
+
+    expect(after).toHaveBeenCalledTimes(1)
+    expect(mockLogout).toHaveBeenCalledTimes(1)
+    unregisterBad()
+    unregisterAfter()
+  })
+
+  it('an unregistered reset no longer runs', async () => {
+    const reset = vi.fn()
+    registerSessionReset(reset)()
+    await endSession()
+    expect(reset).not.toHaveBeenCalled()
   })
 })

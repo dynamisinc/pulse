@@ -13,9 +13,11 @@
  * `stopPropagation()` (React 19 listens at the portal container, so the native event
  * never reaches `window`).
  *
- * The console's own listener should additionally stand aside while another
- * `aria-modal` is mounted (`core/a11y/modalPriority`); that is wiring outside this
- * story, and this guard does not depend on it.
+ * The console's own listener ALSO stands aside while another `aria-modal` is mounted
+ * (`ControllerConsole`, via `core/a11y/modalPriority`; Wave 3 integration), so with the
+ * console mounted this guard is a second line of defence: it still stops the chord at the
+ * dialog (and the browser's own Ctrl+K) wherever the dialog is rendered, and it does not
+ * depend on that wiring.
  */
 
 import type { KeyboardEvent } from 'react'

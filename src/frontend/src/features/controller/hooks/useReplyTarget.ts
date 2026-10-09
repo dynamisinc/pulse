@@ -30,6 +30,11 @@
  * palette closes without a pick (Esc, backdrop, Cmd+K again) the target is dropped, so a
  * later, unrelated Cmd+K -> persona never opens a composer already pointing at an old post.
  *
+ * `requestReply` is also how a REMOUNTED composer puts back the reply its draft was written for
+ * (`PersonaComposer`'s `onRestoreReply`): a "Post status unknown" question or an
+ * off-screen-restored draft comes back with its "Replying to @x" banner. It binds to the
+ * persona active at that moment, exactly like a "Reply as..." click.
+ *
  * What is returned as `replyTo` is DERIVED on every render from the state and the current
  * exercise / persona (never a stale value for one render); the effect then prunes the state
  * so a dropped target cannot reappear when the persona or exercise comes back.

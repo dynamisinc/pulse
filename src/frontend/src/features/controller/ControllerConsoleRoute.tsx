@@ -77,10 +77,15 @@
  *                     palette dismissed without a pick).
  *   runSheetSlot   -> C3's `RunSheetPanel` (prop-less; reads its own providers).
  *
- * STABILITY. The slots run on EVERY console render (the review queue and swamped mode
- * re-render the console constantly), so each slot function and callback here has a stable
- * identity (`useCallback` / `useMemo` / module level). The live-world column memoizes its
- * rows, so a new function identity would re-render them on every tick.
+ * STABILITY. The console re-renders constantly (the review queue's 1 s scenario-clock tick,
+ * every swamped-mode change, each toolstrip toggle) and calls both slot functions each time.
+ * Two things keep that cheap: every slot function and callback here has a stable identity
+ * (`useCallback` / `useMemo` / module level), and each slot's ROOT is `memo`ized with stable
+ * props - `RunSheetPanel` is prop-less and exported memoized, and `LiveWorldSlot` (below) takes
+ * only `ctx`, `requestReply` and `isRowRemoved` and owns the one `onReplyAs` callback. A
+ * console re-render therefore reconciles two memo boundaries instead of re-rendering up to 200
+ * beats and every live-world row. (`isRowRemoved` is deliberately a NEW identity per takedown:
+ * the column's memoized rows must re-render then.)
  *
  * C5's takedown rides the live-world column: `renderRowActions={renderTakedown}` (module
  * level, stable) mounts "Take down" on each row, and `isRowRemoved` (from
@@ -94,7 +99,8 @@
  * console story and is not wired here (Wave-1 scope guard).
  */
 
-import { useCallback, useMemo } from 'react'
+import { memo, useCallback, useMemo } from 'react'
+import type { ReplyTarget } from '@/features/social'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { ToolstripProvider, useToolstrip } from '@/features/staffShell/toolRegistry'
 import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
@@ -121,8 +127,8 @@ import { PersonaContextPanel } from './components/PersonaContextPanel'
 
 /**
  * The RUN SHEET slot (C3): the panel is prop-less - it reads the exercise scope, identity,
- * personas and media library itself - so the slot is a module-level function with a
- * trivially stable identity.
+ * personas and media library itself - and exported `memo`ized, so the slot is a module-level
+ * function with a trivially stable identity and a console re-render never re-renders the sheet.
  */
 const renderRunSheet = () => <RunSheetPanel />
 
@@ -132,6 +138,40 @@ const renderRunSheet = () => <RunSheetPanel />
  * console render (review queue, swamped mode).
  */
 const renderTakedown = (post: LiveWorldPost) => <TakedownAction post={post} />
+
+interface LiveWorldSlotProps {
+  readonly ctx: ConsoleSlotContext
+  readonly requestReply: (target: ReplyTarget) => void
+  readonly isRowRemoved: (post: { readonly id: string }) => boolean
+}
+
+/**
+ * The LIVE WORLD slot's root (C2 + C5). "Reply as..." sets the reply target AND opens the
+ * composer in one go: `ctx.openComposer` selects the active persona and opens the dock, or
+ * opens the palette when there is no persona to open it for (the target waits for the pick).
+ * `memo`ized, and `onReplyAs` is built once per (`ctx`, `requestReply`) - both stable for the
+ * life of the console - so the console's 1 s tick does not re-render the column.
+ */
+const LiveWorldSlot = memo(function LiveWorldSlot({
+  ctx,
+  requestReply,
+  isRowRemoved,
+}: LiveWorldSlotProps) {
+  const onReplyAs = useCallback(
+    (target: ReplyTarget) => {
+      requestReply(target)
+      ctx.openComposer({ replyTo: target })
+    },
+    [ctx, requestReply],
+  )
+  return (
+    <LiveWorldColumn
+      onReplyAs={onReplyAs}
+      renderRowActions={renderTakedown}
+      isRowRemoved={isRowRemoved}
+    />
+  )
+})
 
 /**
  * The console content, inside the provider stack so it may read the controller
@@ -190,28 +230,22 @@ function ControllerConsoleContent() {
               onPublished={post => postStore.appendPost(post)}
               replyTo={replyTo ?? undefined}
               onClearReply={clearReply}
+              // A draft remounted after the dock closed comes back WITH its reply: the route
+              // dropped the target on close, so the composer asks for it back.
+              onRestoreReply={requestReply}
             />
           ),
         }
         : undefined,
-    [activePersona, identity.actingHumanId, identity.callSign, replyTo, clearReply],
+    [activePersona, identity.actingHumanId, identity.callSign, replyTo, clearReply, requestReply],
   )
 
-  // LIVE WORLD slot (C2). "Reply as..." sets the reply target AND opens the composer in one
-  // go; `ctx.openComposer` selects the active persona and opens the dock, or opens the
-  // palette when there is no persona to open it for (the target waits for the pick).
-  // Stable between takedowns: `requestReply` never changes, `ctx` is stable for the life of the
-  // console, and `isRowRemoved` changes identity only when a post is taken down.
+  // LIVE WORLD slot (C2 + C5): stable between takedowns - `requestReply` never changes, `ctx`
+  // is stable for the life of the console, and `isRowRemoved` changes identity only when a
+  // post is taken down.
   const liveWorldSlot = useCallback(
     (ctx: ConsoleSlotContext) => (
-      <LiveWorldColumn
-        onReplyAs={target => {
-          requestReply(target)
-          ctx.openComposer({ replyTo: target })
-        }}
-        renderRowActions={renderTakedown}
-        isRowRemoved={isRowRemoved}
-      />
+      <LiveWorldSlot ctx={ctx} requestReply={requestReply} isRowRemoved={isRowRemoved} />
     ),
     [requestReply, isRowRemoved],
   )

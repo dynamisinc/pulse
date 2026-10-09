@@ -34,12 +34,16 @@
  *   on close focus returns to the Take down control. The step is portalled (the column ignores
  *   J/K/R/N for keys that originate outside its list DOM or in a form field).
  *
- * THE CONFIRM STEP IS NON-MODAL MARKUP WITH ITS OWN MODAL BEHAVIOUR. It is an MUI `Popper` +
- * `ClickAwayListener`, deliberately NOT a `Popover`: a Popover is an MUI Modal, which sets
- * `aria-hidden` on the whole app root and lays an invisible backdrop over it — so the console's
- * Ctrl+K palette (an inline `aria-modal` inside that root) opened over it would be hidden from
- * assistive technology and unclickable. The Popper does neither. The dialog still declares itself
- * `role="dialog" aria-modal="true"`, traps Tab, and closes on Esc, Cancel or a click anywhere else.
+ * THE CONFIRM STEP IS NON-MODAL. It is an MUI `Popper` + `ClickAwayListener`, deliberately NOT a
+ * `Popover`: a Popover is an MUI Modal, which sets `aria-hidden` on the whole app root and lays an
+ * invisible backdrop over it — so the console's Ctrl+K palette (an inline `aria-modal` inside that
+ * root) opened over it would be hidden from assistive technology and unclickable. The Popper does
+ * neither. The panel is `role="dialog"`, traps Tab, and closes on Esc, Cancel or a click anywhere
+ * else — but it does NOT declare `aria-modal` (Wave 3 Gate-2 A S-3): the console's Ctrl+K gate
+ * (`ControllerConsole`) is inert while ANY `[aria-modal="true"]` layer is mounted, and this
+ * non-modal step must not be one. So Ctrl+K still opens the palette over the step, the step's trap
+ * stands aside for the palette (which is `aria-modal`), and focus landing in the palette closes
+ * the step.
  *
  * FOCUS RULES (NFR-001, WCAG 2.4.3 / 3.2.2). Focus is only ever moved when it would otherwise be
  * lost or when the controller's own gesture is what moves it:
@@ -72,12 +76,19 @@
  * not `controller` the component renders nothing at all. (The backend refuses anyone else too.)
  *
  * FOCUS-TRAP CONTRACT (F2, `core/a11y/modalPriority`). The step's trap (initial focus, Tab wrap)
- * STANDS ASIDE while any other `[aria-modal="true"]` element is mounted (`hasOtherModalMounted`):
- * no focus on open, no Tab wrap, no focus return on close. There is NO document-level pull-back at
- * all: because the step is non-modal (a click elsewhere is a click-away), focus that moves outside
- * it - a click into the composer, a modal taking focus, a programmatic move - CLOSES the step and
- * leaves focus exactly where it went (the control's own click is the one exception: it toggles).
- * Its z-index sits below the palette's, so a modal opened over it wins visually as well.
+ * STANDS ASIDE while any other `[aria-modal="true"]` element is mounted (`hasOtherModalMounted`:
+ * the Ctrl+K palette, a MUI dialog): no focus on open, no Tab wrap, no focus return on close. There
+ * is NO document-level pull-back at all: because the step is non-modal (a click elsewhere is a
+ * click-away), focus that moves outside it - a click into the composer, the palette taking focus,
+ * a programmatic move - CLOSES the step and leaves focus exactly where it went (the control's own
+ * click is the one exception: it toggles). Its z-index sits below the palette's, so a modal opened
+ * over it wins visually as well.
+ *
+ * TAKEN DOWN ELSEWHERE MID-CHOICE (Gate-2 A L-8). If another controller's `PostRemoved` lands while
+ * the step is open, the row's slot renders nothing and the step - and the control that anchored
+ * it - leave the page. If focus was inside the step it would fall to <body>, so it goes to the
+ * ROW (a stable element the controller was working in) instead; if it was elsewhere it is left
+ * alone.
  *
  * TELEMETRY. None here. `useTakedown` emits the one XC-004 `steering_action` per successful
  * takedown (the server emits none, DP-9), so this folder never needs the exercise scope.
@@ -224,7 +235,7 @@ function ConfirmPanel({
     const panel = panelRef.current
     if (panel === null) return undefined
 
-    // Another modal (the shell overlay / the palette) is up: it owns focus - take none (F2).
+    // Another modal (the palette / a MUI dialog) is up: it owns focus - take none (F2).
     // `preventScroll`: the popper is positioned a frame later; focusing must not jump the page.
     if (!hasOtherModalMounted(panel)) {
       const checked = panel.querySelector<HTMLElement>('input[type="radio"]:checked')
@@ -281,7 +292,6 @@ function ConfirmPanel({
     <Box
       ref={panelRef}
       role="dialog"
-      aria-modal="true"
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
       tabIndex={-1}
@@ -364,6 +374,10 @@ export function TakedownAction({ post }: TakedownActionProps) {
   const retryRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const closingRef = useRef(false)
+  /** True while keyboard focus is inside the open step (tracked by focus events on its paper). */
+  const focusInStepRef = useRef(false)
+  /** The Live world row that holds this control, remembered when the step opens. */
+  const rowRef = useRef<HTMLElement | null>(null)
   /** Set by Retry / Dismiss (their own button is about to unmount): refocus the control. */
   const refocusTriggerRef = useRef(false)
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
@@ -374,6 +388,23 @@ export function TakedownAction({ post }: TakedownActionProps) {
   const { phase, failure, removed, takenDownAs } = takedown
   const authorName = post.authorDisplayName
   const pending = phase === 'pending'
+
+  // Taken down by ANOTHER controller while the step is open (the store flips, this instance has
+  // no category): the slot is about to render nothing, taking the step - and any focus inside it -
+  // with it. Hand focus to the row instead of letting it fall to <body>, and reset the step so it
+  // cannot reopen anchored to a node that is gone. Runs after the commit that removed the DOM.
+  const droppedByOthers = removed && takenDownAs === undefined && !pending
+  useLayoutEffect(() => {
+    if (!droppedByOthers || anchorEl === null) return
+    const hadFocus = focusInStepRef.current
+    focusInStepRef.current = false
+    closingRef.current = true
+    setAnchorEl(null)
+    const row = rowRef.current
+    if (hadFocus && focusIsLost() && row !== null && row.isConnected) {
+      row.focus({ preventScroll: true })
+    }
+  }, [droppedByOthers, anchorEl])
 
   // Retry / Dismiss unmounted the failure box that held focus: land on the control that replaced it
   // (the pending control during a Retry, the idle one after a Dismiss).
@@ -412,6 +443,8 @@ export function TakedownAction({ post }: TakedownActionProps) {
       return
     }
     closingRef.current = false
+    focusInStepRef.current = false
+    rowRef.current = event.currentTarget.closest<HTMLElement>('[data-live-world-row]')
     setCategory(DEFAULT_TAKEDOWN_CATEGORY)
     setAnchorEl(event.currentTarget)
   }
@@ -424,6 +457,7 @@ export function TakedownAction({ post }: TakedownActionProps) {
    */
   function closeConfirm(): void {
     closingRef.current = true
+    focusInStepRef.current = false
     setAnchorEl(null)
     const trigger = triggerRef.current
     const panel = panelRef.current
@@ -595,6 +629,15 @@ export function TakedownAction({ post }: TakedownActionProps) {
           <ClickAwayListener onClickAway={handleClickAway}>
             <Paper
               elevation={8}
+              // Where focus is, for the "taken down elsewhere mid-choice" case: a removed
+              // element fires no blur, so it is only cleared by focus moving to a node outside.
+              onFocus={() => { focusInStepRef.current = true }}
+              onBlur={event => {
+                const next = event.relatedTarget
+                if (next instanceof Node && !event.currentTarget.contains(next)) {
+                  focusInStepRef.current = false
+                }
+              }}
               sx={{
                 bgcolor: liveWorldTokens.surface,
                 border: `1px solid ${liveWorldTokens.panelBorder}`,

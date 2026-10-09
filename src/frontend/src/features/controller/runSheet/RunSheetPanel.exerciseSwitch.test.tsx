@@ -10,7 +10,7 @@
  * `@/core/exerciseContext` is mocked so the test controls the scope; the rest (personas,
  * media library, the store, `localStorage`) is real.
  */
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ThemeProvider } from '@mui/material/styles'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -18,12 +18,43 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { postStore } from '@/features/social/services/postStore'
 
-const world = vi.hoisted(() => ({
-  scope: { exerciseId: 'ex-mock-0001', exerciseName: 'A', timeZone: 'America/New_York', status: 'live' },
-}))
-vi.mock('@/core/exerciseContext', () => ({
-  useExerciseContext: () => world.scope,
-}))
+// A REACTIVE stand-in for the exercise context. The real one is a React context, so a scope
+// change re-renders every consumer - including the memoized, prop-less `RunSheetPanel` (a
+// console re-render alone must not re-render it, Gate-2 A L-1). A plain function reading a
+// variable would never wake that memo component, so changes go through `setScope` and a
+// `useSyncExternalStore` subscription, exactly like the provider.
+interface Scope {
+  exerciseId: string
+  exerciseName: string
+  timeZone: string
+  status: string
+}
+interface World {
+  scope: Scope
+  listeners: Set<() => void>
+  setScope(next: Scope): void
+}
+const world = vi.hoisted((): World => {
+  const state: World = {
+    scope: { exerciseId: 'ex-mock-0001', exerciseName: 'A', timeZone: 'America/New_York', status: 'live' },
+    listeners: new Set<() => void>(),
+    setScope(next) {
+      state.scope = next
+      for (const listener of [...state.listeners]) listener()
+    },
+  }
+  return state
+})
+vi.mock('@/core/exerciseContext', async () => {
+  const { useSyncExternalStore } = await import('react')
+  const subscribe = (listener: () => void) => {
+    world.listeners.add(listener)
+    return () => {
+      world.listeners.delete(listener)
+    }
+  }
+  return { useExerciseContext: () => useSyncExternalStore(subscribe, () => world.scope) }
+})
 
 import { RunSheetPanel } from './RunSheetPanel'
 import { readStoredSheet, runSheetStorageKey } from './runSheetStorage'
@@ -78,7 +109,7 @@ beforeEach(() => {
   resetRunSheetWorld()
   useFixedClock()
   postStore.resetForTests()
-  world.scope = scopeFor('ex-mock-0001')
+  world.setScope(scopeFor('ex-mock-0001'))
 })
 afterEach(() => {
   cleanup()
@@ -90,21 +121,19 @@ describe('RunSheetPanel - switching exercise', () => {
   it('shows only the current exercise\'s sheet, with its own name and status, in both directions', async () => {
     seedStoredSheet('ex-mock-0001', sheetA())
     seedStoredSheet('ex-b', sheetB())
-    const { rerender } = render(tree())
+    render(tree())
     await screen.findByTestId('beat-row-a1')
     expect(screen.getByLabelText('Sheet name')).toHaveValue('Sheet A')
     expect(screen.queryByTestId('beat-row-b1')).toBeNull()
 
-    world.scope = scopeFor('ex-b')
-    rerender(tree())
+    act(() => world.setScope(scopeFor('ex-b')))
     await screen.findByTestId('beat-row-b1')
     expect(screen.getByLabelText('Sheet name')).toHaveValue('Sheet B')
     expect(screen.queryByTestId('beat-row-a1')).toBeNull()
     expect(screen.queryByTestId('beat-row-a2')).toBeNull()
     expect(within(screen.getByTestId('beat-row-b1')).getByTestId('beat-status')).toHaveTextContent('Fired')
 
-    world.scope = scopeFor('ex-mock-0001')
-    rerender(tree())
+    act(() => world.setScope(scopeFor('ex-mock-0001')))
     await screen.findByTestId('beat-row-a1')
     expect(screen.queryByTestId('beat-row-b1')).toBeNull()
     expect(within(screen.getByTestId('beat-row-a1')).getByTestId('beat-status')).toHaveTextContent('Pending')
@@ -112,10 +141,9 @@ describe('RunSheetPanel - switching exercise', () => {
 
   it('shows an empty sheet for an exercise that has none, never another exercise\'s', async () => {
     seedStoredSheet('ex-mock-0001', sheetA())
-    const { rerender } = render(tree())
+    render(tree())
     await screen.findByTestId('beat-row-a1')
-    world.scope = scopeFor('ex-c')
-    rerender(tree())
+    act(() => world.setScope(scopeFor('ex-c')))
     await screen.findByTestId('run-sheet-empty')
     expect(screen.queryByTestId('beat-row-a1')).toBeNull()
     expect(window.localStorage.getItem(runSheetStorageKey('ex-c'))).toBeNull()
@@ -124,7 +152,7 @@ describe('RunSheetPanel - switching exercise', () => {
   it('writes an edit only to the exercise it was made in', async () => {
     seedStoredSheet('ex-mock-0001', sheetA())
     const user = userEvent.setup({ delay: null })
-    const { rerender } = render(tree())
+    render(tree())
     await screen.findByTestId('beat-row-a1')
     await waitFor(() => expect(screen.getByTestId('run-sheet-panel')).toHaveAttribute('data-personas', 'ready'))
 
@@ -132,8 +160,7 @@ describe('RunSheetPanel - switching exercise', () => {
     await user.keyboard('f')
     await waitFor(() => expect(runtimeOf(stored('ex-mock-0001'), 'a1').status).toBe('fired'))
 
-    world.scope = scopeFor('ex-b')
-    rerender(tree())
+    act(() => world.setScope(scopeFor('ex-b')))
     await screen.findByTestId('run-sheet-empty')
     await user.click(screen.getByRole('button', { name: 'Add beat' }))
     const dialog = await screen.findByRole('dialog')
@@ -151,13 +178,12 @@ describe('RunSheetPanel - switching exercise', () => {
   it('closes an open editor when the exercise changes (no edit lands in the wrong sheet)', async () => {
     seedStoredSheet('ex-mock-0001', sheetA())
     const user = userEvent.setup({ delay: null })
-    const { rerender } = render(tree())
+    render(tree())
     await screen.findByTestId('beat-row-a1')
     await user.click(screen.getByRole('button', { name: 'Add beat' }))
     await screen.findByRole('dialog', { name: 'New beat' })
 
-    world.scope = scopeFor('ex-b')
-    rerender(tree())
+    act(() => world.setScope(scopeFor('ex-b')))
     await screen.findByTestId('run-sheet-empty')
     expect(screen.queryByRole('dialog')).toBeNull()
   })

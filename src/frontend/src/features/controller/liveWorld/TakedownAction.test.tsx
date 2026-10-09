@@ -1221,7 +1221,9 @@ describe('TakedownAction - Gate-1 M-3: the confirm step is non-modal (no aria-hi
 
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
     expect(document.querySelector('[role="tooltip"]')).toBeNull()
-    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    // Wave 3 Gate-2 A S-3: NON-modal, so it must not declare `aria-modal` - the console's Ctrl+K
+    // gate stands aside for every `[aria-modal="true"]` layer, and this step is not one.
+    expect(dialog).not.toHaveAttribute('aria-modal')
   })
 
   it('a later [aria-modal] (the Ctrl+K palette) is still found by role, and keeps focus', async () => {
@@ -1275,5 +1277,68 @@ describe('TakedownAction - Gate-1 M-3: the confirm step is non-modal (no aria-hi
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(trigger()).toHaveFocus()
+  })
+})
+
+describe('TakedownAction - Gate-2 A S-3: a layer that is not modal is not aria-modal', () => {
+  it('no [aria-modal] element exists while the step is open (the console\'s Ctrl+K gate sees none)', async () => {
+    const user = userEvent.setup()
+    renderAction()
+    await user.click(trigger())
+    await screen.findByRole('dialog', { name: 'Take down this post?' })
+    expect(document.querySelector('[aria-modal="true"]')).toBeNull()
+  })
+})
+
+describe('TakedownAction - Gate-2 A L-8: taken down elsewhere while the step is open', () => {
+  /** A Live world row wrapper: the stable element focus falls back to. */
+  function renderInRow() {
+    const ui = (
+      <ThemeProvider theme={cobraTheme}>
+        <div data-live-world-row data-post-id={POST.id} tabIndex={-1} data-testid="the-row">
+          <TakedownAction post={POST} />
+        </div>
+      </ThemeProvider>
+    )
+    return render(ui)
+  }
+
+  it('puts focus on the ROW, never <body>, when the step (holding focus) disappears', async () => {
+    const user = userEvent.setup()
+    renderInRow()
+    await user.click(trigger())
+    const dialog = await screen.findByRole('dialog', { name: 'Take down this post?' })
+    expect(within(dialog).getByRole('radio', { name: 'Other' })).toHaveFocus()
+
+    // Another controller's takedown reaches this tab (the `PostRemoved` push).
+    act(() => removedPosts.add(POST.id))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.queryByTestId('takedown-trigger')).toBeNull()
+    expect(screen.getByTestId('the-row')).toHaveFocus()
+    expect(document.activeElement).not.toBe(document.body)
+  })
+
+  it('leaves focus alone when the step was already closed and focus is elsewhere', async () => {
+    const user = userEvent.setup()
+    render(
+      <ThemeProvider theme={cobraTheme}>
+        <input aria-label="elsewhere" />
+        <div data-live-world-row data-post-id={POST.id} tabIndex={-1} data-testid="the-row">
+          <TakedownAction post={POST} />
+        </div>
+      </ThemeProvider>,
+    )
+    await user.click(trigger())
+    await screen.findByRole('dialog', { name: 'Take down this post?' })
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const elsewhere = screen.getByRole('textbox', { name: 'elsewhere' })
+    elsewhere.focus()
+
+    act(() => removedPosts.add(POST.id))
+
+    await waitFor(() => expect(screen.queryByTestId('takedown-trigger')).toBeNull())
+    expect(elsewhere).toHaveFocus()
   })
 })

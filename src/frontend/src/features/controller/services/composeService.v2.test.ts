@@ -20,6 +20,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/core/services/api'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { registerMockMedia, resetMockMediaRegistry } from '@/core/media/mockMediaRegistry'
+import { classifyLiveFailure } from '../runSheet/runSheetFire'
 import {
   BASELINE_FIELD_MESSAGE,
   BASELINE_RANGE_MESSAGE,
@@ -296,14 +297,49 @@ describe('classifyPublishFailure', () => {
     )
   })
 
-  it('5xx and 408 are FAILED (a retry is reasonable)', () => {
-    expect(classifyPublishFailure(httpError(503, { error: 'unavailable' }))).toMatchObject({
+  it('429 is FAILED (rate limited before any work: a retry is reasonable)', () => {
+    expect(classifyPublishFailure(httpError(429, { error: 'rate_limited' }))).toMatchObject({
       kind: 'failed',
-      status: 503,
-      message: 'The service is not available right now.',
+      status: 429,
+      message: 'Too many requests right now. Wait a moment and try again.',
     })
-    expect(classifyPublishFailure(httpError(500, undefined)).kind).toBe('failed')
-    expect(classifyPublishFailure(httpError(408, undefined)).kind).toBe('failed')
+    expect(classifyPublishFailure(httpError(429, undefined)).message)
+      .toBe('The server could not take the post (HTTP 429).')
+  })
+
+  // Gate-2 A M-3: the SAME rule as the run sheet's (`runSheetFire.classifyFailure`). The server
+  // can commit a post and still answer 5xx (the post-commit broadcast, a lost commit
+  // acknowledgement, a gateway recycling mid-request), so a 5xx never proves nothing was created.
+  it('408 and EVERY 5xx are UNCONFIRMED (the post may be live) - not a plain Retry', () => {
+    for (const status of [408, 500, 502, 503, 504, 599]) {
+      const result = classifyPublishFailure(httpError(status, { error: 'unavailable' }))
+      expect(result).toEqual({
+        kind: 'unconfirmed',
+        status,
+        message: 'The post may already be live - check the feed before posting again.',
+      })
+    }
+  })
+
+  // Gate-2 B S-4: the banner shows at most 300 UTF-16 units of the server's text; cutting it
+  // between the halves of an emoji would leave a lone surrogate, which renders as U+FFFD.
+  it('cuts a long server message without splitting a surrogate pair', () => {
+    const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/
+    // 299 letters + an astral character: the 300-unit cut would fall INSIDE the pair.
+    const splitting = `${'a'.repeat(299)}\u{1F600}${'b'.repeat(40)}`
+    const cut = classifyPublishFailure(httpError(400, splitting)).message
+    expect(cut).toBe(`${'a'.repeat(299)}...`)
+    expect(LONE_SURROGATE.test(cut)).toBe(false)
+
+    // The cut right AFTER a whole pair keeps it.
+    const whole = `${'a'.repeat(298)}\u{1F600}${'b'.repeat(40)}`
+    const kept = classifyPublishFailure(httpError(400, whole)).message
+    expect(kept).toBe(`${'a'.repeat(298)}\u{1F600}...`)
+    expect(LONE_SURROGATE.test(kept)).toBe(false)
+
+    // A short message is untouched.
+    expect(classifyPublishFailure(httpError(400, 'text is required.')).message)
+      .toBe('text is required.')
   })
 
   it('NO response is UNCONFIRMED: a connection that drops after the send looks like one that never connected', () => {
@@ -318,9 +354,17 @@ describe('classifyPublishFailure', () => {
     }
   })
 
-  it('a response that says it took nothing (429 / 5xx other than 504) is still FAILED', () => {
-    for (const status of [408, 429, 500, 502, 503]) {
-      expect(classifyPublishFailure(httpError(status, undefined)).kind).toBe('failed')
+  it('agrees with the run sheet on every status: 408 / 5xx unconfirmed, 429 and other 4xx not', () => {
+    const unconfirmedBoth = (status: number) => {
+      const composer = classifyPublishFailure(httpError(status, undefined)).kind === 'unconfirmed'
+      const sheet = classifyLiveFailure(httpError(status, undefined)).kind === 'unconfirmed'
+      return [composer, sheet]
+    }
+    for (const status of [400, 401, 403, 404, 409, 422, 429]) {
+      expect(unconfirmedBoth(status)).toEqual([false, false])
+    }
+    for (const status of [408, 500, 502, 503, 504]) {
+      expect(unconfirmedBoth(status)).toEqual([true, true])
     }
   })
 

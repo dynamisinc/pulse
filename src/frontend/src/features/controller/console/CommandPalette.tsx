@@ -28,9 +28,9 @@
  *
  * ## Stands aside for other modals (core/a11y/modalPriority.ts)
  * The palette is a channel-level layer, so it follows the product's one-way modal rule:
- * while any OTHER `[aria-modal="true"]` element is mounted (a dialog opened over it, the
- * shell's Pause overlay) it does not fight for focus - no Tab cycling, and no
- * focus-on-open. (Its trap is a Tab handler on its own panel, not a pull-back, so it
+ * while any OTHER `[aria-modal="true"]` element is mounted (a dialog opened over it, a
+ * shell-level overlay that declares itself modal) it does not fight for focus - no Tab cycling,
+ * and no focus-on-open. (Its trap is a Tab handler on its own panel, not a pull-back, so it
  * cannot ping-pong with MUI's trap; this keeps a dialog rendered inside the palette's
  * React tree from having its Tab presses hijacked.) The console's ⌘K handler additionally
  * refuses to OPEN the palette over another modal - see `ControllerConsole`.

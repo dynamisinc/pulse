@@ -92,14 +92,18 @@ function subscribe(listener: () => void): () => void {
 }
 
 /**
- * Forgets every removed id and tells subscribers. The sign-out path
- * (`core/auth/endSession`) calls this. Listeners stay: they are the mounted components',
- * which unmount themselves.
+ * Forgets every removed id WITHOUT notifying (Gate-2 B L-3). The sign-out path
+ * (`core/auth/endSession`) calls this, and sign-out unmounts every consumer a moment later.
+ * Notifying here would be a blocking update that can commit once, with the set empty, BEFORE
+ * the router's (transition) navigation to /login does - re-rendering a taken-down post for a
+ * frame. Silent is safe: the ids are unique server GUIDs and the server omits removed posts,
+ * and a consumer that outlives the reset (a test, a tab that stays) reads the new, empty
+ * snapshot on its next render (`useSyncExternalStore` re-reads `getAll()` every render).
+ * Listeners stay: they are the mounted components', which unmount themselves.
  */
 function reset(): void {
   if (removed.size === 0) return
   removed = new Set()
-  notify()
 }
 
 /** Test-only: forgets every removed id and drops all listeners. */

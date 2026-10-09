@@ -13,12 +13,15 @@
  *  - a post the reader loaded from the pill, and the viewer's OWN just-published post, vanish too;
  *  - an id the feed is not showing changes nothing (no row re-created, focus untouched);
  *  - when the removed post held focus, focus moves to the feed REGION (never `<body>`); when
- *    another card held focus it stays there;
+ *    another card held focus it stays there; so too when the removed post's MEDIA VIEWER
+ *    (portalled to <body>, outside the region) held it (Gate-2 B L-2), while a viewer that stays
+ *    open keeps it;
  *  - surviving rows keep their DOM nodes (no remount: burst legibility, NFR-002);
  *  - when every post is removed the page says so in its own empty-state voice;
  *  - no extra telemetry (still exactly one mount 'view').
  */
 import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
@@ -31,6 +34,7 @@ import { toParticipantView, type Post } from '@/features/social'
 import { ownPostStore } from '../services/ownPostStore'
 import { postStore } from '../services/postStore'
 import { removedPosts } from '../services/removedPosts'
+import { DEMO_IDS } from '../services/mockFixtures'
 import { Feed } from './Feed'
 
 const SEEDED = [
@@ -285,6 +289,66 @@ describe('Feed - focus when the removed post held it (NFR-001)', () => {
     } finally {
       outside.remove()
     }
+  })
+
+  it('moves focus to the feed region when the removed post\'s MEDIA VIEWER (portalled to <body>) held it', async () => {
+    postStore.resetForTests({ withDemoFixtures: true })
+    const user = userEvent.setup()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ExerciseContextProvider>
+          <SessionProvider>
+            <ShellContextProvider
+              value={{ variant: 'full', scenarioNow: new Date('2033-09-04T16:00:00.000Z') }}
+            >
+              <Feed onOpenThread={() => {}} />
+            </ShellContextProvider>
+          </SessionProvider>
+        </ExerciseContextProvider>
+      </QueryClientProvider>,
+    )
+    const card = await waitFor(() => cardOf(DEMO_IDS.grid2))
+    await user.click(within(card).getAllByTestId('media-tile')[0] as HTMLElement)
+    const viewer = await screen.findByTestId('media-viewer')
+    // The viewer is portalled OUT of the feed region and holds focus.
+    expect(screen.getByRole('region', { name: 'Home' }).contains(viewer)).toBe(false)
+    expect(viewer.contains(document.activeElement)).toBe(true)
+
+    act(() => removedPosts.add(DEMO_IDS.grid2))
+
+    await waitFor(() => expect(screen.queryByTestId('media-viewer')).toBeNull())
+    const region = screen.getByRole('region', { name: 'Home' })
+    expect(document.activeElement).toBe(region)
+    expect(document.activeElement).not.toBe(document.body)
+  })
+
+  it('a removal elsewhere does not pull focus from a viewer that stays open', async () => {
+    postStore.resetForTests({ withDemoFixtures: true })
+    const user = userEvent.setup()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ExerciseContextProvider>
+          <SessionProvider>
+            <ShellContextProvider
+              value={{ variant: 'full', scenarioNow: new Date('2033-09-04T16:00:00.000Z') }}
+            >
+              <Feed onOpenThread={() => {}} />
+            </ShellContextProvider>
+          </SessionProvider>
+        </ExerciseContextProvider>
+      </QueryClientProvider>,
+    )
+    const card = await waitFor(() => cardOf(DEMO_IDS.grid2))
+    await user.click(within(card).getAllByTestId('media-tile')[0] as HTMLElement)
+    const viewer = await screen.findByTestId('media-viewer')
+    const held = document.activeElement
+
+    act(() => removedPosts.add('post-seed-fwupd-rumor'))
+
+    expect(screen.getByTestId('media-viewer')).toBe(viewer)
+    expect(document.activeElement).toBe(held)
   })
 
   it('does not make the region a Tab stop (tabIndex -1 only)', async () => {
