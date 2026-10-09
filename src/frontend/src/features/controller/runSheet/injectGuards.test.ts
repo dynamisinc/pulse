@@ -36,8 +36,47 @@ describe('isInjectPostDto', () => {
     ['a fractional sequence', { sequence: 1.5 }],
     ['a string sequence', { sequence: '1' }],
     ['no sequence', { sequence: undefined }],
+    // NESTED fields: each of these crashed `draftFromItem` / `postFromDto` on Edit / View.
+    ['media that is a string', { media: 'not-an-array' }],
+    ['media that is an object', { media: { mediaId: 'm', alt: 'a' } }],
+    ['a null media entry', { media: [null] }],
+    ['a media entry that is a string', { media: ['m'] }],
+    ['a media entry without a mediaId', { media: [{ alt: 'a' }] }],
+    ['a media entry with a numeric mediaId', { media: [{ mediaId: 5, alt: 'a' }] }],
+    ['a media entry without alt', { media: [{ mediaId: 'm' }] }],
+    ['a media entry with a numeric alt', { media: [{ mediaId: 'm', alt: 9 }] }],
+    ['a replyTo that is a string', { replyTo: 'post-1' }],
+    ['a replyTo that is a number', { replyTo: 7 }],
+    ['a replyTo that is an array', { replyTo: [{ postId: 'p' }] }],
+    ['a replyTo naming nothing', { replyTo: {} }],
+    ['a replyTo with an unknown key only', { replyTo: { parent: 'p' } }],
+    ['a replyTo.sequence that is a string', { replyTo: { sequence: '1' } }],
+    ['a replyTo.sequence of 0', { replyTo: { sequence: 0 } }],
+    ['a replyTo.sequence that is fractional', { replyTo: { sequence: 1.5 } }],
+    ['a replyTo.injectPostId that is a number', { replyTo: { injectPostId: 5 } }],
+    ['a replyTo.postId that is null', { replyTo: { postId: null } }],
+    ['a replyTo with one good and one bad key', { replyTo: { sequence: 1, postId: 5 } }],
+    ['a baseline that is a string', { engagementBaseline: 'lots' }],
+    ['a baseline with a non-numeric like', { engagementBaseline: { like: 'many' } }],
   ])('rejects a child with %s', (_name, overrides) => {
     expect(isInjectPostDto({ ...makePost(), ...overrides })).toBe(false)
+  })
+
+  it.each([
+    ['no optional members at all', {}],
+    ['explicit nulls for every optional member (the server may write them)', {
+      media: null,
+      replyTo: null,
+      engagementBaseline: null,
+    }],
+    ['a well-formed media list', { media: [{ mediaId: 'm1', alt: 'a glass' }] }],
+    ['an empty media list', { media: [] }],
+    ['a replyTo by sequence', { replyTo: { sequence: 1 } }],
+    ['a replyTo by injectPostId', { replyTo: { injectPostId: 'injp-9' } }],
+    ['a replyTo by postId', { replyTo: { postId: 'post-9' } }],
+    ['a partial baseline', { engagementBaseline: { like: 5 } }],
+  ])('accepts a child with %s', (_name, overrides) => {
+    expect(isInjectPostDto({ ...makePost(), ...overrides })).toBe(true)
   })
 
   it('rejects non-objects', () => {
