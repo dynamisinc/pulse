@@ -17,6 +17,7 @@ React Query client above it):
 | `RunSheetPanel.tsx` | The panel (the only public component). Keyboard, import / export, dialogs. |
 | `RunSheetBeatRow.tsx` | One beat: status chip (text + icon), details, the selected row's actions. |
 | `BeatEditor.tsx` | Add / edit dialog. Uses C1's `MediaLibraryPicker` through its frozen props. |
+| `libraryView.ts` | The panel's id -> asset view of the media library: the "All" list it fetches (`useMediaLibrary`) plus a fallback to the picker's cached Images / Videos lists (`useLibraryAssetLookup`), so an asset picked under a filter that the capped "All" list misses still resolves. |
 | `ConfirmDialog.tsx` | The one confirm step (delete, replace-by-import, fire again, discard). Focus starts on Cancel. |
 | `useRunSheet.ts` | Joins sheet + exercise + acting human + personas; `fire` / `fireNext`. |
 | `runSheetFire.ts` | Block reasons, the post a beat becomes, `sendBeat`, failed-vs-unconfirmed classification. |

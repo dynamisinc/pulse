@@ -65,9 +65,11 @@ import CobraStyles from '@/theme/CobraStyles'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useMediaLibrary, type StaffMediaAssetView } from '@/core/media'
+import { useLibraryAssetLookup } from '@/features/controller/media/useLibraryAssetLookup'
 import { BUTTON_KBD_SX, FIELD_SX, KBD_SX, runSheetTokens } from './runSheetTokens'
 import { BeatEditor } from './BeatEditor'
 import { ConfirmDialog } from './ConfirmDialog'
+import { buildLibraryView, type LibraryView } from './libraryView'
 import { RunSheetBeatRow } from './RunSheetBeatRow'
 import { KEYBOARD_HELP, shortcutFor } from './runSheetKeyboard'
 import { downloadTextFile, readFileText, runSheetFilename } from './runSheetFileIO'
@@ -128,6 +130,13 @@ function describeMedia(
   return `${media.length} media`
 }
 
+/** Every media id the sheet's beats reference (deduplicated, in first-use order). */
+function snapshotMediaIds(beats: readonly RunSheetBeat[]): readonly string[] {
+  const ids = new Set<string>()
+  for (const beat of beats) for (const item of beat.media ?? []) ids.add(item.mediaId)
+  return [...ids]
+}
+
 /** Entry point. Keys the body by exercise so a switch cannot leave stale UI state behind. */
 export function RunSheetPanel() {
   const { exerciseId } = useExerciseContext()
@@ -137,15 +146,23 @@ export function RunSheetPanel() {
 function RunSheetPanelBody() {
   const sheet = useRunSheet()
   const { exerciseId, timeZone, snapshot, firing, personas, personasLoading } = sheet
-  // TODO(C1-merge): C1's picker module exports `useLibraryAssetLookup()` (id -> asset). After the
-  // rebase onto C1, replace this `useMediaLibrary()` + Map with that hook so the panel, the
-  // editor and the picker share one lookup (and one cache entry).
+  // The media library. This `useMediaLibrary()` query STAYS: it is what FETCHES the library, so
+  // beat thumbnails and "not in the library" notes resolve even when C1's picker was never
+  // opened (`useLibraryAssetLookup()` below only READS the query cache, it never requests).
+  // The picker's Images / Videos filters use the same key family
+  // (`['staff','media',exerciseId,kind]`), so there is one cache entry per kind, shared. The
+  // "All" list is capped, so an asset picked under a filter may be absent from it: the lookup
+  // is the fallback for those ids (`libraryView.ts`).
   const libraryQuery = useMediaLibrary()
   const libraryData = libraryQuery.data
-  const library = useMemo<ReadonlyMap<string, StaffMediaAssetView> | undefined>(
+  const lookupAsset = useLibraryAssetLookup()
+  const referencedMediaIds = useMemo(() => snapshotMediaIds(snapshot.beats), [snapshot.beats])
+  const library = useMemo<LibraryView | undefined>(
     () =>
-      libraryData === undefined ? undefined : new Map(libraryData.map(asset => [asset.id, asset])),
-    [libraryData],
+      libraryData === undefined
+        ? undefined
+        : buildLibraryView(libraryData, referencedMediaIds, lookupAsset),
+    [libraryData, referencedMediaIds, lookupAsset],
   )
 
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)

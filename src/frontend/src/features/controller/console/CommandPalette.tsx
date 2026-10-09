@@ -26,6 +26,15 @@
  * or the "Personas" toolstrip button), captured on open. Every step
  * (open → type → select) is reachable without a pointer.
  *
+ * ## Stands aside for other modals (core/a11y/modalPriority.ts)
+ * The palette is a channel-level layer, so it follows the product's one-way modal rule:
+ * while any OTHER `[aria-modal="true"]` element is mounted (a dialog opened over it, the
+ * shell's Pause overlay) it does not fight for focus - no Tab cycling, and no
+ * focus-on-open. (Its trap is a Tab handler on its own panel, not a pull-back, so it
+ * cannot ping-pong with MUI's trap; this keeps a dialog rendered inside the palette's
+ * React tree from having its Tab presses hijacked.) The console's ⌘K handler additionally
+ * refuses to OPEN the palette over another modal - see `ControllerConsole`.
+ *
  * ## What this file does NOT own
  * The ⌘K key binding + open/close state live in `ControllerConsole` (the
  * composition owner); this component is a controlled overlay (`open`/`onClose`).
@@ -39,6 +48,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faMagnifyingGlass, faMasksTheater } from '@fortawesome/free-solid-svg-icons'
+import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { CobraTextField } from '@/theme/styledComponents'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 
@@ -101,7 +111,8 @@ export function CommandPalette({
     if (!open) return
     triggerRef.current = document.activeElement
     setQuery('')
-    searchInputRef.current?.focus()
+    const panel = panelRef.current
+    if (panel === null || !hasOtherModalMounted(panel)) searchInputRef.current?.focus()
     return () => {
       const trigger = triggerRef.current
       if (trigger instanceof HTMLElement && trigger.isConnected) {
@@ -128,6 +139,8 @@ export function CommandPalette({
 
     const panel = panelRef.current
     if (!panel) return
+    // Another modal is on top: its focus is its own business (see module header).
+    if (hasOtherModalMounted(panel)) return
     const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
     if (focusable.length === 0) {
       // Nothing else to focus — keep focus inside the panel.

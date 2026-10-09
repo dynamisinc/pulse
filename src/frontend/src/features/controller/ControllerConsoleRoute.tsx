@@ -59,6 +59,34 @@
  * the shipped `createPost` with `origin: 'engine'` (sanitized, NFR-004) — there
  * is no second publish path here and no `'engine-edited'` origin.
  *
+ * DEMO-POLISH WAVE 3 - THE MAIN-AREA SLOTS (docs/features/demo-polish/implementation.md
+ * section 4.2; stories 17-20). `ControllerConsole` lays out a LIVE WORLD | RUN SHEET split
+ * and renders whatever this route hands it through two render-prop slots; the route is
+ * where the independently-built stories meet:
+ *
+ *   liveWorldSlot  -> C2's `LiveWorldColumn`. Its "Reply as..." (button, or R on a focused
+ *                     row) arrives as a `ReplyTarget`. The console's `ctx.openComposer`
+ *                     accepts a `replyTo` but does NOT keep it, so THIS route keeps it
+ *                     (`useReplyTarget`) and passes it to C1's `PersonaComposer`
+ *                     (`replyTo` / `onClearReply`) through `dockSlots`. `onReplyAs` therefore
+ *                     does both: `requestReply(target)` then `ctx.openComposer({ replyTo })`.
+ *                     With no persona active the console opens the command palette instead
+ *                     (never an empty dock) and the target waits there for the pick; the
+ *                     hook documents exactly when a target is dropped (composer (x), reply
+ *                     sent, dock closed via `onDockClose`, persona or exercise changed,
+ *                     palette dismissed without a pick).
+ *   runSheetSlot   -> C3's `RunSheetPanel` (prop-less; reads its own providers).
+ *
+ * STABILITY. The slots run on EVERY console render (the review queue and swamped mode
+ * re-render the console constantly), so each slot function and callback here has a stable
+ * identity (`useCallback` / `useMemo` / module level). The live-world column memoizes its
+ * rows, so a new function identity would re-render them on every tick.
+ *
+ * STILL TO MERGE INTO THIS FILE (search for `INSERTION POINT`): C5's takedown
+ * (`renderRowActions` + `isRowRemoved` on the live-world column) and PE-FE's persona edit
+ * button (`actionsSlot` on `PersonaContextPanel`). Their files are not part of this branch yet,
+ * so the points are marked with comments rather than stubs.
+ *
  * Note: `SessionProvider` is deliberately NOT in this stack — the console's
  * operating identity is `useControllerIdentity()` (a Phase-1 mock; the one mock
  * session is a participant), exactly as the shipped `/evaluator` route mounts no
@@ -67,7 +95,8 @@
  */
 
 import { useCallback, useMemo } from 'react'
-import { ToolstripProvider } from '@/features/staffShell/toolRegistry'
+import { useExerciseContext } from '@/core/exerciseContext'
+import { ToolstripProvider, useToolstrip } from '@/features/staffShell/toolRegistry'
 import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
 import { pauseStatePillConfig } from '@/features/staffShell/components/statePillConfig'
@@ -75,14 +104,24 @@ import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
 import { usePauseState } from './hooks/usePauseState'
 import { postStore } from '@/features/social/services/postStore'
 import { EngineDraftEditComposer, type ReviewQueueEditSlotProps } from './engine'
-import { ControllerConsole } from './components/ControllerConsole'
+import { ControllerConsole, type ConsoleSlotContext } from './components/ControllerConsole'
 import type { CommandPalettePersonaSlot } from './console/CommandPalette'
-import type { PersonaDockSlots } from './console/personaDockHost'
+import { PERSONAS_TOOL_ID, type PersonaDockSlots } from './console/personaDockHost'
 import { useControllerIdentity } from './identity/controllerIdentity'
 import { ActivePersonaProvider, useActivePersona } from './hooks/useActivePersona'
+import { useReplyTarget } from './hooks/useReplyTarget'
+import { LiveWorldColumn } from './liveWorld'
+import { RunSheetPanel } from './runSheet/RunSheetPanel'
 import { PersonaPicker } from './components/PersonaPicker'
 import { PersonaComposer } from './components/PersonaComposer'
 import { PersonaContextPanel } from './components/PersonaContextPanel'
+
+/**
+ * The RUN SHEET slot (C3): the panel is prop-less - it reads the exercise scope, identity,
+ * personas and media library itself - so the slot is a module-level function with a
+ * trivially stable identity.
+ */
+const renderRunSheet = () => <RunSheetPanel />
 
 /**
  * The console content, inside the provider stack so it may read the controller
@@ -90,7 +129,26 @@ import { PersonaContextPanel } from './components/PersonaContextPanel'
  */
 function ControllerConsoleContent() {
   const identity = useControllerIdentity()
+  const { exerciseId } = useExerciseContext()
   const { activePersona } = useActivePersona()
+  // The command palette's open state IS the "Personas" tool's active state (see
+  // `ControllerConsole`); the reply target needs it to know a pick is still pending.
+  const { isActive } = useToolstrip()
+  const paletteOpen = isActive(PERSONAS_TOOL_ID)
+
+  // INSERTION POINT (C5, takedown): call C5's subscribing hook here, in the route
+  // component, so a takedown re-renders the live-world fold:
+  //   const isRowRemoved = useIsRowRemoved()
+  // and add `renderRowActions` / `isRowRemoved` to the `<LiveWorldColumn>` in
+  // `liveWorldSlot` below.
+
+  // The post being replied to ("Reply as..." in the live world), held here because the
+  // console's `openComposer` does not keep it. See `useReplyTarget` for when it is dropped.
+  const { replyTo, requestReply, clearReply } = useReplyTarget({
+    exerciseId,
+    activePersonaId: activePersona?.id ?? null,
+    paletteOpen,
+  })
 
   // The ⌘K palette's PERSONAS section renders persona-operation/02's picker.
   // The picker sets the active persona itself (via useActivePersona); `onSelect`
@@ -109,18 +167,52 @@ function ControllerConsoleContent() {
     () =>
       activePersona
         ? {
-          contextPanel: <PersonaContextPanel persona={activePersona} />,
+          contextPanel: (
+            <PersonaContextPanel
+              persona={activePersona}
+              // INSERTION POINT (PE-FE, persona edit): pass the edit button here -
+              //   actionsSlot={<PersonaEditButton persona={activePersona} />}
+              // (import it from `@/features/personas/personaEdit`; the panel gains the
+              // `actionsSlot` prop when PE-FE merges).
+            />
+          ),
           composer: (
             <PersonaComposer
               activePersona={activePersona}
               actingHumanId={identity.actingHumanId}
               callSign={identity.callSign}
               onPublished={post => postStore.appendPost(post)}
+              replyTo={replyTo ?? undefined}
+              onClearReply={clearReply}
             />
           ),
         }
         : undefined,
-    [activePersona, identity.actingHumanId, identity.callSign],
+    [activePersona, identity.actingHumanId, identity.callSign, replyTo, clearReply],
+  )
+
+  // LIVE WORLD slot (C2). "Reply as..." sets the reply target AND opens the composer in one
+  // go; `ctx.openComposer` selects the active persona and opens the dock, or opens the
+  // palette when there is no persona to open it for (the target waits for the pick).
+  // Stable: `requestReply` never changes and `ctx` is stable for the life of the console.
+  const liveWorldSlot = useCallback(
+    (ctx: ConsoleSlotContext) => (
+      <LiveWorldColumn
+        onReplyAs={target => {
+          requestReply(target)
+          ctx.openComposer({ replyTo: target })
+        }}
+        // INSERTION POINT (C5, takedown): mount Take down on each row and fold removed rows:
+        //   renderRowActions={renderTakedown}
+        //   isRowRemoved={isRowRemoved}
+        // `renderTakedown` must be a MODULE-LEVEL function (stable identity), e.g.
+        //   const renderTakedown = (post: LiveWorldPost) => <TakedownAction post={post} />
+        // `isRowRemoved` comes from `useIsRowRemoved()` called above; add it to this
+        // callback's dependency list (rows re-render when the removed set changes because its
+        // identity changes - that is intended).
+      />
+    ),
+    [requestReply],
   )
 
   // The docked review queue's edit composer — a stable render-prop identity so
@@ -135,6 +227,9 @@ function ControllerConsoleContent() {
       renderPersonaResults={renderPersonaResults}
       dockSlots={dockSlots}
       reviewEditSlot={reviewEditSlot}
+      liveWorldSlot={liveWorldSlot}
+      runSheetSlot={renderRunSheet}
+      onDockClose={clearReply}
     />
   )
 }

@@ -21,7 +21,8 @@
  * The picker hands back ids only, so this editor owns what the picker does not: the
  * kind (images up to 4, or exactly one video - locked once something is attached), the
  * REQUIRED alt text per item, and the file name / thumbnail / "not in the library" notes,
- * all read from the library list the panel already loads (`useMediaLibrary`).
+ * all read from the library view the panel already builds (`libraryView.ts`: the list it loads
+ * with `useMediaLibrary`, plus assets the picker cached under its Images / Videos filters).
  *
  * VALIDATION is `runSheetBeatForm.validateDraft`, which runs the draft through the same
  * zod schema the importer uses. Errors are text next to the field (never colour alone)
