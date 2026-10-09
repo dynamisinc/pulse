@@ -155,6 +155,12 @@ a 400. An unfired child left out is removed. This lets a burst's replies point a
   or a Fire after a hold.
 - Editing a held or failed item that already published is allowed. Published posts must be echoed unchanged, and
   `kind` can't change after the first fire (both 409). No edit or delete while a post is mid-publish (409).
+- **Crash-safe exactly-once.** A publish claims its child under the item's `Version` *before* calling the funnel,
+  so at most one child per item is ever in flight. If the process dies after the funnel commits but before the
+  queue records `FiredPostId`, the claim outlives its 60 s lease. The runner then **reconciles** before publishing
+  anything else: the single post with this item's `injectId` that no child has recorded is recorded against the
+  claimed child, never republished. The residual case is an ingest commit stalled past the lease (documented in
+  `InjectBurstPlanner`).
 - Queue actions (hold, skip, edit, …) stay allowed under FREEZE. Only `fire` and `retry` are refused, so controllers
   can prepare the script while the world is frozen.
 
