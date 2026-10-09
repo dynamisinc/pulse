@@ -32,7 +32,7 @@ posts through the existing `POST /api/posts`, so it needs **no backend**.
       message), posts via `publishPost` with `origin: 'controller-as-persona'`, the controller's acting human
       and `scenarioTime = scenarioNow()`, disables while in flight (a double-press cannot fire twice), records
       `firedPostId` and the fired scenario time; **Fire next** fires the first pending beat; **Skip** marks
-      skipped (undo-able). A definite server refusal (4xx other than 408, or 429) sets `failed` with the error and a Retry. An outcome that may have posted (408, 5xx, no response, an unreadable 2xx, or a reload mid-request) sets **`unconfirmed`**: there is no Retry, only "Fire again…" behind a confirm, because post creation is not idempotent (#455). The beat is never falsely "fired". *(Amended at Gate-1, orchestrator ruling; same rule as C1/F4.)*
+      skipped (undo-able). A definite server refusal (4xx other than 408, or 429) sets `failed` with the error and a Retry. An outcome that may have posted (408, 5xx, no response, an unreadable 2xx, or a reload mid-request) sets **`unconfirmed`**: there is no Retry, only "Fire again…" behind a confirm, because post creation is not idempotent (#455). The beat is never falsely "fired". *(Amended at Gate-1, orchestrator ruling. C1's staff composer was aligned to this rule at Wave 3 Gate-2. F4's participant composer still offers Retry on 408, on 5xx other than 504, and when there is no response. That is tracked under #455.)*
 - [ ] **Reply beats.** A beat whose `replyTo` is another beat is disabled with the reason "Fire the parent
       first" until the parent is `fired`, then posts with `parentPostId = parent.firedPostId`; a
       `replyTo.postId` posts against that existing post.
