@@ -181,6 +181,9 @@ describe('useComposeAsPersona (MOCK) — a refusal is visible, never a false suc
       kind: 'rejected',
       message: expect.stringMatching(/not available/),
     })
+    // The banner reads as a message, not as an engineering stack fragment.
+    expect(result.current.failure?.message).toBe('that media attachment is not available.')
+    expect(result.current.failure?.message).not.toMatch(/createPost/)
     expect(result.current.lastPublished).toBeNull()
     expect(onPublished).not.toHaveBeenCalled()
     expect(onClearReply).not.toHaveBeenCalled()

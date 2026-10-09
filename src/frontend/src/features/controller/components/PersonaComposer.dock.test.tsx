@@ -24,6 +24,9 @@ import { PersonaDockHost } from '../console/personaDockHost.tsx'
 import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { PersonaComposer } from './PersonaComposer'
 
+/** The text field is named by its visible label: "Post as X" / "Reply as X". */
+const POST_FIELD = /^(Post|Reply) as Fairhaven Water$/
+
 const PERSONA: StaffPersona = {
   id: 'persona-fairhavenwater',
   exerciseId: 'ex-mock-0001',
@@ -87,7 +90,7 @@ describe('PersonaComposer inside the persona dock', () => {
     const user = userEvent.setup()
     await renderDock(onClose)
 
-    await user.click(screen.getByLabelText('Post text'))
+    await user.click(screen.getByLabelText(POST_FIELD))
     await user.keyboard('{Escape}')
 
     expect(onClose).toHaveBeenCalledTimes(1)
@@ -126,7 +129,7 @@ describe('PersonaComposer inside the persona dock', () => {
     const user = userEvent.setup()
     await renderDock(onClose, onPublished)
 
-    await user.type(screen.getByLabelText('Post text'), 'Fired from the keyboard.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Fired from the keyboard.')
     await user.keyboard('{Control>}{Enter}{/Control}')
 
     expect(onPublished).toHaveBeenCalledTimes(1)

@@ -375,6 +375,44 @@ describe('MediaLibraryPicker — limits', () => {
     expect(tile(FLOOD)).toHaveAttribute('aria-disabled', 'true')
   })
 
+  it('with max 1 it is SINGLE-SELECT: a new pick replaces the old one (nothing is ever "at the limit")', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    await renderPicker({ max: 1, onChange })
+
+    await user.click(tile(FLOOD))
+    expect(onChange).toHaveBeenLastCalledWith([FLOOD])
+    // The other tiles are NOT unavailable.
+    expect(tile(PLANT)).not.toHaveAttribute('aria-disabled')
+    expect(tile(VIDEO)).not.toHaveAttribute('aria-disabled')
+
+    await user.click(tile(PLANT))
+    expect(onChange).toHaveBeenLastCalledWith([PLANT])
+    expect(tile(FLOOD)).toHaveAttribute('aria-selected', 'false')
+    expect(tile(PLANT)).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('media-library-status')).toHaveTextContent('1 of 1 selected')
+
+    // Replacing works across kinds too (the old selection is gone, so nothing is mixed).
+    await user.click(tile(VIDEO))
+    expect(onChange).toHaveBeenLastCalledWith([VIDEO])
+    expect(tile(PLANT)).toHaveAttribute('aria-selected', 'false')
+
+    // Clicking the selected tile still deselects it.
+    await user.click(tile(VIDEO))
+    expect(onChange).toHaveBeenLastCalledWith([])
+  })
+
+  it('with max 1, Space on another tile replaces the selection from the keyboard', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    await renderPicker({ max: 1, initial: [SIGN], onChange })
+
+    focusEl(tile(FLOOD))
+    await user.keyboard(' ')
+
+    expect(onChange).toHaveBeenLastCalledWith([FLOOD])
+  })
+
   it('offers nothing when max is 0 (the host has no room left)', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()

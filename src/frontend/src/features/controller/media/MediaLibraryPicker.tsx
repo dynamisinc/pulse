@@ -30,7 +30,9 @@
  * said in the polite status line ("2 of 4 selected - Limit reached ...").
  *
  * SELECTION RULES (the same ones the server enforces, `attachmentRules.ts`): at most
- * `max` items; never mix images and a video; at most 1 video. A tile the rules forbid
+ * `max` items; never mix images and a video; at most 1 video. With `max === 1` the
+ * picker is SINGLE-SELECT: a new pick replaces the previous one (so a one-slot host,
+ * e.g. an avatar chooser, never meets a dead "limit reached" tile). A tile the rules forbid
  * stays focusable (`aria-disabled`) so a keyboard user can discover why - activating
  * it announces the reason instead of silently doing nothing.
  *
@@ -50,6 +52,7 @@ import { CobraLinkButton } from '@/theme/styledComponents'
 import { formatScenarioTime } from '@/core/clock'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useMediaLibrary, type MediaKind, type StaffMediaAssetView } from '@/core/media'
+import { formatDuration } from '@/features/social/components/media/formatDuration'
 import { safeImageUrl } from '@/features/social/utils/safeImageUrl'
 import { MAX_VIDEOS, MIXED_MEDIA_MESSAGE, TOO_MANY_VIDEOS_MESSAGE } from './attachmentRules'
 import styles from './MediaLibraryPicker.module.css'
@@ -74,14 +77,6 @@ const FILTERS: ReadonlyArray<{ readonly value: Filter; readonly label: string }>
 ]
 
 const NO_ASSETS: readonly StaffMediaAssetView[] = []
-
-/** `m:ss` for a media length (a LENGTH, not a clock - COR-053 is unaffected). */
-function formatDuration(durationSec: number | undefined): string | undefined {
-  if (durationSec === undefined) return undefined
-  const total = Math.max(0, Math.round(durationSec))
-  const seconds = String(total % 60).padStart(2, '0')
-  return `${Math.floor(total / 60)}:${seconds}`
-}
 
 /** The staff media-library picker. See the module header for the contract. */
 export function MediaLibraryPicker({ kind, max, selectedIds, onChange }: MediaLibraryPickerProps) {
@@ -155,6 +150,9 @@ export function MediaLibraryPicker({ kind, max, selectedIds, onChange }: MediaLi
   /** Why `asset` cannot be added right now, or `undefined` when it can. */
   const unavailableReason = (asset: StaffMediaAssetView): string | undefined => {
     if (selectedIds.includes(asset.id)) return undefined
+    // Single-select (an avatar / banner chooser, or a host with one slot left): a new
+    // pick REPLACES the old one, so nothing is ever "unavailable".
+    if (max === 1) return undefined
     if (selectedIds.length >= max) {
       return max <= 0
         ? 'No more media can be added to this post.'
@@ -177,7 +175,7 @@ export function MediaLibraryPicker({ kind, max, selectedIds, onChange }: MediaLi
       return
     }
     setHint(undefined)
-    onChange([...selectedIds, asset.id])
+    onChange(max === 1 ? [asset.id] : [...selectedIds, asset.id])
   }
 
   const focusTile = (index: number) => {
@@ -291,7 +289,9 @@ export function MediaLibraryPicker({ kind, max, selectedIds, onChange }: MediaLi
             const order = selectedIds.indexOf(asset.id) + 1
             const thumbUrl = safeImageUrl(asset.kind === 'video' ? asset.posterUrl : asset.url)
             const showImage = thumbUrl !== undefined && !brokenIds.has(asset.id)
-            const duration = asset.kind === 'video' ? formatDuration(asset.durationSec) : undefined
+            const duration = asset.kind === 'video' && asset.durationSec !== undefined
+              ? formatDuration(asset.durationSec)
+              : undefined
             const uploaded = formatScenarioTime(asset.uploadedAtScenario, timeZone, {
               format: 'absolute',
             })

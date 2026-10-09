@@ -127,7 +127,7 @@ function renderConsole() {
 async function openDockAndType(user: ReturnType<typeof userEvent.setup>, text: string) {
   await user.click(await screen.findByTestId('toolstrip-tool-personas'))
   await user.click(await screen.findByTestId('pick-persona'))
-  const field = await screen.findByRole('textbox', { name: 'Post text' })
+  const field = await screen.findByRole('textbox', { name: 'Post as Fairhaven Water' })
   fireEvent.change(field, { target: { value: text } })
   return field
 }
@@ -148,7 +148,7 @@ describe('ControllerConsole — the persona dock\'s explicit Esc/X close discard
     // empty, not silently pre-filled with the dismissed text.
     await user.click(await screen.findByTestId('toolstrip-tool-personas'))
     await user.click(await screen.findByTestId('pick-persona'))
-    const reopenedField = await screen.findByRole('textbox', { name: 'Post text' })
+    const reopenedField = await screen.findByRole('textbox', { name: 'Post as Fairhaven Water' })
     expect(reopenedField).toHaveValue('')
   }, 20000)
 
@@ -166,7 +166,7 @@ describe('ControllerConsole — the persona dock\'s explicit Esc/X close discard
 
     await user.click(await screen.findByTestId('toolstrip-tool-personas'))
     await user.click(await screen.findByTestId('pick-persona'))
-    const reopenedField = await screen.findByRole('textbox', { name: 'Post text' })
+    const reopenedField = await screen.findByRole('textbox', { name: 'Post as Fairhaven Water' })
     expect(reopenedField).toHaveValue('')
   }, 20000)
 
@@ -190,7 +190,7 @@ describe('ControllerConsole — the persona dock\'s explicit Esc/X close discard
 
     await user.click(await screen.findByTestId('toolstrip-tool-personas'))
     await user.click(await screen.findByTestId('pick-persona'))
-    const reopenedField = await screen.findByRole('textbox', { name: 'Post text' })
+    const reopenedField = await screen.findByRole('textbox', { name: 'Post as Fairhaven Water' })
     expect(reopenedField).toHaveValue('Still mid-thought.')
   }, 20000)
 })

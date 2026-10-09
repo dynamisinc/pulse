@@ -42,6 +42,20 @@
  * (`isPublishing`), so nothing typed after pressing Post can be wiped by the success,
  * and a second ⌘+Enter is ignored.
  *
+ * A POST THAT MAY ALREADY BE LIVE (an unreadable 2xx, a 504, or NO response at all)
+ * is not a plain failure: re-sending could double-post breaking news. It is classified
+ * 'unconfirmed' and the hook sets `awaitingDecision`: `publish()` (hence Post and
+ * Ctrl/Cmd+Enter) is a no-op until the controller chooses `repostAnyway()` ("I checked
+ * the feed - post again") or `discardUnconfirmed()` ("it went out"). The pending
+ * question outlives the composer: a module-level map keyed like the draft brings it
+ * back after a remount, and a response that lands while the composer is off-screen
+ * (dock closed, another persona on screen) restores the draft, raises an app toast
+ * ("status unknown - check the feed" for this kind) and leaves the question waiting.
+ *
+ * A RESPONSE ONLY SETTLES ITS OWN REQUEST. In-flight bookkeeping is per target (a
+ * set, not one slot), and a success clears the route's reply target only if it is
+ * STILL the one the post answered - a newer "Reply as" survives an older post.
+ *
  * INPUTS, NOT IMPORTS (Wave-1 parallel-build contract):
  *   - `activePersona` - the persona to post AS - is a PROP from persona-operation/02's
  *     `useActivePersona()`. This hook does not import that feature; it only reads
@@ -83,6 +97,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'react-toastify'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { scenarioNow } from '@/core/clock'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
@@ -91,6 +106,7 @@ import type { EngagementBaseline, Post, ReplyTarget } from '@/features/social'
 import {
   classifyPublishFailure,
   composeAsPersona,
+  describeOffscreenFailure,
   parseBaselineField,
   publishAsPersonaLive,
   type ComposeAsPersonaInput,
@@ -107,6 +123,17 @@ export const DEFAULT_CHAR_LIMIT = 280
 
 /** `"exerciseId::personaId" -> in-progress draft text`. Absent = no draft (the common case). */
 const draftByKey = new Map<string, string>()
+
+/**
+ * `"exerciseId::personaId" -> the 'unconfirmed' failure of a post that MAY ALREADY be
+ * live` (an unreadable 2xx, a 504, no response at all). The draft it belongs to is kept
+ * (that is the point), so a remount for the same target - the dock closed and reopened,
+ * or a response that landed while the composer was off-screen - must come back still
+ * asking "did it go out?" rather than offering a plain Post that could double-post.
+ * Cleared when the controller decides (post again anyway / discard), when a later send
+ * succeeds or is refused, and by the explicit Esc/X discard.
+ */
+const unconfirmedByKey = new Map<string, PublishFailure>()
 
 function draftKey(exerciseId: string, personaId: string): string {
   return `${exerciseId}::${personaId}`
@@ -132,12 +159,15 @@ function setPersistedDraft(exerciseId: string, personaId: string, text: string):
  * unmount; see the module header). A no-op if there was no draft.
  */
 function discardDraft(exerciseId: string, personaId: string): void {
-  draftByKey.delete(draftKey(exerciseId, personaId))
+  const key = draftKey(exerciseId, personaId)
+  draftByKey.delete(key)
+  unconfirmedByKey.delete(key)
 }
 
 /** Clears every persisted draft. Test-only - prevents cross-test pollution. */
 function resetForTests(): void {
   draftByKey.clear()
+  unconfirmedByKey.clear()
 }
 
 /** The module-singleton persisted-draft store. Exposed for the discard path + test reset. */
@@ -201,6 +231,15 @@ export interface UseComposeAsPersonaResult {
   readonly blockers: readonly string[]
   /** Sanitizes + publishes and reports the outcome via `status`. A no-op unless `canPublish`. */
   readonly publish: () => void
+  /**
+   * True when the last attempt MAY already be live (unreadable 2xx, 504, no response):
+   * `publish` is a no-op until the controller picks `repostAnyway` or `discardUnconfirmed`.
+   */
+  readonly awaitingDecision: boolean
+  /** "I checked the feed - post again": re-sends the kept draft past the gate. */
+  readonly repostAnyway: () => void
+  /** "Discard draft (it went out)": drops the draft, the gate and the answered reply target. */
+  readonly discardUnconfirmed: () => void
 
   /** The attach tray (uploads + library picks, alt text, limits). */
   readonly tray: UseAttachmentTrayResult
@@ -244,13 +283,19 @@ export function useComposeAsPersona(
   const [text, setTextState] = useState(() => getPersistedDraft(exerciseId, personaId))
   const tray = useAttachmentTray()
   const [baselineFields, setBaselineFields] = useState(EMPTY_BASELINE_FIELDS)
-  const [status, setStatus] = useState<PublishStatus>('idle')
-  const [failure, setFailure] = useState<PublishFailure | undefined>(undefined)
+  const [status, setStatus] = useState<PublishStatus>(() =>
+    unconfirmedByKey.has(targetKey) ? 'error' : 'idle',
+  )
+  const [failure, setFailure] = useState<PublishFailure | undefined>(() =>
+    unconfirmedByKey.get(targetKey),
+  )
   const [lastPublished, setLastPublished] = useState<Post | null>(null)
 
   // The target a response belongs to must still be the one on screen when it lands.
   const targetRef = useRef(targetKey)
-  const inFlightTarget = useRef<string | null>(null)
+  // Targets with a request in flight. A SET (not one slot): a completion removes only
+  // ITS OWN target, so A's response can never unlock B's in-flight request.
+  const inFlight = useRef(new Set<string>())
   const mountedRef = useRef(true)
   useEffect(() => {
     mountedRef.current = true
@@ -258,6 +303,17 @@ export function useComposeAsPersona(
       mountedRef.current = false
     }
   }, [])
+
+  // The reply target the route holds RIGHT NOW. A response only drops the target it was
+  // sent for: if the controller picked a different "Reply as" while a post was in
+  // flight, the new target must survive the old post's success.
+  const latestReplyToRef = useRef(replyTo)
+  useEffect(() => {
+    latestReplyToRef.current = replyTo
+  }, [replyTo])
+  // The reply an 'unconfirmed' attempt was sent for (so "discard, it went out" drops
+  // that target and no other).
+  const unconfirmedReplyRef = useRef<ReplyTarget | undefined>(undefined)
 
   // If the compose TARGET changes (a different exercise or persona - NOT merely a
   // remount for the SAME one, which the lazy initializer above already handles),
@@ -273,8 +329,10 @@ export function useComposeAsPersona(
     // Deliberately re-seeds on every mount too (redundant with, but never in
     // conflict with, the lazy initializer above - same value either way).
     setTextState(getPersistedDraft(exerciseId, personaId))
-    setStatus('idle')
-    setFailure(undefined)
+    // A post that may already be live comes back asking, not as a fresh draft.
+    const pending = unconfirmedByKey.get(draftKey(exerciseId, personaId))
+    setStatus(pending !== undefined ? 'error' : 'idle')
+    setFailure(pending)
     setLastPublished(null)
     setBaselineFields(EMPTY_BASELINE_FIELDS)
     clearTray()
@@ -317,31 +375,45 @@ export function useComposeAsPersona(
   }, [baselineFields])
 
   const isPublishing = status === 'publishing'
+  // The last attempt MAY have gone out (unreadable 2xx, 504, no response): Post - and
+  // Ctrl/Cmd+Enter - stay disabled until the controller chooses "post again anyway" or
+  // "discard, it went out". A single stray Enter must never double-post breaking news.
+  const awaitingDecision = status === 'error' && failure?.kind === 'unconfirmed'
   const hasContent = hasText || tray.items.length > 0
   const canPublish =
     hasContent &&
     !isOverLimit &&
     tray.blocker === undefined &&
     parsedBaseline.valid &&
-    !isPublishing
+    !isPublishing &&
+    !awaitingDecision
 
   const blockers = useMemo<string[]>(() => {
     const reasons: string[] = []
+    if (awaitingDecision) {
+      reasons.push('Post is paused: choose "Post again anyway" or "Discard draft" above.')
+    }
     if (isOverLimit) reasons.push(`Remove ${-remaining} characters to post.`)
     if (tray.blocker !== undefined) reasons.push(tray.blocker)
     if (!parsedBaseline.valid) {
       reasons.push('Fix the Starting engagement values: whole numbers from 0 to 1,000,000.')
     }
     return reasons
-  }, [isOverLimit, remaining, tray.blocker, parsedBaseline.valid])
+  }, [awaitingDecision, isOverLimit, remaining, tray.blocker, parsedBaseline.valid])
 
   const { baseline } = parsedBaseline
   const trayMedia = tray.media
 
-  const publish = useCallback(() => {
+  /**
+   * The one send path. `force` bypasses ONLY the "did the last one go out?" gate and is
+   * reserved for the controller's explicit "I checked the feed - post again".
+   */
+  const send = useCallback((force: boolean) => {
     // Re-derive the guard locally rather than trust a stale `canPublish`
     // closure - a forced submit must still no-op when it shouldn't fire.
-    if (inFlightTarget.current === targetKey) return
+    if (inFlight.current.has(targetKey)) return
+    if (awaitingDecision && !force) return
+    if (force && !awaitingDecision) return
     if (trayMedia === undefined) return
     if (text.trim().length === 0 && trayMedia.length === 0) return
     if ([...text].length > charLimit) return
@@ -359,10 +431,13 @@ export function useComposeAsPersona(
       ...(baseline !== undefined ? { engagementBaseline: baseline } : {}),
     }
 
+    const sentReplyTo = replyTo
+    const handle = activePersona.handle
     const stillOnScreen = () => mountedRef.current && targetRef.current === targetKey
 
     const succeed = (post: Post) => {
-      inFlightTarget.current = null
+      inFlight.current.delete(targetKey)
+      unconfirmedByKey.delete(targetKey)
       // The draft is gone whether or not the composer is still mounted - but only if
       // it is still what was sent (a remount may already hold a newer draft).
       if (getPersistedDraft(exerciseId, personaId) === text) discardDraft(exerciseId, personaId)
@@ -374,19 +449,40 @@ export function useComposeAsPersona(
         setLastPublished(post)
         setStatus('success')
       }
-      onClearReply?.()
+      // Drop the reply target only if it is STILL the one this post answered.
+      if (sentReplyTo !== undefined && latestReplyToRef.current?.postId === sentReplyTo.postId) {
+        onClearReply?.()
+      }
       onPublished?.(post)
     }
 
     const fail = (error: unknown) => {
-      inFlightTarget.current = null
-      if (!stillOnScreen()) return
-      setFailure(classifyPublishFailure(error))
+      inFlight.current.delete(targetKey)
+      const classified = classifyPublishFailure(error)
+      if (classified.kind === 'unconfirmed') {
+        unconfirmedByKey.set(targetKey, classified)
+        unconfirmedReplyRef.current = sentReplyTo
+      } else {
+        unconfirmedByKey.delete(targetKey)
+      }
+
+      if (!stillOnScreen()) {
+        // The composer is gone (dock closed / another persona on screen): nobody is
+        // looking at an error banner, so make the failure impossible to miss and put
+        // the text back where a reopened composer will find it.
+        if (getPersistedDraft(exerciseId, personaId) === '') {
+          setPersistedDraft(exerciseId, personaId, text)
+        }
+        const notify = classified.kind === 'unconfirmed' ? toast.warning : toast.error
+        notify(describeOffscreenFailure(handle, classified), { autoClose: 10_000 })
+        return
+      }
+      setFailure(classified)
       setLastPublished(null)
       setStatus('error')
     }
 
-    inFlightTarget.current = targetKey
+    inFlight.current.add(targetKey)
     setFailure(undefined)
     setLastPublished(null)
 
@@ -409,9 +505,11 @@ export function useComposeAsPersona(
     publishAsPersonaLive(input).then(succeed, fail)
   }, [
     targetKey,
+    awaitingDecision,
     exerciseId,
     timeZone,
     personaId,
+    activePersona.handle,
     actingHumanId,
     text,
     charLimit,
@@ -424,6 +522,27 @@ export function useComposeAsPersona(
     onPublished,
   ])
 
+  const publish = useCallback(() => send(false), [send])
+  const repostAnyway = useCallback(() => send(true), [send])
+
+  /** "Discard draft (it went out)": the controller checked the feed and the post is there. */
+  const discardUnconfirmed = useCallback(() => {
+    if (!awaitingDecision) return
+    const sentReplyTo = unconfirmedReplyRef.current
+    unconfirmedReplyRef.current = undefined
+    unconfirmedByKey.delete(targetKey)
+    discardDraft(exerciseId, personaId)
+    setTextState('')
+    clearTray()
+    setBaselineFields(EMPTY_BASELINE_FIELDS)
+    setFailure(undefined)
+    setLastPublished(null)
+    setStatus('idle')
+    if (sentReplyTo !== undefined && latestReplyToRef.current?.postId === sentReplyTo.postId) {
+      onClearReply?.()
+    }
+  }, [awaitingDecision, targetKey, exerciseId, personaId, clearTray, onClearReply])
+
   return {
     text,
     setText,
@@ -434,6 +553,9 @@ export function useComposeAsPersona(
     canPublish,
     blockers,
     publish,
+    awaitingDecision,
+    repostAnyway,
+    discardUnconfirmed,
     tray,
     baselineFields,
     baselineErrors: parsedBaseline.errors,

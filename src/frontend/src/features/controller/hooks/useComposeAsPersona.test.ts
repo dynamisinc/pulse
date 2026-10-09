@@ -29,6 +29,7 @@
  */
 import { act, renderHook } from '@testing-library/react'
 import { AxiosError } from 'axios'
+import { toast } from 'react-toastify'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
@@ -51,6 +52,10 @@ vi.mock('@/core/exerciseContext', () => ({
 
 vi.mock('@/features/social/services/livePostActions', () => ({
   publishPost: vi.fn(),
+}))
+
+vi.mock('react-toastify', () => ({
+  toast: { error: vi.fn(), warning: vi.fn() },
 }))
 
 // This whole file exercises the LIVE branch only.
@@ -130,11 +135,13 @@ function httpError(status: number, data: unknown): AxiosError {
 /** A `publishPost` call the test settles by hand. */
 function deferredPublish() {
   let resolve: (view: CreatedPostView) => void = () => undefined
-  const promise = new Promise<CreatedPostView>(res => {
+  let reject: (error: unknown) => void = () => undefined
+  const promise = new Promise<CreatedPostView>((res, rej) => {
     resolve = res
+    reject = rej
   })
   vi.mocked(publishPost).mockReturnValueOnce(promise)
-  return { resolve }
+  return { resolve, reject }
 }
 
 /** The body most recently handed to `publishPost`. */
@@ -146,6 +153,8 @@ function lastBody() {
 beforeEach(() => {
   mockedUseExerciseContext.mockReturnValue(scope())
   vi.mocked(publishPost).mockReset().mockResolvedValue(PUBLISHED_VIEW)
+  vi.mocked(toast.error).mockClear()
+  vi.mocked(toast.warning).mockClear()
   resetTelemetryBuffer()
   // Gate-1 WR-103's persisted-draft store is a module singleton keyed by
   // (exerciseId, personaId) - several tests below reuse the SAME
@@ -271,12 +280,14 @@ describe('useComposeAsPersona — a failed publish is VISIBLE and keeps the draf
     expect(onClearReply).toHaveBeenCalledTimes(1)
   })
 
-  it('a network failure is "failed" (retry is reasonable); an unreadable 2xx is "unconfirmed"', async () => {
-    vi.mocked(publishPost).mockRejectedValueOnce(new AxiosError('Network Error', 'ERR_NETWORK'))
+  it('a 5xx / 429 answer is "failed" (retry is reasonable); an unreadable 2xx is "unconfirmed"', async () => {
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(503, { error: 'unavailable' }))
     const { result } = renderHook(() => useComposeAsPersona(options()))
-    act(() => result.current.setText('Offline.'))
+    act(() => result.current.setText('Server busy.'))
     await act(async () => result.current.publish())
     expect(result.current.failure?.kind).toBe('failed')
+    expect(result.current.awaitingDecision).toBe(false)
+    expect(result.current.canPublish).toBe(true)
 
     vi.mocked(publishPost).mockRejectedValueOnce(
       new Error('publishPost: the server returned a malformed post'),
@@ -284,7 +295,7 @@ describe('useComposeAsPersona — a failed publish is VISIBLE and keeps the draf
     await act(async () => result.current.publish())
     expect(result.current.failure?.kind).toBe('unconfirmed')
     expect(result.current.status).toBe('error')
-    expect(result.current.text).toBe('Offline.')
+    expect(result.current.text).toBe('Server busy.')
   })
 
   it('keeps the persisted draft on failure, so an unmount does not lose it', async () => {
@@ -433,6 +444,350 @@ describe('useComposeAsPersona — a response for a persona you left', () => {
     expect(result.current.status).toBe('idle')
     expect(result.current.failure).toBeUndefined()
     expect(result.current.tray.items).toHaveLength(0)
+  })
+})
+
+describe('useComposeAsPersona — a post that MAY ALREADY BE LIVE is not blindly re-sent', () => {
+  const OTHER_TARGET: ReplyTarget = { ...REPLY_TARGET, postId: 'post-other', authorHandle: 'other' }
+
+  async function unconfirmedDraft(extra: Partial<UseComposeAsPersonaOptions> = {}) {
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(504, undefined))
+    const hook = renderHook(
+      (props: Partial<UseComposeAsPersonaOptions>) => useComposeAsPersona(options(props)),
+      { initialProps: extra },
+    )
+    act(() => hook.result.current.setText('Breaking: boil-water order lifted.'))
+    await act(async () => hook.result.current.publish())
+    return hook
+  }
+
+  it('after a 504 Post is paused: publish() is a no-op and the draft is kept', async () => {
+    const { result } = await unconfirmedDraft()
+
+    expect(result.current.status).toBe('error')
+    expect(result.current.failure).toMatchObject({ kind: 'unconfirmed', status: 504 })
+    expect(result.current.awaitingDecision).toBe(true)
+    expect(result.current.canPublish).toBe(false)
+    expect(result.current.blockers.join(' ')).toMatch(/Post is paused/)
+    expect(result.current.text).toBe('Breaking: boil-water order lifted.')
+
+    // One Enter, one Ctrl+Enter, one click: all of them end in publish(), which does nothing.
+    act(() => result.current.publish())
+    act(() => result.current.publish())
+    expect(publishPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('NO response at all (a dropped connection) pauses Post exactly like a 504', async () => {
+    vi.mocked(publishPost).mockRejectedValueOnce(new AxiosError('Network Error', 'ERR_NETWORK'))
+    const { result } = renderHook(() => useComposeAsPersona(options()))
+    act(() => result.current.setText('Dropped.'))
+    await act(async () => result.current.publish())
+
+    expect(result.current.failure?.kind).toBe('unconfirmed')
+    expect(result.current.awaitingDecision).toBe(true)
+    act(() => result.current.publish())
+    expect(publishPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('"post again anyway" re-sends the kept draft past the gate, and success clears it', async () => {
+    const onPublished = vi.fn<(post: Post) => void>()
+    const { result } = await unconfirmedDraft({ onPublished })
+
+    await act(async () => result.current.repostAnyway())
+
+    expect(publishPost).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(publishPost).mock.calls[1]?.[0].text).toBe('Breaking: boil-water order lifted.')
+    expect(result.current.status).toBe('success')
+    expect(result.current.awaitingDecision).toBe(false)
+    expect(result.current.text).toBe('')
+    expect(onPublished).toHaveBeenCalledTimes(1)
+  })
+
+  it('repostAnyway is a no-op when nothing is unconfirmed (it is not a back door around canPublish)', async () => {
+    const { result } = renderHook(() => useComposeAsPersona(options()))
+    act(() => result.current.setText('Never failed.'))
+
+    act(() => result.current.repostAnyway())
+
+    expect(publishPost).not.toHaveBeenCalled()
+  })
+
+  it('a SECOND outcome that is a plain refusal lifts the gate (the server said it took nothing)', async () => {
+    const { result } = await unconfirmedDraft()
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(400, 'media is not yours.'))
+
+    await act(async () => result.current.repostAnyway())
+
+    expect(result.current.failure?.kind).toBe('rejected')
+    expect(result.current.awaitingDecision).toBe(false)
+    expect(result.current.canPublish).toBe(true)
+  })
+
+  it('"discard (it went out)" drops the draft, the gate and the answered reply target - without posting', async () => {
+    const onClearReply = vi.fn()
+    const onPublished = vi.fn<(post: Post) => void>()
+    const { result } = await unconfirmedDraft({
+      replyTo: REPLY_TARGET,
+      onClearReply,
+      onPublished,
+    })
+    act(() => result.current.tray.setLibrarySelection([LIBRARY_PHOTO.id], () => LIBRARY_PHOTO))
+
+    act(() => result.current.discardUnconfirmed())
+
+    expect(publishPost).toHaveBeenCalledTimes(1)
+    expect(onPublished).not.toHaveBeenCalled()
+    expect(result.current.text).toBe('')
+    expect(result.current.tray.items).toHaveLength(0)
+    expect(result.current.status).toBe('idle')
+    expect(result.current.failure).toBeUndefined()
+    expect(result.current.awaitingDecision).toBe(false)
+    expect(onClearReply).toHaveBeenCalledTimes(1)
+    // The persisted draft went with it: a remount starts empty and ungated.
+    const again = renderHook(() => useComposeAsPersona(options()))
+    expect(again.result.current.text).toBe('')
+    expect(again.result.current.awaitingDecision).toBe(false)
+  })
+
+  it('"discard" leaves a DIFFERENT reply target alone', async () => {
+    const onClearReply = vi.fn()
+    const { result, rerender } = await unconfirmedDraft({ replyTo: REPLY_TARGET, onClearReply })
+    rerender({ replyTo: OTHER_TARGET, onClearReply })
+
+    act(() => result.current.discardUnconfirmed())
+
+    expect(onClearReply).not.toHaveBeenCalled()
+  })
+
+  it('discardUnconfirmed is a no-op when nothing is unconfirmed', async () => {
+    const { result } = renderHook(() => useComposeAsPersona(options()))
+    act(() => result.current.setText('Keep me.'))
+
+    act(() => result.current.discardUnconfirmed())
+
+    expect(result.current.text).toBe('Keep me.')
+  })
+
+  it('a remount for the same persona comes back STILL asking (the dock closed and reopened)', async () => {
+    const first = await unconfirmedDraft()
+    first.unmount()
+
+    const second = renderHook(() => useComposeAsPersona(options()))
+
+    expect(second.result.current.text).toBe('Breaking: boil-water order lifted.')
+    expect(second.result.current.awaitingDecision).toBe(true)
+    expect(second.result.current.status).toBe('error')
+    act(() => second.result.current.publish())
+    expect(publishPost).toHaveBeenCalledTimes(1)
+
+    // The explicit Esc/X discard is the controller's choice to walk away: it clears the gate.
+    second.unmount()
+    composeAsPersonaDraftStore.discardDraft('ex-live-0001', ACTIVE_PERSONA.id)
+    const third = renderHook(() => useComposeAsPersona(options()))
+    expect(third.result.current.awaitingDecision).toBe(false)
+    expect(third.result.current.text).toBe('')
+  })
+})
+
+describe('useComposeAsPersona — a stale response never clears a NEWER reply target', () => {
+  const OTHER_TARGET: ReplyTarget = { ...REPLY_TARGET, postId: 'post-other', authorHandle: 'other' }
+
+  it('a normal post in flight, then "Reply as" another post: the new target survives the success', async () => {
+    const pending = deferredPublish()
+    const onClearReply = vi.fn()
+    const { result, rerender } = renderHook(
+      (props: Partial<UseComposeAsPersonaOptions>) =>
+        useComposeAsPersona(options({ onClearReply, ...props })),
+      { initialProps: {} },
+    )
+    act(() => result.current.setText('A plain post.'))
+    act(() => result.current.publish())
+
+    rerender({ replyTo: REPLY_TARGET })
+    await act(async () => pending.resolve(PUBLISHED_VIEW))
+
+    expect(result.current.status).toBe('success')
+    expect(onClearReply).not.toHaveBeenCalled()
+  })
+
+  it('a reply in flight, then a DIFFERENT target picked: the first reply\'s success keeps the new one', async () => {
+    const pending = deferredPublish()
+    const onClearReply = vi.fn()
+    const { result, rerender } = renderHook(
+      (props: Partial<UseComposeAsPersonaOptions>) =>
+        useComposeAsPersona(options({ onClearReply, ...props })),
+      { initialProps: { replyTo: REPLY_TARGET } as Partial<UseComposeAsPersonaOptions> },
+    )
+    act(() => result.current.setText('Answering the first.'))
+    act(() => result.current.publish())
+    expect(lastBody()?.parentPostId).toBe('post-pio-1')
+
+    rerender({ replyTo: OTHER_TARGET })
+    await act(async () => pending.resolve(PUBLISHED_VIEW))
+
+    expect(onClearReply).not.toHaveBeenCalled()
+  })
+
+  it('a reply whose target is still the held one DOES clear it', async () => {
+    const pending = deferredPublish()
+    const onClearReply = vi.fn()
+    const { result } = renderHook(() =>
+      useComposeAsPersona(options({ replyTo: REPLY_TARGET, onClearReply })),
+    )
+    act(() => result.current.setText('Same target.'))
+    act(() => result.current.publish())
+
+    await act(async () => pending.resolve(PUBLISHED_VIEW))
+
+    expect(onClearReply).toHaveBeenCalledTimes(1)
+  })
+
+  it('a target cleared by the route while in flight is not "cleared" again', async () => {
+    const pending = deferredPublish()
+    const onClearReply = vi.fn()
+    const { result, rerender } = renderHook(
+      (props: Partial<UseComposeAsPersonaOptions>) =>
+        useComposeAsPersona(options({ onClearReply, ...props })),
+      { initialProps: { replyTo: REPLY_TARGET } as Partial<UseComposeAsPersonaOptions> },
+    )
+    act(() => result.current.setText('Cleared mid-flight.'))
+    act(() => result.current.publish())
+
+    rerender({})
+    await act(async () => pending.resolve(PUBLISHED_VIEW))
+
+    expect(onClearReply).not.toHaveBeenCalled()
+  })
+})
+
+describe('useComposeAsPersona — a failure after the composer left the screen is not silent', () => {
+  it('restores the draft the explicit close discarded, and raises an error toast', async () => {
+    const pending = deferredPublish()
+    const first = renderHook(() => useComposeAsPersona(options()))
+    act(() => first.result.current.setText('Sent just before the dock closed.'))
+    act(() => first.result.current.publish())
+    // Esc / X on the dock: unmount + the console's explicit discard.
+    first.unmount()
+    composeAsPersonaDraftStore.discardDraft('ex-live-0001', ACTIVE_PERSONA.id)
+
+    await act(async () => pending.reject(httpError(400, 'media is not yours.')))
+
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(toast.error).mock.calls[0]?.[0]).toBe(
+      'Post as @FairhavenWater failed (HTTP 400): media is not yours. Draft restored.',
+    )
+    expect(toast.warning).not.toHaveBeenCalled()
+    // A reopened composer finds the text again.
+    const second = renderHook(() => useComposeAsPersona(options()))
+    expect(second.result.current.text).toBe('Sent just before the dock closed.')
+    expect(second.result.current.awaitingDecision).toBe(false)
+  })
+
+  it('does not overwrite a newer draft the controller typed in the meantime', async () => {
+    const pending = deferredPublish()
+    const first = renderHook(() => useComposeAsPersona(options()))
+    act(() => first.result.current.setText('The one that was sent.'))
+    act(() => first.result.current.publish())
+    first.unmount()
+    composeAsPersonaDraftStore.discardDraft('ex-live-0001', ACTIVE_PERSONA.id)
+    const second = renderHook(() => useComposeAsPersona(options()))
+    act(() => second.result.current.setText('A newer draft.'))
+
+    await act(async () => pending.reject(httpError(503, { error: 'unavailable' })))
+
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    second.unmount()
+    const third = renderHook(() => useComposeAsPersona(options()))
+    expect(third.result.current.text).toBe('A newer draft.')
+  })
+
+  it('an UNCONFIRMED outcome says "status unknown - check the feed" and comes back gated', async () => {
+    const pending = deferredPublish()
+    const first = renderHook(() => useComposeAsPersona(options()))
+    act(() => first.result.current.setText('Maybe out.'))
+    act(() => first.result.current.publish())
+    first.unmount()
+
+    await act(async () => pending.reject(httpError(504, undefined)))
+
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(toast.warning).mock.calls[0]?.[0]).toBe(
+      'Post as @FairhavenWater: status unknown - check the feed. Draft restored.',
+    )
+    expect(toast.error).not.toHaveBeenCalled()
+    const second = renderHook(() => useComposeAsPersona(options()))
+    expect(second.result.current.text).toBe('Maybe out.')
+    expect(second.result.current.awaitingDecision).toBe(true)
+  })
+
+  it('also covers a persona switch (still mounted, but another persona is on screen)', async () => {
+    const pending = deferredPublish()
+    const { result, rerender } = renderHook(
+      ({ persona }) => useComposeAsPersona(options({ activePersona: persona })),
+      { initialProps: { persona: ACTIVE_PERSONA as StaffPersona } },
+    )
+    act(() => result.current.setText('For Fairhaven Water.'))
+    act(() => result.current.publish())
+    rerender({ persona: OTHER_PERSONA })
+
+    await act(async () => pending.reject(httpError(403, 'Exercise is not live.')))
+
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(toast.error).mock.calls[0]?.[0]).toMatch(/^Post as @FairhavenWater failed/)
+    // The persona on screen is untouched: no banner, no text.
+    expect(result.current.status).toBe('idle')
+    expect(result.current.failure).toBeUndefined()
+    expect(result.current.text).toBe('')
+  })
+
+  it('a SUCCESS after unmount raises no toast, and still reports the post', async () => {
+    const pending = deferredPublish()
+    const onPublished = vi.fn<(post: Post) => void>()
+    const first = renderHook(() => useComposeAsPersona(options({ onPublished })))
+    act(() => first.result.current.setText('Went out fine.'))
+    act(() => first.result.current.publish())
+    first.unmount()
+
+    await act(async () => pending.resolve(PUBLISHED_VIEW))
+
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
+    expect(onPublished).toHaveBeenCalledTimes(1)
+  })
+
+  it('an on-screen failure raises NO toast (the banner is the signal)', async () => {
+    vi.mocked(publishPost).mockRejectedValueOnce(httpError(400, 'nope.'))
+    const { result } = renderHook(() => useComposeAsPersona(options()))
+    act(() => result.current.setText('Watched.'))
+    await act(async () => result.current.publish())
+
+    expect(result.current.status).toBe('error')
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+})
+
+describe('useComposeAsPersona — in-flight bookkeeping is per target', () => {
+  it('persona A\'s response does not unlock persona B\'s request that is still in flight', async () => {
+    const pendingA = deferredPublish()
+    const pendingB = deferredPublish()
+    const { result, rerender } = renderHook(
+      ({ persona }) => useComposeAsPersona(options({ activePersona: persona })),
+      { initialProps: { persona: ACTIVE_PERSONA as StaffPersona } },
+    )
+    act(() => result.current.setText('For A.'))
+    act(() => result.current.publish())
+    rerender({ persona: OTHER_PERSONA })
+    act(() => result.current.setText('For B.'))
+    act(() => result.current.publish())
+    expect(publishPost).toHaveBeenCalledTimes(2)
+
+    await act(async () => pendingA.resolve(PUBLISHED_VIEW))
+    // B is still waiting: pressing Post again must not send a duplicate.
+    act(() => result.current.publish())
+    expect(publishPost).toHaveBeenCalledTimes(2)
+
+    await act(async () => pendingB.resolve(PUBLISHED_VIEW))
+    expect(result.current.status).toBe('success')
   })
 })
 

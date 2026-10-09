@@ -189,9 +189,14 @@ export class ComposeUnconfirmedError extends Error {
 export type PublishFailureKind =
   /** The server (or mock) refused the request: the same draft would be refused again. */
   | 'rejected'
-  /** The request normally created nothing (network down, 5xx, 429): retry is reasonable. */
+  /** The server ANSWERED that it created nothing (5xx, 429, 408): retry is reasonable. */
   | 'failed'
-  /** The post may ALREADY exist (unreadable 2xx, 504): check before retrying. */
+  /**
+   * The post may ALREADY exist: an unreadable 2xx, a 504, or NO response at all (a
+   * connection that drops after the request was sent looks exactly like one that never
+   * connected). The console withholds a blind retry: the controller must first check
+   * the feed and then choose to post again anyway, or to discard the draft.
+   */
   | 'unconfirmed'
 
 /** A classified publish failure, ready for the error banner. */
@@ -205,6 +210,9 @@ export interface PublishFailure {
 
 /** Longest server message the banner shows (a plain-text 4xx body is short; this caps abuse). */
 const MAX_MESSAGE_LENGTH = 300
+
+/** The sentence that goes with every 'unconfirmed' outcome. */
+export const UNCONFIRMED_MESSAGE = 'The post may already be live - check the feed before posting again.'
 
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g
@@ -253,23 +261,24 @@ function serverMessageOf(data: unknown): string | undefined {
  *  - {@link ComposeRejectedError} (the mock / pre-flight 400) and any other plain
  *    `Error` thrown by the MOCK adapter -> 'rejected' with its own message;
  *  - {@link ComposeUnconfirmedError} -> 'unconfirmed';
- *  - an axios failure with a 2xx response or a 504 -> 'unconfirmed';
- *  - 408 / 429 / 5xx / no response (network, timeout) -> 'failed';
+ *  - an axios failure with a 2xx response, a 504, or NO response at all (a connection
+ *    dropped after the request was sent is indistinguishable from one that never
+ *    connected) -> 'unconfirmed';
+ *  - 408 / 429 / other 5xx -> 'failed' (the server answered that it took nothing);
  *  - any other 4xx -> 'rejected', with the SERVER's message.
+ * A plain `Error` from the MOCK pipeline has its engineering prefix (`createPost: `)
+ * stripped, so the banner reads as a message and not as a stack fragment.
  */
 export function classifyPublishFailure(failure: unknown): PublishFailure {
   if (failure instanceof ComposeRejectedError) {
     return { kind: 'rejected', status: failure.status, message: failure.message }
   }
   if (failure instanceof ComposeUnconfirmedError) {
-    return {
-      kind: 'unconfirmed',
-      message: 'The post may already be live - check the feed before posting again.',
-    }
+    return { kind: 'unconfirmed', message: UNCONFIRMED_MESSAGE }
   }
   if (!isAxiosError(failure)) {
-    const message = failure instanceof Error ? cleanMessage(failure.message) : undefined
-    return { kind: 'rejected', message: message ?? 'The post was not accepted.' }
+    const raw = failure instanceof Error ? failure.message.replace(/^createPost:\s*/, '') : ''
+    return { kind: 'rejected', message: cleanMessage(raw) ?? 'The post was not accepted.' }
   }
 
   const status = failure.response?.status
@@ -277,16 +286,12 @@ export function classifyPublishFailure(failure: unknown): PublishFailure {
 
   if (status === undefined) {
     return {
-      kind: 'failed',
-      message: 'The server could not be reached. Check the connection and try again.',
+      kind: 'unconfirmed',
+      message: `The server did not answer, so the post may have gone out. ${UNCONFIRMED_MESSAGE}`,
     }
   }
   if ((status >= 200 && status < 300) || status === 504) {
-    return {
-      kind: 'unconfirmed',
-      status,
-      message: 'The post may already be live - check the feed before posting again.',
-    }
+    return { kind: 'unconfirmed', status, message: UNCONFIRMED_MESSAGE }
   }
   if (status === 408 || status === 429 || status >= 500) {
     return {
@@ -300,6 +305,22 @@ export function classifyPublishFailure(failure: unknown): PublishFailure {
     status,
     message: serverMessage ?? `The server refused the post (HTTP ${status}).`,
   }
+}
+
+/**
+ * The app-toast text for a publish that failed AFTER the composer was off-screen (the
+ * dock was closed or the controller moved to another persona before the response
+ * landed), so the failure would otherwise be silent. The draft was restored by the
+ * caller; an 'unconfirmed' outcome says the status is unknown rather than "failed".
+ */
+export function describeOffscreenFailure(handle: string, failure: PublishFailure): string {
+  const who = `Post as @${handle.startsWith('@') ? handle.slice(1) : handle}`
+  if (failure.kind === 'unconfirmed') {
+    return `${who}: status unknown - check the feed. Draft restored.`
+  }
+  const code = failure.status !== undefined ? ` (HTTP ${failure.status})` : ''
+  const reason = failure.message.replace(/[.!?\s]+$/, '')
+  return `${who} failed${code}: ${reason}. Draft restored.`
 }
 
 // ---------------------------------------------------------------------------

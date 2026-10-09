@@ -34,26 +34,51 @@ const SOURCES = import.meta.glob(['../**/*.{ts,tsx}', '!../**/*.test.{ts,tsx}'],
   eager: true,
 }) as Record<string, string>
 
-/** Specifier patterns a staff file must never import. */
+/** F2's participant media PLAYERS (UI). Its pure helpers are not in this list. */
+const PARTICIPANT_PLAYERS = [
+  'MediaGrid',
+  'VideoPlayer',
+  'MediaViewer',
+  'MediaTabGrid',
+  'MediaFallbackTile',
+]
+
+/**
+ * Specifier patterns a staff file must never import. Every participant-folder pattern is
+ * anchored on the `social/` PATH SEGMENT rather than on `features/social/`, so it catches
+ * the alias form (`@/features/social/...`) AND any relative form that climbs to it
+ * (`../../social/...`, `../../../features/social/...`).
+ */
 const FORBIDDEN_SPECIFIERS: ReadonlyArray<{ readonly pattern: RegExp; readonly why: string }> = [
   { pattern: /(^|\/)PostCard(\/|$|\.)/, why: 'the participant post card' },
   {
-    pattern: /features\/social\/components\/post\//,
+    pattern: /(^|\/)social\/components\/post\//,
     why: 'a participant post part (PostHeader / PostBody / PostActions / PostMediaSlot ...)',
   },
   {
-    pattern: /features\/social\/components\/(Composer|Reply|Quote|Thread)/,
+    pattern: /(^|\/)social\/components\/(Composer|Reply|Quote|Thread)/,
     why: 'a participant composer or thread view',
   },
-  { pattern: /features\/social\/components\/media\/(?!safeMediaUrl)/, why: 'a participant media player' },
-  { pattern: /features\/social\/(pages|layout|explore|notifications)\//, why: 'a participant page' },
-  { pattern: /features\/social\/SocialChannel/, why: 'the participant channel' },
-  { pattern: /features\/social\/theme\//, why: 'the participant theme' },
-  { pattern: /features\/social\/.*\.css$/, why: 'a participant stylesheet' },
-  { pattern: /features\/participant-shell/, why: 'the participant shell' },
+  {
+    // The participant PLAYERS only. F2's pure helpers (`formatDuration`, `safeMediaUrl`,
+    // `mediaLayout`, ...) are world-neutral and deliberately shared.
+    pattern: new RegExp(`(^|/)social/components/media/(${PARTICIPANT_PLAYERS.join('|')})`),
+    why: 'a participant media player',
+  },
+  {
+    pattern: /(^|\/)social\/(pages|layout|explore|notifications)\//,
+    why: 'a participant page',
+  },
+  { pattern: /(^|\/)social\/SocialChannel/, why: 'the participant channel' },
+  { pattern: /(^|\/)social\/theme\//, why: 'the participant theme' },
+  { pattern: /(^|\/)social\/.*\.css$/, why: 'a participant stylesheet' },
+  { pattern: /(^|\/)participant-shell(\/|$)/, why: 'the participant shell' },
   { pattern: /BrandThemeProvider|brandTokens/, why: 'a per-brand participant skin' },
   { pattern: /^@mui\/icons-material/, why: '@mui/icons-material (icons are FontAwesome only)' },
 ]
+
+/** The social feature as a path segment (`@/features/social`, `../../social/...`). */
+const SOCIAL = /(^|\/)social(\/|$)/
 
 /** Names a staff file must never import from the social barrel or MUI. */
 const FORBIDDEN_NAMES: ReadonlyArray<{ readonly name: string; readonly from: RegExp }> = [
@@ -62,10 +87,13 @@ const FORBIDDEN_NAMES: ReadonlyArray<{ readonly name: string; readonly from: Reg
   { name: 'PostBody', from: /./ },
   { name: 'PostActions', from: /./ },
   { name: 'PostMediaSlot', from: /./ },
-  { name: 'Composer', from: /features\/social/ },
-  { name: 'ThreadView', from: /features\/social/ },
-  { name: 'Feed', from: /features\/social/ },
-  { name: 'SocialChannel', from: /features\/social/ },
+  { name: 'MediaGrid', from: /./ },
+  { name: 'VideoPlayer', from: /./ },
+  { name: 'MediaViewer', from: /./ },
+  { name: 'Composer', from: SOCIAL },
+  { name: 'ThreadView', from: SOCIAL },
+  { name: 'Feed', from: SOCIAL },
+  { name: 'SocialChannel', from: SOCIAL },
   { name: 'Button', from: /^@mui\/material/ },
   { name: 'TextField', from: /^@mui\/material/ },
 ]
@@ -96,6 +124,17 @@ function importsOf(source: string): ImportRecord[] {
     const defaultName = clause.replace(/\{[^}]*\}/, '').replace(/,/g, '').trim()
     if (defaultName !== '' && !defaultName.startsWith('*')) names.push(defaultName)
     records.push({ specifier, names })
+  }
+  // `export { X } from '...'` / `export * from '...'` re-exports pull the module in too.
+  for (const match of code.matchAll(
+    /export\s+(?:type\s+)?(\*(?:\s+as\s+\w+)?|\{[^}]*\})\s*from\s*['"]([^'"]+)['"]/g,
+  )) {
+    const braces = /\{([^}]*)\}/.exec(match[1] ?? '')?.[1] ?? ''
+    const names = braces
+      .split(',')
+      .map(part => part.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]?.trim() ?? '')
+      .filter(name => name !== '')
+    records.push({ specifier: match[2] ?? '', names })
   }
   for (const match of code.matchAll(/import\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) {
     records.push({ specifier: match[1] ?? '', names: [] })
@@ -144,6 +183,40 @@ describe('the controller (staff) world imports no participant skin', () => {
       expect(catches("import { PostCard } from '@/features/social/components/PostCard'")).toBe(true)
       expect(catches("import { PostHeader } from '@/features/social/components/post/PostHeader'"))
         .toBe(true)
+    })
+
+    it('flags a participant media player by name, but allows F2\'s pure media helpers', () => {
+      expect(catches("import { MediaGrid } from '@/features/social/components/media/MediaGrid'"))
+        .toBe(true)
+      expect(catches("import { VideoPlayer } from '@/features/social/components/media/VideoPlayer'"))
+        .toBe(true)
+      expect(catches("import { MediaTabGrid } from '../../social/components/media/MediaTabGrid'"))
+        .toBe(true)
+      expect(catches("import { X } from '@/features/social/components/media/MediaFallbackTile'"))
+        .toBe(true)
+      // The shared, world-neutral helpers (C2 / C5 / the picker use these).
+      expect(catches("import { formatDuration } from '@/features/social/components/media/formatDuration'"))
+        .toBe(false)
+      expect(catches("import { resolveSafeMediaUrl } from '@/features/social/components/media/safeMediaUrl'"))
+        .toBe(false)
+      expect(catches("import { x } from '@/features/social/components/media/mediaLayout'"))
+        .toBe(false)
+    })
+
+    it('flags a RELATIVE specifier that climbs into a participant folder', () => {
+      expect(catches("import { PostHeader } from '../../social/components/post/PostHeader'")).toBe(true)
+      expect(catches("import s from '../../../features/social/theme/tokens'")).toBe(true)
+      expect(catches("import { Feed } from '../../social/pages/Feed'")).toBe(true)
+      expect(catches("import x from '../../social/layout/NavRail'")).toBe(true)
+      expect(catches("import { Avatar } from '../../social/components/Avatar'")).toBe(false)
+    })
+
+    it('scans `export ... from` re-exports as well as imports', () => {
+      expect(catches("export { PostCard } from '@/features/social'")).toBe(true)
+      expect(catches("export * from '@/features/social/components/PostCard'")).toBe(true)
+      expect(catches("export type { X } from '@/features/social/components/post/types'")).toBe(true)
+      expect(catches("export * as card from '../../social/components/post/PostCard'")).toBe(true)
+      expect(catches("export { Avatar, VerifiedMark } from '@/features/social'")).toBe(false)
     })
 
     it('flags a participant theme / stylesheet / shell / brand skin', () => {

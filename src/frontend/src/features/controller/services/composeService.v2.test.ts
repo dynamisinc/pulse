@@ -28,6 +28,7 @@ import {
   MAX_ENGAGEMENT_BASELINE,
   classifyPublishFailure,
   composeAsPersona,
+  describeOffscreenFailure,
   isValidBaselineValue,
   parseBaselineField,
   postFromCreated,
@@ -305,9 +306,22 @@ describe('classifyPublishFailure', () => {
     expect(classifyPublishFailure(httpError(408, undefined)).kind).toBe('failed')
   })
 
-  it('no response (network down) is FAILED', () => {
-    const offline = new AxiosError('Network Error', 'ERR_NETWORK')
-    expect(classifyPublishFailure(offline)).toMatchObject({ kind: 'failed' })
+  it('NO response is UNCONFIRMED: a connection that drops after the send looks like one that never connected', () => {
+    const dropped = new AxiosError('Network Error', 'ERR_NETWORK')
+    const timedOut = new AxiosError('timeout of 10000ms exceeded', 'ECONNABORTED')
+    for (const failure of [dropped, timedOut]) {
+      const result = classifyPublishFailure(failure)
+      expect(result.kind).toBe('unconfirmed')
+      expect(result.status).toBeUndefined()
+      expect(result.message).toMatch(/may have gone out/)
+      expect(result.message).toMatch(/check the feed/i)
+    }
+  })
+
+  it('a response that says it took nothing (429 / 5xx other than 504) is still FAILED', () => {
+    for (const status of [408, 429, 500, 502, 503]) {
+      expect(classifyPublishFailure(httpError(status, undefined)).kind).toBe('failed')
+    }
   })
 
   it('a 504, a 2xx the client could not use, and ComposeUnconfirmedError are UNCONFIRMED', () => {
@@ -326,10 +340,50 @@ describe('classifyPublishFailure', () => {
       .toMatchObject({ kind: 'rejected' })
   })
 
+  it('strips the engineering "createPost: " prefix from a mock pipeline message', () => {
+    expect(classifyPublishFailure(new Error('createPost: that media attachment is not available.')))
+      .toEqual({ kind: 'rejected', message: 'that media attachment is not available.' })
+    expect(classifyPublishFailure(new Error('createPost:   spaced'))).toMatchObject({
+      message: 'spaced',
+    })
+    // A message with no prefix is left alone; an empty one falls back to a sentence.
+    expect(classifyPublishFailure(new Error('plain'))).toMatchObject({ message: 'plain' })
+    expect(classifyPublishFailure(new Error('createPost: '))).toMatchObject({
+      message: 'The post was not accepted.',
+    })
+  })
+
   it('strips control characters and caps an over-long server message', () => {
     const message = classifyPublishFailure(httpError(400, `bad\u0000\u0007 text ${'x'.repeat(500)}`)).message
     // eslint-disable-next-line no-control-regex
     expect(message).not.toMatch(/[\u0000-\u001f]/)
     expect(message.length).toBeLessThanOrEqual(304)
+  })
+})
+
+describe('describeOffscreenFailure (the toast for a failure nobody was watching)', () => {
+  it('names the persona, the status and the reason, and says the draft was restored', () => {
+    const text = describeOffscreenFailure('FairhavenWater', {
+      kind: 'rejected',
+      status: 400,
+      message: 'media is not yours.',
+    })
+    expect(text).toBe('Post as @FairhavenWater failed (HTTP 400): media is not yours. Draft restored.')
+  })
+
+  it('does not double the @ or the full stop, and omits a missing status', () => {
+    expect(
+      describeOffscreenFailure('@Other', { kind: 'failed', message: 'Server busy..' }),
+    ).toBe('Post as @Other failed: Server busy. Draft restored.')
+  })
+
+  it('says "status unknown - check the feed" for an unconfirmed outcome, never "failed"', () => {
+    const text = describeOffscreenFailure('FairhavenWater', {
+      kind: 'unconfirmed',
+      status: 504,
+      message: 'The post may already be live - check the feed before posting again.',
+    })
+    expect(text).toBe('Post as @FairhavenWater: status unknown - check the feed. Draft restored.')
+    expect(text).not.toMatch(/failed/)
   })
 })

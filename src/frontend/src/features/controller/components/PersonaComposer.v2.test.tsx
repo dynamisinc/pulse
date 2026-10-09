@@ -49,6 +49,9 @@ vi.mock('@/core/media/uploadMedia', async importOriginal => {
   return { ...actual, uploadPickedMedia: vi.fn() }
 })
 
+/** The text field is named by its visible label: "Post as X" / "Reply as X". */
+const POST_FIELD = /^(Post|Reply) as Fairhaven Water$/
+
 const PERSONA: StaffPersona = {
   id: 'persona-fairhavenwater',
   exerciseId: 'ex-mock-0001',
@@ -129,6 +132,21 @@ afterEach(() => {
   resetExerciseClock()
 })
 
+describe('PersonaComposer v2 — the text field is named by its visible label', () => {
+  it('is "Post as <name>" - no aria-label override hiding the visible text', async () => {
+    await renderComposer()
+    const field = screen.getByRole('textbox', { name: 'Post as Fairhaven Water' })
+    expect(field).not.toHaveAttribute('aria-label')
+    expect(screen.queryByLabelText('Post text')).not.toBeInTheDocument()
+  })
+
+  it('is "Reply as <name>" while a reply target is held', async () => {
+    await renderComposer({ replyTo: REPLY_TARGET })
+    expect(screen.getByRole('textbox', { name: 'Reply as Fairhaven Water' })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Post as Fairhaven Water' })).not.toBeInTheDocument()
+  })
+})
+
 describe('PersonaComposer v2 — attach by upload', () => {
   it('offers Upload and From library, accepts images AND video, and names the video format', async () => {
     await renderComposer()
@@ -147,7 +165,8 @@ describe('PersonaComposer v2 — attach by upload', () => {
 
     pick(png('flood.png'))
 
-    const row = await screen.findByTestId('attachment')
+    // Generous: this is the first async wait of a heavy file and the box may be loaded.
+    const row = await screen.findByTestId('attachment', undefined, { timeout: 8000 })
     expect(altField('flood.png')).toBeRequired()
     const bar = within(row).getByRole('progressbar', { name: 'Uploading flood.png' })
     expect(bar).toHaveAttribute('aria-valuemin', '0')
@@ -176,7 +195,7 @@ describe('PersonaComposer v2 — attach by upload', () => {
   it('keeps Post disabled - and says why - until every item is uploaded AND described', async () => {
     const user = userEvent.setup()
     await renderComposer()
-    await user.type(screen.getByLabelText('Post text'), 'Flooding on Main Street.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Flooding on Main Street.')
     expect(postButton()).toBeEnabled()
 
     pick(png('flood.png'))
@@ -203,7 +222,7 @@ describe('PersonaComposer v2 — attach by upload', () => {
     const onPublished = vi.fn<(post: Post) => void>()
     const user = userEvent.setup()
     await renderComposer({ onPublished })
-    await user.type(screen.getByLabelText('Post text'), 'Flooding on Main Street.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Flooding on Main Street.')
     pick(png('flood.png'))
     await screen.findByTestId('attachment')
     const asset = uploader.byName('flood.png').resolve()
@@ -216,12 +235,12 @@ describe('PersonaComposer v2 — attach by upload', () => {
     const post = onPublished.mock.calls[0]?.[0]
     expect(post?.media).toMatchObject([{ id: asset.id, kind: 'image', alt: 'Water over the curb' }])
     expect(screen.queryByTestId('attachment')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Post text')).toHaveValue('')
+    expect(screen.getByLabelText(POST_FIELD)).toHaveValue('')
     // Success: "Posted" + the post's SCENARIO time (14:00Z is 10:00 AM in the exercise zone).
     expect(screen.getByTestId('publish-success')).toHaveTextContent('Posted')
     expect(screen.getByTestId('publish-success-time')).toHaveTextContent('Sep 4, 2033, 10:00 AM')
     // Post disabled itself with the draft: focus moves to the text field for the next post.
-    expect(screen.getByLabelText('Post text')).toHaveFocus()
+    expect(screen.getByLabelText(POST_FIELD)).toHaveFocus()
     expect(screen.queryByTestId('publish-error')).not.toBeInTheDocument()
     // The R-003 origin line is unchanged.
     expect(screen.getByTestId('origin-label')).toHaveTextContent('SIMCELL · MANUAL')
@@ -289,7 +308,7 @@ describe('PersonaComposer v2 — attach by upload', () => {
   it('shows a failed upload as words + icon in an alert; the row must be removed before posting', async () => {
     const user = userEvent.setup()
     await renderComposer()
-    await user.type(screen.getByLabelText('Post text'), 'Text.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Text.')
     pick(png('flood.png'))
     const row = await screen.findByTestId('attachment')
 
@@ -351,7 +370,7 @@ describe('PersonaComposer v2 — attach from the library', () => {
   it('a picked asset becomes a "library" row needing alt text; unpicking removes it', async () => {
     const user = userEvent.setup()
     await renderComposer()
-    await user.type(screen.getByLabelText('Post text'), 'Photo.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Photo.')
     await user.click(screen.getByRole('button', { name: 'From library' }))
     await screen.findAllByRole('option')
 
@@ -398,6 +417,27 @@ describe('PersonaComposer v2 — attach from the library', () => {
     ])
   })
 
+  it('refuses to pick an asset that is ALREADY an upload row (no duplicate mediaId)', async () => {
+    const user = userEvent.setup()
+    await renderComposer()
+    pick(png('just-uploaded.png'))
+    await screen.findByTestId('attachment')
+    uploader.byName('just-uploaded.png').resolve()
+    await waitFor(() => expect(screen.getByText('Uploaded')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'From library' }))
+    const panel = within(screen.getByTestId('library-panel'))
+    // The uploaded file is in the library too (the upload registered it there).
+    const tile = await panel.findByRole('option', { name: /just-uploaded\.png/ })
+
+    await user.click(tile)
+
+    expect(screen.getByTestId('attach-error')).toHaveTextContent(
+      'That file is already attached to this post.',
+    )
+    expect(screen.getAllByTestId('attachment')).toHaveLength(1)
+    expect(tile).toHaveAttribute('aria-selected', 'false')
+  })
+
   it('locks the picker to the tray\'s kind and spends the capacity uploads already use', async () => {
     const user = userEvent.setup()
     await renderComposer()
@@ -414,7 +454,16 @@ describe('PersonaComposer v2 — attach from the library', () => {
     const panel = within(screen.getByTestId('library-panel'))
     await user.click(panel.getByRole('option', { name: /flood-main-street\.svg/ }))
     expect(screen.getAllByTestId('attachment')).toHaveLength(4)
-    expect(panel.getByRole('option', { name: /water-plant\.svg/ })).toHaveAttribute('aria-disabled', 'true')
+
+    // One slot left means the picker is single-select: the next pick REPLACES the library
+    // row (the tray stays at four) instead of hitting a dead "limit reached" tile.
+    await user.click(panel.getByRole('option', { name: /water-plant\.svg/ }))
+    const rows = screen.getAllByTestId('attachment')
+    expect(rows).toHaveLength(4)
+    expect(rows.filter(row => row.dataset.source === 'library')).toHaveLength(1)
+    expect(within(screen.getByTestId('attachments')).getByText('water-plant.svg')).toBeInTheDocument()
+    expect(within(screen.getByTestId('attachments')).queryByText('flood-main-street.svg'))
+      .not.toBeInTheDocument()
   })
 
   it('keeps the picked tile (and keyboard focus) when the host narrows the picker to its kind', async () => {
@@ -461,7 +510,7 @@ describe('PersonaComposer v2 — attach from the library', () => {
     expect(onDockKey).not.toHaveBeenCalled()
 
     // Panel closed: Esc is not intercepted, so the dock's handler gets it (closing the dock).
-    await user.click(screen.getByLabelText('Post text'))
+    await user.click(screen.getByLabelText(POST_FIELD))
     await user.keyboard('{Escape}')
     expect(onDockKey).toHaveBeenCalledWith('Escape')
   })
@@ -498,7 +547,7 @@ describe('PersonaComposer v2 — reply as persona', () => {
     await renderComposer({ onPublished })
     expect(screen.queryByTestId('reply-banner')).not.toBeInTheDocument()
 
-    await user.type(screen.getByLabelText('Post text'), 'Normal post.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Normal post.')
     await user.click(postButton())
 
     expect(onPublished.mock.calls[0]?.[0]?.parentPostId).toBeUndefined()
@@ -510,7 +559,7 @@ describe('PersonaComposer v2 — reply as persona', () => {
     const onClearReply = vi.fn()
     const user = userEvent.setup()
     await renderComposer({ replyTo: REPLY_TARGET, onClearReply, onPublished })
-    await user.type(screen.getByLabelText('Post text'), 'Yes - the advisory is lifted.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Yes - the advisory is lifted.')
 
     await user.click(postButton())
 
@@ -540,7 +589,7 @@ describe('PersonaComposer v2 — starting engagement', () => {
     expect(screen.getByTestId('baseline-summary')).toHaveTextContent('none')
     expect(screen.queryByRole('textbox', { name: 'Like' })).not.toBeInTheDocument()
 
-    await user.type(screen.getByLabelText('Post text'), 'No baseline.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'No baseline.')
     await user.click(postButton())
     expect(onPublished.mock.calls[0]?.[0]?.counts).toEqual({ reply: 0, repost: 0, like: 0 })
   })
@@ -549,7 +598,7 @@ describe('PersonaComposer v2 — starting engagement', () => {
     const onPublished = vi.fn<(post: Post) => void>()
     const user = userEvent.setup()
     await renderComposer({ onPublished })
-    await user.type(screen.getByLabelText('Post text'), 'Trending.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Trending.')
     await openBaseline(user)
 
     expect(screen.getByRole('button', { name: /Starting engagement/ })).toHaveAttribute('aria-expanded', 'true')
@@ -574,7 +623,7 @@ describe('PersonaComposer v2 — starting engagement', () => {
     const onPublished = vi.fn<(post: Post) => void>()
     const user = userEvent.setup()
     await renderComposer({ onPublished })
-    await user.type(screen.getByLabelText('Post text'), 'Blocked.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Blocked.')
     await openBaseline(user)
 
     await user.type(screen.getByRole('textbox', { name: 'Like' }), '1000001')
@@ -600,7 +649,7 @@ describe('PersonaComposer v2 — starting engagement', () => {
   it.each(['-3', '4.5', '1e3', 'many'])('rejects %s', async value => {
     const user = userEvent.setup()
     await renderComposer()
-    await user.type(screen.getByLabelText('Post text'), 'Text.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Text.')
     await openBaseline(user)
 
     await user.type(screen.getByRole('textbox', { name: 'Repost' }), value)
@@ -614,7 +663,7 @@ describe('PersonaComposer v2 — preview before Fire', () => {
   it('is a labelled STAFF frame showing author, text, media, "Replying to" and the start engagement', async () => {
     const user = userEvent.setup()
     await renderComposer({ replyTo: REPLY_TARGET, onClearReply: () => undefined })
-    await user.type(screen.getByLabelText('Post text'), 'Hello & welcome <b>team</b>')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Hello & welcome <b>team</b>')
     await user.click(screen.getByRole('button', { name: 'From library' }))
     await screen.findAllByRole('option')
     await user.click(within(screen.getByTestId('library-panel')).getByRole('option', { name: /flood-main-street\.svg/ }))
@@ -651,7 +700,7 @@ describe('PersonaComposer v2 — preview before Fire', () => {
   it('is never a participant post card: no article, no avatar, no like / repost row', async () => {
     const user = userEvent.setup()
     await renderComposer()
-    await user.type(screen.getByLabelText('Post text'), 'Text.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Text.')
 
     const preview = screen.getByTestId('persona-preview')
     expect(within(preview).queryByRole('article')).not.toBeInTheDocument()
@@ -666,14 +715,14 @@ describe('PersonaComposer v2 — keyboard (NFR-001)', () => {
     const onPublished = vi.fn<(post: Post) => void>()
     const user = userEvent.setup()
     await renderComposer({ onPublished })
-    await user.type(screen.getByLabelText('Post text'), 'First.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'First.')
     await user.click(screen.getByRole('button', { name: /Starting engagement/ }))
     await user.type(screen.getByRole('textbox', { name: 'Like' }), '5')
 
     await user.keyboard('{Control>}{Enter}{/Control}')
     expect(onPublished).toHaveBeenCalledTimes(1)
 
-    await user.type(screen.getByLabelText('Post text'), 'Second.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Second.')
     await user.keyboard('{Meta>}{Enter}{/Meta}')
     expect(onPublished).toHaveBeenCalledTimes(2)
   })
@@ -682,7 +731,7 @@ describe('PersonaComposer v2 — keyboard (NFR-001)', () => {
     const onPublished = vi.fn<(post: Post) => void>()
     const user = userEvent.setup()
     await renderComposer({ onPublished })
-    await user.type(screen.getByLabelText('Post text'), 'Ready to go.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Ready to go.')
     await user.click(screen.getByRole('button', { name: /Starting engagement/ }))
 
     await user.type(screen.getByRole('textbox', { name: 'Like' }), '12{Enter}')
@@ -699,7 +748,7 @@ describe('PersonaComposer v2 — keyboard (NFR-001)', () => {
   it('every control is reachable by Tab, in order, ending at Post', async () => {
     const user = userEvent.setup()
     await renderComposer()
-    await user.type(screen.getByLabelText('Post text'), 'Tab order.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Tab order.')
 
     const reached: string[] = []
     for (let i = 0; i < 6; i += 1) {
@@ -721,7 +770,7 @@ describe('PersonaComposer v2 — the library asset in the mock registry is what 
     const onPublished = vi.fn<(post: Post) => void>()
     const user = userEvent.setup()
     await renderComposer({ onPublished })
-    await user.type(screen.getByLabelText('Post text'), 'Photo.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Photo.')
     await user.click(screen.getByRole('button', { name: 'From library' }))
     await screen.findAllByRole('option')
     await user.click(within(screen.getByTestId('library-panel')).getByRole('option', { name: /flood-main-street\.svg/ }))

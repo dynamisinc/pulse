@@ -448,3 +448,17 @@
   font-size: 11.5px;
   color: #4a5360;
 }
+
+/* The two-step choice under an 'unconfirmed' (post status unknown) message. The message
+   itself is focusable (tabIndex -1) so focus has a safe, button-free landing place. */
+.errorMessage:focus-visible {
+  outline: 2px solid #8a1c14;
+  outline-offset: 2px;
+}
+
+.bannerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}

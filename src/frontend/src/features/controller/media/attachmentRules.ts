@@ -37,6 +37,7 @@ export const ALT_MAX_LENGTH = 1000
 export const MIXED_MEDIA_MESSAGE = 'Attach up to 4 images or 1 video, not both.'
 export const TOO_MANY_IMAGES_MESSAGE = `You can attach up to ${MAX_IMAGES} images.`
 export const TOO_MANY_VIDEOS_MESSAGE = `You can attach only ${MAX_VIDEOS} video.`
+export const ALREADY_ATTACHED_MESSAGE = 'That file is already attached to this post.'
 
 /** How many items of `kind` one post may carry. */
 export function kindLimit(kind: MediaKind): number {

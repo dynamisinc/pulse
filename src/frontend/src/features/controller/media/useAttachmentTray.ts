@@ -35,6 +35,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import type { MediaAssetView, MediaKind, StaffMediaAssetView } from '@/core/media'
 import type { CreatePostMedia } from '@/features/social'
 import {
+  ALREADY_ATTACHED_MESSAGE,
   MAX_IMAGES,
   checkKinds,
   effectiveAlt,
@@ -161,9 +162,20 @@ export function useAttachmentTray(): UseAttachmentTrayResult {
       const keptLibraryIds = new Set(
         kept.filter(item => item.source === 'library').map(item => item.asset?.id),
       )
+      // An asset the controller just UPLOADED also shows up in the library; picking it
+      // again would send the same `mediaId` twice (the server answers 400 for a duplicate),
+      // so it is refused here with a message instead.
+      const uploadedIds = new Set(
+        items.filter(item => item.source === 'upload').map(item => item.asset?.id),
+      )
+      let duplicate = false
       const added: TrayItem[] = []
       for (const id of ids) {
         if (keptLibraryIds.has(id)) continue
+        if (uploadedIds.has(id)) {
+          duplicate = true
+          continue
+        }
         const asset = lookup(id)
         if (asset === undefined) continue
         added.push({
@@ -183,7 +195,7 @@ export function useAttachmentTray(): UseAttachmentTrayResult {
         setAttachError(refusal)
         return
       }
-      setAttachError(undefined)
+      setAttachError(duplicate ? ALREADY_ATTACHED_MESSAGE : undefined)
       setItems(next)
     },
     [items, nextKey],

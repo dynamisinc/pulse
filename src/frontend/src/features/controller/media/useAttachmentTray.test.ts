@@ -11,7 +11,11 @@ import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { StaffMediaAssetView } from '@/core/media'
 import { fakeFile } from '@/test/fakeMediaUploader'
-import { MIXED_MEDIA_MESSAGE, TOO_MANY_IMAGES_MESSAGE } from './attachmentRules'
+import {
+  ALREADY_ATTACHED_MESSAGE,
+  MIXED_MEDIA_MESSAGE,
+  TOO_MANY_IMAGES_MESSAGE,
+} from './attachmentRules'
 import { useAttachmentTray } from './useAttachmentTray'
 
 const photo = (id: string, fileName = `${id}.png`): StaffMediaAssetView => ({
@@ -214,6 +218,29 @@ describe('useAttachmentTray — library picks', () => {
     act(() => result.current.setLibrarySelection(['img-1', 'img-2', 'img-3', 'img-4', 'img-5'], lookup))
     expect(result.current.attachError).toBe(TOO_MANY_IMAGES_MESSAGE)
     expect(result.current.libraryIds).toEqual(['img-1'])
+  })
+
+  it('refuses to pick an asset that is already an UPLOAD row - no duplicate mediaId', () => {
+    const { result } = renderHook(() => useAttachmentTray())
+    act(() => {
+      result.current.addFiles([fakeFile('up.png', 'image/png')])
+    })
+    const key = result.current.items[0]?.key ?? ''
+    act(() => result.current.markUploaded(key, { id: 'img-1', kind: 'image', url: 'blob:up' }))
+
+    act(() => result.current.setLibrarySelection(['img-1'], lookup))
+
+    expect(result.current.attachError).toBe(ALREADY_ATTACHED_MESSAGE)
+    expect(result.current.items).toHaveLength(1)
+    expect(result.current.items[0]?.source).toBe('upload')
+    expect(result.current.libraryIds).toEqual([])
+
+    // Other picks in the same selection still go through; the message clears afterwards.
+    act(() => result.current.setLibrarySelection(['img-1', 'img-2'], lookup))
+    expect(result.current.libraryIds).toEqual(['img-2'])
+    expect(result.current.attachError).toBe(ALREADY_ATTACHED_MESSAGE)
+    act(() => result.current.setLibrarySelection(['img-2'], lookup))
+    expect(result.current.attachError).toBeUndefined()
   })
 
   it('ignores an id the lookup cannot resolve', () => {

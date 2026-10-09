@@ -36,6 +36,11 @@
  *     success shows "Posted" with the new post's scenario time. (The old swallowed
  *     `.catch(() => {})` is gone.) In live mode exactly ONE XC-004 event is emitted
  *     per post - the server's.
+ *   - A POST THAT MAY ALREADY BE LIVE (unreadable 2xx, 504, or no response at all) is
+ *     titled "Post status unknown", not "failed", and withholds the blind Retry: Post
+ *     and Ctrl/Cmd+Enter stay disabled until the controller picks "Post again anyway..."
+ *     -> "I checked the feed - post again", or "Discard draft (it went out)". Focus
+ *     goes to the message, never to a button, so one stray Enter cannot double-post.
  *
  * IDENTITY HEADER (R-001/R-004): renders the ACTIVE PERSONA - the cross-surface
  * `<Avatar>` + display name + the canonical `<VerifiedMark>` seal (identical to
@@ -81,6 +86,7 @@ import { IconButton } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faCircleCheck,
+  faCircleQuestion,
   faImages,
   faReply,
   faTriangleExclamation,
@@ -88,6 +94,7 @@ import {
   faXmark,
 } from '@fortawesome/free-solid-svg-icons'
 import {
+  CobraLinkButton,
   CobraPrimaryButton,
   CobraSecondaryButton,
   CobraTextField,
@@ -169,12 +176,15 @@ export function PersonaComposer({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const textInputRef = useRef<HTMLTextAreaElement | null>(null)
   const retryButtonRef = useRef<HTMLButtonElement | null>(null)
+  const unconfirmedMessageRef = useRef<HTMLSpanElement | null>(null)
   const uploadButtonRef = useRef<HTMLButtonElement | null>(null)
   const libraryButtonRef = useRef<HTMLButtonElement | null>(null)
   const libraryPanelRef = useRef<HTMLDivElement | null>(null)
   const libraryPanelId = useId()
   const blockersId = useId()
   const [libraryOpen, setLibraryOpen] = useState(false)
+  // Step 2 of "Post again anyway...": armed once the controller has said they will check.
+  const [repostArmed, setRepostArmed] = useState(false)
 
   // Opening the picker moves focus INTO it (the checked filter option), so a keyboard
   // user lands where the next Tab is the grid.
@@ -188,9 +198,19 @@ export function PersonaComposer({
   // Focus must never fall to <body> when a publish finishes: pressing Post leaves the
   // (now disabled, or about-to-be-removed) button focused. Success hands focus to the
   // text field for the next post; a failure hands it to Retry (or the text field).
-  const { status, lastPublished, failure } = compose
+  //
+  // The exception is a post that MAY ALREADY BE LIVE: focus goes to the banner's MESSAGE
+  // (tabIndex -1) and never to a button, so the stray second Enter of a double-press
+  // lands on plain text instead of re-posting. The same happens when the controller
+  // steps between "Post again anyway..." and "I checked the feed" - the new button is
+  // one deliberate Tab away.
+  const { status, lastPublished, failure, awaitingDecision } = compose
   useEffect(() => {
     if (status !== 'success' && status !== 'error') return
+    if (awaitingDecision) {
+      unconfirmedMessageRef.current?.focus()
+      return
+    }
     const active = document.activeElement
     const focusLost =
       active === null ||
@@ -202,7 +222,18 @@ export function PersonaComposer({
       ? retry
       : textInputRef.current
     target?.focus()
-  }, [status, lastPublished, failure])
+  }, [status, lastPublished, failure, awaitingDecision])
+
+  // A new outcome starts the two-step confirm over.
+  useEffect(() => {
+    setRepostArmed(false)
+  }, [failure])
+
+  const armRepost = (armed: boolean) => {
+    setRepostArmed(armed)
+    // The clicked button is replaced by the next step's: park focus on the message.
+    unconfirmedMessageRef.current?.focus()
+  }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -279,7 +310,7 @@ export function PersonaComposer({
         minRows={3}
         fullWidth
         inputRef={textInputRef}
-        slotProps={{ htmlInput: { 'aria-label': 'Post text', readOnly: locked } }}
+        slotProps={{ htmlInput: { readOnly: locked } }}
       />
 
       <section className={styles.attach} aria-label="Attachments">
@@ -330,13 +361,17 @@ export function PersonaComposer({
             id={libraryPanelId}
             className={styles.libraryPanel}
             data-testid="library-panel"
+            // While a post is in flight the tray must not change under it.
+            inert={locked}
             onKeyDown={handlePanelKeyDown}
           >
             <MediaLibraryPicker
               kind={tray.libraryLimits.kind}
               max={tray.libraryLimits.max}
               selectedIds={tray.libraryIds}
-              onChange={ids => tray.setLibrarySelection(ids, lookupLibraryAsset)}
+              onChange={ids => {
+                if (!locked) tray.setLibrarySelection(ids, lookupLibraryAsset)
+              }}
             />
           </div>
         )}
@@ -365,28 +400,95 @@ export function PersonaComposer({
       />
 
       {compose.status === 'error' && compose.failure !== undefined && (
-        <div className={styles.errorBanner} role="alert" data-testid="publish-error">
-          <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" />
-          <div className={styles.errorText}>
-            <span className={styles.errorTitle}>
-              Post failed{compose.failure.status !== undefined
-                ? ` (HTTP ${compose.failure.status})`
-                : ''}
-            </span>
-            <span data-testid="publish-error-message">{compose.failure.message}</span>
-            <span>Your draft is kept.</span>
+        compose.awaitingDecision ? (
+          <div className={styles.errorBanner} role="alert" data-testid="publish-unconfirmed">
+            <FontAwesomeIcon icon={faCircleQuestion} aria-hidden="true" />
+            <div className={styles.errorText}>
+              <span className={styles.errorTitle}>
+                Post status unknown{compose.failure.status !== undefined
+                  ? ` (HTTP ${compose.failure.status})`
+                  : ''}
+              </span>
+              <span
+                ref={unconfirmedMessageRef}
+                tabIndex={-1}
+                className={styles.errorMessage}
+                data-testid="publish-error-message"
+              >
+                {compose.failure.message}
+              </span>
+              <span>Your draft is kept. Post is paused until you choose.</span>
+              <div className={styles.bannerActions}>
+                {repostArmed ? (
+                  <>
+                    <CobraSecondaryButton
+                      type="button"
+                      size="small"
+                      sx={{ paddingLeft: '12px', paddingRight: '12px' }}
+                      onClick={() => compose.repostAnyway()}
+                    >
+                      I checked the feed — post again
+                    </CobraSecondaryButton>
+                    <CobraLinkButton
+                      type="button"
+                      size="small"
+                      sx={{ paddingLeft: '12px', paddingRight: '12px' }}
+                      onClick={() => armRepost(false)}
+                    >
+                      Back
+                    </CobraLinkButton>
+                  </>
+                ) : (
+                  <>
+                    <CobraSecondaryButton
+                      type="button"
+                      size="small"
+                      sx={{ paddingLeft: '12px', paddingRight: '12px' }}
+                      onClick={() => armRepost(true)}
+                    >
+                      Post again anyway…
+                    </CobraSecondaryButton>
+                    <CobraSecondaryButton
+                      type="button"
+                      size="small"
+                      sx={{ paddingLeft: '12px', paddingRight: '12px' }}
+                      onClick={() => {
+                        compose.discardUnconfirmed()
+                        // The choice button is about to disappear: hand focus on.
+                        textInputRef.current?.focus()
+                      }}
+                    >
+                      Discard draft (it went out)
+                    </CobraSecondaryButton>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
-          <CobraSecondaryButton
-            ref={retryButtonRef}
-            type="button"
-            size="small"
-            disabled={!compose.canPublish}
-            sx={{ paddingLeft: '12px', paddingRight: '12px' }}
-            onClick={() => compose.publish()}
-          >
-            Retry
-          </CobraSecondaryButton>
-        </div>
+        ) : (
+          <div className={styles.errorBanner} role="alert" data-testid="publish-error">
+            <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" />
+            <div className={styles.errorText}>
+              <span className={styles.errorTitle}>
+                Post failed{compose.failure.status !== undefined
+                  ? ` (HTTP ${compose.failure.status})`
+                  : ''}
+              </span>
+              <span data-testid="publish-error-message">{compose.failure.message}</span>
+              <span>Your draft is kept.</span>
+            </div>
+            <CobraSecondaryButton
+              ref={retryButtonRef}
+              type="button"
+              size="small"
+              disabled={!compose.canPublish}
+              sx={{ paddingLeft: '12px', paddingRight: '12px' }}
+              onClick={() => compose.publish()}
+            >
+              Retry
+            </CobraSecondaryButton>
+          </div>
+        )
       )}
 
       {compose.status === 'success' && compose.lastPublished !== null && (

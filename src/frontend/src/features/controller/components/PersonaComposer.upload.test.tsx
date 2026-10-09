@@ -53,6 +53,9 @@ vi.mock('@/core/media/readImageSize', () => ({
   readImageSize: vi.fn().mockResolvedValue({ width: 800, height: 600 }),
 }))
 
+/** The text field is named by its visible label: "Post as X" / "Reply as X". */
+const POST_FIELD = /^(Post|Reply) as Fairhaven Water$/
+
 const PERSONA: StaffPersona = {
   id: 'persona-fairhavenwater',
   exerciseId: 'ex-mock-0001',
@@ -138,7 +141,7 @@ describe('PersonaComposer (real mock upload client)', () => {
     const onPublished = vi.fn<(post: Post) => void>()
     const user = userEvent.setup()
     await renderComposer(onPublished)
-    await user.type(screen.getByLabelText('Post text'), 'Briefing.')
+    await user.type(screen.getByLabelText(POST_FIELD), 'Briefing.')
 
     pick(fakeFile('briefing.mp4', 'video/mp4'))
 
