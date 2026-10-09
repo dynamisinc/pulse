@@ -8,6 +8,11 @@
  *     const isRowRemoved = useIsRowRemoved()
  *     <LiveWorldColumn isRowRemoved={isRowRemoved} renderRowActions={renderTakedown} ... />
  *
+ * THIS WIRING IS WHAT MAKES A ROW SAY "REMOVED". The column's `isRowRemoved` drives the persistent
+ * REMOVED marker on the author line and disables "Reply as…" (and `R`) on a taken-down row; the
+ * Take down slot (`liveWorld/TakedownAction`) deliberately draws no second "Removed" and renders
+ * nothing for a takedown made elsewhere, so without this prop a removed row would show no marker.
+ *
  * WHY HOOKS, NOT JUST `isPostRemoved`. The column memoizes its rows, so a predicate that reads
  * the store at call time would be correct but would never be CALLED again after a takedown — the
  * row would not re-render. {@link useIsRowRemoved} returns a predicate whose identity changes

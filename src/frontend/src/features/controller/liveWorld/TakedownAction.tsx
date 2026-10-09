@@ -7,13 +7,21 @@
  * only, MUI 9 `sx` only — unmistakably the machine, never a participant surface.
  *
  * HOW IT IS MOUNTED. It is NOT imported by the column. The orchestrator mounts it through C2's
- * `renderRowActions` slot (implementation.md §4.2):
+ * `renderRowActions` slot AND wires the column's `isRowRemoved` prop to the same removed-post store
+ * (implementation.md §4.2):
  *
- *     <LiveWorldColumn renderRowActions={post => <TakedownAction post={post} />} ... />
+ *     // module level, one stable function:
+ *     const renderTakedown = (post: LiveWorldPost) => <TakedownAction post={post} />
+ *     // inside a component (a hook cannot run in a callback):
+ *     const isRowRemoved = useIsRowRemoved()
+ *     <LiveWorldColumn renderRowActions={renderTakedown} isRowRemoved={isRowRemoved} ... />
  *
- * The slot renders at the end of each row's bottom line, keyed by the post's id with a stable
- * object identity, so this component's state (an open confirm step, an in-flight request, a
- * failure) survives the column's re-renders.
+ * `isRowRemoved` is what makes the row itself say REMOVED (a marker on the author line, "Reply as…"
+ * disabled, `R` a no-op): that is the PERSISTENT removed state, and it is the column's, so this
+ * slot never draws a second "Removed" for a row the column already marks. The slot renders at the
+ * end of each row's bottom line, keyed by the post's id with a stable object identity, so this
+ * component's state (an open confirm step, an in-flight request, a failure) survives the column's
+ * re-renders.
  *
  * THE FLOW — two clicks, fully keyboard-operable.
  *   1. **Take down** opens a small confirm popover: a four-way category radio group
@@ -22,33 +30,54 @@
  *   2. **Confirm take down** closes the popover and calls `DELETE /api/staff/posts/{id}?category=`
  *      (`takedownService`). Nothing is sent until that second click.
  *   Keyboard: Enter/Space on Take down opens the step with focus on the selected category;
- *   Arrow keys change it; Tab/Shift+Tab cycle category -> Confirm -> Cancel and wrap; Esc cancels;
- *   on any close focus returns to the Take down control. The step is portalled (the column
- *   ignores J/K/R/N for keys that originate outside its list DOM or in a form field), and an
- *   irreversible action always costs the deliberate second activation.
+ *   Arrow keys change it; Tab/Shift+Tab cycle category -> Cancel -> Confirm and wrap; Esc cancels;
+ *   on close focus returns to the Take down control. The step is portalled (the column ignores
+ *   J/K/R/N for keys that originate outside its list DOM or in a form field).
  *
- * OUTCOMES (never colour alone — NFR-001: every state is an icon AND text).
- *   - pending  the control stays in place, reads "Taking down…" and ignores activation
- *              (`aria-disabled`, still focusable, so focus is not lost mid-request);
- *   - success  the control is replaced by a **Removed** marker (ban icon + "Removed"): the row
- *              stays for the record and nothing actionable remains here, so a repeat is
- *              impossible from this row (and harmless anywhere else — the endpoint is
- *              idempotent). Focus moves to the marker once, if THIS action caused it. The
- *              marker also appears when ANOTHER controller's takedown reaches this tab, or when
- *              the row remounts after a filter change — "removed" is read from the session's
- *              `removedPosts` store, not from component state;
+ * THE CONFIRM STEP IS NON-MODAL MARKUP WITH ITS OWN MODAL BEHAVIOUR. It is an MUI `Popper` +
+ * `ClickAwayListener`, deliberately NOT a `Popover`: a Popover is an MUI Modal, which sets
+ * `aria-hidden` on the whole app root and lays an invisible backdrop over it — so the console's
+ * Ctrl+K palette (an inline `aria-modal` inside that root) opened over it would be hidden from
+ * assistive technology and unclickable. The Popper does neither. The dialog still declares itself
+ * `role="dialog" aria-modal="true"`, traps Tab, and closes on Esc, Cancel or a click anywhere else.
+ *
+ * FOCUS RULES (NFR-001, WCAG 2.4.3 / 3.2.2). Focus is only ever moved when it would otherwise be
+ * lost or when the controller's own gesture is what moves it:
+ *   - open: focus goes to the selected category. Close (Esc / Cancel / Confirm / click-away):
+ *     back to the Take down control - but only if focus is on <body> or still inside the step,
+ *     never off an input the controller just clicked into;
+ *   - the pending control ("Taking down…", `aria-disabled`, still focusable) keeps focus
+ *     mid-request;
+ *   - **Retry** and **Dismiss** unmount their own button, so activating either puts focus straight
+ *     back on the Take down control (which is the pending control during a Retry);
+ *   - when a request SETTLES, the confirmation (success) or Retry (failure) takes focus only if
+ *     focus is lost (on <body> / detached - the control that had it just unmounted). If the
+ *     controller has moved on - J/K to another row, typing in the persona composer - focus stays
+ *     exactly where they put it, so a stray Space can never re-send a takedown. On success a
+ *     polite live region says so instead; a failure announces itself (`role="alert"`).
+ *
+ * OUTCOMES (never colour alone - NFR-001: every state is an icon AND text).
+ *   - pending  "Taking down…" in place of the control, ignoring activation;
+ *   - success  the control is replaced by a compact confirmation to THE CONTROLLER WHO DID IT:
+ *              "Taken down · {category}" (check icon + text, `tabIndex -1`, a plain `note` - not
+ *              a live region, because it takes focus and focus already announces it). The row's
+ *              own REMOVED marker (the column's, via `isRowRemoved`) is the persistent state; this
+ *              is the acknowledgement, with the category the column does not know. After a
+ *              remount, or when ANOTHER controller's `PostRemoved` reaches this tab, no category
+ *              is known and the slot renders nothing - the column's marker covers it;
  *   - failure  an alert with the server's plain-text message, **Retry** (re-sends the category
- *              the controller already confirmed) and **Dismiss**; focus moves to Retry.
+ *              the controller already confirmed) and **Dismiss**.
  *
  * ABSENT, NOT DISABLED, FOR NON-CONTROLLERS (CTL-033): when the controller-identity seam's role is
  * not `controller` the component renders nothing at all. (The backend refuses anyone else too.)
  *
- * FOCUS-TRAP CONTRACT (F2, `core/a11y/modalPriority`). The confirm step is a modal dialog with its
- * own small trap (initial focus, Tab wrap, pull-back of a focus that strays outside). Every part
- * of that trap STANDS ASIDE while any other `[aria-modal="true"]` element is mounted
- * (`hasOtherModalMounted`): no focus on open, no Tab wrap, no document-level pull-back. MUI's own
- * focus management is switched off for the same reason (it would fight the shell overlay), as are
- * its scroll lock and transitions (a dense console does not want a jump or a fade for a popover).
+ * FOCUS-TRAP CONTRACT (F2, `core/a11y/modalPriority`). The step's trap (initial focus, Tab wrap)
+ * STANDS ASIDE while any other `[aria-modal="true"]` element is mounted (`hasOtherModalMounted`):
+ * no focus on open, no Tab wrap, no focus return on close. There is NO document-level pull-back at
+ * all: because the step is non-modal (a click elsewhere is a click-away), focus that moves outside
+ * it - a click into the composer, a modal taking focus, a programmatic move - CLOSES the step and
+ * leaves focus exactly where it went (the control's own click is the one exception: it toggles).
+ * Its z-index sits below the palette's, so a modal opened over it wins visually as well.
  *
  * TELEMETRY. None here. `useTakedown` emits the one XC-004 `steering_action` per successful
  * takedown (the server emits none, DP-9), so this folder never needs the exercise scope.
@@ -60,13 +89,24 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-  type MouseEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   type RefObject,
 } from 'react'
-import { Box, FormControlLabel, Popover, Radio, RadioGroup, Stack, Typography } from '@mui/material'
+import {
+  Box,
+  ClickAwayListener,
+  FormControlLabel,
+  Paper,
+  Popper,
+  Radio,
+  RadioGroup,
+  Stack,
+  Typography,
+} from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
-  faBan,
+  faCheck,
   faHourglassHalf,
   faRotateRight,
   faTrashCan,
@@ -87,7 +127,7 @@ import {
   type TakedownCategory,
 } from '../services/takedownService'
 import type { LiveWorldPost } from './liveWorldModel'
-import { liveWorldTokens, monoMeta } from './liveWorldStyles'
+import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 
 export interface TakedownActionProps {
   /** The row's post, as C2's `renderRowActions` hands it over. */
@@ -111,6 +151,17 @@ const ROW_BUTTON_SX = {
   },
 } as const
 
+/**
+ * Above the console's rows, BELOW a modal (the Ctrl+K palette is 1300): a modal opened over the
+ * step must also paint over it.
+ */
+const POPPER_Z_INDEX = 1250
+
+/** The visible label of a category (the picker's own words). */
+function labelOfCategory(category: TakedownCategory): string {
+  return TAKEDOWN_CATEGORIES.find(option => option.value === category)?.label ?? category
+}
+
 /** Tabbable descendants, in DOM order; only the CHECKED radio of a group is a Tab stop. */
 function tabbableIn(container: HTMLElement): HTMLElement[] {
   const found = container.querySelectorAll<HTMLElement>(
@@ -121,13 +172,19 @@ function tabbableIn(container: HTMLElement): HTMLElement[] {
   )
 }
 
+/** True when keyboard focus has nowhere useful to be: on <body>, nothing, or a detached node. */
+function focusIsLost(): boolean {
+  const active = document.activeElement
+  return active === null || active === document.body || !active.isConnected
+}
+
 interface ConfirmPanelProps {
   /** The dialog element, owned by the caller so it can tell "another modal" from this one. */
   readonly panelRef: RefObject<HTMLDivElement | null>
   /**
-   * True from the moment the caller starts closing the step. The dialog stays in the document for a
-   * beat after that (the popover's exit), and the caller is about to move focus OUT of it - the
-   * trap must not pull that focus straight back in.
+   * True from the moment the caller starts closing the step. The dialog is still in the document
+   * until React commits the close, and the caller is about to move focus OUT of it - the trap must
+   * not pull that focus straight back in.
    */
   readonly closingRef: RefObject<boolean>
   readonly authorName: string
@@ -135,12 +192,14 @@ interface ConfirmPanelProps {
   readonly onCategoryChange: (category: TakedownCategory) => void
   readonly onConfirm: () => void
   readonly onCancel: () => void
+  /** Focus landed outside the step (a click elsewhere, another modal, a programmatic move). */
+  readonly onFocusLeave: (target: Node) => void
 }
 
 /**
- * The popover's content and its small focus trap. Mounted only while the popover is open, so the
- * trap's effect IS the dialog's lifetime. Esc is handled by the popover itself (it owns the
- * keydown on its root and stops it propagating).
+ * The confirm step's content and its small focus trap. Mounted only while the step is open, so the
+ * trap's effect IS the dialog's lifetime. Esc is handled here (and stopped from propagating, so the
+ * console's own key handlers never also act on it).
  */
 function ConfirmPanel({
   panelRef,
@@ -150,8 +209,14 @@ function ConfirmPanel({
   onCategoryChange,
   onConfirm,
   onCancel,
+  onFocusLeave,
 }: ConfirmPanelProps) {
   const titleId = useId()
+  // The latest handler, read at event time, so the listener below subscribes once per open.
+  const focusLeaveRef = useRef(onFocusLeave)
+  useLayoutEffect(() => {
+    focusLeaveRef.current = onFocusLeave
+  }, [onFocusLeave])
   const descriptionId = useId()
   const groupLabelId = useId()
 
@@ -159,18 +224,20 @@ function ConfirmPanel({
     const panel = panelRef.current
     if (panel === null) return undefined
 
-    // Another modal (the shell overlay) is up: it owns focus — take none (F2 contract).
+    // Another modal (the shell overlay / the palette) is up: it owns focus - take none (F2).
+    // `preventScroll`: the popper is positioned a frame later; focusing must not jump the page.
     if (!hasOtherModalMounted(panel)) {
       const checked = panel.querySelector<HTMLElement>('input[type="radio"]:checked')
-      ;(checked ?? panel).focus()
+      ;(checked ?? panel).focus({ preventScroll: true })
     }
 
-    // Focus that strays outside is pulled back — unless another modal is mounted.
+    // Focus that lands outside the step ends it - and stays where it went: never pulled back (a
+    // pull-back would fight a click into another field, and the shell overlay's own trap).
     function handleFocusIn(event: FocusEvent): void {
       const target = event.target
       if (panel === null || !(target instanceof Node) || panel.contains(target)) return
-      if (closingRef.current || hasOtherModalMounted(panel)) return
-      ;(tabbableIn(panel)[0] ?? panel).focus()
+      if (closingRef.current) return
+      focusLeaveRef.current(target)
     }
     document.addEventListener('focusin', handleFocusIn)
     return () => {
@@ -179,6 +246,12 @@ function ConfirmPanel({
   }, [panelRef, closingRef])
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+    if (event.key === 'Escape') {
+      event.stopPropagation()
+      event.preventDefault()
+      onCancel()
+      return
+    }
     if (event.key !== 'Tab') return
     const panel = panelRef.current
     // Closing, or another modal owns the keyboard right now: do not wrap (F2 contract).
@@ -287,48 +360,90 @@ export function TakedownAction({ post }: TakedownActionProps) {
   const takedown = useTakedown(post.id)
 
   const triggerRef = useRef<HTMLButtonElement>(null)
-  const markerRef = useRef<HTMLSpanElement>(null)
+  const confirmationRef = useRef<HTMLSpanElement>(null)
   const retryRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const closingRef = useRef(false)
+  /** Set by Retry / Dismiss (their own button is about to unmount): refocus the control. */
+  const refocusTriggerRef = useRef(false)
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
   const [category, setCategory] = useState<TakedownCategory>(DEFAULT_TAKEDOWN_CATEGORY)
+  const [announcement, setAnnouncement] = useState('')
   const open = anchorEl !== null
 
-  const { phase, removed, removedHere } = takedown
+  const { phase, failure, removed, takenDownAs } = takedown
+  const authorName = post.authorDisplayName
+  const pending = phase === 'pending'
 
-  // This action's own success: the trigger is gone, so say where focus went (the marker).
+  // Retry / Dismiss unmounted the failure box that held focus: land on the control that replaced it
+  // (the pending control during a Retry, the idle one after a Dismiss).
   useLayoutEffect(() => {
-    if (removed && removedHere) markerRef.current?.focus()
-  }, [removed, removedHere])
-  // This action's own failure: the trigger is gone, so focus lands on the way forward (Retry).
+    if (!refocusTriggerRef.current || phase === 'failed') return
+    refocusTriggerRef.current = false
+    triggerRef.current?.focus()
+  }, [phase])
+
+  // This action's own success. Focus the confirmation ONLY if focus was lost with the control that
+  // had it; if the controller has moved on, leave focus alone and say so politely instead.
   useLayoutEffect(() => {
-    if (phase === 'failed') retryRef.current?.focus()
+    if (!removed || takenDownAs === undefined) return
+    if (focusIsLost()) {
+      confirmationRef.current?.focus()
+    } else {
+      setAnnouncement(
+        `The post by ${authorName} is taken down: ${labelOfCategory(takenDownAs)}.`,
+      )
+    }
+  }, [removed, takenDownAs, authorName])
+
+  // This action's own failure: same rule - Retry takes focus only when it would otherwise be lost.
+  useLayoutEffect(() => {
+    if (phase === 'failed' && focusIsLost()) retryRef.current?.focus()
   }, [phase])
 
   // Absent, not disabled, for anyone who is not a controller (CTL-033). Hooks above all ran.
   if (role !== 'controller') return null
 
-  const authorName = post.authorDisplayName
-
-  function openConfirm(event: MouseEvent<HTMLElement>): void {
+  function openConfirm(event: ReactMouseEvent<HTMLElement>): void {
     if (phase === 'pending') return
+    // A click on the control while the step is open closes it (the click-away ignores the control).
+    if (open) {
+      closeConfirm()
+      return
+    }
     closingRef.current = false
     setCategory(DEFAULT_TAKEDOWN_CATEGORY)
     setAnchorEl(event.currentTarget)
   }
 
   /**
-   * Closes the step; focus returns to the control that opened it - unless ANOTHER modal (the shell
-   * overlay) is mounted, which then owns focus. "Another" is judged from this step's own dialog,
-   * which is still in the document at this moment and must not count against itself.
+   * Closes the step. Focus returns to the control that opened it when it would otherwise be lost
+   * (it is inside the step, or on <body>) - never off something the controller clicked into - and
+   * never while ANOTHER modal is mounted, which then owns focus. "Another" is judged from this
+   * step's own dialog, still in the document at this moment, which must not count against itself.
    */
   function closeConfirm(): void {
     closingRef.current = true
     setAnchorEl(null)
     const trigger = triggerRef.current
-    const own = panelRef.current ?? trigger
-    if (trigger !== null && own !== null && !hasOtherModalMounted(own)) trigger.focus()
+    const panel = panelRef.current
+    const own = panel ?? trigger
+    if (trigger === null || own === null || hasOtherModalMounted(own)) return
+    if (focusIsLost() || (panel !== null && panel.contains(document.activeElement))) {
+      trigger.focus()
+    }
+  }
+
+  function handleClickAway(event: MouseEvent | TouchEvent): void {
+    // The control's own click is handled by `openConfirm` (it toggles).
+    if (event.target instanceof Node && anchorEl?.contains(event.target) === true) return
+    closeConfirm()
+  }
+
+  function handleFocusLeave(target: Node): void {
+    // The control's own click is handled by `openConfirm` (it toggles); anything else ends it.
+    if (anchorEl?.contains(target) === true) return
+    closeConfirm()
   }
 
   function confirm(): void {
@@ -336,16 +451,38 @@ export function TakedownAction({ post }: TakedownActionProps) {
     takedown.takeDown(category)
   }
 
-  if (removed) {
-    return (
+  function retry(): void {
+    refocusTriggerRef.current = true
+    takedown.retry()
+  }
+
+  function dismiss(): void {
+    refocusTriggerRef.current = true
+    takedown.dismiss()
+  }
+
+  // Taken down, but not by this instance (another controller's push, or this row remounted):
+  // there is no category to confirm, and the column's REMOVED marker (`isRowRemoved`) already
+  // says it. (While THIS instance's request is in flight the store may already say removed:
+  // keep showing "pending".)
+  if (removed && takenDownAs === undefined && !pending) return null
+
+  let content: ReactNode
+  // `removed` alone is not "confirmed": the store flips a beat BEFORE this request's own
+  // continuation records the category it was sent with.
+  if (removed && takenDownAs !== undefined) {
+    const label = labelOfCategory(takenDownAs)
+    content = (
       <Box
-        ref={markerRef}
+        ref={confirmationRef}
         component="span"
-        role="status"
+        role="note"
         tabIndex={-1}
-        // Names the post when focus lands here (the visible word "Removed" is the label's start).
-        aria-label={`Removed. The post by ${authorName} is taken down from participant feeds.`}
-        data-testid="takedown-removed"
+        // Names the post when focus lands here; it starts with the visible words.
+        aria-label={
+          `Taken down · ${label}. The post by ${authorName} is no longer shown to participants.`
+        }
+        data-testid="takedown-confirmation"
         sx={{
           ...monoMeta,
           display: 'inline-flex',
@@ -354,24 +491,19 @@ export function TakedownAction({ post }: TakedownActionProps) {
           px: '8px',
           py: '2px',
           fontWeight: 700,
-          letterSpacing: '0.04em',
           color: liveWorldTokens.ink,
-          border: `1px solid ${liveWorldTokens.danger}`,
-          borderRadius: '3px',
           '&:focus-visible': {
             outline: `2px solid ${liveWorldTokens.focus}`,
             outlineOffset: '1px',
           },
         }}
       >
-        <FontAwesomeIcon icon={faBan} color={liveWorldTokens.danger} aria-hidden="true" />
-        <span>Removed</span>
+        <FontAwesomeIcon icon={faCheck} aria-hidden="true" />
+        <span>{`Taken down · ${label}`}</span>
       </Box>
     )
-  }
-
-  if (phase === 'failed') {
-    return (
+  } else if (phase === 'failed') {
+    content = (
       <Box
         role="alert"
         data-testid="takedown-failure"
@@ -397,14 +529,14 @@ export function TakedownAction({ post }: TakedownActionProps) {
           data-testid="takedown-failure-message"
           sx={{ ...monoMeta, color: liveWorldTokens.ink, fontWeight: 700 }}
         >
-          {takedown.failure}
+          {failure}
         </Typography>
         <CobraLinkButton
           ref={retryRef}
           size="small"
           data-testid="takedown-retry"
           aria-label={`Retry taking down the post by ${authorName}`}
-          onClick={takedown.retry}
+          onClick={retry}
           sx={ROW_BUTTON_SX}
         >
           <FontAwesomeIcon icon={faRotateRight} aria-hidden="true" />
@@ -414,78 +546,86 @@ export function TakedownAction({ post }: TakedownActionProps) {
           size="small"
           data-testid="takedown-dismiss"
           aria-label={`Dismiss the failed take down of the post by ${authorName}`}
-          onClick={takedown.dismiss}
+          onClick={dismiss}
           sx={ROW_BUTTON_SX}
         >
           Dismiss
         </CobraLinkButton>
       </Box>
     )
+  } else {
+    content = (
+      <>
+        {/* `aria-disabled` (not `disabled`) while pending: the control keeps focus and its place
+            in the Tab order, and simply ignores activation. */}
+        <CobraLinkButton
+          ref={triggerRef}
+          size="small"
+          data-testid="takedown-trigger"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-disabled={pending}
+          aria-label={pending
+            ? `Taking down the post by ${authorName}`
+            : `Take down post by ${authorName}`}
+          title={pending ? 'Taking down…' : 'Take down'}
+          onClick={openConfirm}
+          sx={{
+            ...ROW_BUTTON_SX,
+            '&[aria-disabled="true"]': { cursor: 'default', opacity: 0.7 },
+          }}
+        >
+          <FontAwesomeIcon
+            icon={pending ? faHourglassHalf : faTrashCan}
+            color={pending ? undefined : liveWorldTokens.danger}
+            aria-hidden="true"
+          />
+          {pending ? 'Taking down…' : 'Take down'}
+        </CobraLinkButton>
+
+        <Popper
+          open={open}
+          anchorEl={anchorEl}
+          placement="bottom-end"
+          modifiers={[{ name: 'offset', options: { offset: [0, 4] } }]}
+          // The Popper root is presentational; the dialog role lives on the panel.
+          slotProps={{ root: { role: 'presentation' } }}
+          sx={{ zIndex: POPPER_Z_INDEX }}
+        >
+          <ClickAwayListener onClickAway={handleClickAway}>
+            <Paper
+              elevation={8}
+              sx={{
+                bgcolor: liveWorldTokens.surface,
+                border: `1px solid ${liveWorldTokens.panelBorder}`,
+                borderRadius: '4px',
+              }}
+            >
+              <ConfirmPanel
+                panelRef={panelRef}
+                closingRef={closingRef}
+                authorName={authorName}
+                category={category}
+                onCategoryChange={setCategory}
+                onConfirm={confirm}
+                onCancel={closeConfirm}
+                onFocusLeave={handleFocusLeave}
+              />
+            </Paper>
+          </ClickAwayListener>
+        </Popper>
+      </>
+    )
   }
 
-  const pending = phase === 'pending'
+  // The polite region is the SECOND child in every state, so it is the same DOM node from the idle
+  // control through "Taking down…" to the confirmation: it exists before its text changes.
   return (
     <>
-      {/* `aria-disabled` (not `disabled`) while pending: the control keeps focus and its place
-          in the Tab order, and simply ignores activation. */}
-      <CobraLinkButton
-        ref={triggerRef}
-        size="small"
-        data-testid="takedown-trigger"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-disabled={pending}
-        aria-label={pending
-          ? `Taking down the post by ${authorName}`
-          : `Take down post by ${authorName}`}
-        title={pending ? 'Taking down…' : 'Take down'}
-        onClick={openConfirm}
-        sx={{
-          ...ROW_BUTTON_SX,
-          '&[aria-disabled="true"]': { cursor: 'default', opacity: 0.7 },
-        }}
-      >
-        <FontAwesomeIcon
-          icon={pending ? faHourglassHalf : faTrashCan}
-          color={pending ? undefined : liveWorldTokens.danger}
-          aria-hidden="true"
-        />
-        {pending ? 'Taking down…' : 'Take down'}
-      </CobraLinkButton>
-
-      <Popover
-        open={open}
-        anchorEl={anchorEl}
-        onClose={closeConfirm}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-        transitionDuration={0}
-        // Our own trap (ConfirmPanel) replaces MUI's, which would fight the shell overlay.
-        disableAutoFocus
-        disableEnforceFocus
-        disableRestoreFocus
-        disableScrollLock
-        slotProps={{
-          paper: {
-            sx: {
-              mt: '4px',
-              bgcolor: liveWorldTokens.surface,
-              border: `1px solid ${liveWorldTokens.panelBorder}`,
-              borderRadius: '4px',
-            },
-          },
-        }}
-      >
-        <ConfirmPanel
-          panelRef={panelRef}
-          closingRef={closingRef}
-          authorName={authorName}
-          category={category}
-          onCategoryChange={setCategory}
-          onConfirm={confirm}
-          onCancel={closeConfirm}
-        />
-      </Popover>
+      {content}
+      <Box role="status" aria-live="polite" data-testid="takedown-announcer" sx={srOnly}>
+        {announcement}
+      </Box>
     </>
   )
 }

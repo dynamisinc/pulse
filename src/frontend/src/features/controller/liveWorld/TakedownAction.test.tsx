@@ -10,11 +10,16 @@
  *     the chosen category reaches the service; the step resets to Other each time it opens.
  *     Fully keyboard-operable: Enter opens with focus on the selected category, arrows change it,
  *     Tab wraps inside the step, Esc / Cancel cancel and focus returns to the control.
- *  2. VISIBLE OUTCOME  pending ("Taking down…", ignores a second activation), success ("Removed"
- *     as icon + text, nothing actionable left, focus moves to the marker), failure (the server's
- *     message + Retry that re-sends the confirmed category, + Dismiss), "removed" read from the
- *     store (another controller's takedown, a remount); ABSENT - not disabled - for a
- *     non-controller.
+ *  2. VISIBLE OUTCOME  pending ("Taking down…", ignores a second activation), success (a
+ *     confirmation "Taken down · {category}" as icon + text, nothing actionable left; the row's own
+ *     persistent REMOVED marker is the column's, via `isRowRemoved` - so a takedown made elsewhere
+ *     or before a remount renders NOTHING here), failure (the server's message + Retry that
+ *     re-sends the confirmed category, + Dismiss); ABSENT - not disabled - for a non-controller.
+ *  2b. FOCUS (Gate-1 M-1 / M-2)  Dismiss and Retry put focus back on the control; a settled request
+ *     takes focus only when it was lost, never off an input the controller moved to (so a following
+ *     Space cannot re-send); a polite announcement stands in when focus does not move.
+ *  2c. NON-MODAL STEP (Gate-1 M-3)  opening the step sets no aria-hidden on the app root or its
+ *     siblings and lays no backdrop; a later `[aria-modal]` stays reachable.
  *  3. ONE TELEMETRY EVENT  exactly one XC-004 `steering_action` per SUCCESSFUL takedown with the
  *     closed shape (channel system, actor system + acting human + role, target post + id, payload
  *     action + category); none for a cancel, a failure or someone else's takedown; none carrying
@@ -185,7 +190,7 @@ describe('TakedownAction - AC1: two clicks, with a category', () => {
 
     expect(mockedTakeDown).toHaveBeenCalledTimes(1)
     expect(mockedTakeDown).toHaveBeenCalledWith(POST.id, 'other')
-    expect(await screen.findByTestId('takedown-removed')).toBeInTheDocument()
+    expect(await screen.findByTestId('takedown-confirmation')).toBeInTheDocument()
   })
 
   it.each<[string, TakedownCategory]>([
@@ -202,7 +207,7 @@ describe('TakedownAction - AC1: two clicks, with a category', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm take down' }))
 
     expect(mockedTakeDown).toHaveBeenCalledWith(POST.id, wire)
-    await screen.findByTestId('takedown-removed')
+    await screen.findByTestId('takedown-confirmation')
     expect(steeringEvents()[0]?.payload).toEqual({ action: 'takedown', category: wire })
   })
 
@@ -232,21 +237,50 @@ describe('TakedownAction - AC1: two clicks, with a category', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(mockedTakeDown).not.toHaveBeenCalled()
     expect(steeringEvents()).toHaveLength(0)
-    expect(screen.queryByTestId('takedown-removed')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('takedown-confirmation')).not.toBeInTheDocument()
   })
 
-  it('clicking outside the step (the backdrop) cancels it and returns focus to the control', async () => {
+  it('clicking elsewhere (click-away) cancels it and returns focus to the control', async () => {
     const user = userEvent.setup()
     renderAction()
     await user.click(trigger())
     await screen.findByRole('dialog')
 
-    const backdrop = document.querySelector('.MuiBackdrop-root')
-    if (!(backdrop instanceof HTMLElement)) throw new Error('no backdrop')
-    await user.click(backdrop)
+    await user.click(document.body)
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(mockedTakeDown).not.toHaveBeenCalled()
+    expect(trigger()).toHaveFocus()
+  })
+
+  it('click-away into another field leaves focus in that field (it is not stolen back)', async () => {
+    const user = userEvent.setup()
+    render(
+      <ThemeProvider theme={cobraTheme}>
+        <TakedownAction post={POST} />
+        <input aria-label="composer" />
+      </ThemeProvider>,
+    )
+    await user.click(trigger())
+    await screen.findByRole('dialog')
+
+    await user.click(screen.getByLabelText('composer'))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByLabelText('composer')).toHaveFocus()
+    expect(mockedTakeDown).not.toHaveBeenCalled()
+  })
+
+  it('clicking the control again while the step is open closes it (a toggle)', async () => {
+    const user = userEvent.setup()
+    renderAction()
+    await user.click(trigger())
+    await screen.findByRole('dialog')
+
+    await user.click(trigger())
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(trigger()).toHaveAttribute('aria-expanded', 'false')
     expect(trigger()).toHaveFocus()
   })
 })
@@ -292,7 +326,7 @@ describe('TakedownAction - AC1: fully keyboard-operable', () => {
     await user.keyboard('{Enter}')
 
     expect(mockedTakeDown).toHaveBeenCalledWith(POST.id, 'pii')
-    expect(await screen.findByTestId('takedown-removed')).toBeInTheDocument()
+    expect(await screen.findByTestId('takedown-confirmation')).toBeInTheDocument()
   })
 
   it('Tab and Shift+Tab wrap inside the step - focus never leaves it', async () => {
@@ -406,30 +440,31 @@ describe('TakedownAction - AC2: the visible outcome', () => {
     expect(mockedTakeDown).toHaveBeenCalledTimes(1)
     // Nothing is recorded as done until the server says so.
     expect(steeringEvents()).toHaveLength(0)
-    expect(screen.queryByTestId('takedown-removed')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('takedown-confirmation')).not.toBeInTheDocument()
 
     await act(async () => {
       removedPosts.add(POST.id)
       pending.resolve()
     })
-    expect(await screen.findByTestId('takedown-removed')).toBeInTheDocument()
+    expect(await screen.findByTestId('takedown-confirmation')).toBeInTheDocument()
   })
 
-  it('success marks the row "Removed" as ICON + TEXT and leaves nothing actionable', async () => {
+  it('success replaces the control with "Taken down · {category}" as ICON + TEXT; nothing actionable is left', async () => {
     const user = userEvent.setup()
     renderAction()
 
     await user.click(trigger())
+    await user.click(await screen.findByRole('radio', { name: 'PII' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm take down' }))
 
-    const marker = await screen.findByTestId('takedown-removed')
-    expect(marker).toHaveTextContent('Removed')
-    expect(within(marker).getByText('Removed')).toBeVisible()
-    expect(marker.querySelector('svg')).not.toBeNull() // the icon (never colour alone)
-    expect(marker).toHaveAttribute('role', 'status')
-    // Focus lands here, so it is named for the post (and starts with the visible word).
-    expect(marker).toHaveAccessibleName(
-      'Removed. The post by Fairhaven Water Update is taken down from participant feeds.',
+    const confirmation = await screen.findByTestId('takedown-confirmation')
+    expect(confirmation).toHaveTextContent('Taken down · PII')
+    expect(confirmation.querySelector('svg')).not.toBeNull() // the icon (never colour alone)
+    // Distinct from the column's REMOVED marker: never the word "Removed" here.
+    expect(screen.queryByText(/removed/i)).not.toBeInTheDocument()
+    // Focus lands here, so it is named for the post (and starts with the visible words).
+    expect(confirmation).toHaveAccessibleName(
+      'Taken down · PII. The post by Fairhaven Water Update is no longer shown to participants.',
     )
     // The control is gone: a repeat is impossible from this row.
     expect(screen.queryByTestId('takedown-trigger')).not.toBeInTheDocument()
@@ -437,16 +472,32 @@ describe('TakedownAction - AC2: the visible outcome', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('moves focus to the Removed marker after its OWN success (the control it was on is gone)', async () => {
+  it('the focused confirmation is NOT a live region (focus already announces it - no double announce)', async () => {
     const user = userEvent.setup()
     renderAction()
     await user.click(trigger())
     await user.click(await screen.findByRole('button', { name: 'Confirm take down' }))
 
-    const marker = await screen.findByTestId('takedown-removed')
+    const confirmation = await screen.findByTestId('takedown-confirmation')
 
-    expect(marker).toHaveFocus()
-    expect(marker).toHaveAttribute('tabindex', '-1')
+    expect(confirmation).toHaveFocus()
+    expect(confirmation).not.toHaveAttribute('role', 'status')
+    expect(confirmation).not.toHaveAttribute('role', 'alert')
+    expect(confirmation.closest('[aria-live]')).toBeNull()
+    // And the polite region stays quiet when focus itself carries the news.
+    expect(screen.getByTestId('takedown-announcer')).toBeEmptyDOMElement()
+  })
+
+  it('moves focus to the confirmation after its OWN success when the control that held it is gone', async () => {
+    const user = userEvent.setup()
+    renderAction()
+    await user.click(trigger())
+    await user.click(await screen.findByRole('button', { name: 'Confirm take down' }))
+
+    const confirmation = await screen.findByTestId('takedown-confirmation')
+
+    expect(confirmation).toHaveFocus()
+    expect(confirmation).toHaveAttribute('tabindex', '-1')
   })
 
   it('failure shows the server message with Retry, moves focus to Retry, and emits no telemetry', async () => {
@@ -464,7 +515,7 @@ describe('TakedownAction - AC2: the visible outcome', () => {
     const retry = within(alert).getByRole('button', { name: /Retry/ })
     expect(retry).toHaveFocus()
     expect(steeringEvents()).toHaveLength(0)
-    expect(screen.queryByTestId('takedown-removed')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('takedown-confirmation')).not.toBeInTheDocument()
     expect(screen.queryByTestId('takedown-trigger')).not.toBeInTheDocument()
   })
 
@@ -483,7 +534,7 @@ describe('TakedownAction - AC2: the visible outcome', () => {
     expect(mockedTakeDown).toHaveBeenCalledTimes(2)
     expect(mockedTakeDown).toHaveBeenLastCalledWith(POST.id, 'real-world-reference')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(await screen.findByTestId('takedown-removed')).toBeInTheDocument()
+    expect(await screen.findByTestId('takedown-confirmation')).toBeInTheDocument()
     expect(steeringEvents()).toHaveLength(1)
     expect(steeringEvents()[0]?.payload).toEqual({
       action: 'takedown',
@@ -548,40 +599,39 @@ describe('TakedownAction - AC2: the visible outcome', () => {
     expect(alert).toHaveTextContent('<img src=x onerror=alert(1)> bad')
   })
 
-  it('shows Removed at once for a post that is ALREADY taken down - without taking focus', () => {
+  it('renders NOTHING for a post that is ALREADY taken down (the column\'s REMOVED marker covers it)', () => {
     removedPosts.add(POST.id)
 
-    renderAction()
+    const { container } = renderAction()
 
-    expect(screen.getByTestId('takedown-removed')).toHaveTextContent('Removed')
-    expect(screen.getByTestId('takedown-removed')).not.toHaveFocus()
+    expect(container).toBeEmptyDOMElement()
     expect(screen.queryByTestId('takedown-trigger')).not.toBeInTheDocument()
+    expect(screen.queryByText(/removed|taken down/i)).not.toBeInTheDocument()
   })
 
-  it('flips to Removed when ANOTHER controller\'s takedown reaches this tab - no focus, no telemetry', async () => {
-    renderAction()
+  it('goes quiet when ANOTHER controller\'s takedown reaches this tab - no focus, no telemetry, no second marker', async () => {
+    const { container } = renderAction()
     expect(trigger()).toBeInTheDocument()
 
     act(() => removedPosts.add(POST.id))
 
-    expect(await screen.findByTestId('takedown-removed')).toBeInTheDocument()
-    expect(screen.getByTestId('takedown-removed')).not.toHaveFocus()
+    expect(container).toBeEmptyDOMElement()
+    expect(document.activeElement).toBe(document.body)
     expect(steeringEvents()).toHaveLength(0)
     expect(mockedTakeDown).not.toHaveBeenCalled()
   })
 
-  it('stays Removed when the row remounts (a filter change unmounts the rows it hides)', async () => {
+  it('renders nothing after a remount (no category is known; the column\'s marker is the persistent state)', async () => {
     const user = userEvent.setup()
     const first = renderAction()
     await user.click(trigger())
     await user.click(await screen.findByRole('button', { name: 'Confirm take down' }))
-    await screen.findByTestId('takedown-removed')
+    await screen.findByTestId('takedown-confirmation')
     first.unmount()
 
-    renderAction()
+    const { container } = renderAction()
 
-    expect(screen.getByTestId('takedown-removed')).toBeInTheDocument()
-    expect(screen.queryByTestId('takedown-trigger')).not.toBeInTheDocument()
+    expect(container).toBeEmptyDOMElement()
   })
 
   it('a different post\'s removal leaves this row alone', () => {
@@ -590,7 +640,7 @@ describe('TakedownAction - AC2: the visible outcome', () => {
     act(() => removedPosts.add('some-other-post'))
 
     expect(trigger()).toBeInTheDocument()
-    expect(screen.queryByTestId('takedown-removed')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('takedown-confirmation')).not.toBeInTheDocument()
   })
 
   it('survives a parent re-render with the confirm step open (state is the row\'s, not the render\'s)', async () => {
@@ -644,7 +694,7 @@ describe('TakedownAction - AC3: exactly one XC-004 steering_action', () => {
     await user.click(trigger())
     await user.click(await screen.findByRole('radio', { name: 'Inappropriate' }))
     await user.click(screen.getByRole('button', { name: 'Confirm take down' }))
-    await screen.findByTestId('takedown-removed')
+    await screen.findByTestId('takedown-confirmation')
 
     const events = steeringEvents()
     expect(events).toHaveLength(1)
@@ -668,7 +718,7 @@ describe('TakedownAction - AC3: exactly one XC-004 steering_action', () => {
     renderAction()
     await user.click(trigger())
     await user.click(await screen.findByRole('button', { name: 'Confirm take down' }))
-    await screen.findByTestId('takedown-removed')
+    await screen.findByTestId('takedown-confirmation')
 
     const serialized = JSON.stringify(steeringEvents())
     expect(serialized).not.toContain('poisoned')
@@ -689,7 +739,7 @@ describe('TakedownAction - AC3: exactly one XC-004 steering_action', () => {
     expect(steeringEvents()).toHaveLength(0)
 
     await user.click(screen.getByRole('button', { name: /Retry/ }))
-    await screen.findByTestId('takedown-removed')
+    await screen.findByTestId('takedown-confirmation')
     rerenderAction()
     await act(async () => {})
 
@@ -754,7 +804,7 @@ describe('TakedownAction - the focus-trap contract (F2: stand aside for the shel
     return { button, remove: () => overlay.remove() }
   }
 
-  it('control: with NO other modal, focus that strays outside is pulled back into the step', async () => {
+  it('control: with NO other modal, focus that moves outside ENDS the step and stays where it went', async () => {
     const user = userEvent.setup()
     renderAction()
     const outside = document.createElement('button')
@@ -766,8 +816,10 @@ describe('TakedownAction - the focus-trap contract (F2: stand aside for the shel
 
       act(() => outside.focus())
 
-      expect(document.activeElement).not.toBe(outside)
-      expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement)
+      // Never pulled back (that would fight a click into another field) - the step simply yields.
+      expect(outside).toHaveFocus()
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      expect(mockedTakeDown).not.toHaveBeenCalled()
     } finally {
       outside.remove()
     }
@@ -782,16 +834,16 @@ describe('TakedownAction - the focus-trap contract (F2: stand aside for the shel
       // Open via the pointer so the control's own focus is not what is being asserted.
       await user.click(trigger())
       const dialog = await screen.findByRole('dialog')
-      overlay.button.focus()
 
       expect(dialog).toBeInTheDocument()
       expect(screen.getByRole('radio', { name: 'Other' })).not.toHaveFocus()
+      expect(dialog).not.toContainElement(document.activeElement as HTMLElement)
     } finally {
       overlay.remove()
     }
   })
 
-  it('does not pull focus back from the other modal', async () => {
+  it('does not pull focus back from the other modal: the step yields and the overlay keeps focus', async () => {
     const user = userEvent.setup()
     renderAction()
     trigger().focus()
@@ -801,6 +853,9 @@ describe('TakedownAction - the focus-trap contract (F2: stand aside for the shel
     try {
       act(() => overlay.button.focus())
 
+      expect(overlay.button).toHaveFocus()
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Take down this post?' }))
+        .not.toBeInTheDocument())
       expect(overlay.button).toHaveFocus()
     } finally {
       overlay.remove()
@@ -836,10 +891,9 @@ describe('TakedownAction - the focus-trap contract (F2: stand aside for the shel
     await screen.findByRole('dialog')
     const overlay = mountOverlay()
     try {
-      act(() => overlay.button.focus())
-
       await user.click(screen.getByRole('button', { name: 'Cancel' }))
-      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Take down this post?' }))
+        .not.toBeInTheDocument())
 
       expect(trigger()).not.toHaveFocus()
     } finally {
@@ -893,5 +947,333 @@ describe('TakedownAction - AC6: staff world only', () => {
 
     expect(trigger()).toHaveAccessibleName(TRIGGER_NAME)
     expect(dialog).toHaveAccessibleDescription(/Fairhaven Water Update/)
+  })
+})
+
+describe('TakedownAction - Gate-1 M-1: Dismiss and Retry never drop focus to <body>', () => {
+  /** Opens the step by keyboard, confirms, and waits for the failure box (Retry holds focus). */
+  async function reachFailure(user: ReturnType<typeof userEvent.setup>) {
+    trigger().focus()
+    await user.keyboard('{Enter}')
+    await screen.findByRole('dialog')
+    await user.tab()
+    await user.tab()
+    await user.keyboard('{Enter}')
+    await screen.findByRole('alert')
+    expect(screen.getByTestId('takedown-retry')).toHaveFocus()
+  }
+
+  it('Dismiss puts focus back on the Take down control', async () => {
+    const user = userEvent.setup()
+    mockedTakeDown.mockRejectedValueOnce(new TakedownError('boom', 500))
+    renderAction()
+    await reachFailure(user)
+
+    await user.tab() // Retry -> Dismiss
+    expect(screen.getByTestId('takedown-dismiss')).toHaveFocus()
+    await user.keyboard('{Enter}')
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(trigger()).toHaveFocus()
+    expect(document.activeElement).not.toBe(document.body)
+    // ... and it is a working control again, from the keyboard.
+    await user.keyboard('{Enter}')
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('during a Retry the pending control holds focus - never <body>', async () => {
+    const user = userEvent.setup()
+    const pending = deferred()
+    mockedTakeDown
+      .mockRejectedValueOnce(new TakedownError('boom', 500))
+      .mockReturnValueOnce(pending.promise)
+    renderAction()
+    await reachFailure(user)
+
+    await user.keyboard('{Enter}') // Retry
+
+    const busy = screen.getByTestId('takedown-trigger')
+    expect(busy).toHaveTextContent('Taking down…')
+    expect(busy).toHaveAttribute('aria-disabled', 'true')
+    expect(busy).toHaveFocus()
+    expect(document.activeElement).not.toBe(document.body)
+    expect(mockedTakeDown).toHaveBeenCalledTimes(2)
+    // A stray key on the pending control cannot start a third request.
+    await user.keyboard('{Enter}')
+    expect(mockedTakeDown).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      removedPosts.add(POST.id)
+      pending.resolve()
+    })
+    // The pending control had focus, so the confirmation takes it.
+    expect(await screen.findByTestId('takedown-confirmation')).toHaveFocus()
+  })
+
+  it('a Retry that fails again hands focus back to Retry', async () => {
+    const user = userEvent.setup()
+    const pending = deferred()
+    mockedTakeDown
+      .mockRejectedValueOnce(new TakedownError('boom', 500))
+      .mockReturnValueOnce(pending.promise)
+    renderAction()
+    await reachFailure(user)
+    await user.keyboard('{Enter}') // Retry -> pending control holds focus
+    expect(trigger()).toHaveFocus()
+
+    await act(async () => {
+      pending.reject(new TakedownError('still down', 503))
+    })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('still down')
+    expect(screen.getByTestId('takedown-retry')).toHaveFocus()
+  })
+
+  it('Retry by POINTER also lands on the control that replaces the failure box', async () => {
+    const user = userEvent.setup()
+    const pending = deferred()
+    mockedTakeDown
+      .mockRejectedValueOnce(new TakedownError('boom', 500))
+      .mockReturnValueOnce(pending.promise)
+    renderAction()
+    await reachFailure(user)
+
+    await user.click(screen.getByTestId('takedown-retry'))
+
+    expect(trigger()).toHaveFocus()
+    await act(async () => {
+      removedPosts.add(POST.id)
+      pending.resolve()
+    })
+    await screen.findByTestId('takedown-confirmation')
+  })
+})
+
+describe('TakedownAction - Gate-1 M-2: a settled request never steals focus', () => {
+  function renderWithField() {
+    return render(
+      <ThemeProvider theme={cobraTheme}>
+        <TakedownAction post={POST} />
+        <input aria-label="composer" />
+      </ThemeProvider>,
+    )
+  }
+
+  /** Confirms with the deferred request pending, then parks focus where `park` says. */
+  async function pendingThenPark(
+    user: ReturnType<typeof userEvent.setup>,
+    pending: ReturnType<typeof deferred>,
+    park: () => Promise<void> | void,
+  ) {
+    mockedTakeDown.mockReturnValue(pending.promise)
+    trigger().focus()
+    await user.keyboard('{Enter}')
+    await screen.findByRole('dialog')
+    await user.tab()
+    await user.tab()
+    await user.keyboard('{Enter}')
+    expect(trigger()).toHaveTextContent('Taking down…')
+    await park()
+  }
+
+  it('SUCCESS with focus in an unrelated input: focus stays there, the news arrives politely', async () => {
+    const user = userEvent.setup()
+    const pending = deferred()
+    renderWithField()
+    await pendingThenPark(user, pending, () => user.click(screen.getByLabelText('composer')))
+    const field = screen.getByLabelText('composer')
+    expect(field).toHaveFocus()
+
+    await act(async () => {
+      removedPosts.add(POST.id)
+      pending.resolve()
+    })
+
+    const confirmation = await screen.findByTestId('takedown-confirmation')
+    expect(confirmation).toHaveTextContent('Taken down · Other')
+    expect(field).toHaveFocus()
+    expect(confirmation).not.toHaveFocus()
+    expect(screen.getByTestId('takedown-announcer')).toHaveTextContent(
+      'The post by Fairhaven Water Update is taken down: Other.',
+    )
+    // What the controller types next goes to their field.
+    await user.keyboard('hello')
+    expect(field).toHaveValue('hello')
+    expect(steeringEvents()).toHaveLength(1)
+  })
+
+  it('FAILURE with focus in an unrelated input: focus stays, and a following Space cannot re-send', async () => {
+    const user = userEvent.setup()
+    const pending = deferred()
+    renderWithField()
+    await pendingThenPark(user, pending, () => user.click(screen.getByLabelText('composer')))
+    const field = screen.getByLabelText('composer')
+    expect(mockedTakeDown).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      pending.reject(new TakedownError('The server is busy right now.', 503))
+    })
+
+    // The alert announces itself; it does not drag focus onto Retry.
+    expect(await screen.findByRole('alert')).toHaveTextContent('The server is busy right now.')
+    expect(screen.getByTestId('takedown-retry')).not.toHaveFocus()
+    expect(field).toHaveFocus()
+    await user.keyboard(' ')
+    await user.keyboard('{Enter}')
+    expect(field).toHaveValue(' ')
+    expect(mockedTakeDown).toHaveBeenCalledTimes(1)
+    expect(steeringEvents()).toHaveLength(0)
+  })
+
+  it('FAILURE with focus on another row-like control: focus stays on it', async () => {
+    const user = userEvent.setup()
+    const pending = deferred()
+    render(
+      <ThemeProvider theme={cobraTheme}>
+        <TakedownAction post={POST} />
+        <button type="button">next row</button>
+      </ThemeProvider>,
+    )
+    await pendingThenPark(user, pending, () => screen.getByRole('button', { name: 'next row' }).focus())
+
+    await act(async () => {
+      pending.reject(new TakedownError('nope', 500))
+    })
+
+    await screen.findByRole('alert')
+    expect(screen.getByRole('button', { name: 'next row' })).toHaveFocus()
+  })
+
+  it('SUCCESS when focus fell to <body> during the request: the confirmation takes it', async () => {
+    const user = userEvent.setup()
+    const pending = deferred()
+    renderAction()
+    await pendingThenPark(user, pending, async () => {
+      await user.click(document.body)
+    })
+    expect(document.activeElement).toBe(document.body)
+
+    await act(async () => {
+      removedPosts.add(POST.id)
+      pending.resolve()
+    })
+
+    expect(await screen.findByTestId('takedown-confirmation')).toHaveFocus()
+  })
+
+  it('FAILURE when focus fell to <body> during the request: Retry takes it', async () => {
+    const user = userEvent.setup()
+    const pending = deferred()
+    renderAction()
+    await pendingThenPark(user, pending, async () => {
+      await user.click(document.body)
+    })
+
+    await act(async () => {
+      pending.reject(new TakedownError('nope', 500))
+    })
+
+    await screen.findByRole('alert')
+    expect(screen.getByTestId('takedown-retry')).toHaveFocus()
+  })
+
+  it('SUCCESS when the pending control still holds focus: the confirmation takes it', async () => {
+    const user = userEvent.setup()
+    const pending = deferred()
+    renderAction()
+    await pendingThenPark(user, pending, () => {})
+    expect(trigger()).toHaveFocus()
+
+    await act(async () => {
+      removedPosts.add(POST.id)
+      pending.resolve()
+    })
+
+    expect(await screen.findByTestId('takedown-confirmation')).toHaveFocus()
+    expect(screen.getByTestId('takedown-announcer')).toBeEmptyDOMElement()
+  })
+})
+
+describe('TakedownAction - Gate-1 M-3: the confirm step is non-modal (no aria-hidden app root)', () => {
+  it('opening the step sets no aria-hidden on the app root or any sibling, and lays no backdrop', async () => {
+    const user = userEvent.setup()
+    const { container } = renderAction()
+
+    await user.click(trigger())
+    await screen.findByRole('dialog')
+
+    expect(container).not.toHaveAttribute('aria-hidden')
+    for (const child of Array.from(document.body.children)) {
+      expect(child).not.toHaveAttribute('aria-hidden', 'true')
+    }
+    expect(document.querySelector('[aria-hidden="true"] [role="dialog"]')).toBeNull()
+    expect(document.querySelector('.MuiBackdrop-root')).toBeNull()
+    // The app stays in the accessibility tree while the step is open.
+    expect(screen.getByRole('button', { name: TRIGGER_NAME })).toBeInTheDocument()
+  })
+
+  it('the Popper root is presentational: the one dialog role is the panel', async () => {
+    const user = userEvent.setup()
+    renderAction()
+
+    await user.click(trigger())
+    const dialog = await screen.findByRole('dialog', { name: 'Take down this post?' })
+
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+  })
+
+  it('a later [aria-modal] (the Ctrl+K palette) is still found by role, and keeps focus', async () => {
+    const user = userEvent.setup()
+    const { container } = renderAction()
+    await user.click(trigger())
+    await screen.findByRole('dialog', { name: 'Take down this post?' })
+
+    // The palette renders INLINE inside the app root, like the real one.
+    const palette = document.createElement('div')
+    palette.setAttribute('role', 'dialog')
+    palette.setAttribute('aria-modal', 'true')
+    palette.setAttribute('aria-label', 'Console command palette')
+    const search = document.createElement('input')
+    search.setAttribute('aria-label', 'Search personas')
+    palette.appendChild(search)
+    container.appendChild(palette)
+    act(() => search.focus())
+
+    expect(screen.getByRole('dialog', { name: 'Console command palette' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Search personas' })).toBeInTheDocument()
+    expect(search).toHaveFocus() // the step's trap stood aside
+    expect(container).not.toHaveAttribute('aria-hidden')
+    // The palette wins: the step yields (closes) rather than sitting under it.
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Take down this post?' }))
+      .not.toBeInTheDocument())
+    expect(search).toHaveFocus()
+  })
+
+  it('paints below a modal: its z-index is under the palette\'s 1300', async () => {
+    const user = userEvent.setup()
+    renderAction()
+    await user.click(trigger())
+    const dialog = await screen.findByRole('dialog')
+
+    const root = dialog.parentElement?.closest('[role="presentation"]')
+    if (!(root instanceof HTMLElement)) throw new Error('no popper root')
+    const zIndex = Number(getComputedStyle(root).zIndex)
+    expect(zIndex).toBeGreaterThan(0)
+    expect(zIndex).toBeLessThan(1300)
+  })
+
+  it('Esc still closes it and returns focus to the control (the Popper has no Modal Esc of its own)', async () => {
+    const user = userEvent.setup()
+    renderAction()
+    trigger().focus()
+    await user.keyboard('{Enter}')
+    await screen.findByRole('dialog')
+
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(trigger()).toHaveFocus()
   })
 })

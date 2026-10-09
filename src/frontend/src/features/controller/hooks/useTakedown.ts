@@ -16,8 +16,12 @@
  *   - removed    NOT a phase: `removed` reads the session's `removedPosts` store, so it is true
  *                after this console's own success, after ANOTHER controller's `PostRemoved`
  *                reaches this tab, and again after the row remounts (a filter change unmounts
- *                the rows it hides). `removedHere` is true only when THIS instance's own action
- *                succeeded — the one case where the row moves focus to its "Removed" marker.
+ *                the rows it hides). The PERSISTENT "REMOVED" marker on the row belongs to the
+ *                Live world column (its `isRowRemoved` prop, fed by `useIsRowRemoved`).
+ *                `removedHere` / `takenDownAs` are true / the category used only when THIS
+ *                instance's own action succeeded — what the row's slot confirms to the controller
+ *                who just did it ("Taken down · PII"); a takedown made elsewhere has no category
+ *                to confirm, so the slot says nothing then.
  *
  * TELEMETRY (XC-004, DP-9): exactly ONE `steering_action` per SUCCESSFUL takedown, emitted here
  * through the caller-safe `buildAndEmit` (it can never throw into the action): `channel:
@@ -53,8 +57,10 @@ export interface UseTakedownResult {
   readonly failure: string | undefined
   /** The post is taken down (by this console, another controller, or before this row mounted). */
   readonly removed: boolean
-  /** THIS instance's own action succeeded (used to move focus to the "Removed" marker once). */
+  /** THIS instance's own action succeeded (the slot then confirms it to the controller). */
   readonly removedHere: boolean
+  /** The category THIS instance's successful takedown was sent with; `undefined` otherwise. */
+  readonly takenDownAs: TakedownCategory | undefined
   /** Starts the takedown with `category`. Ignored while one is in flight or the post is removed. */
   takeDown(category: TakedownCategory): void
   /** Re-sends the last attempted category. Ignored unless the last attempt failed. */
@@ -82,7 +88,7 @@ export function useTakedown(postId: string): UseTakedownResult {
 
   const [phase, setPhase] = useState<TakedownPhase>('idle')
   const [failure, setFailure] = useState<string | undefined>(undefined)
-  const [removedHere, setRemovedHere] = useState(false)
+  const [takenDownAs, setTakenDownAs] = useState<TakedownCategory | undefined>(undefined)
 
   // A ref guard (not just the `phase` state): two activations in the same tick both see `idle`.
   const inFlightRef = useRef(false)
@@ -120,7 +126,7 @@ export function useTakedown(postId: string): UseTakedownResult {
           payload: { action: 'takedown', category },
         })
         if (!mountedRef.current) return
-        setRemovedHere(true)
+        setTakenDownAs(category)
         setPhase('idle')
       },
       (error: unknown) => {
@@ -144,5 +150,14 @@ export function useTakedown(postId: string): UseTakedownResult {
     setPhase('idle')
   }, [])
 
-  return { phase, failure, removed, removedHere, takeDown: run, retry, dismiss }
+  return {
+    phase,
+    failure,
+    removed,
+    removedHere: takenDownAs !== undefined,
+    takenDownAs,
+    takeDown: run,
+    retry,
+    dismiss,
+  }
 }

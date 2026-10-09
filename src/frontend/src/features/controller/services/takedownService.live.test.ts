@@ -10,7 +10,10 @@
  *  - a 2xx records the id in `removedPosts`; a failure records nothing;
  *  - failures become a `TakedownError` with PLAIN-TEXT, controller-readable messages: the server's
  *    own 400 message verbatim, a plain sentence for 404 (unknown / cross-exercise are identical),
- *    401, 403, 5xx and a network failure; it never leaks a stack, a URL or a token.
+ *    401, 403, 5xx and a network failure; it never leaks a stack, a URL or a token;
+ *  - Gate-1 L-1: a server body is shown only for a 400, or when it is a SHORT single-line
+ *    non-markup text; an HTML error page (a proxy's 502), a multi-line developer exception page
+ *    or an over-long body falls back to the staff copy for that status.
  */
 import { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -216,5 +219,77 @@ describe('takeDownPost (live) - failures are plain text and record nothing', () 
     deleteMock.mockRejectedValue(axiosFailure(500, undefined))
     const error = await failureOf(takeDownPost(POST_ID, 'other'))
     expect(error.message).not.toMatch(/https?:|\/staff\/|at .*\(.*:\d+:\d+\)/)
+  })
+})
+
+describe('takeDownPost (live) - Gate-1 L-1: only safe server text is shown', () => {
+  const HTML_502 = '<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head>'
+    + '<body><h1>Bad Gateway</h1><p>The server returned an invalid response.</p></body></html>'
+  const STACK_500 = [
+    'System.InvalidOperationException: Sequence contains no elements',
+    '   at Pulse.WebApi.Features.Social.Moderation.PostTakedownService.TakeDownAsync(...)',
+    '   at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteAsync(...)',
+  ].join('\n')
+
+  it('does NOT show an HTML error page: a proxy 502 falls back to the staff copy', async () => {
+    deleteMock.mockRejectedValue(axiosFailure(502, HTML_502))
+
+    const error = await failureOf(takeDownPost(POST_ID, 'other'))
+
+    expect(error.message).toMatch(/busy/i)
+    expect(error.message).not.toMatch(/<|html|Bad Gateway/i)
+  })
+
+  it('does NOT show a multi-line developer exception page (a stack trace)', async () => {
+    deleteMock.mockRejectedValue(axiosFailure(500, STACK_500))
+
+    const error = await failureOf(takeDownPost(POST_ID, 'other'))
+
+    expect(error.message).toBe('The post was not taken down (the server answered 500).')
+    expect(error.message).not.toMatch(/Exception|at Pulse|Microsoft/)
+  })
+
+  it('does NOT show an over-long body for a non-400 status', async () => {
+    deleteMock.mockRejectedValue(axiosFailure(503, 'x'.repeat(201)))
+
+    const error = await failureOf(takeDownPost(POST_ID, 'other'))
+
+    expect(error.message).toMatch(/busy/i)
+  })
+
+  it('does show a short single-line text body for another status', async () => {
+    deleteMock.mockRejectedValue(axiosFailure(500, 'The takedown service is restarting.'))
+
+    expect((await failureOf(takeDownPost(POST_ID, 'other'))).message)
+      .toBe('The takedown service is restarting.')
+  })
+
+  it('does show a short ProblemDetails title/detail for another status', async () => {
+    deleteMock.mockRejectedValue(axiosFailure(500, { title: 'Takedown failed.', status: 500 }))
+
+    expect((await failureOf(takeDownPost(POST_ID, 'other'))).message).toBe('Takedown failed.')
+  })
+
+  it('shows B6\'s 400 message VERBATIM', async () => {
+    const body = 'category must be one of: inappropriate, pii, real-world-reference, other.'
+    deleteMock.mockRejectedValue(axiosFailure(400, body))
+
+    expect((await failureOf(takeDownPost(POST_ID, 'other'))).message).toBe(body)
+  })
+
+  it('a 400 that is markup (a front door\'s page) still falls back to staff copy', async () => {
+    deleteMock.mockRejectedValue(axiosFailure(400, '<html><body>Bad Request</body></html>'))
+
+    const error = await failureOf(takeDownPost(POST_ID, 'other'))
+
+    expect(error.message).toBe('The server did not accept that take down. Try again with another category.')
+    expect(error.status).toBe(400)
+  })
+
+  it('a 400 with no body gets the staff copy too', async () => {
+    deleteMock.mockRejectedValue(axiosFailure(400, ''))
+
+    expect((await failureOf(takeDownPost(POST_ID, 'other'))).message)
+      .toMatch(/did not accept that take down/i)
   })
 })

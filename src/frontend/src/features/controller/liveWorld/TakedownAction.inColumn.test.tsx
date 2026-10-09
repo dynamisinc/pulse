@@ -1,21 +1,28 @@
 /**
  * features/controller/liveWorld/TakedownAction.inColumn.test.tsx
  * ---------------------------------------------------------------------------
- * `TakedownAction` MOUNTED THROUGH C2's `renderRowActions` slot in the real `LiveWorldColumn`
- * (demo-polish C5, story 22; the wiring the orchestrator implements, implementation.md §4.2):
+ * `TakedownAction` MOUNTED THROUGH C2's `renderRowActions` slot in the real `LiveWorldColumn`,
+ * with the column's `isRowRemoved` wired to the same removed-post store - EXACTLY the wiring the
+ * orchestrator implements (demo-polish C5, story 22; implementation.md §4.2):
  *
+ *     // module level, one stable function:
  *     const renderTakedown = (post: LiveWorldPost) => <TakedownAction post={post} />
- *     <LiveWorldColumn renderRowActions={renderTakedown} ... />
+ *     // inside a component (a hook cannot run in a callback):
+ *     const isRowRemoved = useIsRowRemoved()
+ *     <LiveWorldColumn renderRowActions={renderTakedown} isRowRemoved={isRowRemoved} ... />
  *
  * Proves, with the column's real keyboard handling and row memoization:
  *  - one Take down control per row, after "Reply as…" in the Tab order, named for the row's author;
- *  - the two-click flow takes THAT row's post down and only that row turns "Removed" - the row
+ *  - the two-click flow takes THAT row's post down: the COLUMN marks it REMOVED once (the
+ *    persistent state), "Reply as…" is disabled and `R` is a no-op on it, and the slot adds only
+ *    the controller's confirmation "Taken down · {category}" - never a second "Removed". The row
  *    stays for the record (its text is still there), the others keep their control, and exactly
  *    one telemetry event is emitted for it;
  *  - keys typed in the portalled confirm step never reach the column as row keys (J / K / R / N),
  *    and Esc returns focus to the same row's control;
  *  - an arrival re-rendering the column does not disturb an open confirm step, and a takedown made
- *    elsewhere (another controller, the store) flips only its own row;
+ *    elsewhere (another controller, the store) marks only its own row REMOVED (the column's marker)
+ *    while the slot renders nothing for it;
  *  - the column needs nothing from this component beyond `{ post }` (the slot is ONE module-level
  *    function, as the orchestrator passes it), and existing rows keep their DOM nodes when a new
  *    row arrives.
@@ -32,6 +39,7 @@ import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { resolveFeed } from '@/features/social/services/feedService'
 import { removedPosts } from '@/features/social/services/removedPosts'
+import { useIsRowRemoved } from '../hooks/useRemovedPostIds'
 import { LiveWorldColumn } from './LiveWorldColumn'
 import type { LiveWorldPost } from './liveWorldModel'
 import { TakedownAction } from './TakedownAction'
@@ -106,13 +114,24 @@ afterEach(() => {
   removedPosts.resetForTests()
 })
 
+/** The component the orchestrator's route wraps the column in (a hook cannot run in a callback). */
+function Harness({ onReplyAs }: { onReplyAs: (target: unknown) => void }) {
+  const isRowRemoved = useIsRowRemoved()
+  return (
+    <ThemeProvider theme={cobraTheme}>
+      <LiveWorldColumn
+        onReplyAs={onReplyAs}
+        source={source}
+        renderRowActions={renderTakedown}
+        isRowRemoved={isRowRemoved}
+      />
+    </ThemeProvider>
+  )
+}
+
 async function loaded() {
   const onReplyAs = vi.fn()
-  const utils = render(
-    <ThemeProvider theme={cobraTheme}>
-      <LiveWorldColumn onReplyAs={onReplyAs} source={source} renderRowActions={renderTakedown} />
-    </ThemeProvider>,
-  )
+  const utils = render(<Harness onReplyAs={onReplyAs} />)
   await screen.findAllByTestId('live-world-row')
   return { ...utils, onReplyAs }
 }
@@ -147,8 +166,8 @@ describe('TakedownAction through renderRowActions', () => {
     expect(within(lookalike).getByTestId('takedown-trigger')).toHaveFocus()
   })
 
-  it('takes down THAT row\'s post in two clicks; only that row turns Removed and it stays for the record', async () => {
-    await loaded()
+  it('takes down THAT row\'s post in two clicks: the column marks it REMOVED once, the slot confirms the category', async () => {
+    const { onReplyAs } = await loaded()
     const user = userEvent.setup()
     const target = rowFor('p-lookalike')
 
@@ -156,15 +175,29 @@ describe('TakedownAction through renderRowActions', () => {
     await user.click(await screen.findByRole('radio', { name: 'PII' }))
     await user.click(screen.getByRole('button', { name: 'Confirm take down' }))
 
-    const marker = await within(target).findByTestId('takedown-removed')
-    expect(marker).toHaveTextContent('Removed')
+    // The persistent state is the COLUMN's: one REMOVED marker, on the author line.
+    const marker = await within(target).findByTestId('live-world-removed')
+    expect(marker).toHaveTextContent('REMOVED')
+    expect(within(target).getAllByText(/^removed$/i)).toHaveLength(1)
+    // The slot adds the controller's acknowledgement - distinct wording, with the category.
+    const confirmation = within(target).getByTestId('takedown-confirmation')
+    expect(confirmation).toHaveTextContent('Taken down · PII')
+    expect(confirmation).toHaveFocus()
+    expect(within(confirmation).queryByText(/removed/i)).toBeNull()
+    // "Reply as…" is disabled on the removed row, and R is a no-op there.
+    expect(within(target).getByTestId('live-world-reply-as')).toBeDisabled()
+    await user.keyboard('r')
+    expect(onReplyAs).not.toHaveBeenCalled()
     // The row stays, with its content, for the record.
     expect(target).toBeInTheDocument()
     expect(within(target).getByTestId('live-world-text')).toHaveTextContent('Do NOT drink the tap water.')
     expect(within(target).queryByTestId('takedown-trigger')).toBeNull()
-    // The other rows are untouched.
-    expect(within(rowFor('p-reply')).getByTestId('takedown-trigger')).toBeInTheDocument()
-    expect(within(rowFor('p-video')).getByTestId('takedown-trigger')).toBeInTheDocument()
+    // The other rows are untouched: still live, still takedown-able.
+    for (const id of ['p-reply', 'p-video']) {
+      expect(within(rowFor(id)).getByTestId('takedown-trigger')).toBeInTheDocument()
+      expect(within(rowFor(id)).queryByTestId('live-world-removed')).toBeNull()
+      expect(within(rowFor(id)).getByTestId('live-world-reply-as')).toBeEnabled()
+    }
     // Exactly one event, for that post.
     expect(steeringEvents()).toHaveLength(1)
     expect(steeringEvents()[0]?.target).toEqual({ entityType: 'post', entityId: 'p-lookalike' })
@@ -216,22 +249,49 @@ describe('TakedownAction through renderRowActions', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: 'Real-world reference' })).toBeChecked()
     await user.click(screen.getByRole('button', { name: 'Confirm take down' }))
-    expect(await within(rowFor('p-video')).findByTestId('takedown-removed')).toBeInTheDocument()
+    expect(await within(rowFor('p-video')).findByTestId('takedown-confirmation'))
+      .toHaveTextContent('Taken down · Real-world reference')
+    expect(within(rowFor('p-video')).getByTestId('live-world-removed')).toBeInTheDocument()
     expect(steeringEvents()[0]?.payload).toEqual({
       action: 'takedown',
       category: 'real-world-reference',
     })
   })
 
-  it('a takedown made elsewhere (another controller / the store) flips only its own row, with no telemetry', async () => {
+  it('a takedown made elsewhere marks only its own row REMOVED (the column); the slot renders nothing; no telemetry', async () => {
     await loaded()
 
     act(() => removedPosts.add('p-reply'))
 
-    expect(await within(rowFor('p-reply')).findByTestId('takedown-removed')).toBeInTheDocument()
+    const target = rowFor('p-reply')
+    expect(await within(target).findByTestId('live-world-removed')).toHaveTextContent('REMOVED')
+    expect(within(target).getAllByText(/^removed$/i)).toHaveLength(1)
+    // Nothing from the slot: no control, no confirmation, no second marker.
+    expect(within(target).queryByTestId('takedown-trigger')).toBeNull()
+    expect(within(target).queryByTestId('takedown-confirmation')).toBeNull()
+    expect(within(target).getByTestId('live-world-reply-as')).toBeDisabled()
+    // The other rows are untouched.
     expect(within(rowFor('p-lookalike')).getByTestId('takedown-trigger')).toBeInTheDocument()
     expect(within(rowFor('p-video')).getByTestId('takedown-trigger')).toBeInTheDocument()
+    expect(within(rowFor('p-video')).queryByTestId('live-world-removed')).toBeNull()
     expect(steeringEvents()).toHaveLength(0)
+  })
+
+  it('a removed row stays REMOVED across a remount of the column rows (the store keeps it)', async () => {
+    const first = await loaded()
+    const user = userEvent.setup()
+    await user.click(within(rowFor('p-video')).getByTestId('takedown-trigger'))
+    await user.click(await screen.findByRole('button', { name: 'Confirm take down' }))
+    await within(rowFor('p-video')).findByTestId('takedown-confirmation')
+    first.unmount()
+
+    await loaded()
+
+    const target = rowFor('p-video')
+    expect(within(target).getByTestId('live-world-removed')).toBeInTheDocument()
+    expect(within(target).queryByTestId('takedown-trigger')).toBeNull()
+    expect(within(target).queryByTestId('takedown-confirmation')).toBeNull()
+    expect(within(target).getByTestId('live-world-reply-as')).toBeDisabled()
   })
 
   it('a new row arriving gets its own control, and the existing rows keep their DOM nodes', async () => {

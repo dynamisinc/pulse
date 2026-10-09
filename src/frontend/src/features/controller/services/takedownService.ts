@@ -38,9 +38,10 @@
  * a repeat of an already-removed id succeeds (idempotent, like the server).
  *
  * ERRORS. Every failure is a {@link TakedownError} carrying a controller-readable `message`
- * (rendered as TEXT, never HTML — NFR-001/NFR-004): the server's own message when it sent one (the
- * 400 body), otherwise a plain sentence for the status or for a network failure. `status` is kept
- * for callers that branch (none needs to today).
+ * (rendered as TEXT, never HTML — NFR-001/NFR-004): the server's own message for a 400 (the
+ * contract's `category must be one of: ...`), or a short single-line non-markup body for another
+ * status; otherwise a plain sentence for the status or for a network failure. An HTML error page or
+ * a stack trace is never shown. `status` is kept for callers that branch (none needs to today).
  */
 
 import axios from 'axios'
@@ -117,8 +118,34 @@ function serverMessageOf(data: unknown): string | undefined {
   return undefined
 }
 
+/** Longest 400 body shown (B6's own message is under 100 characters). */
+const MAX_BAD_REQUEST_MESSAGE_LENGTH = 500
+
+/** Longest body shown for any other status: a short sentence, never a page. */
+const MAX_OTHER_MESSAGE_LENGTH = 200
+
+/** True for text that looks like markup (an HTML error page from a proxy or front door). */
+function looksLikeMarkup(text: string): boolean {
+  return /<\s*[a-z!/?]/i.test(text)
+}
+
+/**
+ * The server's own words, when they are safe and useful to show the controller. The contract
+ * promises a message for the 400 (`category must be one of: ...`), shown verbatim. For any other
+ * status only a SHORT, single-line, non-markup body qualifies: a 502 HTML page from a proxy or an
+ * ASP.NET developer exception page (multi-line plain text with a stack trace) must never reach the
+ * console as a wall of text. Anything else falls back to the staff copy for that status.
+ */
+function showableServerMessage(status: number, data: unknown): string | undefined {
+  const text = serverMessageOf(data)
+  if (text === undefined || looksLikeMarkup(text)) return undefined
+  if (status === 400) return text.length <= MAX_BAD_REQUEST_MESSAGE_LENGTH ? text : undefined
+  return text.length <= MAX_OTHER_MESSAGE_LENGTH && !/[\r\n]/.test(text) ? text : undefined
+}
+
 /** The plain sentence for a status the server answered without a usable message. */
 function messageForStatus(status: number): string {
+  if (status === 400) return 'The server did not accept that take down. Try again with another category.'
   if (status === 404) return NOT_FOUND_MESSAGE
   if (status === 401) return 'Your console session has expired. Sign in again to take this post down.'
   if (status === 403) return 'Only a controller assigned to this exercise can take a post down.'
@@ -136,7 +163,7 @@ function toTakedownError(error: unknown): TakedownError {
     if (status === undefined) {
       return new TakedownError('The server could not be reached. Check the connection and try again.')
     }
-    const reason = serverMessageOf(error.response?.data) ?? messageForStatus(status)
+    const reason = showableServerMessage(status, error.response?.data) ?? messageForStatus(status)
     return new TakedownError(reason, status)
   }
   return new TakedownError('The post was not taken down. Try again.')

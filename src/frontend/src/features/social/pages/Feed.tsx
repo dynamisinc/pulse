@@ -155,9 +155,13 @@
  * "removed" row, no moderator chrome, no announcement (the participant's fiction simply
  * has one post fewer). The pill's side is handled too: a removed id is never admitted to
  * the buffer, and one already buffered is `discard`ed before paint, so the "N new posts"
- * count never promises a post that would load nothing. Rows already loaded into this page's
- * own state are pruned, so a removed post's text is not kept around either (XC-002). An id
- * the page is not showing changes nothing — no re-render of any row, no focus move.
+ * count never promises a post that would load nothing. What this guarantees is the DOM: a
+ * removed post's card (its text, its media, its accessible names) is gone from the document, and
+ * the rows this page loaded from the pill are dropped from its own state. It does NOT purge
+ * in-memory caches - the frozen baseline `useFeed` resolved at mount, and `ownPostStore` - which
+ * can still hold the removed post's `ParticipantPostView` until the next read or sign-out; nothing
+ * renders it, and purging them is deliberately not attempted here. An id the page is not showing
+ * changes nothing - no re-render of any row, no focus move.
  * If the post that was removed held keyboard focus, focus moves to the feed REGION (the
  * `<section>`, `tabIndex={-1}`) instead of falling to `<body>`, so a keyboard or
  * screen-reader user keeps their place (NFR-001); the region is named by the page heading,

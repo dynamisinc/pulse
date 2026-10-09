@@ -22,8 +22,10 @@
  *     and refuses to buffer it; the Explore store drops it from its baseline.
  *
  * WHAT IT HOLDS: opaque ids and nothing else — never the post's text, author or any
- * other content (XC-002). A taken-down post's text must not be retained by anything
- * this store feeds, which is why consumers drop the whole post, not just mark it.
+ * other content (XC-002). Consumers drop the whole post (the card leaves the DOM, the Explore
+ * baseline forgets it) rather than mark it. This store does not reach into every in-memory cache:
+ * the Home feed's frozen baseline and `ownPostStore` can still hold the removed post's view until
+ * the next read or sign-out - nothing renders it.
  *
  * ISOLATION (COR-001). There is no `exerciseId` here and none is needed for
  * correctness: ids are server-issued GUIDs, unique across exercises, so an id only ever
