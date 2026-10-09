@@ -89,6 +89,7 @@ public static class AccountEndpoints
         // participant-login rate-limiter. /api/staff/accounts[/import] below stay gated.
         endpoints.MapPost("/api/auth/login", ParticipantLoginAsync)
             .RequireRateLimiting(ParticipantLoginRateLimitPolicy)
+            .WithLoginBodyLimit()
             .AllowAnonymousPreAuth();
         endpoints.MapPost("/api/staff/accounts", CreateAccountAsync);
 

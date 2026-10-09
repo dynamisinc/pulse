@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.Social;
 
 using System;
+using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Pulse.WebApi.Data.Entities;
@@ -165,6 +166,30 @@ public sealed class PersonaResponseDtoTests
         first.AvatarColor.Should().MatchRegex("^#[0-9A-Fa-f]{6}$");
         second.AvatarColor.Should().Be(
             first.AvatarColor, "the avatar color stays DERIVED from the handle and is stable across reads");
+    }
+
+    [Theory]
+    [InlineData("The Scoop", "TS")] // ordinary names are unchanged
+    [InlineData("mayor's office", "MO")]
+    [InlineData("Fairhaven", "F")]
+    [InlineData("\U0001F30A Fairhaven Water", "FW")] // emoji-leading: no lone surrogate (it serialized as U+FFFD)
+    [InlineData("\U0001F30A\U0001F525 \U0001F4A7", "")] // all emoji: empty, never U+FFFD
+    [InlineData("(Fairhaven) -- water", "FW")] // punctuation-leading word, and a word with no letter skipped
+    [InlineData("Пожарная служба", "ПС")] // non-Latin script, uppercased invariantly
+    [InlineData("東京 消防庁", "東消")] // no case: kept as is
+    [InlineData("\U00010428\U0001042F test", "\U00010400T")] // astral letter: a whole Rune, uppercased
+    [InlineData("911 Dispatch", "9D")]
+    [InlineData("  spaced\tout\nname ", "SO")] // any whitespace separates words
+    public void Initials_AreTheFirstLetterOrDigitRuneOfUpToTwoWords_NeverALoneSurrogate(string displayName, string expected)
+    {
+        var persona = AuthoredPersona();
+        persona.DisplayName = displayName;
+
+        var dto = PersonaResponseDto.FromPersona(persona);
+
+        dto.Initials.Should().Be(expected);
+        dto.Initials.EnumerateRunes().Should().NotContain(Rune.ReplacementChar, "no ill-formed UTF-16 reaches the wire");
+        JsonSerializer.Serialize(dto).Should().NotContain("\\uFFFD").And.NotContain("\uFFFD");
     }
 
     [Fact]

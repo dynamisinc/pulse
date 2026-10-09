@@ -14,6 +14,7 @@ using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
+using Pulse.WebApi.Features.Media; // demo-polish BM
 using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Features.Ops.EngineContentSeed;
 using Pulse.WebApi.Features.Ops.OrgAdminSeed;
@@ -21,6 +22,9 @@ using Pulse.WebApi.Features.OrganizationResolution;
 using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
+using Pulse.WebApi.Features.Social.Moderation; // demo-polish B6
+using Pulse.WebApi.Features.Social.PersonaAdmin; // demo-polish PE-BE
+using Pulse.WebApi.Features.Social.Reactions;  // demo-polish B3
 
 // Pulse.WebApi — the first runtime for the Pulse.Core engine (docs/BACKEND_ROADMAP.md §4, Phase B0).
 // This composition root is orchestrator-owned from here on: only a story that adds a *new* DI
@@ -166,14 +170,24 @@ builder.Services.AddOpsBootstrap(builder.Configuration);
 builder.Services.AddOrgAdminSeed(builder.Environment, builder.Configuration);
 
 // Social API (Phase B1, feature/social-api) — orchestrator-wired composition root. Each story exposes its
-// own Add*/Map* extension (never edits this file itself); these five DI calls register the read/write
+// own Add*/Map* extension (never edits this file itself); the first four DI calls register the read/write
 // services, the persona read, and the SignalR realtime host. AddSocialRealtimeHub also registers
 // IFeedBroadcaster -> SignalRFeedBroadcaster (which PostIngestService calls after a successful persist) and
 // AddSignalR(); it must be present alongside AddSocialPostWrite so the write path's broadcast resolves.
-builder.Services.AddSocialFeedRead();      // #270 GET /api/feed, /api/threads/{id}
+// demo-polish Wave 1b (orchestrator-wired at Gate 2) adds the four `// demo-polish …` lines after them: B6
+// takedown, B2 threads + the REAL IReplyParentResolver, B3 reactions + the REAL IPostEngagementReader, and BM
+// media + the REAL IMediaStore/IMediaUrlSigner. BP's AddSocialFeedRead/AddSocialPostWrite/AddSocialPersonaRead
+// TryAdd fail-closed fallbacks for those three seams; B2/B3/BM register with a plain Add*, so the real
+// implementations win in any order (Wave1bIntegrationTests asserts none of the fallbacks resolves on this host).
+builder.Services.AddSocialFeedRead();      // #270 GET /api/feed (+ BP's projector and the seam fallbacks)
 builder.Services.AddSocialPostWrite();     // #271 POST /api/posts (sanitize + stamp + telemetry + broadcast)
 builder.Services.AddSocialPersonaRead();   // #273 GET /api/personas
 builder.Services.AddSocialRealtimeHub();   // #272 exercise-grouped hub + IFeedBroadcaster impl
+builder.Services.AddSocialModeration();    // demo-polish B6
+builder.Services.AddSocialThreads();       // demo-polish B2
+builder.Services.AddSocialReactions();     // demo-polish B3
+builder.Services.AddMedia(builder.Configuration); // demo-polish BM
+builder.Services.AddPersonaAdmin();       // demo-polish PE-BE
 
 // Engine runtime — Wave 2 (feature/engine-runtime), orchestrator-wired. AddReactionLoopHost (#285)
 // registers the in-process reaction-loop BackgroundService + the IEnginePublishService publish funnel
@@ -355,19 +369,27 @@ app.MapControllers();
 
 // Social API endpoints + realtime hub (Phase B1) — the orchestrator-owned endpoint mappings paired with the
 // DI registrations above. Provenance is projected out server-side (XC-002) inside each endpoint; scope comes
-// only from the resolved IExerciseContext (COR-001), never a client-supplied exerciseId.
+// only from the resolved IExerciseContext (COR-001), never a client-supplied exerciseId. The demo-polish
+// Wave 1b mappings are tagged: B3's participant reaction WRITES sit inside DenyReadOnlySessions() (COR-015);
+// B6's takedown and BM's staff library carry their own staff filters; BM's POST /api/media applies
+// DenyReadOnlySessions() inside its own Map extension.
 app.MapSocialFeedEndpoints();     // #270 GET /api/feed
 app.MapSocialThreadEndpoints();   // #270 GET /api/threads/{postId}
 // #271 POST /api/posts — the one existing sim WRITE. Wrapped in a DenyReadOnlySessions() group
 // (identity-auth-roles/06) so a shared read-only session is refused (403) before the handler runs — the
 // server-side realization of the read-only-never-writes guarantee (COR-015). Opt-in per sim-write by design
 // (a verb-blanket would wrongly block read-only's legitimate writes to /api/telemetry, /auth/refresh,
-// /auth/logout, SignalR negotiate); each FUTURE sim-write (E2 reply/react/follow/DM) must apply the same
-// guard — tracked for a defense-in-depth backstop before E2 participant writes land.
+// /auth/logout, SignalR negotiate). Every participant sim-write applies the same guard: replies ride POST
+// /api/posts; reactions (demo-polish B3) are the next line; follows and BM's POST /api/media apply it inside
+// their own Map extensions. Any FUTURE sim-write (e.g. DMs) must do the same.
 app.MapGroup(string.Empty).DenyReadOnlySessions().MapSocialPostEndpoints();
+app.MapGroup(string.Empty).DenyReadOnlySessions().MapSocialReactionEndpoints(); // demo-polish B3
 
 app.MapSocialPersonaEndpoints();  // #273 GET /api/personas
 app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
+app.MapSocialModerationEndpoints(); // demo-polish B6
+app.MapMedia(); // demo-polish BM
+app.MapPersonaAdminEndpoints(); // demo-polish PE-BE (staff + controller + read-only gates inside)
 
 // Participant-shell config reads — the six GET endpoints the frozen frontend shell seams call
 // (shell-state, chrome-config, brand-tokens, channel-nav-config, alerts, overlay-state). Fixes the UAT
