@@ -472,7 +472,7 @@ public sealed class InjectBurstRunnerTests
             var seeded = await host.SeedExerciseAsync();
             host.ActAs(seeded.ExerciseId, seeded.StaffUserId);
             var item = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 2)); // offsets 0, 3
-            await Task.Delay(TimeSpan.FromMilliseconds(500)); // the runner's start-up sweep finds nothing and goes idle
+            await Task.Delay(TimeSpan.FromMilliseconds(500)); // the runner does not sweep at start-up: it idles until woken
 
             (await host.ActionOkAsync(item.Guid, "fire")).FiredCount.Should().Be(1);
 

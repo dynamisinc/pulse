@@ -180,3 +180,8 @@ the existing funnel and projection.
 - **Real funnel:** fire through real `PostIngestService` → post + telemetry + broadcast + observer.
 - **Real SQL** (`RequiresDockerFact`, runnable locally with `PULSE_TEST_SQL_CONNECTION` → LocalDB): migration applies;
   concurrent fire claims → exactly one post.
+- **Lock contention (exactly once, IQ-9 — #458 CI run 37922671324):** `InjectLockConflictsTests` (the one 1205/1222
+  helper, through every EF wrapper); `InjectLockConflictEndpointTests` (a real error-1205 victim on a fire's read, a
+  fire's claim, a hold, an edit and a runner step → the 409 with the current item, one re-apply, or a skipped tick —
+  never a 500); `InjectBurstRunnerLoopTests` (no database work while the host starts; failing sweeps back off; a
+  repeated failure is logged once).
