@@ -73,7 +73,8 @@ public static class PersonaProfilePatchParser
 
     /// <summary>
     /// A raw text value (or an echoed field name) longer than this many times its bound is refused (or cut)
-    /// before it reaches the sanitizer, whose strip-until-stable loop is super-linear on nested markup.
+    /// before it reaches the sanitizer. The sanitizer is linear now (one strip-until-stable pass), so this is a
+    /// cheap defence-in-depth bound on work and memory rather than the only guard against a CPU blow-up.
     /// </summary>
     public const int RawLengthFactor = 4;
 
@@ -330,7 +331,7 @@ public static class PersonaProfilePatchParser
     {
         text = string.Empty;
 
-        // Gate-1 S-1: never hand the super-linear sanitizer an oversized value.
+        // Gate-1 S-1: never hand the sanitizer an oversized value (defence in depth; the sanitizer itself is linear).
         if (raw.Length > rules.MaxLength * RawLengthFactor)
         {
             return rules.LengthMessage;

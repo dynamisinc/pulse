@@ -15,8 +15,15 @@ using System.Globalization;
 /// (<c>{post.text}</c>) that already escapes <c>&amp; &lt; &gt; " '</c> at render, so entity-encoding here
 /// would DOUBLE-encode ordinary text (<c>don't</c> → <c>don&amp;#39;t</c>) and break the fiction — the
 /// cardinal rule. Stripping keeps the author's literal <c>&amp; " '</c> and stray <c>&lt;</c>/<c>&gt;</c>
-/// while removing anything that could parse as executable markup in a non-React consumer too (an AAR export,
-/// a console replay), so a stored script can execute NOWHERE (NFR-004).
+/// and removes every COMPLETE tag and every <c>&lt;script&gt;</c>/<c>&lt;style&gt;</c> block, so no stored
+/// markup can execute through the React render path (NFR-004).
+/// </para>
+/// <para>
+/// <b>What it does NOT guarantee.</b> An UNCLOSED opener survives, as it always has: <c>"see &lt;img src=x"</c>
+/// with no later <c>&gt;</c> is not a tag and is kept verbatim (so is a literal <c>"5 &lt; 10"</c>). That is
+/// inert in a React text node, but concatenated into HTML it could join with markup that follows. So every
+/// NON-React HTML output of stored text (an AAR export, a console replay rendered as HTML, an email) MUST
+/// HTML-encode it; this sanitizer is not an HTML encoder.
 /// </para>
 /// <para>
 /// A pure static function with no dependencies — it needs no DI registration; each ingest boundary calls it
@@ -60,10 +67,17 @@ public static class PostSanitizer
     /// close tag is searched for once, so the whole pass is linear in the input.
     /// </para>
     /// <para>
-    /// <b>The guarantee:</b> the output contains no <c>&lt;/?[a-zA-Z][^&gt;]*&gt;</c> sequence at all, so nothing in
-    /// it can parse as a tag, and sanitizing it again (with this or the old regexes) changes nothing. For ordinary
-    /// text and well-formed markup the output is identical to the old repeat-until-stable regexes; only for
-    /// pathological overlapping fragments can it differ, and then it never leaves a tag behind.
+    /// <b>The guarantees:</b> the output contains no COMPLETE tag (no <c>&lt;/?[a-zA-Z][^&gt;]*&gt;</c> match; an
+    /// unclosed opener at the end can survive, see the type remarks); it is a fixed point (sanitizing it again, with
+    /// this or the old regexes, changes nothing); it is a subsequence of the input (characters are only removed,
+    /// never added or reordered); the cost is linear; and text with no tag in it comes back unchanged.
+    /// </para>
+    /// <para>
+    /// <b>It is NOT byte-identical to the old regexes.</b> On tag-laden input the two differ on a small fraction of
+    /// cases (the Gate-2 review's fuzzing measured about 0.25%), in both directions — e.g. where a removal rebuilds
+    /// a <c>&lt;script&gt;</c> opener, this version removes the block's contents too, and where overlapping
+    /// fragments interact the old passes sometimes kept a stray <c>&lt;</c> fragment this version removes (or the
+    /// reverse). It is stricter overall, and in every case it never keeps a complete tag.
     /// </para>
     /// </remarks>
     /// <param name="input">The raw text to sanitize.</param>

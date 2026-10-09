@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Features.Social;
 
 using System.Globalization;
+using System.Text;
 using System.Text.Json.Serialization;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
@@ -495,16 +496,40 @@ internal static class PersonaDerivedPresentation
     }
 
     /// <summary>
-    /// Deterministically derives up to two initials from <paramref name="displayName"/>: the first letter
-    /// of up to the first two whitespace-separated words, uppercased.
+    /// Deterministically derives up to two initials from <paramref name="displayName"/>: for each
+    /// whitespace-separated word, its first letter or digit — a whole <see cref="Rune"/>, so an astral letter is
+    /// never split into a lone surrogate — uppercased invariantly. A word with no letter or digit (an emoji, a
+    /// dash) is skipped, so <c>"🌊 Fairhaven Water"</c> is <c>"FW"</c> rather than a U+FFFD the serializer
+    /// substitutes for a lone surrogate. Ordinary names are unchanged (<c>"The Scoop"</c> → <c>"TS"</c>).
     /// </summary>
     /// <param name="displayName">The persona's display name.</param>
-    /// <returns>One or two uppercase initial characters, or an empty string if none could be derived.</returns>
+    /// <returns>Up to two uppercase initials, or an empty string if none could be derived.</returns>
     internal static string InitialsForDisplayName(string displayName)
     {
-        var words = displayName.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var initials = words.Take(2).Where(w => w.Length > 0).Select(w => char.ToUpperInvariant(w[0]));
-        return string.Concat(initials);
+        ArgumentNullException.ThrowIfNull(displayName);
+
+        var initials = new StringBuilder(4);
+        var found = 0;
+        foreach (var word in displayName.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        {
+            foreach (var rune in word.EnumerateRunes())
+            {
+                // EnumerateRunes yields U+FFFD for an ill-formed surrogate, which is not a letter or digit.
+                if (Rune.IsLetterOrDigit(rune))
+                {
+                    initials.Append(Rune.ToUpperInvariant(rune).ToString());
+                    found++;
+                    break;
+                }
+            }
+
+            if (found == 2)
+            {
+                break;
+            }
+        }
+
+        return initials.ToString();
     }
 
     /// <summary>

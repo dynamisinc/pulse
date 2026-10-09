@@ -79,9 +79,10 @@ public sealed partial class PostIngestService
     private const int MaxEngagementBaseline = 1_000_000;
 
     /// <summary>
-    /// A generous ceiling on a post's text: about seven times the 280-character composer default (the run-sheet
-    /// and seed-pack formats cap post text at 280 as well). It is not enforced on the sanitized text; it sizes
-    /// <see cref="MaxRawTextLength"/> and the <c>POST /api/posts</c> body limit.
+    /// The longest SANITIZED post text, in UTF-16 code units (Wave 1b Gate-2 L-3): about seven times the
+    /// 280-character composer default (the participant composer, the staff persona composer, the run-sheet and the
+    /// seed pack all cap post text at 280 code points; the engine is prompted for short posts). Longer is a 400. It
+    /// also sizes <see cref="MaxRawTextLength"/> and the <c>POST /api/posts</c> body limit.
     /// </summary>
     public const int TextLengthCeiling = 2_000;
 
@@ -91,6 +92,9 @@ public sealed partial class PostIngestService
     /// included, which the HTTP body limit never sees.
     /// </summary>
     public const int MaxRawTextLength = 4 * TextLengthCeiling;
+
+    /// <summary>The 400 for text that is too long, raw or sanitized (the same message for both, like alt text).</summary>
+    private static readonly string TextTooLongMessage = $"text must be at most {TextLengthCeiling} characters.";
 
     /// <summary>The longest RAW media <c>alt</c> accepted (4 × <see cref="PostMediaItem.MaxAltLength"/>), checked before sanitizing.</summary>
     public const int MaxRawAltLength = 4 * PostMediaItem.MaxAltLength;
@@ -224,7 +228,7 @@ public sealed partial class PostIngestService
         // DoS guard: the sanitizer's cost grows with its input, so an oversized raw body is refused before it runs.
         if (request.Text.Length > MaxRawTextLength)
         {
-            return PostIngestResult.Invalid($"text must be at most {MaxRawTextLength} characters.");
+            return PostIngestResult.Invalid(TextTooLongMessage);
         }
 
         if (string.IsNullOrEmpty(request.TimeZone))
@@ -285,8 +289,13 @@ public sealed partial class PostIngestService
         var parentPostId = parent?.Id;
         var inReplyTo = parent?.InReplyTo;
 
-        // 3. Sanitize server-side (NFR-004) — strip, never encode.
+        // 3. Sanitize server-side (NFR-004) — strip, never encode — then bound what would be stored (L-3). Nothing has
+        //    been added to the unit of work yet, so a refusal writes nothing.
         var body = PostSanitizer.Sanitize(request.Text);
+        if (body.Length > TextLengthCeiling)
+        {
+            return PostIngestResult.Invalid(TextTooLongMessage);
+        }
 
         // ONE source of truth for the acting human: the server-derived attribution. The persisted column and the
         // telemetry actor below are both projected from this single local — never from two independently-trusted

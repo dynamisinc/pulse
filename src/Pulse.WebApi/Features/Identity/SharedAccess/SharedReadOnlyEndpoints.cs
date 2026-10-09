@@ -97,6 +97,7 @@ public static class SharedReadOnlyEndpoints
         // require one; fails closed on its own behind the shared-login rate-limiter + brute-force lockout.
         endpoints.MapPost("/api/auth/shared", SharedLoginAsync)
             .RequireRateLimiting(SharedLoginRateLimitPolicy)
+            .WithLoginBodyLimit()
             .AllowAnonymousPreAuth();
 
         return endpoints;

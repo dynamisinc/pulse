@@ -216,17 +216,45 @@ public partial class PostSanitizerTests
     }
 
     [Fact]
-    public void Sanitize_RealisticMarkup_IsIdenticalToTheOldRepeatUntilStableRegexes()
+    public void Sanitize_RealisticMarkup_MeetsTheGuarantees()
     {
-        // Differential check against the previous implementation (kept below as the reference oracle): for ordinary
-        // text mixed with well-formed tags, script/style blocks, entities and literal < and >, the linear pass gives
-        // byte-identical output. Deterministic seed, so a failure reproduces.
+        // Ordinary text mixed with well-formed tags, script/style blocks, URLs in angle brackets and literal
+        // <, <<, <3, <-, >, >>. The linear pass is NOT byte-identical to the old regexes (they differ on a small
+        // fraction of tag-laden inputs, in both directions; see PostSanitizer's remarks), so this asserts the real
+        // guarantees instead: no complete tag, a fixed point (for this AND the old regexes), and a subsequence of
+        // the input. Deterministic seed, so a failure reproduces.
         var random = new Random(20261008);
-        for (var sample = 0; sample < 3_000; sample++)
+        for (var sample = 0; sample < 5_000; sample++)
         {
             var input = RealisticMarkup(random);
+            var result = PostSanitizer.Sanitize(input);
 
-            PostSanitizer.Sanitize(input).Should().Be(ReferenceSanitize(input), "for input: {0}", input);
+            AssertGuarantees(input, result);
+        }
+    }
+
+    [Fact]
+    public void Sanitize_TextWithNoTag_ComesBackUnchanged()
+    {
+        // The other half of the contract: text with no complete tag in it (literal <, <<, <3, <-, >, >>, a dangling
+        // "<b" with no '>') is returned exactly as written.
+        string[] pieces = ["Shelter", "in place", "5 < 10", "10 > 5", "<<", "<3", "<-", "->", ">>", "a<b", "x > y", "&", "\"q\"", "don't", " ", "#Flood", "<", ">"];
+        var random = new Random(77);
+        for (var sample = 0; sample < 5_000; sample++)
+        {
+            var builder = new StringBuilder();
+            for (var i = random.Next(1, 10); i > 0; i--)
+            {
+                builder.Append(pieces[random.Next(pieces.Length)]);
+            }
+
+            var input = builder.ToString();
+            if (AnyTag.IsMatch(input))
+            {
+                continue; // a random join happened to form a tag ("a<b" + ">"); not this test's subject
+            }
+
+            PostSanitizer.Sanitize(input).Should().Be(input, "text with no tag is never altered: {0}", input);
         }
     }
 
@@ -244,11 +272,35 @@ public partial class PostSanitizerTests
             }
 
             var input = new string(chars);
-            var result = PostSanitizer.Sanitize(input);
 
-            AnyTag.IsMatch(result).Should().BeFalse("no tag may survive: {0} → {1}", input, result);
-            ReferenceSanitize(result).Should().Be(result, "the output is stable: {0} → {1}", input, result);
+            AssertGuarantees(input, PostSanitizer.Sanitize(input));
         }
+    }
+
+    /// <summary>
+    /// The sanitizer's real contract: no complete tag survives, the output is a fixed point (for this and for the
+    /// old regexes), and it is a subsequence of the input (only removals). Linearity is the timing guard's job.
+    /// </summary>
+    private static void AssertGuarantees(string input, string result)
+    {
+        AnyTag.IsMatch(result).Should().BeFalse("no complete tag may survive: {0} → {1}", input, result);
+        PostSanitizer.Sanitize(result).Should().Be(result, "the output is a fixed point: {0} → {1}", input, result);
+        ReferenceSanitize(result).Should().Be(result, "the old regexes would change nothing either: {0} → {1}", input, result);
+        IsSubsequence(result, input).Should().BeTrue("characters are only removed, never added or reordered: {0} → {1}", input, result);
+    }
+
+    private static bool IsSubsequence(string candidate, string source)
+    {
+        var next = 0;
+        foreach (var c in source)
+        {
+            if (next < candidate.Length && candidate[next] == c)
+            {
+                next++;
+            }
+        }
+
+        return next == candidate.Length;
     }
 
     private static string Adversarial(string shape, int size)
@@ -300,7 +352,7 @@ public partial class PostSanitizerTests
 
     private static string RealisticMarkup(Random random)
     {
-        string[] words = ["Shelter", "in", "place", "Route 9", "don't", "\"stay calm\"", "&", "5 < 10", "10 > 5", "a<b", "x > y", "#Flood", "@EMA"];
+        string[] words = ["Shelter", "in", "place", "Route 9", "don't", "\"stay calm\"", "&", "5 < 10", "10 > 5", "a<b", "x > y", "#Flood", "@EMA", "<<", "<3", "<-", ">>", "<https://fairhaven.example/alerts>", "<mailto:pio@example.test>"];
         string[] tags = ["<b>", "</b>", "<i>", "</i>", "<a href=\"https://x.test\">", "</a>", "<img src=x onerror=alert(1)>", "<br/>", "<p class='x'>", "</p>", "<svg onload=alert(1)>"];
         string[] blocks = ["<script>alert('x')</script>", "<SCRIPT type=\"text/javascript\">evil()</SCRIPT>", "<style>body{display:none}</style>", "<style >p{}</style >"];
 
