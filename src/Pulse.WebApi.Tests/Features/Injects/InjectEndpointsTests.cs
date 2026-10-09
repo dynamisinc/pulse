@@ -411,6 +411,77 @@ public sealed class InjectEndpointsTests
     }
 
     [RequiresDockerFact]
+    public async Task Edit_ExpandingAStartedTwoPostBurstToTwenty_RepacesThemWithinTheWindow()
+    {
+        // Maximum jitter: every layout reaches the very end of its window, so "never beyond it" is the sharp edge.
+        await using var host = await StartAsync(new FixedJitterSource(int.MaxValue));
+        var seeded = await ActAsControllerAsync(host);
+        var item = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 2, window: 90));
+        var fired = await host.ActionOkAsync(item.Guid, "fire");
+        var held = await host.ActionOkAsync(item.Guid, "hold");
+        host.Time.Advance(TimeSpan.FromSeconds(10));
+
+        var posts = new System.Collections.Generic.List<object> { Echo(fired.Posts[0]), Echo(fired.Posts[1]) };
+        posts.AddRange(Enumerable.Range(3, 18).Select(index => Post(seeded.PersonaIds[index % 3], $"pile-on {index}")));
+        var response = await host.PutAsync(item.Id, new { kind = "burst", title = "Pile-on", burstWindowSeconds = 90, version = held.Version, posts });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var edited = (await InjectTestHost.ReadItemAsync(response))!;
+        edited.Posts.Should().HaveCount(20);
+        edited.Posts[0].DueOffsetSeconds.Should().Be(0, "a published post never moves");
+        var pending = edited.Posts.Skip(1).Select(p => p.DueOffsetSeconds!.Value).ToList();
+        pending[0].Should().Be(10, "the first unpublished post is due from now (10 s after release)");
+        pending[^1].Should().Be(90, "the rest are spread across the REMAINING window and never past it");
+        pending.Zip(pending.Skip(1), (x, y) => y - x).Should().OnlyContain(gap => gap >= InjectBurstPacing.MinGapSeconds);
+    }
+
+    [RequiresDockerFact]
+    public async Task Edit_ChangingAStartedBurstsWindow_RepacesItsPendingPosts()
+    {
+        await using var host = await StartAsync(new FixedJitterSource(int.MaxValue));
+        var seeded = await ActAsControllerAsync(host);
+        var item = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 3, window: 90));
+        var fired = await host.ActionOkAsync(item.Guid, "fire");
+        fired.Posts.Select(p => p.DueOffsetSeconds).Should().Equal(0, 87, 90);
+        var held = await host.ActionOkAsync(item.Guid, "hold");
+        host.Time.Advance(TimeSpan.FromSeconds(5));
+
+        var response = await host.PutAsync(item.Id, new
+        {
+            kind = "burst",
+            title = "Pile-on",
+            burstWindowSeconds = 30,
+            version = held.Version,
+            posts = fired.Posts.Select(Echo).ToArray(),
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        (await InjectTestHost.ReadItemAsync(response))!.Posts.Select(p => p.DueOffsetSeconds).Should().Equal(
+            [0, 5, 30], "the window shrank to 30 s, so the two pending posts are re-laid between now (+5 s) and +30 s");
+    }
+
+    [RequiresDockerFact]
+    public async Task Edit_WhenTooLittleWindowRemains_FallsBackToTheMinimumSpacing()
+    {
+        await using var host = await StartAsync(new FixedJitterSource(int.MaxValue));
+        var seeded = await ActAsControllerAsync(host);
+        var item = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 3, window: 90));
+        var fired = await host.ActionOkAsync(item.Guid, "fire");
+        var held = await host.ActionOkAsync(item.Guid, "hold");
+        host.Time.Advance(TimeSpan.FromSeconds(85));
+
+        var posts = fired.Posts.Select(Echo).ToList();
+        posts.AddRange(Enumerable.Range(4, 7).Select(index => Post(seeded.PersonaIds[index % 3], $"late {index}")));
+        var response = await host.PutAsync(item.Id, new { kind = "burst", title = "Pile-on", burstWindowSeconds = 90, version = held.Version, posts });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var pending = (await InjectTestHost.ReadItemAsync(response))!.Posts.Skip(1).Select(p => p.DueOffsetSeconds!.Value).ToList();
+        pending.Should().Equal(
+            Enumerable.Range(0, 9).Select(index => 85 + (3 * index)),
+            "only 5 s of the window remain for 9 posts, so they go at the 3 s floor from now — never closer");
+    }
+
+    [RequiresDockerFact]
     public async Task Edit_WithAStaleVersion_Is409_CarryingTheCurrentItem_AndChangesNothing()
     {
         await using var host = await StartAsync();
@@ -874,6 +945,9 @@ public sealed class InjectEndpointsTests
     }
 
     private static object Post(Guid personaId, string text = "post #WaterIssues") => new { personaId = personaId.ToString(), text };
+
+    /// <summary>Echoes an existing child unchanged (keeps its identity; a published post must not change).</summary>
+    private static object Echo(WirePost post) => new { id = post.Id, personaId = post.PersonaId, text = post.Text };
 
     private static async Task<int> CountPostsAsync(InjectTestHost host, Guid exerciseId)
     {

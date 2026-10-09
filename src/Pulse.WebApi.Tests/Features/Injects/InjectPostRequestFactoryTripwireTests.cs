@@ -24,7 +24,11 @@ using Xunit;
 using Xunit.Sdk;
 using static Pulse.WebApi.Tests.Features.Injects.InjectTestData;
 
-/// <summary>The BP-merge tripwire for the scripted-post funnel mapping (M3) — see the banner above.</summary>
+/// <summary>
+/// The BP-merge tripwire for the scripted-post funnel mapping (M3) — see the banner above. It inspects the REAL
+/// <see cref="CreatePostRequest"/> type, so its only possible failure is "BP's member exists and Build leaves it null";
+/// the stand-in tests pin both states: quiet before BP, and after BP failing until mapped, then passing.
+/// </summary>
 public sealed class InjectPostRequestFactoryTripwireTests
 {
     private static readonly string[] BpTypedMembers = ["ParentPostId", "Media", "EngagementBaseline"];
@@ -58,14 +62,12 @@ public sealed class InjectPostRequestFactoryTripwireTests
     }
 
     [Fact]
-    public void TodaysMediaMember_IsTheOpaquePlaceholder_WhichIsWhyTheTripwireIsQuietNow()
+    public void TheTripwire_IsQuiet_OnThePreBpShape()
     {
-        var media = typeof(CreatePostRequest).GetProperty("Media");
+        // Today's shape: an opaque JsonElement? Media placeholder and no ParentPostId / EngagementBaseline — nothing to map.
+        var check = () => AssertBpMembersMapped(typeof(PreBpCreatePostRequest), new PreBpCreatePostRequest());
 
-        // If this fails, BP has changed Media — the tripwire above is now armed for it, as intended.
-        media?.PropertyType.Should().Be(typeof(JsonElement?));
-        typeof(CreatePostRequest).GetProperty("ParentPostId").Should().BeNull("BP has not landed yet");
-        typeof(CreatePostRequest).GetProperty("EngagementBaseline").Should().BeNull("BP has not landed yet");
+        check.Should().NotThrow("the opaque placeholder is exempt and the absent members are not BP's yet");
     }
 
     /// <summary>For each BP member the request TYPE really has (typed, not the opaque placeholder), demands a value.</summary>
@@ -99,6 +101,12 @@ public sealed class InjectPostRequestFactoryTripwireTests
         child.BaselineRepost = 14;
         child.BaselineReply = 9;
         return item;
+    }
+
+    /// <summary>A stand-in for TODAY's CreatePostRequest: the opaque media placeholder, nothing else of BP's.</summary>
+    private sealed class PreBpCreatePostRequest
+    {
+        public JsonElement? Media { get; init; }
     }
 
     /// <summary>A stand-in for BP's CreatePostRequest: the three typed members, left null unless set.</summary>

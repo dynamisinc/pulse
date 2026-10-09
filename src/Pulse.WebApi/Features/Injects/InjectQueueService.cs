@@ -54,6 +54,7 @@ public sealed partial class InjectQueueService
     private const string FallbackTimeZone = "UTC";
     private const string DeletedMessage = "This item was deleted by someone else.";
     private const int MaxRecordAttempts = 5;
+    private const int MaxQueueAttempts = 3;
     private const int MaxErrorLength = 1000;
 
     private readonly PulseDbContext _dbContext;
@@ -187,8 +188,6 @@ public sealed partial class InjectQueueService
         }
 
         var time = TimeFor(caller.ExerciseId, facts);
-        var lastOrder = await LiveItems(caller.ExerciseId).MaxAsync(item => (int?)item.Order, cancellationToken) ?? 0;
-
         var item = new InjectItem
         {
             Id = Guid.NewGuid(),
@@ -196,7 +195,6 @@ public sealed partial class InjectQueueService
             Kind = draft.Kind,
             Title = draft.Title,
             Status = InjectStatuses.Pending,
-            Order = lastOrder + 1,
             Version = 1,
             CreatedByHumanId = caller.StaffUserId,
             CreatedAt = time.WallClock,
@@ -205,9 +203,26 @@ public sealed partial class InjectQueueService
         ApplyItemFields(item, draft);
         ApplyChildren(item, draft, time.WallClock);
 
-        _dbContext.InjectItems.Add(item);
-        _dbContext.TelemetryEvents.Add(InjectTelemetry.ForItem(item, InjectActions.Create, caller.StaffUserId, time));
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        // A create changes the queue's membership, so it bumps the queue token in the same save. Losing that race (to a
+        // reorder, a delete or another create — or two first-ever creates inserting the token row) is not the
+        // caller's problem: nothing they sent is stale, so take a fresh order slot and try again.
+        for (var attempt = 1; ; attempt++)
+        {
+            item.Order = (await LiveItems(caller.ExerciseId).MaxAsync(row => (int?)row.Order, cancellationToken) ?? 0) + 1;
+            await BumpQueueAsync(caller.ExerciseId, cancellationToken);
+            _dbContext.InjectItems.Add(item);
+            _dbContext.TelemetryEvents.Add(InjectTelemetry.ForItem(item, InjectActions.Create, caller.StaffUserId, time));
+
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                break;
+            }
+            catch (DbUpdateException) when (attempt < MaxQueueAttempts)
+            {
+                _dbContext.ChangeTracker.Clear();
+            }
+        }
 
         return InjectResult.Created(await ProjectAsync(item, facts, cancellationToken));
     }
@@ -323,15 +338,43 @@ public sealed partial class InjectQueueService
 
         var time = TimeFor(caller.ExerciseId, facts);
         item.DeletedAt = time.WallClock;
+        await BumpQueueAsync(caller.ExerciseId, cancellationToken);
+        if (await TrySaveAsync(item, InjectActions.Delete, caller.StaffUserId, time, cancellationToken))
+        {
+            return InjectResult.Deleted<InjectItemDto>();
+        }
 
-        return await TrySaveAsync(item, InjectActions.Delete, caller.StaffUserId, time, cancellationToken)
+        // Lost a race — often only on the QUEUE token (a create or reorder elsewhere), which says nothing about this
+        // item. Re-check ONCE against fresh state: the caller's version must still be current and the item deletable.
+        var fresh = await LoadItemAsync(itemId, caller.ExerciseId, cancellationToken);
+        if (fresh is null)
+        {
+            return InjectResult.Conflict<InjectItemDto>(DeletedMessage, null);
+        }
+
+        if (version != fresh.Version)
+        {
+            return InjectResult.Conflict<InjectItemDto>(StaleVersionMessage, await ProjectAsync(fresh, facts, cancellationToken));
+        }
+
+        if (InjectTransitions.WhyNotDeletable(fresh) is { } freshRefusal)
+        {
+            return InjectResult.Conflict<InjectItemDto>(freshRefusal, await ProjectAsync(fresh, facts, cancellationToken));
+        }
+
+        time = TimeFor(caller.ExerciseId, facts);
+        fresh.DeletedAt = time.WallClock;
+        await BumpQueueAsync(caller.ExerciseId, cancellationToken);
+        return await TrySaveAsync(fresh, InjectActions.Delete, caller.StaffUserId, time, cancellationToken)
             ? InjectResult.Deleted<InjectItemDto>()
             : await ConflictWithCurrentAsync(itemId, caller.ExerciseId, facts, InjectActions.Delete, cancellationToken);
     }
 
     /// <summary>
     /// <c>POST /api/injects/reorder</c>: sets the queue order. <c>ids</c> must name every live item exactly once.
-    /// Order is presentation, not item state, so it does not bump any item's version (an editor's version stays valid).
+    /// Order is presentation, not item state, so it does not bump any item's version (an editor's version stays valid);
+    /// it is serialized against creates and deletes by the per-exercise <see cref="InjectQueueState"/> token instead, so
+    /// a set that changed after the read is a <c>409</c>, never a silent success.
     /// </summary>
     /// <param name="request">The untrusted reorder body.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -363,6 +406,9 @@ public sealed partial class InjectQueueService
             ids.Add(id);
         }
 
+        // Read the queue token BEFORE the membership: any create or delete that lands after this read bumps the token,
+        // so the save below fails rather than writing an order computed for a set that no longer exists.
+        await BumpQueueAsync(caller.ExerciseId, cancellationToken);
         var items = await LiveItems(caller.ExerciseId).ToListAsync(cancellationToken);
         var byId = items.ToDictionary(item => item.Id);
         if (ids.Count != items.Count || ids.Distinct().Count() != ids.Count || ids.Any(id => !byId.ContainsKey(id)))
@@ -383,8 +429,9 @@ public sealed partial class InjectQueueService
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateConcurrencyException)
+        catch (DbUpdateException)
         {
+            // The queue token (an item was created or deleted meanwhile) or an item token (one was edited) moved.
             _dbContext.ChangeTracker.Clear();
             return InjectResult.Conflict<InjectQueueDto>(
                 "The queue changed while you were reordering. Refresh and try again.", null);
@@ -878,6 +925,23 @@ public sealed partial class InjectQueueService
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Bumps the exercise's queue-membership token (creating it on first use) in the current unit of work — see
+    /// <see cref="InjectQueueState"/> for why it is a token row and not a serializable transaction.
+    /// </summary>
+    private async Task BumpQueueAsync(Guid exerciseId, CancellationToken cancellationToken)
+    {
+        var state = await _dbContext.InjectQueueStates
+            .FirstOrDefaultAsync(row => row.ExerciseId == exerciseId, cancellationToken);
+        if (state is null)
+        {
+            _dbContext.InjectQueueStates.Add(new InjectQueueState { ExerciseId = exerciseId, Version = 1 });
+            return;
+        }
+
+        state.Version++;
+    }
+
     /// <summary>The action event a controller's claim still owes, or <c>null</c> for a runner claim.</summary>
     private static ClaimEvent? PendingClaimEvent(InjectItemPost child) =>
         child is { ClaimEventId: { } eventId, ClaimAction: { } action, ClaimActorId: { } actor }
@@ -1276,8 +1340,8 @@ public sealed partial class InjectQueueService
     /// spurious concurrency conflict). On create the item is not tracked yet, and adding it adds the whole graph.
     /// </para>
     /// <para>
-    /// A new child of an item that has ALREADY fired is scheduled after the existing pacing (3 s apart); before the
-    /// first fire, offsets are laid out by Fire itself.
+    /// Before the first fire, offsets are laid out by Fire itself. On a burst that has ALREADY fired, every accepted
+    /// edit re-paces the unpublished posts across what is left of the window — see <see cref="RepaceUnpublished"/>.
     /// </para>
     /// </remarks>
     private void ApplyChildren(InjectItem item, InjectItemDraft draft, DateTimeOffset now)
@@ -1285,7 +1349,6 @@ public sealed partial class InjectQueueService
         var tracked = _dbContext.Entry(item).State != EntityState.Detached;
         var live = InjectTransitions.LiveChildren(item).ToDictionary(post => post.Id);
         var started = InjectTransitions.HasStarted(item);
-        var nextOffset = (live.Values.Max(post => post.DueOffsetSeconds) ?? 0) + InjectBurstPacing.MinGapSeconds;
 
         // Pass 1: resolve every position to its child (kept or new), so a {sequence} reply can name a new sibling.
         var children = new InjectItemPost[draft.Posts.Count];
@@ -1305,11 +1368,6 @@ public sealed partial class InjectQueueService
                 Text = draft.Posts[index].Text,
                 Status = InjectPostStatuses.Pending,
             };
-            if (started)
-            {
-                child.DueOffsetSeconds = nextOffset;
-                nextOffset += InjectBurstPacing.MinGapSeconds;
-            }
 
             item.Posts.Add(child);
             if (tracked)
@@ -1346,6 +1404,50 @@ public sealed partial class InjectQueueService
         {
             removed.DeletedAt = now;
         }
+
+        if (started && item.Kind == InjectKinds.Burst)
+        {
+            RepaceUnpublished(item, children, now);
+        }
+    }
+
+    /// <summary>
+    /// Re-paces a started burst's UNPUBLISHED posts (pending or failed, in their new order) after an accepted edit, so
+    /// the schedule stays truthful to the edited window: the first is due from the later of now and 3 s after the last
+    /// published post, and the rest are spread (jittered, increasing, at least 3 s apart) across what remains of the
+    /// window — or at the minimum 3 s spacing when too little remains. Published posts never move.
+    /// </summary>
+    /// <remarks>
+    /// The accumulated lateness shift is folded in here (reset to zero, offsets absolute from release): only unpublished
+    /// posts are ever scheduled again, and they are all re-laid now.
+    /// </remarks>
+    private void RepaceUnpublished(InjectItem item, IReadOnlyList<InjectItemPost> children, DateTimeOffset now)
+    {
+        var unpublished = children
+            .Where(post => post.Status is InjectPostStatuses.Pending or InjectPostStatuses.Failed)
+            .ToList();
+        if (unpublished.Count == 0 || item.ReleasedAt is not { } released)
+        {
+            return;
+        }
+
+        var anchor = now;
+        if (item.LastPublishedAt is { } last && last.AddSeconds(InjectBurstPacing.MinGapSeconds) > anchor)
+        {
+            anchor = last.AddSeconds(InjectBurstPacing.MinGapSeconds);
+        }
+
+        var start = Math.Max(0, (int)Math.Floor((anchor - released).TotalSeconds));
+        var window = item.BurstWindowSeconds ?? InjectItemValidator.DefaultBurstWindowSeconds;
+        var span = Math.Max(window - start, InjectBurstPacing.MinimumWindowSeconds(unpublished.Count));
+        var offsets = InjectBurstPacing.ComputeOffsets(unpublished.Count, span, _jitter);
+
+        for (var index = 0; index < unpublished.Count; index++)
+        {
+            unpublished[index].DueOffsetSeconds = start + offsets[index];
+        }
+
+        item.ShiftSeconds = 0;
     }
 
     private static string? Truncate(string? message) =>
