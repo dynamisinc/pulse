@@ -56,12 +56,20 @@ export const liveWorldTokens = {
   danger: staffShellTokens.accent.cadenceRed,
 } as const
 
-/** Visually hidden but available to assistive technology. */
+/**
+ * Visually hidden but available to assistive technology.
+ *
+ * The dimensions are PIXEL STRINGS on purpose: under MUI `sx` a bare number is
+ * transformed — `width: 1` / `height: 1` mean 100% and `margin: -1` means one
+ * spacing unit (-8px) — which would turn every one of these into a full-size
+ * absolutely-positioned box (the Live world renders ~4 per row). The computed
+ * style is pinned by `liveWorldStyles.test.ts` and `LiveWorldColumn.test.tsx`.
+ */
 export const srOnly = {
   position: 'absolute',
-  width: 1,
-  height: 1,
-  margin: -1,
+  width: '1px',
+  height: '1px',
+  margin: '-1px',
   padding: 0,
   overflow: 'hidden',
   clip: 'rect(0 0 0 0)',

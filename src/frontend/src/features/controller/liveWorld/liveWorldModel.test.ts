@@ -23,9 +23,11 @@ import {
   mediaLabel,
   mergePending,
   REPLY_EXCERPT_MAX,
+  shortAuthorId,
   toEntry,
   toLiveWorldPost,
   toReplyTarget,
+  unknownAuthorLabel,
   type LiveWorldEntry,
   type LiveWorldState,
 } from './liveWorldModel'
@@ -195,16 +197,32 @@ describe('filters', () => {
     expect(decodeFilter('bogus')).toEqual({ kind: 'all' })
   })
 
-  it('collects the tags SEEN, most-used first then alphabetical, capped', () => {
+  it('collects the tags SEEN, listed alphabetically (usage never reorders them)', () => {
     const entries = [
-      toEntry(view('1', { text: '#b #a' }), 1),
-      toEntry(view('2', { text: '#b' }), 2),
-      toEntry(view('3', { text: 'no tags' }), 3),
+      toEntry(view('1', { text: '#b #a #c' }), 1),
+      toEntry(view('2', { text: '#c #b' }), 2),
+      toEntry(view('3', { text: '#c' }), 3),
+      toEntry(view('4', { text: 'no tags' }), 4),
     ]
-    expect(collectTags(entries)).toEqual(['b', 'a'])
+    // c is the most used, a the least: the options are still a, b, c.
+    expect(collectTags(entries)).toEqual(['a', 'b', 'c'])
+    // More use of 'a' later does not move it.
+    expect(collectTags([...entries, toEntry(view('5', { text: '#a #a' }), 5)]))
+      .toEqual(['a', 'b', 'c'])
+  })
+
+  it('caps the tag options at the MOST-USED MAX_TAG_OPTIONS, still alphabetical', () => {
     const many = Array.from({ length: MAX_TAG_OPTIONS + 10 }, (_, i) =>
       toEntry(view(`m${i}`, { text: `#tag${String(i).padStart(3, '0')}` }), i))
-    expect(collectTags(many)).toHaveLength(MAX_TAG_OPTIONS)
+    // 'zzz' is used twice, so it makes the cut despite sorting last.
+    const popular = [
+      toEntry(view('p1', { text: '#zzz' }), 900),
+      toEntry(view('p2', { text: '#zzz' }), 901),
+    ]
+    const tags = collectTags([...many, ...popular])
+    expect(tags).toHaveLength(MAX_TAG_OPTIONS)
+    expect(tags).toContain('zzz')
+    expect(tags).toEqual([...tags].sort((a, b) => a.localeCompare(b)))
   })
 })
 
@@ -228,6 +246,28 @@ describe('projections', () => {
     expect(Object.keys(projected)).not.toEqual(
       expect.arrayContaining(['origin', 'actingHumanId', 'createdWallClock', 'injectId']),
     )
+  })
+
+  it('still projects a post whose author is unknown: UNKNOWN AUTHOR label, flagged, never dropped', () => {
+    const guid = '3f9a1c2b-7d4e-4a10-9c55-0a1b2c3d4e5f'
+    const projected = toLiveWorldPost(view('x', { authorPersonaId: guid }), undefined)
+    expect(projected).toMatchObject({
+      id: 'x',
+      authorPersonaId: guid,
+      authorDisplayName: 'UNKNOWN AUTHOR · 3f9a1c2b',
+      authorHandle: 'unknown-3f9a1c2b',
+      authorVerified: false,
+      authorUnknown: true,
+    })
+    // A known author carries no flag at all.
+    expect('authorUnknown' in toLiveWorldPost(view('y'), persona(WATER))).toBe(false)
+  })
+
+  it('shortAuthorId: first 8 characters, after dropping the mock cast\'s persona- prefix', () => {
+    expect(shortAuthorId('3f9a1c2b-7d4e-4a10-9c55-0a1b2c3d4e5f')).toBe('3f9a1c2b')
+    expect(shortAuthorId('persona-nobody-at-all')).toBe('nobody-a')
+    expect(shortAuthorId('abc')).toBe('abc')
+    expect(unknownAuthorLabel('persona-ghost')).toBe('UNKNOWN AUTHOR · ghost')
   })
 
   it('omits media/inReplyTo when absent', () => {

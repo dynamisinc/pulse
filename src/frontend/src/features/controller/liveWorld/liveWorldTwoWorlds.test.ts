@@ -16,25 +16,73 @@
  *   - `exerciseId` is read in exactly one place, as the React `key` that remounts
  *     the panel on an exercise switch (COR-001) — it is never passed anywhere.
  *
- * It reads the REAL source text of this folder's non-test files with Vite's
- * `import.meta.glob` (`?raw`) — `node:fs` is deliberately not used (the app TS
- * program omits Node types; see `staffShell/twoWorldsSeparation.test.ts`, whose
- * specifier-parsing approach this mirrors). Comments are stripped first, so prose
- * that merely MENTIONS `PostCard` is not a violation; only code is. A file-count
- * assertion keeps the guard from passing vacuously by scanning nothing.
+ * SCOPE. The glob covers EVERY non-test source file under this folder, nested
+ * folders included (`./**` — C5's `TakedownAction.tsx` lands here and is held to
+ * the same rules). Test files and `liveWorldTestKit.ts` (test-only builders) are
+ * excluded. Every import-like specifier is checked: `import … from`, side-effect
+ * `import '…'`, dynamic `import('…')`, `require('…')`, AND re-exports
+ * (`export … from '…'`, `export * from '…'`), which would otherwise smuggle a
+ * participant module through a barrel.
+ *
+ * THE SOCIAL ALLOWLIST. Anything imported from `@/features/social` must match an
+ * entry of `ALLOWED_SOCIAL_IMPORTS` below — each with the reason it is safe. The
+ * list is deliberately short and explicit: a new entry is a conscious decision
+ * that the module is pure data/service (no participant skin, no UI), made in code
+ * review, not an accident of "it compiled". Relative paths into `social` are
+ * rejected outright (they would bypass the allowlist). The bare barrel
+ * `@/features/social` also exports `PostCard` and friends, so it may be imported
+ * for TYPES only.
+ *
+ * It reads the REAL source text with Vite's `import.meta.glob` (`?raw`) — `node:fs`
+ * is deliberately not used (the app TS program omits Node types; see
+ * `staffShell/twoWorldsSeparation.test.ts`, whose specifier-parsing approach this
+ * mirrors). Comments are stripped first, so prose that merely MENTIONS `PostCard`
+ * is not a violation; only code is. A file-count assertion keeps the guard from
+ * passing vacuously, and the parser has its own self-test.
  */
 import { describe, expect, it } from 'vitest'
 
 const sources = import.meta.glob(
   [
-    './*.ts',
-    './*.tsx',
-    '!./*.test.ts',
-    '!./*.test.tsx',
+    './**/*.ts',
+    './**/*.tsx',
+    '!./**/*.test.ts',
+    '!./**/*.test.tsx',
     '!./liveWorldTestKit.ts',
   ],
   { eager: true, query: '?raw', import: 'default' },
 ) as Record<string, string>
+
+/**
+ * The only modules the Live world folder may import from the social feature, and
+ * why each is safe (pure data / service, no participant skin, no UI). See the
+ * module header: adding an entry is a review decision.
+ */
+const ALLOWED_SOCIAL_IMPORTS: readonly { readonly pattern: RegExp; readonly why: string }[] = [
+  {
+    pattern: /^@\/features\/social$/,
+    why: 'the barrel, for TYPES ONLY (Post/ParticipantPostView/ReplyTarget…); it also exports '
+      + 'PostCard, so a value import is rejected separately',
+  },
+  {
+    pattern: /^@\/features\/social\/services\/(feedService|feedStreamSource|postService|audience)$/,
+    why: 'the feed read seam, the shared ref-counted arrival transport, the sole XC-002 '
+      + 'narrowing (toParticipantView) and the compact-count formatter: services, no UI',
+  },
+  {
+    pattern: /^@\/features\/social\/utils\/hashtags$/,
+    why: 'the pure hashtag parser (one definition of "what a hashtag is")',
+  },
+  {
+    pattern: /^@\/features\/social\/components\/media\/(safeMediaUrl|formatDuration)$/,
+    why: 'pure helpers only: the media URL allow-list (NFR-004) and the duration formatter',
+  },
+  {
+    pattern: /^@\/features\/social\/services\/removedPosts$/,
+    why: 'C5: the pure removed-post id store the console wires into `isRowRemoved` / '
+      + 'TakedownAction (a store, no UI)',
+  },
+]
 
 /** Removes block and whole-line comments (specifier-only scanning must ignore prose). */
 function stripComments(source: string): string {
@@ -45,12 +93,15 @@ function stripComments(source: string): string {
     .join('\n')
 }
 
-function importSpecifiers(code: string): string[] {
+/** Every module specifier `code` imports, side-effect-imports, requires or RE-EXPORTS. */
+function moduleSpecifiers(code: string): string[] {
   const patterns = [
-    /import\s+(?:type\s+)?[^'"]*?from\s+['"]([^'"]+)['"]/g,
-    /import\s+['"]([^'"]+)['"]/g,
-    /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-    /require\(\s*['"]([^'"]+)['"]\s*\)/g,
+    /import\s+(?:type\s+)?[^'"]*?from\s+['"]([^'"]+)['"]/g, // import … from '…'
+    /import\s+['"]([^'"]+)['"]/g, // import '…'
+    /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g, // import('…')
+    /require\(\s*['"]([^'"]+)['"]\s*\)/g, // require('…')
+    /export\s+(?:type\s+)?\*(?:\s+as\s+[\w$]+)?\s*from\s*['"]([^'"]+)['"]/g, // export * [as x] from
+    /export\s+(?:type\s+)?\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g, // export { … } from
   ]
   const found: string[] = []
   for (const pattern of patterns) {
@@ -82,8 +133,53 @@ const files = Object.entries(sources).map(([path, raw]) => ({
   code: stripComments(raw),
 }))
 
+describe('Live world column — the guard\'s own machinery', () => {
+  it('parses imports, side-effect imports, dynamic imports, require, and RE-EXPORTS', () => {
+    const code = [
+      "import { A } from '@/a'",
+      "import type { B } from '@/b'",
+      "import '@/side-effect'",
+      "const lazy = import('@/dynamic')",
+      "const old = require('@/required')",
+      "export * from '@/star'",
+      "export * as ns from '@/star-as'",
+      "export { C, D } from '@/named'",
+      "export type { E } from '@/named-type'",
+      'export { local }',
+    ].join('\n')
+    expect(moduleSpecifiers(code).sort()).toEqual([
+      '@/a', '@/b', '@/dynamic', '@/named', '@/named-type', '@/required',
+      '@/side-effect', '@/star', '@/star-as',
+    ])
+  })
+
+  it('ignores specifiers that only appear in comments', () => {
+    const code = stripComments([
+      "/* import { X } from '@/block-comment' */",
+      "// export * from '@/line-comment'",
+      "import { Y } from '@/real'",
+    ].join('\n'))
+    expect(moduleSpecifiers(code)).toEqual(['@/real'])
+  })
+
+  it('flags a participant module smuggled through a re-export', () => {
+    const forbidden = /features\/social\/components\/post(\/|$)/
+    expect(moduleSpecifiers("export * from '@/features/social/components/post'")
+      .some(s => forbidden.test(s))).toBe(true)
+    expect(moduleSpecifiers("export { PostCard } from '@/features/social/components/post'")
+      .some(s => forbidden.test(s))).toBe(true)
+  })
+
+  it('documents every allowlist entry (a reason is mandatory)', () => {
+    expect(ALLOWED_SOCIAL_IMPORTS.length).toBeGreaterThan(0)
+    for (const entry of ALLOWED_SOCIAL_IMPORTS) {
+      expect(entry.why.trim().length).toBeGreaterThan(20)
+    }
+  })
+})
+
 describe('Live world column — the two-worlds guard', () => {
-  it('scans the real files (non-vacuous)', () => {
+  it('scans the real files (non-vacuous), nested folders included', () => {
     const names = files.map(file => file.path)
     for (const expected of [
       'LiveWorldColumn.tsx',
@@ -92,10 +188,14 @@ describe('Live world column — the two-worlds guard', () => {
       'useLiveWorldFeed.ts',
       'liveWorldModel.ts',
       'liveWorldStyles.ts',
+      'index.ts',
     ]) {
       expect(names).toContain(expected)
     }
     expect(files.every(file => file.code.trim().length > 0)).toBe(true)
+    // Tests and the test kit are NOT scanned (they legitimately name PostCard in prose, etc.).
+    expect(names.some(name => /\.test\.tsx?$/.test(name))).toBe(false)
+    expect(names).not.toContain('liveWorldTestKit.ts')
   })
 
   it('imports no participant post component, no participant stylesheet, no participant shell', () => {
@@ -112,7 +212,7 @@ describe('Live world column — the two-worlds guard', () => {
     ]
     const violations: string[] = []
     for (const file of files) {
-      for (const specifier of importSpecifiers(file.code)) {
+      for (const specifier of moduleSpecifiers(file.code)) {
         if (forbidden.some(pattern => pattern.test(specifier))) {
           violations.push(`${file.path} imports ${specifier}`)
         }
@@ -129,26 +229,31 @@ describe('Live world column — the two-worlds guard', () => {
     expect(offenders).toEqual([])
   })
 
-  it('takes only pure data and services from the social feature (by path, not the UI barrel as a value)', () => {
-    const allowedSocial = [
-      /^@\/features\/social$/, // type-only imports below
-      /^@\/features\/social\/services\/(feedService|feedStreamSource|postService|audience)$/,
-      /^@\/features\/social\/utils\/hashtags$/,
-      /^@\/features\/social\/components\/media\/(safeMediaUrl|formatDuration)$/,
-    ]
+  it('takes only what the SOCIAL ALLOWLIST names, and the bare barrel for types only', () => {
     const violations: string[] = []
     for (const file of files) {
-      for (const specifier of importSpecifiers(file.code)) {
+      for (const specifier of moduleSpecifiers(file.code)) {
+        // A relative path into `social` would sidestep the allowlist entirely.
+        if (specifier.startsWith('.') && /(^|\/)social(\/|$)/.test(specifier)) {
+          violations.push(`${file.path} reaches into social by relative path: ${specifier}`)
+          continue
+        }
         if (!specifier.startsWith('@/features/social')) continue
-        if (!allowedSocial.some(pattern => pattern.test(specifier))) {
-          violations.push(`${file.path} imports ${specifier}`)
+        if (!ALLOWED_SOCIAL_IMPORTS.some(entry => entry.pattern.test(specifier))) {
+          violations.push(`${file.path} imports ${specifier} (not on the social allowlist)`)
         }
       }
-      // The bare barrel exports PostCard & co: it may be imported for TYPES only.
-      for (const match of file.code.matchAll(
-        /import\s+(type\s+)?\{[^}]*\}\s*from\s*['"]@\/features\/social['"]/g,
-      )) {
-        if (match[1] === undefined) violations.push(`${file.path} has a VALUE import of the barrel`)
+      // The bare barrel exports PostCard & co: it may be imported for TYPES only —
+      // neither a value import nor a re-export of it.
+      const barrelStatement = new RegExp(
+        '(import|export)\\s+(type\\s+)?(\\{[^}]*\\}|\\*(?:\\s+as\\s+[\\w$]+)?)\\s*from\\s*'
+        + '[\'"]@/features/social[\'"]',
+        'g',
+      )
+      for (const match of file.code.matchAll(barrelStatement)) {
+        if (match[2] === undefined) {
+          violations.push(`${file.path} has a VALUE ${match[1]} of the social barrel`)
+        }
       }
     }
     expect(violations).toEqual([])
@@ -157,7 +262,7 @@ describe('Live world column — the two-worlds guard', () => {
   it('builds on COBRA: the column imports from @/theme/styledComponents, never raw MUI controls', () => {
     const column = files.find(file => file.path === 'LiveWorldColumn.tsx')
     expect(column).toBeDefined()
-    expect(importSpecifiers(column?.code ?? '')).toContain('@/theme/styledComponents')
+    expect(moduleSpecifiers(column?.code ?? '')).toContain('@/theme/styledComponents')
 
     const rawControls = ['Button', 'TextField', 'IconButton', 'ToggleButton', 'Select', 'Chip']
     const violations: string[] = []
@@ -172,7 +277,7 @@ describe('Live world column — the two-worlds guard', () => {
 
   it('uses FontAwesome icons', () => {
     const column = files.find(file => file.path === 'LiveWorldColumn.tsx')
-    expect(importSpecifiers(column?.code ?? '')).toContain('@fortawesome/free-solid-svg-icons')
+    expect(moduleSpecifiers(column?.code ?? '')).toContain('@fortawesome/free-solid-svg-icons')
   })
 
   it('reads no wall-clock (scenario time only, COR-053)', () => {
@@ -182,7 +287,7 @@ describe('Live world column — the two-worlds guard', () => {
     expect(offenders).toEqual([])
   })
 
-  it('reads exerciseId in exactly one place: as the React key that remounts on an exercise switch', () => {
+  it('reads exerciseId in exactly one place: as the React key that remounts on a switch', () => {
     const occurrences = files.flatMap(file =>
       file.code
         .split('\n')

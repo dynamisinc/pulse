@@ -28,14 +28,24 @@
  *
  * ## Real time without disorientation (burst legibility)
  * Arrivals are batched. While the controller is READING — the list is scrolled
- * down, or keyboard focus is on a row below the top — arrivals are held behind a
- * visible, keyboard-reachable "N new" control instead of shifting the list; at
- * the top they insert in place. Activating "N new" (or scrolling back to the top
- * / leaving the list) merges them and returns to the top. The list is bounded
+ * down, or keyboard focus is ANYWHERE inside it (a focused row, even the first,
+ * would be pushed down and off screen by every insert above it) — arrivals are
+ * held behind a visible, keyboard-reachable "N new" control instead of shifting
+ * the list; at the top, with focus outside the list, they insert in place.
+ * Activating "N new" (or scrolling back to the top / leaving the list) merges them
+ * and returns to the top; a KEYBOARD activation also lands focus on the newest row,
+ * while a mouse click leaves the list live. The list is bounded
  * (see `liveWorldModel`), rows are memoized, and the log region is
  * `role="log"` with `aria-live="off"`: a dense staff surface gets a button, not a
  * chatty live region. Only a CHANGE of filter (and the first load) is announced,
  * politely, as a count of matching rows.
+ *
+ * ## Every post is shown
+ * A controller must see everything participants can. A post whose author is not in
+ * the persona directory is listed as "UNKNOWN AUTHOR · <short id>" (never skipped),
+ * and a new unknown author triggers a persona-directory refresh, throttled to once
+ * per `UNKNOWN_AUTHOR_REFRESH_MS`. If the directory itself fails to load, an inline
+ * alert with Retry says so and every author reads as unknown until it recovers.
  *
  * ## Filters
  * One picker: All posts (default), a hashtag chosen from the tags seen, or a
@@ -62,9 +72,12 @@
  * ## Props (implementation.md §1.11)
  * `onReplyAs(target: ReplyTarget)` — the orchestrator maps it to
  * `ctx.openComposer({ replyTo })`. `renderRowActions?(post: LiveWorldPost)`.
- * `source?` is a test seam (an injectable arrival source); the console never
- * passes it. Wrap `renderRowActions` in `useCallback` for the best performance:
- * rows are memoized and a new function identity re-renders them.
+ * `isRowRemoved?(post)` (optional, added for C5's removed-posts store) marks a
+ * row REMOVED and disables Reply as… on it. `source?` is a test seam (an
+ * injectable arrival source); the console never passes it. Rows are memoized and
+ * a new function identity re-renders them: wrap `renderRowActions` in
+ * `useCallback` for the best performance, and give `isRowRemoved` a new identity
+ * whenever the removed set changes.
  *
  * Time on the column is scenario time in the exercise zone (COR-053); the zone is
  * named in the toolbar. No wall-clock is shown.
@@ -73,6 +86,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -127,6 +141,15 @@ export interface LiveWorldColumnProps {
   onReplyAs(target: ReplyTarget): void
   /** Optional per-row action slot (C5's Take down). Absent = nothing rendered. */
   renderRowActions?(post: LiveWorldPost): ReactNode
+  /**
+   * Whether a post has been taken down (C5's removed-posts store). A removed row
+   * stays listed for the record with a REMOVED marker (icon + text), "Reply as…"
+   * disabled and described, and `R` a no-op on it. Rows are memoized on their
+   * props and call this during render, so when the answer can change, pass a
+   * function with a NEW identity when it does (e.g. `useCallback` over the set a
+   * store hook returns). Absent = nothing is ever marked removed.
+   */
+  isRowRemoved?(post: LiveWorldPost): boolean
   /** TEST SEAM: an injectable arrival source (defaults to the shared transport). */
   source?: FeedStreamSource
 }
@@ -155,11 +178,26 @@ const TRANSPORT_DISPLAY: Readonly<Record<FeedTransportMode, TransportDisplay>> =
   },
 }
 
-/** A row resolved against the persona directory. */
+/** A row resolved against the persona directory (`persona` is undefined for an unknown author). */
 interface ResolvedRow {
   readonly entry: LiveWorldEntry
-  readonly persona: Persona
+  readonly persona: Persona | undefined
 }
+
+/**
+ * The least time between two persona-directory refreshes triggered by an unknown
+ * author. An unknown author usually means the directory is a step behind the feed;
+ * one refresh normally fixes it, and an author who stays unknown (a removed
+ * persona) must not turn the column into a polling loop.
+ */
+export const UNKNOWN_AUTHOR_REFRESH_MS = 30_000
+
+/**
+ * Gap (ms) between clearing the polite region and writing the new text into it.
+ * A live region only speaks a CHANGE, so an identical string (the same filter,
+ * the same count) needs an empty render in between to be announced again.
+ */
+const ANNOUNCE_DELAY_MS = 50
 
 const ROW_SELECTOR = '[data-live-world-row]'
 
@@ -182,7 +220,13 @@ interface LiveWorldPanelProps extends LiveWorldColumnProps {
   readonly timeZone: string
 }
 
-function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveWorldPanelProps) {
+function LiveWorldPanel({
+  timeZone,
+  onReplyAs,
+  renderRowActions,
+  isRowRemoved,
+  source,
+}: LiveWorldPanelProps) {
   const { personas, loading: personasLoading, error: personasError } = usePersonas()
   const personaById = useMemo(
     () => new Map<string, Persona>(personas.map(persona => [persona.id, persona])),
@@ -191,17 +235,21 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
 
   const [filter, setFilter] = useState<LiveWorldFilter>(ALL_POSTS_FILTER)
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [topRequest, setTopRequest] = useState(0)
+  // A fresh object per "N new" activation, so each one runs the effect below.
+  const [topRequest, setTopRequest] = useState<{ readonly focusTop: boolean } | null>(null)
   const [announcement, setAnnouncement] = useState('')
+  const filterId = useId()
 
   const listRef = useRef<HTMLDivElement>(null)
   const filterInputRef = useRef<HTMLSelectElement>(null)
   const newButtonRef = useRef<HTMLButtonElement>(null)
-  // "Reading" = the controller is not looking at the top of the list. Refs, not
-  // state: they are read at arrival time and must not re-render the list.
+  // "Reading" = the controller is not just watching the top of the list: it is
+  // scrolled down, OR keyboard focus is anywhere inside it (a focused row — even
+  // row 0 — would be pushed down and off screen by every insert above it). Refs,
+  // not state: they are read at arrival time and must not re-render the list.
   const scrolledRef = useRef(false)
-  const focusBelowTopRef = useRef(false)
-  const isReading = useCallback(() => scrolledRef.current || focusBelowTopRef.current, [])
+  const focusInListRef = useRef(false)
+  const isReading = useCallback(() => scrolledRef.current || focusInListRef.current, [])
 
   const feed = useLiveWorldFeed({ isReading, ...(source !== undefined ? { source } : {}) })
   const { showPending } = feed
@@ -215,33 +263,47 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
   const handleReply = useCallback((post: LiveWorldPost) => {
     onReplyAsRef.current(toReplyTarget(post))
   }, [])
+  const isRowRemovedRef = useRef(isRowRemoved)
+  useLayoutEffect(() => {
+    isRowRemovedRef.current = isRowRemoved
+  })
 
   // --- derived collections ---------------------------------------------------
   const visible = useMemo<readonly ResolvedRow[]>(() => {
     const rows: ResolvedRow[] = []
     for (const entry of feed.rows) {
-      const persona = personaById.get(entry.view.authorPersonaId)
-      if (persona !== undefined && matchesFilter(entry, filter)) rows.push({ entry, persona })
+      // A controller must see EVERY post: an author the directory doesn't know
+      // is listed as UNKNOWN AUTHOR (persona undefined), never skipped.
+      if (matchesFilter(entry, filter)) {
+        rows.push({ entry, persona: personaById.get(entry.view.authorPersonaId) })
+      }
     }
     return rows
   }, [feed.rows, personaById, filter])
 
   const pendingCount = useMemo(
-    () => feed.pending.filter(entry =>
-      personaById.has(entry.view.authorPersonaId) && matchesFilter(entry, filter)).length,
-    [feed.pending, personaById, filter],
+    () => feed.pending.filter(entry => matchesFilter(entry, filter)).length,
+    [feed.pending, filter],
   )
 
   const tagOptions = useMemo(() => {
     const tags = collectTags([...feed.rows, ...feed.pending])
-    // Keep an active tag selectable even after its posts have scrolled out.
-    return filter.kind === 'hashtag' && !tags.includes(filter.tag) ? [filter.tag, ...tags] : tags
+    // Keep an active tag selectable even after its posts have scrolled out, and
+    // keep the options alphabetical so they never reshuffle while choosing.
+    return filter.kind === 'hashtag' && !tags.includes(filter.tag)
+      ? [...tags, filter.tag].sort((a, b) => a.localeCompare(b))
+      : tags
   }, [feed.rows, feed.pending, filter])
 
   const personaOptions = useMemo(
     () => [...personas].sort((a, b) => a.displayName.localeCompare(b.displayName)),
     [personas],
   )
+
+  // Load / failure state (also drives the unknown-author refresh below).
+  const feedFailed = feed.status === 'error'
+  const personasFailed = !feedFailed && personasError !== undefined && personas.length === 0
+  const loading = !feedFailed && (feed.status === 'loading' || personasLoading)
 
   const hasRows = visible.length > 0
   const effectiveActiveId = visible.some(row => row.entry.view.id === activeId)
@@ -256,27 +318,69 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
   const filterKey = encodeFilter(filter)
   const loaded = feed.status === 'ready' && !personasLoading
   useEffect(() => {
-    if (!loaded) return
+    if (!loaded) return undefined
     const count = visibleCountRef.current
     const noun = count === 1 ? 'post' : 'posts'
+    let text: string
     if (filter.kind === 'hashtag') {
-      setAnnouncement(`${count} ${noun} ${count === 1 ? 'matches' : 'match'} #${filter.tag}`)
+      text = `${count} ${noun} ${count === 1 ? 'matches' : 'match'} #${filter.tag}`
     } else if (filter.kind === 'persona') {
       const handle = personaById.get(filter.personaId)?.handle
-      setAnnouncement(`${count} ${noun} by ${handle !== undefined ? `@${handle}` : 'this persona'}`)
+      text = `${count} ${noun} by ${handle !== undefined ? `@${handle}` : 'this persona'}`
     } else {
-      setAnnouncement(`${count} ${noun} shown`)
+      text = `${count} ${noun} shown`
     }
+    // Clear first, write after a beat: an identical string is only announced again
+    // if the region visibly changed in between.
+    setAnnouncement('')
+    const timer = setTimeout(() => setAnnouncement(text), ANNOUNCE_DELAY_MS)
+    return () => clearTimeout(timer)
     // Deliberately keyed on the filter and load state only: arrivals must NOT
     // re-announce (the log stays aria-live="off").
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey, loaded])
 
+  // A post by an author the directory doesn't know usually means the directory is
+  // a step behind the feed: refresh it, throttled to once per
+  // UNKNOWN_AUTHOR_REFRESH_MS. Keyed on the SET of unknown author ids, so a NEW
+  // unknown author triggers (a trailing call when throttled) while one that stays
+  // unknown (a removed persona) is not retried in a loop. `performance.now()` is a
+  // monotonic interval clock, not a wall-clock read.
+  const unknownAuthorKey = useMemo(() => {
+    if (personasLoading || personasFailed) return ''
+    const unknown = new Set<string>()
+    for (const entry of feed.rows) {
+      if (!personaById.has(entry.view.authorPersonaId)) unknown.add(entry.view.authorPersonaId)
+    }
+    for (const entry of feed.pending) {
+      if (!personaById.has(entry.view.authorPersonaId)) unknown.add(entry.view.authorPersonaId)
+    }
+    return [...unknown].sort().join('|')
+  }, [feed.rows, feed.pending, personaById, personasLoading, personasFailed])
+  const lastRefreshRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (unknownAuthorKey === '') return undefined
+    const refresh = () => {
+      lastRefreshRef.current = performance.now()
+      invalidatePersonas()
+    }
+    const sinceLast = lastRefreshRef.current === null
+      ? Infinity
+      : performance.now() - lastRefreshRef.current
+    const wait = UNKNOWN_AUTHOR_REFRESH_MS - sinceLast
+    if (wait <= 0) {
+      refresh()
+      return undefined
+    }
+    const timer = setTimeout(refresh, wait)
+    return () => clearTimeout(timer)
+  }, [unknownAuthorKey])
+
   // The list unmounts when nothing is visible; a fresh list starts "at the top".
   useEffect(() => {
     if (!hasRows) {
       scrolledRef.current = false
-      focusBelowTopRef.current = false
+      focusInListRef.current = false
     }
   }, [hasRows])
 
@@ -286,23 +390,27 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
   useLayoutEffect(() => {
     const list = listRef.current
     if (list === null || !list.contains(document.activeElement)) {
-      focusBelowTopRef.current = false
+      focusInListRef.current = false
     }
   }, [visible])
 
-  // "N new" → return to the top and put focus on the newest row.
+  // "N new" → return to the top, and (keyboard) put focus on the newest row.
   useLayoutEffect(() => {
-    if (topRequest === 0) return
+    if (topRequest === null) return
     const list = listRef.current
     if (list === null) return
     list.scrollTop = 0
     scrolledRef.current = false
-    list.querySelector<HTMLElement>(ROW_SELECTOR)?.focus()
+    if (topRequest.focusTop) list.querySelector<HTMLElement>(ROW_SELECTOR)?.focus()
   }, [topRequest])
 
-  const showNew = useCallback(() => {
+  // `focusTop`: land focus on the newest row. Keyboard activations need it (the
+  // control unmounts and focus would be lost) — but focus inside the list means
+  // "reading", which holds the NEXT arrivals again, so a mouse click (which has no
+  // focus to preserve) leaves the list live instead.
+  const showNew = useCallback((focusTop: boolean) => {
     showPending()
-    setTopRequest(count => count + 1)
+    setTopRequest({ focusTop })
   }, [showPending])
 
   // --- list event handlers ----------------------------------------------------
@@ -314,7 +422,7 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
     // while the "N new" control itself has focus — it would vanish under the user.
     if (
       !scrolledRef.current &&
-      !focusBelowTopRef.current &&
+      !focusInListRef.current &&
       document.activeElement !== newButtonRef.current
     ) {
       showPending()
@@ -328,13 +436,15 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
     const row = target.closest<HTMLElement>(ROW_SELECTOR)
     if (row === null || !list.contains(row)) return
     setActiveId(row.dataset.postId ?? null)
-    focusBelowTopRef.current = Array.from(list.querySelectorAll(ROW_SELECTOR)).indexOf(row) > 0
+    // ANY focus inside the list counts as reading — row 0 included: it would
+    // otherwise be pushed down and out of view by every insert above it.
+    focusInListRef.current = true
   }, [])
 
   const handleBlur = useCallback((event: FocusEvent<HTMLDivElement>) => {
     const next = event.relatedTarget
     if (next instanceof Node && listRef.current?.contains(next)) return
-    focusBelowTopRef.current = false
+    focusInListRef.current = false
     // Moving to the "N new" control must not merge (and so remove) it: the
     // controller is on their way to activate it.
     if (!scrolledRef.current && next !== newButtonRef.current) showPending()
@@ -361,13 +471,16 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
     } else if (key === 'r') {
       const found = visible.find(item => item.entry.view.id === row.dataset.postId)
       if (found === undefined) return
+      const post = toLiveWorldPost(found.entry.view, found.persona)
+      // A removed post can't be replied to: the shortcut is a no-op on its row.
+      if (isRowRemovedRef.current?.(post) === true) return
       event.preventDefault()
-      handleReply(toLiveWorldPost(found.entry.view, found.persona))
+      handleReply(post)
     } else if (key === 'n' && pendingCount > 0) {
       // The "N new" control, from the list: it precedes the rows in tab order, so
       // Shift+Tab would otherwise walk back through every row's controls to reach it.
       event.preventDefault()
-      showNew()
+      showNew(true)
     }
   }, [visible, handleReply, pendingCount, showNew])
 
@@ -387,10 +500,6 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
   const countLabel = `${visible.length}${filtered ? ` of ${feed.rows.length}` : ''} ${
     visible.length === 1 && !filtered ? 'post' : 'posts'
   }`
-
-  const feedFailed = feed.status === 'error'
-  const personasFailed = !feedFailed && personasError !== undefined && personas.length === 0
-  const loading = !feedFailed && !personasFailed && (feed.status === 'loading' || personasLoading)
 
   return (
     <Box
@@ -482,7 +591,7 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
         <CobraTextField
           select
           size="small"
-          id="live-world-filter"
+          id={filterId}
           label="Filter"
           value={filterKey}
           onChange={event => setFilter(decodeFilter(event.target.value))}
@@ -610,7 +719,7 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
           <span>
             {feedFailed
               ? 'The live world feed could not be loaded.'
-              : 'The persona directory could not be loaded, so posts cannot be shown.'}
+              : 'The persona directory could not be loaded, so authors show as UNKNOWN.'}
           </span>
           <Box sx={{ flex: 1 }} />
           <CobraSecondaryButton
@@ -652,7 +761,9 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
               data-testid="live-world-new"
               aria-label={`Show ${pendingCount >= MAX_PENDING ? `${MAX_PENDING}+` : pendingCount} new ${
                 pendingCount === 1 ? 'post' : 'posts'}`}
-              onClick={showNew}
+              // `detail === 0` is a keyboard-initiated click: only then is focus moved
+              // into the list (see `showNew`).
+              onClick={event => showNew(event.detail === 0)}
               sx={{
                 py: '2px',
                 px: '12px',
@@ -681,7 +792,16 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
             onFocus={handleFocus}
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
-            sx={{ flex: 1, minHeight: 0, minWidth: 0, overflowY: 'auto', overflowX: 'hidden' }}
+            sx={{
+              // `relative`: the visually-hidden text in every row is absolutely
+              // positioned and must be contained by (and scroll with) this list.
+              position: 'relative',
+              flex: 1,
+              minHeight: 0,
+              minWidth: 0,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+            }}
           >
             {visible.map(row => (
               <LiveWorldRow
@@ -692,6 +812,7 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
                 active={row.entry.view.id === effectiveActiveId}
                 onReply={handleReply}
                 {...(renderRowActions !== undefined ? { renderRowActions } : {})}
+                {...(isRowRemoved !== undefined ? { isRowRemoved } : {})}
               />
             ))}
           </Box>
@@ -703,7 +824,7 @@ function LiveWorldPanel({ timeZone, onReplyAs, renderRowActions, source }: LiveW
           >
             {loading
               ? 'Loading the live world…'
-              : feedFailed || personasFailed
+              : feedFailed
                 ? ''
                 : filtered
                   ? 'No posts match this filter.'
