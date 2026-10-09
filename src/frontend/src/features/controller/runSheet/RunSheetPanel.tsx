@@ -485,6 +485,8 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
       sx={{
         display: 'flex',
         flexDirection: 'column',
+        // Fills its console slot (a flex column) and scrolls INSIDE its own list area.
+        flex: 1,
         height: '100%',
         minHeight: 0,
         bgcolor: chrome.panel,
