@@ -55,11 +55,12 @@ public sealed class InjectItemValidatorTests
         { "bad persona id", PostItem(posts: [Post(personaId: "nope")]), "Post 1: personaId does not name a persona" },
         { "empty text", PostItem(posts: [Post(text: "")]), "Post 1: text must be between 1 and 280" },
         { "text 281", PostItem(posts: [Post(text: new string('x', 281))]), "Post 1: text must be between 1 and 280" },
-        { "five media", PostItem(posts: [Post(media: Media(5))]), "at most 4 media" },
+        { "five media", PostItem(posts: [Post(media: Media(5))]), "Post 1: A post may carry up to 4 images or exactly 1 video, never both." },
         { "media without id", PostItem(posts: [Post(media: [new InjectMediaWriteRequest { Alt = "a" }])]), "needs a mediaId" },
-        { "duplicate media", PostItem(posts: [Post(media: [M("m1"), M("m1")])]), "attached twice" },
-        { "empty alt", PostItem(posts: [Post(media: [M("m1", alt: " ")])]), "alt text of 1 to 1000" },
-        { "alt 1001", PostItem(posts: [Post(media: [M("m1", alt: new string('a', 1001))])]), "alt text of 1 to 1000" },
+        { "unparseable media id", PostItem(posts: [Post(media: [new InjectMediaWriteRequest { MediaId = "beat3-photo", Alt = "a" }])]), "Post 1: One or more media items could not be found." },
+        { "duplicate media", PostItem(posts: [Post(media: [M("m1"), M("m1")])]), "The same mediaId cannot be attached twice." },
+        { "empty alt", PostItem(posts: [Post(media: [M("m1", alt: " ")])]), "alt text is required on every media item." },
+        { "alt 1001", PostItem(posts: [Post(media: [M("m1", alt: new string('a', 1001))])]), "alt text must be at most 1000 characters." },
         { "replyTo both", PostItem(posts: [Post(replyTo: new() { InjectPostId = G(), PostId = G() })]), "exactly one of" },
         { "replyTo id and sequence", BurstItem(Post(), Post(replyTo: new() { Sequence = 1, PostId = G() })), "exactly one of" },
         { "replyTo sequence to itself", BurstItem(Post(), Post(replyTo: new() { Sequence = 2 })), "Post 2: replyTo.sequence must name an earlier post" },
@@ -140,6 +141,56 @@ public sealed class InjectItemValidatorTests
     }
 
     // ---- references (phase 2) ----
+
+    [Fact]
+    public void Alt_IsMeasuredInUtf16UnitsAfterSanitizing_LikeTheFunnel()
+    {
+        // 600 astral characters are 1200 UTF-16 units — over the funnel's 1000, so authoring refuses it too.
+        var alt = string.Concat(Enumerable.Repeat("\U0001F6B0", 600));
+
+        InjectItemValidator.Parse(PostItem(posts: [Post(media: [M("m1", alt: alt)])])).Error
+            .Should().Be("Post 1: alt text must be at most 1000 characters.");
+    }
+
+    public static TheoryData<string, string[], string?> MediaKindCases() => new()
+    {
+        { "four images", ["image", "image", "image", "image"], null },
+        { "one video", ["video"], null },
+        { "two videos", ["video", "video"], InjectItemValidator.MediaCountMessage },
+        { "image and video", ["image", "video"], InjectItemValidator.MediaCountMessage },
+        { "an unknown kind", ["audio"], InjectItemValidator.MediaCountMessage },
+    };
+
+    [Theory]
+    [MemberData(nameof(MediaKindCases))]
+    public void MediaKinds_AreUpToFourImagesOrExactlyOneVideo_NeverMixed(string because, string[] kinds, string? expected)
+    {
+        var media = kinds.Select((_, index) => (InjectMediaWriteRequest?)M($"kind-{because}-{index}")).ToArray();
+        var draft = InjectItemValidator.Parse(PostItem(posts: [Post(media: media)])).Draft!;
+        var library = kinds.Select((kind, index) => (Id: MediaId($"kind-{because}-{index}"), Kind: kind))
+            .ToDictionary(entry => entry.Id, entry => entry.Kind);
+
+        var error = InjectItemValidator.CheckReferences(draft, Facts(mediaKinds: library));
+
+        if (expected is null)
+        {
+            error.Should().BeNull(because);
+        }
+        else
+        {
+            error.Should().Be($"Post 1: {expected}", because);
+        }
+    }
+
+    [Fact]
+    public void AnUnknownMediaId_AndAnotherExercisesMediaId_GetTheSameMessage()
+    {
+        var draft = InjectItemValidator.Parse(PostItem(posts: [Post(media: [M("not-in-this-library")])])).Draft!;
+
+        // The library holds only assets the service found INSIDE the scope, so a cross-exercise id is unknown here.
+        InjectItemValidator.CheckReferences(draft, Facts(mediaKinds: [])).Should()
+            .Be("Post 1: One or more media items could not be found.");
+    }
 
     [Fact]
     public void AnUnknownPersona_AndAnotherExercisesPersona_GetTheSameMessage()
@@ -245,13 +296,15 @@ public sealed class InjectItemValidatorTests
         Guid[]? roster = null,
         Dictionary<Guid, Guid>? targets = null,
         Guid? editedItemId = null,
-        HashSet<Guid>? editedChildren = null) =>
+        HashSet<Guid>? editedChildren = null,
+        Dictionary<Guid, string>? mediaKinds = null) =>
         new(
             (personas ?? [Persona]).ToHashSet(),
             (roster ?? []).ToHashSet(),
             targets ?? [],
             editedItemId,
-            editedChildren ?? []);
+            editedChildren ?? [],
+            mediaKinds ?? []);
 
     private static readonly string SharedId = Guid.NewGuid().ToString();
 
@@ -304,8 +357,25 @@ public sealed class InjectItemValidatorTests
             EngagementBaseline = baseline,
         };
 
-    private static InjectMediaWriteRequest M(string id, string alt = "Brown tap water in a glass") =>
-        new() { MediaId = id, Alt = alt };
+    private static readonly Dictionary<string, Guid> MediaIds = [];
+
+    /// <summary>A stable GUID per test key, so "m1" twice is the same asset.</summary>
+    private static Guid MediaId(string key)
+    {
+        lock (MediaIds)
+        {
+            if (!MediaIds.TryGetValue(key, out var id))
+            {
+                id = Guid.NewGuid();
+                MediaIds[key] = id;
+            }
+
+            return id;
+        }
+    }
+
+    private static InjectMediaWriteRequest M(string key, string alt = "Brown tap water in a glass") =>
+        new() { MediaId = MediaId(key).ToString(), Alt = alt };
 
     private static InjectMediaWriteRequest?[] Media(int count) =>
         Enumerable.Range(0, count).Select(index => (InjectMediaWriteRequest?)M($"m{index}")).ToArray();
