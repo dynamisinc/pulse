@@ -1,14 +1,13 @@
 // =====================================================================================================================
 // TRIPWIRE (inject-queue/06, review finding M3). READ THIS BEFORE "FIXING" A FAILURE HERE.
 //
-// Until demo-polish BP merges, CreatePostRequest has no typed ParentPostId / Media / EngagementBaseline members, so
-// InjectPostRequestFactory.Build maps scripted posts as TEXT ONLY (IQ-10). (Today's `Media` is an opaque JsonElement?
-// placeholder that ingest ignores; it does not count as BP's typed member.)
+// demo-polish BP gave CreatePostRequest typed ParentPostId / Media / EngagementBaseline members, and
+// InjectPostRequestFactory.Build maps a scripted post's media, resolved reply parent and baseline onto them (IQ-10).
+// This test is ARMED: it fails if any of those members exists and Build leaves it null — so a refactor cannot silently
+// ship scripted posts without their photo, their reply parent or their seeded engagement. (An opaque JsonElement?
+// `Media` placeholder, the pre-BP shape, would be exempt.)
 //
-// The day BP adds those members, this test FAILS until the factory fills them from the scripted post — so the BP
-// merge cannot silently ship scripted posts without their photo, their reply parent or their seeded engagement.
-// The fix is in InjectPostRequestFactory.Build (map child.Media, the resolved parentPostId and the Baseline* columns),
-// NEVER in this test. `TheTripwire_Bites_...` proves the check really fails on a request type that has the members.
+// The fix is in InjectPostRequestFactory.Build, NEVER in this test. The stand-in tests prove the check really bites.
 // =====================================================================================================================
 namespace Pulse.WebApi.Tests.Features.Injects;
 

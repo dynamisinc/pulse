@@ -101,6 +101,27 @@ public sealed class InjectTelemetryAndRequestFactoryTests
             Time.ScenarioTime, "scenario time comes from the exercise clock, round-tripped (COR-053)");
         request.ScenarioTime.Should().Be(Time.ScenarioTime.ToString("O", CultureInfo.InvariantCulture));
         request.Origin.Should().BeNull("the request body's origin is inert; attribution is stated separately");
+        request.Media.Should().BeNull("this child has no media");
+        request.ParentPostId.Should().BeNull("a top-level post");
+        request.EngagementBaseline.Should().BeNull("no baseline was scripted");
+    }
+
+    [Fact]
+    public void TheFunnelInput_CarriesTheMediaTheResolvedParentAndTheBaseline()
+    {
+        var item = Item(InjectKinds.Post, childCount: 1);
+        var child = Children(item)[0];
+        child.Media = [new InjectMediaRef { MediaId = "aaaaaaaa-0000-4000-8000-000000000001", Alt = "Brown tap water" }];
+        child.BaselineLike = 120;
+        child.BaselineReply = 9;
+        var parent = Guid.NewGuid();
+
+        var (request, _) = InjectPostRequestFactory.Build(item, child, parent, Guid.NewGuid(), Time);
+
+        request.Media.Should().ContainSingle().Which.Should().Be(
+            new Pulse.WebApi.Features.Social.CreatePostMediaRequest("aaaaaaaa-0000-4000-8000-000000000001", "Brown tap water", null));
+        request.ParentPostId.Should().Be(parent.ToString(), "the reply parent the planner resolved");
+        request.EngagementBaseline.Should().Be(new Pulse.WebApi.Features.Social.EngagementBaselineRequest(120, null, 9));
         request.ActingHumanId.Should().BeNull();
         request.AuthorPersonaId.Should().BeNull();
     }
