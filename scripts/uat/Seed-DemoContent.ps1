@@ -9,9 +9,10 @@
     Reads a pulse.demopack.v1 pack (docs/demo/pack/pack.json, implementation.md section 1.10) and:
 
       1. Validates the WHOLE pack before any request. Keys are unique and every reference resolves. Replies
-         come after their parents. Text is at most 280 characters. Every media item has alt text. Every file
-         exists inside the pack folder, is a type the server accepts (judged by its first bytes, as the
-         server does) and is within the server's size limits. The run sheet is also rewritten with
+         come after their parents. Text is at most 280 characters, with no markup (the server strips tags).
+         Every media item has alt text. Every file exists inside the pack folder (symbolic links resolved), is a
+         type the server accepts (judged by its first bytes, as the server does) and is within the server's
+         size limits. The run sheet is also rewritten with
          placeholder ids and checked against the console importer's rules. If anything fails, every problem
          is listed, nothing is sent and the script exits 1.
       2. Reads GET /api/exercise-context (anonymous): the host's exerciseId and the timeZone every post needs.
@@ -19,8 +20,8 @@
       4. Signs in as a staff controller: POST /api/auth/staff/login with {username, secret, exerciseId}.
       5. Checks every handle the pack names against GET /api/personas. An unknown handle stops the run before
          any write, and the known handles are listed.
-      6. Pauses the engine (pause tier "engine") so it does not react to the seeded posts. Skip this with
-         -LeaveEngineRunning.
+      6. Pauses the engine (pause tier "engine") so it does not react to the seeded posts. It reads the tier
+         first and never loosens a stricter one: a frozen world stays frozen. Skip this with -LeaveEngineRunning.
       7. Uploads each media file once (POST /api/media): poster images first, then each video with its
          posterMediaId. On a 429 it waits the Retry-After and retries.
       8. Edits persona profiles: PATCH /api/staff/personas/{id} as a JSON merge-patch, covering display name,
@@ -30,7 +31,7 @@
          are included.
      10. Writes runsheet.demo.json (pulse.runsheet.v1). Pack media keys and post keys become the real asset
          and post ids, so the console's run-sheet import accepts the file unedited.
-     11. Sets the pause tier to "engine" again and reports the tier the server applied. The tier lives in
+     11. Checks the pause tier again (same rule) and reports what it found or set. The tier lives in
          memory, and every reset or restart sets it back to "running". After any reset, run this script
          again or pause from the console.
      12. Self-check. GET /api/feed must show at least the seeded top-level posts. Every media URL (post
@@ -46,9 +47,13 @@
         not duplicate posts either.
       - Posts archived since the last run (for example by Clear-DemoContent.ps1) are posted again, on a fresh
         timeline anchored at now.
+      - The feed only returns its 200 newest posts. When it is full and this machine's manifest does not know a
+        post, an earlier copy could be hidden beyond the window, so the run stops before writing anything
+        unless -AcceptUnverifiableFeed is passed. Run from the machine that holds the manifest instead.
 
     -Resume continues a partial run on its ORIGINAL scenario anchor. Without it, the script refuses to add
     posts next to ones already seeded, because their times would not line up. It says so and writes nothing.
+    -ScenarioAnchor cannot move a partial run either, and a reply is never posted earlier than its parent.
 
     PUBLIC APIs ONLY. There are no ops endpoints and no direct database access: nothing the product's own
     console could not do. The script also refuses, at runtime, any API path outside its allowlist.
@@ -56,7 +61,9 @@
     SECRETS. The staff secret comes from $env:PULSE_STAFF_SECRET if set. Otherwise the script asks for it
     with a hidden prompt; Copy-StaffSecret.ps1 puts it on the clipboard. The secret and the session token
     stay in memory only. They are never printed, logged, or written to the manifest, the run sheet or any
-    other file. The token goes only to the API host, never to the media URLs the self-check probes.
+    other file. The token goes only to the API host, never to the media URLs the self-check probes. This holds
+    with -Debug and -Verbose too (the web requests' own debug output is switched off), redirects are never
+    followed, and a failed request leaves no record of its headers in $Error.
 
     Run-of-show: Clear-DemoContent.ps1 (optional), then Reset-DemoState.ps1, then this script.
 
@@ -90,6 +97,10 @@
 .PARAMETER LeaveEngineRunning
     Do not touch the pause tier (the engine stays as it is, normally "running").
 
+.PARAMETER AcceptUnverifiableFeed
+    Post even when the feed is at its 200-post cap and this machine's manifest does not know some pack posts,
+    so an earlier copy of them cannot be ruled out. They may duplicate an earlier seed.
+
 .PARAMETER ManifestDirectory
     Keep the manifest somewhere other than the default folder.
 
@@ -116,6 +127,7 @@ param(
     [switch] $WhatIf,
     [switch] $Resume,
     [switch] $LeaveEngineRunning,
+    [switch] $AcceptUnverifiableFeed,
     [string] $ManifestDirectory
 )
 
@@ -241,6 +253,39 @@ function Test-HasVisibleCharacter {
         return $true
     }
     return $false
+}
+
+function Get-JsTrimmed {
+    <#
+    .SYNOPSIS
+        String.prototype.trim(), as zod's .trim() checks it in the console importer: it also removes U+FEFF and
+        the Unicode spaces, but NOT U+0085 (which .NET's Trim() removes). Gate-1 L-2.
+    #>
+    param([AllowNull()] [string] $Text)
+    if ($null -eq $Text) { return '' }
+    $js = [char[]] @(0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0xA0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005,
+        0x2006, 0x2007, 0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF)
+    return $Text.Trim($js)
+}
+
+function Test-JsBlank {
+    <# True when the text is empty after a JavaScript trim (blank to the console importer). #>
+    param([AllowNull()] [string] $Text)
+    return (Get-JsTrimmed $Text).Length -eq 0
+}
+
+function Find-SeedMarkup {
+    <#
+    .SYNOPSIS
+        The first markup-like fragment ('<' then a letter, '/', '!' or '?'), or $null. The server strips tags
+        (PostSanitizer), so such text would not read as written, and a re-run could not recognise the post it
+        made. The pack refuses it up front (Gate-1 M-2). '<' before a space or a digit ("<3", "a < b") is fine.
+    #>
+    param([AllowNull()] [string] $Text)
+    if ([string]::IsNullOrEmpty($Text)) { return $null }
+    $match = [regex]::Match($Text, '<[A-Za-z/!?][^\s<>]{0,12}')
+    if ($match.Success) { return $match.Value }
+    return $null
 }
 
 function Format-SeedInstant {
@@ -401,8 +446,43 @@ function Read-FileHead {
     finally { $stream.Dispose() }
 }
 
+function Resolve-SeedRealPath {
+    <#
+    .SYNOPSIS
+        The path with every symbolic link (or junction) along it resolved, component by component, so a link
+        inside the pack folder cannot reach outside it (Gate-1 L-7). Components that do not exist are appended
+        as they are. Throws on a link loop.
+    #>
+    param([Parameter(Mandatory)] [string] $Path)
+    $full = [IO.Path]::GetFullPath($Path)
+    $current = [IO.Path]::GetPathRoot($full)
+    $pending = [System.Collections.Generic.List[string]]::new()
+    $pending.AddRange([string[]] $full.Substring($current.Length).Split([char[]] @('/', '\'), [StringSplitOptions]::RemoveEmptyEntries))
+    $hops = 0
+    while ($pending.Count -gt 0) {
+        $segment = $pending[0]; $pending.RemoveAt(0)
+        $next = [IO.Path]::Combine($current, $segment)
+        $item = Get-Item -LiteralPath $next -Force -ErrorAction SilentlyContinue
+        $target = $null
+        if ($item -and $item.LinkType -in 'SymbolicLink', 'Junction') {
+            $target = if ($item.PSObject.Properties['LinkTarget'] -and $item.LinkTarget) { [string] $item.LinkTarget } else { [string] @($item.Target)[0] }
+        }
+        if (-not $target) { $current = $next; continue }
+        if (++$hops -gt 40) { throw "Too many symbolic links resolving '$Path'." }
+        $resolved = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($target)) { $target } else { [IO.Path]::Combine($current, $target) }))
+        $root = [IO.Path]::GetPathRoot($resolved)
+        $pending.InsertRange(0, [string[]] $resolved.Substring($root.Length).Split([char[]] @('/', '\'), [StringSplitOptions]::RemoveEmptyEntries))
+        $current = $root
+    }
+    return $current
+}
+
 function Get-PackFileInfo {
-    <# Resolves a pack-relative path (it must stay inside the pack folder), and reads its size and first bytes. #>
+    <#
+    .SYNOPSIS
+        Resolves a pack-relative path and reads its size and first bytes. The path must stay inside the pack folder
+        both as written and after resolving symbolic links.
+    #>
     param([Parameter(Mandatory)] [string] $PackRoot, [Parameter(Mandatory)] [AllowEmptyString()] [string] $Relative, [hashtable] $Cache)
     if ($Cache -and $Cache.Contains($Relative)) { return $Cache[$Relative] }
     $info = @{ Relative = $Relative; Path = $null; Exists = $false; Outside = $false; Bytes = [long] 0; Sniff = $null }
@@ -411,18 +491,20 @@ function Get-PackFileInfo {
     }
     else {
         $separators = [char[]] @([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+        $comparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
         $root = [IO.Path]::GetFullPath($PackRoot).TrimEnd($separators) + [IO.Path]::DirectorySeparatorChar
         $full = [IO.Path]::GetFullPath([IO.Path]::Combine($root, ($Relative -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)))
-        $comparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
-        if (-not $full.StartsWith($root, $comparison)) {
+        $realRoot = (Resolve-SeedRealPath -Path $root).TrimEnd($separators) + [IO.Path]::DirectorySeparatorChar
+        $realFull = Resolve-SeedRealPath -Path $full
+        if (-not $full.StartsWith($root, $comparison) -or -not $realFull.StartsWith($realRoot, $comparison)) {
             $info.Outside = $true
         }
         else {
-            $info.Path = $full
-            if (Test-Path -LiteralPath $full -PathType Leaf) {
+            $info.Path = $realFull
+            if (Test-Path -LiteralPath $realFull -PathType Leaf) {
                 $info.Exists = $true
-                $info.Bytes = [long] (Get-Item -LiteralPath $full).Length
-                $info.Sniff = Get-MediaSniff -Head (Read-FileHead -Path $full)
+                $info.Bytes = [long] (Get-Item -LiteralPath $realFull).Length
+                $info.Sniff = Get-MediaSniff -Head (Read-FileHead -Path $realFull)
             }
         }
     }
@@ -456,7 +538,9 @@ function Test-DemoPack {
     $errors = [System.Collections.Generic.List[object]]::new()
     $add = { param($Code, $Where, $Message) $errors.Add([pscustomobject]@{ Code = $Code; Where = $Where; Message = $Message }) }
     $cache = @{}
-    $keyPattern = '^[A-Za-z0-9_-]{1,' + $Limits.KeyMax + '}$'
+    # \z, not $: .NET's $ also matches before a final newline, so "p01`n" would pass (Gate-1 L-2).
+    $keyPattern = '^[A-Za-z0-9_-]{1,' + $Limits.KeyMax + '}\z'
+    $markupMessage = { param($Found) "contains markup ('$Found'): the server strips HTML-like tags, so it would not read as written and a re-run could not recognise it. Use plain text ('<' before a space or a digit is fine)." }
 
     $checkKeys = {
         param($Object, [string[]] $Allowed, [string] $Where)
@@ -466,7 +550,7 @@ function Test-DemoPack {
     }
     $checkHandle = {
         param($Value, [string] $Where, [string] $Code)
-        if ((Get-JsonKind $Value) -ne 'string' -or $Value.Length -lt 1 -or $Value.Length -gt $Limits.HandleMax -or $Value -notmatch '^[^@\s]+$') {
+        if ((Get-JsonKind $Value) -ne 'string' -or $Value.Length -lt 1 -or $Value.Length -gt $Limits.HandleMax -or $Value -notmatch '^[^@\s\uFEFF]+\z') {
             & $add $Code $Where "must be a persona handle without '@' or spaces, 1 to $($Limits.HandleMax) characters (e.g. FulcoEM)."
             return $false
         }
@@ -499,11 +583,13 @@ function Test-DemoPack {
     }
     $checkAlt = {
         param($Value, [string] $Where, [string] $MissingCode, [string] $LengthCode)
-        if ((Get-JsonKind $Value) -ne 'string' -or [string]::IsNullOrWhiteSpace($Value)) {
+        if ((Get-JsonKind $Value) -ne 'string' -or (Test-JsBlank $Value)) {
             & $add $MissingCode $Where 'alt text is required on every media item (NFR-001).'
             return
         }
-        if ($Value.Trim().Length -gt $Limits.AltMax) { & $add $LengthCode $Where "alt text must be at most $($Limits.AltMax) characters." }
+        if ($Value.Length -gt $Limits.AltMax) { & $add $LengthCode $Where "alt text must be at most $($Limits.AltMax) characters." }
+        $found = Find-SeedMarkup $Value
+        if ($found) { & $add 'markup' $Where "alt text $(& $markupMessage $found)" }
     }
     $checkBaseline = {
         param($Value, [string] $Where, [string] $Code)
@@ -563,6 +649,7 @@ function Test-DemoPack {
                 (Test-ForbiddenCharacter $name.Trim()) -or -not (Test-HasVisibleCharacter $name.Trim())) {
                 & $add 'display-name' "$where.displayName" "must be 1 to $($Limits.DisplayNameMax) characters with at least one visible character and no control or bidirectional-override characters."
             }
+            elseif (Find-SeedMarkup $name) { & $add 'markup' "$where.displayName" "displayName $(& $markupMessage (Find-SeedMarkup $name))" }
         }
         foreach ($rule in @(@('bio', $Limits.BioMax, $true), @('location', $Limits.LocationMax, $false))) {
             $field = $rule[0]; $max = $rule[1]; $allowBreaks = [bool] $rule[2]
@@ -572,6 +659,7 @@ function Test-DemoPack {
                 $breaks = if ($allowBreaks) { ' (line breaks and tabs are fine)' } else { '' }
                 & $add $field "$where.$field" "must be null or at most $max characters with no control or bidirectional-override characters$breaks."
             }
+            elseif (Find-SeedMarkup $value) { & $add 'markup' "$where.$field" "$field $(& $markupMessage (Find-SeedMarkup $value))" }
         }
         if ($persona.Contains('verified') -and (Get-JsonKind $persona['verified']) -ne 'boolean') { & $add 'verified' "$where.verified" 'must be true or false.' }
         foreach ($field in 'avatar', 'banner') {
@@ -581,6 +669,7 @@ function Test-DemoPack {
 
     # ── media ──────────────────────────────────────────────────────────────────────────────────────────────
     $mediaByKey = [hashtable]::new([StringComparer]::Ordinal)
+    $mediaKeysSeen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $mediaFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $media = @(Get-SeedList $Pack 'media')
     for ($i = 0; $i -lt $media.Count; $i++) {
@@ -591,7 +680,7 @@ function Test-DemoPack {
         if ((Get-JsonKind $key) -ne 'string' -or $key -cnotmatch $keyPattern) {
             & $add 'key-format' "$where.key" "must be 1 to $($Limits.KeyMax) letters, digits, '_' or '-'."
         }
-        elseif ($mediaByKey.Contains($key)) { & $add 'duplicate-key' "$where.key" "'$key' is already used by another media item." }
+        elseif (-not $mediaKeysSeen.Add($key)) { & $add 'duplicate-key' "$where.key" "'$key' is already used by another media item (keys are compared ignoring case)." }
         else { $mediaByKey[$key] = $item }
 
         $kind = $item['kind']
@@ -628,21 +717,22 @@ function Test-DemoPack {
         $post = $posts[$i]
         if ((Get-JsonKind $post) -eq 'object' -and (Get-JsonKind $post['key']) -eq 'string' -and -not $postIndex.Contains($post['key'])) { $postIndex[$post['key']] = $i }
     }
-    $seenPostKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $seenPostKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     for ($i = 0; $i -lt $posts.Count; $i++) {
         $post = $posts[$i]; $where = "posts[$i]"
         if ((Get-JsonKind $post) -ne 'object') { & $add 'type' $where 'must be an object.'; continue }
         & $checkKeys $post @('key', 'persona', 'text', 'minutesBeforeAnchor', 'media', 'replyTo', 'baseline') $where
         $key = $post['key']
         if ((Get-JsonKind $key) -ne 'string' -or $key -cnotmatch $keyPattern) { & $add 'key-format' "$where.key" "must be 1 to $($Limits.KeyMax) letters, digits, '_' or '-'." }
-        elseif (-not $seenPostKeys.Add($key)) { & $add 'duplicate-key' "$where.key" "'$key' is already used by another post." }
+        elseif (-not $seenPostKeys.Add($key)) { & $add 'duplicate-key' "$where.key" "'$key' is already used by another post (keys are compared ignoring case)." }
         [void] (& $checkHandle $post['persona'] "$where.persona" 'handle-format')
 
         $text = $post['text']
         $hasMedia = (Get-JsonKind $post['media']) -eq 'array' -and $post['media'].Count -gt 0
         if ((Get-JsonKind $text) -ne 'string') { & $add 'text-missing' "$where.text" 'is required (a string).' }
-        elseif ([string]::IsNullOrWhiteSpace($text) -and -not $hasMedia) { & $add 'text-missing' "$where.text" 'is empty and the post has no media.' }
+        elseif ((Test-JsBlank $text) -and -not $hasMedia) { & $add 'text-missing' "$where.text" 'is empty and the post has no media.' }
         elseif ((Get-CodePointCount $text) -gt $Limits.TextMax) { & $add 'text-length' "$where.text" "is $(Get-CodePointCount $text) characters; the limit is $($Limits.TextMax)." }
+        elseif (Find-SeedMarkup $text) { & $add 'markup' "$where.text" "text $(& $markupMessage (Find-SeedMarkup $text))" }
 
         $minutes = $post['minutesBeforeAnchor']
         if ((Get-JsonKind $minutes) -ne 'integer' -or $minutes -lt 0) { & $add 'minutes' "$where.minutesBeforeAnchor" 'must be a whole number of minutes, 0 or more.' }
@@ -671,7 +761,7 @@ function Test-DemoPack {
         else {
             & $checkKeys $sheet @('name', 'beats') 'runSheet'
             $name = $sheet['name']
-            if ((Get-JsonKind $name) -ne 'string' -or [string]::IsNullOrWhiteSpace($name) -or $name.Length -gt $Limits.RunSheetNameMax) {
+            if ((Get-JsonKind $name) -ne 'string' -or (Test-JsBlank $name) -or $name.Length -gt $Limits.RunSheetNameMax) {
                 & $add 'runsheet-name' 'runSheet.name' "must be 1 to $($Limits.RunSheetNameMax) characters, not blank."
             }
             $beats = $sheet['beats']
@@ -685,22 +775,22 @@ function Test-DemoPack {
                 $beat = $beats[$j]
                 if ((Get-JsonKind $beat) -eq 'object' -and (Get-JsonKind $beat['id']) -eq 'string' -and -not $beatIds.Contains($beat['id'])) { $beatIds[$beat['id']] = $j }
             }
-            $seenBeatIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+            $seenBeatIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
             for ($j = 0; $j -lt $beats.Count; $j++) {
                 $beat = $beats[$j]; $where = "runSheet.beats[$j]"
                 if ((Get-JsonKind $beat) -ne 'object') { & $add 'type' $where 'must be an object.'; continue }
                 & $checkKeys $beat @('id', 'order', 'title', 'scenarioMinute', 'persona', 'text', 'media', 'replyTo', 'engagementBaseline', 'notes') $where
                 $id = $beat['id']
-                if ((Get-JsonKind $id) -ne 'string' -or $id -cnotmatch ('^[A-Za-z0-9_-]{1,' + $Limits.BeatIdMax + '}$')) {
+                if ((Get-JsonKind $id) -ne 'string' -or $id -cnotmatch ('^[A-Za-z0-9_-]{1,' + $Limits.BeatIdMax + '}\z')) {
                     & $add 'beat-id' "$where.id" "must be 1 to $($Limits.BeatIdMax) letters, digits, '_' or '-'."
                 }
-                elseif (-not $seenBeatIds.Add($id)) { & $add 'beat-duplicate-id' "$where.id" "'$id' is already used by another beat." }
+                elseif (-not $seenBeatIds.Add($id)) { & $add 'beat-duplicate-id' "$where.id" "'$id' is already used by another beat (ids are compared ignoring case)." }
                 $order = $beat['order']
                 if ((Get-JsonKind $order) -ne 'integer' -or $order -lt 1) { & $add 'beat-order' "$where.order" 'must be a whole number, 1 or more.' }
                 elseif ($orders.Contains([long] $order)) { & $add 'beat-duplicate-order' "$where.order" "$order is already used by another beat." }
                 else { $orders[[long] $order] = $j }
                 $title = $beat['title']
-                if ((Get-JsonKind $title) -ne 'string' -or [string]::IsNullOrWhiteSpace($title) -or $title.Length -gt $Limits.TitleMax) {
+                if ((Get-JsonKind $title) -ne 'string' -or (Test-JsBlank $title) -or $title.Length -gt $Limits.TitleMax) {
                     & $add 'beat-title' "$where.title" "must be 1 to $($Limits.TitleMax) characters, not blank."
                 }
                 $minute = $beat['scenarioMinute']
@@ -714,6 +804,7 @@ function Test-DemoPack {
                 $text = $beat['text']
                 if ((Get-JsonKind $text) -ne 'string') { & $add 'beat-text' "$where.text" 'is required (a string).' }
                 elseif ((Get-CodePointCount $text) -gt $Limits.TextMax) { & $add 'beat-text' "$where.text" "is $(Get-CodePointCount $text) characters; the limit is $($Limits.TextMax)." }
+                elseif (Find-SeedMarkup $text) { & $add 'markup' "$where.text" "text $(& $markupMessage (Find-SeedMarkup $text))" }
                 if ($beat.Contains('media')) { & $checkMediaList $beat['media'] "$where.media" 'beat-media-ref' 'beat-media-count' 'beat-alt' 'beat-alt' $mediaByKey }
                 if ($beat.Contains('replyTo')) {
                     $replyTo = $beat['replyTo']
@@ -754,7 +845,7 @@ function Test-DemoPack {
     if ($errors.Count -eq 0 -and $Pack.Contains('runSheet')) {
         # Placeholder GUIDs stand in for the asset and post ids the live run will have.
         $mediaIds = @{}; $mediaAlt = @{}; $postIds = @{}
-        foreach ($item in $media) { $mediaIds[$item['key']] = [guid]::NewGuid().ToString(); $mediaAlt[$item['key']] = $item['alt'].Trim() }
+        foreach ($item in $media) { $mediaIds[$item['key']] = [guid]::NewGuid().ToString(); $mediaAlt[$item['key']] = Get-JsTrimmed $item['alt'] }
         foreach ($post in $posts) { $postIds[$post['key']] = [guid]::NewGuid().ToString() }
         $file = ConvertTo-RunSheetFile -RunSheet $Pack['runSheet'] -MediaIds $mediaIds -MediaAlt $mediaAlt -PostIds $postIds -ExportedAt '2026-01-01T00:00:00.000Z'
         foreach ($problem in @(Test-RunSheetFile -File (ConvertFrom-SeedJson (ConvertTo-SeedJson $file)) -Limits $Limits)) {
@@ -875,7 +966,8 @@ function Get-UploadPlan {
         $verified = $null -eq $Library -or $Library.Ids.Contains($posterId) -or -not $Library.Complete['image']
         foreach ($video in $videos) {
             $videoEntry = & $entryFor $video.File
-            if ($videoEntry -and [string] $videoEntry['posterAssetId'] -eq $posterId -and $Library.Ids.Contains([string] $videoEntry['assetId'])) { $verified = $true }
+            # Gate-1 L-1: offline (-WhatIf) there is no library; $verified is already true then.
+            if ($null -ne $Library -and $videoEntry -and [string] $videoEntry['posterAssetId'] -eq $posterId -and $Library.Ids.Contains([string] $videoEntry['assetId'])) { $verified = $true }
         }
         if ($verified) { & $decide $unit 'reuse' $posterId 'already uploaded' }
         else { & $decide $unit 'upload' $null 'no longer in the media library' }
@@ -930,7 +1022,7 @@ function Get-PostPlan {
         $key = [string] $post['key']
         $entry = & $entryFor $key
         $manifestId = if ($entry) { [string] $entry['postId'] } else { '' }
-        $action = 'post'; $postId = $null; $reason = 'new'; $scenarioTime = $null
+        $action = 'post'; $postId = $null; $reason = 'new'; $scenarioTime = $null; $unverifiable = $false
         $isReply = -not [string]::IsNullOrEmpty([string] $post['replyTo'])
 
         if (-not $online) {
@@ -965,16 +1057,24 @@ function Get-PostPlan {
                 $reason = 'already in the feed (same persona, text and parent)'; $scenarioTime = $match['scenarioTime']
             }
             elseif ($manifestId) { $reason = 'seeded before, but no longer in the feed (archived or taken down)' }
+            elseif ($truncated) {
+                # Gate-1 M-3: the feed is a 200-post window of the LATEST scenario times. A post this machine has
+                # no record of may have been seeded earlier (another machine, a lost manifest) and pushed out of
+                # the window by newer activity, so its absence proves nothing.
+                $unverifiable = $true
+                $reason = "not in the manifest, and the feed is at its $FeedTake-post cap, so an earlier copy cannot be ruled out"
+            }
         }
         if ($postId) { $resolved[$key] = $postId }
         $items.Add([pscustomobject]@{
                 Key = $key; Post = $post; Action = $action; PostId = $postId; Reason = $reason; IsReply = $isReply
-                MinutesBeforeAnchor = [long] $post['minutesBeforeAnchor']; ScenarioTime = $scenarioTime
+                MinutesBeforeAnchor = [long] $post['minutesBeforeAnchor']; ScenarioTime = $scenarioTime; Unverifiable = $unverifiable
             })
     }
     [pscustomobject]@{
         Items = $items.ToArray(); Warnings = $warnings.ToArray(); Online = $online; FeedTruncated = $truncated
         Done = @($items | Where-Object Action -ne 'post').Count; ToPost = @($items | Where-Object Action -eq 'post').Count
+        Unverifiable = @($items | Where-Object Unverifiable).Count
     }
 }
 
@@ -1001,21 +1101,57 @@ function Resolve-SeedAnchor {
     }
     $earlier = if ($manifestAnchor) { $manifestAnchor } else { $derived }
 
-    # PowerShell unwraps Nullable[T]: $Explicit holds the DateTimeOffset itself (there is no .Value).
-    if ($null -ne $Explicit) { return & $result ([DateTimeOffset] $Explicit) '-ScenarioAnchor' ($PostPlan.Done -eq 0) $null }
     if ($PostPlan.ToPost -eq 0) {
-        $anchor = if ($earlier) { $earlier } else { $nowSeconds }
+        $anchor = if ($null -ne $Explicit) { [DateTimeOffset] $Explicit } elseif ($earlier) { $earlier } else { $nowSeconds }
         return & $result $anchor 'nothing to post' $false $null
     }
-    if ($PostPlan.Done -eq 0) { return & $result $nowSeconds 'now (a fresh timeline)' $true $null }
+    if ($PostPlan.Done -eq 0) {
+        # PowerShell unwraps Nullable[T]: $Explicit holds the DateTimeOffset itself (there is no .Value).
+        if ($null -ne $Explicit) { return & $result ([DateTimeOffset] $Explicit) '-ScenarioAnchor' $true $null }
+        return & $result $nowSeconds 'now (a fresh timeline)' $true $null
+    }
+
+    # Some posts are already seeded and some are not: the rest must land on the SAME timeline (Gate-1 L-4), so
+    # neither a plain re-run nor -ScenarioAnchor may pick a new anchor here.
+    $earlierText = if ($earlier) { " ($(Format-SeedInstant $earlier))" } else { '' }
     if (-not $Resume) {
         $message = "$($PostPlan.Done) of the pack's posts are already seeded and $($PostPlan.ToPost) are not. " +
-            'Re-run with -Resume to post the rest on the earlier run''s scenario anchor, or pass -ScenarioAnchor to choose one.'
+            "Re-run with -Resume to post the rest on the earlier run's scenario anchor$earlierText."
         return & $result $null $null $false $message
     }
-    if ($manifestAnchor) { return & $result $manifestAnchor 'resumed (the anchor in the manifest)' $false $null }
-    if ($derived) { return & $result $derived 'resumed (derived from the posts already in the feed)' $false $null }
-    return & $result $null $null $false 'The earlier run''s scenario anchor cannot be recovered (no manifest anchor and no seeded post in the feed). Pass -ScenarioAnchor.'
+    if ($earlier) {
+        if ($null -ne $Explicit -and ([DateTimeOffset] $Explicit) -ne $earlier) {
+            $message = "-ScenarioAnchor $(Format-SeedInstant ([DateTimeOffset] $Explicit)) would move the rest of a partial run off its original anchor$earlierText. " +
+                'Drop -ScenarioAnchor to continue it, or archive the seeded posts (Clear-DemoContent.ps1) and seed again.'
+            return & $result $null $null $false $message
+        }
+        $source = if ($manifestAnchor) { 'resumed (the anchor in the manifest)' } else { 'resumed (derived from the posts already in the feed)' }
+        return & $result $earlier $source $false $null
+    }
+    if ($null -ne $Explicit) { return & $result ([DateTimeOffset] $Explicit) '-ScenarioAnchor (the earlier anchor could not be recovered)' $false $null }
+    return & $result $null $null $false 'The earlier run''s scenario anchor cannot be recovered (no manifest anchor and no seeded post in the feed). Pass -ScenarioAnchor with -Resume.'
+}
+
+function Test-SeedReplyTimes {
+    <#
+    .SYNOPSIS
+        Emits one message per reply about to be posted that would land EARLIER in scenario time than its parent.
+        A parent posted in this run shares the anchor (and validation already orders the minutes); a parent that
+        is already seeded is checked against its REAL scenario time (from the feed or the manifest).
+    #>
+    param([Parameter(Mandatory)] [object] $PostPlan, [Parameter(Mandatory)] [DateTimeOffset] $Anchor)
+    $byKey = @{}
+    foreach ($item in $PostPlan.Items) { $byKey[$item.Key] = $item }
+    foreach ($item in @($PostPlan.Items | Where-Object { $_.Action -eq 'post' -and $_.IsReply })) {
+        $parent = $byKey[[string] $item.Post['replyTo']]
+        if (-not $parent -or $parent.Action -eq 'post') { continue }
+        $parentTime = ConvertTo-SeedInstant $parent.ScenarioTime
+        if (-not $parentTime) { continue }
+        $replyTime = $Anchor.AddMinutes(-$item.MinutesBeforeAnchor)
+        if ($replyTime -lt $parentTime) {
+            "$($item.Key) would be posted at $(Format-SeedInstant $replyTime), before its already-seeded parent $($parent.Key) ($(Format-SeedInstant $parentTime)). A reply must never precede its parent."
+        }
+    }
 }
 
 function Get-PersonaPatch {
@@ -1082,7 +1218,7 @@ function New-PostRequestBody {
     $media = @(Get-SeedList $Post 'media')
     if ($media.Count -gt 0) {
         $body['media'] = @(foreach ($item in $media) {
-                $alt = if ($item.Contains('alt') -and $item['alt']) { ([string] $item['alt']).Trim() } else { $MediaAlt[$item['ref']] }
+                $alt = if ($item.Contains('alt') -and $item['alt']) { Get-JsTrimmed $item['alt'] } else { $MediaAlt[$item['ref']] }
                 [ordered]@{ mediaId = $MediaIds[$item['ref']]; alt = $alt }
             })
     }
@@ -1123,7 +1259,7 @@ function ConvertTo-RunSheetFile {
             $out['media'] = @(foreach ($item in $media) {
                     $ref = [string] $item['ref']
                     if (-not $MediaIds.Contains($ref) -or -not $MediaIds[$ref]) { throw "Run-sheet beat '$($beat['id'])': media '$ref' has no uploaded asset id." }
-                    $alt = if ($item.Contains('alt') -and $item['alt']) { ([string] $item['alt']).Trim() } else { [string] $MediaAlt[$ref] }
+                    $alt = if ($item.Contains('alt') -and $item['alt']) { Get-JsTrimmed $item['alt'] } else { [string] $MediaAlt[$ref] }
                     [ordered]@{ mediaId = [string] $MediaIds[$ref]; alt = $alt }
                 })
         }
@@ -1149,6 +1285,18 @@ function ConvertTo-RunSheetFile {
     return $file
 }
 
+function ConvertTo-RunSheetJson {
+    <# The exact text of the exported file: pretty JSON (2-space, LF) plus a trailing newline, UTF-8 without BOM on disk. #>
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $RunSheet,
+        [Parameter(Mandatory)] [hashtable] $MediaIds,
+        [Parameter(Mandatory)] [hashtable] $MediaAlt,
+        [Parameter(Mandatory)] [hashtable] $PostIds,
+        [string] $ExportedAt
+    )
+    (ConvertTo-SeedJson (ConvertTo-RunSheetFile -RunSheet $RunSheet -MediaIds $MediaIds -MediaAlt $MediaAlt -PostIds $PostIds -ExportedAt $ExportedAt)) + "`n"
+}
+
 function Test-RunSheetFile {
     <#
     .SYNOPSIS
@@ -1163,13 +1311,14 @@ function Test-RunSheetFile {
         if ($extra.Count) { $errors.Add("$Where has field(s) this format does not allow: $($extra -join ', ')") }
     }
     $isInt = { param($Value, [long] $Min, $Max) (Get-JsonKind $Value) -eq 'integer' -and $Value -ge $Min -and ($null -eq $Max -or $Value -le $Max) }
-    $idOk = { param($Value) (Get-JsonKind $Value) -eq 'string' -and $Value -cmatch ('^[A-Za-z0-9_-]{1,' + $Limits.BeatIdMax + '}$') }
+    # \z, not $ (.NET's $ also matches before a final newline); blank = empty after a JavaScript trim (Gate-1 L-2).
+    $idOk = { param($Value) (Get-JsonKind $Value) -eq 'string' -and $Value -cmatch ('^[A-Za-z0-9_-]{1,' + $Limits.BeatIdMax + '}\z') }
 
     if ((Get-JsonKind $File) -ne 'object') { return 'The file must be a JSON object.' }
     & $strict $File @('schema', 'name', 'exportedAt', 'beats') 'The file'
     if ($File['schema'] -cne 'pulse.runsheet.v1') { $errors.Add('schema must be "pulse.runsheet.v1"') }
     $name = $File['name']
-    if ((Get-JsonKind $name) -ne 'string' -or $name.Length -lt 1 -or $name.Length -gt $Limits.RunSheetNameMax -or $name.Trim().Length -eq 0) { $errors.Add("name must be 1 to $($Limits.RunSheetNameMax) characters, not blank") }
+    if ((Get-JsonKind $name) -ne 'string' -or $name.Length -lt 1 -or $name.Length -gt $Limits.RunSheetNameMax -or (Test-JsBlank $name)) { $errors.Add("name must be 1 to $($Limits.RunSheetNameMax) characters, not blank") }
     if ($File.Contains('exportedAt') -and ((Get-JsonKind $File['exportedAt']) -ne 'string' -or
             [string] $File['exportedAt'] -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$')) {
         if ($File['exportedAt'] -isnot [datetime]) { $errors.Add('exportedAt must be an ISO 8601 date-time') }
@@ -1192,14 +1341,14 @@ function Test-RunSheetFile {
         elseif ($orders.Contains([long] $beat['order'])) { $errors.Add("$where.order is a duplicate: $($beat['order'])") }
         else { $orders[[long] $beat['order']] = $i }
         $title = $beat['title']
-        if ((Get-JsonKind $title) -ne 'string' -or $title.Length -lt 1 -or $title.Length -gt $Limits.TitleMax -or $title.Trim().Length -eq 0) { $errors.Add("$where.title must be 1 to $($Limits.TitleMax) characters, not blank") }
+        if ((Get-JsonKind $title) -ne 'string' -or $title.Length -lt 1 -or $title.Length -gt $Limits.TitleMax -or (Test-JsBlank $title)) { $errors.Add("$where.title must be 1 to $($Limits.TitleMax) characters, not blank") }
         if (-not (& $isInt $beat['scenarioMinute'] 0 $null)) { $errors.Add("$where.scenarioMinute must be a whole number, at least 0") }
         $persona = $beat['persona']
         if ((Get-JsonKind $persona) -ne 'object') { $errors.Add("$where.persona must be an object") }
         else {
             & $strict $persona @('handle') "$where.persona"
             $handle = $persona['handle']
-            if ((Get-JsonKind $handle) -ne 'string' -or $handle.Length -lt 1 -or $handle.Length -gt $Limits.HandleMax -or $handle -notmatch '^[^@\s]+$') {
+            if ((Get-JsonKind $handle) -ne 'string' -or $handle.Length -lt 1 -or $handle.Length -gt $Limits.HandleMax -or $handle -notmatch '^[^@\s\uFEFF]+\z') {
                 $errors.Add("$where.persona.handle must be a handle without ""@"" or spaces, at most $($Limits.HandleMax) characters")
             }
         }
@@ -1219,7 +1368,7 @@ function Test-RunSheetFile {
                     if ((Get-JsonKind $mediaId) -ne 'string' -or $mediaId.Length -lt 1 -or $mediaId.Length -gt $Limits.MediaIdMax) { $errors.Add("$itemWhere.mediaId must be 1 to $($Limits.MediaIdMax) characters") }
                     elseif (-not $seen.Add($mediaId)) { $errors.Add("$itemWhere.mediaId is attached twice (""$mediaId"")") }
                     $alt = $item['alt']
-                    if ((Get-JsonKind $alt) -ne 'string' -or $alt.Length -gt $Limits.AltMax -or $alt.Trim().Length -eq 0) { $errors.Add("$itemWhere.alt is required and at most $($Limits.AltMax) characters") }
+                    if ((Get-JsonKind $alt) -ne 'string' -or $alt.Length -gt $Limits.AltMax -or (Test-JsBlank $alt)) { $errors.Add("$itemWhere.alt is required and at most $($Limits.AltMax) characters") }
                 }
             }
         }
@@ -1338,7 +1487,13 @@ function Update-SeedManifestMediaKeys {
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 # HTTP. Invoke-PulseApi is the one door to the API: allowlisted paths only, the bearer token only to the API
-# host, 429 → wait Retry-After and retry. Nothing here prints a header or a request body.
+# host, 429 → wait Retry-After and retry. Nothing here prints a header or a request body, and that holds under
+# -Debug and -Verbose too: the web cmdlet's own debug output dumps request bodies (the login secret), every
+# Authorization header and the login response, so it is switched off per call (Gate-1 H-1). A failed request
+# leaves an error record holding the HttpRequestMessage (with its Authorization header) in $Error, where
+# Get-Error would print the token; those records are removed and a clean error is thrown instead (Gate-1 M-1).
+# Redirects are never followed: the API never redirects, and a redirected POST would re-send its body (the
+# secret) to another host (Gate-1 L-5).
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 function Resolve-SeedApiBaseUrl {
@@ -1354,6 +1509,21 @@ function Resolve-SeedApiBaseUrl {
     return $uri.GetLeftPart([UriPartial]::Authority)
 }
 
+function Clear-SeedWebErrors {
+    <#
+    .SYNOPSIS
+        Removes from $Error every record a web request left behind. Invoke-WebRequest's error records keep the
+        HttpRequestMessage (Authorization header included) as their TargetObject, and Get-Error prints it.
+    #>
+    param([AllowEmptyCollection()] [object[]] $Exceptions = @())
+    foreach ($record in @($global:Error)) {
+        if ($record -isnot [System.Management.Automation.ErrorRecord]) { continue }
+        $fromRequest = $record.TargetObject -is [System.Net.Http.HttpRequestMessage]
+        $listed = @($Exceptions | Where-Object { $null -ne $_ -and [object]::ReferenceEquals($_, $record.Exception) }).Count -gt 0
+        if ($fromRequest -or $listed) { $global:Error.Remove($record) }
+    }
+}
+
 function Invoke-PulseApi {
     param(
         [Parameter(Mandatory)] [hashtable] $Context,
@@ -1366,7 +1536,8 @@ function Invoke-PulseApi {
         [int] $TimeoutSec = 120,
         [int] $MaxRateLimitRetries = 6
     )
-    if (-not (Test-SeedApiPath -Path $Path)) { throw "Refusing to call $(($Path -split '\?', 2)[0]): it is not on this script's public-API allowlist." }
+    $bare = ($Path -split '\?', 2)[0]
+    if (-not (Test-SeedApiPath -Path $Path)) { throw "Refusing to call ${bare}: it is not on this script's public-API allowlist." }
     $headers = @{ Accept = 'application/json' }
     if (-not $Anonymous) {
         if (-not $Context.Token) { throw 'Not signed in.' }
@@ -1374,7 +1545,12 @@ function Invoke-PulseApi {
     }
     $request = @{
         Uri = "$($Context.BaseUrl)$Path"; Method = $Method; Headers = $headers; TimeoutSec = $TimeoutSec
-        SkipHttpErrorCheck = $true; ErrorAction = 'Stop'
+        SkipHttpErrorCheck = $true
+        Debug = $false                  # H-1: the web cmdlet's debug stream carries bodies and the Authorization header
+        Verbose = $false
+        MaximumRedirection = 0          # L-5: never follow a redirect (a 3xx comes back and fails below)
+        ErrorAction = 'SilentlyContinue'
+        ErrorVariable = 'webErrors'
     }
     if ($Context.BaseUrl -like 'http://*') { $request['AllowUnencryptedAuthentication'] = $true }
     if ($Form) { $request['Form'] = $Form }
@@ -1383,13 +1559,33 @@ function Invoke-PulseApi {
         $request['ContentType'] = "$ContentType; charset=utf-8"
     }
 
-    $response = $null
-    for ($attempt = 1; ; $attempt++) {
-        $response = Invoke-WebRequest @request
-        if ([int] $response.StatusCode -ne 429 -or $attempt -gt $MaxRateLimitRetries) { break }
-        $wait = Get-RetryAfterSeconds -Value $response.Headers['Retry-After']
-        Write-Host ("    429 on {0} {1}: waiting {2}s (Retry-After), retry {3}/{4}" -f $Method, ($Path -split '\?', 2)[0], $wait, $attempt, $MaxRateLimitRetries) -ForegroundColor DarkGray
-        Start-Sleep -Seconds $wait
+    try {
+        $response = $null
+        for ($attempt = 1; ; $attempt++) {
+            $webErrors = $null
+            $failure = $null
+            try { $response = Invoke-WebRequest @request }
+            catch { $failure = $_.Exception }
+            $caught = @($webErrors | ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception } else { $_ } }) + @($failure)
+            Clear-SeedWebErrors -Exceptions $caught
+            $status = if ($response) { [int] $response.StatusCode } else { 0 }
+            if ($status -ge 300 -and $status -lt 400) {
+                throw [System.Exception]::new("$Method $bare answered a redirect ($status). The API never redirects, so it was not followed: check -ApiHost.")
+            }
+            if (-not $response) {
+                $reason = if ($failure) { $failure.Message } elseif (@($webErrors).Count) { @($webErrors)[0].Exception.Message } else { 'no response' }
+                throw [System.Exception]::new("$Method $bare failed: $reason")
+            }
+            if ($status -ne 429 -or $attempt -gt $MaxRateLimitRetries) { break }
+            $wait = Get-RetryAfterSeconds -Value $response.Headers['Retry-After']
+            Write-Host ("    429 on {0} {1}: waiting {2}s (Retry-After), retry {3}/{4}" -f $Method, $bare, $wait, $attempt, $MaxRateLimitRetries) -ForegroundColor DarkGray
+            Start-Sleep -Seconds $wait
+        }
+    }
+    finally {
+        # The request body may hold the login secret: wipe the bytes as soon as they are sent.
+        if ($request['Body'] -is [byte[]]) { [Array]::Clear($request['Body'], 0, $request['Body'].Length) }
+        $headers.Clear()
     }
 
     $text = [string] $response.Content
@@ -1419,9 +1615,12 @@ function Invoke-MediaRangeRequest {
     .SYNOPSIS
         GET <url> with Range: bytes=0-1 and returns the status code (0 on a network failure). Reads headers only.
         No Authorization header: media URLs are pre-signed, and the session token never leaves the API host.
+        Redirects are not followed (a 3xx is reported as such).
     #>
     param([Parameter(Mandatory)] [string] $Url)
-    $client = [System.Net.Http.HttpClient]::new()
+    $handler = [System.Net.Http.HttpClientHandler]::new()
+    $handler.AllowAutoRedirect = $false
+    $client = [System.Net.Http.HttpClient]::new($handler)
     $client.Timeout = [TimeSpan]::FromSeconds(60)
     try {
         $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get, $Url)
@@ -1429,21 +1628,46 @@ function Invoke-MediaRangeRequest {
         $response = $client.SendAsync($request, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
         try { return [int] $response.StatusCode } finally { $response.Dispose() }
     }
-    catch { return 0 }
+    catch { Clear-SeedWebErrors -Exceptions @($_.Exception); return 0 }
     finally { $client.Dispose() }
 }
 
+function Get-PauseTierRank {
+    <# How restrictive a pause tier is (PauseTierRegistry.cs: running < injects < engine < freeze). #>
+    param([AllowNull()] [string] $Tier)
+    switch ($Tier) { 'running' { 0 } 'injects' { 1 } 'engine' { 2 } 'freeze' { 3 } default { -1 } }
+}
+
 function Set-EnginePauseTier {
-    <# POST /api/steering/pause-tier {tier: engine}. The server also requires actingHumanId (COR-018). #>
-    param([Parameter(Mandatory)] [hashtable] $Context, [Parameter(Mandatory)] [string] $ActingHumanId, [string] $TimeZone)
+    <#
+    .SYNOPSIS
+        Makes sure the engine is paused. Reads the current tier first (GET /api/steering/pause-tier) and never
+        DOWNGRADES a more restrictive one: a frozen world stays frozen (Gate-1 L-6). Otherwise POSTs {tier: engine};
+        the server also requires actingHumanId (COR-018).
+    #>
+    param([Parameter(Mandatory)] [hashtable] $Context, [Parameter(Mandatory)] [AllowEmptyString()] [string] $ActingHumanId, [string] $TimeZone)
+    $current = Invoke-PulseApi -Context $Context -Method GET -Path '/api/steering/pause-tier'
+    if ($current.Status -eq 200 -and $current.Json -is [System.Collections.IDictionary]) {
+        $found = [string] $current.Json['tier']
+        if ((Get-PauseTierRank $found) -ge (Get-PauseTierRank 'engine')) {
+            return [pscustomobject]@{ Ok = $true; Tier = $found; Changed = $false; Detail = "found '$found' (the engine is already paused); left as it is" }
+        }
+    }
+    elseif ($current.Status -in 401, 403) {
+        return [pscustomobject]@{ Ok = $false; Tier = $null; Changed = $false; Detail = "$($current.Status) — the staff user must be assigned to this exercise" }
+    }
+    if ([string]::IsNullOrWhiteSpace($ActingHumanId)) {
+        return [pscustomobject]@{ Ok = $false; Tier = $null; Changed = $false; Detail = 'the sign-in returned no actingHumanId, which the pause tier requires' }
+    }
     $body = [ordered]@{ tier = 'engine'; actingHumanId = $ActingHumanId }
     if ($TimeZone) { $body['timeZone'] = $TimeZone }
     $response = Invoke-PulseApi -Context $Context -Method POST -Path '/api/steering/pause-tier' -Body $body
+    $was = if ($current.Status -eq 200) { " (was '$($current.Json['tier'])')" } else { '' }
     switch ($response.Status) {
-        200 { return [pscustomobject]@{ Ok = ($response.Json['tier'] -eq 'engine'); Tier = [string] $response.Json['tier']; Detail = "tier = $($response.Json['tier'])" } }
-        409 { return [pscustomobject]@{ Ok = $false; Tier = $null; Detail = "409 refused: $(Get-ApiErrorText $response)" } }
-        { $_ -in 401, 403 } { return [pscustomobject]@{ Ok = $false; Tier = $null; Detail = "$_ — the staff user must be a controller assigned to this exercise" } }
-        default { return [pscustomobject]@{ Ok = $false; Tier = $null; Detail = "$_ $(Get-ApiErrorText $response)" } }
+        200 { return [pscustomobject]@{ Ok = ($response.Json['tier'] -eq 'engine'); Tier = [string] $response.Json['tier']; Changed = $true; Detail = "set to '$($response.Json['tier'])'$was" } }
+        409 { return [pscustomobject]@{ Ok = $false; Tier = $null; Changed = $false; Detail = "409 refused: $(Get-ApiErrorText $response)" } }
+        { $_ -in 401, 403 } { return [pscustomobject]@{ Ok = $false; Tier = $null; Changed = $false; Detail = "$_ — the staff user must be a controller assigned to this exercise" } }
+        default { return [pscustomobject]@{ Ok = $false; Tier = $null; Changed = $false; Detail = "$_ $(Get-ApiErrorText $response)" } }
     }
 }
 
@@ -1496,7 +1720,7 @@ function Write-SeedPlan {
     if ($RunSheet) { Write-Host ("  Run sheet       {0} beat(s) -> {1}" -f @(Get-SeedList $RunSheet 'beats').Count, $RunSheetOut) }
     else { Write-Host '  Run sheet       none in the pack (nothing exported)' }
     if ($LeaveEngineRunning) { Write-Host '  Engine          left as it is (-LeaveEngineRunning)' }
-    else { Write-Host '  Engine          pause tier -> engine, before the posts and again after seeding' }
+    else { Write-Host '  Engine          pause tier: at least "engine" before the posts and again after seeding (a stricter tier is left as it is)' }
     Write-Host ("  Self-check      GET /api/feed shows >= {0} top-level post(s); Range bytes=0-1 -> 206 on every media URL" -f $TopLevel)
     if ($Offline) { Write-Host '  (Offline plan from the pack and the manifest. A live run first re-checks the feed, the media library and the personas.)' -ForegroundColor DarkGray }
 }
@@ -1518,6 +1742,7 @@ function Invoke-DemoSeed {
         [switch] $WhatIf,
         [switch] $Resume,
         [switch] $LeaveEngineRunning,
+        [switch] $AcceptUnverifiableFeed,
         [string] $ManifestDirectory
     )
     $ProgressPreference = 'SilentlyContinue'
@@ -1590,6 +1815,7 @@ function Invoke-DemoSeed {
         Write-SeedPlan -UploadPlan $uploadPlan -PersonaPlan $personaPlan -PostPlan $postPlan -Anchor $anchor -RunSheet $runSheet -RunSheetOut $RunSheetOut `
             -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel -Offline
         if ($anchor.Error) { Write-SeedLine WARN "A live run would stop here: $($anchor.Error)" }
+        elseif ($anchor.Anchor) { foreach ($problem in @(Test-SeedReplyTimes -PostPlan $postPlan -Anchor $anchor.Anchor)) { Write-SeedLine WARN "A live run would stop here: $problem" } }
         Write-Host "`nWhatIf: nothing was sent or written. Sign-in, uploads, edits, posts, the run sheet and the pause tier were all skipped." -ForegroundColor Cyan
         return 0
     }
@@ -1604,12 +1830,14 @@ function Invoke-DemoSeed {
     }
     if ([string]::IsNullOrWhiteSpace($secret)) { $secret = $null; Write-SeedLine FAIL 'No secret given. Nothing was sent.'; return 1 }
     $login = $null
-    try {
-        $login = Invoke-PulseApi -Context $context -Method POST -Path '/api/auth/staff/login' -Anonymous `
-            -Body ([ordered]@{ username = $StaffUsername; secret = $secret; exerciseId = $exercise.Id })
-    }
+    $loginBody = [ordered]@{ username = $StaffUsername; secret = $secret; exerciseId = $exercise.Id }
+    try { $login = Invoke-PulseApi -Context $context -Method POST -Path '/api/auth/staff/login' -Anonymous -Body $loginBody }
     catch { Write-SeedLine FAIL "sign-in failed: $($_.Exception.Message)"; return 1 }
-    finally { $secret = $null }
+    finally {
+        # The body object is still referenced by the call's bound parameters (and any error record): blank it.
+        $loginBody['secret'] = $null
+        $secret = $null
+    }
     $actingHumanId = $null
     switch ($login.Status) {
         200 {
@@ -1684,6 +1912,21 @@ function Invoke-DemoSeed {
             -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel
         foreach ($warning in $postPlan.Warnings) { Write-SeedLine WARN $warning }
         if ($anchor.Error) { Write-SeedLine FAIL "$($anchor.Error) Nothing was written."; return 1 }
+        $unverifiable = @($postPlan.Items | Where-Object Unverifiable)
+        if ($unverifiable.Count -gt 0 -and -not $AcceptUnverifiableFeed) {
+            Write-SeedLine FAIL ("the feed returned its full {0}-post window, so {1} post(s) cannot be checked against an earlier seed: {2}. The manifest on this machine does not know them, and an older copy may sit beyond the window. Nothing was written." -f
+                $limits.FeedTake, $unverifiable.Count, (@($unverifiable | ForEach-Object Key) -join ', '))
+            Write-Host "  Run from the machine that holds the manifest ($manifestPath), or archive old content first (Clear-DemoContent.ps1)," -ForegroundColor Yellow
+            Write-Host '  or pass -AcceptUnverifiableFeed to post them anyway (they may duplicate an earlier seed).' -ForegroundColor Yellow
+            return 1
+        }
+        if ($unverifiable.Count -gt 0) { Write-SeedLine WARN "posting $($unverifiable.Count) post(s) the full feed window could not verify (-AcceptUnverifiableFeed)" }
+        $replyProblems = @(Test-SeedReplyTimes -PostPlan $postPlan -Anchor $anchor.Anchor)
+        if ($replyProblems.Count -gt 0) {
+            foreach ($problem in $replyProblems) { Write-SeedLine FAIL $problem }
+            Write-Host '  Nothing was written.' -ForegroundColor Red
+            return 1
+        }
         if ($Resume -and $postPlan.Done -eq 0 -and $postPlan.ToPost -gt 0 -and $null -eq $ScenarioAnchor) {
             Write-SeedLine INFO 'nothing from an earlier run is in the feed, so this is a fresh timeline anchored at now'
         }
@@ -1698,7 +1941,7 @@ function Invoke-DemoSeed {
         else {
             Write-Host "`n5. Pause the engine before seeding" -ForegroundColor Cyan
             $pause = Set-EnginePauseTier -Context $context -ActingHumanId $actingHumanId -TimeZone $exercise.TimeZone
-            if ($pause.Ok) { Write-SeedLine PASS "pause tier: $($pause.Tier)" } else { Write-SeedLine WARN "pause tier not set ($($pause.Detail)); the engine may react to the seeded posts" }
+            if ($pause.Ok) { Write-SeedLine PASS "pause tier: $($pause.Detail)" } else { Write-SeedLine WARN "pause tier not set ($($pause.Detail)); the engine may react to the seeded posts" }
         }
 
         # ── 6. Upload media: posters first, then images, then videos with posterMediaId ────────────────────────
@@ -1782,7 +2025,7 @@ function Invoke-DemoSeed {
         $mediaIds = @{}; $mediaAlt = @{}
         foreach ($item in @(Get-SeedList $pack 'media')) {
             $mediaIds[$item['key']] = $assetIds[(Get-NormalizedPackFile $item['file'])]
-            $mediaAlt[$item['key']] = ([string] $item['alt']).Trim()
+            $mediaAlt[$item['key']] = Get-JsTrimmed $item['alt']
         }
         $postIds = @{}
         if ($postPlan.ToPost -gt 0) {
@@ -1833,21 +2076,20 @@ function Invoke-DemoSeed {
         Write-Host "`n9. Export the run sheet" -ForegroundColor Cyan
         if (-not $runSheet) { Write-SeedLine SKIP 'the pack has no runSheet' }
         else {
-            $file = ConvertTo-RunSheetFile -RunSheet $runSheet -MediaIds $mediaIds -MediaAlt $mediaAlt -PostIds $postIds -ExportedAt (Format-SeedInstant ([DateTimeOffset]::UtcNow))
-            $json = ConvertTo-SeedJson $file
-            $invalid = @(Test-RunSheetFile -File (ConvertFrom-SeedJson $json) -Limits $limits)
+            $text = ConvertTo-RunSheetJson -RunSheet $runSheet -MediaIds $mediaIds -MediaAlt $mediaAlt -PostIds $postIds -ExportedAt (Format-SeedInstant ([DateTimeOffset]::UtcNow))
+            $invalid = @(Test-RunSheetFile -File (ConvertFrom-SeedJson $text) -Limits $limits)
             if ($invalid.Count -gt 0) { Write-SeedLine FAIL "the run sheet would not import: $($invalid[0])"; return 1 }
             $directory = Split-Path -Parent $RunSheetOut
             if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
-            [IO.File]::WriteAllText($RunSheetOut, $json + "`n", [Text.UTF8Encoding]::new($false))
-            Write-SeedLine PASS "$(@($file['beats']).Count) beat(s) -> $RunSheetOut (import it from the console's run-sheet panel)"
+            [IO.File]::WriteAllText($RunSheetOut, $text, [Text.UTF8Encoding]::new($false))
+            Write-SeedLine PASS "$(@(Get-SeedList $runSheet 'beats').Count) beat(s) -> $RunSheetOut (import it from the console's run-sheet panel)"
         }
 
         # ── 10. Engine paused after seeding (Decision 4) ──────────────────────────────────────────────────────────
         if (-not $LeaveEngineRunning) {
             Write-Host "`n10. Pause the engine (pause tier engine)" -ForegroundColor Cyan
             $pause = Set-EnginePauseTier -Context $context -ActingHumanId $actingHumanId -TimeZone $exercise.TimeZone
-            if ($pause.Ok) { Write-SeedLine PASS "the server applied pause tier '$($pause.Tier)' (it resets to 'running' on any reset or restart)" }
+            if ($pause.Ok) { Write-SeedLine PASS "pause tier $($pause.Detail) (it resets to 'running' on any reset or restart)" }
             else { Write-SeedLine FAIL "pause tier: $($pause.Detail)" }
         }
 
@@ -1934,6 +2176,12 @@ function Invoke-DemoSeed {
         Write-Host "NOT READY — $failed check(s) failed. Manifest: $manifestPath" -ForegroundColor Red
         return 1
     }
+    catch {
+        # Invoke-PulseApi already threw a clean error (method, path, reason; never a header or a body).
+        Write-SeedLine FAIL $_.Exception.Message
+        if ($manifestPath) { Write-Host "  Progress so far is in the manifest ($manifestPath); fix the cause and run again (-Resume if posts were made)." -ForegroundColor Yellow }
+        return 1
+    }
     finally {
         $context.Token = $null
     }
@@ -1951,6 +2199,7 @@ $seedArguments = @{
     WhatIf             = $WhatIf
     Resume             = $Resume
     LeaveEngineRunning = $LeaveEngineRunning
+    AcceptUnverifiableFeed = $AcceptUnverifiableFeed
     ManifestDirectory  = $ManifestDirectory
 }
 if ($PSBoundParameters.ContainsKey('ScenarioAnchor')) { $seedArguments['ScenarioAnchor'] = $ScenarioAnchor }

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:pulse:schema:pulse.demopack.v1",
   "title": "Pulse demo content pack (pulse.demopack.v1)",
-  "description": "The seed pack scripts/uat/Seed-DemoContent.ps1 loads into an exercise (demo-polish implementation.md section 1.10). File paths are relative to the folder that holds pack.json. This schema covers the SHAPE. The seeder also enforces the rules a JSON Schema cannot express, before it sends anything: keys are unique, every ref resolves, a reply comes after its parent in the array and not earlier in scenario time, text is at most 280 code points (an emoji counts once), each file exists inside the pack folder, its first bytes are JPEG/PNG/GIF/WebP (images) or MP4/WebM (videos) and match its kind, images are at most 5 MiB and videos at most 100 MiB, a post carries up to 4 images or exactly 1 video (never both), beat ids/orders are unique and reply chains have no loops, and every handle exists in the exercise (checked after sign-in).",
+  "description": "The seed pack scripts/uat/Seed-DemoContent.ps1 loads into an exercise (demo-polish implementation.md section 1.10). File paths are relative to the folder that holds pack.json. This schema covers the SHAPE. The seeder also enforces the rules a JSON Schema cannot express, before it sends anything: keys are unique, every ref resolves, a reply comes after its parent in the array and not earlier in scenario time, text is at most 280 code points (an emoji counts once), each file exists inside the pack folder, its first bytes are JPEG/PNG/GIF/WebP (images) or MP4/WebM (videos) and match its kind, images are at most 5 MiB and videos at most 100 MiB, a post carries up to 4 images or exactly 1 video (never both), beat ids/orders are unique and reply chains have no loops, and every handle exists in the exercise (checked after sign-in). Keys and beat ids must also be unique ignoring case.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "personas", "media", "posts"],
@@ -51,12 +51,19 @@
       "minLength": 1,
       "maxLength": 1000,
       "pattern": "\\S",
-      "description": "Alt text (NFR-001). Required, not blank, at most 1000 characters."
+      "not": { "$ref": "#/definitions/markup" },
+      "description": "Alt text (NFR-001). Required, not blank, at most 1000 characters, no markup."
+    },
+    "markup": {
+      "type": "string",
+      "pattern": "<[A-Za-z/!?]",
+      "description": "Markup-like text ('<' then a letter, '/', '!' or '?'). The server strips tags, so such text would not read as written; every free-text field refuses it. '<' before a space or a digit is fine."
     },
     "postText": {
       "type": "string",
       "maxLength": 280,
-      "description": "At most 280 code points. The seeder counts code points; a schema validator may count differently for emoji."
+      "not": { "$ref": "#/definitions/markup" },
+      "description": "At most 280 code points, no markup. The seeder counts code points; a schema validator may count differently for emoji."
     },
     "baseline": {
       "type": "object",
@@ -79,17 +86,20 @@
           "minLength": 1,
           "maxLength": 100,
           "pattern": "\\S",
-          "description": "1 to 100 characters, at least one visible; no control or bidirectional-override characters."
+          "not": { "$ref": "#/definitions/markup" },
+          "description": "1 to 100 characters, at least one visible; no control or bidirectional-override characters; no markup."
         },
         "bio": {
           "type": ["string", "null"],
           "maxLength": 512,
-          "description": "At most 512 characters; line breaks and tabs allowed; null clears it."
+          "not": { "$ref": "#/definitions/markup" },
+          "description": "At most 512 characters; line breaks and tabs allowed; no markup; null clears it."
         },
         "location": {
           "type": ["string", "null"],
           "maxLength": 100,
-          "description": "At most 100 characters; null clears it."
+          "not": { "$ref": "#/definitions/markup" },
+          "description": "At most 100 characters; no markup; null clears it."
         },
         "verified": { "type": "boolean" },
         "avatar": {

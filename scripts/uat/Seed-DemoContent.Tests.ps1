@@ -187,6 +187,7 @@ BeforeAll {
                 return & $reply 200 @($rows | ForEach-Object { & $postView $_ })
             }
             '^/api/steering/pause-tier$' {
+                if ($Method -eq 'GET') { return & $reply 200 ([ordered]@{ tier = $Fake.Tier; clockFrozen = ($Fake.Tier -eq 'freeze') }) }
                 $request = ConvertFrom-SeedJson $bodyText
                 if (-not $request.actingHumanId) { return & $reply 400 'actingHumanId is required (COR-018).' }
                 $Fake.Tier = $request.tier
@@ -212,6 +213,139 @@ BeforeAll {
     }
 
     function Get-FakeCalls([string] $Method, [string] $Path) { @($script:Fake.Calls | Where-Object { $_.Method -eq $Method -and $_.Path -eq $Path }) }
+
+    # ── A REAL HTTP server (System.Net.HttpListener on localhost, in a background runspace). No mocks: the actual
+    #    web cmdlet runs, so its debug stream, its error records and its redirect handling are what get tested. ──
+    function Get-FreeTcpPort {
+        $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+        $probe.Start(); $port = ([System.Net.IPEndPoint] $probe.LocalEndpoint).Port; $probe.Stop()
+        return $port
+    }
+
+    function Start-SeedTestServer {
+        param([string] $Mode = 'api')
+        $port = Get-FreeTcpPort
+        $listener = [System.Net.HttpListener]::new()
+        $listener.Prefixes.Add("http://localhost:$port/")
+        $listener.Start()
+        $state = [hashtable]::Synchronized(@{
+                Mode = $Mode; Port = $port
+                Secret = 'Sekr1t-' + [guid]::NewGuid().ToString('N'); Token = 'TOKEN-' + [guid]::NewGuid().ToString('N')
+                Refresh = 'REFRESH-' + [guid]::NewGuid().ToString('N'); StaffId = 'f0000000-0000-4000-8000-00000000000f'
+                ExerciseId = '22222222-3333-4444-8555-666666666666'; Tier = 'running'
+                Personas = [ordered]@{}; Assets = [ordered]@{}; Posts = [System.Collections.ArrayList]::new()
+                Hits = [System.Collections.ArrayList]::new(); Bodies = [System.Collections.ArrayList]::new()
+            })
+        foreach ($handle in 'FulcoEM', 'Newsline7') {
+            $id = [guid]::NewGuid().ToString()
+            $state.Personas[$id] = [ordered]@{ id = $id; handle = $handle; displayName = $handle; verified = $false; kind = 'organization' }
+        }
+        $loop = {
+            param($Listener, $State)
+            $send = {
+                param($Context, [int] $Status, $Value, [hashtable] $Headers = @{}, [byte[]] $Raw)
+                $response = $Context.Response
+                $response.StatusCode = $Status
+                foreach ($key in $Headers.Keys) { $response.Headers[$key] = $Headers[$key] }
+                $bytes = if ($Raw) { $Raw } elseif ($null -ne $Value) { $response.ContentType = 'application/json; charset=utf-8'; [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $Value -Depth 20 -Compress)) } else { [byte[]]::new(0) }
+                $response.ContentLength64 = $bytes.Length
+                if ($bytes.Length) { $response.OutputStream.Write($bytes, 0, $bytes.Length) }
+                $response.Close()
+            }
+            while ($Listener.IsListening) {
+                try { $context = $Listener.GetContext() } catch { break }
+                try {
+                    $request = $context.Request
+                    $buffer = [IO.MemoryStream]::new(); $request.InputStream.CopyTo($buffer); $bytes = $buffer.ToArray()
+                    $text = [Text.Encoding]::UTF8.GetString($bytes)
+                    $path = $request.Url.AbsolutePath; $method = $request.HttpMethod
+                    $base = "http://localhost:$($State.Port)"
+                    [void] $State.Hits.Add("$method $path"); [void] $State.Bodies.Add($text)
+                    $blob = { param($Id) "$base/blob/$Id" }
+                    $personaView = {
+                        param($p)
+                        $v = [ordered]@{ id = $p.id; handle = $p.handle; displayName = $p.displayName; verified = $p.verified; kind = $p.kind }
+                        foreach ($f in 'bio', 'location') { if ($p.Contains($f) -and $null -ne $p[$f]) { $v[$f] = $p[$f] } }
+                        if ($p['avatarMediaId']) { $v.avatarUrl = & $blob $p['avatarMediaId'] }
+                        if ($p['bannerMediaId']) { $v.bannerUrl = & $blob $p['bannerMediaId'] }
+                        $v
+                    }
+                    $postView = {
+                        param($post)
+                        $v = [ordered]@{ id = $post.id; authorPersonaId = $post.authorPersonaId; text = $post.text; scenarioTime = $post.scenarioTime; counts = [ordered]@{ reply = 0; repost = 0; like = 0 } }
+                        if ($post.media.Count) {
+                            $v.media = @(foreach ($m in $post.media) {
+                                    $a = $State.Assets[[string] $m.mediaId]
+                                    $item = [ordered]@{ id = $a.id; kind = $a.kind; url = (& $blob $a.id); alt = $m.alt }
+                                    if ($a.poster) { $item.posterUrl = & $blob $a.poster }
+                                    $item
+                                })
+                        }
+                        if ($post.parent) { $v.inReplyTo = [ordered]@{ postId = $post.parent; authorHandle = 'x' } }
+                        $v
+                    }
+                    if ($State.Mode -eq 'redirect' -and $path -notlike '/elsewhere*') { & $send $context 307 $null @{ Location = "$base/elsewhere$path" }; continue }
+                    if ($path -like '/elsewhere*') { & $send $context 200 ([ordered]@{ followed = $true }); continue }
+                    if ($path -like '/blob/*') {
+                        if ($request.Headers['Authorization']) { & $send $context 400 'token sent to the blob host'; continue }
+                        if ($request.Headers['Range'] -eq 'bytes=0-1') { & $send $context 206 $null @{ 'Content-Range' = 'bytes 0-1/2' } ([byte[]] (1, 2)) } else { & $send $context 200 $null @{} ([byte[]] (1, 2)) }
+                        continue
+                    }
+                    if ($path -eq '/api/exercise-context') { & $send $context 200 ([ordered]@{ exerciseId = $State.ExerciseId; exerciseName = 'Listener'; timeZone = 'America/Chicago'; status = 'live' }); continue }
+                    if ($path -eq '/api/auth/staff/login') {
+                        $login = ConvertFrom-Json -InputObject $text -AsHashtable
+                        if ($login.secret -cne $State.Secret) { & $send $context 401 $null; continue }
+                        & $send $context 200 ([ordered]@{ token = $State.Token; refreshToken = $State.Refresh; session = [ordered]@{ exerciseId = $State.ExerciseId; role = 'controller'; actingHumanId = $State.StaffId } })
+                        continue
+                    }
+                    if ($request.Headers['Authorization'] -cne "Bearer $($State.Token)") { & $send $context 401 $null; continue }
+                    if ($path -eq '/api/personas') { & $send $context 200 @($State.Personas.Values | ForEach-Object { & $personaView $_ }); continue }
+                    if ($path -match '^/api/staff/personas/(?<id>[0-9a-f-]+)$') {
+                        $persona = $State.Personas[$Matches.id]
+                        foreach ($entry in (ConvertFrom-Json -InputObject $text -AsHashtable).GetEnumerator()) { $persona[$entry.Key] = $entry.Value }
+                        & $send $context 200 (& $personaView $persona); continue
+                    }
+                    if ($path -eq '/api/staff/media') { & $send $context 200 @(); continue }
+                    if ($path -eq '/api/media') {
+                        $latin = [Text.Encoding]::GetEncoding(28591).GetString($bytes)
+                        $field = { param($Name) $m = [regex]::Match($latin, "name=`"?$Name`"?\r\n(?:[^\r\n]+\r\n)*\r\n(?<v>[^\r\n]*)"); if ($m.Success) { $m.Groups['v'].Value } }
+                        $id = [guid]::NewGuid().ToString()
+                        $State.Assets[$id] = [ordered]@{ id = $id; kind = (& $field 'kind'); poster = (& $field 'posterMediaId') }
+                        $view = [ordered]@{ id = $id; kind = $State.Assets[$id].kind; url = (& $blob $id) }
+                        & $send $context 201 $view; continue
+                    }
+                    if ($path -eq '/api/posts') {
+                        $body = ConvertFrom-Json -InputObject $text -AsHashtable
+                        $post = [ordered]@{ id = [guid]::NewGuid().ToString(); authorPersonaId = $body.authorPersonaId; text = $body.text; scenarioTime = [string] $body.scenarioTime; media = @($body.media | Where-Object { $_ }); parent = $body.parentPostId }
+                        [void] $State.Posts.Add($post)
+                        & $send $context 201 (& $postView $post); continue
+                    }
+                    if ($path -eq '/api/feed') {
+                        $include = $request.Url.Query -match 'includeReplies=true'
+                        $rows = @($State.Posts | Where-Object { $include -or -not $_.parent } | Sort-Object { $_.scenarioTime } -Descending)
+                        & $send $context 200 @($rows | ForEach-Object { & $postView $_ }); continue
+                    }
+                    if ($path -eq '/api/steering/pause-tier') {
+                        if ($method -eq 'POST') { $State.Tier = (ConvertFrom-Json -InputObject $text -AsHashtable).tier }
+                        & $send $context 200 ([ordered]@{ tier = $State.Tier; clockFrozen = $false }); continue
+                    }
+                    & $send $context 404 $null
+                }
+                catch { try { $context.Response.StatusCode = 500; $context.Response.Close() } catch { } }
+            }
+        }
+        $shell = [powershell]::Create()
+        [void] $shell.AddScript($loop).AddArgument($listener).AddArgument($state)
+        $handle = $shell.BeginInvoke()
+        [pscustomobject]@{ BaseUrl = "http://localhost:$port"; State = $state; Listener = $listener; Shell = $shell; Handle = $handle }
+    }
+
+    function Stop-SeedTestServer($Server) {
+        if (-not $Server) { return }
+        try { $Server.Listener.Stop(); $Server.Listener.Close() } catch { }
+        try { [void] $Server.Shell.EndInvoke($Server.Handle) } catch { }
+        $Server.Shell.Dispose()
+    }
 }
 
 Describe 'Pack validation (implementation.md §1.10 rules, one case per rule)' {
@@ -282,6 +416,27 @@ Describe 'Pack validation (implementation.md §1.10 rules, one case per rule)' {
         }
         @{ Name = 'beat baseline negative'; Code = 'beat-baseline'; Mutate = { param($p) $p['runSheet']['beats'][0]['engagementBaseline']['like'] = -1 } }
         @{ Name = 'beat notes over 500'; Code = 'beat-notes'; Mutate = { param($p) $p['runSheet']['beats'][0]['notes'] = 'n' * 501 } }
+        # Gate-1 M-2: markup the server would strip (the post would not read as written, and dedup could not match it)
+        @{ Name = 'markup in post text'; Code = 'markup'; Mutate = { param($p) $p['posts'][1]['text'] = 'Harbor Road is <b>closed</b> between 3rd and 5th.' } }
+        @{ Name = 'markup in media alt'; Code = 'markup'; Mutate = { param($p) $p['media'][0]['alt'] = '<img src=x>' } }
+        @{ Name = 'markup in a post alt override'; Code = 'markup'; Mutate = { param($p) $p['posts'][1]['media'][0]['alt'] = 'Photo of a road </p>' } }
+        @{ Name = 'markup in displayName'; Code = 'markup'; Mutate = { param($p) $p['personas'][0]['displayName'] = '<i>Fairhaven</i> EM' } }
+        @{ Name = 'markup in bio (comment)'; Code = 'markup'; Mutate = { param($p) $p['personas'][0]['bio'] = 'Updates <!-- hidden -->' } }
+        @{ Name = 'markup in location (processing instruction)'; Code = 'markup'; Mutate = { param($p) $p['personas'][0]['location'] = 'Fairhaven <?x?>' } }
+        @{ Name = 'markup in beat text'; Code = 'markup'; Mutate = { param($p) $p['runSheet']['beats'][0]['text'] = 'Live now <script>x</script>' } }
+        @{ Name = 'markup in a beat alt override'; Code = 'markup'; Mutate = { param($p) $p['runSheet']['beats'][0]['media'][0]['alt'] = '<a href=x>photo</a>' } }
+        # Gate-1 L-2: anchor with \z, and blank = blank to JavaScript's trim() (U+FEFF included), as zod checks it
+        @{ Name = 'post key with a trailing newline'; Code = 'key-format'; Mutate = { param($p) $p['posts'][0]['key'] = "p01`n"; $p['posts'][2]['replyTo'] = "p01`n" } }
+        @{ Name = 'beat id with a trailing newline'; Code = 'beat-id'; Mutate = { param($p) $p['runSheet']['beats'][0]['id'] = "beat-1`n" } }
+        @{ Name = 'handle with a trailing newline'; Code = 'handle-format'; Mutate = { param($p) $p['posts'][0]['persona'] = "Newsline7`n" } }
+        @{ Name = 'handle with a U+FEFF'; Code = 'handle-format'; Mutate = { param($p) $p['posts'][0]['persona'] = "News`u{FEFF}line7" } }
+        @{ Name = 'beat title that is only U+FEFF'; Code = 'beat-title'; Mutate = { param($p) $p['runSheet']['beats'][0]['title'] = "`u{FEFF}" } }
+        @{ Name = 'run sheet name that is only U+FEFF'; Code = 'runsheet-name'; Mutate = { param($p) $p['runSheet']['name'] = "`u{FEFF} " } }
+        @{ Name = 'media alt that is only U+FEFF'; Code = 'alt-missing'; Mutate = { param($p) $p['media'][0]['alt'] = "`u{FEFF}" } }
+        # Gate-1 L-3: keys collide ignoring case (the manifest and the id maps are case-insensitive)
+        @{ Name = 'post keys differing only in case'; Code = 'duplicate-key'; Mutate = { param($p) $p['posts'] += [ordered]@{ key = 'P01'; persona = 'FulcoEM'; text = 'A different post'; minutesBeforeAnchor = 10 } } }
+        @{ Name = 'media keys differing only in case'; Code = 'duplicate-key'; Mutate = { param($p) $p['media'] += [ordered]@{ key = 'Harbor-Photo'; file = 'avatars/fulcoem.png'; kind = 'image'; alt = 'x' } } }
+        @{ Name = 'beat ids differing only in case'; Code = 'beat-duplicate-id'; Mutate = { param($p) $b = Copy-Map $p['runSheet']['beats'][0]; $b['id'] = 'BEAT-1'; $b['order'] = 2; $p['runSheet']['beats'] += $b } }
     ) {
         $pack = Get-FixturePack
         & $Mutate $pack
@@ -301,6 +456,38 @@ Describe 'Pack validation (implementation.md §1.10 rules, one case per rule)' {
         Copy-Item -Recurse $script:FixtureRoot $root
         Set-Content -LiteralPath (Join-Path $root 'media/harbor-photo.jpg') -Value $null -NoNewline
         Get-PackCodes (Get-FixturePack) -Root $root | Should -Be @('file-empty')
+    }
+
+    It 'plain-text "<" is fine: "<3", "a < b" and "<5 min" pass' {
+        $pack = Get-FixturePack
+        $pack['posts'][0]['text'] = 'Stay safe <3 levels are a < b and closures last <5 min'
+        $pack['media'][0]['alt'] = 'Water depth <1 m'
+        Get-PackCodes $pack | Should -BeNullOrEmpty
+    }
+
+    It 'L-7: a symbolic link that resolves outside the pack folder -> file-outside-pack; one that stays inside passes' {
+        $root = Join-Path $TestDrive 'link-pack'
+        Copy-Item -Recurse $script:FixtureRoot $root
+        $outside = Join-Path $TestDrive 'outside'; New-Item -ItemType Directory -Force $outside | Out-Null
+        Copy-Item (Join-Path $root 'media/harbor-photo.jpg') (Join-Path $outside 'secret.jpg')
+        try {
+            Remove-Item (Join-Path $root 'media/harbor-photo.jpg')
+            New-Item -ItemType SymbolicLink -Path (Join-Path $root 'media/harbor-photo.jpg') -Target (Join-Path $outside 'secret.jpg') -ErrorAction Stop | Out-Null
+        }
+        catch { Set-ItResult -Skipped -Because "symbolic links cannot be created here: $($_.Exception.Message)"; return }
+        Get-PackCodes (Get-FixturePack) -Root $root | Should -Be @('file-outside-pack')
+
+        # A linked DIRECTORY pointing outside is caught too.
+        Remove-Item (Join-Path $root 'media/harbor-photo.jpg')
+        Copy-Item (Join-Path $outside 'secret.jpg') (Join-Path $root 'media/harbor-photo.jpg')
+        New-Item -ItemType SymbolicLink -Path (Join-Path $root 'avatars-link') -Target $outside | Out-Null
+        $pack = Get-FixturePack; $pack['media'][0]['file'] = 'avatars-link/secret.jpg'
+        Get-PackCodes $pack -Root $root | Should -Be @('file-outside-pack')
+
+        # A link that stays inside the pack is fine.
+        New-Item -ItemType SymbolicLink -Path (Join-Path $root 'media/alias.jpg') -Target (Join-Path $root 'media/harbor-photo.jpg') | Out-Null
+        $pack = Get-FixturePack; $pack['media'][0]['file'] = 'media/alias.jpg'
+        Get-PackCodes $pack -Root $root | Should -BeNullOrEmpty
     }
 
     It 'counts code points, not UTF-16 units: 280 emoji pass, 281 fail' {
@@ -328,6 +515,10 @@ Describe 'Pack validation (implementation.md §1.10 rules, one case per rule)' {
         Test-Json -Json (ConvertTo-SeedJson $bad) -SchemaFile $script:SchemaPath -ErrorAction SilentlyContinue | Should -BeFalse
         $typo = Get-FixturePack; $typo['posts'][0]['minutesBeforeAncor'] = 5
         Test-Json -Json (ConvertTo-SeedJson $typo) -SchemaFile $script:SchemaPath -ErrorAction SilentlyContinue | Should -BeFalse
+        $markup = Get-FixturePack; $markup['posts'][1]['text'] = 'Harbor Road is <b>closed</b>'
+        Test-Json -Json (ConvertTo-SeedJson $markup) -SchemaFile $script:SchemaPath -ErrorAction SilentlyContinue | Should -BeFalse
+        $nullBio = Get-FixturePack; $nullBio['personas'][0]['bio'] = $null; $nullBio['personas'][0]['location'] = 'Fairhaven <3'
+        Test-Json -Json (ConvertTo-SeedJson $nullBio) -SchemaFile $script:SchemaPath | Should -BeTrue
     }
 
     It 'an invalid pack exits 1 before any request (nothing is sent)' {
@@ -409,6 +600,75 @@ Describe 'Offset math and posting order' {
         $plan.Items[0].Action | Should -Be 'adopt'
         $resumed = Resolve-SeedAnchor -Resume -Manifest $manifest -PostPlan $plan -Now ([DateTimeOffset]::UtcNow)
         Format-SeedInstant $resumed.Anchor | Should -Be '2026-10-16T15:00:00.000Z'   # 13:00 + p01's 120 minutes
+    }
+}
+
+Describe 'Gate-1 folds: anchors, the feed window and the offline plan' {
+    BeforeAll {
+        function New-SeededPlan {
+            <# p01 already seeded (in the manifest and the feed at $ParentTime); p02 and p03 (a reply to p01) still to post. #>
+            param([string] $ParentTime = '2026-10-16T13:00:00.000Z', [string] $ManifestAnchor = '2026-10-16T15:00:00.000Z')
+            $manifest = New-SeedManifest
+            if ($ManifestAnchor) { $manifest['anchor'] = $ManifestAnchor }
+            $manifest['posts']['p01'] = [ordered]@{ postId = 'post-1'; scenarioTime = $ParentTime }
+            $feed = @([ordered]@{ id = 'post-1'; authorPersonaId = 'n7'; text = (Get-FixturePack)['posts'][0]['text']; scenarioTime = $ParentTime })
+            $plan = Get-PostPlan -Pack (Get-FixturePack) -Manifest $manifest -Feed $feed -PersonaIds @{ Newsline7 = 'n7'; FulcoEM = 'em' }
+            [pscustomobject]@{ Manifest = $manifest; Plan = $plan }
+        }
+    }
+
+    It 'L-4: -ScenarioAnchor does not bypass the partial-run refusal, and the message does not suggest it' {
+        $seeded = New-SeededPlan
+        $result = Resolve-SeedAnchor -Explicit ([DateTimeOffset] '2026-10-19T09:00:00Z') -Manifest $seeded.Manifest -PostPlan $seeded.Plan -Now ([DateTimeOffset]::UtcNow)
+        $result.Error | Should -Match 'Re-run with -Resume'
+        $result.Error | Should -Not -Match 'ScenarioAnchor'
+        $plain = Resolve-SeedAnchor -Manifest $seeded.Manifest -PostPlan $seeded.Plan -Now ([DateTimeOffset]::UtcNow)
+        $plain.Error | Should -Not -Match 'ScenarioAnchor'
+    }
+
+    It 'L-4: with -Resume, a different -ScenarioAnchor is refused; the same one is accepted' {
+        $seeded = New-SeededPlan
+        (Resolve-SeedAnchor -Resume -Explicit ([DateTimeOffset] '2026-10-19T09:00:00Z') -Manifest $seeded.Manifest -PostPlan $seeded.Plan -Now ([DateTimeOffset]::UtcNow)).Error |
+            Should -Match 'would move the rest of a partial run'
+        $same = Resolve-SeedAnchor -Resume -Explicit ([DateTimeOffset] '2026-10-16T15:00:00Z') -Manifest $seeded.Manifest -PostPlan $seeded.Plan -Now ([DateTimeOffset]::UtcNow)
+        $same.Error | Should -BeNullOrEmpty
+        Format-SeedInstant $same.Anchor | Should -Be '2026-10-16T15:00:00.000Z'
+    }
+
+    It 'L-4: a reply is never posted earlier than its already-seeded parent' {
+        # The parent really went out at 14:30, later than the manifest anchor suggests (e.g. it was re-posted):
+        # p03 (75 min before a 15:00 anchor = 13:45) would precede it.
+        $seeded = New-SeededPlan -ParentTime '2026-10-16T14:30:00.000Z'
+        $anchor = (Resolve-SeedAnchor -Resume -Manifest $seeded.Manifest -PostPlan $seeded.Plan -Now ([DateTimeOffset]::UtcNow)).Anchor
+        $problems = @(Test-SeedReplyTimes -PostPlan $seeded.Plan -Anchor $anchor)
+        $problems.Count | Should -Be 1
+        $problems[0] | Should -Match 'p03 would be posted at 2026-10-16T13:45:00.000Z, before its already-seeded parent p01'
+        @(Test-SeedReplyTimes -PostPlan (New-SeededPlan).Plan -Anchor $anchor) | Should -BeNullOrEmpty
+    }
+
+    It 'M-3: no manifest + a full 200-post feed window marks every pack post unverifiable' {
+        $feed = @(1..200 | ForEach-Object { [ordered]@{ id = "other-$_"; authorPersonaId = 'x'; text = 'engine chatter'; scenarioTime = '2026-10-19T13:59:00.000Z' } })
+        $plan = Get-PostPlan -Pack (Get-FixturePack) -Manifest (New-SeedManifest) -Feed $feed -PersonaIds @{ Newsline7 = 'n7'; FulcoEM = 'em' }
+        $plan.FeedTruncated | Should -BeTrue
+        $plan.Unverifiable | Should -Be 3
+        $plan.Items[0].Reason | Should -Match 'cannot be ruled out'
+        # Under the cap the same empty feed proves the posts are new.
+        (Get-PostPlan -Pack (Get-FixturePack) -Manifest (New-SeedManifest) -Feed @($feed | Select-Object -First 199) -PersonaIds @{}).Unverifiable | Should -Be 0
+    }
+
+    It 'L-1: the offline (-WhatIf) plan survives a changed video with an unchanged poster' {
+        $units = Get-FixtureUnits
+        $manifest = New-FullManifest -Units $units
+        $manifest['files']['media/river-clip.mp4']['sha256'] = '0' * 64
+        $plan = @(Get-UploadPlan -Units $units -Manifest $manifest -Library $null -Username 'controller1')
+        ($plan | Where-Object { $_.Unit.File -eq 'media/river-clip.mp4' }).Action | Should -Be 'upload'
+        ($plan | Where-Object { $_.Unit.File -eq 'media/river-clip.poster.jpg' }).Action | Should -Be 'reuse'
+    }
+
+    It 'zod-compatible trim: U+FEFF and Unicode spaces are blank, U+0085 is not' {
+        Test-JsBlank "`u{FEFF} `u{3000}`t" | Should -BeTrue
+        Test-JsBlank "`u{0085}" | Should -BeFalse
+        Get-JsTrimmed "`u{FEFF}Title`u{00A0}" | Should -Be 'Title'
     }
 }
 
@@ -585,10 +845,12 @@ Describe 'End to end against the fake API' {
 
         $patch = Get-FakeCalls PATCH ($script:Fake.Calls | Where-Object Method -eq 'PATCH' | Select-Object -First 1).Path
         $patch[0].ContentType | Should -BeLike 'application/merge-patch+json*'
-        $pause = Get-FakeCalls POST '/api/steering/pause-tier'
-        $pause.Count | Should -Be 2   # before the posts and after seeding
-        (ConvertFrom-SeedJson $pause[1].Body).tier | Should -Be 'engine'
-        (ConvertFrom-SeedJson $pause[1].Body).actingHumanId | Should -Be $script:Fake.StaffId
+        # Read first, set once: before the posts it finds 'running' and sets 'engine'; after seeding it finds 'engine'.
+        (Get-FakeCalls GET '/api/steering/pause-tier').Count | Should -Be 2
+        $pause = @(Get-FakeCalls POST '/api/steering/pause-tier')
+        $pause.Count | Should -Be 1
+        (ConvertFrom-SeedJson $pause[0].Body).tier | Should -Be 'engine'
+        (ConvertFrom-SeedJson $pause[0].Body).actingHumanId | Should -Be $script:Fake.StaffId
     }
 
     It 'exports a run sheet the console imports: real ids, no status fields' {
@@ -670,6 +932,124 @@ Describe 'End to end against the fake API' {
         Should -Invoke Invoke-MediaRangeRequest -Times 5 -Exactly
         Should -Invoke Invoke-MediaRangeRequest -ParameterFilter { $Url -like 'https://blob.fake.test/*' } -Times 5 -Exactly
         (Get-Command Invoke-MediaRangeRequest).Parameters.Keys | Should -Not -Contain 'Headers'
+    }
+}
+
+Describe 'Gate-1 folds end to end (in-memory fake)' {
+    BeforeEach {
+        $script:Fake = New-FakePulse
+        $env:PULSE_STAFF_SECRET = $script:Fake.Secret
+        Mock Invoke-WebRequest { Invoke-FakePulse -Fake $script:Fake -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType }
+        Mock Invoke-MediaRangeRequest { 206 }
+        Mock Start-Sleep { }
+        Remove-Item -Recurse -Force (Join-Path $TestDrive 'manifests') -ErrorAction SilentlyContinue
+        Remove-Item -Force (Join-Path $TestDrive 'runsheet.demo.json') -ErrorAction SilentlyContinue
+    }
+    AfterEach { $env:PULSE_STAFF_SECRET = $null }
+
+    It 'M-3: with no manifest and a full feed window it refuses before any write; -AcceptUnverifiableFeed proceeds' {
+        $persona = @($script:Fake.Personas.Keys)[2]
+        foreach ($n in 1..200) {
+            $script:Fake.Posts.Add([ordered]@{ id = "old-$n"; authorPersonaId = $persona; text = "older chatter $n"; scenarioTime = '2026-10-01T00:00:00.000Z'; media = @(); parent = $null; counts = [ordered]@{ reply = 0; repost = 0; like = 0 } })
+        }
+        $refused = Invoke-FakeSeed
+        $refused.Code | Should -Be 1
+        $refused.Text | Should -Match 'full 200-post window, so 3 post\(s\) cannot be checked'
+        $refused.Text | Should -Match '-AcceptUnverifiableFeed'
+        @($script:Fake.Calls | Where-Object { $_.Method -ne 'GET' -and $_.Path -ne '/api/auth/staff/login' }).Count | Should -Be 0
+
+        $accepted = Invoke-FakeSeed @{ AcceptUnverifiableFeed = $true }
+        $accepted.Code | Should -Be 0 -Because $accepted.Text
+        (Get-FakeCalls POST '/api/posts').Count | Should -Be 3
+    }
+
+    It 'L-6: a frozen world stays frozen (the tier is read first and never downgraded)' {
+        $script:Fake.Tier = 'freeze'
+        $run = Invoke-FakeSeed
+        $run.Code | Should -Be 0 -Because $run.Text
+        (Get-FakeCalls POST '/api/steering/pause-tier').Count | Should -Be 0
+        $script:Fake.Tier | Should -Be 'freeze'
+        $run.Text | Should -Match "found 'freeze' \(the engine is already paused\); left as it is"
+    }
+
+    It 'L-6: a running engine is paused once and reported' {
+        $run = Invoke-FakeSeed
+        $run.Code | Should -Be 0
+        $run.Text | Should -Match "set to 'engine' \(was 'running'\)"
+        (Get-FakeCalls POST '/api/steering/pause-tier').Count | Should -Be 1
+    }
+
+    It 'M-1: a network failure mid-run is a clean [FAIL] line and exit 1, not a raw exception' {
+        Mock Invoke-WebRequest {
+            if (([Uri] $Uri).AbsolutePath -eq '/api/staff/media') { throw [System.Net.Http.HttpRequestException]::new('Connection reset by peer') }
+            Invoke-FakePulse -Fake $script:Fake -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+        }
+        $run = Invoke-FakeSeed
+        $run.Code | Should -Be 1
+        $run.Text | Should -Match '\[FAIL\] GET /api/staff/media failed: Connection reset by peer'
+        $run.Text.Contains($script:Fake.Token) | Should -BeFalse
+    }
+}
+
+Describe 'Real HTTP, no mocks: -Debug, error records and redirects (Gate-1 H-1, M-1, L-5)' {
+    AfterEach {
+        $env:PULSE_STAFF_SECRET = $null
+        Stop-SeedTestServer $script:Server
+        $script:Server = $null
+    }
+
+    It 'H-1: a full run with -Debug -Verbose and $DebugPreference=Continue never shows the secret or the token in any stream' {
+        try { $script:Server = Start-SeedTestServer }
+        catch { Set-ItResult -Skipped -Because "a local HttpListener cannot start here: $($_.Exception.Message)"; return }
+        $env:PULSE_STAFF_SECRET = $script:Server.State.Secret
+        $manifests = Join-Path $TestDrive 'real-manifests'
+        $runSheet = Join-Path $TestDrive 'real-runsheet.json'
+        $savedDebug, $savedVerbose = $DebugPreference, $VerbosePreference
+        try {
+            $DebugPreference = 'Continue'; $VerbosePreference = 'Continue'
+            $output = & $script:ScriptFile -PackPath $script:FixturePath -ApiHost $script:Server.BaseUrl -StaffUsername controller1 `
+                -ManifestDirectory $manifests -RunSheetOut $runSheet -Debug -Verbose *>&1 | Out-String
+            $code = $LASTEXITCODE
+        }
+        finally { $DebugPreference, $VerbosePreference = $savedDebug, $savedVerbose }
+
+        $code | Should -Be 0 -Because $output
+        $output | Should -Match 'SEEDED — every check passed'
+        $script:Server.State.Posts.Count | Should -Be 3                          # real requests flowed end to end
+        @($script:Server.State.Hits | Where-Object { $_ -like 'POST /api/media' }).Count | Should -Be 5
+        $output.Contains($script:Server.State.Secret) | Should -BeFalse
+        $output.Contains($script:Server.State.Token) | Should -BeFalse
+        $output.Contains($script:Server.State.Refresh) | Should -BeFalse
+        $output | Should -Not -Match 'Bearer'
+        foreach ($file in Get-ChildItem -Recurse -File $manifests, $runSheet) {
+            $content = Get-Content -LiteralPath $file.FullName -Raw
+            $content.Contains($script:Server.State.Secret) -or $content.Contains($script:Server.State.Token) | Should -BeFalse -Because $file.FullName
+        }
+        # The secret went to the server exactly once, in the login body.
+        @($script:Server.State.Bodies | Where-Object { $_.Contains($script:Server.State.Secret) }).Count | Should -Be 1
+    }
+
+    It 'M-1: after a connection failure neither $Error nor Get-Error holds the token' {
+        $port = Get-FreeTcpPort   # nothing listens there
+        $token = 'TOKEN-' + [guid]::NewGuid().ToString('N')
+        $Error.Clear()
+        { Invoke-PulseApi -Context @{ BaseUrl = "http://localhost:$port"; Token = $token } -Method GET -Path '/api/personas' -TimeoutSec 5 } |
+            Should -Throw "GET /api/personas failed: *"
+        $everything = (@($Error) | ForEach-Object { ($_ | Out-String) + ($_ | Get-Error | Out-String) + ($_ | Format-List * -Force | Out-String) + [string] $_.TargetObject }) -join "`n"
+        $everything.Contains($token) | Should -BeFalse
+        (Get-Error | Out-String).Contains($token) | Should -BeFalse
+        @($Error | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] -and $_.TargetObject -is [System.Net.Http.HttpRequestMessage] }).Count | Should -Be 0
+    }
+
+    It 'L-5: a redirect is never followed (a POST body is not re-sent) and fails clearly' {
+        try { $script:Server = Start-SeedTestServer -Mode redirect }
+        catch { Set-ItResult -Skipped -Because "a local HttpListener cannot start here: $($_.Exception.Message)"; return }
+        $context = @{ BaseUrl = $script:Server.BaseUrl; Token = $null }
+        { Invoke-PulseApi -Context $context -Method POST -Path '/api/auth/staff/login' -Anonymous -Body ([ordered]@{ username = 'u'; secret = 'SECRET-REDIRECT'; exerciseId = 'e' }) } |
+            Should -Throw '*answered a redirect (307)*not followed*'
+        @($script:Server.State.Hits | Where-Object { $_ -like '*/elsewhere*' }).Count | Should -Be 0
+        @($script:Server.State.Bodies | Where-Object { $_.Contains('SECRET-REDIRECT') }).Count | Should -Be 1   # only the original request
+        Invoke-MediaRangeRequest -Url "$($script:Server.BaseUrl)/blob/x" | Should -Be 307
     }
 }
 
@@ -795,6 +1175,24 @@ Describe 'Run-sheet rewrite and the console importer rules (runSheetSchema.ts)' 
         $file = New-ValidRunSheet
         & $Mutate $file
         @(Test-RunSheetFile -File (ConvertFrom-SeedJson (ConvertTo-SeedJson $file))) | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'Golden run sheet (Gate-1 M-4): the seeder''s export, byte for byte, is what the console imports' {
+    It 'regenerating the export from the fixture pack matches scripts/uat/test-fixtures/runsheet.demo.golden.json exactly' {
+        # Fixed ids so the export is deterministic; src/frontend/.../runSheet/seedRunSheet.golden.test.ts feeds the same
+        # file to C3's real parseRunSheetFile. Regenerate after a deliberate change: $env:SEED_UPDATE_GOLDEN = '1'.
+        $golden = Join-Path $PSScriptRoot 'test-fixtures/runsheet.demo.golden.json'
+        $text = ConvertTo-RunSheetJson -RunSheet (Get-FixturePack)['runSheet'] `
+            -MediaIds @{ 'harbor-photo' = '5eed0000-0000-4000-8000-00000000a001'; 'river-clip' = '5eed0000-0000-4000-8000-00000000a002' } `
+            -MediaAlt @{ 'harbor-photo' = Get-JsTrimmed (Get-FixturePack)['media'][0]['alt']; 'river-clip' = Get-JsTrimmed (Get-FixturePack)['media'][1]['alt'] } `
+            -PostIds @{ p01 = '5eed0000-0000-4000-8000-00000000b001'; p02 = '5eed0000-0000-4000-8000-00000000b002'; p03 = '5eed0000-0000-4000-8000-00000000b003' } `
+            -ExportedAt '2026-10-19T14:00:00.000Z'
+        if ($env:SEED_UPDATE_GOLDEN -eq '1') { [IO.File]::WriteAllText($golden, $text, [Text.UTF8Encoding]::new($false)) }
+        $bytes = [IO.File]::ReadAllBytes($golden)
+        [Text.Encoding]::UTF8.GetString($bytes) | Should -BeExactly $text -Because 'the golden file must be what the seeder writes (set SEED_UPDATE_GOLDEN=1 to regenerate)'
+        $bytes[0] | Should -Not -Be 0xEF                     # no BOM
+        @(Test-RunSheetFile -File (ConvertFrom-SeedJson $text)) | Should -BeNullOrEmpty
     }
 }
 
