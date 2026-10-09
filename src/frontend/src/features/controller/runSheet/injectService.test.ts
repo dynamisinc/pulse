@@ -235,6 +235,24 @@ describe('live service — errors', () => {
     await expect(service.fire('inj-1')).rejects.toThrow(/Unrecognised inject item/)
   })
 
+  it.each([
+    ['media: a string', { media: 'not-an-array' }],
+    ['media: [null]', { media: [null] }],
+    ['a media entry without alt', { media: [{ mediaId: 'm' }] }],
+    ['a media entry without a mediaId', { media: [{ alt: 'a' }] }],
+    ['replyTo: a string', { replyTo: 'post-1' }],
+    ['replyTo: {}', { replyTo: {} }],
+    ['replyTo: an unknown key', { replyTo: { parent: 'p' } }],
+  ])('a child with %s is dropped by the live read (with the warning), never rendered', async (_n, bad) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const malformed = makeItem({ id: 'inj-nested', posts: [{ ...makePost(), ...bad } as never] })
+    getMock.mockResolvedValue({ data: { items: [item, malformed], pauseTier: 'running' } })
+    const queue = await service.list()
+    expect(queue.items.map(i => i.id)).toEqual([item.id])
+    expect(queue.droppedItemIds).toEqual(['inj-nested'])
+    warn.mockRestore()
+  })
+
   it('an item with a MALFORMED CHILD is never rendered: a read DROPS it (and warns once), a 409 item is dropped', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const malformed = makeItem({ id: 'inj-bad', posts: [makePost({ personaId: '' })] })

@@ -28,6 +28,7 @@ import { RunSheetPanel } from './RunSheetPanel'
 import { MOCK_ME, injectMock } from './injectMock'
 import { InjectConflictError, InjectValidationError } from './injectErrors'
 import { FILTERS_STORAGE_PREFIX } from './useRunSheetFilters'
+import { parseInjectQueue } from './injectGuards'
 import { MESSAGES } from './injectMessages'
 import { renderRunSheet } from './runSheetTestHarness'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
@@ -188,6 +189,57 @@ describe('RunSheetPanel — the list', () => {
     expect(rowTitles()).toEqual(['Alpha', 'Bravo', 'Charlie', 'Delta'])
     press('Fire Alpha')
     await waitFor(() => expect(chipOf('Alpha')).toBe('Fired'))
+  })
+
+  it('malformed NESTED fields drop their item; Edit and View on a neighbour row still open (no crash)', async () => {
+    const real = injectMock.snapshot()
+    const [alpha, bravo, charlie] = real.items
+    const nestedBad = (id: string, over: Record<string, unknown>) => ({
+      ...charlie,
+      id,
+      posts: [{ ...charlie?.posts[0], ...over }],
+    })
+    // A fired neighbour, so a read-only View is on offer.
+    const bravoFired = {
+      ...bravo,
+      status: 'fired',
+      firedCount: 1,
+      firedByHumanId: ME,
+      posts: bravo?.posts.map(p => ({ ...p, status: 'fired' })),
+    }
+    const raw = {
+      items: [
+        alpha,
+        nestedBad('bad-media-string', { media: 'not-an-array' }),
+        nestedBad('bad-media-null', { media: [null] }),
+        nestedBad('bad-media-entry', { media: [{ mediaId: 'm' }] }),
+        nestedBad('bad-reply-string', { replyTo: 'post-1' }),
+        nestedBad('bad-reply-empty', { replyTo: {} }),
+        bravoFired,
+      ],
+      pauseTier: 'running',
+    }
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    // The same parse the live service applies to a GET /api/injects body.
+    vi.spyOn(injectMock, 'list').mockImplementation(async () => {
+      const parsed = parseInjectQueue(raw)
+      if (!parsed) throw new Error('top level malformed')
+      return parsed
+    })
+    await mountPanel()
+
+    expect(await screen.findByTestId('banner-dropped')).toHaveTextContent(
+      "5 items couldn't be displayed (malformed data)",
+    )
+    expect(rowTitles()).toEqual(['Alpha', 'Bravo'])
+
+    // The neighbours open without crashing the panel: Edit on the pending, View on the fired.
+    press('Edit Alpha')
+    expect(await screen.findByTestId('inject-editor')).toHaveAttribute('data-mode', 'edit')
+    press('Cancel editing')
+    press('View Bravo')
+    expect(await screen.findByTestId('inject-editor')).toHaveAttribute('data-mode', 'view')
+    expect(screen.getByTestId('run-sheet-panel')).toBeInTheDocument()
   })
 
   it('the warning counts several dropped items; no warning when nothing was dropped', async () => {
@@ -1091,6 +1143,31 @@ describe('RunSheetPanel — live region + staff-world rules', () => {
     })
     await waitFor(() => expect(announcer()).toHaveTextContent('Bravo: Skipped'))
     expect(announcer()).toHaveTextContent('Charlie: Held')
+  })
+
+  it('two different items with the SAME title are both announced (a fresh node per event)', async () => {
+    injectMock.reset({
+      seed: [single('Advisory', { assigneeId: ME }), single('Advisory', { assigneeId: ME })],
+    })
+    const { queryClient } = await mountPanel()
+    const [one, two] = injectMock.snapshot().items
+    if (!one || !two) throw new Error('fixture')
+
+    await act(async () => {
+      await injectMock.as(PEER).fire(one.id)
+      await queryClient.invalidateQueries()
+    })
+    await waitFor(() => expect(announcer()).toHaveTextContent('Advisory: Fired'))
+    const firstNode = announcer().firstElementChild
+
+    await act(async () => {
+      await injectMock.as(PEER).fire(two.id)
+      await queryClient.invalidateQueries()
+    })
+    // Same words, but a DIFFERENT node: the live region sees a new event and speaks it again.
+    await waitFor(() => expect(announcer().firstElementChild).not.toBe(firstNode))
+    expect(announcer()).toHaveTextContent('Advisory: Fired')
+    expect(announcer().textContent).toBe('Advisory: Fired')
   })
 
   it('announces an item another controller adds or removes', async () => {

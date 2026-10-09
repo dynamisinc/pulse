@@ -730,7 +730,8 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
           flex: 'none',
         }}
       >
-        {announcement}
+        {/* Keyed by the event id: a NEW node per announcement, so repeated words speak again. */}
+        <span key={announcement.id}>{announcement.text}</span>
       </Box>
     </Box>
   )

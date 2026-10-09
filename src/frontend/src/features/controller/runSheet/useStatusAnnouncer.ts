@@ -15,6 +15,13 @@
  *
  * Several changes in one poll are joined into one sentence (capped at three, then
  * "and N more") so a screen reader is never handed a paragraph.
+ *
+ * EACH ANNOUNCEMENT IS A DISCRETE EVENT. A live region only speaks when its content CHANGES, and
+ * two different items can produce the SAME words ("Advisory: Fired" for two items titled
+ * "Advisory", fired in separate updates): React would keep the identical string and the second
+ * event would be silent. So every announcement carries a fresh `id`, and the panel renders the
+ * text in a node KEYED by it — a new node is inserted for every event, spoken even when the
+ * words repeat.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -49,13 +56,19 @@ function snapshotOf(items: readonly InjectItemDto[]): Map<string, Snapshot> {
   return new Map(items.map(item => [item.id, { title: item.title, status: item.status }]))
 }
 
+/** One announcement: the words, and an `id` that changes for EVERY event (same words or not). */
+export interface Announcement {
+  readonly text: string
+  readonly id: number
+}
+
 /**
- * Returns the latest announcement ('' until something changes). `ready` must be
+ * Returns the latest announcement (empty text until something changes). `ready` must be
  * false until the first read has landed so the initial list is not announced.
  */
-export function useStatusAnnouncer(items: readonly InjectItemDto[], ready: boolean): string {
+export function useStatusAnnouncer(items: readonly InjectItemDto[], ready: boolean): Announcement {
   const previous = useRef<Map<string, Snapshot> | null>(null)
-  const [message, setMessage] = useState('')
+  const [announcement, setAnnouncement] = useState<Announcement>({ text: '', id: 0 })
 
   useEffect(() => {
     if (!ready) return
@@ -66,8 +79,9 @@ export function useStatusAnnouncer(items: readonly InjectItemDto[], ready: boole
     if (lines.length === 0) return
     const shown = lines.slice(0, MAX_LINES)
     const extra = lines.length - shown.length
-    setMessage(extra > 0 ? `${shown.join('. ')}. And ${extra} more changes` : shown.join('. '))
+    const text = extra > 0 ? `${shown.join('. ')}. And ${extra} more changes` : shown.join('. ')
+    setAnnouncement(last => ({ text, id: last.id + 1 }))
   }, [items, ready])
 
-  return message
+  return announcement
 }

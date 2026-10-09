@@ -156,6 +156,32 @@ export function useInjectQueue(): UseInjectQueueResult {
     [queryClient, queueKey],
   )
 
+  /**
+   * Applies a reorder's result as ORDER ONLY. The reply is a snapshot taken when the server handled
+   * the reorder; row actions and deletes use independent locks, so a delayed reply can be older
+   * than what the cache already holds (a Fire that landed meanwhile, a row since deleted).
+   * Replacing the cache with it would roll those back until the next successful read. So each
+   * cached row keeps its OWN content (and so its version guard) and takes only its new `order`;
+   * a row missing from the reply is left alone, and a row we already dropped is not resurrected.
+   * The invalidation that follows every mutation reconciles anything this leaves out.
+   */
+  const applyOrder = useCallback(
+    (reply: InjectQueueRead): void => {
+      const orders = new Map(reply.items.map(item => [item.id, item.order]))
+      queryClient.setQueryData<InjectQueueRead>(queueKey, previous => {
+        if (!previous) return previous
+        const items = previous.items
+          .map(item => {
+            const order = orders.get(item.id)
+            return order === undefined ? item : { ...item, order }
+          })
+          .sort(byOrder)
+        return { ...previous, items }
+      })
+    },
+    [queryClient, queueKey],
+  )
+
   /** Cancels any in-flight poll and re-reads now, so a mutation shows up immediately. */
   const refreshNow = useCallback((): void => {
     void queryClient.invalidateQueries({ queryKey: queueKey })
@@ -215,7 +241,7 @@ export function useInjectQueue(): UseInjectQueueResult {
   })
   const { mutateAsync: reorderAsync } = useMutation({
     mutationFn: (ids: string[]) => getInjectService().reorder(ids),
-    onSuccess: (queue: InjectQueueRead) => queryClient.setQueryData(queueKey, queue),
+    onSuccess: applyOrder,
     onSettled: refreshNow,
   })
 

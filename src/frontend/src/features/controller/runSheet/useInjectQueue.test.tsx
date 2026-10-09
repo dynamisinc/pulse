@@ -326,6 +326,94 @@ describe('useInjectQueue — mutations', () => {
   })
 })
 
+describe('useInjectQueue — a delayed reorder reply never rolls the cache back', () => {
+  /** A promise settled from outside, to hold a request in flight. */
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>(r => {
+      resolve = r
+    })
+    return { promise, resolve }
+  }
+
+  /**
+   * Holds every refetch behind a gate, so the assertion sees the cache as the reorder reply left
+   * it — otherwise the immediate invalidation re-read would paper over a bad merge.
+   */
+  function gateRefetch() {
+    const gate = deferred<void>()
+    const real = injectMock.list.bind(injectMock)
+    vi.spyOn(injectMock, 'list').mockImplementation(async () => {
+      await gate.promise
+      return real()
+    })
+    return () => gate.resolve()
+  }
+
+  it('a Fire that landed while the reorder was in flight survives the late (older) reply', async () => {
+    const { result } = await mount()
+    await settle()
+    const [a, b] = result.current.items
+    if (!a || !b) throw new Error('no items')
+
+    // The snapshot the server took BEFORE the fire: reordered, with `a` still pending.
+    const older = injectMock.snapshot()
+    older.items = older.items
+      .map(i => ({ ...i, order: i.id === b.id ? 1 : 2 }))
+      .sort((x, y) => x.order - y.order)
+    const reply = deferred<typeof older>()
+    vi.spyOn(injectMock, 'reorder').mockImplementation(() => reply.promise)
+    const releaseRefetch = gateRefetch()
+
+    let reorder: ReturnType<typeof result.current.reorder> | undefined
+    await act(async () => {
+      reorder = result.current.reorder([b.id, a.id])
+    })
+    await act(async () => {
+      expect((await result.current.fire(a.id)).status).toBe('ok') // lands while the reorder is pending
+    })
+    expect(result.current.items.find(i => i.id === a.id)?.status).toBe('fired')
+
+    await act(async () => {
+      reply.resolve(older) // the late, OLDER reply
+      await reorder
+    })
+    // The fire is NOT rolled back to pending, and the new order IS applied.
+    expect(result.current.items.find(i => i.id === a.id)?.status).toBe('fired')
+    expect(result.current.items.map(i => i.id).slice(0, 2)).toEqual([b.id, a.id])
+    await act(async () => releaseRefetch())
+  })
+
+  it('a row deleted while the reorder was in flight is not resurrected by the late reply', async () => {
+    const { result } = await mount()
+    await settle()
+    const [a, b] = result.current.items
+    if (!a || !b) throw new Error('no items')
+
+    const older = injectMock.snapshot() // still contains `b`
+    const reply = deferred<typeof older>()
+    vi.spyOn(injectMock, 'reorder').mockImplementation(() => reply.promise)
+    const releaseRefetch = gateRefetch()
+
+    let reorder: ReturnType<typeof result.current.reorder> | undefined
+    await act(async () => {
+      reorder = result.current.reorder([b.id, a.id])
+    })
+    await act(async () => {
+      expect((await result.current.remove(b.id, b.version)).status).toBe('ok')
+    })
+    expect(result.current.items.some(i => i.id === b.id)).toBe(false)
+
+    await act(async () => {
+      reply.resolve(older)
+      await reorder
+    })
+    expect(result.current.items.some(i => i.id === b.id)).toBe(false)
+    expect(result.current.items.some(i => i.id === a.id)).toBe(true)
+    await act(async () => releaseRefetch())
+  })
+})
+
 describe('useInjectAssignees', () => {
   it('resolves me and names (the source of "Mine" and "Already fired by {name}")', async () => {
     const client = makeQueryClient()

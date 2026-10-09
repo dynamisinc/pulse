@@ -129,7 +129,7 @@ function postFromDto(post: InjectPostDto): DraftPost {
     text: post.text,
     media: (post.media ?? []).map(m => ({ mediaId: m.mediaId, alt: m.alt })),
     reply: { kind: 'none' },
-    baselineOn: baseline !== undefined,
+    baselineOn: baseline !== undefined && baseline !== null,
     baselineLike: baseline?.like !== undefined ? String(baseline.like) : '',
     baselineRepost: baseline?.repost !== undefined ? String(baseline.repost) : '',
     baselineReply: baseline?.reply !== undefined ? String(baseline.reply) : '',

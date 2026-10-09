@@ -54,9 +54,9 @@ describe('useStatusAnnouncer', () => {
         useStatusAnnouncer(items, ready),
       { initialProps: { items: [] as InjectItemDto[], ready: false } },
     )
-    expect(result.current).toBe('')
+    expect(result.current.text).toBe('')
     rerender({ items: [a, b], ready: true })
-    expect(result.current).toBe('')
+    expect(result.current.text).toBe('')
   })
 
   it('announces a later status change', () => {
@@ -65,7 +65,26 @@ describe('useStatusAnnouncer', () => {
       { initialProps: { items: [a, b] } },
     )
     rerender({ items: [{ ...a, status: 'held' }, b] })
-    expect(result.current).toBe('Alpha: Held')
+    expect(result.current.text).toBe('Alpha: Held')
+  })
+
+  it('two DIFFERENT items with the SAME title are two separate events (the words repeat, the id does not)', () => {
+    const one = makeItem({ id: 'one', title: 'Advisory', status: 'pending' })
+    const two = makeItem({ id: 'two', title: 'Advisory', status: 'pending' })
+    const { result, rerender } = renderHook(
+      ({ items }: { items: InjectItemDto[] }) => useStatusAnnouncer(items, true),
+      { initialProps: { items: [one, two] } },
+    )
+    expect(result.current.id).toBe(0)
+
+    rerender({ items: [{ ...one, status: 'fired' }, two] })
+    const first = result.current
+    expect(first.text).toBe('Advisory: Fired')
+
+    rerender({ items: [{ ...one, status: 'fired' }, { ...two, status: 'fired' }] })
+    const second = result.current
+    expect(second.text).toBe('Advisory: Fired') // identical words...
+    expect(second.id).toBeGreaterThan(first.id) // ...but a distinct event: the region speaks again
   })
 
   it('joins several changes into one sentence, capped at three', () => {
@@ -75,6 +94,8 @@ describe('useStatusAnnouncer', () => {
       { initialProps: { items: many } },
     )
     rerender({ items: many.map(item => ({ ...item, status: 'fired' as const })) })
-    expect(result.current).toBe('Item 1: Fired. Item 2: Fired. Item 3: Fired. And 2 more changes')
+    expect(result.current.text).toBe(
+      'Item 1: Fired. Item 2: Fired. Item 3: Fired. And 2 more changes',
+    )
   })
 })
