@@ -204,6 +204,29 @@ public sealed class EngineReviewEndpointsTests
     }
 
     [RequiresDockerFact]
+    public async Task Edit_OverTheTextCeiling_Returns400_WithTheIngestLengthMessage_AndNeverPublishes()
+    {
+        // Wave 3 Gate-2 M-1: a staff edit the ingest funnel would refuse is refused here first, with its message —
+        // never cut, and never sent as a burst whose lead post fails while the rest go out.
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        await SeedAsync(Item(draftId, exerciseId, AutonomyLevel.DelayedAuto, DraftDisposition.CountingDown, countdown: true));
+
+        await using var host = await StartHostAsync(exerciseId);
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri($"/api/engine/review/{draftId}/edit", UriKind.Relative),
+            new { text = new string('w', Pulse.WebApi.Features.Social.PostIngestService.TextLengthCeiling + 1), actingHumanId = "controller-9", timeZone = "America/Chicago" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync()).Should().Contain(Pulse.WebApi.Features.Social.PostIngestService.TextTooLongMessage);
+        host.Publisher.Published.Should().BeEmpty("nothing publishes for a refused edit");
+
+        await using var verify = _fixture.CreateContext();
+        var reloaded = await verify.EngineReviewItems.IgnoreQueryFilters().SingleAsync(i => i.DraftId == draftId);
+        reloaded.Disposition.Should().Be(DraftDisposition.CountingDown, "the item stays actionable");
+    }
+
+    [RequiresDockerFact]
     public async Task Veto_HappyPath_Returns200_MarksVetoed_AndNeverPublishes()
     {
         var exerciseId = Guid.NewGuid();

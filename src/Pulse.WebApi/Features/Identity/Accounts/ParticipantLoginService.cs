@@ -4,7 +4,6 @@ using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Sessions;
-using Pulse.WebApi.Features.Social;
 
 /// <summary>
 /// The participant credential-login funnel behind <c>POST /api/auth/login</c> (COR-011). It verifies a
@@ -108,17 +107,20 @@ public sealed class ParticipantLoginService
         }
 
         // DoS guard (Wave 1b Gate-2 M-1): this endpoint is ANONYMOUS, so the raw handle is bounded before the
-        // sanitizer sees it. A legitimate handle is at most MaxUsernameLength after sanitizing; four times that is
-        // generous for any markup it might carry.
+        // sanitizer sees it. The raw cap is 4 × MaxUsernameLength on purpose: a handle that only LOOKS long because
+        // of markup still reaches the normal validation below, and a 257-1,024-character handle reaches it too and
+        // gets the SAME 400 text from AccountFieldRules.TryNormalizeUsername (the rule accounts are created under,
+        // so no stored handle is longer). The two refusals are indistinguishable by message (Wave 3 Gate-2 S-5).
         if (rawUsername.Length > MaxRawUsernameLength)
         {
             return ParticipantLoginResult.Invalid($"username must be at most {AccountFieldRules.MaxUsernameLength} characters.");
         }
 
-        var username = PostSanitizer.Sanitize(rawUsername).Trim();
-        if (username.Length == 0)
+        // The same trim → sanitize → trim → length rule the account was stored under, so a legitimate handle
+        // round-trips to the stored value and an impossible one is a 400, not a credential check.
+        if (!AccountFieldRules.TryNormalizeUsername(rawUsername, out var username, out var usernameError))
         {
-            return ParticipantLoginResult.Invalid("username is required.");
+            return ParticipantLoginResult.Invalid(usernameError);
         }
 
         // 2. Scope comes ONLY from the resolved exercise context (host-resolved for this pre-auth request), never
