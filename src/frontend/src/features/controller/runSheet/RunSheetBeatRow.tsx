@@ -23,7 +23,7 @@
  * Beat text, titles and notes are rendered as plain text (React escapes; no HTML).
  */
 
-import type { Ref } from 'react'
+import { useEffect, useState, type Ref } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -41,21 +41,24 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { CobraLinkButton, CobraPrimaryButton, CobraSecondaryButton } from '@/theme/styledComponents'
 import { formatScenarioTime } from '@/core/clock'
-import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import type { BeatRuntime } from './runSheetModel'
 import { formatScenarioMinute, type RunSheetBeat } from './runSheetSchema'
-import { COLOR_FAILED, COLOR_FIRED, COLOR_UNCONFIRMED, statusChipFor } from './runSheetStatus'
+import { SLOW_FIRE_NOTICE, SLOW_FIRE_NOTICE_MS, statusChipFor } from './runSheetStatus'
+import { BUTTON_KBD_SX, runSheetTokens } from './runSheetTokens'
 
-const KBD_SX = {
-  fontFamily: staffShellTokens.classificationTag.fontFamily,
-  fontSize: 10,
-  fontWeight: 700,
-  border: '1px solid currentColor',
-  borderRadius: '3px',
-  px: 0.5,
-  ml: 0.75,
-  opacity: 0.85,
-} as const
+/** True once a fire has been in flight for {@link SLOW_FIRE_NOTICE_MS} (resets when it ends). */
+function useSlowFire(inFlight: boolean): boolean {
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    if (!inFlight) return undefined
+    const timer = window.setTimeout(() => setSlow(true), SLOW_FIRE_NOTICE_MS)
+    return () => {
+      window.clearTimeout(timer)
+      setSlow(false)
+    }
+  }, [inFlight])
+  return inFlight && slow
+}
 
 const SMALL_BUTTON_SX = { py: '2px', px: 1.25, fontSize: 12, minWidth: 0 } as const
 
@@ -122,6 +125,7 @@ export function RunSheetBeatRow({
 }: RunSheetBeatRowProps) {
   const chip = statusChipFor(record)
   const inFlight = record.inFlight === true
+  const slowFire = useSlowFire(inFlight)
   const unconfirmed = record.status === 'failed' && record.failure?.kind === 'unconfirmed'
   const canFire = (record.status === 'pending' || record.status === 'failed') && !inFlight
   const fireLabel = unconfirmed ? 'Fire again...' : record.status === 'failed' ? 'Retry' : 'Fire'
@@ -145,19 +149,19 @@ export function RunSheetBeatRow({
           px: 1.25,
           py: 0.875,
           borderLeft: `${selected ? 4 : 1}px solid ${
-            selected ? staffShellTokens.header.background : staffShellTokens.toolstrip.borderColor
+            selected ? runSheetTokens.navy : runSheetTokens.hairline
           }`,
-          borderBottom: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
-          bgcolor: selected ? '#eef3f9' : 'transparent',
+          borderBottom: `1px solid ${runSheetTokens.hairline}`,
+          bgcolor: selected ? runSheetTokens.selectedRow : 'transparent',
           cursor: 'pointer',
           outlineOffset: -2,
-          '&:focus-visible': { outline: `2px solid ${staffShellTokens.header.background}` },
+          '&:focus-visible': { outline: `2px solid ${runSheetTokens.navy}` },
         }}
       >
         <Stack direction="row" sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           <Typography
             component="span"
-            sx={{ fontSize: 11, fontWeight: 800, color: staffShellTokens.accent.secondaryText }}
+            sx={{ fontSize: 11, fontWeight: 800, color: runSheetTokens.mutedText }}
           >
             #{beat.order}
           </Typography>
@@ -165,10 +169,10 @@ export function RunSheetBeatRow({
             component="span"
             data-testid="beat-minute"
             sx={{
-              fontFamily: staffShellTokens.classificationTag.fontFamily,
+              fontFamily: runSheetTokens.mono,
               fontSize: 11,
               fontWeight: 700,
-              color: staffShellTokens.header.background,
+              color: runSheetTokens.navy,
             }}
           >
             {formatScenarioMinute(beat.scenarioMinute)}
@@ -206,7 +210,7 @@ export function RunSheetBeatRow({
             flexWrap: 'wrap',
             mt: 0.25,
             fontSize: 12,
-            color: staffShellTokens.accent.secondaryText,
+            color: runSheetTokens.mutedText,
           }}
         >
           <span>@{beat.persona.handle}</span>
@@ -255,11 +259,11 @@ export function RunSheetBeatRow({
         {record.status === 'fired' && record.firedAtScenario !== undefined && (
           <Typography
             data-testid="beat-fired-at"
-            sx={{ mt: 0.5, fontSize: 12, color: COLOR_FIRED, fontWeight: 700 }}
+            sx={{ mt: 0.5, fontSize: 12, color: runSheetTokens.firedText, fontWeight: 700 }}
           >
             Fired {formatScenarioTime(record.firedAtScenario, timeZone)}
             {record.firedPostId !== undefined && (
-              <Box component="span" sx={{ fontWeight: 400, color: staffShellTokens.accent.secondaryText }}>
+              <Box component="span" sx={{ fontWeight: 400, color: runSheetTokens.mutedText }}>
                 {' '}
                 - post {record.firedPostId}
               </Box>
@@ -273,6 +277,17 @@ export function RunSheetBeatRow({
           </Typography>
         )}
 
+        {slowFire && (
+          <Box
+            role="status"
+            data-testid="beat-slow-notice"
+            sx={{ mt: 0.5, display: 'flex', gap: 0.75, alignItems: 'flex-start', fontSize: 12, fontWeight: 600 }}
+          >
+            <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" style={{ marginTop: 2 }} />
+            <span>{SLOW_FIRE_NOTICE}</span>
+          </Box>
+        )}
+
         {!inFlight && record.failure !== undefined && record.status !== 'fired' && (
           <Box
             data-testid="beat-failure"
@@ -283,7 +298,7 @@ export function RunSheetBeatRow({
               alignItems: 'flex-start',
               fontSize: 12,
               fontWeight: 600,
-              color: unconfirmed ? COLOR_UNCONFIRMED : COLOR_FAILED,
+              color: unconfirmed ? runSheetTokens.unconfirmedText : runSheetTokens.failedText,
             }}
           >
             <FontAwesomeIcon
@@ -338,7 +353,7 @@ export function RunSheetBeatRow({
                 sx={SMALL_BUTTON_SX}
               >
                 {fireLabel}
-                <Box component="kbd" aria-hidden="true" sx={KBD_SX}>F</Box>
+                <Box component="kbd" aria-hidden="true" sx={BUTTON_KBD_SX}>F</Box>
               </CobraPrimaryButton>
             )}
             {inFlight && (
@@ -355,7 +370,7 @@ export function RunSheetBeatRow({
                 sx={SMALL_BUTTON_SX}
               >
                 Skip
-                <Box component="kbd" aria-hidden="true" sx={KBD_SX}>S</Box>
+                <Box component="kbd" aria-hidden="true" sx={BUTTON_KBD_SX}>S</Box>
               </CobraSecondaryButton>
             )}
             {record.status === 'skipped' && (
@@ -367,7 +382,7 @@ export function RunSheetBeatRow({
                 sx={SMALL_BUTTON_SX}
               >
                 Undo skip
-                <Box component="kbd" aria-hidden="true" sx={KBD_SX}>S</Box>
+                <Box component="kbd" aria-hidden="true" sx={BUTTON_KBD_SX}>S</Box>
               </CobraSecondaryButton>
             )}
             <CobraSecondaryButton
@@ -379,7 +394,7 @@ export function RunSheetBeatRow({
               sx={SMALL_BUTTON_SX}
             >
               Edit
-              <Box component="kbd" aria-hidden="true" sx={KBD_SX}>E</Box>
+              <Box component="kbd" aria-hidden="true" sx={BUTTON_KBD_SX}>E</Box>
             </CobraSecondaryButton>
             <CobraLinkButton
               size="small"

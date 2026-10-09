@@ -21,6 +21,7 @@ import {
   beginFireIn,
   completeFireIn,
   deleteBeatFrom,
+  failFireIn,
   duplicateBeatIn,
   getRunSheetSnapshot,
   moveBeatIn,
@@ -38,6 +39,17 @@ import { beatFixture, resetRunSheetWorld, seedStoredSheet, sheetFixture } from '
 
 const A = 'ex-a'
 const B = 'ex-b'
+
+/** Begins a fire and records its success with the attempt token the store handed out. */
+function fireAndRecord(
+  exerciseId: string,
+  beatId: string,
+  result: { postId: string; scenarioTime: string },
+): boolean {
+  const claimed = beginFireIn(exerciseId, beatId)
+  if (!claimed.ok) throw new Error(claimed.reason)
+  return completeFireIn(exerciseId, beatId, claimed.attemptId, result)
+}
 
 const content = (title: string, extra: Partial<BeatContent> = {}): BeatContent => ({
   title,
@@ -64,8 +76,7 @@ describe('storage key and shape', () => {
   it('stores the definition and the status side by side, with no exerciseId inside', () => {
     const id = addBeatTo(A, content('One'))
     expect(id).toBe('beat-1')
-    beginFireIn(A, 'beat-1')
-    completeFireIn(A, 'beat-1', { postId: 'post-1', scenarioTime: '2033-09-04T14:00:00.000Z' })
+    fireAndRecord(A, 'beat-1', { postId: 'post-1', scenarioTime: '2033-09-04T14:00:00.000Z' })
     const raw = window.localStorage.getItem(runSheetStorageKey(A)) ?? ''
     const stored: unknown = JSON.parse(raw)
     expect(stored).toMatchObject({
@@ -97,12 +108,17 @@ describe('per-exercise isolation (no cross-exercise bleed)', () => {
   it('records a fire against the exercise it started in, whatever is current later', () => {
     addBeatTo(A, content('A beat'))
     addBeatTo(B, content('B beat'))
-    expect(beginFireIn(A, 'beat-1').ok).toBe(true)
+    const inA = beginFireIn(A, 'beat-1')
+    expect(inA.ok).toBe(true)
     // The controller has switched to B and fired there meanwhile...
-    expect(beginFireIn(B, 'beat-1').ok).toBe(true)
-    completeFireIn(B, 'beat-1', { postId: 'post-b', scenarioTime: '2033-09-04T14:00:00Z' })
-    // ...and A's response arrives afterwards.
-    completeFireIn(A, 'beat-1', { postId: 'post-a', scenarioTime: '2033-09-04T14:01:00Z' })
+    fireAndRecord(B, 'beat-1', { postId: 'post-b', scenarioTime: '2033-09-04T14:00:00Z' })
+    // ...and A's response arrives afterwards, carrying A's own attempt token.
+    if (!inA.ok) throw new Error('unreachable')
+    const recorded = completeFireIn(A, 'beat-1', inA.attemptId, {
+      postId: 'post-a',
+      scenarioTime: '2033-09-04T14:01:00Z',
+    })
+    expect(recorded).toBe(true)
     expect(runtimeOf(getRunSheetSnapshot(A), 'beat-1').firedPostId).toBe('post-a')
     expect(runtimeOf(getRunSheetSnapshot(B), 'beat-1').firedPostId).toBe('post-b')
   })
@@ -142,9 +158,10 @@ describe('authoring through the store persists every change', () => {
 
   it('replaces the sheet on import, with every beat pending', () => {
     addBeatTo(A, content('Old'))
-    beginFireIn(A, 'beat-1')
-    completeFireIn(A, 'beat-1', { postId: 'p', scenarioTime: '2033-09-04T14:00:00Z' })
-    replaceSheetIn(A, { name: 'Imported', beats: [beatFixture({ id: 'z', order: 1 })] })
+    fireAndRecord(A, 'beat-1', { postId: 'p', scenarioTime: '2033-09-04T14:00:00Z' })
+    expect(
+      replaceSheetIn(A, { name: 'Imported', beats: [beatFixture({ id: 'z', order: 1 })] }),
+    ).toEqual({ ok: true })
     const after = getRunSheetSnapshot(A)
     expect(after.name).toBe('Imported')
     expect(after.beats.map(b => b.id)).toEqual(['z'])
@@ -311,5 +328,127 @@ describe('a second tab', () => {
     window.dispatchEvent(new StorageEvent('storage', { key: 'something-else' }))
     expect(listener).not.toHaveBeenCalled()
     unsubscribe()
+  })
+})
+
+describe('a late result cannot land on a replaced or reconciled sheet (Gate-1 M-2)', () => {
+  const OUTCOME = { postId: 'ghost-post', scenarioTime: '2033-09-04T14:00:00Z' }
+
+  it('refuses to REPLACE the sheet while a beat is in flight', () => {
+    addBeatTo(A, content('One'))
+    const claimed = beginFireIn(A, 'beat-1')
+    expect(claimed.ok).toBe(true)
+    const outcome = replaceSheetIn(A, { name: 'New', beats: [beatFixture({ id: 'beat-1', order: 1 })] })
+    expect(outcome.ok).toBe(false)
+    expect(outcome.ok === false && outcome.reason).toContain('firing')
+    expect(getRunSheetSnapshot(A).name).toBe('Run sheet')
+    expect(runtimeOf(getRunSheetSnapshot(A), 'beat-1').inFlight).toBe(true)
+  })
+
+  it('probe: another tab replaces the sheet, then the first tab\'s result arrives', () => {
+    addBeatTo(A, content('One'))
+    const claimed = beginFireIn(A, 'beat-1')
+    if (!claimed.ok) throw new Error('expected ok')
+
+    // The other tab loaded the old marker as a dead page's (reconciled in ITS memory only), then
+    // replaced the sheet with one that reuses the beat id. Storage now holds a fresh sheet.
+    writeStoredSheet(A, sheetFixture([beatFixture({ id: 'beat-1', order: 1 })], {}, 'Replaced'))
+
+    // The first tab's request comes back.
+    expect(completeFireIn(A, 'beat-1', claimed.attemptId, OUTCOME)).toBe(false)
+    expect(failFireIn(A, 'beat-1', claimed.attemptId, { kind: 'failed', message: 'x' })).toBe(false)
+    const after = getRunSheetSnapshot(A)
+    expect(after.name).toBe('Replaced')
+    // NOT a false "Fired" for a post this sheet never sent.
+    expect(runtimeOf(after, 'beat-1')).toEqual({ status: 'pending' })
+  })
+
+  it('a result from an earlier attempt cannot land on a later attempt of the same beat', () => {
+    addBeatTo(A, content('One'))
+    const first = beginFireIn(A, 'beat-1')
+    if (!first.ok) throw new Error('expected ok')
+    // The first attempt's marker is wiped (another tab reconciled it), the controller re-fires.
+    writeStoredSheet(A, sheetFixture(getRunSheetSnapshot(A).beats, {
+      'beat-1': { status: 'failed', failure: { kind: 'unconfirmed', message: 'maybe' } },
+    }))
+    const second = beginFireIn(A, 'beat-1', { confirmedUnconfirmed: true })
+    if (!second.ok) throw new Error('expected ok')
+
+    expect(completeFireIn(A, 'beat-1', first.attemptId, OUTCOME)).toBe(false)
+    expect(runtimeOf(getRunSheetSnapshot(A), 'beat-1').inFlight).toBe(true)
+    expect(completeFireIn(A, 'beat-1', second.attemptId, { ...OUTCOME, postId: 'real-post' })).toBe(true)
+    expect(runtimeOf(getRunSheetSnapshot(A), 'beat-1').firedPostId).toBe('real-post')
+  })
+})
+
+describe('the unconfirmed gate is checked against fresh storage (Gate-1 L-1)', () => {
+  it('a stale tab that thinks the beat is pending still has to confirm', () => {
+    addBeatTo(A, content('One'))
+    expect(runtimeOf(getRunSheetSnapshot(A), 'beat-1').status).toBe('pending')
+    // The other tab recorded "unconfirmed" for it.
+    const other = readStoredSheet(A)
+    if (other.kind !== 'ok') throw new Error('expected a stored sheet')
+    writeStoredSheet(A, {
+      ...other.data,
+      runtime: { 'beat-1': { status: 'failed', failure: { kind: 'unconfirmed', message: 'maybe live' } } },
+    })
+
+    const refused = beginFireIn(A, 'beat-1')
+    expect(refused).toMatchObject({ ok: false, needsConfirmation: true })
+    expect(beginFireIn(A, 'beat-1', { confirmedUnconfirmed: true }).ok).toBe(true)
+  })
+})
+
+describe('a stored value that does not read back is never overwritten (Gate-1 L-4)', () => {
+  const key = runSheetStorageKey(A)
+
+  it('when storage turns unreadable under a ready sheet, the next change is blocked, not written', () => {
+    addBeatTo(A, content('One'))
+    window.localStorage.setItem(key, '{ corrupted by another tab')
+    addBeatTo(A, content('Two'))
+    expect(window.localStorage.getItem(key)).toBe('{ corrupted by another tab')
+    const snapshot = getRunSheetSnapshot(A)
+    expect(snapshot.state).toBe('unreadable')
+    expect(snapshot.unreadableReason).toContain('not valid JSON')
+    expect(beginFireIn(A, 'beat-1').ok).toBe(false)
+  })
+
+  it('keeps editing in memory (still without writing) when our own earlier write had failed', () => {
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('full', 'QuotaExceededError')
+    })
+    addBeatTo(A, content('One'))
+    spy.mockRestore()
+    window.localStorage.setItem(key, '{ corrupted')
+    addBeatTo(A, content('Two'))
+    expect(window.localStorage.getItem(key)).toBe('{ corrupted')
+    const snapshot = getRunSheetSnapshot(A)
+    expect(snapshot.state).toBe('ready')
+    expect(snapshot.beats.map(b => b.title)).toEqual(['One', 'Two'])
+    expect(snapshot.storageWarning).toBeDefined()
+  })
+
+  it('refuses a change that would not read back as a valid sheet, and says so', () => {
+    addBeatTo(A, content('One'))
+    const before = window.localStorage.getItem(key)
+    updateBeatIn(A, 'beat-1', content('One', { text: 'x'.repeat(300) }))
+    const snapshot = getRunSheetSnapshot(A)
+    expect(snapshot.changeRefused).toContain('was not saved')
+    expect(snapshot.beats[0]?.text).toBe('One text')
+    expect(window.localStorage.getItem(key)).toBe(before)
+
+    // The next valid change clears the notice.
+    updateBeatIn(A, 'beat-1', content('One again'))
+    expect(getRunSheetSnapshot(A).changeRefused).toBeUndefined()
+    expect(getRunSheetSnapshot(A).beats[0]?.title).toBe('One again')
+  })
+})
+
+describe('storage warnings tell the truth about Export (Gate-1 L-3)', () => {
+  it('say that Export does not carry fired status, so a reload shows every beat Pending', () => {
+    for (const message of [STORAGE_UNAVAILABLE_MESSAGE, STORAGE_WRITE_FAILED_MESSAGE]) {
+      expect(message).toContain('Export keeps your beats but NOT which have been fired')
+      expect(message).toContain('every beat shows as Pending')
+    }
   })
 })

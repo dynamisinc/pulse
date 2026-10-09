@@ -294,7 +294,7 @@ const fileSchema = strict({
     error: issue =>
       issue.input === undefined
         ? `is required (must be "${RUN_SHEET_SCHEMA_ID}")`
-        : `must be "${RUN_SHEET_SCHEMA_ID}" - this is not a Pulse run sheet (found ${JSON.stringify(issue.input)})`,
+        : `must be "${RUN_SHEET_SCHEMA_ID}" - this is not a Pulse run sheet (found ${echo(issue.input)})`,
   }),
   name: sheetNameSchema,
   exportedAt: z.iso.datetime({ offset: true, error: 'must be an ISO 8601 date-time' }).optional(),
@@ -304,6 +304,12 @@ const fileSchema = strict({
 // ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
+
+/** A value quoted back to the user in a message, capped so a hostile file cannot flood the UI. */
+function echo(value: unknown, max = 80): string {
+  const text = JSON.stringify(value) ?? String(value)
+  return text.length > max ? `${text.slice(0, max)}...` : text
+}
 
 /** `["beats", 2, "text"]` -> `beats[2].text`. An empty path is the file itself. */
 function formatPath(path: readonly PropertyKey[]): string {

@@ -57,7 +57,8 @@ vi.mock('@/core/media', async importOriginal => ({
 }))
 
 import { RunSheetPanel } from './RunSheetPanel'
-import { readStoredSheet } from './runSheetStorage'
+import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
+import { readStoredSheet, runSheetStorageKey, writeStoredSheet } from './runSheetStorage'
 import { resetRunSheetStoreForTests } from './runSheetStore'
 import { runtimeOf, type RunSheetData } from './runSheetModel'
 import {
@@ -147,6 +148,7 @@ beforeEach(() => {
   resetRunSheetWorld()
   useFixedClock()
   postMock.mockReset()
+  resetTelemetryBuffer()
   world.scope = {
     exerciseId: EX,
     exerciseName: 'Coastal Surge (Live)',
@@ -270,6 +272,35 @@ describe('the request a fire sends', () => {
   })
 })
 
+describe('telemetry (M-6)', () => {
+  it('a live fire emits ZERO frontend telemetry events: the server\'s own event is the only one', async () => {
+    postMock.mockResolvedValue({ data: created('post-live-1') })
+    const { user } = await mountLive(sheetFixture([
+      beatFixture({ id: 'p', order: 1, persona: { handle: 'tbrandt41' } }),
+      beatFixture({ id: 'c', order: 2, persona: { handle: 'mvega_fh' }, replyTo: { beatId: 'p' } }),
+    ]))
+    await selectRow(user, 'p')
+    await user.keyboard('f')
+    await waitFor(() => expect(statusOf('p')).toHaveTextContent('Fired'))
+    await selectRow(user, 'c')
+    await user.keyboard('f')
+    await waitFor(() => expect(statusOf('c')).toHaveTextContent('Fired'))
+
+    expect(getEmittedTelemetryEvents()).toHaveLength(0)
+    // Nor a hand-rolled /telemetry POST: the only requests are the two posts.
+    expect(postMock.mock.calls.map(call => call[0])).toEqual(['/posts', '/posts'])
+  })
+
+  it('a failed live fire emits none either', async () => {
+    postMock.mockRejectedValue(httpError(400, 'nope'))
+    const { user } = await mountLive(SINGLE())
+    await selectRow(user, 'a')
+    await user.keyboard('f')
+    await waitFor(() => expect(statusOf('a')).toHaveTextContent('Failed'))
+    expect(getEmittedTelemetryEvents()).toHaveLength(0)
+  })
+})
+
 describe('a request in flight', () => {
   it('disables firing, and a double press (or double Fire next) sends ONE request', async () => {
     const pending = deferred<{ data: unknown }>()
@@ -335,6 +366,32 @@ describe('a request in flight', () => {
     expect(screen.queryByTestId('beat-row-a')).toBeNull()
   })
 
+  it('probe: the sheet is replaced by another tab mid-flight - the late result is NOT recorded as Fired', async () => {
+    const pending = deferred<{ data: unknown }>()
+    postMock.mockReturnValue(pending.promise)
+    const { user } = await mountLive(SINGLE())
+    await selectRow(user, 'a')
+    await user.keyboard('f')
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1))
+
+    // Another tab replaces the sheet with one that reuses the same beat ids, then this tab hears.
+    writeStoredSheet(EX, sheetFixture(SINGLE().beats, {}, 'Replaced elsewhere'))
+    fireEvent(window, new StorageEvent('storage', { key: runSheetStorageKey(EX) }))
+    await waitFor(() => expect(screen.getByLabelText('Sheet name')).toHaveValue('Replaced elsewhere'))
+    expect(statusOf('a')).toHaveTextContent('Pending')
+
+    pending.resolve({ data: created('post-went-out') })
+    const alert = await screen.findByTestId('run-sheet-alert')
+    // The controller is told the post DID go out, and that the sheet cannot say so.
+    expect(alert).toHaveTextContent('WENT OUT')
+    expect(alert).toHaveTextContent('post-went-out')
+    expect(alert).toHaveTextContent('could not be recorded here')
+    // And the replaced sheet does not claim a post it never sent.
+    expect(statusOf('a')).toHaveTextContent('Pending')
+    expect(runtimeOf(stored(), 'a')).toEqual({ status: 'pending' })
+    expect(runtimeOf(stored(), 'a').firedPostId).toBeUndefined()
+  })
+
   it('still records the outcome against the right beat if the panel unmounts first', async () => {
     const pending = deferred<{ data: unknown }>()
     postMock.mockReturnValue(pending.promise)
@@ -367,6 +424,8 @@ describe('FAILED: the server refused it (nothing was created)', () => {
     const alert = screen.getByTestId('run-sheet-alert')
     expect(alert).toHaveAttribute('role', 'alert')
     expect(alert).toHaveTextContent('Failed: "Photo drop"')
+    // Announced once (the alert), not twice (alert + the polite status region).
+    expect(liveStatus().textContent).toBe('')
     expect(runtimeOf(stored(), 'a').status).toBe('failed')
     expect(runtimeOf(stored(), 'a').firedPostId).toBeUndefined()
 

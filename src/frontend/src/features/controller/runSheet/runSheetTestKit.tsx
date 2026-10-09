@@ -14,7 +14,14 @@ import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { resetRunSheetStoreForTests } from './runSheetStore'
 import { writeStoredSheet } from './runSheetStorage'
-import { emptySheet, type RunSheetData } from './runSheetModel'
+import {
+  beginFire,
+  completeFire,
+  emptySheet,
+  failFire,
+  type BeatFailure,
+  type RunSheetData,
+} from './runSheetModel'
 import type { RunSheetBeat } from './runSheetSchema'
 import type { Persona } from '@/features/personas'
 
@@ -95,4 +102,56 @@ export function personaFixture(handle: string, overrides: Partial<Persona> = {})
     joinedAt: '2030-01-01T00:00:00Z',
     ...overrides,
   }
+}
+
+const KIT_ATTEMPT = 'kit-attempt'
+
+/** `data` with `id` fired by one attempt: begin, then complete with the same token. */
+export function firedBy(
+  data: RunSheetData,
+  id: string,
+  result: { postId: string; scenarioTime: string } = {
+    postId: 'p',
+    scenarioTime: '2033-09-04T14:00:00Z',
+  },
+): RunSheetData {
+  const begun = beginFire(data, id, { attemptId: KIT_ATTEMPT, confirmedUnconfirmed: true })
+  if (!begun.ok) throw new Error(begun.reason)
+  return completeFire(begun.data, id, KIT_ATTEMPT, result)
+}
+
+/** `data` with `id` failed (or left unconfirmed) by one attempt. */
+export function failedBy(data: RunSheetData, id: string, failure: BeatFailure): RunSheetData {
+  const begun = beginFire(data, id, { attemptId: KIT_ATTEMPT, confirmedUnconfirmed: true })
+  if (!begun.ok) throw new Error(begun.reason)
+  return failFire(begun.data, id, KIT_ATTEMPT, failure)
+}
+
+/** Parses `#rrggbb` or `rgb(r, g, b)` / `rgba(r, g, b, a)` into 0-255 channels. */
+function channels(color: string): [number, number, number] {
+  const hex = /^#([0-9a-f]{6})$/i.exec(color.trim())
+  if (hex?.[1] !== undefined) {
+    const value = hex[1]
+    const [r, g, b] = [0, 2, 4].map(offset => parseInt(value.slice(offset, offset + 2), 16))
+    return [r ?? 0, g ?? 0, b ?? 0]
+  }
+  const rgb = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(color.trim())
+  if (rgb?.[1] === undefined || rgb[2] === undefined || rgb[3] === undefined) {
+    throw new Error(`cannot parse colour "${color}"`)
+  }
+  return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])]
+}
+
+function relativeLuminance(color: string): number {
+  const [r, g, b] = channels(color).map(value => {
+    const c = value / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }) as [number, number, number]
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** WCAG 2.x contrast ratio between two colours (`#rrggbb` or the `rgb(...)` jsdom computes). */
+export function contrastRatio(a: string, b: string): number {
+  const [light, dark] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x)
+  return ((light ?? 0) + 0.05) / ((dark ?? 0) + 0.05)
 }

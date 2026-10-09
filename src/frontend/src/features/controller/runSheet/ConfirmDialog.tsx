@@ -13,8 +13,9 @@
  */
 
 import { useId, type ReactNode } from 'react'
-import { Dialog, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/material'
+import { DialogActions, DialogContent, DialogTitle, Typography } from '@mui/material'
 import { CobraDeleteButton, CobraLinkButton, CobraPrimaryButton } from '@/theme/styledComponents'
+import { StaffDialog } from './StaffDialog'
 
 export interface ConfirmDialogProps {
   readonly title: string
@@ -37,7 +38,8 @@ export function ConfirmDialog({
   const titleId = useId()
   const bodyId = useId()
   return (
-    <Dialog
+    <StaffDialog
+      initialFocus="[data-initial-focus]"
       open
       onClose={onCancel}
       maxWidth="xs"
@@ -54,7 +56,7 @@ export function ConfirmDialog({
         </Typography>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <CobraLinkButton autoFocus onClick={onCancel}>
+        <CobraLinkButton data-initial-focus onClick={onCancel}>
           Cancel
         </CobraLinkButton>
         {destructive ? (
@@ -63,6 +65,6 @@ export function ConfirmDialog({
           <CobraPrimaryButton onClick={onConfirm}>{confirmLabel}</CobraPrimaryButton>
         )}
       </DialogActions>
-    </Dialog>
+    </StaffDialog>
   )
 }

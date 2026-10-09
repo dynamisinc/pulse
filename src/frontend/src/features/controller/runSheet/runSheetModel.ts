@@ -56,6 +56,12 @@ export interface BeatRuntime {
   readonly status: BeatStatus
   /** True from the moment a fire starts until its outcome is recorded. */
   readonly inFlight?: boolean
+  /**
+   * The token of the fire attempt that set `inFlight`. Only THAT attempt may record its
+   * outcome (`completeFire` / `failFire`): a late result must never land on a sheet that was
+   * replaced, reconciled or re-fired meanwhile and show a beat that never went out as Fired.
+   */
+  readonly attemptId?: string
   /** The id of the post this beat created (`status: 'fired'`). */
   readonly firedPostId?: string
   /** SCENARIO instant the post was fired at (COR-053). */
@@ -199,7 +205,10 @@ export function addBeat(
 ): { readonly data: RunSheetData; readonly beatId?: string } {
   if (!canAddBeat(data)) return { data }
   const beatId = nextBeatId(data)
-  const beat = normalizeBeat({ ...content, id: beatId, order: data.beats.length + 1 })
+  // After the largest existing order, NOT `length + 1`: an imported sheet may use orders
+  // 10, 20, 30, and a new beat must go at the END (Fire next would fire it first otherwise).
+  const lastOrder = data.beats.reduce((max, beat) => Math.max(max, beat.order), 0)
+  const beat = normalizeBeat({ ...content, id: beatId, order: lastOrder + 1 })
   return { data: withBeats(data, [...data.beats, beat]), beatId }
 }
 
@@ -307,13 +316,33 @@ function renumberKeepingOrder(beats: readonly RunSheetBeat[]): RunSheetBeat[] {
 /** Result of trying to start a fire. */
 export type BeginFireResult =
   | { readonly ok: true; readonly data: RunSheetData }
-  | { readonly ok: false; readonly reason: string }
+  | {
+    readonly ok: false
+    readonly reason: string
+    /** The beat's outcome is unknown (it may be live): the caller must confirm and retry. */
+    readonly needsConfirmation?: true
+  }
+
+/** Options for {@link beginFire}. */
+export interface BeginFireOptions {
+  /** This attempt's token, stamped on the in-flight marker (see `BeatRuntime.attemptId`). */
+  readonly attemptId: string
+  /** The controller has confirmed re-firing a beat whose outcome is unknown. */
+  readonly confirmedUnconfirmed?: boolean
+}
 
 /**
  * Marks a beat in flight. Refused when ANY beat is already in flight (one at a time),
- * when the beat does not exist, or when it is not `pending` / `failed`.
+ * when the beat does not exist, when it is fired or skipped, or - unless the controller has
+ * confirmed - when its last outcome is `unconfirmed` (the post may be live). The
+ * confirmation gate lives HERE, on the data the store has just re-read, so a stale tab
+ * cannot skip past a warning another tab recorded.
  */
-export function beginFire(data: RunSheetData, beatId: string): BeginFireResult {
+export function beginFire(
+  data: RunSheetData,
+  beatId: string,
+  options: BeginFireOptions,
+): BeginFireResult {
   if (isFiring(data)) {
     return { ok: false, reason: 'Another beat is still firing. Wait for its result.' }
   }
@@ -325,16 +354,37 @@ export function beginFire(data: RunSheetData, beatId: string): BeginFireResult {
   if (record.status === 'skipped') {
     return { ok: false, reason: 'That beat is skipped. Undo the skip to fire it.' }
   }
-  return { ok: true, data: withRuntime(data, beatId, { ...record, inFlight: true }) }
+  if (record.failure?.kind === 'unconfirmed' && options.confirmedUnconfirmed !== true) {
+    return {
+      ok: false,
+      needsConfirmation: true,
+      reason: 'This beat may already be live. Check the Live world, then confirm to fire again.',
+    }
+  }
+  return {
+    ok: true,
+    data: withRuntime(data, beatId, { ...record, inFlight: true, attemptId: options.attemptId }),
+  }
 }
 
-/** Records a confirmed success: `fired` with the post id and the scenario instant. */
+/** True when `record` is the in-flight marker that attempt `attemptId` set. */
+function isAttempt(record: BeatRuntime, attemptId: string): boolean {
+  return record.inFlight === true && record.attemptId === attemptId
+}
+
+/**
+ * Records a confirmed success: `fired` with the post id and the scenario instant. Applies
+ * ONLY while the beat still carries this attempt's in-flight marker; otherwise (the sheet
+ * was replaced, the beat was reconciled by another tab, ...) it returns `data` unchanged.
+ */
 export function completeFire(
   data: RunSheetData,
   beatId: string,
+  attemptId: string,
   result: { readonly postId: string; readonly scenarioTime: string },
 ): RunSheetData {
   if (!data.beats.some(beat => beat.id === beatId)) return data
+  if (!isAttempt(runtimeOf(data, beatId), attemptId)) return data
   return withRuntime(data, beatId, {
     status: 'fired',
     firedPostId: result.postId,
@@ -342,10 +392,23 @@ export function completeFire(
   })
 }
 
-/** Records a failed fire (`failed` or `unconfirmed`), clearing the in-flight marker. */
-export function failFire(data: RunSheetData, beatId: string, failure: BeatFailure): RunSheetData {
+/** Records a failed fire (`failed` or `unconfirmed`); same attempt rule as {@link completeFire}. */
+export function failFire(
+  data: RunSheetData,
+  beatId: string,
+  attemptId: string,
+  failure: BeatFailure,
+): RunSheetData {
   if (!data.beats.some(beat => beat.id === beatId)) return data
+  if (!isAttempt(runtimeOf(data, beatId), attemptId)) return data
   return withRuntime(data, beatId, { status: 'failed', failure })
+}
+
+/** Why the sheet cannot be replaced right now (a fire is in flight), or `undefined`. */
+export function replaceBlockReason(data: RunSheetData): string | undefined {
+  return isFiring(data)
+    ? 'A beat is firing right now. Wait for its result before replacing the sheet.'
+    : undefined
 }
 
 /** Skips a `pending` or `failed` beat (undo-able). Anything else is left alone. */
@@ -371,12 +434,17 @@ export const INTERRUPTED_FIRE_MESSAGE =
   'This beat was firing when the page was closed or reloaded, so it is unknown whether the post '
   + 'went out. Check the live world before firing it again.'
 
-/** The ids of the beats a stored sheet still marks as in flight. */
-export function inFlightBeatIds(data: RunSheetData): Set<string> {
+/** Identifies one in-flight marker: the beat plus the attempt token that set it. */
+function attemptKey(beatId: string, record: BeatRuntime): string {
+  return `${beatId}|${record.attemptId ?? ''}`
+}
+
+/** The in-flight markers a stored sheet carries (see {@link reconcileInterruptedFires}). */
+export function inFlightAttempts(data: RunSheetData): Set<string> {
   return new Set(
     Object.entries(data.runtime)
       .filter(([, record]) => record.inFlight === true)
-      .map(([beatId]) => beatId),
+      .map(([beatId, record]) => attemptKey(beatId, record)),
   )
 }
 
@@ -384,8 +452,8 @@ export function inFlightBeatIds(data: RunSheetData): Set<string> {
  * Applied once when a sheet is loaded from storage into a fresh page: a beat still
  * marked in flight cannot have a live request behind it any more, and its outcome is
  * unknown, so it becomes `unconfirmed` - never silently `pending`. `only` limits this to
- * the beats that were already orphaned at load (a marker a LIVE second tab sets later is
- * its own business and is left alone).
+ * the markers that were already orphaned at load (a marker a LIVE second tab sets later, a
+ * different attempt, is its own business and is left alone).
  */
 export function reconcileInterruptedFires(
   data: RunSheetData,
@@ -394,7 +462,7 @@ export function reconcileInterruptedFires(
   let next = data
   for (const [beatId, record] of Object.entries(data.runtime)) {
     if (record.inFlight !== true) continue
-    if (only !== undefined && !only.has(beatId)) continue
+    if (only !== undefined && !only.has(attemptKey(beatId, record))) continue
     next = withRuntime(next, beatId, {
       status: 'failed',
       failure: { kind: 'unconfirmed', message: INTERRUPTED_FIRE_MESSAGE },

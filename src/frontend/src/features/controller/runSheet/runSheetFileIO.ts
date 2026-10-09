@@ -18,6 +18,9 @@ export function runSheetFilename(sheetName: string): string {
   return `${slug === '' ? 'run-sheet' : slug}.runsheet.json`
 }
 
+/** How long an export's object URL stays alive after the click. */
+const REVOKE_DELAY_MS = 1000
+
 /** Saves `text` to the user's machine as `filename` (an object URL and a synthetic click). */
 export function downloadTextFile(filename: string, text: string, mime = 'application/json'): void {
   const url = URL.createObjectURL(new Blob([text], { type: `${mime};charset=utf-8` }))
@@ -29,8 +32,9 @@ export function downloadTextFile(filename: string, text: string, mime = 'applica
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
-  // The click has been dispatched; the browser has taken its own reference to the blob.
-  setTimeout(() => URL.revokeObjectURL(url), 0)
+  // The click has been dispatched, but some browsers read the blob a moment later: give the
+  // download a full second before the URL is released.
+  setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS)
 }
 
 /** Reads a picked file as text. Rejects if the browser cannot read it. */

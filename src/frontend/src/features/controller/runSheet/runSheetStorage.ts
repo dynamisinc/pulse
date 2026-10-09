@@ -64,6 +64,7 @@ const failureSchema = z.strictObject({
 const runtimeSchema = z.strictObject({
   status: z.enum(['pending', 'fired', 'skipped', 'failed']),
   inFlight: z.boolean().optional(),
+  attemptId: z.string().min(1).max(100).optional(),
   firedPostId: z.string().min(1).max(200).optional(),
   firedAtScenario: z.string().min(1).max(64).optional(),
   failure: failureSchema.optional(),
@@ -87,12 +88,14 @@ export type StoredRead =
 /** The warning shown when the browser will not let us read or write storage at all. */
 export const STORAGE_UNAVAILABLE_MESSAGE =
   'Browser storage is unavailable, so this run sheet will not be saved. Your edits are lost when '
-  + 'you close or reload this tab - use Export to keep a copy.'
+  + 'you close or reload this tab. Export keeps your beats but NOT which have been fired, so '
+  + 'after a reload every beat shows as Pending - check the Live world before firing again.'
 
 /** The warning shown when a write fails. */
 export const STORAGE_WRITE_FAILED_MESSAGE =
   'The last change could not be saved to browser storage (it may be full or blocked). Your edits '
-  + 'are kept while this tab stays open - use Export to keep a copy.'
+  + 'are kept while this tab stays open. Export keeps your beats but NOT which have been fired, '
+  + 'so after a reload every beat shows as Pending - check the Live world before firing again.'
 
 function storage(): Storage | undefined {
   try {

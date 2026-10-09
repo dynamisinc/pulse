@@ -47,10 +47,11 @@ import {
   duplicateBeat,
   emptySheet,
   failFire,
-  inFlightBeatIds,
+  inFlightAttempts,
   moveBeat,
   reconcileInterruptedFires,
   renameSheet,
+  replaceBlockReason,
   replaceDefinition,
   skipBeat,
   sortBeatsByMinute,
@@ -64,6 +65,7 @@ import type { RunSheetDefinition } from './runSheetSchema'
 import {
   backUpUnreadable,
   exerciseIdFromStorageKey,
+  parseStoredSheet,
   readStoredSheet,
   removeStoredSheet,
   serializeStoredSheet,
@@ -76,6 +78,12 @@ export interface RunSheetSnapshot extends RunSheetData {
   readonly state: 'ready' | 'unreadable'
   /** Set while the browser would not read or save the sheet; cleared by the next good write. */
   readonly storageWarning?: string
+  /**
+   * Set when a change was REFUSED because storing it would have produced a sheet that reads
+   * back as invalid (defence in depth; the editor validates first). Cleared by the next
+   * applied change.
+   */
+  readonly changeRefused?: string
   /** Why the stored value was unreadable (`state: 'unreadable'`). */
   readonly unreadableReason?: string
 }
@@ -83,7 +91,7 @@ export interface RunSheetSnapshot extends RunSheetData {
 const snapshots = new Map<string, RunSheetSnapshot>()
 /** The raw text of an unreadable stored value, kept in memory for the backup on `startFresh`. */
 const unreadableRaw = new Map<string, string>()
-/** Per exercise: the beats a stored sheet had in flight when THIS page loaded it (a dead one's). */
+/** Per exercise: the in-flight markers a stored sheet had when THIS page loaded it. */
 const orphanedFires = new Map<string, ReadonlySet<string>>()
 const listeners = new Set<() => void>()
 
@@ -93,7 +101,7 @@ function emit(): void {
 
 function snapshotFrom(
   data: RunSheetData,
-  extra: Pick<RunSheetSnapshot, 'storageWarning'> = {},
+  extra: Pick<RunSheetSnapshot, 'storageWarning' | 'changeRefused'> = {},
 ): RunSheetSnapshot {
   return { ...data, state: 'ready', ...extra }
 }
@@ -109,7 +117,7 @@ function dataOf(snapshot: RunSheetSnapshot): RunSheetData {
  * those same beats.
  */
 function settleOrphans(exerciseId: string, data: RunSheetData, firstLoad: boolean): RunSheetData {
-  if (firstLoad) orphanedFires.set(exerciseId, inFlightBeatIds(data))
+  if (firstLoad) orphanedFires.set(exerciseId, inFlightAttempts(data))
   const orphans = orphanedFires.get(exerciseId)
   return orphans === undefined || orphans.size === 0
     ? data
@@ -174,21 +182,52 @@ export function useRunSheetSnapshot(exerciseId: string): RunSheetSnapshot {
   return useSyncExternalStore(subscribeRunSheet, () => getRunSheetSnapshot(exerciseId))
 }
 
+/** What {@link mutate} did. */
+type MutateResult = 'applied' | 'unchanged' | 'refused' | 'blocked'
+
+/** Why a sheet would not read back from storage, or `undefined` when it would. */
+function storageProblem(data: RunSheetData): string | undefined {
+  const reread = parseStoredSheet(serializeStoredSheet(data))
+  if (reread.kind === 'ok') return undefined
+  return reread.kind === 'unreadable' ? reread.message : 'it could not be stored'
+}
+
 /**
  * Applies `change` to an exercise's data, persists it, and notifies subscribers.
- * `change` returns the same object to mean "nothing to do". Does nothing while the
- * stored value is unreadable (the controller must `startFresh` first).
+ * `change` returns the same object to mean "nothing to do".
+ *
+ *  - `blocked`   nothing was written: the stored value is (or has just become) unreadable.
+ *                A stored value that does not read back is NEVER overwritten here - only
+ *                `startFreshIn`, an explicit choice, replaces it.
+ *  - `refused`   nothing was written: the changed sheet would not read back as valid.
+ *  - `unchanged` `change` had nothing to do (or its guard said no).
+ *  - `applied`   written (or kept in memory with a visible warning if the write failed).
  */
-function mutate(exerciseId: string, change: (data: RunSheetData) => RunSheetData): void {
+function mutate(exerciseId: string, change: (data: RunSheetData) => RunSheetData): MutateResult {
   const current = getRunSheetSnapshot(exerciseId)
-  if (current.state === 'unreadable') return
+  if (current.state === 'unreadable') return 'blocked'
 
-  // Pick up another tab's latest status before changing anything, unless our last write
-  // failed (then memory is ahead of storage and must not be rolled back).
+  // Re-read storage first: another tab may have written since we last looked.
+  const stored = readStoredSheet(exerciseId)
+  // If our own last write failed, memory is ahead of storage: keep editing in memory (the
+  // warning already says so) and still never write over the unreadable value.
+  const memoryOnly = stored.kind === 'unreadable' && current.storageWarning !== undefined
+  if (stored.kind === 'unreadable' && !memoryOnly) {
+    unreadableRaw.set(exerciseId, stored.raw)
+    snapshots.set(exerciseId, {
+      ...emptySheet(),
+      state: 'unreadable',
+      unreadableReason: stored.message,
+    })
+    emit()
+    return 'blocked'
+  }
+
+  // Pick up that tab's latest status, unless our last write failed (then memory is ahead
+  // of storage and must not be rolled back).
   let base: RunSheetData = dataOf(current)
-  if (current.storageWarning === undefined) {
-    const stored = readStoredSheet(exerciseId)
-    if (stored.kind === 'ok') base = settleOrphans(exerciseId, stored.data, false)
+  if (current.storageWarning === undefined && stored.kind === 'ok') {
+    base = settleOrphans(exerciseId, stored.data, false)
   }
 
   const next = change(base)
@@ -198,7 +237,27 @@ function mutate(exerciseId: string, change: (data: RunSheetData) => RunSheetData
       snapshots.set(exerciseId, snapshotFrom(base))
       emit()
     }
-    return
+    return 'unchanged'
+  }
+
+  const problem = storageProblem(next)
+  if (problem !== undefined) {
+    snapshots.set(
+      exerciseId,
+      snapshotFrom(base, {
+        changeRefused:
+          `That change was not saved because the sheet would no longer be valid (${problem}). `
+          + 'Nothing was overwritten.',
+      }),
+    )
+    emit()
+    return 'refused'
+  }
+
+  if (memoryOnly) {
+    snapshots.set(exerciseId, snapshotFrom(next, { storageWarning: current.storageWarning }))
+    emit()
+    return 'applied'
   }
   const written = writeStoredSheet(exerciseId, next)
   snapshots.set(
@@ -206,11 +265,24 @@ function mutate(exerciseId: string, change: (data: RunSheetData) => RunSheetData
     snapshotFrom(next, written.ok ? {} : { storageWarning: written.message }),
   )
   emit()
+  return 'applied'
 }
 
 /** True when two data objects describe the same sheet (compared as they would be stored). */
 function sameData(a: RunSheetData, b: RunSheetData): boolean {
   return serializeStoredSheet(a) === serializeStoredSheet(b)
+}
+
+let attemptCounter = 0
+
+/** A token unique to one fire attempt (see `BeatRuntime.attemptId`). */
+function newAttemptId(): string {
+  attemptCounter += 1
+  const random =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2)
+  return `attempt-${attemptCounter}-${random}`
 }
 
 // ---------------------------------------------------------------------------
@@ -274,9 +346,35 @@ export function renameSheetIn(exerciseId: string, name: string): void {
   mutate(exerciseId, data => (data.name === name ? data : renameSheet(data, name)))
 }
 
-/** Replaces the whole sheet with an imported definition (every beat starts pending). */
-export function replaceSheetIn(exerciseId: string, definition: RunSheetDefinition): void {
-  mutate(exerciseId, () => replaceDefinition(definition))
+/** Result of {@link replaceSheetIn}. */
+export type ReplaceSheetOutcome =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string }
+
+const replaceOk = (): ReplaceSheetOutcome => ({ ok: true })
+
+/**
+ * Replaces the whole sheet with an imported definition (every beat starts pending). REFUSED
+ * while a beat is in flight: its result would otherwise land on the new sheet and could show
+ * a same-id beat as Fired that never went out.
+ */
+export function replaceSheetIn(
+  exerciseId: string,
+  definition: RunSheetDefinition,
+): ReplaceSheetOutcome {
+  let outcome = replaceOk()
+  const result = mutate(exerciseId, data => {
+    const reason = replaceBlockReason(data)
+    if (reason !== undefined) {
+      outcome = { ok: false, reason }
+      return data
+    }
+    return replaceDefinition(definition)
+  })
+  if (outcome.ok && result !== 'applied') {
+    return { ok: false, reason: 'The sheet could not be replaced. Nothing was changed.' }
+  }
+  return outcome
 }
 
 // ---------------------------------------------------------------------------
@@ -285,37 +383,80 @@ export function replaceSheetIn(exerciseId: string, definition: RunSheetDefinitio
 
 /** Result of {@link beginFireIn}. */
 export type BeginFireOutcome =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly reason: string }
+  | { readonly ok: true; readonly attemptId: string }
+  | {
+    readonly ok: false
+    readonly reason: string
+    /** The beat's last outcome is unknown: confirm with the controller, then call again. */
+    readonly needsConfirmation?: true
+  }
+
+const beginRefused = (): BeginFireOutcome => ({
+  ok: false,
+  reason: 'That beat no longer exists.',
+})
 
 /**
  * Claims the single fire slot for a beat, SYNCHRONOUSLY: it is already persisted when
- * this returns, so a second call in the same tick (a double-press) is refused.
+ * this returns, so a second call in the same tick (a double-press) is refused. The returned
+ * `attemptId` must be handed back to {@link completeFireIn} / {@link failFireIn}; only that
+ * attempt may record the outcome. Nothing is sent unless this says `ok` - so a change that
+ * could not be stored (refused / unreadable) is `ok: false` too.
  */
-export function beginFireIn(exerciseId: string, beatId: string): BeginFireOutcome {
-  let outcome: BeginFireOutcome = { ok: false, reason: 'That beat no longer exists.' }
-  mutate(exerciseId, data => {
-    const result = beginFire(data, beatId)
-    if (!result.ok) {
-      outcome = { ok: false, reason: result.reason }
+export function beginFireIn(
+  exerciseId: string,
+  beatId: string,
+  options: { readonly confirmedUnconfirmed?: boolean } = {},
+): BeginFireOutcome {
+  const attemptId = newAttemptId()
+  let outcome = beginRefused()
+  const result = mutate(exerciseId, data => {
+    const attempt = beginFire(data, beatId, {
+      attemptId,
+      ...(options.confirmedUnconfirmed === true ? { confirmedUnconfirmed: true } : {}),
+    })
+    if (!attempt.ok) {
+      outcome = {
+        ok: false,
+        reason: attempt.reason,
+        ...(attempt.needsConfirmation === true ? { needsConfirmation: true as const } : {}),
+      }
       return data
     }
-    outcome = { ok: true }
-    return result.data
+    outcome = { ok: true, attemptId }
+    return attempt.data
   })
+  if (outcome.ok && result !== 'applied') {
+    return { ok: false, reason: 'The sheet could not be saved, so nothing was fired.' }
+  }
+  if (result === 'blocked') {
+    return { ok: false, reason: 'The saved run sheet could not be read, so nothing was fired.' }
+  }
   return outcome
 }
 
+/**
+ * Records a confirmed fire. Returns whether it was RECORDED: false means the beat no longer
+ * carries this attempt's in-flight marker (the sheet was replaced or reconciled meanwhile),
+ * so the post went out but the sheet could not say so - the caller must tell the controller.
+ */
 export function completeFireIn(
   exerciseId: string,
   beatId: string,
+  attemptId: string,
   result: { readonly postId: string; readonly scenarioTime: string },
-): void {
-  mutate(exerciseId, data => completeFire(data, beatId, result))
+): boolean {
+  return mutate(exerciseId, data => completeFire(data, beatId, attemptId, result)) === 'applied'
 }
 
-export function failFireIn(exerciseId: string, beatId: string, failure: BeatFailure): void {
-  mutate(exerciseId, data => failFire(data, beatId, failure))
+/** Records a failed or unconfirmed fire; returns whether it was recorded (see above). */
+export function failFireIn(
+  exerciseId: string,
+  beatId: string,
+  attemptId: string,
+  failure: BeatFailure,
+): boolean {
+  return mutate(exerciseId, data => failFire(data, beatId, attemptId, failure)) === 'applied'
 }
 
 export function skipBeatIn(exerciseId: string, beatId: string): void {

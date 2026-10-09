@@ -32,8 +32,11 @@
  *   unconfirmed  anything else: no response (network drop, timeout), a 5xx / 504, 408, or
  *                a 2xx the client could not read -> the post MAY be live, so the UI asks
  *                the controller to check the live world and never retries by itself.
- * (Mirrors the participant composer's `classifyPublishFailure`, with controller-facing
- * wording instead of in-fiction wording.)
+ * This is deliberately STRICTER than the participant composer's `classifyPublishFailure`
+ * (`useComposePost.ts`), not a mirror of it: that classifier offers Retry after no response, a
+ * 408 and any 5xx other than 504, which is right for a person re-sending their own post but
+ * would let a presenter double-post a staged beat. Here only a 4xx (other than 408) earns a
+ * Retry; everything else is "unconfirmed". The wording is controller-facing, not in-fiction.
  */
 
 import { isAxiosError } from 'axios'

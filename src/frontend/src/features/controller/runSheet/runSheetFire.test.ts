@@ -13,7 +13,7 @@ import { resetExerciseClock } from '@/core/clock'
 import { registerMockMedia, resetMockMediaRegistry } from '@/core/media'
 import { resetTelemetryBuffer } from '@/core/telemetry'
 import { postStore } from '@/features/social/services/postStore'
-import { completeFire, failFire, skipBeat, type RunSheetData } from './runSheetModel'
+import { skipBeat, type RunSheetData } from './runSheetModel'
 import {
   FIRE_PARENT_FIRST,
   buildPostInput,
@@ -27,6 +27,8 @@ import {
   MOCK_ACTING_HUMAN_ID,
   MOCK_EXERCISE_ID,
   beatFixture,
+  failedBy,
+  firedBy,
   personaFixture,
   sheetFixture,
   useFixedClock,
@@ -115,14 +117,14 @@ describe('fireBlockReason', () => {
 
     it('keeps that exact reason and adds context when the parent is skipped, failed or unconfirmed', () => {
       expect(blocked(skipBeat(chain(), 'p'), 'c')).toMatch(/^Fire the parent first \(.*skipped/)
-      expect(blocked(failFire(chain(), 'p', { kind: 'failed', message: 'x' }), 'c'))
+      expect(blocked(failedBy(chain(), 'p', { kind: 'failed', message: 'x' }), 'c'))
         .toMatch(/^Fire the parent first \(.*did not go out/)
-      expect(blocked(failFire(chain(), 'p', { kind: 'unconfirmed', message: 'x' }), 'c'))
+      expect(blocked(failedBy(chain(), 'p', { kind: 'unconfirmed', message: 'x' }), 'c'))
         .toMatch(/^Fire the parent first \(.*may already be live/)
     })
 
     it('posts against the parent\'s firedPostId once the parent is fired', () => {
-      const fired = completeFire(chain(), 'p', { postId: 'post-parent', scenarioTime: FIXED_SCENARIO_NOW })
+      const fired = firedBy(chain(), 'p', { postId: 'post-parent', scenarioTime: FIXED_SCENARIO_NOW })
       const child = fired.beats[1]
       const decision = child && fireBlockReason(fired, child, LOADED, MOCK_EXERCISE_ID)
       expect(decision).toEqual({ ok: true, persona: fulco, parentPostId: 'post-parent' })

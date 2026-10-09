@@ -109,6 +109,17 @@ describe('parseRunSheetValue - the whole file is rejected, with one readable mes
     expectRejected({ name: 'x', beats: [] }, 'schema is required')
   })
 
+  it('caps the value it quotes back for a wrong schema id (a hostile file cannot flood the UI)', () => {
+    const message = expectRejected(file({ schema: 'x'.repeat(5000) }), 'schema must be "pulse.runsheet.v1"')
+    expect(message.length).toBeLessThan(300)
+    expect(message).toContain('...')
+    // A short value is quoted whole.
+    expectRejected(file({ schema: 'pulse.runsheet.v2' }), 'found "pulse.runsheet.v2"')
+    // A non-string value is quoted as JSON, also capped.
+    const long = expectRejected(file({ schema: ['y'.repeat(500)] }), 'schema must be')
+    expect(long.length).toBeLessThan(300)
+  })
+
   it('rejects non-objects and wrong-typed members', () => {
     expectRejected(null, 'The file must be an object')
     expectRejected([], 'The file must be an object')

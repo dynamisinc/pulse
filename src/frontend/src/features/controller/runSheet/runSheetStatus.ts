@@ -21,8 +21,8 @@ import {
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
-import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import type { BeatRuntime } from './runSheetModel'
+import { runSheetTokens } from './runSheetTokens'
 
 /** What a status chip shows. */
 export interface StatusChipSpec {
@@ -33,31 +33,37 @@ export interface StatusChipSpec {
   readonly color: string
 }
 
-// Dark enough for 4.5:1 on white (the console's Cadence red is only ~4.2:1 for small text).
-export const COLOR_FAILED = '#a8160d'
-export const COLOR_UNCONFIRMED = '#8a5a00'
-export const COLOR_FIRED = '#1b6e3c'
+/** How long a fire may sit in flight before the row says the server has not answered. */
+export const SLOW_FIRE_NOTICE_MS = 20_000
+
+/**
+ * Shown on a beat that has been "Firing" for {@link SLOW_FIRE_NOTICE_MS}. There is no
+ * auto-retry (a retry could double-post): the controller is told what a reload will do.
+ */
+export const SLOW_FIRE_NOTICE =
+  'No answer yet. If this persists, reload — the beat will show as Unconfirmed.'
 
 /** The chip for a beat's runtime record. Exported for the panel's counts and the tests. */
 export function statusChipFor(record: BeatRuntime): StatusChipSpec {
   if (record.inFlight === true) {
-    return { label: 'Firing', icon: faSpinner, spin: true, color: staffShellTokens.header.background }
+    return { label: 'Firing', icon: faSpinner, spin: true, color: runSheetTokens.navy }
   }
   switch (record.status) {
     case 'fired':
-      return { label: 'Fired', icon: faCircleCheck, color: COLOR_FIRED }
+      return { label: 'Fired', icon: faCircleCheck, color: runSheetTokens.firedText }
     case 'skipped':
       return {
         label: 'Skipped',
         icon: faForwardStep,
-        color: staffShellTokens.accent.secondaryText,
+        // 8.27:1 on white, 7.41:1 on the selected row (COBRA's #848482 was 3.75 / 3.36).
+        color: runSheetTokens.mutedText,
       }
     case 'failed':
       return record.failure?.kind === 'unconfirmed'
-        ? { label: 'Unconfirmed', icon: faCircleQuestion, color: COLOR_UNCONFIRMED }
-        : { label: 'Failed', icon: faTriangleExclamation, color: COLOR_FAILED }
+        ? { label: 'Unconfirmed', icon: faCircleQuestion, color: runSheetTokens.unconfirmedText }
+        : { label: 'Failed', icon: faTriangleExclamation, color: runSheetTokens.failedText }
     case 'pending':
     default:
-      return { label: 'Pending', icon: faClock, color: staffShellTokens.header.background }
+      return { label: 'Pending', icon: faClock, color: runSheetTokens.navy }
   }
 }

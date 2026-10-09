@@ -3,9 +3,9 @@
  * ---------------------------------------------------------------------------
  * THE RUN SHEET PANEL (demo-polish C3, story 19 / issue #438; CTL-010 lite, CTL-011
  * lite, CTL-013 lite, CTL-001, COR-018, NFR-001). STAFF world: COBRA components
- * (`@/theme/styledComponents`) and `staffShellTokens`, dense, desktop-first, keyboard-first,
- * FontAwesome icons only, MUI 9 `sx`-only. It renders no participant skin and no `PostCard`,
- * and nothing in it can be mistaken for a participant view.
+ * (`@/theme/styledComponents`) and the staff shell tokens (through `runSheetTokens`), dense,
+ * desktop-first, keyboard-first, FontAwesome icons only, MUI 9 `sx`-only. It renders no
+ * participant skin and no `PostCard`, and nothing in it can be mistaken for a participant view.
  *
  * WHAT IT IS. An MSEL-style list of STAGED POSTS ("beats") a controller can fire with one
  * key press - the misinformation beat of the demo script ("the impersonator posts a
@@ -65,7 +65,7 @@ import CobraStyles from '@/theme/CobraStyles'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useMediaLibrary, type StaffMediaAssetView } from '@/core/media'
-import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
+import { BUTTON_KBD_SX, FIELD_SX, KBD_SX, runSheetTokens } from './runSheetTokens'
 import { BeatEditor } from './BeatEditor'
 import { ConfirmDialog } from './ConfirmDialog'
 import { RunSheetBeatRow } from './RunSheetBeatRow'
@@ -110,18 +110,6 @@ type ConfirmState =
   | { readonly kind: 'import'; readonly sheet: RunSheetDefinition; readonly fileName: string }
   | { readonly kind: 'start-fresh' }
 
-const KBD_SX = {
-  fontFamily: staffShellTokens.classificationTag.fontFamily,
-  fontSize: 11,
-  fontWeight: 700,
-  color: staffShellTokens.header.background,
-  border: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
-  borderRadius: '4px',
-  bgcolor: staffShellTokens.workArea.background,
-  px: 0.75,
-  py: 0.125,
-} as const
-
 const HEADER_BUTTON_SX = { py: '3px', px: 1.5, fontSize: 12, minWidth: 0 } as const
 
 /** "2 images", "1 video", or "3 media" when the library does not know every id. */
@@ -149,6 +137,9 @@ export function RunSheetPanel() {
 function RunSheetPanelBody() {
   const sheet = useRunSheet()
   const { exerciseId, timeZone, snapshot, firing, personas, personasLoading } = sheet
+  // TODO(C1-merge): C1's picker module exports `useLibraryAssetLookup()` (id -> asset). After the
+  // rebase onto C1, replace this `useMediaLibrary()` + Map with that hook so the panel, the
+  // editor and the picker share one lookup (and one cache entry).
   const libraryQuery = useMediaLibrary()
   const libraryData = libraryQuery.data
   const library = useMemo<ReadonlyMap<string, StaffMediaAssetView> | undefined>(
@@ -206,12 +197,19 @@ function RunSheetPanelBody() {
   // ---- firing -------------------------------------------------------------------------
 
   const reportFire = (report: FireReport) => {
-    announce(report.message)
-    if (report.outcome === 'failed' || report.outcome === 'unconfirmed') {
+    if (
+      report.outcome === 'failed'
+      || report.outcome === 'unconfirmed'
+      || report.outcome === 'unrecorded'
+    ) {
+      // One announcement, not two: the assertive alert carries the failure, so the polite
+      // status region is cleared rather than repeating it.
       setAlertMessage(report.message)
-    } else if (report.outcome === 'fired') {
-      setAlertMessage(undefined)
+      announce('')
+      return
     }
+    announce(report.message)
+    if (report.outcome === 'fired') setAlertMessage(undefined)
   }
 
   const runFire = async (beatId: string, confirmed = false) => {
@@ -372,7 +370,15 @@ function RunSheetPanelBody() {
   // ---- import / export ----------------------------------------------------------------
 
   const applyImport = (definition: RunSheetDefinition, fileName: string) => {
-    replaceSheetIn(exerciseId, definition)
+    // Refused while a beat is firing (checked again here, on the store's fresh read: the
+    // result of that fire must not land on the new sheet).
+    const replaced = replaceSheetIn(exerciseId, definition)
+    if (!replaced.ok) {
+      const message = `Import refused: ${replaced.reason} Nothing was changed.`
+      setImportError(message)
+      announce(message)
+      return
+    }
     const first = definition.beats[0]
     setSelectedId(first?.id)
     const withMissing =
@@ -475,8 +481,8 @@ function RunSheetPanelBody() {
         flex: 1,
         minHeight: 0,
         minWidth: 0,
-        bgcolor: staffShellTokens.toolstrip.background,
-        border: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
+        bgcolor: runSheetTokens.panel,
+        border: `1px solid ${runSheetTokens.hairline}`,
         borderRadius: '8px',
         overflow: 'hidden',
         color: 'text.primary',
@@ -487,26 +493,27 @@ function RunSheetPanelBody() {
         sx={{
           flex: 'none',
           p: 1.25,
-          borderBottom: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
+          borderBottom: `1px solid ${runSheetTokens.hairline}`,
           display: 'flex',
           flexDirection: 'column',
           gap: 1,
+          ...FIELD_SX,
         }}
       >
         <Stack direction="row" sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <FontAwesomeIcon icon={faListCheck} color={staffShellTokens.header.background} aria-hidden="true" />
+          <FontAwesomeIcon icon={faListCheck} color={runSheetTokens.navy} aria-hidden="true" />
           <Typography
             component="h2"
             sx={{
               fontSize: 13,
               fontWeight: 800,
               letterSpacing: '0.1em',
-              color: staffShellTokens.header.background,
+              color: runSheetTokens.navy,
             }}
           >
             RUN SHEET
           </Typography>
-          <Typography data-testid="run-sheet-counts" sx={{ fontSize: 12, color: 'text.secondary' }}>
+          <Typography data-testid="run-sheet-counts" sx={{ fontSize: 12, color: runSheetTokens.mutedText }}>
             {counts.total === 0
               ? 'No beats yet'
               : `${counts.fired} of ${counts.total} fired · ${counts.pending} pending`
@@ -524,12 +531,12 @@ function RunSheetPanelBody() {
             sx={HEADER_BUTTON_SX}
           >
             Fire next
-            <Box component="kbd" aria-hidden="true" sx={{ ...KBD_SX, ml: 0.75, color: 'inherit' }}>N</Box>
+            <Box component="kbd" aria-hidden="true" sx={BUTTON_KBD_SX}>N</Box>
           </CobraPrimaryButton>
         </Stack>
 
         {nextUp !== undefined && !unreadable && (
-          <Typography data-testid="run-sheet-next-up" sx={{ fontSize: 12, color: 'text.secondary' }}>
+          <Typography data-testid="run-sheet-next-up" sx={{ fontSize: 12, color: runSheetTokens.mutedText }}>
             Next up: #{nextUp.order} {formatScenarioMinute(nextUp.scenarioMinute)}{' '}
             "{nextUp.title}" as @{nextUp.persona.handle}
           </Typography>
@@ -610,7 +617,7 @@ function RunSheetPanelBody() {
         )}
 
         {atLimit && (
-          <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
+          <Typography sx={{ fontSize: 12, color: runSheetTokens.mutedText }}>
             A sheet holds at most {RUN_SHEET_LIMITS.beatsMax} beats.
           </Typography>
         )}
@@ -630,8 +637,9 @@ function RunSheetPanelBody() {
             py: 0.75,
             fontSize: 12.5,
             fontWeight: 600,
-            bgcolor: '#fff4d6',
-            borderBottom: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
+            bgcolor: runSheetTokens.warningBanner.background,
+            color: runSheetTokens.warningBanner.text,
+            borderBottom: `1px solid ${runSheetTokens.hairline}`,
           }}
         >
           <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" style={{ marginTop: 3 }} />
@@ -684,8 +692,9 @@ function RunSheetPanelBody() {
             py: 0.75,
             fontSize: 12.5,
             fontWeight: 600,
-            bgcolor: '#fde8e6',
-            borderBottom: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
+            bgcolor: runSheetTokens.errorBanner.background,
+            color: runSheetTokens.errorBanner.text,
+            borderBottom: `1px solid ${runSheetTokens.hairline}`,
           }}
         >
           <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" style={{ marginTop: 3 }} />
@@ -709,8 +718,9 @@ function RunSheetPanelBody() {
             py: 0.75,
             fontSize: 12.5,
             fontWeight: 600,
-            bgcolor: '#fde8e6',
-            borderBottom: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
+            bgcolor: runSheetTokens.errorBanner.background,
+            color: runSheetTokens.errorBanner.text,
+            borderBottom: `1px solid ${runSheetTokens.hairline}`,
           }}
         >
           <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" style={{ marginTop: 3 }} />
@@ -729,7 +739,7 @@ function RunSheetPanelBody() {
             px: 1.25,
             py: 0.75,
             fontSize: 12.5,
-            borderBottom: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
+            borderBottom: `1px solid ${runSheetTokens.hairline}`,
           }}
         >
           {importNotice}
@@ -746,7 +756,7 @@ function RunSheetPanelBody() {
         }}
       >
         {!unreadable && beats.length === 0 && (
-          <Typography data-testid="run-sheet-empty" sx={{ p: 2, fontSize: 13, color: 'text.secondary' }}>
+          <Typography data-testid="run-sheet-empty" sx={{ p: 2, fontSize: 13, color: runSheetTokens.mutedText }}>
             No beats yet. Add a beat, or import a run sheet file (pulse.runsheet.v1 JSON).
           </Typography>
         )}
@@ -819,7 +829,7 @@ function RunSheetPanelBody() {
       <Box
         sx={{
           flex: 'none',
-          borderTop: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
+          borderTop: `1px solid ${runSheetTokens.hairline}`,
           px: 1.25,
           py: 0.75,
           display: 'flex',
@@ -847,7 +857,7 @@ function RunSheetPanelBody() {
             gap: 1.25,
             flexWrap: 'wrap',
             fontSize: 11.5,
-            color: 'text.secondary',
+            color: runSheetTokens.mutedText,
           }}
         >
           <Box component="span" sx={{ display: 'inline-flex', gap: 0.75, alignItems: 'center', fontWeight: 800 }}>

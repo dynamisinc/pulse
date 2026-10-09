@@ -10,14 +10,19 @@
  * THE FIRE SEQUENCE (`fire`)
  *   1. look the beat up in the CURRENT snapshot (never a render-time closure);
  *   2. an `unconfirmed` beat needs an explicit confirmation first (the panel asks), so a
- *      retry of a request whose outcome is unknown is never one keystroke away;
+ *      retry of a request whose outcome is unknown is never one keystroke away - the gate
+ *      lives in the claim (step 4), on the sheet as storage has it right now;
  *   3. `fireBlockReason` (persona resolves, something to post, a reply's parent fired);
  *   4. `beginFireIn` claims the sheet's single fire slot SYNCHRONOUSLY and persists the
- *      in-flight marker, so a double-press (two key events in one tick) cannot fire twice
- *      and a reload mid-request leaves an `unconfirmed` beat rather than a `pending` one;
+ *      in-flight marker with a per-attempt token, so a double-press (two key events in one
+ *      tick) cannot fire twice and a reload mid-request leaves an `unconfirmed` beat rather
+ *      than a `pending` one;
  *   5. `sendBeat` posts as `controller-as-persona` and never rejects;
  *   6. the outcome is recorded against the EXERCISE THE FIRE STARTED IN (`exerciseId` is
- *      captured at step 1) - the console does not remount on an exercise switch.
+ *      captured at step 1) - the console does not remount on an exercise switch - and only
+ *      if the beat still carries THIS attempt's token. If the sheet was replaced or the beat
+ *      reconciled meanwhile, the post is reported as `unrecorded` (it went out; the sheet
+ *      cannot say so) instead of marking a beat that never went out as Fired.
  * Every path returns a `FireReport` with a controller-facing sentence for the panel's
  * live region; a failure is never reported as success.
  *
@@ -58,6 +63,8 @@ export type FireOutcome =
   | 'fired'
   | 'failed'
   | 'unconfirmed'
+  /** The post went out but the sheet changed while it was in flight, so it was not recorded. */
+  | 'unrecorded'
   | 'blocked'
   | 'needs-confirmation'
   | 'nothing-pending'
@@ -142,14 +149,6 @@ export function useRunSheet(): UseRunSheetResult {
           message: 'Another beat is still firing. Wait for its result.',
         }
       }
-      if (record.failure?.kind === 'unconfirmed' && options.confirmedUnconfirmed !== true) {
-        return {
-          outcome: 'needs-confirmation',
-          beatId,
-          message: `${quoted(beat)} may already be live. Check the Live world, then confirm to fire again.`,
-        }
-      }
-
       const decision = fireBlockReason(data, beat, lookup, exerciseId)
       if (!decision.ok) {
         return {
@@ -159,8 +158,25 @@ export function useRunSheet(): UseRunSheetResult {
         }
       }
 
-      const claimed = beginFireIn(exerciseId, beatId)
-      if (!claimed.ok) return { outcome: 'blocked', beatId, message: claimed.reason }
+      const claimed = beginFireIn(
+        exerciseId,
+        beatId,
+        options.confirmedUnconfirmed === true ? { confirmedUnconfirmed: true } : {},
+      )
+      if (!claimed.ok) {
+        // The unconfirmed gate is checked inside the claim, against the sheet as storage has
+        // it right now, so a warning another tab recorded cannot be skipped.
+        if (claimed.needsConfirmation === true) {
+          return {
+            outcome: 'needs-confirmation',
+            beatId,
+            message:
+              `${quoted(beat)} may already be live. Check the Live world, then confirm to fire again.`,
+          }
+        }
+        return { outcome: 'blocked', beatId, message: claimed.reason }
+      }
+      const { attemptId } = claimed
 
       const input = buildPostInput(beat, {
         exerciseId,
@@ -172,10 +188,20 @@ export function useRunSheet(): UseRunSheetResult {
       const result = await sendBeat(input)
 
       if (result.kind === 'fired') {
-        completeFireIn(exerciseId, beatId, {
+        const recorded = completeFireIn(exerciseId, beatId, attemptId, {
           postId: result.postId,
           scenarioTime: result.scenarioTime,
         })
+        if (!recorded) {
+          return {
+            outcome: 'unrecorded',
+            beatId,
+            message:
+              `${quoted(beat)} WENT OUT as @${decision.persona.handle} (post ${result.postId}), but the `
+              + 'sheet changed while it was firing, so it could not be recorded here. Check the '
+              + 'Live world before firing it again.',
+          }
+        }
         return {
           outcome: 'fired',
           beatId,
@@ -184,7 +210,7 @@ export function useRunSheet(): UseRunSheetResult {
             + `${formatScenarioTime(result.scenarioTime, timeZone)}.`,
         }
       }
-      failFireIn(exerciseId, beatId, { kind: result.kind, message: result.message })
+      failFireIn(exerciseId, beatId, attemptId, { kind: result.kind, message: result.message })
       return {
         outcome: result.kind,
         beatId,

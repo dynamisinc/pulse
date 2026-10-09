@@ -98,12 +98,27 @@ describe('run sheet - staff world only', () => {
   })
 
   it('the panel and editor are built from @/theme/styledComponents and staffShellTokens', () => {
-    for (const file of ['./RunSheetPanel.tsx', './BeatEditor.tsx', './RunSheetBeatRow.tsx']) {
-      const source = sources[file] ?? ''
-      expect(specifiers(source), file).toContain('@/theme/styledComponents')
+    const surfaces = ['./RunSheetPanel.tsx', './BeatEditor.tsx', './RunSheetBeatRow.tsx']
+    for (const file of surfaces) {
+      const imports = specifiers(sources[file] ?? '')
+      expect(imports, file).toContain('@/theme/styledComponents')
+      // Every colour comes through the one tokens module (Gate-1 L-12), which is itself
+      // built from the staff shell tokens and the COBRA theme.
+      expect(imports, file).toContain('./runSheetTokens')
     }
-    for (const file of ['./RunSheetPanel.tsx', './BeatEditor.tsx', './RunSheetBeatRow.tsx']) {
-      expect(specifiers(sources[file] ?? ''), file).toContain('@/features/staffShell/staffShellTokens')
+    const tokens = specifiers(sources['./runSheetTokens.ts'] ?? '')
+    expect(tokens).toContain('@/features/staffShell/staffShellTokens')
+    expect(tokens).toContain('@/theme/cobraTheme')
+  })
+
+  it('draws with named tokens: no hard-coded hex colours in the components', () => {
+    const hex = /['"`]#[0-9a-fA-F]{3,8}['"`]/g
+    // The detector itself works (so an empty result below means something).
+    expect("sx={{ color: '#a8160d', bg: \"#fff\" }}".match(hex)).toHaveLength(2)
+    for (const file of ['./RunSheetPanel.tsx', './BeatEditor.tsx', './RunSheetBeatRow.tsx',
+      './ConfirmDialog.tsx', './StaffDialog.tsx', './runSheetStatus.ts']) {
+      const code = (sources[file] ?? '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+      expect(code.match(hex) ?? [], file).toEqual([])
     }
   })
 

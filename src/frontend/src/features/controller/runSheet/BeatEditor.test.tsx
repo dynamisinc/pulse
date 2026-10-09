@@ -106,27 +106,49 @@ describe('BeatEditor', () => {
     expect(screen.queryByTestId('media-missing-note')).toBeNull()
   })
 
-  it('shows a thumbnail only for safe URLs (https, blob, root-relative), never javascript:', () => {
+  it('shows a thumbnail only for URLs the app-wide media allow-list accepts (M-3)', () => {
+    const urls: Record<string, string> = {
+      'ok-rel': '/mock-media/a.svg',
+      'ok-https': 'https://cdn.example.test/b.jpg',
+      'bad-js': 'javascript:alert(1)',
+      'bad-proto-relative': '//evil.example.test/x.jpg',
+      'bad-backslash': '/\\evil.example.test/x.jpg',
+      'bad-credentials': 'https://user:pw@cdn.example.test/x.jpg',
+      'bad-control': 'https://cdn.example.test/a\tb.jpg',
+      'bad-data': 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
+      'bad-http': 'http://cdn.example.test/x.jpg',
+    }
+    const beat = beatFixture({
+      media: Object.keys(urls).map(mediaId => ({ mediaId, alt: mediaId })),
+    })
+    const { container } = renderEditor({
+      beat,
+      data: sheetFixture([beat]),
+      library: new Map(Object.entries(urls).map(([id, url]) => [id, asset({ id, url })])),
+    })
+    const sources = [...container.ownerDocument.querySelectorAll('img')].map(img =>
+      img.getAttribute('src'))
+    expect(sources).toEqual(['/mock-media/a.svg', 'https://cdn.example.test/b.jpg'])
+  })
+
+  it('a video\'s thumbnail is its poster, put through the same allow-list', () => {
     const beat = beatFixture({
       media: [
-        { mediaId: 'ok-rel', alt: 'a' },
-        { mediaId: 'ok-https', alt: 'b' },
-        { mediaId: 'bad-js', alt: 'c' },
-        { mediaId: 'bad-proto', alt: 'd' },
+        { mediaId: 'v-ok', alt: 'clip one' },
+        { mediaId: 'v-bad', alt: 'clip two' },
       ],
     })
     const { container } = renderEditor({
       beat,
       data: sheetFixture([beat]),
       library: new Map([
-        ['ok-rel', asset({ id: 'ok-rel', url: '/mock-media/a.svg' })],
-        ['ok-https', asset({ id: 'ok-https', url: 'https://cdn.example.test/b.jpg' })],
-        ['bad-js', asset({ id: 'bad-js', url: 'javascript:alert(1)' })],
-        ['bad-proto', asset({ id: 'bad-proto', url: '//evil.example.test/x.jpg' })],
+        ['v-ok', asset({ id: 'v-ok', kind: 'video', url: '/v.mp4', posterUrl: '/mock-media/p.svg' })],
+        ['v-bad', asset({ id: 'v-bad', kind: 'video', url: '/v2.mp4', posterUrl: 'javascript:alert(1)' })],
       ]),
     })
-    const sources = [...container.ownerDocument.querySelectorAll('img')].map(img => img.getAttribute('src'))
-    expect(sources).toEqual(['/mock-media/a.svg', 'https://cdn.example.test/b.jpg'])
+    const sources = [...container.ownerDocument.querySelectorAll('img')].map(img =>
+      img.getAttribute('src'))
+    expect(sources).toEqual(['/mock-media/p.svg'])
   })
 
   it('saves with Ctrl+Enter from a field and cancels with Escape', async () => {

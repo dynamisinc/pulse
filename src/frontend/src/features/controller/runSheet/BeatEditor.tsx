@@ -35,7 +35,6 @@
 import { useId, useMemo, useState } from 'react'
 import {
   Box,
-  Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
@@ -52,10 +51,15 @@ import {
 import { CobraLinkButton, CobraPrimaryButton, CobraTextField } from '@/theme/styledComponents'
 import type { MediaKind, StaffMediaAssetView } from '@/core/media'
 import type { Persona } from '@/features/personas'
-import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
+// The ONE media-URL allow-list in the app (delegates to F2's `resolveSafeMediaUrl`): https,
+// same-origin paths and same-origin blob URLs only - no credentials, control characters or
+// backslash tricks.
+import { safeImageUrl } from '@/features/social/utils/safeImageUrl'
+import { FIELD_SX, runSheetTokens } from './runSheetTokens'
 // C1's picker. Frozen props: see the module header. If C1 lands it at a different path,
 // this is the ONE import to change.
 import { MediaLibraryPicker } from '@/features/controller/media/MediaLibraryPicker'
+import { StaffDialog } from './StaffDialog'
 import { descendantIds, type BeatContent, type RunSheetData } from './runSheetModel'
 import {
   contentFromDraft,
@@ -90,23 +94,11 @@ export interface BeatEditorProps {
   readonly onCancel: () => void
 }
 
-/** Only `https:`, `blob:` and root-relative URLs ever reach an `<img src>` (URLs are opaque). */
-function safeImageSrc(url: string | undefined): string | undefined {
-  if (url === undefined) return undefined
-  if (url.startsWith('/') && !url.startsWith('//')) return url
-  try {
-    const protocol = new URL(url).protocol
-    return protocol === 'https:' || protocol === 'blob:' ? url : undefined
-  } catch {
-    return undefined
-  }
-}
-
 const SECTION_LABEL_SX = {
   fontSize: 11,
   fontWeight: 800,
   letterSpacing: '0.08em',
-  color: staffShellTokens.accent.secondaryText,
+  color: runSheetTokens.mutedText,
 } as const
 
 /** The kinds of the media the library knows, by id. */
@@ -179,7 +171,8 @@ export function BeatEditor({ data, beat, personas, library, onSave, onCancel }: 
   }
 
   return (
-    <Dialog
+    <StaffDialog
+      initialFocus="[data-initial-focus]"
       open
       onClose={onCancel}
       fullWidth
@@ -189,7 +182,7 @@ export function BeatEditor({ data, beat, personas, library, onSave, onCancel }: 
       <DialogTitle id={titleId} sx={{ fontSize: 15, fontWeight: 800, pb: 0.5 }}>
         {isEdit ? 'Edit beat' : 'New beat'}
       </DialogTitle>
-      <DialogContent>
+      <DialogContent sx={FIELD_SX}>
         <Stack
           data-testid="beat-editor"
           // Keyboard-first (NFR-001): Ctrl/Cmd+Enter saves without leaving the field.
@@ -217,7 +210,7 @@ export function BeatEditor({ data, beat, personas, library, onSave, onCancel }: 
             size="small"
             fullWidth
             required
-            autoFocus
+            slotProps={{ htmlInput: { 'data-initial-focus': '' } }}
             value={draft.title}
             onChange={event => update({ title: event.target.value })}
             error={shown.title !== undefined}
@@ -298,7 +291,7 @@ export function BeatEditor({ data, beat, personas, library, onSave, onCancel }: 
               m: 0,
               p: 1.25,
               gap: 1,
-              border: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
+              border: `1px solid ${runSheetTokens.hairline}`,
               borderRadius: '6px',
               minWidth: 0,
             }}
@@ -325,7 +318,7 @@ export function BeatEditor({ data, beat, personas, library, onSave, onCancel }: 
                 </Box>
               ))}
               {draft.media.length > 0 && (
-                <Typography sx={{ fontSize: 12, color: staffShellTokens.accent.secondaryText }}>
+                <Typography sx={{ fontSize: 12, color: runSheetTokens.mutedText }}>
                   Remove the attached media to switch type.
                 </Typography>
               )}
@@ -349,7 +342,7 @@ export function BeatEditor({ data, beat, personas, library, onSave, onCancel }: 
                 {draft.media.map((item, index) => {
                   const asset = library?.get(item.mediaId)
                   const missing = library !== undefined && asset === undefined
-                  const src = safeImageSrc(asset?.kind === 'video' ? asset.posterUrl : asset?.url)
+                  const src = safeImageUrl(asset?.kind === 'video' ? asset.posterUrl : asset?.url)
                   const altError = shown[`media.${index}.alt`]
                   return (
                     <Stack
@@ -365,8 +358,8 @@ export function BeatEditor({ data, beat, personas, library, onSave, onCancel }: 
                           height: 56,
                           borderRadius: '4px',
                           overflow: 'hidden',
-                          border: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
-                          bgcolor: staffShellTokens.workArea.background,
+                          border: `1px solid ${runSheetTokens.hairline}`,
+                          bgcolor: runSheetTokens.workArea,
                         }}
                       >
                         {src !== undefined && (
@@ -527,7 +520,7 @@ export function BeatEditor({ data, beat, personas, library, onSave, onCancel }: 
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Typography sx={{ flex: 1, fontSize: 12, color: staffShellTokens.accent.secondaryText }}>
+        <Typography sx={{ flex: 1, fontSize: 12, color: runSheetTokens.mutedText }}>
           Ctrl+Enter saves, Esc cancels.
         </Typography>
         <CobraLinkButton onClick={onCancel}>Cancel</CobraLinkButton>
@@ -535,6 +528,6 @@ export function BeatEditor({ data, beat, personas, library, onSave, onCancel }: 
           Save beat
         </CobraPrimaryButton>
       </DialogActions>
-    </Dialog>
+    </StaffDialog>
   )
 }

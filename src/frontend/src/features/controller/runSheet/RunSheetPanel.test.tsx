@@ -23,7 +23,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { resetTelemetryBuffer } from '@/core/telemetry'
+import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { postStore } from '@/features/social/services/postStore'
 import type { MediaKind } from '@/core/media'
 
@@ -80,7 +80,12 @@ vi.mock('./runSheetFileIO', async importOriginal => ({
 
 import { downloadTextFile } from './runSheetFileIO'
 import { RunSheetPanel } from './RunSheetPanel'
-import { readStoredSheet, runSheetBackupKey, runSheetStorageKey } from './runSheetStorage'
+import {
+  readStoredSheet,
+  runSheetBackupKey,
+  runSheetStorageKey,
+  writeStoredSheet,
+} from './runSheetStorage'
 import { resetRunSheetStoreForTests } from './runSheetStore'
 import { runtimeOf, type RunSheetData } from './runSheetModel'
 import { parseRunSheetFile, serializeRunSheetFile } from './runSheetSchema'
@@ -88,6 +93,7 @@ import {
   MOCK_ACTING_HUMAN_ID,
   MOCK_EXERCISE_ID,
   beatFixture,
+  contrastRatio,
   renderStaff,
   resetRunSheetWorld,
   seedStoredSheet,
@@ -446,6 +452,9 @@ describe('RunSheetPanel - persistence (AC "Persisted per exercise")', () => {
     const warning = await screen.findByTestId('run-sheet-storage-warning')
     expect(warning).toHaveAttribute('role', 'alert')
     expect(warning).toHaveTextContent(/could not be saved to browser storage/)
+    // Honest about what Export carries: beats, not fired status (Gate-1 L-3).
+    expect(warning).toHaveTextContent('Export keeps your beats but NOT which have been fired')
+    expect(warning).toHaveTextContent('every beat shows as Pending')
     expect(within(row('beat-1')).getByText('Unsaved but kept')).toBeInTheDocument()
   })
 
@@ -1164,5 +1173,178 @@ describe('RunSheetPanel - keyboard (AC "Keyboard (NFR-001)")', () => {
     for (const name of ['Add beat', 'Import', 'Export', 'Sort by T+']) {
       expect(screen.getByRole('button', { name })).toBeInTheDocument()
     }
+  })
+})
+
+describe('RunSheetPanel - Gate-1 folds', () => {
+  const importFile = (text: string, name = 'demo.runsheet.json') =>
+    fireEvent.change(screen.getByTestId('run-sheet-import-input'), {
+      target: { files: [new File([text], name, { type: 'application/json' })] },
+    })
+
+  describe('contrast (H-1, H-2), measured on the rendered DOM', () => {
+    it('the "N" hint inside Fire next takes the button\'s colours, not the grey keycap surface', async () => {
+      await mountPanel(TWO_BEATS())
+      const button = screen.getByRole('button', { name: /^Fire next/ })
+      const hint = button.querySelector('kbd')
+      expect(hint).not.toBeNull()
+      if (hint === null) return
+      const hintStyle = getComputedStyle(hint)
+      const buttonStyle = getComputedStyle(button)
+      // Transparent, so the cobalt button shows through; the text is the button's own white.
+      expect(hintStyle.backgroundColor).toBe('rgba(0, 0, 0, 0)')
+      expect(hintStyle.color).toBe(buttonStyle.color)
+      expect(contrastRatio(hintStyle.color, buttonStyle.backgroundColor))
+        .toBeGreaterThanOrEqual(4.5)
+      // The bug it replaces: that text on the #f8f8f8 keycap surface was 1.06:1.
+      expect(contrastRatio(hintStyle.color, '#f8f8f8')).toBeLessThan(1.2)
+    })
+
+    it('the Skipped chip is #4a4f55: AA on the white panel and on the selected row', async () => {
+      const { user } = await mountPanel(sheetFixture([
+        beatFixture({ id: 'a', order: 1 }),
+        beatFixture({ id: 'b', order: 2 }),
+      ], { a: { status: 'skipped', skippedFrom: 'pending' } }))
+      const chip = statusOf('a')
+      expect(getComputedStyle(chip).color).toBe('rgb(74, 79, 85)')
+      expect(contrastRatio(getComputedStyle(chip).color, '#ffffff')).toBeGreaterThanOrEqual(4.5)
+      await selectRow(user, 'a')
+      expect(contrastRatio(getComputedStyle(statusOf('a')).color, getComputedStyle(row('a')).backgroundColor))
+        .toBeGreaterThanOrEqual(4.5)
+    })
+
+    it('small informational text (counts, next up, legend) is the AA muted colour', async () => {
+      await mountPanel(TWO_BEATS())
+      for (const element of [
+        screen.getByTestId('run-sheet-counts'),
+        screen.getByTestId('run-sheet-next-up'),
+        screen.getByTestId('run-sheet-keyboard-help'),
+      ]) {
+        expect(getComputedStyle(element).color).toBe('rgb(74, 79, 85)')
+      }
+      expect(getComputedStyle(within(row('b1')).getByTestId('beat-minute')).color).not.toBe('rgb(132, 132, 130)')
+    })
+  })
+
+  describe('M-1: a new beat goes at the end of an imported sheet', () => {
+    it('after importing orders 10 and 20, an added beat is last and Fire next still fires the first', async () => {
+      const { user } = await mountPanel()
+      importFile(serializeRunSheetFile({
+        name: 'Sparse orders',
+        beats: [
+          beatFixture({ id: 'x10', order: 10, title: 'Ten' }),
+          beatFixture({ id: 'x20', order: 20, title: 'Twenty' }),
+        ],
+      }))
+      await screen.findByTestId('beat-row-x10')
+
+      await user.click(screen.getByRole('button', { name: 'Add beat' }))
+      const dialog = await screen.findByRole('dialog')
+      await user.type(within(dialog).getByLabelText(/^Title/), 'Added later')
+      await user.selectOptions(within(dialog).getByLabelText(/^Persona/), 'FulcoEM')
+      await user.type(within(dialog).getByLabelText('Text'), 'Late addition.')
+      await user.click(within(dialog).getByRole('button', { name: 'Save beat' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+      expect(storedData().beats.map(b => [b.title, b.order])).toEqual([
+        ['Ten', 1],
+        ['Twenty', 2],
+        ['Added later', 3],
+      ])
+      await user.click(screen.getByRole('button', { name: /^Fire next/ }))
+      await waitFor(() => expect(statusOf('x10')).toHaveTextContent('Fired'))
+      const added = storedData().beats[2]?.id ?? ''
+      expect(statusOf(added)).toHaveTextContent('Pending')
+    })
+  })
+
+  describe('M-2: a fire in flight blocks replacing the sheet', () => {
+    it('refuses the replace if a fire started elsewhere between choosing the file and confirming', async () => {
+      const { user } = await mountPanel(TWO_BEATS())
+      importFile(serializeRunSheetFile({
+        name: 'Replacement',
+        beats: [beatFixture({ id: 'only', order: 1, title: 'Only beat' })],
+      }))
+      const dialog = await screen.findByRole('dialog', { name: 'Replace the current run sheet?' })
+
+      // Another tab claims the fire slot while the dialog is open.
+      writeStoredSheet(MOCK_EXERCISE_ID, {
+        ...TWO_BEATS(),
+        runtime: { b1: { status: 'pending', inFlight: true, attemptId: 'other-tab' } },
+      })
+      await user.click(within(dialog).getByRole('button', { name: 'Replace sheet' }))
+
+      const alert = await screen.findByTestId('run-sheet-import-error')
+      expect(alert).toHaveTextContent('Import refused: A beat is firing right now.')
+      expect(alert).toHaveTextContent('Nothing was changed.')
+      expect(storedData().beats.map(b => b.id)).toEqual(['b1', 'b2'])
+      expect(storedData().runtime.b1?.inFlight).toBe(true)
+    })
+
+    it('disables Import while a beat is firing here', async () => {
+      await mountPanel(sheetFixture([beatFixture({ id: 'a', order: 1 })], {
+        a: { status: 'pending', inFlight: true, attemptId: 'other-tab' },
+      }))
+      // A marker left by a dead page is settled on load; a LIVE marker from another tab is not.
+      writeStoredSheet(MOCK_EXERCISE_ID, sheetFixture([beatFixture({ id: 'a', order: 1 })], {
+        a: { status: 'pending', inFlight: true, attemptId: 'live-elsewhere' },
+      }))
+      fireEvent(window, new StorageEvent('storage', { key: runSheetStorageKey(MOCK_EXERCISE_ID) }))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled())
+    })
+  })
+
+  describe('M-6: telemetry', () => {
+    it('a mock-mode fire emits exactly ONE event (the post), and a reply fire one more', async () => {
+      const { user } = await mountPanel(sheetFixture([
+        beatFixture({ id: 'p', order: 1, title: 'Parent', persona: { handle: 'tbrandt41' } }),
+        beatFixture({
+          id: 'c',
+          order: 2,
+          title: 'Child',
+          persona: { handle: 'mvega_fh' },
+          replyTo: { beatId: 'p' },
+        }),
+      ]))
+      expect(getEmittedTelemetryEvents()).toHaveLength(0)
+      await selectRow(user, 'p')
+      await user.keyboard('f')
+      await waitFor(() => expect(statusOf('p')).toHaveTextContent('Fired'))
+      expect(getEmittedTelemetryEvents()).toHaveLength(1)
+      expect(getEmittedTelemetryEvents()[0]).toMatchObject({
+        eventType: 'post',
+        origin: 'controller-as-persona',
+      })
+
+      await selectRow(user, 'c')
+      await user.keyboard('f')
+      await waitFor(() => expect(statusOf('c')).toHaveTextContent('Fired'))
+      expect(getEmittedTelemetryEvents()).toHaveLength(2)
+      expect(getEmittedTelemetryEvents()[1]).toMatchObject({ eventType: 'reply' })
+    })
+
+    it('authoring, skipping, importing and exporting emit no telemetry', async () => {
+      const { user } = await mountPanel(TWO_BEATS())
+      await selectRow(user, 'b1')
+      await user.keyboard('s')
+      await user.keyboard('s')
+      await user.click(screen.getByRole('button', { name: 'Export' }))
+      await user.click(within(row('b1')).getByRole('button', { name: 'Duplicate' }))
+      expect(getEmittedTelemetryEvents()).toHaveLength(0)
+    })
+  })
+
+  describe('M-4 / L-6 wiring', () => {
+    it('announces a failure ONCE: the alert carries it and the polite status region is cleared', async () => {
+      const { user } = await mountPanel(sheetFixture([
+        beatFixture({ id: 'm', order: 1, title: 'Bad media', media: [{ mediaId: 'nope', alt: 'A photo' }] }),
+      ]))
+      await selectRow(user, 'm')
+      await user.keyboard('f')
+      await waitFor(() => expect(statusOf('m')).toHaveTextContent('Failed'))
+      expect(screen.getByTestId('run-sheet-alert')).toHaveTextContent('Failed: "Bad media"')
+      expect(liveStatus()).toHaveTextContent('')
+      expect(liveStatus().textContent).toBe('')
+    })
   })
 })
