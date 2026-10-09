@@ -265,7 +265,7 @@ public sealed class CreatePostRequest   // existing members unchanged; Media cha
 {
     public IReadOnlyList<CreatePostMediaRequest>? Media { get; init; }   // <=4 images OR exactly 1 video; never mixed
     public string? ParentPostId { get; init; }                           // reply; resolved by IReplyParentResolver
-    public EngagementBaselineRequest? EngagementBaseline { get; init; }  // STAFF controller-as-persona only; ignored for participants
+    public EngagementBaselineRequest? EngagementBaseline { get; init; }  // STAFF controller-as-persona, or in-process inject (IQ-10, #458); ignored for participants
 }
 ```
 

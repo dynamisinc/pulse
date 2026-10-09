@@ -1,6 +1,6 @@
 # Story: Scripted posts — server-side inject queue (demo slice)
 
-**Feature:** Inject queue & conduct timeline  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Review (PR #458, draft until #449)
+**Feature:** Inject queue & conduct timeline  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Review (PR #458)
 **Requirements:** CTL-010 (lite), CTL-011, CTL-014 (lite), COR-001, COR-018, COR-053, XC-002, XC-004, XC-010, NFR-004  ·  **Design decisions:** IQ-1…IQ-10 (implementation.md § Demo slice)  ·  **Issue:** #452
 **Story ID:** IQ-B  ·  **Stack:** backend  ·  **Priority:** Must (Oct 20 demo)  ·  **Effort:** L
 **Home stories:** [`01`](01-conduct-timeline.md) (list + status, no timeline rail), [`02`](02-fire-hold-skip-edit.md) (single-item fire/hold/skip/edit; no multi-select batch), [`04`](04-timed-bursts.md) (bursts, fixed ~90 s window). **Replaces** demo-polish [`C3`](../demo-polish/19-run-sheet.md)'s browser-only run sheet (#438).
@@ -126,14 +126,14 @@ the existing funnel and projection.
   - Plus one migration.
   - The `Program.cs` `AddInjects()`/`MapInjects()` lines are **orchestrator-owned**: this story's orchestrator adds
     them in the same PR, and the composition-root test guards them.
-- **Do not edit** `PostIngestService.cs`, `PostWriteEndpoints.cs` or `CreatePostRequest`: demo-polish BP owns them in
-  this push.
-  - Fire builds a `CreatePostRequest` + `PostAttribution` and calls `IngestAsync`.
-  - Media / `ParentPostId` / `EngagementBaseline` are mapped onto BP's typed members (implementation.md §1.5.2) once BP
-    merges. Until then a text-only mapping compiles, and the media/reply/baseline paths are covered by tests that are
-    enabled when BP lands.
-- **Amendment needed in BP (#425).** Honour `engagementBaseline` for origin `inject` as well as `controller-as-persona`.
-  Keep media / reply / baseline handling **inside `IngestAsync`** so in-process callers get identical validation.
+- **Ingest funnel.** Fire builds a `CreatePostRequest` + `PostAttribution` and calls `IngestAsync`. Media,
+  `ParentPostId` and `EngagementBaseline` map onto BP's typed members (demo-polish implementation.md §1.5.2) in
+  `InjectPostRequestFactory`. A tripwire test fails if BP's members exist but go unmapped.
+- **Landed 2026-10-09 (after BP #459 merged).** BP did not take the baseline amendment, so this story made the one
+  cross-team edit to `PostIngestService.cs`: `engagementBaseline` is honoured for origin `inject` as well as
+  `controller-as-persona` (a participant baseline is still ignored, and `engine` gets none). Tests sit beside BP's
+  baseline tests. Media, reply and baseline handling stay inside `IngestAsync`, so the in-process fire gets HTTP's
+  validation. Media ids and `replyTo.postId` are also validated at authoring, in the exercise-scoped reference phase.
 - **Reply to a scripted post** maps `replyTo.injectPostId` → that child's `FiredPostId` → `ParentPostId`, which B2's
   `IReplyParentResolver` resolves in scope.
 - **Concurrency.** Every state change bumps the item's integer `Version` (`IsConcurrencyToken`). A concurrent writer
