@@ -1,0 +1,30 @@
+{
+  "schema": "pulse.runsheet.v1",
+  "name": "Seed fixture run sheet",
+  "exportedAt": "2026-10-19T14:00:00.000Z",
+  "beats": [
+    {
+      "id": "beat-1",
+      "order": 1,
+      "title": "Newsline follows up on the road closure",
+      "scenarioMinute": 5,
+      "persona": {
+        "handle": "Newsline7"
+      },
+      "text": "Test fixture beat: we are at the Harbor Road closure now. More shortly.",
+      "media": [
+        {
+          "mediaId": "5eed0000-0000-4000-8000-00000000a001",
+          "alt": "Test pattern standing in for a photo of standing water on a harbor road."
+        }
+      ],
+      "replyTo": {
+        "postId": "5eed0000-0000-4000-8000-00000000b002"
+      },
+      "engagementBaseline": {
+        "like": 20
+      },
+      "notes": "Fixture only. Fire after the participant's first post."
+    }
+  ]
+}

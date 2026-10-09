@@ -102,6 +102,24 @@
  * The palette-open state is unified with the "Personas" tool's active state so
  * the toolstrip button reflects the palette being open (one extension point).
  *
+ * ## ⌘K yields to other modals (demo-polish integration, Wave 3 Gate-2 L-11)
+ * The chord is IGNORED while any `[aria-modal="true"]` layer outside the console is
+ * mounted - a run-sheet dialog, PE-FE's persona edit dialog, the pause-tier popover, any
+ * shell-level overlay that declares itself modal (`core/a11y/modalPriority.ts`
+ * `hasOtherModalMounted`, measured from the console root so the palette's own panel never
+ * counts). Opened over such a layer the palette would sit hidden behind it (same z-index,
+ * earlier in the DOM) while its focus-on-open fought that layer's focus trap. A layer that
+ * is deliberately NON-modal does not declare `aria-modal`, so ⌘K still works over it: C5's
+ * takedown step is one - the palette opens over it and focus landing there closes the step.
+ * (The shell's Pause / EndEx overlay is the participant `OverlayLayer`; it never mounts on
+ * /console, where the pause control is the pause-tier popover above.)
+ *
+ * ## `onDockClose` (the route's reply target)
+ * `ControllerConsoleRoute` holds the reply target of "Reply as…" and feeds it to the
+ * composer; this component reports back when an OPEN dock closes, for any reason (Esc /
+ * X, an ENGINE / USAGE flyout taking over, an exercise switch), so the target never
+ * outlives the dock that showed it.
+ *
  * World: staff (COBRA/Cadence) — everything here is COBRA chrome; the
  * participant OUTPUT (a published post) is `persona-operation`'s / the engine
  * review queue's via `createPost` and is never drawn here. Never a participant
@@ -120,6 +138,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { useStaffPersonas, type StaffPersona } from '@/features/personas'
 import { useExerciseContext } from '@/core/exerciseContext'
+import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { useRegisterSurfaceTool, useToolstrip } from '@/features/staffShell/toolRegistry'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import { useControllerIdentity } from '../identity/controllerIdentity'
@@ -292,15 +311,26 @@ export interface ControllerConsoleProps {
    * `/console` route. Right column of the main-area split. Absent = not rendered.
    */
   runSheetSlot?: (ctx: ConsoleSlotContext) => ReactNode
+  /**
+   * Called when an OPEN persona dock closes, for ANY reason: the operator's Esc / X, the
+   * ENGINE or USAGE flyout displacing it, or an exercise switch. It is never called for a
+   * dock that was not open, nor while the dock merely changes persona. The route uses it to
+   * drop the reply target it holds (the dock content is what showed that target, so it
+   * must not outlive the dock). Give it a stable identity (`useCallback`).
+   */
+  onDockClose?: () => void
 }
 
 export function ControllerConsole(
-  { renderPersonaResults, dockSlots, reviewEditSlot, liveWorldSlot, runSheetSlot }:
+  { renderPersonaResults, dockSlots, reviewEditSlot, liveWorldSlot, runSheetSlot, onDockClose }:
   ControllerConsoleProps = {},
 ) {
   const identity = useControllerIdentity()
   const { exerciseId, timeZone } = useExerciseContext()
   const { isActive, toggleTool } = useToolstrip()
+  // The console's root element: the reference point for "is some OTHER modal on top of
+  // the console?" (see the ⌘K handler below).
+  const rootRef = useRef<HTMLDivElement | null>(null)
 
   // The engine-review-cockpit's own continuous-watch inputs (D5-017 permanent
   // column, not a toolstrip flyout). `useReviewQueue()`/`useEngineControl()`/
@@ -385,10 +415,20 @@ export function ControllerConsole(
     if (isActive(PERSONAS_TOOL_ID)) toggleTool(PERSONAS_TOOL_ID)
   }, [isActive, toggleTool])
 
+  // ⌘K / Ctrl+K toggles the palette - UNLESS another modal layer is up (a run-sheet
+  // dialog, the persona edit dialog, the pause-tier popover: anything declaring aria-modal).
+  // The palette is a hand-built fixed layer at the same z-index as MUI's modals, so
+  // opening it over one would put it BEHIND the dialog (hidden), while its focus-on-open
+  // fought the dialog's focus trap (core/a11y/modalPriority.ts). The chord is still
+  // swallowed (`preventDefault`) so the browser's own Ctrl+K does not fire in its place.
+  // The palette's own panel sits inside `rootRef`, so it never counts as "another" modal:
+  // with only the palette open, the chord still closes it.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && (event.key === 'k' || event.key === 'K')) {
         event.preventDefault()
+        const root = rootRef.current
+        if (root !== null && hasOtherModalMounted(root)) return
         toggleTool(PERSONAS_TOOL_ID)
       }
     }
@@ -469,6 +509,16 @@ export function ControllerConsole(
     if (engineSettingsOpen || engineUsageOpen) setDockPersonaId(null)
   }, [engineSettingsOpen, engineUsageOpen, setDockPersonaId])
 
+  // Tell the route when an OPEN dock closes, whatever closed it (`onDockClose`). Watching
+  // the RENDERED open flag - not `closeDock` - is what makes the ENGINE/USAGE takeover
+  // and the exercise switch count too; a dock that merely changes persona stays open and
+  // reports nothing.
+  const wasDockOpen = useRef(false)
+  useEffect(() => {
+    if (wasDockOpen.current && !dockPersonaOpen) onDockClose?.()
+    wasDockOpen.current = dockPersonaOpen
+  }, [dockPersonaOpen, onDockClose])
+
   // The context every main-area slot receives. `openComposer` is the ONE way a
   // slot (live-world "Reply as…", a run-sheet row, …) opens the persona dock:
   //   - resolve WHO: the requested `personaId`, else the persona already active,
@@ -516,10 +566,15 @@ export function ControllerConsole(
 
   return (
     <Box
+      ref={rootRef}
       data-testid="controller-console"
+      // The last-resort home for focus (`CommandPalette`'s fallback when the layer it was opened
+      // over has closed): focusable by script only, no tab stop, no ring on a container.
+      data-console-root=""
+      tabIndex={-1}
       // Positioning context for the console's own flyouts (persona-dock host),
       // anchored to the work area's edges — mirrors the evaluator dashboard page.
-      sx={{ position: 'relative', height: '100%', overflow: 'hidden' }}
+      sx={{ position: 'relative', height: '100%', overflow: 'hidden', outline: 'none' }}
     >
       <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* The engine-control chrome strip — full width, top of the work area

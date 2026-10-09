@@ -1,6 +1,6 @@
 # Story: Takedown UI and live feed removal
 
-**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** CTL-025, XC-010, XC-004, NFR-001  ·  **Design decisions:** DP-9 (implementation.md §0), D1-009, CTL-033 (absent, not disabled)  ·  **Issue:** #441
 **Story ID:** C5  ·  **Stack:** frontend  ·  **Priority:** Should  ·  **Effort:** S  ·  **Wave:** 3 (after C2, F2, F4, B6)
 **Home story:** [`world-steering/05`](../world-steering/05-content-takedown.md) (slice).

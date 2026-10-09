@@ -1,6 +1,6 @@
 # Story: Seed script (demo content through the public APIs)
 
-**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** CTL-001, COR-023 (backdated history), COR-024, XC-004  ·  **Design decisions:** plan §2.5 (seed late, through the product)  ·  **Issue:** #443
 **Story ID:** S1  ·  **Stack:** script (PowerShell 7)  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** seed (Fri 10/16 → Sun 10/18; written after the backend freeze)
 **Home story:** — (no existing backlog story; extends the `scripts/uat` toolbox).
@@ -25,7 +25,7 @@ so content work never collides with the backend freeze (plan §2.5). Pack format
       `/api/staff/media`, `/api/media`, `/api/personas`, `/api/staff/personas/{id}`, `/api/posts`, `/api/feed`;
       a test greps the script for any other `/api/` path or `sqlcmd`/SQL and fails.
 - [ ] **Engine paused by default (Decision 4).** After seeding, and unless `-LeaveEngineRunning` is passed, it
-      calls `POST /api/steering/pause-tier` with `{"tier":"engine"}` as the controller and reports the applied
+      calls `POST /api/steering/pause-tier` with `{"tier":"engine","actingHumanId":…,"timeZone":…}` (the server 400s without a non-blank `actingHumanId`; the script sends the login session's) as the controller, before posting as well as after (so the engine cannot react to the seed posts) and reports the applied
       tier. The tier lives in memory and every reset or restart sets it back to `running`, so the run-of-show
       repeats this after any reset.
 - [ ] **Validate first, write nothing on error.** It validates the whole pack (§1.10 rules: unique keys,

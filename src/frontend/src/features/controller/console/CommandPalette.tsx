@@ -26,6 +26,15 @@
  * or the "Personas" toolstrip button), captured on open. Every step
  * (open → type → select) is reachable without a pointer.
  *
+ * ## Stands aside for other modals (core/a11y/modalPriority.ts)
+ * The palette is a channel-level layer, so it follows the product's one-way modal rule:
+ * while any OTHER `[aria-modal="true"]` element is mounted (a dialog opened over it, a
+ * shell-level overlay that declares itself modal) it does not fight for focus - no Tab cycling,
+ * and no focus-on-open. (Its trap is a Tab handler on its own panel, not a pull-back, so it
+ * cannot ping-pong with MUI's trap; this keeps a dialog rendered inside the palette's
+ * React tree from having its Tab presses hijacked.) The console's ⌘K handler additionally
+ * refuses to OPEN the palette over another modal - see `ControllerConsole`.
+ *
  * ## What this file does NOT own
  * The ⌘K key binding + open/close state live in `ControllerConsole` (the
  * composition owner); this component is a controlled overlay (`open`/`onClose`).
@@ -39,6 +48,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faMagnifyingGlass, faMasksTheater } from '@fortawesome/free-solid-svg-icons'
+import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { CobraTextField } from '@/theme/styledComponents'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 
@@ -46,6 +56,37 @@ import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), ' +
   'input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+/** The palette's own panel, so focus tracking can tell "inside the palette" from "before it". */
+const PALETTE_SELECTOR = '[data-command-palette]'
+
+/** True when keyboard focus has nowhere useful to be: on <body>, nothing, or a detached node. */
+function focusIsLost(): boolean {
+  const active = document.activeElement
+  return active === null || active === document.body || !active.isConnected
+}
+
+/**
+ * The elements focus may return to, best first, when the opener is gone by the time the palette
+ * closes. Captured when it OPENS, while they all still exist:
+ *  1. the control the opener's layer names as its home (`data-focus-return-to="<id>"` on the
+ *     layer: a popup that closes itself when focus leaves it points back at its own button);
+ *  2. the Live world row that control sits in;
+ *  3. the console root (`data-console-root`), a stable region around everything.
+ */
+function focusFallbacks(opener: Element | null, panel: Element | null): readonly Element[] {
+  const found: Element[] = []
+  const homeId = opener?.closest('[data-focus-return-to]')?.getAttribute('data-focus-return-to')
+  const home = homeId ? document.getElementById(homeId) : null
+  if (home !== null) {
+    found.push(home)
+    const row = home.closest('[data-live-world-row]')
+    if (row !== null) found.push(row)
+  }
+  const root = panel?.closest('[data-console-root]') ?? document.querySelector('[data-console-root]')
+  if (root !== null) found.push(root)
+  return found
+}
 
 /**
  * The context the PERSONAS-section slot receives: the live search `query` and
@@ -94,20 +135,62 @@ export function CommandPalette({
   const panelRef = useRef<HTMLDivElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const triggerRef = useRef<Element | null>(null)
+  // Where focus goes if the trigger is GONE by the time the palette closes (see below).
+  const fallbacksRef = useRef<readonly Element[]>([])
+
+  // The element that had focus BEFORE the palette opened, tracked while it is closed. It cannot be
+  // read from `document.activeElement` when the open effect runs: the persona picker inside the
+  // palette autofocuses its own search field during the same commit, so by then focus is already
+  // in the palette and the real opener would be lost (which is why Esc used to drop focus to
+  // <body> in the console). Focus that lands INSIDE the palette is ignored.
+  const lastOutsideFocusRef = useRef<Element | null>(null)
+  useEffect(() => {
+    const outside = (node: EventTarget | null): node is Element =>
+      node instanceof Element && node.closest(PALETTE_SELECTOR) === null
+    const active = document.activeElement
+    lastOutsideFocusRef.current = outside(active) ? active : null
+    const onFocusIn = (event: FocusEvent) => {
+      if (outside(event.target)) lastOutsideFocusRef.current = event.target
+    }
+    const onFocusOut = (event: FocusEvent) => {
+      // Focus left to nowhere (a click on bare page, a removed node): nothing to return to.
+      if (event.relatedTarget === null && outside(event.target)) lastOutsideFocusRef.current = null
+    }
+    document.addEventListener('focusin', onFocusIn)
+    document.addEventListener('focusout', onFocusOut)
+    return () => {
+      document.removeEventListener('focusin', onFocusIn)
+      document.removeEventListener('focusout', onFocusOut)
+    }
+  }, [])
 
   // Open: capture the trigger, reset the query, and move focus into the field.
-  // Close (cleanup): return focus to the trigger if still in the document.
+  // Close (cleanup): return focus to the trigger if still in the document - and if it is gone
+  // (it lived in a layer that closed because focus moved here, e.g. C5's takedown step), to the
+  // next best stable place, never <body> (Gate-2 A L-NEW-3): the control that layer says it
+  // belongs to (`data-focus-return-to`, an element id), then the Live world row holding it, then
+  // the console root.
   useEffect(() => {
     if (!open) return
-    triggerRef.current = document.activeElement
+    const opener = lastOutsideFocusRef.current
+    triggerRef.current = opener
+    const panel = panelRef.current
+    fallbacksRef.current = focusFallbacks(opener, panel)
     setQuery('')
-    searchInputRef.current?.focus()
+    if (panel === null || !hasOtherModalMounted(panel)) searchInputRef.current?.focus()
     return () => {
       const trigger = triggerRef.current
       if (trigger instanceof HTMLElement && trigger.isConnected) {
         trigger.focus()
+      } else if (focusIsLost()) {
+        const fallback = fallbacksRef.current.find(
+          (candidate): candidate is HTMLElement =>
+            candidate instanceof HTMLElement && candidate.isConnected,
+        )
+        fallback?.focus({ preventScroll: true })
       }
       triggerRef.current = null
+      fallbacksRef.current = []
     }
   }, [open])
 
@@ -128,6 +211,8 @@ export function CommandPalette({
 
     const panel = panelRef.current
     if (!panel) return
+    // Another modal is on top: its focus is its own business (see module header).
+    if (hasOtherModalMounted(panel)) return
     const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
     if (focusable.length === 0) {
       // Nothing else to focus — keep focus inside the panel.
@@ -175,6 +260,7 @@ export function CommandPalette({
         role="dialog"
         aria-modal="true"
         aria-label="Console command palette"
+        data-command-palette=""
         data-testid="command-palette"
         onKeyDown={handleKeyDown}
         sx={{
