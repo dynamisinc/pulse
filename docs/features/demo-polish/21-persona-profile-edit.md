@@ -1,6 +1,6 @@
 # Story: Persona profile edit (staff)
 
-**Feature:** Demo polish  ·  **Epic:** E1 / E7  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Demo polish  ·  **Epic:** E1 / E7  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-020, COR-022 (edit, not create), COR-024, NFR-004, XC-001, XC-002  ·  **Design decisions:** DP-4, DP-9 (implementation.md §0), D1-008  ·  **Issue:** #440
 **Story ID:** PE  ·  **Stack:** fullstack (BE half **PE-BE** in Wave 2; FE half **PE-FE** in Wave 3)  ·  **Priority:** Should  ·  **Effort:** M  ·  **Review:** Tier 1
 **Home stories:** [`persona-management/03`](../persona-management/03-mid-exercise-persona-creation.md) (slice — edit only), [`persona-management/05`](../persona-management/05-avatar-library.md).

@@ -58,8 +58,8 @@ Order = wave order. Priorities and effort are the plan's (§5). *Home story* is 
 | 18 | [Live world column](18-live-world-column.md) | C2 | Must | frontend | 3 | CTL-030, CTL-031 | In Review | #437 |
 | 19 | [Run sheet](19-run-sheet.md) | C3 | Must | frontend | 3 | CTL-010, CTL-011, CTL-013 | In Review | #438 |
 | 20 | [Console cleanup](20-console-cleanup.md) | C4 | Must | frontend | 3 | CTL-002, CTL-003 | In Review | #439 |
-| 21 | [Persona profile edit](21-persona-profile-edit.md) | PE | Should | fullstack | 2 (BE) / 3 (FE) | COR-020, COR-022, COR-024 | In Progress | #440 |
-| 22 | [Takedown UI and live feed removal](22-takedown-ui.md) | C5 | Should | frontend | 3 | CTL-025, XC-010 | In Progress | #441 |
+| 21 | [Persona profile edit](21-persona-profile-edit.md) | PE | Should | fullstack | 2 (BE) / 3 (FE) | COR-020, COR-022, COR-024 | In Review | #440 |
+| 22 | [Takedown UI and live feed removal](22-takedown-ui.md) | C5 | Should | frontend | 3 | CTL-025, XC-010 | In Review | #441 |
 | 23 | [Preview-as-participant and StartEx/EndEx](23-preview-and-startex.md) | C6 | Could | frontend | 3 | COR-041, COR-054 | Not Started | #442 |
 | 24 | [Seed script](24-seed-script.md) | S1 | Must | script | seed | CTL-001, COR-023 | In Progress | #443 |
 | 25 | [Content pack authoring](25-content-pack-authoring.md) | S2 | Must | content | seed | COR-023, XC-009 | Not Started | #444 |
