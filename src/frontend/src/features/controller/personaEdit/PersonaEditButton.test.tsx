@@ -1107,6 +1107,60 @@ describe('the console\'s global chords stay out of the dialogs (Gate-1 M-2)', ()
     expect(screen.getByRole('dialog', { name: 'Edit persona' })).toBeInTheDocument()
   })
 
+  // Gate-1 M-2r: MUI parks focus on `.MuiDialog-container` (the form's PARENT) whenever the
+  // focused control unmounts or is disabled, and a key pressed there never passes through the
+  // form. The guard therefore lives on the Dialog ROOT.
+  const dialogContainer = () => {
+    const container = document.querySelector('.MuiDialog-container')
+    if (!(container instanceof HTMLElement)) throw new Error('no dialog container')
+    return container
+  }
+
+  it('Ctrl+K is swallowed with focus PARKED on the dialog container, not only inside the form', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+
+    dialogContainer().focus()
+    expect(dialogContainer()).toHaveFocus()
+    await user.keyboard('{Control>}k{/Control}')
+    await user.keyboard('{Meta>}k{/Meta}')
+
+    expect(palette).not.toHaveBeenCalled()
+    expect(fireEvent.keyDown(dialogContainer(), { key: 'k', ctrlKey: true })).toBe(false)
+    expect(screen.getByRole('dialog', { name: 'Edit persona' })).toBeInTheDocument()
+  })
+
+  it('Ctrl+K stays swallowed right after Remove avatar, and while a save is in flight', async () => {
+    let finish: (updated: StaffPersona) => void = () => undefined
+    mockedPatch.mockImplementationOnce(
+      () => new Promise<StaffPersona>(resolve => {
+        finish = resolve
+      }),
+    )
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+
+    await user.click(
+      within(screen.getByTestId('persona-edit-avatar')).getByRole('button', { name: /remove avatar/i }),
+    )
+    await user.keyboard('{Control>}k{/Control}')
+    expect(palette).not.toHaveBeenCalled()
+
+    // Saving disables the focused Save button, so focus is parked again.
+    await user.click(saveButton())
+    expect(saveButton()).toBeDisabled()
+    dialogContainer().focus()
+    await user.keyboard('{Control>}k{/Control}')
+    expect(palette).not.toHaveBeenCalled()
+
+    await act(async () => {
+      finish({ ...seeded(WATER_ID) })
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
   it('... nor from the Verified confirmation or the discard question', async () => {
     const user = userEvent.setup()
     await renderPersonaEdit(seeded(WATER_ID))
@@ -1235,5 +1289,103 @@ describe('a cancelled upload is never applied (ImageChooser race)', () => {
     })
     expect(await within(group).findByRole('img', { name: /avatar preview/i }))
       .toHaveAttribute('src', PLANT_URL)
+  })
+})
+
+describe('focus continuity in the image chooser (Gate-1 L-focus)', () => {
+  const group = (slot: 'avatar' | 'banner' = 'avatar') => screen.getByTestId(`persona-edit-${slot}`)
+  const remove = (slot: 'avatar' | 'banner' = 'avatar') =>
+    within(group(slot)).getByRole('button', { name: new RegExp(`remove ${slot}`, 'i') })
+  const undo = (slot: 'avatar' | 'banner' = 'avatar') =>
+    within(group(slot)).getByRole('button', { name: new RegExp(`undo ${slot} change`, 'i') })
+
+  it('Remove -> focus moves to Undo (the Remove button is gone)', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+
+    await user.click(remove())
+
+    expect(within(group()).queryByRole('button', { name: /remove avatar/i })).not.toBeInTheDocument()
+    expect(undo()).toHaveFocus()
+    expect(group().contains(document.activeElement)).toBe(true)
+  })
+
+  it('Undo -> focus moves back to Remove', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+    await user.click(remove())
+    expect(undo()).toHaveFocus()
+
+    await user.click(undo())
+
+    expect(remove()).toHaveFocus()
+    expect(within(group()).queryByRole('button', { name: /undo avatar change/i })).not.toBeInTheDocument()
+  })
+
+  it('a library pick (the picker closes) -> focus moves to Undo', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(TOM_ID))
+    await openDialog(user)
+    await user.click(within(group()).getByRole('button', { name: /choose from library/i }))
+    await user.click(screen.getByRole('button', { name: 'pick flood' }))
+
+    expect(screen.queryByTestId('fake-picker')).not.toBeInTheDocument()
+    expect(undo()).toHaveFocus()
+  })
+
+  it('works for the banner too', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(WATER_ID))
+    await openDialog(user)
+    await user.click(remove('banner'))
+    expect(undo('banner')).toHaveFocus()
+    await user.click(undo('banner'))
+    expect(remove('banner')).toHaveFocus()
+  })
+
+  it('Cancel upload (the Cancel button is gone) -> focus returns to "Upload image…"', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(TOM_ID))
+    await openDialog(user)
+    await user.upload(screen.getByTestId('persona-edit-avatar-file'), fakeFile('p.png', 'image/png'))
+    await within(group()).findByRole('progressbar')
+
+    await user.click(within(group()).getByRole('button', { name: /cancel upload/i }))
+
+    await waitFor(() => expect(within(group()).queryByRole('progressbar')).not.toBeInTheDocument())
+    expect(within(group()).getByRole('button', { name: /upload image/i })).toHaveFocus()
+  })
+
+  it('a finished upload -> focus moves to Undo ...', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(TOM_ID))
+    await openDialog(user)
+    await user.upload(screen.getByTestId('persona-edit-avatar-file'), fakeFile('p.png', 'image/png'))
+    await within(group()).findByRole('progressbar')
+
+    act(() => {
+      uploader.byName('p.png').resolve({ url: PLANT_URL })
+    })
+
+    await waitFor(() => expect(undo()).toHaveFocus())
+  })
+
+  it('... but never steals focus from a field the controller moved to while it uploaded', async () => {
+    const user = userEvent.setup()
+    await renderPersonaEdit(seeded(TOM_ID))
+    await openDialog(user)
+    await user.upload(screen.getByTestId('persona-edit-avatar-file'), fakeFile('p.png', 'image/png'))
+    await within(group()).findByRole('progressbar')
+    await user.click(field(/^location/i))
+    expect(field(/^location/i)).toHaveFocus()
+
+    act(() => {
+      uploader.byName('p.png').resolve({ url: PLANT_URL })
+    })
+
+    await waitFor(() => expect(within(group()).getByRole('img', { name: /preview/i })).toBeInTheDocument())
+    expect(field(/^location/i)).toHaveFocus()
   })
 })

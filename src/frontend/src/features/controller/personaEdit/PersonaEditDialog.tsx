@@ -247,8 +247,6 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     // Only keys pressed inside THIS dialog (React events also bubble out of portals).
     if (!event.currentTarget.contains(event.target as Node)) return
-    // The console's global ⌘K must not open its palette behind this modal (M-2).
-    if (swallowConsoleChord(event)) return
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault()
       void submit()
@@ -289,6 +287,13 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
       <Dialog
         open
         onClose={dismiss}
+        // On the ROOT, not the form: MUI parks focus on `.MuiDialog-container` (the form's
+        // parent) whenever the focused control unmounts or is disabled — Remove, a library
+        // pick, an upload, a save in flight — and a key pressed there never passes through
+        // the form. The console's global ⌘K must not open its palette behind this modal (M-2).
+        onKeyDown={event => {
+          swallowConsoleChord(event)
+        }}
         maxWidth="sm"
         fullWidth
         scroll="paper"

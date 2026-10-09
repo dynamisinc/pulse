@@ -35,7 +35,7 @@
  * the text placeholder instead of a request.
  */
 
-import { useEffect, useId, useRef, useState, type ChangeEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ChangeEvent } from 'react'
 import { Box, LinearProgress, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -175,6 +175,34 @@ export function ImageChooser({
     currentUploadRef.current = null
   }, [])
 
+  // FOCUS CONTINUITY (Gate-1 L-focus). Remove, Undo, a library pick, Cancel upload and a
+  // finished upload each REMOVE (or disable) the control that was focused; the browser then
+  // parks focus on the dialog container / <body>, which strands a keyboard user. So the
+  // handler names the counterpart control that should take focus, and the layout effect below
+  // focuses it as soon as it exists in the DOM (right after the commit that removed the old
+  // one) — but only while focus is still "parked" or inside this chooser, never stealing it
+  // from a field the controller has since moved to.
+  const rootRef = useRef<HTMLFieldSetElement>(null)
+  const uploadButtonRef = useRef<HTMLButtonElement>(null)
+  const removeButtonRef = useRef<HTMLButtonElement>(null)
+  const undoButtonRef = useRef<HTMLButtonElement>(null)
+  const focusNextRef = useRef<'upload' | 'remove' | 'undo' | null>(null)
+  useLayoutEffect(() => {
+    const wanted = focusNextRef.current
+    if (wanted === null) return
+    const target = { upload: uploadButtonRef, remove: removeButtonRef, undo: undoButtonRef }[wanted]
+      .current
+    if (target === null || target.disabled) return // not rendered yet — try again next commit
+    focusNextRef.current = null
+    const active = document.activeElement
+    const parked =
+      active === null
+      || active === document.body
+      || (active instanceof HTMLElement && active.classList.contains('MuiDialog-container'))
+      || rootRef.current?.contains(active) === true
+    if (parked) target.focus()
+  })
+
   const uploading = upload.state === 'uploading'
   const previewSource =
     choice.mode === 'set' ? choice.previewUrl : choice.mode === 'keep' ? currentUrl : undefined
@@ -219,6 +247,7 @@ export function ImageChooser({
           setFileProblem(`The ${noun} must be an image — JPEG, PNG, GIF or WebP.`)
           return
         }
+        focusNextRef.current = 'undo'
         onChoose({ mode: 'set', mediaId: asset.id, previewUrl: asset.url })
       })
       // The failure is recorded in `upload.error` (or is a cancel); never unhandled.
@@ -228,6 +257,7 @@ export function ImageChooser({
   return (
     <Box
       component="fieldset"
+      ref={rootRef}
       data-testid={`persona-edit-${slot}`}
       sx={{
         m: 0,
@@ -277,6 +307,7 @@ export function ImageChooser({
 
           <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
             <CobraSecondaryButton
+              ref={uploadButtonRef}
               size="small"
               disabled={uploading}
               onClick={() => fileInputRef.current?.click()}
@@ -297,9 +328,13 @@ export function ImageChooser({
             </CobraSecondaryButton>
             {canRemove ? (
               <CobraLinkButton
+                ref={removeButtonRef}
                 size="small"
                 disabled={uploading}
-                onClick={() => onChoose({ mode: 'clear' })}
+                onClick={() => {
+                  focusNextRef.current = 'undo'
+                  onChoose({ mode: 'clear' })
+                }}
                 startIcon={<FontAwesomeIcon icon={faTrashCan} />}
               >
                 Remove {noun}
@@ -307,9 +342,13 @@ export function ImageChooser({
             ) : null}
             {choice.mode !== 'keep' ? (
               <CobraLinkButton
+                ref={undoButtonRef}
                 size="small"
                 disabled={uploading}
-                onClick={() => onChoose({ mode: 'keep' })}
+                onClick={() => {
+                  focusNextRef.current = 'remove'
+                  onChoose({ mode: 'keep' })
+                }}
                 startIcon={<FontAwesomeIcon icon={faRotateLeft} />}
               >
                 Undo {noun} change
@@ -340,6 +379,7 @@ export function ImageChooser({
                 size="small"
                 onClick={() => {
                   currentUploadRef.current = null
+                  focusNextRef.current = 'upload'
                   upload.cancel()
                 }}
                 startIcon={<FontAwesomeIcon icon={faXmark} />}
@@ -379,6 +419,7 @@ export function ImageChooser({
                 onChoose({ mode: 'keep' })
                 return
               }
+              focusNextRef.current = 'undo'
               onChoose({ mode: 'set', mediaId, ...(url !== undefined ? { previewUrl: url } : {}) })
               setLibraryOpen(false)
             }}
