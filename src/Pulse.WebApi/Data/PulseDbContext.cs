@@ -165,6 +165,9 @@ public class PulseDbContext : DbContext
     /// <summary>The scripted posts inside each queue item (inject-queue/06). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
     public DbSet<InjectItemPost> InjectItemPosts => Set<InjectItemPost>();
 
+    /// <summary>The per-exercise queue-membership token row (inject-queue/06). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<InjectQueueState> InjectQueueStates => Set<InjectQueueState>();
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -625,6 +628,14 @@ public class PulseDbContext : DbContext
             entity.Property(e => e.ClaimAction).HasMaxLength(16);
 
             entity.OwnsMany(e => e.Media, media => media.ToJson());
+        });
+
+        modelBuilder.Entity<InjectQueueState>(entity =>
+        {
+            // One row per exercise: the exercise id IS the key (so it is also the required, indexed scope column).
+            entity.HasKey(e => e.ExerciseId);
+            entity.Property(e => e.ExerciseId).ValueGeneratedNever();
+            entity.Property(e => e.Version).IsConcurrencyToken();
         });
 
         // ------------------------------------------------------------------------------------------

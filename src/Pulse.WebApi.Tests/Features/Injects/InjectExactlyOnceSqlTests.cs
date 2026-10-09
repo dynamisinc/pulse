@@ -181,6 +181,115 @@ public sealed class InjectExactlyOnceSqlTests
             afterGiveUp.Select(e => e.EventId), "exactly one fire event: the reconcile saw it was already emitted");
     }
 
+    // ---- the queue token: reorder is atomic against create and delete (Copilot review, #458) --------
+
+    [RequiresDockerFact]
+    public async Task AReorder_ThatACreateLandsInsideOf_Is409_AndWritesNoOrder()
+    {
+        var world = await SeedAsync(InjectKinds.Post); // live: X
+        Guid a, b;
+        await using (var author = Build(world, interceptor: null, controller: world.StaffUserId))
+        {
+            a = await CreatePostAsync(author, world, "A");
+            b = await CreatePostAsync(author, world, "B");
+        }
+
+        var before = await OrdersAsync(world);
+        await using var racer = Build(world, interceptor: null, controller: world.StaffUserId);
+        var race = new BeforeSaveHook(
+            context => context.ChangeTracker.Entries<InjectItem>().Any(e => e.State == EntityState.Modified && e.Property(i => i.Order).IsModified),
+            async () => await CreatePostAsync(racer, world, "C"),
+            times: 1);
+        await using var reorderer = Build(world, race, controller: world.StaffUserId);
+
+        var result = await reorderer.Service.ReorderAsync(Ids(b, a, world.ItemId));
+
+        race.Fired.Should().Be(1, "the create really landed between the reorder's read and its save");
+        result.Outcome.Should().Be(InjectOutcome.Conflict, "the ids no longer list the live set");
+        result.Message.Should().Be("The queue changed while you were reordering. Refresh and try again.");
+        result.CurrentItem.Should().BeNull("a queue-level 409 carries no item");
+        var after = await OrdersAsync(world);
+        after.Should().HaveCount(4, "the racing create landed");
+        after.Where(entry => before.ContainsKey(entry.Key)).Should().BeEquivalentTo(before, "the stale reorder wrote nothing");
+    }
+
+    [RequiresDockerFact]
+    public async Task AReorder_ThatADeleteOfAnUnmovedItemLandsInsideOf_Is409()
+    {
+        var world = await SeedAsync(InjectKinds.Post); // live: X (order 1)
+        Guid a, b;
+        await using (var author = Build(world, interceptor: null, controller: world.StaffUserId))
+        {
+            a = await CreatePostAsync(author, world, "A"); // order 2
+            b = await CreatePostAsync(author, world, "B"); // order 3 — keeps order 3 in the reorder below
+        }
+
+        await using var racer = Build(world, interceptor: null, controller: world.StaffUserId);
+        var race = new BeforeSaveHook(
+            context => context.ChangeTracker.Entries<InjectItem>().Any(e => e.State == EntityState.Modified && e.Property(i => i.Order).IsModified),
+            async () => (await racer.Service.DeleteAsync(b, 1)).Outcome.Should().Be(InjectOutcome.Deleted),
+            times: 1);
+        await using var reorderer = Build(world, race, controller: world.StaffUserId);
+
+        // B's own row is untouched by this reorder, so only the queue token can see that it was deleted meanwhile.
+        var result = await reorderer.Service.ReorderAsync(Ids(a, world.ItemId, b));
+
+        race.Fired.Should().Be(1);
+        result.Outcome.Should().Be(InjectOutcome.Conflict);
+        result.CurrentItem.Should().BeNull();
+        (await OrdersAsync(world)).Should().BeEquivalentTo(
+            new System.Collections.Generic.Dictionary<Guid, int> { [world.ItemId] = 1, [a] = 2 }, "B is gone and nothing was reordered");
+    }
+
+    [RequiresDockerFact]
+    public async Task ACreate_ThatLosesTheQueueTokenToAReorder_RetriesOnAFreshSlot_AndLands()
+    {
+        var world = await SeedAsync(InjectKinds.Post); // live: X
+        Guid a;
+        await using (var author = Build(world, interceptor: null, controller: world.StaffUserId))
+        {
+            a = await CreatePostAsync(author, world, "A");
+        }
+
+        await using var reorderer = Build(world, interceptor: null, controller: world.StaffUserId);
+        var race = new BeforeSaveHook(
+            context => context.ChangeTracker.Entries<InjectItem>().Any(e => e.State == EntityState.Added),
+            async () => (await reorderer.Service.ReorderAsync(Ids(a, world.ItemId))).Outcome.Should().Be(InjectOutcome.Ok),
+            times: 1);
+        await using var creator = Build(world, race, controller: world.StaffUserId);
+
+        var created = await CreatePostAsync(creator, world, "C");
+
+        race.Fired.Should().Be(1);
+        (await OrdersAsync(world)).Should().BeEquivalentTo(
+            new System.Collections.Generic.Dictionary<Guid, int> { [a] = 1, [world.ItemId] = 2, [created] = 3 },
+            "nothing the creator sent was stale, so it retried and took the next slot after the reorder");
+    }
+
+    [RequiresDockerFact]
+    public async Task ADelete_ThatLosesTheQueueTokenToACreate_RechecksOnce_AndLands()
+    {
+        var world = await SeedAsync(InjectKinds.Post);
+        Guid a;
+        await using (var author = Build(world, interceptor: null, controller: world.StaffUserId))
+        {
+            a = await CreatePostAsync(author, world, "A");
+        }
+
+        await using var racer = Build(world, interceptor: null, controller: world.StaffUserId);
+        var race = new BeforeSaveHook(
+            context => context.ChangeTracker.Entries<InjectItem>().Any(e => e.Property(i => i.DeletedAt).IsModified && e.Entity.DeletedAt != null),
+            async () => await CreatePostAsync(racer, world, "C"),
+            times: 1);
+        await using var deleter = Build(world, race, controller: world.StaffUserId);
+
+        var result = await deleter.Service.DeleteAsync(a, 1);
+
+        race.Fired.Should().Be(1);
+        result.Outcome.Should().Be(InjectOutcome.Deleted, "the race was on the queue token only; item A had not changed");
+        (await OrdersAsync(world)).Keys.Should().NotContain(a).And.HaveCount(2);
+    }
+
     // ---- harness ----
 
     private async Task<World> SeedAsync(string kind)
@@ -244,7 +353,7 @@ public sealed class InjectExactlyOnceSqlTests
             await db.SaveChangesAsync();
         }
 
-        return new World(exerciseId, staffUserId, itemId, time, new ExerciseClockService(time));
+        return new World(exerciseId, staffUserId, personaId, itemId, time, new ExerciseClockService(time));
     }
 
     private Harness Build(World world, IInterceptor? interceptor, Guid? controller)
@@ -280,6 +389,27 @@ public sealed class InjectExactlyOnceSqlTests
         }
 
         return new PulseDbContext(builder.Options, new ExerciseContext { CurrentExerciseId = exerciseId });
+    }
+
+    private static async Task<Guid> CreatePostAsync(Harness harness, World world, string title)
+    {
+        var result = await harness.Service.CreateAsync(new InjectItemWriteRequest
+        {
+            Kind = InjectKinds.Post,
+            Title = title,
+            Posts = [new InjectPostWriteRequest { PersonaId = world.PersonaId.ToString(), Text = title }],
+        });
+        result.Outcome.Should().Be(InjectOutcome.Created, result.Message);
+        return Guid.Parse(result.Value!.Id);
+    }
+
+    private static InjectReorderRequest Ids(params Guid[] ids) => new() { Ids = ids.Select(id => (string?)id.ToString()).ToList() };
+
+    /// <summary>The live items' stored order, by id.</summary>
+    private async Task<System.Collections.Generic.Dictionary<Guid, int>> OrdersAsync(World world)
+    {
+        await using var db = Context(world.ExerciseId, null);
+        return await db.InjectItems.Where(i => i.DeletedAt == null).ToDictionaryAsync(i => i.Id, i => i.Order);
     }
 
     private async Task<int> PostCountAsync(World world)
@@ -339,7 +469,7 @@ public sealed class InjectExactlyOnceSqlTests
         }
     }
 
-    private sealed record World(Guid ExerciseId, Guid StaffUserId, Guid ItemId, ManualTimeProvider Time, IExerciseClock Clock);
+    private sealed record World(Guid ExerciseId, Guid StaffUserId, Guid PersonaId, Guid ItemId, ManualTimeProvider Time, IExerciseClock Clock);
 
     private sealed record Harness(PulseDbContext Db, InjectQueueService Service) : IAsyncDisposable
     {
