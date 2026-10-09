@@ -17,8 +17,8 @@ using Xunit;
 /// client-side filters over the feed, so the feed assertions cover them. Real <c>Program</c> pipeline, real SQL.
 /// </summary>
 /// <remarks>
-/// The thread reply tombstone (B2), reply counts (B3) and <c>includeReplies</c> (BP) are not in this branch, so
-/// they are checked at Gate 2 once those stories merge.
+/// The thread reply tombstone (B2), the parent's reply count (B3) and <c>includeReplies</c> (BP) are covered
+/// together in <c>Wave1bIntegrationTests.TakenDownReply_ReactionIsTheUnknownId404_ParentReplyCountDrops_AndTheThreadShowsATombstone</c>.
 /// </remarks>
 [Collection(MsSqlCollection.Name)]
 public sealed class TakedownReadPathTests
