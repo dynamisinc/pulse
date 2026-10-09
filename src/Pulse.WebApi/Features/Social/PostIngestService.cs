@@ -93,8 +93,11 @@ public sealed partial class PostIngestService
     /// </summary>
     public const int MaxRawTextLength = 4 * TextLengthCeiling;
 
-    /// <summary>The 400 for text that is too long, raw or sanitized (the same message for both, like alt text).</summary>
-    private static readonly string TextTooLongMessage = $"text must be at most {TextLengthCeiling} characters.";
+    /// <summary>
+    /// The 400 for text that is too long, raw or sanitized (the same message for both, like alt text). Public so
+    /// the engine review edit path answers an over-long staff edit with the very same text.
+    /// </summary>
+    public static readonly string TextTooLongMessage = $"text must be at most {TextLengthCeiling} characters.";
 
     /// <summary>The longest RAW media <c>alt</c> accepted (4 × <see cref="PostMediaItem.MaxAltLength"/>), checked before sanitizing.</summary>
     public const int MaxRawAltLength = 4 * PostMediaItem.MaxAltLength;
@@ -392,18 +395,29 @@ public sealed partial class PostIngestService
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         // 6. Tell in-process observers (the engine's response-reaction inbox, engine-runtime/06) the moment the
-        //    post is committed: never before, so nothing reacts to a post that failed to persist, and never after
-        //    the broadcast, which can throw and would strand a committed answer
-        //    outside the engine for good.
+        //    post is committed: never before, so nothing reacts to a post that failed to persist, and before the
+        //    projection and broadcast, so nothing slow or failing there can delay or strand a committed answer
+        //    outside the engine.
         NotifyObservers(exerciseId, post);
 
         // 7. Fan out the participant-safe projection only (XC-002 — the broadcast never carries provenance or a
         //    baseline). No viewer state: one payload goes to every member of the exercise group. The request's token
         //    is NOT passed from here on (as B6's takedown does): the post has committed, so a client that disconnects
         //    now must not cancel the projection or the broadcast — its retry would DUPLICATE the post, never re-send
-        //    the push (Wave 1b Gate-2 L-1).
+        //    the push (Wave 1b Gate-2 L-1). A broadcast failure is logged, never surfaced (as B6's takedown does):
+        //    the post has committed, so a throw here would answer 500 (whose retry duplicates the post) and abort an
+        //    engine burst mid-loop. Connected participants pick the post up on their next feed read.
         var participantView = await ProjectCommittedPostAsync(post, mediaItems.Count > 0, inReplyTo, CancellationToken.None);
-        await _broadcaster.BroadcastPostAsync(exerciseId, participantView, CancellationToken.None);
+        try
+        {
+            await _broadcaster.BroadcastPostAsync(exerciseId, participantView, CancellationToken.None);
+        }
+#pragma warning disable CA1031 // A broadcast fault must never turn a committed post into a failed request.
+        catch (Exception ex)
+        {
+            LogPostBroadcastFailed(ex, exerciseId, post.Id);
+        }
+#pragma warning restore CA1031
 
         // 8. Hand the full post (and its projection) back to the endpoint, which shapes the response by caller role.
         return PostIngestResult.Created(post, participantView);
@@ -712,6 +726,12 @@ public sealed partial class PostIngestService
         Level = LogLevel.Error,
         Message = "Participant projection of committed post {PostId} hit an exercise-scope violation (COR-001); broadcasting the baseline view instead.")]
     private partial void LogProjectionScopeViolation(Exception exception, Guid postId);
+
+    [LoggerMessage(
+        EventId = 5,
+        Level = LogLevel.Warning,
+        Message = "Post broadcast failed for post {PostId} in exercise {ExerciseId}. The post is committed; connected participants pick it up on their next feed read.")]
+    private partial void LogPostBroadcastFailed(Exception exception, Guid exerciseId, Guid postId);
 
     /// <summary>One validated attachment: the asset, its optional poster override, and the sanitized alt text.</summary>
     private sealed record RequestedMedia(Guid AssetId, Guid? PosterId, string Alt);

@@ -21,8 +21,10 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Publishing;
 using Pulse.WebApi.Features.EngineRuntime.Review;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
+using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Xunit;
 
 /// <summary>
@@ -381,6 +383,178 @@ public sealed class EngineReviewServiceTests
         (await ReadReviewedEventsAsync(failing)).Should().BeEmpty("no success engine.reviewed for the failing burst");
     }
 
+    // ---- Wave 3 Gate-2 M-1: the engine and the ingest text ceiling -----------------------------------
+
+    [RequiresDockerTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Edit_OverTheTextCeiling_RawOrSanitized_IsInvalidWithTheIngestMessage_AndNeverPublishes(bool overTheRawCap)
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        await SeedAsync(DelayedAuto(draftId, exerciseId, DraftDisposition.CountingDown));
+
+        // Sanitized over: 2,001 plain characters. Raw over: 8,001 characters that would sanitize to almost nothing,
+        // so only the raw cap (checked before the sanitizer runs) can refuse it.
+        var text = overTheRawCap
+            ? string.Concat(Enumerable.Repeat("<b>", (PostIngestService.MaxRawTextLength / 3) + 1)) + "Boil water."
+            : new string('w', PostIngestService.TextLengthCeiling + 1);
+
+        await using var harness = Build(exerciseId);
+        var result = await harness.Service.EditAsync(draftId, text, Input("controller-9"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "a human edit over the ingest bounds is refused (→ 400), never cut");
+        result.ValidationError.Should().Be(PostIngestService.TextTooLongMessage, "the same message ingest itself would give");
+        harness.PublishedBursts.Should().BeEmpty("an over-long edit never reaches the funnel, so no part of the burst goes out");
+        await AssertDispositionAsync(draftId, DraftDisposition.CountingDown, "the item stays actionable for a shorter edit");
+        (await ReadReviewedEventsAsync(draftId)).Should().BeEmpty();
+    }
+
+    [RequiresDockerFact]
+    public async Task Edit_AtTheTextCeiling_IsPublishedWhole_NeverCut()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        await SeedAsync(DelayedAuto(draftId, exerciseId, DraftDisposition.CountingDown));
+        var text = new string('w', PostIngestService.TextLengthCeiling);
+
+        await using var harness = Build(exerciseId);
+        var result = await harness.Service.EditAsync(draftId, text, Input("controller-9"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok, "the ceiling is inclusive");
+        harness.PublishedBursts.Should().ContainSingle().Which.Posts[0].Text.Should().Be(text, "a human edit is never truncated");
+    }
+
+    [RequiresDockerFact]
+    public async Task AutoHold_SwampedAutoSend_WithOneInvalidPost_PublishesTheRestOnce_GoesHeldWithAReason_AndLaterTicksPublishNothing()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        var item = Countdown(draftId, exerciseId, started: 0, minutes: 3);
+        item.ActionLabel = "post · #WaterIssues";
+        item.Posts = new List<EngineReviewDraftPost>
+        {
+            Post("@rosa", "Pressure is low on Elm."),
+            Post("@marcus", "TOO LONG"),
+            Post("@lena", "Neighbors are filling tubs."),
+        };
+        await SeedAsync(item);
+
+        // The middle post is refused by the funnel; the other two reach the feed.
+        await using var harness = Build(exerciseId, burst => new EngineBurstPublishResult
+        {
+            Posts = burst.Posts
+                .Select(p => p.Text == "TOO LONG"
+                    ? new EnginePublishedPost { PersonaHandle = p.PersonaHandle, Outcome = EnginePublishOutcome.Invalid, Error = PostIngestService.TextTooLongMessage }
+                    : new EnginePublishedPost { PersonaHandle = p.PersonaHandle, PostId = Guid.NewGuid(), Outcome = EnginePublishOutcome.Published })
+                .ToList(),
+        });
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        harness.Time.Advance(TimeSpan.FromMinutes(4));
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.PublishedBursts.Should().ContainSingle("the expired countdown auto-sends once");
+        await AssertDispositionAsync(draftId, DraftDisposition.Held, "a burst that did not fully publish waits for a human — it never stays counting down");
+        var held = await ReloadAsync(draftId);
+        held.Posts.Select(p => p.PersonaHandle).Should().Equal(new[] { "@marcus" }, "the two posts that went out are dropped, so nothing can send them again");
+        held.ActionLabel.Should().Be(
+            "post · #WaterIssues · publish incomplete: auto-send posted 2 of 3; 1 held for review (text must be at most 2000 characters.)",
+            "the console shows the reason on the card");
+        PayloadAction((await ReadReviewedEventsAsync(draftId)).Should().ContainSingle().Subject).Should().Be(
+            "hold-on-expiry", "one decision: the expiry ended in a hold");
+
+        // The old behaviour left it counting down, so every tick re-sent the two good posts. Now later ticks — even
+        // well past the deadline, still swamped — do nothing at all.
+        for (var tick = 0; tick < 3; tick++)
+        {
+            harness.Time.Advance(TimeSpan.FromMinutes(1));
+            await harness.Service.EvaluateAutoHoldAsync();
+        }
+
+        harness.PublishedBursts.Should().ContainSingle("no later tick publishes anything");
+        (await ReadReviewedEventsAsync(draftId)).Should().ContainSingle("and no later tick records another decision");
+        await AssertDispositionAsync(draftId, DraftDisposition.Held);
+    }
+
+    [RequiresDockerFact]
+    public async Task AutoHold_SwampedAutoSend_WhosePublishThrows_GoesHeld_KeepsItsPosts_AndLaterTicksPublishNothing()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        var item = Countdown(draftId, exerciseId, started: 0, minutes: 3);
+        item.ActionLabel = "post · #WaterIssues";
+        await SeedAsync(item);
+
+        await using var harness = Build(exerciseId, _ => throw new InvalidOperationException("ingest database unavailable"));
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        harness.Time.Advance(TimeSpan.FromMinutes(4));
+
+        await harness.Service.EvaluateAutoHoldAsync();
+        harness.Time.Advance(TimeSpan.FromMinutes(1));
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.PublishedBursts.Should().ContainSingle("the failed auto-send is attempted once, then left to a human");
+        await AssertDispositionAsync(draftId, DraftDisposition.Held);
+        var held = await ReloadAsync(draftId);
+        held.Posts.Should().ContainSingle("which posts went out is unknown, so none is dropped");
+        held.ActionLabel.Should().Be("post · #WaterIssues · publish incomplete: auto-send failed; check the feed before approving");
+        PayloadAction((await ReadReviewedEventsAsync(draftId)).Should().ContainSingle().Subject).Should().Be("hold-on-expiry");
+    }
+
+    [RequiresDockerFact]
+    public async Task Approve_AfterAPartialPublish_SendsOnlyThePostsThatDidNotGoOut()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        var item = Suggest(draftId, exerciseId, DraftDisposition.Queued);
+        item.ActionLabel = "post · #WaterIssues";
+        item.Posts = new List<EngineReviewDraftPost>
+        {
+            Post("@rosa", "Pressure is low on Elm."),
+            Post("@marcus", "Is the school closed?"),
+            Post("@lena", "Neighbors are filling tubs."),
+        };
+        await SeedAsync(item);
+
+        // First approve: @marcus's post is refused (e.g. his persona is missing); the second approve, after the
+        // controller fixes that, succeeds for whatever it is given.
+        var calls = 0;
+        await using var harness = Build(exerciseId, burst => ++calls == 1
+            ? new EngineBurstPublishResult
+            {
+                Posts = burst.Posts
+                    .Select(p => p.PersonaHandle == "@marcus"
+                        ? new EnginePublishedPost { PersonaHandle = p.PersonaHandle, Outcome = EnginePublishOutcome.Invalid, Error = "unresolved persona handle" }
+                        : new EnginePublishedPost { PersonaHandle = p.PersonaHandle, PostId = Guid.NewGuid(), Outcome = EnginePublishOutcome.Published })
+                    .ToList(),
+            }
+            : AllPublished(burst));
+
+        var first = await harness.Service.ApproveAsync(draftId, Input("controller-7"));
+
+        first.Outcome.Should().Be(EngineReviewOutcome.PublishFailed, "WR-002 is unchanged: a partial publish is never Published");
+        await AssertDispositionAsync(draftId, DraftDisposition.Queued, "the item stays actionable");
+        (await ReadReviewedEventsAsync(draftId)).Should().BeEmpty("no decision is recorded for a failed publish");
+        var afterFirst = await ReloadAsync(draftId);
+        afterFirst.Posts.Select(p => p.PersonaHandle).Should().Equal(new[] { "@marcus" }, "the two live posts are dropped from the item");
+        afterFirst.ActionLabel.Should().Be(
+            "post · #WaterIssues · publish incomplete: approve posted 2 of 3; 1 held for review (unresolved persona handle)");
+
+        var second = await harness.Service.ApproveAsync(draftId, Input("controller-7"));
+
+        second.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        harness.PublishedBursts.Should().HaveCount(2);
+        harness.PublishedBursts[1].Posts.Select(p => p.PersonaHandle).Should().Equal(
+            new[] { "@marcus" }, "the re-approve sends only the post that did not go out — @rosa and @lena are not duplicated");
+        await AssertDispositionAsync(draftId, DraftDisposition.Published);
+        PayloadAction((await ReadReviewedEventsAsync(draftId)).Should().ContainSingle().Subject).Should().Be("approve");
+    }
+
     // ---- Terminal re-action guard (WR-001 — a resolved item can never be re-published) -----------
 
     [RequiresDockerFact]
@@ -706,6 +880,12 @@ public sealed class EngineReviewServiceTests
             Verified = false,
         });
         await seed.SaveChangesAsync();
+    }
+
+    private async Task<EngineReviewItemEntity> ReloadAsync(Guid draftId)
+    {
+        await using var verify = _fixture.CreateContext();
+        return await verify.EngineReviewItems.IgnoreQueryFilters().AsNoTracking().SingleAsync(i => i.DraftId == draftId);
     }
 
     private async Task AssertDispositionAsync(Guid draftId, DraftDisposition expected, string because = "")

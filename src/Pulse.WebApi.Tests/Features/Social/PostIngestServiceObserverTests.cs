@@ -83,18 +83,20 @@ public class PostIngestServiceObserverTests
     }
 
     [RequiresDockerFact]
-    public async Task AFailedBroadcast_AfterTheCommit_StillReachesEveryObserver()
+    public async Task AFailedBroadcast_AfterTheCommit_StillReachesEveryObserver_AndTheIngestStillSucceeds()
     {
-        // The broadcast runs after the commit and can throw (or be cancelled with the request). A committed PIO
-        // answer must still reach the engine; otherwise it is persisted but can never address its storyline.
+        // The broadcast runs after the commit and can throw. A committed PIO answer must still reach the engine;
+        // otherwise it is persisted but can never address its storyline. Since the Wave 3 Gate-2 L-1 fold the
+        // broadcast failure is also absorbed (logged, as B6's takedown does): the post committed, so the ingest
+        // reports Created rather than throwing — a throw would answer 500 and the caller's retry would duplicate it.
         var exerciseId = Guid.NewGuid();
         var observer = new RecordingObserver();
         await using var context = _fixture.CreateContext(ScopeFor(exerciseId));
         var service = new PostIngestService(context, ScopeFor(exerciseId), new ThrowingFeedBroadcaster(), [observer]);
 
-        var ingest = () => service.IngestAsync(Request(), ParticipantAttribution());
+        var result = await service.IngestAsync(Request(), ParticipantAttribution());
 
-        await ingest.Should().ThrowAsync<InvalidOperationException>("precondition: the broadcast failed after the commit");
+        result.Outcome.Should().Be(PostIngestOutcome.Created, "a broadcast fault never turns a committed post into a failure");
         observer.Calls.Should().ContainSingle("the observer hears a committed post whatever the broadcast does");
 
         await using var read = _fixture.CreateContext();
