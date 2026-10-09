@@ -37,6 +37,14 @@ using Pulse.WebApi.Features.Social;
 /// message; an exception records <c>failed</c> unless the post provably exists.
 /// </para>
 /// <para>
+/// <b>Lock contention is a lost race, never a 500.</b> SQL Server can choose one of two concurrent writers as a deadlock
+/// victim (or time out a lock request) — <see cref="InjectLockConflicts"/>. The victim's work rolled back, so it is
+/// treated exactly like an optimistic-concurrency conflict: a fire, retry, edit or delete answers the <c>409</c> with the
+/// item as it is now; hold, release, skip and unskip reload and re-apply once, as they already do on a lost race; a
+/// runner step skips the tick; recording a claimed post's outcome retries. The source of the one deadlock observed
+/// (a fire's read against another fire's claim) is removed in <see cref="LoadItemAsync"/>; this is the safety net.
+/// </para>
+/// <para>
 /// <b>Telemetry (IQ-8).</b> Exactly one <c>inject_action</c> event per controller action, in the same
 /// <c>SaveChanges</c> as the state change it describes (for a fire, the save that records the outcome). The posts the
 /// queue publishes get their own <c>post</c> event from the funnel. Runner-paced posts emit no action event: they are
@@ -249,6 +257,24 @@ public sealed partial class InjectQueueService
             return InjectResult.ScopeUnresolved<InjectItemDto>();
         }
 
+        try
+        {
+            return await UpdateCoreAsync(itemId, request, caller, cancellationToken);
+        }
+        catch (Exception ex) when (InjectLockConflicts.IsLockConflict(ex))
+        {
+            LogLockConflict(ex, InjectActions.Edit, itemId);
+            return await CurrentItemConflictAsync(itemId, caller.ExerciseId, InjectActions.Edit, cancellationToken);
+        }
+    }
+
+    /// <summary>The body of an edit once the caller is resolved; a lock conflict anywhere in it is the caller's 409.</summary>
+    private async Task<InjectResult<InjectItemDto>> UpdateCoreAsync(
+        Guid itemId,
+        InjectItemWriteRequest? request,
+        Caller caller,
+        CancellationToken cancellationToken)
+    {
         var item = await LoadItemAsync(itemId, caller.ExerciseId, cancellationToken);
         if (item is null)
         {
@@ -319,6 +345,24 @@ public sealed partial class InjectQueueService
             return InjectResult.Invalid<InjectItemDto>("version is required.");
         }
 
+        try
+        {
+            return await DeleteCoreAsync(itemId, version.Value, caller, cancellationToken);
+        }
+        catch (Exception ex) when (InjectLockConflicts.IsLockConflict(ex))
+        {
+            LogLockConflict(ex, InjectActions.Delete, itemId);
+            return await CurrentItemConflictAsync(itemId, caller.ExerciseId, InjectActions.Delete, cancellationToken);
+        }
+    }
+
+    /// <summary>The body of a delete once the caller is resolved; a lock conflict anywhere in it is the caller's 409.</summary>
+    private async Task<InjectResult<InjectItemDto>> DeleteCoreAsync(
+        Guid itemId,
+        int version,
+        Caller caller,
+        CancellationToken cancellationToken)
+    {
         var item = await LoadItemAsync(itemId, caller.ExerciseId, cancellationToken);
         if (item is null)
         {
@@ -492,6 +536,22 @@ public sealed partial class InjectQueueService
             return InjectResult.ScopeUnresolved<InjectItemDto>();
         }
 
+        try
+        {
+            return await FireCoreAsync(itemId, caller, cancellationToken);
+        }
+        catch (Exception ex) when (InjectLockConflicts.IsLockConflict(ex))
+        {
+            // Another writer had the item's rows (in practice: a concurrent fire's claim). Whatever this request did not
+            // finish rolled back, so it is the same lost race as a stale version — the 409 with the item as it is now.
+            LogLockConflict(ex, InjectActions.Fire, itemId);
+            return await CurrentItemConflictAsync(itemId, caller.ExerciseId, InjectActions.Fire, cancellationToken);
+        }
+    }
+
+    /// <summary>The body of a fire once the caller is resolved; a lock conflict anywhere in it is the caller's 409.</summary>
+    private async Task<InjectResult<InjectItemDto>> FireCoreAsync(Guid itemId, Caller caller, CancellationToken cancellationToken)
+    {
         var item = await LoadItemAsync(itemId, caller.ExerciseId, cancellationToken);
         if (item is null)
         {
@@ -562,6 +622,20 @@ public sealed partial class InjectQueueService
             return InjectResult.ScopeUnresolved<InjectItemDto>();
         }
 
+        try
+        {
+            return await RetryCoreAsync(itemId, caller, cancellationToken);
+        }
+        catch (Exception ex) when (InjectLockConflicts.IsLockConflict(ex))
+        {
+            LogLockConflict(ex, InjectActions.Retry, itemId);
+            return await CurrentItemConflictAsync(itemId, caller.ExerciseId, InjectActions.Retry, cancellationToken);
+        }
+    }
+
+    /// <summary>The body of a retry once the caller is resolved; a lock conflict anywhere in it is the caller's 409.</summary>
+    private async Task<InjectResult<InjectItemDto>> RetryCoreAsync(Guid itemId, Caller caller, CancellationToken cancellationToken)
+    {
         var item = await LoadItemAsync(itemId, caller.ExerciseId, cancellationToken);
         if (item is null)
         {
@@ -617,7 +691,8 @@ public sealed partial class InjectQueueService
     /// The <see cref="InjectBurstRunner"/>'s per-item step: publishes at most ONE due post of a <c>firing</c> item in
     /// the resolved scope. Does nothing under PAUSE INJECTS or FREEZE, for a held/settled item, or when the next post
     /// is not due — the lateness rule (IQ-4) then keeps the remainder's spacing when it resumes. A concurrent writer
-    /// winning the claim simply means this tick does nothing.
+    /// winning the claim — or SQL Server choosing this step as a deadlock victim (<see cref="InjectLockConflicts"/>) —
+    /// simply means this tick does nothing; the next tick tries again.
     /// </summary>
     /// <param name="itemId">The firing item to advance.</param>
     /// <param name="cancellationToken">Cancellation token (honoured only before a claim is saved).</param>
@@ -636,6 +711,20 @@ public sealed partial class InjectQueueService
             return;
         }
 
+        try
+        {
+            await AdvanceCoreAsync(itemId, exerciseId, cancellationToken);
+        }
+        catch (Exception ex) when (InjectLockConflicts.IsLockConflict(ex))
+        {
+            _dbContext.ChangeTracker.Clear();
+            LogRunnerStepSkipped(ex, itemId);
+        }
+    }
+
+    /// <summary>The body of one runner step in the resolved exercise.</summary>
+    private async Task AdvanceCoreAsync(Guid itemId, Guid exerciseId, CancellationToken cancellationToken)
+    {
         var item = await LoadItemAsync(itemId, exerciseId, cancellationToken);
         if (item is null || item.Status != InjectStatuses.Firing)
         {
@@ -804,7 +893,19 @@ public sealed partial class InjectQueueService
     {
         for (var attempt = 1; ; attempt++)
         {
-            var item = await LoadItemAsync(itemId, exerciseId, CancellationToken.None);
+            InjectItem? item;
+            try
+            {
+                item = await LoadItemAsync(itemId, exerciseId, CancellationToken.None);
+            }
+            catch (Exception ex) when (InjectLockConflicts.IsLockConflict(ex) && attempt < MaxRecordAttempts)
+            {
+                // A deadlock victim on the reload is one more lost race: the post went out regardless, so try again.
+                _dbContext.ChangeTracker.Clear();
+                LogLockConflict(ex, "record", itemId);
+                continue;
+            }
+
             var child = item?.Posts.FirstOrDefault(post => post.Id == childId);
             if (item is null || child is null)
             {
@@ -967,7 +1068,8 @@ public sealed partial class InjectQueueService
 
     /// <summary>
     /// Bumps the version, stamps the change, attaches the action's event (when there is one) and saves. Returns
-    /// <c>false</c> — with the change tracker cleared — when a concurrent writer won.
+    /// <c>false</c> — with the change tracker cleared — when a concurrent writer won: a stale version, or SQL Server
+    /// choosing this save as a deadlock victim (<see cref="InjectLockConflicts"/>), which rolled it back just the same.
     /// </summary>
     private async Task<bool> TrySaveAsync(
         InjectItem item,
@@ -993,11 +1095,21 @@ public sealed partial class InjectQueueService
             _dbContext.ChangeTracker.Clear();
             return false;
         }
+        catch (DbUpdateException ex) when (InjectLockConflicts.IsLockConflict(ex))
+        {
+            _dbContext.ChangeTracker.Clear();
+            LogLockConflict(ex, action ?? "save", item.Id);
+            return false;
+        }
     }
 
     // ---- action plumbing -----------------------------------------------------------------------------
 
-    /// <summary>Loads, applies one pure transition, and saves with its event — or returns the 409/404.</summary>
+    /// <summary>
+    /// Loads, applies one pure transition, and saves with its event — or returns the 409/404. A lost race (a stale
+    /// version at the save, or a deadlock victim anywhere before the save committed) reloads and re-applies ONCE; a
+    /// second loss is the 409 with the item as it is now.
+    /// </summary>
     private async Task<InjectResult<InjectItemDto>> TransitionAsync(
         Guid itemId,
         string action,
@@ -1010,44 +1122,75 @@ public sealed partial class InjectQueueService
             return InjectResult.ScopeUnresolved<InjectItemDto>();
         }
 
-        var item = await LoadItemAsync(itemId, caller.ExerciseId, cancellationToken);
-        if (item is null)
+        // Lost a race — usually to a runner tick publishing the burst's next post. The second pass re-applies against
+        // fresh state, so Hold can stop a pile-on even while it is publishing (a lost save already cleared the tracker).
+        for (var attempt = 1; attempt <= 2; attempt++)
         {
-            return InjectResult.NotFound<InjectItemDto>();
+            InjectItem? saved = null;
+            ExerciseFacts? savedFacts = null;
+            try
+            {
+                var item = await LoadItemAsync(itemId, caller.ExerciseId, cancellationToken);
+                if (item is null)
+                {
+                    return attempt == 1
+                        ? InjectResult.NotFound<InjectItemDto>()
+                        : InjectResult.Conflict<InjectItemDto>(DeletedMessage, null);
+                }
+
+                var facts = await ReadExerciseFactsAsync(caller.ExerciseId, cancellationToken);
+                if (apply(item, caller) is { } refusal)
+                {
+                    return InjectResult.Conflict<InjectItemDto>(refusal, await ProjectAsync(item, facts, cancellationToken));
+                }
+
+                if (await TrySaveAsync(item, action, caller.StaffUserId, TimeFor(caller.ExerciseId, facts), cancellationToken))
+                {
+                    saved = item;
+                    savedFacts = facts;
+                }
+            }
+            catch (Exception ex) when (InjectLockConflicts.IsLockConflict(ex))
+            {
+                // Chosen as a deadlock victim before anything committed: the same lost race as a stale version.
+                _dbContext.ChangeTracker.Clear();
+                LogLockConflict(ex, action, itemId);
+            }
+
+            if (saved is not null)
+            {
+                // Outside the retry: a committed transition is never re-applied.
+                WakeRunnerIfFiring(saved);
+                return InjectResult.Ok(await ProjectAsync(saved, savedFacts!, cancellationToken));
+            }
         }
 
-        var facts = await ReadExerciseFactsAsync(caller.ExerciseId, cancellationToken);
-        if (apply(item, caller) is { } refusal)
-        {
-            return InjectResult.Conflict<InjectItemDto>(refusal, await ProjectAsync(item, facts, cancellationToken));
-        }
+        return await CurrentItemConflictAsync(itemId, caller.ExerciseId, action, cancellationToken);
+    }
 
-        if (await TrySaveAsync(item, action, caller.StaffUserId, TimeFor(caller.ExerciseId, facts), cancellationToken))
+    /// <summary>
+    /// The lost-race <c>409</c> when the caller holds no exercise facts — after a lock conflict, or a transition that
+    /// lost twice. Reads the item as it is now; if even that read is a deadlock victim, the <c>409</c> carries the
+    /// stale-version message without an item (the console refreshes) — still never a <c>500</c>.
+    /// </summary>
+    private async Task<InjectResult<InjectItemDto>> CurrentItemConflictAsync(
+        Guid itemId,
+        Guid exerciseId,
+        string action,
+        CancellationToken cancellationToken)
+    {
+        _dbContext.ChangeTracker.Clear();
+        try
         {
-            WakeRunnerIfFiring(item);
-            return InjectResult.Ok(await ProjectAsync(item, facts, cancellationToken));
+            var facts = await ReadExerciseFactsAsync(exerciseId, cancellationToken);
+            return await ConflictWithCurrentAsync(itemId, exerciseId, facts, action, cancellationToken);
         }
-
-        // Lost a race — usually to a runner tick publishing the burst's next post. Re-apply ONCE against fresh state,
-        // so Hold can stop a pile-on even while it is publishing (TrySaveAsync already cleared the tracker).
-        var fresh = await LoadItemAsync(itemId, caller.ExerciseId, cancellationToken);
-        if (fresh is null)
+        catch (Exception ex) when (InjectLockConflicts.IsLockConflict(ex))
         {
-            return InjectResult.Conflict<InjectItemDto>(DeletedMessage, null);
+            _dbContext.ChangeTracker.Clear();
+            LogLockConflict(ex, action, itemId);
+            return InjectResult.Conflict<InjectItemDto>(StaleVersionMessage, null);
         }
-
-        if (apply(fresh, caller) is { } freshRefusal)
-        {
-            return InjectResult.Conflict<InjectItemDto>(freshRefusal, await ProjectAsync(fresh, facts, cancellationToken));
-        }
-
-        if (await TrySaveAsync(fresh, action, caller.StaffUserId, TimeFor(caller.ExerciseId, facts), cancellationToken))
-        {
-            WakeRunnerIfFiring(fresh);
-            return InjectResult.Ok(await ProjectAsync(fresh, facts, cancellationToken));
-        }
-
-        return await ConflictWithCurrentAsync(itemId, caller.ExerciseId, facts, action, cancellationToken);
     }
 
     /// <summary>Wakes the runner when a controller action leaves the item firing (L6: no 1 s polling while idle).</summary>
@@ -1130,18 +1273,54 @@ public sealed partial class InjectQueueService
             .ThenBy(item => item.Id);
 
     /// <summary>Loads one live item, tracked, with all its children. Another exercise's id reads as missing.</summary>
-    private Task<InjectItem?> LoadItemAsync(Guid itemId, Guid exerciseId, CancellationToken cancellationToken) =>
-        _dbContext.InjectItems
-            .Include(item => item.Posts)
-            .Where(item => item.Id == itemId && item.ExerciseId == exerciseId && item.DeletedAt == null)
+    /// <remarks>
+    /// <b>Two single-table reads, deliberately — never one join (the deadlock source).</b> Every save of an item writes
+    /// its <c>InjectItemPosts</c> rows BEFORE its <c>InjectItems</c> row (EF Core's batch order, as the captured
+    /// deadlock graph shows), all in one transaction. A joined <c>Include</c> read ran the other way: under READ COMMITTED it held its
+    /// shared lock on the <c>InjectItems</c> row while it waited for the child rows. Two concurrent fires therefore
+    /// deadlocked — the reader holding the item and waiting for a child; the claiming writer holding that child (X) and
+    /// waiting to update the item — and SQL Server killed the reader (error 1205, CI run 37922671324). Reading the item,
+    /// then its children in a separate statement, never holds a lock on one table while waiting for the other, so that
+    /// cycle cannot form. <see cref="InjectLockConflicts"/> remains the safety net for any other contention.
+    /// </remarks>
+    private async Task<InjectItem?> LoadItemAsync(Guid itemId, Guid exerciseId, CancellationToken cancellationToken)
+    {
+        var item = await _dbContext.InjectItems
+            .Where(row => row.Id == itemId && row.ExerciseId == exerciseId && row.DeletedAt == null)
             .FirstOrDefaultAsync(cancellationToken);
+        if (item is null)
+        {
+            return null;
+        }
+
+        // Tracked, so EF's relationship fix-up attaches every child (deleted ones too, as the Include did) to item.Posts.
+        await _dbContext.InjectItemPosts
+            .Where(post => post.InjectItemId == itemId && post.ExerciseId == exerciseId)
+            .OrderBy(post => post.Id)
+            .LoadAsync(cancellationToken);
+
+        return item;
+    }
 
     private async Task<InjectQueueDto> BuildQueueAsync(Guid exerciseId, CancellationToken cancellationToken)
     {
         var items = await LiveItems(exerciseId)
             .AsNoTracking()
-            .Include(item => item.Posts)
             .ToListAsync(cancellationToken);
+
+        // The children in their own single-table statement, never a joined Include — the lock-order reason is on
+        // LoadItemAsync (a console polling this read while a burst fires is exactly the reader that deadlocked).
+        var itemIds = items.Select(item => item.Id).ToList();
+        var children = (await _dbContext.InjectItemPosts
+                .AsNoTracking()
+                .Where(post => post.ExerciseId == exerciseId && itemIds.Contains(post.InjectItemId))
+                .OrderBy(post => post.Id)
+                .ToListAsync(cancellationToken))
+            .ToLookup(post => post.InjectItemId);
+        foreach (var item in items)
+        {
+            item.Posts = children[item.Id].ToList();
+        }
 
         var facts = await ReadExerciseFactsAsync(exerciseId, cancellationToken);
         var names = await ReadAssigneeNamesAsync(exerciseId, facts, cancellationToken);
@@ -1495,6 +1674,18 @@ public sealed partial class InjectQueueService
         Level = LogLevel.Warning,
         Message = "Reconciled an abandoned claim on scripted post {ChildId} of inject item {ItemId}: post {PostId} had already been published.")]
     private partial void LogClaimReconciled(Guid itemId, Guid childId, Guid postId);
+
+    [LoggerMessage(
+        EventId = 4,
+        Level = LogLevel.Information,
+        Message = "SQL Server chose the {Action} of inject item {ItemId} as a lock-conflict victim; it rolled back and is handled as a lost race.")]
+    private partial void LogLockConflict(Exception exception, string action, Guid itemId);
+
+    [LoggerMessage(
+        EventId = 5,
+        Level = LogLevel.Information,
+        Message = "The runner step for inject item {ItemId} was a lock-conflict victim; it rolled back and the item is retried on the next tick.")]
+    private partial void LogRunnerStepSkipped(Exception exception, Guid itemId);
 
     /// <summary>The resolved scope and the server-side staff user behind a request.</summary>
     private sealed record Caller(Guid ExerciseId, Guid StaffUserId);

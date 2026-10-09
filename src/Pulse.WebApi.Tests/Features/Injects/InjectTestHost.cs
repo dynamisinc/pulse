@@ -90,7 +90,8 @@ internal sealed class InjectTestHost : IAsyncDisposable
         Func<IServiceProvider, IInjectPostPublisher>? publisher = null,
         IFeedBroadcaster? broadcaster = null,
         bool hostedRunner = false,
-        InjectBurstRunnerOptions? runnerOptions = null)
+        InjectBurstRunnerOptions? runnerOptions = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         var caller = new CallerHolder();
         var time = new ManualTimeProvider(DateTimeOffset.UtcNow);
@@ -161,6 +162,9 @@ internal sealed class InjectTestHost : IAsyncDisposable
         // A fresh, SETTABLE ExerciseContext per scope (the runner sets its own), seeded from the acting caller.
         builder.Services.RemoveAll<IExerciseContext>();
         builder.Services.AddScoped<IExerciseContext>(_ => new ExerciseContext { CurrentExerciseId = caller.ExerciseId });
+
+        // Last word for a test (e.g. a command interceptor that plays a SQL Server deadlock victim).
+        configureServices?.Invoke(builder.Services);
 
         var app = builder.Build();
         app.MapInjects();
