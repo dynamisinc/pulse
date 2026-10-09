@@ -18,10 +18,13 @@
  *                         injectMock.ts (in-memory server: state machine, versions, burst pacing)
  *   contract + rules      types.ts (FROZEN wire contract) · injectRules.ts · injectDraft.ts
  *
- * The mock's controls (`injectMock.setPauseTier`, `.as(actor)`, `.failNextPublish`) are for
- * tests and dev only and are deliberately NOT re-exported here.
+ * `RunSheetMockPauseBridge` (mock mode only; renders nothing) copies the tier set through
+ * PausePill into the mock queue so PAUSE INJECTS / FREEZE are demoable without the backend;
+ * the route mounts it beside the panel. The mock's other controls (`.as(actor)`,
+ * `.failNextPublish`) are for tests and dev only and are deliberately NOT re-exported here.
  */
 export { RunSheetPanel } from './RunSheetPanel'
+export { RunSheetMockPauseBridge } from './RunSheetMockPauseBridge'
 export type {
   InjectAssigneesDto,
   InjectItemDto,
