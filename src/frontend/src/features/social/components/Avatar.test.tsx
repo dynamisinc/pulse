@@ -51,6 +51,19 @@ describe('Avatar', () => {
     expect(avatar).not.toHaveTextContent('MV')
   })
 
+  it('falls back to the silhouette for an org whose initials are blank (an all-emoji name)', () => {
+    // The server derives initials from letters/digits only, so a name with none
+    // (e.g. "🌊🌊") yields "" — never an empty coloured disc.
+    for (const initials of ['', '   ']) {
+      const { unmount } = render(<Avatar persona={{ ...ORG_PERSONA, initials }} />)
+      const avatar = screen.getByTestId('post-avatar')
+      expect(avatar).toHaveAttribute('data-avatar-kind', 'org')
+      expect(avatar.querySelector('svg')).toBeInTheDocument()
+      expect(avatar.textContent?.trim()).toBe('')
+      unmount()
+    }
+  })
+
   it('is decorative — hidden from assistive tech, no alt text duplicating identity', () => {
     render(<Avatar persona={HUMAN_PERSONA} />)
 

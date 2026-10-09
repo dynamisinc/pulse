@@ -18,6 +18,10 @@
  *                          also preserves the intentionally near-identical
  *                          @FairhavenWater / @FairhavenWaterUpd impersonation
  *                          pair, SOC-052 — both are orgs, both get monograms).
+ *                          Blank initials (a name with no letter or digit, e.g.
+ *                          all emoji; the server derives initials from letters and
+ *                          digits only) fall back to the silhouette below, never an
+ *                          empty disc.
  *  - `kind === 'human'` -> a duotone head-and-shoulders SILHOUETTE (a simple
  *                          inline SVG shape, ~85% white) over `avatarColor`.
  *                          Offline-safe, no photo dependency.
@@ -108,7 +112,7 @@ export function Avatar({ persona, size = DEFAULT_SIZE }: AvatarProps) {
             borderRadius: '999px',
           }}
         />
-      ) : persona.kind === 'org' ? (
+      ) : persona.kind === 'org' && persona.initials.trim() !== '' ? (
         <span
           style={{
             color: '#fff',
