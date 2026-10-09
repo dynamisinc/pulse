@@ -150,7 +150,7 @@ public sealed class InjectEndpointsTests
     {
         await using var host = await StartAsync();
         var seeded = await ActAsControllerAsync(host);
-        var existingPost = Guid.NewGuid();
+        var existingPost = await host.AddPostAsync(seeded.ExerciseId, seeded.PersonaIds[2]);
         var photo = await host.AddMediaAssetAsync(seeded.ExerciseId);
 
         var response = await host.CreateAsync(new
@@ -179,6 +179,37 @@ public sealed class InjectEndpointsTests
         post.GetProperty("replyTo").TryGetProperty("injectPostId", out _).Should().BeFalse();
         post.GetProperty("engagementBaseline").GetProperty("like").GetInt32().Should().Be(120);
         post.GetProperty("engagementBaseline").TryGetProperty("reply", out _).Should().BeFalse();
+    }
+
+    [RequiresDockerFact]
+    public async Task Create_AReplyToAnUnknownACrossExerciseOrATakenDownPost_GetsTheSame400()
+    {
+        await using var host = await StartAsync();
+        var seeded = await ActAsControllerAsync(host);
+        var other = await host.SeedExerciseAsync();
+        var live = await host.AddPostAsync(seeded.ExerciseId, seeded.PersonaIds[1]);
+        var takenDown = await host.AddPostAsync(seeded.ExerciseId, seeded.PersonaIds[1], takenDown: true);
+        var othersPost = await host.AddPostAsync(other.ExerciseId, other.PersonaIds[0]);
+
+        async Task<HttpResponseMessage> ReplyTo(string postId) =>
+            await host.CreateAsync(InjectTestHost.PostItem(seeded.PersonaIds[0], "reply", new { postId }));
+
+        (await ReplyTo(live.ToString())).StatusCode.Should().Be(HttpStatusCode.Created, "a live post of this exercise");
+
+        foreach (var (because, target) in new[]
+        {
+            ("unknown", Guid.NewGuid().ToString()),
+            ("another exercise's", othersPost.ToString()),
+            ("taken down", takenDown.ToString()),
+            ("not an id at all", "post-1234"),
+        })
+        {
+            var response = await ReplyTo(target);
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest, because);
+            (await InjectTestHost.ReadProblemAsync(response)).Detail.Should().Be(
+                "Post 1: replyTo.postId does not name a post in this exercise.",
+                "a {0} post id must fail when the controller saves, identically, never mid-burst", because);
+        }
     }
 
     [RequiresDockerFact]
