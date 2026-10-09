@@ -1,6 +1,6 @@
 # Story: Brand and profile finish
 
-**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** SOC-050, SOC-002, SOC-052, COR-030, COR-024, NFR-001, COR-053  ·  **Design decisions:** D1-003/R-001 (seal `#2D9CDB` fixed), D1-012 (magnitude counts), D1-011  ·  **Issue:** #433
 **Story ID:** F5  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** 2 (**merges last**)
 **Home stories:** the D1 backlog and [`profiles-social-graph/01`](../profiles-social-graph/01-profile-page.md) (profile page).

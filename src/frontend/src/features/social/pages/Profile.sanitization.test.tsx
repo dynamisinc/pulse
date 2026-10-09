@@ -28,6 +28,7 @@ import { api } from '@/core/services/api'
 import type { Persona, UsePersonasResult } from '@/features/personas'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import type { UseFeedResult } from '../hooks/useFeed'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { Profile } from './Profile'
 
 const SCRIPT_PAYLOAD = '<script>window.__xss = true</script>'
@@ -71,6 +72,7 @@ vi.mock('@/features/personas', async importOriginal => {
 
 vi.mock('../hooks/useFeed', () => ({
   useFeed: () => useFeedMock(),
+  useFeedWithCast: () => useFeedMock(),
 }))
 
 function renderProfile() {
@@ -80,7 +82,9 @@ function renderProfile() {
         <ShellContextProvider
           value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <Profile personaId={MALICIOUS_PERSONA.id} />
+          <SocialDirectoryProvider>
+            <Profile personaId={MALICIOUS_PERSONA.id} />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,

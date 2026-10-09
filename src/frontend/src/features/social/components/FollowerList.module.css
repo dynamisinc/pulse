@@ -8,12 +8,11 @@
  *
  * Theming mirrors the sibling social modules (`../pages/Profile.module.css`,
  * `../theme/social.module.css`) so the list reads as part of the same profile
- * frame it opens from: `.followers` declares the light-mode palette as CSS
- * custom properties and rules read `var(--fl-*)`. Dark mode has the same TWO
- * independent triggers — the OS `prefers-color-scheme: dark` media query AND a
- * host-set `[data-theme="dark"]` on the root or any ancestor — neither
- * dependent on a React theme provider. Values mirror `../theme/tokens.ts`'s
- * LIGHT/DARK_PALETTE; keep them in sync by hand.
+ * frame it opens from: `.followers` declares the light palette as CSS custom
+ * properties and rules read `var(--fl-*)`. LIGHT ONLY (demo-polish F5): the
+ * former OS and `data-theme` dark-mode blocks were removed — the Social skin has
+ * no dark palette, and `theme/forcedLight.guard.test.ts` keeps it that way.
+ * Values mirror `../theme/tokens.ts`'s LIGHT_PALETTE; keep them in sync by hand.
  *
  * The "…and ~N others" line is ITALIC per D1-012 — but the italic is the
  * FLAVOUR, never the information: the line carries its own icon and full text
@@ -22,7 +21,7 @@
  */
 
 .followers {
-  /* Light-mode palette (default) — mirrors tokens.ts LIGHT_PALETTE. */
+  /* Light palette (the only palette) — mirrors tokens.ts LIGHT_PALETTE. */
   --fl-bg: #fff;
   --fl-line: #e5e8ea;
   --fl-ink: #0e1518;
@@ -38,27 +37,6 @@
   color: var(--fl-ink);
   font-family: 'Figtree', system-ui, sans-serif;
   text-align: left;
-}
-
-/* OS-level dark mode (no host override). */
-@media (prefers-color-scheme: dark) {
-  .followers {
-    --fl-bg: #0c1116;
-    --fl-line: #233039;
-    --fl-ink: #e9eef1;
-    --fl-ink-muted: #8aa0ac;
-    --fl-hover: rgba(255, 255, 255, .05);
-  }
-}
-
-/* Host-forced dark mode — `data-theme="dark"` on the root OR an ancestor. */
-:global([data-theme='dark']) .followers,
-.followers:global([data-theme='dark']) {
-  --fl-bg: #0c1116;
-  --fl-line: #233039;
-  --fl-ink: #e9eef1;
-  --fl-ink-muted: #8aa0ac;
-  --fl-hover: rgba(255, 255, 255, .05);
 }
 
 /* --------------------------------------------------------------------------

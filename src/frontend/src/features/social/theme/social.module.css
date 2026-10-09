@@ -17,69 +17,49 @@
  *
  * Theming model (see D1 README "Design Tokens" + DECISIONS.md D1-003/R-001):
  *  - `.tokens` (composed onto `.postCard`) is the token ROOT: it declares the
- *    light-mode palette as CSS custom properties, then every per-part module
- *    reads those vars (`var(--pc-*)`) rather than hardcoding a color. A
- *    component mounts the class on its outermost element and everything beneath
- *    it is themed.
- *  - Dark mode has TWO independent triggers, per the story brief: the OS-level
- *    `prefers-color-scheme: dark` media query (the default, no-provider path),
- *    AND a `[data-theme="dark"]` attribute a host can set on the card root
- *    itself OR any ancestor, to FORCE dark mode regardless of OS preference.
- *    Neither depends on a React theme provider/context — a plain CSS
- *    cascade, so this component tree can be dropped anywhere.
+ *    light palette as CSS custom properties, then every per-part module reads
+ *    those vars (`var(--pc-*)`) rather than hardcoding a color. A component
+ *    mounts the class on its outermost element and everything beneath it is
+ *    themed.
+ *  - LIGHT ONLY (demo-polish F5). There is no dark palette: the former
+ *    `prefers-color-scheme: dark` and `[data-theme='dark']` blocks were removed
+ *    so a dark-mode OS can no longer turn the page half dark (and so F3's active
+ *    like/repost accent is never drawn on a dark canvas). Do not reintroduce
+ *    either trigger; `forcedLight.guard.test.ts` fails the build if one appears
+ *    in any `features/social/**` stylesheet.
  *  - The accent (`--pc-accent`) reads the shared `--pulse-ac` custom property
- *    (COR-030 per-exercise rebrand hook) with the Cadence-navy default
- *    fallback — see `tokens.ts`'s `ACCENT_CSS_VAR`/`DEFAULT_ACCENT`. The
- *    verified-mark seal is deliberately NOT themed here — see
- *    `VerifiedMark.tsx`, which uses the fixed `SEAL_BLUE` token directly as an
- *    SVG fill, never a CSS variable, so no cascade can ever recolor it.
+ *    (COR-030 per-exercise rebrand hook), which `SocialBrandScope` sets from the
+ *    resolved brand — with the Cadence-navy default fallback — see `tokens.ts`'s
+ *    `ACCENT_CSS_VAR`/`DEFAULT_ACCENT`. The verified-mark seal is deliberately
+ *    NOT themed here — see `VerifiedMark.tsx`, which uses the fixed `SEAL_BLUE`
+ *    token directly as an SVG fill, never a CSS variable, so no cascade can ever
+ *    recolor it.
  *
- * Values mirror `tokens.ts`'s `LIGHT_PALETTE`/`DARK_PALETTE` — keep both in
- * sync by hand if either changes (a CSS Module cannot import a `.ts` file's
- * values directly).
+ * Values mirror `tokens.ts`'s `LIGHT_PALETTE` — keep both in sync by hand if
+ * either changes (a CSS Module cannot import a `.ts` file's values directly).
  *
- * `.tokens` (Wave-S3.1 orchestrator extraction) is the token-only slice the
- * card root uses — the custom-property declarations (light default + both
- * dark triggers) WITHOUT any layout rule. `PostCard.module.css`'s `.postCard`
- * composes it so nothing changes for `<PostCard>` itself; other participant-world components
- * that sit alongside (not inside) a `<PostCard>` — e.g. `<QuotePostCard>`'s
- * inline-styled roots, `<QuoteComposer>` — apply `.tokens` directly so their
- * `var(--pc-*)` reads resolve to the SAME palette/dark-mode/`--pulse-ac`
- * cascade, instead of re-hardcoding the hex values (the Gate-1 token-drift
- * finding this extraction fixes).
+ * `.tokens` (Wave-S3.1 orchestrator extraction) is the token-only slice the card
+ * root uses — the custom-property declarations WITHOUT any layout rule.
+ * `PostCard.module.css`'s `.postCard` composes it so nothing changes for
+ * `<PostCard>` itself; other participant-world components that sit alongside (not
+ * inside) a `<PostCard>` — e.g. `<QuotePostCard>`'s inline-styled roots,
+ * `<QuoteComposer>` — apply `.tokens` directly so their `var(--pc-*)` reads
+ * resolve to the SAME palette/`--pulse-ac` cascade, instead of re-hardcoding the
+ * hex values (the Gate-1 token-drift finding this extraction fixes).
  */
 
 .tokens {
-  /* Light-mode palette (default) */
+  /* Light palette (the only palette) */
   --pc-bg: #fff;
   --pc-panel: #f3f5f6;
   --pc-line: #e5e8ea;
+  /* The border of an interactive CONTROL (text field, outlined pill): 3.59:1 on white,
+   * 3.29:1 on `--pc-panel` -- WCAG 1.4.11 wants >= 3:1. `--pc-line` is a hairline
+   * DIVIDER (1.23:1) and must never be the only edge of an input. */
+  --pc-control-line: #7b8993;
   --pc-ink: #0e1518;
   --pc-ink-muted: #61707a;
   --pc-hover: rgba(14, 21, 24, .045);
   /* Per-exercise accent hook (COR-030) — never hardcode a bare accent color. */
   --pc-accent: var(--pulse-ac, #1e3a5f);
-}
-
-/* OS-level dark mode (no host override). */
-@media (prefers-color-scheme: dark) {
-  .tokens {
-    --pc-bg: #0c1116;
-    --pc-panel: #161e25;
-    --pc-line: #233039;
-    --pc-ink: #e9eef1;
-    --pc-ink-muted: #8aa0ac;
-    --pc-hover: rgba(255, 255, 255, .05);
-  }
-}
-
-/* Host-forced dark mode — `data-theme="dark"` on the token root OR an ancestor. */
-:global([data-theme='dark']) .tokens,
-.tokens:global([data-theme='dark']) {
-  --pc-bg: #0c1116;
-  --pc-panel: #161e25;
-  --pc-line: #233039;
-  --pc-ink: #e9eef1;
-  --pc-ink-muted: #8aa0ac;
-  --pc-hover: rgba(255, 255, 255, .05);
 }

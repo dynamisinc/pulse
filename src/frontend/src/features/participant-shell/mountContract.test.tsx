@@ -12,6 +12,7 @@
  * narrower, faster unit layer around the context module itself, mirroring
  * `core/exerciseContext/exerciseContext.test.tsx`'s own structure.
  */
+import { useCallback, useState, type ReactNode } from 'react'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -182,5 +183,59 @@ describe('module surface (AC4, WAVE0-REVIEW precedent 20)', () => {
     for (const forbidden of forbiddenSubstrings) {
       expect(exportNames.some(name => name.includes(forbidden))).toBe(false)
     }
+  })
+})
+
+describe('useClaimShellAccountControl (demo-polish F1 M2)', () => {
+  function Channel({ active }: { active: boolean }) {
+    MountContractModule.useClaimShellAccountControl(active)
+    return <p>channel</p>
+  }
+
+  /** Stands in for ShellLayout: counts the live claims the way it does. */
+  function ClaimHost({ children }: { children: ReactNode }) {
+    const [claims, setClaims] = useState(0)
+    const claim = useCallback(() => {
+      setClaims(count => count + 1)
+      return () => setClaims(count => count - 1)
+    }, [])
+    return (
+      <div>
+        <output data-testid="claims">{claims}</output>
+        <MountContractModule.ShellAccountControlClaimProvider value={claim}>
+          {children}
+        </MountContractModule.ShellAccountControlClaimProvider>
+      </div>
+    )
+  }
+
+  it('registers a claim while active and releases it when the channel goes inactive', () => {
+    const { rerender } = render(<ClaimHost><Channel active /></ClaimHost>)
+    expect(screen.getByTestId('claims')).toHaveTextContent('1')
+
+    rerender(<ClaimHost><Channel active={false} /></ClaimHost>)
+    expect(screen.getByTestId('claims')).toHaveTextContent('0')
+  })
+
+  it('releases on unmount', () => {
+    const { rerender } = render(<ClaimHost><Channel active /></ClaimHost>)
+    rerender(<ClaimHost>{null}</ClaimHost>)
+    expect(screen.getByTestId('claims')).toHaveTextContent('0')
+  })
+
+  it('makes no claim when inactive from the start', () => {
+    render(<ClaimHost><Channel active={false} /></ClaimHost>)
+    expect(screen.getByTestId('claims')).toHaveTextContent('0')
+  })
+
+  it('is a no-op outside a shell (a channel rendered alone in a test, or a staff preview)', () => {
+    expect(() => render(<Channel active />)).not.toThrow()
+    expect(screen.getByText('channel')).toBeInTheDocument()
+  })
+})
+
+describe('SHELL_ALERT_HEIGHT_VAR', () => {
+  it('is the published alert-height custom property name', () => {
+    expect(MountContractModule.SHELL_ALERT_HEIGHT_VAR).toBe('--pulse-alert-height')
   })
 })

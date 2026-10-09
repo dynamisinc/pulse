@@ -1,5 +1,10 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+// Figtree, the Pulse type face (D1-003), self-hosted so no one needs a network font
+// call. Imported ONCE, here. The package registers the family as 'Figtree Variable';
+// `index.css` registers the plain 'Figtree' alias face over the same files so every
+// existing `font-family: 'Figtree', ...` declaration resolves to it.
+import '@fontsource-variable/figtree'
 import './index.css'
 import App from './App.tsx'
 import { checkEnvironment } from './core/utils/validateEnv'

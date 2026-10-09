@@ -10,10 +10,13 @@
  *    in a read-only/observer session (COR-015/D1-011 — affordances absent, not
  *    disabled);
  *  - tapping a post's open target opens its flattened thread IN the channel
- *    (Phase-1 local view state, no router), swapping out the feed+composer;
- *  - "Back to feed" returns to the feed.
+ *    (a real route, `/:handle/status/:id`, demo-polish F1), hiding the feed +
+ *    composer;
+ *  - "Back" returns to the feed.
  *
- * Renders through the REAL `ExerciseContextProvider` + `SessionProvider` (both
+ * Mounted under a `MemoryRouter` (F1: the channel now has a router of its own, so
+ * it needs a Router ancestor, as it has in the app). Renders through the REAL
+ * `ExerciseContextProvider` + `SessionProvider` (both
  * resolve via the shared axios client's built-in mock adapters, exactly as the
  * shipped `/shell` route does), under a `ShellContextProvider` supplying the
  * mount variant — the same providers App.tsx stacks around the channel. A fixed
@@ -22,6 +25,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
@@ -57,13 +61,15 @@ function renderChannel(variant: ShellVariant = 'full') {
   const mount: ShellMountProps = { variant, scenarioNow: SCENARIO_NOW }
   return render(
     <QueryClientProvider client={client}>
-      <ExerciseContextProvider>
-        <SessionProvider>
-          <ShellContextProvider value={mount}>
-            <SocialChannel />
-          </ShellContextProvider>
-        </SessionProvider>
-      </ExerciseContextProvider>
+      <MemoryRouter initialEntries={['/home']}>
+        <ExerciseContextProvider>
+          <SessionProvider>
+            <ShellContextProvider value={mount}>
+              <SocialChannel />
+            </ShellContextProvider>
+          </SessionProvider>
+        </ExerciseContextProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -97,7 +103,7 @@ describe('SocialChannel — Wave S2 integration wiring', () => {
     expect(within(firstActions).queryAllByRole('button')).toHaveLength(0)
   })
 
-  it('opens a post into its flattened thread and returns via "Back to feed"', async () => {
+  it('opens a post into its flattened thread and returns via "Back"', async () => {
     const user = userEvent.setup()
     renderChannel('full')
 
@@ -113,16 +119,17 @@ describe('SocialChannel — Wave S2 integration wiring', () => {
     expect(await screen.findByTestId('thread-view')).toBeInTheDocument()
     expect(screen.getByTestId('composer')).not.toBeVisible()
     expect(screen.getByTestId('social-feed-region')).not.toBeVisible()
-    // Focus moved INTO the thread (the feed below is display:none — NFR-001).
-    expect(screen.getByTestId('social-thread-region')).toHaveFocus()
+    // Focus moved to the new route's heading (the feed below is display:none —
+    // NFR-001). F1: the heading, not the old region wrapper.
+    expect(screen.getByRole('heading', { name: 'Post' })).toHaveFocus()
 
-    await user.click(screen.getByRole('button', { name: /back to feed/i }))
+    await user.click(screen.getByRole('button', { name: /^back$/i }))
 
     // Back to the feed — composer + cards visible again, thread gone, focus
-    // returned to the feed region.
+    // returned to the Home heading.
     await waitFor(() => expect(screen.getByTestId('composer')).toBeVisible())
     expect(screen.queryByTestId('thread-view')).not.toBeInTheDocument()
-    expect(screen.getByTestId('social-feed-region')).toHaveFocus()
+    expect(screen.getByRole('heading', { name: 'Home' })).toHaveFocus()
     expect(screen.getAllByTestId('post-card').length).toBeGreaterThan(0)
   })
 
@@ -144,7 +151,7 @@ describe('SocialChannel — Wave S2 integration wiring', () => {
     // Open a thread and come back.
     await user.click(first(screen.getAllByTestId('post-open-target')))
     await screen.findByTestId('thread-view')
-    await user.click(screen.getByRole('button', { name: /back to feed/i }))
+    await user.click(screen.getByRole('button', { name: /^back$/i }))
     await waitFor(() => expect(screen.getByTestId('composer')).toBeVisible())
 
     // The feed was hidden, not remounted — so still exactly one feed-view event

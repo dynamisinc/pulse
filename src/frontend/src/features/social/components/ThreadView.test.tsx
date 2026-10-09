@@ -5,7 +5,8 @@
  *  - a thread renders FLATTENED - ancestors (oldest first) -> the focused
  *    post (enlarged) -> replies, as one flat sibling list, never nested/
  *    indented, even with a 2-deep ancestor chain (D1-006);
- *  - every reply is labelled "Replying to @handle";
+ *  - every visible reply CARD shows exactly one "Replying to @handle" line - its own
+ *    (`PostReplyContext`); the tombstone, which has no card, shows none;
  *  - a taken-down reply renders the interim in-thread tombstone
  *    ("This post is unavailable.") instead of its content;
  *  - every post's relative time renders from the injected exercise clock,
@@ -34,6 +35,7 @@ import {
   ShellContextProvider,
   type ShellVariant,
 } from '@/features/participant-shell/mountContract'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { ThreadView } from './ThreadView'
 
 function fixedClock(instant: Date): IExerciseClock {
@@ -50,7 +52,9 @@ async function renderThread(focusedPostId: string, variant: ShellVariant = 'full
         <ShellContextProvider
           value={{ variant, scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <ThreadView focusedPostId={focusedPostId} />
+          <SocialDirectoryProvider>
+            <ThreadView focusedPostId={focusedPostId} />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,
@@ -102,13 +106,18 @@ describe('ThreadView — flattened layout (SOC-010, D1-006)', () => {
     }
   })
 
-  it('labels every reply "Replying to @handle"', async () => {
+  it('shows each visible reply card exactly one "Replying to @handle" line (its own)', async () => {
     await renderThread('post-seed-mvega-question')
 
-    const labels = screen.getAllByText(/^Replying to @/)
-    expect(labels).toHaveLength(2)
-    for (const label of labels) {
-      expect(label).toHaveTextContent('Replying to @mvega_fh')
+    const groups = screen.getAllByTestId('thread-reply')
+    const visible = groups.filter(group => within(group).queryByTestId('post-card') !== null)
+    expect(visible).toHaveLength(1)
+    for (const group of visible) {
+      const lines = within(group).getAllByText(/^Replying to @/)
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toHaveTextContent('Replying to @mvega_fh')
+      // It is the card's own context line, not a second label the thread adds.
+      expect(within(group).getByTestId('post-reply-context')).toBe(lines[0])
     }
   })
 })
@@ -120,6 +129,9 @@ describe('ThreadView — in-thread tombstone (SOC-005, D1-009)', () => {
     const tombstone = screen.getByTestId('thread-tombstone')
     expect(tombstone).toHaveTextContent('This post is unavailable.')
     expect(screen.queryByText(/screenshot this before it disappears/i)).not.toBeInTheDocument()
+    // Accessible: a labelled note (words + decorative icon), no card behind it.
+    expect(tombstone).toHaveAttribute('role', 'note')
+    expect(within(tombstone).queryByTestId('post-card')).not.toBeInTheDocument()
   })
 })
 
@@ -166,7 +178,9 @@ describe('ThreadView — thread-open telemetry (XC-004)', () => {
             <ShellContextProvider
               value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
             >
-              <ThreadView focusedPostId={focusedPostId} />
+              <SocialDirectoryProvider>
+                <ThreadView focusedPostId={focusedPostId} />
+              </SocialDirectoryProvider>
             </ShellContextProvider>
           </SessionProvider>
         </ExerciseContextProvider>
@@ -249,8 +263,11 @@ describe('ThreadView — content sanitization (NFR-004)', () => {
     const { container } = await renderThread('post-xss-focused')
 
     // A `dangerouslySetInnerHTML` render would parse this into a real (if
-    // inert-in-jsdom) <img> element; a plain-text React child never does.
-    expect(container.querySelector('img')).not.toBeInTheDocument()
+    // inert-in-jsdom) <img> element; a plain-text React child never does. (The authors'
+    // avatar PHOTOS are legitimate <img>s since F5, so only a non-avatar <img> counts.)
+    const injected = Array.from(container.querySelectorAll('img'))
+      .filter(img => !img.closest('[data-testid="post-avatar"]'))
+    expect(injected).toHaveLength(0)
     expect(screen.getByText(maliciousText)).toBeInTheDocument()
   })
 })

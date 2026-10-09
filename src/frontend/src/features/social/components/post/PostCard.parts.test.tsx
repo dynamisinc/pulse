@@ -12,6 +12,7 @@
  */
 import type { ReactNode } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
@@ -33,12 +34,22 @@ function buildPost(overrides: Partial<PostView> = {}): PostView {
   }
 }
 
-async function renderCard(node: ReactNode) {
-  const utils = render(
-    <ExerciseContextProvider>
-      <SessionProvider>{node}</SessionProvider>
-    </ExerciseContextProvider>,
+// A React Query client is required since F2: a video's player reads `useChromeConfig()`
+// (the NFR-008 watermark signal), exactly as the real shell provides.
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+function Providers({ children }: { children: ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ExerciseContextProvider>
+        <SessionProvider>{children}</SessionProvider>
+      </ExerciseContextProvider>
+    </QueryClientProvider>
   )
+}
+
+async function renderCard(node: ReactNode) {
+  const utils = render(<Providers>{node}</Providers>)
   await waitFor(() => expect(screen.getByTestId('post-card')).toBeInTheDocument())
   return utils
 }
@@ -91,11 +102,9 @@ describe('PostCard — composition and DOM hooks', () => {
     expect(screen.getByTestId('post-reply-context')).toHaveTextContent('Replying to @mvega_fh')
 
     rerender(
-      <ExerciseContextProvider>
-        <SessionProvider>
-          <PostCard post={buildPost()} />
-        </SessionProvider>
-      </ExerciseContextProvider>,
+      <Providers>
+        <PostCard post={buildPost()} />
+      </Providers>,
     )
     expect(screen.queryByTestId('post-reply-context')).not.toBeInTheDocument()
   })
@@ -107,7 +116,7 @@ describe('PostCard — composition and DOM hooks', () => {
     expect(screen.queryByTestId('post-link-preview')).not.toBeInTheDocument()
   })
 
-  it('renders an accessible placeholder for an image AND a video attachment (F0 behaviour)', async () => {
+  it('renders an image tile AND an inline video player for the attachments (F2)', async () => {
     await renderCard(
       <PostCard
         post={buildPost({
@@ -119,8 +128,11 @@ describe('PostCard — composition and DOM hooks', () => {
       />,
     )
 
-    expect(screen.getByRole('img', { name: 'Flooded street' })).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: 'Crew briefing clip' })).toBeInTheDocument()
+    // The photo is a real <img> in an activatable tile; the video is a focusable player group.
+    expect(screen.getByRole('img', { name: 'Flooded street' })).toHaveAttribute('src', '/i.png')
+    expect(screen.getByRole('button', { name: 'Flooded street' })).toBeInTheDocument()
+    const player = screen.getByRole('group', { name: 'Crew briefing clip' })
+    expect(player.querySelector('video')).toHaveAttribute('controls')
   })
 
   it('is the same component through the legacy components/PostCard re-export shim', () => {

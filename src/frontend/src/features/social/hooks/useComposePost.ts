@@ -1,77 +1,122 @@
 /**
  * features/social/hooks/useComposePost.ts
  * ---------------------------------------------------------------------------
- * The compose-post state machine behind the inline `<Composer>` (feature:
- * posts, story 01 — "Post composition"; SOC-001, D1-R5). Participant world
+ * The compose-post state machine behind the inline `<Composer>` AND the thread's
+ * `<ReplyComposer>` (feature: posts, story 01 "Post composition"; SOC-001,
+ * D1-R5 — and demo-polish F4, story 13 "Threads and composer"). Participant world
  * (Pulse Social skin) — pure hook + pure helpers, no UI, no COBRA.
  *
  * WHAT THIS OWNS
- *  - Draft state: `text` and validated `media` (0–4 images).
- *  - Derived counter state for the D1-R5 depleting ring: `length`,
- *    `remaining`, `showCount` (count text appears at ≤20 remaining),
- *    `isLow` (amber near the limit), `isOverLimit` (publish blocked).
- *  - Parsed `#hashtags` / `@mentions` for the model/telemetry (SOC-001). S2
- *    does NOT navigate/link them — it only parses + exposes them.
- *  - `publish()`, the single sanctioned publish path: it assembles a
- *    `CreatePostInput` and, behind the ONE `USE_MOCK_DATA` flip point
- *    (`@/core/config/mockData`, WAVE0-REVIEW precedent 15):
- *      - MOCK: calls `createPost` from `@/features/social` — the ONE place
- *        sanitization (NFR-004) and the `'post'` telemetry event (XC-004)
- *        happen — then fires `onPosted` with the created `Post` so the host
- *        can refresh its (in-tab) feed.
- *      - LIVE (UAT fix): fires `livePostActions.publishPost` — a fire-and-
- *        forget `POST /api/posts` (`.catch(() => {})`) — and does NOT call
- *        `createPost` or `onPosted`. The published post reaches every
- *        participant, INCLUDING the author, via the backend's `PostReceived`
- *        SignalR broadcast and the "▲ N new posts" pill (`useFeedStream`,
- *        feeds-discovery/04) once `useFeed`'s baseline resolve/the pill tap
- *        picks it up — never a client-side optimistic insert here (which the
- *        feed's persona-cast resolution would drop anyway, and which would
- *        double the XC-004 telemetry the backend now emits authoritatively).
- *    Either way the draft (`text`/`media`/`mediaError`) is cleared on publish.
+ *  - Draft state: `text` and the ATTACH TRAY (`attachments`: up to 4 images OR 1
+ *    video, each uploading / ready / failed, each with its own alt text).
+ *  - Derived counter state for the D1-R5 depleting ring: `length`, `remaining`,
+ *    `showCount` (count text appears at ≤20 remaining), `isLow` (amber near the
+ *    limit), `isOverLimit` (publish blocked).
+ *  - Parsed `#hashtags` / `@mentions` for the model/telemetry (SOC-001).
+ *  - `publish()`, the single sanctioned publish path (below).
+ *
+ * THE ATTACH TRAY (demo-polish F4). Picking files validates the whole batch up
+ * front (`validateMediaFile`'s size/MIME messages, which carry the "MP4 (H.264)"
+ * hint, plus the count rules below) and rejects the BATCH on the first failure, so
+ * a partial, surprising attach never happens. Accepted files upload IMMEDIATELY and
+ * in parallel through `@/core/media`'s `uploadPickedMedia` (image: size read +
+ * upload; video: poster first, then the video) — each with its own
+ * `AbortController`, progress fraction and cancel. (`useMediaUpload` is the
+ * single-slot React wrapper over that same function; it aborts the first upload
+ * when a second starts, so a four-image tray cannot be built on it — the tray owns
+ * one controller per item instead.) The rules:
+ *   - at most 4 images OR exactly 1 video, never mixed (clear in-fiction messages);
+ *   - every item needs a NON-EMPTY alt text (NFR-001) — measured AFTER
+ *     sanitization, so an alt of only markup counts as empty;
+ *   - Post stays disabled while any item is uploading, failed, or missing its alt;
+ *     a failed item must be removed (a photo is never silently dropped from a post).
+ * A media-only post (no text) is allowed once everything is ready.
+ *
+ * `publish()`, behind the ONE `USE_MOCK_DATA` flip point (`@/core/config/mockData`):
+ *   - MOCK: `createPost` — the one place the mock sanitizes and emits the `'post'`
+ *     (or, with `parentPostId`, `'reply'`) telemetry event — then appends the post
+ *     to `postStore` (the mock backend: it links a reply to its parent and bumps
+ *     the parent's reply count, so the thread shows it) and registers a top-level
+ *     post as the viewer's own.
+ *   - LIVE: AWAITS `livePostActions.publishPost` (`POST /api/posts`); on success the
+ *     201 body is narrowed to a participant-safe view (`narrowCreatedPost` — the
+ *     union also admits the staff provenance shape) and registered as the viewer's
+ *     own. No frontend telemetry: the server emits `post`/`reply` (§1.8).
+ *   Either way, on success `onPosted(view)` fires with the participant-safe view
+ *   (also in LIVE mode — it used to be mock-only) and the draft clears.
+ *
+ * A FAILED PUBLISH KEEPS THE DRAFT. `publishPost` rejections are no longer
+ * swallowed: the text and the tray stay exactly as they were and `publishError`
+ * carries an in-fiction message. What the UI may OFFER depends on what the failure
+ * proves (`publishErrorKind`, from {@link classifyPublishFailure}):
+ *   - 'failed'      the request failed in a way that NORMALLY means nothing was
+ *                   created (network down, most 5xx, 408/429): offer RETRY - calling
+ *                   `publish()` again re-sends the same draft. Not a guarantee: a
+ *                   network drop or a 5xx can still have landed after the server
+ *                   committed, and there is no idempotency key yet (a filed follow-up),
+ *                   so Retry is a deliberate author action, never automatic;
+ *   - 'refused'     the server answered 4xx (400/403/409: lifecycle gate, read-only,
+ *                   media not yours, ...): the same draft would be refused again, so NO
+ *                   Retry; the message says so and editing the draft clears it;
+ *   - 'unconfirmed' the post may ALREADY exist: the server answered 2xx but the body
+ *                   could not be read (a plain `Error`, or an axios failure that
+ *                   carries a 2xx response), or a 504 gateway timeout (the origin may
+ *                   have committed). With no idempotency key a Retry could double-post
+ *                   - NO Retry; the author checks the feed (and may press Post
+ *                   deliberately).
+ * While a publish is in flight the form locks (`isPublishing`), so nothing typed
+ * after pressing Post can be cleared by the success.
+ *
+ * A 201 THAT OUTLIVES THE SESSION has no effect. `publish()` captures the own-post
+ * store's generation when it starts; `core/auth/endSession` bumps it (`reset()`), so a
+ * response that lands after sign-out neither refills the store the next sign-in reads
+ * nor calls the host's `onPosted`.
+ *
+ * CONTENT SECURITY (NFR-004). The body and every alt go through `sanitizeText`
+ * before they leave the hook (the server sanitizes again — it is the authoritative
+ * boundary; this is defence in depth and keeps `canPublish` honest about what would
+ * actually be sent). Files are validated before upload.
  *
  * TWO-WORLDS / ISOLATION
- *  - `exerciseId`/`timeZone` come from `useExerciseContext()` and are used ONLY
- *    to STAMP the created post + its telemetry envelope — never as a fetch
- *    scoping param (COR-001/XC-002). `livePostActions.publishPost` drops
- *    `exerciseId` from the wire body entirely (COR-001) — the server stamps
- *    scope from the session.
- *  - `authorPersonaId`/`actingHumanId` come from `useSession()` (COR-018). If
- *    the session has no bound persona (`personaId` undefined) there is no
- *    identity to post as, so `canPost` is false and `publish()` is a no-op.
- *  - Observer/read-only (COR-015/D1-011): `isReadOnly` is surfaced so the
- *    `<Composer>` renders NOTHING at all (absent, not disabled). `publish()`
- *    additionally hard-guards on it (belt-and-braces).
+ *  - `exerciseId`/`timeZone` come from `useExerciseContext()` and are used ONLY to
+ *    STAMP the created post + its telemetry envelope — never as a fetch scoping
+ *    param (COR-001/XC-002). `livePostActions.publishPost` and `core/media` drop /
+ *    never send `exerciseId` — the server stamps scope from the session.
+ *  - `authorPersonaId`/`actingHumanId` come from `useSession()` (COR-018). If the
+ *    session has no bound persona there is no identity to post as, so `canPost` is
+ *    false and `publish()` is a no-op.
+ *  - Observer/read-only (COR-015/D1-011): `isReadOnly` is surfaced so the composers
+ *    render NOTHING at all (absent, not disabled). `publish()` hard-guards on it too.
  *
  * SCENARIO TIME (COR-053): `scenarioTime` is `scenarioNow().toISOString()` from
- * `@/core/clock` — never wall-clock (`new Date()`/`Date.now()` are lint-banned
- * on this path). `createPost` stamps the telemetry `wallClockTime` itself
- * (mock mode); the backend stamps its own wall-clock in live mode.
- *
- * MEDIA (story AC — minimal validated stub): the attach affordance validates +
- * accepts 0–4 images (count/MIME/size). Inline VIDEO (the 1-video "Utube
- * replacement" path in SOC-001) is recognized by the validator and DOCUMENTED as
- * a follow-up. A selected image becomes a local DRAFT chip
- * (`DraftMedia`: `{kind:'image',alt}`) with its filename as interim `alt`.
- *
- * CONTRACT v2 (demo-polish F0): a draft chip is NOT an uploaded asset — it has no
- * `mediaId` — and the legacy `{kind, alt}` placeholder is no longer sent
- * (implementation.md §1.5.2; DP-6). So `publish()` does not put the draft chips
- * on the post; the real attach tray (upload via `@/core/media`, alt text, video)
- * is F4's story, which replaces the draft state with `CreatePostMedia[]`.
- * Publishing with chips attached therefore sends the TEXT only and raises
- * {@link DRAFT_MEDIA_NOT_SENT_MESSAGE} as the composer's `mediaError`; publishing
- * with chips but NO text is blocked (`canPublish` false, `publish()` a no-op).
- * Both are pinned by `useComposePost.interim.test.ts`.
+ * `@/core/clock` — never wall-clock (`new Date()`/`Date.now()` are lint-banned on
+ * this path).
  */
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { isAxiosError } from 'axios'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { scenarioNow } from '@/core/clock'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
-import { createPost, type CreatePostInput, type Post } from '@/features/social'
+import {
+  MEDIA_ERROR_TEXT,
+  MediaUploadError,
+  isAbortError,
+  uploadPickedMedia,
+  validateMediaFile,
+} from '@/core/media'
+import type { MediaAssetView, MediaKind } from '@/core/media'
+import {
+  createPost,
+  toParticipantView,
+  type CreatePostInput,
+  type CreatePostMedia,
+  type ParticipantPostView,
+} from '@/features/social'
 import { publishPost } from '../services/livePostActions'
+import { postStore } from '../services/postStore'
+import { narrowCreatedPost, ownPostStore } from '../services/ownPostStore'
 import { sanitizeText } from '../services/sanitize'
 
 /** Default per-exercise character limit (SOC-001); overridable via a prop. */
@@ -81,28 +126,90 @@ export const DEFAULT_CHAR_LIMIT = 280
  * and the ring enters its amber "low" state (D1-R5). */
 export const COUNT_VISIBLE_THRESHOLD = 20
 
-/**
- * Shown (as the composer's `mediaError` alert, in-fiction wording) when a post is
- * published while photo chips are attached: the chips are interim drafts with no
- * uploaded asset behind them, so the post goes out as text only until F4's real
- * attach tray lands (see the MEDIA note in the module header).
- */
-export const DRAFT_MEDIA_NOT_SENT_MESSAGE =
-  "Photo upload isn't available yet — your post went out as text."
-
 /** Max images per post (SOC-001: "0–4 images OR 1 video"). */
 export const MAX_IMAGES = 4
 
-/** Max accepted image size, in bytes (5 MB) — validated before attach (NFR-004). */
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+/** Max videos per post. */
+export const MAX_VIDEOS = 1
 
-/** Accepted image MIME types (NFR-004 MIME validation). */
-export const ACCEPTED_IMAGE_MIME: readonly string[] = [
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-]
+/** Longest accepted alt text (the server accepts 1..1000 after sanitization). */
+export const ALT_MAX_LENGTH = 1000
+
+/** In-fiction wording for the tray's count rules (never engineering vocabulary). */
+export const MEDIA_MIXED_MESSAGE = 'Attach up to 4 photos or 1 video, not both.'
+export const MEDIA_TOO_MANY_IMAGES_MESSAGE = `You can attach up to ${MAX_IMAGES} photos.`
+export const MEDIA_TOO_MANY_VIDEOS_MESSAGE = 'You can attach only 1 video.'
+
+/** Shown WITH Retry when the request normally created nothing (network down, 5xx). */
+export function publishFailedMessage(isReply: boolean): string {
+  return `Your ${isReply ? 'reply' : 'post'} couldn't be sent. Check your connection and try again.`
+}
+
+/** Shown WITH Retry when the server asked the client to slow down (429). */
+export function publishRateLimitedMessage(isReply: boolean): string {
+  return `Too many ${isReply ? 'replies' : 'posts'} right now. Wait a moment, then try again.`
+}
+
+/**
+ * Shown WITHOUT Retry when the server refused the request (4xx): a Retry of the same
+ * draft would be refused again. Deliberately says nothing about why — the cause can
+ * be exercise control (not open yet, paused), read-only, or an attachment that is not
+ * yours — and none of that belongs in the fiction.
+ */
+export function publishRefusedMessage(isReply: boolean): string {
+  return `Your ${isReply ? 'reply' : 'post'} wasn't accepted right now. ` +
+    'Change it if you like, then try posting again.'
+}
+
+/**
+ * Shown WITHOUT Retry when the post may already exist (an unreadable 2xx, a 504): the
+ * author checks the feed before posting again.
+ */
+export function publishUnconfirmedMessage(isReply: boolean): string {
+  return `We couldn't confirm your ${isReply ? 'reply' : 'post'} went out. ` +
+    'Check the feed before you try again.'
+}
+
+/** What a failed publish proves, hence what the UI may offer (see the module header). */
+export type PublishErrorKind = 'failed' | 'refused' | 'unconfirmed'
+
+/** A classified publish failure: the kind and its in-fiction message. */
+export interface PublishFailure {
+  readonly kind: PublishErrorKind
+  readonly message: string
+}
+
+/**
+ * Classifies a `publishPost` rejection (see the module header for what each kind
+ * proves and offers):
+ *  - not an axios failure (`publishPost` throws a plain `Error` for a 2xx body it
+ *    could not parse), an axios failure carrying a 2xx response, or a 504 gateway
+ *    timeout -> 'unconfirmed' (no Retry: the post may exist);
+ *  - 429 -> 'failed' with the rate-limit wording; no response (network, timeout),
+ *    408 and the other 5xx -> 'failed' (Retry offered);
+ *  - any other 4xx -> 'refused' (no Retry).
+ */
+export function classifyPublishFailure(failure: unknown, isReply: boolean): PublishFailure {
+  const unconfirmed: PublishFailure = {
+    kind: 'unconfirmed',
+    message: publishUnconfirmedMessage(isReply),
+  }
+  if (!isAxiosError(failure)) return unconfirmed
+
+  const status = failure.response?.status
+  // A 2xx the client could not use, or a gateway timeout: the origin may have committed.
+  if (status !== undefined && ((status >= 200 && status < 300) || status === 504)) {
+    return unconfirmed
+  }
+  if (status === 429) {
+    return { kind: 'failed', message: publishRateLimitedMessage(isReply) }
+  }
+  // 408 (request timeout) is a retryable transport failure, not a refusal.
+  if (status !== undefined && status !== 408 && status >= 400 && status < 500) {
+    return { kind: 'refused', message: publishRefusedMessage(isReply) }
+  }
+  return { kind: 'failed', message: publishFailedMessage(isReply) }
+}
 
 /**
  * Parses distinct `#hashtags` from free text (deduped, order-preserved, the
@@ -133,75 +240,143 @@ function dedupe(values: string[]): string[] {
   return [...new Set(values)]
 }
 
-/**
- * A locally picked image awaiting the real attach flow (F4): just its interim
- * `alt`. Deliberately NOT the contract's `PostMedia` (which needs an uploaded
- * asset's id + url) and NOT sendable — see the MEDIA note in the module header.
- */
-export interface DraftMedia {
-  readonly kind: 'image'
+// -----------------------------------------------------------------------------
+// The attach tray
+// -----------------------------------------------------------------------------
+
+/** Where one tray item is in its life. */
+export type AttachmentStatus = 'uploading' | 'ready' | 'failed'
+
+/** One picked file in the attach tray. */
+export interface ComposerAttachment {
+  /** Local, tray-unique key (stable across renders; NOT the server's asset id). */
+  readonly key: string
+  readonly file: File
+  readonly kind: MediaKind
+  readonly status: AttachmentStatus
+  /** Upload progress as a fraction in [0, 1] (1 once `ready`). */
+  readonly progress: number
+  /** The author-entered description (required before the post can go out). */
   readonly alt: string
+  /** In-fiction failure text, set only when `status === 'failed'`. */
+  readonly error?: string
+  /** The uploaded asset, set once `status === 'ready'`. */
+  readonly asset?: MediaAssetView
 }
 
-/** Outcome of validating a batch of picked files against the media rules. */
-export interface ImageValidationResult {
-  /** The accepted attachments (empty when any file failed validation). */
-  readonly media: DraftMedia[]
-  /** A human-readable, in-fiction-safe reason the batch was rejected. */
-  readonly error?: string
+/** Outcome of validating a picked batch against the media rules. */
+export type AttachBatchResult =
+  | { readonly ok: true; readonly kinds: readonly MediaKind[] }
+  | { readonly ok: false; readonly error: string }
+
+/**
+ * Validates a batch of newly picked files against the media rules (NFR-004), given
+ * the kinds already in the tray. Rejects the WHOLE batch on the first failure:
+ * a file that fails `validateMediaFile` (type / size / empty — the message names
+ * the file), then the count rules (mixed image + video; more than 1 video; more
+ * than 4 images).
+ *
+ * @param files         the newly picked files
+ * @param existingKinds the kinds of the items already in the tray
+ */
+export function validateAttachBatch(
+  files: readonly File[],
+  existingKinds: readonly MediaKind[],
+): AttachBatchResult {
+  const kinds: MediaKind[] = []
+  for (const file of files) {
+    const check = validateMediaFile(file)
+    if (!check.ok) return { ok: false, error: `${file.name}: ${check.error}` }
+    kinds.push(check.kind)
+  }
+
+  const all = [...existingKinds, ...kinds]
+  const images = all.filter(kind => kind === 'image').length
+  const videos = all.length - images
+  if (images > 0 && videos > 0) return { ok: false, error: MEDIA_MIXED_MESSAGE }
+  if (videos > MAX_VIDEOS) return { ok: false, error: MEDIA_TOO_MANY_VIDEOS_MESSAGE }
+  if (images > MAX_IMAGES) return { ok: false, error: MEDIA_TOO_MANY_IMAGES_MESSAGE }
+  return { ok: true, kinds }
+}
+
+/** The alt text that would actually be sent: sanitized, trimmed, bounded. */
+export function effectiveAlt(alt: string): string {
+  return sanitizeText(alt).trim().slice(0, ALT_MAX_LENGTH)
 }
 
 /**
- * Validates a batch of picked files for the image-attach affordance (NFR-004:
- * count/MIME/size). Rejects the WHOLE batch on the first failure so a partial,
- * surprising attach never happens. A video file is recognized and rejected
- * with a message pointing at the documented inline-video follow-up (Phase-1
- * `PostMedia` cannot represent a video yet).
- *
- * @param files         the newly-picked files
- * @param existingCount how many images are already attached (for the ≤4 cap)
+ * Builds the request's `media[]` from the tray, or `undefined` when the tray is
+ * not ready to send (an item is still uploading, failed, or has no usable alt).
+ * An empty tray yields `[]`.
  */
-export function validateImageFiles(files: File[], existingCount: number): ImageValidationResult {
-  const accepted: DraftMedia[] = []
-  for (const file of files) {
-    if (file.type.startsWith('video/')) {
-      return { media: [], error: 'Inline video is coming soon — attach up to 4 images for now.' }
-    }
-    if (!ACCEPTED_IMAGE_MIME.includes(file.type)) {
-      return { media: [], error: `That file type isn't supported: ${file.name}` }
-    }
-    if (file.size > MAX_IMAGE_BYTES) {
-      return { media: [], error: `${file.name} is too large (max 5 MB).` }
-    }
-    // Interim alt = filename, sanitized — NFR-004 keeps ALL free text on the
-    // publish path cleaned (defense-in-depth; alt already renders inert) until
-    // a real alt-authoring affordance lands.
-    accepted.push({ kind: 'image', alt: sanitizeText(file.name) })
+export function toCreatePostMedia(
+  items: readonly ComposerAttachment[],
+): CreatePostMedia[] | undefined {
+  const media: CreatePostMedia[] = []
+  for (const item of items) {
+    const alt = effectiveAlt(item.alt)
+    if (item.status !== 'ready' || item.asset === undefined || alt.length === 0) return undefined
+    media.push({ mediaId: item.asset.id, alt })
   }
-  if (existingCount + accepted.length > MAX_IMAGES) {
-    return { media: [], error: `You can attach up to ${MAX_IMAGES} images.` }
-  }
-  return { media: accepted }
+  return media
 }
+
+/** The user-facing text for a failed upload (never a raw error message). */
+function uploadFailureMessage(error: unknown): string {
+  return error instanceof MediaUploadError ? error.message : MEDIA_ERROR_TEXT.failed
+}
+
+// -----------------------------------------------------------------------------
+// The hook
+// -----------------------------------------------------------------------------
 
 /** Options for {@link useComposePost}. */
 export interface UseComposePostOptions {
   /** Per-exercise character limit; defaults to {@link DEFAULT_CHAR_LIMIT}. */
   readonly charLimit?: number
-  /** Called with the created `Post` after a successful publish, so the host
-   * can refresh the feed. The composer never touches the feed itself. */
-  readonly onPosted?: (post: Post) => void
+  /**
+   * Makes every post this composer publishes a REPLY to this post (an opaque id).
+   * Omitted for the top-level composer.
+   */
+  readonly parentPostId?: string
+  /**
+   * Called with the participant-safe view of the created post after a successful
+   * publish — in live mode too. The composer never touches the feed itself; the
+   * host reacts (a modal closes, a thread appends the reply).
+   */
+  readonly onPosted?: (view: ParticipantPostView) => void
 }
 
-/** The full compose surface the `<Composer>` binds to. */
+/** The full compose surface the composers bind to. */
 export interface UseComposePostResult {
   readonly text: string
   readonly setText: (value: string) => void
-  readonly media: readonly DraftMedia[]
-  /** Validates + appends picked image files; sets `mediaError` on rejection. */
-  readonly attachImages: (files: File[]) => void
-  readonly removeMedia: (index: number) => void
+  /** The attach tray, in pick order. */
+  readonly attachments: readonly ComposerAttachment[]
+  /** Validates the batch, then adds + uploads the files. Sets `mediaError` on rejection. */
+  readonly attachFiles: (files: readonly File[]) => void
+  /** Aborts an in-flight upload and drops its item. */
+  readonly cancelAttachment: (key: string) => void
+  /** Drops an item (aborting its upload if it is still running). */
+  readonly removeAttachment: (key: string) => void
+  /** Sets one item's description. */
+  readonly setAttachmentAlt: (key: string, alt: string) => void
+  /** The reason the last pick was refused, or `undefined`. */
   readonly mediaError: string | undefined
+  /** True while any tray item is still uploading. */
+  readonly isUploading: boolean
+  /** True while a publish request is in flight (the form is locked). */
+  readonly isPublishing: boolean
+  /** In-fiction reason the last publish failed, or `undefined`. */
+  readonly publishError: string | undefined
+  /**
+   * What the last failure proves (see the module header): only 'failed' may offer
+   * Retry (`publish()` again); 'refused' and 'unconfirmed' must not, or a Retry could
+   * be refused again / double-post. `undefined` when there is no error.
+   */
+  readonly publishErrorKind: PublishErrorKind | undefined
+  /** True from a successful publish until the next edit (drives the SR "posted" notice). */
+  readonly posted: boolean
   readonly hashtags: readonly string[]
   readonly mentions: readonly string[]
   readonly charLimit: number
@@ -219,25 +394,64 @@ export interface UseComposePostResult {
   readonly canPost: boolean
   /** Whether the composer must not render at all (observer mode, COR-015). */
   readonly isReadOnly: boolean
-  /** All conditions met to publish (non-empty content, within limit, canPost). */
+  /** All conditions met to publish (content, ready tray with alts, within limit, canPost). */
   readonly canPublish: boolean
-  /** Sanitizes + publishes via `createPost`, then clears the draft + fires
-   * `onPosted`. A no-op unless `canPublish`. */
+  /** Why Post is disabled for a MEDIA reason the author can fix, or `undefined`. */
+  readonly mediaBlockReason: string | undefined
+  /** Publishes the draft. A no-op unless `canPublish`. Calling it again after a failure = Retry. */
   readonly publish: () => void
 }
 
+/** Monotonic local key source for tray items. */
+let attachmentSeq = 0
+
 /**
- * The inline composer's state + publish machine. See the module header for the
- * full contract; the `<Composer>` component is its only intended consumer.
+ * The composer's state + publish machine. See the module header for the full
+ * contract; `<Composer>` and `<ReplyComposer>` are its intended consumers.
  */
 export function useComposePost(options: UseComposePostOptions = {}): UseComposePostResult {
-  const { charLimit = DEFAULT_CHAR_LIMIT, onPosted } = options
+  const { charLimit = DEFAULT_CHAR_LIMIT, parentPostId, onPosted } = options
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
 
-  const [text, setText] = useState('')
-  const [media, setMedia] = useState<DraftMedia[]>([])
+  const [text, setTextState] = useState('')
+  const [items, setItems] = useState<readonly ComposerAttachment[]>([])
   const [mediaError, setMediaError] = useState<string | undefined>(undefined)
+  const [isPublishing, setIsPublishing] = useState(false)
+  const [publishFailure, setPublishFailure] = useState<PublishFailure | undefined>(undefined)
+  const [posted, setPosted] = useState(false)
+
+  // The tray is mirrored in a ref so a batch pick and the async upload callbacks
+  // always see the current items (no stale closure), and in state so it renders.
+  const itemsRef = useRef<readonly ComposerAttachment[]>([])
+  const controllersRef = useRef(new Map<string, AbortController>())
+  const mountedRef = useRef(true)
+  const publishingRef = useRef(false)
+  const onPostedRef = useRef(onPosted)
+
+  useEffect(() => {
+    onPostedRef.current = onPosted
+  }, [onPosted])
+
+  useEffect(() => {
+    mountedRef.current = true
+    const controllers = controllersRef.current
+    return () => {
+      mountedRef.current = false
+      for (const controller of controllers.values()) controller.abort()
+      controllers.clear()
+    }
+  }, [])
+
+  const commit = useCallback((next: readonly ComposerAttachment[]) => {
+    itemsRef.current = next
+    if (mountedRef.current) setItems(next)
+  }, [])
+
+  const patchItem = useCallback((key: string, patch: Partial<ComposerAttachment>) => {
+    if (!itemsRef.current.some(item => item.key === key)) return
+    commit(itemsRef.current.map(item => (item.key === key ? { ...item, ...patch } : item)))
+  }, [commit])
 
   const hashtags = useMemo(() => parseHashtags(text), [text])
   const mentions = useMemo(() => parseMentions(text), [text])
@@ -251,67 +465,179 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
 
   const isReadOnly = session.isReadOnly
   const canPost = session.personaId !== undefined
-  // Draft chips are not sendable (see the MEDIA note in the module header), so a
-  // post needs TEXT: a chip-only publish would otherwise create a blank post.
-  const hasContent = text.trim().length > 0
-  const canPublish = hasContent && !isOverLimit && canPost && !isReadOnly
 
-  const attachImages = useCallback((files: File[]) => {
-    const result = validateImageFiles(files, media.length)
-    if (result.error !== undefined) {
+  // "Has content" is judged on what would be SENT: text that is only markup
+  // sanitizes to nothing and must not count as a post.
+  const hasText = useMemo(() => sanitizeText(text).trim().length > 0, [text])
+  const mediaReady = useMemo(() => toCreatePostMedia(items) !== undefined, [items])
+  const isUploading = items.some(item => item.status === 'uploading')
+  const hasMedia = items.length > 0
+  const canPublish =
+    (hasText || hasMedia) && mediaReady && !isOverLimit && canPost && !isReadOnly && !isPublishing
+
+  const mediaBlockReason = useMemo((): string | undefined => {
+    if (items.some(item => item.status === 'failed')) {
+      return 'Remove the attachment that failed to upload before posting.'
+    }
+    if (items.some(item => item.status === 'uploading')) {
+      return 'Waiting for your uploads to finish.'
+    }
+    if (items.some(item => effectiveAlt(item.alt).length === 0)) {
+      return 'Add a description to every photo or video before posting.'
+    }
+    return undefined
+  }, [items])
+
+  /** Any edit to the draft clears the last outcome (failure banner, "posted" notice). */
+  const noteEdit = useCallback(() => {
+    setPublishFailure(undefined)
+    setPosted(false)
+  }, [])
+
+  const setText = useCallback((value: string) => {
+    setTextState(value)
+    noteEdit()
+  }, [noteEdit])
+
+  const startUpload = useCallback((item: ComposerAttachment) => {
+    const controller = new AbortController()
+    controllersRef.current.set(item.key, controller)
+
+    uploadPickedMedia(item.file, {
+      signal: controller.signal,
+      onProgress: fraction => patchItem(item.key, { progress: fraction }),
+    })
+      .then(asset => {
+        patchItem(item.key, { status: 'ready', progress: 1, asset })
+      })
+      .catch((failure: unknown) => {
+        // A cancel/remove already dropped the item; nothing to report.
+        if (isAbortError(failure)) return
+        patchItem(item.key, { status: 'failed', error: uploadFailureMessage(failure) })
+      })
+      .finally(() => {
+        controllersRef.current.delete(item.key)
+      })
+  }, [patchItem])
+
+  const attachFiles = useCallback((files: readonly File[]) => {
+    if (files.length === 0) return
+    const result = validateAttachBatch(files, itemsRef.current.map(item => item.kind))
+    if (!result.ok) {
       setMediaError(result.error)
       return
     }
     setMediaError(undefined)
-    setMedia(prev => [...prev, ...result.media])
-  }, [media.length])
+    noteEdit()
 
-  const removeMedia = useCallback((index: number) => {
-    setMedia(prev => prev.filter((_, i) => i !== index))
+    const added: ComposerAttachment[] = files.map((file, index) => {
+      attachmentSeq += 1
+      return {
+        key: `attachment-${attachmentSeq}`,
+        file,
+        kind: result.kinds[index] ?? 'image',
+        status: 'uploading',
+        progress: 0,
+        alt: '',
+      }
+    })
+    commit([...itemsRef.current, ...added])
+    for (const item of added) startUpload(item)
+  }, [commit, noteEdit, startUpload])
+
+  const removeAttachment = useCallback((key: string) => {
+    controllersRef.current.get(key)?.abort()
+    controllersRef.current.delete(key)
+    commit(itemsRef.current.filter(item => item.key !== key))
     setMediaError(undefined)
-  }, [])
+    noteEdit()
+  }, [commit, noteEdit])
+
+  const setAttachmentAlt = useCallback((key: string, alt: string) => {
+    patchItem(key, { alt })
+    noteEdit()
+  }, [patchItem, noteEdit])
 
   const publish = useCallback(() => {
-    // Re-derive the guard locally rather than trusting a stale `canPublish`
+    // Re-derive every guard locally rather than trusting a stale `canPublish`
     // closure, and narrow `personaId` to a string (no non-null assertion).
     const personaId = session.personaId
     if (session.isReadOnly || personaId === undefined) return
-    if (text.trim().length === 0) return
+    if (publishingRef.current) return
     if ([...text].length > charLimit) return
 
+    const body = sanitizeText(text).trim()
+    const media = toCreatePostMedia(itemsRef.current)
+    if (media === undefined) return
+    if (body.length === 0 && media.length === 0) return
+
+    const isReply = parentPostId !== undefined
+    // The own-post store's generation at the moment of pressing Post: a sign-out
+    // while this is in flight bumps it, and the late result is then discarded.
+    const generation = ownPostStore.getGeneration()
     const input: CreatePostInput = {
       exerciseId,
       timeZone,
       scenarioTime: scenarioNow().toISOString(),
       authorPersonaId: personaId,
       actingHumanId: session.actingHumanId,
-      text,
-      // Draft chips are never sent (no mediaId; legacy placeholders are retired —
-      // see the MEDIA note in the module header). F4 supplies `CreatePostMedia[]`.
+      text: body,
+      ...(media.length > 0 ? { media } : {}),
+      ...(parentPostId !== undefined ? { parentPostId } : {}),
       origin: 'participant',
     }
 
-    if (USE_MOCK_DATA) {
-      const post = createPost(input)
-      onPosted?.(post)
-    } else {
-      // LIVE (UAT fix): POST-only, fire-and-forget. NEVER call `createPost`
-      // here (would double the XC-004 telemetry the backend now emits
-      // authoritatively) and NEVER call `onPosted` (there is no locally-
-      // created `Post` to hand back, and an optimistic insert would be
-      // dropped by the feed's persona-cast resolution anyway) — the
-      // SignalR "new posts" pill (`useFeedStream`) is what surfaces this
-      // post, to every participant including the author, once the request
-      // lands (see the module header).
-      publishPost(input).catch(() => {})
+    const finish = (view: ParticipantPostView) => {
+      // The session ended while this was in flight: it belongs to nobody now.
+      if (generation !== ownPostStore.getGeneration()) return
+      // A top-level post is the viewer's own (merged at the top of the feed, its
+      // echo kept off the pill). A reply is not a feed item: the thread appends it.
+      if (!isReply) ownPostStore.add(view, generation)
+      onPostedRef.current?.(view)
+      if (!mountedRef.current) return
+      setTextState('')
+      commit([])
+      setMediaError(undefined)
+      setPublishFailure(undefined)
+      setPosted(true)
     }
 
-    // The post went out as TEXT ONLY: tell the author in-fiction that their photo
-    // chips were not sent, rather than letting them vanish silently.
-    const hadDraftChips = media.length > 0
-    setText('')
-    setMedia([])
-    setMediaError(hadDraftChips ? DRAFT_MEDIA_NOT_SENT_MESSAGE : undefined)
+    if (USE_MOCK_DATA) {
+      try {
+        const post = createPost(input)
+        // Register BEFORE appending so the mock stream's synchronous echo of this
+        // post is already known to be the viewer's own (the live echo can beat the
+        // 201, which `<Feed>` handles by discarding from the pill's buffer).
+        if (!isReply) ownPostStore.add(toParticipantView(post), generation)
+        // The mock backend: `appendPost` links a reply to its parent (resolving
+        // `inReplyTo`) and bumps the parent's reply count, so read the stored form.
+        postStore.appendPost(post)
+        const stored = postStore.getPosts().find(candidate => candidate.id === post.id) ?? post
+        finish(toParticipantView(stored))
+      } catch {
+        // Only a mock-mode media rejection (unknown id / no alt) can throw here; the
+        // same draft would throw again, so it is a refusal, not a Retry.
+        setPublishFailure({ kind: 'refused', message: publishRefusedMessage(isReply) })
+      }
+      return
+    }
+
+    publishingRef.current = true
+    setIsPublishing(true)
+    setPublishFailure(undefined)
+    publishPost(input)
+      .then(created => {
+        finish(narrowCreatedPost(created))
+      })
+      .catch((failure: unknown) => {
+        if (!mountedRef.current) return
+        // The draft is untouched: this is what makes Retry safe and lossless.
+        setPublishFailure(classifyPublishFailure(failure, isReply))
+      })
+      .finally(() => {
+        publishingRef.current = false
+        if (mountedRef.current) setIsPublishing(false)
+      })
   }, [
     exerciseId,
     timeZone,
@@ -319,18 +645,25 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     session.actingHumanId,
     session.isReadOnly,
     text,
-    media.length,
     charLimit,
-    onPosted,
+    parentPostId,
+    commit,
   ])
 
   return {
     text,
     setText,
-    media,
-    attachImages,
-    removeMedia,
+    attachments: items,
+    attachFiles,
+    cancelAttachment: removeAttachment,
+    removeAttachment,
+    setAttachmentAlt,
     mediaError,
+    isUploading,
+    isPublishing,
+    publishError: publishFailure?.message,
+    publishErrorKind: publishFailure?.kind,
+    posted,
     hashtags,
     mentions,
     charLimit,
@@ -342,6 +675,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     canPost,
     isReadOnly,
     canPublish,
+    mediaBlockReason,
     publish,
   }
 }

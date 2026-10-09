@@ -7,23 +7,27 @@
  *
  * Theming mirrors the sibling social modules (`Feed.module.css` /
  * `social.module.css`): the per-exercise accent `var(--pulse-ac)` (COR-030)
- * with the Cadence-navy fallback drives the pill fill, plus the two dark-mode
- * triggers (`prefers-color-scheme` OR a host `[data-theme="dark"]`), neither
- * dependent on a React theme provider.
+ * with the Cadence-navy fallback drives the pill fill. LIGHT ONLY (demo-polish
+ * F5): the former dark-mode shadow overrides were removed; the Social skin has no
+ * dark palette (`theme/forcedLight.guard.test.ts` keeps it that way).
  *
- * The `.liveRegion` wrapper is the PERSISTENT `aria-live="polite"` container
- * (see NewPostsPill.tsx): it is always mounted but has no box of its own, so at
- * count 0 it is invisible and occupies no sticky space — only the child `.pill`
- * is ever visible.
+ * The `.liveRegion` wrapper is the always-mounted sticky container (see
+ * NewPostsPill.tsx): it has no box of its own, so at count 0 it is invisible and
+ * occupies no sticky space — only the child `.pill` is ever visible. The
+ * PERSISTENT `aria-live="polite"` region is its visually hidden child `.srOnly`
+ * (a throttled copy of the label), NOT the wrapper, so the pill's per-arrival
+ * count changes are not each announced.
  */
 
 .liveRegion {
   /* Sticky above the reading stream so the pill stays reachable as the reader
    * scrolls the feed; the shell content region is the scroll context. Insets
    * below the compliance chrome via the shell's contract var (0px fallback when
-   * chrome is off — a legal state). */
+   * chrome is off — a legal state) AND below an active alert bar via the
+   * shell-published `--pulse-alert-height` (0px when there is no alert), so the
+   * pill is never covered by the sticky alert. */
   position: sticky;
-  top: calc(var(--pulse-chrome-top, 0px) + 8px);
+  top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px) + 8px);
   /* Scoped inside the channel's own stacking context (SHELL_Z.content) — this
    * value cannot paint above the shell nav/alert/overlay/chrome layers. */
   z-index: 1;
@@ -31,6 +35,18 @@
   justify-content: center;
   /* No background/padding: an empty region (count 0) is invisible. */
   pointer-events: none;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .pill {
@@ -67,16 +83,4 @@
 .icon {
   width: 12px;
   height: 12px;
-}
-
-/* Dark mode deepens the drop shadow so the pill keeps a legible edge on the
- * dark canvas (the accent fill itself is unchanged — it is the exercise brand). */
-@media (prefers-color-scheme: dark) {
-  .pill {
-    box-shadow: 0 2px 12px rgba(0, 0, 0, .5);
-  }
-}
-
-:global([data-theme='dark']) .pill {
-  box-shadow: 0 2px 12px rgba(0, 0, 0, .5);
 }

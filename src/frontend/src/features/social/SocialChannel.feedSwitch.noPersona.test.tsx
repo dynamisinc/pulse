@@ -18,6 +18,7 @@
  */
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/core/auth'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
@@ -56,11 +57,13 @@ function renderChannel() {
   const mount: ShellMountProps = { variant: 'full', scenarioNow: SCENARIO_NOW }
   return render(
     <QueryClientProvider client={client}>
-      <ExerciseContextProvider>
-        <ShellContextProvider value={mount}>
-          <SocialChannel />
-        </ShellContextProvider>
-      </ExerciseContextProvider>
+      <MemoryRouter initialEntries={['/home']}>
+        <ExerciseContextProvider>
+          <ShellContextProvider value={mount}>
+            <SocialChannel />
+          </ShellContextProvider>
+        </ExerciseContextProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -80,5 +83,18 @@ describe('SocialChannel — no-persona session gets no feed switch (COR-015)', (
     expect(screen.queryByTestId('social-feed-panel-following')).not.toBeInTheDocument()
     // The All Posts feed is still served in full.
     expect(screen.getByTestId('social-feed-panel-all')).toBeVisible()
+  })
+
+  it('also gets no Post button and no Profile pill — only a bare Sign out (F1, D1-011)', async () => {
+    renderChannel()
+    await waitFor(() => expect(screen.getAllByTestId('post-card').length).toBeGreaterThan(0))
+
+    // Nothing to post AS, nothing to link a profile to: both are absent, not disabled.
+    expect(screen.queryByTestId('nav-post-button')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Profile' })).not.toBeInTheDocument()
+    // The rail still never strands the session without a way out.
+    const card = screen.getByTestId('account-card')
+    expect(card).toHaveAttribute('data-has-persona', 'false')
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
   })
 })

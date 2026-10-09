@@ -1,17 +1,145 @@
 /*
  * features/social/components/FeedSkeleton.module.css
  * ---------------------------------------------------------------------------
- * Styles for the feed loading state (demo-polish F0 stub). Today it is the same
- * calm, centred "Loading posts…" line `Feed.module.css`'s `.state` painted before
- * the split; F5 (brand & profile finish) owns this file and replaces it with
- * shimmering skeleton rows. Reads the `--fd-*` tokens declared on the feed page
- * root (`Feed.module.css`'s `.feed`), which this component is always rendered
- * inside.
+ * Styles for the feed loading skeleton (demo-polish F5, story 14). CSS Module,
+ * participant world: no COBRA, no MUI. LIGHT ONLY (no dark-mode rule; see
+ * `theme/social.module.css`).
+ *
+ * LAYOUT PARITY. `.row` copies `PostCard.module.css`'s `.postCard` box model
+ * (max-width 600px, 12px 16px padding, 12px gap, 1px bottom rule, the 420px
+ * breakpoint) and the blocks are sized to the real avatar (42px) and text lines
+ * (15px type at 1.4 leading = 21px), so the content that replaces the skeleton
+ * lands at about the same height: no layout jump.
+ *
+ * SHIMMER is decorative. The placeholder tint (#e9edef on #fff) is intentionally
+ * low-contrast — these are not UI components and carry no information (WCAG
+ * 1.4.11 exempts them); the "Loading posts" status text is the accessible
+ * alternative. Under `prefers-reduced-motion: reduce` the animation is removed
+ * and the blocks sit still.
  */
 
-.state {
-  padding: 32px 16px;
-  color: var(--fd-ink-muted);
-  font-size: 15px;
-  text-align: center;
+.skeleton {
+  position: relative; /* anchors the visually hidden status text */
+  display: block;
+  width: 100%;
+  max-width: 600px;
+  background: #fff;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 600px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e8ea;
+  background: #fff;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.actions {
+  display: flex;
+  gap: 28px;
+  margin-top: 6px;
+}
+
+/* A placeholder block: a soft tint with a travelling highlight. */
+.block {
+  display: block;
+  flex: none;
+  border-radius: 6px;
+  background-color: #e9edef;
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, .65) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  background-position: 100% 0;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+}
+
+.name {
+  width: 120px;
+  height: 14px;
+}
+
+.handle {
+  width: 80px;
+  height: 14px;
+}
+
+.line {
+  width: 100%;
+  height: 15px;
+}
+
+.lineShort {
+  width: 62%;
+}
+
+.action {
+  width: 28px;
+  height: 14px;
+  border-radius: 4px;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block {
+    animation: none;
+    background-image: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .row {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+}
+
+/* Visually hidden, still announced: the status text for assistive tech. */
+.srOnly {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
 }

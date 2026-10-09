@@ -5,8 +5,8 @@
  * Wave-S3.1 orchestrator integration — amplification story 01). Reads the
  * SAME `--pc-*` tokens `../theme/social.module.css`'s `.tokens` class
  * declares (composed onto this form's root by the component) — no hardcoded
- * hex here, so a per-exercise accent / dark-mode override cascades exactly as
- * it does for `PostCard`.
+ * hex here, so a per-exercise accent override cascades exactly as it does for
+ * `PostCard` (light palette only, demo-polish F5).
  */
 
 .quoteComposer {

@@ -5,8 +5,9 @@
  * relocation of the like/repost wiring into the card changed no behaviour, the
  * cards carry the v2 members (media renders in the media slot, a reply card shows
  * its reply context), the taken-down reply is the interim tombstone, and the
- * direct replies show ONE "Replying to" label each (the thread's own — the card's
- * `inReplyTo` line is suppressed there to avoid a duplicate).
+ * visible direct replies each show ONE "Replying to" line - the card's own (F4
+ * removed the separate label the thread used to print above each reply, and the
+ * blanking of the card's `inReplyTo` that avoided the duplicate).
  */
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -16,6 +17,7 @@ import { SessionProvider } from '@/core/auth'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
 import { DEMO_IDS } from '../services/mockFixtures'
+import { SocialDirectoryProvider } from '../layout/SocialDirectoryProvider'
 import { ThreadView } from './ThreadView'
 
 async function renderThread(focusedPostId: string) {
@@ -25,7 +27,9 @@ async function renderThread(focusedPostId: string) {
         <ShellContextProvider
           value={{ variant: 'full', scenarioNow: new Date('2033-09-04T15:00:00.000Z') }}
         >
-          <ThreadView focusedPostId={focusedPostId} />
+          <SocialDirectoryProvider>
+            <ThreadView focusedPostId={focusedPostId} />
+          </SocialDirectoryProvider>
         </ShellContextProvider>
       </SessionProvider>
     </ExerciseContextProvider>,
@@ -58,12 +62,22 @@ describe('ThreadView over the v2 fixture thread', () => {
     expect(screen.getAllByTestId('thread-tombstone')).toHaveLength(1)
   })
 
-  it('shows each direct reply exactly one "Replying to" line, never two', async () => {
+  it('shows each visible direct reply exactly one "Replying to" line (the card\'s own), never two', async () => {
     await renderThread(DEMO_IDS.threadFocus)
 
-    for (const group of screen.getAllByTestId('thread-reply')) {
+    const groups = screen.getAllByTestId('thread-reply')
+    expect(groups).toHaveLength(3)
+    for (const group of groups) {
+      if (within(group).queryByTestId('thread-tombstone') !== null) {
+        // The tombstone has no card, so no reply line either.
+        expect(within(group).queryAllByText(/^Replying to @/)).toHaveLength(0)
+        continue
+      }
       expect(within(group).getAllByText(/^Replying to @/)).toHaveLength(1)
-      expect(within(group).queryByTestId('post-reply-context')).not.toBeInTheDocument()
+      expect(within(group).getAllByTestId('post-reply-context')).toHaveLength(1)
+      expect(within(group).getByTestId('post-reply-context')).toHaveTextContent(
+        'Replying to @FulcoEM',
+      )
     }
   })
 

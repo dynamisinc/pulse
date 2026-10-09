@@ -2,7 +2,9 @@
  * features/social/components/post/PostLinkCard.module.css
  * ---------------------------------------------------------------------------
  * The in-sim link-preview card. Split out of `theme/social.module.css` by
- * demo-polish F0, UNCHANGED; F2 owns this file from here on.
+ * demo-polish F0; F2 owns this file from here on and added the photo frame
+ * (`.linkCardPhotoFrame`): a fixed 1.91:1 box, so the card's height is known
+ * before the preview image loads (no layout shift).
  */
 
 .linkCard {
@@ -21,6 +23,23 @@
   background: var(--pc-panel);
   color: var(--pc-ink-muted);
   font-size: 13px;
+}
+
+.linkCardPhotoFrame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1.91 / 1;
+  overflow: hidden;
+  background: var(--pc-panel);
+}
+
+.linkCardPhoto {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .linkCardBody {
