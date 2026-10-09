@@ -71,6 +71,7 @@ import {
   type StaffPostView,
 } from '@/features/social'
 import { publishPost } from '@/features/social/services/livePostActions'
+import { truncateWithoutSplittingSurrogates } from '@/core/utils/truncateText'
 
 // ---------------------------------------------------------------------------
 // Input
@@ -223,20 +224,6 @@ const ERROR_CODE_TEXT: Readonly<Record<string, string>> = {
   too_many_requests: 'Too many requests right now. Wait a moment and try again.',
   unavailable: 'The service is not available right now.',
   service_unavailable: 'The service is not available right now.',
-}
-
-/**
- * `text` cut to at most `max` UTF-16 units, never between the halves of a surrogate pair
- * (a bare half would render as U+FFFD in the banner).
- */
-function truncateWithoutSplittingSurrogates(text: string, max: number): string {
-  if (text.length <= max) return text
-  let end = max
-  const last = text.charCodeAt(end - 1)
-  const next = text.charCodeAt(end)
-  const splitsPair = last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff
-  if (splitsPair) end -= 1
-  return text.slice(0, end)
 }
 
 function cleanMessage(text: string): string | undefined {

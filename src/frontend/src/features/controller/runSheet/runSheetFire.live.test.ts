@@ -169,4 +169,11 @@ describe('sendBeat - live: failures are classified by what they prove', () => {
     expect(failure.kind).toBe('failed')
     expect(failure.message.length).toBeLessThan(500)
   })
+
+  it('classifyLiveFailure never cuts a server message between the halves of an emoji', () => {
+    // 299 units + a surrogate pair: a raw .slice(0, 300) would keep the bare high half.
+    const failure = classifyLiveFailure(httpError(400, `${'x'.repeat(299)}😀 and more`))
+    expect(failure.kind).toBe('failed')
+    expect(failure.message).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/)
+  })
 })

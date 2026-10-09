@@ -49,6 +49,7 @@ import { publishPost } from '@/features/social/services/livePostActions'
 import type { CreatePostInput } from '@/features/social/types/post'
 import { runtimeOf, type BeatFailure, type RunSheetData } from './runSheetModel'
 import type { RunSheetBeat } from './runSheetSchema'
+import { truncateWithoutSplittingSurrogates } from '@/core/utils/truncateText'
 
 /** What the persona read has delivered so far. */
 export interface PersonaLookup {
@@ -192,7 +193,9 @@ function serverText(data: unknown): string | undefined {
         ? (data as { error: string }).error
         : undefined
   const trimmed = text?.trim()
-  return trimmed === undefined || trimmed === '' ? undefined : trimmed.slice(0, 300)
+  return trimmed === undefined || trimmed === ''
+    ? undefined
+    : truncateWithoutSplittingSurrogates(trimmed, 300)
 }
 
 /**
