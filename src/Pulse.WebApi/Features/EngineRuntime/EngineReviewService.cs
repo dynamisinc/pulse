@@ -221,6 +221,12 @@ public sealed partial class EngineReviewService
         // Sanitize the edited text at the review boundary (NFR-004) before it enters the burst; the ingest
         // funnel sanitizes again — strip-not-encode is idempotent, so this belt-and-suspenders is safe.
         var sanitized = PostSanitizer.Sanitize(newText);
+        if (string.IsNullOrWhiteSpace(sanitized))
+        {
+            // "", "   " or pure markup: ingest would refuse the lead post while the rest of the burst went out.
+            return Task.FromResult(EngineReviewActionResult.Invalid("text is required for an edit; it is blank once markup is removed."));
+        }
+
         if (sanitized.Length > PostIngestService.TextLengthCeiling)
         {
             return Task.FromResult(EngineReviewActionResult.Invalid(PostIngestService.TextTooLongMessage));
@@ -803,8 +809,13 @@ public sealed partial class EngineReviewService
             }
             else
             {
-                // Silence is never approval → HOLD for the controller (D5-014/1.1). NOTHING publishes.
-                await ResolveOnTickAsync(candidate.DraftId, exerciseId, DraftDisposition.Held, EngineReviewAction.HoldOnExpiry, mutate: null, cancellationToken);
+                // Silence is never approval → HOLD for the controller (D5-014/1.1). NOTHING publishes. The row is
+                // re-read first: a human who acted since the snapshot (veto, approve, re-roll) is never overridden.
+                var item = await FindStillExpiredAsync(candidate, cancellationToken);
+                if (item is not null)
+                {
+                    await ResolveOnTickAsync(item, exerciseId, DraftDisposition.Held, EngineReviewAction.HoldOnExpiry, mutate: null, cancellationToken);
+                }
             }
         }
     }
@@ -816,39 +827,78 @@ public sealed partial class EngineReviewService
     /// counting down (Wave 3 Gate-2 M-1).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Leaving a partly-published burst counting down re-sent it on every tick: the expiry is re-evaluated each
     /// interval, and the posts that had published went out again each time while the failing one kept failing. Now
     /// the posts that reached the feed are dropped from the item (so a later approve sends only the rest) and the
-    /// item waits for a human, with one <c>engine.reviewed</c> (hold-on-expiry). A publish that THROWS is held the
-    /// same way, but its posts are kept and the label tells the controller to check the feed first: which of them
-    /// went out is unknown, and the same ingest-side draftId idempotency gap (WR-001) applies to a later approve.
+    /// item waits for a human, with one <c>engine.reviewed</c> (hold-on-expiry). A publish that THROWS, or is
+    /// interrupted by shutdown, is held the same way, but its posts are kept and the label tells the controller to
+    /// check the feed first: which of them went out is unknown, and the ingest-side draftId idempotency gap
+    /// (WR-001) applies to a later approve.
+    /// </para>
+    /// <para>
+    /// <b>One instance, re-checked before the publish (483dd34 review M-1).</b> The queue snapshot the tick iterates
+    /// is untracked and can be stale by the time an item's turn comes (a swamped tick works through every expired
+    /// countdown in turn). So the TRACKED row is read first, the burst is published only if that row is still the
+    /// same expired, undecided countdown, and the outcomes are recorded against that very instance — the per-post
+    /// outcomes then line up with the posts that were sent. A human who vetoed, approved or re-rolled the item since
+    /// the snapshot is never published over; after a partial approve only the posts it left are sent. What remains
+    /// is the window of the publish itself across
+    /// two DbContexts; closing it needs an atomic claim (a rowversion or a conditional update), a follow-up tracked
+    /// with WR-001.
+    /// </para>
     /// </remarks>
     private async Task AutoSendOnTickAsync(
         EngineReviewItemEntity candidate,
         Guid exerciseId,
         CancellationToken cancellationToken)
     {
+        var item = await FindStillExpiredAsync(candidate, cancellationToken);
+        if (item is null)
+        {
+            return;
+        }
+
         // Once the publish has been attempted, its record is written with CancellationToken.None: posts may be live,
         // so a host shutdown at this point must not leave the item counting down to be sent again on restart.
         EngineBurstPublishResult publishResult;
         try
         {
-            publishResult = await PublishBurstAsync(candidate, exerciseId, input: null, leadTextOverride: null, cancellationToken);
+            publishResult = await PublishBurstAsync(item, exerciseId, input: null, leadTextOverride: null, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // Shutdown in the middle of a burst: posts 1..k may be live. Hold it with the same warning (best effort,
+            // so a failed record never hides the cancellation), then let the cancellation through.
+#pragma warning disable CA1031 // The hold is best effort; the cancellation must still propagate.
+            try
+            {
+                await ResolveOnTickAsync(
+                    item,
+                    exerciseId,
+                    DraftDisposition.Held,
+                    EngineReviewAction.HoldOnExpiry,
+                    tracked => tracked.ActionLabel = WithPublishReason(tracked.ActionLabel, "auto-send interrupted; check the feed before approving"),
+                    CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                LogAutoSendHoldFailed(ex, item.DraftId, exerciseId);
+            }
+#pragma warning restore CA1031
+
             throw;
         }
 #pragma warning disable CA1031 // Any publish fault must hold the burst for a human, never leave it to re-send next tick.
         catch (Exception ex)
         {
-            LogAutoSendFailed(ex, candidate.DraftId, exerciseId);
+            LogAutoSendFailed(ex, item.DraftId, exerciseId);
             await ResolveOnTickAsync(
-                candidate.DraftId,
+                item,
                 exerciseId,
                 DraftDisposition.Held,
                 EngineReviewAction.HoldOnExpiry,
-                item => item.ActionLabel = WithPublishReason(item.ActionLabel, "auto-send failed; check the feed before approving"),
+                tracked => tracked.ActionLabel = WithPublishReason(tracked.ActionLabel, "auto-send failed; check the feed before approving"),
                 CancellationToken.None);
             return;
         }
@@ -856,17 +906,37 @@ public sealed partial class EngineReviewService
 
         if (IsPublishFullySuccessful(publishResult))
         {
-            await ResolveOnTickAsync(candidate.DraftId, exerciseId, DraftDisposition.Published, EngineReviewAction.AutoSend, mutate: null, CancellationToken.None);
+            await ResolveOnTickAsync(item, exerciseId, DraftDisposition.Published, EngineReviewAction.AutoSend, mutate: null, CancellationToken.None);
             return;
         }
 
         await ResolveOnTickAsync(
-            candidate.DraftId,
+            item,
             exerciseId,
             DraftDisposition.Held,
             EngineReviewAction.HoldOnExpiry,
-            item => RecordPartialPublish(item, publishResult, "auto-send"),
+            tracked => RecordPartialPublish(tracked, publishResult, "auto-send"),
             CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Re-reads the TRACKED row for a snapshot <paramref name="candidate"/> and returns it only if it is still the
+    /// same expired countdown with no decision: still <see cref="DraftDisposition.CountingDown"/>, no controller
+    /// decision, and the same countdown start and length (a re-roll restarts it). Otherwise <c>null</c> — a human
+    /// acted after the snapshot and the tick must leave the item alone.
+    /// </summary>
+    private async Task<EngineReviewItemEntity?> FindStillExpiredAsync(
+        EngineReviewItemEntity candidate,
+        CancellationToken cancellationToken)
+    {
+        var item = await _store.FindAsync(candidate.DraftId, cancellationToken);
+        return item is not null
+            && item.Disposition == DraftDisposition.CountingDown
+            && (item.CountdownDecision ?? ControllerDecision.None) == ControllerDecision.None
+            && item.CountdownStartedScenarioMinute == candidate.CountdownStartedScenarioMinute
+            && item.CountdownMinutes == candidate.CountdownMinutes
+                ? item
+                : null;
     }
 
     // ---- internals ------------------------------------------------------------------------------
@@ -1069,6 +1139,18 @@ public sealed partial class EngineReviewService
 #pragma warning restore CA1031
     }
 
+    /// <summary>Source-generated Error log for an interrupted auto-send whose best-effort hold could not be recorded.</summary>
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Swamped-mode auto-send of draft {DraftId} in exercise {ExerciseId} was interrupted and its hold could not be recorded; some of its posts may already be live.")]
+    private partial void LogAutoSendHoldFailed(Exception exception, Guid draftId, Guid exerciseId);
+
+    /// <summary>Source-generated Warning log for a review-item push that failed after a partial publish was recorded.</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Review-item push failed for draft {DraftId} in exercise {ExerciseId} after a partial publish was recorded; the console picks it up on its next queue read.")]
+    private partial void LogPartialPublishPushFailed(Exception exception, Guid draftId, Guid exerciseId);
+
     /// <summary>Source-generated Error log for a swamped-mode auto-send whose publish threw; the burst is held for a human.</summary>
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -1146,9 +1228,29 @@ public sealed partial class EngineReviewService
             // request token is not passed: those posts are live, so a disconnect must not lose the record of them.
             if (publishResult.Posts.Any(p => p.Outcome == EnginePublishOutcome.Published))
             {
+                // An edited lead that did NOT go out keeps the controller's edit, so approving again sends what they
+                // wrote rather than the engine text they replaced (483dd34 review L-3).
+                if (leadTextOverride is not null
+                    && item.Posts.Count > 0
+                    && (publishResult.Posts.Count == 0 || publishResult.Posts[0].Outcome != EnginePublishOutcome.Published))
+                {
+                    item.Posts[0].Text = leadTextOverride;
+                }
+
                 RecordPartialPublish(item, publishResult, action == EngineReviewAction.Edit ? "edit" : "approve");
                 await _dbContext.SaveChangesAsync(CancellationToken.None);
-                await _broadcaster.BroadcastReviewItemChangedAsync(exerciseId, EngineReviewItemDto.FromEntity(item), CancellationToken.None);
+
+                // The record is saved; a failed push must not turn the 502 into a 500 (the console re-reads the queue).
+                try
+                {
+                    await _broadcaster.BroadcastReviewItemChangedAsync(exerciseId, EngineReviewItemDto.FromEntity(item), CancellationToken.None);
+                }
+#pragma warning disable CA1031 // A push fault after the record is saved must not change the response.
+                catch (Exception ex)
+                {
+                    LogPartialPublishPushFailed(ex, item.DraftId, exerciseId);
+                }
+#pragma warning restore CA1031
             }
 
             return EngineReviewActionResult.PublishFailed();
@@ -1260,23 +1362,26 @@ public sealed partial class EngineReviewService
         await _broadcaster.BroadcastReviewItemChangedAsync(exerciseId, EngineReviewItemDto.FromEntity(item), cancellationToken);
     }
 
-    /// <summary>Commits an auto-HOLD-tick resolution (no human actor): loads the tracked row, mutates it, commits its single engine.reviewed event, then pushes.</summary>
-    /// <param name="draftId">The review item to resolve.</param>
+    /// <summary>
+    /// Commits an auto-HOLD-tick resolution (no human actor) on the TRACKED row the tick re-read: mutates it, commits
+    /// its single engine.reviewed event, then pushes. A row that is already resolved (Published/Vetoed) is left
+    /// exactly as it is, with no event — the same WR-001 terminal guard every request-bound action applies.
+    /// </summary>
+    /// <param name="item">The tracked review item to resolve.</param>
     /// <param name="exerciseId">The tick's resolved scope.</param>
     /// <param name="disposition">The disposition to resolve it to.</param>
     /// <param name="action">The <c>engine.reviewed</c> action to record.</param>
     /// <param name="mutate">An extra change to the tracked row in the same unit of work (e.g. a partial-publish record), or <c>null</c>.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     private async Task ResolveOnTickAsync(
-        Guid draftId,
+        EngineReviewItemEntity item,
         Guid exerciseId,
         DraftDisposition disposition,
         EngineReviewAction action,
         Action<EngineReviewItemEntity>? mutate,
         CancellationToken cancellationToken)
     {
-        var item = await _store.FindAsync(draftId, cancellationToken);
-        if (item is null)
+        if (IsResolved(item.Disposition))
         {
             return;
         }

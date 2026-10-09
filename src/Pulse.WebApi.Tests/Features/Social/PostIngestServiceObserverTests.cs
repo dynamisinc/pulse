@@ -92,10 +92,12 @@ public class PostIngestServiceObserverTests
         var exerciseId = Guid.NewGuid();
         var observer = new RecordingObserver();
         await using var context = _fixture.CreateContext(ScopeFor(exerciseId));
-        var service = new PostIngestService(context, ScopeFor(exerciseId), new ThrowingFeedBroadcaster(), [observer]);
+        var broadcaster = new ThrowingFeedBroadcaster();
+        var service = new PostIngestService(context, ScopeFor(exerciseId), broadcaster, [observer]);
 
         var result = await service.IngestAsync(Request(), ParticipantAttribution());
 
+        broadcaster.Calls.Should().Be(1, "precondition: the broadcast was attempted after the commit and threw");
         result.Outcome.Should().Be(PostIngestOutcome.Created, "a broadcast fault never turns a committed post into a failure");
         observer.Calls.Should().ContainSingle("the observer hears a committed post whatever the broadcast does");
 
@@ -135,7 +137,12 @@ public class PostIngestServiceObserverTests
 
     private sealed class ThrowingFeedBroadcaster : IFeedBroadcaster
     {
-        public Task BroadcastPostAsync(Guid exerciseId, ParticipantPostDto post, CancellationToken cancellationToken = default) =>
+        public int Calls { get; private set; }
+
+        public Task BroadcastPostAsync(Guid exerciseId, ParticipantPostDto post, CancellationToken cancellationToken = default)
+        {
+            Calls++;
             throw new InvalidOperationException("hub connection lost");
+        }
     }
 }

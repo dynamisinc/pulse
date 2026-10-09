@@ -555,6 +555,196 @@ public sealed class EngineReviewServiceTests
         PayloadAction((await ReadReviewedEventsAsync(draftId)).Should().ContainSingle().Subject).Should().Be("approve");
     }
 
+    // ---- 483dd34 review fold: the tick re-reads before it acts; L-1 / L-3 / S-5 --------------------
+
+    [RequiresDockerTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AutoHold_AVetoBetweenTheSnapshotAndTheTick_StaysVetoed_AndNothingPublishes(bool swamped)
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        var item = Countdown(draftId, exerciseId, started: 0, minutes: 3);
+        await SeedAsync(item);
+
+        // A controller vetoes the expiring draft after the tick has taken its queue snapshot but before the tick
+        // reaches the item (a swamped tick works through every expired countdown in turn).
+        await using var controller = Build(exerciseId);
+        await using var harness = Build(exerciseId, afterQueueSnapshot: async () =>
+            (await controller.Service.VetoAsync(draftId, Input("controller-3"))).Outcome.Should().Be(EngineReviewOutcome.Ok));
+        if (swamped)
+        {
+            var state = harness.Registry.GetOrCreate(exerciseId);
+            state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+            state.SetSwampedMode(enabled: true, "lead-1", 0);
+        }
+
+        harness.Time.Advance(TimeSpan.FromMinutes(4));
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.PublishedBursts.Should().BeEmpty("a vetoed draft is never published by a tick that read it before the veto");
+        await AssertDispositionAsync(draftId, DraftDisposition.Vetoed, "the human decision stands — never overwritten with Held/Published");
+        PayloadAction((await ReadReviewedEventsAsync(draftId)).Should().ContainSingle("only the veto is recorded").Subject).Should().Be("veto");
+    }
+
+    [RequiresDockerFact]
+    public async Task AutoHold_AManualPartialApproveBetweenTheSnapshotAndTheTick_SendsOnlyWhatIsLeft_AndAttributesItCorrectly()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        var item = Countdown(draftId, exerciseId, started: 0, minutes: 3);
+        item.ActionLabel = "post · #WaterIssues";
+        item.Posts = new List<EngineReviewDraftPost>
+        {
+            Post("@rosa", "Pressure is low on Elm."),
+            Post("@marcus", "Is the school closed?"),
+            Post("@lena", "TOO LONG"),
+        };
+        await SeedAsync(item);
+
+        // @lena's post fails in BOTH publishes (the review's scenario b): the controller's approve sends @rosa and
+        // @marcus and trims the item to [@lena] inside the tick's window.
+        static EngineBurstPublishResult LenaFails(EngineBurst burst) => new()
+        {
+            Posts = burst.Posts
+                .Select(p => p.Text == "TOO LONG"
+                    ? new EnginePublishedPost { PersonaHandle = p.PersonaHandle, Outcome = EnginePublishOutcome.Invalid, Error = PostIngestService.TextTooLongMessage }
+                    : new EnginePublishedPost { PersonaHandle = p.PersonaHandle, PostId = Guid.NewGuid(), Outcome = EnginePublishOutcome.Published })
+                .ToList(),
+        };
+
+        await using var controller = Build(exerciseId, LenaFails);
+        await using var harness = Build(exerciseId, LenaFails, afterQueueSnapshot: async () =>
+            (await controller.Service.ApproveAsync(draftId, Input("controller-7"))).Outcome.Should().Be(EngineReviewOutcome.PublishFailed));
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        harness.Time.Advance(TimeSpan.FromMinutes(4));
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        // The early return does NOT fully prevent this one: after a partial approve the item is still the same
+        // undecided, expired countdown, so the tick auto-sends what is left. It must send only that.
+        controller.PublishedBursts.Should().ContainSingle().Which.Posts.Should().HaveCount(3);
+        harness.PublishedBursts.Should().ContainSingle("the tick publishes once")
+            .Which.Posts.Select(p => p.PersonaHandle).Should().Equal(
+                new[] { "@lena" }, "it sends the re-read item, not its stale snapshot — @rosa and @marcus are not sent twice");
+        var held = await ReloadAsync(draftId);
+        held.Disposition.Should().Be(DraftDisposition.Held);
+        held.Posts.Select(p => p.PersonaHandle).Should().Equal(new[] { "@lena" }, "the post that never went out is kept, not lost to a misattributed outcome");
+        held.ActionLabel.Should().Be(
+            "post · #WaterIssues · publish incomplete: auto-send posted 0 of 1; 1 held for review (text must be at most 2000 characters.)");
+    }
+
+    [RequiresDockerFact]
+    public async Task AutoHold_SwampedAutoSend_InterruptedByShutdown_IsHeldWithAWarning_AndTheCancellationPropagates()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        var item = Countdown(draftId, exerciseId, started: 0, minutes: 3);
+        item.ActionLabel = "post · #WaterIssues";
+        await SeedAsync(item);
+
+        // The host stops while the burst is being published: posts 1..k may already be live.
+        using var shutdown = new CancellationTokenSource();
+        await using var harness = Build(exerciseId, _ =>
+        {
+            shutdown.Cancel();
+            throw new OperationCanceledException(shutdown.Token);
+        });
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        harness.Time.Advance(TimeSpan.FromMinutes(4));
+
+        var tick = () => harness.Service.EvaluateAutoHoldAsync(shutdown.Token);
+
+        await tick.Should().ThrowAsync<OperationCanceledException>("the shutdown still propagates to the tick host");
+        await AssertDispositionAsync(draftId, DraftDisposition.Held, "never left counting down to be re-sent after a restart");
+        var held = await ReloadAsync(draftId);
+        held.Posts.Should().ContainSingle("which posts went out is unknown, so none is dropped");
+        held.ActionLabel.Should().Be("post · #WaterIssues · publish incomplete: auto-send interrupted; check the feed before approving");
+        PayloadAction((await ReadReviewedEventsAsync(draftId)).Should().ContainSingle().Subject).Should().Be("hold-on-expiry");
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("<b></b>")]
+    [InlineData("<script>alert(1)</script>")]
+    public async Task Edit_ThatIsBlankOnceSanitized_IsInvalid_AndNeverPublishes(string text)
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        await SeedAsync(DelayedAuto(draftId, exerciseId, DraftDisposition.CountingDown));
+
+        await using var harness = Build(exerciseId);
+        var result = await harness.Service.EditAsync(draftId, text, Input("controller-9"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "ingest would refuse a blank lead while the rest of the burst went out");
+        result.ValidationError.Should().Be("text is required for an edit; it is blank once markup is removed.");
+        harness.PublishedBursts.Should().BeEmpty();
+        await AssertDispositionAsync(draftId, DraftDisposition.CountingDown);
+    }
+
+    [RequiresDockerFact]
+    public async Task Edit_PartialPublishWhereTheEditedLeadFailed_KeepsTheEdit_SoReApproveSendsTheEditedText()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        var item = Suggest(draftId, exerciseId, DraftDisposition.Queued);
+        item.Posts = new List<EngineReviewDraftPost>
+        {
+            Post("@rosa", "Original engine lead."),
+            Post("@marcus", "Is the school closed?"),
+            Post("@lena", "Neighbors are filling tubs."),
+        };
+        await SeedAsync(item);
+
+        // First publish: the (edited) lead is refused, the other two go out. Second: everything succeeds.
+        var calls = 0;
+        await using var harness = Build(exerciseId, burst => ++calls == 1
+            ? FailingPublish(burst, EnginePublishOutcome.Invalid)
+            : AllPublished(burst));
+
+        var edit = await harness.Service.EditAsync(draftId, "Boil <b>water</b> in Zone 4 now.", Input("controller-9"));
+
+        edit.Outcome.Should().Be(EngineReviewOutcome.PublishFailed);
+        var afterEdit = await ReloadAsync(draftId);
+        afterEdit.Posts.Should().ContainSingle().Which.Text.Should().Be(
+            "Boil water in Zone 4 now.", "the controller's (sanitized) edit replaces the engine text on the lead that did not go out");
+
+        var approve = await harness.Service.ApproveAsync(draftId, Input("controller-9"));
+
+        approve.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        harness.PublishedBursts[1].Posts.Should().ContainSingle().Which.Text.Should().Be(
+            "Boil water in Zone 4 now.", "the re-approve sends what the controller wrote, not the original");
+    }
+
+    [RequiresDockerFact]
+    public async Task Approve_PartialPublish_AFailingPushAfterTheSave_StillAnswersPublishFailed()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        var item = Suggest(draftId, exerciseId, DraftDisposition.Queued);
+        item.Posts = new List<EngineReviewDraftPost>
+        {
+            Post("@rosa", "Pressure is low on Elm."),
+            Post("@marcus", "Is the school closed?"),
+        };
+        await SeedAsync(item);
+
+        var push = new ThrowingReviewBroadcaster();
+        await using var harness = Build(exerciseId, burst => FailingPublish(burst, EnginePublishOutcome.Invalid), push);
+
+        var result = await harness.Service.ApproveAsync(draftId, Input("controller-7"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.PublishFailed, "a failed push after the record is saved must not turn the 502 into a 500");
+        push.Calls.Should().Be(1, "precondition: the push was attempted and threw");
+        (await ReloadAsync(draftId)).Posts.Select(p => p.PersonaHandle).Should().Equal(
+            new[] { "@rosa" }, "the partial-publish record was saved before the push");
+    }
+
     // ---- Terminal re-action guard (WR-001 — a resolved item can never be re-published) -----------
 
     [RequiresDockerFact]
@@ -809,7 +999,11 @@ public sealed class EngineReviewServiceTests
 
     private static EngineReviewActionInput Input(string actingHumanId) => new(actingHumanId, "America/Chicago");
 
-    private Harness Build(Guid? currentExerciseId, Func<EngineBurst, EngineBurstPublishResult>? publishOutcome = null)
+    private Harness Build(
+        Guid? currentExerciseId,
+        Func<EngineBurst, EngineBurstPublishResult>? publishOutcome = null,
+        IEngineReviewBroadcaster? reviewBroadcaster = null,
+        Func<Task>? afterQueueSnapshot = null)
     {
         var context = new ExerciseContext { CurrentExerciseId = currentExerciseId };
         var db = _fixture.CreateContext(context);
@@ -842,14 +1036,20 @@ public sealed class EngineReviewServiceTests
 
         var broadcaster = new Mock<IEngineReviewBroadcaster>();
         var registry = new EngineAutonomyRegistry();
+        IEngineReviewStore store = new EngineReviewStore(db);
+        if (afterQueueSnapshot is not null)
+        {
+            store = new AfterSnapshotStore(store, afterQueueSnapshot);
+        }
+
         var service = new EngineReviewService(
-            new EngineReviewStore(db),
+            store,
             db,
             context,
             clock,
             new EngineTelemetryEmitter(),
             publisher.Object,
-            broadcaster.Object,
+            reviewBroadcaster ?? broadcaster.Object,
             registry,
             new EngineTierPolicyRegistry(),
             new FakeGenerationProvider(),
@@ -985,6 +1185,52 @@ public sealed class EngineReviewServiceTests
         Sentiment = -0.3,
         Hashtags = new List<string> { "#WaterIssues" },
     };
+
+    /// <summary>
+    /// Runs <paramref name="afterSnapshot"/> once, right after the auto-HOLD tick has taken its (untracked) queue
+    /// snapshot: the window in which a controller acts on an expiring timer before the tick reaches that item.
+    /// </summary>
+    private sealed class AfterSnapshotStore(IEngineReviewStore inner, Func<Task> afterSnapshot) : IEngineReviewStore
+    {
+        private bool _ran;
+
+        public Task EnqueueAsync(EngineReviewItemEntity item, CancellationToken cancellationToken = default) =>
+            inner.EnqueueAsync(item, cancellationToken);
+
+        public async Task<IReadOnlyList<EngineReviewItemEntity>> GetQueueAsync(CancellationToken cancellationToken = default)
+        {
+            var snapshot = await inner.GetQueueAsync(cancellationToken);
+            if (!_ran)
+            {
+                _ran = true;
+                await afterSnapshot();
+            }
+
+            return snapshot;
+        }
+
+        public Task<EngineReviewItemEntity?> FindAsync(Guid draftId, CancellationToken cancellationToken = default) =>
+            inner.FindAsync(draftId, cancellationToken);
+
+        public Task<bool> UpdateDispositionAsync(
+            Guid draftId,
+            DraftDisposition disposition,
+            ControllerDecision? decision = null,
+            CancellationToken cancellationToken = default) =>
+            inner.UpdateDispositionAsync(draftId, disposition, decision, cancellationToken);
+    }
+
+    /// <summary>A review broadcaster whose push always fails (a hub fault after the record is saved).</summary>
+    private sealed class ThrowingReviewBroadcaster : IEngineReviewBroadcaster
+    {
+        public int Calls { get; private set; }
+
+        public Task BroadcastReviewItemChangedAsync(Guid exerciseId, EngineReviewItemDto item, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            throw new InvalidOperationException("review hub connection lost");
+        }
+    }
 
     private sealed class Harness : IAsyncDisposable
     {
