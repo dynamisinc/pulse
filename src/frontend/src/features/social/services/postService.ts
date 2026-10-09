@@ -8,7 +8,8 @@
  * Owns the FULL `Post` model's read/write seam:
  *
  *   - `createPost`         Sanitizes (NFR-004) + assembles a `Post` and emits
- *                          exactly one XC-004 `'post'` telemetry event. The
+ *                          exactly one XC-004 `'post'` telemetry event (a
+ *                          `'reply'` event when `parentPostId` is set, §1.8). The
  *                          blessed ingest path — every new post (a
  *                          participant's compose action, a controller
  *                          operating a persona, a fired MSEL inject, the
@@ -45,6 +46,17 @@
  *                          ingest action, so reading them carries no
  *                          telemetry/network side effect.
  *
+ * CONTRACT v2 (demo-polish F0, implementation.md §1.5/§5): `createPost` is also
+ * the MOCK analog of the v2 `POST /api/posts`. It resolves each
+ * `CreatePostMedia.mediaId` through the mock media registry (`@/core/media`) to
+ * build the full `PostMedia`, mirroring the server's 400s for an unknown media id
+ * and a missing alt (MOCK mode only — in live mode an unresolvable id is skipped
+ * from the local post, never thrown, because the server is the gate); records
+ * `parentPostId` (the store links it to its parent — see
+ * `postStore.appendPost`); and honours `engagementBaseline` for NON-
+ * participant origins only (the server ignores it for participants). The LIVE
+ * path is `livePostActions.publishPost`.
+ *
  * Two-worlds note: this module is participant-world data/service code, but
  * the `Post` shape it produces carries staff/telemetry-only fields
  * (`origin`, `actingHumanId`, `createdWallClock`, `injectId`). Those must
@@ -54,52 +66,121 @@
 
 import { buildAndEmit, generateEventId } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
+import { getMockMediaAsset } from '@/core/media/mockMediaRegistry'
 import { personaIdForHandle } from '@/features/personas'
 import { sanitizeText } from './sanitize'
 import type {
+  CreatePostInput,
+  CreatePostMedia,
+  EngagementBaseline,
   ParticipantPostView,
   Post,
   PostCounts,
-  PostLinkPreview,
   PostMedia,
-  PostOrigin,
 } from '../types/post'
 
-/**
- * Input to `createPost`. The caller (a compose action, a controller console,
- * a fired inject) supplies `scenarioTime`/`timeZone` from its own clock /
- * exercise context — this service stays pure and never reads either itself.
- */
-export interface CreatePostInput {
-  readonly exerciseId: string
-  readonly timeZone: string
-  readonly scenarioTime: string
-  readonly authorPersonaId: string
-  readonly actingHumanId: string
-  readonly text: string
-  readonly media?: PostMedia[]
-  readonly linkPreview?: PostLinkPreview
-  readonly counts?: Partial<PostCounts>
-  readonly origin: PostOrigin
-  readonly injectId?: string
-}
+// `CreatePostInput` now lives with the other contract-v2 types (`types/post.ts`);
+// it stays importable from here so existing `./postService` imports keep working.
+export type { CreatePostInput } from '../types/post'
 
 /** Every post starts with zero engagement unless the caller overrides it
  * (e.g. a seeded fixture backfilling an already-established post's counts). */
 const DEFAULT_COUNTS: PostCounts = { reply: 0, repost: 0, like: 0 }
 
-function mergeCounts(overrides: Partial<PostCounts> | undefined): PostCounts {
-  return { ...DEFAULT_COUNTS, ...overrides }
+/** Server-side bound on a seeded baseline number (implementation.md §1.5.2). */
+const MAX_BASELINE = 1_000_000
+
+/** Clamps one baseline number to a whole number in 0..1,000,000, or drops it. */
+function baselineValue(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) return undefined
+  return Math.min(MAX_BASELINE, Math.max(0, Math.trunc(value)))
+}
+
+/**
+ * The engagement counts of a new post. `input.counts` overrides the zero
+ * default (a seeded fixture backfilling an established post). The STAFF
+ * `engagementBaseline` then overrides it for non-participant origins only — the
+ * server ignores a participant's baseline, so the mock does too.
+ */
+function mergeCounts(
+  overrides: Partial<PostCounts> | undefined,
+  baseline: EngagementBaseline | undefined,
+  origin: CreatePostInput['origin'],
+): PostCounts {
+  const merged: PostCounts = { ...DEFAULT_COUNTS, ...overrides }
+  if (baseline === undefined || origin === 'participant') return merged
+  return {
+    ...merged,
+    reply: baselineValue(baseline.reply) ?? merged.reply,
+    repost: baselineValue(baseline.repost) ?? merged.repost,
+    like: baselineValue(baseline.like) ?? merged.like,
+  }
+}
+
+/**
+ * Builds the LOCAL post's `PostMedia[]` from `CreatePostMedia[]` (an id the actor
+ * uploaded + alt text), resolving each id through the mock media registry.
+ *
+ *  - MOCK mode (`USE_MOCK_DATA`): mirrors the server's 400s — an id the registry
+ *    does not know, or alt text that is empty after sanitization (NFR-001/
+ *    NFR-004), THROWS instead of quietly dropping the attachment, so a builder's
+ *    missing-alt bug shows up on `npm run dev` and not only against UAT.
+ *  - LIVE mode: the registry holds only mock assets, so a REAL uploaded asset id
+ *    is legitimately "unknown" here. The controller builds a local `Post` through
+ *    `createPost` (via `composeAsPersona`) BEFORE it fires `publishPost`, so
+ *    throwing would stop the publish ever being sent. The SERVER is the gate in
+ *    live mode: unresolvable (or alt-less) items are skipped from the local
+ *    `Post` and never throw.
+ */
+function resolveMedia(items: readonly CreatePostMedia[] | undefined): PostMedia[] | undefined {
+  if (items === undefined || items.length === 0) return undefined
+
+  const resolved: PostMedia[] = []
+  for (const item of items) {
+    const asset = getMockMediaAsset(item.mediaId)
+    if (asset === undefined) {
+      if (USE_MOCK_DATA) throw new Error('createPost: that media attachment is not available.')
+      continue
+    }
+    const alt = sanitizeText(item.alt).trim()
+    if (alt.length === 0) {
+      if (USE_MOCK_DATA) {
+        throw new Error('createPost: every media attachment needs a description (alt text).')
+      }
+      continue
+    }
+    const posterUrl =
+      item.posterMediaId !== undefined
+        ? getMockMediaAsset(item.posterMediaId)?.url ?? asset.posterUrl
+        : asset.posterUrl
+
+    resolved.push({
+      id: asset.id,
+      kind: asset.kind,
+      url: asset.url,
+      alt,
+      ...(posterUrl !== undefined ? { posterUrl } : {}),
+      ...(asset.width !== undefined ? { width: asset.width } : {}),
+      ...(asset.height !== undefined ? { height: asset.height } : {}),
+      ...(asset.durationSec !== undefined ? { durationSec: asset.durationSec } : {}),
+    })
+  }
+  return resolved.length > 0 ? resolved : undefined
 }
 
 /**
  * Sanitizes + assembles a `Post` and emits exactly one XC-004 `'post'`
- * telemetry event. Never throws because of telemetry — `buildAndEmit` is
+ * telemetry event. Never throws because of TELEMETRY — `buildAndEmit` is
  * caller-safe, so a dead/misconfigured telemetry pipeline can never block a
- * post from being created.
+ * post from being created. It can throw for ONE other reason: in MOCK mode only,
+ * an invalid media attachment (unknown id / no alt) — mirroring the server's 400.
+ * In LIVE mode it never throws for media; the server is the gate (see
+ * {@link resolveMedia}).
  */
 export function createPost(input: CreatePostInput): Post {
   const text = sanitizeText(input.text)
+  const media = resolveMedia(input.media)
   const createdWallClock = wallClockNowIso()
   const id = `post-${generateEventId()}`
 
@@ -109,13 +190,16 @@ export function createPost(input: CreatePostInput): Post {
     authorPersonaId: input.authorPersonaId,
     actingHumanId: input.actingHumanId,
     text,
-    media: input.media,
+    media,
     linkPreview: input.linkPreview,
-    counts: mergeCounts(input.counts),
+    counts: mergeCounts(input.counts, input.engagementBaseline, input.origin),
     createdWallClock,
     scenarioTime: input.scenarioTime,
     origin: input.origin,
     injectId: input.injectId,
+    // A reply records its parent; `postStore.appendPost` links it (resolves the
+    // parent's author handle into `inReplyTo` and bumps the parent's reply count).
+    ...(input.parentPostId !== undefined ? { parentPostId: input.parentPostId } : {}),
   }
 
   // XC-004: actor.kind is always 'persona' - even an engine- or inject-origin
@@ -125,7 +209,7 @@ export function createPost(input: CreatePostInput): Post {
   // schema's conditional 'controller-as-persona' requirement unconditionally.
   buildAndEmit({
     exerciseId: input.exerciseId,
-    eventType: 'post',
+    eventType: input.parentPostId !== undefined ? 'reply' : 'post',
     channel: 'social',
     actor: {
       kind: 'persona',
@@ -138,6 +222,7 @@ export function createPost(input: CreatePostInput): Post {
     scenarioTime: input.scenarioTime,
     timeZone: input.timeZone,
     target: { entityType: 'post', entityId: id },
+    ...(input.parentPostId !== undefined ? { payload: { parentPostId: input.parentPostId } } : {}),
   })
 
   return post
@@ -156,9 +241,94 @@ export function toParticipantView(post: Post): ParticipantPostView {
     text: post.text,
     counts: post.counts,
     scenarioTime: post.scenarioTime,
-    ...(post.media !== undefined ? { media: post.media } : {}),
-    ...(post.linkPreview !== undefined ? { linkPreview: post.linkPreview } : {}),
+    // Contract v2 members. Each is rebuilt from its documented, participant-safe
+    // keys (never passed through wholesale), so a wire object that happened to
+    // carry an extra server-side key can not smuggle it onto a participant view.
+    // `!= null` (not `!== undefined`): a backend member that forgot
+    // `WhenWritingNull` arrives as JSON `null`; null is treated as ABSENT, so the
+    // key is dropped rather than emitted as a null a consumer would trip on.
+    ...(post.media != null ? { media: post.media.map(narrowMedia) } : {}),
+    ...(post.inReplyTo != null
+      ? { inReplyTo: { postId: post.inReplyTo.postId, authorHandle: post.inReplyTo.authorHandle } }
+      : {}),
+    ...(post.linkPreview != null ? { linkPreview: post.linkPreview } : {}),
+    ...(post.viewer != null
+      ? { viewer: { liked: post.viewer.liked, reposted: post.viewer.reposted } }
+      : {}),
   }
+}
+
+/**
+ * Rebuilds one media item from its contract keys only (XC-002 defence in depth).
+ * An optional member that is `null` on the wire is DROPPED (treated as absent).
+ */
+function narrowMedia(item: PostMedia): PostMedia {
+  return {
+    id: item.id,
+    kind: item.kind,
+    url: item.url,
+    alt: item.alt,
+    ...(item.posterUrl != null ? { posterUrl: item.posterUrl } : {}),
+    ...(item.width != null ? { width: item.width } : {}),
+    ...(item.height != null ? { height: item.height } : {}),
+    ...(item.durationSec != null ? { durationSec: item.durationSec } : {}),
+  }
+}
+
+/** True when `value` is a plain object (not null, not an array). */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** An optional member: absent (`undefined`) OR `null` (a backend that forgot `WhenWritingNull`). */
+function isAbsent(value: unknown): boolean {
+  return value === undefined || value === null
+}
+
+function isOptionalNumber(value: unknown): boolean {
+  return isAbsent(value) || (typeof value === 'number' && Number.isFinite(value))
+}
+
+function isWellFormedMedia(item: unknown): boolean {
+  if (!isRecord(item)) return false
+  return (
+    typeof item.id === 'string' && item.id.length > 0 &&
+    (item.kind === 'image' || item.kind === 'video') &&
+    typeof item.url === 'string' && item.url.length > 0 &&
+    typeof item.alt === 'string' &&
+    (isAbsent(item.posterUrl) || typeof item.posterUrl === 'string') &&
+    isOptionalNumber(item.width) &&
+    isOptionalNumber(item.height) &&
+    isOptionalNumber(item.durationSec)
+  )
+}
+
+/**
+ * Runtime guard for the OPTIONAL contract-v2 members of a wire post — `media`,
+ * `inReplyTo`, `viewer` (implementation.md §1.5.3). Each is accepted when absent
+ * (every pre-v2 body and fixture) OR `null` (treated as absent: one backend
+ * member missing `WhenWritingNull` must not fail-close the whole feed), but must
+ * be well-formed when present, so a
+ * malformed attachment fails CLOSED at the read seam instead of throwing deep in
+ * the render tree (`PostMediaSlot` reads `url`/`alt`/`kind` unguarded).
+ *
+ * Shared by `feedService.isPost` and `useThread`'s guards, so the feed and the
+ * thread can never disagree about what a valid v2 post is.
+ */
+export function hasWellFormedV2Members(value: object): boolean {
+  const p = value as Record<string, unknown>
+  const { media, inReplyTo, viewer } = p
+  return (
+    (isAbsent(media) || (Array.isArray(media) && media.every(isWellFormedMedia))) &&
+    (isAbsent(inReplyTo) ||
+      (isRecord(inReplyTo) &&
+        typeof inReplyTo.postId === 'string' && inReplyTo.postId.length > 0 &&
+        typeof inReplyTo.authorHandle === 'string')) &&
+    (isAbsent(viewer) ||
+      (isRecord(viewer) &&
+        typeof viewer.liked === 'boolean' &&
+        typeof viewer.reposted === 'boolean'))
+  )
 }
 
 /**
@@ -260,7 +430,14 @@ const SEEDED_POSTS: readonly Post[] = [
       'BREAKING: boil-water advisory issued for parts of Fairhaven after elevated turbidity ' +
       'readings. Newsline 7 is on the scene — updates as we get them.',
     media: [
-      { kind: 'image', alt: 'Newsline 7 crew reporting outside the Fairhaven water plant' },
+      {
+        id: 'mock-media-seed-newsline7-plant',
+        kind: 'image',
+        url: '/mock-media/photos/water-plant.svg',
+        alt: 'Newsline 7 crew reporting outside the Fairhaven water plant',
+        width: 1200,
+        height: 800,
+      },
     ],
     linkPreview: {
       title: 'Boil-water advisory issued for parts of Fairhaven',

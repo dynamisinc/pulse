@@ -1,0 +1,44 @@
+/*
+ * features/social/components/post/PostLinkCard.module.css
+ * ---------------------------------------------------------------------------
+ * The in-sim link-preview card. Split out of `theme/social.module.css` by
+ * demo-polish F0, UNCHANGED; F2 owns this file from here on.
+ */
+
+.linkCard {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--pc-line);
+  border-radius: 14px;
+}
+
+.linkCardImage {
+  display: flex;
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+  background: var(--pc-panel);
+  color: var(--pc-ink-muted);
+  font-size: 13px;
+}
+
+.linkCardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+}
+
+.linkTitle {
+  margin: 0;
+  color: var(--pc-ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.linkDomain {
+  margin: 0;
+  color: var(--pc-ink-muted);
+  font-size: 13px;
+}

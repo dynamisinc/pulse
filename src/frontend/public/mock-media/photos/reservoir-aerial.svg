@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900" role="img" aria-hidden="true">
+<defs>
+<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5e86a8"/><stop offset="1" stop-color="#cfe0ec"/></linearGradient>
+<linearGradient id="wat" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b7d9c"/><stop offset="1" stop-color="#0d2a3a"/></linearGradient>
+</defs>
+<rect width="1600" height="900" fill="url(#sky)"/>
+<circle cx="1248" cy="180" r="63" fill="#fff6d6" opacity="0.85"/>
+<path d="M0 522 Q 400 414 800 486 T 1600 450 V 900 H0 Z" fill="#4f7d5a"/>
+<rect y="594" width="1600" height="378" fill="url(#wat)" opacity="0.92"/>
+<path d="M0 630 q 80 -8 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0" stroke="#bfe3f2" stroke-width="2" fill="none" opacity="0.35"/>
+<path d="M0 679 q 80 -8 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0" stroke="#bfe3f2" stroke-width="2" fill="none" opacity="0.35"/>
+<path d="M0 728 q 80 -8 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0" stroke="#bfe3f2" stroke-width="2" fill="none" opacity="0.35"/>
+<path d="M0 777 q 80 -8 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0" stroke="#bfe3f2" stroke-width="2" fill="none" opacity="0.35"/>
+<path d="M0 826 q 80 -8 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0" stroke="#bfe3f2" stroke-width="2" fill="none" opacity="0.35"/>
+<path d="M0 875 q 80 -8 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0 t 160 0" stroke="#bfe3f2" stroke-width="2" fill="none" opacity="0.35"/>
+</svg>

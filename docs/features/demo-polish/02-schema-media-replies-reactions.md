@@ -1,6 +1,6 @@
 # Story: Schema — media, replies, reactions, avatars (one migration)
 
-**Feature:** Demo polish  ·  **Epic:** E1 / E2  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Demo polish  ·  **Epic:** E1 / E2  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** SOC-001, SOC-010, SOC-030, COR-001, COR-020, COR-024, XC-010  ·  **Design decisions:** none  ·  **Issue:** #421
 **Story ID:** B1  ·  **Stack:** backend  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** 1 (merges first)  ·  **Review:** Tier-2 (Tom)
 **Home story:** [`posts/01`](../posts/01-post-composition.md), [`persona-management/05`](../persona-management/05-avatar-library.md); also seeds [`reactions/01`](../reactions/01-like.md), [`threads-replies/01`](../threads-replies/01-flattened-thread-view.md).

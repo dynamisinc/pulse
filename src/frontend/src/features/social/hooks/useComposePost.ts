@@ -48,14 +48,21 @@
  * on this path). `createPost` stamps the telemetry `wallClockTime` itself
  * (mock mode); the backend stamps its own wall-clock in live mode.
  *
- * MEDIA (story AC — minimal validated stub): Phase-1 `PostMedia` is image-only
- * (`{kind:'image',alt}`), so the attach affordance validates + accepts 0–4
- * images (count/MIME/size). Inline VIDEO (the 1-video "Utube replacement"
- * path in SOC-001) is recognized by the validator and DOCUMENTED as a
- * follow-up — it needs a `PostMedia` video kind (rich-media composer state,
- * D1 backlog) that this story deliberately does not add. No real upload /
- * storage is built (no backend); a selected image becomes a `PostMedia`
- * placeholder with its filename as interim `alt`.
+ * MEDIA (story AC — minimal validated stub): the attach affordance validates +
+ * accepts 0–4 images (count/MIME/size). Inline VIDEO (the 1-video "Utube
+ * replacement" path in SOC-001) is recognized by the validator and DOCUMENTED as
+ * a follow-up. A selected image becomes a local DRAFT chip
+ * (`DraftMedia`: `{kind:'image',alt}`) with its filename as interim `alt`.
+ *
+ * CONTRACT v2 (demo-polish F0): a draft chip is NOT an uploaded asset — it has no
+ * `mediaId` — and the legacy `{kind, alt}` placeholder is no longer sent
+ * (implementation.md §1.5.2; DP-6). So `publish()` does not put the draft chips
+ * on the post; the real attach tray (upload via `@/core/media`, alt text, video)
+ * is F4's story, which replaces the draft state with `CreatePostMedia[]`.
+ * Publishing with chips attached therefore sends the TEXT only and raises
+ * {@link DRAFT_MEDIA_NOT_SENT_MESSAGE} as the composer's `mediaError`; publishing
+ * with chips but NO text is blocked (`canPublish` false, `publish()` a no-op).
+ * Both are pinned by `useComposePost.interim.test.ts`.
  */
 
 import { useCallback, useMemo, useState } from 'react'
@@ -63,7 +70,7 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { useSession } from '@/core/auth'
 import { scenarioNow } from '@/core/clock'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
-import { createPost, type CreatePostInput, type Post, type PostMedia } from '@/features/social'
+import { createPost, type CreatePostInput, type Post } from '@/features/social'
 import { publishPost } from '../services/livePostActions'
 import { sanitizeText } from '../services/sanitize'
 
@@ -73,6 +80,15 @@ export const DEFAULT_CHAR_LIMIT = 280
 /** Remaining-character threshold at/under which the count text becomes visible
  * and the ring enters its amber "low" state (D1-R5). */
 export const COUNT_VISIBLE_THRESHOLD = 20
+
+/**
+ * Shown (as the composer's `mediaError` alert, in-fiction wording) when a post is
+ * published while photo chips are attached: the chips are interim drafts with no
+ * uploaded asset behind them, so the post goes out as text only until F4's real
+ * attach tray lands (see the MEDIA note in the module header).
+ */
+export const DRAFT_MEDIA_NOT_SENT_MESSAGE =
+  "Photo upload isn't available yet — your post went out as text."
 
 /** Max images per post (SOC-001: "0–4 images OR 1 video"). */
 export const MAX_IMAGES = 4
@@ -117,10 +133,20 @@ function dedupe(values: string[]): string[] {
   return [...new Set(values)]
 }
 
+/**
+ * A locally picked image awaiting the real attach flow (F4): just its interim
+ * `alt`. Deliberately NOT the contract's `PostMedia` (which needs an uploaded
+ * asset's id + url) and NOT sendable — see the MEDIA note in the module header.
+ */
+export interface DraftMedia {
+  readonly kind: 'image'
+  readonly alt: string
+}
+
 /** Outcome of validating a batch of picked files against the media rules. */
 export interface ImageValidationResult {
   /** The accepted attachments (empty when any file failed validation). */
-  readonly media: PostMedia[]
+  readonly media: DraftMedia[]
   /** A human-readable, in-fiction-safe reason the batch was rejected. */
   readonly error?: string
 }
@@ -136,7 +162,7 @@ export interface ImageValidationResult {
  * @param existingCount how many images are already attached (for the ≤4 cap)
  */
 export function validateImageFiles(files: File[], existingCount: number): ImageValidationResult {
-  const accepted: PostMedia[] = []
+  const accepted: DraftMedia[] = []
   for (const file of files) {
     if (file.type.startsWith('video/')) {
       return { media: [], error: 'Inline video is coming soon — attach up to 4 images for now.' }
@@ -171,7 +197,7 @@ export interface UseComposePostOptions {
 export interface UseComposePostResult {
   readonly text: string
   readonly setText: (value: string) => void
-  readonly media: readonly PostMedia[]
+  readonly media: readonly DraftMedia[]
   /** Validates + appends picked image files; sets `mediaError` on rejection. */
   readonly attachImages: (files: File[]) => void
   readonly removeMedia: (index: number) => void
@@ -210,7 +236,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
   const session = useSession()
 
   const [text, setText] = useState('')
-  const [media, setMedia] = useState<PostMedia[]>([])
+  const [media, setMedia] = useState<DraftMedia[]>([])
   const [mediaError, setMediaError] = useState<string | undefined>(undefined)
 
   const hashtags = useMemo(() => parseHashtags(text), [text])
@@ -225,7 +251,9 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
 
   const isReadOnly = session.isReadOnly
   const canPost = session.personaId !== undefined
-  const hasContent = text.trim().length > 0 || media.length > 0
+  // Draft chips are not sendable (see the MEDIA note in the module header), so a
+  // post needs TEXT: a chip-only publish would otherwise create a blank post.
+  const hasContent = text.trim().length > 0
   const canPublish = hasContent && !isOverLimit && canPost && !isReadOnly
 
   const attachImages = useCallback((files: File[]) => {
@@ -248,7 +276,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     // closure, and narrow `personaId` to a string (no non-null assertion).
     const personaId = session.personaId
     if (session.isReadOnly || personaId === undefined) return
-    if (text.trim().length === 0 && media.length === 0) return
+    if (text.trim().length === 0) return
     if ([...text].length > charLimit) return
 
     const input: CreatePostInput = {
@@ -258,7 +286,8 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
       authorPersonaId: personaId,
       actingHumanId: session.actingHumanId,
       text,
-      ...(media.length > 0 ? { media: [...media] } : {}),
+      // Draft chips are never sent (no mediaId; legacy placeholders are retired —
+      // see the MEDIA note in the module header). F4 supplies `CreatePostMedia[]`.
       origin: 'participant',
     }
 
@@ -277,9 +306,12 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
       publishPost(input).catch(() => {})
     }
 
+    // The post went out as TEXT ONLY: tell the author in-fiction that their photo
+    // chips were not sent, rather than letting them vanish silently.
+    const hadDraftChips = media.length > 0
     setText('')
     setMedia([])
-    setMediaError(undefined)
+    setMediaError(hadDraftChips ? DRAFT_MEDIA_NOT_SENT_MESSAGE : undefined)
   }, [
     exerciseId,
     timeZone,
@@ -287,7 +319,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     session.actingHumanId,
     session.isReadOnly,
     text,
-    media,
+    media.length,
     charLimit,
     onPosted,
   ])

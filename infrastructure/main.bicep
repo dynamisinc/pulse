@@ -237,14 +237,37 @@ var generationProvider = generationLive ? 'AzureOpenAI' : 'Fake'
 var generationResidency = location
 
 // ============================================================================
+// Post-media Blob storage (Azure:BlobStorage:*) — demo-polish/01 (story I1), KEYLESS
+// ----------------------------------------------------------------------------
+// Plain locals, NOT reads of module storage's outputs — the same no-cycle reason as the Generation:*
+// locals above: modules/storage.bicep depends on modules/webapp.bicep (it grants the App Service's
+// principalId Storage Blob Data Contributor), so webApp reading storage's outputs would be a cycle.
+// The service URI is deterministic from the account name. az.environment() is namespace-qualified
+// because this template's `environment` PARAMETER shadows the bare environment() function (BCP265).
+// One container-name local feeds BOTH the storage module (the container it creates) and the webApp
+// module (Azure:BlobStorage:ContainerName), so the two cannot drift apart.
+// ============================================================================
+
+var blobServiceUri = 'https://${storageName}.blob.${az.environment().suffixes.storage}'
+var blobStorageContainerName = 'post-media'
+
+// ============================================================================
 // Module Deployments
 // ============================================================================
 
+// Keyless post-media storage (demo-polish/01). backendPrincipalId grants the App Service's system-assigned
+// identity Storage Blob Data Contributor at account scope (write + user-delegation SAS); skipped when
+// there is no App Service. One-directional, like ai: storage reads webApp's principalId; webApp reads
+// only the blob locals above, never storage's outputs.
 module storage 'modules/storage.bicep' = if (deployStorage) {
   name: 'storageDeploy'
   params: {
     location: location
     storageAccountName: storageName
+    postMediaContainerName: blobStorageContainerName
+    #disable-next-line BCP318
+    backendPrincipalId: deployWebApp ? webApp.outputs.principalId! : ''
+    corsAllowedOrigins: empty(frontendUrl) ? [] : [frontendUrl]
     tags: tags
   }
 }
@@ -322,8 +345,14 @@ module webApp 'modules/webapp.bicep' = if (deployWebApp) {
     appInsightsConnectionString: deployMonitoring ? appInsights.outputs.connectionString! : ''
     #disable-next-line BCP318
     sqlConnectionString: deployDatabase ? database.outputs.connectionString! : ''
-    #disable-next-line BCP318
-    storageConnectionString: deployStorage ? storage.outputs.connectionString! : ''
+    // Keyless post media (demo-polish/01): endpoint + container only, from the plain locals above —
+    // no connection string or account key exists (storage.bicep sets allowSharedKeyAccess: false).
+    // FAIL CLOSED without storage: Provider = None (uploads answer 503, the rest of the API is
+    // unaffected — implementation.md §1.7) and no service URI, rather than pointing the app at an
+    // account that was never deployed.
+    blobStorageProvider: deployStorage ? 'Azure' : 'None'
+    blobServiceUri: deployStorage ? blobServiceUri : ''
+    blobStorageContainerName: blobStorageContainerName
     // The SignalR hub is hosted IN this Web API (ServiceMode Default), so the host — not the Function
     // App — reads this connection string. Empty when SignalR isn't deployed.
     #disable-next-line BCP318

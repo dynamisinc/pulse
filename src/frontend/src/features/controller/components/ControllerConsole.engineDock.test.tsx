@@ -25,6 +25,7 @@ import { resetTelemetryBuffer } from '@/core/telemetry'
 import { postStore } from '@/features/social/services/postStore'
 import { reviewStore } from '../engine/services/reviewStore'
 import { engineControlStore } from '../engine/hooks/useEngineControl'
+import { ActivePersonaProvider } from '../hooks/useActivePersona'
 import { ControllerConsole } from './ControllerConsole'
 
 beforeEach(() => {
@@ -44,8 +45,10 @@ function renderConsole() {
     <ThemeProvider theme={cobraTheme}>
       <ExerciseContextProvider>
         <ToolstripProvider>
-          <ControllerConsole />
-          <Toolstrip />
+          <ActivePersonaProvider>
+            <ControllerConsole />
+            <Toolstrip />
+          </ActivePersonaProvider>
         </ToolstripProvider>
       </ExerciseContextProvider>
     </ThemeProvider>,

@@ -3,7 +3,7 @@
  * ---------------------------------------------------------------------------
  * TESTER-added coverage for story 01 (console-shell) AC "A tool's toolstrip
  * icon carries a status badge ... never color alone (NFR-001)" — specifically
- * the badge SHAPE `ControllerConsole` derives from `usePersonas()`, which
+ * the badge SHAPE `ControllerConsole` derives from `useStaffPersonas()`, which
  * `ControllerConsole.test.tsx` only spot-checks against the real seeded cast
  * (`Number(badge.textContent) > 0`). Here `@/features/personas` is mocked so
  * the persona count is a controlled, exact value:
@@ -30,25 +30,28 @@ import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { ToolstripProvider } from '@/features/staffShell/toolRegistry'
 import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
-import type { Persona } from '@/features/personas'
-import { usePersonas } from '@/features/personas'
+import type { StaffPersona } from '@/features/personas'
+import { useStaffPersonas } from '@/features/personas'
+import { ActivePersonaProvider } from '../hooks/useActivePersona'
 import { ControllerConsole } from './ControllerConsole'
 
 vi.mock('@/features/personas', async () => {
   const actual = await vi.importActual<typeof import('@/features/personas')>('@/features/personas')
-  return { ...actual, usePersonas: vi.fn() }
+  return { ...actual, useStaffPersonas: vi.fn() }
 })
 
-const mockedUsePersonas = vi.mocked(usePersonas)
+// The console reads the STAFF persona list (one fetch: the badge count AND
+// `openComposer`'s persona lookup), so that is the hook mocked here.
+const mockedUseStaffPersonas = vi.mocked(useStaffPersonas)
 
-function personaStub(id: string): Persona {
+function personaStub(id: string): StaffPersona {
   return {
     id,
     displayName: `Persona ${id}`,
     handle: `@${id}`,
     kind: 'human',
     verified: false,
-  } as Persona
+  } as StaffPersona
 }
 
 function renderConsole() {
@@ -56,8 +59,10 @@ function renderConsole() {
     <ThemeProvider theme={cobraTheme}>
       <ExerciseContextProvider>
         <ToolstripProvider>
-          <ControllerConsole />
-          <Toolstrip />
+          <ActivePersonaProvider>
+            <ControllerConsole />
+            <Toolstrip />
+          </ActivePersonaProvider>
         </ToolstripProvider>
       </ExerciseContextProvider>
     </ThemeProvider>,
@@ -66,7 +71,7 @@ function renderConsole() {
 
 describe('ControllerConsole — Personas badge shape', () => {
   it('omits the badge entirely when the persona count is zero', async () => {
-    mockedUsePersonas.mockReturnValue({ personas: [], loading: false, error: undefined })
+    mockedUseStaffPersonas.mockReturnValue({ personas: [], loading: false, error: undefined })
     renderConsole()
 
     const surfaceZone = await screen.findByTestId('toolstrip-zone-surface')
@@ -77,7 +82,7 @@ describe('ControllerConsole — Personas badge shape', () => {
   })
 
   it('renders the badge with the EXACT persona count, never-escalating', async () => {
-    mockedUsePersonas.mockReturnValue({
+    mockedUseStaffPersonas.mockReturnValue({
       personas: [personaStub('a'), personaStub('b'), personaStub('c')],
       loading: false,
       error: undefined,

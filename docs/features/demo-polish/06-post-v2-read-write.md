@@ -1,6 +1,6 @@
 # Story: Post v2 read and write
 
-**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo polish  ·  **Epic:** E2  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** SOC-001, SOC-002, SOC-011, SOC-054, COR-024, XC-002, XC-001  ·  **Design decisions:** DP-5, DP-6, DP-8 (implementation.md §0)  ·  **Issue:** #425
 **Story ID:** BP  ·  **Stack:** backend  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** 1b
 **Home story:** [`posts/01`](../posts/01-post-composition.md), [`amplification/02`](../amplification/02-amplification-counts.md) (counts).

@@ -19,6 +19,7 @@ import type { ReactNode } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
+import { SessionProvider } from '@/core/auth'
 import { resetExerciseClock, setExerciseClock, type IExerciseClock } from '@/core/clock'
 import type { Persona } from '@/features/personas'
 import { QuotePostCard } from './QuotePostCard'
@@ -28,8 +29,18 @@ function fixedClock(instant: Date): IExerciseClock {
   return { scenarioNow: () => instant }
 }
 
+/** Every `<PostCard>` needs exercise context AND a session: `PostActions` self-wires
+ * the like/repost hooks (demo-polish F0, DP-14), which read both. */
+function Providers({ children }: { children: ReactNode }) {
+  return (
+    <ExerciseContextProvider>
+      <SessionProvider>{children}</SessionProvider>
+    </ExerciseContextProvider>
+  )
+}
+
 async function renderWithExerciseContext(children: ReactNode) {
-  const utils = render(<ExerciseContextProvider>{children}</ExerciseContextProvider>)
+  const utils = render(<Providers>{children}</Providers>)
   await waitFor(() => expect(screen.getByTestId('quote-post-card')).toBeInTheDocument())
   return utils
 }

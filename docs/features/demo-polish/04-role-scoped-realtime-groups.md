@@ -1,6 +1,6 @@
 # Story: Role-scoped realtime groups
 
-**Feature:** Demo polish  ·  **Epic:** E2 / E7  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Demo polish  ·  **Epic:** E2 / E7  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** XC-002, SOC-052, COR-001, NFR-003  ·  **Design decisions:** D1-008  ·  **Issue:** #423 (home story is #346)
 **Story ID:** B5  ·  **Stack:** backend  ·  **Priority:** Should  ·  **Effort:** M  ·  **Wave:** 1  ·  **Review:** Tier-2 (Tom)
 **Home story:** [`social-api/05`](../social-api/05-realtime-role-scoped-groups.md) (slice: server side; the frontend already presents the token).

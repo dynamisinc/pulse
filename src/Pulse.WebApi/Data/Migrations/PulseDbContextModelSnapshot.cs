@@ -289,6 +289,73 @@ namespace Pulse.WebApi.Data.Migrations
                     b.ToTable("Follows");
                 });
 
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.MediaAsset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("BlobName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<long>("Bytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset>("CreatedScenarioTime")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("CreatedWallClock")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<double?>("DurationSec")
+                        .HasColumnType("float");
+
+                    b.Property<Guid>("ExerciseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("Height")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<Guid?>("PosterMediaAssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("UploadedByHumanId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int?>("Width")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlobName")
+                        .IsUnique();
+
+                    b.HasIndex("ExerciseId");
+
+                    b.HasIndex("PosterMediaAssetId");
+
+                    b.ToTable("MediaAssets");
+                });
+
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.Organization", b =>
                 {
                     b.Property<Guid>("Id")
@@ -329,6 +396,12 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("int")
                         .HasDefaultValue(0);
 
+                    b.Property<Guid?>("AvatarMediaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("BannerMediaId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("Bio")
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
@@ -359,6 +432,10 @@ namespace Pulse.WebApi.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("Location")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<Guid?>("PersonaTemplateId")
                         .HasColumnType("uniqueidentifier");
 
@@ -373,6 +450,10 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("bit");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AvatarMediaId");
+
+                    b.HasIndex("BannerMediaId");
 
                     b.HasIndex("ExerciseId");
 
@@ -419,6 +500,21 @@ namespace Pulse.WebApi.Data.Migrations
                     b.Property<Guid>("AuthorPersonaId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("BaselineLikeCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("BaselineReplyCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("BaselineRepostCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("Body")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -445,6 +541,9 @@ namespace Pulse.WebApi.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("ParentPostId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("RumorRef")
                         .HasColumnType("uniqueidentifier");
 
@@ -452,7 +551,86 @@ namespace Pulse.WebApi.Data.Migrations
 
                     b.HasIndex("ExerciseId");
 
+                    b.HasIndex("ParentPostId");
+
                     b.ToTable("Posts");
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.PostMediaItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Alt")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid>("ExerciseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("MediaAssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("PostId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PosterMediaAssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExerciseId");
+
+                    b.HasIndex("MediaAssetId");
+
+                    b.HasIndex("PosterMediaAssetId");
+
+                    b.HasIndex("PostId", "Order")
+                        .IsUnique();
+
+                    b.ToTable("PostMediaItems");
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.PostReaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedScenarioTime")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("ExerciseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<Guid>("PersonaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PostId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExerciseId");
+
+                    b.HasIndex("PostId", "PersonaId", "Kind")
+                        .IsUnique()
+                        .HasFilter("[DeletedAt] IS NULL");
+
+                    b.ToTable("PostReactions");
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.Session", b =>
@@ -731,6 +909,64 @@ namespace Pulse.WebApi.Data.Migrations
                         });
 
                     b.Navigation("Posts");
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.MediaAsset", b =>
+                {
+                    b.HasOne("Pulse.WebApi.Data.Entities.MediaAsset", null)
+                        .WithMany()
+                        .HasForeignKey("PosterMediaAssetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.Persona", b =>
+                {
+                    b.HasOne("Pulse.WebApi.Data.Entities.MediaAsset", null)
+                        .WithMany()
+                        .HasForeignKey("AvatarMediaId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Pulse.WebApi.Data.Entities.MediaAsset", null)
+                        .WithMany()
+                        .HasForeignKey("BannerMediaId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.Post", b =>
+                {
+                    b.HasOne("Pulse.WebApi.Data.Entities.Post", null)
+                        .WithMany()
+                        .HasForeignKey("ParentPostId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.PostMediaItem", b =>
+                {
+                    b.HasOne("Pulse.WebApi.Data.Entities.MediaAsset", null)
+                        .WithMany()
+                        .HasForeignKey("MediaAssetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pulse.WebApi.Data.Entities.Post", null)
+                        .WithMany()
+                        .HasForeignKey("PostId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pulse.WebApi.Data.Entities.MediaAsset", null)
+                        .WithMany()
+                        .HasForeignKey("PosterMediaAssetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.PostReaction", b =>
+                {
+                    b.HasOne("Pulse.WebApi.Data.Entities.Post", null)
+                        .WithMany()
+                        .HasForeignKey("PostId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.TelemetryEvent", b =>

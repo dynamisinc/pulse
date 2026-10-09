@@ -1,5 +1,6 @@
 namespace Pulse.WebApi.Features.Social;
 
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 using Pulse.WebApi.Data.Entities;
 
@@ -19,9 +20,41 @@ using Pulse.WebApi.Data.Entities;
 /// config. <c>media</c>/<c>linkPreview</c> are OMITTED this phase — they are optional in the frozen
 /// contract and there is no media storage in B1; feeds-discovery adds them later (absent optional fields
 /// are contract-valid).
+/// <para>
+/// <b>demo-polish B1 skeleton (implementation.md §1.4).</b> The class is deliberately UNSEALED with a
+/// protected copy constructor so the thread read can derive its reply shape from it, and it carries the
+/// optional <see cref="Media"/> / <see cref="InReplyTo"/> / <see cref="Viewer"/> members — each OMITTED from the
+/// wire when null. <see cref="FromPost"/> never sets them, so its output is byte-identical to before; populating
+/// them is the participant projector's job, not this type's.
+/// </para>
 /// </remarks>
-public sealed class ParticipantPostDto
+public class ParticipantPostDto
 {
+    /// <summary>Creates an empty instance; the <c>required</c> members are set by an object initializer.</summary>
+    public ParticipantPostDto()
+    {
+    }
+
+    /// <summary>
+    /// Copy constructor for derived participant shapes (e.g. a thread reply): copies every member of
+    /// <paramref name="source"/>, so a derived type adds fields without re-deriving the participant-safe base.
+    /// </summary>
+    /// <param name="source">The participant post to copy.</param>
+    [SetsRequiredMembers]
+    protected ParticipantPostDto(ParticipantPostDto source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        Id = source.Id;
+        AuthorPersonaId = source.AuthorPersonaId;
+        Text = source.Text;
+        Counts = source.Counts;
+        ScenarioTime = source.ScenarioTime;
+        Media = source.Media;
+        InReplyTo = source.InReplyTo;
+        Viewer = source.Viewer;
+    }
+
     /// <summary>The post id.</summary>
     [JsonPropertyName("id")]
     public required string Id { get; init; }
@@ -44,6 +77,23 @@ public sealed class ParticipantPostDto
     /// </summary>
     [JsonPropertyName("scenarioTime")]
     public required string ScenarioTime { get; init; }
+
+    /// <summary>The post's media attachments in display order; OMITTED from the wire when null.</summary>
+    [JsonPropertyName("media")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PostMediaDto>? Media { get; init; }
+
+    /// <summary>The post this one replies to; OMITTED from the wire when null (a top-level post).</summary>
+    [JsonPropertyName("inReplyTo")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PostInReplyToDto? InReplyTo { get; init; }
+
+    /// <summary>
+    /// The caller's own reaction state; OMITTED from the wire when null (always absent on broadcasts and for staff).
+    /// </summary>
+    [JsonPropertyName("viewer")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PostViewerStateDto? Viewer { get; init; }
 
     /// <summary>
     /// The single server-side XC-002 narrowing — the server-side mirror of the frontend

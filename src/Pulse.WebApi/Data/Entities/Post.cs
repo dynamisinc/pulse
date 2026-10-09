@@ -63,4 +63,23 @@ public sealed class Post : IExerciseScoped
 
     /// <summary>Soft-delete marker (scenario time). Null = live; set = taken down. Nothing is hard-deleted (XC-010).</summary>
     public DateTimeOffset? DeletedAt { get; set; }
+
+    /// <summary>
+    /// The post this one replies to (SOC-010); null for a top-level post. A self foreign key to <c>Posts</c>
+    /// (<c>Restrict</c> — no cascade, no hard-delete path, XC-010), indexed by <c>IX_Posts_ParentPostId</c>. The
+    /// parent must resolve inside the same exercise scope; that check belongs to the write path, not the schema.
+    /// </summary>
+    public Guid? ParentPostId { get; set; }
+
+    /// <summary>
+    /// The SEEDED like count the fiction starts from (SOC-030); the displayed count is this baseline plus the real
+    /// <see cref="PostReaction"/> rows. <c>NOT NULL DEFAULT 0</c>. Staff-only — never on a participant payload (XC-002).
+    /// </summary>
+    public int BaselineLikeCount { get; set; }
+
+    /// <summary>The seeded repost baseline (see <see cref="BaselineLikeCount"/>). <c>NOT NULL DEFAULT 0</c>. Staff-only.</summary>
+    public int BaselineRepostCount { get; set; }
+
+    /// <summary>The seeded reply baseline (see <see cref="BaselineLikeCount"/>). <c>NOT NULL DEFAULT 0</c>. Staff-only.</summary>
+    public int BaselineReplyCount { get; set; }
 }

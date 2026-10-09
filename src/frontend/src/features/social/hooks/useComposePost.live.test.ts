@@ -70,6 +70,15 @@ vi.mock('../services/livePostActions', () => ({
 import { createPost } from '../services/postService'
 import { publishPost } from '../services/livePostActions'
 
+/** A well-formed 201 body — `publishPost` now resolves with the parsed post. */
+const PUBLISHED_VIEW = {
+  id: 'post-published-1',
+  authorPersonaId: 'persona-dreyes_fh',
+  text: 'published',
+  counts: { reply: 0, repost: 0, like: 0 },
+  scenarioTime: '2033-09-04T14:00:00Z',
+}
+
 const mockedUseExerciseContext = vi.mocked(useExerciseContext)
 const mockedUseSession = vi.mocked(useSession)
 
@@ -97,7 +106,7 @@ function writableSession(): Session {
 beforeEach(() => {
   mockedUseExerciseContext.mockReturnValue(scope())
   mockedUseSession.mockReturnValue(writableSession())
-  vi.mocked(publishPost).mockReset().mockResolvedValue(undefined)
+  vi.mocked(publishPost).mockReset().mockResolvedValue(PUBLISHED_VIEW)
   vi.mocked(createPost).mockClear()
 })
 

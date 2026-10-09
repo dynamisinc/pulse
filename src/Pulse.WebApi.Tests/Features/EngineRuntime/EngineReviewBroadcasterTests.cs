@@ -16,21 +16,22 @@ using Xunit;
 /// <summary>
 /// Unit tests for <see cref="EngineReviewBroadcaster"/> (story 02 SignalR push; COR-001, XC-002). Docker-free,
 /// plain <see cref="FactAttribute"/>s — the broadcaster's only collaborator is <see cref="IHubContext{THub}"/>,
-/// trivially mocked. Proves the pushed event name, the SERVER-DERIVED exercise group (mirroring
-/// <see cref="ExerciseRealtimeHub.GroupNameFor"/>, never client-supplied), and that a push targets ONLY the
-/// owning exercise's group.
+/// trivially mocked. Proves the pushed event name, the SERVER-DERIVED exercise staff group (mirroring
+/// <see cref="ExerciseRealtimeHub.StaffGroupNameFor"/>, never client-supplied — demo-polish B5 moved this push
+/// off the exercise-wide group participants join; see <see cref="EngineReviewBroadcasterScopeTests"/>), and
+/// that a push targets ONLY the owning exercise's staff group.
 /// </summary>
 public sealed class EngineReviewBroadcasterTests
 {
     [Fact]
-    public async Task BroadcastReviewItemChangedAsync_SendsReviewItemChanged_ToTheExercisesGroup_WithThePayload()
+    public async Task BroadcastReviewItemChangedAsync_SendsReviewItemChanged_ToTheExercisesStaffGroup_WithThePayload()
     {
         var exerciseId = Guid.NewGuid();
         var item = SampleItem(exerciseId);
 
         var groupProxy = new Mock<IClientProxy>();
         var clients = new Mock<IHubClients>();
-        clients.Setup(c => c.Group($"exercise:{exerciseId}")).Returns(groupProxy.Object);
+        clients.Setup(c => c.Group($"exercise:{exerciseId}:staff")).Returns(groupProxy.Object);
 
         var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
         hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
@@ -48,7 +49,7 @@ public sealed class EngineReviewBroadcasterTests
     }
 
     [Fact]
-    public async Task BroadcastReviewItemChangedAsync_TargetsOnlyTheOwningExercisesGroup_NeverAnothers()
+    public async Task BroadcastReviewItemChangedAsync_TargetsOnlyTheOwningExercisesStaffGroup_NeverAnothers()
     {
         var exerciseA = Guid.NewGuid();
         var exerciseB = Guid.NewGuid();
@@ -56,8 +57,8 @@ public sealed class EngineReviewBroadcasterTests
         var groupProxyA = new Mock<IClientProxy>();
         var groupProxyB = new Mock<IClientProxy>();
         var clients = new Mock<IHubClients>();
-        clients.Setup(c => c.Group($"exercise:{exerciseA}")).Returns(groupProxyA.Object);
-        clients.Setup(c => c.Group($"exercise:{exerciseB}")).Returns(groupProxyB.Object);
+        clients.Setup(c => c.Group($"exercise:{exerciseA}:staff")).Returns(groupProxyA.Object);
+        clients.Setup(c => c.Group($"exercise:{exerciseB}:staff")).Returns(groupProxyB.Object);
 
         var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
         hubContext.SetupGet(h => h.Clients).Returns(clients.Object);

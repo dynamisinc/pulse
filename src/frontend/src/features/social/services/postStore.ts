@@ -38,6 +38,20 @@
  *   - `resetForTests()` Restores the seeded baseline and clears listeners, so
  *                      tests never pollute each other.
  *
+ * CONTRACT v2 (demo-polish F0, implementation.md §5):
+ *   - SEED. The canonical six `listPosts()` posts, PLUS the rich v2 fixtures
+ *     (`mockFixtures.ts`: media grids, video, a reply thread, viewer states,
+ *     count boundaries, mentions, the mock viewer's own posts) when
+ *     `DEMO_FIXTURES_ENABLED` — i.e. `npm run dev` / a mock-data build, never
+ *     Vitest. Tests opt in with `resetForTests({ withDemoFixtures: true })`.
+ *   - REPLIES. A reply is a `Post` carrying `inReplyTo`. `appendPost` LINKS a
+ *     freshly created reply (one that has `parentPostId` but no `inReplyTo`, as
+ *     `createPost` produces) to its parent in the store — resolving the parent
+ *     author's handle into `inReplyTo` — and bumps the parent's `counts.reply`,
+ *     standing in for what the server's projector does on a live reply. The
+ *     top-level feed read (`feedService.resolveFeed`) excludes replies; the
+ *     `includeReplies` read returns them.
+ *
  * ISOLATION (COR-001, XC-002) — exercise-scoped BY CONSTRUCTION, STAMPING-ONLY.
  * This store introduces NO client `exerciseId` query-scoping parameter anywhere
  * (WAVE0-REVIEW precedent 13): appended posts already carry their stamped
@@ -49,14 +63,24 @@
  * exactly like a seeded one (XC-002). The store never narrows and never renders.
  */
 
+import { personaById } from '@/features/personas'
 import { listPosts } from './postService'
+import { DEMO_FIXTURES_ENABLED, listDemoFixturePosts } from './mockFixtures'
 import type { Post } from '../types/post'
+
+/**
+ * The initial post set: the canonical six, plus the v2 demo fixtures when they
+ * are enabled (see the module header and `mockFixtures.DEMO_FIXTURES_ENABLED`).
+ */
+function initialPosts(withDemoFixtures: boolean): Post[] {
+  return withDemoFixtures ? [...listPosts(), ...listDemoFixturePosts()] : listPosts()
+}
 
 /**
  * The current post set. Its identity is swapped (not mutated in place) on every
  * `appendPost`, so `getPosts()` returns a stable snapshot between appends.
  */
-let posts: Post[] = listPosts()
+let posts: Post[] = initialPosts(DEMO_FIXTURES_ENABLED)
 
 /** Active change listeners; notified on every append. */
 const listeners = new Set<() => void>()
@@ -72,13 +96,42 @@ function getPosts(): Post[] {
 }
 
 /**
+ * Resolves a freshly created reply's `parentPostId` into the participant-safe
+ * `inReplyTo` (parent id + parent author handle), the way the server's projector
+ * does. A post that already has `inReplyTo`, has no parent, or whose parent (or
+ * the parent's author) cannot be found is returned unchanged.
+ */
+function linkReply(post: Post, existing: readonly Post[]): Post {
+  if (post.inReplyTo !== undefined || post.parentPostId === undefined) return post
+  const parentId = post.parentPostId
+  const parent = existing.find(candidate => candidate.id === parentId)
+  const handle = parent !== undefined ? personaById(parent.authorPersonaId)?.handle : undefined
+  if (handle === undefined) return post
+  return { ...post, inReplyTo: { postId: parentId, authorHandle: handle } }
+}
+
+/**
  * Appends a post and notifies every subscriber. The post is added in insertion
  * order — the newest-first ORDERING the feed shows is applied by
  * `assembleFeedView` (by `scenarioTime`, COR-053), not here. The appended
  * `Post` is a FULL record (provenance included); it is narrowed only on read.
+ *
+ * A reply is linked to its parent (see {@link linkReply}) and the parent's
+ * reply count is bumped by one — a NEW parent object, so memoized rows see the
+ * change while the parent keeps its id (the live pill never re-emits it).
  */
 function appendPost(post: Post): void {
-  posts = [...posts, post]
+  const stored = linkReply(post, posts)
+  const parentId = stored.inReplyTo?.postId
+  const withParentBumped =
+    parentId === undefined
+      ? posts
+      : posts.map(existing =>
+        existing.id === parentId
+          ? { ...existing, counts: { ...existing.counts, reply: existing.counts.reply + 1 } }
+          : existing,
+      )
+  posts = [...withParentBumped, stored]
   for (const listener of listeners) listener()
 }
 
@@ -93,12 +146,20 @@ function subscribe(listener: () => void): () => void {
   }
 }
 
+/** Options for {@link resetForTests}. */
+interface ResetOptions {
+  /** Seed the rich v2 demo fixtures too (default: just the canonical six). */
+  readonly withDemoFixtures?: boolean
+}
+
 /**
  * Restores the seeded baseline and clears all listeners. Test-only — lets each
- * case start from the canonical seeded set with no cross-test pollution.
+ * case start from the canonical seeded set with no cross-test pollution. By
+ * default that is the canonical six `listPosts()` posts even when the demo
+ * fixtures are enabled; pass `{ withDemoFixtures: true }` for the rich set.
  */
-function resetForTests(): void {
-  posts = listPosts()
+function resetForTests(options: ResetOptions = {}): void {
+  posts = initialPosts(options.withDemoFixtures === true)
   listeners.clear()
 }
 

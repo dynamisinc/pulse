@@ -36,11 +36,18 @@
  * mock follow-edge store on every request rather than serving the frozen
  * seed-time number (WR-005 — see `withMockFollowEdges`).
  *
+ * CONTRACT v2 (demo-polish F0, implementation.md §1.5.6 / §1.11): both reads
+ * accept the OPTIONAL `avatarUrl` / `bannerUrl` / `location` (validated only when
+ * present; `toParticipantPersona` forwards them), and `invalidatePersonas()` is the
+ * refetch signal for the two hooks below — they are `useState`/`useEffect` hooks,
+ * not React Query, so a persona edit (PE-FE's PATCH) calls it to make every
+ * mounted hook re-resolve.
+ *
  * `usePersonaTemplates()` exposes the org-library templates (NOT
  * exercise-scoped, story 01). Staff/data world — no UI, no COBRA.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
@@ -113,6 +120,14 @@ export function toParticipantPersona(persona: Persona): Persona {
     followerCount: persona.followerCount,
     joinedAt: persona.joinedAt,
     ...(persona.bio !== undefined ? { bio: persona.bio } : {}),
+    // Contract v2 profile decoration (demo-polish §1.5.6) — participant-safe
+    // (no archetype tell), forwarded only when present so an absent value stays
+    // genuinely absent and the avatar/banner fallbacks engage.
+    // `!= null`: a `null` on the wire (a backend member missing `WhenWritingNull`)
+    // is treated as absent and the key is dropped.
+    ...(persona.avatarUrl != null ? { avatarUrl: persona.avatarUrl } : {}),
+    ...(persona.bannerUrl != null ? { bannerUrl: persona.bannerUrl } : {}),
+    ...(persona.location != null ? { location: persona.location } : {}),
     // Optional follow-graph counts (profiles-social-graph/02+07) — forwarded
     // only when present, mirroring `bio`'s pattern, so an absent value stays
     // genuinely absent rather than becoming an `undefined` key.
@@ -196,7 +211,15 @@ function isValidPersona(value: unknown): value is Persona {
     // fixtures that omit them, but a present-and-wrong-typed value still
     // fails closed rather than silently misrendering a follow count.
     (p.followingCount === undefined || typeof p.followingCount === 'number') &&
-    (p.audienceMagnitude === undefined || typeof p.audienceMagnitude === 'number')
+    (p.audienceMagnitude === undefined || typeof p.audienceMagnitude === 'number') &&
+    // Contract v2 (`avatarUrl`/`bannerUrl`/`location`) are OPTIONAL strings —
+    // accepted when absent (every pre-v2 body and fixture) or `null` (treated as
+    // absent: one backend member missing `WhenWritingNull` must not fail-close the
+    // WHOLE persona set), but a present value of the wrong type fails closed
+    // rather than reaching an <img src>.
+    (p.avatarUrl == null || typeof p.avatarUrl === 'string') &&
+    (p.bannerUrl == null || typeof p.bannerUrl === 'string') &&
+    (p.location == null || typeof p.location === 'string')
   )
 }
 
@@ -278,11 +301,49 @@ export interface UseStaffPersonasResult {
   readonly error: unknown
 }
 
+// ---------------------------------------------------------------------------
+// Refetch signal (demo-polish F0 — `invalidatePersonas`)
+// ---------------------------------------------------------------------------
+
+/**
+ * `usePersonas` / `useStaffPersonas` are `useState`/`useEffect` hooks, NOT React
+ * Query, so a persona edit (PE-FE's PATCH) has no cache to invalidate. This
+ * module-level version is the explicit refetch signal instead: every mounted
+ * persona hook subscribes to it (`useSyncExternalStore`) and re-resolves when it
+ * is bumped.
+ */
+let personaVersion = 0
+const personaVersionListeners = new Set<() => void>()
+
+function subscribeToPersonaVersion(listener: () => void): () => void {
+  personaVersionListeners.add(listener)
+  return () => {
+    personaVersionListeners.delete(listener)
+  }
+}
+
+function getPersonaVersion(): number {
+  return personaVersion
+}
+
+/**
+ * Makes every mounted `usePersonas()` / `useStaffPersonas()` refetch. Call it
+ * after anything that changes a persona on the server (PE-FE calls it after a
+ * successful save). Safe to call with no hook mounted. A refetch keeps the
+ * previously loaded list on screen (no loading flash) and swaps it when the new
+ * read lands.
+ */
+export function invalidatePersonas(): void {
+  personaVersion += 1
+  for (const listener of [...personaVersionListeners]) listener()
+}
+
 /**
  * Shared body for the two persona hooks: a thin useState/useEffect wrapper
  * over the supplied resolver (ordinary cacheable data; a later refactor may
  * move both to React Query, the project default). `resolve` must be a stable
- * module-level function reference — both call sites pass one.
+ * module-level function reference — both call sites pass one. Re-resolves
+ * whenever {@link invalidatePersonas} is called.
  */
 function usePersonaResolution<T extends Persona>(resolve: () => Promise<T[]>): {
   readonly personas: readonly T[]
@@ -292,20 +353,28 @@ function usePersonaResolution<T extends Persona>(resolve: () => Promise<T[]>): {
   const [personas, setPersonas] = useState<readonly T[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(undefined)
+  const version = useSyncExternalStore(subscribeToPersonaVersion, getPersonaVersion)
+  const loadedOnceRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    // Only the FIRST load shows a loading state; an invalidation refetch keeps
+    // the previous list visible until the new one lands.
+    if (!loadedOnceRef.current) setLoading(true)
     resolve()
       .then(resolved => {
         if (cancelled) return
+        loadedOnceRef.current = true
         setPersonas(resolved)
         setError(undefined)
       })
       .catch((err: unknown) => {
         if (cancelled) return
-        // Fail closed: the list stays EMPTY (it is never populated before a
-        // successful resolve) and the error is surfaced to the caller.
+        // Fail closed on the FIRST load: the list is never populated before a
+        // successful resolve, so it stays EMPTY. After an `invalidatePersonas()`
+        // refetch the previously loaded list stays on screen instead (stale, but
+        // never cleared by a transient failure). Either way the error is surfaced
+        // to the caller.
         setError(err)
       })
       .finally(() => {
@@ -314,7 +383,7 @@ function usePersonaResolution<T extends Persona>(resolve: () => Promise<T[]>): {
     return () => {
       cancelled = true
     }
-  }, [resolve])
+  }, [resolve, version])
 
   return { personas, loading, error }
 }
@@ -333,8 +402,10 @@ export function usePersonas(): UsePersonasResult {
 /**
  * Resolves the exercise's persona instances in the STAFF projection. Staff
  * world only. On a tokenless/participant-shaped response the hook reports an
- * error with an EMPTY persona list (fail-closed + visible), instead of a list
- * whose `personaType` is silently `undefined`.
+ * error with an EMPTY persona list on its first load (fail-closed + visible),
+ * instead of a list whose `personaType` is silently `undefined`. (A failed
+ * `invalidatePersonas()` refetch keeps the previously loaded list and reports the
+ * error.)
  */
 export function useStaffPersonas(): UseStaffPersonasResult {
   return usePersonaResolution(resolveStaffPersonas)
