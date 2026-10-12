@@ -97,7 +97,12 @@ public sealed class InjectRichPostFunnelTests
         posts.Should().OnlyContain(p => p.Origin == "inject" && p.ActingHumanId == seeded.StaffUserId.ToString());
 
         // 4. The participant broadcasts carry media / inReplyTo and the summed counts — and no provenance.
-        var broadcasts = host.Broadcaster.Calls.Select(call => JsonSerializer.Serialize(call.Post)).ToList();
+        // This exercise's broadcasts only: the tick is cross-exercise by design, and the shared real-SQL database can hold
+        // other tests' firing bursts, whose posts this host's recording broadcaster would also see.
+        var broadcasts = host.Broadcaster.Calls
+            .Where(call => call.ExerciseId == seeded.ExerciseId)
+            .Select(call => JsonSerializer.Serialize(call.Post))
+            .ToList();
         broadcasts.Should().HaveCount(2);
         using (var first = JsonDocument.Parse(broadcasts[0]))
         {

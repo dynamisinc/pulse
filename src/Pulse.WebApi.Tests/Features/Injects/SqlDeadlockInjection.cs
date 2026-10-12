@@ -68,33 +68,41 @@ internal static class SqlExceptionFactory
 
 /// <summary>
 /// An EF Core command interceptor that plays SQL Server choosing a command as the deadlock victim: once armed, the next
-/// <c>n</c> commands whose text matches throw a real error-1205 <see cref="SqlException"/> before reaching the server,
-/// exactly where the database would have raised it (a query surfaces it raw; a <c>SaveChanges</c> wraps it in a
+/// <c>n</c> matching commands throw a real error-1205 <see cref="SqlException"/> before reaching the server, exactly
+/// where the database would have raised it (a query surfaces it raw; a <c>SaveChanges</c> wraps it in a
 /// <c>DbUpdateException</c>). <see cref="Thrown"/> proves the injection happened, so a pass is never vacuous.
 /// </summary>
+/// <remarks>
+/// Every predicate is pinned to ONE item id (a command parameter), never to command text alone. The runner's sweep is
+/// cross-exercise by design, and the real-SQL collection shares one database, so a tick also advances other tests'
+/// leftover firing items: an untargeted "next item read" was consumed by one of THOSE in CI run 38285619936 (reproduced
+/// locally 10/12), and the test's own item then published in the very tick that was meant to be the victim.
+/// </remarks>
 internal sealed class DeadlockInjector : DbCommandInterceptor
 {
-    private Func<string, bool> _matches = _ => false;
+    private Func<DbCommand, bool> _matches = _ => false;
     private int _remaining;
     private int _thrown;
-
-    /// <summary>
-    /// The single-item load (<c>SELECT TOP(1) … FROM [InjectItems]</c>) every action and runner step starts with — not
-    /// the runner's discovery sweep or a projection's id list, which read the table without <c>TOP(1)</c>.
-    /// </summary>
-    public static Func<string, bool> ItemRead { get; } =
-        sql => sql.TrimStart().StartsWith("SELECT TOP(1)", StringComparison.OrdinalIgnoreCase)
-            && sql.Contains("FROM [InjectItems]", StringComparison.Ordinal);
-
-    /// <summary>A save batch that writes the item aggregate (the claim, a transition, an edit, a record).</summary>
-    public static Func<string, bool> ItemSave { get; } =
-        sql => sql.Contains("UPDATE [InjectItem", StringComparison.Ordinal);
 
     /// <summary>How many 1205s were actually raised.</summary>
     public int Thrown => Volatile.Read(ref _thrown);
 
+    /// <summary>
+    /// The single-item load (<c>SELECT TOP(1) … FROM [InjectItems]</c>) of <paramref name="itemId"/>, which every action
+    /// and runner step starts with — not the runner's discovery sweep or a projection's id list (no <c>TOP(1)</c>), and
+    /// not any other item's load.
+    /// </summary>
+    public static Func<DbCommand, bool> ItemReadOf(Guid itemId) =>
+        command => command.CommandText.TrimStart().StartsWith("SELECT TOP(1)", StringComparison.OrdinalIgnoreCase)
+            && command.CommandText.Contains("FROM [InjectItems]", StringComparison.Ordinal)
+            && Names(command, itemId);
+
+    /// <summary>A save batch that writes <paramref name="itemId"/>'s aggregate (the claim, a transition, an edit, a record).</summary>
+    public static Func<DbCommand, bool> ItemSaveOf(Guid itemId) =>
+        command => command.CommandText.Contains("UPDATE [InjectItem", StringComparison.Ordinal) && Names(command, itemId);
+
     /// <summary>Makes the next <paramref name="times"/> matching commands deadlock victims.</summary>
-    public void Arm(Func<string, bool> matches, int times = 1)
+    public void Arm(Func<DbCommand, bool> matches, int times = 1)
     {
         _matches = matches;
         Volatile.Write(ref _remaining, times);
@@ -124,7 +132,7 @@ internal sealed class DeadlockInjector : DbCommandInterceptor
 
     private void ThrowIfChosen(DbCommand command)
     {
-        if (!_matches(command.CommandText))
+        if (!_matches(command))
         {
             return;
         }
@@ -144,4 +152,7 @@ internal sealed class DeadlockInjector : DbCommandInterceptor
             }
         }
     }
+
+    private static bool Names(DbCommand command, Guid itemId) =>
+        command.Parameters.Cast<DbParameter>().Any(parameter => parameter.Value is Guid value && value == itemId);
 }

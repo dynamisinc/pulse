@@ -37,7 +37,7 @@ public sealed class InjectLockConflictEndpointTests
         var seeded = await ActAsControllerAsync(host);
         var item = await host.CreateOkAsync(InjectTestHost.PostItem(seeded.PersonaIds[0]));
 
-        deadlocks.Arm(DeadlockInjector.ItemRead);
+        deadlocks.Arm(DeadlockInjector.ItemReadOf(item.Guid));
         var fire = await host.ActionAsync(item.Guid, "fire");
 
         deadlocks.Thrown.Should().Be(1, "the item load really was chosen as the deadlock victim");
@@ -60,7 +60,7 @@ public sealed class InjectLockConflictEndpointTests
         var seeded = await ActAsControllerAsync(host);
         var item = await host.CreateOkAsync(InjectTestHost.PostItem(seeded.PersonaIds[0]));
 
-        deadlocks.Arm(DeadlockInjector.ItemSave);
+        deadlocks.Arm(DeadlockInjector.ItemSaveOf(item.Guid));
         var fire = await host.ActionAsync(item.Guid, "fire");
 
         deadlocks.Thrown.Should().Be(1);
@@ -80,7 +80,7 @@ public sealed class InjectLockConflictEndpointTests
         var seeded = await ActAsControllerAsync(host);
         var item = await host.CreateOkAsync(InjectTestHost.PostItem(seeded.PersonaIds[0]));
 
-        deadlocks.Arm(DeadlockInjector.ItemRead);
+        deadlocks.Arm(DeadlockInjector.ItemReadOf(item.Guid));
         var held = await host.ActionOkAsync(item.Guid, "hold");
 
         deadlocks.Thrown.Should().Be(1);
@@ -97,7 +97,7 @@ public sealed class InjectLockConflictEndpointTests
         var seeded = await ActAsControllerAsync(host);
         var item = await host.CreateOkAsync(InjectTestHost.PostItem(seeded.PersonaIds[0]));
 
-        deadlocks.Arm(DeadlockInjector.ItemRead, times: 10);
+        deadlocks.Arm(DeadlockInjector.ItemReadOf(item.Guid), times: 10);
         var hold = await host.ActionAsync(item.Guid, "hold");
         deadlocks.Disarm();
 
@@ -116,7 +116,7 @@ public sealed class InjectLockConflictEndpointTests
         var seeded = await ActAsControllerAsync(host);
         var item = await host.CreateOkAsync(InjectTestHost.PostItem(seeded.PersonaIds[0]));
 
-        deadlocks.Arm(DeadlockInjector.ItemSave);
+        deadlocks.Arm(DeadlockInjector.ItemSaveOf(item.Guid));
         var edit = await host.PutAsync(item.Id, new
         {
             kind = "post",
@@ -138,13 +138,24 @@ public sealed class InjectLockConflictEndpointTests
     {
         var deadlocks = new DeadlockInjector();
         await using var host = await StartAsync(deadlocks);
+
+        // Other exercises' firing bursts — what earlier tests leave in the shared database (CI run 38285619936). The
+        // sweep orders by exercise id, so these almost always come before this test's item in the tick; an injection
+        // not pinned to this item would be spent on one of them.
+        for (var other = 0; other < 3; other++)
+        {
+            var neighbour = await ActAsControllerAsync(host);
+            var leftover = await host.CreateOkAsync(InjectTestHost.BurstItem(neighbour.PersonaIds, count: 3, window: 600));
+            await host.ActionOkAsync(leftover.Guid, "fire");
+        }
+
         var seeded = await ActAsControllerAsync(host);
         var item = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 2)); // offsets 0, 3
         await host.ActionOkAsync(item.Guid, "fire"); // post 1 inline
         host.Time.Advance(TimeSpan.FromSeconds(10)); // post 2 is due
 
         // The step itself treats the victim as a skipped tick — it does not throw for the runner to log as an item fault.
-        deadlocks.Arm(DeadlockInjector.ItemRead);
+        deadlocks.Arm(DeadlockInjector.ItemReadOf(item.Guid));
         await using (var scope = host.Services.CreateAsyncScope())
         {
             var queue = scope.ServiceProvider.GetRequiredService<InjectQueueService>();
@@ -155,8 +166,9 @@ public sealed class InjectLockConflictEndpointTests
         deadlocks.Thrown.Should().Be(1, "the step's item load really was the victim");
         (await CountPostsAsync(host, seeded.ExerciseId)).Should().Be(1, "the victim step published nothing");
 
-        // And through the runner's own tick: a victim tick publishes nothing, the next one publishes the due post.
-        deadlocks.Arm(DeadlockInjector.ItemRead);
+        // And through the runner's own tick: a victim tick publishes nothing, the next one publishes the due post. The arm
+        // is pinned to THIS item — the tick also advances other tests' leftover firing items in the shared database.
+        deadlocks.Arm(DeadlockInjector.ItemReadOf(item.Guid));
         var tick = () => host.Runner.RunTickAsync();
         await tick.Should().NotThrowAsync();
         deadlocks.Thrown.Should().Be(2);
