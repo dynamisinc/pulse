@@ -1,9 +1,15 @@
 # Story: Run sheet
 
-**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Dropped (replaced by inject-queue 06 + 07)
 **Requirements:** CTL-010 (lite), CTL-011 (lite), CTL-013 (lite), CTL-001, COR-018, NFR-001  ·  **Design decisions:** none (file schema `pulse.runsheet.v1`, implementation.md §1.9)  ·  **Issue:** #438
 **Story ID:** C3  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** 3
 **Home stories:** [`inject-queue/02`](../inject-queue/02-fire-hold-skip-edit.md), [`/03`](../inject-queue/03-standalone-scheduler.md) (lite — manual fire only; no scheduler).
+
+> **Replaced 2026-10-08 (Tom).** Tom moved scripted posts **server-side**: several controllers each own their slice
+> of the script, so a list saved in one browser is not the product. This story is replaced by
+> [`inject-queue/06`](../inject-queue/06-scripted-posts-server-queue.md) (backend) and
+> [`inject-queue/07`](../inject-queue/07-scripted-posts-console.md) (console). 07 keeps the `RunSheetPanel` seam,
+> so the `runSheetSlot` mount is unchanged. The text below is kept for history. **Do not build it.**
 
 ## Context
 **As** a controller (and the presenter), **I want** a list of staged posts I can fire with one key press, **so
