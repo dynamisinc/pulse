@@ -185,3 +185,6 @@ the existing funnel and projection.
   fire's claim, a hold, an edit and a runner step → the 409 with the current item, one re-apply, or a skipped tick —
   never a 500); `InjectBurstRunnerLoopTests` (no database work while the host starts; failing sweeps back off; a
   repeated failure is logged once).
+- **Rate limit (NFR-009, Copilot High on #458):** `InjectFireRateLimitTests` (one staff user past the 30-token bucket
+  gets a 429 ProblemDetails with `Retry-After`; retry and release share the bucket; another staff user is unaffected;
+  GET and hold are never limited) and `InjectsCompositionRootWiringTests.ProgramCs_RateLimitsExactlyFireRetryAndRelease_WithTheInjectFirePolicy`.

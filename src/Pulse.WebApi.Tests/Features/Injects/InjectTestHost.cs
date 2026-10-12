@@ -21,6 +21,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
+using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Injects;
 using Pulse.WebApi.Features.Media;
@@ -167,6 +168,27 @@ internal sealed class InjectTestHost : IAsyncDisposable
         configureServices?.Invoke(builder.Services);
 
         var app = builder.Build();
+
+        // As Program.cs orders it: the session middleware builds the principal (here: the acting staff user's live
+        // staff session, which the rate limiter partitions on), then UseRateLimiter() enforces the per-route policies.
+        app.Use(async (context, next) =>
+        {
+            if (caller.StaffUserId is { } staffUserId)
+            {
+                context.User = SessionPrincipal.Create(new AuthenticatedSession
+                {
+                    SessionId = Guid.NewGuid(),
+                    ExerciseId = caller.ExerciseId ?? Guid.Empty,
+                    Kind = "staff",
+                    StaffUserId = staffUserId,
+                    PrincipalId = staffUserId.ToString(),
+                    ActingHumanId = staffUserId.ToString(),
+                });
+            }
+
+            await next(context);
+        });
+        app.UseRateLimiter();
         app.MapInjects();
         await app.StartAsync();
 

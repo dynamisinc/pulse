@@ -30,6 +30,12 @@ using Pulse.WebApi.Features.EngineRuntime;
 /// the row without a second call — ASP.NET serializes extensions at the TOP level, so it is <c>body.item</c>. A
 /// cross-exercise id is a <c>404</c> identical to an unknown one (COR-001).
 /// </para>
+/// <para>
+/// <b>Rate-limited where it publishes (NFR-009).</b> <c>fire</c>, <c>retry</c> and <c>release</c> require the
+/// <see cref="InjectFireRateLimiterPolicy"/> (per staff user; generous enough that a presenter never meets it — a
+/// <c>429</c> is ProblemDetails with a readable <c>detail</c>). Reads, authoring, hold, skip and unskip publish nothing
+/// and are not limited; runner-paced burst posts are not requests at all.
+/// </para>
 /// </remarks>
 public static class InjectEndpoints
 {
@@ -56,6 +62,11 @@ public static class InjectEndpoints
         services.TryAddScoped<IInjectPostPublisher, FunnelInjectPostPublisher>();
         services.TryAddScoped<InjectQueueService>();
         services.AddHostedService<InjectBurstRunner>();
+
+        // NFR-009 — per staff user. AddRateLimiter is additive across slices; enforcement is the already-wired
+        // app.UseRateLimiter() in Program.cs, which runs after the session middleware has built the principal.
+        services.AddRateLimiter(options =>
+            options.AddPolicy<string, InjectFireRateLimiterPolicy>(InjectFireRateLimiterPolicy.PolicyName));
 
         return services;
     }
@@ -85,12 +96,15 @@ public static class InjectEndpoints
         controllerOnly.MapPut("/api/injects/{id:guid}", UpdateAsync);
         controllerOnly.MapDelete("/api/injects/{id:guid}", DeleteAsync);
         controllerOnly.MapPost("/api/injects/reorder", ReorderAsync);
-        controllerOnly.MapPost("/api/injects/{id:guid}/fire", FireAsync);
+        controllerOnly.MapPost("/api/injects/{id:guid}/fire", FireAsync)
+            .RequireRateLimiting(InjectFireRateLimiterPolicy.PolicyName);
         controllerOnly.MapPost("/api/injects/{id:guid}/hold", HoldAsync);
-        controllerOnly.MapPost("/api/injects/{id:guid}/release", ReleaseAsync);
+        controllerOnly.MapPost("/api/injects/{id:guid}/release", ReleaseAsync)
+            .RequireRateLimiting(InjectFireRateLimiterPolicy.PolicyName); // a release can restart a held burst
         controllerOnly.MapPost("/api/injects/{id:guid}/skip", SkipAsync);
         controllerOnly.MapPost("/api/injects/{id:guid}/unskip", UnskipAsync);
-        controllerOnly.MapPost("/api/injects/{id:guid}/retry", RetryAsync);
+        controllerOnly.MapPost("/api/injects/{id:guid}/retry", RetryAsync)
+            .RequireRateLimiting(InjectFireRateLimiterPolicy.PolicyName);
 
         return endpoints;
     }

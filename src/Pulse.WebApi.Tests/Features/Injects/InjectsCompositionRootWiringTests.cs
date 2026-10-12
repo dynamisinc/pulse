@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -59,6 +60,31 @@ public sealed class InjectsCompositionRootWiringTests
         }
     }
 
+    [Theory]
+    [MemberData(nameof(Routes))]
+    public void ProgramCs_RateLimitsExactlyFireRetryAndRelease_WithTheInjectFirePolicy(string method, string pattern)
+    {
+        using var factory = new ProbeFactory();
+        var dataSource = factory.Services.GetRequiredService<EndpointDataSource>();
+        var endpoint = FindRoute(dataSource, method, pattern);
+
+        var publishes = pattern.EndsWith("/fire", StringComparison.Ordinal)
+            || pattern.EndsWith("/retry", StringComparison.Ordinal)
+            || pattern.EndsWith("/release", StringComparison.Ordinal);
+        var policy = endpoint.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName;
+
+        if (publishes)
+        {
+            policy.Should().Be(
+                InjectFireRateLimiterPolicy.PolicyName,
+                "{0} {1} publishes (or restarts a burst) and must carry the per-staff-user limit (NFR-009)", method, pattern);
+        }
+        else
+        {
+            policy.Should().BeNull("{0} {1} publishes nothing and must never be rate-limited", method, pattern);
+        }
+    }
+
     [Fact]
     public void ProgramCs_RegistersTheBurstRunner_AsAHostedService()
     {
@@ -93,6 +119,13 @@ public sealed class InjectsCompositionRootWiringTests
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "{0} {1}: participants and anonymous callers are refused", method, pattern);
         response.Headers.WwwAuthenticate.Should().NotBeEmpty("the default-deny gate answers first, before any handler or database work");
     }
+
+    private static RouteEndpoint FindRoute(EndpointDataSource dataSource, string method, string rawText) =>
+        dataSource.Endpoints
+            .OfType<RouteEndpoint>()
+            .Single(endpoint =>
+                string.Equals(endpoint.RoutePattern.RawText, rawText, StringComparison.OrdinalIgnoreCase)
+                && (endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains(method) ?? false));
 
     private static int CountRoutes(EndpointDataSource dataSource, string method, string rawText) =>
         dataSource.Endpoints
