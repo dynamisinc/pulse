@@ -51,21 +51,23 @@ function isMediaList(value: unknown): boolean {
 }
 
 /**
- * `replyTo`: absent, or an object naming its target by `sequence` (whole, >= 1), `injectPostId` or
- * `postId`; at least one, and every one present must have the right type. The editor reads it with
- * `in` checks (`draftFromItem`), which throw on a string or `null`.
+ * `replyTo`: absent, or an object naming its target by EXACTLY ONE of `sequence` (whole, >= 1),
+ * `injectPostId` or `postId` (the server writes exactly one: "exactly one member is present on the
+ * wire"). Two keys — even two correctly typed ones — are malformed: the editor reads the object
+ * with `in` checks in a fixed order (`draftFromItem`), so accepting two would silently pick one by
+ * PRECEDENCE and show the controller a target the server did not mean. A string, `null` or array
+ * (which throw at those `in` checks) and a key of the wrong type are malformed too.
  */
 function isReplyTo(value: unknown): boolean {
   if (isAbsent(value)) return true
   if (!isRecord(value) || Array.isArray(value)) return false
   const named = ['sequence', 'injectPostId', 'postId'].filter(key => key in value)
-  if (named.length === 0) return false
-  return (
-    (!('sequence' in value) ||
-      (typeof value.sequence === 'number' && Number.isInteger(value.sequence) && value.sequence >= 1)) &&
-    (!('injectPostId' in value) || typeof value.injectPostId === 'string') &&
-    (!('postId' in value) || typeof value.postId === 'string')
-  )
+  if (named.length !== 1) return false
+  if ('sequence' in value) {
+    return typeof value.sequence === 'number' && Number.isInteger(value.sequence) && value.sequence >= 1
+  }
+  if ('injectPostId' in value) return typeof value.injectPostId === 'string'
+  return typeof value.postId === 'string'
 }
 
 /** `engagementBaseline`: absent, or an object whose like / repost / reply are numbers. */

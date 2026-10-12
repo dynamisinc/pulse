@@ -31,10 +31,12 @@
 
 import type { Ref } from 'react'
 import { Box } from '@mui/material'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faArrowDown,
   faArrowUp,
   faBolt,
+  faCircleInfo,
   faEye,
   faForwardStep,
   faPause,
@@ -43,6 +45,7 @@ import {
   faRotateRight,
   faTrash,
   faRotateLeft,
+  faXmark,
 } from '@fortawesome/free-solid-svg-icons'
 import type { Persona } from '@/features/personas'
 import { formatScenarioTime } from '@/core/clock'
@@ -87,6 +90,9 @@ export interface RunSheetRowProps {
   readonly canMoveUp: boolean
   readonly canMoveDown: boolean
   readonly confirmingDelete: boolean
+  /** Calm guidance for THIS row (e.g. a rate-limited fire): shown inline, never as a failure. */
+  readonly rowNote?: string
+  readonly onDismissRowNote?: () => void
 
   readonly onSelect: () => void
   readonly onFire: () => void
@@ -129,6 +135,8 @@ export function RunSheetRow({
   canMoveUp,
   canMoveDown,
   confirmingDelete,
+  rowNote,
+  onDismissRowNote,
   onSelect,
   onFire,
   onHold,
@@ -246,6 +254,36 @@ export function RunSheetRow({
       {reason ? (
         <Box data-testid="row-error" sx={{ fontSize: 12, color: chrome.ink }}>
           <strong>Failed:</strong> {reason}
+        </Box>
+      ) : null}
+
+      {rowNote ? (
+        <Box
+          role="status"
+          data-testid="row-note"
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            fontSize: 12,
+            color: chrome.ink,
+            border: `1px solid ${chrome.line}`,
+            borderRadius: '6px',
+            px: 1,
+            py: 0.5,
+          }}
+        >
+          <FontAwesomeIcon icon={faCircleInfo} color={chrome.blue} aria-hidden="true" />
+          <Box component="span" sx={{ flex: 1, minWidth: 0 }}>{rowNote}</Box>
+          {onDismissRowNote ? (
+            <RunSheetButton
+              icon={faXmark}
+              label="Dismiss"
+              ariaLabel={`Dismiss message for ${item.title}`}
+              testId="row-note-dismiss"
+              onClick={onDismissRowNote}
+            />
+          ) : null}
         </Box>
       ) : null}
 

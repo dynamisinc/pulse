@@ -325,7 +325,10 @@ export function validateWrite(
     })
 
     const reply = post.replyTo
-    if (reply) {
+    if (reply && ['sequence', 'injectPostId', 'postId'].filter(key => key in reply).length !== 1) {
+      // Typed writes cannot do this; a hand-built / cast body can, and the server answers 400.
+      errors[`${at}.replyTo`] = 'replyTo must name exactly one of injectPostId, postId or sequence'
+    } else if (reply) {
       if ('sequence' in reply) {
         // An EARLIER sibling of this item, 1-based: strictly before this post's own position.
         const own = i + 1

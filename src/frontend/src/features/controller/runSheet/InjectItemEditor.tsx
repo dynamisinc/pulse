@@ -84,6 +84,8 @@ export interface InjectItemEditorProps {
   /** The whole sheet, for the reply-to options. */
   readonly items: readonly InjectItemDto[]
   readonly assignees: InjectAssigneesDto['assignees']
+  /** The staff roster failed to load: the assignee select cannot offer anyone, and says so. */
+  readonly assigneesUnavailable?: boolean
   /** The caller's staff id: the default assignee of a new item. */
   readonly me?: string
   readonly personas: readonly StaffPersona[]
@@ -122,6 +124,7 @@ export function InjectItemEditor({
   liveItem,
   items,
   assignees,
+  assigneesUnavailable = false,
   me,
   personas,
   personasUnavailable,
@@ -400,6 +403,13 @@ export function InjectItemEditor({
           onChange={value => patch({ assigneeId: value })}
           disabled={readOnly}
           error={errors.assigneeId}
+          hint={
+            assigneesUnavailable ? (
+              <span data-testid="assignee-roster-unavailable">
+                Staff roster unavailable: only the current assignee can be kept
+              </span>
+            ) : undefined
+          }
         >
           <option value="">Unassigned</option>
           {assignees.map(assignee => (
@@ -408,7 +418,7 @@ export function InjectItemEditor({
             </option>
           ))}
           {draft.assigneeId !== '' && !assignees.some(a => a.id === draft.assigneeId) ? (
-            <option value={draft.assigneeId}>{draft.assigneeId}</option>
+            <option value={draft.assigneeId}>{item?.assigneeName ?? draft.assigneeId}</option>
           ) : null}
         </RunSheetField>
       </Box>

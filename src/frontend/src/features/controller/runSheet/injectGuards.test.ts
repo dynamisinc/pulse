@@ -56,6 +56,13 @@ describe('isInjectPostDto', () => {
     ['a replyTo.injectPostId that is a number', { replyTo: { injectPostId: 5 } }],
     ['a replyTo.postId that is null', { replyTo: { postId: null } }],
     ['a replyTo with one good and one bad key', { replyTo: { sequence: 1, postId: 5 } }],
+    // EXACTLY ONE target key: two correctly typed keys are malformed (never picked by precedence).
+    ['a replyTo with sequence AND postId', { replyTo: { sequence: 1, postId: 'post-1' } }],
+    ['a replyTo with sequence AND injectPostId', { replyTo: { sequence: 1, injectPostId: 'injp-1' } }],
+    ['a replyTo with injectPostId AND postId', { replyTo: { injectPostId: 'injp-1', postId: 'post-1' } }],
+    ['a replyTo with all three keys', { replyTo: { sequence: 1, injectPostId: 'i', postId: 'p' } }],
+    ['a replyTo with a good key plus a null one', { replyTo: { sequence: 1, postId: null } }],
+    ['a replyTo with a good key plus an undefined-valued one', { replyTo: { postId: 'p', sequence: undefined } }],
     ['a baseline that is a string', { engagementBaseline: 'lots' }],
     ['a baseline with a non-numeric like', { engagementBaseline: { like: 'many' } }],
   ])('rejects a child with %s', (_name, overrides) => {

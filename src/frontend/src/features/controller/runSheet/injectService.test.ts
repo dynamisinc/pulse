@@ -17,7 +17,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError, type InternalAxiosRequestConfig } from 'axios'
-import { InjectConflictError, InjectNotFoundError, InjectValidationError } from './injectErrors'
+import {
+  InjectConflictError,
+  InjectNotFoundError,
+  InjectRateLimitedError,
+  InjectValidationError,
+} from './injectErrors'
 import { makeItem, makePost } from './runSheetTestHarness'
 import type { InjectItemWrite } from './types'
 
@@ -54,11 +59,15 @@ const write: InjectItemWrite = {
   posts: [{ personaId: 'persona-a', text: 'Hello' }],
 }
 
-function axiosError(status: number, data: unknown): AxiosError {
+function axiosError(
+  status: number,
+  data: unknown,
+  headers: Record<string, string> = {},
+): AxiosError {
   return new AxiosError('Request failed', 'ERR_BAD_REQUEST', undefined, undefined, {
     status,
     statusText: '',
-    headers: {},
+    headers,
     config: {} as InternalAxiosRequestConfig,
     data,
   })
@@ -213,6 +222,24 @@ describe('live service — errors', () => {
     expect(error.fieldErrors.title).toBe('Title is required')
   })
 
+  it.each(['fire', 'retry', 'release'] as const)(
+    'a 429 on %s becomes a typed rate-limit error with the detail and Retry-After seconds',
+    async action => {
+      postMock.mockRejectedValue(axiosError(429, { detail: 'Too many fires.' }, { 'retry-after': '6' }))
+      const error = (await service[action]('inj-1').catch((e: unknown) => e)) as InjectRateLimitedError
+      expect(error).toBeInstanceOf(InjectRateLimitedError)
+      expect(error.detail).toBe('Too many fires.')
+      expect(error.retryAfterSeconds).toBe(6)
+    },
+  )
+
+  it('a 429 with no body or header is still the typed error', async () => {
+    postMock.mockRejectedValue(axiosError(429, undefined))
+    const error = (await service.fire('inj-1').catch((e: unknown) => e)) as InjectRateLimitedError
+    expect(error).toBeInstanceOf(InjectRateLimitedError)
+    expect(error.retryAfterSeconds).toBeUndefined()
+  })
+
   it('a 404 becomes a typed not-found', async () => {
     postMock.mockRejectedValue(axiosError(404, {}))
     await expect(service.hold('nope')).rejects.toBeInstanceOf(InjectNotFoundError)
@@ -243,6 +270,7 @@ describe('live service — errors', () => {
     ['replyTo: a string', { replyTo: 'post-1' }],
     ['replyTo: {}', { replyTo: {} }],
     ['replyTo: an unknown key', { replyTo: { parent: 'p' } }],
+    ['replyTo: two keys (sequence + postId)', { replyTo: { sequence: 1, postId: 'post-1' } }],
   ])('a child with %s is dropped by the live read (with the warning), never rendered', async (_n, bad) => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const malformed = makeItem({ id: 'inj-nested', posts: [{ ...makePost(), ...bad } as never] })

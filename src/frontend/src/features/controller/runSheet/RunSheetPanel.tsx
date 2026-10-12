@@ -75,7 +75,12 @@ import { RunSheetButton } from './RunSheetButtons'
 import { RunSheetRow } from './RunSheetRow'
 import { InjectItemEditor, type EditorMode, type EditorSubmitResult } from './InjectItemEditor'
 import { KeyboardHelp } from './KeyboardHelp'
-import { InjectConflictError, InjectNotFoundError, InjectValidationError } from './injectErrors'
+import {
+  InjectConflictError,
+  InjectNotFoundError,
+  InjectRateLimitedError,
+  InjectValidationError,
+} from './injectErrors'
 import { describeActionError, MESSAGES, type InjectAction } from './injectMessages'
 import {
   canDelete,
@@ -130,9 +135,16 @@ function isTypingTarget(target: EventTarget | null): boolean {
 
 const byOrder = (a: InjectItemDto, b: InjectItemDto): number => a.order - b.order
 
+function omitKey(record: Readonly<Record<string, string>>, key: string): Record<string, string> {
+  const { [key]: _omitted, ...rest } = record
+  return rest
+}
+
 interface SegmentOption<T extends string> {
   readonly value: T
   readonly label: string
+  /** Why this option is unavailable now (shown disabled, the reason as its tooltip). */
+  readonly unavailableReason?: string
 }
 
 interface SegmentedProps<T extends string> {
@@ -152,6 +164,8 @@ function Segmented<T extends string>({ label, value, options, onChange }: Segmen
           label={option.label}
           ariaLabel={`${label}: ${option.label}`}
           pressed={option.value === value}
+          disabled={option.unavailableReason !== undefined}
+          title={option.unavailableReason}
           testId={`filter-${option.value}`}
           onClick={() => onChange(option.value)}
         />
@@ -196,9 +210,24 @@ function Banner({
 function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
   const { timeZone } = useExerciseContext()
   const queue = useInjectQueue()
-  const { me, assignees, nameOf } = useInjectAssignees()
+  const {
+    me,
+    assignees,
+    nameOf,
+    isLoading: identityLoading,
+    isError: rosterError,
+    refetch: refetchRoster,
+  } = useInjectAssignees()
   const { personas, error: personasError } = useStaffPersonas()
   const [filters, updateFilters] = useRunSheetFilters(exerciseId)
+  // WHO AM I is unknown until the roster read lands. If it FAILED, "Mine" cannot be evaluated: a
+  // remembered "Mine" would filter out every row and the sheet would claim nothing matches. So
+  // while the roster is unavailable the view falls back to ALL (with a visible note and "Mine"
+  // shown unavailable); the remembered choice is untouched and applies again once it loads.
+  const rosterUnavailable = rosterError && me === undefined
+  const scope: RunSheetFilters['scope'] = rosterUnavailable ? 'all' : filters.scope
+  // Still loading and the choice is "Mine": say so, not the "nothing matches" of an empty list.
+  const identityPending = scope === 'mine' && me === undefined && identityLoading
 
   const reasonId = useId()
   const helpId = useId()
@@ -206,6 +235,8 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // Calm per-row guidance (a rate-limited fire / retry / release), by item id.
+  const [rowNotes, setRowNotes] = useState<Readonly<Record<string, string>>>({})
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
   const editorKey = useRef(0)
@@ -222,7 +253,11 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
   const personaOf = useCallback((id: string) => personasById.get(id), [personasById])
   const staffName = useCallback((id: string | undefined) => nameOf(id), [nameOf])
 
-  const visible = useMemo(() => filterItems(items, filters, me), [items, filters, me])
+  const statusFilter = filters.status
+  const visible = useMemo(
+    () => filterItems(items, { scope, status: statusFilter }, me),
+    [items, scope, statusFilter, me],
+  )
   const nextPending = firstPending(visible)
   const selected = visible.find(item => item.id === selectedId)
 
@@ -264,10 +299,26 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
 
   // ----- actions -----------------------------------------------------------
 
+  /**
+   * Turns an action's outcome into the right message. A RATE-LIMITED reply (429 on fire / retry /
+   * release) is calm, per-row guidance — "Too many fires in a few seconds. Try again in a moment."
+   * — shown on THAT row; nothing is marked failed and the row's lock is already released. Every
+   * other failure stays a panel notice.
+   */
   const report = useCallback(
-    (action: InjectAction, outcome: ActionOutcome<unknown>): void => {
-      if (outcome.status === 'error') setNotice(describeActionError(action, outcome.error, staffName))
-      else if (outcome.status === 'ok') setNotice(null)
+    (action: InjectAction, outcome: ActionOutcome<unknown>, itemId?: string): void => {
+      if (outcome.status === 'ok') {
+        setNotice(null)
+        if (itemId) setRowNotes(notes => omitKey(notes, itemId))
+        return
+      }
+      if (outcome.status !== 'error') return
+      if (outcome.error instanceof InjectRateLimitedError && itemId) {
+        const note = describeActionError(action, outcome.error, staffName)
+        setRowNotes(notes => ({ ...notes, [itemId]: note }))
+        return
+      }
+      setNotice(describeActionError(action, outcome.error, staffName))
     },
     [staffName],
   )
@@ -282,7 +333,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
       setNotice(`Fire is unavailable: ${MESSAGES.worldFrozen}`)
       return
     }
-    void queue.fire(item.id).then(outcome => report('fire', outcome))
+    void queue.fire(item.id).then(outcome => report('fire', outcome, item.id))
   }
 
   const fireNext = (): void => {
@@ -295,7 +346,8 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
       return
     }
     setSelectedId(nextPending.id)
-    void queue.fire(nextPending.id).then(outcome => report('fire', outcome))
+    const target = nextPending.id
+    void queue.fire(target).then(outcome => report('fire', outcome, target))
   }
 
   const retryItem = (item: InjectItemDto): void => {
@@ -304,17 +356,23 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
       setNotice(`Retry is unavailable: ${MESSAGES.worldFrozen}`)
       return
     }
-    void queue.retry(item.id).then(outcome => report('retry', outcome))
+    void queue.retry(item.id).then(outcome => report('retry', outcome, item.id))
   }
 
   const toggleHold = (item: InjectItemDto): void => {
-    if (canRelease(item.status)) void queue.release(item.id).then(outcome => report('release', outcome))
-    else if (canHold(item.status)) void queue.hold(item.id).then(outcome => report('hold', outcome))
+    if (canRelease(item.status)) {
+      void queue.release(item.id).then(outcome => report('release', outcome, item.id))
+    } else if (canHold(item.status)) {
+      void queue.hold(item.id).then(outcome => report('hold', outcome, item.id))
+    }
   }
 
   const toggleSkip = (item: InjectItemDto): void => {
-    if (canUnskip(item.status)) void queue.unskip(item.id).then(outcome => report('unskip', outcome))
-    else if (canSkip(item.status)) void queue.skip(item.id).then(outcome => report('skip', outcome))
+    if (canUnskip(item.status)) {
+      void queue.unskip(item.id).then(outcome => report('unskip', outcome, item.id))
+    } else if (canSkip(item.status)) {
+      void queue.skip(item.id).then(outcome => report('skip', outcome, item.id))
+    }
   }
 
   const openEditor = (item: InjectItemDto): void => {
@@ -512,9 +570,15 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
         <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>
           <Segmented<RunSheetFilters['scope']>
             label="Assigned to"
-            value={filters.scope}
+            value={scope}
             options={[
-              { value: 'mine', label: 'Mine' },
+              {
+                value: 'mine',
+                label: 'Mine',
+                unavailableReason: rosterUnavailable
+                  ? "Unavailable: the staff roster didn't load"
+                  : undefined,
+              },
               { value: 'all', label: 'All' },
             ]}
             onChange={scope => setFilters({ scope })}
@@ -588,6 +652,22 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
             {`${queue.droppedItemIds.length} item${queue.droppedItemIds.length === 1 ? '' : 's'} couldn't be displayed (malformed data)`}
           </Banner>
         ) : null}
+        {rosterUnavailable ? (
+          <Banner icon={faTriangleExclamation} testId="banner-roster-failed" live>
+            <span>
+              {filters.scope === 'mine'
+                ? 'Couldn\'t load the staff roster, so "Mine" is unavailable: showing all items.'
+                : "Couldn't load the staff roster: \"Mine\" and the assignee list are unavailable."}
+            </span>{' '}
+            <RunSheetButton
+              icon={faRotateRight}
+              label="Try now"
+              ariaLabel="Try loading the staff roster now"
+              testId="reload-roster"
+              onClick={() => void refetchRoster()}
+            />
+          </Banner>
+        ) : null}
         {queue.connectionLost ? (
           <Banner icon={faTriangleExclamation} testId="banner-connection" live>
             {MESSAGES.connectionLost}
@@ -644,6 +724,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
             liveItem={liveEditing}
             items={items}
             assignees={assignees}
+            assigneesUnavailable={rosterUnavailable}
             me={me}
             personas={personas}
             personasUnavailable={personasError !== undefined}
@@ -658,6 +739,10 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
         ) : total === 0 && !queue.isError && queue.droppedItemIds.length === 0 ? (
           <Box data-testid="run-sheet-empty" sx={{ p: 2, fontSize: 12.5, color: chrome.inkMuted }}>
             The run sheet is empty. Add a scripted post to get started.
+          </Box>
+        ) : identityPending ? (
+          <Box data-testid="run-sheet-identity-loading" sx={{ p: 2, fontSize: 12.5, color: chrome.inkMuted }}>
+            Loading your assignments…
           </Box>
         ) : filteredOut ? (
           <Box data-testid="run-sheet-filtered-empty" sx={{ p: 2, fontSize: 12.5, color: chrome.inkMuted }}>
@@ -693,6 +778,8 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
                 canMoveUp={index > 0}
                 canMoveDown={index < visible.length - 1}
                 confirmingDelete={confirmDeleteId === item.id}
+                rowNote={rowNotes[item.id]}
+                onDismissRowNote={() => setRowNotes(notes => omitKey(notes, item.id))}
                 onSelect={() => setSelectedId(item.id)}
                 onFire={() => fireItem(item)}
                 onHold={() => toggleHold(item)}

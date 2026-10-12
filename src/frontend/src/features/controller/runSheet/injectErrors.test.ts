@@ -11,22 +11,28 @@
  *  - "Already fired by {name}" / "Changed by someone else. Reloaded." / "World frozen".
  */
 import { describe, expect, it } from 'vitest'
-import { AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
 import {
   InjectConflictError,
   InjectNotFoundError,
+  InjectRateLimitedError,
   InjectValidationError,
   normalizeFieldPath,
+  parseRetryAfterSeconds,
   translateInjectError,
 } from './injectErrors'
 import { MESSAGES, alreadyFiredBy, describeActionError } from './injectMessages'
 import { makeItem } from './runSheetTestHarness'
 
-function axiosError(status: number, data: unknown): AxiosError {
+function axiosError(
+  status: number,
+  data: unknown,
+  headers: Record<string, string> = {},
+): AxiosError {
   return new AxiosError('Request failed', 'ERR_BAD_REQUEST', undefined, undefined, {
     status,
     statusText: '',
-    headers: {},
+    headers,
     config: {} as InternalAxiosRequestConfig,
     data,
   })
@@ -101,6 +107,73 @@ describe('translateInjectError', () => {
   it('is idempotent on typed errors', () => {
     const conflict = new InjectConflictError('x')
     expect(translateInjectError(conflict)).toBe(conflict)
+  })
+})
+
+describe('429 -> InjectRateLimitedError', () => {
+  it('carries the server detail and the Retry-After seconds when sent', () => {
+    const error = translateInjectError(
+      axiosError(429, { detail: 'Slow down.' }, { 'retry-after': '7' }),
+    ) as InjectRateLimitedError
+    expect(error).toBeInstanceOf(InjectRateLimitedError)
+    expect(error.status).toBe(429)
+    expect(error.detail).toBe('Slow down.')
+    expect(error.retryAfterSeconds).toBe(7)
+  })
+
+  it('works with no body and no header (both absent)', () => {
+    const error = translateInjectError(axiosError(429, undefined)) as InjectRateLimitedError
+    expect(error).toBeInstanceOf(InjectRateLimitedError)
+    expect(error.detail).toBe('')
+    expect(error.retryAfterSeconds).toBeUndefined()
+  })
+
+  it('reads the header from an AxiosHeaders instance too', () => {
+    const response = {
+      status: 429,
+      statusText: '',
+      data: {},
+      config: {} as InternalAxiosRequestConfig,
+      headers: new AxiosHeaders({ 'Retry-After': '3' }),
+    }
+    const error = translateInjectError(
+      new AxiosError('x', 'ERR_BAD_REQUEST', undefined, undefined, response),
+    ) as InjectRateLimitedError
+    expect(error.retryAfterSeconds).toBe(3)
+  })
+
+  it('is idempotent on the typed error', () => {
+    const limited = new InjectRateLimitedError('x', 2)
+    expect(translateInjectError(limited)).toBe(limited)
+  })
+
+  it('parseRetryAfterSeconds: whole seconds, an HTTP date, and junk', () => {
+    expect(parseRetryAfterSeconds('5')).toBe(5)
+    expect(parseRetryAfterSeconds(12)).toBe(12)
+    expect(parseRetryAfterSeconds(' 30 ')).toBe(30)
+    for (const junk of [undefined, null, '', 'abc', '0', '-3', '1.5', {}]) {
+      expect(parseRetryAfterSeconds(junk), String(junk)).toBeUndefined()
+    }
+    const future = new Date(Date.now() + 10_500).toUTCString()
+    const fromDate = parseRetryAfterSeconds(future)
+    expect(fromDate).toBeGreaterThanOrEqual(9)
+    expect(fromDate).toBeLessThanOrEqual(11)
+    expect(parseRetryAfterSeconds(new Date(Date.now() - 60_000).toUTCString())).toBeUndefined()
+  })
+
+  it('the sentence: the default guidance, the server detail, and Retry-After seconds', () => {
+    const names = () => undefined
+    expect(describeActionError('fire', new InjectRateLimitedError(), names)).toBe(
+      'Too many fires in a few seconds. Try again in a moment.',
+    )
+    expect(MESSAGES.rateLimited).toBe('Too many fires in a few seconds. Try again in a moment.')
+    expect(describeActionError('fire', new InjectRateLimitedError('', 4), names)).toBe(
+      'Too many fires in a few seconds. Try again in 4 s.',
+    )
+    expect(describeActionError('retry', new InjectRateLimitedError('Easy there.'), names)).toBe('Easy there.')
+    expect(describeActionError('release', new InjectRateLimitedError('Easy there.', 2), names)).toBe(
+      'Easy there. Try again in 2 s.',
+    )
   })
 })
 

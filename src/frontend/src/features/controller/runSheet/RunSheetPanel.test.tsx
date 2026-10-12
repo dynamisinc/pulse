@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { RunSheetPanel } from './RunSheetPanel'
 import { MOCK_ME, injectMock } from './injectMock'
-import { InjectConflictError, InjectValidationError } from './injectErrors'
+import { InjectConflictError, InjectRateLimitedError, InjectValidationError } from './injectErrors'
 import { FILTERS_STORAGE_PREFIX } from './useRunSheetFilters'
 import { parseInjectQueue } from './injectGuards'
 import { MESSAGES } from './injectMessages'
@@ -509,6 +509,172 @@ describe('RunSheetPanel — Fire, Fire next', () => {
     await screen.findByText('Nope')
     press('Dismiss message')
     expect(screen.queryByText('Nope')).toBeNull()
+  })
+})
+
+describe('RunSheetPanel — the staff roster failed to load (Mine cannot be evaluated)', () => {
+  const failRoster = () =>
+    vi.spyOn(injectMock, 'assignees').mockRejectedValue(new Error('roster down'))
+
+  it('a remembered "Mine" does not hide every row: shows ALL, with a visible note and Mine unavailable', async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ scope: 'mine', status: 'all' }))
+    failRoster()
+    await mountPanel()
+
+    const banner = await screen.findByTestId('banner-roster-failed')
+    expect(banner).toHaveAttribute('role', 'status')
+    expect(banner).toHaveTextContent('Couldn\'t load the staff roster')
+    expect(banner).toHaveTextContent('"Mine" is unavailable: showing all items')
+    // Every row is shown, and the sheet does not claim nothing matches.
+    expect(rowTitles()).toEqual(['Alpha', 'Bravo', 'Charlie', 'Delta'])
+    expect(screen.queryByTestId('run-sheet-filtered-empty')).toBeNull()
+    // "Mine" is visibly unavailable (disabled, with the reason); All is the pressed one.
+    const mine = screen.getByRole('button', { name: 'Assigned to: Mine' })
+    expect(mine).toBeDisabled()
+    expect(mine).toHaveAttribute('title', expect.stringContaining("roster didn't load"))
+    expect(screen.getByRole('button', { name: 'Assigned to: All' })).toHaveAttribute('aria-pressed', 'true')
+    // The remembered choice itself is untouched.
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? 'null')).toEqual({ scope: 'mine', status: 'all' })
+  })
+
+  it('a failed roster is reported even when the view is already All', async () => {
+    failRoster()
+    await mountPanel()
+    expect(await screen.findByTestId('banner-roster-failed')).toHaveTextContent(
+      'the assignee list are unavailable',
+    )
+    expect(rowTitles()).toHaveLength(4)
+  })
+
+  it('Try now re-reads the roster: the note clears, Mine works, and the remembered "Mine" applies', async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ scope: 'mine', status: 'all' }))
+    const spy = failRoster()
+    await mountPanel()
+    await screen.findByTestId('banner-roster-failed')
+    expect(rowTitles()).toHaveLength(4)
+
+    spy.mockRestore() // the roster is back
+    press('Try loading the staff roster now')
+    await waitFor(() => expect(screen.queryByTestId('banner-roster-failed')).toBeNull())
+    await waitFor(() => expect(rowTitles()).toEqual(['Alpha', 'Delta']))
+    expect(screen.getByRole('button', { name: 'Assigned to: Mine' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Assigned to: Mine' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('while the roster is still LOADING, a remembered "Mine" says so instead of "nothing matches"', async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ scope: 'mine', status: 'all' }))
+    let release: () => void = () => undefined
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const real = injectMock.assignees.bind(injectMock)
+    vi.spyOn(injectMock, 'assignees').mockImplementation(async () => {
+      await gate
+      return real()
+    })
+    renderRunSheet(<RunSheetPanel />)
+    expect(await screen.findByTestId('run-sheet-identity-loading')).toHaveTextContent('Loading your assignments')
+    expect(screen.queryByTestId('run-sheet-filtered-empty')).toBeNull()
+    expect(screen.queryByTestId('banner-roster-failed')).toBeNull()
+
+    await act(async () => release())
+    await waitFor(() => expect(rowTitles()).toEqual(['Alpha', 'Delta']))
+    expect(screen.queryByTestId('run-sheet-identity-loading')).toBeNull()
+  })
+
+  it('the editor is told the roster failed (Add shows the unavailable note)', async () => {
+    failRoster()
+    await mountPanel()
+    await screen.findByTestId('banner-roster-failed')
+    press('Add item')
+    expect(await screen.findByTestId('assignee-roster-unavailable')).toHaveTextContent('Staff roster unavailable')
+  })
+
+  it('no roster note when the roster loaded', async () => {
+    await mountPanel()
+    expect(screen.queryByTestId('banner-roster-failed')).toBeNull()
+  })
+})
+
+describe('RunSheetPanel — a rate-limited fire / retry / release (429)', () => {
+  it('shows calm guidance on THAT row; the item is not failed and the row is usable again', async () => {
+    vi.spyOn(injectMock, 'fire').mockRejectedValueOnce(new InjectRateLimitedError())
+    await mountPanel()
+    press('Fire Alpha')
+
+    const note = await within(rowOf('Alpha')).findByTestId('row-note')
+    expect(note).toHaveAttribute('role', 'status')
+    expect(note).toHaveTextContent('Too many fires in a few seconds. Try again in a moment.')
+    // Not a panel-level failure, and not on any other row.
+    expect(within(screen.getByTestId('run-sheet-notice')).queryByText(/Too many/)).toBeNull()
+    expect(within(rowOf('Bravo')).queryByTestId('row-note')).toBeNull()
+    // The item is NOT marked failed: still pending, with no error line; its lock is released.
+    expect(chipOf('Alpha')).toBe('Pending')
+    expect(within(rowOf('Alpha')).queryByTestId('row-error')).toBeNull()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Fire Alpha' })).toBeEnabled())
+
+    // The next press goes through and clears the note.
+    press('Fire Alpha')
+    await waitFor(() => expect(chipOf('Alpha')).toBe('Fired'))
+    expect(within(rowOf('Alpha')).queryByTestId('row-note')).toBeNull()
+  })
+
+  it('uses the server detail and the Retry-After seconds when sent', async () => {
+    vi.spyOn(injectMock, 'fire').mockRejectedValueOnce(new InjectRateLimitedError('Easy on the fire key.', 5))
+    await mountPanel()
+    press('Fire Alpha')
+    expect(await within(rowOf('Alpha')).findByTestId('row-note')).toHaveTextContent(
+      'Easy on the fire key. Try again in 5 s.',
+    )
+  })
+
+  it('with only Retry-After the default sentence carries the seconds', async () => {
+    vi.spyOn(injectMock, 'fire').mockRejectedValueOnce(new InjectRateLimitedError('', 3))
+    await mountPanel()
+    press('Fire Alpha')
+    expect(await within(rowOf('Alpha')).findByTestId('row-note')).toHaveTextContent(
+      'Too many fires in a few seconds. Try again in 3 s.',
+    )
+  })
+
+  it('works for Retry on a failed item (it stays Failed, with its own reason)', async () => {
+    await mountPanel()
+    injectMock.failNextPublish('Media asset not found')
+    press('Fire Alpha')
+    await waitFor(() => expect(chipOf('Alpha')).toBe('Failed'))
+    vi.spyOn(injectMock, 'retry').mockRejectedValueOnce(new InjectRateLimitedError())
+    press('Retry Alpha')
+    expect(await within(rowOf('Alpha')).findByTestId('row-note')).toHaveTextContent('Too many fires')
+    expect(chipOf('Alpha')).toBe('Failed')
+    expect(within(rowOf('Alpha')).getByTestId('row-error')).toHaveTextContent('Media asset not found')
+  })
+
+  it('works for Release on a held item (it stays Held)', async () => {
+    await act(async () => {
+      await injectMock.hold(idOf('Alpha'))
+    })
+    await mountPanel()
+    vi.spyOn(injectMock, 'release').mockRejectedValueOnce(new InjectRateLimitedError())
+    press('Release Alpha')
+    expect(await within(rowOf('Alpha')).findByTestId('row-note')).toHaveTextContent('Too many fires')
+    expect(chipOf('Alpha')).toBe('Held')
+  })
+
+  it('the note can be dismissed', async () => {
+    vi.spyOn(injectMock, 'fire').mockRejectedValueOnce(new InjectRateLimitedError())
+    await mountPanel()
+    press('Fire Alpha')
+    await within(rowOf('Alpha')).findByTestId('row-note')
+    press('Dismiss message for Alpha')
+    expect(within(rowOf('Alpha')).queryByTestId('row-note')).toBeNull()
+  })
+
+  it('other failures still use the panel notice (not the row note)', async () => {
+    vi.spyOn(injectMock, 'fire').mockRejectedValueOnce(new Error('boom'))
+    await mountPanel()
+    press('Fire Alpha')
+    expect(await screen.findByText("Couldn't fire: boom")).toBeInTheDocument()
+    expect(within(rowOf('Alpha')).queryByTestId('row-note')).toBeNull()
   })
 })
 

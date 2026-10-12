@@ -179,6 +179,15 @@ describe('validateWrite', () => {
     expect(first['posts.0.replyTo']).toBeDefined()
   })
 
+  it('a hand-built replyTo with two (or no) target keys is refused: exactly one, like the server', () => {
+    const reply = (replyTo: object) =>
+      validateWrite(validWrite({ posts: [{ ...validPost, replyTo } as never] }))['posts.0.replyTo']
+    expect(reply({ postId: 'p', injectPostId: 'i' })).toMatch(/exactly one/)
+    expect(reply({ sequence: 1, postId: 'p' })).toMatch(/exactly one/)
+    expect(reply({})).toMatch(/exactly one/)
+    expect(reply({ postId: 'p' })).toBeUndefined()
+  })
+
   it('a reply needs a target; a baseline is whole numbers in 0..1,000,000', () => {
     const post = (extra: object) =>
       validateWrite(validWrite({ posts: [{ ...validPost, ...extra }] }))

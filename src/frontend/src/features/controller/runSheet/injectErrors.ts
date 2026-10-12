@@ -16,6 +16,8 @@
  *   400 -> `InjectValidationError` a readable message, plus an optional `errors`
  *                                  map (field path -> first message) so the editor
  *                                  can put the message on the field.
+ *   429 -> `InjectRateLimitedError` too many fires / retries / releases in a few seconds (the
+ *                                  server's per-controller limit): `detail` + `Retry-After`.
  *   404 -> `InjectNotFoundError`   unknown id — and a cross-exercise id is
  *                                  deliberately the same response (COR-001).
  *
@@ -65,6 +67,51 @@ export class InjectNotFoundError extends Error {
     super(detail)
     this.name = 'InjectNotFoundError'
   }
+}
+
+/**
+ * A 429: this controller is firing / retrying / releasing too fast (the server's per-controller
+ * rate limit on those three actions). Nothing was applied and the item is NOT failed: the console
+ * shows calm guidance on the row and the controller simply tries again.
+ */
+export class InjectRateLimitedError extends Error {
+  readonly status = 429 as const
+  /** The server's readable reason (ProblemDetails `detail`). Empty when it sent none. */
+  readonly detail: string
+  /** Seconds to wait, from the `Retry-After` header, when the server sent one. */
+  readonly retryAfterSeconds: number | undefined
+
+  constructor(detail = '', retryAfterSeconds?: number) {
+    super(detail || 'Too many requests')
+    this.name = 'InjectRateLimitedError'
+    this.detail = detail
+    this.retryAfterSeconds = retryAfterSeconds
+  }
+}
+
+/**
+ * `Retry-After` is either whole seconds or an HTTP date. Returns whole seconds (>= 1), or
+ * `undefined` when the header is absent or unusable.
+ */
+export function parseRetryAfterSeconds(raw: unknown): number | undefined {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return undefined
+  const text = String(raw).trim()
+  if (/^\d+$/.test(text)) {
+    const seconds = Number(text)
+    return seconds >= 1 ? seconds : undefined
+  }
+  const date = Date.parse(text)
+  if (Number.isNaN(date)) return undefined
+  const seconds = Math.ceil((date - Date.now()) / 1000)
+  return seconds >= 1 ? seconds : undefined
+}
+
+/** Reads a response header by name from a plain object or an `AxiosHeaders`. */
+function readHeader(headers: unknown, name: string): unknown {
+  if (typeof headers !== 'object' || headers === null) return undefined
+  const bag = headers as { get?: (key: string) => unknown } & Record<string, unknown>
+  if (typeof bag.get === 'function') return bag.get(name)
+  return bag[name] ?? bag[name.toLowerCase()]
 }
 
 /**
@@ -125,7 +172,8 @@ export function translateInjectError(error: unknown): unknown {
   if (
     error instanceof InjectConflictError ||
     error instanceof InjectValidationError ||
-    error instanceof InjectNotFoundError
+    error instanceof InjectNotFoundError ||
+    error instanceof InjectRateLimitedError
   ) {
     return error
   }
@@ -142,6 +190,11 @@ export function translateInjectError(error: unknown): unknown {
     }
     case 404:
       return new InjectNotFoundError(readDetail(body) || 'Not found')
+    case 429:
+      return new InjectRateLimitedError(
+        readDetail(body),
+        parseRetryAfterSeconds(readHeader(error.response.headers, 'retry-after')),
+      )
     default:
       return error
   }

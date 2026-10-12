@@ -331,6 +331,29 @@ describe('InjectItemEditor — burst mode: 2..20 posts and the window', () => {
   })
 })
 
+describe('InjectItemEditor — the staff roster failed to load', () => {
+  it('tells the controller the assignee list is unavailable (and offers only Unassigned)', () => {
+    // (`me` comes from the same failed read, so it is unknown too.)
+    renderEditor({ assignees: [], assigneesUnavailable: true, me: undefined })
+    expect(screen.getByTestId('assignee-roster-unavailable')).toHaveTextContent('Staff roster unavailable')
+    const options = within(field(/^Assignee/)).getAllByRole('option').map(o => o.textContent)
+    expect(options).toEqual(['Unassigned'])
+  })
+
+  it('keeps the current assignee of an edited item, shown by NAME, not the raw id', () => {
+    const item = makeItem({ id: 'inj-a', assigneeId: 'human-controller-02', assigneeName: 'Jordan Ames' })
+    renderEditor({ mode: 'edit', item, items: [item], assignees: [], assigneesUnavailable: true })
+    expect(field(/^Assignee/)).toHaveValue('human-controller-02')
+    const options = within(field(/^Assignee/)).getAllByRole('option').map(o => o.textContent)
+    expect(options).toEqual(['Unassigned', 'Jordan Ames'])
+  })
+
+  it('shows no such hint when the roster loaded', () => {
+    renderEditor()
+    expect(screen.queryByTestId('assignee-roster-unavailable')).toBeNull()
+  })
+})
+
 describe('InjectItemEditor — the type is fixed once the item has fired', () => {
   const partlyFired = makeItem({
     id: 'inj-fired',

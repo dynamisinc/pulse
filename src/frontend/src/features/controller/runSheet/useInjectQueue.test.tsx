@@ -60,7 +60,7 @@ async function mount() {
     rendered = renderHook(() => useInjectQueue(), { wrapper: createWrapper(client) })
   })
   if (!rendered) throw new Error('hook did not mount')
-  return rendered
+  return Object.assign(rendered, { client })
 }
 
 beforeEach(() => {
@@ -326,7 +326,7 @@ describe('useInjectQueue — mutations', () => {
   })
 })
 
-describe('useInjectQueue — a delayed reorder reply never rolls the cache back', () => {
+describe('useInjectQueue — the reorder reply is never applied (it can only be older)', () => {
   /** A promise settled from outside, to hold a request in flight. */
   function deferred<T>() {
     let resolve!: (value: T) => void
@@ -378,10 +378,67 @@ describe('useInjectQueue — a delayed reorder reply never rolls the cache back'
       reply.resolve(older) // the late, OLDER reply
       await reorder
     })
-    // The fire is NOT rolled back to pending, and the new order IS applied.
+    // The fire is NOT rolled back to pending, and the reply's order is NOT applied either: the
+    // authoritative order arrives with the re-read that follows (held behind the gate here).
     expect(result.current.items.find(i => i.id === a.id)?.status).toBe('fired')
-    expect(result.current.items.map(i => i.id).slice(0, 2)).toEqual([b.id, a.id])
+    expect(result.current.items.map(i => i.id).slice(0, 2)).toEqual([a.id, b.id])
     await act(async () => releaseRefetch())
+  })
+
+  it('a late reply (older order) does NOT overwrite a NEWER order a poll already brought in', async () => {
+    injectMock.reset({ seed: [single('A'), single('B'), single('C')] })
+    const { result, client } = await mount()
+    await settle()
+    const [a, b, c] = result.current.items
+    if (!a || !b || !c) throw new Error('no items')
+
+    // Our reorder's reply is held; when it lands it carries the order of that moment: B, A, C.
+    const older = injectMock.snapshot()
+    const byId = new Map(older.items.map(i => [i.id, i]))
+    older.items = [b, a, c].flatMap((item, index) => {
+      const found = byId.get(item.id)
+      return found ? [{ ...found, order: index + 1 }] : []
+    })
+    const reply = deferred<typeof older>()
+    vi.spyOn(injectMock, 'reorder').mockImplementationOnce(() => reply.promise)
+
+    let reorder: ReturnType<typeof result.current.reorder> | undefined
+    await act(async () => {
+      reorder = result.current.reorder([b.id, a.id, c.id])
+    })
+
+    // Meanwhile another controller reorders (C, B, A) and this console's poll picks it up.
+    await act(async () => {
+      await injectMock.as(PEER).reorder([c.id, b.id, a.id])
+      await client.invalidateQueries()
+    })
+    await flush(10)
+    expect(result.current.items.map(i => i.id)).toEqual([c.id, b.id, a.id])
+
+    // Hold the follow-up re-read, then let the OLD reply land.
+    const releaseRefetch = gateRefetch()
+    await act(async () => {
+      reply.resolve(older)
+      await reorder
+    })
+    // The newer polled order survives: `order` has no version, so the reply is never applied.
+    expect(result.current.items.map(i => i.id)).toEqual([c.id, b.id, a.id])
+    await act(async () => releaseRefetch())
+    await flush(10)
+    // ...and the re-read agrees.
+    expect(result.current.items.map(i => i.id)).toEqual([c.id, b.id, a.id])
+  })
+
+  it('a reorder still shows its result once the immediate re-read lands', async () => {
+    const { result } = await mount()
+    await settle()
+    const [a, b] = result.current.items
+    if (!a || !b) throw new Error('no items')
+    await act(async () => {
+      expect((await result.current.reorder([b.id, a.id])).status).toBe('ok')
+    })
+    await flush(10)
+    expect(result.current.items.map(i => i.id)).toEqual([b.id, a.id])
   })
 
   it('a row deleted while the reorder was in flight is not resurrected by the late reply', async () => {

@@ -29,6 +29,7 @@ export interface UseInjectAssigneesResult {
   readonly nameOf: (id: string | null | undefined) => string | undefined
   readonly isLoading: boolean
   readonly isError: boolean
+  readonly refetch: () => Promise<unknown>
 }
 
 const NO_ASSIGNEES: InjectAssigneesDto['assignees'] = []
@@ -54,5 +55,6 @@ export function useInjectAssignees(): UseInjectAssigneesResult {
     nameOf,
     isLoading: query.isPending,
     isError: query.isError,
+    refetch: query.refetch,
   }
 }

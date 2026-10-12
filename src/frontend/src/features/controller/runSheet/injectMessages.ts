@@ -14,7 +14,12 @@
  */
 
 import axios from 'axios'
-import { InjectConflictError, InjectNotFoundError, InjectValidationError } from './injectErrors'
+import {
+  InjectConflictError,
+  InjectNotFoundError,
+  InjectRateLimitedError,
+  InjectValidationError,
+} from './injectErrors'
 
 export const MESSAGES = {
   /** AC "Fire on cue": the reason Fire/Retry are disabled under FREEZE. */
@@ -29,6 +34,8 @@ export const MESSAGES = {
   loadFailed: 'Can\'t load the run sheet. Retrying…',
   connectionLost: 'Lost contact with the server. Showing the last known run sheet; retrying…',
   heldFireHint: 'Held. Release it first.',
+  /** A 429 with no server `detail`: calm guidance, not a failure. */
+  rateLimited: 'Too many fires in a few seconds. Try again in a moment.',
 } as const
 
 /** AC "Fire on cue": a 409 from a concurrent fire. */
@@ -47,6 +54,18 @@ export type InjectAction =
   | 'reorder'
 
 /**
+ * The calm sentence for a 429: the server's `detail` if it sent one, else the default guidance;
+ * with the `Retry-After` seconds when the header was sent ("Try again in 5 s.").
+ */
+function describeRateLimit(error: InjectRateLimitedError): string {
+  const seconds = error.retryAfterSeconds
+  if (error.detail) return seconds === undefined ? error.detail : `${error.detail} Try again in ${seconds} s.`
+  return seconds === undefined
+    ? MESSAGES.rateLimited
+    : 'Too many fires in a few seconds. Try again in ' + `${seconds} s.`
+}
+
+/**
  * The sentence for a failed action.
  *
  *   409 on `fire` for an item that is already fired/firing -> "Already fired by {name}"
@@ -55,6 +74,8 @@ export type InjectAction =
  *   any other 409                                           -> the server's own `detail`
  *       ("The world is frozen", "Fire the parent first", ...), or the stale-version line if none;
  *   400                                                     -> the server's validation message;
+ *   429                                                     -> calm guidance: server detail or the
+ *                                                              default, + Retry-After when sent;
  *   404                                                     -> the item is gone; the list reloaded;
  *   401 / 403                                               -> a plain access sentence;
  *   anything else                                           -> "Couldn't {verb}: {message}".
@@ -75,6 +96,7 @@ export function describeActionError(
   if (error instanceof InjectValidationError) {
     return error.detail || `Couldn't ${action}: invalid request`
   }
+  if (error instanceof InjectRateLimitedError) return describeRateLimit(error)
   if (error instanceof InjectNotFoundError) return MESSAGES.notFound
   if (axios.isAxiosError(error)) {
     const status = error.response?.status
