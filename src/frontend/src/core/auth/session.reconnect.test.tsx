@@ -254,6 +254,28 @@ describe('an expired session is a refusal; a malformed body is not (W2-2)', () =
   })
 })
 
+describe('"Sign in again" leads to the sign-in for THIS kind of session (S2-1)', () => {
+  it('a staff tab (sessionStorage) goes to the STAFF sign-in', async () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+    mockResolve.mockRejectedValue(networkError())
+
+    renderProvider()
+
+    expect(await screen.findByRole('link', { name: 'Sign in again' }))
+      .toHaveAttribute('href', '/staff/login')
+  })
+
+  it('a participant (localStorage) goes to the participant sign-in', async () => {
+    signedInParticipant()
+    mockResolve.mockRejectedValue(networkError())
+
+    renderProvider()
+
+    expect(await screen.findByRole('link', { name: 'Sign in again' }))
+      .toHaveAttribute('href', '/login')
+  })
+})
+
 describe('Try again', () => {
   it('re-runs the resolution and, on success, mounts the app', async () => {
     const user = userEvent.setup()

@@ -78,8 +78,8 @@ import {
   type ReactNode,
 } from 'react'
 import { Navigate } from 'react-router-dom'
-import { isAxiosError } from 'axios'
 import { endRefreshCooldown } from '../services/api'
+import { httpStatusOf, signInPathForPage } from './reconnect'
 import { ReconnectingState } from './ReconnectingState'
 import { SessionExpiredError } from './sessionExpiredError'
 import { resolveSession, type Session } from './sessionResolver'
@@ -119,7 +119,7 @@ function shouldStayConnected(error: unknown): boolean {
   // Reconnecting.)
   if (error instanceof SessionExpiredError) return false
   // The server answered the session request itself with a refusal retrying cannot fix.
-  if (isAxiosError(error) && error.response?.status === 403) return false
+  if (httpStatusOf(error) === 403) return false
   return true
 }
 
@@ -202,7 +202,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
         retrying={state.retrying}
         failedRetries={state.failedRetries}
         onRetry={retry}
-        signInPath={LOGIN_PATH}
+        signInPath={signInPathForPage()}
       />
     )
   }
