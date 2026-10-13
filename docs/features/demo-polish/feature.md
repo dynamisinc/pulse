@@ -60,7 +60,7 @@ Order = wave order. Priorities and effort are the plan's (§5). *Home story* is 
 | 20 | [Console cleanup](20-console-cleanup.md) | C4 | Must | frontend | 3 | CTL-002, CTL-003 | In Review | #439 |
 | 21 | [Persona profile edit](21-persona-profile-edit.md) | PE | Should | fullstack | 2 (BE) / 3 (FE) | COR-020, COR-022, COR-024 | In Review | #440 |
 | 22 | [Takedown UI and live feed removal](22-takedown-ui.md) | C5 | Should | frontend | 3 | CTL-025, XC-010 | In Review | #441 |
-| 23 | [Preview-as-participant and StartEx/EndEx](23-preview-and-startex.md) | C6 | Could | frontend | 3 | COR-041, COR-054 | In Progress | #442 |
+| 23 | [Preview-as-participant and StartEx/EndEx](23-preview-and-startex.md) | C6 | Could | frontend | 3 | COR-041, COR-054 | In Review | #442 |
 | 24 | [Seed script](24-seed-script.md) | S1 | Must | script | seed | CTL-001, COR-023 | In Review | #443 |
 | 25 | [Content pack authoring](25-content-pack-authoring.md) | S2 | Must | content | seed | COR-023, XC-009 | Not Started | #444 |
 

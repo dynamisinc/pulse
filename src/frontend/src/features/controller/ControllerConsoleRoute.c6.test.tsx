@@ -30,12 +30,11 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SessionProvider } from '@/core/auth'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
+import { ExerciseContextProvider, type ExerciseStatus } from '@/core/exerciseContext'
 import {
-  ExerciseContextProvider,
   resetMockExerciseStatus,
   setMockExerciseStatus,
-  type ExerciseStatus,
-} from '@/core/exerciseContext'
+} from '@/core/exerciseContext/exerciseContextResolver'
 import { resetTelemetryBuffer } from '@/core/telemetry'
 import type { ExerciseRole } from '@/core/auth'
 import { postStore } from '@/features/social/services/postStore'
@@ -44,6 +43,7 @@ import { reviewStore } from './engine/services/reviewStore'
 import { engineControlStore } from './engine/hooks/useEngineControl'
 import { engineSettingsStore } from './engine/hooks/useEngineSettings'
 import { composeAsPersonaDraftStore } from './hooks/useComposeAsPersona'
+import { resetPauseStateForTest } from './hooks/usePauseState'
 import { ControllerConsoleRoute } from './ControllerConsoleRoute'
 import { resetSessionRole, setSessionRole } from './lifecycle/lifecycle.sessionKit.testUtils'
 
@@ -58,6 +58,7 @@ vi.mock('@/core/auth/sessionResolver', async importOriginal => ({
 }))
 
 beforeEach(() => {
+  resetPauseStateForTest()
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:30Z') })
   postStore.resetForTests({ withDemoFixtures: true })
   reviewStore.resetForTests()
@@ -80,6 +81,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  resetPauseStateForTest()
   resetExerciseClock()
   resetMockExerciseStatus()
   resetSessionRole()
@@ -151,6 +153,37 @@ describe('ControllerConsoleRoute -- the StartEx / EndEx control (C6)', () => {
     await user.click(within(dialog).getByTestId('end-exercise-confirm'))
 
     await waitFor(() => expect(pill()).toBe('ENDEX'))
+  })
+
+  it('W-2: the pill reads ENDEX after End even while the world is FROZEN (a pause tier never masks the end)', async () => {
+    const { user } = await renderRoute('live')
+    // Freeze the world through the real pause control (the guarded Freeze).
+    await user.click(screen.getByTestId('pause-pill'))
+    await user.click(within(screen.getByTestId('pause-tier-option-freeze')).getByRole('radio'))
+    await user.click(screen.getByTestId('pause-apply'))
+    await user.click(screen.getByTestId('pause-freeze-confirm-button'))
+    await waitFor(() => expect(pill()).toBe('WORLD FROZEN'))
+
+    // End the exercise.
+    await user.click(screen.getByRole('button', { name: /end exercise/i }))
+    const dialog = await screen.findByRole('dialog', { name: /end the exercise/i })
+    await user.type(within(dialog).getByLabelText('Type END to confirm'), 'END')
+    await user.click(within(dialog).getByTestId('end-exercise-confirm'))
+
+    // The lifecycle wins once the world is no longer running: ENDEX, not WORLD FROZEN.
+    await waitFor(() => expect(pill()).toBe('ENDEX'))
+    expect(screen.getByTestId('staff-header-state-pill')).toHaveAttribute('aria-label', 'Exercise state: ENDEX')
+  })
+
+  it('W-2: a pause tier still shows on the pill while the world is running', async () => {
+    const { user } = await renderRoute('live')
+
+    await user.click(screen.getByTestId('pause-pill'))
+    await user.click(within(screen.getByTestId('pause-tier-option-freeze')).getByRole('radio'))
+    await user.click(screen.getByTestId('pause-apply'))
+    await user.click(screen.getByTestId('pause-freeze-confirm-button'))
+
+    await waitFor(() => expect(pill()).toBe('WORLD FROZEN'))
   })
 
   it('keeps Ctrl+K inert while the End dialog is open, and working again once it closes', async () => {

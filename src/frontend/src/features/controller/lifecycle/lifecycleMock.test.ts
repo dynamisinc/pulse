@@ -6,11 +6,8 @@
  * real server refuses teaches the wrong thing.
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-  EXERCISE_STATUSES,
-  resetMockExerciseStatus,
-  resolveExerciseContext,
-} from '@/core/exerciseContext'
+import { EXERCISE_STATUSES, resolveExerciseContext } from '@/core/exerciseContext'
+import { resetMockExerciseStatus } from '@/core/exerciseContext/exerciseContextResolver'
 import { LifecycleError, LIFECYCLE_STATES } from './lifecycleService'
 import { canonicalLifecycleState, mockLifecycleFor, simulateTransition } from './lifecycleMock'
 

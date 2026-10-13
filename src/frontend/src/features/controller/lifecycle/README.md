@@ -39,10 +39,24 @@ The control is self-contained; it needs the console's providers (`ExerciseContex
   inside the dialog, which stays open with `END` still typed. A 409 means the console's view was stale, so it also
   re-reads the lifecycle **and** re-resolves the exercise scope (the pill stops showing the old state).
 - **Absent for non-controllers**: nothing renders and no request is made unless the **signed-in session's** role is
-  `controller` (`useOptionalSession()`; staff routes sit under the `SessionProvider` hoisted in `app-shell/routes.tsx`;
-  `role` prop overrides, for tests). With no session it fails closed — renders nothing — instead of crashing the
+  `controller` (`useOptionalSession()`; staff routes sit under the `SessionProvider` hoisted in `app-shell/routes.tsx`).
+  The control takes **no props** — there is no way to tell it "you are a controller"; tests pick the session
+  (`lifecycle.sessionKit.testUtils`). With no session it fails closed — renders nothing — instead of crashing the
   console. Not `useControllerIdentity().role`: that is a hard-coded mock, so gating on it would be a no-op. This only
-  hides a control: the server's transition route admits **any** assigned staff session (backend follow-up).
+  hides a control: the server's transition route admits **any** assigned staff session (backend follow-up, #481), so the
+  403 sentence says "Only staff assigned to this exercise can change its state."
+- **An outcome already reached is a success, not an error.** After a failure that leaves the state unknown (no status,
+  408, 5xx, or a 409) the hook re-reads the server. If the exercise is *already at the target* — our request was applied
+  and only its answer lost, or another controller got there first — the error is cleared, the End dialog closes, focus
+  goes to the control's group, and the polite status region announces it ("The exercise had already ended. The state is
+  now ENDEX."). Any other state: the reason stands and an open End dialog is never torn down underneath the controller.
+- **The server's exercise must be the one shown.** The lifecycle answer's `exerciseId` echo must match the console's
+  exercise (a second tab may have switched the session's active exercise); if not, nothing is offered, the console says
+  so, and the scope is re-resolved. The End dialog also **names the exercise** it believes it is ending.
+- **The status text does not linger**: the result is cleared from the live region after ~5 s, so it can never stay up
+  as a stale claim ("the state is now LIVE") after a later freeze.
+- **Start is not undone by EndEx.** There is no "un-start"; **Pause** (the world-steering tier control) is the
+  mitigation for a premature start, so Start needs no confirm dialog.
 - **Keyboard**: native buttons; while a request is in flight the focusable controls (Start, and the End dialog's field,
   Cancel and confirm) are `aria-disabled` / read-only — never `disabled`, which would drop focus to `<body>` mid-request;
   after a success removes the button that held focus, focus moves to the control's group.
@@ -52,11 +66,17 @@ The control is self-contained; it needs the console's providers (`ExerciseContex
 
 ## Mock data
 
-Under `USE_MOCK_DATA` (`npm run dev`, the backend-less UAT) nothing is requested: the lifecycle is derived
-from the mock exercise scope's `status` (`lifecycleMock.ts`, the backend's table copied), a transition
-moves that status through `setMockExerciseStatus` (`core/exerciseContext`), and the same scope refresh
-makes the pill follow. The mock exercise starts `live`, so a demo shows **End exercise**; call
-`setMockExerciseStatus('staged')` to see Start.
+Under `USE_MOCK_DATA` nothing is requested: the lifecycle is derived from the mock exercise scope's `status`
+(`lifecycleMock.ts`, the backend's table copied), a transition moves that status through `setMockExerciseStatus`, and
+the same scope refresh makes the pill follow. **But the control never renders in `npm run dev` or the backend-less
+UAT**: the mock session is a *participant* (`resolveSession`'s canned persona), and the control is controller-only on
+the session's role, so it is absent there — `RoleAwareEntry` would not even route that session to the staff console.
+The simulated machine is exercised by the tests, which swap in a staff session (`lifecycle.sessionKit.testUtils`) and
+pre-set the status with `setMockExerciseStatus('staged')` / `('live')`.
+
+`setMockExerciseStatus` / `resetMockExerciseStatus` live in `core/exerciseContext/exerciseContextResolver.ts` and are
+**not** exported from the `core/exerciseContext` barrel (import them by path, from tests and `lifecycleMock.ts`); both
+are no-ops unless `USE_MOCK_DATA` is on.
 
 ## Files
 
@@ -68,3 +88,4 @@ makes the pill follow. The mock exercise starts `live`, so a demo shows **End ex
 | `lifecycleService.ts` | `fetchLifecycle`, `postTransition`, the fail-closed parser, error mapping. |
 | `lifecycleMock.ts` | The simulated state machine for mock data. |
 | `lifecycle.testUtils.tsx` | Test-only render harness. |
+| `lifecycle.sessionKit.testUtils.ts` | Test-only staff-session stand-in (the mock resolver's session is a participant). |

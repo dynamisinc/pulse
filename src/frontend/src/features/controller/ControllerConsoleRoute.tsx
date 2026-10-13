@@ -121,7 +121,7 @@
 
 import { memo, useCallback, useMemo } from 'react'
 import type { ReplyTarget } from '@/features/social'
-import { useExerciseContext } from '@/core/exerciseContext'
+import { useExerciseContext, type ExerciseStatus } from '@/core/exerciseContext'
 import { ToolstripProvider, useToolstrip } from '@/features/staffShell/toolRegistry'
 import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
@@ -178,6 +178,15 @@ const renderRunSheet = () => <RunSheetSlot />
  * console render (review queue, swamped mode).
  */
 const renderTakedown = (post: LiveWorldPost) => <TakedownAction post={post} />
+
+/**
+ * The StartEx / EndEx control for `ControllerConsole`'s `lifecycleSlot` (demo-polish C6). A MODULE-
+ * LEVEL element, like `renderRunSheet` above: the console re-renders constantly (the review queue's
+ * 1 s tick, every swamped-mode change) and an element built inside the route would be a new object
+ * each time, re-rendering the control for nothing. It takes no props, so one shared element is
+ * exact.
+ */
+const LIFECYCLE_SLOT = <ExerciseLifecycleControl />
 
 interface LiveWorldSlotProps {
   readonly ctx: ConsoleSlotContext
@@ -305,7 +314,7 @@ function ControllerConsoleContent() {
       liveWorldSlot={liveWorldSlot}
       runSheetSlot={renderRunSheet}
       onDockClose={clearReply}
-      lifecycleSlot={<ExerciseLifecycleControl />}
+      lifecycleSlot={LIFECYCLE_SLOT}
     />
   )
 }
@@ -320,20 +329,40 @@ function ConsoleWorkArea() {
 }
 
 /**
+ * The lifecycle statuses in which the WORLD IS RUNNING - the only ones a pause tier describes. A
+ * tier (INJECTS / ENGINE PAUSED, WORLD FROZEN) means "the exercise is live but held"; before
+ * StartEx there is nothing to hold (the server refuses a Freeze then) and after EndEx there is
+ * nothing left running. `paused` is the lifecycle's own held state and `active` its legacy alias.
+ */
+const WORLD_RUNNING_STATUSES: readonly ExerciseStatus[] = ['live', 'paused', 'active']
+
+/**
  * The staff header for the console: the shared `StaffHeader` with its exercise-
  * state pill driven by the world-steering tiered-pause tier (D7-010) — while a
- * tier is active the pill shows INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN
- * (amber), otherwise the lifecycle status (LIVE / STAGED / …). Reads
- * `usePauseState()` here (inside the provider stack) rather than in the shared
- * header, so the header stays free of the controller-only pause/identity seam.
+ * tier is active AND THE WORLD IS RUNNING the pill shows INJECTS PAUSED / ENGINE
+ * PAUSED / WORLD FROZEN (amber), otherwise the lifecycle status (LIVE / STAGED /
+ * ENDEX / …). Reads `usePauseState()` here (inside the provider stack) rather
+ * than in the shared header, so the header stays free of the controller-only
+ * pause/identity seam.
+ *
+ * WHY THE TIER ONLY OVERRIDES WHILE THE WORLD IS RUNNING (Gate-2 W-2). The override wins over the
+ * lifecycle status, and a tier set before EndEx is still recorded after it - so without this rule
+ * a controller who froze the world and then pressed End exercise would see WORLD FROZEN on the
+ * header while the exercise had in fact ended, hiding the state change from the very pill that
+ * exists to show it. The rule is a pure DISPLAY rule: EndEx moves the pill to ENDEX whatever tier
+ * is recorded. (The alternative - resetting the tier on a successful EndEx - would make the
+ * lifecycle control issue a second server write, couple two steering features, and still miss
+ * the exercise being ended from another console.)
  */
 function ConsoleStaffHeader() {
   const { isPaused, label } = usePauseState()
+  const { status } = useExerciseContext()
   const { active, toggle } = usePreview()
+  const showTier = isPaused && WORLD_RUNNING_STATUSES.includes(status)
   return (
     <StaffHeader
       surfaceName="Controller Console"
-      stateOverride={isPaused ? pauseStatePillConfig(label) : undefined}
+      stateOverride={showTier ? pauseStatePillConfig(label) : undefined}
       previewActive={active}
       onTogglePreview={toggle}
     />

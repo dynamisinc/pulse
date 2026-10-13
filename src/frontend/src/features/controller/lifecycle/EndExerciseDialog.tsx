@@ -35,6 +35,13 @@
  * preview-as-participant replaces the console's work area (and with it this control) while it
  * is open, so no participant layer can be up at the same time as this dialog.
  *
+ * IT NAMES THE EXERCISE (Gate-2 S-3). The body says WHICH exercise is about to end, using the
+ * name from the console's exercise scope. The transition request deliberately names no exercise
+ * (the server resolves it from the session, COR-001), so a second browser tab whose session
+ * switched the active exercise could otherwise end an exercise this tab is not showing; reading
+ * the name aloud in the confirmation is the last chance for the controller to notice. (The name
+ * is data, rendered as text -- never HTML.)
+ *
  * The dialog owns its text and nothing else: the request, the pending flag and the error come
  * from the caller (`ExerciseLifecycleControl` via `useExerciseLifecycle`).
  */
@@ -58,6 +65,8 @@ const PENDING_SX = {
 } as const
 
 export interface EndExerciseDialogProps {
+  /** The exercise the console is showing (the scope's name): the one this dialog says it ends. */
+  readonly exerciseName: string
   /** A request is in flight: the dialog cannot be dismissed and the confirm reads "Ending...". */
   readonly pending: boolean
   /** The plain-text reason the last attempt failed; shown inside the dialog. */
@@ -66,7 +75,13 @@ export interface EndExerciseDialogProps {
   readonly onCancel: () => void
 }
 
-export function EndExerciseDialog({ pending, error, onConfirm, onCancel }: EndExerciseDialogProps) {
+export function EndExerciseDialog({
+  exerciseName,
+  pending,
+  error,
+  onConfirm,
+  onCancel,
+}: EndExerciseDialogProps) {
   const [typed, setTyped] = useState('')
   const titleId = useId()
   const bodyId = useId()
@@ -105,8 +120,8 @@ export function EndExerciseDialog({ pending, error, onConfirm, onCancel }: EndEx
       </DialogTitle>
       <DialogContent onKeyDown={handleKeyDown}>
         <Typography id={bodyId} component="div" sx={{ fontSize: 13, lineHeight: 1.5, mb: 1.5 }}>
-          This moves the exercise to ENDEX for everyone in it. It cannot be undone from the
-          console.
+          This moves <strong data-testid="end-exercise-name">{exerciseName}</strong> to ENDEX for
+          everyone in it. It cannot be undone from the console.
         </Typography>
         <CobraTextField
           label="Type END to confirm"

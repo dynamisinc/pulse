@@ -12,11 +12,13 @@ import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   ExerciseContextProvider,
-  resetMockExerciseStatus,
-  setMockExerciseStatus,
   useExerciseContext,
   type ExerciseStatus,
 } from '@/core/exerciseContext'
+import {
+  resetMockExerciseStatus,
+  setMockExerciseStatus,
+} from '@/core/exerciseContext/exerciseContextResolver'
 import { lifecycleQueryKey, useExerciseLifecycle } from './useExerciseLifecycle'
 
 afterEach(() => {

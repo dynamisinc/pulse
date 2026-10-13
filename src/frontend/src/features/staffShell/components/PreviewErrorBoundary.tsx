@@ -58,28 +58,36 @@ export class PreviewErrorBoundary extends Component<
 
   override render(): ReactNode {
     if (!this.state.failed) return this.props.children
+    // A `main` landmark of its own: while a preview is staged the staff work area is not a `main`
+    // (StaffShellFrame), the channel that would have been the page's one is gone, and a page with
+    // no main is as wrong as one with two. The alert is a CHILD - `role="alert"` on the main
+    // itself would replace its landmark role.
     return (
       <Stack
-        role="alert"
-        data-testid="preview-unavailable"
+        component="main"
+        data-testid="preview-unavailable-main"
         sx={{
-          gap: 0.75,
-          p: 3,
           bgcolor: '#ffffff',
           color: staffShellTokens.accent.secondaryText,
         }}
       >
-        <Typography
-          component="div"
-          sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: 14, fontWeight: 800 }}
+        <Stack
+          role="alert"
+          data-testid="preview-unavailable"
+          sx={{ gap: 0.75, p: 3 }}
         >
-          <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" />
-          Participant preview unavailable
-        </Typography>
-        <Typography component="div" sx={{ fontSize: 12.5, lineHeight: 1.5 }}>
-          The participant view could not be drawn. The console is not affected. Choose Exit
-          preview to return to it.
-        </Typography>
+          <Typography
+            component="div"
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: 14, fontWeight: 800 }}
+          >
+            <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" />
+            Participant preview unavailable
+          </Typography>
+          <Typography component="div" sx={{ fontSize: 12.5, lineHeight: 1.5 }}>
+            The participant view could not be drawn. The console is not affected. Choose Exit
+            preview to return to it.
+          </Typography>
+        </Stack>
       </Stack>
     )
   }

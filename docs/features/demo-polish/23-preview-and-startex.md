@@ -1,6 +1,6 @@
 # Story: Preview-as-participant shows the real feed, and StartEx/EndEx (Could)
 
-**Feature:** Demo polish  ·  **Epic:** E1 / E7  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Demo polish  ·  **Epic:** E1 / E7  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-041, COR-054, COR-032, NFR-001  ·  **Design decisions:** D7-007 (preview), D1-011  ·  **Issue:** #442
 **Story ID:** C6  ·  **Stack:** frontend  ·  **Priority:** Could  ·  **Effort:** S  ·  **Wave:** 3 slot (cut first if time is short)
 **Home stories:** [`staff-shell/04`](../staff-shell/04-preview-as-participant.md), [`exercise-configuration/03`](../exercise-configuration/03-exercise-lifecycle.md).
@@ -15,7 +15,7 @@ it keeps the labelled "PREVIEW AS PARTICIPANT — READ-ONLY" strip and a neutral
 **no COBRA theme** and the staff frame gets no participant skin.
 
 ## Acceptance Criteria
-- [ ] **Real channel in the preview.** `PreviewAsParticipant` mounts the participant `SocialChannel` (inside
+- [x] **Real channel in the preview.** `PreviewAsParticipant` mounts the participant `SocialChannel` (inside
       `BrandThemeProvider` and `ShellContextProvider` with `variant: 'preview'`, scenario time from the chosen
       moment) instead of `PortalStub`. It mounts under F1's **`MemorySocialNavigationProvider`**: in-memory
       location, no browser-history writes. So a thread, profile or hashtag link inside the preview never
@@ -23,19 +23,42 @@ it keeps the labelled "PREVIEW AS PARTICIPANT — READ-ONLY" strip and a neutral
       navigation-adapter AC); the staff label strip and Exit control are unchanged.
       **[Amended by the orchestrator after Gate-1: the original "moment picker … unchanged" is SUPERSEDED — the
       picker is NOT rendered. See Amendments, W-4.]**
-- [ ] **Read-only.** In the `preview` variant the composer, follow, like/repost and compose-modal controls are
+      *Tests:* [`PreviewAsParticipant.channel.test.tsx`](../../../src/frontend/src/features/staffShell/components/PreviewAsParticipant.channel.test.tsx)
+      (the real feed in the frame; thread / profile / Explore stay inside the preview and never move the router,
+      `window.location` or history), [`PreviewChannelHost.test.tsx`](../../../src/frontend/src/features/staffShell/components/PreviewChannelHost.test.tsx)
+      (variant, scenario time, in-memory navigation, brand), [`PreviewAsParticipant.test.tsx`](../../../src/frontend/src/features/staffShell/components/PreviewAsParticipant.test.tsx)
+      (strip, Exit, no picker).
+- [x] **Read-only.** In the `preview` variant the composer, follow, like/repost and compose-modal controls are
       absent (`affordancesAvailable` false) — no write can be issued from the preview; the feed it shows is the
       exercise's real feed. **[Amended after Gate-1: enforced by three independent layers — the variant, a
       read-only session scope, and a mute of PARTICIPANT-kind telemetry only. See Amendments, CR-001.]**
-- [ ] **Two-worlds guards stay true.** `previewStubTwoWorlds.test.ts` / `twoWorldsSeparation.test.ts` are
+      *Tests:* [`PreviewAsParticipant.channel.test.tsx`](../../../src/frontend/src/features/staffShell/components/PreviewAsParticipant.channel.test.tsx)
+      (`expectNoWriteControls` on Home, a thread and a profile: no composer, Post, Follow, like / repost / reply
+      buttons, no Notifications entry or store, no `localStorage` write; no POST / PUT / PATCH / DELETE; no telemetry),
+      [`PreviewChannelHost.test.tsx`](../../../src/frontend/src/features/staffShell/components/PreviewChannelHost.test.tsx),
+      [`mockSink.mute.test.ts`](../../../src/frontend/src/core/telemetry/mockSink.mute.test.ts) (participant-only mute),
+      [`session.readOnlyScope.test.tsx`](../../../src/frontend/src/core/auth/session.readOnlyScope.test.tsx).
+- [x] **Two-worlds guards stay true.** `previewStubTwoWorlds.test.ts` / `twoWorldsSeparation.test.ts` are
       updated to the new composition and pass: the participant subtree has no COBRA ancestor; the staff strip
       has no participant tokens.
-- [ ] **StartEx / EndEx control.** The console shows **Start exercise** when the lifecycle state allows `live`
+      *Tests:* [`previewStubTwoWorlds.test.ts`](../../../src/frontend/src/features/staffShell/previewStubTwoWorlds.test.ts)
+      (the participant host imports no COBRA / MUI; the staff strip no participant token),
+      [`twoWorldsSeparation.test.ts`](../../../src/frontend/src/features/staffShell/twoWorldsSeparation.test.ts) (the host is scanned with the
+      participant roots), and the runtime check (no `Mui` element in the participant subtree) in
+      [`PreviewAsParticipant.channel.test.tsx`](../../../src/frontend/src/features/staffShell/components/PreviewAsParticipant.channel.test.tsx).
+- [x] **StartEx / EndEx control.** The console shows **Start exercise** when the lifecycle state allows `live`
       and **End exercise** when it allows `completed`, calling `POST /api/staff/exercise-lifecycle/transition {
       to }`; End requires a type-to-confirm ("END"); the header state pill reflects the new state; errors are
       visible; the control is absent for non-controller roles; keyboard-operable and text-labelled (never
       color-only). **[Amended after Gate-1: Start is offered for a STAGED exercise only (W-1); "non-controller"
       is judged on the signed-in SESSION's role (W-2). See Amendments.]**
+      *Tests:* [`ExerciseLifecycleControl.test.tsx`](../../../src/frontend/src/features/controller/lifecycle/ExerciseLifecycleControl.test.tsx)
+      (mock data: allowed-transitions gating, type-to-confirm, the pill following, keyboard, absent for non-controller
+      sessions), [`ExerciseLifecycleControl.live.test.tsx`](../../../src/frontend/src/features/controller/lifecycle/ExerciseLifecycleControl.live.test.tsx)
+      (the live endpoints: request shapes, every error as text, uncertain failures re-read, an outcome already reached
+      is a success), and [`ControllerConsoleRoute.c6.test.tsx`](../../../src/frontend/src/features/controller/ControllerConsoleRoute.c6.test.tsx)
+      (mounted in the real route: Start / End move the pill — also while WORLD FROZEN —, Ctrl+K inert while the End
+      dialog is open, preview toggle and Exit).
 
 ## Out of Scope
 Pause/resume (already built), time jumps, practice mode, the portal/news/weather previews, wiring beyond the
@@ -106,3 +129,28 @@ Gate-1 on C6 (the code-review gate) was not clean. These amendments supersede th
   `disabled`; Exit returns focus to the header preview toggle; unused participant-facing moment copy is trimmed
   from `previewContext.ts`; the mock lifecycle's legacy-status mapping is an exhaustive `Record` over
   `core/exerciseContext`'s `ExerciseStatus` vocabulary (no other module canonicalizes statuses).
+
+## Amendments (Wave 4 Gate-2 lens A fold)
+Gate-2 on C6 and the console seam came back clean (0 Critical); the Warnings and Suggestions were folded in on the umbrella.
+
+- **W-1 — an uncertain failure that landed anyway is a success.** When a transition fails with no status, a 408, a
+  409 or a 5xx, the control re-reads the lifecycle; if the exercise is now at the state that was asked for (and it
+  is the same exercise), the control reports success (`alreadyDone`), clears the error and says so in the polite
+  status region ("The exercise had already ended. The state is now ENDEX."). An open End dialog is never torn down
+  by the control going quiet, and focus never falls to `<body>`.
+- **W-2 — the header pill reads ENDEX after End, even while a pause tier is active (display rule, not a reset).**
+  The pause-tier override on the state pill applies only while the exercise is `live` / `paused` / `active`. After
+  EndEx the pill shows ENDEX whichever tier the module store still holds. Chosen over resetting the tier on End
+  because a reset would add a second server write from the lifecycle control, couple two steering features, and
+  miss an EndEx performed from another console.
+- **W-3 — one `main`, and the preview is a named region.** The staged preview is a
+  `<section aria-label="Participant preview (read-only)">`; the staff work area stops being a `main` landmark while a
+  preview is staged (`StaffShellFrame` via `useOptionalPreview`), so the channel's own `main` is the page's only one;
+  the preview's error fallback supplies a `main` of its own. Done from the staff side; `SocialChannel` is untouched.
+- **Suggestions folded in:** the read-only test also covers Notifications (the F7 seam); the mock status setters are
+  out of the `core/exerciseContext` barrel and are a no-op unless `USE_MOCK_DATA`; the End dialog names the exercise
+  it will end, and `parseLifecycle` keeps `exerciseId` — an answer for a different exercise than the one shown
+  refreshes the scope and offers nothing; the Start comment says EndEx does not undo Start (Pause is the
+  mitigation); the control takes no `role` prop (it is hidden, not configured); the 403 copy reads "staff assigned to
+  this exercise" until backend follow-up #481; the `lifecycle-status` message clears after about 5 s; the
+  `lifecycleSlot` element is a module constant.

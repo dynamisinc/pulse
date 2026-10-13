@@ -153,9 +153,17 @@ let mockStatus: ExerciseStatus = MOCK_EXERCISE_CONTEXT.status
  * Mock-only: makes the mock scope report `status` from the next resolution on. The ONE
  * caller is the controller's simulated lifecycle transition under mock data
  * (`features/controller/lifecycle`); the live path never reaches it (the server owns the
- * state). A module-level value, so tests that call it must {@link resetMockExerciseStatus}.
+ * state).
+ *
+ * NOT part of the `core/exerciseContext` barrel (`index.ts`): a mock control is not something
+ * production code should be able to reach for by the public import, so the few callers (the
+ * lifecycle mock and the tests) import it from THIS module by path. And it is a NO-OP unless
+ * `USE_MOCK_DATA` is on, so even a stray call cannot move a real build's scope: with the live
+ * resolver in use `mockStatus` is never read anyway, and this keeps the claim true by
+ * construction. A module-level value, so tests that call it must {@link resetMockExerciseStatus}.
  */
 export function setMockExerciseStatus(status: ExerciseStatus): void {
+  if (!USE_MOCK_DATA) return
   mockStatus = status
 }
 

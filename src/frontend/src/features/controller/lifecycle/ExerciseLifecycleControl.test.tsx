@@ -10,10 +10,11 @@
  * `StaffHeader`, the real dialog. Nothing about the control is mocked, so "the header state pill
  * reflects the new state" is observed on the pill itself.
  */
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
+import { ExerciseLifecycleControl, STATUS_CLEAR_MS } from './ExerciseLifecycleControl'
 import {
   pillLabel,
   renderControl,
@@ -166,8 +167,18 @@ describe('ExerciseLifecycleControl -- End exercise needs a typed END', () => {
     const { dialog } = await openEndDialog()
 
     expect(dialog).toHaveAttribute('aria-modal', 'true')
-    expect(dialog).toHaveAccessibleDescription(/moves the exercise to ENDEX/i)
+    expect(dialog).toHaveAccessibleDescription(/to ENDEX for everyone in it/i)
     expect(pillLabel()).toBe('LIVE')
+  })
+
+  it('S-3: the dialog NAMES the exercise it is about to end (read from the exercise scope)', async () => {
+    const { dialog } = await openEndDialog()
+
+    expect(within(dialog).getByTestId('end-exercise-name')).toHaveTextContent(
+      'Coastal Surge (Mock Exercise)',
+    )
+    // ...and it is part of what a screen reader hears when the dialog opens.
+    expect(dialog).toHaveAccessibleDescription(/Coastal Surge \(Mock Exercise\) to ENDEX/)
   })
 
   it('keeps the confirm button disabled until the field reads exactly END', async () => {
@@ -297,17 +308,59 @@ describe('ExerciseLifecycleControl -- absent for non-controller roles (W-2: gate
     expect(screen.queryByTestId('exercise-lifecycle-control')).not.toBeInTheDocument()
   })
 
-  it('the `role` prop overrides the session (a test seam): an evaluator prop hides it for a controller session', async () => {
-    renderControl({ status: 'live', sessionRole: 'controller', role: 'evaluator', withHeader: true })
+  it('S-5: takes NO props -- there is no way to tell it "you are a controller" (tests pick the session)', () => {
+    // A compile-time guard: if a `role` prop ever comes back this directive stops being needed
+    // and `tsc` fails the build.
+    // @ts-expect-error -- the control accepts no props
+    const attempt = <ExerciseLifecycleControl role="controller" />
+    expect(attempt.props).toEqual({ role: 'controller' })
+  })
+})
+
+describe('ExerciseLifecycleControl -- the live-region result does not linger (S-7)', () => {
+  it('clears the "state is now LIVE" text after STATUS_CLEAR_MS, so it cannot go stale', async () => {
+    const user = userEvent.setup()
+    const timers = vi.spyOn(window, 'setTimeout')
+    renderControl({ status: 'staged', withHeader: true })
     await scopeResolved()
 
-    expect(screen.queryByTestId('exercise-lifecycle-control')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /start exercise/i }))
+    await waitFor(() => expect(screen.getByTestId('lifecycle-status'))
+      .toHaveTextContent('Exercise started. The state is now LIVE.'))
+
+    // The clear is scheduled for STATUS_CLEAR_MS; run it.
+    const scheduled = timers.mock.calls.filter(call => call[1] === STATUS_CLEAR_MS)
+    expect(scheduled.length).toBeGreaterThan(0)
+    await act(async () => {
+      for (const [callback] of scheduled) (callback as () => void)()
+    })
+
+    expect(screen.getByTestId('lifecycle-status')).toHaveTextContent('')
+    // The group (and the End button) are still there: only the claim went away.
+    expect(screen.getByRole('button', { name: /end exercise/i })).toBeInTheDocument()
+    timers.mockRestore()
   })
 
-  it('...and a controller prop shows it for a non-controller session', async () => {
-    renderControl({ status: 'live', sessionRole: 'evaluator', role: 'controller', withHeader: true })
+  it('keeps the (empty) group mounted after an EndEx with nothing left to press, so focus is not lost when the text clears', async () => {
+    const user = userEvent.setup()
+    const timers = vi.spyOn(window, 'setTimeout')
+    renderControl({ status: 'live', withHeader: true })
     await scopeResolved()
+    await user.click(screen.getByRole('button', { name: /end exercise/i }))
+    const dialog = await screen.findByRole('dialog', { name: /end the exercise/i })
+    await user.type(within(dialog).getByLabelText('Type END to confirm'), 'END')
+    await user.click(within(dialog).getByTestId('end-exercise-confirm'))
+    await waitFor(() => expect(pillLabel()).toBe('ENDEX'))
+    const group = await screen.findByRole('group', { name: 'Exercise lifecycle' })
+    await waitFor(() => expect(group).toHaveFocus())
 
-    expect(screen.getByRole('button', { name: /end exercise/i })).toBeInTheDocument()
+    const scheduled = timers.mock.calls.filter(call => call[1] === STATUS_CLEAR_MS)
+    await act(async () => {
+      for (const [callback] of scheduled) (callback as () => void)()
+    })
+
+    expect(screen.getByTestId('lifecycle-status')).toHaveTextContent('')
+    expect(screen.getByRole('group', { name: 'Exercise lifecycle' })).toHaveFocus()
+    timers.mockRestore()
   })
 })

@@ -18,7 +18,9 @@
  * the same 409 with the same sentence the server sends, so the error path is demonstrable too.
  */
 
-import { setMockExerciseStatus, type ExerciseStatus } from '@/core/exerciseContext'
+import type { ExerciseStatus } from '@/core/exerciseContext'
+// By path, not the barrel: a mock-only control (see the resolver).
+import { setMockExerciseStatus } from '@/core/exerciseContext/exerciseContextResolver'
 import {
   LifecycleError,
   type ExerciseLifecycle,

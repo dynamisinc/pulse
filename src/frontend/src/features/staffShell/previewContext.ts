@@ -210,6 +210,17 @@ export function PreviewProvider({ children }: PreviewProviderProps) {
 }
 
 /**
+ * The NON-THROWING read of the preview state: `undefined` outside a `<PreviewProvider>` (the
+ * planner workspace, which has no preview, mounts none). For shared staff CHROME that must adapt
+ * to a staged preview when there is one but cannot require one -- `StaffShellFrame` uses it to
+ * stop calling its work area a `main` landmark while the preview (whose channel has its own) is
+ * staged. Anything that needs the state to function must use {@link usePreview}.
+ */
+export function useOptionalPreview(): PreviewContextValue | undefined {
+  return useContext(PreviewContext)
+}
+
+/**
  * Reads the preview toggle + selected-moment state.
  *
  * Throws when called outside a `<PreviewProvider>` (fail-closed, mirroring

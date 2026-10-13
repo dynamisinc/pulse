@@ -70,9 +70,26 @@ export function isLifecycleState(value: unknown): value is LifecycleState {
 
 /** What the console needs of the lifecycle response: the state and what may happen next. */
 export interface ExerciseLifecycle {
+  /**
+   * The exercise the SERVER resolved this answer for (the body's `exerciseId` echo), when it sent
+   * one. It is never an input -- the console cannot choose an exercise (COR-001) -- but it lets the
+   * console notice that the server's exercise is not the one it is showing: a second tab whose
+   * session switched the active exercise. See {@link sameExercise}. Absent from mock data.
+   */
+  readonly exerciseId?: string
   readonly state: LifecycleState
   /** The states reachable from `state`, in the server's order. Unknown entries are dropped. */
   readonly allowedTransitions: readonly LifecycleState[]
+}
+
+/**
+ * Whether the exercise a lifecycle answer was resolved for is the one the console is showing.
+ * `undefined` (no echo -- mock data, an older server) matches: there is nothing to contradict.
+ * Compared case-insensitively on trimmed text so a GUID's casing can never HIDE the control.
+ */
+export function sameExercise(answerFor: string | undefined, shown: string): boolean {
+  if (answerFor === undefined) return true
+  return answerFor.trim().toLowerCase() === shown.trim().toLowerCase()
 }
 
 /** `GET`/`POST` path, relative to the shared axios client's `/api` base. */
@@ -100,14 +117,22 @@ export class LifecycleError extends Error {
  * `allowedTransitions` is dropped, so a target this build does not know is never offered.
  */
 export function parseLifecycle(data: unknown): ExerciseLifecycle {
-  const body = data as { state?: unknown; allowedTransitions?: unknown } | null | undefined
+  const body = data as
+    | { exerciseId?: unknown; state?: unknown; allowedTransitions?: unknown }
+    | null
+    | undefined
   if (!isLifecycleState(body?.state)) {
     throw new LifecycleError('The server returned an exercise state this console does not recognise.')
   }
   const allowed = Array.isArray(body.allowedTransitions)
     ? body.allowedTransitions.filter(isLifecycleState)
     : []
-  return { state: body.state, allowedTransitions: allowed }
+  const exerciseId = typeof body.exerciseId === 'string' && body.exerciseId.length > 0
+    ? body.exerciseId
+    : undefined
+  return exerciseId === undefined
+    ? { state: body.state, allowedTransitions: allowed }
+    : { exerciseId, state: body.state, allowedTransitions: allowed }
 }
 
 // -----------------------------------------------------------------------------
@@ -139,7 +164,9 @@ function messageForStatus(status: number): string {
     case 401:
       return 'Your console session has expired or has no exercise. Sign in again.'
     case 403:
-      return 'Only a controller assigned to this exercise can change its state.'
+      // The server admits any STAFF assigned to the exercise (not only controllers) until #481
+      // narrows the transition route; do not promise more than it enforces.
+      return 'Only staff assigned to this exercise can change its state.'
     case 404:
       return 'This exercise no longer exists.'
     case 409:

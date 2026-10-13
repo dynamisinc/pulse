@@ -90,6 +90,9 @@ import { resolvePreviewMomentInstant, usePreview } from '../previewContext'
 import { PreviewChannelHost } from './PreviewChannelHost'
 import { PreviewErrorBoundary } from './PreviewErrorBoundary'
 
+/** The accessible name of the preview's region (Gate-2 W-3). */
+export const PREVIEW_REGION_LABEL = 'Participant preview (read-only)'
+
 export function PreviewAsParticipant() {
   const { moment, toggle, returnFocus } = usePreview()
 
@@ -200,6 +203,11 @@ export function PreviewAsParticipant() {
         }}
       >
         <Box
+          // A named REGION, so the preview is identifiable without sight: a screen-reader user
+          // can tell where the participant's view starts (landmark navigation) and that it is a
+          // read-only rendering, not the console. The channel inside brings the one `main`.
+          component="section"
+          aria-label={PREVIEW_REGION_LABEL}
           data-testid="preview-frame"
           sx={{
             width: '100%',

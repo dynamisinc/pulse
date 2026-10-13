@@ -22,12 +22,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from '@mui/material/styles'
 import { MemoryRouter } from 'react-router-dom'
 import { cobraTheme } from '@/theme/cobraTheme'
+import { ExerciseContextProvider, type ExerciseStatus } from '@/core/exerciseContext'
 import {
-  ExerciseContextProvider,
   resetMockExerciseStatus,
   setMockExerciseStatus,
-  type ExerciseStatus,
-} from '@/core/exerciseContext'
+} from '@/core/exerciseContext/exerciseContextResolver'
 import type { ExerciseRole } from '@/core/auth'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
 import { SessionProvider } from '@/core/auth'
@@ -37,8 +36,6 @@ import { resetSessionRole, setSessionRole } from './lifecycle.sessionKit.testUti
 export interface RenderControlOptions {
   /** The status the MOCK exercise scope reports at mount. Defaults to the mock's own `live`. */
   readonly status?: ExerciseStatus
-  /** The `role` PROP override (wins over the session's role). */
-  readonly role?: ExerciseRole
   /** The signed-in session's role; `'none'` = no `SessionProvider`. Defaults to `controller`. */
   readonly sessionRole?: ExerciseRole | 'none'
   /** Render the real staff header beside the control, to read the state pill. */
@@ -47,13 +44,13 @@ export interface RenderControlOptions {
 
 /** Renders the control (and optionally the header) under the real providers. */
 export function renderControl(options: RenderControlOptions = {}): RenderResult {
-  const { status, role, sessionRole = 'controller', withHeader = false } = options
+  const { status, sessionRole = 'controller', withHeader = false } = options
   if (status !== undefined) setMockExerciseStatus(status)
   if (sessionRole !== 'none') setSessionRole(sessionRole)
   const body = (
     <>
       {withHeader && <StaffHeader surfaceName="Controller Console" />}
-      <ExerciseLifecycleControl {...(role !== undefined ? { role } : {})} />
+      <ExerciseLifecycleControl />
     </>
   )
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })

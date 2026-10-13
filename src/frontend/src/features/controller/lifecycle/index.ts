@@ -8,7 +8,6 @@
  */
 
 export { ExerciseLifecycleControl } from './ExerciseLifecycleControl'
-export type { ExerciseLifecycleControlProps } from './ExerciseLifecycleControl'
 export { useExerciseLifecycle, lifecycleQueryKey } from './useExerciseLifecycle'
 export type { UseExerciseLifecycleResult, LifecycleLoadPhase } from './useExerciseLifecycle'
 export type { ExerciseLifecycle, LifecycleState, LifecycleTarget } from './lifecycleService'

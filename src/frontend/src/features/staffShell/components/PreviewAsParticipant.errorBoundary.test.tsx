@@ -140,6 +140,18 @@ describe('a channel that throws on its FIRST render', () => {
     expect(screen.queryByTestId('outer-boundary-hit')).not.toBeInTheDocument()
   })
 
+  it('W-3: the failure panel is the preview\'s ONE main (the channel that would have been it is gone), with the alert inside', async () => {
+    await openPreview()
+    const alert = await screen.findByTestId('preview-unavailable')
+
+    const mains = screen.getAllByRole('main')
+    expect(mains).toHaveLength(1)
+    expect(mains[0]).toContainElement(alert)
+    // The alert role is on a CHILD: on the main itself it would replace the landmark role.
+    expect(alert).not.toBe(mains[0])
+    expect(screen.getByRole('region', { name: 'Participant preview (read-only)' })).toContainElement(mains[0] ?? null)
+  })
+
   it('leaves telemetry unmuted: the hold was never taken', async () => {
     await openPreview()
     await screen.findByTestId('preview-unavailable')

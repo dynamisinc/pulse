@@ -21,6 +21,7 @@
  *  - AC3 Two worlds: no MUI in the participant subtree, none of the participant shell's
  *    own layers (alert bar, overlay, compliance banners) inside the preview.
  */
+import { useLayoutEffect } from 'react'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -32,12 +33,35 @@ import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { api } from '@/core/services/api'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { RouterProbe } from '@/features/social/layout/RouterProbe.testUtils'
-import { PreviewProvider } from '../previewContext'
+import { notificationsStore } from '@/features/social/notifications/notificationsStore'
+import { PreviewProvider, usePreview } from '../previewContext'
 import { StaffShellFrame } from '../StaffShellFrame'
-import { PreviewAsParticipant } from './PreviewAsParticipant'
+import { PREVIEW_REGION_LABEL, PreviewAsParticipant } from './PreviewAsParticipant'
 
 const STAFF_ROUTE = '/staff/console'
 const SCENARIO_NOW = new Date('2033-09-04T14:30:00.000Z')
+
+/**
+ * What a staff route does with the preview: stage it in place of the work area. The preview is
+ * OPENED once on mount (as the header toggle would), so the frame sees `active` and the work area
+ * is in the state it is in for a real preview.
+ *
+ * The opener lives BESIDE the frame, not inside it: while the preview is staged the frame's work
+ * area changes its element (`main` to `div`, W-3), which remounts everything inside it -- an
+ * opener in there would run again and toggle the preview straight back off, forever.
+ */
+function PreviewOpener() {
+  const { toggle } = usePreview()
+  useLayoutEffect(() => {
+    toggle()
+  }, [toggle])
+  return null
+}
+
+function Stage() {
+  const { active } = usePreview()
+  return active ? <PreviewAsParticipant /> : null
+}
 
 function renderPreview() {
   setExerciseClock({ scenarioNow: () => SCENARIO_NOW })
@@ -52,8 +76,9 @@ function renderPreview() {
               <ExerciseContextProvider>
                 <SessionProvider>
                   <PreviewProvider>
+                    <PreviewOpener />
                     <StaffShellFrame>
-                      <PreviewAsParticipant />
+                      <Stage />
                     </StaffShellFrame>
                   </PreviewProvider>
                 </SessionProvider>
@@ -78,6 +103,7 @@ function channel(): HTMLElement {
 }
 
 let writeSpies: Array<ReturnType<typeof vi.spyOn>>
+let setItem: ReturnType<typeof vi.spyOn>
 let pushState: ReturnType<typeof vi.spyOn>
 let replaceState: ReturnType<typeof vi.spyOn>
 
@@ -89,6 +115,7 @@ beforeEach(() => {
     vi.spyOn(api, 'patch'),
     vi.spyOn(api, 'delete'),
   ]
+  setItem = vi.spyOn(Storage.prototype, 'setItem')
   pushState = vi.spyOn(window.history, 'pushState')
   replaceState = vi.spyOn(window.history, 'replaceState')
 })
@@ -116,6 +143,23 @@ describe('PreviewAsParticipant -- the real channel (AC1)', () => {
     // The staff strip keeps its label and Exit (the moment picker was removed after Gate-1).
     expect(screen.getByTestId('preview-bar-label')).toHaveTextContent('PREVIEW AS PARTICIPANT — READ-ONLY')
     expect(screen.getByTestId('preview-exit')).toBeInTheDocument()
+  })
+
+  it('W-3: the preview is a NAMED REGION and the page has exactly ONE main landmark', async () => {
+    renderPreview()
+    await feedReady()
+
+    // The preview is identifiable without sight: a labelled region around the participant view.
+    const region = screen.getByRole('region', { name: PREVIEW_REGION_LABEL })
+    expect(region).toBe(screen.getByTestId('preview-frame'))
+    expect(region).toContainElement(channel())
+    expect(PREVIEW_REGION_LABEL).toBe('Participant preview (read-only)')
+    // ONE main: the channel's. The staff work area is not a landmark while the preview is up.
+    const mains = screen.getAllByRole('main')
+    expect(mains).toHaveLength(1)
+    expect(mains[0]).toBe(screen.getByTestId('social-main'))
+    expect(region).toContainElement(mains[0] ?? null)
+    expect(screen.getByTestId('staff-shell-work-area').tagName).toBe('DIV')
   })
 
   it('is no longer the PortalStub mock', async () => {
@@ -191,6 +235,11 @@ describe('PreviewAsParticipant -- read-only: every write affordance is ABSENT (A
     // The Following feed (needs a persona) and the live "new posts" stream.
     expect(screen.queryByRole('tablist', { name: 'Feed' })).not.toBeInTheDocument()
     expect(screen.queryByTestId('new-posts-pill')).not.toBeInTheDocument()
+    // The F7 seam: Notifications are PERSONAL to a participant (they are about "you"), so a
+    // staff preview has no Notifications entry, its store is not live, and nothing is persisted.
+    expect(screen.queryByRole('link', { name: /^Notifications/ })).not.toBeInTheDocument()
+    expect(notificationsStore.getSummary().available).toBe(false)
+    expect(setItem).not.toHaveBeenCalled()
   }
 
   it('Home: no composer, no Post button, no Follow, no like / repost / reply buttons', async () => {

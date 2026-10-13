@@ -214,14 +214,14 @@ describe('ExerciseLifecycleControl (live) -- the requests', () => {
 })
 
 describe('ExerciseLifecycleControl (live) -- failures are visible text', () => {
-  it('a refused Start shows the server\'s own sentence, and re-reads the lifecycle so the buttons stop lying', async () => {
+  it('a Start refused because the exercise has MOVED ON still shows the server\'s own sentence, and the buttons tell the truth', async () => {
     const user = userEvent.setup()
     renderControl({ withHeader: true })
     await scopeResolved()
     const start = await screen.findByRole('button', { name: /start exercise/i })
     const readsBefore = lifecycleReads().length
-    // Another controller starts the exercise first: our Start is now a live -> live request.
-    serverState = 'live'
+    // Another controller started the exercise AND ended it: our Start is now completed -> live.
+    serverState = 'completed'
 
     await user.click(start)
 
@@ -229,19 +229,39 @@ describe('ExerciseLifecycleControl (live) -- failures are visible text', () => {
     expect(alert).toHaveAttribute('role', 'alert')
     expect(alert).toHaveTextContent('The exercise state was not changed.')
     expect(alert).toHaveTextContent(
-      "'live' -> 'live' is not an allowed lifecycle transition (allowed from 'live': paused, completed).",
+      "'completed' -> 'live' is not an allowed lifecycle transition (allowed from 'completed': archived).",
     )
     // S-1: the exercise scope was re-resolved too, so the header pill stops showing the old state.
-    await waitFor(() => expect(pillLabel()).toBe('LIVE'))
-    // The lifecycle was re-read, so the control now offers what is actually possible.
+    await waitFor(() => expect(pillLabel()).toBe('ENDEX'))
+    // The lifecycle was re-read, so the control offers what is actually possible: nothing.
     await waitFor(() => expect(lifecycleReads().length).toBeGreaterThan(readsBefore))
-    expect(await screen.findByRole('button', { name: /end exercise/i })).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('button', { name: /start exercise/i })).not.toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /end exercise/i })).not.toBeInTheDocument()
+  })
+
+  it('W-1: a Start refused (409) because another controller already started it is a SUCCESS, announced, with no error', async () => {
+    const user = userEvent.setup()
+    renderControl({ withHeader: true })
+    await scopeResolved()
+    const start = await screen.findByRole('button', { name: /start exercise/i })
+    // Another controller starts the exercise first: our Start is now a live -> live request (409).
+    serverState = 'live'
+
+    await user.click(start)
+
+    await waitFor(() => expect(screen.getByTestId('lifecycle-status'))
+      .toHaveTextContent('The exercise was already started. The state is now LIVE.'))
+    expect(screen.queryByTestId('lifecycle-error')).not.toBeInTheDocument()
+    await waitFor(() => expect(pillLabel()).toBe('LIVE'))
+    expect(await screen.findByRole('button', { name: /end exercise/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /start exercise/i })).not.toBeInTheDocument()
+    // Focus is never left on <body>: the Start button it was on is gone.
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Exercise lifecycle' })).toHaveFocus())
   })
 
   it.each([
     [401, 'Your console session has expired or has no exercise. Sign in again.'],
-    [403, 'Only a controller assigned to this exercise can change its state.'],
+    [403, 'Only staff assigned to this exercise can change its state.'],
     [404, 'This exercise no longer exists.'],
     [503, 'The server is busy right now. Try again in a moment.'],
     [500, 'The exercise state was not changed (the server answered 500).'],
@@ -264,7 +284,7 @@ describe('ExerciseLifecycleControl (live) -- failures are visible text', () => {
     ['a 408 (the request timed out)', httpError(408, undefined)],
     ['a 502 (a proxy cut the response)', httpError(502, undefined)],
     ['a 500 (the server failed after committing)', httpError(500, undefined)],
-  ])('S-A: %s -- the server may have APPLIED it, so the console asks instead of guessing', async (_label, failure) => {
+  ])('S-A / W-1: %s -- the server may have APPLIED it; the console asks, finds it LIVE and reports success', async (_label, failure) => {
     const user = userEvent.setup()
     failAfterApply = failure
     renderControl({ withHeader: true })
@@ -275,14 +295,91 @@ describe('ExerciseLifecycleControl (live) -- failures are visible text', () => {
 
     await user.click(await screen.findByRole('button', { name: /start exercise/i }))
 
-    // The error is shown (the console cannot know it worked)...
-    expect(await screen.findByTestId('lifecycle-error')).toBeInTheDocument()
-    // ...but it re-read the lifecycle and re-resolved the scope, so the screen tells the truth:
+    // It re-read the lifecycle and re-resolved the scope, so the screen tells the truth...
     await waitFor(() => expect(lifecycleReads().length).toBeGreaterThan(readsBefore))
     await waitFor(() => expect(scopeReads().length).toBeGreaterThan(scopeBefore))
     await waitFor(() => expect(pillLabel()).toBe('LIVE'))
     expect(await screen.findByRole('button', { name: /end exercise/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /start exercise/i })).not.toBeInTheDocument()
+    // ...and it does NOT also say "the state was not changed" beside a screen that says it was.
+    expect(screen.queryByTestId('lifecycle-error')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('lifecycle-status'))
+      .toHaveTextContent('The exercise was already started. The state is now LIVE.'))
+  })
+
+  it.each([
+    ['no status at all (the response was lost)', new AxiosError('Network Error', 'ERR_NETWORK')],
+    ['a 504 (a gateway timed out)', httpError(504, undefined)],
+  ])('W-1: an End with %s that the server APPLIED closes the dialog as a success, announced, with focus kept', async (_label, failure) => {
+    serverState = 'live'
+    failAfterApply = failure
+    const user = userEvent.setup()
+    renderControl({ withHeader: true })
+    await scopeResolved()
+
+    await user.click(await screen.findByRole('button', { name: /end exercise/i }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText('Type END to confirm'), 'END')
+    await user.click(within(dialog).getByTestId('end-exercise-confirm'))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(pillLabel()).toBe('ENDEX'))
+    // No contradiction: no "not ended" anywhere, in or out of the dialog.
+    expect(screen.queryByTestId('end-exercise-error')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('lifecycle-error')).not.toBeInTheDocument()
+    expect(screen.getByTestId('lifecycle-status'))
+      .toHaveTextContent('The exercise had already ended. The state is now ENDEX.')
+    expect(screen.getByRole('group', { name: 'Exercise lifecycle' })).toHaveFocus()
+    expect(screen.queryByRole('button', { name: /start exercise|end exercise/i })).not.toBeInTheDocument()
+  })
+
+  it('W-1: an End refused (409) because ANOTHER controller already ended it is a success: announced, dialog closed, focus on the group, never <body>', async () => {
+    serverState = 'live'
+    const user = userEvent.setup()
+    renderControl({ withHeader: true })
+    await scopeResolved()
+    await user.click(await screen.findByRole('button', { name: /end exercise/i }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText('Type END to confirm'), 'END')
+    // Another controller ends the exercise while this one is typing.
+    serverState = 'completed'
+
+    await user.click(within(dialog).getByTestId('end-exercise-confirm'))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByTestId('end-exercise-error')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('lifecycle-error')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('lifecycle-status'))
+      .toHaveTextContent('The exercise had already ended. The state is now ENDEX.'))
+    await waitFor(() => expect(pillLabel()).toBe('ENDEX'))
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Exercise lifecycle' })).toHaveFocus())
+    expect(document.body).not.toHaveFocus()
+  })
+
+  it('W-1: an End refused because the exercise moved to something ELSE keeps the reason, and the open dialog is NOT torn down when the buttons behind it go away', async () => {
+    serverState = 'live'
+    const user = userEvent.setup()
+    renderControl({ withHeader: true })
+    await scopeResolved()
+    await user.click(await screen.findByRole('button', { name: /end exercise/i }))
+    const dialog = await screen.findByRole('dialog')
+    const field = within(dialog).getByLabelText('Type END to confirm')
+    await user.type(field, 'END')
+    // The exercise is ended AND archived under the controller: completed -> completed is not the
+    // outcome asked for, and there is nothing left to offer.
+    serverState = 'archived'
+
+    await user.click(within(dialog).getByTestId('end-exercise-confirm'))
+
+    const error = await within(dialog).findByTestId('end-exercise-error')
+    expect(error).toHaveTextContent("'archived' -> 'completed' is not an allowed lifecycle transition")
+    // The End button behind the dialog is gone (nothing is reachable from archived)...
+    await waitFor(() => expect(screen.queryByTestId('lifecycle-end')).not.toBeInTheDocument())
+    // ...but the dialog explaining why is still there, with END still typed.
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(field).toHaveValue('END')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
   it.each([400, 401, 403, 404, 429])(
@@ -378,6 +475,57 @@ describe('ExerciseLifecycleControl (live) -- failures are visible text', () => {
     postFailure = undefined
     await user.click(within(dialog).getByTestId('end-exercise-confirm'))
     await waitFor(() => expect(pillLabel()).toBe('ENDEX'))
+  })
+})
+
+describe('ExerciseLifecycleControl (live) -- the server\'s exercise must be the one shown (S-3)', () => {
+  it('offers NOTHING when the lifecycle answer is for a DIFFERENT exercise, says so, and re-resolves the scope', async () => {
+    // A duplicated tab: another tab switched the session\'s active exercise to ex-other-9999.
+    lifecycleBodyOverride = {
+      exerciseId: 'ex-other-9999',
+      state: 'live',
+      storedStatus: 'live',
+      allowedTransitions: ['paused', 'completed'],
+    }
+    renderControl({ withHeader: true })
+    await scopeResolved()
+    const scopeBefore = scopeReads().length
+
+    const alert = await screen.findByTestId('lifecycle-load-error')
+    expect(alert).toHaveTextContent('different exercise than this console shows')
+    expect(screen.queryByRole('button', { name: /start exercise|end exercise/i })).not.toBeInTheDocument()
+    // The console catches up: the scope is asked again (once per answer, never in a loop).
+    await waitFor(() => expect(scopeReads().length).toBeGreaterThan(scopeBefore))
+    await new Promise(resolve => setTimeout(resolve, 30))
+    const settled = scopeReads().length
+    await new Promise(resolve => setTimeout(resolve, 60))
+    expect(scopeReads().length).toBe(settled)
+  })
+
+  it('still offers its buttons when the echo is the console\'s exercise in a different letter case', async () => {
+    lifecycleBodyOverride = {
+      exerciseId: 'EX-LIVE-0001',
+      state: 'staged',
+      storedStatus: 'staged',
+      allowedTransitions: ['live'],
+    }
+    renderControl({ withHeader: true })
+    await scopeResolved()
+
+    expect(await screen.findByRole('button', { name: /start exercise/i })).toBeInTheDocument()
+    expect(screen.queryByTestId('lifecycle-load-error')).not.toBeInTheDocument()
+  })
+
+  it('names the exercise in the End dialog', async () => {
+    serverState = 'live'
+    const user = userEvent.setup()
+    renderControl({ withHeader: true })
+    await scopeResolved()
+
+    await user.click(await screen.findByRole('button', { name: /end exercise/i }))
+    const dialog = await screen.findByRole('dialog')
+
+    expect(within(dialog).getByTestId('end-exercise-name')).toHaveTextContent('Coastal Surge (live)')
   })
 })
 

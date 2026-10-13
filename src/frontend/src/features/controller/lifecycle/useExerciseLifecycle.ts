@@ -33,6 +33,22 @@
  * unreachable, and the scope is left alone: a failed scope refresh fails the whole provider
  * CLOSED and would take the console down over a network blip.
  *
+ * THE RE-READ MAY SHOW THE REQUEST ALREADY DONE (Gate-2 W-1). If the re-read finds the exercise
+ * AT the state that was asked for -- our own request was applied and only its answer was lost, or
+ * another controller got there first and the machine answered 409 -- then "the state was not
+ * changed" would be a lie next to a screen that says it was. That outcome is a SUCCESS: the error
+ * is cleared, `lastTransition` is set with `lastTransitionAlreadyDone` (the control announces
+ * "already ended", not "ended"), and `transition` resolves `true`. It is not a success when the
+ * re-read shows any other state: then the reason stands and the buttons show the truth.
+ *
+ * THE SERVER'S EXERCISE MUST BE THE ONE SHOWN (Gate-2 S-3). The lifecycle answer echoes the
+ * `exerciseId` the SERVER resolved. A second tab whose session switched the active exercise would
+ * otherwise let this tab's buttons act on an exercise it is not displaying. When the echo is not
+ * the console's exercise the hook offers NOTHING, says so (`loadPhase: 'error'`), and re-resolves
+ * the scope so the console catches up. (A switch that happens between the read and the click
+ * cannot be seen from here -- the transition body deliberately names no exercise, COR-001 -- which
+ * is why the End dialog names the exercise it believes it is ending.)
+ *
  * ONE IN FLIGHT. A second `transition` while one is pending is ignored (a ref guard, because two
  * activations in the same tick both see `idle`): StartEx and EndEx must never race each other.
  *
@@ -46,13 +62,14 @@
  * `transitionError` when a change was refused or failed. Never colour, never a status code alone.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { useExerciseContext, useExerciseScopeRefresh } from '@/core/exerciseContext'
 import {
   fetchLifecycle,
   postTransition,
+  sameExercise,
   stateMayHaveChanged,
   toLifecycleError,
   type ExerciseLifecycle,
@@ -60,6 +77,11 @@ import {
   type LifecycleTarget,
 } from './lifecycleService'
 import { mockLifecycleFor, simulateTransition } from './lifecycleMock'
+
+/** Shown when the server's lifecycle answer is for a different exercise than the console shows. */
+const SCOPE_MISMATCH_MESSAGE =
+  'The server is on a different exercise than this console shows, so nothing is offered. ' +
+  'The console is refreshing; reload the page if this stays.'
 
 /** Where the lifecycle read is cached, per exercise (an exercise switch is a different key). */
 export function lifecycleQueryKey(exerciseId: string): readonly unknown[] {
@@ -92,6 +114,12 @@ export interface UseExerciseLifecycleResult {
   /** The last transition that SUCCEEDED in this mount (the control confirms it in text). */
   readonly lastTransition: LifecycleTarget | undefined
   /**
+   * `lastTransition` is a success the SERVER'S STATE proved rather than its answer: the request's
+   * answer was lost or refused (409), and a re-read showed the exercise already at the target.
+   * The control then announces "already ...", not "ended".
+   */
+  readonly lastTransitionAlreadyDone: boolean
+  /**
    * Requests `to`. Resolves `true` when the server applied it, `false` when it was refused or
    * failed (see `transitionError`) or was ignored because another is in flight. Never rejects.
    */
@@ -119,7 +147,9 @@ export function useExerciseLifecycle(): UseExerciseLifecycleResult {
     staleTime: 0,
   })
 
-  const [lastTransition, setLastTransition] = useState<LifecycleTarget | undefined>(undefined)
+  const [last, setLast] = useState<
+    { readonly to: LifecycleTarget; readonly alreadyDone: boolean } | undefined
+  >(undefined)
   const inFlightRef = useRef(false)
 
   const {
@@ -144,7 +174,7 @@ export function useExerciseLifecycle(): UseExerciseLifecycleResult {
     inFlightRef.current = true
     try {
       const next = await mutateAsync(to)
-      setLastTransition(to)
+      setLast({ to, alreadyDone: false })
       // 1. The buttons follow the response at once (live; mock derives from the scope below).
       queryClient.setQueryData(key, next)
       // 2. The header pill follows the re-resolved scope. A refresh that fails has already failed
@@ -157,32 +187,59 @@ export function useExerciseLifecycle(): UseExerciseLifecycleResult {
       // server: re-read the lifecycle so the buttons show the truth, then re-resolve the scope
       // so the header pill follows. See the module header.
       if (stateMayHaveChanged(toLifecycleError(error).status)) {
-        if (!USE_MOCK_DATA) {
+        let current: ExerciseLifecycle
+        if (USE_MOCK_DATA) {
+          current = mockLifecycleFor(status)
+        } else {
           try {
-            await queryClient.fetchQuery({ queryKey: key, queryFn: fetchLifecycle, staleTime: 0 })
+            current = await queryClient.fetchQuery({
+              queryKey: key,
+              queryFn: fetchLifecycle,
+              staleTime: 0,
+            })
           } catch {
             // Unreachable: leave the scope alone (a failed refresh would fail the provider closed).
             return false
           }
         }
         await refreshScope().catch(() => undefined)
+        // The exercise is already where the request wanted it (our own request was applied and
+        // only its answer lost, or another controller got there first): that is the OUTCOME the
+        // controller asked for, so it is a success, not "the state was not changed".
+        if (current.state === to && sameExercise(current.exerciseId, exerciseId)) {
+          clearError()
+          setLast({ to, alreadyDone: true })
+          return true
+        }
       }
       return false
     } finally {
       inFlightRef.current = false
     }
-  }, [mutateAsync, queryClient, refreshScope, key])
+  }, [mutateAsync, queryClient, refreshScope, key, status, exerciseId, clearError])
 
-  const lifecycle: ExerciseLifecycle | undefined = USE_MOCK_DATA
+  const answer: ExerciseLifecycle | undefined = USE_MOCK_DATA
     ? mockLifecycleFor(status)
     : query.data
 
-  const loadPhase: LifecycleLoadPhase = lifecycle !== undefined
-    ? 'ready'
-    : query.isError ? 'error' : 'loading'
-  const loadError = lifecycle === undefined && query.isError
-    ? toLifecycleError(query.error).message
-    : undefined
+  // The server answered for a DIFFERENT exercise than the one this console shows: offer nothing
+  // and re-resolve the scope so the console catches up (see the module header).
+  const scopeMismatch = answer !== undefined && !sameExercise(answer.exerciseId, exerciseId)
+  const lifecycle: ExerciseLifecycle | undefined = scopeMismatch ? undefined : answer
+  const dataUpdatedAt = query.dataUpdatedAt
+  useEffect(() => {
+    // Keyed on the answer's arrival, so a persistent mismatch asks once per read, never in a loop.
+    if (scopeMismatch) void refreshScope().catch(() => undefined)
+  }, [scopeMismatch, dataUpdatedAt, refreshScope])
+
+  const loadPhase: LifecycleLoadPhase = scopeMismatch || (lifecycle === undefined && query.isError)
+    ? 'error'
+    : lifecycle !== undefined ? 'ready' : 'loading'
+  const loadError = scopeMismatch
+    ? SCOPE_MISMATCH_MESSAGE
+    : lifecycle === undefined && query.isError
+      ? toLifecycleError(query.error).message
+      : undefined
 
   const allowedTransitions = lifecycle?.allowedTransitions ?? []
   const pending = isPending ? variables : undefined
@@ -200,7 +257,8 @@ export function useExerciseLifecycle(): UseExerciseLifecycleResult {
     canEnd: allowedTransitions.includes('completed'),
     pending,
     transitionError: isError ? toLifecycleError(mutationError).message : undefined,
-    lastTransition,
+    lastTransition: last?.to,
+    lastTransitionAlreadyDone: last?.alreadyDone ?? false,
     transition,
     reload,
     clearError,

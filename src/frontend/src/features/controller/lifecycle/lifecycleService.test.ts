@@ -16,6 +16,7 @@ import {
   parseLifecycle,
   postTransition,
   REQUEST_TIMEOUT_MS,
+  sameExercise,
   stateMayHaveChanged,
   toLifecycleError,
 } from './lifecycleService'
@@ -49,14 +50,25 @@ describe('the vocabulary', () => {
 })
 
 describe('parseLifecycle', () => {
-  it('reads the state and its allowed transitions off the endpoint body, ignoring the rest', () => {
+  it('reads the state, its allowed transitions and the exercise echo off the endpoint body, ignoring the rest', () => {
     expect(parseLifecycle({
       exerciseId: 'x',
       state: 'live',
       storedStatus: 'active',
       allowedTransitions: ['paused', 'completed'],
       behaviour: { clockRuns: true },
-    })).toEqual({ state: 'live', allowedTransitions: ['paused', 'completed'] })
+    })).toEqual({ exerciseId: 'x', state: 'live', allowedTransitions: ['paused', 'completed'] })
+  })
+
+  it('S-3: keeps the body\'s exerciseId when it sends one, and omits it when it does not (or sends junk)', () => {
+    expect(parseLifecycle({ exerciseId: 'ex-1', state: 'staged' }).exerciseId).toBe('ex-1')
+    for (const body of [
+      { state: 'staged' },
+      { exerciseId: '', state: 'staged' },
+      { exerciseId: 7, state: 'staged' },
+    ]) {
+      expect(parseLifecycle(body)).not.toHaveProperty('exerciseId')
+    }
   })
 
   it('drops allowed targets it does not know, and treats a missing list as none', () => {
@@ -143,7 +155,7 @@ describe('toLifecycleError -- every failure is a sentence', () => {
 
   it('NEVER shows server text for a status that is not a refusal sentence (401 / 403 / 404 / 5xx)', () => {
     expect(toLifecycleError(httpError(403, 'internal detail that must not leak')).message)
-      .toBe('Only a controller assigned to this exercise can change its state.')
+      .toBe('Only staff assigned to this exercise can change its state.')
     expect(toLifecycleError(httpError(500, 'Server stack trace')).message)
       .toBe('The exercise state was not changed (the server answered 500).')
   })
@@ -189,5 +201,21 @@ describe('stateMayHaveChanged -- which failures leave the exercise state UNKNOWN
   it('agrees with what toLifecycleError reports for a failure with no response', () => {
     expect(stateMayHaveChanged(toLifecycleError(new AxiosError('Network Error', 'ERR_NETWORK')).status))
       .toBe(true)
+  })
+})
+
+describe('sameExercise -- is the server\'s answer for the exercise the console shows? (S-3)', () => {
+  it('matches the same id, ignoring letter case and surrounding space (a GUID\'s casing must never hide the control)', () => {
+    expect(sameExercise('ex-1', 'ex-1')).toBe(true)
+    expect(sameExercise('3F2504E0-4F89-11D3-9A0C-0305E82C3301', '3f2504e0-4f89-11d3-9a0c-0305e82c3301')).toBe(true)
+    expect(sameExercise(' ex-1 ', 'ex-1')).toBe(true)
+  })
+
+  it('does not match a different exercise', () => {
+    expect(sameExercise('ex-2', 'ex-1')).toBe(false)
+  })
+
+  it('has nothing to contradict when the answer carries no echo (mock data, an older server)', () => {
+    expect(sameExercise(undefined, 'ex-1')).toBe(true)
   })
 })
