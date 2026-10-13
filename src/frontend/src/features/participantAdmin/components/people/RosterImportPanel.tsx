@@ -35,6 +35,12 @@
  * (derived sign-in names and collisions, auto personas, the identity key,
  * "a blank cell never clears a value") so staff are never surprised by what a
  * re-upload does. It is the template's documentation, in the place they use it.
+ * Since the Gate-2 fold it also says, in staff words: a row that could mean more than
+ * one person fails; the same-file guards (a name-only row beside a keyed row of the same
+ * name and agency, an email used twice, two rows reaching one person); a person with no
+ * persona gets one; an unused sign-in name is ignored with a note; and a newline inside
+ * a quoted cell is not supported (save as plain CSV). The roster mock
+ * (`../../mocks/rosterMocks.ts`) behaves exactly this way, so the words stay true in dev.
  *
  * ## Accessibility
  * The outcome sentence is in a `role="status"` region; failures are
@@ -227,6 +233,43 @@ function HowTheFileIsRead() {
           row fails rather than guess. Rows in the same file never update each other: a second
           row for the same person fails as a duplicate of the first. A blank cell never erases
           what is already stored.
+        </li>
+        <li>
+          <strong>A row that could mean more than one person fails.</strong> If a sign-in name,
+          an email or a name plus agency matches more than one person already on the roster
+          (say two older entries both called Pat Lee, with no agency), the row fails with
+          &ldquo;matches more than one person on the roster&rdquo;. Add a sign-in name to say
+          which one you mean.
+        </li>
+        <li>
+          <strong>One file gives the same answer every time.</strong> A row with only a name
+          (and agency) fails when another row in the same file has that same name and agency
+          plus a sign-in name or email: &ldquo;same name and agency as row N&rdquo;. Add a
+          sign-in name or email to the plain row, so the file means the same thing the first
+          time you upload it and every time after. An email can appear on only one row of a
+          file: a later row with an email an earlier row already used fails with &ldquo;email
+          also on row N&rdquo;, so two people never end up sharing an address. Two rows that
+          reach the same person already on the roster in different ways (one by sign-in name,
+          the other by email) fail the later one as &ldquo;duplicate of row N (same
+          person)&rdquo;, and an earlier row counts even if it failed.
+        </li>
+        <li>
+          <strong>People with no persona get one.</strong> Someone already on the roster who
+          has no persona (for example from an older import) gets a new citizen persona the first
+          time their row is uploaded. The row shows as Updated, with &ldquo;persona
+          created&rdquo;. If they had a persona that can no longer be found, a new one is made
+          and the message says &ldquo;persona re-created&rdquo;.
+        </li>
+        <li>
+          <strong>Sign-in names that are ignored.</strong> When a row finds someone by email,
+          or by name plus agency, and also has a sign-in name that nobody has, that person keeps
+          the sign-in name they already have. The row still counts, and its message ends
+          &ldquo;signInName &hellip; ignored: this person signs in as &hellip;&rdquo;.
+        </li>
+        <li>
+          <strong>Save as plain CSV.</strong> A line break inside a quoted cell is not
+          supported. Every line of the file is one row, so a cell split over two lines is read
+          as two rows. Export from your spreadsheet as plain CSV, one person per line.
         </li>
         <li>
           <strong>Validate first.</strong> It shows exactly what Import would do and writes
