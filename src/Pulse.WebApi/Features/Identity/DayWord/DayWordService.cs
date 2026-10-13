@@ -1,7 +1,9 @@
 namespace Pulse.WebApi.Features.Identity.DayWord;
 
 using System.Globalization;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
@@ -44,6 +46,12 @@ public sealed class DayWordService
     /// <summary>The wire format of a calendar date (<see cref="EasyLoginWire.DateFormat"/>).</summary>
     public const string DateFormat = EasyLoginWire.DateFormat;
 
+    /// <summary>SQL Server: cannot insert a duplicate key row (unique index).</summary>
+    private const int DuplicateKeyErrorNumber = 2601;
+
+    /// <summary>SQL Server: violation of a unique constraint.</summary>
+    private const int UniqueConstraintErrorNumber = 2627;
+
     /// <summary>The 400 reason for a date that is not <c>yyyy-MM-dd</c>.</summary>
     public const string DateFormatError = "The date must be written yyyy-MM-dd.";
 
@@ -76,6 +84,7 @@ public sealed class DayWordService
     private readonly IExerciseClock _exerciseClock;
     private readonly TimeProvider _timeProvider;
     private readonly EasyLoginOptions _options;
+    private readonly ILogger<DayWordService> _logger;
 
     /// <summary>Creates the service over its collaborators.</summary>
     /// <param name="dbContext">The persistence context (rows and telemetry share one unit of work).</param>
@@ -86,6 +95,7 @@ public sealed class DayWordService
     /// <param name="exerciseClock">The native exercise clock, for the telemetry scenario time.</param>
     /// <param name="timeProvider">The wall clock (a fake in tests).</param>
     /// <param name="options">The easy-login options (the day rollover hour).</param>
+    /// <param name="logger">Logs the once-per-exercise time-zone fallback warning (never a word).</param>
     public DayWordService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
@@ -94,7 +104,8 @@ public sealed class DayWordService
         ISharedCredentialHasher hasher,
         IExerciseClock exerciseClock,
         TimeProvider timeProvider,
-        IOptions<EasyLoginOptions> options)
+        IOptions<EasyLoginOptions> options,
+        ILogger<DayWordService> logger)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -104,6 +115,7 @@ public sealed class DayWordService
         ArgumentNullException.ThrowIfNull(exerciseClock);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
@@ -113,6 +125,7 @@ public sealed class DayWordService
         _exerciseClock = exerciseClock;
         _timeProvider = timeProvider;
         _options = options.Value;
+        _logger = logger;
     }
 
     /// <summary>
@@ -242,8 +255,8 @@ public sealed class DayWordService
 
         // 3. One row per (exercise, date): replace in place when one exists (a rotation), else insert. Tracked read
         //    under the central filter, so it can only ever be this exercise's row.
-        var row = await _dbContext.ExerciseDayWords
-            .FirstOrDefaultAsync(r => r.ExerciseId == context.ExerciseId && r.ForDate == date, cancellationToken);
+        var eventTime = EasyLoginEventTime.For(context.ExerciseId, context.Facts, _exerciseClock, now);
+        var row = await FindRowAsync(context.ExerciseId, date, cancellationToken);
 
         var replaced = row is not null;
         if (row is null)
@@ -262,22 +275,36 @@ public sealed class DayWordService
         }
         else
         {
-            row.WordHash = hash;
-            row.SetAt = now;
-            row.SetByStaffUserId = context.StaffUserId;
-            row.ReplacedCount++;
+            Replace(row, hash, now, context.StaffUserId);
         }
 
-        _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.DayWordSet(
-            context.ExerciseId,
-            context.Actor,
-            row.Id,
-            date,
-            first: !replaced,
-            generated,
-            EasyLoginEventTime.For(context.ExerciseId, context.Facts, _exerciseClock, now)));
+        _dbContext.TelemetryEvents.Add(SetEvent(context, row.Id, date, first: !replaced, generated, eventTime));
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (!replaced && IsUniqueViolation(ex))
+        {
+            // Gate-1 W-3: another staff member's FIRST set for the same date committed between our read and our
+            // insert, so the (ExerciseId, ForDate) unique index refused ours. Exactly one retry, as a rotation: drop
+            // the refused insert and its event, re-read the winner's row under the central filter, and replace it in
+            // place. No 409: the caller asked for this word to be the date's word, and now it is.
+            _dbContext.ChangeTracker.Clear();
+
+            var winner = await FindRowAsync(context.ExerciseId, date, cancellationToken);
+            if (winner is null)
+            {
+                // The winner was cleared again in between: nothing coherent to replace. Fail rather than loop (the
+                // exception names the index and key, never the word).
+                throw;
+            }
+
+            Replace(winner, hash, now, context.StaffUserId);
+            _dbContext.TelemetryEvents.Add(SetEvent(context, winner.Id, date, first: false, generated, eventTime));
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            replaced = true;
+        }
 
         return DayWordResult.ForSet(new DayWordSetResultDto
         {
@@ -324,9 +351,7 @@ public sealed class DayWordService
             return DayWordResult.Invalid(ClearRangeError);
         }
 
-        var row = await _dbContext.ExerciseDayWords
-            .FirstOrDefaultAsync(r => r.ExerciseId == context.ExerciseId && r.ForDate == date, cancellationToken);
-
+        var row = await FindRowAsync(context.ExerciseId, date, cancellationToken);
         if (row is null)
         {
             return DayWordResult.Cleared();
@@ -351,6 +376,33 @@ public sealed class DayWordService
     /// <returns><c>true</c> when <paramref name="raw"/> is a real date in that exact form.</returns>
     public static bool TryParseDate(string? raw, out DateOnly date) =>
         DateOnly.TryParseExact(raw, DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+
+    /// <summary>Whether a save failed on a unique index (SQL Server 2601 duplicate key, 2627 unique constraint).</summary>
+    private static bool IsUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is SqlException { Number: DuplicateKeyErrorNumber or UniqueConstraintErrorNumber };
+
+    /// <summary>Rotates <paramref name="row"/> in place to the new hash (ReplacedCount + 1).</summary>
+    private static void Replace(ExerciseDayWord row, string hash, DateTimeOffset now, Guid staffUserId)
+    {
+        row.WordHash = hash;
+        row.SetAt = now;
+        row.SetByStaffUserId = staffUserId;
+        row.ReplacedCount++;
+    }
+
+    private static TelemetryEvent SetEvent(
+        StaffDayWordContext context,
+        Guid rowId,
+        DateOnly date,
+        bool first,
+        bool generated,
+        EasyLoginEventTime time) =>
+        EasyLoginTelemetry.DayWordSet(context.ExerciseId, context.Actor, rowId, date, first, generated, time);
+
+    /// <summary>This exercise's row for <paramref name="date"/>, tracked, under the central filter.</summary>
+    private Task<ExerciseDayWord?> FindRowAsync(Guid exerciseId, DateOnly date, CancellationToken cancellationToken) =>
+        _dbContext.ExerciseDayWords
+            .FirstOrDefaultAsync(r => r.ExerciseId == exerciseId && r.ForDate == date, cancellationToken);
 
     /// <summary>The zone the day maths actually used: the stored id when it resolves, else <c>UTC</c>.</summary>
     private static string EffectiveZone(string? timeZone) =>
@@ -398,6 +450,9 @@ public sealed class DayWordService
         {
             return new CallerResolution(DayWordOutcome.Unauthorized, null);
         }
+
+        // An unknown zone falls back to UTC for "today" (logged once per exercise: exercise id and zone id only).
+        DayWordTimeZoneWarning.WarnIfFallback(_logger, exerciseId, facts.TimeZone);
 
         return new CallerResolution(
             DayWordOutcome.Ok,

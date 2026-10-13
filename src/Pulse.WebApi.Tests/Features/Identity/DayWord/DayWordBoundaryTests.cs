@@ -14,7 +14,8 @@ using static Pulse.WebApi.Tests.Features.Identity.DayWord.DayWordTestSupport;
 /// easy-login/05 (AC5; EL-9, EL-19c) — the day boundary. A word set for date D signs in until the exercise-zone rollover
 /// that ends D (local midnight plus <c>DayRolloverHour</c>) and not a second after; the word for D+1 does not work before
 /// it. Driven by a hand-advanced <see cref="TimeProvider"/> (no real sleeping) across <c>America/New_York</c>'s fall-back
-/// (a 25-hour day) and spring-forward (a 23-hour day), <c>Asia/Kolkata</c> (a half-hour offset) and a rollover hour of 3.
+/// (a 25-hour day) and spring-forward (a 23-hour day), <c>Asia/Kolkata</c> (a half-hour offset), a rollover hour of 3, and
+/// a rollover hour of 2 on the spring-forward night, where local 02:00 does not exist (Gate-1 S-7).
 /// The staff side agrees: <c>today</c>, <c>todayEndsAt</c>, <c>validUntil</c> and "a past date" all flip at the same
 /// instant.
 /// </summary>
@@ -102,6 +103,25 @@ public sealed class DayWordBoundaryTests
         (await AttemptAsync(exerciseId, "second day word", Utc(2026, 10, 14, 6, 59, 59), rolloverHour: 3)).Should().Be(WordLoginOutcome.Rejected);
         (await AttemptAsync(exerciseId, "first day word", Utc(2026, 10, 14, 7, 0, 0), rolloverHour: 3)).Should().Be(WordLoginOutcome.Rejected);
         (await AttemptAsync(exerciseId, "second day word", Utc(2026, 10, 14, 7, 0, 0), rolloverHour: 3)).Should().Be(WordLoginOutcome.Authenticated);
+    }
+
+    [RequiresDockerFact]
+    public async Task RolloverHourTwo_OnTheSpringForwardNight_EndsTheDayWhenTheClocksJump()
+    {
+        // 2027-03-14 in New York: local 02:00 does not exist (02:00 EST jumps to 03:00 EDT at 07:00Z). With a 02:00
+        // rollover the 13th therefore ends at the next valid instant, the jump itself: 07:00Z. The 14th then runs to
+        // 2027-03-15 02:00 EDT (06:00Z).
+        var exerciseId = await SeedTwoDaysAsync(NewYork, new DateOnly(2027, 3, 13));
+
+        (await AttemptAsync(exerciseId, "first day word", Utc(2027, 3, 14, 6, 59, 59), rolloverHour: 2)).Should().Be(
+            WordLoginOutcome.Authenticated, "01:59:59 EST is still the 13th's exercise day");
+        (await AttemptAsync(exerciseId, "second day word", Utc(2027, 3, 14, 6, 59, 59), rolloverHour: 2)).Should().Be(WordLoginOutcome.Rejected);
+        (await AttemptAsync(exerciseId, "first day word", Utc(2027, 3, 14, 7, 0, 0), rolloverHour: 2)).Should().Be(
+            WordLoginOutcome.Rejected, "the missing 02:00 resolves to the instant the clocks jump, and not a second after");
+        (await AttemptAsync(exerciseId, "second day word", Utc(2027, 3, 14, 7, 0, 0), rolloverHour: 2)).Should().Be(WordLoginOutcome.Authenticated);
+        (await AttemptAsync(exerciseId, "second day word", Utc(2027, 3, 15, 5, 59, 59), rolloverHour: 2)).Should().Be(WordLoginOutcome.Authenticated);
+        (await AttemptAsync(exerciseId, "second day word", Utc(2027, 3, 15, 6, 0, 0), rolloverHour: 2)).Should().Be(
+            WordLoginOutcome.Rejected, "the 14th ends at 02:00 EDT on the 15th");
     }
 
     [RequiresDockerFact]

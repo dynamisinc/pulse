@@ -8,7 +8,8 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 
 /// <summary>
 /// easy-login/05 (AC1): a generated word is <c>adjective-noun-NN</c>, lower-case, from curated lists of unambiguous
-/// words, always a valid word once normalised, and random (cryptographic draws, so two calls differ).
+/// words (200 adjectives and 200 nouns after Gate-1 S-1, ~21.8 bits), always a valid word once normalised, and random
+/// (cryptographic draws, so two calls differ).
 /// </summary>
 public sealed class DayWordGeneratorTests
 {
@@ -46,11 +47,11 @@ public sealed class DayWordGeneratorTests
     [Fact]
     public void Generate_TwoCallsDiffer()
     {
-        // ~230,000 combinations: 20 draws all equal would mean the source is not random.
+        // 3.6 million combinations: 20 draws all equal would mean the source is not random.
         var words = Enumerable.Range(0, 20).Select(_ => DayWordGenerator.Generate()).ToList();
 
         words.Distinct().Should().HaveCountGreaterThan(1, "the generator draws with RandomNumberGenerator, so calls differ");
-        DayWordGenerator.Generate().Should().NotBe(DayWordGenerator.Generate(), "two consecutive calls differ (collision odds ~1 in 230,000)");
+        DayWordGenerator.Generate().Should().NotBe(DayWordGenerator.Generate(), "two consecutive calls differ (collision odds ~1 in 3.6 million)");
     }
 
     [Fact]
@@ -60,10 +61,21 @@ public sealed class DayWordGeneratorTests
         {
             list.Should().OnlyHaveUniqueItems();
             list.Should().OnlyContain(word => Regex.IsMatch(word, "^[a-z]{4,8}$"), "short, lower-case ASCII letters only");
-            list.Count.Should().BeGreaterThanOrEqualTo(50, "enough words that a guess is not a short list");
+            list.Count.Should().Be(200, "Gate-1 S-1: about 200 plain words per list");
+            list.Should().BeInAscendingOrder(System.StringComparer.Ordinal, "kept alphabetical so a review can scan it");
         }
 
         DayWordGenerator.Adjectives.Intersect(DayWordGenerator.Nouns).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TheWordSpace_IsAbout22Bits()
+    {
+        var combinations = (long)DayWordGenerator.Adjectives.Count * DayWordGenerator.Nouns.Count
+            * (DayWordGenerator.MaxNumber - DayWordGenerator.MinNumber + 1);
+
+        combinations.Should().Be(3_600_000);
+        System.Math.Log2(combinations).Should().BeGreaterThan(21.7, "Gate-1 S-1: ~21.8 bits, up from ~17.8");
     }
 
     [Theory]
@@ -75,6 +87,12 @@ public sealed class DayWordGeneratorTests
     [InlineData("blue")]
     [InlineData("bear")]
     [InlineData("harbor")]
+    [InlineData("beacon")]
+    [InlineData("rocket")]
+    [InlineData("siren")]
+    [InlineData("secret")]
+    [InlineData("whale")]
+    [InlineData("deer")]
     public void TheCuratedLists_AvoidAlarmingWords_HomophonesAndRegionalSpellings(string word)
     {
         DayWordGenerator.Adjectives.Should().NotContain(word);

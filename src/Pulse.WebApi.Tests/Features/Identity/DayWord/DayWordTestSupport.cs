@@ -7,6 +7,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
@@ -151,7 +153,8 @@ internal static class DayWordTestSupport
         TimeProvider clock,
         ISharedCredentialHasher? hasher = null,
         int rolloverHour = 0,
-        IExerciseClock? exerciseClock = null) =>
+        IExerciseClock? exerciseClock = null,
+        ILogger<DayWordService>? logger = null) =>
         new(
             context,
             new ExerciseContext { CurrentExerciseId = scope },
@@ -161,7 +164,8 @@ internal static class DayWordTestSupport
             hasher ?? new SharedCredentialHasher(),
             exerciseClock ?? new StubExerciseClock(null),
             clock,
-            Options.Create(new EasyLoginOptions { DayRolloverHour = rolloverHour }));
+            Options.Create(new EasyLoginOptions { DayRolloverHour = rolloverHour }),
+            logger ?? NullLogger<DayWordService>.Instance);
 
     /// <summary>Builds the sign-in service over a context scoped to <paramref name="scope"/>.</summary>
     public static WordLoginService LoginService(
@@ -171,7 +175,8 @@ internal static class DayWordTestSupport
         RecordingSessionIssuer issuer,
         ISharedCredentialHasher? hasher = null,
         int rolloverHour = 0,
-        IExerciseClock? exerciseClock = null) =>
+        IExerciseClock? exerciseClock = null,
+        ILogger<WordLoginService>? logger = null) =>
         new(
             context,
             new ExerciseContext { CurrentExerciseId = scope },
@@ -180,7 +185,8 @@ internal static class DayWordTestSupport
             new ExerciseFactsReader(context),
             exerciseClock ?? new StubExerciseClock(null),
             clock,
-            Options.Create(new EasyLoginOptions { DayRolloverHour = rolloverHour }));
+            Options.Create(new EasyLoginOptions { DayRolloverHour = rolloverHour }),
+            logger ?? NullLogger<WordLoginService>.Instance);
 
     /// <summary>A hand-advanced wall clock at <paramref name="now"/> (no real sleeping).</summary>
     public static ManualTimeProvider ClockAt(DateTimeOffset now) => new(now);
@@ -230,7 +236,7 @@ internal sealed class CountingHasher : ISharedCredentialHasher
     }
 }
 
-/// <summary>Records every SQL command text into a shared ordered log.</summary>
+/// <summary>Records every SQL command text (reader, non-query and scalar) into a shared ordered log.</summary>
 internal sealed class CommandLogInterceptor : DbCommandInterceptor
 {
     private readonly List<string> _log;
@@ -246,6 +252,40 @@ internal sealed class CommandLogInterceptor : DbCommandInterceptor
         _log.Add("SQL:" + command.CommandText);
         return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
     }
+
+    public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+        DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        _log.Add("SQL:" + command.CommandText);
+        return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
+    }
+
+    public override ValueTask<InterceptionResult<object>> ScalarExecutingAsync(
+        DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<object> result,
+        CancellationToken cancellationToken = default)
+    {
+        _log.Add("SQL:" + command.CommandText);
+        return base.ScalarExecutingAsync(command, eventData, result, cancellationToken);
+    }
+}
+
+/// <summary>An <see cref="ILogger{TCategoryName}"/> that keeps every entry (level and formatted message).</summary>
+internal sealed class ListLogger<T> : ILogger<T>
+{
+    public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+        Entries.Add((logLevel, formatter(state, exception)));
 }
 
 /// <summary>An <see cref="IExerciseClock"/> that reports a fixed scenario instant (or none).</summary>

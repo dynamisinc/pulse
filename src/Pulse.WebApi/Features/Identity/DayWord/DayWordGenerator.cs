@@ -19,9 +19,9 @@ using System.Security.Cryptography;
 /// number is 10 to 99, so it is always two spoken digits and never starts with "oh".
 /// </para>
 /// <para>
-/// <b>Strength.</b> About 230,000 combinations (50 × 51 × 90, ~17.8 bits). That is deliberately a readable word, not a
-/// password: the controls that make it tolerable are the per-IP limiter, the one-day life, one-click rotation and the
-/// word-before-name verification (story 05 context). The plaintext is returned to staff once and only ever stored as
+/// <b>Strength.</b> 3.6 million combinations (200 × 200 × 90, ~21.8 bits; widened at Gate-1 S-1). That is deliberately
+/// a readable word, not a password: the controls that make it tolerable are the per-IP limiter, the one-day life,
+/// one-click rotation and the word-before-name verification (story 05 context). The plaintext is returned to staff once and only ever stored as
 /// an <c>ISharedCredentialHasher</c> hash of its normalised form.
 /// </para>
 /// </remarks>
@@ -33,25 +33,50 @@ public static class DayWordGenerator
     /// <summary>The largest two-digit suffix (inclusive).</summary>
     public const int MaxNumber = 99;
 
-    /// <summary>The adjective list (first part).</summary>
+    /// <summary>The adjective list (first part): 200 words, alphabetical.</summary>
     public static IReadOnlyList<string> Adjectives { get; } =
     [
-        "amber", "brave", "breezy", "bright", "brisk", "calm", "cheerful", "clever", "crisp", "dapper",
-        "eager", "early", "fancy", "frosty", "gentle", "giant", "glad", "golden", "grand", "happy",
-        "jolly", "jumbo", "kind", "lively", "lucky", "mighty", "misty", "modest", "nimble", "noble",
-        "plucky", "polite", "proud", "quick", "rapid", "rosy", "rustic", "sandy", "silver", "smooth",
-        "snowy", "spry", "steady", "sturdy", "swift", "tidy", "upbeat", "vivid", "witty", "zesty",
+        "agile", "amber", "ample", "amused", "artful", "avid", "awake", "balmy", "bouncy", "brainy", "brave", "breezy",
+        "bright", "brisk", "bubbly", "bumpy", "busy", "calm", "candid", "careful", "caring", "casual", "cheerful",
+        "cheery", "chirpy", "classic", "clean", "clever", "cloudy", "comfy", "cool", "cosmic", "crafty", "creamy",
+        "crisp", "crunchy", "cuddly", "curious", "curly", "dainty", "dandy", "dapper", "daring", "dazzling", "dreamy",
+        "dusty", "eager", "early", "easy", "elegant", "epic", "expert", "famous", "fancy", "fearless", "festive",
+        "fizzy", "flashy", "fluffy", "fond", "frank", "fresh", "friendly", "frosty", "funny", "fuzzy", "gentle",
+        "giant", "giddy", "gifted", "glad", "gleeful", "glossy", "glowing", "golden", "graceful", "grand", "grassy",
+        "handy", "happy", "hardy", "hearty", "helpful", "honest", "hopeful", "humble", "jaunty", "jazzy", "jolly",
+        "joyful", "jumbo", "keen", "kind", "kindly", "leafy", "limber", "lively", "lofty", "loyal", "lucid", "lucky",
+        "lunar", "lush", "mellow", "mighty", "mild", "minty", "misty", "modest", "mossy", "muddy", "musical", "neat",
+        "nifty", "nimble", "noble", "peaceful", "peppy", "perky", "placid", "playful", "plucky", "plush", "polar",
+        "polite", "precise", "pretty", "proud", "quick", "quirky", "radiant", "rapid", "ready", "regal", "robust",
+        "rocky", "rosy", "royal", "rugged", "rustic", "rusty", "sandy", "savvy", "serene", "shiny", "silky", "silly",
+        "silver", "simple", "sleek", "sleepy", "slick", "smart", "smooth", "snappy", "snowy", "snug", "soft", "solar",
+        "solid", "speedy", "spicy", "sporty", "spry", "stable", "stately", "steady", "sturdy", "stylish", "subtle",
+        "sunlit", "superb", "swift", "tall", "tangy", "tender", "tidy", "tiny", "tough", "tranquil", "trendy",
+        "trusty", "tuneful", "upbeat", "useful", "valiant", "velvet", "vibrant", "vital", "vivid", "warm", "wavy",
+        "wise", "witty", "worthy", "young", "youthful", "zany", "zesty", "zippy",
     ];
 
-    /// <summary>The noun list (second part).</summary>
+    /// <summary>The noun list (second part): 200 words, alphabetical.</summary>
     public static IReadOnlyList<string> Nouns { get; } =
     [
-        "acorn", "anchor", "apple", "badger", "banjo", "beacon", "bison", "button", "cactus", "camel",
-        "candle", "canyon", "cedar", "comet", "compass", "copper", "cricket", "dolphin", "falcon", "garden",
-        "ginger", "hammock", "jacket", "kettle", "lantern", "lemon", "magnet", "maple", "meadow", "mitten",
-        "muffin", "orchard", "otter", "panda", "parrot", "pebble", "pepper", "piano", "pickle", "pillow",
-        "pocket", "rabbit", "ribbon", "saddle", "tiger", "tulip", "turtle", "violin", "walnut", "wombat",
-        "zebra",
+        "acorn", "almond", "anchor", "apple", "badger", "bagel", "balloon", "bamboo", "banana", "banjo", "basket",
+        "beaver", "bench", "bison", "blanket", "bottle", "boulder", "bridge", "broom", "bucket", "buffalo", "bunny",
+        "butter", "button", "cabin", "cactus", "camel", "camera", "canary", "candle", "canoe", "canyon", "castle",
+        "cedar", "cello", "chair", "cheetah", "cherry", "circus", "clock", "clover", "coconut", "comet", "compass",
+        "cookie", "copper", "coral", "cotton", "cougar", "crayon", "cricket", "crown", "crystal", "cupcake", "daisy",
+        "diamond", "dolphin", "donkey", "dragon", "drum", "eagle", "falcon", "feather", "finch", "flamingo", "flute",
+        "forest", "fountain", "frog", "garden", "garlic", "gecko", "ginger", "giraffe", "globe", "goose", "grape",
+        "guitar", "hammock", "hamster", "harp", "helmet", "heron", "hill", "hippo", "honey", "husky", "jacket",
+        "jaguar", "jelly", "jungle", "kayak", "kettle", "kite", "kitten", "kiwi", "koala", "ladder", "lake", "lamp",
+        "lantern", "lemon", "lily", "lime", "lion", "lizard", "lobster", "lotus", "magnet", "mango", "maple", "marble",
+        "meadow", "melon", "mirror", "mitten", "monkey", "muffin", "mushroom", "noodle", "ocean", "olive", "onion",
+        "orange", "orca", "orchard", "orchid", "otter", "oyster", "paddle", "pancake", "panda", "panther", "parrot",
+        "pasta", "peach", "peacock", "peanut", "pebble", "pelican", "penguin", "pepper", "piano", "pickle", "pigeon",
+        "pillow", "planet", "pocket", "pond", "pony", "poppy", "potato", "puffin", "pumpkin", "puppy", "puzzle",
+        "quail", "quilt", "rabbit", "raccoon", "raven", "ribbon", "river", "robin", "saddle", "salad", "scarf",
+        "scooter", "shell", "sloth", "snail", "sparrow", "spoon", "stone", "stork", "swan", "table", "teapot", "tiger",
+        "toast", "tomato", "toucan", "tractor", "trail", "trumpet", "tulip", "tunnel", "turnip", "turtle", "valley",
+        "violin", "waffle", "wagon", "walnut", "walrus", "willow", "window", "wombat", "zebra", "zipper",
     ];
 
     /// <summary>Produces a fresh <c>adjective-noun-NN</c> word. The caller hashes it and shows the plaintext once.</summary>
