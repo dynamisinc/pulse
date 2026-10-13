@@ -53,9 +53,10 @@
  *     participant link in a staff tab signs that staff user out). A DIFFERENT
  *     participant's persisted pair is simply replaced. Both are `tokenStore`
  *     behaviour (story 07); this page just passes the flag.
- *   - `queryClient.clear()` — nothing the previous identity fetched may be shown
- *     to the new one (COR-001). Done AFTER the new tokens are stored, so no
- *     refetch can go out under the old token.
+ *   - `resetClientSession()` + `queryClient.clear()` — nothing the previous identity
+ *     fetched or composed may be shown to the new one (COR-001): the same client
+ *     reset sign-out runs, minus the logout (easy-login 08 Gate-1 W-1). Done AFTER
+ *     the new tokens are stored, so no refetch can go out under the old token.
  *   - `navigate('/', { replace: true })` — the role-aware entry then lands the
  *     participant on their feed. `replace`, so Back never returns here.
  * One browser, one identity (story 07, S-1): a second join link opened in another
@@ -122,7 +123,7 @@ import {
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
-import { setTokens } from '@/core/auth'
+import { resetClientSession, setTokens } from '@/core/auth'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import { JOIN_PATH, LOGIN_PATH } from '@/features/app-shell/constants'
 import {
@@ -263,6 +264,10 @@ export function JoinPage() {
       { token: envelope.token, refreshToken: envelope.refreshToken },
       { persist: true },
     )
+    // Forget the previous identity's client state exactly as sign-out does (own posts,
+    // reply intent, the shared cache), then clear the provider's client too (the same
+    // object in the app; a test may mount its own).
+    resetClientSession()
     queryClient.clear()
     tokenRef.current = null
     navigate(ENTRY_PATH, { replace: true })

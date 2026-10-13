@@ -44,7 +44,7 @@ The epics have no requirement text for personal links, day words or card sheets 
 | 05 | [Day word: staff controls and word sign-in](05-day-word.md) | backend | Must | 1 | 01 | In Review | #470 |
 | 06 | [Day-long participant sessions](06-day-long-sessions.md) | backend | Must | 1 | 01 | In Review | #471 |
 | 07 | [Participant tokens survive a closed tab](07-fe-token-persistence.md) | frontend | Must | 1 | contract | In Review | #472 |
-| 08 | [Join page: tap the link, you are in](08-fe-join-page.md) | frontend | Must | 2 | 07 | Not Started | #473 |
+| 08 | [Join page: tap the link, you are in](08-fe-join-page.md) | frontend | Must | 2 | 07 | In Review | #473 |
 | 09 | [Sign-in page: Today's word](09-fe-todays-word-sign-in.md) | frontend | Must | 2 | 07 | In Review | #474 |
 | 10 | [Roster screen (staff)](10-fe-roster-screen.md) | frontend | Must | 1 | contract | In Review | #475 |
 | 11 | [Today's word panel (staff)](11-fe-day-word-panel.md) | frontend | Must | 1 | contract | In Review | #476 |

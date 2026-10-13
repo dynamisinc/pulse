@@ -45,7 +45,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/core/services/api'
-import { setTokens } from '@/core/auth'
+import { resetClientSession, setTokens } from '@/core/auth'
 import {
   clearTokens,
   getAccessToken,
@@ -64,11 +64,12 @@ vi.mock('@/core/services/api', () => ({
 vi.mock('@/core/config/mockData', () => ({ USE_MOCK_DATA: false }))
 
 // The real token store; only `setTokens` is wrapped so the page's call can be asserted.
+// `resetClientSession` is a spy: its own behaviour is covered by core/auth/endSession.test.ts.
 vi.mock('@/core/auth', async () => {
   const store = await vi.importActual<typeof import('@/core/auth/tokenStore')>(
     '@/core/auth/tokenStore',
   )
-  return { setTokens: vi.fn(store.setTokens) }
+  return { setTokens: vi.fn(store.setTokens), resetClientSession: vi.fn() }
 })
 
 vi.mock('@/core/exerciseContext', () => ({
@@ -77,6 +78,7 @@ vi.mock('@/core/exerciseContext', () => ({
 
 const mockPost = vi.mocked(api.post)
 const mockSetTokens = vi.mocked(setTokens)
+const mockResetClientSession = vi.mocked(resetClientSession)
 const mockResolveExerciseContext = vi.mocked(resolveExerciseContext)
 
 const TOKEN = 'tok_7f3a9c1e-SECRET-join-link'
@@ -630,6 +632,19 @@ describe('one browser, one identity (AC4)', () => {
     expect(getSessionMarker()).not.toBeNull()
     expect(getSessionMarker()).not.toBe(markerA)
     expect(queryClient.getQueryData(['social', 'feed'])).toBeUndefined()
+  })
+
+  it('runs sign-out\'s client reset for the replaced identity, after the new tokens are stored (W-1)', async () => {
+    mockPost.mockResolvedValue(ok())
+    mockResetClientSession.mockClear()
+
+    renderJoin()
+    await screen.findByTestId('entry')
+
+    expect(mockResetClientSession).toHaveBeenCalledTimes(1)
+    expect(mockResetClientSession.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockSetTokens.mock.invocationCallOrder.at(-1) ?? Number.POSITIVE_INFINITY,
+    )
   })
 
   it('removes a staff session held in sessionStorage on the same browser', async () => {

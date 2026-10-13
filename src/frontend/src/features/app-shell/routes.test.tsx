@@ -207,8 +207,9 @@ describe('createRoleAwareRoutes', () => {
 
       await user.click(screen.getByRole('link', { name: 'Continue' }))
 
-      // Landed on the sign-in page, not on a participant surface.
-      expect(await screen.findByLabelText('Handle')).toBeInTheDocument()
+      // Landed on the sign-in page (Today's word is its default method, story 09), not on a
+      // participant surface.
+      expect(await screen.findByLabelText('Sign-in name')).toBeInTheDocument()
       expect(screen.queryByTestId('participant-guard')).not.toBeInTheDocument()
       consoleSpy.mockRestore()
     })
