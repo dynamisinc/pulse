@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Identity.Roster;
 using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -49,7 +50,21 @@ public static class RosterEndpoints
     /// <summary>The most bytes an import file may have (shared with the legacy account import: 1 MB).</summary>
     public const int MaxImportFileBytes = AccountEndpoints.MaxImportFileBytes;
 
+    /// <summary>
+    /// The request-body cap on the import route: the 1 MB file plus room for the multipart envelope (boundaries, part
+    /// headers). The file's own 1 MB check still answers a readable 400; anything far larger is refused while it is read.
+    /// </summary>
+    public const long MaxImportRequestBytes = MaxImportFileBytes + (64 * 1024);
+
+    /// <summary>
+    /// The request-body cap on the single add: a <c>RosterRowWrite</c> is six short fields (about 1 KB at the field
+    /// limits), so 16 KB leaves room for markup that is stripped on ingest while bounding the read, as the post write
+    /// route does.
+    /// </summary>
+    public const long MaxAddRequestBytes = 16 * 1024;
+
     private const string NoStore = "no-store";
+    private const string DryRunParameter = "dryRun";
 
     /// <summary>Registers the roster services.</summary>
     /// <param name="services">The service collection.</param>
@@ -76,12 +91,17 @@ public static class RosterEndpoints
         ArgumentNullException.ThrowIfNull(endpoints);
 
         endpoints.MapGet(RosterRoute, ListAsync).WithRosterStaffGate();
-        endpoints.MapPost(RosterRoute, AddAsync).WithRosterStaffGate();
+        endpoints.MapPost(RosterRoute, AddAsync)
+            .WithRosterStaffGate()
+            .WithMetadata(new RequestSizeLimitAttribute(MaxAddRequestBytes));
 
         // multipart/form-data (field "file"). DisableAntiforgery: a bearer-token API (the staff token travels in the
         // Authorization header, not a cookie), so the CSRF antiforgery defends against does not apply; the staff gate
         // is the authorization. Same as /api/staff/accounts/import.
-        endpoints.MapPost(ImportRoute, ImportAsync).WithRosterStaffGate().DisableAntiforgery();
+        endpoints.MapPost(ImportRoute, ImportAsync)
+            .WithRosterStaffGate()
+            .WithMetadata(new RequestSizeLimitAttribute(MaxImportRequestBytes))
+            .DisableAntiforgery();
 
         return endpoints;
     }
@@ -123,14 +143,16 @@ public static class RosterEndpoints
     }
 
     private static async Task<IResult> ImportAsync(
+        HttpRequest request,
         IFormFile? file,
-        string? dryRun,
         RosterService service,
         CancellationToken cancellationToken)
     {
-        // A dry run must never become a real one by a typo: only true/false (any casing) or absent (false) is accepted.
+        // A dry run must never become a real one by a typo: absent means false; present, it must be exactly one
+        // true/false (any casing). An empty "?dryRun=" or a repeated parameter is a 400, never a real import.
         var isDryRun = false;
-        if (!string.IsNullOrWhiteSpace(dryRun) && !bool.TryParse(dryRun.Trim(), out isDryRun))
+        if (request.Query.TryGetValue(DryRunParameter, out var dryRun)
+            && (dryRun.Count != 1 || !bool.TryParse(dryRun[0]?.Trim(), out isDryRun)))
         {
             return Problem(StatusCodes.Status400BadRequest, "dryRun must be true or false.");
         }

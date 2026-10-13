@@ -11,7 +11,8 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// <remarks>
 /// <para>
 /// <b>The frozen derivation and matching rules</b> (<c>docs/features/easy-login/implementation.md</c>, as amended at
-/// 34c6c80 and 1aea6f2; the staff roster mock implements the same rules), in the order they are applied:
+/// 34c6c80, 1aea6f2, f07c1ea and 241b7d0; the staff roster mock implements the 34c6c80 rules), in the order they are
+/// applied:
 /// </para>
 /// <list type="number">
 ///   <item><description>An invalid field fails the row (<see cref="RosterRowRules.Validate"/>). A <c>personaHandle</c>
@@ -28,8 +29,14 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 ///   email differs from the row's.</description></item>
 ///   <item><description>A match is <c>updated</c> (agency, role, email, the display name when matched by sign-in name
 ///   or email, or the org-persona binding changed) or <c>unchanged</c>; a blank cell never clears a stored value and a
-///   blank <c>personaHandle</c> keeps the current persona. An explicit <c>signInName</c> that matched nobody is not
-///   applied to the matched person and is reported in the message.</description></item>
+///   blank <c>personaHandle</c> keeps the current persona, except that a matched participant with NO persona (a legacy
+///   import) gets an auto citizen persona, so every roster participant can post (<c>updated</c>, "persona created").
+///   An explicit <c>signInName</c> that matched nobody is not applied to the matched person and is reported in the
+///   message.</description></item>
+///   <item><description>Same-file guards (<see cref="ApplyFile"/> only): a row whose first key an earlier row used fails
+///   as its duplicate; two rows that reach the same EXISTING participant, through any keys, fail the later one ("same
+///   person"); and a row keyed by name + agency alone fails when another row of the file has that name + agency AND a
+///   <c>signInName</c> or <c>email</c>, so a file gives the same answer on its first upload and on every re-upload.</description></item>
 ///   <item><description>Otherwise a new participant: the given or derived sign-in name (a derived one steps around
 ///   every sign-in name AND every persona handle), and the named org persona (role <c>pio</c>) or a new citizen
 ///   persona whose handle steps around every handle AND every sign-in name, the row's own included (role
@@ -68,6 +75,7 @@ public sealed class RosterWorkspace
     private readonly HashSet<string> _handles = new(StringComparer.Ordinal);
     private readonly HashSet<string> _claimedInFile = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _fileKeys = new(StringComparer.Ordinal);
+    private readonly Dictionary<Guid, int> _matchedInFile = [];
     private readonly List<RosterParticipant> _created = [];
     private readonly List<RosterParticipant> _updated = [];
     private readonly HashSet<Guid> _updatedIds = [];
@@ -121,16 +129,55 @@ public sealed class RosterWorkspace
     public IReadOnlyList<RosterParticipant> Updated => _updated;
 
     /// <summary>
-    /// Applies one row of a CSV file: a row with a name whose first identity key (<c>signInName</c>, else
-    /// <c>email</c>, else <c>name + agency</c>) an earlier row of the same file already used fails as that row's
-    /// duplicate; otherwise it is <see cref="Apply"/>-ed.
+    /// Applies the rows of one CSV file, in order, with the same-file guards on top of <see cref="Apply"/>'s rules:
+    /// <list type="bullet">
+    ///   <item><description>a row keyed by name + agency alone (no <c>signInName</c>, no <c>email</c>) fails when ANY other
+    ///   row of the file, earlier or later, has the same name + agency and carries a <c>signInName</c> or <c>email</c>
+    ///   ("same name and agency as row N: …"), because which of the two people it means would otherwise depend on whether
+    ///   this is the first upload or a re-upload;</description></item>
+    ///   <item><description>a row whose first identity key (<c>signInName</c>, else <c>email</c>, else
+    ///   <c>name + agency</c>) an earlier row already used fails as that row's duplicate;</description></item>
+    ///   <item><description>a row that reaches an existing participant an earlier row already reached, through any keys,
+    ///   fails ("duplicate of row N (same person)"), so one upload never updates a person twice.</description></item>
+    /// </list>
+    /// Call it once per workspace: the guards are file-wide.
     /// </summary>
-    /// <param name="rowNumber">The 1-based data-row number.</param>
-    /// <param name="row">The normalised row.</param>
-    /// <returns>What the row did.</returns>
-    public RosterRowOutcome ApplyFileRow(int rowNumber, RosterRowInput row)
+    /// <param name="rows">The normalised rows with their 1-based data-row numbers.</param>
+    /// <returns>One outcome per row, in order.</returns>
+    public IReadOnlyList<RosterRowOutcome> ApplyFile(IReadOnlyList<(int RowNumber, RosterRowInput Row)> rows)
     {
-        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(rows);
+
+        // Name + agency keys that some row of the file ties to a signInName or email, with the first such row.
+        var keyedNameAgency = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var (rowNumber, row) in rows)
+        {
+            if (row.Name.Length > 0 && (row.SignInName.Length > 0 || row.Email.Length > 0))
+            {
+                keyedNameAgency.TryAdd(NameAgencyKey(row.Name, row.Agency), rowNumber);
+            }
+        }
+
+        var outcomes = new List<RosterRowOutcome>(rows.Count);
+        foreach (var (rowNumber, row) in rows)
+        {
+            outcomes.Add(ApplyFileRow(rowNumber, row, keyedNameAgency));
+        }
+
+        return outcomes;
+    }
+
+    private RosterRowOutcome ApplyFileRow(int rowNumber, RosterRowInput row, Dictionary<string, int> keyedNameAgency)
+    {
+        if (row.Name.Length > 0
+            && row.SignInName.Length == 0
+            && row.Email.Length == 0
+            && keyedNameAgency.TryGetValue(NameAgencyKey(row.Name, row.Agency), out var keyedRow))
+        {
+            return RosterRowOutcome.Failed(
+                RosterRowFailure.Conflict,
+                $"same name and agency as row {keyedRow}: add a signInName or email to tell them apart");
+        }
 
         var key = FileKey(row);
         if (row.Name.Length > 0 && _fileKeys.TryGetValue(key, out var earlier))
@@ -140,16 +187,21 @@ public sealed class RosterWorkspace
         }
 
         _fileKeys[key] = rowNumber;
-        return Apply(row);
+        return ApplyCore(row, rowNumber);
     }
 
-    /// <summary>Judges one row against the roster and records what it would do (see the type remarks for the rules).</summary>
+    /// <summary>Judges one row (a single add) against the roster and records what it would do (see the type remarks for the rules).</summary>
     /// <param name="row">The normalised row.</param>
     /// <returns>What the row did.</returns>
     public RosterRowOutcome Apply(RosterRowInput row)
     {
         ArgumentNullException.ThrowIfNull(row);
+        return ApplyCore(row, rowNumber: null);
+    }
 
+    /// <summary>The rules shared by a single add (<paramref name="rowNumber"/> null) and a file row.</summary>
+    private RosterRowOutcome ApplyCore(RosterRowInput row, int? rowNumber)
+    {
         var invalid = RosterRowRules.Validate(row);
         if (invalid is not null)
         {
@@ -230,6 +282,17 @@ public sealed class RosterWorkspace
             return RosterRowOutcome.Failed(RosterRowFailure.Conflict, DifferentEmailMessage);
         }
 
+        if (rowNumber is { } fileRow)
+        {
+            // Same-file guard (2): one upload reaches an existing person at most once, whichever keys it used.
+            if (_matchedInFile.TryGetValue(matched.Id, out var earlierRow))
+            {
+                return RosterRowOutcome.Failed(RosterRowFailure.Conflict, $"duplicate of row {earlierRow} (same person)");
+            }
+
+            _matchedInFile[matched.Id] = fileRow;
+        }
+
         return Update(row, org, _working[matched.Id], matchedBySignInName: primaryLabel == SignInNameLabel, matchedByNameAgency: primaryLabel == NameAgencyLabel);
     }
 
@@ -265,6 +328,7 @@ public sealed class RosterWorkspace
         }
 
         string? bound = null;
+        var personaCreated = false;
         if (org is not null
             && (current.Persona?.Id != org.Id
                 || !string.Equals(current.ExerciseRole, RosterRoles.Pio, StringComparison.Ordinal)))
@@ -274,6 +338,20 @@ public sealed class RosterWorkspace
             current.PersonaAutoCreated = false;
             current.ExerciseRole = RosterRoles.Pio;
             bound = $"persona bound to @{org.Handle}";
+        }
+        else if (org is null && current.Persona is null)
+        {
+            // A matched participant with no persona at all (a legacy import) gets the auto citizen persona every roster
+            // participant has, so they can post. Its handle steps around every handle and every sign-in name, their own
+            // included (a legacy "madonna" posts as @madonna_2). No link is issued here: staff reissue one (story 03).
+            var handle = PersonaHandleDeriver.Derive(current.Name, candidate => _handles.Contains(candidate) || _signInNames.Contains(candidate));
+            _handles.Add(handle);
+            current.Persona = new RosterPersonaRef(Guid.NewGuid(), handle, current.Name, CitizenPersonaFactory.HumanKind);
+            current.PersonaAutoCreated = true;
+            current.PersonaCreated = true;
+            current.ExerciseRole = RosterRoles.Participant;
+            personaCreated = true;
+            bound = $"persona created @{handle}";
         }
 
         var note = !matchedBySignInName && row.SignInName.Length > 0
@@ -302,7 +380,7 @@ public sealed class RosterWorkspace
         }
 
         var message = string.Join("; ", parts) + "." + (note is null ? string.Empty : " " + note);
-        return RosterRowOutcome.Updated(current, message);
+        return RosterRowOutcome.Updated(current, message, personaCreated);
     }
 
     private RosterRowOutcome Create(RosterRowInput row, RosterPersonaRef? org)
@@ -340,6 +418,7 @@ public sealed class RosterWorkspace
             ExerciseRole = org is null ? RosterRoles.Participant : RosterRoles.Pio,
             Persona = persona,
             PersonaAutoCreated = autoCreated,
+            PersonaCreated = autoCreated,
         };
 
         _working[created.Id] = created;
@@ -443,6 +522,13 @@ public sealed class RosterParticipant
     /// <summary>Whether <see cref="Persona"/> is the citizen persona the roster created for this person.</summary>
     public bool PersonaAutoCreated { get; set; }
 
+    /// <summary>
+    /// Whether THIS request created <see cref="Persona"/> (an auto citizen persona for a new participant, or for a
+    /// matched one who had none), so a real run must insert the persona row. Always <c>false</c> for a row read from the
+    /// database.
+    /// </summary>
+    public bool PersonaCreated { get; set; }
+
     /// <summary>A detached copy.</summary>
     /// <returns>The copy.</returns>
     internal RosterParticipant Clone() => new()
@@ -457,6 +543,7 @@ public sealed class RosterParticipant
         ExerciseRole = ExerciseRole,
         Persona = Persona,
         PersonaAutoCreated = PersonaAutoCreated,
+        PersonaCreated = PersonaCreated,
     };
 }
 
@@ -497,7 +584,7 @@ public sealed class RosterRowOutcome
     /// <summary>The participant after the row (created, updated or matched); <c>null</c> when failed.</summary>
     public RosterParticipant? Participant { get; }
 
-    /// <summary>Whether the row created an auto citizen persona.</summary>
+    /// <summary>Whether the row created an auto citizen persona (for a new participant, or a matched one who had none).</summary>
     public bool PersonaCreated { get; }
 
     /// <summary>A failed row.</summary>
@@ -517,9 +604,10 @@ public sealed class RosterRowOutcome
     /// <summary>A row that changed an existing participant.</summary>
     /// <param name="participant">The participant, changed.</param>
     /// <param name="message">What changed.</param>
+    /// <param name="personaCreated">Whether the row created an auto persona for a participant who had none.</param>
     /// <returns>The outcome.</returns>
-    public static RosterRowOutcome Updated(RosterParticipant participant, string message) =>
-        new(RosterRowStatuses.Updated, RosterRowFailure.None, message, participant, false);
+    public static RosterRowOutcome Updated(RosterParticipant participant, string message, bool personaCreated) =>
+        new(RosterRowStatuses.Updated, RosterRowFailure.None, message, participant, personaCreated);
 
     /// <summary>A row that matched an existing participant and changed nothing.</summary>
     /// <param name="participant">The participant.</param>

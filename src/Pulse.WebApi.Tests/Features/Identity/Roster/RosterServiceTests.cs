@@ -222,6 +222,7 @@ public sealed class RosterServiceTests
             await harness.Service.ImportAsync(
                 Header + "Riley Chen,Fulco Fire,,riley@example.test,,\nTaylor Reed,,,taylor@example.test,,\nBad,,,,NoSuchOrg,", dryRun: false);
             harness.Issuer!.Calls.Should().HaveCount(2, "every new participant gets a link before the response returns");
+            harness.Issuer.IssuedBy.Should().OnlyContain(id => id == world.StaffUserId, "the provisioning staff user is the link's issuer");
         }
 
         await using var read = Read(world.ExerciseId);
@@ -444,6 +445,89 @@ public sealed class RosterServiceTests
         (await read.Accounts.CountAsync(a => a.DisplayName != "Concurrent Person")).Should().Be(0, "nothing of the roster's was written");
         (await read.Personas.CountAsync()).Should().Be(0);
         (await read.TelemetryEvents.CountAsync()).Should().Be(0);
+    }
+
+    [RequiresDockerFact]
+    public async Task Import_AMatchedPersonalessParticipant_GetsANonCastableAutoPersona_NoLink_AndADryRunWritesNone()
+    {
+        var world = await RosterSeed.ExerciseAsync(_fixture);
+        var legacy = await RosterSeed.AccountAsync(_fixture, world.ExerciseId, "madonna", "Madonna");
+        const string file = Header + "Madonna,,,,,";
+
+        await using (var dry = RosterHarness.For(_fixture, world))
+        {
+            var row = (await dry.Service.ImportAsync(file, dryRun: true)).Report!.Rows.Single();
+            (row.Status, row.PersonaCreated, row.PersonaHandle).Should().Be((RosterRowStatuses.Updated, true, "madonna_2"));
+        }
+
+        await using (var read = Read(world.ExerciseId))
+        {
+            (await read.Personas.CountAsync()).Should().Be(0, "a dry run writes no persona");
+        }
+
+        await using (var harness = RosterHarness.For(_fixture, world))
+        {
+            var row = (await harness.Service.ImportAsync(file, dryRun: false)).Report!.Rows.Single();
+            row.Status.Should().Be(RosterRowStatuses.Updated);
+            row.PersonaCreated.Should().BeTrue();
+            row.Message.Should().Be("persona created @madonna_2.");
+            harness.Issuer!.Calls.Should().BeEmpty("a matched legacy participant gets no link here; staff reissue one (story 03)");
+        }
+
+        await using (var read = Read(world.ExerciseId))
+        {
+            var account = await read.Accounts.SingleAsync();
+            var persona = await read.Personas.SingleAsync();
+            account.Id.Should().Be(legacy.Id);
+            account.PersonaId.Should().Be(persona.Id, "the persona row exists, so the reference does not dangle");
+            account.PersonaAutoCreated.Should().BeTrue();
+            account.Role.Should().Be("participant");
+            persona.ExerciseId.Should().Be(world.ExerciseId, "stamped from the resolved scope");
+            persona.Handle.Should().Be("madonna_2");
+            persona.Kind.Should().Be("human");
+            persona.Castable.Should().BeFalse("EL-4 holds for a persona created on re-upload too");
+            (await read.ParticipantLinks.CountAsync()).Should().Be(0);
+        }
+
+        await using (var again = RosterHarness.For(_fixture, world))
+        {
+            (await again.Service.ImportAsync(file, dryRun: false)).Report!.Rows.Single().Status.Should().Be(RosterRowStatuses.Unchanged);
+        }
+
+        await using var after = Read(world.ExerciseId);
+        (await after.Personas.CountAsync()).Should().Be(1, "the second upload creates nothing");
+        (await after.TelemetryEvents.CountAsync(e => e.EventType == EasyLoginTelemetry.RosterImportedEventType)).Should().Be(
+            1, "only the upload that wrote something is recorded");
+    }
+
+    [RequiresDockerFact]
+    public async Task Import_TwoRowsReachingOnePersonByDifferentKeys_FailTheLater_AndTheReuploadIsStable()
+    {
+        var world = await RosterSeed.ExerciseAsync(_fixture);
+        await RosterSeed.AccountAsync(_fixture, world.ExerciseId, "dwhitfield", "Dana Whitfield", agency: "Fulco EM", email: "dana@example.test");
+        const string file = Header + "Dana Whitfield,Fulco EM,Ops Chief,,,dwhitfield\nDana Whitfield,Fulco EM,Planner,dana@example.test,,";
+
+        await using (var first = RosterHarness.For(_fixture, world))
+        {
+            var rows = (await first.Service.ImportAsync(file, dryRun: false)).Report!.Rows;
+            rows[0].Status.Should().Be(RosterRowStatuses.Updated);
+            rows[1].Status.Should().Be(RosterRowStatuses.Failed);
+            rows[1].Message.Should().Be("duplicate of row 1 (same person)");
+        }
+
+        await using var between = Read(world.ExerciseId);
+        (await between.Accounts.SingleAsync()).JobRole.Should().Be("Ops Chief");
+        var events = await between.TelemetryEvents.CountAsync();
+
+        await using (var again = RosterHarness.For(_fixture, world))
+        {
+            (await again.Service.ImportAsync(file, dryRun: false)).Report!.Rows.Select(r => r.Status)
+                .Should().Equal(RosterRowStatuses.Unchanged, RosterRowStatuses.Failed);
+        }
+
+        await using var after = Read(world.ExerciseId);
+        (await after.Accounts.SingleAsync()).JobRole.Should().Be("Ops Chief", "no flip-flop between the two rows");
+        (await after.TelemetryEvents.CountAsync()).Should().Be(events, "a stable re-upload emits no roster.imported");
     }
 
     internal static Session Session(Guid exerciseId, Guid accountId, DateTimeOffset expiresAt, DateTimeOffset? refreshExpiresAt, bool revoked = false) => new()

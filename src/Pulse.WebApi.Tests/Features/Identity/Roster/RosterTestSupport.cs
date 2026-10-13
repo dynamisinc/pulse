@@ -142,9 +142,12 @@ internal sealed class RecordingLinkIssuer : IParticipantLinkIssuer
 
     public List<Guid> Calls { get; } = [];
 
+    public List<Guid?> IssuedBy { get; } = [];
+
     public Task<ParticipantLink?> EnsureActiveAsync(Account account, Guid? issuedByStaffUserId, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
         Calls.Add(account.Id);
+        IssuedBy.Add(issuedByStaffUserId);
         var token = ParticipantLinkTokens.Generate();
         var link = new ParticipantLink
         {

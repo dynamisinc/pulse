@@ -40,12 +40,20 @@ the real one). The CSV columns, the derivation rules and the wire shapes are fro
       **`Castable = false`**, no bio) with a derived unique handle (`jane_smith`, then `_2`), `PersonaAutoCreated = true`,
       `ExerciseRole = participant`, and the row reports `personaCreated: true`. Two rows may name the same org
       handle: each keeps its own account and acting human (COR-018).
-- [ ] **Idempotent re-upload.** **Given** the same file posted again, **then** every row is `unchanged`: zero
-      accounts, personas, links or `roster.imported` rows are created. Rows are matched by identity key
-      (`signInName` > `email` > `name + agency`, case-insensitive). **Given** a changed agency, role, email, display
-      name (matched by sign-in name or email) or org-persona binding, **then** the row is `updated` and says what
-      changed. A blank cell never clears a stored value, and a blank `personaHandle` keeps the current persona. Two
-      rows in one file with the same key fail the later one with a message naming the earlier row.
+- [ ] **Idempotent re-upload.** **Given** the same file posted again, **then** every row that applied is `unchanged`
+      (a failed row fails again): zero accounts, personas, links or `roster.imported` rows are created. Rows are matched
+      by identity key, cascading `signInName` > `email` > `name + agency` (case-insensitive, whitespace-normalised),
+      against the participants that existed before the file. **Given** a changed agency, role, email, display name
+      (matched by sign-in name or email) or org-persona binding, **then** the row is `updated` and says what changed.
+      A blank cell never clears a stored value, and a blank `personaHandle` keeps the current persona; **a matched
+      participant with no persona at all (a legacy import) gets an auto-created citizen persona** (`Castable = false`,
+      handle derived as for a new row), the row is `updated` with `personaCreated: true`, and no link is issued for
+      them (staff reissue one, story 03). Same-file guards: two rows with the same first key fail the later one with a
+      message naming the earlier row; two rows that reach the **same existing** participant through any keys fail the
+      later one ("duplicate of row N (same person)"); and a row keyed by name + agency alone fails when another row of
+      the file has that name + agency with a `signInName` or `email` ("same name and agency as row N: add a signInName
+      or email to tell them apart"), on the first upload and on every re-upload. *(Amended after Gate-1: f07c1ea,
+      241b7d0.)*
 - [ ] **Given** `POST /api/staff/roster` with a `RosterRowWrite`, **then** it creates one participant the same way
       and answers `201 RosterEntryDto`; a key that already exists answers `409`; an invalid field answers `400`.
 - [ ] **Given** `GET /api/staff/roster`, **then** it lists **every account in the exercise** (including ones the
@@ -131,8 +139,15 @@ rule tests (`participantAdmin/mocks/rosterMocks.test.ts`) case for case.
   citizen/nano/unverified, magnitude, `PersonaAutoCreated`), `.Import_AnOrgHandle_BindsThatPersonaAsPio_AndTwoRowsKeepTheirOwnAccountsAndActingHumans`.
 - **AC-4** `RosterWorkspaceTests.Import_TheSameFileAgain_IsIdempotent_EveryValidRowUnchanged`, `.Import_AChangedAgency_IsUpdatedAndSaysSo_AndABlankCellNeverClears`,
   `.Import_BindingAnOrgPersonaOnReupload_UpdatesTheRow_AndMakesItPio`, `.Import_TwoRowsWithTheSameKey_FailTheLaterOne_NamingTheEarlierRow`,
-  `.Cascade_*`, `.SameFile_*`; `RosterServiceTests.Import_TheSameFileTwice_IsIdempotent_NothingIsCreated_NoLinkRotates_NoEventIsEmitted`,
-  `.Import_AChangedRow_IsUpdatedAndPersisted_AndABlankCellNeverClears`.
+  `.Cascade_*`, `.SameFile_ASecondRowWithTheSameKey_FailsAsADuplicate_AndUpdatesNobody`,
+  `.SameFile_ANameAndAgencyOnlyRow_FailsWhenAnotherRowHasThatNameAndAgencyWithAKey_OnEveryUpload` (W-1),
+  `.SameFile_TwoRowsReachingTheSameExistingPersonThroughDifferentKeys_FailTheLaterOne` (W-2),
+  `.Matched_APersonalessParticipant_GetsAnAutoCitizenPersona_ThenIsUnchanged`, `.Matched_APersonalessParticipant_InADryRun_ReportsThePersona_ButCreatesNone`,
+  `.Add_MatchingAPersonalessParticipant_IsStillNotACreation` (CR-001);
+  `RosterServiceTests.Import_TheSameFileTwice_IsIdempotent_NothingIsCreated_NoLinkRotates_NoEventIsEmitted`,
+  `.Import_AChangedRow_IsUpdatedAndPersisted_AndABlankCellNeverClears`,
+  `.Import_AMatchedPersonalessParticipant_GetsANonCastableAutoPersona_NoLink_AndADryRunWritesNone` (CR-001),
+  `.Import_TwoRowsReachingOnePersonByDifferentKeys_FailTheLater_AndTheReuploadIsStable` (W-2).
 - **AC-5** `RosterEndpointsHttpTests.Add_Is201WithTheEntry_ThenTheSameKeyIs409_AndAnInvalidFieldIs400_AsProblemDetails`;
   `RosterServiceTests.Add_CreatesOneParticipant_WithAnActiveLink_AndOnlyALinkEvent`, `.Add_AnExistingKeyIsAConflict_AndAnInvalidFieldIsInvalid_AndNeitherWrites`;
   `RosterWorkspaceTests.Add_*`.

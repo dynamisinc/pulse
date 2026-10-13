@@ -131,6 +131,8 @@ public sealed class RosterEndpointsHttpTests
             ("no name column", RosterSeed.CsvUpload("agency\nFulco"), string.Empty, "\"name\" column"),
             ("more than 5000 rows", RosterSeed.CsvUpload("name\n" + string.Concat(Enumerable.Range(0, 5001).Select(i => $"P {i}\n"))), string.Empty, "5000"),
             ("a dryRun typo", RosterSeed.CsvUpload("name\nA B"), "?dryRun=ture", "dryRun must be true or false"),
+            ("an empty dryRun", RosterSeed.CsvUpload("name\nA B"), "?dryRun=", "dryRun must be true or false"),
+            ("a repeated dryRun", RosterSeed.CsvUpload("name\nA B"), "?dryRun=true&dryRun=false", "dryRun must be true or false"),
             ("no file field", new MultipartFormDataContent { { new StringContent("x"), "other" } }, string.Empty, "non-empty CSV"),
         };
 

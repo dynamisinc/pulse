@@ -87,7 +87,7 @@ public sealed class RosterWorkspaceTests
             var workspace = dryRun
                 ? new RosterWorkspace(Participants.Select(Copy), NonRosterSignInNames, Personas)
                 : Open();
-            var outcomes = rows.Select((row, i) => workspace.ApplyFileRow(i + 1, RosterRowRules.Normalize(row))).ToList();
+            var outcomes = workspace.ApplyFile(Numbered(rows)).ToList();
             if (!dryRun)
             {
                 Persist(workspace);
@@ -114,13 +114,14 @@ public sealed class RosterWorkspaceTests
 
         private void Persist(RosterWorkspace workspace)
         {
-            // Updates mutated the working objects (this list's own), so only the creations need adding.
-            foreach (var created in workspace.Created)
+            // Updates mutated the working objects (this list's own), so only the creations and new personas need adding.
+            Participants.AddRange(workspace.Created);
+            foreach (var participant in workspace.Created.Concat(workspace.Updated))
             {
-                Participants.Add(created);
-                if (created.PersonaAutoCreated && created.Persona is { } persona)
+                if (participant.PersonaCreated && participant.Persona is { } persona)
                 {
                     Personas.Add(persona);
+                    participant.PersonaCreated = false; // persisted: the next request reads it as an existing persona
                 }
             }
         }
@@ -138,6 +139,9 @@ public sealed class RosterWorkspaceTests
             PersonaAutoCreated = p.PersonaAutoCreated,
         };
     }
+
+    private static List<(int RowNumber, RosterRowInput Row)> Numbered(params RosterRowWrite[] rows) =>
+        rows.Select((row, i) => (i + 1, RosterRowRules.Normalize(row))).ToList();
 
     private static RosterRowWrite Row(
         string? name, string? agency = null, string? role = null, string? email = null, string? personaHandle = null, string? signInName = null) =>
@@ -427,8 +431,8 @@ public sealed class RosterWorkspaceTests
         var roster = new Roster();
         var workspace = roster.Open();
 
-        var outcome = workspace.ApplyFileRow(
-            1, RosterRowRules.Normalize(Row("Dana Whitfield-Reyes", email: "other@example.test", signInName: "dwhitfield")));
+        var outcome = workspace.ApplyFile(
+            Numbered(Row("Dana Whitfield-Reyes", email: "other@example.test", signInName: "dwhitfield"))).Single();
 
         outcome.Failure.Should().Be(RosterRowFailure.Conflict);
         outcome.Message.Should().Be(RosterWorkspace.DifferentEmailMessage);
@@ -453,8 +457,8 @@ public sealed class RosterWorkspaceTests
     public void Cascade_AKeyMatchingMoreThanOnePerson_FailsRatherThanGuessing()
     {
         var roster = new Roster();
-        roster.Participants.Add(Participant("Pat Lee", "plee7", null, null, null, "participant", null));
-        roster.Participants.Add(Participant("Pat Lee", "plee8", null, null, null, "participant", null));
+        roster.Participants.Add(Participant("Pat Lee", "plee7", null, null, null, "participant", new(Guid.NewGuid(), "pat_lee", "Pat Lee", "human"), auto: true));
+        roster.Participants.Add(Participant("Pat Lee", "plee8", null, null, null, "participant", new(Guid.NewGuid(), "pat_lee_2", "Pat Lee", "human"), auto: true));
 
         var ambiguous = roster.Import(dryRun: true, Row("Pat Lee")).Single();
         ambiguous.Failure.Should().Be(RosterRowFailure.Conflict);
@@ -485,9 +489,7 @@ public sealed class RosterWorkspaceTests
         var roster = new Roster();
         var workspace = roster.Open();
 
-        var outcomes = new[] { Row("Zed Zimmer", "Alpha"), Row("Zed Zimmer", "Alpha") }
-            .Select((row, i) => workspace.ApplyFileRow(i + 1, RosterRowRules.Normalize(row)))
-            .ToList();
+        var outcomes = workspace.ApplyFile(Numbered(Row("Zed Zimmer", "Alpha"), Row("Zed Zimmer", "Alpha")));
 
         outcomes[0].Status.Should().Be(RosterRowStatuses.Created);
         outcomes[1].Message.Should().Be("duplicate of row 1; give a signInName to tell them apart");
@@ -495,15 +497,90 @@ public sealed class RosterWorkspaceTests
     }
 
     [Fact]
-    public void SameFile_ALaterRowWhoseOtherKeyWouldMatchAnEarlierRowsNewPerson_CreatesASecondPerson()
+    public void SameFile_ANameAndAgencyOnlyRow_FailsWhenAnotherRowHasThatNameAndAgencyWithAKey_OnEveryUpload()
+    {
+        // Row 1 could mean the person row 2 names (by email) or someone else: on a first upload it would create a second
+        // person, on a re-upload it would match row 2's. The amended guard (241b7d0) fails it on BOTH, so the file's
+        // answer never depends on which upload this is.
+        var roster = new Roster();
+        var file = new[] { Row("Zed Zimmer", "Alpha"), Row("Zed Zimmer", "Alpha", email: "zed@example.test") };
+
+        var first = roster.Import(dryRun: false, file);
+        first[0].Status.Should().Be(RosterRowStatuses.Failed);
+        first[0].Message.Should().Be("same name and agency as row 2: add a signInName or email to tell them apart");
+        first[1].Status.Should().Be(RosterRowStatuses.Created);
+        first[1].Participant!.SignInName.Should().Be("zzimmer");
+
+        var again = roster.Import(dryRun: false, file);
+        again[0].Status.Should().Be(RosterRowStatuses.Failed);
+        again[0].Message.Should().Be("same name and agency as row 2: add a signInName or email to tell them apart");
+        again[1].Status.Should().Be(RosterRowStatuses.Unchanged);
+        roster.Participants.Count(p => p.Name == "Zed Zimmer").Should().Be(1, "the ambiguous row never creates a second person");
+    }
+
+    [Fact]
+    public void SameFile_TwoRowsReachingTheSameExistingPersonThroughDifferentKeys_FailTheLaterOne()
     {
         var roster = new Roster();
+        var file = new[]
+        {
+            Row("Dana Whitfield", "Fulco County EM", role: "Ops Chief", signInName: "dwhitfield"),
+            Row("Dana Whitfield", "Fulco County EM", role: "Planner", email: "dana.whitfield@example.test"),
+        };
 
-        var outcomes = roster.Import(dryRun: false, Row("Zed Zimmer", "Alpha"), Row("Zed Zimmer", "Alpha", email: "zed@example.test"));
+        var first = roster.Import(dryRun: false, file);
+        first[0].Status.Should().Be(RosterRowStatuses.Updated);
+        first[1].Failure.Should().Be(RosterRowFailure.Conflict);
+        first[1].Message.Should().Be("duplicate of row 1 (same person)");
+        roster.BySignIn("dwhitfield").JobRole.Should().Be("Ops Chief", "one upload never updates a person twice");
 
-        outcomes.Select(o => o.Status).Should().Equal(RosterRowStatuses.Created, RosterRowStatuses.Created);
-        outcomes.Select(o => o.Participant!.SignInName).Should().Equal("zzimmer", "zzimmer2");
-        roster.Participants.Count(p => p.Name == "Zed Zimmer").Should().Be(2, "matching is only against who existed before the file");
+        roster.Import(dryRun: false, file).Select(o => o.Status).Should().Equal(
+            [RosterRowStatuses.Unchanged, RosterRowStatuses.Failed], "the re-upload is stable: no flip-flop between the two rows");
+    }
+
+    [Fact]
+    public void Matched_APersonalessParticipant_GetsAnAutoCitizenPersona_ThenIsUnchanged()
+    {
+        var roster = new Roster();
+        roster.Participants.Add(Participant("Madonna", "madonna", null, null, null, "participant", null));
+
+        var first = roster.Import(dryRun: false, Row("Madonna"), Row("Aiko Tanaka")).ToList();
+
+        first.Should().OnlyContain(o => o.Status == RosterRowStatuses.Updated && o.PersonaCreated);
+        first[0].Participant!.Persona!.Handle.Should().Be("madonna_2", "the handle steps around the person's own sign-in name (EL-1)");
+        first[0].Message.Should().Be("persona created @madonna_2.");
+        first[1].Participant!.Persona!.Handle.Should().Be("aiko_tanaka");
+        foreach (var participant in first.Select(o => o.Participant!))
+        {
+            participant.PersonaAutoCreated.Should().BeTrue();
+            participant.Persona!.Kind.Should().Be("human");
+            participant.ExerciseRole.Should().Be("participant");
+        }
+
+        roster.Import(dryRun: false, Row("Madonna"), Row("Aiko Tanaka")).Should().OnlyContain(
+            o => o.Status == RosterRowStatuses.Unchanged && !o.PersonaCreated, "the persona exists now: a second upload changes nothing");
+    }
+
+    [Fact]
+    public void Matched_APersonalessParticipant_InADryRun_ReportsThePersona_ButCreatesNone()
+    {
+        var roster = new Roster();
+        var personas = roster.Personas.Count;
+
+        var outcome = roster.Import(dryRun: true, Row("Aiko Tanaka")).Single();
+
+        outcome.Status.Should().Be(RosterRowStatuses.Updated);
+        outcome.PersonaCreated.Should().BeTrue("the dry run reports what the real run will do");
+        roster.Personas.Should().HaveCount(personas);
+        roster.BySignIn("atanaka").Persona.Should().BeNull("a dry run changes nothing");
+    }
+
+    [Fact]
+    public void Add_MatchingAPersonalessParticipant_IsStillNotACreation()
+    {
+        var outcome = new Roster().Add(Row("Aiko Tanaka"));
+
+        outcome.Status.Should().NotBe(RosterRowStatuses.Created, "a single add that matches someone is a 409, persona or not");
     }
 
     // ------------------------------------------------------------------ explicit signInName refusals

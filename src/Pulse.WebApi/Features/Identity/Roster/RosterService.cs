@@ -128,12 +128,9 @@ public sealed class RosterService
         {
             var (workspace, accountsById) = await LoadWorkspaceAsync(track: !dryRun, cancellationToken);
 
-            var rows = new List<RosterImportRowDto>(parsed.Rows.Count);
-            foreach (var csvRow in parsed.Rows)
-            {
-                var input = RosterRowRules.Normalize(csvRow.Fields);
-                rows.Add(ToReportRow(csvRow.RowNumber, input, workspace.ApplyFileRow(csvRow.RowNumber, input)));
-            }
+            var inputs = parsed.Rows.Select(r => (r.RowNumber, Row: RosterRowRules.Normalize(r.Fields))).ToList();
+            var outcomes = workspace.ApplyFile(inputs);
+            var rows = inputs.Select((input, i) => ToReportRow(input.RowNumber, input.Row, outcomes[i])).ToList();
 
             var report = BuildReport(dryRun, rows);
             if (dryRun || (workspace.Created.Count == 0 && workspace.Updated.Count == 0))
@@ -321,7 +318,8 @@ public sealed class RosterService
     /// <summary>
     /// Stages what the workspace decided on the request's context, stamping every new row with the resolved scope:
     /// each created account (no credential) with its auto persona, a link per new account from the issuer (and its
-    /// <c>participant.link.issued</c> event), and each updated account's final state. Does not save.
+    /// <c>participant.link.issued</c> event), and each updated account's final state, with the auto persona a
+    /// persona-less participant was given. Does not save.
     /// </summary>
     private async Task<List<(Account Account, RosterPersonaRef? Persona, ParticipantLink? Link)>> StageAsync(
         RosterCaller caller,
@@ -335,10 +333,7 @@ public sealed class RosterService
 
         foreach (var participant in workspace.Created)
         {
-            if (participant.PersonaAutoCreated && participant.Persona is { } auto)
-            {
-                _dbContext.Personas.Add(CitizenPersonaFactory.Create(auto.Id, caller.ExerciseId, participant.Name, auto.Handle));
-            }
+            AddCreatedPersona(caller, participant);
 
             var account = new Account
             {
@@ -357,9 +352,9 @@ public sealed class RosterService
             };
             _dbContext.Accounts.Add(account);
 
-            // Provisioning issues the link, so no staff user is recorded on it; the event names the staff actor. A link
-            // the issuer staged as Added is a new one (the seam's contract); only that emits participant.link.issued.
-            var link = await _linkIssuer.EnsureActiveAsync(account, issuedByStaffUserId: null, now, cancellationToken);
+            // The staff caller who provisioned the participant is recorded as the issuer. A link the issuer staged as
+            // Added is a new one (the seam's contract); only that emits participant.link.issued.
+            var link = await _linkIssuer.EnsureActiveAsync(account, caller.Staff.StaffUserId, now, cancellationToken);
             if (link is not null && _dbContext.Entry(link).State == EntityState.Added)
             {
                 _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.LinkIssued(caller.ExerciseId, caller.Staff, link.Id, account.Id, time));
@@ -370,6 +365,10 @@ public sealed class RosterService
 
         foreach (var participant in workspace.Updated)
         {
+            // A matched participant who had no persona gets one (implementation.md, amended f07c1ea). Account.PersonaId has
+            // no foreign key, so the persona row must be inserted here or the id would dangle. No link is issued for them.
+            AddCreatedPersona(caller, participant);
+
             var account = accountsById[participant.Id];
             account.DisplayName = participant.Name;
             account.Agency = participant.Agency;
@@ -386,6 +385,15 @@ public sealed class RosterService
         }
 
         return created;
+    }
+
+    /// <summary>Inserts the auto citizen persona this request created for <paramref name="participant"/>, if it created one.</summary>
+    private void AddCreatedPersona(RosterCaller caller, RosterParticipant participant)
+    {
+        if (participant.PersonaCreated && participant.Persona is { } persona)
+        {
+            _dbContext.Personas.Add(CitizenPersonaFactory.Create(persona.Id, caller.ExerciseId, participant.Name, persona.Handle));
+        }
     }
 
     private static RosterImportRowDto ToReportRow(int rowNumber, RosterRowInput input, RosterRowOutcome outcome)

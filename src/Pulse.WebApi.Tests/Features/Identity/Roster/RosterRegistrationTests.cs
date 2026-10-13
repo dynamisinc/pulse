@@ -4,6 +4,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -48,6 +49,15 @@ public sealed class RosterRegistrationTests
         routes.Should().BeEquivalentTo(
             ["GET /api/staff/roster", "POST /api/staff/roster", "POST /api/staff/roster/import"],
             "story 02 owns exactly these three routes");
+
+        long? LimitOf(string method, string route) => host.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Single(e => e.RoutePattern.RawText == route && e.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.Contains(method))
+            .Metadata.GetMetadata<IRequestSizeLimitMetadata>()?.MaxRequestBodySize;
+
+        LimitOf("POST", RosterEndpoints.ImportRoute).Should().Be(RosterEndpoints.MaxImportRequestBytes, "the 1 MB file plus the multipart envelope");
+        RosterEndpoints.MaxImportRequestBytes.Should().BeGreaterThan(RosterEndpoints.MaxImportFileBytes);
+        LimitOf("POST", RosterEndpoints.RosterRoute).Should().Be(RosterEndpoints.MaxAddRequestBytes, "one row is a few KB");
     }
 
     private static Task<ServiceProvider> BuildProviderAsync()
