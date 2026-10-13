@@ -16,9 +16,12 @@
  *
  * Reissue, Revoke and Disable are CONSEQUENTIAL — they end the participant's
  * live sessions (EL-8) — so each sits behind a confirm dialog that says plainly
- * what will happen. Issuing the FIRST link to someone with no link and no live
- * sessions has nothing to lose, so it goes straight through. Enable and Copy
- * never confirm.
+ * what will happen — including "Issue link" for someone with no link yet, because
+ * the live-session count on screen can be stale and issuing ends any session they
+ * have. Enable and Copy never confirm.
+ *
+ * One action at a time per row: `run` takes a synchronous in-flight guard, so a
+ * double click on Enable, or on a confirm button, sends ONE request.
  *
  * ## Copy link and the secret
  * The `joinUrl` is a bearer credential. It is read from the list data ALREADY IN
@@ -106,6 +109,7 @@ const DESTRUCTIVE_SX = { ...BUTTON_SX, color: 'notifications.errorText' } as con
 export function RosterRowActions({ entry, onReport }: RosterRowActionsProps) {
   const mutation = useRosterAction()
   const groupRef = useRef<HTMLDivElement>(null)
+  const inFlight = useRef(false)
 
   // `confirm.action` is kept after `open` goes false so the dialog's exit
   // transition keeps its words instead of flashing empty.
@@ -139,6 +143,11 @@ export function RosterRowActions({ entry, onReport }: RosterRowActionsProps) {
   }, [pendingFocus, entry])
 
   const run = async (kind: RosterActionKind, viaDialog: boolean) => {
+    // Synchronous guard: `mutation.isPending` only turns true on a later render, so a
+    // double click on Enable (no dialog) or on the confirm button would otherwise send
+    // the action twice — a double reissue rotates the link twice.
+    if (inFlight.current) return
+    inFlight.current = true
     try {
       const result = await mutation.mutateAsync({ kind, participantId: entry.id })
       setConfirm(current => (current ? { ...current, open: false } : current))
@@ -155,6 +164,8 @@ export function RosterRowActions({ entry, onReport }: RosterRowActionsProps) {
       setConfirm(current => (current ? { ...current, open: false } : current))
       setDialogError(undefined)
       onReport({ tone: 'error', message })
+    } finally {
+      inFlight.current = false
     }
   }
 
@@ -173,7 +184,7 @@ export function RosterRowActions({ entry, onReport }: RosterRowActionsProps) {
       })
       return
     }
-    if (needsConfirmation(action, entry)) {
+    if (needsConfirmation(action)) {
       setDialogError(undefined)
       setConfirm({ action, open: true })
       return

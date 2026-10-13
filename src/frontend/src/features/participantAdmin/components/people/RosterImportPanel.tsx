@@ -15,6 +15,11 @@
  * server's reason. A new pick clears the previous result so a stale outcome never
  * sits against a different file.
  *
+ * ## One request at a time (story 10 Gate-1 W3)
+ * While a validate or import is in flight the file picker is disabled (a new pick
+ * would reset the mutation and orphan the answer) and a synchronous in-flight ref
+ * makes a double click upload ONCE.
+ *
  * ## The size / type check runs BEFORE upload
  * With the server's own wording (see `AccountEndpoints.cs`): over 1 MB, not a
  * CSV, empty. The server re-checks; this is for fast feedback.
@@ -197,20 +202,31 @@ function HowTheFileIsRead() {
         </li>
         <li>
           <strong>Sign-in names:</strong> left blank, it is the first initial plus the last name,
-          lower-case: Jane Smith becomes <code>jsmith</code>. If that is taken (or an earlier row
-          in the same file took it), a number is added: <code>jsmith2</code>. A sign-in name you
-          type is never changed; if it is invalid or taken, that row fails.
+          lower-case: Jane Smith becomes <code>jsmith</code>. If that is already taken (by another
+          account, by an earlier row in the same file, or by a persona handle), a number is
+          added: <code>jsmith2</code>. A sign-in name you type is never changed: that row fails
+          if it is invalid, if it equals a persona handle, or if it is taken by an earlier row
+          or by an account that is not on this roster. (A sign-in name that belongs to someone
+          on the roster means that person; see &ldquo;Uploading again&rdquo;.)
         </li>
         <li>
           <strong>Personas:</strong> a row with a <code>personaHandle</code> (like{' '}
           <code>FulcoEM</code>) operates that organization persona, which must already exist in
           this exercise. Everyone else gets a new citizen persona named for them, such as{' '}
-          <code>@jane_smith</code>.
+          <code>@jane_smith</code>. A persona handle is public, so it is never the same as a
+          sign-in name: Madonna signs in as <code>madonna</code> and posts as{' '}
+          <code>@madonna_2</code>.
         </li>
         <li>
-          <strong>Uploading again is safe.</strong> People are matched by sign-in name, else
-          email, else name plus agency, and shown as Updated or Unchanged, never duplicated. A
-          blank cell never erases what is already stored.
+          <strong>Uploading again is safe.</strong> Each row is matched against who was on the
+          roster <em>before</em> the file: by sign-in name, then email, then name plus agency.
+          A match is shown as Updated or Unchanged and never duplicated, so filling in a blank
+          email or sign-in name and uploading again updates the same person. When two
+          different people match one row (the sign-in name is one person&rsquo;s and the email
+          another&rsquo;s), or a sign-in name belongs to someone with a different email, the
+          row fails rather than guess. Rows in the same file never update each other: a second
+          row for the same person fails as a duplicate of the first. A blank cell never erases
+          what is already stored.
         </li>
         <li>
           <strong>Validate first.</strong> It shows exactly what Import would do and writes
@@ -236,6 +252,11 @@ export function RosterImportPanel({ ref, id = 'roster-import-panel' }: RosterImp
   const mutation = useImportRoster()
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    // Swapping the file mid-request would reset the mutation and orphan its answer.
+    if (mutation.isPending) {
+      event.target.value = ''
+      return
+    }
     const picked = event.target.files?.[0] ?? null
     // A fresh pick clears the previous result so it never sits against another file.
     mutation.reset()
@@ -246,8 +267,13 @@ export function RosterImportPanel({ ref, id = 'roster-import-panel' }: RosterImp
   }
 
   const canRun = file !== null && clientError === null && !mutation.isPending
+  const inFlight = useRef(false)
   const run = (dryRun: boolean) => {
-    if (file !== null && clientError === null) mutation.mutate({ file, dryRun })
+    // Synchronous guard: `isPending` turns true on a later render, so a double click
+    // would otherwise upload the file twice.
+    if (inFlight.current || file === null || clientError !== null) return
+    inFlight.current = true
+    mutation.mutate({ file, dryRun }, { onSettled: () => { inFlight.current = false } })
   }
 
   const pendingDryRun = mutation.isPending ? mutation.variables?.dryRun : undefined
@@ -282,6 +308,7 @@ export function RosterImportPanel({ ref, id = 'roster-import-panel' }: RosterImp
       <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
         <CobraSecondaryButton
           type="button"
+          disabled={mutation.isPending}
           onClick={() => inputRef.current?.click()}
           startIcon={<FontAwesomeIcon icon={faFileCsv} />}
         >
@@ -293,6 +320,7 @@ export function RosterImportPanel({ ref, id = 'roster-import-panel' }: RosterImp
           accept={ROSTER_IMPORT_ACCEPT}
           aria-label="Choose a CSV roster file"
           data-testid="roster-import-file-input"
+          disabled={mutation.isPending}
           onChange={handleFileChange}
         />
         <Typography

@@ -37,8 +37,13 @@
  *
  * ## The derivation + matching rules live HERE too
  * They are the frozen rules the backend (story 02) implements and the screen
- * explains to staff; reproducing them keeps the mock honest. See
- * {@link deriveSignInName} and {@link deriveAutoPersonaHandle}.
+ * explains to staff (implementation.md, "Derivation and matching rules", as amended
+ * at 34c6c80); reproducing them keeps the mock honest. See {@link deriveSignInName},
+ * {@link deriveAutoPersonaHandle} and {@link applyRow} for: the CASCADING identity key,
+ * conflicting matches failing, a signInName match with a different stored email
+ * failing, rows in one file never updating each other, and an explicit signInName
+ * failing when it equals a persona handle or is taken (an earlier row, or an account
+ * the roster does not list: {@link MOCK_NON_ROSTER_SIGN_IN_NAMES}).
  *
  * The join URLs below are FAKE (`pulse.example.test`). A real one is a bearer
  * credential and is never rendered, logged or toasted by the screen.
@@ -296,7 +301,9 @@ function asciiFold(value: string): string {
  * suffixes `jr sr ii iii iv md phd`, then the first initial of the first word
  * plus the last word, letters and digits only, at most 32 characters. A derived
  * name under 3 characters gets `1` appended. On a collision the smallest free
- * integer from 2 is appended.
+ * integer from 2 is appended. `taken` is every name to step around: existing
+ * accounts (roster or not), earlier rows in the file, AND every persona handle in
+ * the exercise (amended contract, story 10 Gate-1 W5).
  *
  * `Jane Smith` -> `jsmith`; `Mary-Ann O'Neil` -> `moneil`; `José Álvarez` ->
  * `jalvarez`; `Madonna` -> `madonna`; `Ng` -> `ng1`.
@@ -324,7 +331,9 @@ export function deriveSignInName(name: string, taken: ReadonlySet<string>): stri
 /**
  * The auto citizen persona's handle (frozen rules): the full name as a slug,
  * `[a-z0-9_]` only, at most 30 characters; `_2`, `_3`… on a collision
- * (case-insensitive) with any persona in the exercise or an earlier row.
+ * (case-insensitive) with any persona in the exercise, an earlier row, OR any
+ * sign-in name in the exercise INCLUDING the row's own: the public handle is never a
+ * sign-in name (EL-1), so `Madonna` signs in as `madonna` and posts as `@madonna_2`.
  */
 export function deriveAutoPersonaHandle(name: string, taken: ReadonlySet<string>): string {
   const slug = asciiFold(name).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30)
@@ -394,26 +403,45 @@ function validateRow(row: RowInput): string | undefined {
   return undefined
 }
 
-/** The identity key (idempotency): signInName > email > name + agency. */
-function findMatch(entries: readonly RosterEntryDto[], row: RowInput): {
-  entry: RosterEntryDto
-  by: 'signInName' | 'email' | 'nameAgency'
-} | undefined {
+/** Which key of a row matched an existing participant. */
+type MatchBy = 'signInName' | 'email' | 'nameAgency'
+
+interface RowMatch {
+  readonly entry: RosterEntryDto
+  readonly by: MatchBy
+}
+
+const MATCH_LABEL: Readonly<Record<MatchBy, string>> = {
+  signInName: 'signInName',
+  email: 'email',
+  nameAgency: 'name and agency',
+}
+
+/**
+ * The identity key CASCADES (frozen rules): try each key the row carries, in order
+ * `signInName`, `email`, `name + agency`. Every key that matches an existing
+ * participant is returned, in that order; the first is THE match, and matches on two
+ * DIFFERENT participants make the row fail (the caller checks). Matching is only
+ * ever against `before` — the participants that existed BEFORE this file.
+ */
+function findMatches(before: readonly RosterEntryDto[], row: RowInput): RowMatch[] {
+  const matches: RowMatch[] = []
   if (row.signInName.length > 0) {
-    const entry = entries.find(e => normalizeKey(e.signInName) === row.signInName)
-    return entry ? { entry, by: 'signInName' } : undefined
+    const entry = before.find(e => normalizeKey(e.signInName) === row.signInName)
+    if (entry) matches.push({ entry, by: 'signInName' })
   }
   if (row.email.length > 0) {
     const key = normalizeKey(row.email)
-    const entry = entries.find(e => normalizeKey(e.email) === key)
-    return entry ? { entry, by: 'email' } : undefined
+    const entry = before.find(e => normalizeKey(e.email) === key)
+    if (entry) matches.push({ entry, by: 'email' })
   }
   const nameKey = normalizeKey(row.name)
   const agencyKey = normalizeKey(row.agency)
-  const entry = entries.find(
+  const entry = before.find(
     e => normalizeKey(e.name) === nameKey && normalizeKey(e.agency) === agencyKey,
   )
-  return entry ? { entry, by: 'nameAgency' } : undefined
+  if (entry) matches.push({ entry, by: 'nameAgency' })
+  return matches
 }
 
 /** The within-file duplicate key for a row (same precedence as the match key). */
@@ -442,36 +470,127 @@ function newLink(): RosterEntryDto['link'] {
   }
 }
 
+/** Why a row failed: a bad value (400 when adding one) or a conflict (409). */
+type FailureCode = 'invalid' | 'conflict'
+
 type RowOutcome =
-  | { kind: 'failed', message: string }
+  | { kind: 'failed', code: FailureCode, message: string }
   | { kind: 'created', entry: RosterEntryDto }
   | { kind: 'updated', entry: RosterEntryDto, message: string }
   | { kind: 'unchanged', entry: RosterEntryDto }
 
 /**
- * Applies ONE row to `working` (a private copy) and reports what happened. The
- * caller commits `working` only for a real, non-dry-run import.
+ * Accounts that exist in the exercise but are NOT on the roster (a staff or legacy
+ * account). Their sign-in names are taken: a derived name steps around them and an
+ * explicit one that equals one fails the row. `plee` is what `Pat Lee` would derive.
  */
-function applyRow(
-  working: RosterEntryDto[],
-  row: RowInput,
-  takenSignInNames: Set<string>,
-  takenHandles: Set<string>,
-): RowOutcome {
+export const MOCK_NON_ROSTER_SIGN_IN_NAMES: readonly string[] = ['admin', 'legacybot', 'plee']
+
+/**
+ * What one row is judged against. Built once per request from the store, then
+ * mutated as rows claim names, so a later row sees what an earlier one took.
+ */
+interface RowContext {
+  /** The participants as they were BEFORE this file: the only thing a row matches. */
+  readonly before: readonly RosterEntryDto[]
+  /** The working copy that updates and creations are applied to. */
+  readonly working: RosterEntryDto[]
+  /** Every sign-in name in use (lower-case): roster, non-roster accounts, this file. */
+  readonly signInNames: Set<string>
+  /** Sign-in names claimed by rows earlier in THIS file. */
+  readonly claimedInFile: Set<string>
+  /** Every persona handle in the exercise (lower-case, no '@'): org, roster, this file. */
+  readonly handles: Set<string>
+}
+
+function makeContext(): RowContext {
+  const before = state.entries.map(entry => ({ ...entry, link: { ...entry.link } }))
+  const signInNames = new Set(before.map(entry => entry.signInName.toLowerCase()))
+  for (const name of MOCK_NON_ROSTER_SIGN_IN_NAMES) signInNames.add(name)
+  const handles = new Set(MOCK_ORG_PERSONAS.map(persona => persona.handle.toLowerCase()))
+  for (const entry of before) {
+    if (entry.persona) handles.add(entry.persona.handle.toLowerCase())
+  }
+  return { before, working: [...before], signInNames, claimedInFile: new Set(), handles }
+}
+
+function fail(code: FailureCode, message: string): RowOutcome {
+  return { kind: 'failed', code, message }
+}
+
+/**
+ * Judges ONE row against `context` (frozen rules, amended after story 10 Gate-1) and
+ * reports what happened. The caller commits `context.working` only for a real,
+ * non-dry-run import.
+ *
+ *  1. an invalid field fails the row; an unknown org persona fails it (same message);
+ *  2. an EXPLICIT `signInName` is never altered. If it is not an existing
+ *     participant's, it fails when it equals a persona handle in the exercise or is
+ *     taken (an earlier row in this file, or an account the roster does not list);
+ *  3. the identity key cascades `signInName` > `email` > `name + agency` against the
+ *     participants from BEFORE the file. Two keys matching DIFFERENT people fails the
+ *     row; a signInName match whose stored email differs from the row's fails it too
+ *     (guards a typo renaming someone else);
+ *  4. a match is `updated` / `unchanged`, never duplicated; a blank cell never clears
+ *     a value; rows in one file never update each other (the duplicate-key check in
+ *     the caller fails the later one);
+ *  5. otherwise a new participant: the derived sign-in name steps around every taken
+ *     name AND every persona handle; the auto handle steps around every handle AND
+ *     every sign-in name, including this row's own (`Madonna` -> `madonna_2`).
+ */
+function applyRow(context: RowContext, row: RowInput): RowOutcome {
   const invalid = validateRow(row)
-  if (invalid !== undefined) return { kind: 'failed', message: invalid }
+  if (invalid !== undefined) return fail('invalid', invalid)
 
   let org: RosterPersonaDto | undefined
   if (row.personaHandle.length > 0) {
     org = findOrgPersona(row.personaHandle)
     // An unknown handle, another exercise's handle and a non-org persona all
     // fail with the SAME message (no oracle).
-    if (org === undefined) return { kind: 'failed', message: UNKNOWN_PERSONA_MESSAGE }
+    if (org === undefined) return fail('invalid', UNKNOWN_PERSONA_MESSAGE)
   }
 
-  const match = findMatch(working, row)
-  if (match) {
-    const existing = match.entry
+  // An explicit sign-in name that is a participant's means THAT participant (below).
+  const namesAParticipant = row.signInName.length > 0
+    && context.before.some(e => normalizeKey(e.signInName) === row.signInName)
+  if (row.signInName.length > 0 && !namesAParticipant) {
+    if (context.handles.has(row.signInName)) {
+      return fail('invalid', `signInName "${row.signInName}" is the same as a persona handle.`)
+    }
+    if (context.claimedInFile.has(row.signInName)) {
+      return fail(
+        'conflict',
+        `signInName "${row.signInName}" is already claimed by an earlier row in this file.`,
+      )
+    }
+    if (context.signInNames.has(row.signInName)) {
+      return fail('conflict', `signInName "${row.signInName}" is already taken by another account.`)
+    }
+  }
+
+  const matches = findMatches(context.before, row)
+  const primary = matches[0]
+  if (primary !== undefined) {
+    const other = matches.find(m => m.entry.id !== primary.entry.id)
+    if (other !== undefined) {
+      return fail(
+        'conflict',
+        `${MATCH_LABEL[primary.by]} matches ${primary.entry.name} but`
+        + ` ${MATCH_LABEL[other.by]} matches ${other.entry.name}.`,
+      )
+    }
+    const stored = primary.entry
+    if (
+      primary.by === 'signInName'
+      && row.email.length > 0
+      && (stored.email ?? '').length > 0
+      && normalizeKey(row.email) !== normalizeKey(stored.email)
+    ) {
+      return fail('conflict', 'signInName belongs to someone with a different email.')
+    }
+
+    const index = context.working.findIndex(e => e.id === stored.id)
+    const existing = context.working[index] ?? stored
     const changes: string[] = []
     let next: RosterEntryDto = existing
 
@@ -484,12 +603,13 @@ function applyRow(
       next = { ...next, role: row.role }
       changes.push('role')
     }
-    if (row.email.length > 0 && row.email !== (existing.email ?? '')) {
+    // Emails compare case-insensitively (as the key does): a re-cased address is no change.
+    if (row.email.length > 0 && normalizeKey(row.email) !== normalizeKey(existing.email)) {
       next = { ...next, email: row.email }
       changes.push('email')
     }
     // The display name is only corrected when matched by sign-in name or email.
-    if (match.by !== 'nameAgency' && row.name !== existing.name) {
+    if (primary.by !== 'nameAgency' && row.name !== existing.name) {
       next = { ...next, name: row.name }
       changes.push('name')
     }
@@ -499,28 +619,28 @@ function applyRow(
     }
 
     if (changes.length === 0) return { kind: 'unchanged', entry: existing }
-    const index = working.findIndex(e => e.id === existing.id)
-    if (index >= 0) working[index] = next
+    if (index >= 0) context.working[index] = next
     return { kind: 'updated', entry: next, message: `${changes.join(', ')} changed.` }
   }
 
-  // A new participant.
-  let signInName = row.signInName
-  if (signInName.length > 0) {
-    if (takenSignInNames.has(signInName)) {
-      return { kind: 'failed', message: `signInName "${signInName}" is already taken.` }
-    }
-  } else {
-    signInName = deriveSignInName(row.name, takenSignInNames)
-  }
-  takenSignInNames.add(signInName)
+  // A new participant. The derived sign-in name steps around persona handles too.
+  const signInName = row.signInName.length > 0
+    ? row.signInName
+    : deriveSignInName(row.name, new Set([...context.signInNames, ...context.handles]))
+  context.signInNames.add(signInName)
+  context.claimedInFile.add(signInName)
 
   let persona: RosterPersonaDto
   if (org !== undefined) {
     persona = org
   } else {
-    const handle = deriveAutoPersonaHandle(row.name, takenHandles)
-    takenHandles.add(handle)
+    // The handle steps around every handle AND every sign-in name (this row's own
+    // included, just added above): a public handle never exposes a sign-in name.
+    const handle = deriveAutoPersonaHandle(
+      row.name,
+      new Set([...context.handles, ...context.signInNames]),
+    )
+    context.handles.add(handle)
     persona = autoPersona(handle, row.name)
   }
 
@@ -539,20 +659,8 @@ function applyRow(
     liveSessions: 0,
     createdAt: new Date().toISOString(),
   }
-  working.push(entry)
+  context.working.push(entry)
   return { kind: 'created', entry }
-}
-
-function takenNamesOf(entries: readonly RosterEntryDto[]): Set<string> {
-  return new Set(entries.map(entry => entry.signInName.toLowerCase()))
-}
-
-function takenHandlesOf(entries: readonly RosterEntryDto[]): Set<string> {
-  const handles = new Set<string>(MOCK_ORG_PERSONAS.map(persona => persona.handle.toLowerCase()))
-  for (const entry of entries) {
-    if (entry.persona) handles.add(entry.persona.handle.toLowerCase())
-  }
-  return handles
 }
 
 // ---------------------------------------------------------------------------
@@ -697,14 +805,16 @@ function asRowWrite(body: unknown): RosterRowWrite {
 
 function addParticipant(config: InternalAxiosRequestConfig) {
   const row = toRowInput(asRowWrite(parseJsonBody(config.data)))
-  const working = [...state.entries]
-  const outcome = applyRow(working, row, takenNamesOf(working), takenHandlesOf(working))
+  const context = makeContext()
+  const outcome = applyRow(context, row)
 
-  if (outcome.kind === 'failed') return reject(config, 400, outcome.message)
+  if (outcome.kind === 'failed') {
+    return reject(config, outcome.code === 'invalid' ? 400 : 409, outcome.message)
+  }
   if (outcome.kind !== 'created') {
     return reject(config, 409, 'That person is already on the roster.')
   }
-  state.entries = working
+  state.entries = context.working
   return respond(config, { ...outcome.entry, link: { ...outcome.entry.link } }, 201)
 }
 
@@ -738,9 +848,7 @@ async function importRoster(config: InternalAxiosRequestConfig) {
     return reject(config, 400, `the CSV exceeds the maximum of ${MAX_IMPORT_ROWS} data rows.`)
   }
 
-  const working = state.entries.map(entry => ({ ...entry, link: { ...entry.link } }))
-  const takenNames = takenNamesOf(working)
-  const takenHandles = takenHandlesOf(working)
+  const context = makeContext()
   const seen = new Map<string, number>()
   const rows: RosterImportRowDto[] = []
 
@@ -773,7 +881,7 @@ async function importRoster(config: InternalAxiosRequestConfig) {
     }
     seen.set(key, rowNumber)
 
-    const outcome = applyRow(working, row, takenNames, takenHandles)
+    const outcome = applyRow(context, row)
     if (outcome.kind === 'failed') {
       rows.push({
         rowNumber,
@@ -797,7 +905,7 @@ async function importRoster(config: InternalAxiosRequestConfig) {
   })
 
   // A dry run reports the SAME thing and writes nothing.
-  if (!dryRun) state.entries = working
+  if (!dryRun) state.entries = context.working
 
   const count = (status: RosterImportRowDto['status']) =>
     rows.filter(row => row.status === status).length

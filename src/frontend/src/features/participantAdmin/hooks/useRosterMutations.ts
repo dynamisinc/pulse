@@ -8,6 +8,10 @@
  * Mutations, not queries: each is an explicit staff-triggered write that must
  * never auto-fire, dedupe or retry.
  *
+ * ## No join URL is kept in the mutation cache
+ * Results of add and the four actions arrive without `link.joinUrl` (the service
+ * drops it) and each mutation has `gcTime: 0`. See {@link MUTATION_GC_TIME_MS}.
+ *
  * ## The list is refetched BEFORE the mutation resolves
  * Each write's `onSuccess` returns the invalidation promise, so `mutateAsync`
  * settles only once the refreshed roster is in the cache. The screen relies on
@@ -38,6 +42,14 @@ import type {
 } from '../types'
 import { rosterQueryKey } from './useRoster'
 
+/**
+ * A finished mutation is dropped from React Query's mutation cache as soon as nothing
+ * observes it (default: 5 minutes). Together with the service dropping `joinUrl` from
+ * add / action results, this keeps a join URL out of the mutation cache entirely
+ * (story 10 Gate-1 W1); the list query's own short `gcTime` governs the one place it lives.
+ */
+export const MUTATION_GC_TIME_MS = 0
+
 /** A function that refetches the active exercise's roster and resolves when it has. */
 function useRefetchRoster(): () => Promise<void> {
   const queryClient = useQueryClient()
@@ -54,6 +66,7 @@ export function useAddParticipant(): UseMutationResult<
   const refetch = useRefetchRoster()
   return useMutation<RosterEntryDto, RosterError, RosterRowWrite>({
     mutationFn: row => addParticipant(row),
+    gcTime: MUTATION_GC_TIME_MS,
     onSuccess: () => refetch(),
   })
 }
@@ -74,6 +87,7 @@ export function useImportRoster(): UseMutationResult<
   const refetch = useRefetchRoster()
   return useMutation<RosterImportResultDto, RosterError, ImportRosterVariables>({
     mutationFn: ({ file, dryRun }) => importRoster(file, { dryRun }),
+    gcTime: MUTATION_GC_TIME_MS,
     onSuccess: result => (result.dryRun ? undefined : refetch()),
   })
 }
@@ -97,6 +111,7 @@ export function useRosterAction(): UseMutationResult<
   const refetch = useRefetchRoster()
   return useMutation<RosterActionResultDto, RosterError, RosterActionVariables>({
     mutationFn: ({ kind, participantId }) => runRosterAction(kind, participantId),
+    gcTime: MUTATION_GC_TIME_MS,
     onSuccess: () => refetch(),
     onError: error => (error.status === 404 ? refetch() : undefined),
   })

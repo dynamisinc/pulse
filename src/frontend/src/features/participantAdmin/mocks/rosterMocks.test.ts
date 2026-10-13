@@ -36,6 +36,11 @@ async function failure(promise: Promise<unknown>): Promise<RosterError> {
   return error as RosterError
 }
 
+/** A participant's join URL, read from the LIST (the only place it is returned). */
+async function urlOf(id: string): Promise<string | undefined> {
+  return (await getRoster()).participants.find(p => p.id === id)?.link.joinUrl
+}
+
 beforeEach(() => {
   resetRosterMocks()
 })
@@ -94,7 +99,7 @@ describe('the switches', () => {
 
     const added = await addParticipant({ name: 'New Person' })
     expect(added.link.status).toBe('active')
-    expect(added.link.joinUrl).toBeUndefined()
+    expect(await urlOf(added.id)).toBeUndefined()
   })
 })
 
@@ -146,8 +151,9 @@ describe('POST /staff/roster (add one)', () => {
       persona: { handle: 'riley_chen', kind: 'human', autoCreated: true },
       link: { status: 'active' },
     })
-    expect(created.link.joinUrl).toBeDefined()
-    expect((await getRoster()).participants.some(p => p.id === created.id)).toBe(true)
+    // The service drops the URL from the add result; the LIST carries it.
+    expect(created.link.joinUrl).toBeUndefined()
+    expect(await urlOf(created.id)).toMatch(/^https:\/\/pulse\.example\.test\/join\//)
   })
 
   it('binds an org persona (case-insensitive, @ tolerated) and makes the account a pio', async () => {
@@ -261,12 +267,6 @@ describe('POST /staff/roster/import', () => {
 
   it('binding an org persona on re-upload updates the row and makes it a pio', async () => {
     await importRoster(csv(FILE), { dryRun: false })
-    const result = await importRoster(
-      csv('name,personaHandle\nRiley Chen,FulcoPIO'),
-      { dryRun: false },
-    )
-    // name-only identity key is name + agency: no agency given -> a NEW person, not a match.
-    expect(result.rows[0]?.status).toBe('created')
 
     const bySignIn = await importRoster(
       csv('name,signInName,personaHandle\nRiley Chen,rchen,FulcoPIO'),
@@ -274,6 +274,8 @@ describe('POST /staff/roster/import', () => {
     )
     expect(bySignIn.rows[0]).toMatchObject({ status: 'updated', personaHandle: 'FulcoPIO' })
     expect(bySignIn.rows[0]?.message).toMatch(/persona bound to @FulcoPIO/)
+    expect((await getRoster()).participants.find(p => p.signInName === 'rchen')?.exerciseRole)
+      .toBe('pio')
   })
 
   it('derives collision suffixes against existing accounts AND earlier rows in the same file', async () => {
@@ -351,18 +353,19 @@ describe('the four actions', () => {
     const result = await reissueLink('mock-acct-002')
     expect(result.sessionsEnded).toBe(2)
     expect(result.link.status).toBe('active')
-    expect(result.link.joinUrl).toBeDefined()
-    expect(result.link.joinUrl).not.toBe(before?.link.joinUrl)
+    // No URL in the action result (it would sit in the mutation cache); the list has it.
+    expect(result.link.joinUrl).toBeUndefined()
 
     const after = (await getRoster()).participants.find(p => p.id === 'mock-acct-002')
     expect(after?.liveSessions).toBe(0)
-    expect(after?.link.joinUrl).toBe(result.link.joinUrl)
+    expect(after?.link.joinUrl).toBeDefined()
+    expect(after?.link.joinUrl).not.toBe(before?.link.joinUrl)
   })
 
   it('reissue clears needsReissue and issues a first link to a `none` row', async () => {
     const fixed = await reissueLink('mock-acct-004')
     expect(fixed.link.needsReissue).toBeUndefined()
-    expect(fixed.link.joinUrl).toBeDefined()
+    expect(await urlOf('mock-acct-004')).toBeDefined()
 
     const first = await reissueLink('mock-acct-003')
     expect(first.link.status).toBe('active')
@@ -390,5 +393,262 @@ describe('the four actions', () => {
     for (const run of [reissueLink, revokeLink, disableParticipant, enableParticipant]) {
       expect((await failure(run('not-a-real-id'))).status).toBe(404)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The amended derivation + matching rules (implementation.md at 34c6c80;
+// story 10 Gate-1 W4 + W5). The mock must reproduce them exactly: the screen's
+// explainer promises them, and the live server (story 02) is built to them.
+// ---------------------------------------------------------------------------
+
+describe('the identity key CASCADES: signInName, then email, then name + agency', () => {
+  it('a row with an unknown signInName but a known email matches by email (never duplicated)', async () => {
+    const before = (await getRoster()).participants.length
+    const result = await importRoster(
+      csv('name,email,signInName\nDana Whitfield,dana.whitfield@example.test,dana.w'),
+      { dryRun: false },
+    )
+
+    expect(result.rows[0]).toMatchObject({ status: 'unchanged', signInName: 'dwhitfield' })
+    const { participants } = await getRoster()
+    expect(participants).toHaveLength(before)
+    // The matched person's sign-in name is NOT changed by the row.
+    expect(participants.find(p => p.id === 'mock-acct-001')?.signInName).toBe('dwhitfield')
+  })
+
+  it('a row with an unknown signInName but a known name + agency matches that person', async () => {
+    const before = (await getRoster()).participants.length
+    const result = await importRoster(
+      csv('name,agency,signInName\nTom Becker,County Transportation,tom.b'),
+      { dryRun: true },
+    )
+    expect(result.rows[0]).toMatchObject({ status: 'unchanged', signInName: 'tbecker' })
+    expect((await getRoster()).participants).toHaveLength(before)
+  })
+
+  it('filling in a previously blank email and re-uploading updates the SAME person, then is unchanged', async () => {
+    const before = (await getRoster()).participants.length
+    const file = 'name,agency,email\nTom Becker,County Transportation,tom.becker@example.test'
+
+    const first = await importRoster(csv(file), { dryRun: false })
+    expect(first.rows[0]).toMatchObject({ status: 'updated', signInName: 'tbecker' })
+    expect(first.rows[0]?.message).toMatch(/email/)
+
+    const { participants } = await getRoster()
+    expect(participants).toHaveLength(before)
+    expect(participants.find(p => p.id === 'mock-acct-004')?.email).toBe('tom.becker@example.test')
+
+    // Now the EMAIL key carries the match, and nothing is left to change.
+    const second = await importRoster(csv(file), { dryRun: false })
+    expect(second.rows[0]?.status).toBe('unchanged')
+  })
+
+  it('two keys matching DIFFERENT people fails the row and names both', async () => {
+    const result = await importRoster(
+      csv('name,email,signInName\nAnyone,dana.whitfield@example.test,moyelaran'),
+      { dryRun: false },
+    )
+    expect(result.rows[0]).toMatchObject({ status: 'failed' })
+    expect(result.rows[0]?.message)
+      .toBe('signInName matches Marcus Oyelaran but email matches Dana Whitfield.')
+    expect(result.createdCount + result.updatedCount).toBe(0)
+  })
+
+  it('an email matching one person and name + agency another fails the row', async () => {
+    const result = await importRoster(
+      csv('name,agency,email\nTom Becker,County Transportation,dana.whitfield@example.test'),
+      { dryRun: true },
+    )
+    expect(result.rows[0]?.status).toBe('failed')
+    expect(result.rows[0]?.message)
+      .toBe('email matches Dana Whitfield but name and agency matches Tom Becker.')
+  })
+
+  it('a signInName match whose stored email differs from the row\'s fails (guards a typo renaming someone)', async () => {
+    const before = getRosterMockEntries()
+    const result = await importRoster(
+      csv('name,email,signInName\nDana Whitfield-Reyes,other@example.test,dwhitfield'),
+      { dryRun: false },
+    )
+    expect(result.rows[0]).toMatchObject({
+      status: 'failed',
+      message: 'signInName belongs to someone with a different email.',
+    })
+    expect(getRosterMockEntries()).toEqual(before)
+  })
+
+  it('…but the same email (case and spacing aside) is no conflict, and a blank stored email is filled in', async () => {
+    const same = await importRoster(
+      csv('name,email,signInName\nDana Whitfield, DANA.whitfield@example.test ,dwhitfield'),
+      { dryRun: true },
+    )
+    expect(same.rows[0]?.status).toBe('unchanged')
+
+    const filled = await importRoster(
+      csv('name,email,signInName\nMarcus Oyelaran,marcus@example.test,moyelaran'),
+      { dryRun: false },
+    )
+    expect(filled.rows[0]?.status).toBe('updated')
+    expect((await getRoster()).participants.find(p => p.id === 'mock-acct-002')?.email)
+      .toBe('marcus@example.test')
+  })
+})
+
+describe('rows in one file never update each other', () => {
+  it('a second row with the same key fails as a duplicate of the first (and updates nobody)', async () => {
+    const result = await importRoster(
+      csv('name,agency\nZed Zimmer,Alpha\nZed Zimmer,Alpha'),
+      { dryRun: false },
+    )
+    expect(result.rows[0]?.status).toBe('created')
+    expect(result.rows[1]).toMatchObject({
+      status: 'failed',
+      message: 'duplicate of row 1; give a signInName to tell them apart',
+    })
+    expect(result.updatedCount).toBe(0)
+  })
+
+  it('a later row whose OTHER key would match an earlier row\'s new person does not update them', async () => {
+    // Row 1 creates Zed. Row 2 carries an email, so its first key differs from row 1's
+    // (name + agency); matching is only against who existed BEFORE the file, so it
+    // creates a second person instead of updating the first.
+    const result = await importRoster(
+      csv('name,agency,email\nZed Zimmer,Alpha,\nZed Zimmer,Alpha,zed@example.test'),
+      { dryRun: false },
+    )
+    expect(result.rows.map(r => r.status)).toEqual(['created', 'created'])
+    expect(result.updatedCount).toBe(0)
+    expect(result.rows.map(r => r.signInName)).toEqual(['zzimmer', 'zzimmer2'])
+    expect((await getRoster()).participants.filter(p => p.name === 'Zed Zimmer')).toHaveLength(2)
+  })
+})
+
+describe('an explicit signInName fails when it equals a persona handle or is taken', () => {
+  it('equals an organization persona handle (case-insensitive)', async () => {
+    const result = await importRoster(csv('name,signInName\nA One,fulcoem'), { dryRun: true })
+    expect(result.rows[0]?.status).toBe('failed')
+    expect(result.rows[0]?.message).toMatch(/persona handle/)
+  })
+
+  it('equals an existing participant\'s persona handle', async () => {
+    const result = await importRoster(csv('name,signInName\nA Two,marcus_oyelaran'), { dryRun: true })
+    expect(result.rows[0]?.status).toBe('failed')
+    expect(result.rows[0]?.message).toMatch(/persona handle/)
+  })
+
+  it('equals the auto handle an EARLIER ROW in the same file just claimed', async () => {
+    const result = await importRoster(
+      csv('name,signInName\nRiley Chen,\nOther Person,riley_chen'),
+      { dryRun: true },
+    )
+    expect(result.rows[0]?.status).toBe('created')
+    expect(result.rows[0]?.personaHandle).toBe('riley_chen')
+    expect(result.rows[1]?.status).toBe('failed')
+    expect(result.rows[1]?.message).toMatch(/persona handle/)
+  })
+
+  it('was claimed by an earlier row in the same file (even a derived one)', async () => {
+    const result = await importRoster(
+      csv('name,agency,signInName\nJane Smith,A,\nOther Person,B,jsmith'),
+      { dryRun: true },
+    )
+    expect(result.rows[0]).toMatchObject({ status: 'created', signInName: 'jsmith' })
+    expect(result.rows[1]?.status).toBe('failed')
+    expect(result.rows[1]?.message).toMatch(/claimed by an earlier row/)
+  })
+
+  it('belongs to an account the roster does not list (a staff or legacy account)', async () => {
+    const result = await importRoster(csv('name,signInName\nA One,admin'), { dryRun: true })
+    expect(result.rows[0]?.status).toBe('failed')
+    expect(result.rows[0]?.message).toMatch(/taken by another account/)
+  })
+
+  it('and an explicit name is never silently altered when it is fine', async () => {
+    const result = await importRoster(csv('name,signInName\nA One,aone'), { dryRun: true })
+    expect(result.rows[0]).toMatchObject({ status: 'created', signInName: 'aone' })
+  })
+})
+
+describe('derived names and auto handles never collide with each other', () => {
+  it('a DERIVED sign-in name steps around a non-roster account and around a persona handle', async () => {
+    const result = await importRoster(
+      csv('name,agency\nPat Lee,A\nFulcoem,B'),
+      { dryRun: true },
+    )
+    // `plee` belongs to a legacy account; `fulcoem` is the org persona @FulcoEM.
+    expect(result.rows[0]).toMatchObject({ status: 'created', signInName: 'plee2' })
+    expect(result.rows[1]).toMatchObject({ status: 'created', signInName: 'fulcoem2' })
+  })
+
+  it('the auto handle never equals the row\'s OWN sign-in name: Madonna -> madonna_2', async () => {
+    const result = await importRoster(csv('name\nMadonna'), { dryRun: false })
+    expect(result.rows[0]).toMatchObject({
+      status: 'created',
+      signInName: 'madonna',
+      personaHandle: 'madonna_2',
+      personaCreated: true,
+    })
+  })
+
+  it('the auto handle never equals ANY sign-in name in the exercise', async () => {
+    // "Dwhitfield" slugs to `dwhitfield`, which is Dana's sign-in name.
+    const result = await importRoster(csv('name\nDwhitfield'), { dryRun: false })
+    expect(result.rows[0]).toMatchObject({
+      status: 'created',
+      signInName: 'dwhitfield2',
+      personaHandle: 'dwhitfield_2',
+    })
+  })
+
+  it('across a whole imported roster no persona handle is anyone\'s sign-in name', async () => {
+    await importRoster(
+      csv('name,agency\nMadonna,A\nCher,B\nDwhitfield,C\nJane Smith,D\nJane Smith,E'),
+      { dryRun: false },
+    )
+    const { participants } = await getRoster()
+    const signIns = new Set(participants.map(p => p.signInName.toLowerCase()))
+    for (const p of participants) {
+      if (!p.persona) continue
+      expect(signIns.has(p.persona.handle.toLowerCase()), p.persona.handle).toBe(false)
+    }
+  })
+})
+
+describe('POST /staff/roster follows the same rules', () => {
+  it('two keys matching different people is a 409', async () => {
+    const error = await failure(addParticipant({
+      name: 'Anyone',
+      email: 'dana.whitfield@example.test',
+      signInName: 'moyelaran',
+    }))
+    expect(error.status).toBe(409)
+    expect(error.serverMessage).toBe('signInName matches Marcus Oyelaran but email matches Dana Whitfield.')
+  })
+
+  it('a signInName match with a different stored email is a 409', async () => {
+    const error = await failure(addParticipant({
+      name: 'Dana Whitfield',
+      email: 'other@example.test',
+      signInName: 'dwhitfield',
+    }))
+    expect(error.status).toBe(409)
+    expect(error.serverMessage).toMatch(/different email/)
+  })
+
+  it('an explicit signInName equal to a persona handle is a 400', async () => {
+    const error = await failure(addParticipant({ name: 'A One', signInName: 'FulcoEM' }))
+    expect(error.status).toBe(400)
+    expect(error.serverMessage).toMatch(/persona handle/)
+  })
+
+  it('an explicit signInName held by a non-roster account is a 409', async () => {
+    expect((await failure(addParticipant({ name: 'A One', signInName: 'admin' }))).status).toBe(409)
+  })
+
+  it('a derived name and handle follow the same rules (Madonna -> madonna / madonna_2)', async () => {
+    const created = await addParticipant({ name: 'Madonna' })
+    expect(created.signInName).toBe('madonna')
+    expect(created.persona?.handle).toBe('madonna_2')
   })
 })

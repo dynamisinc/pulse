@@ -335,10 +335,19 @@ function parseImportResult(value: unknown): RosterImportResultDto | undefined {
   }
 }
 
-function parseActionResult(value: unknown): RosterActionResultDto | undefined {
+/**
+ * Parses an action result and fails closed unless it is ABOUT the participant that
+ * was asked for: a result for someone else would announce the wrong person's name
+ * and sessionsEnded count.
+ */
+function parseActionResult(
+  value: unknown,
+  requestedId: string,
+): RosterActionResultDto | undefined {
   if (!isRec(value)) return undefined
   if (
     typeof value.participantId !== 'string'
+    || value.participantId !== requestedId
     || (value.access !== 'enabled' && value.access !== 'disabled')
     || typeof value.sessionsEnded !== 'number'
   ) return undefined
@@ -350,6 +359,25 @@ function parseActionResult(value: unknown): RosterActionResultDto | undefined {
     access: value.access,
     sessionsEnded: value.sessionsEnded,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Secrets: the join URL is read from the LIST only
+// ---------------------------------------------------------------------------
+
+/**
+ * `link.joinUrl` is a bearer credential. The roster list is the one place it may
+ * live in client state (query data, `staleTime: 0`, a short `gcTime`). The add and
+ * action responses also carry it, but nothing needs it from there (the list is
+ * refetched straight after), and a mutation result sits in React Query's mutation
+ * cache — a second, separately-timed cache — so it is dropped HERE, at the seam,
+ * before any caller or cache can hold it.
+ */
+function withoutJoinUrl<T extends { link: RosterLinkDto }>(value: T): T {
+  if (value.link.joinUrl === undefined) return value
+  const link = { ...value.link }
+  delete link.joinUrl
+  return { ...value, link }
 }
 
 // ---------------------------------------------------------------------------
@@ -404,12 +432,19 @@ function toWireRow(row: RosterRowWrite): RosterRowWrite {
   }
 }
 
-/** `POST /api/staff/roster` — add one participant. 400 invalid field, 409 already on the roster. */
+/**
+ * `POST /api/staff/roster` — add one participant. 400 invalid field, 409 already
+ * on the roster. The returned row has NO `link.joinUrl` (see {@link withoutJoinUrl});
+ * the new person's link is read from the refetched list.
+ */
 export function addParticipant(row: RosterRowWrite): Promise<RosterEntryDto> {
   return call(
     'Adding the participant',
     () => api.post<unknown>(ROSTER_ENDPOINT, toWireRow(row), mockOptions()),
-    parseEntry,
+    value => {
+      const entry = parseEntry(value)
+      return entry === undefined ? undefined : withoutJoinUrl(entry)
+    },
   )
 }
 
@@ -419,15 +454,20 @@ export function addParticipant(row: RosterRowWrite): Promise<RosterEntryDto> {
  * valid rows. The file is sent as `multipart/form-data` with the single `file`
  * part; the content type is set explicitly so the client's JSON default cannot
  * serialize the FormData.
+ *
+ * Fails closed if the server's echoed `dryRun` is not the one requested: a
+ * "validated, nothing written" answer to a real import (or the reverse) would
+ * leave staff believing the wrong thing about the roster.
  */
-export function importRoster(
+export async function importRoster(
   file: File,
   options: { readonly dryRun: boolean },
 ): Promise<RosterImportResultDto> {
   const form = new FormData()
   form.append(ROSTER_IMPORT_FILE_PART, file)
-  return call(
-    options.dryRun ? 'Validating the file' : 'Importing the file',
+  const what = options.dryRun ? 'Validating the file' : 'Importing the file'
+  const result = await call(
+    what,
     () => api.post<unknown>(`${ROSTER_ENDPOINT}/import`, form, {
       params: { dryRun: options.dryRun },
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -435,6 +475,13 @@ export function importRoster(
     }),
     parseImportResult,
   )
+  if (result.dryRun !== options.dryRun) {
+    throw new RosterError(
+      `${what}: the server answered for ${result.dryRun ? 'a dry run' : 'a real import'},`
+      + ' not the one requested.',
+    )
+  }
+  return result
 }
 
 const ACTION_SEGMENT: Readonly<Record<RosterActionKind, string>> = {
@@ -454,7 +501,9 @@ const ACTION_LABEL: Readonly<Record<RosterActionKind, string>> = {
 /**
  * Runs one per-participant action: `POST /api/staff/roster/{id}/…`. `id` is the
  * participant's account id from the list response. Reissue, revoke and disable
- * end the participant's live sessions; the result reports `sessionsEnded`.
+ * end the participant's live sessions; the result reports `sessionsEnded`. The
+ * result must be about the requested participant, and carries NO `link.joinUrl`
+ * (see {@link withoutJoinUrl}).
  */
 export function runRosterAction(
   kind: RosterActionKind,
@@ -464,7 +513,10 @@ export function runRosterAction(
   return call(
     ACTION_LABEL[kind],
     () => api.post<unknown>(path, undefined, mockOptions()),
-    parseActionResult,
+    value => {
+      const result = parseActionResult(value, participantId)
+      return result === undefined ? undefined : withoutJoinUrl(result)
+    },
   )
 }
 

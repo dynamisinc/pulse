@@ -252,6 +252,14 @@ describe('addParticipant', () => {
     expect((error as RosterError).serverMessage).toBe('name is required.')
   })
 
+  it('drops the join URL from the created row (read it from the refetched list)', async () => {
+    mockPost.mockResolvedValue(ok(ENTRY))
+    const created = await addParticipant({ name: 'Jane Smith' })
+    expect(created.link).not.toHaveProperty('joinUrl')
+    expect(created.link.status).toBe('active')
+    expect(JSON.stringify(created)).not.toContain('FAKE-SECRET-TOKEN')
+  })
+
   it('fails closed on a malformed 201 body', async () => {
     mockPost.mockResolvedValue(ok({ id: 'x' }))
     await expect(addParticipant({ name: 'Jane' })).rejects.toBeInstanceOf(RosterError)
@@ -328,6 +336,18 @@ describe('importRoster', () => {
     expect((error as RosterError).serverMessage).toBe('the CSV file exceeds the maximum size of 1048576 bytes.')
   })
 
+  it('fails closed when the echoed dryRun is not the one requested', async () => {
+    // A "validated, nothing written" answer to a REAL import…
+    mockPost.mockResolvedValue(ok({ ...IMPORT_RESULT, dryRun: true }))
+    const real = await importRoster(file, { dryRun: false }).catch((e: unknown) => e)
+    expect(real).toBeInstanceOf(RosterError)
+    expect((real as RosterError).message).toMatch(/not the one requested/)
+
+    // …or an "imported" answer to a dry run.
+    mockPost.mockResolvedValue(ok({ ...IMPORT_RESULT, dryRun: false }))
+    await expect(importRoster(file, { dryRun: true })).rejects.toBeInstanceOf(RosterError)
+  })
+
   it('exposes the 1 MB limit the picker checks against', () => {
     expect(MAX_ROSTER_IMPORT_BYTES).toBe(1024 * 1024)
   })
@@ -355,7 +375,7 @@ describe('the four per-participant actions', () => {
   })
 
   it('URL-encodes the participant id', async () => {
-    mockPost.mockResolvedValue(ok(ACTION_RESULT))
+    mockPost.mockResolvedValue(ok({ ...ACTION_RESULT, participantId: 'a/b c' }))
     await disableParticipant('a/b c')
     expect(mockPost.mock.calls[0]?.[0]).toBe('/staff/roster/a%2Fb%20c/disable')
   })
@@ -367,6 +387,20 @@ describe('the four per-participant actions', () => {
     expect(result.access).toBe('enabled')
     expect(result.link.status).toBe('active')
     expect(result.participantId).toBe('acct-1')
+  })
+
+  it('fails closed when the result is about SOMEONE ELSE (it would announce the wrong person)', async () => {
+    mockPost.mockResolvedValue(ok({ ...ACTION_RESULT, participantId: 'someone-else' }))
+    for (const run of [reissueLink, revokeLink, disableParticipant, enableParticipant]) {
+      await expect(run('acct-1')).rejects.toBeInstanceOf(RosterError)
+    }
+  })
+
+  it('drops the join URL from the result (a mutation result sits in a second cache)', async () => {
+    mockPost.mockResolvedValue(ok(ACTION_RESULT))
+    const result = await reissueLink('acct-1')
+    expect(result.link).toEqual({ status: 'active', useCount: 0 })
+    expect(JSON.stringify(result)).not.toContain('FAKE-SECRET-TOKEN')
   })
 
   it('maps a 404 (unknown or cross-exercise id, indistinguishable) to a RosterError', async () => {

@@ -14,9 +14,9 @@
  *   no link ("none")    Issue link, Disable
  *   access disabled     Enable   (the person is off; turn them back on first)
  *
- * Reissue, Revoke and Disable end the participant's live sessions (EL-8), so
- * they are confirmed; issuing the FIRST link to someone with none and no live
- * sessions has nothing to lose and goes straight through. Copy and Enable never
+ * Reissue (and "Issue link"), Revoke and Disable end the participant's live
+ * sessions (EL-8), so they are ALL confirmed — even a first link for someone with
+ * none, because the on-screen session count can be stale. Copy and Enable never
  * confirm. No message built here ever contains a join URL.
  *
  * World: STAFF. Pure functions — no UI.
@@ -48,14 +48,14 @@ export function availableActions(entry: RosterEntryDto): RowActionId[] {
   return actions
 }
 
-/** True when the action should be confirmed first. */
-export function needsConfirmation(action: RowActionId, entry: RosterEntryDto): boolean {
-  if (action === 'revoke' || action === 'disable') return true
-  if (action === 'reissue') {
-    // The first link for someone with none and no live sessions has nothing to lose.
-    return !(entry.link.status === 'none' && entry.liveSessions === 0)
-  }
-  return false
+/**
+ * True when the action should be confirmed first: every action that ends sessions
+ * (reissue, "issue", revoke, disable). "Issue link" for someone with no link and no
+ * live sessions is confirmed too: the session count on screen can be stale, and
+ * issuing ends any session they turn out to have.
+ */
+export function needsConfirmation(action: RowActionId): boolean {
+  return action === 'reissue' || action === 'revoke' || action === 'disable'
 }
 
 /** The visible label of a button. */
@@ -89,7 +89,8 @@ export function confirmText(action: RosterActionKind, entry: RosterEntryDto): Co
       return entry.link.status === 'none'
         ? {
           title: `Issue a link for ${name}?`,
-          body: `This signs ${name} out everywhere and creates a link they can use to sign in.`
+          body: `This creates a link ${name} can use to sign in. Any session ${name} has open is`
+            + ' ended.'
             + liveSessionsNote(entry),
           confirmLabel: 'Issue link',
         }

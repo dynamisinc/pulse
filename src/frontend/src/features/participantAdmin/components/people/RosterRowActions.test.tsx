@@ -9,7 +9,7 @@
  * remaining one), and the `needsReissue` / `none` rows.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { configure, screen, waitFor, within } from '@testing-library/react'
+import { configure, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as rosterService from '../../services/rosterService'
 import { useRoster } from '../../hooks/useRoster'
 import {
@@ -18,9 +18,10 @@ import {
 } from '../../mocks/rosterMocks'
 import { makeEntry, makeLink } from '../../test/fixtures'
 import { renderWithProviders } from '../../test/renderWithProviders'
+import type { RosterActionResultDto } from '../../types'
 import type { RosterActionReport } from './rosterActions'
 import { RosterRowActions } from './RosterRowActions'
-import { setupUser } from '../../test/userEvents'
+import { deferred, setupUser } from '../../test/userEvents'
 
 // These tests render the full COBRA page / MUI dialogs through the stateful mock
 // backend. A CI box under load can take several seconds just to mount the first
@@ -28,7 +29,7 @@ import { setupUser } from '../../test/userEvents'
 // default (set in src/test/setup.ts) rather than let contention read as a regression.
 // Both settings are per test file (each file runs in its own isolated worker).
 vi.setConfig({ testTimeout: 30_000 })
-configure({ asyncUtilTimeout: 20_000 })
+configure({ asyncUtilTimeout: 10_000 })
 
 vi.mock('../../services/rosterService', async importOriginal => {
   const actual = await importOriginal<typeof import('../../services/rosterService')>()
@@ -290,12 +291,17 @@ describe('RosterRowActions — confirmed actions', () => {
     )
   })
 
-  it('"Issue link" on a no-link row with no live sessions goes straight through (nothing to lose)', async () => {
+  it('"Issue link" is CONFIRMED even with no live sessions (the on-screen count can be stale)', async () => {
     const { onReport, user } = await renderLiveRow(PRIYA)
 
     await user.click(screen.getByRole('button', { name: 'Issue link for Priya Raman' }))
 
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    const dialog = await screen.findByRole('alertdialog', { name: 'Issue a link for Priya Raman?' })
+    expect(dialog).toHaveAccessibleDescription(/Any session Priya Raman has open is ended\./)
+    expect(runAction).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Issue link' }))
+
     await waitFor(() => expect(onReport).toHaveBeenCalled())
     expect(onReport.mock.calls[0]?.[0]).toEqual({
       tone: 'success',
@@ -366,5 +372,97 @@ describe('RosterRowActions — failures', () => {
       tone: 'error',
       message: 'You don\'t have access to change this roster.',
     })
+  })
+})
+
+describe('RosterRowActions — one request at a time (Gate-1 W3)', () => {
+  const REISSUED: RosterActionResultDto = {
+    participantId: MARCUS,
+    link: { status: 'active', useCount: 0 },
+    access: 'enabled',
+    sessionsEnded: 2,
+  }
+
+  it('a double click on the confirm button sends ONE request', async () => {
+    const gate = deferred<RosterActionResultDto>()
+    runAction.mockReturnValueOnce(gate.promise)
+    const { onReport, user } = await renderLiveRow(MARCUS)
+    await user.click(screen.getByRole('button', { name: 'Reissue link for Marcus Oyelaran' }))
+    const confirm = within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Reissue link' })
+
+    // Two clicks in the same tick: `isPending` has not rendered yet, so only the
+    // synchronous in-flight guard can stop the second.
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
+
+    // (The mutation starts a microtask later, hence the wait; it must be exactly one.)
+    await waitFor(() => expect(runAction).toHaveBeenCalledTimes(1))
+    gate.resolve(REISSUED)
+    await waitFor(() => expect(onReport).toHaveBeenCalledTimes(1))
+    expect(runAction).toHaveBeenCalledTimes(1)
+  })
+
+  it('a double click on Enable (no dialog) sends ONE request', async () => {
+    const gate = deferred<RosterActionResultDto>()
+    runAction.mockReturnValueOnce(gate.promise)
+    const { onReport } = await renderLiveRow(JORDAN)
+    const enable = screen.getByRole('button', { name: 'Enable Jordan Pike' })
+
+    fireEvent.click(enable)
+    fireEvent.click(enable)
+
+    await waitFor(() => expect(runAction).toHaveBeenCalledTimes(1))
+    gate.resolve({
+      participantId: JORDAN,
+      link: { status: 'active', useCount: 1 },
+      access: 'enabled',
+      sessionsEnded: 0,
+    })
+    await waitFor(() => expect(onReport).toHaveBeenCalledTimes(1))
+    expect(runAction).toHaveBeenCalledTimes(1)
+  })
+
+  it('the guard lets the NEXT action through once the first has finished', async () => {
+    const { onReport, user } = await renderLiveRow(JORDAN)
+    await user.click(screen.getByRole('button', { name: 'Enable Jordan Pike' }))
+    await waitFor(() => expect(onReport).toHaveBeenCalledTimes(1))
+
+    await user.click(await screen.findByRole('button', { name: 'Disable Jordan Pike' }))
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Disable' }))
+
+    await waitFor(() => expect(onReport).toHaveBeenCalledTimes(2))
+    expect(runAction).toHaveBeenCalledTimes(2)
+  })
+
+  it('the guard is released after a FAILURE, so a retry goes through', async () => {
+    runAction.mockRejectedValueOnce(new rosterService.RosterError('x', { status: 500 }))
+    const { onReport, user } = await renderLiveRow(DANA)
+    await user.click(screen.getByRole('button', { name: 'Disable Dana Whitfield' }))
+    const dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Disable' }))
+    await within(dialog).findByRole('alert')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Disable' }))
+
+    await waitFor(() => expect(onReport).toHaveBeenCalledTimes(1))
+    expect(runAction).toHaveBeenCalledTimes(2)
+  })
+
+  it('Escape does not dismiss the confirm dialog while its request is in flight', async () => {
+    const gate = deferred<RosterActionResultDto>()
+    runAction.mockReturnValueOnce(gate.promise)
+    const { onReport, user } = await renderLiveRow(MARCUS)
+    await user.click(screen.getByRole('button', { name: 'Reissue link for Marcus Oyelaran' }))
+    const dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Reissue link' }))
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled())
+
+    await user.keyboard('{Escape}')
+
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+    gate.resolve(REISSUED)
+    await waitFor(() => expect(onReport).toHaveBeenCalled())
+    await dialogGone()
   })
 })

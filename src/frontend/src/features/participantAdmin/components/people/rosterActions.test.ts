@@ -57,26 +57,15 @@ describe('actionLabel', () => {
 })
 
 describe('needsConfirmation', () => {
-  it('reissue (with a link), revoke and disable are confirmed', () => {
-    const entry = makeEntry()
-    expect(needsConfirmation('reissue', entry)).toBe(true)
-    expect(needsConfirmation('revoke', entry)).toBe(true)
-    expect(needsConfirmation('disable', entry)).toBe(true)
+  it('everything that ends sessions is confirmed: reissue / issue, revoke, disable', () => {
+    expect(needsConfirmation('reissue')).toBe(true)
+    expect(needsConfirmation('revoke')).toBe(true)
+    expect(needsConfirmation('disable')).toBe(true)
   })
 
   it('copy and enable are never confirmed', () => {
-    expect(needsConfirmation('copy', makeEntry())).toBe(false)
-    expect(needsConfirmation('enable', makeEntry({ access: 'disabled' }))).toBe(false)
-  })
-
-  it('the FIRST link for someone with none and no live sessions has nothing to lose', () => {
-    const none = makeEntry({ link: makeLink({ status: 'none' }), liveSessions: 0 })
-    expect(needsConfirmation('reissue', none)).toBe(false)
-  })
-
-  it('but a no-link person with live sessions IS confirmed (it signs them out)', () => {
-    const none = makeEntry({ link: makeLink({ status: 'none' }), liveSessions: 2 })
-    expect(needsConfirmation('reissue', none)).toBe(true)
+    expect(needsConfirmation('copy')).toBe(false)
+    expect(needsConfirmation('enable')).toBe(false)
   })
 })
 
@@ -106,10 +95,13 @@ describe('confirmText says plainly what will happen', () => {
     expect(confirmText('disable', makeEntry({ liveSessions: 0 })).body).not.toContain('live session')
   })
 
-  it('Issue link (no link yet) is worded as issuing, not reissuing', () => {
-    const none = makeEntry({ link: makeLink({ status: 'none' }), liveSessions: 1 })
-    const { title, confirmLabel } = confirmText('reissue', none)
+  it('Issue link (no link yet) is worded as issuing, and still warns that open sessions end', () => {
+    const none = makeEntry({ link: makeLink({ status: 'none' }), liveSessions: 0 })
+    const { title, body, confirmLabel } = confirmText('reissue', none)
     expect(title).toBe('Issue a link for Jane Smith?')
+    expect(body).toContain('creates a link Jane Smith can use to sign in')
+    // The on-screen count can be stale, so it never promises there is nothing to end.
+    expect(body).toContain('Any session Jane Smith has open is ended.')
     expect(confirmLabel).toBe('Issue link')
   })
 

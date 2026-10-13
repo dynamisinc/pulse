@@ -67,6 +67,23 @@ describe('copyToClipboard', () => {
     expect(execCommand).toHaveBeenCalledWith('copy')
   })
 
+  it('a SYNCHRONOUS writeText throw is caught and falls back in the same turn (inside the gesture)', async () => {
+    stubClipboard({ writeText: vi.fn(() => { throw new Error('boom') }) })
+    const execCommand = vi.fn().mockReturnValue(true)
+    Object.defineProperty(document, 'execCommand', { value: execCommand, configurable: true, writable: true })
+
+    const pending = copyToClipboard(SECRET)
+
+    // The fallback has ALREADY run, before any await: it was not deferred out of the click.
+    expect(execCommand).toHaveBeenCalledWith('copy')
+    await expect(pending).resolves.toBe(true)
+  })
+
+  it('a synchronous throw with no working fallback reports false rather than throwing', async () => {
+    stubClipboard({ writeText: vi.fn(() => { throw new Error('boom') }) })
+    await expect(copyToClipboard(SECRET)).resolves.toBe(false)
+  })
+
   it('reports failure (false), never throwing, when nothing can copy', async () => {
     stubClipboard(undefined)
     await expect(copyToClipboard(SECRET)).resolves.toBe(false)

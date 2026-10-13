@@ -38,6 +38,7 @@
 
 import { memo, useEffect, useRef } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
+import type { Theme } from '@mui/material/styles'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faSort, faSortDown, faSortUp } from '@fortawesome/free-solid-svg-icons'
 import type { RosterEntryDto } from '../../types'
@@ -110,7 +111,8 @@ const CHECKBOX_SX = {
   width: 16,
   height: 16,
   margin: 0,
-  accentColor: '#0020c2',
+  // The theme's info colour (no hard-coded hex): sx has no palette path for accent-color.
+  accentColor: (theme: Theme) => theme.palette.info.main,
   cursor: 'pointer',
   '&:focus-visible': FOCUS_RING,
 } as const

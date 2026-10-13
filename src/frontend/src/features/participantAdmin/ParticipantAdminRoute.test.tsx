@@ -17,7 +17,7 @@ import { ParticipantAdminRoute } from './ParticipantAdminRoute'
 // The full COBRA page mounts through the mock backend; give a loaded CI box headroom
 // over the 10 s test default and the 5 s `findBy`/`waitFor` default (src/test/setup.ts).
 vi.setConfig({ testTimeout: 30_000 })
-configure({ asyncUtilTimeout: 20_000 })
+configure({ asyncUtilTimeout: 10_000 })
 
 function renderRoute() {
   const queryClient = new QueryClient({

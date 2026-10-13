@@ -41,7 +41,9 @@
  * of date.
  *
  * ## Isolation + secrets (XC-001, story 10)
- * No request here carries an exercise id; the cache key does (`useRoster`).
+ * No request here carries an exercise id; the cache key does (`useRoster`), and the
+ * page body is keyed on it so NO page state (selection, filter, announcement,
+ * dialogs, import result) survives an exercise switch.
  * Participant ids come only from the list response. `joinUrl` lives in query
  * data only and is never rendered.
  *
@@ -257,8 +259,25 @@ function JoinLinksBanner() {
   )
 }
 
-/** The roster page. See the module header. */
-export function RosterPage({ dayWordSlot, renderCardsAction, renderEmailAction }: RosterPageProps) {
+/**
+ * The roster page. See the module header.
+ *
+ * The body is KEYED on the exercise id (as the day-word panel is): the staff
+ * switcher re-resolves the scope WITHOUT remounting the tree, so without the key
+ * the previous exercise's selection, filter, sort, open dialogs, import result and
+ * announcement ("Link copied for Jane") would survive into the next exercise. A
+ * different `key` is a fresh mount with fresh state.
+ */
+export function RosterPage(props: RosterPageProps) {
+  const { exerciseId } = useExerciseContext()
+  return <RosterPageBody key={exerciseId} {...props} />
+}
+
+function RosterPageBody({
+  dayWordSlot,
+  renderCardsAction,
+  renderEmailAction,
+}: RosterPageProps) {
   const { timeZone } = useExerciseContext()
   const roster = useRoster()
   const { refetch } = roster

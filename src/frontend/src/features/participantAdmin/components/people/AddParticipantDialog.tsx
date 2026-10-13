@@ -23,11 +23,16 @@
  * The state lives in `AddParticipantForm`, which MUI unmounts when the dialog
  * closes, so reopening always starts blank.
  *
+ * ## One request at a time, and no closing mid-request (story 10 Gate-1 W3)
+ * The submit handler sets an in-flight ref synchronously, so a double Enter or
+ * double click sends ONE request. While a request is pending the dialog ignores
+ * Escape and backdrop clicks (`onClose` is withheld) and Cancel is disabled.
+ *
  * World: STAFF. COBRA buttons + text fields from `@/theme/styledComponents`; MUI
  * `Dialog` under the COBRA theme. FontAwesome only; `sx`-only system props.
  */
 
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { Box, Dialog, DialogActions, DialogContent, DialogTitle, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTriangleExclamation, faUserPlus } from '@fortawesome/free-solid-svg-icons'
@@ -38,7 +43,7 @@ import {
 } from '@/theme/styledComponents'
 import { useAddParticipant } from '../../hooks/useRosterMutations'
 import type { RosterError } from '../../services/rosterService'
-import type { RosterEntryDto } from '../../types'
+import type { RosterEntryDto, RosterRowWrite } from '../../types'
 import {
   EMPTY_ROSTER_FORM,
   toRosterRowWrite,
@@ -84,12 +89,17 @@ const FIELD_HELP: Readonly<Partial<Record<RosterFormField, string>>> = {
 }
 
 interface AddParticipantFormProps {
+  readonly pending: boolean
+  readonly submit: (row: RosterRowWrite) => Promise<RosterEntryDto>
   readonly onClose: () => void
   readonly onAdded: (entry: RosterEntryDto) => void
 }
 
-function AddParticipantForm({ onClose, onAdded }: AddParticipantFormProps) {
-  const mutation = useAddParticipant()
+function AddParticipantForm({ pending, submit, onClose, onAdded }: AddParticipantFormProps) {
+  // Set synchronously in the submit handler. `pending` only turns true on a later
+  // render, so a double Enter or double click would otherwise send two requests (and
+  // the second would 409 against the first).
+  const inFlight = useRef(false)
   const [values, setValues] = useState<RosterFormValues>(EMPTY_ROSTER_FORM)
   const [errors, setErrors] = useState<RosterFormErrors>({})
   const [serverError, setServerError] = useState<string | undefined>(undefined)
@@ -102,6 +112,7 @@ function AddParticipantForm({ onClose, onAdded }: AddParticipantFormProps) {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (inFlight.current) return
     const form = event.currentTarget
     const found = validateRosterForm(values)
     if (Object.values(found).some(message => message !== undefined)) {
@@ -113,11 +124,14 @@ function AddParticipantForm({ onClose, onAdded }: AddParticipantFormProps) {
     }
     setErrors({})
     setServerError(undefined)
+    inFlight.current = true
     try {
-      const entry = await mutation.mutateAsync(toRosterRowWrite(values))
+      const entry = await submit(toRosterRowWrite(values))
       onAdded(entry)
     } catch (error) {
       setServerError(serverFailureMessage(error as RosterError))
+    } finally {
+      inFlight.current = false
     }
   }
 
@@ -136,7 +150,7 @@ function AddParticipantForm({ onClose, onAdded }: AddParticipantFormProps) {
       required={extra.required}
       autoFocus={extra.autoFocus}
       fullWidth
-      disabled={mutation.isPending}
+      disabled={pending}
       slotProps={{ htmlInput: { maxLength: extra.maxLength } }}
     />
   )
@@ -177,15 +191,15 @@ function AddParticipantForm({ onClose, onAdded }: AddParticipantFormProps) {
           : null}
       </DialogContent>
       <DialogActions sx={{ padding: '8px 20px 16px', gap: 1 }}>
-        <CobraLinkButton type="button" disabled={mutation.isPending} onClick={onClose}>
+        <CobraLinkButton type="button" disabled={pending} onClick={onClose}>
           Cancel
         </CobraLinkButton>
         <CobraPrimaryButton
           type="submit"
-          disabled={mutation.isPending}
+          disabled={pending}
           startIcon={<FontAwesomeIcon icon={faUserPlus} />}
         >
-          {mutation.isPending ? 'Adding…' : 'Add participant'}
+          {pending ? 'Adding…' : 'Add participant'}
         </CobraPrimaryButton>
       </DialogActions>
     </Box>
@@ -194,17 +208,27 @@ function AddParticipantForm({ onClose, onAdded }: AddParticipantFormProps) {
 
 /** The "Add participant" dialog. See the module header. */
 export function AddParticipantDialog({ open, onClose, onAdded }: AddParticipantDialogProps) {
+  // The mutation lives HERE, not in the form, so the dialog itself knows a request is
+  // in flight: while one is, Escape and a backdrop click do nothing (closing mid-request
+  // would leave the person added with no feedback), exactly as Cancel is disabled.
+  const mutation = useAddParticipant()
+  const pending = mutation.isPending
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={pending ? undefined : onClose}
       disableRestoreFocus
       maxWidth="sm"
       fullWidth
       aria-labelledby="add-participant-title"
       aria-describedby="add-participant-intro"
     >
-      <AddParticipantForm onClose={onClose} onAdded={onAdded} />
+      <AddParticipantForm
+        pending={pending}
+        submit={row => mutation.mutateAsync(row)}
+        onClose={onClose}
+        onAdded={onAdded}
+      />
     </Dialog>
   )
 }

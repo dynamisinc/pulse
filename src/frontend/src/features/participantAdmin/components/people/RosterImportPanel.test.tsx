@@ -14,7 +14,7 @@ import { getRosterMockEntries, resetRosterMocks } from '../../mocks/rosterMocks'
 import * as rosterService from '../../services/rosterService'
 import { makeQueryClient, renderWithProviders } from '../../test/renderWithProviders'
 import { RosterImportPanel } from './RosterImportPanel'
-import { setupUser } from '../../test/userEvents'
+import { deferred, setupUser } from '../../test/userEvents'
 
 // These tests render the full COBRA page / MUI dialogs through the stateful mock
 // backend. A CI box under load can take several seconds just to mount the first
@@ -22,7 +22,7 @@ import { setupUser } from '../../test/userEvents'
 // default (set in src/test/setup.ts) rather than let contention read as a regression.
 // Both settings are per test file (each file runs in its own isolated worker).
 vi.setConfig({ testTimeout: 30_000 })
-configure({ asyncUtilTimeout: 20_000 })
+configure({ asyncUtilTimeout: 10_000 })
 
 vi.mock('../../services/rosterService', async importOriginal => {
   const actual = await importOriginal<typeof import('../../services/rosterService')>()
@@ -86,7 +86,31 @@ describe('RosterImportPanel — structure', () => {
     expect(rules).toHaveTextContent(/never changed/i)
     expect(rules).toHaveTextContent(/new citizen persona/i)
     expect(rules).toHaveTextContent(/blank cell never erases/i)
-    expect(rules).toHaveTextContent(/sign-in name, else\s+email, else name plus agency/i)
+    expect(rules).toHaveTextContent(/by sign-in name, then email, then name plus agency/i)
+  })
+
+  it('states the amended contract rules (story 10 Gate-1 W4 + W5) in plain words', async () => {
+    const { user } = await renderPanel()
+    const rules = screen.getByTestId('roster-import-rules')
+    await user.click(within(rules).getByText('How the file is read'))
+
+    // Derived names step around persona handles too.
+    expect(rules).toHaveTextContent(/by a persona handle/i)
+    // An explicit name: invalid, equal to a persona handle, or taken (an earlier row or a
+    // non-roster account).
+    expect(rules).toHaveTextContent(/never changed: that row fails/i)
+    expect(rules).toHaveTextContent(/equals a persona handle/i)
+    expect(rules).toHaveTextContent(/earlier row or by an account that is not on this roster/i)
+    // The public handle is never a sign-in name.
+    expect(rules).toHaveTextContent('madonna')
+    expect(rules).toHaveTextContent('@madonna_2')
+    // The cascade, and what makes a row fail rather than guess.
+    expect(rules).toHaveTextContent(/before the file/i)
+    expect(rules).toHaveTextContent(/filling in a blank\s+email or sign-in name/i)
+    expect(rules).toHaveTextContent(/two\s+different people match one row/i)
+    expect(rules).toHaveTextContent(/someone with a different email/i)
+    expect(rules).toHaveTextContent(/never update each other/i)
+    expect(rules).toHaveTextContent(/duplicate of the first/i)
   })
 })
 
@@ -307,5 +331,66 @@ describe('RosterImportPanel — a 400', () => {
     await user.click(screen.getByRole('button', { name: 'Import' }))
 
     expect(await screen.findByTestId('roster-import-server-error')).toHaveTextContent(/could not reach the server/i)
+  })
+})
+
+describe('RosterImportPanel — one request at a time (Gate-1 W3)', () => {
+  const RESULT = {
+    dryRun: true,
+    totalRows: 1,
+    createdCount: 1,
+    updatedCount: 0,
+    unchangedCount: 0,
+    failedCount: 0,
+    rows: [{ rowNumber: 1, name: 'Riley Chen', status: 'created' as const, personaCreated: true }],
+  }
+
+  it('disables the file picker (button and input) while a request is pending, and ignores a swap', async () => {
+    const gate = deferred<typeof RESULT>()
+    importSpy.mockReturnValueOnce(gate.promise)
+    const { input, user } = await renderPanel()
+    pick(input, csv(GOOD_CSV))
+
+    await user.click(screen.getByRole('button', { name: 'Validate' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Choose CSV file' })).toBeDisabled())
+    expect(input).toBeDisabled()
+    // A change event that still arrives is ignored: the file (and the pending result) stay.
+    pick(input, csv('name\nOther Person', 'other.csv'))
+    expect(screen.getByTestId('roster-import-file-name')).toHaveTextContent('roster.csv')
+
+    gate.resolve(RESULT)
+    await screen.findByText(/Validated 1 row/)
+    expect(screen.getByRole('button', { name: 'Choose CSV file' })).toBeEnabled()
+    expect(input).toBeEnabled()
+  })
+
+  it('a double click on Import uploads ONCE', async () => {
+    const gate = deferred<typeof RESULT>()
+    importSpy.mockReturnValueOnce(gate.promise)
+    const { input } = await renderPanel()
+    pick(input, csv(GOOD_CSV))
+    const button = screen.getByRole('button', { name: 'Import' })
+
+    fireEvent.click(button)
+    fireEvent.click(button)
+
+    await waitFor(() => expect(importSpy).toHaveBeenCalledTimes(1))
+    gate.resolve({ ...RESULT, dryRun: false })
+    await screen.findByText(/Imported 1 row/)
+    expect(importSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases the guard after a failure, so a retry uploads again', async () => {
+    importSpy.mockRejectedValueOnce(new rosterService.RosterError('x', { status: 500 }))
+    const { input, user } = await renderPanel()
+    pick(input, csv(GOOD_CSV))
+    await user.click(screen.getByRole('button', { name: 'Import' }))
+    await screen.findByTestId('roster-import-server-error')
+
+    await user.click(screen.getByRole('button', { name: 'Import' }))
+
+    await screen.findByText(/Imported 3 rows/)
+    expect(importSpy).toHaveBeenCalledTimes(2)
   })
 })

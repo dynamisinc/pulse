@@ -32,7 +32,7 @@ import { setupUser, fill } from '../test/userEvents'
 // default (set in src/test/setup.ts) rather than let contention read as a regression.
 // Both settings are per test file (each file runs in its own isolated worker).
 vi.setConfig({ testTimeout: 30_000 })
-configure({ asyncUtilTimeout: 20_000 })
+configure({ asyncUtilTimeout: 10_000 })
 
 vi.mock('../services/rosterService', async importOriginal => {
   const actual = await importOriginal<typeof import('../services/rosterService')>()
@@ -472,12 +472,21 @@ describe('RosterPage — selection and slots', () => {
     const toolbar = screen.getByTestId('roster-toolbar')
     expect(within(toolbar).getByTestId('cards-slot')).toHaveTextContent('Cards 0')
 
-    // Select Marcus THEN Dana: the ids still arrive in roster (name) order.
-    await user.click(screen.getByRole('checkbox', { name: 'Select Marcus Oyelaran' }))
+    // Roster order (the server's list: Dana is 001, Aiko is 007) is NOT the display order
+    // (by name, Aiko comes first) and NOT the click order. Click Aiko, then Dana: a
+    // click-order or display-order implementation yields [007, 001].
+    await user.click(screen.getByRole('checkbox', { name: 'Select Aiko Tanaka' }))
     await user.click(screen.getByRole('checkbox', { name: 'Select Dana Whitfield' }))
+    expect(rowNames().slice(0, 2)).toEqual(['Aiko Tanaka', 'Dana Whitfield'])
 
-    expect(cards).toHaveBeenLastCalledWith(['mock-acct-001', 'mock-acct-002'])
-    expect(email).toHaveBeenLastCalledWith(['mock-acct-001', 'mock-acct-002'])
+    expect(cards).toHaveBeenLastCalledWith(['mock-acct-001', 'mock-acct-007'])
+    expect(email).toHaveBeenLastCalledWith(['mock-acct-001', 'mock-acct-007'])
+
+    // Re-sorting the DISPLAY (name descending) does not reorder the selection.
+    await user.click(within(screen.getByRole('columnheader', { name: 'Name' })).getByRole('button'))
+    expect(rowNames().slice(0, 2)).toEqual(['Tom Becker', 'Priya Raman'])
+    expect(cards).toHaveBeenLastCalledWith(['mock-acct-001', 'mock-acct-007'])
+
     expect(within(toolbar).getByTestId('cards-slot')).toHaveTextContent('Cards 2')
     expect(within(toolbar).getByTestId('email-slot')).toHaveTextContent('Email 2')
     expect(screen.getByTestId('roster-selected-count')).toHaveTextContent('2 selected')

@@ -17,23 +17,24 @@
  * service is mocked at its boundary so each exercise can answer differently.
  */
 import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from '@mui/material/styles'
-import { configure, act, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { configure, act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { rosterQueryKey } from '../hooks/useRoster'
 import { useRosterAction } from '../hooks/useRosterMutations'
 import * as rosterService from '../services/rosterService'
 import { makeEntry } from '../test/fixtures'
+import { setupUser } from '../test/userEvents'
 import type { RosterListDto } from '../types'
 import { RosterPage } from './RosterPage'
 
 // The full COBRA page mounts through the mock backend; give a loaded CI box headroom
 // over the 10 s test default and the 5 s `findBy`/`waitFor` default (src/test/setup.ts).
 vi.setConfig({ testTimeout: 30_000 })
-configure({ asyncUtilTimeout: 20_000 })
+configure({ asyncUtilTimeout: 10_000 })
 
 vi.mock('@/core/exerciseContext', async importOriginal => {
   const actual = await importOriginal<typeof import('@/core/exerciseContext')>()
@@ -214,5 +215,72 @@ describe('roster isolation — writes invalidate only the active exercise', () =
       expect(client.getQueryState(rosterQueryKey('ex-A'))?.isInvalidated).toBe(true)
     })
     expect(client.getQueryState(rosterQueryKey('ex-B'))?.isInvalidated).toBe(false)
+  })
+})
+
+describe('roster isolation — no page state survives an exercise switch (Gate-1 W2)', () => {
+  afterEach(() => {
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+  })
+
+  it('clears the announcement, the selection, the filter and any open dialog when the exercise changes', async () => {
+    const cards = vi.fn((_selection: readonly string[]): ReactNode => null)
+    const user = setupUser()
+    scopeSpy.mockReturnValue(scope('ex-A'))
+    // The SAME participant id exists in both exercises, so a selection that wrongly
+    // survived the switch would still match a row in B and show up as "1 selected".
+    getRosterSpy.mockResolvedValueOnce(listOf('Shared Person', 'Other Person'))
+    const wrapper = wrapperFor(makeClient())
+    const view = render(<RosterPage renderCardsAction={cards} />, { wrapper })
+    await screen.findByTestId('roster-table')
+
+    // Build up page state in exercise A: a selection, an announcement, a filter, a dialog.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    })
+    await user.click(screen.getByRole('checkbox', { name: 'Select Shared Person' }))
+    await user.click(screen.getByRole('button', { name: 'Copy link for Shared Person' }))
+    await user.click(screen.getByRole('button', { name: 'Add participant' }))
+    await screen.findByRole('dialog', { name: 'Add participant' })
+
+    expect(screen.getByTestId('roster-announcement')).toHaveTextContent('Link copied for Shared Person.')
+    expect(screen.getByTestId('roster-selected-count')).toHaveTextContent('1 selected')
+    expect(cards).toHaveBeenLastCalledWith(['Shared Person-0'])
+
+    // The staff switcher moves the session to exercise B WITHOUT remounting the tree.
+    scopeSpy.mockReturnValue(scope('ex-B'))
+    getRosterSpy.mockResolvedValueOnce(listOf('Shared Person', 'Other Person'))
+    view.rerender(<RosterPage renderCardsAction={cards} />)
+
+    const table = await screen.findByTestId('roster-table')
+    expect(screen.getByTestId('roster-announcement')).toBeEmptyDOMElement()
+    expect(screen.getByTestId('roster-announcement-error')).toBeEmptyDOMElement()
+    expect(screen.queryByTestId('roster-selected-count')).not.toBeInTheDocument()
+    expect(within(table).getByRole('checkbox', { name: 'Select Shared Person' })).not.toBeChecked()
+    expect(cards).toHaveBeenLastCalledWith([])
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Filter participants' })).toHaveValue('')
+  })
+
+  it('also resets a typed filter and a changed sort', async () => {
+    const user = setupUser()
+    scopeSpy.mockReturnValue(scope('ex-A'))
+    getRosterSpy.mockResolvedValueOnce(listOf('Alpha Person', 'Beta Person'))
+    const view = render(<RosterPage />, { wrapper: wrapperFor(makeClient()) })
+    await screen.findByTestId('roster-table')
+    await user.click(screen.getByRole('searchbox', { name: 'Filter participants' }))
+    await user.paste('alpha')
+    await user.click(within(screen.getByRole('columnheader', { name: 'Name' })).getByRole('button'))
+    expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'descending')
+
+    scopeSpy.mockReturnValue(scope('ex-B'))
+    getRosterSpy.mockResolvedValueOnce(listOf('Alpha Person', 'Beta Person'))
+    view.rerender(<RosterPage />)
+    await screen.findByTestId('roster-table')
+
+    expect(screen.getByRole('searchbox', { name: 'Filter participants' })).toHaveValue('')
+    expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'ascending')
+    expect(screen.getByText('Beta Person')).toBeInTheDocument()
   })
 })
