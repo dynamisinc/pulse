@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
@@ -51,6 +52,12 @@ public static class SessionEndpoints
     /// fail-closed default), <see cref="IHttpContextAccessor"/>, and the per-IP rate-limit policy. The
     /// orchestrator wires the single call into <c>Program.cs</c>.
     /// </summary>
+    /// <remarks>
+    /// Easy-login story 06's participant day cap also needs <see cref="TimeProvider"/> and <see cref="ExerciseFactsReader"/>;
+    /// both are <c>TryAdd</c>ed here so the slice resolves on its own. The cap's rollover hour
+    /// (<c>Authentication:EasyLogin:DayRolloverHour</c>, validated 0 to 6) is bound by <c>AddEasyLoginFoundation()</c>;
+    /// on a host without it the default (0, local midnight) applies.
+    /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">Configuration — the session lifetimes bind from <see cref="SessionOptions.SectionName"/>.</param>
     /// <returns>The same collection, for chaining.</returns>
@@ -66,6 +73,12 @@ public static class SessionEndpoints
 
         // The endpoint funnel behind /api/session, /api/auth/refresh, /api/auth/logout.
         services.AddScoped<SessionService>();
+
+        // Easy-login story 06 (participant day cap): the issuer and the service read the server clock and the bound
+        // exercise's zone. TryAdd, so this slice resolves on its own and AddEasyLoginFoundation() (which registers the
+        // same two, also with TryAdd) or a test host's fake clock wins in either order.
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddScoped<ExerciseFactsReader>();
 
         // The stateless, throwaway-scope live-session resolver the request-scope middleware uses (singleton,
         // like HostExerciseResolver).

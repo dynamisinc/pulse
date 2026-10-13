@@ -83,3 +83,48 @@ persistence). Independent of 02 to 05.
 (`[RequiresDockerFact]`) for participant vs staff vs read-only expiry, refresh before/at/after end of day, flag off,
 unknown zone, revoked-session refresh; add `ParticipantSessionCapTests` (fake `TimeProvider`/clock across DST and
 a 3 a.m. rollover) and a lifecycle-pin test in `ExerciseLifecycleGatingTests` territory for the `completed` case.
+
+**Built (test linkage):**
+
+- **AC-1 (issue, any login method):** `SessionIssuerTests.Issue_Participant_MidDay_RefreshEndsAtEndOfExerciseDay_AccessIsTheLifetime`,
+  `.Issue_Participant_LateInTheDay_AccessExpiryIsCappedAtTheDayEnd`, `.Issue_Participant_WithAThreeAmRollover_BelongsToThePreviousDayUntilThree`,
+  `.Issue_StampsShortLivedExpiryAndRefreshWindow_ServerSide` (updated), `.Issue_Staff_IsUnchanged_EvenLateInTheExerciseDay`,
+  `.Issue_SharedReadOnly_IsUnchanged_EvenLateInTheExerciseDay`; `ParticipantDayLongLoginTests.PasswordLogin_OnExerciseDayN_GetsARefreshWindowEndingAtDayNsEnd`
+  (Gate-1 S-6, end to end through `ParticipantLoginService`); `ParticipantSessionCapTests.AppliesTo_OnlyParticipantKind_AndOnlyWithTheOptionOn`,
+  `.Windows_Uncapped_AreNowPlusTheConfiguredLifetimes`, `.Windows_Capped_MidDay_AccessIsTheLifetime_RefreshIsTheDayEnd`,
+  `.Windows_Capped_LateInTheDay_AccessIsCappedAtTheDayEnd`. The cap keys on `Kind == "participant"` at the one issuer, so
+  password, link and word sessions (all built by `ParticipantSessionRequests.For` / `ParticipantLoginService`) are covered alike.
+- **AC-2 (refresh before / at / after end of day):** `SessionServiceTests.Refresh_Participant_BeforeEndOfDay_RotatesAndCapsAtTheEndOfTheCurrentDay`,
+  `.Refresh_Participant_LateInTheDay_AccessExpiryIsCappedAtTheDayEnd`, `.Refresh_Participant_ExactlyAtTheEndOfDay_Is401_WithNoEvent`,
+  `.Refresh_Participant_AfterTheEndOfDay_Is401_WithNoEvent`, `.Refresh_Participant_WhoseStoredWindowCrossesMidnight_Is401OnceItsDayHasEnded_AndIsRevoked` (Gate-1 S-2: a legacy row refused at
+  day end is revoked, no event, not retried),
+  `.Refresh_Participant_RepeatedRefreshes_NeverSlidePastTheDay`, `.Refresh_Staff_IsUnchanged_SlidesByTheRefreshLifetimeAcrossTheDayEnd`,
+  `.Refresh_SharedReadOnly_IsUnchanged_SlidesByTheRefreshLifetimeAcrossTheDayEnd`;
+  `ParticipantDayLongHttpTests.Refresh_AfterTheExerciseDayEnded_Is401_ExactlyLikeALapsedRefreshToken`,
+  `.Refresh_InsideTheExerciseDay_ReturnsTheDayCappedSession`.
+- **AC-3 (revoked session):** `SessionServiceTests.Refresh_ParticipantSessionRevokedByStaff_Is401_AndTheAccessTokenIs401`,
+  `.Refresh_ParticipantSessionLoggedOut_Is401_AndTheAccessTokenIs401`;
+  `ParticipantDayLongHttpTests.ARevokedDayLongSession_Is401OnRefresh_AndOnItsNextAuthenticatedRequest`.
+- **AC-4 (`ParticipantDayLong = false`, default true):** `SessionIssuerTests.Issue_ParticipantDayLongOff_StampsTheConfiguredLifetimes_AsBefore`;
+  `SessionServiceTests.Refresh_Participant_WithParticipantDayLongOff_SlidesExactlyAsBefore`;
+  `SessionRegistrationTests.AddSessions_BindsSessionLifetimeDefaults`, `.AddSessions_BindsParticipantDayLongOff_FromAuthenticationSession`.
+- **AC-5 (unknown zone, warn once, rollover 0 to 6, DST):** `SessionIssuerTests.Issue_Participant_UnknownOrBlankZone_IsCappedAtTheEndOfTheUtcDay`;
+  `SessionServiceTests.Refresh_Participant_UnknownZone_IsCappedAtTheEndOfTheUtcDay`,
+  `.Refresh_ParticipantWithNoExerciseRow_FallsBackToUtc_AndTheWallClockScenarioTime`;
+  `ParticipantSessionCapTests.UnknownOrBlankZone_FallsBackToTheUtcDay`, `.UnknownZone_IsWarnedOncePerExercisePerProcess_NotPerRequest`,
+  `.KnownZone_IsNeverWarned`, `.TheFallbackWarning_SaysWhatHappenedAndWhichDefaultWasUsed_AndEchoesNoStoredValue` (Gate-1 S-4),
+  `.RolloverHour_OutsideZeroToSix_IsBoundedIntoRange`, `.EasyLoginOptions_ValidatesTheRolloverHourZeroToSix`,
+  `.SpringForward_RolloverZero_TheTwentyThreeHourDayEndsAtLocalMidnightInDaylightTime`,
+  `.SpringForward_ThreeAmRollover_TheDayEndsAtThreeLocalDaylightTime`,
+  `.FallBack_RolloverZero_TheTwentyFiveHourDayEndsAtLocalMidnightInStandardTime`,
+  `.FallBack_ThreeAmRollover_TheDayEndsAtThreeLocalAfterTheClocksFall`, `.AtTheDayEndExactly_TheNextDayHasBegun`.
+- **AC-6 (completed / archived, lifecycle pin):** `ParticipantDayLongLifecyclePinTests.AfterEndEx_ADayLongParticipantSession_StillRefreshes_AndTheGateBehavesAsBefore`
+  (completed: feed 403, overlay 200; archived: feed 403, overlay 403; refresh succeeds in both and the refreshed token
+  resolves a live session, Gate-1 S-1);
+  `SessionServiceTests.Refresh_Participant_InACompletedOrArchivedExercise_IsNotRefused`.
+- **Isolation (XC-001):** `SessionIssuerTests.Issue_Participant_IsCappedByItsOwnExercisesZone_NeverAnotherExercises`,
+  `SessionServiceTests.Refresh_Participant_IsCappedByItsOwnExercisesZone_NeverAnotherExercises`; `OrganizationScopeSweepTests`
+  unchanged (no new `Exercises` read: issue and refresh read through `ExerciseFactsReader`).
+- **Telemetry (XC-004):** `SessionServiceTests.Refresh_Participant_SessionRefreshedEnvelope_IsUnchanged`; the AC-2 day-ended tests
+  assert zero `session.refreshed` events; the existing per-kind actor-shape tests still pass.
+- **Composition:** `SessionRegistrationTests.AddSessions_RegistersTheDayCapInputs_WithoutOverridingAHostsOwnClock`.
