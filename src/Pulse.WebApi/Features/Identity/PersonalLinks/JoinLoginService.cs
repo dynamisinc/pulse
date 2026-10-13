@@ -18,9 +18,10 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// <para>
 /// <b>One code path for every refusal.</b> The lookup is a single equality match on <c>ParticipantLink.TokenHash</c>
 /// (with <c>RevokedAt</c> unset) joined to its account, so an unknown, malformed, revoked or superseded token, a token
-/// from another exercise, a disabled account and a closed exercise all take the same path: one indexed read, one
-/// identity-less failure event, <see cref="JoinLoginOutcome.Rejected"/>. A token is 128 random bits, so there is no
-/// slow KDF to equalise: every attempt is the same cheap work.
+/// from another exercise, a disabled account, an account outside the participant world (Gate-2 S-6: only
+/// <c>participant</c> / <c>pio</c>, the rule the day word applies) and a closed exercise all take the same path: one
+/// indexed read, one identity-less failure event, <see cref="JoinLoginOutcome.Rejected"/>. A token is 128 random bits,
+/// so there is no slow KDF to equalise: every attempt is the same cheap work.
 /// </para>
 /// <para>
 /// <b>Isolation (always-Critical, COR-001).</b> The exercise is ONLY <see cref="IExerciseContext.CurrentExerciseId"/>,
@@ -37,6 +38,13 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// read the sessions just before this one was committed and saved just after the re-read); pressing Disable or Reissue
 /// again ends such a lingering session. The use is recorded, and the one <c>login</c> event written, only once the
 /// re-read passes, so a raced attempt emits exactly one identity-less failure event and no success event.
+/// </para>
+/// <para>
+/// <b>The use counter (Gate-2 S-4).</b> <c>UseCount</c> and <c>LastUsedAt</c> are bumped with one conditional
+/// <c>UPDATE</c> (<c>UseCount = UseCount + 1</c> where the link still carries THIS token's hash and is not revoked), in
+/// one transaction with the success event and <c>LastLoginAt</c>. A reissue or revoke that commits after the re-read
+/// therefore cannot have its reset overwritten by a stale count: the update matches no row, the transaction rolls back,
+/// and the attempt ends as the same raced refusal as above.
 /// </para>
 /// <para>
 /// <b>COR-011.</b> Nothing here creates or edits an account beyond the sign-in bookkeeping (<c>LastLoginAt</c>, and the
@@ -129,10 +137,12 @@ public sealed class JoinLoginService
                 select new { Link = link, Account = account })
             .FirstOrDefaultAsync(cancellationToken);
 
-        // 4. Admit only an enabled account in an exercise participants may enter (EL-8, EL-11). Every other case is the
-        //    same refusal and the same identity-less event: no target, never the token.
+        // 4. Admit only an enabled participant-world account (participant / pio, as for the day word: Gate-2 S-6) in an
+        //    exercise participants may enter (EL-8, EL-11). Every other case is the same refusal and the same
+        //    identity-less event: no target, never the token.
         if (match is null
             || match.Account.DisabledAt is not null
+            || !ParticipantSessionRequests.IsParticipantWorldRole(match.Account.Role)
             || !ExerciseLifecycleStates.IsParticipantAccessible(facts.Status))
         {
             _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.LinkLoginFailed(scope.Value, time));
@@ -160,33 +170,68 @@ public sealed class JoinLoginService
 
         if (!stillAdmitted)
         {
-            // End the session just minted (explicit ExerciseId: Session is unscoped) and record the attempt as the same
-            // identity-less failure every other refusal records. No success event was written for it.
-            var issuedId = issued.Session.Id;
-            var raced = await _dbContext.Sessions
-                .FirstOrDefaultAsync(s => s.Id == issuedId && s.ExerciseId == scope.Value, cancellationToken);
-            if (raced is not null)
-            {
-                // A fresh read: the issuer stamped IssuedAt after this attempt's first clock read.
-                raced.RevokedAt ??= _timeProvider.GetUtcNow();
-            }
-
-            _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.LinkLoginFailed(scope.Value, time));
-            await _dbContext.SaveChangesAsync(cancellationToken);
-
-            return JoinLoginResult.Rejected();
+            return await RefuseRacedAsync(issued.Session.Id, scope.Value, time, cancellationToken);
         }
 
-        // 7. Success: the bookkeeping and the success event in ONE unit of work. Only the use columns are written, so a
-        //    concurrent staff change to other columns is not overwritten. The link stays usable.
-        match.Link.LastUsedAt = now;
-        match.Link.UseCount += 1;
-        match.Account.LastLoginAt = now;
-        _dbContext.TelemetryEvents.Add(
-            EasyLoginTelemetry.LoginSucceeded(scope.Value, match.Account.Id, EasyLoginMethod.Link, time));
+        // 7. Success: the bookkeeping and the success event in ONE transaction. The use counter is one conditional
+        //    UPDATE (Gate-2 S-4): it increments in the database, and only while the link still carries THIS token and
+        //    is not revoked, so a reissue's or revoke's reset that committed after the re-read is never overwritten by a
+        //    stale count. Only the use columns are written, so a concurrent staff change to other columns is not
+        //    overwritten either. The link stays usable. The update runs through the scoped set, so the central filter
+        //    bounds its WHERE too; it never touches ExerciseId, so the write guard (which it bypasses) has nothing to
+        //    check.
+        DateTimeOffset? usedAt = now;
+        await using (var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken))
+        {
+            var bumped = await _dbContext.ParticipantLinks
+                .Where(link => link.Id == linkId && link.TokenHash == tokenHash && link.RevokedAt == null)
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(link => link.UseCount, link => link.UseCount + 1)
+                        .SetProperty(link => link.LastUsedAt, usedAt),
+                    cancellationToken);
+
+            if (bumped == 1)
+            {
+                match.Account.LastLoginAt = now;
+                _dbContext.TelemetryEvents.Add(
+                    EasyLoginTelemetry.LoginSucceeded(scope.Value, accountId, EasyLoginMethod.Link, time));
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+
+                return JoinLoginResult.Authenticated(issued);
+            }
+
+            // The link was reissued or revoked after the re-read: nothing was written. Refuse as for any other race.
+            await transaction.RollbackAsync(cancellationToken);
+        }
+
+        return await RefuseRacedAsync(issued.Session.Id, scope.Value, time, cancellationToken);
+    }
+
+    /// <summary>
+    /// The refusal for an attempt that lost a race to a staff action after its session was minted: ends that session
+    /// (an explicit <c>ExerciseId</c> predicate, since <c>Session</c> is unscoped) and records the attempt as the same
+    /// identity-less failure every other refusal records, in one unit of work. No success event was written for it.
+    /// </summary>
+    private async Task<JoinLoginResult> RefuseRacedAsync(
+        Guid issuedSessionId,
+        Guid exerciseId,
+        EasyLoginEventTime time,
+        CancellationToken cancellationToken)
+    {
+        var raced = await _dbContext.Sessions
+            .FirstOrDefaultAsync(s => s.Id == issuedSessionId && s.ExerciseId == exerciseId, cancellationToken);
+        if (raced is not null)
+        {
+            // A fresh read: the issuer stamped IssuedAt after this attempt's first clock read.
+            raced.RevokedAt ??= _timeProvider.GetUtcNow();
+        }
+
+        _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.LinkLoginFailed(exerciseId, time));
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        return JoinLoginResult.Authenticated(issued);
+        return JoinLoginResult.Rejected();
     }
 }
 
@@ -200,8 +245,9 @@ public enum JoinLoginOutcome
     Invalid,
 
     /// <summary>
-    /// Any other refusal: unknown, malformed, revoked, superseded or another exercise's token, a disabled account, or an
-    /// exercise outside Staged/Live/Paused (<c>401</c>, bodyless). One failure event was emitted.
+    /// Any other refusal: unknown, malformed, revoked, superseded or another exercise's token, a disabled account, an
+    /// account role outside the participant world, or an exercise outside Staged/Live/Paused (<c>401</c>, bodyless). One
+    /// failure event was emitted.
     /// </summary>
     Rejected,
 

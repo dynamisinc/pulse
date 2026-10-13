@@ -42,6 +42,12 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// lifecycle gate already refuses participant data routes, and refusing refresh would bounce participants off the
 /// COR-054 EndEx overlay. Staff and read-only sessions renew exactly as before.
 /// </para>
+/// <para>
+/// <b>A disabled participant cannot renew (easy-login Gate-2 W-001).</b> Disable ends the account's live sessions, but a
+/// sign-in that raced it can mint one the sweep never saw. So a <c>participant</c>-kind session whose account staff have
+/// disabled is refused on refresh, exactly like a revoked one: the same fail-closed 401, no event and no write. A
+/// session that slipped through can therefore outlive the Disable by at most one access-token lifetime.
+/// </para>
 /// </remarks>
 public sealed class SessionService
 {
@@ -142,8 +148,9 @@ public sealed class SessionService
     /// tokens and preserving the exact binding (never re-scoping to a different exercise / account). Emits one
     /// <c>session.refreshed</c> XC-004 event in the same unit of work. Fails closed
     /// (<see cref="RefreshOutcome.Invalid"/> → 401, no event) on an absent/unknown refresh token, or one whose session
-    /// is revoked or whose refresh window has lapsed, or (a capped participant session) whose exercise day has ended. In
-    /// that last case the session is also revoked (still no event), because its stored window was still open.
+    /// is revoked or whose refresh window has lapsed, or (a participant session) whose account is disabled, or (a capped
+    /// participant session) whose exercise day has ended. In that last case the session is also revoked (still no
+    /// event), because its stored window was still open.
     /// </summary>
     /// <param name="rawRefreshToken">The presented raw refresh token, or <c>null</c> when none.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -166,6 +173,15 @@ public sealed class SessionService
             session.RefreshExpiresAt.Value <= now)
         {
             // Unknown / revoked / lapsed refresh window → force a full re-login (fail closed).
+            return RefreshResult.Invalid();
+        }
+
+        if (session.Kind == ParticipantKind
+            && session.AccountId is { } accountId
+            && await IsAccountDisabledAsync(session.ExerciseId, accountId, cancellationToken))
+        {
+            // easy-login Gate-2 W-001: staff disabled this participant (a sign-in that raced the Disable can hold a
+            // session its sweep never saw). Refused exactly as a revoked session is: 401, no event, nothing written.
             return RefreshResult.Invalid();
         }
 
@@ -249,6 +265,18 @@ public sealed class SessionService
 
         await EmitLifecycleEventAsync(session, LogoutEventType, now, cancellationToken);
     }
+
+    /// <summary>
+    /// Whether the participant account a session is bound to has been disabled by staff. The read ignores the central
+    /// filter on purpose and carries BOTH ids explicitly instead: the refresh request's own resolved scope may be unset or
+    /// another exercise, and a filtered read would then see no account and fail OPEN (renew). The ids are the
+    /// server-issued session's own binding, never caller input, so the read cannot reach another exercise's account.
+    /// </summary>
+    private Task<bool> IsAccountDisabledAsync(Guid exerciseId, Guid accountId, CancellationToken cancellationToken) =>
+        _dbContext.Accounts
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .AnyAsync(a => a.ExerciseId == exerciseId && a.Id == accountId && a.DisabledAt != null, cancellationToken);
 
     /// <summary>
     /// Adds one XC-004 session-lifecycle event against the locked v0 envelope and persists it together with the

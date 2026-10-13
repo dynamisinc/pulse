@@ -122,6 +122,26 @@ public sealed class SessionServiceTests
         return session;
     }
 
+    private async Task<Account> SeedAccountAsync(Guid exerciseId, DateTimeOffset? disabledAt)
+    {
+        var id = Guid.NewGuid();
+        var account = new Account
+        {
+            Id = id,
+            ExerciseId = exerciseId,
+            Username = $"acct{id:N}"[..30],
+            DisplayName = "Pat Participant",
+            Role = "participant",
+            CreatedAt = DateTimeOffset.UtcNow,
+            DisabledAt = disabledAt,
+        };
+
+        await using var seed = _fixture.CreateContext();
+        seed.Accounts.Add(account);
+        await seed.SaveChangesAsync();
+        return account;
+    }
+
     private async Task<int> CountEventsAsync(Guid exerciseId, string eventType)
     {
         await using var read = _fixture.CreateContext();
@@ -484,6 +504,46 @@ public sealed class SessionServiceTests
         var result = await ServiceFor(context).RefreshAsync("revoked-refresh");
 
         result.Outcome.Should().Be(RefreshOutcome.Invalid, "a revoked (logged-out) session cannot be refreshed");
+    }
+
+    [RequiresDockerFact]
+    public async Task Refresh_ParticipantWhoseAccountIsDisabled_IsRefusedLikeARevokedSession_WithNoEventAndNoWrite()
+    {
+        // easy-login Gate-2 W-001: a sign-in that raced a Disable can hold a session the Disable's sweep never saw. Refresh
+        // refuses a participant session whose account is disabled exactly as it refuses a revoked one (401, no event,
+        // nothing written), so such a session outlives the Disable by at most one access-token lifetime. The context is
+        // UNSCOPED on purpose: the check must not depend on the refresh request's own resolved scope (a filtered read
+        // would see no account there and renew).
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId);
+        var disabled = await SeedAccountAsync(exerciseId, disabledAt: DateTimeOffset.UtcNow.AddMinutes(-1));
+        var enabled = await SeedAccountAsync(exerciseId, disabledAt: null);
+        var disabledRefresh = $"disabled-refresh-{Guid.NewGuid():N}";
+        var enabledRefresh = $"enabled-refresh-{Guid.NewGuid():N}";
+        var disabledSession = await SeedSessionAsync(
+            exerciseId, rawRefreshToken: disabledRefresh, accountId: disabled.Id, principalId: disabled.Id.ToString());
+        await SeedSessionAsync(exerciseId, rawRefreshToken: enabledRefresh, accountId: enabled.Id, principalId: enabled.Id.ToString());
+
+        RefreshResult refused;
+        RefreshResult renewed;
+        await using (var context = _fixture.CreateContext())
+        {
+            refused = await ServiceFor(context).RefreshAsync(disabledRefresh);
+        }
+
+        await using (var context = _fixture.CreateContext())
+        {
+            renewed = await ServiceFor(context).RefreshAsync(enabledRefresh);
+        }
+
+        refused.Outcome.Should().Be(RefreshOutcome.Invalid, "a disabled participant cannot renew (the ordinary fail-closed 401)");
+        refused.SessionToken.Should().BeNull();
+        renewed.Outcome.Should().Be(RefreshOutcome.Refreshed, "anti-vacuity: the same session for an enabled account renews");
+
+        await using var verify = _fixture.CreateContext();
+        var stored = await verify.Sessions.AsNoTracking().SingleAsync(x => x.Id == disabledSession.Id);
+        stored.Should().BeEquivalentTo(disabledSession, "the refusal writes nothing: no rotation, no new window, no RevokedAt");
+        (await CountEventsAsync(exerciseId, "session.refreshed")).Should().Be(1, "only the enabled account's refresh emits an event");
     }
 
     // ---- Story 06: day-long participant sessions on refresh (EL-10, EL-11) ------------------------------------

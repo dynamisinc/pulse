@@ -71,6 +71,7 @@ delete them. Both classes read `DateTimeOffset.UtcNow` directly today; give each
 parameter (story 01's `AddEasyLoginFoundation()` registers `TimeProvider.System` with `TryAddSingleton`) so the end-of-day
 boundary is testable without sleeping, and pass `TimeProvider.System` in the tests that construct them by hand.
 See `implementation.md` (story 06, gotchas 3, 4).
+Gate-2 W-001: refresh also refuses a `participant` session whose account is disabled, exactly like a revoked one (401, no event, no write), reading the account by the session's own `ExerciseId` + `AccountId` rather than the request's scope (`SessionServiceTests.Refresh_ParticipantWhoseAccountIsDisabled_IsRefusedLikeARevokedSession_WithNoEventAndNoWrite`).
 
 ## Dependencies
 

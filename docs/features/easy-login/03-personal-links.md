@@ -88,8 +88,7 @@ additive `services.AddRateLimiter(...)` reading `EasyLoginOptions`. Do not log t
 `implementation.md` (story 03, gotchas 2, 4, 5, 6, 8).
 
 A join that races a staff revoke, reissue or disable is caught by re-reading the link and account after the session is
-minted (Gate-1 W-001). `/api/auth/login` against disable keeps the same narrow window (a sign-in that passes its checks
-just before Disable commits): accepted for the demo, and pressing Disable again ends a lingering session.
+minted (Gate-1 W-001). Gate-2 W-001/S-4/S-6: `/api/auth/login` and `/api/auth/word` take the same mint-then-re-read step against Disable, refresh refuses a disabled participant's session (so a session that slips through ends within one access-token lifetime), the join's use counter is a conditional `UPDATE` on the token hash (a reissue's reset is never overwritten; a join that loses that race is refused), and join admits only `participant`/`pio` accounts, like the word.
 
 ## Dependencies
 

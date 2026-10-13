@@ -32,6 +32,14 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// in B3; falls back to the wall clock when unset). Brute-force lockout is deliberately NOT handled here (it is
 /// story 07); per-IP rate limiting is applied at the endpoint (NFR-009). The password is never logged (NFR-009).
 /// </para>
+/// <para>
+/// <b>A Disable racing the sign-in (easy-login Gate-2 W-001, story 03's join pattern).</b> The session is minted FIRST
+/// and the account re-read, untracked, after it exists: a Disable committed in between ends the fresh session at once
+/// and the attempt is the ordinary <see cref="ParticipantLoginOutcome.RejectedCredential"/> with the wrong-password
+/// failure event; a Disable that commits later finds and ends the session itself. <c>LastLoginAt</c> and the success
+/// event are written only once the re-read passes. Every <c>login</c> event carries <c>"method":"password"</c>
+/// (easy-login Gate-2 S-1), an additive payload field matching the link and word sign-ins; its clock is unchanged.
+/// </para>
 /// </remarks>
 public sealed class ParticipantLoginService
 {
@@ -49,8 +57,8 @@ public sealed class ParticipantLoginService
     private const string SystemChannel = "system";
     private const string LoginEventType = "login";
     private const string AttemptedHandleTargetType = "accountHandle";
-    private const string SuccessOutcomePayload = "{\"outcome\":\"success\"}";
-    private const string FailureOutcomePayload = "{\"outcome\":\"failure\"}";
+    private const string SuccessOutcomePayload = "{\"outcome\":\"success\",\"method\":\"password\"}";
+    private const string FailureOutcomePayload = "{\"outcome\":\"failure\",\"method\":\"password\"}";
     private const string FallbackTimeZone = "UTC";
 
     private readonly PulseDbContext _dbContext;
@@ -165,25 +173,13 @@ public sealed class ParticipantLoginService
         {
             // Fail closed: no session, and a failure event with NO session identity (target = the sanitized
             // attempted handle for audit). One SaveChanges — the write-guard runs here against the valid scope.
-            _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
-                scope.Value, participantId: null, outcome: FailureOutcomePayload, now: now,
-                scenarioTime: scenarioTime, timeZone: exercise.TimeZone, attemptedHandle: username));
-            await _dbContext.SaveChangesAsync(cancellationToken);
-
-            return ParticipantLoginResult.RejectedCredential();
+            return await RejectAsync(scope.Value, now, scenarioTime, exercise.TimeZone, username, cancellationToken);
         }
 
-        // 6. Success: record the last successful login and emit one success event in ONE unit of work with the
-        //    mutation (the write-guard validates the scoped telemetry row carries the non-empty ExerciseId).
-        account.LastLoginAt = now;
-        _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
-            scope.Value, participantId: account.Id.ToString(), outcome: SuccessOutcomePayload, now: now,
-            scenarioTime: scenarioTime, timeZone: exercise.TimeZone, attemptedHandle: null));
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        // 7. Mint the participant session through the story-03 issuer (it owns Session persistence + the raw
+        // 6. Mint the participant session through the story-03 issuer (it owns Session persistence + the raw
         //    token). Bound exercise = the host-resolved scope; principal/persona/acting-human come from the
         //    account. ActingHumanId derives from the account id when the account carries none (COR-018 1:1 case).
+        //    Nothing about the sign-in is recorded yet: nothing is pending, so the issuer commits only the session.
         var issued = await _sessionIssuer.IssueAsync(
             new SessionIssueRequest
             {
@@ -199,7 +195,59 @@ public sealed class ParticipantLoginService
             },
             cancellationToken);
 
+        // 7. easy-login Gate-2 W-001: re-read the account, untracked, now that the session exists. A Disable that
+        //    committed while the session was being minted fails this check (its sweep could not see the session); one
+        //    that commits after it will find (and end) the session.
+        var accountId = account.Id;
+        var stillEnabled = await _dbContext.Accounts
+            .AsNoTracking()
+            .AnyAsync(a => a.ExerciseId == scope.Value && a.Id == accountId && a.DisabledAt == null, cancellationToken);
+
+        if (!stillEnabled)
+        {
+            // End the session just minted (explicit ExerciseId: Session is unscoped) and refuse exactly as a disabled
+            // account is refused above, in one unit of work. No success event was written for it.
+            var issuedId = issued.Session.Id;
+            var raced = await _dbContext.Sessions
+                .FirstOrDefaultAsync(s => s.Id == issuedId && s.ExerciseId == scope.Value, cancellationToken);
+            if (raced is not null)
+            {
+                raced.RevokedAt ??= DateTimeOffset.UtcNow;
+            }
+
+            return await RejectAsync(scope.Value, now, scenarioTime, exercise.TimeZone, username, cancellationToken);
+        }
+
+        // 8. Success: record the last successful login and emit one success event in ONE unit of work with the
+        //    mutation (the write-guard validates the scoped telemetry row carries the non-empty ExerciseId), only
+        //    now that the account is known to be enabled after its session exists.
+        account.LastLoginAt = now;
+        _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
+            scope.Value, participantId: account.Id.ToString(), outcome: SuccessOutcomePayload, now: now,
+            scenarioTime: scenarioTime, timeZone: exercise.TimeZone, attemptedHandle: null));
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
         return ParticipantLoginResult.Authenticated(issued);
+    }
+
+    /// <summary>
+    /// The fail-closed refusal: one identity-less failure event (target = the sanitized attempted handle), saved with
+    /// anything the caller staged (a raced session's revocation) in one <c>SaveChanges</c>.
+    /// </summary>
+    private async Task<ParticipantLoginResult> RejectAsync(
+        Guid exerciseId,
+        DateTimeOffset now,
+        DateTimeOffset scenarioTime,
+        string timeZone,
+        string attemptedHandle,
+        CancellationToken cancellationToken)
+    {
+        _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
+            exerciseId, participantId: null, outcome: FailureOutcomePayload, now: now,
+            scenarioTime: scenarioTime, timeZone: timeZone, attemptedHandle: attemptedHandle));
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return ParticipantLoginResult.RejectedCredential();
     }
 
     /// <summary>

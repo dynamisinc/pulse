@@ -1,17 +1,23 @@
 namespace Pulse.WebApi.Tests.Features.Identity.PersonalLinks;
 
 using System;
+using System.Data.Common;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.PersonalLinks;
+using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Tests.Data;
-using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 
 /// <summary>
@@ -39,12 +45,13 @@ public sealed class JoinLoginServiceTests
         SupersededLink,
         OtherExercisesToken,
         DisabledAccount,
+        StaffAdjacentRole,
         ExerciseInBuild,
         ExerciseCompleted,
         ExerciseArchived,
     }
 
-    private static JoinLoginService ServiceFor(PulseDbContext context, Guid? scope, RecordingSessionIssuer issuer, DateTimeOffset? now = null) =>
+    private static JoinLoginService ServiceFor(PulseDbContext context, Guid? scope, ISessionIssuer issuer, DateTimeOffset? now = null) =>
         new(
             context,
             new ExerciseContext { CurrentExerciseId = scope },
@@ -144,6 +151,7 @@ public sealed class JoinLoginServiceTests
     [InlineData(RejectCase.SupersededLink)]
     [InlineData(RejectCase.OtherExercisesToken)]
     [InlineData(RejectCase.DisabledAccount)]
+    [InlineData(RejectCase.StaffAdjacentRole)]
     [InlineData(RejectCase.ExerciseInBuild)]
     [InlineData(RejectCase.ExerciseCompleted)]
     [InlineData(RejectCase.ExerciseArchived)]
@@ -157,8 +165,13 @@ public sealed class JoinLoginServiceTests
             _ => "live",
         };
         var exercise = await PersonalLinkSeed.ExerciseAsync(_fixture, status: status);
+        // StaffAdjacentRole (Gate-2 S-6): an account whose role is outside the participant world (participant / pio)
+        // is refused like any other failure, the rule the day word already applies.
         var account = await PersonalLinkSeed.AccountAsync(
-            _fixture, exercise.Id, disabledAt: rejectCase == RejectCase.DisabledAccount ? Now.AddHours(-1) : null);
+            _fixture,
+            exercise.Id,
+            disabledAt: rejectCase == RejectCase.DisabledAccount ? Now.AddHours(-1) : null,
+            role: rejectCase == RejectCase.StaffAdjacentRole ? "controller" : "participant");
         var (_, token) = await PersonalLinkSeed.LinkAsync(_fixture, account, revoked: rejectCase == RejectCase.RevokedLink);
 
         var presented = rejectCase switch
@@ -271,6 +284,64 @@ public sealed class JoinLoginServiceTests
         interceptor.SaveChangesCallCount.Should().Be(1, "the link/account bookkeeping and its login event commit together (XC-004)");
     }
 
+    [RequiresDockerFact]
+    public async Task Join_AReissueCommittingAfterTheReRead_KeepsItsCounterReset_AndTheJoinIsRefused()
+    {
+        // Gate-2 S-4: the join passes its post-mint re-read, then a staff reissue commits (rotating the token and resetting
+        // UseCount / LastUsedAt) just before the join records the use. The use counter is one conditional UPDATE on THIS
+        // token's hash, so it matches no row: the reset survives, and the join ends as the raced refusal (its fresh
+        // session is revoked, one identity-less failure event, no success event, no LastLoginAt). Before the fold the
+        // tracked write stored the stale count + 1 over the reset.
+        var exercise = await PersonalLinkSeed.ExerciseAsync(_fixture);
+        var account = await PersonalLinkSeed.AccountAsync(_fixture, exercise.Id);
+        var (_, token) = await PersonalLinkSeed.LinkAsync(_fixture, account, useCount: 5, lastUsedAt: Now.AddHours(-1));
+
+        async Task ReissueAsync()
+        {
+            await using var staffSide = ScopedContext(exercise.Id);
+            var staffAccount = await staffSide.Accounts.SingleAsync(a => a.Id == account.Id);
+            await PersonalLinkSeed.LinkService(staffSide, exercise.Id).ReissueAsync(staffAccount, Guid.NewGuid(), Now);
+            await staffSide.SaveChangesAsync();
+        }
+
+        var options = new DbContextOptionsBuilder<PulseDbContext>()
+            .UseSqlServer(_fixture.ConnectionString)
+            .AddInterceptors(new BeforeLinkUpdateInterceptor(ReissueAsync))
+            .Options;
+
+        JoinLoginResult result;
+        await using (var context = new PulseDbContext(options, new ExerciseContext { CurrentExerciseId = exercise.Id }))
+        {
+            var issuer = new SessionIssuer(
+                context,
+                Options.Create(new SessionOptions()),
+                new ExerciseFactsReader(context),
+                Options.Create(new EasyLoginOptions()),
+                TimeProvider.System,
+                NullLogger<SessionIssuer>.Instance);
+            result = await ServiceFor(context, exercise.Id, issuer).JoinAsync(new JoinRequestBody { Token = token });
+        }
+
+        result.Outcome.Should().Be(JoinLoginOutcome.Rejected, "a join whose link was reissued before its use was recorded is refused");
+        result.Issued.Should().BeNull();
+
+        var link = await PersonalLinkSeed.ReadLinkAsync(_fixture, exercise.Id, account.Id);
+        link!.Generation.Should().Be(2, "precondition: the reissue committed");
+        link.UseCount.Should().Be(0, "the reissue's reset is never overwritten by the join's stale count");
+        link.LastUsedAt.Should().BeNull("nor is its cleared LastUsedAt");
+        (await PersonalLinkSeed.ReadAccountAsync(_fixture, exercise.Id, account.Id)).LastLoginAt.Should().BeNull();
+
+        await using var unfiltered = _fixture.CreateContext();
+        var sessions = await unfiltered.Sessions.AsNoTracking().Where(s => s.AccountId == account.Id).ToListAsync();
+        sessions.Should().ContainSingle("precondition: the session was minted").Which.RevokedAt.Should().NotBeNull(
+            "the raced session is ended at once");
+
+        var evt = (await PersonalLinkSeed.ReadEventsAsync(_fixture, exercise.Id)).Should().ContainSingle(
+            "a raced attempt emits exactly one login event, and no success event").Subject;
+        evt.Payload.Should().Be("{\"outcome\":\"failure\",\"method\":\"link\"}");
+        evt.Actor.ParticipantId.Should().BeNull();
+    }
+
     /// <summary>Reissues the account's link (as staff would) and returns the now-superseded old token.</summary>
     private async Task<string> SupersedeAsync(Guid exerciseId, Account account, string oldToken)
     {
@@ -278,6 +349,48 @@ public sealed class JoinLoginServiceTests
         await PersonalLinkSeed.LinkService(context, exerciseId).ReissueAsync(account, Guid.NewGuid(), Now.AddMinutes(-1));
         await context.SaveChangesAsync();
         return oldToken;
+    }
+
+    /// <summary>
+    /// Runs <c>race</c> once, on its own connection, just before the first command that UPDATEs <c>ParticipantLinks</c>
+    /// executes: the join's use-counter write, after its post-mint re-read has passed.
+    /// </summary>
+    private sealed class BeforeLinkUpdateInterceptor(Func<Task> race) : DbCommandInterceptor
+    {
+        private bool _raced;
+
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            await RaceBeforeLinkUpdateAsync(command);
+            return result;
+        }
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            await RaceBeforeLinkUpdateAsync(command);
+            return result;
+        }
+
+        private async Task RaceBeforeLinkUpdateAsync(DbCommand command)
+        {
+            if (_raced
+                || !command.CommandText.Contains("UPDATE", StringComparison.OrdinalIgnoreCase)
+                || !command.CommandText.Contains("[ParticipantLinks]", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _raced = true;
+            await race();
+        }
     }
 
     /// <summary>A live, active, enabled link in ANOTHER exercise, whose token is then presented here.</summary>
