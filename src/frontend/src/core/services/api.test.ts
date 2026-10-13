@@ -1456,6 +1456,101 @@ describe('S-3: an automatic clear touches only the store the session lives in', 
   })
 })
 
+describe('W-6: a refused staff tab never falls through to a participant pair', () => {
+  /** What a participant's sign-in in another tab leaves in the shared localStorage. */
+  function participantPairInOtherTab(): void {
+    localStorage.setItem('pulse.auth.token', 'p-access')
+    localStorage.setItem('pulse.auth.refreshToken', 'p-refresh')
+    localStorage.setItem('pulse.auth.session', 'participant-marker')
+  }
+
+  /** An adapter that refuses everything with a 401 and records each request's bearer. */
+  function refusingAdapter(bearers: Array<string | null>): AxiosAdapter {
+    return config => {
+      const header: unknown = config.headers.get('Authorization')
+      bearers.push(typeof header === 'string' ? header : null)
+      return reject401(config)
+    }
+  }
+
+  it('after the refusal getAccessToken() is null in this page, and the participant pair is untouched', async () => {
+    setTokens({ token: 'expired-staff', refreshToken: 'staff-refresh' }) // sessionStorage
+    participantPairInOtherTab()
+    const bearers: Array<string | null> = []
+    api.defaults.adapter = refusingAdapter(bearers)
+
+    await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(getAccessToken()).toBeNull()
+    expect(getRefreshToken()).toBeNull()
+    expect(sessionStorage.length).toBe(0)
+    expect(localStorage.getItem('pulse.auth.token')).toBe('p-access')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('p-refresh')
+  })
+
+  it('NO request goes out with the participant bearer, before, during or after the refusal', async () => {
+    setTokens({ token: 'expired-staff', refreshToken: 'staff-refresh' })
+    participantPairInOtherTab()
+    const bearers: Array<string | null> = []
+    api.defaults.adapter = refusingAdapter(bearers)
+
+    await expect(api.get('/protected')).rejects.toBeDefined()
+    // The page keeps working (polling, a retry button, a navigation): every later request
+    // must go out anonymous, never as the participant.
+    await expect(api.get('/later')).rejects.toBeDefined()
+    await expect(api.get('/session')).rejects.toBeDefined()
+
+    expect(bearers).not.toContain('Bearer p-access')
+    expect(bearers).not.toContain('Bearer p-refresh')
+    // The first call carried the staff token; the refresh call carries none; the rest none.
+    expect(bearers[0]).toBe('Bearer expired-staff')
+    expect(bearers.slice(1).every(bearer => bearer === null)).toBe(true)
+    // And the refresh call presented the STAFF refresh token in its body, not the participant's.
+    expect(getRefreshToken()).toBeNull()
+  })
+
+  it('a refresh call never presents the participant refresh token', async () => {
+    setTokens({ token: 'expired-staff', refreshToken: 'staff-refresh' })
+    participantPairInOtherTab()
+    const refreshBodies: string[] = []
+    api.defaults.adapter = config => {
+      if (config.url === '/auth/refresh') refreshBodies.push(String(config.data))
+      return reject401(config)
+    }
+
+    await expect(api.get('/protected')).rejects.toBeDefined()
+    await expect(api.get('/later')).rejects.toBeDefined()
+
+    // One refresh, with the staff token. The second 401 had nothing to present, so no call.
+    expect(refreshBodies).toEqual([JSON.stringify({ refreshToken: 'staff-refresh' })])
+  })
+
+  it('a staff tab with no refresh token to present is sticky too', async () => {
+    setTokens({ token: 'shared-readonly-access' }) // session-only, no refresh token
+    participantPairInOtherTab()
+    const bearers: Array<string | null> = []
+    api.defaults.adapter = refusingAdapter(bearers)
+
+    await expect(api.get('/protected')).rejects.toBeDefined()
+    await expect(api.get('/later')).rejects.toBeDefined()
+
+    expect(getAccessToken()).toBeNull()
+    expect(bearers).not.toContain('Bearer p-access')
+  })
+
+  it('a new sign-in in this tab ends it', async () => {
+    setTokens({ token: 'expired-staff', refreshToken: 'staff-refresh' })
+    participantPairInOtherTab()
+    api.defaults.adapter = config => reject401(config)
+    await expect(api.get('/protected')).rejects.toBeDefined()
+    expect(getAccessToken()).toBeNull()
+
+    setTokens({ token: 'staff-2', refreshToken: 'staff-refresh-2' })
+
+    expect(getAccessToken()).toBe('staff-2')
+  })
+})
+
 describe('mock-mode no-op', () => {
   it('a per-call mock adapter (the app-wide mock-data pattern) is unaffected by the token seam', async () => {
     // Mirrors sessionResolver/exerciseContextResolver/feedService: a canned
