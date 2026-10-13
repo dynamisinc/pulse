@@ -159,7 +159,9 @@ public sealed class ParticipantLoginService
         //    resistance). A null/empty stored hash can never authenticate.
         var authenticated = _passwordHasher.Verify(account?.CredentialHash, request.Password);
 
-        if (account is null || !authenticated)
+        // easy-login/03 (EL-8): a person staff have DISABLED is refused here too, deliberately AFTER Verify() has run,
+        // so the timing, the 401 and the failure event are exactly those of a wrong password.
+        if (account is null || !authenticated || account.DisabledAt is not null)
         {
             // Fail closed: no session, and a failure event with NO session identity (target = the sanitized
             // attempted handle for audit). One SaveChanges — the write-guard runs here against the valid scope.
@@ -258,7 +260,7 @@ public enum ParticipantLoginOutcome
     /// <summary>The request failed validation (missing/oversized field) — the endpoint returns 400.</summary>
     Invalid,
 
-    /// <summary>The credential was rejected (unknown handle / credential-less / wrong password) — 401, fail closed.</summary>
+    /// <summary>The credential was rejected (unknown handle / credential-less / wrong password / disabled account) — 401, fail closed.</summary>
     RejectedCredential,
 
     /// <summary>No exercise scope resolved from the host — the endpoint returns 401 (fail closed, no telemetry).</summary>

@@ -48,7 +48,13 @@ public sealed class ParticipantLoginServiceTests
         return exercise;
     }
 
-    private async Task<Account> SeedAccountAsync(Guid exerciseId, string username, string? password, string role = "participant", string? actingHumanId = null)
+    private async Task<Account> SeedAccountAsync(
+        Guid exerciseId,
+        string username,
+        string? password,
+        string role = "participant",
+        string? actingHumanId = null,
+        DateTimeOffset? disabledAt = null)
     {
         var account = new Account
         {
@@ -60,6 +66,7 @@ public sealed class ParticipantLoginServiceTests
             ActingHumanId = actingHumanId,
             CredentialHash = password is null ? null : _hasher.Hash(password),
             CreatedAt = DateTimeOffset.UtcNow,
+            DisabledAt = disabledAt,
         };
 
         await using var seed = _fixture.CreateContext();
@@ -191,6 +198,44 @@ public sealed class ParticipantLoginServiceTests
         result.Outcome.Should().Be(ParticipantLoginOutcome.RejectedCredential,
             "an account provisioned without a credential can never authenticate — fail closed");
         issuer.IssueCount.Should().Be(0);
+    }
+
+    [RequiresDockerFact]
+    public async Task Login_DisabledAccount_WithTheRightPassword_IsRefusedExactlyLikeAWrongPassword()
+    {
+        // easy-login/03 (EL-8): staff disabled this person. Their CORRECT password is refused with the wrong-password
+        // outcome and the identical identity-less failure event; nothing about the refusal says "disabled".
+        var exercise = await SeedExerciseAsync(scenarioTime: null);
+        var disabled = await SeedAccountAsync(exercise.Id, "disabled-dana", "right-password", disabledAt: DateTimeOffset.UtcNow.AddMinutes(-5));
+        await SeedAccountAsync(exercise.Id, "enabled-eve", "right-password");
+
+        var issuer = new RecordingSessionIssuer();
+        ParticipantLoginResult disabledResult;
+        ParticipantLoginResult wrongPasswordResult;
+        await using (var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id }))
+        {
+            var service = ServiceFor(context, exercise.Id, issuer);
+            disabledResult = await service.LoginAsync(new ParticipantLoginRequest { Username = "disabled-dana", Password = "right-password" });
+            wrongPasswordResult = await service.LoginAsync(new ParticipantLoginRequest { Username = "enabled-eve", Password = "WRONG" });
+        }
+
+        disabledResult.Outcome.Should().Be(ParticipantLoginOutcome.RejectedCredential, "a disabled person is refused (401)");
+        disabledResult.ValidationError.Should().BeNull();
+        disabledResult.Issued.Should().BeNull();
+        wrongPasswordResult.Outcome.Should().Be(disabledResult.Outcome);
+        issuer.IssueCount.Should().Be(0, "a disabled person gets no session");
+
+        var events = await ReadLoginEventsAsync(exercise.Id);
+        events.Should().HaveCount(2);
+        var disabledEvent = events.Single(e => e.Target!.EntityId == "disabled-dana");
+        var wrongPasswordEvent = events.Single(e => e.Target!.EntityId == "enabled-eve");
+        disabledEvent.Payload.Should().Be(wrongPasswordEvent.Payload, "the same failure payload as a wrong password");
+        disabledEvent.Actor.Kind.Should().Be("system");
+        disabledEvent.Actor.ParticipantId.Should().BeNull("the refusal carries no identity, exactly like a wrong password");
+        disabledEvent.Target!.EntityType.Should().Be(wrongPasswordEvent.Target!.EntityType);
+
+        await using var verify = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
+        (await verify.Accounts.SingleAsync(a => a.Id == disabled.Id)).LastLoginAt.Should().BeNull("a refused sign-in records no login");
     }
 
     [RequiresDockerFact]
