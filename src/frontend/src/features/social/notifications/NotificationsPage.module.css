@@ -10,7 +10,7 @@
  * `SocialBrandScope` has already made contrast-safe: >= 4.5:1 as text on white, the panel and
  * the hover tint). A LEFT-ANCHORED ~600px column like the feed and Explore (D1-013).
  *
- * CONTRAST (WCAG 2.1 AA, computed -- `notifications.contrast.test.ts` re-derives every ratio
+ * CONTRAST (WCAG 2.1 AA, computed -- `notifications.guards.test.ts` re-derives every ratio
  * below from this file's text, so a change here that breaks one fails the build):
  *   - ink `--pc-ink` (#0e1518) on white / the unread panel / the hover tint: >= 16:1.
  *   - muted `--nt-muted` (#56656f): 6.0:1 on white, 5.5:1 on the unread panel (#f3f5f6), 5.5:1

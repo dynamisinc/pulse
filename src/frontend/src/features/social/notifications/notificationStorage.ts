@@ -1,14 +1,27 @@
 /**
  * features/social/notifications/notificationStorage.ts
  * ---------------------------------------------------------------------------
- * What the notifications feature remembers in `sessionStorage` (demo-polish F7, story 16:
- * "Mark all read persists per persona in `sessionStorage` under an exercise-scoped key";
- * "Like-increase detection compares `counts.like` against a per-post snapshot stored in
- * `sessionStorage`"). Participant world -- plain functions, no React, no clock.
+ * What the notifications feature remembers in the browser (demo-polish F7, story 16:
+ * "Mark all read persists per persona ... under an exercise-scoped key"; "Like-increase
+ * detection compares `counts.like` against a per-post snapshot"). Participant world -- plain
+ * functions, no React, no clock.
+ *
+ * WHERE: `localStorage`, NOT `sessionStorage`. A participant's tokens now persist across a
+ * closed tab (easy-login 07 keeps them in `localStorage`), so the same persona comes back to
+ * the same exercise after a reopen -- and their read marks and like baselines must come back
+ * with them, or every reopen would present the whole feed's replies as unread again and reset
+ * every baseline. The state is tab-independent but still strictly per (exercise, persona).
+ * Sign-out sweeps it (below), so a persisted token and persisted notification state live and
+ * die together.
+ *
+ * MIGRATION: none. This feature has never shipped with `sessionStorage` state in the wild
+ * (it was built on an unreleased branch), so there is nothing to migrate. The sign-out sweep
+ * still clears any `sessionStorage` entry a development build may have left.
  *
  * WHAT IS STORED, per (exercise, persona):
  *
- *   readIds   the ids of the reply/mention events the viewer has marked read;
+ *   readIds   the ids of the reply/mention events the viewer has marked read (the newest
+ *             {@link READ_IDS_CAP} are written);
  *   likes     per post of mine: the like count when the viewer last LOOKED (the baseline
  *             a rise is measured against), when the latest rise was first seen, and the
  *             last acknowledged "N new likes" row.
@@ -24,14 +37,20 @@
  * from another persona's entry.
  *
  * SIGN-OUT. `clearAllNotificationStorage` removes EVERY entry under the prefix, whichever
- * persona wrote it; the store registers it with `core/auth/sessionReset`, so `endSession`
- * wipes it (the next sign-in on the same tab starts clean even for the same persona).
+ * persona wrote it, from EVERY store it is given; the notifications store registers a sweep
+ * of both `localStorage` and `sessionStorage` with `core/auth/sessionReset`, so `endSession`
+ * wipes them (the next sign-in on the same browser starts clean even for the same persona).
  *
- * FAIL-SAFE. `sessionStorage` can be absent or throw (sandboxed frames, blocked storage,
- * quota); every call is guarded and the feature simply works from memory. A stored value
- * that does not parse, or is the wrong shape, is IGNORED (an empty state), never trusted
- * half-way: this is tab-local data any script on the origin could have written, so it is
- * validated field by field and rebuilt, not cast. Sizes are bounded on read as well as write.
+ * TWO TABS. `localStorage` is shared, so two tabs of the same persona write the same key.
+ * `mergeForWrite` makes a write additive for what must never be lost (read marks are
+ * unioned; a like record this tab does not know is kept), so one tab's write does not undo
+ * the other's "Mark all read". It is last-writer-wins for a record both tabs know.
+ *
+ * FAIL-SAFE. Storage can be absent or throw (sandboxed frames, blocked storage, quota);
+ * every call is guarded and the feature simply works from memory. A stored value that does not
+ * parse, or is the wrong shape, is IGNORED (an empty state), never trusted half-way: this is
+ * origin-wide data any script on the origin could have written, so it is validated field by
+ * field and rebuilt, not cast. Sizes are bounded on read as well as write.
  */
 
 import { LIKE_RECORDS_CAP, READ_IDS_CAP } from './notificationTypes'
@@ -61,8 +80,21 @@ export interface PersistedNotifications {
 export const EMPTY_PERSISTED: PersistedNotifications = { v: 1, readIds: [], likes: [] }
 
 /**
- * `sessionStorage`, or `undefined` where it is unavailable. Reading `window.sessionStorage`
- * itself can throw (a sandboxed iframe, storage disabled), so even the lookup is guarded.
+ * `window.localStorage`, or `undefined` where it is unavailable -- the store the state lives in
+ * (see the module header). Even the property lookup can throw (a sandboxed iframe, storage
+ * disabled), so it is guarded.
+ */
+export function getPersistentStorage(): Storage | undefined {
+  try {
+    return typeof window === 'undefined' ? undefined : window.localStorage
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * `window.sessionStorage`, or `undefined`. Nothing is stored there any more; it exists so the
+ * sign-out sweep can also clear an entry an earlier development build left behind.
  */
 export function getSessionStorage(): Storage | undefined {
   try {
@@ -163,7 +195,23 @@ export function writePersisted(
 }
 
 /**
- * Removes EVERY notification entry from the tab's storage, whichever exercise/persona wrote
+ * What to write given what is ALREADY stored (another tab of the same viewer may have written
+ * since this one loaded): read marks are unioned (stored first, so this tab's newest stay at
+ * the tail the cap keeps), and a like record this tab has no opinion on is kept. A record both
+ * know takes this tab's version.
+ */
+export function mergeForWrite(
+  stored: PersistedNotifications,
+  mine: PersistedNotifications,
+): PersistedNotifications {
+  const readIds = [...new Set([...stored.readIds, ...mine.readIds])].slice(-READ_IDS_CAP)
+  const known = new Set(mine.likes.map(record => record.postId))
+  const likes = [...stored.likes.filter(record => !known.has(record.postId)), ...mine.likes]
+  return { v: 1, readIds, likes: likes.slice(-LIKE_RECORDS_CAP) }
+}
+
+/**
+ * Removes EVERY notification entry from the given storage, whichever exercise/persona wrote
  * it. Keys are collected first and removed after, because removing while iterating shifts
  * the indices.
  */

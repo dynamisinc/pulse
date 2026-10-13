@@ -8,7 +8,7 @@
  *   - Derived items: a reply and a mention in the exercise feed become rows and a badge;
  *     nothing is made up (an honest empty state); the engine reads the feed WITH replies.
  *   - Bell and badge: text count + "Notifications, N unread" name; `99+` cap; ABSENT for a
- *     read-only / preview mount (and, in `NotificationsFlow.noPersona.test.tsx`, a
+ *     read-only / preview mount (and, in `NotificationsFlow.session.test.tsx`, a
  *     persona-less session).
  *   - Page: newest first, in SCENARIO time, a typed icon AND a text label per row, activation
  *     opens the thread, "Mark all read" clears the badge and persists under the
@@ -96,6 +96,7 @@ function seed(...posts: Post[]) {
 }
 
 beforeEach(() => {
+  window.localStorage.clear()
   window.sessionStorage.clear()
   resetTelemetryBuffer()
 })
@@ -107,6 +108,7 @@ afterEach(() => {
   resetReplyIntent()
   resetExerciseClock()
   resetTelemetryBuffer()
+  window.localStorage.clear()
   window.sessionStorage.clear()
   vi.restoreAllMocks()
 })
@@ -273,7 +275,7 @@ describe('"Mark all read"', () => {
     expect(rows().every(row => row.getAttribute('data-unread') === 'false')).toBe(true)
     expect(screen.getByTestId('notifications-live')).toHaveTextContent('All notifications marked as read')
 
-    const stored = window.sessionStorage.getItem(notificationStorageKey(EXERCISE, ME))
+    const stored = window.localStorage.getItem(notificationStorageKey(EXERCISE, ME))
     expect(stored).not.toBeNull()
     expect(JSON.parse(stored ?? '{}').readIds.sort()).toEqual(['nt-mention-kward', 'nt-reply-fulco'])
     // The key names BOTH ids.
@@ -281,7 +283,7 @@ describe('"Mark all read"', () => {
     expect(notificationStorageKey(EXERCISE, ME)).toContain(ME)
   })
 
-  it('stays marked after the channel is remounted (a reload of the same persona)', async () => {
+  it('stays marked after a closed-and-reopened tab (localStorage outlives sessionStorage)', async () => {
     const user = userEvent.setup()
     seed(OWN, REPLY_FULCO)
     const first = renderChannel({ entries: ['/notifications'] })
@@ -289,6 +291,7 @@ describe('"Mark all read"', () => {
     await user.click(screen.getByRole('button', { name: 'Mark all read' }))
     await waitFor(() => expect(screen.queryByTestId('notifications-badge')).not.toBeInTheDocument())
     first.unmount()
+    window.sessionStorage.clear() // closing the tab discards its sessionStorage; localStorage stays
 
     renderChannel({ entries: ['/notifications'] })
     await waitFor(() => expect(rows()).toHaveLength(1))
@@ -323,6 +326,26 @@ describe('live and calm', () => {
     const live = screen.getByTestId('notifications-live')
     expect(live).toHaveAttribute('aria-live', 'polite')
     expect(live).toHaveAttribute('role', 'status')
+    await waitFor(() => expect(live).toHaveTextContent('1 new reply'))
+  })
+
+  it('announces even while the compose modal is open (the live region is outside the inert frame)', async () => {
+    const user = userEvent.setup()
+    seed(OWN)
+    renderChannel({ entries: ['/home'] })
+    await user.click(await screen.findByTestId('nav-post-button'))
+    await screen.findByRole('dialog')
+
+    // The frame behind the modal is inert -- and the live region must not be inside it.
+    const frame = screen.getByTestId('nav-rail').closest('[inert]')
+    expect(frame).not.toBeNull()
+    const live = screen.getByTestId('notifications-live')
+    expect(live.closest('[inert]')).toBeNull()
+    expect(frame?.contains(live)).toBe(false)
+
+    act(() => {
+      postStore.appendPost(REPLY_FULCO)
+    })
     await waitFor(() => expect(live).toHaveTextContent('1 new reply'))
   })
 
@@ -386,7 +409,7 @@ describe('absent, not inert (D1-011)', () => {
       expect(screen.queryByRole('link', { name: /notifications/i })).not.toBeInTheDocument()
       expect(screen.queryByTestId('notifications-page')).not.toBeInTheDocument()
       // And nothing ran: no storage was touched for a viewer who has no notifications.
-      const keys = Object.keys(window.sessionStorage)
+      const keys = Object.keys(window.localStorage)
       expect(keys.filter(key => key.startsWith(NOTIFICATION_STORAGE_PREFIX))).toEqual([])
       expect(notificationsStore.getSummary().available).toBe(false)
     },
@@ -394,19 +417,23 @@ describe('absent, not inert (D1-011)', () => {
 })
 
 describe('sign-out', () => {
-  it('the registered session reset sweeps the storage and removes the bell', async () => {
+  it('the registered session reset sweeps BOTH stores and removes the bell', async () => {
     const user = userEvent.setup()
     seed(OWN, REPLY_FULCO)
     renderChannel({ entries: ['/notifications'] })
     await waitFor(() => expect(rows()).toHaveLength(1))
     await user.click(screen.getByRole('button', { name: 'Mark all read' }))
     await waitFor(() =>
-      expect(window.sessionStorage.getItem(notificationStorageKey(EXERCISE, ME))).not.toBeNull())
+      expect(window.localStorage.getItem(notificationStorageKey(EXERCISE, ME))).not.toBeNull())
+
+    // ... and a leftover from a build that kept the state per tab.
+    window.sessionStorage.setItem(notificationStorageKey(EXERCISE, ME), '{"v":1,"readIds":[],"likes":[]}')
 
     act(() => {
       runSessionResets() // what `endSession` runs on sign-out
     })
 
+    expect(window.localStorage.getItem(notificationStorageKey(EXERCISE, ME))).toBeNull()
     expect(window.sessionStorage.getItem(notificationStorageKey(EXERCISE, ME))).toBeNull()
     expect(notificationsStore.getSnapshot().items).toEqual([])
     await waitFor(() =>

@@ -9,16 +9,16 @@
  * WHY A MODULE STORE. The unread badge lives in the nav rail (visible on every route) and
  * the rows live on `/notifications`; one engine has to feed both, and it has to keep
  * running while the viewer is on Home. A React context would have to be mounted above
- * both -- `SocialChannel`, which this story does not own -- whereas a store the rail and
- * the page both subscribe to needs no shared ancestor. It is the same shape as
- * `ownPostStore` / `removedPosts`: a leaf singleton, reset on sign-out.
+ * both, whereas a store the rail and the page both subscribe to needs no shared ancestor
+ * (and the rail stays renderable on its own). It is the same shape as `ownPostStore` /
+ * `removedPosts`: a leaf singleton, reset on sign-out.
  *
  * ONE SESSION AT A TIME. `start(config)` begins a session for an eligible viewer (a
  * persona-bound, interactive, not read-only participant -- `NotificationsEngine` decides)
  * and returns its idempotent `stop`. A session:
  *
- *   1. loads that viewer's persisted state (`notificationStorage`: read ids + like
- *      baselines under an exercise- AND persona-scoped key) and builds a
+ *   1. loads that viewer's persisted state (`notificationStorage`, in `localStorage`: read
+ *      ids + like baselines under an exercise- AND persona-scoped key) and builds a
  *      {@link NotificationModel};
  *   2. subscribes to the SHARED arrival source (`defaultArrivalSource`: SignalR
  *      `PostReceived` with its polling fallback in live mode, the in-tab `postStore` under
@@ -27,7 +27,8 @@
  *      already share. Replies and mentions therefore arrive in real time;
  *   3. reads the exercise-scoped feed WITH replies (`resolveFeed('all', { includeReplies:
  *      true })` -- the session binds the exercise server-side, COR-001) once, to establish
- *      the baseline, and then every 30 s WHILE THE TAB IS VISIBLE. That re-read is how a
+ *      the baseline, and then about every 30 s WHILE THE TAB IS VISIBLE (jittered, and backed
+ *      off after repeated failures -- see {@link nextPollDelayMs}). That re-read is how a
  *      like is noticed: B3 adds no reaction broadcast and `PostReceived` never carries a
  *      like, so a like is only ever visible as a count change on one of the viewer's own
  *      posts. A tick that lands while the tab is hidden is skipped, and the missed read is
@@ -58,10 +59,19 @@
  * session never reads another persona's entry.
  *
  * SIGN-OUT. `reset()` stops any session WITHOUT writing (a late-resolving read after
- * sign-out must not re-persist), sweeps every notification key from `sessionStorage` and
- * publishes the inactive state. It is registered with `core/auth/sessionReset` below, the
- * way the controller composer registers its drafts: `core/` cannot import this feature, and
- * a tab-lived singleton must not hand one sign-in's baseline to the next.
+ * sign-out must not re-persist), sweeps every notification key from BOTH `localStorage` (where
+ * the state lives, next to the persisted tokens) and `sessionStorage` (where an earlier
+ * development build kept it) and publishes the inactive state. It is registered with
+ * `core/auth/sessionReset` below, the way the controller composer registers its drafts:
+ * `core/` cannot import this feature, and a browser-lived singleton must not hand one
+ * sign-in's baseline to the next.
+ *
+ * ARRIVALS THAT DO NOT FIT. The model is bounded (`GROUPS_CAP` rows, `MINE_CAP` own posts), so
+ * a long session costs the same per snapshot as a short one. WHAT THE RE-READ CAN SEE is bounded
+ * too, by the server: the feed is the newest 200 posts (`PostReadService.FeedTake`), about the
+ * last 100 s under a 120-posts/min burst. Likes on, and replies after a reload to, posts that
+ * have scrolled out of that window are not seen; live replies still arrive through the
+ * realtime path. The real fix is a backend own-posts read, filed as a follow-up.
  *
  * TESTABILITY. `createNotificationsStore(deps)` takes every side effect as a dependency
  * (the feed read, the arrival source, storage, the clock, visibility, the intervals); the
@@ -79,7 +89,9 @@ import { removedPosts } from '../services/removedPosts'
 import { NotificationModel } from './notificationModel'
 import {
   clearAllNotificationStorage,
+  getPersistentStorage,
   getSessionStorage,
+  mergeForWrite,
   notificationStorageKey,
   readPersisted,
   writePersisted,
@@ -87,7 +99,10 @@ import {
 import {
   MAX_NOTIFICATION_ROWS,
   NOTIFICATION_ANNOUNCE_THROTTLE_MS,
+  NOTIFICATION_BACKOFF_CAP_MS,
+  NOTIFICATION_POLL_FIRST_MIN,
   NOTIFICATION_POLL_INTERVAL_MS,
+  NOTIFICATION_POLL_JITTER,
   NOTIFICATION_PUBLISH_DELAY_MS,
   PRELOAD_BUFFER_CAP,
   type NotificationEvent,
@@ -146,7 +161,12 @@ export interface NotificationsDeps {
     has(postId: string): boolean
     subscribe(listener: () => void): () => void
   }
+  /** Where the state lives (default `localStorage`; see `notificationStorage`). */
   readonly storage: () => Storage | undefined
+  /** Every store a sign-out sweeps, besides `storage` (default: local AND session storage). */
+  readonly sweepStorages: () => readonly (Storage | undefined)[]
+  /** A number in [0, 1): the poll jitter source (default `Math.random`). */
+  readonly random: () => number
   /** The current SCENARIO instant, ISO (never wall-clock). */
   readonly now: () => string
   readonly isVisible: () => boolean
@@ -212,6 +232,41 @@ export function describeAnnouncement(held: HeldEvents): string {
   return `${held.events} new ${held.events === 1 ? 'notification' : 'notifications'}`
 }
 
+/** Inputs to {@link nextPollDelayMs}. */
+export interface PollDelayInput {
+  readonly intervalMs: number
+  /** Consecutive failed reads so far (0 after any success). */
+  readonly failures: number
+  /** True for the very first re-read after the session started. */
+  readonly first: boolean
+  /** A number in [0, 1). */
+  readonly random: () => number
+}
+
+/**
+ * How long to wait before the next feed re-read. Many participants start together (an
+ * exercise opens, everyone signs in), so the schedule is deliberately NOT lockstep:
+ *
+ *  - the FIRST re-read lands at a random point between {@link NOTIFICATION_POLL_FIRST_MIN} of
+ *    the interval and the full interval after start (the baseline read itself is immediate --
+ *    the page needs it);
+ *  - every later one is the interval spread +/- {@link NOTIFICATION_POLL_JITTER};
+ *  - after repeated failures the delay doubles per consecutive failure (the first failure
+ *    retries at the normal pace), up to {@link NOTIFICATION_BACKOFF_CAP_MS} -- a struggling
+ *    server is not hammered by every open tab -- and never exceeds that cap, jitter included.
+ */
+export function nextPollDelayMs({ intervalMs, failures, first, random }: PollDelayInput): number {
+  if (first && failures === 0) {
+    return Math.round(
+      intervalMs * (NOTIFICATION_POLL_FIRST_MIN + (1 - NOTIFICATION_POLL_FIRST_MIN) * random()),
+    )
+  }
+  const doubled = intervalMs * 2 ** Math.max(0, failures - 1)
+  const backedOff = Math.min(NOTIFICATION_BACKOFF_CAP_MS, doubled)
+  const spread = 1 + (random() * 2 - 1) * NOTIFICATION_POLL_JITTER
+  return Math.round(Math.min(NOTIFICATION_BACKOFF_CAP_MS, backedOff * spread))
+}
+
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
@@ -221,7 +276,9 @@ function defaultDeps(): NotificationsDeps {
     fetchFeed: () => resolveFeed('all', { includeReplies: true }),
     source: () => defaultArrivalSource,
     removed: removedPosts,
-    storage: getSessionStorage,
+    storage: getPersistentStorage,
+    sweepStorages: () => [getPersistentStorage(), getSessionStorage()],
+    random: Math.random,
     now: () => scenarioNow().toISOString(),
     isVisible: () => typeof document === 'undefined' || document.visibilityState === 'visible',
     onVisibilityChange: listener => {
@@ -256,7 +313,11 @@ interface ActiveSession {
   /** Removed ids already applied to the model. */
   readonly appliedRemoved: Set<string>
   publishTimer: ReturnType<typeof setTimeout> | undefined
-  pollTimer: ReturnType<typeof setInterval> | undefined
+  pollTimer: ReturnType<typeof setTimeout> | undefined
+  /** Consecutive failed reads (drives the backoff). */
+  failures: number
+  /** The first re-read has been scheduled. */
+  scheduledFirst: boolean
   unsubscribeArrivals: (() => void) | undefined
   unsubscribeRemoved: (() => void) | undefined
   unsubscribeVisibility: (() => void) | undefined
@@ -327,7 +388,10 @@ export function createNotificationsStore(
   // ---- publishing ---------------------------------------------------------
 
   function persistIfDirty(s: ActiveSession, storage: Storage | undefined): void {
-    if (s.model.takeDirty()) writePersisted(storage, s.storageKey, s.model.toPersisted())
+    if (!s.model.takeDirty()) return
+    // Merged with what is stored: another tab of this viewer may have written since we loaded.
+    const merged = mergeForWrite(readPersisted(storage, s.storageKey), s.model.toPersisted())
+    writePersisted(storage, s.storageKey, merged)
   }
 
   function publishNow(s: ActiveSession, deps: NotificationsDeps): void {
@@ -373,24 +437,35 @@ export function createNotificationsStore(
     if (result.changed) schedulePublish(s, deps)
   }
 
-  async function loadFeed(s: ActiveSession, deps: NotificationsDeps): Promise<void> {
-    if (s.stopped || s.inFlight) return
+  /**
+   * One feed read. Resolves to what happened -- `ok`, `failed` (drives the backoff) or `skipped`
+   * (stopped, or a read is already in flight: nothing was asked, so nothing is counted).
+   */
+  async function loadFeed(
+    s: ActiveSession,
+    deps: NotificationsDeps,
+  ): Promise<'ok' | 'failed' | 'skipped'> {
+    if (s.stopped || s.inFlight) return 'skipped'
     s.inFlight = true
     let posts: readonly Post[]
     try {
       posts = await deps.fetchFeed()
     } catch {
       // A failed read leaves what we have; before the first success it is the page's
-      // "not available" state. The next tick retries either way.
-      if (!s.stopped && !s.loaded) {
-        s.status = 'error'
-        publishNow(s, deps)
+      // "not available" state. The next tick retries (later, if it keeps failing).
+      if (!s.stopped) {
+        s.failures += 1
+        if (!s.loaded) {
+          s.status = 'error'
+          publishNow(s, deps)
+        }
       }
-      return
+      return 'failed'
     } finally {
       s.inFlight = false
     }
-    if (s.stopped) return
+    if (s.stopped) return 'skipped'
+    s.failures = 0
 
     // XC-002: narrow through the one sanctioned path before the model sees a post.
     const events = s.model.ingestBatch(posts.map(toParticipantView))
@@ -410,6 +485,38 @@ export function createNotificationsStore(
     }
     applyRemoved(s, deps)
     publishNow(s, deps)
+    return 'ok'
+  }
+
+  /**
+   * Schedules the next re-read (see {@link nextPollDelayMs}). A chain of timeouts rather than
+   * an interval: the next one is set only after the previous has finished, so a slow server
+   * can never be handed overlapping reads, and the delay can change with the failure count.
+   * While the tab is hidden a tick reads nothing (it only notes that one was missed) and the
+   * chain carries on.
+   */
+  function scheduleNextRead(s: ActiveSession, deps: NotificationsDeps): void {
+    if (s.stopped) return
+    const delay = nextPollDelayMs({
+      intervalMs: deps.pollIntervalMs,
+      failures: s.failures,
+      first: !s.scheduledFirst,
+      random: deps.random,
+    })
+    s.scheduledFirst = true
+    s.pollTimer = setTimeout(() => {
+      s.pollTimer = undefined
+      if (s.stopped) return
+      if (!deps.isVisible()) {
+        s.missedWhileHidden = true
+        scheduleNextRead(s, deps)
+        return
+      }
+      // (`loadFeed` handles its own failures; the catch only keeps the chain alive.)
+      void loadFeed(s, deps)
+        .catch(() => undefined)
+        .then(() => scheduleNextRead(s, deps))
+    }, delay)
   }
 
   /** Applies removed ids not yet applied; returns whether anything visible changed. */
@@ -429,7 +536,7 @@ export function createNotificationsStore(
   function teardown(s: ActiveSession): void {
     s.stopped = true
     if (s.publishTimer !== undefined) clearTimeout(s.publishTimer)
-    if (s.pollTimer !== undefined) clearInterval(s.pollTimer)
+    if (s.pollTimer !== undefined) clearTimeout(s.pollTimer)
     s.publishTimer = undefined
     s.pollTimer = undefined
     s.unsubscribeArrivals?.()
@@ -487,6 +594,8 @@ export function createNotificationsStore(
       appliedRemoved: new Set(),
       publishTimer: undefined,
       pollTimer: undefined,
+      failures: 0,
+      scheduledFirst: false,
       unsubscribeArrivals: undefined,
       unsubscribeRemoved: undefined,
       unsubscribeVisibility: undefined,
@@ -509,15 +618,9 @@ export function createNotificationsStore(
       if (applyRemoved(s, deps) && s.loaded) publishNow(s, deps)
     })
 
-    // The baseline read, then the 30 s re-read while the tab is visible.
+    // The baseline read now; then a re-read about every 30 s while the tab is visible.
     void loadFeed(s, deps)
-    s.pollTimer = setInterval(() => {
-      if (!deps.isVisible()) {
-        s.missedWhileHidden = true
-        return
-      }
-      void loadFeed(s, deps)
-    }, deps.pollIntervalMs)
+    scheduleNextRead(s, deps)
     s.unsubscribeVisibility = deps.onVisibilityChange(() => {
       if (s.missedWhileHidden && deps.isVisible()) {
         s.missedWhileHidden = false
@@ -548,7 +651,10 @@ export function createNotificationsStore(
       teardown(s) // no persist: a sign-out must leave nothing behind
       session = undefined
     }
-    clearAllNotificationStorage(deps.storage())
+    // Sign-out sweeps EVERY store the state could be in (see `notificationStorage`).
+    for (const storage of new Set([deps.storage(), ...deps.sweepStorages()])) {
+      clearAllNotificationStorage(storage)
+    }
     setInactive()
   }
 

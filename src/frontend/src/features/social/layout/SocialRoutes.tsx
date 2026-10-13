@@ -7,7 +7,9 @@
  *   /home                  -> the feed (`HomeView`)                    [kept mounted]
  *   /explore               -> `ExplorePage` (F0's stub; F6 fills it)
  *   /notifications         -> `NotificationsPage` (F7; redirects Home for a session
- *                             that has no notifications -- read-only, persona-less, ...)
+ *                             that has no notifications -- read-only, persona-less, ...).
+ *                             The notifications ENGINE is not mounted here: `SocialChannel`
+ *                             mounts it outside the frame (see there).
  *   /hashtag/:tag          -> the hashtag feed
  *   /:handle/status/:id    -> the flattened thread
  *   /:handle               -> a profile
@@ -64,19 +66,12 @@
  * `useScrollRestoration`.) Detail routes (thread / profile / hashtag) unmount on
  * leaving; they are cheap to re-open and carry no state worth keeping.
  *
- * THE NOTIFICATIONS ENGINE LIVES HERE TOO (demo-polish F7). `<NotificationsEngine />` is
- * rendered once, outside `<Routes>` like Home, so the derived notifications keep updating --
- * and the rail's bell keeps its count -- on EVERY route, and is torn down only with the
- * channel. It renders nothing visible (just a polite live region) and starts only for an
- * interactive, persona-bound, not read-only participant.
- *
  * World: participant. No COBRA, no MUI.
  */
 
 import { useState, type ContextType } from 'react'
 import { Route, Routes, UNSAFE_RouteContext } from 'react-router-dom'
 import { ExplorePage } from '../explore/ExplorePage'
-import { NotificationsEngine } from '../notifications/NotificationsEngine'
 import { NotificationsPage } from '../notifications/NotificationsPage'
 import {
   HOME_PATH,
@@ -108,8 +103,6 @@ export function SocialRoutes() {
 
   return (
     <>
-      <NotificationsEngine />
-
       {homeMounted && (
         <div hidden={!onHome} data-testid="social-feed-region">
           <HomeView />

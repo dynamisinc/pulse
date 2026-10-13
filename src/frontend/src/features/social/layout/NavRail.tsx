@@ -26,10 +26,11 @@
  *     resolved (it needs the persona's handle for its URL).
  *   - **Post** appears only when the mount may compose AND the session can post --
  *     `onCompose` is simply not passed otherwise, and no button renders.
- *   - **Notifications** (demo-polish F7) appears only while the notifications engine is
- *     running for this viewer -- an interactive, persona-bound, not read-only participant
- *     (`notifications/useNotificationsEligibility`). The rail does not decide that itself and
- *     reads no session: it asks the notifications store (`useNotificationsSummary`), so this
+ *   - **Notifications** (demo-polish F7) appears only when BOTH hold: the host passes
+ *     `showNotifications` (the shell variant grants interactive affordances) AND the
+ *     notifications engine is running for this viewer -- an interactive, persona-bound, not
+ *     read-only participant (`notifications/useNotificationsEligibility`). The rail reads no
+ *     session itself: it asks the notifications store (`useNotificationsSummary`), so this
  *     component stays renderable on its own. A read-only, observer, kiosk, preview or
  *     persona-less session therefore gets no bell at all, never a disabled one (D1-011).
  *   - Messages is NOT here: out of scope, and a dangling door is worse than none.
@@ -90,6 +91,13 @@ export interface NavRailProps {
    * `kiosk` mount: a staff preview must never be able to sign the staff user out.
    */
   showAccount: boolean
+  /**
+   * Whether this mount may show the Notifications bell: the shell variant grants interactive
+   * affordances (`affordancesAvailable(variant)` -- false for `readOnly`, `kiosk`, `preview`).
+   * Omit it and the bell is ABSENT whatever the notifications store says, so a rail in a
+   * staff preview can never show a bell that belongs to another mount's session (D1-011).
+   */
+  showNotifications?: boolean
 }
 
 interface NavItemSpec {
@@ -106,7 +114,13 @@ function soleSegment(pathname: string): string | undefined {
   return segments.length === 1 && only !== undefined ? only.toLowerCase() : undefined
 }
 
-export function NavRail({ onCompose, postButtonRef, self, showAccount }: NavRailProps) {
+export function NavRail({
+  onCompose,
+  postButtonRef,
+  self,
+  showAccount,
+  showNotifications = false,
+}: NavRailProps) {
   const { location, navigate, kind } = useSocialNavigation()
   const { available: notificationsAvailable, unread } = useNotificationsSummary()
   const current = soleSegment(location.pathname)
@@ -115,7 +129,7 @@ export function NavRail({ onCompose, postButtonRef, self, showAccount }: NavRail
     { id: 'home', label: 'Home', path: HOME_PATH, icon: faHouse },
     { id: 'explore', label: 'Explore', path: EXPLORE_PATH, icon: faHashtag },
   ]
-  if (notificationsAvailable) {
+  if (showNotifications && notificationsAvailable) {
     items.push({
       id: 'notifications',
       label: 'Notifications',

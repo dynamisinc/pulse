@@ -84,6 +84,15 @@ export interface IngestResult {
 /** How often the feed is re-read to notice like-count rises (the story fixes it at 30 s). */
 export const NOTIFICATION_POLL_INTERVAL_MS = 30_000
 
+/** Each later tick is spread +/- this fraction around the interval, so clients drift apart. */
+export const NOTIFICATION_POLL_JITTER = 0.15
+
+/** The first re-read lands this fraction of the interval after start, plus a random share. */
+export const NOTIFICATION_POLL_FIRST_MIN = 0.25
+
+/** Repeated read failures back off exponentially, up to this many ms (about 5 minutes). */
+export const NOTIFICATION_BACKOFF_CAP_MS = 300_000
+
 /**
  * Publishing is coalesced: a burst of arrivals schedules ONE snapshot after this delay
  * instead of one per arrival, so the rail badge and the page re-render a few times a
@@ -104,8 +113,22 @@ export const MAX_NOTIFICATION_ROWS = 100
 /** The badge shows this many, then `99+`. */
 export const BADGE_DISPLAY_CAP = 99
 
-/** Most read-event ids remembered per persona (oldest forgotten first). */
+/**
+ * Most read-event ids WRITTEN to storage per viewer (the newest are kept). It bounds what is
+ * persisted, never what is remembered live: the live read set is exactly as large as the
+ * groups it describes, which are themselves bounded by {@link GROUPS_CAP}.
+ */
 export const READ_IDS_CAP = 500
+
+/**
+ * Most reply/mention rows the model keeps (the newest by scenario time). The page draws only
+ * {@link MAX_NOTIFICATION_ROWS}; this bounds memory and the cost of building a snapshot, so a
+ * long, busy session costs the same on its thousandth minute as on its first (SOC-071).
+ */
+export const GROUPS_CAP = 500
+
+/** Most of the viewer's own posts the model tracks (the oldest forgotten first). */
+export const MINE_CAP = 500
 
 /** Most per-post like records remembered per persona (oldest forgotten first). */
 export const LIKE_RECORDS_CAP = 200

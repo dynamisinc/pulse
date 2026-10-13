@@ -51,7 +51,9 @@ import type { ParticipantPostView } from '../types/post'
 import {
   ACTOR_PREVIEW_MAX,
   EXCERPT_MAX_LENGTH,
+  GROUPS_CAP,
   LIKE_RECORDS_CAP,
+  MINE_CAP,
   READ_IDS_CAP,
   type IngestResult,
   type NotificationEvent,
@@ -91,6 +93,8 @@ interface Group {
   readonly subjectPostId: string
   readonly subjectHandle: string | undefined
   readonly members: Map<string, Member>
+  /** Scenario ms of the newest member (what the group is ranked by when the cap bites). */
+  newestMs: number
   /** The derived item; `undefined` when a member changed and it must be rebuilt. */
   item: NotificationItem | undefined
 }
@@ -167,6 +171,12 @@ export class NotificationModel {
   private readonly readIds = new Set<string>()
   /** Rows handed out last time, to return the SAME object for an unchanged row. */
   private lastItems = new Map<string, NotificationItem>()
+  /**
+   * The newest scenario ms among groups the cap has evicted. Anything at or below it, offered
+   * while the model is full, would only be ranked out again -- so it is ignored up front, which
+   * also keeps a re-read of the feed from "discovering" (and announcing) an evicted row again.
+   */
+  private evictedFloorMs = -Infinity
   /** Whether the persisted part (read ids / like records) changed since `takeDirty`. */
   private dirty = false
 
@@ -222,6 +232,10 @@ export class NotificationModel {
     const previous = known?.likes
     if (known === undefined) {
       this.mine.set(post.id, { excerpt: toExcerpt(post.text), likes: like })
+      if (this.mine.size > MINE_CAP) {
+        const oldest = this.mine.keys().next()
+        if (oldest.done !== true) this.mine.delete(oldest.value)
+      }
     } else {
       known.likes = like
     }
@@ -286,14 +300,18 @@ export class NotificationModel {
     post: ParticipantPostView,
   ): IngestResult {
     const key = `${type}:${subjectPostId}`
+    const ms = toMs(post.scenarioTime)
     let group = this.groups.get(key)
     if (group === undefined) {
+      // A full model ignores what it would only rank straight out again (see evictedFloorMs).
+      if (this.groups.size >= GROUPS_CAP && ms <= this.evictedFloorMs) return NO_CHANGE
       group = {
         key,
         type,
         subjectPostId,
         subjectHandle,
         members: new Map(),
+        newestMs: ms,
         item: undefined,
       }
       this.groups.set(key, group)
@@ -301,14 +319,33 @@ export class NotificationModel {
     group.members.set(post.id, {
       actorId: post.authorPersonaId,
       at: post.scenarioTime,
-      ms: toMs(post.scenarioTime),
+      ms,
       excerpt: toExcerpt(post.text),
     })
+    if (ms > group.newestMs) group.newestMs = ms
     group.item = undefined
     this.memberIndex.set(post.id, key)
+    if (this.groups.size > GROUPS_CAP && this.evictOldestGroup() === group) return NO_CHANGE
     return this.readIds.has(post.id)
       ? { changed: true }
       : { changed: true, event: { type, amount: 1 } }
+  }
+
+  /**
+   * Drops the group whose newest event is oldest (ties: the one inserted first) and returns
+   * it. O(groups) with groups <= GROUPS_CAP + 1, so a constant per NEW group -- never per
+   * post -- however long the session runs.
+   */
+  private evictOldestGroup(): Group | undefined {
+    let oldest: Group | undefined
+    for (const group of this.groups.values()) {
+      if (oldest === undefined || group.newestMs < oldest.newestMs) oldest = group
+    }
+    if (oldest === undefined) return undefined
+    for (const id of oldest.members.keys()) this.memberIndex.delete(id)
+    this.groups.delete(oldest.key)
+    if (oldest.newestMs > this.evictedFloorMs) this.evictedFloorMs = oldest.newestMs
+    return oldest
   }
 
   // -------------------------------------------------------------------------
@@ -374,13 +411,15 @@ export class NotificationModel {
     this.dirty = true
   }
 
+  /**
+   * Remembers an event as read. NOT capped: the live set must keep every event the current
+   * rows are made of, or "Mark all read" would leave the oldest of a long group unread and the
+   * badge stuck above zero. Only what is WRITTEN to storage is bounded (see `toPersisted`); the
+   * live set is as large as the (bounded) groups it describes plus what was loaded.
+   */
   private rememberRead(id: string): void {
     this.readIds.delete(id) // re-insert at the newest end
     this.readIds.add(id)
-    if (this.readIds.size > READ_IDS_CAP) {
-      const oldest = this.readIds.values().next()
-      if (oldest.done !== true) this.readIds.delete(oldest.value)
-    }
     this.dirty = true
   }
 
@@ -496,7 +535,12 @@ export class NotificationModel {
    * whether writing is needed.
    */
   toPersisted(): PersistedNotifications {
-    return { v: 1, readIds: [...this.readIds], likes: [...this.likes.values()] }
+    return {
+      v: 1,
+      // Bounded here, on the way out: the newest READ_IDS_CAP, never trimmed from the live set.
+      readIds: [...this.readIds].slice(-READ_IDS_CAP),
+      likes: [...this.likes.values()],
+    }
   }
 
   /** True once if the persisted part changed since the last call. */

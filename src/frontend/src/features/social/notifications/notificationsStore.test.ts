@@ -3,14 +3,16 @@
  * ---------------------------------------------------------------------------
  * The notifications ENGINE (demo-polish F7, story 16 "Live and calm" + "Isolation"), driven
  * through `createNotificationsStore` with every side effect faked: the feed read, the shared
- * arrival source, the removed-post store, tab visibility, the clock and `sessionStorage`
- * (jsdom's real one, cleared per test). Fake timers carry the 30 s read, the publish
- * coalescing window and the announcement throttle.
+ * arrival source, the removed-post store, tab visibility, the clock and the browser storage
+ * (jsdom's real `localStorage` / `sessionStorage`, cleared per test). Fake timers carry the
+ * ~30 s read, the publish coalescing window and the announcement throttle.
  *
- * Covered: baseline vs live; arrivals that beat the baseline; the 30 s re-read that notices
- * likes (and only while the tab is visible); no overlapping reads; the burst cost (one
- * coalesced publish, one throttled announcement for 120 arrivals); the row cap; takedowns;
- * "Mark all read" and its exercise- and persona-scoped persistence; stop / restart / reset.
+ * Covered: baseline vs live; arrivals that beat the baseline; the re-read that notices likes
+ * (and only while the tab is visible); its jitter and its backoff on repeated failures; no
+ * overlapping reads; the burst cost (one coalesced publish, one throttled announcement for 120
+ * arrivals); the row cap; takedowns; "Mark all read" and its exercise- and persona-scoped
+ * persistence in `localStorage` (surviving a tab reopen, merged across tabs, swept from BOTH
+ * stores on sign-out); stop / restart / reset.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ParticipantPostView, Post } from '../types/post'
@@ -18,6 +20,8 @@ import type { FeedStreamSource } from '../services/feedStreamSource'
 import {
   createNotificationsStore,
   describeAnnouncement,
+  nextPollDelayMs,
+  type NotificationsDeps,
   type NotificationsSessionConfig,
 } from './notificationsStore'
 import {
@@ -28,8 +32,12 @@ import {
 import {
   MAX_NOTIFICATION_ROWS,
   NOTIFICATION_ANNOUNCE_THROTTLE_MS,
+  NOTIFICATION_BACKOFF_CAP_MS,
+  NOTIFICATION_POLL_FIRST_MIN,
   NOTIFICATION_POLL_INTERVAL_MS,
+  NOTIFICATION_POLL_JITTER,
   NOTIFICATION_PUBLISH_DELAY_MS,
+  READ_IDS_CAP,
 } from './notificationTypes'
 
 const ME = 'persona-dreyes_fh'
@@ -159,7 +167,7 @@ interface Rig {
   readonly notifications: { count: number }
 }
 
-function rig(initial: Post[] = []): Rig {
+function rig(initial: Post[] = [], over: Partial<NotificationsDeps> = {}): Rig {
   const feed = { posts: initial }
   const fetchFeed = vi.fn<() => Promise<readonly Post[]>>(() => Promise.resolve(feed.posts))
   const source = fakeSource()
@@ -173,6 +181,10 @@ function rig(initial: Post[] = []): Rig {
     isVisible: visibility.isVisible,
     onVisibilityChange: visibility.onVisibilityChange,
     now: () => clock.now,
+    // 0.5 is the centre of every jitter range: the first re-read lands at 62.5 % of the interval
+    // and each later one at exactly the interval (the jitter has its own tests below).
+    random: () => 0.5,
+    ...over,
   })
   const notifications = { count: 0 }
   store.subscribe(() => { notifications.count += 1 })
@@ -185,7 +197,7 @@ const deferredFeed = (capture: (resolve: (posts: Post[]) => void) => void) => ()
 
 /** The notification entries currently in the tab's storage. */
 const storedKeys = () =>
-  Object.keys(window.sessionStorage).filter(key => key.startsWith(NOTIFICATION_STORAGE_PREFIX))
+  Object.keys(window.localStorage).filter(key => key.startsWith(NOTIFICATION_STORAGE_PREFIX))
 
 /** Lets already-resolved promises (the feed read) settle without moving the clock. */
 const settle = () => vi.advanceTimersByTimeAsync(0)
@@ -193,10 +205,12 @@ const advance = (ms: number) => vi.advanceTimersByTimeAsync(ms)
 
 beforeEach(() => {
   vi.useFakeTimers()
+  window.localStorage.clear()
   window.sessionStorage.clear()
 })
 afterEach(() => {
   vi.useRealTimers()
+  window.localStorage.clear()
   window.sessionStorage.clear()
 })
 
@@ -354,7 +368,7 @@ describe('likes: the 30 s re-read, while the tab is visible', () => {
   it('does NOT announce the likes already pending at the baseline', async () => {
     const t = rig([mineP('m1', 12)])
     // A stored baseline of 8 means 4 likes accrued before this load.
-    window.sessionStorage.setItem(
+    window.localStorage.setItem(
       notificationStorageKey(EXERCISE, ME),
       JSON.stringify({ v: 1, readIds: [], likes: [{ postId: 'm1', baseline: 8, riseAt: '2033-09-04T10:00:00.000Z' }] }),
     )
@@ -586,9 +600,9 @@ describe('"Mark all read": persists per persona under an exercise-scoped key', (
     expect(rows.every(row => !row.unread)).toBe(true)
     expect(t.store.getAnnouncement().text).toBe('All notifications marked as read')
 
-    const stored = readPersisted(window.sessionStorage, notificationStorageKey(EXERCISE, ME))
+    const stored = readPersisted(window.localStorage, notificationStorageKey(EXERCISE, ME))
     expect([...stored.readIds].sort()).toEqual(['p1', 'r1'])
-    const keys = Object.keys(window.sessionStorage)
+    const keys = Object.keys(window.localStorage)
     expect(keys.filter(key => key.startsWith(NOTIFICATION_STORAGE_PREFIX))).toEqual([
       notificationStorageKey(EXERCISE, ME),
     ])
@@ -598,7 +612,7 @@ describe('"Mark all read": persists per persona under an exercise-scoped key', (
     const first = rig([mineP('m1', 2), replyP('r1', 'm1')])
     const stop = await started(first)
     first.store.markAllRead()
-    stop() // the tab keeps its sessionStorage; only the in-memory engine goes away
+    stop() // the browser keeps its localStorage; only the in-memory engine goes away
 
     const second = rig([mineP('m1', 2), replyP('r1', 'm1')])
     await started(second)
@@ -617,9 +631,9 @@ describe('"Mark all read": persists per persona under an exercise-scoped key', (
     await started(b, { exerciseId: EXERCISE, personaId: 'persona-b', handle: 'persona_b' })
     expect(b.store.getSummary().unread).toBe(1)
     // And B wrote its own key without touching A's.
-    expect(readPersisted(window.sessionStorage, notificationStorageKey(EXERCISE, ME)).readIds)
+    expect(readPersisted(window.localStorage, notificationStorageKey(EXERCISE, ME)).readIds)
       .toEqual(['r1'])
-    expect(window.sessionStorage.getItem(notificationStorageKey(EXERCISE, 'persona-b'))).not.toBeNull()
+    expect(window.localStorage.getItem(notificationStorageKey(EXERCISE, 'persona-b'))).not.toBeNull()
   })
 
   it('does not leak to another exercise: the same persona starts unread there', async () => {
@@ -702,15 +716,15 @@ describe('stop / restart / reset', () => {
     t.store.start(CONFIG)
     await settle()
     t.store.markAllRead()
-    window.sessionStorage.setItem(notificationStorageKey('ex-9', 'persona-other'), '{"v":1,"readIds":[],"likes":[]}')
-    window.sessionStorage.setItem('unrelated', 'keep')
+    window.localStorage.setItem(notificationStorageKey('ex-9', 'persona-other'), '{"v":1,"readIds":[],"likes":[]}')
+    window.localStorage.setItem('unrelated', 'keep')
 
     t.store.reset()
     expect(t.store.getSnapshot()).toMatchObject({ status: 'inactive', items: [], unread: 0 })
     expect(t.store.getSummary()).toEqual({ available: false, unread: 0 })
     expect(t.store.getAnnouncement().text).toBe('')
     expect(storedKeys()).toEqual([])
-    expect(window.sessionStorage.getItem('unrelated')).toBe('keep')
+    expect(window.localStorage.getItem('unrelated')).toBe('keep')
     expect(t.source.subscribers()).toBe(0)
     expect(t.source.calls.stopped).toBe(1)
   })
@@ -732,7 +746,257 @@ describe('stop / restart / reset', () => {
     const stop = t.store.start(CONFIG)
     await settle()
     stop()
-    const stored = readPersisted(window.sessionStorage, notificationStorageKey(EXERCISE, ME))
+    const stored = readPersisted(window.localStorage, notificationStorageKey(EXERCISE, ME))
     expect(stored.likes).toEqual([{ postId: 'm1', baseline: 2 }])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// W-1 / W-4 / S-4 (Gate-1 fold)
+// ---------------------------------------------------------------------------
+
+describe('"Mark all read" clears the badge however many events there are (W-1)', () => {
+  it('after more than READ_IDS_CAP events the badge reads 0 and every row is read', async () => {
+    const t = rig([mineP('m1')])
+    t.store.start(CONFIG)
+    await settle()
+
+    // READ_IDS_CAP + 20 replies to one post (one row), then a pile of mentions (many rows).
+    for (let index = 0; index < READ_IDS_CAP + 20; index += 1) {
+      t.source.emit(replyP(`r${index}`, 'm1', `persona-${index % 5}`))
+    }
+    for (let index = 0; index < 30; index += 1) t.source.emit(mentionP(`p${index}`))
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+    expect(t.store.getSummary().unread).toBe(31)
+
+    t.store.markAllRead()
+
+    expect(t.store.getSummary().unread).toBe(0)
+    const rows = t.store.getSnapshot().items
+    expect(rows.length).toBe(31)
+    expect(rows.every(row => !row.unread)).toBe(true)
+    // What is WRITTEN is bounded; what is remembered live is not.
+    const stored = readPersisted(window.localStorage, notificationStorageKey(EXERCISE, ME))
+    expect(stored.readIds.length).toBe(READ_IDS_CAP)
+  })
+})
+
+describe('state lives in localStorage and survives a closed tab (W-4)', () => {
+  const started = async (rigged: Rig) => {
+    const stop = rigged.store.start(CONFIG)
+    await settle()
+    return stop
+  }
+
+  it('is written to localStorage, not sessionStorage', async () => {
+    const t = rig([mineP('m1', 2), replyP('r1', 'm1')])
+    await started(t)
+    t.store.markAllRead()
+    const key = notificationStorageKey(EXERCISE, ME)
+    expect(window.localStorage.getItem(key)).not.toBeNull()
+    expect(window.sessionStorage.getItem(key)).toBeNull()
+  })
+
+  it('a simulated tab reopen (sessionStorage gone, localStorage kept) keeps read marks and baselines', async () => {
+    const first = rig([mineP('m1', 5), replyP('r1', 'm1')])
+    const stop = await started(first)
+    first.store.markAllRead()
+    stop()
+
+    // Closing a tab discards its sessionStorage; localStorage outlives it.
+    window.sessionStorage.clear()
+
+    const reopened = rig([mineP('m1', 5), replyP('r1', 'm1')])
+    await started(reopened)
+    expect(reopened.store.getSummary().unread).toBe(0)
+    expect(reopened.store.getSnapshot().items[0]).toMatchObject({ id: 'reply:m1', unread: false })
+
+    // The like baseline came back too: likes since are counted from 5, not from scratch.
+    reopened.feed.posts = [mineP('m1', 8), replyP('r1', 'm1')]
+    await advance(NOTIFICATION_POLL_INTERVAL_MS)
+    expect(reopened.store.getSnapshot().items.find(row => row.type === 'like')).toMatchObject({
+      count: 3,
+      unread: true,
+    })
+  })
+
+  it('sign-out sweeps BOTH stores, for any persona, and nothing else', async () => {
+    const t = rig([mineP('m1', 2), replyP('r1', 'm1')])
+    await started(t)
+    t.store.markAllRead()
+    const other = notificationStorageKey('ex-9', 'persona-other')
+    window.localStorage.setItem(other, '{"v":1,"readIds":[],"likes":[]}')
+    // A leftover from a development build that kept the state per tab:
+    window.sessionStorage.setItem(notificationStorageKey(EXERCISE, ME), '{"v":1,"readIds":[],"likes":[]}')
+    window.localStorage.setItem('unrelated', 'keep')
+    window.sessionStorage.setItem('unrelated', 'keep')
+
+    t.store.reset()
+
+    const mine = (storage: Storage) =>
+      Object.keys(storage).filter(key => key.startsWith(NOTIFICATION_STORAGE_PREFIX))
+    expect(mine(window.localStorage)).toEqual([])
+    expect(mine(window.sessionStorage)).toEqual([])
+    expect(window.localStorage.getItem('unrelated')).toBe('keep')
+    expect(window.sessionStorage.getItem('unrelated')).toBe('keep')
+  })
+
+  it('also sweeps a store the caller injected as the state store', async () => {
+    const memory = new Map<string, string>([[notificationStorageKey('ex-1', 'p'), '{}']])
+    const injected = {
+      get length() { return memory.size },
+      key: (index: number) => [...memory.keys()][index] ?? null,
+      getItem: (key: string) => memory.get(key) ?? null,
+      setItem: (key: string, value: string) => { memory.set(key, value) },
+      removeItem: (key: string) => { memory.delete(key) },
+    } as unknown as Storage
+    const t = rig([], { storage: () => injected })
+    t.store.reset()
+    expect(memory.size).toBe(0)
+  })
+
+  it('two tabs of one persona do not undo each other\'s "Mark all read"', async () => {
+    const tabA = rig([mineP('m1', 2), replyP('r1', 'm1')])
+    const tabB = rig([mineP('m1', 2), replyP('r1', 'm1')])
+    await started(tabA)
+    await started(tabB) // loaded BEFORE tab A marked anything
+
+    tabA.store.markAllRead()
+    // Tab B, still unaware, writes later because something of its own changed (a new post of mine).
+    tabB.source.emit(mineP('fresh', 0))
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+
+    const stored = readPersisted(window.localStorage, notificationStorageKey(EXERCISE, ME))
+    expect(stored.readIds).toContain('r1') // tab A's mark survived tab B's write
+    expect(stored.likes.map(record => record.postId).sort()).toEqual(['fresh', 'm1'])
+  })
+})
+
+describe('the re-read schedule: jitter and backoff (S-4)', () => {
+  const INTERVAL = NOTIFICATION_POLL_INTERVAL_MS
+
+  describe('nextPollDelayMs', () => {
+    const delay = (over: Partial<Parameters<typeof nextPollDelayMs>[0]>, random = 0.5) =>
+      nextPollDelayMs({
+        intervalMs: INTERVAL,
+        failures: 0,
+        first: false,
+        random: () => random,
+        ...over,
+      })
+
+    it('puts the FIRST re-read at a random point between the minimum share and the full interval', () => {
+      expect(delay({ first: true }, 0)).toBe(INTERVAL * NOTIFICATION_POLL_FIRST_MIN)
+      expect(delay({ first: true }, 0.999)).toBeCloseTo(INTERVAL, -2)
+      for (const random of [0, 0.1, 0.5, 0.9, 0.999]) {
+        const value = delay({ first: true }, random)
+        expect(value).toBeGreaterThanOrEqual(INTERVAL * NOTIFICATION_POLL_FIRST_MIN)
+        expect(value).toBeLessThanOrEqual(INTERVAL)
+      }
+      expect(delay({ first: true }, 0.2)).not.toBe(delay({ first: true }, 0.8)) // really random
+    })
+
+    it('spreads every later tick +/- the jitter around the interval', () => {
+      expect(delay({}, 0.5)).toBe(INTERVAL)
+      expect(delay({}, 0)).toBe(Math.round(INTERVAL * (1 - NOTIFICATION_POLL_JITTER)))
+      expect(delay({}, 0.999999)).toBeLessThanOrEqual(
+        Math.round(INTERVAL * (1 + NOTIFICATION_POLL_JITTER)),
+      )
+      for (let step = 0; step <= 20; step += 1) {
+        const value = delay({}, step / 20.0001)
+        expect(value).toBeGreaterThanOrEqual(INTERVAL * (1 - NOTIFICATION_POLL_JITTER) - 1)
+        expect(value).toBeLessThanOrEqual(INTERVAL * (1 + NOTIFICATION_POLL_JITTER) + 1)
+      }
+    })
+
+    it('retries the first failure at the normal pace, then doubles per consecutive failure', () => {
+      expect(delay({ failures: 1 })).toBe(INTERVAL)
+      expect(delay({ failures: 2 })).toBe(INTERVAL * 2)
+      expect(delay({ failures: 3 })).toBe(INTERVAL * 4)
+      expect(delay({ failures: 4 })).toBe(INTERVAL * 8)
+    })
+
+    it('never backs off past about five minutes -- jitter included', () => {
+      expect(delay({ failures: 5 })).toBe(NOTIFICATION_BACKOFF_CAP_MS)
+      expect(delay({ failures: 50 })).toBe(NOTIFICATION_BACKOFF_CAP_MS)
+      for (const random of [0, 0.5, 0.999]) {
+        expect(delay({ failures: 50 }, random)).toBeLessThanOrEqual(NOTIFICATION_BACKOFF_CAP_MS)
+      }
+      expect(NOTIFICATION_BACKOFF_CAP_MS).toBe(300_000)
+    })
+  })
+
+  it('the first re-read is NOT at the fixed interval, and later ones are not lockstep either', async () => {
+    // random = 0: the earliest first tick (25 %) and the earliest later ticks (-15 %).
+    const early = rig([mineP('m1', 1)], { random: () => 0 })
+    early.store.start(CONFIG)
+    await settle()
+    expect(early.fetchFeed).toHaveBeenCalledTimes(1)
+    await advance(INTERVAL * NOTIFICATION_POLL_FIRST_MIN - 1)
+    expect(early.fetchFeed).toHaveBeenCalledTimes(1)
+    await advance(1)
+    expect(early.fetchFeed).toHaveBeenCalledTimes(2) // 7.5 s after start
+    await advance(INTERVAL * (1 - NOTIFICATION_POLL_JITTER) - 1)
+    expect(early.fetchFeed).toHaveBeenCalledTimes(2)
+    await advance(1)
+    expect(early.fetchFeed).toHaveBeenCalledTimes(3) // 25.5 s later, not 30
+    early.store.reset()
+
+    // random just under 1: the latest first tick (the full interval) and later ticks at +15 %.
+    const late = rig([mineP('m1', 1)], { random: () => 0.999999 })
+    late.store.start(CONFIG)
+    await settle()
+    await advance(INTERVAL - 5)
+    expect(late.fetchFeed).toHaveBeenCalledTimes(1)
+    await advance(5)
+    expect(late.fetchFeed).toHaveBeenCalledTimes(2)
+    await advance(INTERVAL * (1 + NOTIFICATION_POLL_JITTER) - 5)
+    expect(late.fetchFeed).toHaveBeenCalledTimes(2)
+    await advance(10)
+    expect(late.fetchFeed).toHaveBeenCalledTimes(3)
+  })
+
+  it('backs off exponentially while reads keep failing, capped near 5 minutes, and recovers on success', async () => {
+    const t = rig([mineP('m1', 1)])
+    t.fetchFeed.mockRejectedValue(new Error('server down'))
+    t.store.start(CONFIG)
+    await settle() // read #1 fails at once
+
+    const callsAt = async (elapsedMs: number) => {
+      await advance(elapsedMs)
+      return t.fetchFeed.mock.calls.length
+    }
+    // Centre jitter: first re-read at 62.5 % (18.75 s), then the gaps double after the 2nd failure.
+    expect(await callsAt(18_750)).toBe(2) // failure #2 -> the next gap is 2 x interval
+    expect(await callsAt(59_999)).toBe(2)
+    expect(await callsAt(1)).toBe(3) // +60 s; failure #3 -> 4 x
+    expect(await callsAt(119_999)).toBe(3)
+    expect(await callsAt(1)).toBe(4) // +120 s; failure #4 -> 8 x
+    expect(await callsAt(239_999)).toBe(4)
+    expect(await callsAt(1)).toBe(5) // +240 s; failure #5 -> capped
+    expect(await callsAt(299_999)).toBe(5)
+    expect(await callsAt(1)).toBe(6) // +300 s (the cap)
+    expect(await callsAt(299_999)).toBe(6)
+    expect(await callsAt(1)).toBe(7) // still the cap
+
+    // The server comes back: the very next read succeeds and the pace returns to normal.
+    t.fetchFeed.mockResolvedValue([mineP('m1', 1), replyP('r1', 'm1')])
+    expect(await callsAt(299_999)).toBe(7)
+    expect(await callsAt(1)).toBe(8)
+    await settle()
+    expect(t.store.getSnapshot().status).toBe('ready')
+    expect(await callsAt(NOTIFICATION_POLL_INTERVAL_MS)).toBe(9) // back to ~30 s
+  })
+
+  it('a hidden tab keeps the schedule going but reads nothing', async () => {
+    const t = rig([mineP('m1', 1)])
+    t.store.start(CONFIG)
+    await settle()
+    t.visibility.set(false)
+    await advance(NOTIFICATION_POLL_INTERVAL_MS * 10)
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1)
+    t.visibility.set(true) // the missed read is made up at once
+    await settle()
+    expect(t.fetchFeed).toHaveBeenCalledTimes(2)
   })
 })

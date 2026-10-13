@@ -49,6 +49,7 @@ vi.mock('@/core/auth', async importOriginal => ({
 }))
 
 beforeEach(() => {
+  window.localStorage.clear()
   window.sessionStorage.clear()
   resetTelemetryBuffer()
 })
@@ -57,13 +58,14 @@ afterEach(() => {
   postStore.resetForTests()
   resetExerciseClock()
   resetTelemetryBuffer()
+  window.localStorage.clear()
   window.sessionStorage.clear()
   // `current.session` is deliberately left set: RTL's own cleanup (which unmounts the tree) runs
   // AFTER this hook, and the reset above re-renders the still-mounted tree once.
 })
 
 const storedKeys = () =>
-  Object.keys(window.sessionStorage).filter(key => key.startsWith(NOTIFICATION_STORAGE_PREFIX))
+  Object.keys(window.localStorage).filter(key => key.startsWith(NOTIFICATION_STORAGE_PREFIX))
 
 describe('control: an ordinary persona-bound session gets the bell', () => {
   it('shows the Notifications link', async () => {

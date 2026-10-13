@@ -15,7 +15,13 @@ import {
   type NotificationModelOptions,
 } from './notificationModel'
 import { EMPTY_PERSISTED } from './notificationStorage'
-import { EXCERPT_MAX_LENGTH, READ_IDS_CAP, type NotificationItem } from './notificationTypes'
+import {
+  EXCERPT_MAX_LENGTH,
+  GROUPS_CAP,
+  MINE_CAP,
+  READ_IDS_CAP,
+  type NotificationItem,
+} from './notificationTypes'
 
 const ME = 'persona-dreyes_fh'
 const HANDLE = 'dreyes_fh'
@@ -50,6 +56,11 @@ const mine = (id: string, like = 0, at = '2033-09-04T12:00:00.000Z'): Participan
 /** A reply to one of my posts. */
 const replyTo = (id: string, parentId: string, by = ALEX, at = '2033-09-04T14:00:00.000Z') =>
   post({ id, by, at, text: `Reply ${id}`, replyTo: { postId: parentId, authorHandle: HANDLE } })
+
+/** A distinct, increasing scenario instant for the n-th event (one second apart, from 08:00Z). */
+function tick(n: number): string {
+  return new Date(Date.UTC(2033, 8, 4, 8, 0, 0) + n * 1000).toISOString()
+}
 
 interface Harness {
   readonly model: NotificationModel
@@ -482,6 +493,132 @@ describe('read state', () => {
     expect(persisted.readIds).toHaveLength(READ_IDS_CAP)
     expect(persisted.readIds).toContain(`r${READ_IDS_CAP + 24}`)
     expect(persisted.readIds).not.toContain('r0')
+  })
+})
+
+describe('"Mark all read" never leaves an old event unread (W-1)', () => {
+  it('clears every row after MORE than READ_IDS_CAP events, in one group', () => {
+    const { model } = harness()
+    model.ingest(mine('m1'))
+    // Oldest first: the old cap evicted from the FRONT, i.e. exactly the oldest events.
+    for (let index = 0; index < READ_IDS_CAP + 20; index += 1) {
+      const minute = String(Math.floor(index / 60) % 60).padStart(2, '0')
+      const second = String(index % 60).padStart(2, '0')
+      model.ingest(replyTo(`r${index}`, 'm1', ALEX, `2033-09-04T14:${minute}:${second}.000Z`))
+    }
+    expect(only(model.items()).unread).toBe(true)
+
+    model.markAllRead()
+
+    expect(model.items().every(item => !item.unread)).toBe(true)
+  })
+
+  it('clears every row after more than READ_IDS_CAP events across many groups', () => {
+    const { model } = harness()
+    for (let index = 0; index < READ_IDS_CAP + 40; index += 1) {
+      model.ingest(post({ id: `p${index}`, text: '@dreyes_fh hi', at: tick(index) }))
+    }
+    model.markAllRead()
+    expect(model.items().every(item => !item.unread)).toBe(true)
+  })
+
+  it('still WRITES at most READ_IDS_CAP ids, the newest', () => {
+    const { model } = harness()
+    model.ingest(mine('m1'))
+    for (let index = 0; index < READ_IDS_CAP + 40; index += 1) {
+      model.ingest(replyTo(`r${index}`, 'm1', ALEX, tick(index)))
+    }
+    model.markAllRead()
+    const written = model.toPersisted().readIds
+    expect(written).toHaveLength(READ_IDS_CAP)
+    expect(written.at(-1)).toBe(`r${READ_IDS_CAP + 39}`)
+    // ... without touching the live set: the model itself still reads everything as read.
+    expect(model.items().every(item => !item.unread)).toBe(true)
+  })
+})
+
+describe('the model is bounded (S-1: cost stays flat over a long session)', () => {
+  it('keeps only the newest GROUPS_CAP reply/mention rows', () => {
+    const { model } = harness()
+    const total = GROUPS_CAP + 200
+    for (let index = 0; index < total; index += 1) {
+      model.ingest(post({ id: `p${index}`, text: '@dreyes_fh hi', at: tick(index) }))
+    }
+    const rows = model.items()
+    expect(rows).toHaveLength(GROUPS_CAP)
+    const subjects = new Set(rows.map(row => row.subjectPostId))
+    expect(subjects.has(`p${total - 1}`)).toBe(true) // the newest is kept
+    expect(subjects.has('p0')).toBe(false) // the oldest went
+    expect(subjects.has(`p${total - GROUPS_CAP}`)).toBe(true) // exactly the newest GROUPS_CAP
+    expect(subjects.has(`p${total - GROUPS_CAP - 1}`)).toBe(false)
+  })
+
+  it('does not rediscover (or announce) an evicted row when the feed is read again', () => {
+    const { model } = harness()
+    for (let index = 0; index < GROUPS_CAP + 10; index += 1) {
+      model.ingest(post({ id: `p${index}`, text: '@dreyes_fh hi', at: tick(index) }))
+    }
+    // p0 was evicted. A re-read offers it again: nothing changes, nothing is announced.
+    expect(model.ingest(post({ id: 'p0', text: '@dreyes_fh hi', at: tick(0) }))).toEqual({
+      changed: false,
+    })
+    expect(model.items()).toHaveLength(GROUPS_CAP)
+  })
+
+  it('a backdated arrival older than everything it would displace is ignored, not stored', () => {
+    const { model } = harness()
+    for (let index = 0; index < GROUPS_CAP; index += 1) {
+      model.ingest(post({ id: `p${index}`, text: '@dreyes_fh hi', at: tick(index + 10) }))
+    }
+    // Full. A very old mention would rank last, i.e. be the one evicted at once.
+    const old = model.ingest(post({ id: 'old', text: '@dreyes_fh hi', at: tick(0) }))
+    expect(old.event).toBeUndefined()
+    expect(model.items().some(row => row.subjectPostId === 'old')).toBe(false)
+    expect(model.items()).toHaveLength(GROUPS_CAP)
+  })
+
+  it('a NEWER arrival into a full model displaces the oldest and IS announced', () => {
+    const { model } = harness()
+    for (let index = 0; index < GROUPS_CAP; index += 1) {
+      model.ingest(post({ id: `p${index}`, text: '@dreyes_fh hi', at: tick(index) }))
+    }
+    const fresh = model.ingest(post({ id: 'fresh', text: '@dreyes_fh hi', at: tick(GROUPS_CAP + 5) }))
+    expect(fresh.event).toEqual({ type: 'mention', amount: 1 })
+    const subjects = model.items().map(row => row.subjectPostId)
+    expect(subjects).toContain('fresh')
+    expect(subjects).not.toContain('p0')
+    expect(subjects).toHaveLength(GROUPS_CAP)
+  })
+
+  it('adding to an EXISTING group never evicts anything', () => {
+    const { model } = harness()
+    model.ingest(mine('m1'))
+    for (let index = 0; index < GROUPS_CAP - 1; index += 1) {
+      model.ingest(post({ id: `p${index}`, text: '@dreyes_fh hi', at: tick(index) }))
+    }
+    expect(model.items()).toHaveLength(GROUPS_CAP - 1)
+    for (let index = 0; index < 50; index += 1) {
+      model.ingest(replyTo(`r${index}`, 'm1', ALEX, tick(index)))
+    }
+    expect(model.items()).toHaveLength(GROUPS_CAP)
+  })
+
+  it('tracks at most MINE_CAP of my own posts (the oldest forgotten first)', () => {
+    const { model } = harness()
+    for (let index = 0; index < MINE_CAP + 5; index += 1) model.ingest(mine(`m${index}`))
+    model.ingest(replyTo('r-old', 'm0')) // m0 was forgotten: this is no longer a reply to "mine"
+    model.ingest(replyTo('r-new', `m${MINE_CAP + 4}`))
+    expect(model.items().map(row => row.subjectPostId)).toEqual([`m${MINE_CAP + 4}`])
+  })
+
+  it('building the list stays proportional to the cap, not to how long the session ran', () => {
+    const { model } = harness()
+    model.ingest(mine('m1'))
+    // 5 x GROUPS_CAP distinct rows over a "long session"; the list never exceeds the cap.
+    for (let index = 0; index < GROUPS_CAP * 5; index += 1) {
+      model.ingest(post({ id: `p${index}`, text: '@dreyes_fh hi', at: tick(index) }))
+    }
+    expect(model.items().length).toBeLessThanOrEqual(GROUPS_CAP)
   })
 })
 

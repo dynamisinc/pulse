@@ -5,9 +5,12 @@
  * story 16; SOC-070 lite, NFR-001). Participant world -- renders one visually hidden
  * element; no COBRA, no MUI.
  *
- * `SocialRoutes` renders it ONCE, outside `<Routes>` (the way it keeps Home mounted), so
- * the engine runs on every route -- the badge in the rail must keep counting while the
- * viewer reads Home or a thread -- and is torn down only when the channel unmounts.
+ * `SocialChannel` renders it ONCE, as a sibling of the frame (not inside it), so the engine runs
+ * on every route -- the badge in the rail must keep counting while the viewer reads Home or a
+ * thread -- and is torn down only when the channel unmounts. It sits OUTSIDE the frame on
+ * purpose: the frame goes `inert` while the compose modal is open, and a live region inside
+ * it would be inert too, silently dropping any announcement made while the participant is
+ * composing (S-5). A test pins that the region has no `[inert]` ancestor with the modal open.
  *
  * START / STOP. When the viewer is eligible (`useNotificationsEligibility`: an interactive,
  * persona-bound, not read-only participant whose persona has resolved) it starts a store

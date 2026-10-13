@@ -4,13 +4,18 @@
  * What the notifications feature keeps in `sessionStorage` (demo-polish F7, story 16
  * "Isolation": "the storage key includes the exercise id; nothing is read from another
  * persona"): the key's scope, the round trip, defence against malformed/oversized stored
- * values, the sign-out sweep, and survival of unusable storage.
+ * values, the merge that keeps two tabs from undoing each other, the sign-out sweep, which
+ * store the state lives in (`localStorage`: tokens persist across a closed tab, so must it),
+ * and survival of unusable storage.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   EMPTY_PERSISTED,
   NOTIFICATION_STORAGE_PREFIX,
   clearAllNotificationStorage,
+  getPersistentStorage,
+  getSessionStorage,
+  mergeForWrite,
   notificationStorageKey,
   parsePersisted,
   readPersisted,
@@ -20,9 +25,11 @@ import {
 import { LIKE_RECORDS_CAP, READ_IDS_CAP } from './notificationTypes'
 
 beforeEach(() => {
+  window.localStorage.clear()
   window.sessionStorage.clear()
 })
 afterEach(() => {
+  window.localStorage.clear()
   window.sessionStorage.clear()
   vi.restoreAllMocks()
 })
@@ -56,23 +63,94 @@ describe('the storage key (Isolation AC)', () => {
   })
 })
 
+describe('which storage', () => {
+  it('the state store is localStorage (it must outlive a closed tab, like the tokens)', () => {
+    expect(getPersistentStorage()).toBe(window.localStorage)
+  })
+
+  it('sessionStorage is still reachable, but only so sign-out can sweep it', () => {
+    expect(getSessionStorage()).toBe(window.sessionStorage)
+  })
+
+  it('both lookups tolerate storage that throws on access (a sandboxed frame)', () => {
+    const local = vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+      throw new Error('SecurityError')
+    })
+    const session = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new Error('SecurityError')
+    })
+    expect(getPersistentStorage()).toBeUndefined()
+    expect(getSessionStorage()).toBeUndefined()
+    local.mockRestore()
+    session.mockRestore()
+  })
+})
+
+describe('mergeForWrite (two tabs of one viewer)', () => {
+  const stored: PersistedNotifications = {
+    v: 1,
+    readIds: ['a', 'b'],
+    likes: [
+      { postId: 'only-stored', baseline: 7 },
+      { postId: 'both', baseline: 1 },
+    ],
+  }
+  const mine: PersistedNotifications = {
+    v: 1,
+    readIds: ['b', 'c'],
+    likes: [
+      { postId: 'both', baseline: 9 },
+      { postId: 'only-mine', baseline: 2 },
+    ],
+  }
+
+  it('unions read marks (stored first, so this tab\'s newest stay at the tail)', () => {
+    expect(mergeForWrite(stored, mine).readIds).toEqual(['a', 'b', 'c'])
+  })
+
+  it('keeps a like record this tab does not know, and takes this tab\'s version of a shared one', () => {
+    const merged = mergeForWrite(stored, mine)
+    expect(merged.likes).toEqual([
+      { postId: 'only-stored', baseline: 7 },
+      { postId: 'both', baseline: 9 },
+      { postId: 'only-mine', baseline: 2 },
+    ])
+  })
+
+  it('writing into an empty store is just this tab\'s state', () => {
+    expect(mergeForWrite(EMPTY_PERSISTED, mine)).toEqual(mine)
+  })
+
+  it('stays bounded', () => {
+    const many = (prefix: string, n: number): PersistedNotifications => ({
+      v: 1,
+      readIds: Array.from({ length: n }, (_, i) => `${prefix}${i}`),
+      likes: Array.from({ length: n }, (_, i) => ({ postId: `${prefix}${i}`, baseline: i })),
+    })
+    const merged = mergeForWrite(many('s', READ_IDS_CAP), many('m', READ_IDS_CAP))
+    expect(merged.readIds).toHaveLength(READ_IDS_CAP)
+    expect(merged.readIds.at(-1)).toBe(`m${READ_IDS_CAP - 1}`)
+    expect(merged.likes.length).toBeLessThanOrEqual(LIKE_RECORDS_CAP)
+  })
+})
+
 describe('read / write', () => {
   it('round-trips a state', () => {
     const key = notificationStorageKey('ex-1', 'p-a')
-    writePersisted(window.sessionStorage, key, SAMPLE)
-    expect(readPersisted(window.sessionStorage, key)).toEqual(SAMPLE)
+    writePersisted(window.localStorage, key, SAMPLE)
+    expect(readPersisted(window.localStorage, key)).toEqual(SAMPLE)
   })
 
   it('reads nothing from another persona\'s or another exercise\'s entry', () => {
-    writePersisted(window.sessionStorage, notificationStorageKey('ex-1', 'p-a'), SAMPLE)
-    expect(readPersisted(window.sessionStorage, notificationStorageKey('ex-1', 'p-b')))
+    writePersisted(window.localStorage, notificationStorageKey('ex-1', 'p-a'), SAMPLE)
+    expect(readPersisted(window.localStorage, notificationStorageKey('ex-1', 'p-b')))
       .toEqual(EMPTY_PERSISTED)
-    expect(readPersisted(window.sessionStorage, notificationStorageKey('ex-2', 'p-a')))
+    expect(readPersisted(window.localStorage, notificationStorageKey('ex-2', 'p-a')))
       .toEqual(EMPTY_PERSISTED)
   })
 
   it('an absent entry is the empty state', () => {
-    expect(readPersisted(window.sessionStorage, 'nothing-here')).toEqual(EMPTY_PERSISTED)
+    expect(readPersisted(window.localStorage, 'nothing-here')).toEqual(EMPTY_PERSISTED)
   })
 })
 
@@ -133,19 +211,19 @@ describe('untrusted stored values', () => {
 
 describe('sign-out sweep', () => {
   it('removes every notification entry (any persona, any exercise) and nothing else', () => {
-    writePersisted(window.sessionStorage, notificationStorageKey('ex-1', 'p-a'), SAMPLE)
-    writePersisted(window.sessionStorage, notificationStorageKey('ex-1', 'p-b'), SAMPLE)
-    writePersisted(window.sessionStorage, notificationStorageKey('ex-2', 'p-a'), SAMPLE)
-    window.sessionStorage.setItem('unrelated', 'keep me')
-    window.sessionStorage.setItem(`${NOTIFICATION_STORAGE_PREFIX}-lookalike`, 'keep me too')
+    writePersisted(window.localStorage, notificationStorageKey('ex-1', 'p-a'), SAMPLE)
+    writePersisted(window.localStorage, notificationStorageKey('ex-1', 'p-b'), SAMPLE)
+    writePersisted(window.localStorage, notificationStorageKey('ex-2', 'p-a'), SAMPLE)
+    window.localStorage.setItem('unrelated', 'keep me')
+    window.localStorage.setItem(`${NOTIFICATION_STORAGE_PREFIX}-lookalike`, 'keep me too')
 
-    clearAllNotificationStorage(window.sessionStorage)
+    clearAllNotificationStorage(window.localStorage)
 
-    expect(window.sessionStorage.getItem(notificationStorageKey('ex-1', 'p-a'))).toBeNull()
-    expect(window.sessionStorage.getItem(notificationStorageKey('ex-1', 'p-b'))).toBeNull()
-    expect(window.sessionStorage.getItem(notificationStorageKey('ex-2', 'p-a'))).toBeNull()
-    expect(window.sessionStorage.getItem('unrelated')).toBe('keep me')
-    expect(window.sessionStorage.getItem(`${NOTIFICATION_STORAGE_PREFIX}-lookalike`))
+    expect(window.localStorage.getItem(notificationStorageKey('ex-1', 'p-a'))).toBeNull()
+    expect(window.localStorage.getItem(notificationStorageKey('ex-1', 'p-b'))).toBeNull()
+    expect(window.localStorage.getItem(notificationStorageKey('ex-2', 'p-a'))).toBeNull()
+    expect(window.localStorage.getItem('unrelated')).toBe('keep me')
+    expect(window.localStorage.getItem(`${NOTIFICATION_STORAGE_PREFIX}-lookalike`))
       .toBe('keep me too')
   })
 })

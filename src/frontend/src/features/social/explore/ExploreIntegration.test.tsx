@@ -29,18 +29,26 @@ afterEach(() => {
   resetReplyIntent()
 })
 
+/** The `includeReplies` flag of a recorded `api.get('/feed', config)` call. */
+const asksForReplies = (config: unknown): boolean =>
+  (config as { params?: { includeReplies?: boolean } } | undefined)?.params?.includeReplies === true
+
 /**
  * How many times the TOP-LEVEL feed was read: the Home feed's and the shared Explore baseline's
  * reads. The notifications engine (F7) also reads `/feed`, but WITH replies
  * (`includeReplies: true`) and for its own purpose -- noticing replies and like-count changes --
- * so it is a different request and is not one of the reads this suite pins to "one".
+ * so it is a different request and is not one of the reads these tests pin to "one".
  */
 const feedReads = (spy: { mock: { calls: unknown[][] } }): number =>
-  spy.mock.calls.filter(([url, config]) => {
-    if (url !== '/feed') return false
-    const params = (config as { params?: { includeReplies?: boolean } } | undefined)?.params
-    return params?.includeReplies !== true
-  }).length
+  spy.mock.calls.filter(([url, config]) => url === '/feed' && !asksForReplies(config)).length
+
+/**
+ * How many times the notifications ENGINE read the feed (the `includeReplies` read). Counted on
+ * its own so the TOTAL stays pinned: top-level reads (`feedReads`) plus exactly this many, and a
+ * stray extra read of either kind fails a test here.
+ */
+const engineReads = (spy: { mock: { calls: unknown[][] } }): number =>
+  spy.mock.calls.filter(([url, config]) => url === '/feed' && asksForReplies(config)).length
 
 function seedQuietFeed() {
   // Channel clock: 2033-09-04T14:30Z. #Alpha leads, #Beta trails.
@@ -106,6 +114,9 @@ describe('one feed read, shared between the rail and the page (M3)', () => {
 
     await screen.findAllByTestId('trending-row')
     expect(feedReads(get)).toBe(1)
+    // ... plus the notifications engine's own single baseline read: the total is exactly 2.
+    await waitFor(() => expect(engineReads(get)).toBe(1))
+    expect(get.mock.calls.filter(([url]) => url === '/feed')).toHaveLength(2)
   })
 
   it('adds no read when moving from Home to Explore and back', async () => {
@@ -117,6 +128,7 @@ describe('one feed read, shared between the rail and the page (M3)', () => {
     // Home's own frozen feed read + the shared Explore baseline.
     const atHome = feedReads(get)
     expect(atHome).toBe(2)
+    await waitFor(() => expect(engineReads(get)).toBe(1))
 
     await user.click(screen.getByRole('link', { name: 'Explore' }))
     await screen.findByTestId('explore-page')
@@ -124,10 +136,13 @@ describe('one feed read, shared between the rail and the page (M3)', () => {
     await screen.findAllByTestId('trending-row')
     expect(screen.queryByText('Loading trends…')).not.toBeInTheDocument()
     expect(feedReads(get)).toBe(atHome)
+    expect(engineReads(get)).toBe(1) // the engine is not restarted by a route change
 
     await user.click(screen.getByRole('link', { name: 'Home' }))
     await waitFor(() => expect(railTrendingTags()).toEqual(['alpha', 'beta']))
     expect(feedReads(get)).toBe(atHome)
+    expect(engineReads(get)).toBe(1)
+    expect(get.mock.calls.filter(([url]) => url === '/feed')).toHaveLength(atHome + 1)
   })
 
   it('shows one search landmark and one trends region on /explore, and two nowhere else', async () => {

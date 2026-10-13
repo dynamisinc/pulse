@@ -6,7 +6,9 @@
  * its accessible name is "Notifications, N unread"; it is never a colour-only dot; it carries
  * `aria-current` on `/notifications`; and a plain click moves through the navigation adapter.
  *
- * The rail reads the count through `useNotificationsSummary`, so this suite replaces that one
+ * The rail shows the bell only when the host says `showNotifications` (the shell variant
+ * grants affordances) AND the store says it is available. It reads the count through
+ * `useNotificationsSummary`, so this suite replaces that one
  * hook (hoisted mock) and leaves the rest of the rail real. The real engine -> rail path is in
  * `notifications/NotificationsFlow.test.tsx`.
  */
@@ -34,10 +36,14 @@ function Where() {
   return <output data-testid="where">{location.pathname}</output>
 }
 
-function setup(path = '/home') {
+function setup(path = '/home', showNotifications = true) {
   render(
     <MemorySocialNavigationProvider initialEntries={[path]}>
-      <NavRail self={persona('dreyes_fh')} showAccount={false} />
+      <NavRail
+        self={persona('dreyes_fh')}
+        showAccount={false}
+        showNotifications={showNotifications}
+      />
       <Where />
     </MemorySocialNavigationProvider>,
   )
@@ -53,6 +59,23 @@ describe('NavRail — the Notifications bell is absent unless the engine runs (D
     setup()
     expect(screen.queryByRole('link', { name: /notifications/i })).not.toBeInTheDocument()
     expect(screen.queryByTestId('notifications-badge')).not.toBeInTheDocument()
+  })
+
+  it('is gated on the shell variant too: no bell without showNotifications, whatever the store says (S-6)', () => {
+    summary.value = { available: true, unread: 4 }
+    setup('/home', false)
+    expect(screen.queryByRole('link', { name: /notifications/i })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('notifications-badge')).not.toBeInTheDocument()
+  })
+
+  it('is absent by default: a host that says nothing gets no bell (fail closed)', () => {
+    summary.value = { available: true, unread: 4 }
+    render(
+      <MemorySocialNavigationProvider>
+        <NavRail self={persona('dreyes_fh')} showAccount={false} />
+      </MemorySocialNavigationProvider>,
+    )
+    expect(screen.queryByRole('link', { name: /notifications/i })).not.toBeInTheDocument()
   })
 
   it('has the link between Explore and Profile when available', () => {
@@ -85,7 +108,7 @@ describe('NavRail — the unread badge is text, not a dot', () => {
     summary.value = { available: true, unread: 99 }
     const { unmount } = render(
       <MemorySocialNavigationProvider>
-        <NavRail self={persona('dreyes_fh')} showAccount={false} />
+        <NavRail self={persona('dreyes_fh')} showAccount={false} showNotifications />
       </MemorySocialNavigationProvider>,
     )
     expect(screen.getByTestId('notifications-badge')).toHaveTextContent(/^99$/)

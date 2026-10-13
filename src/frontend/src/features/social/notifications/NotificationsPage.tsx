@@ -9,8 +9,8 @@
  * newest first -- replies to my posts, @mentions of me, and "Your post got N new likes" --
  * each with a typed icon AND a text label (`NotificationRow`). Activating a row opens the
  * thread it is about, through the channel's navigation adapter. "Mark all read" is the one
- * control: it clears the rail's badge, persists per persona in `sessionStorage` under an
- * exercise- and persona-scoped key, and is announced politely.
+ * control: it clears the rail's badge, persists per persona in `localStorage` (next to the
+ * persisted tokens) under an exercise- and persona-scoped key, and is announced politely.
  *
  * THE DATA is the engine's snapshot (`useNotifications`): this page derives nothing and
  * fetches nothing. The engine (`NotificationsEngine`, mounted by `SocialRoutes`) keeps
