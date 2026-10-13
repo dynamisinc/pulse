@@ -20,6 +20,12 @@ using Pulse.WebApi.Data.Entities;
 /// It emits no telemetry: the caller, which holds the staff role, emits <c>participant.link.issued</c> with
 /// <see cref="EasyLoginTelemetry.LinkIssued"/> when a link was newly issued.
 /// </para>
+/// <para>
+/// <b>Telling "newly issued" from "already active".</b> The return value is the active link either way; the caller
+/// infers a new link from the change tracker: <c>dbContext.Entry(link).State == EntityState.Added</c> means this call
+/// created it (a revoked link re-activated in place reads <c>Modified</c>; an untouched active link reads
+/// <c>Unchanged</c>). The null default returns <c>null</c>, so nothing is inferred and no event is emitted.
+/// </para>
 /// </remarks>
 public interface IParticipantLinkIssuer
 {
