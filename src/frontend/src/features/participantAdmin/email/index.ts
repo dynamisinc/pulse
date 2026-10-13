@@ -1,8 +1,8 @@
 /**
  * features/participantAdmin/email - public barrel (easy-login story 13).
  *
- * The one thing the roster screen needs from this folder, for the orchestrator's slot
- * composition in `ParticipantAdminRoute.tsx`:
+ * The one thing the roster screen needs from this folder, for the slot composition in
+ * `ParticipantAdminSurface.tsx`:
  *
  *     renderEmailAction={selection => <EmailLinksButton selection={selection} />}
  *

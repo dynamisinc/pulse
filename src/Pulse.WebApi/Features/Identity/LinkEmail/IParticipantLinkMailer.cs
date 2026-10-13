@@ -32,7 +32,13 @@ public enum LinkMailSendOutcome
     /// <summary>The provider throttled the send (<c>429</c>). Nothing was sent; try again later.</summary>
     RateLimited,
 
-    /// <summary>Anything else: refused, unreachable, timed out, or the credential failed. Nothing is known to be sent.</summary>
+    /// <summary>
+    /// The send did not finish within its bound. NOT CONFIRMED either way: the provider may already have accepted the
+    /// message, so it must not be blindly sent again (it could email the person twice).
+    /// </summary>
+    TimedOut,
+
+    /// <summary>Anything else: refused, unreachable, or the credential failed. Nothing is known to be sent.</summary>
     Failed,
 }
 

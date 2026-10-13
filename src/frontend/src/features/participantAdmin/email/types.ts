@@ -33,7 +33,7 @@ export type RosterEmailSkipReason =
  * Why a send failed. The contract types `reason` as a generic string; these are
  * the values the server sends today. An unknown value is shown generically.
  */
-export type RosterEmailFailureReason = 'sendFailed' | 'rateLimited' | 'notAttempted'
+export type RosterEmailFailureReason = 'sendFailed' | 'rateLimited' | 'notAttempted' | 'timedOut'
 
 /** One participant's result. `reason` is omitted when sent. */
 export interface RosterEmailResultItemDto {

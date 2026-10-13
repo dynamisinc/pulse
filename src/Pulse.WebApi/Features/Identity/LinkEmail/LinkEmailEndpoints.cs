@@ -20,10 +20,11 @@ using Pulse.WebApi.Features.Media;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Dark until configured.</b> With <c>Email:Endpoint</c> unset the host starts normally and quietly, the mailer is
-/// the fail-closed <see cref="NullParticipantLinkMailer"/>, this route answers <c>503</c> ProblemDetails ("Email
-/// delivery is not configured") and sends nothing, and the roster reports <c>capabilities.emailLinks: false</c> from
-/// the same key. No migration, nothing else depends on it.
+/// <b>Dark until configured.</b> With <c>Email:Endpoint</c> unset (or set but unusable) the host starts normally, the
+/// mailer is the fail-closed <see cref="NullParticipantLinkMailer"/>, this route answers <c>503</c> ProblemDetails
+/// ("Email delivery is not configured") and sends nothing, and the roster reports <c>capabilities.emailLinks: false</c>
+/// from the SAME switch: <c>RosterQueryService</c> asks the registered mailer's
+/// <see cref="IParticipantLinkMailer.IsConfigured"/>. No migration, nothing else depends on it.
 /// </para>
 /// <para>
 /// <b>Who may call it (EL-13).</b> <see cref="EngineCockpitStaffAuthorizationFilter"/> then

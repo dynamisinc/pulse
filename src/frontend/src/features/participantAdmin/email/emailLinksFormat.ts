@@ -69,7 +69,15 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
   sendFailed: 'the email could not be sent',
   rateLimited: 'email limit reached; send again to just these people later',
   notAttempted: 'not attempted in time, send again',
+  timedOut: 'not confirmed sent: it may have been sent, so check with them before sending again',
 }
+
+/**
+ * The `failed` reasons that are KNOWN not to have been sent, and so are safe to send again:
+ * refused, throttled, or never attempted. `timedOut` is deliberately absent (the provider may
+ * have accepted the message), and so is any reason this build does not know.
+ */
+const RESENDABLE_REASONS: ReadonlySet<string> = new Set(['sendFailed', 'rateLimited', 'notAttempted'])
 
 /** The readable text for a reason. */
 export function reasonText(reason: string | undefined): string {
@@ -129,13 +137,16 @@ export function summarizeResult(result: RosterEmailResultDto): EmailLinksSummary
 }
 
 /**
- * The people who were NOT sent an email and can simply be sent again: every `failed`
- * result (`rateLimited`, `notAttempted`, `sendFailed`), in result order. Never a
- * `skipped` one (sending again cannot fix a missing address or link) and never a
- * `sent` one (an emailed link cannot be recalled, so it is never sent twice by this).
+ * The people KNOWN not to have been sent an email, who can simply be sent again: the
+ * `failed` results whose reason is `rateLimited`, `notAttempted` or `sendFailed`, in result
+ * order. Never a `skipped` one (sending again cannot fix a missing address or link), never a
+ * `sent` one, and never a `timedOut` one or an unknown reason: those may already have been
+ * delivered, and an emailed link cannot be recalled, so this never risks emailing twice.
  */
 export function unsentIds(result: RosterEmailResultDto): string[] {
-  return result.results.filter(item => item.status === 'failed').map(item => item.participantId)
+  return result.results
+    .filter(item => item.status === 'failed' && RESENDABLE_REASONS.has(item.reason ?? ''))
+    .map(item => item.participantId)
 }
 
 /** "1 person" / "3 people". */

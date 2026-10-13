@@ -258,6 +258,56 @@ describe('EmailLinksButton - sending and the summary', () => {
     expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
   })
 
+  it('a timed-out send is "not confirmed sent" and is left out of "Send again"', async () => {
+    const user = userEvent.setup()
+    const post = vi.spyOn(api, 'post')
+      .mockResolvedValueOnce(okResponse({
+        results: [
+          { participantId: 'p-ann', status: 'failed', reason: 'timedOut' },
+          { participantId: 'p-ben', status: 'failed', reason: 'rateLimited' },
+        ],
+      }))
+      .mockResolvedValueOnce(okResponse({ results: [{ participantId: 'p-ben', status: 'sent' }] }))
+    await renderWithRoster(
+      <EmailLinksButton selection={['p-ann', 'p-ben']} />,
+      rosterWith(sampleEntries()),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Email links (2)' }))
+    await user.click(await screen.findByRole('button', { name: 'Send emails' }))
+
+    const summary = await screen.findByTestId('email-links-summary')
+    expect(summary).toHaveTextContent(
+      'Failed, not confirmed sent: it may have been sent, so check with them before sending again: Ann Able',
+    )
+    await user.click(screen.getByRole('button', { name: 'Send again to the 1 not sent' }))
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
+    expect(post.mock.calls[1]?.[1]).toEqual({ participantIds: ['p-ben'] })
+  })
+
+  it('a request-level error brings back "who would be emailed" for the retry', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, 'post')
+      .mockRejectedValueOnce(httpError(500))
+      .mockResolvedValueOnce(okResponse({ results: [{ participantId: 'p-ann', status: 'sent' }] }))
+    await renderWithRoster(<EmailLinksButton selection={['p-ann']} />, rosterWith(sampleEntries()))
+
+    await user.click(screen.getByRole('button', { name: 'Email links (1)' }))
+    await user.click(await screen.findByRole('button', { name: 'Send emails' }))
+
+    await waitFor(() => expect(screen.getByTestId('email-links-error')).toHaveTextContent(
+      'The emails could not be sent.',
+    ))
+    expect(screen.getByTestId('email-links-scope')).toHaveTextContent(
+      '1 person selected; 1 of them has an email address and an active link.',
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Send emails' }))
+    expect(await screen.findByTestId('email-links-summary')).toHaveTextContent('Sent: 1 person')
+    expect(screen.queryByTestId('email-links-scope')).not.toBeInTheDocument()
+  })
+
   it('offers no "Send again" when nobody failed (skips cannot be fixed by resending)', async () => {
     const user = userEvent.setup()
     spyOnEmail({

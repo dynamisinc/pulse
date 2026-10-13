@@ -158,9 +158,10 @@ public sealed partial class AcsParticipantLinkMailer : IParticipantLinkMailer
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            // The send's own bound (or the SDK's network timeout), not the caller's cancellation.
+            // The send's own bound (or the SDK's network timeout), not the caller's cancellation. Unconfirmed: the
+            // provider may have accepted the message before the bound fired, so this is NOT reported as plainly failed.
             LogSendFailed(_logger, SendOperation, "timeout");
-            return LinkMailSendOutcome.Failed;
+            return LinkMailSendOutcome.TimedOut;
         }
     }
 

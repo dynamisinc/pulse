@@ -28,7 +28,9 @@ deliberately minimal.
       participant (omitting the ids means everyone eligible, at most 100 per call; more is `400`) and answers
       `200 RosterEmailResultDto` with, per participant, `sent`, `skipped` (reason: `noEmail`, `noActiveLink`,
       `disabled`, `tokenUnrecoverable`, `notFound`, where `notFound` covers an id from another exercise identically)
-      or `failed` (a generic reason). Sends are sequential with a short pause; **one failure never aborts the batch**.
+      or `failed` (a generic reason). Sends are sequential with a short pause; **one failure never aborts the batch**,
+      except the provider's `429`: no further send is attempted; the rest are `failed`/`rateLimited` with no event
+      *(amended 2026-10-13, Gate-1 S-1)*.
       Behind `EngineCockpitStaffAuthorizationFilter` + `RosterStaffRoleFilter`, `Cache-Control: no-store`.
 - [ ] **Given** `Email:Endpoint` is unset, **then** the endpoint answers `503` ProblemDetails ("Email delivery is not
       configured") and sends nothing, `GET /api/staff/roster` reports `capabilities.emailLinks: false`, and the host
@@ -95,7 +97,8 @@ human-run infrastructure deploy. **Nothing depends on this story.**
 ## Tests
 
 `Pulse.WebApi.Tests/Features/Identity/LinkEmail/`: `LinkEmailServiceTests` (eligibility and each skip reason, a fake
-mailer, one failure does not abort, no secrets in events/logs, HTML encoding of a hostile name), `LinkEmailEndpointsHttpTests`
+mailer, one failure does not abort, the 429 exception `AfterTheFirst429_NobodyElseIsAttempted_TheyAreRateLimited_AndNothingIsRecordedForThem`,
+no secrets in events/logs, HTML encoding of a hostile name), `LinkEmailEndpointsHttpTests`
 (200/400/401/403/503, `no-store`), `LinkEmailIsolationTests` (`[RequiresDockerFact]`), `NullParticipantLinkMailerTests`
 (startup with no config). `features/participantAdmin/email/*.test.tsx` (button hidden without the capability, confirm,
 summary). Infra: `az bicep build` in CI. Manual: send to a controlled mailbox and tap the link (walk-through step 9).

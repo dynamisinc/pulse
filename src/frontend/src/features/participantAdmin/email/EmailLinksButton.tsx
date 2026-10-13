@@ -2,7 +2,7 @@
  * features/participantAdmin/email/EmailLinksButton.tsx
  * ---------------------------------------------------------------------------
  * "Email links" on the staff roster (easy-login story 13; COR-017 in part,
- * NFR-001). The orchestrator mounts it into the roster's email slot:
+ * NFR-001). `ParticipantAdminSurface.tsx` mounts it into the roster's email slot:
  *
  *     renderEmailAction={selection => <EmailLinksButton selection={selection} />}
  *
@@ -27,10 +27,12 @@
  *   4. A result summary in an `aria-live` region: counts by status (sent / skipped /
  *      failed, each text plus icon, never colour alone) and, for skipped and failed,
  *      the reasons with the people's names from the roster.
- *   5. "Send again to the N not sent": re-posts ONLY the `failed` ids (rate-limited,
- *      not attempted in time, send failed) as `{ participantIds }`, never a skipped or
- *      a sent person, so nobody is emailed twice by it. The new result replaces the
- *      summary. The confirm already given covers these same people.
+ *   5. "Send again to the N not sent": re-posts ONLY the ids KNOWN not to have been
+ *      sent (rate-limited, not attempted in time, send failed) as `{ participantIds }`.
+ *      Never a skipped or a sent person, and never a timed-out one (`timedOut`: it may
+ *      have been accepted, and the summary says to check first), so nobody is emailed
+ *      twice by it. The new result replaces the summary. The confirm already given covers
+ *      these same people.
  *   Closing returns focus to the button.
  *
  * SECRETS. Nothing here reads, shows or logs a join URL or an email address: the
@@ -146,8 +148,9 @@ export function EmailLinksButton({ selection }: EmailLinksButtonProps) {
 
   // `null` = closed; otherwise the ids the dialog was opened for (empty = everyone eligible).
   const [openFor, setOpenFor] = useState<readonly string[] | null>(null)
-  // Whether this dialog has sent at least once: the "who would be emailed" estimate then gives way
-  // to the results.
+  // Whether this dialog's last send went through (or is in flight): the "who would be emailed"
+  // estimate then gives way to the results. A request-level error clears it, so the retry's
+  // confirm shows who would be emailed again.
   const [sentOnce, setSentOnce] = useState(false)
   const isOpen = openFor !== null
 
@@ -199,7 +202,7 @@ export function EmailLinksButton({ selection }: EmailLinksButtonProps) {
 
   const send = (ids: readonly string[]) => {
     setSentOnce(true)
-    mutation.mutate(ids)
+    mutation.mutate(ids, { onError: () => setSentOnce(false) })
   }
 
   // Re-posts only the people who were not sent an email; the snapshot becomes them.

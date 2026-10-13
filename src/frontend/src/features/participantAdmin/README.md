@@ -30,8 +30,9 @@ test/                       render harness + fixtures for the tests
 ```
 
 Stories 11 (`dayWord/`), 12 (`cards/`) and 13 (`email/`) own their own folders and plug into `RosterPage`'s props.
-Story 10's files import none of them; `ParticipantAdminSurface.tsx` does the composing. Story 13's email action is not
-composed yet (it lands on its own branch): add `renderEmailAction` to the surface when it does.
+Story 10's files import none of them; `ParticipantAdminSurface.tsx` does the composing, story 13's email action
+included (`renderEmailAction`, mounted unconditionally: `EmailLinksButton` renders nothing unless the roster reports
+`capabilities.emailLinks: true`).
 
 ## The seam: slot props (frozen)
 

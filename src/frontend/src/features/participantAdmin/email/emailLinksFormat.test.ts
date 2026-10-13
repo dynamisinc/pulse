@@ -88,10 +88,24 @@ describe('emailLinksFormat', () => {
     expect(unsentIds({ results: [{ participantId: 'a', status: 'sent' }] })).toEqual([])
   })
 
+  it('never offers a timed-out or an unknown-reason failure for resending (it may have been sent)', () => {
+    expect(unsentIds({
+      results: [
+        { participantId: 'slow', status: 'failed', reason: 'timedOut' },
+        { participantId: 'odd', status: 'failed', reason: 'somethingNew' },
+        { participantId: 'bare', status: 'failed' },
+        { participantId: 'limited', status: 'failed', reason: 'rateLimited' },
+      ],
+    })).toEqual(['limited'])
+    expect(reasonText('timedOut')).toBe(
+      'not confirmed sent: it may have been sent, so check with them before sending again',
+    )
+  })
+
   it('words every known reason and counts people', () => {
     for (const reason of [
       'noEmail', 'noActiveLink', 'disabled', 'tokenUnrecoverable', 'notFound',
-      'sendFailed', 'rateLimited', 'notAttempted',
+      'sendFailed', 'rateLimited', 'notAttempted', 'timedOut',
     ]) {
       expect(reasonText(reason)).not.toBe('no reason given')
     }

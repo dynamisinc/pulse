@@ -41,6 +41,12 @@ public static class RosterEmailFailureReasons
 
     /// <summary>The batch reached its time limit before this participant; nothing was attempted. Send again.</summary>
     public const string NotAttempted = "notAttempted";
+
+    /// <summary>
+    /// The send timed out. NOT CONFIRMED either way: the provider may already have accepted it, so check with the person
+    /// before sending again (a blind resend could email them twice).
+    /// </summary>
+    public const string TimedOut = "timedOut";
 }
 
 /// <summary>

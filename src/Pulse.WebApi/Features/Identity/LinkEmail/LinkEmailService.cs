@@ -58,7 +58,8 @@ public sealed class LinkEmailPacing
 /// <para>
 /// <b>Sending.</b> Sequential, in name order, with <see cref="LinkEmailPacing.SendPause"/> between sends. One failure
 /// never aborts the batch: a provider refusal, throttle, timeout, credential failure or any unexpected fault in one
-/// send becomes that participant's <c>failed</c> result (<see cref="RosterEmailFailureReasons"/>, generic) and the next
+/// send becomes that participant's <c>failed</c> result (<see cref="RosterEmailFailureReasons"/>, generic; a timeout is
+/// <c>timedOut</c>, because the provider may have accepted it, so it is not offered for a blind resend) and the next
 /// one is attempted. The ONE exception is the provider's throttle: after the first <c>429</c> nobody else is attempted
 /// (the next send would only be throttled too, and on an Azure-managed domain the window is minutes long); everyone
 /// left is reported <c>failed</c> / <c>rateLimited</c> without a call and without an event, so staff can send again to
@@ -365,6 +366,8 @@ public sealed partial class LinkEmailService
                 LinkMailSendOutcome.Sent => Result(step.ParticipantId, RosterEmailStatuses.Sent, reason: null),
                 LinkMailSendOutcome.RateLimited =>
                     Result(step.ParticipantId, RosterEmailStatuses.Failed, RosterEmailFailureReasons.RateLimited),
+                LinkMailSendOutcome.TimedOut =>
+                    Result(step.ParticipantId, RosterEmailStatuses.Failed, RosterEmailFailureReasons.TimedOut),
                 _ => Result(step.ParticipantId, RosterEmailStatuses.Failed, RosterEmailFailureReasons.SendFailed),
             });
         }

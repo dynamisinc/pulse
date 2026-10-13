@@ -243,8 +243,9 @@ public sealed class EasyLoginCompositionRootWiringTests
     [Fact]
     public void EveryEasyLoginAddCall_IsIdempotent_AndTheRateLimiterOptionsStillBuild()
     {
-        // Gate-2 CR-001: Program.cs wires all five, and a test host's ConfigureTestServices runs AFTER Program.cs, so a
-        // host that adds one again used to register a second easy-login-word policy and throw at start-up.
+        // Gate-2 CR-001: Program.cs wires all six (story 13's AddLinkEmail included), and a test host's
+        // ConfigureTestServices runs AFTER Program.cs, so a host that adds one again used to register a second
+        // easy-login-word policy and throw at start-up.
         static ServiceCollection Compose(int calls)
         {
             var services = new ServiceCollection();
@@ -257,6 +258,7 @@ public sealed class EasyLoginCompositionRootWiringTests
                 services.AddPersonalLinks();
                 services.AddLinkCards();
                 services.AddDayWord();
+                services.AddLinkEmail();
             }
 
             return services;

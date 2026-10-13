@@ -114,7 +114,7 @@ public sealed class AcsParticipantLinkMailerTests
     }
 
     [Fact]
-    public async Task ASlowTokenRequest_IsBoundedBySendTimeout_AndReportedAsATimeout()
+    public async Task ASlowTokenRequest_IsBoundedBySendTimeout_AndReportedAsTimedOut_NotPlainlyFailed()
     {
         // W-3: the SDK's NetworkTimeout covers the HTTP call only; a managed-identity endpoint that hangs or retries
         // would otherwise hold the whole batch. The linked cancellation source bounds token acquisition too.
@@ -126,7 +126,8 @@ public sealed class AcsParticipantLinkMailerTests
         var outcome = await mailer.SendAsync(Message(), CancellationToken.None);
 
         clock.Stop();
-        outcome.Should().Be(LinkMailSendOutcome.Failed);
+        outcome.Should().Be(
+            LinkMailSendOutcome.TimedOut, "a timed-out send is unconfirmed (it may have been accepted), not plainly failed");
         clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10), "the send gave up at its bound, not when the token arrived");
         transport.Requests.Should().BeEmpty("no token, no request");
         logs.Messages.Should().ContainSingle(m => m.Contains("Link email send failed", StringComparison.Ordinal))

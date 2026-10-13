@@ -193,6 +193,30 @@ public sealed class LinkEmailServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task ATimedOutSend_IsFailedTimedOut_NotSendFailed_AndTheBatchContinues()
+    {
+        // Gate-1 S-4: a timeout is unconfirmed (the provider may have accepted it), so it carries its own reason and the
+        // roster does not offer it for a blind resend.
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var slow = await _world.SeedParticipantAsync(exercise, "A Slow");
+        var fine = await _world.SeedParticipantAsync(exercise, "B Fine");
+        var mailer = new FakeParticipantLinkMailer().Answer(slow.Email!, LinkMailSendOutcome.TimedOut);
+
+        var result = await _world.SendAsync(exercise, staff, mailer);
+
+        result.Body!.Results.Select(r => (r.ParticipantId, r.Status, r.Reason)).Should().Equal(
+            [
+                (slow.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.TimedOut),
+                (fine.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+            ]);
+        mailer.Messages.Should().HaveCount(2, "a timeout is not a throttle: the next send still goes");
+        var events = await _world.EmailEventsAsync(exercise);
+        events.Single(e => e.Target!.EntityId == slow.LinkId.ToString()).Payload.Should().Contain("\"failed\"",
+            "the frozen telemetry outcome is sent|failed; not confirmed sent is recorded as failed");
+    }
+
+    [RequiresDockerFact]
     public async Task AfterTheFirst429_NobodyElseIsAttempted_TheyAreRateLimited_AndNothingIsRecordedForThem()
     {
         // S-1: the provider's throttle window is minutes long on a managed domain; the next send would only be throttled.
