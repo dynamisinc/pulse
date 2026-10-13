@@ -49,8 +49,9 @@
      12. Self-check. GET /api/feed must show at least the seeded top-level posts. Every media URL (post
          media, posters, avatars, banners) must answer a ranged GET (Range: bytes=0-1) with 206. Every
          run-sheet item must be in GET /api/injects with the pack's post count, and armable: pending, or
-         held with nothing out (see AFTER A REHEARSAL). It prints a ✅/❌ summary and exits 1 if any check
-         failed.
+         held before its release (see AFTER A REHEARSAL). The armable items must be in pack order in the
+         console's queue, because "Fire next" follows that order. It prints a ✅/❌ summary and exits 1 if any
+         check failed.
 
     RE-RUNNING IS SAFE. A manifest records what has been seeded, at
     %LOCALAPPDATA%\Pulse\demo-seed\<exerciseId>.json on Windows or $HOME/.local/share/Pulse/demo-seed on
@@ -77,8 +78,14 @@
     rules), the manifest records the new id and keeps the old one as superseded (never adopted again), and the
     old item is never touched (no fire, delete or reorder). An item still firing is refused, and nothing is
     written: wait for the burst to finish, or Hold it in the console, then run again. The old items stay in
-    the console; its run-sheet filter "Open" hides fired and skipped ones, and failed or skipped ones can be
-    deleted there (fired ones cannot).
+    the console; its run-sheet filter "Open" hides fired and skipped ones, and failed or skipped ones (and a
+    burst held part-way) can be deleted there (fired ones cannot).
+
+    ORDER. A created item (new, re-created or reloaded) lands at the END of the console's queue, and the
+    script never reorders. After a PARTIAL rehearsal (some items fired, the rest still pending), a reload would
+    put the fresh copies behind the untouched later items, and "Fire next" would go out of order. The plan
+    warns about this, and the self-check fails on it. First Skip the remaining items in the console, then run
+    with -ReloadFiredRunSheet: everything reloads, in pack order. Or drag the items into order in the console.
 
     -Resume continues a partial run on its ORIGINAL scenario anchor. Without it, the script refuses to add
     posts next to ones already seeded, because their times would not line up. It says so and writes nothing.
@@ -1394,10 +1401,12 @@ function Test-InjectItemMatch {
 function Test-InjectArmable {
     <#
     .SYNOPSIS
-        True when the console can still fire this queue item as scripted: it is 'pending', or 'held' with
-        nothing published yet. Only pending and held items fire (InjectTransitions.WhyNotFireable). A fired,
-        firing, skipped or failed item (a rehearsal's) is not armable, and neither is a burst held part-way: Fire
-        would release only its remaining posts.
+        True when the console can still fire this queue item as scripted: it is 'pending', or 'held' before it
+        was ever released. Only pending and held items fire (InjectTransitions.WhyNotFireable). A fired, firing,
+        skipped or failed item (a rehearsal's) is not armable, and neither is a burst held after its release:
+        Fire would only resume what is left. "Released" shows as any post that is no longer pending (fired,
+        failed or skipped: a post can fail while its siblings wait, then a Hold leaves firedCount at 0), or any
+        post with a dueOffsetSeconds (the server lays out the burst's pacing on first release only).
     #>
     param([AllowNull()] [System.Collections.IDictionary] $Row)
     if (-not $Row) { return $false }
@@ -1405,17 +1414,22 @@ function Test-InjectArmable {
     if ($status -ceq 'pending') { return $true }
     if ($status -cne 'held') { return $false }
     if ([long] $Row['firedCount'] -gt 0) { return $false }
-    return @(@(Get-SeedList $Row 'posts') | Where-Object { [string] $_['status'] -ceq 'fired' }).Count -eq 0
+    foreach ($post in @(Get-SeedList $Row 'posts')) {
+        if ([string] $post['status'] -cne 'pending' -or $null -ne $post['dueOffsetSeconds']) { return $false }
+    }
+    return $true
 }
 
 function Get-InjectStatusText {
-    <# A queue item's status for messages: "fired", "skipped", or "held part-way (2/5 posts out)". #>
+    <# A queue item's status for messages: "fired", "skipped", or "held part-way (2/5 posts out[, 1 failed])". #>
     param([AllowNull()] [System.Collections.IDictionary] $Row)
     if (-not $Row) { return 'missing' }
     $status = [string] $Row['status']
     if ($status -ceq 'held' -and -not (Test-InjectArmable -Row $Row)) {
-        $out = [math]::Max([long] $Row['firedCount'], @(@(Get-SeedList $Row 'posts') | Where-Object { [string] $_['status'] -ceq 'fired' }).Count)
-        return "held part-way ($out/$(@(Get-SeedList $Row 'posts').Count) posts out)"
+        $posts = @(Get-SeedList $Row 'posts')
+        $out = [math]::Max([long] $Row['firedCount'], @($posts | Where-Object { [string] $_['status'] -ceq 'fired' }).Count)
+        $failed = @($posts | Where-Object { [string] $_['status'] -ceq 'failed' }).Count
+        return "held part-way ($out/$($posts.Count) posts out$(if ($failed) { ", $failed failed" }))"
     }
     return $status
 }
@@ -1517,16 +1531,12 @@ function Get-InjectPlan {
                 }
             }
             else {
-                # Spent (a rehearsal fired it, or it was skipped or failed). An armable identical copy already in
-                # the queue (an earlier reload that stopped part-way) takes over; nothing is created for that.
-                $found = @(Find-InjectItemMatches -PackItem $item -Rows $Queue -PersonaIds $PersonaIds -Claimed $claimed)
-                if ($found.Count -gt 0) {
-                    $reason = "the loaded copy is $status; adopting the armable copy already in the run sheet"
-                    $row = & $adoptFrom $found
-                    $action = 'adopt'; $itemId = [string] $row['id']; [void] $claimed.Add($itemId); $replaces = $manifestId
-                    $armable = $true; $status = Get-InjectStatusText -Row $row
-                }
-                elseif ([string] $row['status'] -ceq 'firing') {
+                # Spent (a rehearsal fired it, or it was skipped or failed). FIRING comes first, before anything else
+                # is decided: an item still releasing posts is never replaced, not even by a copy already in the
+                # queue (Gate-1 S1b N-2), so "an item still firing is refused and nothing is written" always holds.
+                $found = @()
+                if ([string] $row['status'] -cne 'firing') { $found = @(Find-InjectItemMatches -PackItem $item -Rows $Queue -PersonaIds $PersonaIds -Claimed $claimed) }
+                if ([string] $row['status'] -ceq 'firing') {
                     if ($ReloadFired) {
                         $action = 'refuse'
                         $reason = 'is firing (a burst still releasing its posts, or suspended by PAUSE INJECTS or FREEZE). -ReloadFiredRunSheet does not reload an item that is still firing: wait for it to finish, or Hold it in the console, then run again'
@@ -1534,6 +1544,14 @@ function Get-InjectPlan {
                     else {
                         $warnings.Add("$key is firing (a burst still releasing its posts, or suspended by PAUSE INJECTS or FREEZE): the console has nothing left to fire. When it has finished (or after Hold in the console), run again with -ReloadFiredRunSheet to load a fresh copy.")
                     }
+                }
+                elseif ($found.Count -gt 0) {
+                    # An armable identical copy already in the queue (an earlier reload that stopped part-way) takes
+                    # over; nothing is created for that.
+                    $reason = "the loaded copy is $status; adopting the armable copy already in the run sheet"
+                    $row = & $adoptFrom $found
+                    $action = 'adopt'; $itemId = [string] $row['id']; [void] $claimed.Add($itemId); $replaces = $manifestId
+                    $armable = $true; $status = Get-InjectStatusText -Row $row
                 }
                 elseif ($ReloadFired) {
                     $action = 'reload'; $itemId = $null; $replaces = $manifestId
@@ -1563,8 +1581,28 @@ function Get-InjectPlan {
                 Kind = [string] $item['kind']; Title = [string] $item['title']; PostCount = @(Get-SeedList $item 'posts').Count
             })
     }
+
+    # Order (Gate-1 S1b N-1). A created item (new, re-created or reloaded) lands at the END of the console's queue,
+    # while an item kept from an earlier run keeps its place, and "Fire next" takes the first pending item in the
+    # queue's order. A fresh item followed in the pack by a kept armable one will therefore come after it. The
+    # script never reorders (not on its allowlist), so it says so here, and the self-check fails on the result.
+    $late = [System.Collections.Generic.List[string]]::new()
+    $ahead = [System.Collections.Generic.List[string]]::new()
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        if ($items[$i].Action -notin 'create', 'reload') { continue }
+        $kept = @(for ($j = $i + 1; $j -lt $items.Count; $j++) { if ($items[$j].Action -in 'skip', 'adopt' -and $items[$j].Armable) { $items[$j].Key } })
+        if ($kept.Count -eq 0) { continue }
+        $late.Add($items[$i].Key)
+        foreach ($k in $kept) { if (-not $ahead.Contains($k)) { $ahead.Add($k) } }
+    }
+    if ($late.Count -gt 0) {
+        $warnings.Add(("Order: {0} will be added at the END of the console's queue, after {1}, which come{2} later in the pack, so ""Fire next"" would take the run sheet out of order. After this run, drag them into pack order in the console; or Skip the remaining old items ({1}) in the console and run again with -ReloadFiredRunSheet, so the whole sheet reloads in pack order." -f
+                ($late -join ', '), ($ahead -join ', '), $(if ($ahead.Count -eq 1) { 's' } else { '' })))
+    }
+
     [pscustomobject]@{
         Items = $items.ToArray(); Warnings = $warnings.ToArray(); Online = $online; Claimed = $claimed
+        LandsLate = $late.ToArray()
         ToCreate = @($items | Where-Object Action -in 'create', 'reload').Count
         Done = @($items | Where-Object Action -in 'skip', 'adopt').Count
         NotArmable = @($items | Where-Object { $_.Action -eq 'skip' -and $_.Armable -eq $false })
@@ -1576,8 +1614,9 @@ function Get-InjectStaleReplies {
     <#
     .SYNOPSIS
         What a queue item (skipped or adopted, so loaded earlier) still replies to by an OLD id, so at fire it
-        would fail or answer the wrong post: a pack post that was archived (for example by Clear-DemoContent.ps1) and posted again, or a post
-        of an earlier run-sheet item that was loaded again (-ReloadFiredRunSheet, or deleted and re-created).
+        would fail or answer the wrong post: a pack post that was archived (for example by Clear-DemoContent.ps1)
+        and posted again, or a post of an earlier run-sheet item that was loaded again (-ReloadFiredRunSheet, or
+        deleted and re-created).
         The current ids are known by then: posts are made before the run sheet, and a reply names an EARLIER item.
     .PARAMETER InjectPostIds
         Run-sheet item key → the CURRENT ids of its posts in sequence order.
@@ -1608,6 +1647,71 @@ function Get-InjectStaleReplies {
             $current = if ($index -ge 0 -and $index -lt $children.Count) { [string] $children[$index] } else { '' }
             $loaded = if ($loadedReply -is [System.Collections.IDictionary]) { [string] $loadedReply['injectPostId'] } else { '' }
             if ($current -and $loaded -and $loaded -ne $current) { "post $($reply['sequence']) of $target ($target was loaded again since)" }
+        }
+    }
+}
+
+function Find-InjectOrderInversion {
+    <#
+    .SYNOPSIS
+        The first pair of run-sheet items that the console's queue has the other way round from the pack:
+        @{ PackFirst = the item the pack has first; QueuedAhead = the later pack item the queue puts ahead of it },
+        or $null when the queue's "order" increases in pack order. Entries are @{ Key; Order } in pack order
+        (armable items only).
+    #>
+    param([AllowEmptyCollection()] [object[]] $Entries = @())
+    $highest = $null
+    foreach ($entry in @($Entries)) {
+        if ($null -eq $entry -or (Get-JsonKind $entry.Order) -ne 'integer') { continue }
+        if ($highest -and [long] $entry.Order -le [long] $highest.Order) { return [pscustomobject]@{ PackFirst = $highest; QueuedAhead = $entry } }
+        $highest = $entry
+    }
+    return $null
+}
+
+function Get-InjectContentDrift {
+    <#
+    .SYNOPSIS
+        Where a queue item kept from an earlier run (skipped or adopted) differs from the pack in what its posts
+        attach or reply to, now that the real ids are known (Gate-1 S1b N-4): the media ids (a changed file is
+        uploaded again under a new id), and whether and how each post replies. That covers a reply missing
+        altogether, one the pack does not have, one of the wrong form (a post vs a scripted post), and a sibling
+        reply to a different post of the item. A reply to an EARLIER COPY of the right target is reported by
+        Get-InjectStaleReplies; kind, title, persona and text are compared by the plan (Test-InjectItemMatch).
+    #>
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $PackItem,
+        [AllowNull()] [System.Collections.IDictionary] $Row,
+        [hashtable] $MediaIds = @{}
+    )
+    if (-not $Row) { return }
+    $key = [string] $PackItem['key']
+    $want = @(Get-SeedList $PackItem 'posts')
+    $have = @(@(Get-SeedList $Row 'posts') | Sort-Object { [long] $_['sequence'] })
+    $ownIds = @($have | ForEach-Object { [string] $_['id'] })
+    for ($k = 0; $k -lt [math]::Min($want.Count, $have.Count); $k++) {
+        $label = "post $($k + 1)"
+        $wantMedia = @(@(Get-SeedList $want[$k] 'media') | ForEach-Object { [string] $MediaIds[[string] $_['ref']] })
+        $haveMedia = @(@(Get-SeedList $have[$k] 'media') | ForEach-Object { [string] $_['mediaId'] })
+        if (($wantMedia -join '|') -ne ($haveMedia -join '|')) { "$label's media" }
+
+        $reply = $want[$k]['replyTo']
+        $loaded = $have[$k]['replyTo']
+        $loadedForm = if ($loaded -isnot [System.Collections.IDictionary]) { '' } elseif ($loaded['postId']) { 'postId' } elseif ($loaded['injectPostId']) { 'injectPostId' } else { '' }
+        if ($reply -isnot [System.Collections.IDictionary]) {
+            if ($loadedForm) { "$label's reply (the loaded post replies; the pack's does not)" }
+            continue
+        }
+        if (-not $loadedForm) { "$label's reply (missing)"; continue }
+        $wantForm = if ($reply.Contains('postKey')) { 'postId' } else { 'injectPostId' }
+        if ($loadedForm -ne $wantForm) {
+            "$label's reply (to $(if ($loadedForm -eq 'postId') { 'a feed post' } else { 'a scripted post' }) instead of $(if ($wantForm -eq 'postId') { 'a feed post' } else { 'a scripted post' }))"
+            continue
+        }
+        if ($wantForm -eq 'injectPostId' -and (-not $reply.Contains('item') -or [string] $reply['item'] -ceq $key)) {
+            $index = [long] $reply['sequence'] - 1
+            $expected = if ($index -ge 0 -and $index -lt $ownIds.Count) { $ownIds[$index] } else { '' }
+            if ([string] $loaded['injectPostId'] -ne $expected) { "$label's reply (to another post of this item)" }
         }
     }
 }
@@ -2547,6 +2651,11 @@ function Invoke-DemoSeed {
                     continue
                 }
                 Write-SeedLine SKIP "$($entry.Key) — $($entry.Reason) ($($entry.ItemId))"
+                $drift = @(Get-InjectContentDrift -PackItem $item -Row $entry.Row -MediaIds $mediaIds)
+                if ($drift.Count -gt 0) {
+                    Write-SeedLine WARN ("{0} differs from the pack in {1} (edited in the console, or the pack or its media changed after it was loaded); the queue's version stays. To load the pack's version, delete {0} in the console and run again." -f
+                        $entry.Key, ($drift -join ', '))
+                }
                 $stale = @(Get-InjectStaleReplies -PackItem $item -Row $entry.Row -PostIds $postIds -InjectPostIds $injectPostIds)
                 if ($stale.Count -gt 0) {
                     # An archived parent post fails at fire; a reloaded item's old post would get the reply instead
@@ -2693,6 +2802,17 @@ function Invoke-DemoSeed {
                         "run-sheet items the console cannot fire: $($sheetSpent -join ', '). After a rehearsal, run again with -ReloadFiredRunSheet to load fresh copies"
                     }
                     else { 'every run-sheet item is armable (pending, or held with nothing out)' })
+                # N-1: "Fire next" takes the first pending item in the queue's order, so the armable items must be in
+                # pack order there too. A fresh copy lands at the end, behind items kept from an earlier run.
+                $inversion = Find-InjectOrderInversion -Entries @(foreach ($entry in $injectPlan.Items) {
+                        $row = $queueById[[string] $injectIds[$entry.Key]]
+                        if ($row -and (Test-InjectArmable -Row $row)) { [pscustomobject]@{ Key = $entry.Key; Order = $row['order'] } }
+                    })
+                & $check ($null -eq $inversion) $(if ($inversion) {
+                        ("the console's queue is out of pack order: {0} (order {1}) comes after {2} (order {3}), so ""Fire next"" would take {2} first. Drag them into pack order in the console, or Skip the remaining old items in the console and run again with -ReloadFiredRunSheet so the whole sheet reloads in order" -f
+                            $inversion.PackFirst.Key, $inversion.PackFirst.Order, $inversion.QueuedAhead.Key, $inversion.QueuedAhead.Order)
+                    }
+                    else { "the armable run-sheet items are in pack order in the console's queue (""Fire next"" follows the pack)" })
             }
         }
 

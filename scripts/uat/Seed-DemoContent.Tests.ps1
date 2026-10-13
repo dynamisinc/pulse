@@ -996,7 +996,7 @@ Describe 'Run sheet: inject items for POST /api/injects (pure)' {
             $k = 0
             [ordered]@{
                 id = $Id; kind = $PackItem['kind']; title = $PackItem['title']; status = $Status
-                posts = @($PackItem['posts'] | ForEach-Object { $k++; [ordered]@{ id = [guid]::NewGuid().ToString(); sequence = $k; personaId = $script:Ids.Personas[$_['persona']]; text = $_['text'] } })
+                posts = @($PackItem['posts'] | ForEach-Object { $k++; [ordered]@{ id = [guid]::NewGuid().ToString(); sequence = $k; status = 'pending'; personaId = $script:Ids.Personas[$_['persona']]; text = $_['text'] } })
             }
         }
     }
@@ -1637,6 +1637,76 @@ Describe 'Spent run sheet (rehearsals) and -ReloadFiredRunSheet (Gate-1 S1b M-1)
             $plan.Warnings | Should -Match 'i01 matches 2 items in the run sheet \(item-a, item-b\): a duplicate is already in the queue'
         }
 
+        It 'N-3: a held burst that was released is spent, even with firedCount 0 (a failed post, or pacing laid out)' {
+            $pack = Get-FixturePack
+            $failed = New-SpentRow $pack['runSheet']['items'][1] -Status 'held'
+            $failed['posts'][0]['status'] = 'failed'                          # released, its first post failed, then Hold
+            Test-InjectArmable -Row $failed | Should -BeFalse
+            Get-InjectStatusText -Row $failed | Should -Be 'held part-way (0/3 posts out, 1 failed)'
+            $paced = New-SpentRow $pack['runSheet']['items'][1] -Status 'held'
+            $paced['posts'][1]['dueOffsetSeconds'] = 17                        # set on first release only
+            Test-InjectArmable -Row $paced | Should -BeFalse
+            Test-InjectArmable -Row (New-SpentRow $pack['runSheet']['items'][1] -Status 'held') | Should -BeTrue
+        }
+
+        It 'N-1: the plan warns when a fresh copy will land after armable items that come later in the pack' {
+            $pack = Get-FixturePack
+            $manifest = New-SeedManifest
+            $manifest['injects']['i01'] = [ordered]@{ itemId = 'item-1' }
+            $manifest['injects']['i02'] = [ordered]@{ itemId = 'item-2' }
+            $queue = @((New-SpentRow $pack['runSheet']['items'][0] -Id 'item-1' -Status 'fired'), (New-SpentRow $pack['runSheet']['items'][1] -Id 'item-2'))
+            $plan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $queue -PersonaIds $script:Personas -ReloadFired
+            $plan.LandsLate | Should -Be @('i01')
+            $plan.Warnings | Should -Match 'Order: i01 will be added at the END of the console''s queue, after i02, which comes later in the pack'
+            # Skipped too (the advice): both reload, in pack order, and there is nothing to warn about.
+            Set-RowState $queue[1] 'skipped'
+            $plan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $queue -PersonaIds $script:Personas -ReloadFired
+            @($plan.Items | ForEach-Object Action) | Should -Be @('reload', 'reload')
+            $plan.LandsLate | Should -BeNullOrEmpty
+            @($plan.Warnings | Where-Object { $_ -like 'Order:*' }) | Should -BeNullOrEmpty
+            # The last item reloading alone lands at the end anyway: in order.
+            Set-RowState $queue[0] 'pending'; Set-RowState $queue[1] 'fired'
+            (Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $queue -PersonaIds $script:Personas -ReloadFired).LandsLate | Should -BeNullOrEmpty
+        }
+
+        It 'N-1: the order check finds the first inversion, and none in pack order' {
+            $entries = @([pscustomobject]@{ Key = 'i01'; Order = 9 }, [pscustomobject]@{ Key = 'i02'; Order = 1 }, [pscustomobject]@{ Key = 'i03'; Order = 2 })
+            $found = Find-InjectOrderInversion -Entries $entries
+            "$($found.PackFirst.Key)>$($found.QueuedAhead.Key)" | Should -Be 'i01>i02'
+            Find-InjectOrderInversion -Entries @([pscustomobject]@{ Key = 'a'; Order = 1 }, [pscustomobject]@{ Key = 'b'; Order = 5 }) | Should -BeNullOrEmpty
+            Find-InjectOrderInversion -Entries @() | Should -BeNullOrEmpty
+        }
+
+        It 'N-2: a firing manifest item is never replaced by an armable copy, with or without the switch' {
+            $pack = Get-FixturePack
+            $manifest = New-SeedManifest; $manifest['injects']['i02'] = [ordered]@{ itemId = 'item-2' }
+            $queue = @((New-SpentRow $pack['runSheet']['items'][1] -Id 'item-2' -Status 'firing'), (New-SpentRow $pack['runSheet']['items'][1] -Id 'item-copy'))
+            (Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $queue -PersonaIds $script:Personas -ReloadFired).Items[1].Action | Should -Be 'refuse'
+            $plain = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $queue -PersonaIds $script:Personas
+            "$($plain.Items[1].Action):$($plain.Items[1].ItemId)" | Should -Be 'skip:item-2'
+            $plain.Items[1].Armable | Should -BeFalse
+        }
+
+        It 'N-4: content drift compares media ids and reply targets with the pack' {
+            $pack = Get-FixturePack
+            $item = $pack['runSheet']['items'][1]
+            $row = New-SpentRow $item -Id 'item-2'
+            $row['posts'][1]['replyTo'] = [ordered]@{ injectPostId = 'item-2-p1' }
+            $row['posts'][2]['replyTo'] = [ordered]@{ injectPostId = 'i01-p1' }
+            @(Get-InjectContentDrift -PackItem $item -Row $row) | Should -BeNullOrEmpty
+            $row['posts'][0]['replyTo'] = [ordered]@{ postId = 'p-x' }                 # the pack's post 1 replies to nothing
+            $row['posts'][2]['replyTo'] = [ordered]@{ postId = 'p-y' }                 # a feed post instead of a scripted one
+            $row['posts'][1]['media'] = @([ordered]@{ mediaId = 'm-1'; alt = 'a' })    # media the pack's post 2 does not have
+            @(Get-InjectContentDrift -PackItem $item -Row $row) | Should -Be @(
+                "post 1's reply (the loaded post replies; the pack's does not)", "post 2's media", "post 3's reply (to a feed post instead of a scripted post)")
+            $post = $pack['runSheet']['items'][0]
+            $loaded = New-SpentRow $post -Id 'item-1'
+            $loaded['posts'][0]['media'] = @([ordered]@{ mediaId = 'asset-photo'; alt = 'a' })
+            $loaded['posts'][0]['replyTo'] = [ordered]@{ postId = 'post-2' }
+            @(Get-InjectContentDrift -PackItem $post -Row $loaded -MediaIds @{ 'harbor-photo' = 'asset-photo' }) | Should -BeNullOrEmpty
+            @(Get-InjectContentDrift -PackItem $post -Row $loaded -MediaIds @{ 'harbor-photo' = 'asset-new' }) | Should -Be @("post 1's media")
+        }
+
         It 'L-1: "me" must itself be on the assignee list' {
             $roster = [ordered]@{ me = 'id-me'; assignees = @([ordered]@{ id = 'id-eve'; displayName = 'Eve Evaluator'; role = 'evaluator' }) }
             $result = Resolve-InjectAssignees -Items @([ordered]@{ key = 'a'; assignee = 'me' }) -Roster $roster
@@ -1722,24 +1792,28 @@ Describe 'Spent run sheet (rehearsals) and -ReloadFiredRunSheet (Gate-1 S1b M-1)
             $script:Fake.Injects.Count | Should -Be 4
         }
 
-        It '-ReloadFiredRunSheet leaves armable items alone, and warns that one still replies to the reloaded item''s old post (L-2)' {
+        It 'a PARTIAL reload (i01 fired, i02 still pending): i02 is left alone, the plan warns about order, the self-check fails on the inversion (N-1), and i02''s stale reply is reported (L-2)' {
             (Invoke-FakeSeed).Code | Should -Be 0
             Set-RowState $script:Fake.Injects[0] 'fired'                    # i01 fired in a rehearsal; i02 still pending
             $run = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
-            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Code | Should -Be 1
             (Get-FakeCalls POST '/api/injects').Count | Should -Be 3        # 2 on the first run + i01's fresh copy
+            $script:Fake.Injects[1].status | Should -Be 'pending'            # i02 untouched
+            $run.Text | Should -Match '\[WARN\] Order: i01 will be added at the END of the console''s queue, after i02, which comes later in the pack.*Skip the remaining old items \(i02\) in the console and run again with -ReloadFiredRunSheet'
+            $run.Text | Should -Match '❌ the console''s queue is out of pack order: i01 \(order 3\) comes after i02 \(order 2\), so "Fire next" would take i02 first\. Drag them into pack order in the console, or Skip the remaining old items'
+            $run.Text | Should -Match 'NOT READY'
             $run.Text | Should -Match '\[WARN\] i02 still replies to the earlier copy of post 1 of i01 \(i01 was loaded again since\), not the current one: at fire it would fail or answer the old post\. Delete i02 in the console and run again'
         }
 
         It 'an uncertain create during a reload adopts the fresh copy (never the fired one), once' {
             (Invoke-FakeSeed).Code | Should -Be 0
             $old = $script:Fake.Injects[0].id
-            Set-RowState $script:Fake.Injects[0] 'fired'
-            $script:Fake.InjectFaults[3] = 'lost-after-write'
+            Set-RowState $script:Fake.Injects[0] 'fired'; Set-RowState $script:Fake.Injects[1] 'fired'
+            $script:Fake.InjectFaults[3] = 'lost-after-write'                # i01's fresh copy: written, answer lost
             $run = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
             $run.Code | Should -Be 0 -Because $run.Text
-            (Get-FakeCalls POST '/api/injects').Count | Should -Be 3
-            $script:Fake.Injects.Count | Should -Be 3
+            (Get-FakeCalls POST '/api/injects').Count | Should -Be 4        # 2 + one per fresh copy, i01's never re-sent
+            $script:Fake.Injects.Count | Should -Be 4
             $manifest = Get-InjectManifestFor
             $manifest['i01']['itemId'] | Should -Be $script:Fake.Injects[2].id
             $manifest['i01']['adoptedAt'] | Should -Not -BeNullOrEmpty
@@ -1749,7 +1823,7 @@ Describe 'Spent run sheet (rehearsals) and -ReloadFiredRunSheet (Gate-1 S1b M-1)
 
         It 'an uncertain reload that did not land stops (wait a minute; no -Resume needed); the next reload creates it once' {
             (Invoke-FakeSeed).Code | Should -Be 0
-            Set-RowState $script:Fake.Injects[0] 'fired'
+            Set-RowState $script:Fake.Injects[0] 'fired'; Set-RowState $script:Fake.Injects[1] 'fired'
             $script:Fake.InjectFaults[3] = 'lost-before-write'
             $stopped = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
             $stopped.Code | Should -Be 1
@@ -1757,8 +1831,59 @@ Describe 'Spent run sheet (rehearsals) and -ReloadFiredRunSheet (Gate-1 S1b M-1)
             $stopped.Text | Should -Match 'run the same command again \(no -Resume needed: the posts are all in\)'
             $again = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
             $again.Code | Should -Be 0 -Because $again.Text
-            (Get-FakeCalls POST '/api/injects').Count | Should -Be 4        # 2 + the lost one + the real one
-            $script:Fake.Injects.Count | Should -Be 3
+            (Get-FakeCalls POST '/api/injects').Count | Should -Be 5        # 2 + the lost one + i01's and i02's fresh copies
+            $script:Fake.Injects.Count | Should -Be 4
+        }
+
+        It 'after a partial rehearsal, Skip the rest in the console, then reload: the whole sheet reloads in pack order (N-1)' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Set-RowState $script:Fake.Injects[0] 'fired'                     # the rehearsal fired i01...
+            Set-RowState $script:Fake.Injects[1] 'skipped'                   # ...and the presenter skipped the rest
+            $run = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
+            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Text | Should -Not -Match 'Order: '
+            $run.Text | Should -Match '✅ the armable run-sheet items are in pack order in the console''s queue'
+            $manifest = Get-InjectManifestFor
+            $orders = @('i01', 'i02' | ForEach-Object { $id = $manifest[$_]['itemId']; (@($script:Fake.Injects) | Where-Object id -eq $id).order })
+            $orders | Should -Be @(3, 4)
+        }
+
+        It 'the order self-check passes on a fresh seed and fails when the queue was dragged out of pack order' {
+            $first = Invoke-FakeSeed
+            $first.Code | Should -Be 0
+            $first.Text | Should -Match '✅ the armable run-sheet items are in pack order'
+            $script:Fake.Injects[0].order = 2; $script:Fake.Injects[1].order = 1   # someone dragged i02 above i01
+            $script:Fake.Calls.Clear()
+            $again = Invoke-FakeSeed
+            $again.Code | Should -Be 1
+            $again.Text | Should -Match '❌ the console''s queue is out of pack order: i01 \(order 2\) comes after i02 \(order 1\)'
+            Get-InjectWrites | Should -BeNullOrEmpty
+        }
+
+        It 'N-2: with the switch, a firing item is refused even when an armable copy of it is already in the queue' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $copy = New-FakeInjectItem -Fake $script:Fake -Request (ConvertFrom-SeedJson (Get-FakeCalls POST '/api/injects')[1].Body)
+            $script:Fake.Injects.Add($copy)                                  # an identical pending copy of i02
+            Set-RowState $script:Fake.Injects[1] 'firing'
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match '\[FAIL\] i02 is firing .*Nothing was written\.'
+            @($script:Fake.Calls | Where-Object { $_.Method -ne 'GET' -and $_.Path -ne '/api/auth/staff/login' }) | Should -BeNullOrEmpty
+            (Get-InjectManifestFor)['i02']['itemId'] | Should -Be $script:Fake.Injects[1].id   # not switched to the copy
+        }
+
+        It 'N-4: a kept item whose media or reply no longer match the pack is reported (the queue''s version stays)' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $script:Fake.Injects[0].posts[0].media = @([ordered]@{ mediaId = [guid]::NewGuid().ToString(); alt = 'other' })
+            $script:Fake.Injects[0].posts[0].Remove('replyTo')
+            $script:Fake.Injects[1].posts[1].replyTo = [ordered]@{ injectPostId = $script:Fake.Injects[1].posts[2].id }
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Text | Should -Match '\[WARN\] i01 differs from the pack in post 1''s media, post 1''s reply \(missing\) \(edited in the console, or the pack or its media changed after it was loaded\); the queue''s version stays'
+            $run.Text | Should -Match '\[WARN\] i02 differs from the pack in post 2''s reply \(to another post of this item\)'
+            Get-InjectWrites | Should -BeNullOrEmpty
         }
 
         It '-ReloadFiredRunSheet refuses an item that is still firing, before any write' {

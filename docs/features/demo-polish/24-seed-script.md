@@ -54,7 +54,7 @@ Authors the content: S2.
 - [ ] **Self-check.** After seeding it fetches `GET /api/feed` and verifies ≥ the number of top-level posts
       seeded, that every media `url` answers a ranged request (`Range: bytes=0-1`) with `206`, and that every
       run-sheet item is in `GET /api/injects` with the pack's post count and is **armable** (`pending`, or `held`
-      with nothing published). A rehearsal that fired the run sheet leaves it spent, so a fired, firing, skipped,
+      before its release), with the armable items in pack order in the queue ("Fire next" follows it). A rehearsal that fired the run sheet leaves it spent, so a fired, firing, skipped,
       failed or part-held item fails the check, naming `-ReloadFiredRunSheet`; that switch loads a fresh copy of
       each spent item (the old one is never touched; an item still firing is refused before any write). It prints
       a ✅/❌ summary and exits non-zero if any check fails.
