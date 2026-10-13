@@ -18,7 +18,7 @@ using Pulse.WebApi.Tests.Data;
 
 /// <summary>
 /// <b>Easy-login story 06 lifecycle pin (EL-11).</b> A day-long participant session in a <c>completed</c> or
-/// <c>archived</c> exercise keeps the EXISTING lifecycle-gate behaviour — participant data routes <c>403</c>, and
+/// <c>archived</c> exercise refreshes into a live session and keeps the EXISTING lifecycle-gate behaviour — participant data routes <c>403</c>, and
 /// <c>/api/overlay-state</c> served in <c>completed</c> (COR-054's EndEx overlay) — and its refresh is NOT newly refused.
 /// Refusing refresh at EndEx would sign participants out underneath the overlay they are meant to see; this pin stops a
 /// later change from doing that silently.
@@ -70,6 +70,15 @@ public sealed class ParticipantDayLongLifecyclePinTests
 
         refreshed.Outcome.Should().Be(
             RefreshOutcome.Refreshed, "EL-11: refresh is deliberately not refused in a '{0}' exercise", state);
+
+        // Gate-1 S-1: the refreshed access token is a LIVE session, not merely a successful refresh response.
+        await using (var sessionContext = _fixture.CreateContext())
+        {
+            var current = await ServiceFor(sessionContext).GetCurrentAsync(refreshed.SessionToken);
+            current.Outcome.Should().Be(
+                SessionQueryOutcome.Live, "after EndEx the refreshed participant session still resolves (GET /api/session 200)");
+            current.Session!.ExerciseId.Should().Be(exerciseId, "and stays bound to its own exercise");
+        }
 
         await using var host = await ExerciseLifecycleTestHost.StartAsync(
             _fixture.ConnectionString!,

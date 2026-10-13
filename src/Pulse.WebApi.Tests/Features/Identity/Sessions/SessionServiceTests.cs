@@ -555,7 +555,7 @@ public sealed class SessionServiceTests
         AssertDayEndedRefreshAsync(Utc(2026, 10, 15, 4, 0, 1));
 
     [RequiresDockerFact]
-    public async Task Refresh_Participant_WhoseStoredWindowCrossesMidnight_Is401OnceItsDayHasEnded()
+    public async Task Refresh_Participant_WhoseStoredWindowCrossesMidnight_Is401OnceItsDayHasEnded_AndIsRevoked()
     {
         // A row stamped under the old sliding rule (option off, or before story 06 shipped): last refreshed at 19:00 EDT
         // on the 14th with a 720-minute window ending 11:00Z on the 15th. At 01:00 EDT on the 15th the stored window is
@@ -563,11 +563,13 @@ public sealed class SessionServiceTests
         var exerciseId = Guid.NewGuid();
         await SeedExerciseAsync(exerciseId, timeZone: NewYork);
         var token = $"legacy-window-{Guid.NewGuid():N}";
-        await SeedSessionAsync(
+        var accessToken = $"legacy-access-{Guid.NewGuid():N}";
+        var original = await SeedSessionAsync(
             exerciseId,
+            rawToken: accessToken,
             rawRefreshToken: token,
             issuedAt: Utc(2026, 10, 14, 23),
-            expiresAt: Utc(2026, 10, 15, 0),
+            expiresAt: Utc(2026, 10, 15, 6),
             refreshExpiresAt: Utc(2026, 10, 15, 11));
         var clock = new ManualTimeProvider(Utc(2026, 10, 15, 5));
 
@@ -578,6 +580,30 @@ public sealed class SessionServiceTests
         }
 
         (await CountEventsAsync(exerciseId, "session.refreshed")).Should().Be(0, "a refused refresh emits no event");
+
+        // Gate-1 S-2: the row is ended, not left with an open window. It reads as revoked at the refusal instant, the
+        // binding and token hashes are untouched, and nothing else on the row moved.
+        await using (var verify = _fixture.CreateContext())
+        {
+            var ended = await verify.Sessions.SingleAsync(s => s.Id == original.Id && s.ExerciseId == exerciseId);
+            ended.RevokedAt.Should().Be(Utc(2026, 10, 15, 5), "the day-end refusal of a legacy row revokes it, server-stamped");
+            ended.RefreshTokenHash.Should().Be(SessionTokens.Hash(token), "nothing is rotated");
+            ended.IssuedAt.Should().Be(Utc(2026, 10, 14, 23));
+            ended.RefreshExpiresAt.Should().Be(Utc(2026, 10, 15, 11), "the stored window is left as evidence");
+        }
+
+        // A retry stops at the revoked check, and the still-unexpired access token no longer authenticates.
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await using (var retry = _fixture.CreateContext())
+        {
+            var service = ServiceFor(retry, clock: clock);
+            (await service.RefreshAsync(token)).Outcome.Should().Be(RefreshOutcome.Invalid, "a revoked row is never retried");
+            (await service.GetCurrentAsync(accessToken)).Outcome.Should().Be(
+                SessionQueryOutcome.Absent, "its access token (ExpiresAt 06:00Z) stops at once, with no session.expired event");
+        }
+
+        (await CountEventsAsync(exerciseId, "session.refreshed")).Should().Be(0);
+        (await CountEventsAsync(exerciseId, "session.expired")).Should().Be(0);
     }
 
     [RequiresDockerFact]
@@ -779,8 +805,11 @@ public sealed class SessionServiceTests
 
         (await CountEventsAsync(exerciseId, "session.refreshed")).Should().Be(0, "a refused refresh emits no event");
         await using var verify = _fixture.CreateContext();
-        (await verify.Sessions.SingleAsync(s => s.Id == original.Id)).RefreshTokenHash.Should().Be(
-            SessionTokens.Hash(token), "a refused refresh rotates nothing");
+        var stored = await verify.Sessions.SingleAsync(s => s.Id == original.Id);
+        stored.RefreshTokenHash.Should().Be(SessionTokens.Hash(token), "a refused refresh rotates nothing");
+        stored.RevokedAt.Should().BeNull(
+            "a window that already ended at the day end is the ordinary lapsed case: nothing is written (only a legacy row "
+            + "whose stored window was still open is revoked)");
     }
 
     /// <summary>

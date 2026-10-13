@@ -144,7 +144,7 @@ public sealed class SessionIssuer : ISessionIssuer
 
         return ParticipantSessionCap.EndOfExerciseDay(
             request.ExerciseId,
-            facts?.TimeZone,
+            facts,
             now,
             _dayRolloverHour,
             _logger);

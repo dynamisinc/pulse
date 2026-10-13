@@ -42,7 +42,8 @@ public sealed class ParticipantDayLongHttpTests
         // Yesterday's session whose stored window is still open (stamped under the old sliding rule): its day has
         // ended all the same.
         var slidingToken = $"day-ended-sliding-{Guid.NewGuid():N}";
-        await SeedParticipantSessionAsync(exerciseId, slidingToken, issuedAt: now.AddDays(-2), refreshExpiresAt: now.AddHours(1));
+        var slidingId = await SeedParticipantSessionAsync(
+            exerciseId, slidingToken, issuedAt: now.AddDays(-2), refreshExpiresAt: now.AddHours(1));
 
         // The pre-existing refusal it must look exactly like.
         var lapsedToken = $"lapsed-{Guid.NewGuid():N}";
@@ -65,6 +66,8 @@ public sealed class ParticipantDayLongHttpTests
         (await verify.TelemetryEvents.IgnoreQueryFilters()
             .CountAsync(e => e.ExerciseId == exerciseId && e.EventType == "session.refreshed"))
             .Should().Be(0, "a refused refresh emits no event");
+        (await verify.Sessions.SingleAsync(s => s.Id == slidingId && s.ExerciseId == exerciseId)).RevokedAt
+            .Should().NotBeNull("the legacy row whose window was still open is ended, not left to be retried");
     }
 
     [RequiresDockerFact]

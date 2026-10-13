@@ -37,7 +37,8 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// windows are recomputed on every refresh (see <see cref="ParticipantSessionCap"/>): the refresh window ends at the end
 /// of the CURRENT exercise day and the access expiry is <c>min(now + SessionLifetime, end of day)</c>, so a session can
 /// never slide into the next day. Once the day of the session's last issue or refresh has ended, refresh is the
-/// ordinary fail-closed 401 with no event. Refresh is deliberately NOT refused at EndEx (<c>completed</c>): the
+/// ordinary fail-closed 401 with no event; a row whose stored window was still open at that point (stamped under the
+/// old sliding rule) is also revoked, so it reads as ended in the audit trail and a retry stops at the revoked check. Refresh is deliberately NOT refused at EndEx (<c>completed</c>): the
 /// lifecycle gate already refuses participant data routes, and refusing refresh would bounce participants off the
 /// COR-054 EndEx overlay. Staff and read-only sessions renew exactly as before.
 /// </para>
@@ -141,7 +142,8 @@ public sealed class SessionService
     /// tokens and preserving the exact binding (never re-scoping to a different exercise / account). Emits one
     /// <c>session.refreshed</c> XC-004 event in the same unit of work. Fails closed
     /// (<see cref="RefreshOutcome.Invalid"/> → 401, no event) on an absent/unknown refresh token, or one whose session
-    /// is revoked or whose refresh window has lapsed, or (a capped participant session) whose exercise day has ended.
+    /// is revoked or whose refresh window has lapsed, or (a capped participant session) whose exercise day has ended. In
+    /// that last case the session is also revoked (still no event), because its stored window was still open.
     /// </summary>
     /// <param name="rawRefreshToken">The presented raw refresh token, or <c>null</c> when none.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -180,7 +182,7 @@ public sealed class SessionService
             // or before the cap shipped) cannot carry the session into the next day either.
             endOfExerciseDay = ParticipantSessionCap.EndOfExerciseDay(
                 session.ExerciseId,
-                facts?.TimeZone,
+                facts,
                 session.IssuedAt,
                 _dayRolloverHour,
                 _logger);
@@ -188,7 +190,12 @@ public sealed class SessionService
             if (endOfExerciseDay.Value <= now)
             {
                 // The exercise day is over → a full sign-in (tap the link again, or the new day's word). Same
-                // fail-closed 401 as a lapsed window, and no event.
+                // fail-closed 401 as a lapsed window, and no event (story 06 telemetry AC). The stored window was still
+                // open (the row predates the cap or was stamped with it off), so the row is ended here: RevokedAt marks
+                // it as over in the audit trail, its access token stops at once, and a retry fails at the revoked check
+                // above without another exercise read. Nothing else on the row changes.
+                session.RevokedAt = now;
+                await _dbContext.SaveChangesAsync(cancellationToken);
                 return RefreshResult.Invalid();
             }
         }

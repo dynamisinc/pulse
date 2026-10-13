@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
@@ -13,7 +14,7 @@ using Xunit;
 /// Easy-login story 06 (EL-10) — the participant day cap shared by issue and refresh, with no database and no real
 /// clock: which kinds are capped, the two windows, the end of the exercise day across a spring-forward and a fall-back
 /// change in <c>America/New_York</c> with rollover 0 and a 3 a.m. rollover, the UTC fallback logged once per exercise
-/// per process, and the 0-to-6 rollover bound.
+/// per process (with a distinct, secret-free message for a missing exercise row), and the 0-to-6 rollover bound.
 /// </summary>
 public sealed class ParticipantSessionCapTests
 {
@@ -31,6 +32,8 @@ public sealed class ParticipantSessionCapTests
         var off = new SessionOptions { ParticipantDayLong = false };
 
         on.ParticipantDayLong.Should().BeTrue("the option defaults to on");
+        ParticipantSessionCap.AppliesTo(ParticipantSessionRequests.ParticipantSessionKind, on).Should().BeTrue(
+            "the cap keys on the same kind every participant login method issues");
         ParticipantSessionCap.AppliesTo("participant", on).Should().BeTrue();
         ParticipantSessionCap.AppliesTo("participant", off).Should().BeFalse("option off: participants behave as before");
         ParticipantSessionCap.AppliesTo("staff", on).Should().BeFalse("staff sessions are never day-capped");
@@ -184,13 +187,13 @@ public sealed class ParticipantSessionCapTests
 
         for (var request = 0; request < 5; request++)
         {
-            ParticipantSessionCap.EndOfExerciseDay(exerciseA, "Not/AZone", asOf, 0, logger);
+            ParticipantSessionCap.EndOfExerciseDay(exerciseA, Facts("Not/AZone"), asOf, 0, logger);
         }
 
         logger.Warnings.Should().ContainSingle("five requests for the same exercise log one warning")
             .Which.Should().Contain(exerciseA.ToString());
 
-        ParticipantSessionCap.EndOfExerciseDay(exerciseB, " ", asOf, 0, logger);
+        ParticipantSessionCap.EndOfExerciseDay(exerciseB, Facts(" "), asOf, 0, logger);
         ParticipantSessionCap.EndOfExerciseDay(exerciseB, null, asOf, 0, logger);
         logger.Warnings.Should().HaveCount(2, "a second exercise with a bad zone gets its own single warning");
         logger.Warnings[1].Should().Contain(exerciseB.ToString());
@@ -201,14 +204,46 @@ public sealed class ParticipantSessionCapTests
     {
         var logger = new RecordingLogger();
 
-        ParticipantSessionCap.EndOfExerciseDay(Guid.NewGuid(), NewYork, Utc(2026, 10, 14, 12), 0, logger);
-        ParticipantSessionCap.EndOfExerciseDay(Guid.NewGuid(), "UTC", Utc(2026, 10, 14, 12), 0, logger);
+        ParticipantSessionCap.EndOfExerciseDay(Guid.NewGuid(), Facts(NewYork), Utc(2026, 10, 14, 12), 0, logger);
+        ParticipantSessionCap.EndOfExerciseDay(Guid.NewGuid(), Facts("UTC"), Utc(2026, 10, 14, 12), 0, logger);
 
         logger.Warnings.Should().BeEmpty();
     }
 
+    [Fact]
+    public void TheFallbackWarning_SaysWhatHappenedAndWhichDefaultWasUsed_AndEchoesNoStoredValue()
+    {
+        // Gate-1 S-4: an operator reading the log must be able to tell a missing exercise row from a bad zone, and see
+        // the default applied (the UTC day, and the rollover hour actually used). The stored zone is staff-entered free
+        // text, so it is never echoed; nor is anything else but the exercise id and the hour.
+        var badZoneLogger = new RecordingLogger();
+        var missingRowLogger = new RecordingLogger();
+        var badZoneExercise = Guid.NewGuid();
+        var missingExercise = Guid.NewGuid();
+        const string storedZone = "Mars/<script>alert(1)</script>";
+
+        ParticipantSessionCap.EndOfExerciseDay(badZoneExercise, Facts(storedZone), Utc(2026, 10, 14, 12), 3, badZoneLogger);
+        ParticipantSessionCap.EndOfExerciseDay(missingExercise, null, Utc(2026, 10, 14, 12), 9, missingRowLogger);
+
+        var badZone = badZoneLogger.Warnings.Should().ContainSingle().Which;
+        badZone.Should().Contain(badZoneExercise.ToString()).And.Contain("time zone").And.Contain("UTC day")
+            .And.Contain("rollover hour 3");
+        badZone.Should().NotContain(storedZone, "the stored value is never echoed into the log");
+        badZone.Should().NotContain("Mars");
+
+        var missingRow = missingRowLogger.Warnings.Should().ContainSingle().Which;
+        missingRow.Should().Contain(missingExercise.ToString()).And.Contain("no exercise row was found")
+            .And.Contain("UTC day").And.Contain("rollover hour 6", "the reported hour is the bounded one actually used");
+        missingRow.Should().NotBe(badZone, "the two causes read differently");
+    }
+
+    /// <summary>The end of the day for <paramref name="zone"/>; a <c>null</c> zone stands for an exercise row that could not be read.</summary>
     private static DateTimeOffset EndOfDay(string? zone, DateTimeOffset asOf, int rolloverHour) =>
-        ParticipantSessionCap.EndOfExerciseDay(Guid.NewGuid(), zone, asOf, rolloverHour, new RecordingLogger());
+        ParticipantSessionCap.EndOfExerciseDay(
+            Guid.NewGuid(), zone is null ? null : Facts(zone), asOf, rolloverHour, new RecordingLogger());
+
+    private static ExerciseFacts Facts(string zone) =>
+        new("Cap test", zone, "live", Organization.DefaultOrganizationId, StoredScenarioTime: null);
 
     /// <summary>Records the formatted warnings it receives.</summary>
     private sealed class RecordingLogger : ILogger
