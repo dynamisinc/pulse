@@ -1,6 +1,6 @@
 # Story: Participant tokens survive a closed tab
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-012, NFR-004, NFR-009  ·  **Design decisions:** none (EL-10)  ·  **Issue:** #472
 **Stack:** frontend  ·  **Review:** Tier-2 (changes where credentials live in the browser)  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** M
 

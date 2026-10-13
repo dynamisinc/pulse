@@ -1,6 +1,6 @@
 # Story: Link cards and QR codes
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** COR-011, COR-017 (part: handing out credentials at StartEx)  ·  **Design decisions:** none (EL-5, EL-6, EL-12)  ·  **Issue:** #469
 **Stack:** backend  ·  **Review:** Tier-1 (staff-only; reveals credentials in bulk, so isolation and `no-store` are checked at Gate 1)  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** S
 

@@ -1,6 +1,6 @@
 # Story: Day-long participant sessions
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** COR-012 (refined, not relaxed)  ·  **Design decisions:** none (EL-10, EL-11)  ·  **Issue:** #471
 **Stack:** backend  ·  **Review:** Tier-2 (changes how long a credential stays live)  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** S
 
