@@ -25,14 +25,33 @@
  *   - RESPONSE interceptor: on a 401, with a stored refresh token, attempts
  *     EXACTLY ONE silent `POST /auth/refresh` and retries the ORIGINAL
  *     request once on success, with the rotated token attached. A refresh
- *     failure (401 or a network error) clears both tokens and the original
- *     401 propagates — no retry loop. `/auth/refresh`, `/auth/logout`, and
- *     the three login endpoints are excluded from ever TRIGGERING this path,
- *     so a failing refresh can't recursively retrigger itself, a logout 401
- *     can never spin up a refresh (explicit, not left emergent), and a
- *     bad-credentials login 401 is never misread as an expired session.
- *     Concurrent 401s coalesce onto a single in-flight refresh call (never
- *     more than one outstanding `POST /auth/refresh` at a time).
+ *     failure (401 or a network error) clears BOTH token stores and the
+ *     original 401 propagates — no retry loop. `/auth/refresh`, `/auth/logout`,
+ *     the three login endpoints and the two participant easy-login endpoints
+ *     (`/auth/join`, `/auth/word`) are excluded from ever TRIGGERING this
+ *     path, so a failing refresh can't recursively retrigger itself, a logout
+ *     401 can never spin up a refresh (explicit, not left emergent), and a
+ *     rejected credential, link or word is never misread as an expired
+ *     session. Concurrent 401s coalesce onto a single in-flight refresh call
+ *     (never more than one outstanding `POST /auth/refresh` per tab).
+ *
+ * TOKEN STORE AND TABS (easy-login story 07, EL-10). A participant's tokens
+ * live in `localStorage` (shared by every tab), a staff user's in
+ * `sessionStorage`; see `core/auth/tokenStore`. The silent refresh therefore:
+ *   - stores the rotated pair in the SAME store the current pair lives in
+ *     (`isPersistentSession()`), with no option passed by any caller;
+ *   - runs under a Web Lock (`navigator.locks`), so two tabs that 401 together
+ *     make ONE refresh call: the second waits, finds the stored access token
+ *     is no longer the one its request was rejected with, and ADOPTS the pair
+ *     the first tab already rotated instead of presenting a spent refresh
+ *     token (which the server would refuse, and which used to sign BOTH tabs
+ *     out via `clearTokens()`);
+ *   - where the Locks API is absent (jsdom, very old browsers) it still adopts
+ *     if it can, and a refresh that FAILS re-reads the stored refresh token
+ *     before giving up: if another tab changed it since this attempt began,
+ *     it retries ONCE with the new value instead of clearing;
+ *   - never writes over, or clears, a sign-in/sign-out this tab performed while
+ *     its refresh call was in flight (`getTokenGeneration()`).
  *
  * DELIBERATELY depends on `core/auth/tokenStore` ONLY — a dependency-free
  * leaf module — never on `core/auth/sessionResolver` or `session.tsx`, so
@@ -44,7 +63,14 @@
  * No token is ever logged (console or otherwise) by this module.
  */
 import axios, { type AxiosRequestConfig, type InternalAxiosRequestConfig } from 'axios'
-import { getAccessToken, getRefreshToken, setTokens, clearTokens } from '../auth/tokenStore'
+import {
+  getAccessToken,
+  getRefreshToken,
+  setTokens,
+  clearTokens,
+  isPersistentSession,
+  getTokenGeneration,
+} from '../auth/tokenStore'
 
 /**
  * Internal per-request flags this module attaches to a config object. Not
@@ -102,10 +128,12 @@ api.interceptors.request.use(config => {
  * Endpoints that must NEVER trigger the silent-refresh retry: the refresh
  * endpoint itself (so a failing refresh can't recursively retrigger a
  * refresh), the logout endpoint (explicit rather than emergent — a 401 there
- * must never spin up a refresh either), and the three login endpoints (a
+ * must never spin up a refresh either), the three login endpoints (a
  * bad-credentials 401 there is not an expired session — see the three login
  * endpoints' shared envelope, docs/features/login/implementation.md's reuse
- * map).
+ * map) and the two easy-login participant sign-ins, `/auth/join` (personal
+ * link) and `/auth/word` (sign-in name + day word): a rejected link or word
+ * is a failed sign-in, never an expired session, and must not be retried.
  */
 const NO_REFRESH_RETRY_PATHS = new Set([
   '/auth/refresh',
@@ -113,6 +141,8 @@ const NO_REFRESH_RETRY_PATHS = new Set([
   '/auth/login',
   '/auth/staff/login',
   '/auth/shared',
+  '/auth/join',
+  '/auth/word',
 ])
 
 function isExcludedFromRefresh(url: string | undefined): boolean {
@@ -128,21 +158,54 @@ interface RefreshResponseBody {
 /** A single in-flight refresh call, COALESCED across concurrent 401s. */
 let refreshInFlight: Promise<string | null> | null = null
 
-/**
- * Performs the silent refresh: `POST /auth/refresh` with the stored refresh
- * token. Stores the rotated tokens and returns the new access token on
- * success; clears both tokens and returns `null` on any failure (no stored
- * refresh token, a request failure, or a malformed response) — fail-closed,
- * and never attempts the network call at all when there is no refresh token
- * to present.
- */
-async function performSilentRefresh(): Promise<string | null> {
-  const refreshToken = getRefreshToken()
-  if (!refreshToken) {
-    clearTokens()
-    return null
-  }
+/** The Web Lock every tab's refresh runs under (one holder at a time, origin-wide). */
+const REFRESH_LOCK_NAME = 'pulse.auth.refresh'
 
+/**
+ * Runs `work` under the origin-wide refresh Web Lock, so tabs sharing
+ * `localStorage` refresh ONE AT A TIME. Feature-detects `navigator.locks`
+ * (absent in jsdom and older browsers) and degrades to running `work`
+ * directly; also degrades if the lock request itself is refused before
+ * `work` started (e.g. an opaque origin). `work` must not throw (the refresh
+ * attempts below catch everything); if it somehow does after starting, that
+ * error propagates untouched rather than being run a second time.
+ */
+async function runUnderRefreshLock<T>(work: () => Promise<T>): Promise<T> {
+  const locks: LockManager | undefined =
+    typeof navigator === 'undefined' ? undefined : navigator.locks
+  if (!locks || typeof locks.request !== 'function') {
+    return work()
+  }
+  let started = false
+  try {
+    return (await locks.request(REFRESH_LOCK_NAME, () => {
+      started = true
+      return work()
+    })) as T
+  } catch (error) {
+    if (started) throw error
+    return work()
+  }
+}
+
+/** The outcome of one `POST /auth/refresh` attempt. */
+type RotationResult =
+  | { readonly kind: 'rotated'; readonly token: string }
+  /** Refused, network error, or a malformed response: fail closed. */
+  | { readonly kind: 'failed' }
+  /** This tab signed in or out while the call was in flight; its result is stale. */
+  | { readonly kind: 'superseded' }
+
+/**
+ * One `POST /auth/refresh` with `refreshToken`. On success stores the rotated
+ * pair in the SAME store the current pair lives in (never chosen by a caller).
+ * Never throws and never clears anything: the caller decides what a failure
+ * means.
+ */
+async function rotate(refreshToken: string): Promise<RotationResult> {
+  const persist = isPersistentSession()
+  const generation = getTokenGeneration()
+  let rotated: RefreshResponseBody | null
   try {
     // `_pulseSkipAuthAttach`: the backend reads the refresh token from the
     // BODY, never the Authorization header — presenting the (possibly
@@ -155,27 +218,82 @@ async function performSilentRefresh(): Promise<string | null> {
       { refreshToken },
       refreshRequestConfig,
     )
-    const { token, refreshToken: rotatedRefreshToken } = response.data
-    if (!token || !rotatedRefreshToken) {
-      clearTokens()
-      return null
-    }
-    setTokens({ token, refreshToken: rotatedRefreshToken })
-    return token
+    rotated = response.data
   } catch {
+    rotated = null
+  }
+
+  // Signed out (or in as someone else) in THIS tab while the call was in
+  // flight: writing the rotated pair would resurrect the old session, and
+  // clearing on a failure would wipe the new one. Leave the store alone.
+  if (getTokenGeneration() !== generation) return { kind: 'superseded' }
+
+  const token = rotated?.token
+  const rotatedRefreshToken = rotated?.refreshToken
+  if (!token || !rotatedRefreshToken) return { kind: 'failed' }
+  setTokens({ token, refreshToken: rotatedRefreshToken }, { persist })
+  return { kind: 'rotated', token }
+}
+
+/**
+ * Performs the silent refresh (always called under the refresh lock where the
+ * Locks API exists). `rejectedToken` is the access token the 401'd request was
+ * SENT with.
+ *
+ *  1. ADOPT: if the stored access token is no longer `rejectedToken`, another
+ *     tab (or an earlier refresh in this one) already rotated the pair; hand
+ *     back the stored token without calling the server.
+ *  2. Otherwise `POST /auth/refresh` with the stored refresh token and store
+ *     the rotated pair in the same store (see `rotate`).
+ *  3. On a failure, re-read the stored refresh token. If it CHANGED since the
+ *     attempt began (another tab rotated it without our noticing: the no-Locks
+ *     path), retry ONCE with the new value instead of clearing.
+ *  4. Any remaining failure (no refresh token, a refused/failed call, a
+ *     malformed response) clears BOTH stores and returns `null` — fail-closed.
+ *     No network call is made at all when there is no refresh token to present.
+ */
+async function performSilentRefresh(rejectedToken: string | null): Promise<string | null> {
+  const current = getAccessToken()
+  if (current !== null && current !== rejectedToken) {
+    return current
+  }
+
+  const refreshToken = getRefreshToken()
+  if (!refreshToken) {
     clearTokens()
     return null
   }
+
+  const first = await rotate(refreshToken)
+  if (first.kind === 'rotated') return first.token
+  if (first.kind === 'superseded') return null
+
+  const latest = getRefreshToken()
+  if (latest !== null && latest !== refreshToken) {
+    const second = await rotate(latest)
+    if (second.kind === 'rotated') return second.token
+    if (second.kind === 'superseded') return null
+  }
+
+  clearTokens()
+  return null
 }
 
 /** Coalesces concurrent 401s onto a single in-flight `performSilentRefresh()` call. */
-function silentRefresh(): Promise<string | null> {
+function silentRefresh(rejectedToken: string | null): Promise<string | null> {
   if (!refreshInFlight) {
-    refreshInFlight = performSilentRefresh().finally(() => {
-      refreshInFlight = null
-    })
+    refreshInFlight = runUnderRefreshLock(() => performSilentRefresh(rejectedToken))
+      .finally(() => {
+        refreshInFlight = null
+      })
   }
   return refreshInFlight
+}
+
+/** The bearer token a request was SENT with, or `null` if it carried none. */
+function sentBearerToken(config: InternalAxiosRequestConfig): string | null {
+  const header: unknown = config.headers.get('Authorization')
+  return typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : null
 }
 
 api.interceptors.response.use(
@@ -191,7 +309,7 @@ api.interceptors.response.use(
     }
     config._pulseRefreshRetried = true
 
-    return silentRefresh().then(newToken => {
+    return silentRefresh(sentBearerToken(config)).then(newToken => {
       if (!newToken) {
         return Promise.reject(error)
       }
