@@ -33,6 +33,11 @@ describe('validateRosterForm', () => {
     expect(validateRosterForm({ ...valid, email: 'jane' }).email).toMatch(/valid email/i)
     expect(validateRosterForm({ ...valid, email: 'jane@fulco' }).email).toMatch(/valid email/i)
     expect(validateRosterForm({ ...valid, email: 'a b@c.d' }).email).toMatch(/valid email/i)
+    // The server refuses angle brackets (RosterRowRules.EmailPattern): so does the form.
+    expect(validateRosterForm({ ...valid, email: 'a<b>@x.test' }).email).toMatch(/valid email/i)
+    expect(validateRosterForm({ ...valid, email: 'Jane<jane@fulco.gov>' }).email).toMatch(/valid email/i)
+    expect(validateRosterForm({ ...valid, email: 'jane@fulco<.gov' }).email).toMatch(/valid email/i)
+    expect(validateRosterForm({ ...valid, email: 'jane@fulco.gov>' }).email).toMatch(/valid email/i)
     expect(validateRosterForm({ ...valid, email: `${'a'.repeat(250)}@x.io` }).email).toMatch(/valid email/i)
   })
 

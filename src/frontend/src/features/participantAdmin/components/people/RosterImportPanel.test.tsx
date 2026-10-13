@@ -112,6 +112,36 @@ describe('RosterImportPanel — structure', () => {
     expect(rules).toHaveTextContent(/never update each other/i)
     expect(rules).toHaveTextContent(/duplicate of the first/i)
   })
+
+  it('states the Gate-2 rules in plain words: ambiguity, the same-file guards, personas, notes, CSV', async () => {
+    const { user } = await renderPanel()
+    const rules = screen.getByTestId('roster-import-rules')
+    await user.click(within(rules).getByText('How the file is read'))
+
+    // A key that names more than one person fails rather than guess.
+    expect(rules).toHaveTextContent(/more than one person already on the roster/i)
+    expect(rules).toHaveTextContent(/matches more than one person on the roster/i)
+    expect(rules).toHaveTextContent(/add a sign-in name to say\s+which one you mean/i)
+    // Guard (2): a name-only row beside a keyed row of the same name and agency.
+    expect(rules).toHaveTextContent(/same name and agency as row N/)
+    expect(rules).toHaveTextContent(/add a\s+sign-in name or email to the plain row/i)
+    // Guard (4): one email per file.
+    expect(rules).toHaveTextContent(/email\s+also on row N/)
+    expect(rules).toHaveTextContent(/never end up sharing an address/i)
+    // Guards (1) and (3): two rows reaching one person; the earlier row counts even if it failed.
+    expect(rules).toHaveTextContent(/duplicate of row N \(same\s+person\)/)
+    expect(rules).toHaveTextContent(/earlier row counts even if it failed/i)
+    // A person with no persona gets one; a lost persona is re-created.
+    expect(rules).toHaveTextContent(/people with no persona get one/i)
+    expect(rules).toHaveTextContent(/persona\s+created/)
+    expect(rules).toHaveTextContent(/persona re-created/)
+    // An unused sign-in name is ignored, and the row says so.
+    expect(rules).toHaveTextContent(/that person keeps\s+the sign-in name they already have/i)
+    expect(rules).toHaveTextContent(/signInName .* ignored: this person signs in as/)
+    // A newline inside a quoted cell is not supported.
+    expect(rules).toHaveTextContent(/line break inside a quoted cell is not\s+supported/i)
+    expect(rules).toHaveTextContent(/plain CSV/)
+  })
 })
 
 describe('RosterImportPanel — pre-upload checks (the server\'s wording)', () => {
@@ -310,7 +340,10 @@ describe('RosterImportPanel — a 400', () => {
 
     const alert = await screen.findByTestId('roster-import-server-error')
     expect(alert).toHaveAttribute('role', 'alert')
-    expect(alert).toHaveTextContent('The file could not be imported: the CSV header must include a "name" column.')
+    // The server's exact sentence (RosterCsvParser.NoNameColumnError), alias included.
+    expect(alert).toHaveTextContent(
+      'The file could not be imported: the CSV header must include a "name" column (or its alias "displayName").',
+    )
     expect(screen.queryByTestId('roster-import-rows')).not.toBeInTheDocument()
   })
 
