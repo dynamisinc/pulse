@@ -34,10 +34,17 @@
  *    429 -> its own copy; network / 5xx / 400 / malformed -> the generic
  *    "Could not sign in" copy; focus lands on a usable control, not <body>.
  *  - 09-AC5: Password and View-only code still behave as before but now persist.
+ *    Gate-1 W-1: the view-only form uses one name throughout - field label
+ *    "View-only code", form name "Sign in with a view-only code", 401
+ *    "That view-only code wasn't recognized." - and nothing says "Exercise code".
  *  - 09-AC6: the exercise heading and the staff link are untouched (the
  *    story-02/04 tests below still run against the default view).
  *  - Content security (NFR-004 / NFR-009): the word and name never reach the
- *    console, the URL or the alert text.
+ *    console, the URL or the alert text; every form is `method="post"` so a
+ *    native (script-less) submit can never put credentials in a GET query
+ *    (Gate-1 S-6).
+ *  - Status announcement (Gate-1 S-4): the `role="status"` region is mounted
+ *    all the time, empty when idle, and only its text swaps to "Signing in…".
  *
  * `@/core/services/api` is mocked at the module boundary (never a real axios
  * sink — the repo's own worker-teardown footgun). `@/core/config/mockData` is
@@ -173,7 +180,7 @@ async function submitWordFormLosingFocusInFlight(
     }),
   )
   await submitWordForm(user, 'dreyes', 'bluebird')
-  await screen.findByRole('status')
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Signing in…'))
   screen.getByLabelText('Sign-in name').focus()
   expect(screen.getByLabelText('Sign-in name')).toHaveFocus()
   rejectRequest(error)
@@ -227,7 +234,7 @@ describe('ParticipantSignInPage — three methods, Today\'s word is the default 
     expect(screen.getByLabelText("Today's word")).toBeInTheDocument()
     expect(screen.queryByLabelText('Handle')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Exercise code')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('View-only code')).not.toBeInTheDocument()
   })
 
   it('clicking Password swaps to the named-account form and moves aria-pressed', async () => {
@@ -255,7 +262,7 @@ describe('ParticipantSignInPage — three methods, Today\'s word is the default 
 
     await openViewOnlyForm(user)
 
-    expect(screen.getByLabelText('Exercise code')).toBeInTheDocument()
+    expect(screen.getByLabelText('View-only code')).toBeInTheDocument()
     expect(screen.queryByLabelText('Handle')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument()
     expect(screen.queryByLabelText("Today's word")).not.toBeInTheDocument()
@@ -273,7 +280,7 @@ describe('ParticipantSignInPage — three methods, Today\'s word is the default 
     await user.click(screen.getByRole('button', { name: "Today's word" }))
 
     expect(screen.getByLabelText("Today's word")).toBeInTheDocument()
-    expect(screen.queryByLabelText('Exercise code')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('View-only code')).not.toBeInTheDocument()
   })
 
   it('is operable from the keyboard alone: Tab reaches each toggle, Enter / Space activate it', async () => {
@@ -295,7 +302,7 @@ describe('ParticipantSignInPage — three methods, Today\'s word is the default 
     await user.tab()
     expect(viewOnlyToggle).toHaveFocus()
     await user.keyboard(' ')
-    expect(screen.getByLabelText('Exercise code')).toBeInTheDocument()
+    expect(screen.getByLabelText('View-only code')).toBeInTheDocument()
     expect(viewOnlyToggle).toHaveAttribute('aria-pressed', 'true')
   })
 
@@ -323,7 +330,7 @@ describe('ParticipantSignInPage — three methods, Today\'s word is the default 
     const viewOnlyToggle = screen.getByRole('button', { name: 'View-only code' })
     viewOnlyToggle.focus()
     await user.keyboard('{Enter}')
-    await user.type(screen.getByLabelText('Exercise code'), 'shared-1')
+    await user.type(screen.getByLabelText('View-only code'), 'shared-1')
 
     // ...and back round again: nothing was lost in any form.
     screen.getByRole('button', { name: "Today's word" }).focus()
@@ -338,7 +345,7 @@ describe('ParticipantSignInPage — three methods, Today\'s word is the default 
 
     screen.getByRole('button', { name: 'View-only code' }).focus()
     await user.keyboard('{Enter}')
-    expect(screen.getByLabelText('Exercise code')).toHaveValue('shared-1')
+    expect(screen.getByLabelText('View-only code')).toHaveValue('shared-1')
   })
 
   it('switching methods clears a showing error (and the error does not follow you back)', async () => {
@@ -705,7 +712,7 @@ describe('ParticipantSignInPage — View-only code sign-in stores tokens (persis
     renderPage()
 
     await openViewOnlyForm(user)
-    await user.type(screen.getByLabelText('Exercise code'), 'shared-code-123')
+    await user.type(screen.getByLabelText('View-only code'), 'shared-code-123')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
     expect(mockPost).toHaveBeenCalledWith('/auth/shared', { password: 'shared-code-123' })
@@ -746,12 +753,13 @@ describe('ParticipantSignInPage — 401 anti-enumeration handling on the older f
     renderPage()
 
     await openViewOnlyForm(user)
-    await user.type(screen.getByLabelText('Exercise code'), 'wrong-code')
+    await user.type(screen.getByLabelText('View-only code'), 'wrong-code')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent("That exercise code wasn't recognized.")
-    expect(screen.getByLabelText('Exercise code')).toHaveValue('')
+    expect(alert).toHaveTextContent("That view-only code wasn't recognized.")
+    expect(alert).not.toHaveTextContent(/exercise code/i)
+    expect(screen.getByLabelText('View-only code')).toHaveValue('')
     expect(mockSetTokens).not.toHaveBeenCalled()
     expect(mockNavigate).not.toHaveBeenCalled()
   })
@@ -868,21 +876,47 @@ describe('ParticipantSignInPage — staff link (feature: login, story 04, AC2)',
   })
 })
 
-describe('ParticipantSignInPage — submit-in-flight is announced (aria-live)', () => {
-  it('Today\'s word: mounts a role="status" aria-live="polite" region reading "Signing in…" while in flight', async () => {
+describe('ParticipantSignInPage — submit-in-flight is announced (aria-live; Gate-1 S-4)', () => {
+  it('has the role="status" aria-live="polite" region mounted from the start, and EMPTY while idle', () => {
+    renderPage()
+
+    const status = screen.getByRole('status')
+    expect(status).toHaveAttribute('aria-live', 'polite')
+    expect(status).toBeEmptyDOMElement()
+  })
+
+  it('Today\'s word: the SAME region swaps its text to "Signing in…" while in flight', async () => {
     mockPost.mockReturnValue(new Promise(() => {})) // never resolves
     const user = userEvent.setup()
     renderPage()
+    const statusBefore = screen.getByRole('status')
 
     await submitWordForm(user)
 
-    const status = await screen.findByRole('status')
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Signing in…'))
+    const status = screen.getByRole('status')
+    // Not a freshly inserted node: a live region that already existed is what
+    // screen readers announce changes to.
+    expect(status).toBe(statusBefore)
     expect(status).toHaveAttribute('aria-live', 'polite')
-    expect(status).toHaveTextContent('Signing in…')
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeDisabled()
   })
 
-  it('Password: mounts the same in-flight region and disables the submit button', async () => {
+  it('the region empties again, still the same node, once the request settles', async () => {
+    mockPost.mockRejectedValue(axiosErrorWith(500))
+    const user = userEvent.setup()
+    renderPage()
+    const statusBefore = screen.getByRole('status')
+
+    await submitWordForm(user)
+    await screen.findByRole('alert')
+
+    expect(screen.getByRole('status')).toBe(statusBefore)
+    await waitFor(() => expect(statusBefore).toBeEmptyDOMElement())
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+  })
+
+  it('Password: the same region announces "Signing in…" and the submit button is disabled', async () => {
     mockPost.mockReturnValue(new Promise(() => {})) // never resolves
     const user = userEvent.setup()
     renderPage()
@@ -892,9 +926,97 @@ describe('ParticipantSignInPage — submit-in-flight is announced (aria-live)', 
     await user.type(screen.getByLabelText('Password'), 'correct-password')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
-    const status = await screen.findByRole('status')
-    expect(status).toHaveAttribute('aria-live', 'polite')
-    expect(status).toHaveTextContent('Signing in…')
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Signing in…'))
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeDisabled()
+  })
+
+  it('View-only code: the same region announces "Signing in…" and the submit button is disabled', async () => {
+    mockPost.mockReturnValue(new Promise(() => {})) // never resolves
+    const user = userEvent.setup()
+    renderPage()
+
+    await openViewOnlyForm(user)
+    await user.type(screen.getByLabelText('View-only code'), 'shared-code-123')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Signing in…'))
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeDisabled()
+  })
+})
+
+describe('ParticipantSignInPage — one credential, one name (Gate-1 W-1)', () => {
+  it('the view-only form is "Sign in with a view-only code" with a "View-only code" field', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await openViewOnlyForm(user)
+
+    expect(
+      screen.getByRole('form', { name: 'Sign in with a view-only code' }),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('View-only code')).toHaveAttribute('type', 'password')
+  })
+
+  it('"Exercise code" appears nowhere on the page, on any of the three methods', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    expect(document.body).not.toHaveTextContent(/exercise code/i)
+    await openPasswordForm(user)
+    expect(document.body).not.toHaveTextContent(/exercise code/i)
+    await openViewOnlyForm(user)
+    expect(document.body).not.toHaveTextContent(/exercise code/i)
+    expect(screen.queryByLabelText('Exercise code')).not.toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: /exercise code/i })).not.toBeInTheDocument()
+  })
+
+  it('the toggle, the field and the 401 message all say "view-only code"', async () => {
+    mockPost.mockRejectedValue(axiosErrorWith(401))
+    const user = userEvent.setup()
+    renderPage()
+
+    await openViewOnlyForm(user)
+    await user.type(screen.getByLabelText('View-only code'), 'wrong-code')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "That view-only code wasn't recognized.",
+    )
+  })
+})
+
+describe('ParticipantSignInPage — a native submit can never put credentials in the URL (Gate-1 S-6)', () => {
+  it("Today's word form is method=\"post\"", () => {
+    renderPage()
+
+    expect(screen.getByRole('form', { name: "Sign in with today's word" })).toHaveAttribute(
+      'method',
+      'post',
+    )
+  })
+
+  it('Password form is method="post"', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await openPasswordForm(user)
+
+    expect(screen.getByRole('form', { name: 'Sign in with your account' })).toHaveAttribute(
+      'method',
+      'post',
+    )
+  })
+
+  it('View-only code form is method="post"', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await openViewOnlyForm(user)
+
+    expect(screen.getByRole('form', { name: 'Sign in with a view-only code' })).toHaveAttribute(
+      'method',
+      'post',
+    )
   })
 })

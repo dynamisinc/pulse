@@ -36,8 +36,11 @@
  *     dev build or when `VITE_USE_MOCK_DATA=true`; a production build without
  *     the flag FAILS CLOSED to the real endpoint (COR-001). Flip to live = no
  *     consumer change. THE MOCK'S RULES (demo config, not product copy):
- *       * the word `demo-word` (compared after trimming) with any non-blank
- *         sign-in name -> 200 with a canned mock-participant envelope;
+ *       * the word `demo-word` with any non-blank sign-in name -> 200 with a
+ *         canned mock-participant envelope. The word is compared the way the
+ *         real server will compare it (EL-9): NFKD, combining marks stripped,
+ *         lower-cased, only `a-z0-9` kept - so `Demo-Word`, `demoword` and
+ *         `  DEMO word ` all sign in, as they would against the real route;
  *       * ANYTHING ELSE (wrong word, blank name, unparseable body) -> 401 with
  *         no detail, exactly like the real route;
  *       * the sentinel `slow` — as the sign-in name OR the word (trimmed,
@@ -54,7 +57,9 @@
  * word (NFKD, accents stripped, lower-case, `a-z0-9` only) before hashing; this
  * seam therefore sends the sign-in name and word EXACTLY AS GIVEN. The page
  * trims surrounding whitespace and does nothing else — no case-folding, no
- * stripping — and this module does not even trim.
+ * stripping — and this module does not even trim. (Only the MOCK adapter
+ * applies the rule, privately, so the demo accepts what the real server
+ * would.)
  *
  * ERROR TRANSLATION mirrors `staffAssignmentsService.ts`'s
  * `StaffAssignmentError` precedent: `ParticipantSignInError` carries a
@@ -273,7 +278,11 @@ export async function signInWithSharedCode(
 // Today's word (easy-login story 09): `POST /auth/word`, mock-first.
 // ---------------------------------------------------------------------------
 
-/** The one word the mock accepts (compared after trimming). Demo config. */
+/**
+ * The one word the mock accepts. Demo config. It is compared AFTER the EL-9
+ * normalisation (see `normaliseDayWord`), so any spelling that normalises to
+ * `demoword` signs in.
+ */
 export const MOCK_DAY_WORD = 'demo-word'
 
 /** How long the mock waits when the `slow` sentinel is typed (milliseconds). */
@@ -312,6 +321,23 @@ function readMockDayWordBody(data: unknown): { signInName: string; word: string 
   }
 }
 
+/**
+ * The EL-9 day-word normalisation, exactly as the server applies it before
+ * hashing: NFKD, strip combining marks (accents), lower-case, keep only ASCII
+ * `a-z0-9`. Marks are stripped BEFORE lower-casing so a letter such as `İ`
+ * (which lower-cases to `i` + a combining dot) ends up as plain `i`.
+ * MOCK-ONLY: the real client never normalises (the server's job).
+ */
+function normaliseDayWord(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+const NORMALISED_MOCK_DAY_WORD = normaliseDayWord(MOCK_DAY_WORD)
+
 function isSlowSentinel(value: string): boolean {
   return value.trim().toLowerCase() === MOCK_SLOW_SENTINEL
 }
@@ -329,7 +355,7 @@ const mockDayWordAdapter: AxiosAdapter = async config => {
     await new Promise<void>(resolve => setTimeout(resolve, MOCK_SLOW_DELAY_MS))
   }
 
-  if (word.trim() === MOCK_DAY_WORD && signInName.trim().length > 0) {
+  if (normaliseDayWord(word) === NORMALISED_MOCK_DAY_WORD && signInName.trim().length > 0) {
     return { data: MOCK_DAY_WORD_ENVELOPE, status: 200, statusText: 'OK', headers: {}, config }
   }
 

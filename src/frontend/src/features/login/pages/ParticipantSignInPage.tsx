@@ -20,7 +20,11 @@
  *   - "View-only code" (was "Exercise code") — a single shared-password field ->
  *     `signInWithSharedCode()` -> `POST /auth/shared`. A SHARED, read-only
  *     session, which is why it is named for what it gives you and never
- *     sounds like "Today's word".
+ *     sounds like "Today's word". ONE CREDENTIAL, ONE NAME (Gate-1 W-1): the
+ *     toggle, the field label ("View-only code"), the form's accessible name
+ *     ("Sign in with a view-only code") and its 401 message all say
+ *     "view-only code"; the old "Exercise code" wording survives nowhere on
+ *     the page.
  * Each form keeps its OWN typed values (they live in page state, so switching
  * methods and coming back loses nothing) and switching clears any error. All
  * three endpoints return the SAME success envelope
@@ -39,7 +43,7 @@
  *
  * ANTI-ENUMERATION (NFR-009): a 401 from ANY endpoint renders exactly one
  * generic, form-specific message ("That handle or password wasn't
- * recognized." / "That exercise code wasn't recognized." / "That name or word
+ * recognized." / "That view-only code wasn't recognized." / "That name or word
  * wasn't recognized. Check today's word with your controller.") — this page
  * never distinguishes "no such handle" from "wrong password", or a wrong name
  * from a wrong word (it only branches on HTTP status via
@@ -92,7 +96,14 @@
  *    `features/staff/components/ExerciseSwitcher.tsx`'s `SwitcherAlert`
  *    idiom).
  *  - The submit-in-flight state is a `role="status"` / `aria-live="polite"`
- *    region (same idiom), mounted only while a request is outstanding.
+ *    region (same idiom). It is mounted ALL THE TIME and empty when idle, and
+ *    only its text swaps to "Signing in…" while a request is outstanding: a
+ *    live region that is inserted already holding its text is not reliably
+ *    announced, one that already exists and then changes is (Gate-1 S-4). The
+ *    CSS Module reserves its height so the swap never shifts the layout.
+ *  - Every form carries `method="post"`: if a form is ever submitted natively
+ *    (script failed to load, or fired before React attached) the credentials
+ *    go in a POST body, never in the URL query string of a GET (NFR-004).
  *
  * CONTENT SECURITY (NFR-004): the resolved exercise name renders as a plain
  * React text node inside the heading (`{...}`), which React escapes by
@@ -151,7 +162,7 @@ const WORD_UNAUTHORIZED_MESSAGE =
   "That name or word wasn't recognized. Check today's word with your controller."
 const WORD_RATE_LIMITED_MESSAGE = 'Too many tries. Wait a minute and try again.'
 const NAMED_UNAUTHORIZED_MESSAGE = "That handle or password wasn't recognized."
-const SHARED_UNAUTHORIZED_MESSAGE = "That exercise code wasn't recognized."
+const SHARED_UNAUTHORIZED_MESSAGE = "That view-only code wasn't recognized."
 const GENERIC_FAILURE_MESSAGE = 'Could not sign in. Please try again.'
 
 interface SignInFormError {
@@ -323,6 +334,7 @@ export function ParticipantSignInPage() {
           <form
             className={styles.form}
             aria-label="Sign in with today's word"
+            method="post"
             onSubmit={handleWordSubmit}
           >
             <div className={styles.field}>
@@ -377,6 +389,7 @@ export function ParticipantSignInPage() {
           <form
             className={styles.form}
             aria-label="Sign in with your account"
+            method="post"
             onSubmit={handleNamedSubmit}
           >
             <div className={styles.field}>
@@ -416,12 +429,13 @@ export function ParticipantSignInPage() {
         ) : (
           <form
             className={styles.form}
-            aria-label="Sign in with the shared exercise code"
+            aria-label="Sign in with a view-only code"
+            method="post"
             onSubmit={handleSharedSubmit}
           >
             <div className={styles.field}>
               <label htmlFor="participant-signin-shared-password" className={styles.label}>
-                Exercise code
+                View-only code
               </label>
               <input
                 id="participant-signin-shared-password"
@@ -447,11 +461,11 @@ export function ParticipantSignInPage() {
           </p>
         ) : null}
 
-        {isSubmitting ? (
-          <p role="status" aria-live="polite" className={styles.status}>
-            Signing in…
-          </p>
-        ) : null}
+        {/* Always mounted, empty when idle: only the text swaps, so a screen
+            reader announces "Signing in…" (S-4 — see module header). */}
+        <p role="status" aria-live="polite" className={styles.status}>
+          {isSubmitting ? 'Signing in…' : ''}
+        </p>
 
         {/* The one cross-world reference (AC2 — see module header). Visually
             subordinate to the forms above (small, muted, separated by a

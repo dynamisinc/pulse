@@ -15,8 +15,10 @@
  * live 401 would. No request ever leaves the process: the adapter answers.
  *
  * The mock's rules under test (also in the service header): the word
- * `demo-word` (after trimming) with a non-blank name -> a mock envelope;
- * anything else -> 401; the `slow` sentinel (as name or word) waits ~1.5 s.
+ * `demo-word`, compared after the EL-9 normalisation the real server applies
+ * (NFKD, marks stripped, lower-case, `a-z0-9` only; Gate-1 S-2), with a
+ * non-blank name -> a mock envelope; anything else -> 401; the `slow` sentinel
+ * (as name or word) waits ~1.5 s.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -63,6 +65,36 @@ describe('signInWithDayWord - mock adapter: the accepted word', () => {
     await expect(
       signInWithDayWord({ signInName: 'dreyes', word: '  demo-word  ' }),
     ).resolves.toMatchObject({ token: expect.any(String) })
+  })
+
+  // EL-9 / Gate-1 S-2: the mock accepts whatever the real server would, so a
+  // participant who types the word the way it was read out is not turned away
+  // in the demo and then accepted in production (or the reverse).
+  it.each([
+    ['different case', 'Demo-Word'],
+    ['all capitals', 'DEMO-WORD'],
+    ['no hyphen', 'demoword'],
+    ['a space instead of the hyphen', 'demo word'],
+    ['stray punctuation and spacing', '  DEMO - word! '],
+    ['accented letters (marks stripped)', 'démo-wörd'],
+    ['full-width letters (NFKD compatibility)', 'ｄｅｍｏ－ｗｏｒｄ'],
+    ['decomposed accents', 'de\u0301mo-wo\u0308rd'],
+  ])('signs in when the word is typed with %s', async (_label, word) => {
+    await expect(signInWithDayWord({ signInName: 'dreyes', word })).resolves.toMatchObject({
+      token: expect.any(String),
+    })
+  })
+
+  it.each([
+    ['a different letter', 'demo-wort'],
+    ['a digit for a letter', 'dem0-word'],
+    ['an extra letter', 'demo-words'],
+    ['a missing letter', 'demo-wor'],
+    ['only punctuation (normalises to nothing)', '---'],
+  ])('still refuses %s', async (_label, word) => {
+    const caught = await caughtFrom(signInWithDayWord({ signInName: 'dreyes', word }))
+
+    expect(isUnauthorizedSignInError(caught)).toBe(true)
   })
 
   it('accepts any non-blank name, including one that is not on any roster', async () => {

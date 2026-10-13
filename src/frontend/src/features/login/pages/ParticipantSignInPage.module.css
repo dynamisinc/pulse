@@ -71,6 +71,8 @@
 
 .heading {
   margin: 0;
+  /* "Sign in to {exercise name}": a long, unbroken name wraps, never overflows. */
+  overflow-wrap: anywhere;
   color: #10202e;
   font-size: 22px;
   font-weight: 700;
@@ -119,6 +121,17 @@
   outline-offset: 2px;
 }
 
+/* Forced-colors (Windows High Contrast): the box-shadow bar above is dropped and
+   backgrounds are overridden, which would leave the active method looking like
+   the other two. A real border survives, so the active one keeps a visible
+   3 px bar in the system text colour. (Border, not outline: the outline is the
+   focus ring.) */
+@media (forced-colors: active) {
+  .toggleButton[aria-pressed='true'] {
+    border-bottom: 3px solid CanvasText;
+  }
+}
+
 .form {
   display: flex;
   flex-direction: column;
@@ -143,7 +156,10 @@
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
-  border: 1px solid #cdd7de;
+  /* #7f8c98: 3.35:1 on the input fill (#fbfcfd) and 3.44:1 on the white card,
+     so the field edge meets WCAG 1.4.11 (>= 3:1) - the old #cdd7de was 1.42:1.
+     Pinned by ParticipantSignInPage.boundary.test.ts. */
+  border: 1px solid #7f8c98;
   border-radius: 8px;
   background: #fbfcfd;
   color: #10202e;
@@ -195,10 +211,15 @@
   overflow-wrap: anywhere;
 }
 
+/* Always mounted (empty when idle) so a screen reader announces its text when it
+   swaps to "Signing in…"; the height is RESERVED so that swap never shifts the
+   layout. */
 .status {
   margin: 0;
+  min-height: 1.4em;
   color: #4a5b68;
   font-size: 13px;
+  line-height: 1.4;
 }
 
 /* The one cross-world link (to /staff/login) — visually SUBORDINATE to the
@@ -208,7 +229,9 @@
   margin: 4px 0 0;
   padding-top: 12px;
   border-top: 1px solid #e5eaf0;
-  color: #7c8894;
+  /* #5f6b76: 5.45:1 on white (was #7c8894, 3.62:1 - below the 4.5:1 AA floor
+     for 12 px text). Pinned by ParticipantSignInPage.boundary.test.ts. */
+  color: #5f6b76;
   font-size: 12px;
   text-align: center;
 }

@@ -22,7 +22,15 @@
  *     toggle buttons / inputs / submit are at least 44 px tall, the page never
  *     uses `100vw` (the classic cause of horizontal scroll), has a narrow-phone
  *     media query, and the toggle has a visible keyboard focus ring.
- *  4. The Today's-word fields are `type="text"` in the JSX (the word is read off
+ *  4. CONTRAST, computed from the colours read off the stylesheet (never a
+ *     hand-typed ratio - `src/test/contrast.ts`): the small staff-link text is at
+ *     least 4.5:1 on the card (WCAG 1.4.3) and the input border at least 3:1
+ *     against both the input fill and the card (1.4.11) - Gate-1 W-2.
+ *  5. Forced-colors (Windows High Contrast) keeps a visible cue on the active
+ *     method, which the box-shadow bar cannot (S-1); long exercise names wrap
+ *     (S-3); the status region keeps a reserved height (S-4); every form is
+ *     `method="post"` (S-6); "Exercise code" no longer appears in the page (W-1).
+ *  6. The Today's-word fields are `type="text"` in the JSX (the word is read off
  *     a screen; a masked field only causes typos) with the attribute set the
  *     story lists - a second line of defence beside the RTL tests, on the
  *     source itself.
@@ -37,6 +45,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { readSrcFile } from '@/test/readSource'
+import { contrastRatio } from '@/test/contrast'
 
 const rawSources = import.meta.glob(
   ['./ParticipantSignInPage.tsx', '../services/participantSignInService.ts'],
@@ -94,6 +103,18 @@ function forbiddenImports(source: string): string[] {
 function ruleBlock(css: string, className: string): string {
   const match = new RegExp(`\\.${className}\\s*\\{([^}]*)\\}`).exec(css)
   return match?.[1] ?? ''
+}
+
+/**
+ * The `#rrggbb` value of `property` in a declaration block (a `1px solid` prefix, as on
+ * `border`, is skipped). Throws if absent: a guard must not guess.
+ */
+function hexValue(block: string, property: string): string {
+  const pattern = `(?:^|[;\\s])${property}\\s*:\\s*(?:1px solid\\s+)?(#[0-9a-fA-F]{6})\\b`
+  const match = new RegExp(pattern).exec(block)
+  const value = match?.[1]
+  if (value === undefined) throw new Error(`no #rrggbb ${property} in: ${block}`)
+  return value
 }
 
 /** The px value of `property` in a declaration block, or `undefined`. */
@@ -308,5 +329,95 @@ describe('ParticipantSignInPage boundary - mobile-first numbers (NFR-001, 09 tec
     ]) {
       expect(CSS_CODE, `.${className}`).toMatch(new RegExp(`\\.${className}\\s*[{:\\[]`))
     }
+  })
+})
+
+describe('ParticipantSignInPage boundary - contrast, computed off the stylesheet (WCAG 1.4.3 / 1.4.11, Gate-1 W-2)', () => {
+  const cardBackground = hexValue(ruleBlock(CSS_CODE, 'card'), 'background')
+
+  it('reads real colours (the guard is not vacuous)', () => {
+    expect(cardBackground).toBe('#ffffff')
+    expect(hexValue(ruleBlock(CSS_CODE, 'input'), 'background')).toMatch(/^#[0-9a-f]{6}$/i)
+  })
+
+  it('the "Staff or controller?" text is at least 4.5:1 on the card', () => {
+    const colour = hexValue(ruleBlock(CSS_CODE, 'staffLinkRow'), 'color')
+
+    expect(contrastRatio(colour, cardBackground)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('the input border is at least 3:1 against the input fill AND against the card', () => {
+    const inputBlock = ruleBlock(CSS_CODE, 'input')
+    const border = hexValue(inputBlock, 'border')
+    const fill = hexValue(inputBlock, 'background')
+
+    expect(contrastRatio(border, fill)).toBeGreaterThanOrEqual(3)
+    expect(contrastRatio(border, cardBackground)).toBeGreaterThanOrEqual(3)
+  })
+
+  it.each([
+    ['staffLink', 'color'],
+    ['status', 'color'],
+    ['label', 'color'],
+    ['heading', 'color'],
+  ])('.%s text is at least 4.5:1 on the card', (className, property) => {
+    const colour = hexValue(ruleBlock(CSS_CODE, className), property)
+
+    expect(contrastRatio(colour, cardBackground)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('the submit button text is at least 4.5:1 on its fill, and the alert text on its fill', () => {
+    const submit = ruleBlock(CSS_CODE, 'submitButton')
+    expect(contrastRatio(hexValue(submit, 'color'), hexValue(submit, 'background'))).toBeGreaterThanOrEqual(4.5)
+    const alert = ruleBlock(CSS_CODE, 'alert')
+    expect(contrastRatio(hexValue(alert, 'color'), hexValue(alert, 'background'))).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('the contrast helper bites: the OLD values (#7c8894 text, #cdd7de border) fail the same bars', () => {
+    expect(contrastRatio('#7c8894', '#ffffff')).toBeLessThan(4.5)
+    expect(contrastRatio('#cdd7de', '#fbfcfd')).toBeLessThan(3)
+  })
+})
+
+describe('ParticipantSignInPage boundary - Gate-1 folds (S-1, S-3, S-4, S-6, W-1)', () => {
+  it('S-1: forced-colors mode keeps a visible cue on the active method (a border, not the dropped box-shadow)', () => {
+    const forcedColors = new RegExp(
+      '@media\\s*\\(forced-colors:\\s*active\\)\\s*\\{\\s*' +
+        '\\.toggleButton\\[aria-pressed=\'true\'\\]\\s*\\{([^}]*)\\}',
+    )
+    const match = forcedColors.exec(CSS_CODE)
+    expect(match?.[1]).toBeDefined()
+    expect(match?.[1]).toMatch(/border-bottom:\s*3px solid CanvasText/)
+  })
+
+  it('S-3: the heading wraps a long exercise name', () => {
+    expect(ruleBlock(CSS_CODE, 'heading')).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+
+  it('S-4: the status region reserves its height so the text swap cannot shift the layout', () => {
+    expect(ruleBlock(CSS_CODE, 'status')).toMatch(/min-height:\s*1\.4em/)
+  })
+
+  it('S-4: the page mounts the status region unconditionally and swaps only its text', () => {
+    const statusElements = PAGE_CODE.match(/role="status"/g) ?? []
+    expect(statusElements).toHaveLength(1)
+    // Not `{isSubmitting ? (<p role="status" ...>) : null}` - the node must always exist.
+    expect(PAGE_CODE).not.toMatch(/\?\s*\(\s*<p[^>]*role="status"/)
+    expect(PAGE_CODE).toMatch(/\{isSubmitting \? 'Signing in…' : ''\}/)
+  })
+
+  it('S-6: all three forms are method="post"', () => {
+    const forms = Array.from(PAGE_CODE.matchAll(/<form\b[\s\S]*?>/g), match => match[0])
+    expect(forms).toHaveLength(3)
+    for (const form of forms) {
+      expect(form).toContain('method="post"')
+    }
+  })
+
+  it('W-1: no user-visible "Exercise code" wording is left in the page (comments excluded)', () => {
+    expect(PAGE_CODE).not.toMatch(/exercise code/i)
+    expect(PAGE_CODE).toContain('View-only code')
+    expect(PAGE_CODE).toContain('Sign in with a view-only code')
+    expect(PAGE_CODE).toContain("That view-only code wasn't recognized.")
   })
 })
