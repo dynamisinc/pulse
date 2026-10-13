@@ -2,9 +2,11 @@ namespace Pulse.WebApi.Features.Identity.Sessions;
 
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Identity.EasyLogin;
 
 /// <summary>
 /// The service behind the three session-lifecycle endpoints (story 03): <c>GET /api/session</c> (resolve the
@@ -30,6 +32,15 @@ using Pulse.WebApi.Data.Entities;
 /// <c>StaffLoginService</c>. The <c>session.expired</c> event is emitted only from <c>GET /api/session</c> (the
 /// bounded moment the client learns it must re-auth), never per-request in the middleware, to avoid spamming.
 /// </para>
+/// <para>
+/// <b>Participant day cap on refresh (easy-login story 06, EL-10, EL-11).</b> A <c>participant</c>-kind session's
+/// windows are recomputed on every refresh (see <see cref="ParticipantSessionCap"/>): the refresh window ends at the end
+/// of the CURRENT exercise day and the access expiry is <c>min(now + SessionLifetime, end of day)</c>, so a session can
+/// never slide into the next day. Once the day of the session's last issue or refresh has ended, refresh is the
+/// ordinary fail-closed 401 with no event. Refresh is deliberately NOT refused at EndEx (<c>completed</c>): the
+/// lifecycle gate already refuses participant data routes, and refusing refresh would bounce participants off the
+/// COR-054 EndEx overlay. Staff and read-only sessions renew exactly as before.
+/// </para>
 /// </remarks>
 public sealed class SessionService
 {
@@ -46,17 +57,39 @@ public sealed class SessionService
 
     private readonly PulseDbContext _dbContext;
     private readonly SessionOptions _options;
+    private readonly ExerciseFactsReader _exerciseFacts;
+    private readonly int _dayRolloverHour;
+    private readonly TimeProvider _timeProvider;
+    private readonly ILogger<SessionService> _logger;
 
-    /// <summary>Creates the service over its persistence context and the configured session lifetimes.</summary>
+    /// <summary>Creates the service over its persistence context, the configured session lifetimes and the day cap's inputs.</summary>
     /// <param name="dbContext">The persistence context the session mutation + its lifecycle event are written through.</param>
-    /// <param name="options">The short-lived session / refresh-window lifetimes used when renewing on refresh.</param>
-    public SessionService(PulseDbContext dbContext, IOptions<SessionOptions> options)
+    /// <param name="options">The short-lived session / refresh-window lifetimes used when renewing on refresh, and the participant day-cap switch.</param>
+    /// <param name="exerciseFacts">The easy-login exercise read (EL-17): the bound exercise's zone and stored scenario time on refresh.</param>
+    /// <param name="easyLoginOptions">The easy-login settings, for the exercise day's rollover hour.</param>
+    /// <param name="timeProvider">The server wall clock.</param>
+    /// <param name="logger">Logs the once-per-exercise time-zone fallback warning.</param>
+    public SessionService(
+        PulseDbContext dbContext,
+        IOptions<SessionOptions> options,
+        ExerciseFactsReader exerciseFacts,
+        IOptions<EasyLoginOptions> easyLoginOptions,
+        TimeProvider timeProvider,
+        ILogger<SessionService> logger)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(exerciseFacts);
+        ArgumentNullException.ThrowIfNull(easyLoginOptions);
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _dbContext = dbContext;
         _options = options.Value;
+        _exerciseFacts = exerciseFacts;
+        _dayRolloverHour = easyLoginOptions.Value.DayRolloverHour;
+        _timeProvider = timeProvider;
+        _logger = logger;
     }
 
     /// <summary>
@@ -85,7 +118,7 @@ public sealed class SessionService
             return SessionQueryResult.Absent();
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         if (session.IsLive(now))
         {
             return SessionQueryResult.Live(session);
@@ -107,8 +140,8 @@ public sealed class SessionService
     /// Renews a short-lived session for <c>POST /api/auth/refresh</c> from its refresh token, rotating BOTH
     /// tokens and preserving the exact binding (never re-scoping to a different exercise / account). Emits one
     /// <c>session.refreshed</c> XC-004 event in the same unit of work. Fails closed
-    /// (<see cref="RefreshOutcome.Invalid"/> → 401) on an absent/unknown refresh token, or one whose session is
-    /// revoked or whose refresh window has lapsed.
+    /// (<see cref="RefreshOutcome.Invalid"/> → 401, no event) on an absent/unknown refresh token, or one whose session
+    /// is revoked or whose refresh window has lapsed, or (a capped participant session) whose exercise day has ended.
     /// </summary>
     /// <param name="rawRefreshToken">The presented raw refresh token, or <c>null</c> when none.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -124,7 +157,7 @@ public sealed class SessionService
         var session = await _dbContext.Sessions
             .SingleOrDefaultAsync(s => s.RefreshTokenHash == refreshHash, cancellationToken);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         if (session is null ||
             session.RevokedAt is not null ||
             session.RefreshExpiresAt is null ||
@@ -134,18 +167,47 @@ public sealed class SessionService
             return RefreshResult.Invalid();
         }
 
+        // The bound exercise's facts: the ONE exercise read on this path, through the easy-login reader (EL-17), shared
+        // by the participant day cap (zone) and the session.refreshed envelope (stored scenario time + zone). The id is
+        // the server-issued session's own binding, so a session for exercise A is only ever capped by A's zone.
+        var facts = await _exerciseFacts.GetAsync(session.ExerciseId, cancellationToken);
+
+        DateTimeOffset? endOfExerciseDay = null;
+        if (ParticipantSessionCap.AppliesTo(session.Kind, _options))
+        {
+            // The session's day is the day of its last issue or refresh (IssuedAt). Recomputing that day's end from the
+            // zone, rather than trusting the stored window alone, means a window stamped under other rules (option off,
+            // or before the cap shipped) cannot carry the session into the next day either.
+            endOfExerciseDay = ParticipantSessionCap.EndOfExerciseDay(
+                session.ExerciseId,
+                facts?.TimeZone,
+                session.IssuedAt,
+                _dayRolloverHour,
+                _logger);
+
+            if (endOfExerciseDay.Value <= now)
+            {
+                // The exercise day is over → a full sign-in (tap the link again, or the new day's word). Same
+                // fail-closed 401 as a lapsed window, and no event.
+                return RefreshResult.Invalid();
+            }
+        }
+
         // Rotate both references (the old ones can no longer be replayed) and renew the windows. The binding is
         // PRESERVED verbatim — no field except the token hashes / timestamps is touched, so refresh can never
         // re-scope to a different exercise or account.
+        var windows = ParticipantSessionCap.Windows(now, endOfExerciseDay, _options);
         var newSessionToken = SessionTokens.Generate();
         var newRefreshToken = SessionTokens.Generate();
         session.TokenHash = SessionTokens.Hash(newSessionToken);
         session.RefreshTokenHash = SessionTokens.Hash(newRefreshToken);
         session.IssuedAt = now;
-        session.ExpiresAt = now + _options.SessionLifetime;
-        session.RefreshExpiresAt = now + _options.RefreshLifetime;
+        session.ExpiresAt = windows.ExpiresAt;
+        session.RefreshExpiresAt = windows.RefreshExpiresAt;
 
-        await EmitLifecycleEventAsync(session, SessionRefreshedEventType, now, cancellationToken);
+        // The same session.refreshed event as before, built from the facts already read (no second exercise read).
+        AddLifecycleEvent(session, SessionRefreshedEventType, now, facts?.StoredScenarioTime, facts?.TimeZone);
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return RefreshResult.Refreshed(session, newSessionToken, newRefreshToken);
     }
@@ -175,7 +237,7 @@ public sealed class SessionService
             return;
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         session.RevokedAt = now;
 
         await EmitLifecycleEventAsync(session, LogoutEventType, now, cancellationToken);
@@ -200,9 +262,23 @@ public sealed class SessionService
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == session.ExerciseId, cancellationToken);
 
-        var scenarioTime = exercise?.CurrentScenarioTime ?? now;
-        var timeZone = exercise?.TimeZone ?? FallbackTimeZone;
+        AddLifecycleEvent(session, eventType, now, exercise?.CurrentScenarioTime, exercise?.TimeZone);
 
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Stages one XC-004 session-lifecycle event against the locked v0 envelope (the caller saves it with its session
+    /// mutation). Scenario time is the bound exercise's stored scenario time, falling back to the wall clock; the zone
+    /// falls back to UTC when the exercise could not be read.
+    /// </summary>
+    private void AddLifecycleEvent(
+        Session session,
+        string eventType,
+        DateTimeOffset now,
+        DateTimeOffset? storedScenarioTime,
+        string? timeZone)
+    {
         _dbContext.TelemetryEvents.Add(new TelemetryEvent
         {
             EventId = Guid.NewGuid().ToString(),
@@ -212,12 +288,10 @@ public sealed class SessionService
             Channel = SystemChannel,
             Actor = BuildActor(session),
             WallClockTime = now,
-            ScenarioTime = scenarioTime,
-            TimeZone = timeZone,
+            ScenarioTime = storedScenarioTime ?? now,
+            TimeZone = timeZone ?? FallbackTimeZone,
             EmittedAt = now,
         });
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>
