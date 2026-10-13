@@ -104,3 +104,34 @@ Blocks stories 02, 03, 04, 05, 06 and 13.
 `RosterLinkDtoFactoryTests`, `EasyLoginRegistrationTests`. `Pulse.WebApi.Tests/Data/EasyLoginIsolationTests`
 (`[RequiresDockerFact]`, Testcontainers like its siblings) and `EasyLoginMigrationTests` (round-trip and
 idempotent script). `OrganizationScopeSweepTests` count bump (+1).
+
+### Test linkage
+
+AC numbers follow the order of the criteria above: AC-1 and AC-2 are the two Schema items, AC-3 is Isolation, AC-4
+is Frozen contract, AC-5 is Tokens, AC-6 is URLs and days, AC-7 is Exercise facts and telemetry, AC-8 is Sessions
+and gates, and AC-9 is the issuer, factory and registration item.
+
+- **AC-1** `EasyLoginMigrationTests.TheMigration_DirectlyFollowsThePreviousOne`,
+  `.Up_KeepsALegacyAccount_WithNullRosterColumns_AndItStillSignsInWithItsPassword`,
+  `.Up_CreatesTheColumnsWithTheStoryTypes`, `.TheModelSnapshot_MatchesTheModel_SoNoSchemaChangeIsPendingWithoutAMigration`,
+  `.TheDeployScript_AppliesItOverALegacyAccount_BatchByBatch_AndReplaysAsANoOp`.
+- **AC-2** `EasyLoginMigrationTests.Up_CreatesTheColumnsWithTheStoryTypes`, `.Up_CreatesTheThreeUniqueIndexes_ScopeLeading`,
+  `.UniqueIndexes_RefuseASecondLinkForAnAccount_ADuplicateTokenHash_AndASecondWordForADate`,
+  `.BothEntities_RoundTripEveryColumn`, `.Down_RemovesTheSchema_AndUpReappliesIt`; standing guards
+  `IdempotentMigrationScriptTests.*` and `MigrationRoundTripTests.*` stay green.
+- **AC-3** `EasyLoginIsolationTests.*` (by list, by id/IDOR, by the join's token-hash lookup, by aggregate, unset and
+  empty scope fail closed with the rows proven to exist, `IgnoreQueryFilters` control, write guard throws);
+  `QueryFilterModelTests.EveryExerciseScopedEntity_HasAGlobalQueryFilter` (two rows added); standing
+  `OrganizationScopeSweepTests`, `UnscopedIdentityEntityTests` green.
+- **AC-4** `EasyLoginDtoContractTests.*` (one test per frozen type, transcribed expected JSON; omission of optional
+  members; explicit camelCase names on every property; union literals; `LoginEnvelope` is the reused
+  `ParticipantLoginResponseDto`).
+- **AC-5** `ParticipantLinkTokensTests.*`, `ParticipantLinkTokenProtectorTests.*`.
+- **AC-6** `JoinUrlBuilderTests.*`, `ExerciseDayTests.*` (New York spring-forward and fall-back, Kolkata, Havana
+  missing midnight, rollover 0 and 3, unknown/blank zone, and a Today/EndOfDayUtc agreement sweep).
+- **AC-7** `ExerciseFactsReaderTests.*`, `OrganizationScopeSweepTests.TheExemptionInventory_IsPinned_SoANewUnboundedReadCannotSlipInSilently`
+  (`ResolvedScope` 23 to 24), `EasyLoginTelemetryTests.*`.
+- **AC-8** `ParticipantSessionRequestsTests.*` (including equivalence with `ParticipantLoginService` on real SQL),
+  `RosterStaffRoleFilterTests.*`.
+- **AC-9** `RosterLinkDtoFactoryTests.*`, `EasyLoginRegistrationTests.*` (including composition into the real
+  `Program` host and `ValidateOnStart`); the `QRCoder` 1.8.1 reference builds warning-free.
