@@ -42,7 +42,7 @@ The epics have no requirement text for personal links, day words or card sheets 
 | 03 | [Personal links: join, revoke, reissue, disable](03-personal-links.md) | backend | Must | 1 | 01 | In Progress | #468 |
 | 04 | [Link cards and QR codes](04-link-cards-and-qr.md) | backend | Must | 1 | 01 | In Progress | #469 |
 | 05 | [Day word: staff controls and word sign-in](05-day-word.md) | backend | Must | 1 | 01 | In Progress | #470 |
-| 06 | [Day-long participant sessions](06-day-long-sessions.md) | backend | Must | 1 | 01 | In Progress | #471 |
+| 06 | [Day-long participant sessions](06-day-long-sessions.md) | backend | Must | 1 | 01 | In Review | #471 |
 | 07 | [Participant tokens survive a closed tab](07-fe-token-persistence.md) | frontend | Must | 1 | contract | In Review | #472 |
 | 08 | [Join page: tap the link, you are in](08-fe-join-page.md) | frontend | Must | 2 | 07 | Not Started | #473 |
 | 09 | [Sign-in page: Today's word](09-fe-todays-word-sign-in.md) | frontend | Must | 2 | 07 | Not Started | #474 |
