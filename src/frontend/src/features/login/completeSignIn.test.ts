@@ -115,9 +115,51 @@ describe('completeSignIn - the three pages all finish through it', () => {
     expect(source).not.toMatch(/\bnavigate\(/)
   })
 
-  it('the participant pages persist and the staff page does not', () => {
-    expect(code(pages['./pages/JoinPage.tsx'] ?? '')).toMatch(/persist:\s*true/)
-    expect(code(pages['./pages/ParticipantSignInPage.tsx'] ?? '')).toMatch(/persist:\s*true/)
-    expect(code(pages['./pages/StaffSignInPage.tsx'] ?? '')).toMatch(/persist:\s*false/)
+  it('the participant pages persist and the staff page does not (read from the call itself)', () => {
+    // Anchored to the `completeSignIn(...)` call's own argument list, not the whole file: a page
+    // that merely MENTIONS `persist: true` elsewhere (a constant, a sibling call) must not pass.
+    const persistOf = (path: string): string | undefined =>
+      /\bpersist:\s*(true|false)\b/.exec(callArguments(code(pages[path] ?? ''), 'completeSignIn'))?.[1]
+
+    expect(persistOf('./pages/JoinPage.tsx')).toBe('true')
+    expect(persistOf('./pages/ParticipantSignInPage.tsx')).toBe('true')
+    expect(persistOf('./pages/StaffSignInPage.tsx')).toBe('false')
+  })
+
+  it('the call-anchored scan is not fooled by a `persist` that sits outside the call', () => {
+    const decoy = [
+      "import { completeSignIn } from '../completeSignIn'",
+      'const persist = { persist: true }',
+      'function finish() {',
+      '  completeSignIn(pair, { persist: false, navigate })',
+      '}',
+    ].join('\n')
+
+    expect(callArguments(decoy, 'completeSignIn')).toContain('persist: false')
+    expect(callArguments(decoy, 'completeSignIn')).not.toContain('persist: true')
+    // A name that is only imported, never called, has no arguments at all.
+    expect(callArguments("import { completeSignIn } from '../completeSignIn'", 'completeSignIn')).toBe('')
+    // Parentheses inside the arguments do not end the scan early.
+    expect(callArguments('completeSignIn(f(a), { persist: true }) ; g(persist: false)', 'completeSignIn'))
+      .toBe('f(a), { persist: true }')
   })
 })
+
+/**
+ * The text between the parentheses of the first CALL `name(...)` in `source` (balanced, so
+ * nested calls are included), or '' when it is never called. An import of the name has no
+ * `(` after it and so does not count.
+ */
+function callArguments(source: string, name: string): string {
+  const start = new RegExp(`\\b${name}\\(`).exec(source)
+  if (start === null) return ''
+  const open = start.index + start[0].length
+  let depth = 1
+  for (let index = open; index < source.length; index += 1) {
+    const char = source[index]
+    if (char === '(') depth += 1
+    else if (char === ')') depth -= 1
+    if (depth === 0) return source.slice(open, index)
+  }
+  return source.slice(open)
+}
