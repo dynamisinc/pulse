@@ -1,6 +1,6 @@
 # Story: Roster provisioning: CSV, add one, list, personas
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-011, COR-017 (part: roster and diagnosis view), COR-018 (org-persona binding at provisioning)  ·  **Design decisions:** none (EL-1 to EL-4, EL-13, EL-17)  ·  **Issue:** #467
 **Stack:** backend  ·  **Review:** Tier-1 (staff-only writes; isolation and content security checked at Gate 1)  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** L
 
@@ -40,12 +40,20 @@ the real one). The CSV columns, the derivation rules and the wire shapes are fro
       **`Castable = false`**, no bio) with a derived unique handle (`jane_smith`, then `_2`), `PersonaAutoCreated = true`,
       `ExerciseRole = participant`, and the row reports `personaCreated: true`. Two rows may name the same org
       handle: each keeps its own account and acting human (COR-018).
-- [ ] **Idempotent re-upload.** **Given** the same file posted again, **then** every row is `unchanged`: zero
-      accounts, personas, links or `roster.imported` rows are created. Rows are matched by identity key
-      (`signInName` > `email` > `name + agency`, case-insensitive). **Given** a changed agency, role, email, display
-      name (matched by sign-in name or email) or org-persona binding, **then** the row is `updated` and says what
-      changed. A blank cell never clears a stored value, and a blank `personaHandle` keeps the current persona. Two
-      rows in one file with the same key fail the later one with a message naming the earlier row.
+- [ ] **Idempotent re-upload.** **Given** the same file posted again, **then** every row that applied is `unchanged`
+      (a failed row fails again): zero accounts, personas, links or `roster.imported` rows are created. Rows are matched
+      by identity key, cascading `signInName` > `email` > `name + agency` (case-insensitive, whitespace-normalised),
+      against the participants that existed before the file. **Given** a changed agency, role, email, display name
+      (matched by sign-in name or email) or org-persona binding, **then** the row is `updated` and says what changed.
+      A blank cell never clears a stored value, and a blank `personaHandle` keeps the current persona; **a matched
+      participant with no persona at all (a legacy import) gets an auto-created citizen persona** (`Castable = false`,
+      handle derived as for a new row), the row is `updated` with `personaCreated: true`, and no link is issued for
+      them (staff reissue one, story 03). Same-file guards: two rows with the same first key fail the later one with a
+      message naming the earlier row; two rows that reach the **same existing** participant through any keys fail the
+      later one ("duplicate of row N (same person)"); and a row keyed by name + agency alone fails when another row of
+      the file has that name + agency with a `signInName` or `email` ("same name and agency as row N: add a signInName
+      or email to tell them apart"), on the first upload and on every re-upload. *(Amended after Gate-1: f07c1ea,
+      241b7d0.)*
 - [ ] **Given** `POST /api/staff/roster` with a `RosterRowWrite`, **then** it creates one participant the same way
       and answers `201 RosterEntryDto`; a key that already exists answers `409`; an invalid field answers `400`.
 - [ ] **Given** `GET /api/staff/roster`, **then** it lists **every account in the exercise** (including ones the
@@ -108,3 +116,54 @@ seam commit with both. Consumed by stories 10, 13, 14.
 `Castable = false`, ExerciseRole, duplicate-in-file), `RosterEndpointsHttpTests` (200/201/400/409/401/403,
 `no-store`), `RosterIsolationTests` (`[RequiresDockerFact]`: cross-exercise persona handle, list, update),
 `RosterContentSecurityTests` (stored script in name/agency/role, oversize, wrong MIME).
+
+### Test linkage
+
+AC numbers follow the order of the criteria above: AC-1 CSV parse, AC-2 rows create, AC-3 personas, AC-4 idempotent
+re-upload, AC-5 add one, AC-6 list, AC-7 link issuer; then Isolation, Telemetry, Content security, Authorization. All
+in `Pulse.WebApi.Tests/Features/Identity/Roster/`; the in-memory `RosterWorkspaceTests` port the staff roster mock's
+rule tests (`participantAdmin/mocks/rosterMocks.test.ts`) case for case.
+
+- **AC-1** `RosterCsvParserTests.*` (template, aliases + BOM, quotes, blank and comma-only lines, unknown columns, first
+  duplicate column wins, header-only, no header, no name column, 5000 cap);
+  `RosterEndpointsHttpTests.Import_RefusesABadUpload_With400AndAReadableReason_AndWritesNothing` (empty, > 1 MB, non-CSV,
+  no name column, > 5000 rows, bad `dryRun`, no file field), `.Import_Is200_ADryRunWritesNothing_AndARealRunWrites`.
+- **AC-2** `SignInNameDeriverTests.*`, `RosterWorkspaceTests.Import_CreatesTheValidRows_FailsTheBadOne_WithTheFrozenNames`,
+  `.Import_DerivesCollisionSuffixes_AgainstEarlierRowsOfTheSameFile`, `.Import_AnExplicitSignInName_IsNeverAltered_InvalidFails_ValidIsKept`,
+  `.ExplicitSignInName_*`, `.Derived_*`; `RosterServiceTests.Import_ARow_CreatesAPasswordlessParticipantAndANonCastableCitizenPersona`,
+  `.Import_PartialApply_ValidRowsCommit_AFailedRowWritesNothing`, `.Import_ADryRun_ReturnsTheSameReport_AndWritesNoAccountPersonaLinkOrEvent`,
+  `.Import_AConcurrentClaimOfTheSameSignInName_IsRejudgedOnce_AndSteppedAround`, `.Import_ARepeatedCollision_ReportsTheRowsFailed_AndWritesNothing_NeverA500`.
+- **AC-3** `PersonaHandleDeriverTests.*`, `RosterWorkspaceTests.Add_BindsAnOrgPersona_CaseInsensitive_AtTolerated_AndMakesTheAccountPio`,
+  `.Add_AnUnknownHandle_ANonOrgPersona_AndAnotherExercisesHandle_FailWithTheSameMessage`, `.TwoRowsMayNameTheSameOrgHandle_EachKeepsTheirOwnAccount`;
+  `RosterServiceTests.Import_ARow_CreatesAPasswordlessParticipantAndANonCastableCitizenPersona` (`Castable = false`,
+  citizen/nano/unverified, magnitude, `PersonaAutoCreated`), `.Import_AnOrgHandle_BindsThatPersonaAsPio_AndTwoRowsKeepTheirOwnAccountsAndActingHumans`.
+- **AC-4** `RosterWorkspaceTests.Import_TheSameFileAgain_IsIdempotent_EveryValidRowUnchanged`, `.Import_AChangedAgency_IsUpdatedAndSaysSo_AndABlankCellNeverClears`,
+  `.Import_BindingAnOrgPersonaOnReupload_UpdatesTheRow_AndMakesItPio`, `.Import_TwoRowsWithTheSameKey_FailTheLaterOne_NamingTheEarlierRow`,
+  `.Cascade_*`, `.SameFile_ASecondRowWithTheSameKey_FailsAsADuplicate_AndUpdatesNobody`,
+  `.SameFile_ANameAndAgencyOnlyRow_FailsWhenAnotherRowHasThatNameAndAgencyWithAKey_OnEveryUpload` (W-1),
+  `.SameFile_TwoRowsReachingTheSameExistingPersonThroughDifferentKeys_FailTheLaterOne` (W-2),
+  `.Matched_APersonalessParticipant_GetsAnAutoCitizenPersona_ThenIsUnchanged`, `.Matched_APersonalessParticipant_InADryRun_ReportsThePersona_ButCreatesNone`,
+  `.Add_MatchingAPersonalessParticipant_IsStillNotACreation` (CR-001);
+  `RosterServiceTests.Import_TheSameFileTwice_IsIdempotent_NothingIsCreated_NoLinkRotates_NoEventIsEmitted`,
+  `.Import_AChangedRow_IsUpdatedAndPersisted_AndABlankCellNeverClears`,
+  `.Import_AMatchedPersonalessParticipant_GetsANonCastableAutoPersona_NoLink_AndADryRunWritesNone` (CR-001),
+  `.Import_TwoRowsReachingOnePersonByDifferentKeys_FailTheLater_AndTheReuploadIsStable` (W-2).
+- **AC-5** `RosterEndpointsHttpTests.Add_Is201WithTheEntry_ThenTheSameKeyIs409_AndAnInvalidFieldIs400_AsProblemDetails`;
+  `RosterServiceTests.Add_CreatesOneParticipant_WithAnActiveLink_AndOnlyALinkEvent`, `.Add_AnExistingKeyIsAConflict_AndAnInvalidFieldIsInvalid_AndNeitherWrites`;
+  `RosterWorkspaceTests.Add_*`.
+- **AC-6** `RosterServiceTests.List_ShowsEveryParticipant_IncludingLegacyOnes_OrderedByName_WithLiveSessionsAndCapabilities`;
+  `RosterEndpointsHttpTests.List_Is200_WithTheFrozenShape_AndNoStore`.
+- **AC-7** `RosterServiceTests.Import_EmitsOneCountsOnlyRosterImportedEvent_AndALinkIssuedEventPerNewLink` (issuer called
+  per new participant), `.Import_TheSameFileTwice_IsIdempotent_NothingIsCreated_NoLinkRotates_NoEventIsEmitted` (never
+  on a re-upload), `.Import_WithTheNullIssuer_StillProvisions_AndReportsNoLink`.
+- **Isolation** `RosterIsolationTests.*` (cross-exercise handle = unknown handle, list shows only A and never counts B's
+  sessions, an import in A never matches or updates B and B's names never block A's, every written row stamped with the
+  resolved scope, unset/empty scope fails closed, B's controller scoped to A is forbidden); standing
+  `OrganizationScopeSweepTests` (no new `Exercises` read), `QueryFilterModelTests`, `EasyLoginIsolationTests` green.
+- **Telemetry** `RosterServiceTests.Import_EmitsOneCountsOnlyRosterImportedEvent_AndALinkIssuedEventPerNewLink`,
+  `RosterContentSecurityStorageTests.Import_StoresNoMarkup_FailsAMarkupOnlyRow_AndKeepsTheEmailOutOfTelemetry`.
+- **Content security** `RosterContentSecurityTests.*` (strip, bounds, email check, email only on `RosterEntryDto`),
+  `RosterContentSecurityStorageTests.*`, `RosterEndpointsHttpTests.Import_RefusesABadUpload_With400AndAReadableReason_AndWritesNothing` (MIME, size).
+- **Authorization** `RosterEndpointsGateHttpTests.EveryRoute_WithNoStaffSession_Is401_AndNoStore`,
+  `RosterEndpointsHttpTests.AnEvaluator_AndAnUnassignedStaffUser_Are403_OnEveryRoute`, `.APlanner_IsAdmitted`;
+  `RosterServiceTests.Service_RefusesWithoutAStaffSession_ForAnEvaluator_AndWithNoScope`; `RosterRegistrationTests.*`.

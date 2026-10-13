@@ -106,7 +106,7 @@ public static class AccountCsvParser
         index >= 0 && index < fields.Count ? fields[index] : null;
 
     /// <summary>Splits text into lines on <c>\n</c>, tolerating <c>\r\n</c> and lone <c>\r</c> endings.</summary>
-    private static List<string> SplitLines(string content)
+    internal static List<string> SplitLines(string content)
     {
         var normalized = content.Replace("\r\n", "\n", StringComparison.Ordinal)
                                 .Replace('\r', '\n');
@@ -114,7 +114,7 @@ public static class AccountCsvParser
     }
 
     /// <summary>Parses one CSV line into fields, honoring double-quote wrapping and <c>""</c> escapes.</summary>
-    private static List<string> ParseLine(string line)
+    internal static List<string> ParseLine(string line)
     {
         var fields = new List<string>();
         var current = new System.Text.StringBuilder();
