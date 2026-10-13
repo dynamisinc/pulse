@@ -75,6 +75,17 @@ current "deliberately NOT localStorage" rationale becomes "participants opt in; 
 `navigator.locks` may be undefined in jsdom and older browsers: feature-detect. No new npm package. See
 `implementation.md` (story 07).
 
+**Gate-1 amendments (orchestrator).** (1) `rotateTokens(expectedRefreshToken, pair)` is the refresh path's write: a
+compare-and-swap on the refresh token, so a refresh response that lands after another tab signed out (or in as someone
+else) writes nothing and the session the server just issued is revoked with `POST /auth/logout` (CR-001). (2) A random,
+non-secret session identity marker (`pulse.auth.session`) sits beside the pair: a sign-in (`setTokens`) writes a new one, a
+rotation keeps it. A request is never retried with, and never adopts, a pair stamped with a different marker, and the new
+module `core/auth/crossTabSessionSync.ts` (installed from `core/services/api.ts`) reloads a tab when another tab changes
+the marker; a `sessionStorage` (staff) session ignores it (M-2). (3) The wait for the Web Lock is capped at 45 s
+(`AbortSignal.timeout`) and falls back to the unlocked path (M-1). (4) Both token keys are read from the one store that
+holds the session (M-3). (5) After a no-answer refresh, a cool-down (`Retry-After` seconds, else 15 s, capped at 120 s)
+makes the next 401s fail without calling refresh (L-1).
+
 ## Dependencies
 
 None (contract only). Blocks 08 and 09. Pairs with backend 06.

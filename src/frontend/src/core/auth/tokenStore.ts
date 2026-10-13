@@ -23,18 +23,39 @@
  *     sanitizer/CSP posture. A shared store also means several tabs can wake
  *     on the same stale access token together — `core/services/api.ts` closes
  *     that refresh race (Web Lock + re-read), this module only supplies the
- *     storage primitives it needs (`isPersistentSession`, `getTokenGeneration`).
+ *     storage primitives it needs (`rotateTokens`, `getSessionMarker`,
+ *     `getTokenGeneration`).
  *
  * AT MOST ONE STORE HOLDS A SESSION. `setTokens` writes the target store and
  * REMOVES the other store's copy, so a staff sign-in after a participant one
  * (or vice versa) can never leave a stale pair behind. `clearTokens` clears
- * BOTH, so `logout()` / `endSession()` leave nothing in either. Reads check
- * `sessionStorage` first (it wins if both somehow hold a value), then
- * `localStorage`.
+ * BOTH, so `logout()` / `endSession()` leave nothing in either. A page's
+ * session is whichever store holds tokens, `sessionStorage` first; BOTH keys
+ * are always read from that ONE store, never one key from each, so a read can
+ * never combine one user's access token (say a shared read-only session in
+ * this tab) with another user's refresh token (a participant who signed in in
+ * another tab and left theirs in `localStorage`).
  *
  * The access token and refresh token are stored under two SEPARATE keys
  * (`pulse.auth.token`, `pulse.auth.refreshToken`; never serialized together as
- * one JSON blob), so a partial read can never hand back a half-written pair.
+ * one JSON blob) so neither can corrupt the other's encoding.
+ *
+ * SESSION IDENTITY MARKER (`pulse.auth.session`). Beside every pair sits a
+ * random, NON-secret id naming the sign-in that produced it. A SIGN-IN
+ * (`setTokens`) writes a fresh one; a silent-refresh ROTATION (`rotateTokens`)
+ * keeps it. Because `localStorage` is shared, "the marker changed" is exactly
+ * "a different sign-in (or a sign-out) happened in some tab": `core/services/
+ * api.ts` uses it to refuse to retry one user's request with another user's
+ * freshly-stored token, and `core/auth/crossTabSessionSync` reloads the other
+ * tabs so their UI matches the store. Written LAST on sign-in and removed LAST
+ * on clear, so a tab woken by its change always finds a complete pair.
+ *
+ * `rotateTokens(expectedRefreshToken, pair)` is the refresh path's compare-and-
+ * swap: it stores the rotated pair in the store that currently holds the
+ * session, but ONLY if that store still holds the refresh token the caller
+ * presented. If another tab signed out (or in as someone else) meanwhile it
+ * writes nothing and says so, so a stale refresh response can never resurrect a
+ * signed-out session or overwrite another user's.
  *
  * STORAGE THAT THROWS (Safari private mode, quota, blocked by policy — even
  * touching `window.localStorage` can throw): no function here ever throws.
@@ -59,6 +80,11 @@
 
 const ACCESS_TOKEN_KEY = 'pulse.auth.token'
 const REFRESH_TOKEN_KEY = 'pulse.auth.refreshToken'
+/**
+ * The session identity marker's key. Exported (it is a name, not a secret) so
+ * `core/auth/crossTabSessionSync` can recognise the `storage` event for it.
+ */
+export const SESSION_MARKER_KEY = 'pulse.auth.session'
 
 /** The token pair persisted from a login/refresh response envelope. */
 export interface TokenPair {
@@ -82,9 +108,9 @@ export interface SetTokensOptions {
   readonly persist?: boolean
 }
 
-/** The two backing stores. Order matters for reads: `session` first, so it wins. */
+/** The two backing stores. Order matters: `session` first, so it wins. */
 type Area = 'session' | 'persistent'
-const READ_ORDER: readonly Area[] = ['session', 'persistent']
+const AREAS: readonly Area[] = ['session', 'persistent']
 
 /**
  * In-memory fallback, per store, used (and preferred over the real store) only
@@ -96,9 +122,10 @@ const memory: Record<Area, Map<string, string>> = {
 }
 
 /**
- * Bumped by every `setTokens` / `clearTokens`. Lets the silent-refresh path
- * detect that THIS tab signed out or in while its refresh call was in flight
- * (and so must not write the rotated pair over what the user did).
+ * Bumped by every `setTokens` / `rotateTokens` / `clearTokens`. Lets the
+ * silent-refresh path detect that THIS tab signed out or in while its refresh
+ * call was in flight (and so must not write the rotated pair over what the
+ * user did).
  */
 let generation = 0
 
@@ -151,80 +178,136 @@ function removeItem(area: Area, key: string): void {
   removeFromStorage(area, key)
 }
 
-function readFirst(key: string): string | null {
-  for (const area of READ_ORDER) {
-    const value = readItem(area, key)
-    if (value !== null) return value
-  }
-  return null
-}
-
 function holdsTokens(area: Area): boolean {
   return readItem(area, ACCESS_TOKEN_KEY) !== null || readItem(area, REFRESH_TOKEN_KEY) !== null
 }
 
+/**
+ * The ONE store this page's session lives in: `sessionStorage` if it holds any
+ * token, else `localStorage`. Every read goes through this so the access token,
+ * the refresh token and the marker always come from the same store.
+ */
+function activeArea(): Area {
+  return holdsTokens('session') ? 'session' : 'persistent'
+}
+
+/** A fresh, unguessable-enough, NON-secret id for one sign-in. */
+function newSessionMarker(): string {
+  const cryptoApi: Crypto | undefined = globalThis.crypto
+  if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+    return cryptoApi.randomUUID()
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
 /** Returns the stored access token, or `null` when none is stored. */
 export function getAccessToken(): string | null {
-  return readFirst(ACCESS_TOKEN_KEY)
+  return readItem(activeArea(), ACCESS_TOKEN_KEY)
 }
 
 /** Returns the stored refresh token, or `null` when none is stored. */
 export function getRefreshToken(): string | null {
-  return readFirst(REFRESH_TOKEN_KEY)
+  return readItem(activeArea(), REFRESH_TOKEN_KEY)
 }
 
 /**
- * Persists a token pair from a login/silent-refresh response envelope.
- * `refreshToken` REPLACES any previously stored one when present (token
- * rotation); when ABSENT, any previously stored refresh token is cleared —
- * every call establishes the CURRENT session's tokens wholesale, so a stale
- * refresh token from a prior session can never linger (mirrors the "never a
- * stale/empty header" contract the axios interceptor relies on).
- *
- * `options.persist` picks the store (see the header): `true` writes
- * `localStorage`, anything else writes `sessionStorage`. Either way the OTHER
- * store's copy is removed, so the pair lives in exactly one place. The
- * signature is frozen (easy-login stories 08 and 09 code against it).
+ * The identity marker of the sign-in the stored pair belongs to, or `null` when
+ * no pair is stored (or it predates markers). Unchanged by a refresh rotation,
+ * replaced by every sign-in, removed by a sign-out.
  */
-export function setTokens({ token, refreshToken }: TokenPair, options?: SetTokensOptions): void {
-  const target: Area = options?.persist === true ? 'persistent' : 'session'
-  const other: Area = target === 'persistent' ? 'session' : 'persistent'
-
-  generation++
-  writeItem(target, ACCESS_TOKEN_KEY, token)
-  if (refreshToken !== undefined) {
-    writeItem(target, REFRESH_TOKEN_KEY, refreshToken)
-  } else {
-    removeItem(target, REFRESH_TOKEN_KEY)
-  }
-  removeItem(other, ACCESS_TOKEN_KEY)
-  removeItem(other, REFRESH_TOKEN_KEY)
+export function getSessionMarker(): string | null {
+  const area = activeArea()
+  return holdsTokens(area) ? readItem(area, SESSION_MARKER_KEY) : null
 }
 
-/** Clears the stored tokens from BOTH stores. Safe to call when nothing is stored. */
-export function clearTokens(): void {
-  generation++
-  for (const area of READ_ORDER) {
-    removeItem(area, ACCESS_TOKEN_KEY)
+function writePair(area: Area, { token, refreshToken }: TokenPair): void {
+  writeItem(area, ACCESS_TOKEN_KEY, token)
+  if (refreshToken !== undefined) {
+    writeItem(area, REFRESH_TOKEN_KEY, refreshToken)
+  } else {
     removeItem(area, REFRESH_TOKEN_KEY)
   }
 }
 
 /**
- * `true` when the current pair lives in the persistent (`localStorage`) store,
- * `false` when it lives in `sessionStorage` or nothing is stored. The silent
- * refresh uses this to put the rotated pair back in the SAME store, so a
- * participant stays persistent and a staff user stays session-only without the
- * refresh path ever being told which one it is.
+ * Persists a token pair from a SIGN-IN response envelope. `refreshToken`
+ * REPLACES any previously stored one when present; when ABSENT, any previously
+ * stored refresh token is cleared — every call establishes the CURRENT
+ * session's tokens wholesale, so a stale refresh token from a prior session can
+ * never linger (mirrors the "never a stale/empty header" contract the axios
+ * interceptor relies on). Each call also stamps a NEW session identity marker.
+ *
+ * `options.persist` picks the store (see the header): `true` writes
+ * `localStorage`, anything else writes `sessionStorage`. Either way the OTHER
+ * store's copy is removed, so the pair lives in exactly one place. The
+ * signature is frozen (easy-login stories 08 and 09 code against it). The
+ * silent refresh does NOT use this: it calls `rotateTokens`.
+ */
+export function setTokens(pair: TokenPair, options?: SetTokensOptions): void {
+  const target: Area = options?.persist === true ? 'persistent' : 'session'
+  const other: Area = target === 'persistent' ? 'session' : 'persistent'
+
+  generation++
+  writePair(target, pair)
+  removeItem(other, ACCESS_TOKEN_KEY)
+  removeItem(other, REFRESH_TOKEN_KEY)
+  removeItem(other, SESSION_MARKER_KEY)
+  // Last, so a tab woken by the marker's `storage` event reads a complete pair.
+  writeItem(target, SESSION_MARKER_KEY, newSessionMarker())
+}
+
+/**
+ * Stores the pair a silent refresh just rotated, if and only if the store that
+ * holds this page's session STILL holds `expectedRefreshToken` (the one the
+ * refresh call presented). Keeps the session's store and identity marker.
+ * Returns `false` and writes NOTHING otherwise: the user signed out, or in as
+ * someone else, in some tab while the refresh was in flight, and the stale
+ * result must not undo it. (This is as close to an atomic compare-and-swap as
+ * Web Storage allows: there is no cross-tab atomic operation, so the check and
+ * the write are two synchronous steps in this tab, a window of microseconds.)
+ */
+export function rotateTokens(expectedRefreshToken: string, pair: TokenPair): boolean {
+  const area = activeArea()
+  if (readItem(area, REFRESH_TOKEN_KEY) !== expectedRefreshToken) return false
+
+  generation++
+  writePair(area, pair)
+  return true
+}
+
+/** Clears the tokens (and the identity marker) from BOTH stores. Safe when nothing is stored. */
+export function clearTokens(): void {
+  generation++
+  for (const area of AREAS) {
+    removeItem(area, ACCESS_TOKEN_KEY)
+    removeItem(area, REFRESH_TOKEN_KEY)
+    // Last, so a tab woken by the marker's `storage` event finds the pair gone.
+    removeItem(area, SESSION_MARKER_KEY)
+  }
+}
+
+/**
+ * `true` when this page's session lives in the persistent (`localStorage`)
+ * store, `false` when it lives in `sessionStorage` or nothing is stored.
  */
 export function isPersistentSession(): boolean {
   return !holdsTokens('session') && holdsTokens('persistent')
 }
 
 /**
- * A counter that changes whenever THIS page calls `setTokens` or `clearTokens`.
- * Opaque: compare for equality only. It does not (and cannot) see another
- * tab's writes; the cross-tab refresh race is handled in `core/services/api.ts`.
+ * `true` when this page's session lives in `sessionStorage` (every staff
+ * session). Such a page is private to its tab: another tab's sign-in or
+ * sign-out in the shared `localStorage` says nothing about it.
+ */
+export function isSessionScoped(): boolean {
+  return holdsTokens('session')
+}
+
+/**
+ * A counter that changes whenever THIS page calls `setTokens`, `rotateTokens` or
+ * `clearTokens`. Opaque: compare for equality only. It does not (and cannot)
+ * see another tab's writes; the cross-tab races are handled by `rotateTokens`'
+ * compare-and-swap and the identity marker.
  */
 export function getTokenGeneration(): number {
   return generation

@@ -24,7 +24,7 @@
  *   - the response interceptor's one-shot silent refresh: a 401 with a stored
  *     refresh token triggers exactly one `POST /auth/refresh`, retries the
  *     original request once on success, storing the rotated tokens;
- *   - a failed refresh clears both tokens and does not loop;
+ *   - a REFUSED refresh (401/403 from `/auth/refresh`) clears both stores and does not loop;
  *   - no refresh is attempted when there is no stored refresh token;
  *   - the refresh/logout/login endpoints themselves never trigger the retry
  *     (SG-001 adds `/auth/logout` to that exclusion, explicit not emergent);
@@ -37,21 +37,33 @@
  * Covers (feature: easy-login, story 07 — participant tokens in `localStorage`):
  *   - the rotated pair is stored in the SAME store the current pair lives in
  *     (participant stays persistent, staff stays session-only) with no option
- *     passed, and a refresh failure clears BOTH stores;
+ *     passed, and a REFUSED refresh (401/403) clears BOTH stores;
  *   - `/auth/join` and `/auth/word` never trigger a refresh;
  *   - the two-tab refresh race. A "tab" here is a separately-loaded copy of
  *     `api.ts` + `tokenStore.ts` (`vi.resetModules()`), which, like a real tab,
  *     has its own in-flight coalescing and in-memory state but SHARES
  *     `localStorage` and `navigator.locks`. With a (fake) Web Lock: exactly one
  *     `POST /auth/refresh`, neither tab signed out. Without the Locks API: a
- *     failed refresh re-reads the stored refresh token and retries once with
+ *     REFUSED refresh re-reads the stored refresh token and retries once with
  *     the new value instead of clearing;
  *   - a sign-out / sign-in this tab performs mid-refresh is not overwritten;
  *   - only a REFUSAL (401/403 from `/auth/refresh`) clears the stores. A network
  *     error, a timeout, a 5xx/429 or a token-less 2xx keeps the stored pair (the
  *     user stays signed in, the original request fails with its own error, and
  *     the next 401 tries the refresh again); the refresh call alone carries a
- *     20 s timeout, never the shared instance.
+ *     20 s timeout, never the shared instance. After a no-answer refresh, a
+ *     cool-down (`Retry-After` seconds, else 15 s, capped at 120 s) makes the next
+ *     401s fail without calling the refresh;
+ *   - CR-001: tab B signs out while tab A's refresh is on the wire. Nothing is
+ *     left in `localStorage`, and A revokes the session the server just issued
+ *     (`POST /auth/logout` with the NEW token; B's own logout carried the
+ *     pre-rotation one and missed), with and without the Locks API;
+ *   - M-1: the wait for the Web Lock is bounded (a suspended holder cannot block
+ *     another tab), falling back to the unlocked path;
+ *   - M-2: a request is never retried with, and never adopts, a pair another tab
+ *     signed in as someone else; a same-sign-in rotation by another tab IS
+ *     adopted; staff (sessionStorage) is unaffected; the cross-tab reload
+ *     listener is installed by importing this module.
  */
 import axios, {
   type AxiosAdapter,
@@ -60,7 +72,13 @@ import axios, {
 } from 'axios'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { api } from './api'
-import { setTokens, clearTokens, getAccessToken, getRefreshToken } from '../auth/tokenStore'
+import {
+  setTokens,
+  rotateTokens,
+  clearTokens,
+  getAccessToken,
+  getRefreshToken,
+} from '../auth/tokenStore'
 
 function respond(
   config: InternalAxiosRequestConfig,
@@ -81,8 +99,12 @@ function respond(
  * `validateStatus` rejects a status. A custom test adapter must do this
  * itself (see the module header) to reproduce a REAL 401 rejection.
  */
-function rejectStatus(config: InternalAxiosRequestConfig, status: number): Promise<never> {
-  const response = respond(config, status, {})
+function rejectStatus(
+  config: InternalAxiosRequestConfig,
+  status: number,
+  headers: Record<string, string> = {},
+): Promise<never> {
+  const response = { ...respond(config, status, {}), headers: new axios.AxiosHeaders(headers) }
   return Promise.reject(
     new axios.AxiosError(
       `Request failed with status code ${status}`,
@@ -134,6 +156,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   api.defaults.adapter = originalAdapter
   // Tests below install a fake Web Lock manager; jsdom has none by default.
   Reflect.deleteProperty(navigator, 'locks')
@@ -215,7 +238,7 @@ describe('response interceptor — one-shot silent refresh', () => {
     expect(getRefreshToken()).toBe('refresh-2')
   })
 
-  it('clears both tokens and propagates the original 401 when refresh itself fails, without looping', async () => {
+  it('clears both tokens and propagates the original 401 when refresh is REFUSED, without looping', async () => {
     setTokens({ token: 'expired-token', refreshToken: 'stale-refresh' })
 
     let refreshCalls = 0
@@ -388,7 +411,7 @@ describe('silent refresh keeps the token store the current pair lives in (EL-10)
     expect(localStorage.length).toBe(0)
   })
 
-  it('a refresh failure clears BOTH stores and the original 401 propagates (persistent pair)', async () => {
+  it('a REFUSED refresh clears BOTH stores and the original 401 propagates (persistent pair)', async () => {
     setTokens({ token: 'expired', refreshToken: 'stale' }, { persist: true })
     // Belt and braces: a stray copy in the other store must go too.
     sessionStorage.setItem('pulse.auth.token', 'stray')
@@ -435,6 +458,13 @@ describe('only a REFUSED refresh ends the session; no answer keeps the pair', ()
     }
   }
 
+  // The cool-down after a no-answer refresh reads `Date.now()`; drive it by hand.
+  let now = 1_000_000
+  beforeEach(() => {
+    now = 1_000_000
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+  })
+
   describe.each([
     ['persistent (participant)', { persist: true }, () => localStorage],
     ['session-only (staff)', {}, () => sessionStorage],
@@ -453,7 +483,8 @@ describe('only a REFUSED refresh ends the session; no answer keeps the pair', ()
       expect(getAccessToken()).toBe('expired')
       expect(getRefreshToken()).toBe('refresh-1')
 
-      // The next 401 simply tries the refresh again, and it works.
+      // Once the cool-down has passed, the next 401 simply tries the refresh again.
+      now += 16_000
       const response = await api.get('/protected')
       expect(response.status).toBe(200)
       expect(refreshCalls).toEqual(['refresh-1', 'refresh-1'])
@@ -471,6 +502,7 @@ describe('only a REFUSED refresh ends the session; no answer keeps the pair', ()
       expect(storeOf().getItem('pulse.auth.token')).toBe('expired')
       expect(storeOf().getItem('pulse.auth.refreshToken')).toBe('refresh-1')
 
+      now += 16_000
       await expect(api.get('/protected')).resolves.toMatchObject({ status: 200 })
       expect(refreshCalls).toHaveLength(2)
     })
@@ -597,8 +629,9 @@ describe('a late 401 adopts a pair that was already rotated', () => {
         return Promise.resolve(respond(config, 200, { ok: true }))
       }
       // The first call is sent with 'old-token'; while it is "in flight" the
-      // pair is rotated underneath it (as another tab would).
-      setTokens({ token: 'rotated-token', refreshToken: 'refresh-2' }, { persist: true })
+      // pair is rotated underneath it by the SAME sign-in (as another tab's
+      // refresh would: new tokens, identity marker kept).
+      rotateTokens('refresh-1', { token: 'rotated-token', refreshToken: 'refresh-2' })
       return reject401(config)
     }
 
@@ -612,12 +645,17 @@ describe('a late 401 adopts a pair that was already rotated', () => {
 })
 
 describe('a sign-out / sign-in in THIS tab while a refresh is in flight', () => {
-  it('does not write the rotated pair back over a sign-out (nothing is left in localStorage)', async () => {
+  it('does not write the rotated pair back over a sign-out, and revokes the session it was issued', async () => {
     setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const logoutBearers: string[] = []
     api.defaults.adapter = config => {
       if (config.url === '/auth/refresh') {
         clearTokens() // the user signed out while the call was in flight
         return Promise.resolve(respond(config, 200, { token: 'new', refreshToken: 'refresh-2' }))
+      }
+      if (config.url === '/auth/logout') {
+        logoutBearers.push(String(config.headers.get('Authorization')))
+        return Promise.resolve(respond(config, 204, undefined))
       }
       return reject401(config)
     }
@@ -626,6 +664,8 @@ describe('a sign-out / sign-in in THIS tab while a refresh is in flight', () => 
 
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
+    // The server rotated; the sign-out's own logout could not have known the new token.
+    await vi.waitFor(() => expect(logoutBearers).toEqual(['Bearer new']))
   })
 
   it('does not clear a fresh sign-in when the in-flight refresh then fails', async () => {
@@ -721,15 +761,40 @@ describe('refresh without the Web Locks API: re-read before clearing', () => {
 
 /**
  * A minimal in-process Web Locks manager: exclusive, FIFO, shared by every tab
- * through `navigator.locks` (which, like the real one, is origin-wide).
+ * through `navigator.locks` (which, like the real one, is origin-wide). Supports
+ * both call shapes (`request(name, callback)` and `request(name, options,
+ * callback)`) and `options.signal`: a request still WAITING when its signal aborts
+ * rejects with the signal's reason and never runs its callback, as the real one does.
  */
 function installFakeWebLocks() {
   let tail: Promise<unknown> = Promise.resolve()
-  const request = vi.fn((_name: string, callback: () => unknown) => {
-    const granted = tail.then(() => callback())
-    tail = granted.catch(() => undefined)
-    return granted
-  })
+  const request = vi.fn(
+    (
+      _name: string,
+      optionsOrCallback: LockOptions | (() => unknown),
+      maybeCallback?: () => unknown,
+    ) => {
+      const options: LockOptions = typeof optionsOrCallback === 'function' ? {} : optionsOrCallback
+      const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback
+      if (!callback) throw new TypeError('fake navigator.locks.request: no callback')
+
+      return new Promise((resolve, reject) => {
+        let waiting = true
+        options.signal?.addEventListener('abort', () => {
+          if (!waiting) return
+          waiting = false
+          reject(options.signal?.reason)
+        }, { once: true })
+        const granted = tail.then(() => {
+          if (!waiting) return undefined // aborted while queued: never runs
+          waiting = false
+          return callback()
+        })
+        tail = granted.catch(() => undefined)
+        granted.then(resolve, reject)
+      })
+    },
+  )
   Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true })
   return request
 }
@@ -737,6 +802,12 @@ function installFakeWebLocks() {
 interface FakeServer {
   /** Refresh tokens presented to `POST /auth/refresh`, in arrival order. */
   readonly refreshArrivals: string[]
+  /** Access tokens presented to `POST /auth/logout`, in arrival order. */
+  readonly logoutBearers: string[]
+  /** `true` once a logout carried the CURRENT access token (the live session was ended). */
+  readonly state: { sessionRevoked: boolean }
+  /** Runs after the server has rotated, before its refresh response reaches the caller. */
+  onRefreshOnTheWire: (() => Promise<void> | void) | undefined
   /** Hold the Nth (0-based) refresh RESPONSE until the returned function is called. */
   holdRefreshResponse(index: number): () => void
   readonly adapter: AxiosAdapter
@@ -744,56 +815,69 @@ interface FakeServer {
 
 /**
  * A tiny auth server: `/protected` accepts only the current access token;
- * `/auth/refresh` accepts only the current refresh token and ROTATES both
- * (a spent refresh token is refused, which is what signed a second tab out).
+ * `/auth/refresh` accepts only the current refresh token and ROTATES both (a
+ * spent refresh token is refused, which is what signed a second tab out);
+ * `/auth/logout` ends the session only when it carries the CURRENT access token
+ * (a pre-rotation token misses, as on the real server).
  */
 function createFakeServer(initialRefresh: string): FakeServer {
   let version = 1
   let currentRefresh = initialRefresh
   let currentAccess = 'access-v1'
   const refreshArrivals: string[] = []
+  const logoutBearers: string[] = []
   const holds = new Map<number, Promise<void>>()
 
-  const adapter: AxiosAdapter = async config => {
-    await Promise.resolve()
-    if (config.url === '/auth/refresh') {
-      const index = refreshArrivals.length
-      const presented = (JSON.parse(String(config.data)) as { refreshToken: string }).refreshToken
-      refreshArrivals.push(presented)
-      let body: { token: string; refreshToken: string } | undefined
-      if (presented === currentRefresh) {
-        version++
-        currentRefresh = `refresh-v${version}`
-        currentAccess = `access-v${version}`
-        body = { token: currentAccess, refreshToken: currentRefresh }
-      }
-      await holds.get(index)
-      return body ? respond(config, 200, body) : reject401(config)
-    }
-    if (config.headers.get('Authorization') === `Bearer ${currentAccess}`) {
-      return respond(config, 200, { ok: true })
-    }
-    return reject401(config)
-  }
-
-  return {
+  const server: FakeServer = {
     refreshArrivals,
-    adapter,
+    logoutBearers,
+    state: { sessionRevoked: false },
+    onRefreshOnTheWire: undefined,
+    adapter: async config => {
+      await Promise.resolve()
+      if (config.url === '/auth/refresh') {
+        const index = refreshArrivals.length
+        const presented = (JSON.parse(String(config.data)) as { refreshToken: string }).refreshToken
+        refreshArrivals.push(presented)
+        let body: { token: string; refreshToken: string } | undefined
+        if (presented === currentRefresh) {
+          version++
+          currentRefresh = `refresh-v${version}`
+          currentAccess = `access-v${version}`
+          body = { token: currentAccess, refreshToken: currentRefresh }
+        }
+        await server.onRefreshOnTheWire?.()
+        await holds.get(index)
+        return body ? respond(config, 200, body) : reject401(config)
+      }
+      if (config.url === '/auth/logout') {
+        const bearer = String(config.headers.get('Authorization') ?? '').replace('Bearer ', '')
+        logoutBearers.push(bearer)
+        if (bearer === currentAccess) server.state.sessionRevoked = true
+        return respond(config, 204, undefined)
+      }
+      if (config.headers.get('Authorization') === `Bearer ${currentAccess}`) {
+        return respond(config, 200, { ok: true })
+      }
+      return reject401(config)
+    },
     holdRefreshResponse(index) {
       let release: () => void = () => undefined
       holds.set(index, new Promise<void>(resolve => { release = resolve }))
       return release
     },
   }
+  return server
 }
 
-/** Loads a fresh copy of the api + token store, as a newly opened tab would. */
+/** Loads a fresh copy of the api + token store + logout, as a newly opened tab would. */
 async function openTab(server: FakeServer) {
   vi.resetModules()
   const tabApi = (await import('./api')).api
   const tabStore = await import('../auth/tokenStore')
+  const { logout } = await import('../auth/logout')
   tabApi.defaults.adapter = server.adapter
-  return { api: tabApi, store: tabStore }
+  return { api: tabApi, store: tabStore, logout }
 }
 
 describe('two tabs 401 at the same moment (the shared-localStorage refresh race)', () => {
@@ -858,6 +942,377 @@ describe('two tabs 401 at the same moment (the shared-localStorage refresh race)
     expect(server.refreshArrivals).toEqual(['refresh-v1', 'refresh-v1', 'refresh-v2'])
     expect(localStorage.getItem('pulse.auth.token')).toBe('access-v3')
     expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('refresh-v3')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Gate-1 fold: CR-001, M-1, M-2, L-1
+// ---------------------------------------------------------------------------
+
+describe.each([
+  ['with a Web Lock', true],
+  ['without the Locks API', false],
+])('CR-001: a sign-out in tab B during tab A\'s in-flight refresh sticks (%s)', (_label, withLock) => {
+  it('leaves nothing in localStorage and ends the session the server just issued', async () => {
+    if (withLock) installFakeWebLocks()
+    const server = createFakeServer('refresh-v1')
+    const tabA = await openTab(server)
+    const tabB = await openTab(server)
+    // One participant, signed in (persistently) in both tabs.
+    tabA.store.setTokens({ token: 'stale-access', refreshToken: 'refresh-v1' }, { persist: true })
+    // While A's refresh is on the wire, the user taps Sign out in B.
+    server.onRefreshOnTheWire = async () => {
+      server.onRefreshOnTheWire = undefined
+      await tabB.logout()
+    }
+
+    await expect(tabA.api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    // The sign-out was not undone by A's rotated pair.
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+    expect(tabA.store.getAccessToken()).toBeNull()
+    expect(tabB.store.getAccessToken()).toBeNull()
+    // B's logout carried the PRE-rotation token and missed the live session; A's
+    // cleanup carried the NEW one and ended it.
+    await vi.waitFor(() => expect(server.logoutBearers).toEqual(['stale-access', 'access-v2']))
+    expect(server.state.sessionRevoked).toBe(true)
+    expect(server.refreshArrivals).toEqual(['refresh-v1'])
+  })
+})
+
+describe('M-1: waiting for the Web Lock is bounded', () => {
+  it('asks for the lock with a 45 s abort signal', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout')
+    const locks = installFakeWebLocks()
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    api.defaults.adapter = rotatingAdapter('new-token', [])
+
+    await api.get('/protected')
+
+    expect(timeoutSpy).toHaveBeenCalledWith(45_000)
+    const options = locks.mock.calls[0]?.[1] as LockOptions | undefined
+    expect(options?.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('a holder that never lets go (a suspended tab) cannot block the refresh for ever', async () => {
+    const locks = installFakeWebLocks()
+    // The suspended tab: takes the lock and never releases it.
+    void locks('pulse.auth.refresh', {}, () => new Promise<void>(() => undefined))
+    // Stand in for the 45 s timer: a signal the test aborts.
+    const waitLimit = new AbortController()
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(waitLimit.signal)
+
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const refreshCalls: string[] = []
+    api.defaults.adapter = rotatingAdapter('new-token', refreshCalls)
+
+    const request = api.get('/protected')
+    await vi.waitFor(() => expect(locks).toHaveBeenCalledTimes(2)) // holder + this refresh
+    expect(refreshCalls).toEqual([]) // still waiting for the lock
+
+    waitLimit.abort(new DOMException('timed out', 'TimeoutError'))
+    const response = await request
+
+    // It carried on without the lock, on the unlocked path, and still rotated.
+    expect(response.status).toBe(200)
+    expect(refreshCalls).toEqual(['refresh-1'])
+    expect(localStorage.getItem('pulse.auth.token')).toBe('new-token')
+  })
+})
+
+describe('M-2: a different sign-in in another tab is never silently adopted', () => {
+  /** Two tabs on one shared storage, each a separately-loaded copy of the modules. */
+  type Tab = Awaited<ReturnType<typeof openTab>>
+  async function twoTabs(adapterFor: (tabs: { b: Tab }) => AxiosAdapter) {
+    const server = createFakeServer('unused')
+    const a = await openTab(server)
+    const b = await openTab(server)
+    a.api.defaults.adapter = adapterFor({ b })
+    return { a, b }
+  }
+
+  it('rejects the request with its own 401 instead of retrying it as the new user', async () => {
+    const seen: string[] = []
+    const { a } = await twoTabs(({ b }) => config => {
+      if (config.url === '/auth/refresh') throw new Error('must not refresh another user\'s pair')
+      seen.push(String(config.headers.get('Authorization')))
+      // While X's request is out, tab B signs in as Y (new tokens, new identity marker).
+      if (seen.length === 1) b.store.setTokens({ token: 'y-access', refreshToken: 'y-refresh' }, { persist: true })
+      return reject401(config)
+    })
+    a.store.setTokens({ token: 'x-access', refreshToken: 'x-refresh' }, { persist: true })
+
+    await expect(a.api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(seen).toEqual(['Bearer x-access']) // never retried, least of all with y-access
+    // Y's pair is untouched: not adopted, not refreshed, not cleared.
+    expect(localStorage.getItem('pulse.auth.token')).toBe('y-access')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('y-refresh')
+  })
+
+  it('DOES adopt a pair another tab rotated for the SAME sign-in (marker unchanged)', async () => {
+    const seen: string[] = []
+    const { a, b } = await twoTabs(({ b }) => config => {
+      if (config.url === '/auth/refresh') throw new Error('adopting must not call refresh')
+      seen.push(String(config.headers.get('Authorization')))
+      if (seen.length === 1) b.store.rotateTokens('x-refresh', { token: 'x-access-2', refreshToken: 'x-refresh-2' })
+      return config.headers.get('Authorization') === 'Bearer x-access-2'
+        ? Promise.resolve(respond(config, 200, { ok: true }))
+        : reject401(config)
+    })
+    a.store.setTokens({ token: 'x-access', refreshToken: 'x-refresh' }, { persist: true })
+
+    const response = await a.api.get('/protected')
+
+    expect(response.status).toBe(200)
+    expect(seen).toEqual(['Bearer x-access', 'Bearer x-access-2'])
+    expect(b.store.getSessionMarker()).toBe(a.store.getSessionMarker())
+  })
+
+  it('a refused refresh does not retry with, or clear, a pair another sign-in stored meanwhile', async () => {
+    const refreshSent: string[] = []
+    const { a } = await twoTabs(({ b }) => config => {
+      if (config.url === '/auth/refresh') {
+        refreshSent.push((JSON.parse(String(config.data)) as { refreshToken: string }).refreshToken)
+        b.store.setTokens({ token: 'y-access', refreshToken: 'y-refresh' }, { persist: true })
+      }
+      return reject401(config)
+    })
+    a.store.setTokens({ token: 'x-access', refreshToken: 'x-refresh' }, { persist: true })
+
+    await expect(a.api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(refreshSent).toEqual(['x-refresh']) // never presents y-refresh
+    expect(localStorage.getItem('pulse.auth.token')).toBe('y-access')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('y-refresh')
+  })
+
+  it('a refresh that SUCCEEDS after another sign-in is not stored, and its session is ended', async () => {
+    const logoutBearers: string[] = []
+    const { a } = await twoTabs(({ b }) => config => {
+      if (config.url === '/auth/refresh') {
+        b.store.setTokens({ token: 'y-access', refreshToken: 'y-refresh' }, { persist: true })
+        return Promise.resolve(respond(config, 200, { token: 'x-access-2', refreshToken: 'x-refresh-2' }))
+      }
+      if (config.url === '/auth/logout') {
+        logoutBearers.push(String(config.headers.get('Authorization')))
+        return Promise.resolve(respond(config, 204, undefined))
+      }
+      return reject401(config)
+    })
+    a.store.setTokens({ token: 'x-access', refreshToken: 'x-refresh' }, { persist: true })
+
+    await expect(a.api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(localStorage.getItem('pulse.auth.token')).toBe('y-access')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('y-refresh')
+    await vi.waitFor(() => expect(logoutBearers).toEqual(['Bearer x-access-2']))
+  })
+
+  it('a staff session (sessionStorage) is unaffected by a participant signing in in another tab', async () => {
+    const server = createFakeServer('staff-refresh-1')
+    const staff = await openTab(server)
+    staff.store.setTokens({ token: 'stale-staff', refreshToken: 'staff-refresh-1' }) // session-only
+    const staffMarker = staff.store.getSessionMarker()
+
+    // What a participant's sign-in in ANOTHER tab does to the shared localStorage
+    // (sessionStorage is per tab, so it never reaches the staff tab's).
+    localStorage.setItem('pulse.auth.token', 'p-access')
+    localStorage.setItem('pulse.auth.refreshToken', 'p-refresh')
+    localStorage.setItem('pulse.auth.session', 'participant-marker')
+
+    // The staff tab still sees its own session, from its own store, same identity.
+    expect(staff.store.getAccessToken()).toBe('stale-staff')
+    expect(staff.store.getRefreshToken()).toBe('staff-refresh-1')
+    expect(staff.store.getSessionMarker()).toBe(staffMarker)
+    // And its 401 refresh rotates within sessionStorage, leaving the participant's pair alone.
+    await expect(staff.api.get('/protected')).resolves.toMatchObject({ status: 200 })
+    expect(sessionStorage.getItem('pulse.auth.token')).toBe('access-v2')
+    expect(sessionStorage.getItem('pulse.auth.session')).toBe(staffMarker)
+    expect(localStorage.getItem('pulse.auth.token')).toBe('p-access')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('p-refresh')
+  })
+
+  it('a request sent under one sign-in never borrows a refresh another sign-in started', async () => {
+    // R1 is sent as X. Before its 401 lands, X is replaced by Y in this tab; Y's own
+    // request then 401s and starts a refresh. R1's late 401 arrives WHILE that refresh
+    // is still in flight and must not join it (and so be retried as Y).
+    const r1Gates: Array<() => void> = []
+    let finishRefresh: () => void = () => undefined
+    const refreshSent: string[] = []
+    const seen: string[] = []
+    api.defaults.adapter = config => {
+      if (config.url === '/auth/refresh') {
+        refreshSent.push((JSON.parse(String(config.data)) as { refreshToken: string }).refreshToken)
+        return new Promise(resolve => {
+          finishRefresh = () => resolve(
+            respond(config, 200, { token: 'y-access-2', refreshToken: 'y-refresh-2' }),
+          )
+        })
+      }
+      const auth = String(config.headers.get('Authorization'))
+      seen.push(`${String(config.url)}:${auth}`)
+      if (auth === 'Bearer y-access-2') return Promise.resolve(respond(config, 200, { ok: true }))
+      if (config.url === '/r1') {
+        return new Promise((_resolve, reject) => {
+          r1Gates.push(() => { void reject401(config).catch(reject) })
+        })
+      }
+      return reject401(config)
+    }
+    setTokens({ token: 'x-access', refreshToken: 'x-refresh' }, { persist: true })
+    const r1 = api.get('/r1').catch((error: unknown) => error)
+    await vi.waitFor(() => expect(r1Gates).toHaveLength(1))
+    setTokens({ token: 'y-access', refreshToken: 'y-refresh' }, { persist: true })
+    const r2 = api.get('/r2')
+    await vi.waitFor(() => expect(refreshSent).toEqual(['y-refresh'])) // Y's refresh is on the wire
+
+    r1Gates[0]?.() // R1's 401 arrives now
+    expect(await r1).toMatchObject({ response: { status: 401 } })
+
+    finishRefresh()
+    expect((await r2).status).toBe(200)
+    expect(seen.filter(entry => entry.startsWith('/r1'))).toEqual(['/r1:Bearer x-access'])
+    expect(refreshSent).toEqual(['y-refresh'])
+  })
+
+  it('importing the api module installs the cross-tab reload listener', async () => {
+    const add = vi.spyOn(window, 'addEventListener')
+    vi.resetModules()
+
+    await import('./api')
+
+    expect(add).toHaveBeenCalledWith('storage', expect.any(Function))
+  })
+})
+
+describe('L-1: a cool-down after a no-answer refresh', () => {
+  let now = 5_000_000
+  beforeEach(() => {
+    now = 5_000_000
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+  })
+
+  /** Counts refresh calls; every refresh answers with `failure`, every other call 401s. */
+  function failingRefresh(failure: (config: InternalAxiosRequestConfig) => Promise<never>) {
+    const calls = { refresh: 0 }
+    api.defaults.adapter = config => {
+      if (config.url === '/auth/refresh') {
+        calls.refresh++
+        return failure(config)
+      }
+      return reject401(config)
+    }
+    return calls
+  }
+
+  it('a 401 inside the default 15 s cool-down fails with its own error and calls no refresh', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const calls = failingRefresh(rejectNetworkError)
+
+    await expect(api.get('/a')).rejects.toMatchObject({ response: { status: 401 } })
+    expect(calls.refresh).toBe(1)
+
+    now += 14_000
+    await expect(api.get('/b')).rejects.toMatchObject({ response: { status: 401 } })
+    expect(calls.refresh).toBe(1) // cooling down: no call
+
+    now += 2_000 // 16 s after the failure
+    await expect(api.get('/c')).rejects.toMatchObject({ response: { status: 401 } })
+    expect(calls.refresh).toBe(2) // tried again
+
+    // And throughout, the pair was kept.
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('refresh-1')
+  })
+
+  it('honours Retry-After seconds from a 503 / 429', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const calls = failingRefresh(config => rejectStatus(config, 503, { 'Retry-After': '42' }))
+
+    await expect(api.get('/a')).rejects.toBeTruthy()
+    now += 41_000
+    await expect(api.get('/b')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(1)
+
+    now += 2_000 // 43 s
+    await expect(api.get('/c')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(2)
+  })
+
+  it('caps an absurd Retry-After at 120 s', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const calls = failingRefresh(config => rejectStatus(config, 429, { 'Retry-After': '86400' }))
+
+    await expect(api.get('/a')).rejects.toBeTruthy()
+    now += 119_000
+    await expect(api.get('/b')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(1)
+
+    now += 2_000 // 121 s
+    await expect(api.get('/c')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(2)
+  })
+
+  it.each([400, 404])('an unexpected %i from refresh is "no answer": pair kept, cool-down applies', async status => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const calls = failingRefresh(config => rejectStatus(config, status))
+
+    await expect(api.get('/a')).rejects.toMatchObject({ response: { status: 401 } })
+    await expect(api.get('/b')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(calls.refresh).toBe(1)
+    expect(localStorage.getItem('pulse.auth.token')).toBe('expired')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('refresh-1')
+  })
+
+  it('a refusal (401) is NOT a no-answer: it clears, with no cool-down involved', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const calls = failingRefresh(reject401)
+
+    await expect(api.get('/a')).rejects.toBeTruthy()
+
+    expect(calls.refresh).toBe(1)
+    expect(localStorage.length).toBe(0)
+  })
+
+  it('a new sign-in ends the cool-down', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const calls = failingRefresh(rejectNetworkError)
+    await expect(api.get('/a')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(1)
+
+    setTokens({ token: 'fresh-login', refreshToken: 'refresh-9' }, { persist: true }) // no time passes
+    await expect(api.get('/b')).rejects.toBeTruthy()
+
+    expect(calls.refresh).toBe(2)
+  })
+
+  it('a Retry-After the server sends as a plain-object header is read too', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    let calls = 0
+    api.defaults.adapter = config => {
+      if (config.url === '/auth/refresh') {
+        calls++
+        const response = { ...respond(config, 503, {}), headers: { 'retry-after': '30' } }
+        return Promise.reject(new axios.AxiosError(
+          'Service Unavailable',
+          axios.AxiosError.ERR_BAD_RESPONSE,
+          config,
+          undefined,
+          response,
+        ))
+      }
+      return reject401(config)
+    }
+
+    await expect(api.get('/a')).rejects.toBeTruthy()
+    now += 29_000
+    await expect(api.get('/b')).rejects.toBeTruthy()
+    expect(calls).toBe(1)
+    now += 2_000
+    await expect(api.get('/c')).rejects.toBeTruthy()
+    expect(calls).toBe(2)
   })
 })
 
