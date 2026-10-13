@@ -2,8 +2,8 @@
  * features/social/layout/NavRail.tsx
  * ---------------------------------------------------------------------------
  * The left rail of the three-column frame (demo-polish F1; D1-013 "240px nav
- * rail"): the Pulse logomark, the pill links **Home - Explore - Profile**, the
- * **Post** button, and the account card. It is the `nav[aria-label="Primary"]`
+ * rail"): the Pulse logomark, the pill links **Home - Explore - Notifications -
+ * Profile**, the **Post** button, and the account card. It is the `nav[aria-label="Primary"]`
  * landmark -- the whole rail, so the logo, the links, Post and the account card
  * are one navigation region, as on the platforms this mimics.
  *
@@ -16,17 +16,29 @@
  *
  * ACTIVE STATE is `aria-current="page"` on exactly one pill -- never color alone:
  * the active pill is also heavier and carries an inset accent bar (NFR-001).
- *   - Home    -> `/home`
- *   - Explore -> `/explore`
- *   - Profile -> the viewer's own single-segment profile path (`/:handle`)
+ *   - Home          -> `/home`
+ *   - Explore       -> `/explore`
+ *   - Notifications -> `/notifications` (F7; see below)
+ *   - Profile       -> the viewer's own single-segment profile path (`/:handle`)
  *
  * ABSENT, NOT DISABLED (D1-011 / COR-015):
  *   - **Profile** appears only for a persona-bound session whose persona has
  *     resolved (it needs the persona's handle for its URL).
  *   - **Post** appears only when the mount may compose AND the session can post --
  *     `onCompose` is simply not passed otherwise, and no button renders.
- *   - Notifications and Messages are NOT here: out of scope for this story (F7 may
- *     add Notifications), and a dangling door is worse than none.
+ *   - **Notifications** (demo-polish F7) appears only when BOTH hold: the host passes
+ *     `showNotifications` (the shell variant grants interactive affordances) AND the
+ *     notifications engine is running for this viewer -- an interactive, persona-bound, not
+ *     read-only participant (`notifications/useNotificationsEligibility`). The rail reads no
+ *     session itself: it asks the notifications store (`useNotificationsSummary`), so this
+ *     component stays renderable on its own. A read-only, observer, kiosk, preview or
+ *     persona-less session therefore gets no bell at all, never a disabled one (D1-011).
+ *   - Messages is NOT here: out of scope, and a dangling door is worse than none.
+ *
+ * THE BELL'S BADGE is the unread count as TEXT ("3", capped at "99+"), never a colour-only
+ * dot, and the link's accessible name carries it: "Notifications, 3 unread" (just
+ * "Notifications" when nothing is unread, and then no badge is drawn). See
+ * `notifications/unreadBadge.ts`, which keeps the seen and the heard text together.
  *
  * ICON RAIL. Below 840px the rail collapses to icons: every label stays in the DOM
  * (visually hidden), so each control keeps its accessible name at every width.
@@ -43,13 +55,22 @@
 import type { MouseEvent, Ref } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
-import { faFeatherPointed, faHashtag, faHouse, faUser } from '@fortawesome/free-solid-svg-icons'
+import {
+  faBell,
+  faFeatherPointed,
+  faHashtag,
+  faHouse,
+  faUser,
+} from '@fortawesome/free-solid-svg-icons'
 import type { Persona } from '@/features/personas'
+import { formatUnreadBadge, notificationsLinkName } from '../notifications/unreadBadge'
+import { useNotificationsSummary } from '../notifications/useNotifications'
 import { AccountCard } from './AccountCard'
 import { PulseLogo } from './PulseLogo'
 import {
   EXPLORE_PATH,
   HOME_PATH,
+  NOTIFICATIONS_PATH,
   socialPaths,
   useSocialNavigation,
 } from './socialNavigation'
@@ -70,10 +91,17 @@ export interface NavRailProps {
    * `kiosk` mount: a staff preview must never be able to sign the staff user out.
    */
   showAccount: boolean
+  /**
+   * Whether this mount may show the Notifications bell: the shell variant grants interactive
+   * affordances (`affordancesAvailable(variant)` -- false for `readOnly`, `kiosk`, `preview`).
+   * Omit it and the bell is ABSENT whatever the notifications store says, so a rail in a
+   * staff preview can never show a bell that belongs to another mount's session (D1-011).
+   */
+  showNotifications?: boolean
 }
 
 interface NavItemSpec {
-  readonly id: 'home' | 'explore' | 'profile'
+  readonly id: 'home' | 'explore' | 'notifications' | 'profile'
   readonly label: string
   readonly path: string
   readonly icon: IconDefinition
@@ -86,14 +114,29 @@ function soleSegment(pathname: string): string | undefined {
   return segments.length === 1 && only !== undefined ? only.toLowerCase() : undefined
 }
 
-export function NavRail({ onCompose, postButtonRef, self, showAccount }: NavRailProps) {
+export function NavRail({
+  onCompose,
+  postButtonRef,
+  self,
+  showAccount,
+  showNotifications = false,
+}: NavRailProps) {
   const { location, navigate, kind } = useSocialNavigation()
+  const { available: notificationsAvailable, unread } = useNotificationsSummary()
   const current = soleSegment(location.pathname)
 
   const items: NavItemSpec[] = [
     { id: 'home', label: 'Home', path: HOME_PATH, icon: faHouse },
     { id: 'explore', label: 'Explore', path: EXPLORE_PATH, icon: faHashtag },
   ]
+  if (showNotifications && notificationsAvailable) {
+    items.push({
+      id: 'notifications',
+      label: 'Notifications',
+      path: NOTIFICATIONS_PATH,
+      icon: faBell,
+    })
+  }
   if (self !== undefined) {
     items.push({
       id: 'profile',
@@ -107,6 +150,7 @@ export function NavRail({ onCompose, postButtonRef, self, showAccount }: NavRail
     if (current === undefined) return false
     if (item.id === 'home') return current === 'home'
     if (item.id === 'explore') return current === 'explore'
+    if (item.id === 'notifications') return current === 'notifications'
     return self !== undefined && current === self.handle.toLowerCase()
   }
 
@@ -134,16 +178,29 @@ export function NavRail({ onCompose, postButtonRef, self, showAccount }: NavRail
         <ul className={styles.list}>
           {items.map(item => {
             const active = isActive(item)
+            const isBell = item.id === 'notifications'
             return (
               <li key={item.id}>
                 <a
                   className={active ? `${styles.link} ${styles.linkActive}` : styles.link}
                   href={item.path}
                   aria-current={active ? 'page' : undefined}
+                  // The bell's name carries the count ("Notifications, 3 unread"); the badge
+                  // below is the same count as visible TEXT, so it is hidden from AT.
+                  aria-label={isBell ? notificationsLinkName(unread) : undefined}
                   onClick={event => handleLinkClick(event, item.path)}
                 >
                   <FontAwesomeIcon icon={item.icon} aria-hidden="true" className={styles.icon} />
                   <span className={styles.label}>{item.label}</span>
+                  {isBell && unread > 0 && (
+                    <span
+                      className={styles.badge}
+                      aria-hidden="true"
+                      data-testid="notifications-badge"
+                    >
+                      {formatUnreadBadge(unread)}
+                    </span>
+                  )}
                 </a>
               </li>
             )

@@ -4,7 +4,8 @@
  * The nav rail in isolation (demo-polish F1, "Nav rail" AC): pill links
  * Home / Explore / Profile with `aria-current="page"` on the active one; Profile
  * only for a persona-bound session; a Post button that is ABSENT (not disabled)
- * unless the host passes `onCompose`; no Notifications / Messages; and the
+ * unless the host passes `onCompose`; no Messages (and no Notifications bell unless the
+ * notifications engine is running -- F7); and the
  * account card (avatar, name, @handle) only when asked for.
  */
 import { render, screen, within } from '@testing-library/react'
@@ -70,7 +71,9 @@ describe('NavRail — landmark and links', () => {
     expect(screen.queryByRole('link', { name: 'Profile' })).not.toBeInTheDocument()
   })
 
-  it('has no Notifications or Messages (out of scope for this story)', () => {
+  it('has no Messages, and no Notifications bell unless the notifications engine is running', () => {
+    // F7 adds the bell, but only while the engine runs for this viewer (see
+    // `NavRail.notifications.test.tsx`); rendered on its own the rail has none.
     setup({ self: persona('dreyes_fh'), onCompose: () => undefined })
     expect(screen.queryByText(/notifications/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/messages/i)).not.toBeInTheDocument()
