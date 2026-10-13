@@ -126,6 +126,33 @@
   height: 22px;
 }
 
+/*
+ * The bell's unread badge (demo-polish F7): the count as TEXT over the icon's top-right
+ * corner -- never a colour-only dot (NFR-001); the link's accessible name carries the same
+ * count. White on `--pc-accent`: the per-exercise accent is certified by
+ * `theme/accent.ts` to clear 4.5:1 with white even after the 1.08 hover brightening, so
+ * the badge needs no colour of its own. A 2px ring in the rail's background colour
+ * separates it from the icon. `99+` is the cap (`unreadBadge.ts`).
+ */
+.badge {
+  position: absolute;
+  top: 3px;
+  left: 26px;
+  box-sizing: border-box;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border: 2px solid var(--pc-bg);
+  border-radius: 999px;
+  background: var(--pc-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
 /* Visually hidden in the icon rail; still the link's accessible name. */
 .label {
   position: absolute;
@@ -200,6 +227,11 @@
     justify-content: flex-start;
     width: auto;
     padding: 0 20px 0 16px;
+  }
+
+  /* The wide rail's icon starts at 16px, not centered: keep the badge on its corner. */
+  .badge {
+    left: 30px;
   }
 
   .label,

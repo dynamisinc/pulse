@@ -6,6 +6,8 @@
  *   /                      -> redirect to /home
  *   /home                  -> the feed (`HomeView`)                    [kept mounted]
  *   /explore               -> `ExplorePage` (F0's stub; F6 fills it)
+ *   /notifications         -> `NotificationsPage` (F7; redirects Home for a session
+ *                             that has no notifications -- read-only, persona-less, ...)
  *   /hashtag/:tag          -> the hashtag feed
  *   /:handle/status/:id    -> the flattened thread
  *   /:handle               -> a profile
@@ -62,12 +64,20 @@
  * `useScrollRestoration`.) Detail routes (thread / profile / hashtag) unmount on
  * leaving; they are cheap to re-open and carry no state worth keeping.
  *
+ * THE NOTIFICATIONS ENGINE LIVES HERE TOO (demo-polish F7). `<NotificationsEngine />` is
+ * rendered once, outside `<Routes>` like Home, so the derived notifications keep updating --
+ * and the rail's bell keeps its count -- on EVERY route, and is torn down only with the
+ * channel. It renders nothing visible (just a polite live region) and starts only for an
+ * interactive, persona-bound, not read-only participant.
+ *
  * World: participant. No COBRA, no MUI.
  */
 
 import { useState, type ContextType } from 'react'
 import { Route, Routes, UNSAFE_RouteContext } from 'react-router-dom'
 import { ExplorePage } from '../explore/ExplorePage'
+import { NotificationsEngine } from '../notifications/NotificationsEngine'
+import { NotificationsPage } from '../notifications/NotificationsPage'
 import {
   HOME_PATH,
   SOCIAL_ROUTE_PATTERNS,
@@ -98,6 +108,8 @@ export function SocialRoutes() {
 
   return (
     <>
+      <NotificationsEngine />
+
       {homeMounted && (
         <div hidden={!onHome} data-testid="social-feed-region">
           <HomeView />
@@ -110,6 +122,7 @@ export function SocialRoutes() {
           {/* Home renders above, outside <Routes>, so it can stay mounted. */}
           <Route path={SOCIAL_ROUTE_PATTERNS.home} element={null} />
           <Route path={SOCIAL_ROUTE_PATTERNS.explore} element={<ExplorePage />} />
+          <Route path={SOCIAL_ROUTE_PATTERNS.notifications} element={<NotificationsPage />} />
           <Route path={SOCIAL_ROUTE_PATTERNS.hashtag} element={<HashtagRoute />} />
           <Route path={SOCIAL_ROUTE_PATTERNS.thread} element={<ThreadRoute />} />
           <Route path={SOCIAL_ROUTE_PATTERNS.profile} element={<ProfileRoute />} />

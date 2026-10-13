@@ -1,0 +1,224 @@
+/*
+ * features/social/notifications/NotificationsPage.module.css
+ * ---------------------------------------------------------------------------
+ * Scoped styles for the notifications page and its rows (demo-polish F7, story 16). CSS
+ * Module -- locally scoped, NO COBRA / MUI (participant world, Pulse skin). LIGHT ONLY: the
+ * Social surface is forced to its one light palette, so there are no theme-switching rules.
+ *
+ * `.page` COMPOSES the shared `.tokens` class, so every `var(--pc-*)` below is the same
+ * palette the post cards read, including the per-exercise accent (`--pc-accent`, which
+ * `SocialBrandScope` has already made contrast-safe: >= 4.5:1 as text on white, the panel and
+ * the hover tint). A LEFT-ANCHORED ~600px column like the feed and Explore (D1-013).
+ *
+ * CONTRAST (WCAG 2.1 AA, computed -- `notifications.contrast.test.ts` re-derives every ratio
+ * below from this file's text, so a change here that breaks one fails the build):
+ *   - ink `--pc-ink` (#0e1518) on white / the unread panel / the hover tint: >= 16:1.
+ *   - muted `--nt-muted` (#56656f): 6.0:1 on white, 5.5:1 on the unread panel (#f3f5f6), 5.5:1
+ *     on the hover tint over white and 5.0:1 where that tint would sit over the panel. The
+ *     shared `--pc-ink-muted` (#61707a) is only 4.3:1 over the panel+tint, which is why this
+ *     sheet carries its own slightly deeper muted ink -- the fix `TrendingPanel.module.css`
+ *     made too.
+ *   - accent (kind icon, "New" tag, focus ring) on white and on the unread panel: >= 4.5:1 by
+ *     the accent model; the icon is a graphic (needs only 3:1).
+ *   - the "Mark all read" outline `--pc-control-line` (#7b8993) is 3.6:1 on white (WCAG
+ *     1.4.11); its disabled-looking text is `--nt-muted`.
+ *
+ * NOTHING HERE IS COLOUR-ONLY (NFR-001): type = icon + label; unread = "New" tag + heavier
+ * summary + the panel wash; the keyboard focus ring is a solid 2px ink outline.
+ */
+
+.page {
+  composes: tokens from '../theme/social.module.css';
+
+  /* Muted text that still clears 4.5:1 on the hover tint (see the header). */
+  --nt-muted: #56656f;
+
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 600px;
+  margin: 0;
+  background: var(--pc-bg);
+  color: var(--pc-ink);
+  font-family: 'Figtree', system-ui, sans-serif;
+  text-align: left;
+}
+
+/* Sticks below the shell's top EXERCISE banner AND an active alert, like the detail headers. */
+.header {
+  position: sticky;
+  top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px));
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: 53px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--pc-line);
+  background: var(--pc-bg);
+}
+
+.title {
+  margin: 0;
+  color: var(--pc-ink);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.markAll {
+  flex: none;
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid var(--pc-control-line);
+  border-radius: 999px;
+  background: none;
+  color: var(--pc-ink);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.markAll:hover {
+  background: var(--pc-hover);
+}
+
+.markAll:focus-visible {
+  outline: 2px solid var(--pc-ink);
+  outline-offset: 2px;
+}
+
+/* Nothing left to mark: still focusable (focus is never yanked), but visibly inert. */
+.markAll[aria-disabled='true'] {
+  color: var(--nt-muted);
+  cursor: default;
+}
+
+.markAll[aria-disabled='true']:hover {
+  background: none;
+}
+
+.state {
+  margin: 0;
+  padding: 24px 16px;
+  color: var(--nt-muted);
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  border-bottom: 1px solid var(--pc-line);
+}
+
+.link {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  color: var(--pc-ink);
+  text-decoration: none;
+  background: var(--pc-bg);
+}
+
+.link:hover {
+  background: var(--pc-hover);
+}
+
+/* A solid ink ring, inset so the row's own box never clips it. */
+.link:focus-visible {
+  outline: 2px solid var(--pc-ink);
+  outline-offset: -2px;
+}
+
+/* Unread: a panel wash (one of three cues -- see the header). Hover keeps the same wash so the
+ * muted text on it never drops below 4.5:1; the summary underlines instead. */
+.rowUnread .link,
+.rowUnread .link:hover {
+  background: var(--pc-panel);
+}
+
+.link:hover .summary {
+  text-decoration: underline;
+}
+
+.iconWrap {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--pc-accent);
+  font-size: 20px;
+}
+
+.content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.avatars {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--nt-muted);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.kind {
+  color: var(--pc-ink);
+  font-weight: 700;
+}
+
+.newTag {
+  padding: 0 8px;
+  border: 1px solid var(--pc-accent);
+  border-radius: 999px;
+  color: var(--pc-accent);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 18px;
+}
+
+.summary {
+  color: var(--pc-ink);
+  font-size: 15px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.rowUnread .summary {
+  font-weight: 800;
+}
+
+.excerpt {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--nt-muted);
+  font-size: 15px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}

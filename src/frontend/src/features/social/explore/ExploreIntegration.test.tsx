@@ -29,8 +29,18 @@ afterEach(() => {
   resetReplyIntent()
 })
 
+/**
+ * How many times the TOP-LEVEL feed was read: the Home feed's and the shared Explore baseline's
+ * reads. The notifications engine (F7) also reads `/feed`, but WITH replies
+ * (`includeReplies: true`) and for its own purpose -- noticing replies and like-count changes --
+ * so it is a different request and is not one of the reads this suite pins to "one".
+ */
 const feedReads = (spy: { mock: { calls: unknown[][] } }): number =>
-  spy.mock.calls.filter(([url]) => url === '/feed').length
+  spy.mock.calls.filter(([url, config]) => {
+    if (url !== '/feed') return false
+    const params = (config as { params?: { includeReplies?: boolean } } | undefined)?.params
+    return params?.includeReplies !== true
+  }).length
 
 function seedQuietFeed() {
   // Channel clock: 2033-09-04T14:30Z. #Alpha leads, #Beta trails.

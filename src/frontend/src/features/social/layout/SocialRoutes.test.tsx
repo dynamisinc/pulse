@@ -188,6 +188,7 @@ describe('SocialRoutes — matchSocialRoute agrees with the rendered <Routes> ta
   const battery: ReadonlyArray<string> = [
     '/home',
     '/explore',
+    '/notifications',
     '/hashtag/zone2',
     '/hashtag/%23WaterIssues',
     '/hashtag/%23',
