@@ -39,6 +39,8 @@
  *     staff tab even when a participant's pair sits in `localStorage`.)
  *   - the server answered 403 to the session request itself -> `/login`: a real
  *     refusal of this account that retrying cannot fix.
+ *   - the server returned a well-formed session that is ALREADY EXPIRED
+ *     (`SessionExpiredError`) -> `/login`: it confirmed the sign-in is over.
  *   - anything else, with a pair still stored -> "Reconnecting...", because nothing
  *     says the sign-in is bad, only that the server was not reached. Try again re-runs
  *     the resolution and ends the refresh cool-down first (a deliberate press is not the
@@ -79,6 +81,7 @@ import { Navigate } from 'react-router-dom'
 import { isAxiosError } from 'axios'
 import { endRefreshCooldown } from '../services/api'
 import { ReconnectingState } from './ReconnectingState'
+import { SessionExpiredError } from './sessionExpiredError'
 import { resolveSession, type Session } from './sessionResolver'
 import { getAccessToken } from './tokenStore'
 import { LOGIN_PATH } from '@/features/app-shell/constants'
@@ -110,6 +113,11 @@ export interface SessionProviderProps {
 function shouldStayConnected(error: unknown): boolean {
   // No token left: signed out, never signed in, or the refresh was REFUSED and cleared it.
   if (getAccessToken() === null) return false
+  // The server answered with a well-formed session that is already over (W2-2): that is a
+  // refusal in all but status code, and a retry could only get the same answer. (A MALFORMED
+  // body, e.g. a captive portal's HTML page, proves nothing about the sign-in: it stays on
+  // Reconnecting.)
+  if (error instanceof SessionExpiredError) return false
   // The server answered the session request itself with a refusal retrying cannot fix.
   if (isAxiosError(error) && error.response?.status === 403) return false
   return true

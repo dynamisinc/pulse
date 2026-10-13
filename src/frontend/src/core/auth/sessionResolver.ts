@@ -20,7 +20,10 @@
  * Fail-closed: a malformed/empty body, an out-of-vocabulary role, or an
  * ALREADY-EXPIRED session throws, so the provider renders nothing rather than
  * ever handing back a default/unscoped session (the anchor the isolation
- * guarantee COR-001 relies on).
+ * guarantee COR-001 relies on). The expired case throws the typed
+ * `SessionExpiredError` (the server confirmed the sign-in is over: the provider sends the
+ * person to sign in); a malformed body stays a plain `Error` (it proves nothing about the
+ * sign-in, e.g. a captive portal's HTML page: the provider offers a retry).
  *
  * World: platform/foundation. Pure `core/` module — no UI, no COBRA. Note the
  * session's `expiresAt` is REAL wall-clock (auth lifetime is a real-time
@@ -32,6 +35,7 @@ import type { AxiosAdapter } from 'axios'
 import { api } from '../services/api'
 import { isExerciseRole, type ExerciseRole } from './roles'
 import { USE_MOCK_DATA } from '../config/mockData'
+import { SessionExpiredError } from './sessionExpiredError'
 
 /**
  * The bound session for the current participant. Bound to exactly ONE exercise
@@ -153,7 +157,9 @@ export async function resolveSession(): Promise<Session> {
   }
 
   if (isSessionExpired(session, new Date())) {
-    throw new Error('resolveSession: resolved session is already expired; re-auth required')
+    // The server answered with a well-formed session that is over: a typed failure, so the
+    // provider sends the person to sign in instead of offering a pointless retry (W2-2).
+    throw new SessionExpiredError()
   }
 
   return session

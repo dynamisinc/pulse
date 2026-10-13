@@ -213,6 +213,31 @@ describe('page load with a valid stored pair whose access token has expired', ()
   })
 })
 
+describe('what the server says at /session decides retry versus sign-in (W2-2)', () => {
+  it('a well-formed but EXPIRED session goes to /login', async () => {
+    setTokens({ token: 'access-1', refreshToken: 'refresh-1' }, { persist: true })
+    api.defaults.adapter = config =>
+      ok(config, { ...SESSION_BODY, expiresAt: new Date(Date.now() - 1000).toISOString() })
+
+    renderApp()
+
+    expect(await screen.findByTestId('login-sentinel')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Reconnecting…' })).not.toBeInTheDocument()
+  })
+
+  it('a captive portal answering 200 with an HTML page stays on Reconnecting, pair kept', async () => {
+    setTokens({ token: 'access-1', refreshToken: 'refresh-1' }, { persist: true })
+    api.defaults.adapter = config =>
+      ok(config, '<html><body>Welcome to the venue Wi-Fi. Please accept the terms.</body></html>')
+
+    renderApp()
+
+    expect(await screen.findByRole('heading', { name: 'Reconnecting…' })).toBeInTheDocument()
+    expect(screen.queryByTestId('login-sentinel')).not.toBeInTheDocument()
+    expect(getAccessToken()).toBe('access-1')
+  })
+})
+
 describe('no pair at all', () => {
   it('a signed-out page goes straight to /login, with no refresh attempted', async () => {
     const calls: string[] = []
