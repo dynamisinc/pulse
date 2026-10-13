@@ -320,6 +320,7 @@ describe('fetchRosterCards - errors', () => {
     [403, 'forbidden'],
     [401, 'unauthorized'],
     [400, 'badRequest'],
+    [413, 'badRequest'],
     [500, 'unavailable'],
   ] as const)('maps HTTP %i to the %s kind', async (status, kind) => {
     vi.spyOn(api, 'post').mockRejectedValue(httpError(status))

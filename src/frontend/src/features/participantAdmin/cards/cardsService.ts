@@ -137,6 +137,9 @@ export class RosterCardsError extends Error {
 function kindForStatus(status: number | undefined): RosterCardsErrorKind {
   switch (status) {
     case 400: return 'badRequest'
+    // 413: the server's 64 KiB body limit. Unreachable with roster GUIDs (500 x ~39 B), but it is
+    // a refusal of what we sent, never an outage.
+    case 413: return 'badRequest'
     case 401: return 'unauthorized'
     case 403: return 'forbidden'
     case 409: return 'notConfigured'

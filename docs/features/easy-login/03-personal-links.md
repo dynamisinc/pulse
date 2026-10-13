@@ -1,6 +1,6 @@
 # Story: Personal links: join, revoke, reissue, disable
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-011, COR-012, COR-017 (part: force-logout, credential reset), NFR-009  ·  **Design decisions:** none (EL-5 to EL-8, EL-11, EL-16)  ·  **Issue:** #468
 **Stack:** backend  ·  **Review:** Tier-2 (a new anonymous credential endpoint and session termination; always-Critical class)  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** L
 
