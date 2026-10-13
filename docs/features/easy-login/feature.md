@@ -40,7 +40,7 @@ The epics have no requirement text for personal links, day words or card sheets 
 | 01 | [Foundation: schema, shared kernel, frozen contract](01-foundation-schema-and-seams.md) | backend | Must | 0 | none | In Review | #466 |
 | 02 | [Roster provisioning: CSV, add one, list, personas](02-roster-provisioning.md) | backend | Must | 1 | 01 | In Progress | #467 |
 | 03 | [Personal links: join, revoke, reissue, disable](03-personal-links.md) | backend | Must | 1 | 01 | In Review | #468 |
-| 04 | [Link cards and QR codes](04-link-cards-and-qr.md) | backend | Must | 1 | 01 | In Progress | #469 |
+| 04 | [Link cards and QR codes](04-link-cards-and-qr.md) | backend | Must | 1 | 01 | In Review | #469 |
 | 05 | [Day word: staff controls and word sign-in](05-day-word.md) | backend | Must | 1 | 01 | In Progress | #470 |
 | 06 | [Day-long participant sessions](06-day-long-sessions.md) | backend | Must | 1 | 01 | In Review | #471 |
 | 07 | [Participant tokens survive a closed tab](07-fe-token-persistence.md) | frontend | Must | 1 | contract | In Review | #472 |
