@@ -72,3 +72,48 @@ well-formed, no script/href/image), `LinkCardServiceTests` (eligible, each skip 
 >500, `id` filter), `LinkCardEndpointsHttpTests` (200/400/409/401/403, `no-store`),
 `LinkCardIsolationTests` (`[RequiresDockerFact]`: cross-exercise id is `notFound`), `LinkCardTelemetryTests`.
 Manual check in UAT: scan a card QR with a phone camera (see `feature.md` walk-through step 4).
+
+### Test linkage
+
+AC numbers follow the order of the criteria above: AC-1 the 200 sheet, AC-2 the QR, AC-3 the skip reasons, AC-4 the
+409 and 400, AC-5 `no-store`; then AC-6 Isolation, AC-7 Telemetry, AC-8 Authorization, AC-9 Content security. Shared
+seeding and the frontend-gate mirror live in `LinkCardTestWorld` (`FrontendQrGate` is `safeQrDataUri.ts`'s regex and
+512 KB cap, transcribed); the HTTP suite runs on a self-hosted `LinkCardTestHost` with the real filters and the real
+token-backed `CurrentStaffSessionAccessor`, because `Program.cs` does not map the route until the seam commit.
+
+- **AC-1** `LinkCardServiceTests.EligibleParticipants_GetACardEach_WithEveryField_OrderedByName`,
+  `.NoId_MeansEveryParticipant_AndEveryoneWithoutACard_IsSkippedWithTheReason`, `.Ids_LimitTheSheet_ToThoseAccounts`,
+  `.ARepeatedId_GivesOneCard`, `.TheService_ChangesNoLink`; `LinkCardEndpointsHttpTests.AController_Gets200_InTheFrozenShape_WithNoStore`,
+  `.APlanner_Gets200`, `.RepeatedIdQueryValues_AllBind`.
+- **AC-2** `QrSvgRendererTests.TheRenderedModuleMatrix_EqualsQRCodersMatrix_ForTheSameUrl_AtErrorCorrectionM`,
+  `.TheRenderedMatrix_IsNotTheMatrixOfAnyOtherErrorCorrectionLevel`, `.AnotherUrl_GivesAnotherMatrix`,
+  `.TheSvg_IsWellFormedXml_WithAViewBoxTheSizeOfTheMatrix_AndNoWidthOrHeight`,
+  `.TheSvg_IsBlackModulesOnAWhiteBackground_ThatCoversTheWholeCode`, `.TheQuietZone_IsDrawn_AndHoldsNoDarkModule`,
+  `.TheSvg_HasNoScriptImageHrefOrExternalReference`, `.TheDataUri_IsTheBase64OfTheUtf8Svg`,
+  `.TheDataUri_PassesTheFrontendGate_RegexAndSizeCap`, `.AnEmptyUrl_IsRefused`,
+  `.TheRenderer_IsTheCrossPlatformSvgPath_NeverSystemDrawing`;
+  `LinkCardServiceTests.EveryCardsQr_EncodesItsOwnJoinUrl_AndPassesTheFrontendGate`.
+- **AC-3** `LinkCardServiceTests.EachSkipReason_IsReported_AndTheRequestStillSucceedsWithTheOthers` (`noActiveLink`
+  for no link and revoked, `disabled` with and without a link, `tokenUnrecoverable` for a lost key ring, a stale copy
+  and no copy, `notFound`), `.MalformedOrBlankIds_AreNotFound_AndNeverWidenToEveryone`;
+  `LinkCardEndpointsHttpTests.AnEmptyIdValue_IsANotFoundSkip_NeverEveryone`.
+- **AC-4** `LinkCardServiceTests.UnsetJoinBase_IsJoinLinksUnavailable_AndNoCardIsProduced`,
+  `.MoreIdsThanTheCap_IsTooManyIds_AndExactlyTheCapIsFine`; `LinkCardEndpointsHttpTests.NoJoinBase_Is409ProblemDetails_WithNoStore_AndNoCard`,
+  `.MoreThan500Ids_Is400ProblemDetails_WithNoStore`.
+- **AC-5** `LinkCardEndpointsHttpTests.AController_Gets200_InTheFrozenShape_WithNoStore` (and the 400/409 tests above).
+- **AC-6** `LinkCardIsolationTests.AnIdFromAnotherExercise_IsNotFound_ExactlyLikeAnUnknownId`,
+  `.Everyone_MeansEveryoneInTheCallersExercise_Only`, `.MixedRequest_GivesCardsOnlyForTheCallersExercise`,
+  `.TheExerciseName_IsTheCallersExercise`, `.AControllerOfB_ScopedToA_GetsNothingFromEither`,
+  `.AnUnsetOrEmptyScope_ReadsNothing_AndWritesNothing`, `.TheSameAccountRead_UnderTheCentralFilter_IsInvisibleCrossExercise`;
+  `LinkCardEndpointsHttpTests.ACrossExerciseId_AndAnUnknownId_GiveTheSameStatusAndBody`.
+- **AC-7** `LinkCardTelemetryTests.ASuccessfulRequest_EmitsOneEvent_WithTheCountAndAStaffActor`,
+  `.TheScenarioTime_IsTheLiveExerciseClock_WhenItRuns`, `.ARequestThatProducesNoCard_StillEmitsOneEvent_WithCountZero`,
+  `.TwoRequests_AreTwoEvents`, `.NoUrlTokenOrName_EverReachesTheEvent`, `.ARefusedRequest_EmitsNothing`,
+  `.TheEvent_PassesTheEnvelopeRules`.
+- **AC-8** `LinkCardEndpointsHttpTests.AnEvaluator_Is403`, `.AStaffUserNotAssignedToTheExercise_Is403`,
+  `.AParticipantSession_NeverReachesIt_401`, `.AnUnresolvedScope_Is401`, `.NoCredential_Is401_BeforeAnyDatabaseAccess`,
+  `.OnlyGet_IsMapped`, `.ComposedIntoTheRealProgramHost_TheCardServiceResolves`;
+  `LinkCardServiceTests.NoStaffSession_OrAnUnresolvedScope_IsUnauthenticated`, `.AnEvaluator_OrAnUnassignedStaffUser_IsForbidden`,
+  `.AddLinkCards_IsIdempotent_WithTheRightLifetimes`.
+- **AC-9** `QrSvgRendererTests.TheSvg_NeverCarriesTheUrlItself_OnlyModuleGeometry`, `.TheSvg_HasNoScriptImageHrefOrExternalReference`;
+  `LinkCardServiceTests.EligibleParticipants_GetACardEach_WithEveryField_OrderedByName` (names returned verbatim).
