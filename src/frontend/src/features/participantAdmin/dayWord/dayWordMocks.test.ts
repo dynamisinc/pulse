@@ -150,13 +150,14 @@ describe('PUT', () => {
     expect((await getDayWordStatus()).todaySet).toBe(false)
   })
 
-  it('logs what was actually sent (for tests that check omitted fields)', async () => {
+  it('logs only whether a word was typed and the date - never the word', async () => {
     await putDayWord({})
     await putDayWord({ word: 'pinecone42', date: '2026-10-15' })
-    expect(dayWordMockControls.putBodies()).toEqual([
-      {},
-      { word: 'pinecone42', date: '2026-10-15' },
-    ])
+
+    const log = dayWordMockControls.putRequests()
+
+    expect(log).toEqual([{ hasWord: false }, { hasWord: true, date: '2026-10-15' }])
+    expect(JSON.stringify(log)).not.toContain('pinecone42')
   })
 })
 
@@ -206,6 +207,35 @@ describe('error injection', () => {
       expect(error.status).toBe(403)
       expect(error.serverMessage).toMatch(/controller or planner/)
     }
+  })
+
+  it('can limit a queued failure to one method, leaving the others untouched', async () => {
+    dayWordMockControls.failNext(503, 'Down.', { method: 'get' })
+
+    // A PUT is not the GET it was queued for, so it goes through.
+    await expect(putDayWord({})).resolves.toBeDefined()
+    expect((await failure(getDayWordStatus())).status).toBe(503)
+    await expect(getDayWordStatus()).resolves.toBeDefined()
+  })
+
+  it('can queue several consecutive failures (one per retry attempt)', async () => {
+    dayWordMockControls.failNext(503, 'Down.', { method: 'get', times: 3 })
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      expect((await failure(getDayWordStatus())).status).toBe(503)
+    }
+    await expect(getDayWordStatus()).resolves.toBeDefined()
+  })
+
+  it('malformNext: the change COMMITS but the answer is not the contract shape', async () => {
+    dayWordMockControls.malformNext()
+
+    const error = await failure(putDayWord({ word: 'pinecone42' }))
+    expect(error.kind).toBe('malformed')
+    // The word really was set, even though the caller could not read the answer.
+    expect((await getDayWordStatus()).todaySet).toBe(true)
+    // One-shot: the next call is normal.
+    await expect(putDayWord({})).resolves.toBeDefined()
   })
 
   it('fails only the NEXT request with the queued status and reason', async () => {

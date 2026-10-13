@@ -49,24 +49,49 @@ const mockConfig = (): Pick<AxiosRequestConfig, 'adapter'> =>
   USE_MOCK_DAY_WORD ? { adapter: dayWordMockAdapter } : {}
 
 /**
+ * What went wrong, so the panel can word it truthfully:
+ *  - `http`      the server answered with a non-2xx (`status` / `serverMessage` set);
+ *  - `network`   no answer at all (offline, timeout, CORS) - "check your connection";
+ *  - `malformed` the server answered 2xx but the body was not the contract's shape.
+ *                The call may well have COMMITTED, so this must never be reported
+ *                as a connection problem;
+ *  - `unknown`   anything else thrown inside the call.
+ */
+export type DayWordErrorKind = 'http' | 'network' | 'malformed' | 'unknown'
+
+/**
+ * The only thing kept of the underlying failure: a machine code and a status.
+ * NEVER the original error - an `AxiosError` carries `config.data` (the request
+ * body, i.e. the word staff just typed) and `request`/`response`, and an Error's
+ * `cause` is a serialisable, loggable own property.
+ */
+export interface DayWordErrorCause {
+  readonly code?: string
+  readonly status?: number
+}
+
+/**
  * A transport-agnostic error so the panel renders status-aware feedback without
  * coupling to axios. `status` is the HTTP status when the server answered, or
  * `undefined` when no response arrived. `serverMessage` is the server's own
  * reason (ProblemDetails `detail`) when present - shown verbatim on a `400`.
  */
 export interface DayWordErrorInit {
+  readonly kind?: DayWordErrorKind
   readonly status?: number
   readonly serverMessage?: string
-  readonly cause?: unknown
+  readonly cause?: DayWordErrorCause
 }
 
 export class DayWordError extends Error {
+  readonly kind: DayWordErrorKind
   readonly status?: number
   readonly serverMessage?: string
 
   constructor(message: string, init: DayWordErrorInit = {}) {
     super(message)
     this.name = 'DayWordError'
+    this.kind = init.kind ?? 'unknown'
     this.status = init.status
     this.serverMessage = init.serverMessage
     if (init.cause !== undefined) {
@@ -75,45 +100,76 @@ export class DayWordError extends Error {
   }
 }
 
-/** Pulls a readable reason off a ProblemDetails (or plain string) error body. */
-function extractServerMessage(data: unknown): string | undefined {
+/** A readable reason is a sentence, not a page: cap what we are willing to show. */
+const MAX_SERVER_MESSAGE_LENGTH = 300
+
+/**
+ * Pulls a readable reason off a ProblemDetails error body. A bare STRING body is
+ * trusted only on a `400` (where the contract says the server explains itself);
+ * on any other status it is more likely a proxy's or gateway's page (an HTML
+ * "Bad Gateway"), which must not be pasted into the panel - the panel falls back
+ * to generic wording instead.
+ */
+function extractServerMessage(data: unknown, status: number | undefined): string | undefined {
+  let message: string | undefined
   if (typeof data === 'string') {
-    const trimmed = data.trim()
-    return trimmed.length > 0 ? trimmed : undefined
-  }
-  if (typeof data === 'object' && data !== null) {
+    if (status === 400) message = data.trim()
+  } else if (typeof data === 'object' && data !== null) {
     const body = data as Record<string, unknown>
     for (const key of ['detail', 'message', 'title'] as const) {
       const value = body[key]
       if (typeof value === 'string' && value.trim().length > 0) {
-        return value.trim()
+        message = value.trim()
+        break
       }
     }
   }
-  return undefined
+  if (message === undefined || message.length === 0) return undefined
+  return message.length > MAX_SERVER_MESSAGE_LENGTH
+    ? `${message.slice(0, MAX_SERVER_MESSAGE_LENGTH)}…`
+    : message
 }
 
 /** Translates any thrown transport failure into a `DayWordError`. */
 function toDayWordError(error: unknown): DayWordError {
   if (axios.isAxiosError(error)) {
+    const status = error.response?.status
     return new DayWordError(error.message, {
-      status: error.response?.status,
-      serverMessage: extractServerMessage(error.response?.data),
-      cause: error,
+      kind: error.response === undefined ? 'network' : 'http',
+      status,
+      serverMessage: extractServerMessage(error.response?.data, status),
+      // Sanitised on purpose - see `DayWordErrorCause`.
+      cause: {
+        ...(error.code !== undefined ? { code: error.code } : {}),
+        ...(status !== undefined ? { status } : {}),
+      },
     })
   }
   if (error instanceof Error) {
-    return new DayWordError(error.message, { cause: error })
+    return new DayWordError(error.message, { kind: 'unknown' })
   }
-  return new DayWordError('The day-word request failed for an unknown reason.', { cause: error })
+  return new DayWordError('The day-word request failed for an unknown reason.', {
+    kind: 'unknown',
+  })
+}
+
+/** A 2xx whose body is not the contract's shape: the call may have committed. */
+function malformed(what: string): DayWordError {
+  return new DayWordError(`The day-word ${what} response was empty or malformed.`, {
+    kind: 'malformed',
+  })
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+/**
+ * `setAt` and `setByName` are display-only, so a `null` (a server that writes
+ * `null` instead of omitting) is read as "absent". Every other field is strict.
+ */
 function isOptionalString(value: unknown): boolean {
-  return value === undefined || typeof value === 'string'
+  return value === undefined || value === null || typeof value === 'string'
 }
 
 /**
@@ -177,7 +233,7 @@ export async function getDayWordStatus(): Promise<DayWordStatusDto> {
   }
   const status = parseDayWordStatus(data)
   if (status === null) {
-    throw new DayWordError('The day-word status response was empty or malformed.')
+    throw malformed('status')
   }
   return status
 }
@@ -203,7 +259,7 @@ export async function putDayWord(body: DayWordPutBody): Promise<DayWordSetResult
   }
   const result = parseDayWordSetResult(data)
   if (result === null) {
-    throw new DayWordError('The day-word response was empty or malformed.')
+    throw malformed('set')
   }
   return result
 }

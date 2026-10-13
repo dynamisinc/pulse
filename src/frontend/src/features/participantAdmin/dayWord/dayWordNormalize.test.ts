@@ -1,8 +1,9 @@
 /**
  * features/participantAdmin/dayWord/dayWordNormalize.test.ts
  * ---------------------------------------------------------------------------
- * The pure mirror of the server's day-word normalisation (lower-case, `a-z0-9`
- * only) and the live length check built on it. The server stays authoritative;
+ * The pure mirror of the server's day-word normalisation (NFKD, strip combining
+ * marks, lower-case, `a-z0-9` only - exactly backend story 05) and the live length
+ * check built on it. The server stays authoritative;
  * this pins the helper that drives the "3 of 6" hint under the typed-word field.
  */
 import { describe, expect, it } from 'vitest'
@@ -24,9 +25,21 @@ describe('normalizeDayWord', () => {
     expect(normalizeDayWord('a-b_c.d,e f')).toBe('abcdef')
   })
 
-  it('drops everything outside a-z0-9, including accented and non-Latin letters', () => {
-    expect(normalizeDayWord('café')).toBe('caf')
+  it('folds accents the way the server does (NFKD, then strip combining marks)', () => {
+    expect(normalizeDayWord('café')).toBe('cafe')
+    expect(normalizeDayWord('Ñandú 1')).toBe('nandu1')
+    expect(normalizeDayWord('Crème Brûlée')).toBe('cremebrulee')
+    // A precomposed and a decomposed é normalise to the same word.
+    expect(normalizeDayWord('caf\u00e9')).toBe(normalizeDayWord('cafe\u0301'))
+  })
+
+  it('applies compatibility decomposition (NFKD), so full-width forms fold too', () => {
+    expect(normalizeDayWord('ＡＢＣ１２３')).toBe('abc123')
+  })
+
+  it('drops letters that have no ASCII decomposition, and non-Latin scripts', () => {
     expect(normalizeDayWord('日本語')).toBe('')
+    expect(normalizeDayWord('Straße')).toBe('strae')
   })
 
   it('treats two spellings of one word as the same word', () => {
@@ -50,6 +63,11 @@ describe('checkDayWord', () => {
     expect(checkDayWord('a b c d e')).toEqual({ kind: 'tooShort', have: 5 })
     // 11 typed characters, 6 of which count: acceptable.
     expect(checkDayWord('a-b c-d e-f')).toEqual({ kind: 'ok', have: 6 })
+  })
+
+  it('counts the folded form, so "Ñandú 1" is six characters and accepted', () => {
+    expect(checkDayWord('Ñandú 1')).toEqual({ kind: 'ok', have: 6 })
+    expect(checkDayWord('café')).toEqual({ kind: 'tooShort', have: 4 })
   })
 
   it('accepts the minimum and rejects one under it', () => {
@@ -84,6 +102,7 @@ describe('describeDayWordCheck', () => {
   it('shows the standing rule when nothing is typed', () => {
     expect(describeDayWordCheck({ kind: 'empty' })).toBe(DAY_WORD_RULE_HINT)
     expect(DAY_WORD_RULE_HINT).toMatch(/6 to 64 letters and digits/)
+    expect(DAY_WORD_RULE_HINT).toMatch(/accents/)
   })
 
   it('says how far short a word is, in text', () => {

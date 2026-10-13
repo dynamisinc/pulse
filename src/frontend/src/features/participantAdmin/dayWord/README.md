@@ -39,6 +39,13 @@ already provides.
 - **Secrets.** The word lives only in component state for the one result view. Not in the React Query
   query or mutation cache (`gcTime: 0` + `reset()`), storage, a toast, a log, the title or a URL.
   `DayWordPanel.secrets.test.tsx` guards each of those.
+- **Failures.** A failed background re-read of the status never hides the one-time word: the full
+  error state is only for "no status at all", otherwise an inline notice with Try again. A malformed
+  2xx is its own error kind ("the word may have been set"), never "check your connection". Status is
+  re-read after every PUT / DELETE however it ends, on window focus, and just after the local-midnight
+  rollover. Error objects never carry the request (and so never the typed word).
+- **Normalisation.** `dayWordNormalize.ts` is the server's chain step for step (NFKD, strip combining
+  marks, lower-case, `a-z0-9`), so "Ñandú 1" is six characters.
 - **Isolation.** No request carries an exercise id. The query key includes the active exercise id for
   cache separation only, and the panel body is re-keyed on it so a switch drops all state.
 - **Time.** Real dates and instants in the exercise zone, with the zone named. Never scenario time.

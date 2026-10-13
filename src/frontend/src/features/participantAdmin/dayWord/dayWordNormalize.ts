@@ -5,16 +5,18 @@
  * length check under the "type your own word" field (easy-login story 11).
  *
  * The server (EL-9, backend story 05) normalises a word before hashing it AND
- * before comparing a sign-in attempt: lower-case, then keep letters and digits
- * only, then require 6 to 64 characters. So "Pine Cone 42!" and "pinecone42"
- * are the same word to the sign-in page - which is why a typed word's *raw*
- * length is meaningless and this helper counts the normalised form instead.
+ * before comparing a sign-in attempt: Unicode NFKD decomposition, strip the
+ * combining marks (so "é" becomes "e" and "Ñ" becomes "n"), lower-case, then keep
+ * `a-z` and `0-9` only, then require 6 to 64 characters. So "Pine Cone 42!" and
+ * "pinecone42" are the same word to the sign-in page, and so are "Café" and
+ * "cafe" - which is why a typed word's *raw* length is meaningless and this helper
+ * counts the normalised form instead.
  *
  * The server stays authoritative. This helper never decides whether a word is
  * accepted; it only lets the panel say "3 of 6" while staff type, and a `400`
- * from `PUT /staff/day-word` is always shown verbatim. If the two ever disagree
- * (e.g. the server counts an accented letter that `a-z0-9` drops), the worst
- * case is a live hint that is stricter than the server, never a weaker secret.
+ * from `PUT /staff/day-word` is always shown verbatim. The chain below is the
+ * server's, step for step, so the two agree on accents as well as on case; if
+ * they ever drift the live hint is merely advisory and the server wins.
  *
  * Deliberately has NO dependency on the panel, React, or the network so it is
  * trivially unit-testable. World: staff.
@@ -22,9 +24,16 @@
 
 import { DAY_WORD_MAX_LENGTH, DAY_WORD_MIN_LENGTH } from './types'
 
-/** Lower-cases `input` and keeps only `a-z` and `0-9`. */
+/**
+ * Exactly the server's normalisation: NFKD, drop combining marks, lower-case,
+ * keep only `a-z` and `0-9`.
+ */
 export function normalizeDayWord(input: string): string {
-  return input.toLowerCase().replace(/[^a-z0-9]/g, '')
+  return input
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
 }
 
 /** The outcome of the live check. `have` is the NORMALISED length. */
@@ -46,7 +55,7 @@ export function checkDayWord(input: string): DayWordCheck {
 /** Plain-language rule shown as the field's standing hint. */
 export const DAY_WORD_RULE_HINT =
   `${DAY_WORD_MIN_LENGTH} to ${DAY_WORD_MAX_LENGTH} letters and digits. ` +
-  'Capitals, spaces and punctuation are ignored when people sign in.'
+  'Capitals, accents, spaces and punctuation are ignored when people sign in.'
 
 /**
  * The live message for a check result. Always TEXT (never colour alone,
@@ -63,6 +72,6 @@ export function describeDayWordCheck(check: DayWordCheck): string {
       return `Too long: ${check.have} letters or digits, the most allowed is ${DAY_WORD_MAX_LENGTH}.`
     case 'ok':
       return `Looks good: ${check.have} letters and digits count. ` +
-        'Capitals, spaces and punctuation are ignored when people sign in.'
+        'Capitals, accents, spaces and punctuation are ignored when people sign in.'
   }
 }

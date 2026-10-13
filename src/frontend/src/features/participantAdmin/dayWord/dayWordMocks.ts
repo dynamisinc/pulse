@@ -16,15 +16,19 @@
  *  - ONE word per exercise per calendar DATE in the exercise zone (EL-9); "today"
  *    is the real wall clock there. `todayEndsAt` / `validUntil` are the real next
  *    local midnight in that zone.
- *  - The word is NEVER stored. Like the server (a PBKDF2 hash), the mock keeps
- *    only "a word was set, by whom, when, replaced N times" - so `GET` cannot
- *    leak what `PUT` returned, and there is nothing here to read back.
+ *  - The word is NEVER stored or logged. Like the server (a PBKDF2 hash), the mock
+ *    keeps only { setAt, setByName, replacedCount } per date, so `GET` cannot leak
+ *    what `PUT` returned and there is nothing here to read back. Even the
+ *    test-only request log (`putRequests()`) records just { hasWord, date? } -
+ *    whether a word was typed, never which.
  *  - Generated vs typed (`generated`), first set vs rotation (`replaced`,
  *    `replacedCount`), the 14-day pre-set window, and the same 6-to-64
  *    letters-and-digits rule the real server enforces (via the shared
  *    `normalizeDayWord`).
  *  - A deterministic way to hit every error path (`dayWordMockControls`) so tests
- *    do not depend on a magic input.
+ *    do not depend on a magic input: a queued 4xx / 5xx for the next request (of a
+ *    given method), a blanket 403, and a 2xx whose body is not the contract's shape
+ *    AFTER the change committed (the "may have been set" case).
  *
  * It is DEMO / TEST CONFIG, not product behaviour: deleted from the call path the
  * moment the live endpoint is deployed (the flip point stops attaching it).
@@ -41,7 +45,6 @@ import {
   DAY_WORD_MAX_DAYS_AHEAD,
   DAY_WORD_MAX_LENGTH,
   DAY_WORD_MIN_LENGTH,
-  type DayWordPutBody,
   type DayWordSetResultDto,
   type DayWordStatusDto,
 } from './types'
@@ -59,10 +62,20 @@ interface MockWordRow {
   replacedCount: number
 }
 
-/** A failure queued by a test to be returned by the next request. */
+type MockMethod = 'get' | 'put' | 'delete'
+
+/** A failure queued by a test to be returned by the next matching request. */
 interface QueuedFailure {
   status: number
   detail: string
+  /** Only fail a request of this method; absent = the next request of any method. */
+  method?: MockMethod
+}
+
+/** What the test-only request log keeps of a `PUT`: never the word itself. */
+export interface MockPutRequest {
+  hasWord: boolean
+  date?: string
 }
 
 const FORBIDDEN_DETAIL =
@@ -72,7 +85,8 @@ let rows = new Map<string, MockWordRow>()
 let queuedFailures: QueuedFailure[] = []
 let forbidden = false
 let nowOverride: Date | null = null
-let putBodies: DayWordPutBody[] = []
+let putRequests: MockPutRequest[] = []
+let malformNextResponse = false
 
 const now = (): Date => nowOverride ?? new Date()
 
@@ -217,8 +231,8 @@ function put(config: InternalAxiosRequestConfig) {
     typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
   const word = body.word
   const date = body.date
-  putBodies.push({
-    ...(typeof word === 'string' ? { word } : {}),
+  putRequests.push({
+    hasWord: typeof word === 'string',
     ...(typeof date === 'string' ? { date } : {}),
   })
 
@@ -284,20 +298,38 @@ function remove(config: InternalAxiosRequestConfig) {
 
 /** The mock adapter `dayWordService` attaches per request when `USE_MOCK_DATA` is on. */
 export const dayWordMockAdapter: AxiosAdapter = async config => {
-  const queued = queuedFailures.shift()
-  if (queued) fail(config, queued.status, queued.detail)
+  const method = (config.method ?? 'get').toLowerCase()
+  const queuedIndex = queuedFailures.findIndex(
+    failure => failure.method === undefined || failure.method === method,
+  )
+  if (queuedIndex !== -1) {
+    const [queued] = queuedFailures.splice(queuedIndex, 1)
+    if (queued) fail(config, queued.status, queued.detail)
+  }
   if (forbidden) fail(config, 403, FORBIDDEN_DETAIL)
 
-  switch ((config.method ?? 'get').toLowerCase()) {
+  let response: ReturnType<typeof respond>
+  switch (method) {
     case 'get':
-      return status(config)
+      response = status(config)
+      break
     case 'put':
-      return put(config)
+      response = put(config)
+      break
     case 'delete':
-      return remove(config)
+      response = remove(config)
+      break
     default:
       return fail(config, 400, 'Unsupported day-word method.')
   }
+
+  if (malformNextResponse && response.status !== 204) {
+    // The change above COMMITTED; only the answer is garbled (a proxy rewrite, a
+    // server bug, a contract drift). The caller must not assume nothing happened.
+    malformNextResponse = false
+    return { ...response, data: { unexpected: true } }
+  }
+  return response
 }
 
 /**
@@ -311,7 +343,8 @@ export const dayWordMockControls = {
     queuedFailures = []
     forbidden = false
     nowOverride = null
-    putBodies = []
+    putRequests = []
+    malformNextResponse = false
   },
   /** Pins "now" (the wall clock in the exercise zone). `null` restores real time. */
   setNow(instant: Date | null): void {
@@ -334,12 +367,37 @@ export const dayWordMockControls = {
   forbid(): void {
     forbidden = true
   },
-  /** The NEXT request fails with `status` and a ProblemDetails `detail`. */
-  failNext(status: number, detail: string): void {
-    queuedFailures.push({ status, detail })
+  /**
+   * The NEXT matching request fails with `status` and a ProblemDetails `detail`.
+   * `method` limits it to a GET / PUT / DELETE (e.g. fail the status refetch that
+   * follows a successful PUT); `times` queues that many consecutive failures
+   * (a retried query needs one per attempt).
+   */
+  failNext(
+    status: number,
+    detail: string,
+    options: { method?: MockMethod; times?: number } = {},
+  ): void {
+    for (let i = 0; i < (options.times ?? 1); i += 1) {
+      queuedFailures.push({
+        status,
+        detail,
+        ...(options.method !== undefined ? { method: options.method } : {}),
+      })
+    }
   },
-  /** The `PUT` bodies received so far, in order (what was actually sent). */
-  putBodies(): readonly DayWordPutBody[] {
-    return putBodies
+  /**
+   * The NEXT successful request still performs its change but answers with a 2xx
+   * body that is not the contract's shape - "the word may have been set".
+   */
+  malformNext(): void {
+    malformNextResponse = true
+  },
+  /**
+   * What each `PUT` carried, in order: whether a word was typed and the date - NEVER
+   * the word. (Tests that need the exact wire body spy on `api.put` instead.)
+   */
+  putRequests(): readonly MockPutRequest[] {
+    return putRequests
   },
 }

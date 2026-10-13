@@ -30,15 +30,17 @@
  *    mangle it.
  *  - Show large is a real toggle button (`aria-pressed`), and its on/off state
  *    is shown by icon and by the block itself, not by colour.
- *  - Copy outcome is announced (without the word) via `onAnnounce` and shown as
- *    text; a failed copy says so and tells staff to select the word instead.
+ *  - A successful copy is announced (without the word) via `onAnnounce` and shown
+ *    as text. A failed copy is shown, and announced, ONCE - by its own
+ *    `role="alert"` block, not also through the live region - and tells staff to
+ *    select the word instead.
  *
  * CONTENT SECURITY (NFR-004): the word is rendered as a React text node.
  *
  * World: STAFF (COBRA).
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Box, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -94,6 +96,7 @@ export function OneTimeWordResult({
   const [large, setLarge] = useState(false)
   const [copy, setCopy] = useState<CopyState>('idle')
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const headingId = useId()
 
   // Land the user on the result as soon as it appears.
   useEffect(() => {
@@ -102,10 +105,11 @@ export function OneTimeWordResult({
 
   const handleCopy = () => {
     // Called synchronously inside the click so Safari allows the clipboard write.
+    // A failure is reported ONCE, by the `role="alert"` block below; it is not also
+    // sent to the live region, which would have a screen reader say it twice.
     const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard
     if (!clipboard) {
       setCopy('failed')
-      onAnnounce('Could not copy. Select the word and copy it manually.')
       return
     }
     clipboard.writeText(result.word).then(
@@ -113,10 +117,7 @@ export function OneTimeWordResult({
         setCopy('copied')
         onAnnounce('Word copied to the clipboard.')
       },
-      () => {
-        setCopy('failed')
-        onAnnounce('Could not copy. Select the word and copy it manually.')
-      },
+      () => setCopy('failed'),
     )
   }
 
@@ -125,7 +126,7 @@ export function OneTimeWordResult({
   return (
     <Box
       component="section"
-      aria-labelledby="day-word-result-heading"
+      aria-labelledby={headingId}
       data-testid="day-word-result"
       sx={{
         border: '2px solid',
@@ -139,7 +140,7 @@ export function OneTimeWordResult({
       }}
     >
       <Typography
-        id="day-word-result-heading"
+        id={headingId}
         ref={headingRef}
         tabIndex={-1}
         variant="subtitle1"

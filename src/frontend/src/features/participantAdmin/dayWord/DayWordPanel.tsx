@@ -34,6 +34,14 @@
  * is re-keyed on the exercise id, so a switch remounts it and drops all state).
  * The status query never contains a word.
  *
+ * A FAILED BACKGROUND RE-READ never hides the word. The full error state is only
+ * for "there is no status at all". If a refresh fails while a status is already in
+ * hand (and above all while the one-time word is on screen, which can never be
+ * shown again), the panel keeps everything and adds an inline "Status could not be
+ * refreshed" notice with a Try again button. A change that answers an unexpected
+ * format is reported as exactly that ("the word may have been set"), never as a
+ * connection problem, and the status is re-read whatever the outcome.
+ *
  * ISOLATION (XC-001 / COR-001). The panel sends no exercise id. The query key
  * includes the active exercise id from `useExerciseContext()` (see
  * `useDayWord.ts`) so a switch can never paint another exercise's status.
@@ -116,6 +124,9 @@ const VISUALLY_HIDDEN = {
  * with. The live word-rule hint and the date hint are real instructions, not
  * decoration, so on THIS panel's fields they use the primary text colour. (An
  * error keeps its own, already-AA, error colour.)
+ *
+ * TODO(#461): remove this override when the COBRA theme's `text.secondary` is
+ * darkened to AA; every COBRA field then gets the fix and this goes away.
  */
 const READABLE_FIELD_SX = {
   '& .MuiInputLabel-root:not(.Mui-focused):not(.Mui-error)': { color: 'text.primary' },
@@ -131,6 +142,9 @@ type ConfirmState =
 
 type FocusTarget = 'status' | 'upcoming' | 'trigger'
 
+/** How a PUT / DELETE ended; 'busy' means another call was in flight and none was sent. */
+type CallOutcome = 'ok' | 'failed' | 'busy'
+
 /** The dialog text for a confirm state. */
 interface ConfirmCopy {
   title: string
@@ -139,9 +153,25 @@ interface ConfirmCopy {
   destructive: boolean
 }
 
-/** Maps a thrown failure to plain, status-aware staff copy. */
-function describeError(error: unknown): string {
+/** What the failed call was: reading the status, or changing a word. */
+type ErrorContext = 'load' | 'change'
+
+/**
+ * Maps a thrown failure to plain, status-aware staff copy.
+ *
+ * A malformed 2xx is deliberately NOT a connection problem: the server answered,
+ * and on a change it may already have committed. The copy says exactly that, and
+ * tells staff how to recover (re-read the status; rotate if unsure).
+ */
+function describeError(error: unknown, context: ErrorContext): string {
   if (error instanceof DayWordError) {
+    if (error.kind === 'malformed') {
+      return context === 'change'
+        ? 'Pulse answered in an unexpected format. ' +
+          'The word may have been set — check the status and rotate if needed.'
+        : 'Pulse answered in an unexpected format, so the word status cannot be shown. ' +
+          'Try again.'
+    }
     switch (error.status) {
       case 400:
         return error.serverMessage
@@ -153,7 +183,9 @@ function describeError(error: unknown): string {
         return 'You do not have permission to manage the day word. ' +
           'Only a controller or planner assigned to this exercise can.'
       case undefined:
-        return 'Could not reach the server. Check your connection and try again.'
+        return error.kind === 'network'
+          ? 'Could not reach the server. Check your connection and try again.'
+          : 'The request could not be completed. Please try again.'
       default:
         return error.serverMessage ?? 'The request could not be completed. Please try again.'
     }
@@ -173,6 +205,47 @@ function ErrorNotice({ message, testId }: { message: string; testId: string }) {
         <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden />
       </Box>
       <Typography variant="body2" sx={{ fontWeight: 600 }}>{message}</Typography>
+    </Box>
+  )
+}
+
+interface StaleStatusNoticeProps {
+  /** Why the refresh failed, when the reason is one staff can act on (401 / 403). */
+  reason: string | null
+  retrying: boolean
+  onRetry: () => void
+}
+
+/**
+ * A background re-read of the status failed but the last good status is still on
+ * screen. Say so, inline, and keep everything else - above all the one-time word,
+ * which can never be shown again and must not vanish behind a full error state.
+ */
+function StaleStatusNotice({ reason, retrying, onRetry }: StaleStatusNoticeProps) {
+  return (
+    <Box
+      role="status"
+      data-testid="day-word-stale-warning"
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 1.5,
+        mb: 1.5,
+        bgcolor: 'notifications.warning',
+        color: 'text.primary',
+        borderRadius: 1,
+        padding: '8px 12px',
+      }}
+    >
+      <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden />
+      <Typography variant="body2" sx={{ fontWeight: 600, flex: '1 1 240px' }}>
+        Status could not be refreshed. What you see may be out of date.
+        {reason ? ` ${reason}` : ''}
+      </Typography>
+      <CobraSecondaryButton disabled={retrying} onClick={onRetry}>
+        Try again
+      </CobraSecondaryButton>
     </Box>
   )
 }
@@ -224,7 +297,8 @@ function StatusBanner({ status }: StatusBannerProps) {
         gap: 1.5,
         bgcolor: 'notifications.warning',
         color: 'text.primary',
-        borderLeft: '6px solid #6F4E37',
+        borderLeft: '6px solid',
+        borderLeftColor: 'notifications.warningText',
         borderRadius: 1,
         padding: '12px 14px',
       }}
@@ -268,6 +342,10 @@ function DayWordPanelBody() {
   const statusHeadingRef = useRef<HTMLHeadingElement>(null)
   const upcomingHeadingRef = useRef<HTMLHeadingElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
+  // A synchronous latch: `isPending` only turns true after React Query notifies and
+  // React re-renders, so two clicks in the same tick would both pass a `disabled`
+  // check. This ref flips immediately, so the second click sends nothing.
+  const inFlightRef = useRef(false)
 
   const status = statusQuery.data
   const busy = isSetting || clearMutation.isPending
@@ -362,12 +440,15 @@ function DayWordPanelBody() {
     )
   }
 
-  if (statusQuery.isError || status === undefined) {
+  // The FULL error state is only for "there is no status at all". A failed
+  // background re-read with a status already in hand is an inline notice below, so
+  // it can never take a one-time word off the screen.
+  if (status === undefined) {
     const forbidden = statusQuery.error?.status === 403
     return shell(
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, alignItems: 'flex-start' }}>
         <ErrorNotice
-          message={describeError(statusQuery.error)}
+          message={describeError(statusQuery.error, 'load')}
           testId="day-word-status-error"
         />
         {forbidden ? null : (
@@ -393,8 +474,13 @@ function DayWordPanelBody() {
 
   // ---------------------------------------------------------------- actions
 
-  /** Calls the PUT. Resolves true on success; the error is shown in the panel. */
-  const runSet = async (source: WordSource, date: string): Promise<boolean> => {
+  /**
+   * Calls the PUT. 'ok' on success, 'failed' (error shown in the panel) otherwise,
+   * and 'busy' - having sent NOTHING - when another call is already in flight.
+   */
+  const runSet = async (source: WordSource, date: string): Promise<CallOutcome> => {
+    if (inFlightRef.current) return 'busy'
+    inFlightRef.current = true
     setActionError(null)
     setResult(null)
     const body: DayWordPutBody = {
@@ -411,15 +497,19 @@ function DayWordPanelBody() {
         `${saved.replaced ? ', replacing the previous word' : ''}. ` +
         'It is shown on screen once.',
       )
-      return true
+      return 'ok'
     } catch (error) {
-      setActionError(describeError(error))
-      return false
+      setActionError(describeError(error, 'change'))
+      return 'failed'
+    } finally {
+      inFlightRef.current = false
     }
   }
 
-  /** Calls the DELETE for `date` (omit for today). Resolves true on success. */
-  const runClear = async (date: string | undefined): Promise<boolean> => {
+  /** Calls the DELETE for `date` (omit for today). Outcomes as for `runSet`. */
+  const runClear = async (date: string | undefined): Promise<CallOutcome> => {
+    if (inFlightRef.current) return 'busy'
+    inFlightRef.current = true
     setActionError(null)
     try {
       await clearMutation.mutateAsync(date)
@@ -430,10 +520,12 @@ function DayWordPanelBody() {
           ? 'Word sign-in is off for today.'
           : `Word cleared for ${formatDateLabel(date)}.`,
       )
-      return true
+      return 'ok'
     } catch (error) {
-      setActionError(describeError(error))
-      return false
+      setActionError(describeError(error, 'change'))
+      return 'failed'
+    } finally {
+      inFlightRef.current = false
     }
   }
 
@@ -460,18 +552,23 @@ function DayWordPanelBody() {
   const submitConfirm = async () => {
     if (confirm === null || !confirmOpen) return
     if (confirm.kind === 'rotate') {
-      const ok = await runSet(confirm.source, confirm.date)
+      const outcome = await runSet(confirm.source, confirm.date)
+      // A second click on Confirm while the first call is in flight sent nothing and
+      // must not close the dialog out from under the first.
+      if (outcome === 'busy') return
       setConfirmOpen(false)
       // On success the result view takes focus itself; on failure go back.
-      if (!ok) requestFocus('trigger')
+      if (outcome === 'failed') requestFocus('trigger')
     } else if (confirm.kind === 'turnOff') {
-      const ok = await runClear(undefined)
+      const outcome = await runClear(undefined)
+      if (outcome === 'busy') return
       setConfirmOpen(false)
-      requestFocus(ok ? 'status' : 'trigger')
+      requestFocus(outcome === 'ok' ? 'status' : 'trigger')
     } else {
-      const ok = await runClear(confirm.date)
+      const outcome = await runClear(confirm.date)
+      if (outcome === 'busy') return
       setConfirmOpen(false)
-      requestFocus(ok ? 'upcoming' : 'trigger')
+      requestFocus(outcome === 'ok' ? 'upcoming' : 'trigger')
     }
   }
 
@@ -511,6 +608,18 @@ function DayWordPanelBody() {
 
   return shell(
     <>
+      {statusQuery.isError ? (
+        <StaleStatusNotice
+          reason={
+            statusQuery.error?.status === 401 || statusQuery.error?.status === 403
+              ? describeError(statusQuery.error, 'load')
+              : null
+          }
+          retrying={statusQuery.isFetching}
+          onRetry={() => void statusQuery.refetch()}
+        />
+      ) : null}
+
       <Typography variant="body2" component="p" data-testid="day-word-date-line" sx={{ mb: 1.5 }}>
         <strong>{formatDateLabel(today)}</strong> in <strong>{timeZone}</strong>. Today ends{' '}
         {formatInstant(status.todayEndsAt, timeZone)}.
