@@ -43,15 +43,24 @@
          uncertain outcome (no response, 408, a 5xx or an unreadable 2xx) it never simply sends it again:
          it re-reads GET /api/injects and adopts an armable item with the same kind, title and posts, or
          stops and says so (wait about a minute and run the same command again; no -Resume needed).
+         A KEPT item (loaded by an earlier run, still armable) whose reply target got a new id is re-pointed IN
+         PLACE with PUT /api/injects/{id}: on the Tue 10/20 re-seed, Clear-DemoContent.ps1 archives the posts and
+         step 9 posts them again under new ids, and a reloaded item's posts get new ids too. The PUT sends the
+         QUEUE's own copy (a controller's console edits stay), echoes every child by its id, changes only the
+         stale replyTo, and carries the version GET /api/injects showed. The item keeps its id, its children and
+         its place in the queue. A 409 or no answer re-reads the queue once and retries once with the fresh
+         version; if that fails too it is a warning naming the item, and the self-check's reply line fails.
+         Spent items are never edited (-ReloadFiredRunSheet's fresh copies already point at the new ids).
      11. Checks the pause tier again (same rule) and reports what it found or set. The tier lives in
          memory, and every reset or restart sets it back to "running". After any reset, run this script
          again or pause from the console.
      12. Self-check. GET /api/feed must show at least the seeded top-level posts. Every media URL (post
          media, posters, avatars, banners) must answer a ranged GET (Range: bytes=0-1) with 206. Every
          run-sheet item must be in GET /api/injects with the pack's post count, and armable: pending, or
-         held before its release (see AFTER A REHEARSAL). The armable items must be in pack order in the
-         console's queue, because "Fire next" follows that order. It prints a ✅/❌ summary and exits 1 if any
-         check failed.
+         held before its release (see AFTER A REHEARSAL). Every reply of an armable item must point at a live
+         post (the current copy of its target). The armable items must be in pack order in the console's
+         queue, because "Fire next" follows that order. It prints a ✅/❌ summary and exits 1 if any check
+         failed.
 
     RE-RUNNING IS SAFE. A manifest records what has been seeded, at
     %LOCALAPPDATA%\Pulse\demo-seed\<exerciseId>.json on Windows or $HOME/.local/share/Pulse/demo-seed on
@@ -92,7 +101,15 @@
     -ScenarioAnchor cannot move a partial run either, and a reply is never posted earlier than its parent.
 
     PUBLIC APIs ONLY. There are no ops endpoints and no direct database access: nothing the product's own
-    console could not do. The script also refuses, at runtime, any API path outside its allowlist.
+    console could not do. The script also refuses, at runtime, any API path outside its allowlist. On a
+    run-sheet item it only ever sends PUT (the re-point above): never fire, hold, delete or reorder.
+
+    DEMO WEEK. The participant app's scenario "now" is the browser's wall clock, and Trending counts the last
+    12 hours, so the demo feed is seeded fresh on the morning: Clear-DemoContent.ps1, Reset-DemoState.ps1, then
+    this script (README-seed.md has the run-of-show). Never leave the world FROZEN overnight: a frozen server
+    clock falls behind, so the next day's run-sheet fires and engine posts would be stamped in the past and
+    never trend. Recover with Reset-DemoState.ps1 -Restart, wait ~8 minutes, Reset-DemoState.ps1, then this
+    script. This script warns when it finds the world frozen.
 
     SECRETS. The staff secret comes from $env:PULSE_STAFF_SECRET if set. Otherwise the script asks for it
     with a hidden prompt; Copy-StaffSecret.ps1 puts it on the clipboard. The secret and the session token
@@ -217,13 +234,21 @@ function Get-SeedApiAllowlist {
         '/api/feed'
         '/api/injects'
         '/api/injects/assignees'
+        '/api/injects/{id}'
     )
 }
 
 function Test-SeedApiPath {
-    param([Parameter(Mandatory)] [string] $Path)
+    <#
+    .SYNOPSIS
+        True when the path is on the allowlist. An item route, /api/injects/{id}, is allowed for PUT only (re-pointing
+        a kept item's stale reply in place): never fire, hold, delete or reorder. Pass the method to allow it.
+    #>
+    param([Parameter(Mandatory)] [string] $Path, [string] $Method)
     $bare = ($Path -split '\?', 2)[0]
-    if ($bare -cmatch '^/api/staff/personas/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') { return $true }
+    $guid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+    if ($bare -cmatch "^/api/staff/personas/$guid`$") { return $true }
+    if ($bare -cmatch "^/api/injects/$guid`$") { return $Method -ceq 'PUT' }
     return (Get-SeedApiAllowlist) -ccontains $bare
 }
 
@@ -1610,14 +1635,19 @@ function Get-InjectPlan {
     }
 }
 
-function Get-InjectStaleReplies {
+function Get-InjectReplyRepairs {
     <#
     .SYNOPSIS
-        What a queue item (skipped or adopted, so loaded earlier) still replies to by an OLD id, so at fire it
-        would fail or answer the wrong post: a pack post that was archived (for example by Clear-DemoContent.ps1)
-        and posted again, or a post of an earlier run-sheet item that was loaded again (-ReloadFiredRunSheet, or
-        deleted and re-created).
+        The replies of a queue item (kept from an earlier run: skipped or adopted) that still point at an OLD id,
+        one object per post: @{ Index; Sequence; Field (postId | injectPostId); Loaded; Current; Target ("p02",
+        "post 1 of i01"); Label (the target and why) }.
+          - a pack post that was archived (for example by Clear-DemoContent.ps1) and posted again: { postKey }
+            resolves to a new postId;
+          - a post of an earlier run-sheet item that was loaded again (-ReloadFiredRunSheet, or deleted and
+            re-created): { item, sequence } resolves to a new injectPostId.
         The current ids are known by then: posts are made before the run sheet, and a reply names an EARLIER item.
+        Sibling replies never go stale (a kept item keeps its children). The run-sheet step re-points these in
+        place (Update-InjectReplies).
     .PARAMETER InjectPostIds
         Run-sheet item key → the CURRENT ids of its posts in sequence order.
     #>
@@ -1635,19 +1665,122 @@ function Get-InjectStaleReplies {
         $reply = $want[$k]['replyTo']
         if ($reply -isnot [System.Collections.IDictionary]) { continue }
         $loadedReply = $have[$k]['replyTo']
+        $field = $null; $current = ''; $label = ''; $name = ''
         if ($reply.Contains('postKey')) {
+            $field = 'postId'
             $current = [string] $PostIds[[string] $reply['postKey']]
-            $loaded = if ($loadedReply -is [System.Collections.IDictionary]) { [string] $loadedReply['postId'] } else { '' }
-            if ($current -and $loaded -and $loaded -ne $current) { "$($reply['postKey']) (archived and posted again since)" }
+            $name = [string] $reply['postKey']
+            $label = "$name (archived and posted again since)"
         }
         elseif ($reply.Contains('item') -and [string] $reply['item'] -cne $key) {
             $target = [string] $reply['item']
             $children = @($InjectPostIds[$target])
             $index = [long] $reply['sequence'] - 1
+            $field = 'injectPostId'
             $current = if ($index -ge 0 -and $index -lt $children.Count) { [string] $children[$index] } else { '' }
-            $loaded = if ($loadedReply -is [System.Collections.IDictionary]) { [string] $loadedReply['injectPostId'] } else { '' }
-            if ($current -and $loaded -and $loaded -ne $current) { "post $($reply['sequence']) of $target ($target was loaded again since)" }
+            $name = "post $($reply['sequence']) of $target"
+            $label = "$name ($target was loaded again since)"
         }
+        if (-not $field) { continue }
+        $loaded = if ($loadedReply -is [System.Collections.IDictionary]) { [string] $loadedReply[$field] } else { '' }
+        if ($current -and $loaded -and $loaded -ne $current) {
+            [pscustomobject]@{ Index = $k; Sequence = $k + 1; Field = $field; Loaded = $loaded; Current = $current; Target = $name; Label = $label }
+        }
+    }
+}
+
+function Get-InjectStaleReplies {
+    <# The labels of Get-InjectReplyRepairs, for messages ("p02 (archived and posted again since)"). #>
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $PackItem,
+        [AllowNull()] [System.Collections.IDictionary] $Row,
+        [Parameter(Mandatory)] [hashtable] $PostIds,
+        [hashtable] $InjectPostIds = @{}
+    )
+    Get-InjectReplyRepairs -PackItem $PackItem -Row $Row -PostIds $PostIds -InjectPostIds $InjectPostIds | ForEach-Object Label
+}
+
+function New-InjectRepointBody {
+    <#
+    .SYNOPSIS
+        The PUT /api/injects/{id} body (InjectItemWrite & { version }) that re-points a kept item's stale replies
+        IN PLACE: same item, same place in the queue, same children. It is built from the QUEUE's copy, not the
+        pack, so a controller's console edits (title, notes, text, assignee, media, ...) are sent back as they are.
+        Every child is echoed by its id, which keeps its identity ("Child identity on PUT", inject-queue
+        implementation.md). Only the replies named in Repairs change. Version is the one the queue showed.
+    #>
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Row,
+        [AllowEmptyCollection()] [object[]] $Repairs = @()
+    )
+    $bySequence = @{}
+    foreach ($repair in @($Repairs)) { if ($repair) { $bySequence[[long] $repair.Sequence] = $repair } }
+    $body = [ordered]@{ kind = [string] $Row['kind']; title = [string] $Row['title'] }
+    if ($null -ne $Row['notes']) { $body['notes'] = [string] $Row['notes'] }
+    if ($null -ne $Row['plannedMinute']) { $body['plannedMinute'] = [long] $Row['plannedMinute'] }
+    if ($Row['assigneeId']) { $body['assigneeId'] = [string] $Row['assigneeId'] }
+    if ([string] $Row['kind'] -ceq 'burst' -and $null -ne $Row['burstWindowSeconds']) { $body['burstWindowSeconds'] = [long] $Row['burstWindowSeconds'] }
+    $body['posts'] = @(foreach ($post in @(@(Get-SeedList $Row 'posts') | Sort-Object { [long] $_['sequence'] })) {
+            $out = [ordered]@{ id = [string] $post['id']; personaId = [string] $post['personaId']; text = [string] $post['text'] }
+            $media = @(Get-SeedList $post 'media')
+            if ($media.Count -gt 0) { $out['media'] = @(foreach ($item in $media) { [ordered]@{ mediaId = [string] $item['mediaId']; alt = [string] $item['alt'] } }) }
+            $repair = $bySequence[[long] $post['sequence']]
+            if ($repair) { $out['replyTo'] = [ordered]@{}; $out['replyTo'][$repair.Field] = $repair.Current }
+            elseif ($post['replyTo'] -is [System.Collections.IDictionary]) {
+                if ($post['replyTo']['postId']) { $out['replyTo'] = [ordered]@{ postId = [string] $post['replyTo']['postId'] } }
+                elseif ($post['replyTo']['injectPostId']) { $out['replyTo'] = [ordered]@{ injectPostId = [string] $post['replyTo']['injectPostId'] } }
+            }
+            if ($post['engagementBaseline'] -is [System.Collections.IDictionary]) {
+                $baseline = [ordered]@{}
+                foreach ($name in 'like', 'repost', 'reply') { if ($null -ne $post['engagementBaseline'][$name]) { $baseline[$name] = [long] $post['engagementBaseline'][$name] } }
+                $out['engagementBaseline'] = $baseline
+            }
+            $out
+        })
+    $body['version'] = [long] $Row['version']
+    return $body
+}
+
+function Get-InjectRepointPlan {
+    <#
+    .SYNOPSIS
+        What the plan expects to re-point in place: per kept, armable run-sheet item, the replies whose target will
+        get a new id in this run (a pack post posted again, a run-sheet item created or reloaded), or (online) that
+        already differ from the target's current id. A prediction for the plan only; step 10 decides on the real
+        ids (Get-InjectReplyRepairs). Offline (-WhatIf) only the manifest is known, so it sees less: it cannot
+        tell that posts were archived, nor see the queue.
+    #>
+    param([Parameter(Mandatory)] [object] $InjectPlan, [Parameter(Mandatory)] [object] $PostPlan)
+    $posts = @{}
+    foreach ($entry in @($PostPlan.Items)) { $posts[$entry.Key] = $entry }
+    $sheet = @{}
+    foreach ($entry in @($InjectPlan.Items)) { $sheet[$entry.Key] = $entry }
+    foreach ($entry in @($InjectPlan.Items)) {
+        if ($entry.Action -notin 'skip', 'adopt' -or $entry.Armable -eq $false) { continue }
+        $have = @(if ($entry.Row) { @(Get-SeedList $entry.Row 'posts') | Sort-Object { [long] $_['sequence'] } })
+        $labels = @(for ($k = 0; $k -lt @(Get-SeedList $entry.Item 'posts').Count; $k++) {
+                $reply = @(Get-SeedList $entry.Item 'posts')[$k]['replyTo']
+                if ($reply -isnot [System.Collections.IDictionary]) { continue }
+                $loaded = if ($k -lt $have.Count -and $have[$k]['replyTo'] -is [System.Collections.IDictionary]) { $have[$k]['replyTo'] } else { $null }
+                if ($reply.Contains('postKey')) {
+                    $target = $posts[[string] $reply['postKey']]
+                    if (-not $target) { continue }
+                    if ($target.Action -eq 'post') { "post $($k + 1)'s reply to $($reply['postKey']) (posted again)" }
+                    elseif ($loaded -and $loaded['postId'] -and $target.PostId -and [string] $loaded['postId'] -ne [string] $target.PostId) { "post $($k + 1)'s reply to $($reply['postKey']) (an earlier copy)" }
+                }
+                elseif ($reply.Contains('item') -and [string] $reply['item'] -cne $entry.Key) {
+                    $target = $sheet[[string] $reply['item']]
+                    if (-not $target) { continue }
+                    $label = "post $($k + 1)'s reply to post $($reply['sequence']) of $($reply['item'])"
+                    if ($target.Action -in 'create', 'reload') { "$label (loaded again)" }
+                    elseif ($loaded -and $loaded['injectPostId'] -and $target.Row) {
+                        $current = @(Get-InjectChildIds -Row $target.Row)
+                        $index = [long] $reply['sequence'] - 1
+                        if ($index -ge 0 -and $index -lt $current.Count -and [string] $loaded['injectPostId'] -ne $current[$index]) { "$label (an earlier copy)" }
+                    }
+                }
+            })
+        if ($labels.Count -gt 0) { [pscustomobject]@{ Key = $entry.Key; Labels = $labels } }
     }
 }
 
@@ -1949,7 +2082,7 @@ function Clear-SeedWebErrors {
 function Invoke-PulseApi {
     param(
         [Parameter(Mandatory)] [hashtable] $Context,
-        [Parameter(Mandatory)] [ValidateSet('GET', 'POST', 'PATCH')] [string] $Method,
+        [Parameter(Mandatory)] [ValidateSet('GET', 'POST', 'PATCH', 'PUT')] [string] $Method,
         [Parameter(Mandatory)] [string] $Path,
         [AllowNull()] [object] $Body,
         [string] $ContentType = 'application/json',
@@ -1959,7 +2092,7 @@ function Invoke-PulseApi {
         [int] $MaxRateLimitRetries = 6
     )
     $bare = ($Path -split '\?', 2)[0]
-    if (-not (Test-SeedApiPath -Path $Path)) { throw "Refusing to call ${bare}: it is not on this script's public-API allowlist." }
+    if (-not (Test-SeedApiPath -Path $Path -Method $Method)) { throw "Refusing to call $Method ${bare}: it is not on this script's public-API allowlist." }
     $headers = @{ Accept = 'application/json' }
     if (-not $Anonymous) {
         if (-not $Context.Token) { throw 'Not signed in.' }
@@ -2149,6 +2282,59 @@ function Set-EnginePauseTier {
     }
 }
 
+function Update-InjectReplies {
+    <#
+    .SYNOPSIS
+        Re-points a kept item's stale replies IN PLACE: PUT /api/injects/{id} with the queue's own content, every
+        child echoed by id, and only the stale replyTo values changed (New-InjectRepointBody). The item keeps its
+        id, its children and its place in the queue; its version advances. Returns @{ Ok; Row (the item now);
+        Puts (requests sent); Detail }.
+    .DESCRIPTION
+        Anything but a 200 (a 409 for a stale version or an item that stopped being editable, no response, a 5xx)
+        re-reads GET /api/injects ONCE. If the item already points at the current ids there (the PUT landed), that
+        is success. If it is still armable and still stale, the PUT is sent once more with the fresh version and
+        content. Otherwise, or if that fails too, the outcome is a failure the caller reports as a warning: the run
+        goes on, and the self-check's reply line fails. A 400 is not retried; its detail is returned as it is.
+    #>
+    param(
+        [Parameter(Mandatory)] [hashtable] $Context,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $PackItem,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Row,
+        [Parameter(Mandatory)] [hashtable] $PostIds,
+        [hashtable] $InjectPostIds = @{}
+    )
+    $id = [string] $Row['id']
+    $result = { param([bool] $Ok, $Now, [int] $Puts, $Detail) [pscustomobject]@{ Ok = $Ok; Row = $Now; Puts = $Puts; Detail = $Detail } }
+    $current = $Row
+    $puts = 0
+    $why = $null
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        $repairs = @(Get-InjectReplyRepairs -PackItem $PackItem -Row $current -PostIds $PostIds -InjectPostIds $InjectPostIds)
+        if ($repairs.Count -eq 0) { return & $result $true $current $puts $why }
+        $body = New-InjectRepointBody -Row $current -Repairs $repairs
+        $response = $null
+        $puts++
+        try { $response = Invoke-PulseApi -Context $Context -Method PUT -Path "/api/injects/$id" -Body $body }
+        catch { $why = $_.Exception.Message.TrimEnd('.') }
+        if ($response) {
+            if ($response.Status -eq 200 -and $response.Json -is [System.Collections.IDictionary] -and $response.Json['id']) { return & $result $true $response.Json $puts $null }
+            if ($response.Status -eq 400) { return & $result $false $current $puts "400: $(Get-ApiErrorText $response -Full)" }
+            $why = "PUT /api/injects/{id} answered $($response.Status) $(Get-ApiErrorText $response)".TrimEnd()
+        }
+        if ($attempt -eq 2) { break }
+        # Look before trying again: the PUT may have landed, or someone else may have changed the item.
+        $reread = $null
+        try { $reread = Invoke-PulseApi -Context $Context -Method GET -Path '/api/injects' }
+        catch { return & $result $false $current $puts "$why; re-reading the run sheet failed too ($($_.Exception.Message.TrimEnd('.')))" }
+        if ($reread.Status -ne 200 -or $reread.Json -isnot [System.Collections.IDictionary]) { return & $result $false $current $puts "$why; re-reading the run sheet answered $($reread.Status)" }
+        $fresh = @(Get-SeedList $reread.Json 'items') | Where-Object { [string] $_['id'] -eq $id } | Select-Object -First 1
+        if (-not $fresh) { return & $result $false $current $puts "$why; the item is no longer in the run sheet" }
+        if (-not (Test-InjectArmable -Row $fresh)) { return & $result $false $fresh $puts "$why; the item is now $(Get-InjectStatusText -Row $fresh)" }
+        $current = $fresh
+    }
+    return & $result $false $current $puts "$why (also after re-reading it and retrying once with the fresh version)"
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 # Output helpers
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -2169,7 +2355,7 @@ function Format-Bytes {
 function Write-SeedPlan {
     param(
         [object[]] $UploadPlan, [object[]] $PersonaPlan, [object] $PostPlan, [object] $Anchor,
-        [object] $InjectPlan, [switch] $ReloadFired, [switch] $LeaveEngineRunning, [int] $TopLevel, [switch] $Offline
+        [object] $InjectPlan, [object[]] $Repoint = @(), [switch] $ReloadFired, [switch] $LeaveEngineRunning, [int] $TopLevel, [switch] $Offline
     )
     $uploads = @($UploadPlan | Where-Object Action -eq 'upload')
     $images = @($uploads | Where-Object { $_.Unit.Kind -eq 'image' }).Count
@@ -2215,6 +2401,12 @@ function Write-SeedPlan {
             $note = if ($mark -eq '!') { ' — NOT armable: the console has nothing to fire (rehearsal?)' } else { '' }
             Write-Host ("                    {0} {1}  {2}{3}" -f $mark, $item.Key, $item.Reason, $note) -ForegroundColor $(if ($mark -eq '=') { 'DarkGray' } else { 'Yellow' })
         }
+    }
+    $repointing = @($Repoint | Where-Object { $_ })
+    if ($repointing.Count -gt 0 -or ($Offline -and $sheetItems.Count -gt 0)) {
+        Write-Host (("  Re-point        {0} kept item(s) whose reply target gets a new id: " -f $repointing.Count) + 'PUT /api/injects/{id} in place (same item, same place in the queue; only the stale reply changes)')
+        foreach ($row in $repointing) { Write-Host ("                    ~ {0}  {1}" -f $row.Key, ($row.Labels -join '; ')) -ForegroundColor DarkGray }
+        if ($Offline) { Write-Host '                    (-WhatIf cannot see the feed or the queue: a live run re-points every kept item whose reply target was posted or loaded again)' -ForegroundColor DarkGray }
     }
     if ($ReloadFired) {
         $when = if ($Offline) { ' (-WhatIf cannot see statuses: a live run decides which items are spent)' } else { '' }
@@ -2314,7 +2506,8 @@ function Invoke-DemoSeed {
                 [pscustomobject]@{ Handle = $persona['handle']; Fields = $fields }
             })
         $injectPlan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $null -PersonaIds $null -ReloadFired:$ReloadFiredRunSheet
-        Write-SeedPlan -UploadPlan $uploadPlan -PersonaPlan $personaPlan -PostPlan $postPlan -Anchor $anchor -InjectPlan $injectPlan `
+        $repointPlan = @(Get-InjectRepointPlan -InjectPlan $injectPlan -PostPlan $postPlan)
+        Write-SeedPlan -UploadPlan $uploadPlan -PersonaPlan $personaPlan -PostPlan $postPlan -Anchor $anchor -InjectPlan $injectPlan -Repoint $repointPlan `
             -ReloadFired:$ReloadFiredRunSheet -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel -Offline
         if ($anchor.Error) { Write-SeedLine WARN "A live run would stop here: $($anchor.Error)" }
         elseif ($anchor.Anchor) { foreach ($problem in @(Test-SeedReplyTimes -PostPlan $postPlan -Anchor $anchor.Anchor)) { Write-SeedLine WARN "A live run would stop here: $problem" } }
@@ -2446,8 +2639,9 @@ function Invoke-DemoSeed {
                 [pscustomobject]@{ Handle = $handle; Fields = @($patch.Keys) }
             })
         $injectPlan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $injectQueue -PersonaIds $personaIds -ReloadFired:$ReloadFiredRunSheet
+        $repointPlan = @(Get-InjectRepointPlan -InjectPlan $injectPlan -PostPlan $postPlan)
         Write-Host "`nPlan" -ForegroundColor Cyan
-        Write-SeedPlan -UploadPlan $uploadPlan -PersonaPlan $personaPlan -PostPlan $postPlan -Anchor $anchor -InjectPlan $injectPlan `
+        Write-SeedPlan -UploadPlan $uploadPlan -PersonaPlan $personaPlan -PostPlan $postPlan -Anchor $anchor -InjectPlan $injectPlan -Repoint $repointPlan `
             -ReloadFired:$ReloadFiredRunSheet -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel
         foreach ($warning in @($postPlan.Warnings) + @($injectPlan.Warnings)) { Write-SeedLine WARN $warning }
         if ($anchor.Error) { Write-SeedLine FAIL "$($anchor.Error) Nothing was written."; return 1 }
@@ -2485,6 +2679,10 @@ function Invoke-DemoSeed {
             Write-Host "`n5. Pause the engine before seeding" -ForegroundColor Cyan
             $pause = Set-EnginePauseTier -Context $context -ActingHumanId $actingHumanId -TimeZone $exercise.TimeZone
             if ($pause.Ok) { Write-SeedLine PASS "pause tier: $($pause.Detail)" } else { Write-SeedLine WARN "pause tier not set ($($pause.Detail)); the engine may react to the seeded posts" }
+            if ($pause.Tier -eq 'freeze') {
+                Write-SeedLine WARN ('the world is FROZEN. A frozen server clock falls behind: run-sheet fires and engine posts would be stamped in the past and never trend. ' +
+                    'Unless it was frozen on purpose just now, run Reset-DemoState.ps1 -Restart, wait ~8 minutes, run Reset-DemoState.ps1, then this script again.')
+            }
         }
 
         # ── 6. Upload media: posters first, then images, then videos with posterMediaId ────────────────────────
@@ -2651,17 +2849,27 @@ function Invoke-DemoSeed {
                     continue
                 }
                 Write-SeedLine SKIP "$($entry.Key) — $($entry.Reason) ($($entry.ItemId))"
+                # Re-point a stale reply IN PLACE (the Tuesday re-seed: Clear-DemoContent archived the posts and
+                # step 8 posted them again under new ids). Deleting and re-creating would lose its place in the queue.
+                $repairs = @(Get-InjectReplyRepairs -PackItem $item -Row $entry.Row -PostIds $postIds -InjectPostIds $injectPostIds)
+                if ($repairs.Count -gt 0) {
+                    $repoint = Update-InjectReplies -Context $context -PackItem $item -Row $entry.Row -PostIds $postIds -InjectPostIds $injectPostIds
+                    $what = ($repairs | ForEach-Object { "post $($_.Sequence)'s reply to $($_.Target)" }) -join ', '
+                    if ($repoint.Ok) {
+                        Write-SeedLine PASS ("{0} — re-pointed {1} in place: same item, order {2}, version {3} -> {4}" -f
+                            $entry.Key, $what, $repoint.Row['order'], $entry.Row['version'], $repoint.Row['version'])
+                        $entry.Row = $repoint.Row
+                    }
+                    else {
+                        Write-SeedLine WARN ("{0}: could not re-point {1} in place ({2}). It still replies to the earlier copy of {3}, so at fire it would fail or answer the old post. Run again, or delete {0} in the console and run again (that re-creates it at the end of the queue)." -f
+                            $entry.Key, $what, $repoint.Detail, (@($repairs | ForEach-Object Label) -join ', '))
+                        if ($repoint.Row) { $entry.Row = $repoint.Row }
+                    }
+                }
                 $drift = @(Get-InjectContentDrift -PackItem $item -Row $entry.Row -MediaIds $mediaIds)
                 if ($drift.Count -gt 0) {
                     Write-SeedLine WARN ("{0} differs from the pack in {1} (edited in the console, or the pack or its media changed after it was loaded); the queue's version stays. To load the pack's version, delete {0} in the console and run again." -f
                         $entry.Key, ($drift -join ', '))
-                }
-                $stale = @(Get-InjectStaleReplies -PackItem $item -Row $entry.Row -PostIds $postIds -InjectPostIds $injectPostIds)
-                if ($stale.Count -gt 0) {
-                    # An archived parent post fails at fire; a reloaded item's old post would get the reply instead
-                    # (or a 409 "reply parent not fired" if that copy never fired). Either way it is not the script.
-                    Write-SeedLine WARN ("{0} still replies to the earlier copy of {1}, not the current one: at fire it would fail or answer the old post. Delete {0} in the console and run again to load it against the current one." -f
-                        $entry.Key, ($stale -join ', '))
                 }
                 continue
             }
@@ -2727,6 +2935,9 @@ function Invoke-DemoSeed {
         $check = { param([bool] $Ok, [string] $Text) $checks.Add([pscustomobject]@{ Ok = $Ok; Text = $Text }) }
 
         $topLevelIds = @($postPlan.Items | Where-Object { -not $_.IsReply } | ForEach-Object { $postIds[$_.Key] })
+        # Posts known to be live: this run's (posted or found in the feed) and whatever the feed read below returns.
+        $liveFeedIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($id in $postIds.Values) { if ($id) { [void] $liveFeedIds.Add([string] $id) } }
         $response = Invoke-PulseApi -Context $context -Method GET -Path '/api/feed'
         if ($response.Status -ne 200) { & $check $false "GET /api/feed -> $($response.Status)" }
         else {
@@ -2750,6 +2961,7 @@ function Invoke-DemoSeed {
         else {
             $byId = @{}
             foreach ($row in @($response.Json)) { $byId[[string] $row['id']] = $row }
+            foreach ($id in $byId.Keys) { [void] $liveFeedIds.Add($id) }
             $mediaShort = [System.Collections.Generic.List[string]]::new()
             foreach ($item in $postPlan.Items) {
                 $expected = @(Get-SeedList $item.Post 'media').Count
@@ -2808,6 +3020,27 @@ function Invoke-DemoSeed {
                         $row = $queueById[[string] $injectIds[$entry.Key]]
                         if ($row -and (Test-InjectArmable -Row $row)) { [pscustomobject]@{ Key = $entry.Key; Order = $row['order'] } }
                     })
+                # Every reply of an armable item must point at a live post: the CURRENT copy of its pack target (no stale
+                # reply left after the re-point), a post in the feed, or a post of an item still in the run sheet.
+                $liveChildIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                foreach ($row in $queueById.Values) { foreach ($child in @(Get-SeedList $row 'posts')) { [void] $liveChildIds.Add([string] $child['id']) } }
+                $deadReplies = [System.Collections.Generic.List[string]]::new()
+                foreach ($entry in $injectPlan.Items) {
+                    $row = $queueById[[string] $injectIds[$entry.Key]]
+                    if (-not $row -or -not (Test-InjectArmable -Row $row)) { continue }
+                    $staleAt = @{}
+                    foreach ($repair in @(Get-InjectReplyRepairs -PackItem $entry.Item -Row $row -PostIds $postIds -InjectPostIds $injectPostIds)) {
+                        $staleAt[[long] $repair.Sequence] = $true
+                        $deadReplies.Add("$($entry.Key) post $($repair.Sequence) (the earlier copy of $($repair.Target))")
+                    }
+                    foreach ($child in @(@(Get-SeedList $row 'posts') | Sort-Object { [long] $_['sequence'] })) {
+                        $reply = $child['replyTo']
+                        if ($reply -isnot [System.Collections.IDictionary] -or $staleAt.Contains([long] $child['sequence'])) { continue }
+                        if ($reply['postId'] -and -not $liveFeedIds.Contains([string] $reply['postId'])) { $deadReplies.Add("$($entry.Key) post $($child['sequence']) (post $($reply['postId']) is not in the feed)") }
+                        if ($reply['injectPostId'] -and -not $liveChildIds.Contains([string] $reply['injectPostId'])) { $deadReplies.Add("$($entry.Key) post $($child['sequence']) (its scripted parent is not in the run sheet)") }
+                    }
+                }
+                & $check ($deadReplies.Count -eq 0) $(if ($deadReplies.Count) { "run-sheet replies that do not point at a live post: $($deadReplies -join ', ')" } else { 'every run-sheet reply points at a live post' })
                 & $check ($null -eq $inversion) $(if ($inversion) {
                         ("the console's queue is out of pack order: {0} (order {1}) comes after {2} (order {3}), so ""Fire next"" would take {2} first. Drag them into pack order in the console, or Skip the remaining old items in the console and run again with -ReloadFiredRunSheet so the whole sheet reloads in order" -f
                             $inversion.PackFirst.Key, $inversion.PackFirst.Order, $inversion.QueuedAhead.Key, $inversion.QueuedAhead.Order)
