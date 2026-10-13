@@ -1,6 +1,6 @@
 # Story: Link cards and QR codes
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** COR-011, COR-017 (part: handing out credentials at StartEx)  ·  **Design decisions:** none (EL-5, EL-6, EL-12)  ·  **Issue:** #469
 **Stack:** backend  ·  **Review:** Tier-1 (staff-only; reveals credentials in bulk, so isolation and `no-store` are checked at Gate 1)  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** S
 
@@ -16,7 +16,7 @@ World: staff (the data feeds the print preview in story 12). The QR encodes exac
 
 ## Acceptance Criteria
 
-- [ ] **Given** `GET /api/staff/roster/cards`, **then** it answers `200 RosterCardsDto` with `exerciseName` and one
+- [ ] **Given** `POST /api/staff/roster/cards` *(amended: was GET, see EL-20)*, **then** it answers `200 RosterCardsDto` with `exerciseName` and one
       `RosterCardDto` per participant whose account is enabled, whose link is active and whose token decrypts:
       `name`, `agency`, `role`, `signInName`, `joinUrl` and `qrSvgDataUri`. Ordered by name. `?id=` (repeatable)
       limits it to those accounts; no `id` means every eligible participant.

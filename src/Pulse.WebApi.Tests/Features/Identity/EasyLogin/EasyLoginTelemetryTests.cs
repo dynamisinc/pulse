@@ -161,6 +161,10 @@ public sealed class EasyLoginTelemetryTests
     [InlineData("AbC-dEf_GhIjKlMnOpQrSt", null)]             // a raw link token (22 base64url characters)
     [InlineData("abcdefghijklmnopqrstuv", null)]             // a lower-cased token is still token-shaped
     [InlineData("maple-harbor-42", null)]                    // a generated day word typed into the name box
+    [InlineData("mapleharbor42", null)]                      // ...the same word typed without its separators (W-3)
+    [InlineData("Maple_Harbor.42", null)]                    // ...or with other separators
+    [InlineData("jsmith42", null)]                           // accepted over-redaction: a name ending in two digits
+    [InlineData("jsmith2", "jsmith2")]                       // a collision suffix (one digit) is still a plain name
     [InlineData("Maple Harbor 42", null)]                    // a spoken day word (a phrase)
     [InlineData("jsmith\u0007", null)]                       // a control character
     public void RedactAttemptedName_KeepsOnlyAPlainSignInName(string? attempted, string? expected)
@@ -185,6 +189,7 @@ public sealed class EasyLoginTelemetryTests
             token.ToLowerInvariant(),
             $"https://spa.example/join/{token}",
             "maple-harbor-42",
+            "mapleharbor42",
             "Maple Harbor 42",
             "jane.smith@agency.gov",
         ];

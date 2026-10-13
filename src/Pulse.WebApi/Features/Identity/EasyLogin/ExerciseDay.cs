@@ -9,8 +9,11 @@ namespace Pulse.WebApi.Features.Identity.EasyLogin;
 /// <remarks>
 /// <para>
 /// <b>Day D</b> runs from local <c>D hh:00</c> to local <c>D+1 hh:00</c>, where <c>hh</c> is the rollover hour.
-/// <see cref="Today"/> and <see cref="EndOfDayUtc(string?, DateOnly, int)"/> agree on that boundary exactly:
-/// <c>Today(now)</c> is D for every instant before <c>EndOfDayUtc(D)</c> and D+1 from that instant on.
+/// <see cref="EndOfDayUtc(string?, DateOnly, int)"/> is the one definition of that boundary, and <see cref="Today"/> is
+/// DERIVED from it, so the two agree by construction: <c>Today(now)</c> is the D with
+/// <c>EndOfDayUtc(D - 1) &lt;= now &lt; EndOfDayUtc(D)</c>, it never goes backwards as <c>now</c> increases, and
+/// <c>EndOfDayUtc(now)</c> is always in the future. (Reading the local time of day instead is NOT equivalent: inside a
+/// fall-back overlap the second occurrence of the rollover hour would flip the day back; review W-1.)
 /// </para>
 /// <para>
 /// <b>Daylight saving.</b> The boundary is a LOCAL wall-clock time, so a 23- or 25-hour day is handled by the zone
@@ -86,10 +89,18 @@ public static class ExerciseDay
     {
         ValidateRolloverHour(rolloverHour);
 
-        var local = TimeZoneInfo.ConvertTime(nowUtc, ResolveTimeZone(timeZone));
-        var date = DateOnly.FromDateTime(local.DateTime);
+        var zone = ResolveTimeZone(timeZone);
 
-        return local.TimeOfDay < TimeSpan.FromHours(rolloverHour) ? date.AddDays(-1) : date;
+        // Start from the local calendar date, then let the boundaries decide (review W-1): the day is the one whose
+        // end has not yet come and whose predecessor's end has. One step either way suffices: verified for rollover 0
+        // to 6 across every transition of every system zone, 2024 to 2030.
+        var date = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(nowUtc, zone).DateTime);
+        if (nowUtc < EndOfDayUtc(zone, date.AddDays(-1), rolloverHour))
+        {
+            return date.AddDays(-1);
+        }
+
+        return nowUtc >= EndOfDayUtc(zone, date, rolloverHour) ? date.AddDays(1) : date;
     }
 
     /// <summary>
@@ -103,11 +114,7 @@ public static class ExerciseDay
     public static DateTimeOffset EndOfDayUtc(string? timeZone, DateOnly day, int rolloverHour)
     {
         ValidateRolloverHour(rolloverHour);
-
-        var zone = ResolveTimeZone(timeZone);
-        var boundary = day.AddDays(1).ToDateTime(new TimeOnly(rolloverHour, 0), DateTimeKind.Unspecified);
-
-        return LocalToUtc(boundary, zone);
+        return EndOfDayUtc(ResolveTimeZone(timeZone), day, rolloverHour);
     }
 
     /// <summary>The instant the exercise day containing <paramref name="nowUtc"/> ends (always later than <paramref name="nowUtc"/>).</summary>
@@ -117,6 +124,13 @@ public static class ExerciseDay
     /// <returns>The end-of-day instant, with a zero offset.</returns>
     public static DateTimeOffset EndOfDayUtc(string? timeZone, DateTimeOffset nowUtc, int rolloverHour) =>
         EndOfDayUtc(timeZone, Today(timeZone, nowUtc, rolloverHour), rolloverHour);
+
+    /// <summary>The single definition of the day boundary: local <c>day + 1</c> at the rollover hour, as a UTC instant.</summary>
+    private static DateTimeOffset EndOfDayUtc(TimeZoneInfo zone, DateOnly day, int rolloverHour)
+    {
+        var boundary = day.AddDays(1).ToDateTime(new TimeOnly(rolloverHour, 0), DateTimeKind.Unspecified);
+        return LocalToUtc(boundary, zone);
+    }
 
     /// <summary>Converts a local wall-clock time in <paramref name="zone"/> to the UTC instant it names.</summary>
     private static DateTimeOffset LocalToUtc(DateTime local, TimeZoneInfo zone)

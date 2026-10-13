@@ -12,6 +12,8 @@
  *    resolved exercise-context value.
  *  - AC4/AC5: 401 -> ONE generic message + clears ONLY the secret field; 403
  *    -> a DISTINCT "not assigned" message, clearly different from 401.
+ *  - easy-login 07 (EL-10): the page never opts in to the persistent
+ *    (`localStorage`) token store, so staff tokens stay in `sessionStorage`.
  *
  * `@/core/services/api` is mocked so no real axios sink is ever touched
  * (repo footgun: an unmocked rejection can crash Vitest worker teardown).
@@ -29,6 +31,7 @@ import { api } from '@/core/services/api'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
 import { setTokens } from '@/core/auth'
+import { setTokens as realSetTokens } from '@/core/auth/tokenStore'
 import { StaffSignInPage } from './StaffSignInPage'
 
 vi.mock('@/core/services/api', () => ({
@@ -220,5 +223,38 @@ describe('StaffSignInPage — accessibility (NFR-001)', () => {
     const status = await screen.findByRole('status')
     expect(status).toHaveAttribute('aria-live', 'polite')
     expect(status).toHaveTextContent(/signing in/i)
+  })
+})
+
+describe('StaffSignInPage — staff tokens never reach localStorage (easy-login 07, EL-10)', () => {
+  it('does not pass persist: true to setTokens', async () => {
+    mockPost.mockResolvedValue({
+      data: { token: 'tok-123', refreshToken: 'ref-456', session: {} },
+    } as Awaited<ReturnType<typeof api.post>>)
+    renderPage()
+
+    await fillAndSubmit('planner1', 'correct-secret')
+
+    await waitFor(() => expect(mockSetTokens).toHaveBeenCalledTimes(1))
+    const [pair, options] = mockSetTokens.mock.calls[0] ?? []
+    expect(pair).toEqual({ token: 'tok-123', refreshToken: 'ref-456' })
+    expect(options?.persist).not.toBe(true)
+  })
+
+  it('with the real token store behind it, the pair lands in sessionStorage and localStorage stays empty', async () => {
+    sessionStorage.clear()
+    localStorage.clear()
+    mockSetTokens.mockImplementation(realSetTokens)
+    mockPost.mockResolvedValue({
+      data: { token: 'tok-123', refreshToken: 'ref-456', session: {} },
+    } as Awaited<ReturnType<typeof api.post>>)
+    renderPage()
+
+    await fillAndSubmit('planner1', 'correct-secret')
+
+    await waitFor(() => expect(sessionStorage.getItem('pulse.auth.token')).toBe('tok-123'))
+    expect(sessionStorage.getItem('pulse.auth.refreshToken')).toBe('ref-456')
+    expect(localStorage.length).toBe(0)
+    sessionStorage.clear()
   })
 })

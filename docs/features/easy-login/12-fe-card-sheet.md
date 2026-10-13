@@ -23,7 +23,7 @@ So the sheet is rendered in a **portal outside `#root`**, and `@media print` hid
 - [ ] **Given** `<PrintCardsButton selection={ids} />` (mounted by the orchestrator into the roster's
       `renderCardsAction`), **then** it renders a COBRA button reading **Print cards (N)** for N selected people, or
       **Print all cards** when the selection is empty. Activating it opens the preview and calls
-      `GET /staff/roster/cards`, passing `id` for each selected participant (in chunks of at most 500 and
+      `POST /staff/roster/cards` *(amended, EL-20)* with `{ participantIds }` for the selection or `{ all: true }` for "Print all", passing each selected participant (in chunks of at most 500 and
       concatenated; none when the selection is empty).
 - [ ] **Given** the cards arrive, **then** a full-screen preview (a portal appended to `document.body`, a sibling
       of `#root`) shows every card as it will print, a count, and a toolbar with **Print** (`window.print()`) and

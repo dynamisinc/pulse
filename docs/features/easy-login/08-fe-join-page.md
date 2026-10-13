@@ -77,6 +77,13 @@ The **orchestrator seam** adds `JOIN_PATH = '/join'` to `app-shell/constants.ts`
 exchange. Build the page so the route is testable on its own with a memory router. MUI 9 does not apply (no MUI).
 See `implementation.md` (story 08, gotchas 9, 11).
 
+**One browser, one identity (from story 07, S-1).** The persisted participant session is per origin, not per tab. A new
+`setTokens(pair, { persist: true })` in any tab replaces the pair every tab uses, and `core/auth/crossTabSessionSync`
+reloads the OTHER tabs so they show the new identity. So when a tester opens a second join link in the same browser while
+another sign-in is still in progress in another tab, that earlier sign-in can be interrupted by the reload (its exchange
+result is lost along with the already-scrubbed link) and has to be started again from the link. This is intended: do not
+try to defend against it in the page. Document it in the tester notes (feature walk-through) rather than in the UI.
+
 ## Dependencies
 
 Story 07 (`setTokens` with `persist`). Backend story 03 (`POST /api/auth/join`) for live use; unit tests mock the

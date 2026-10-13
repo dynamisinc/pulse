@@ -1,6 +1,6 @@
 # Story: Participant tokens survive a closed tab
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-012, NFR-004, NFR-009  ·  **Design decisions:** none (EL-10)  ·  **Issue:** #472
 **Stack:** frontend  ·  **Review:** Tier-2 (changes where credentials live in the browser)  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** M
 
@@ -33,8 +33,15 @@ that race.
       test proves a signed-out browser has nothing in `localStorage`.
 - [ ] **Given** a silent refresh (`performSilentRefresh` in `core/services/api.ts`), **then** the rotated pair is
       stored **in the same store the current pair lives in** (a participant stays persistent, a staff user stays
-      session-only), without the caller passing an option. A refresh failure still clears both stores and the
-      original `401` propagates.
+      session-only), without the caller passing an option. A refresh the server **refuses** (`/auth/refresh`
+      answering `401` or `403`) clears both stores and the original `401` propagates. A refresh that gets **no
+      answer** (no response, a network error, the timeout, a `5xx` or `429`) clears **nothing**, for staff and
+      participants alike: the stored pair is kept, the original request is rejected with its own error, and the
+      next `401` tries the refresh again. The refresh call (that call only, not the shared axios instance) has a
+      20 s timeout, so a hung refresh cannot hold the Web Lock and block every other tab; a timeout counts as "no
+      answer". *(Amended by the orchestrator: the original wording cleared both stores on any refresh failure.
+      With day-long sessions, a dropped request must not log a participant out. The backend answers a bad refresh
+      token with `401` only, see `SessionEndpoints.RefreshAsync`.)*
 - [ ] **Given** `/auth/join` and `/auth/word`, **then** they are added to `NO_REFRESH_RETRY_PATHS` so a rejected link
       or word is never mistaken for an expired session and never triggers a refresh.
 - [ ] **Given** two tabs that receive a `401` at the same moment, **then** exactly one `POST /auth/refresh` is made
@@ -67,6 +74,32 @@ current "deliberately NOT localStorage" rationale becomes "participants opt in; 
 `setTokens(pair: TokenPair, options?: { persist?: boolean }): void` is **frozen** (stories 08 and 09 code against it).
 `navigator.locks` may be undefined in jsdom and older browsers: feature-detect. No new npm package. See
 `implementation.md` (story 07).
+
+**Gate-1 amendments (orchestrator).** (1) `rotateTokens(expectedRefreshToken, pair)` is the refresh path's write: a
+compare-and-swap on the refresh token, so a refresh response that lands after another tab signed out (or in as someone
+else) writes nothing and the session the server just issued is revoked with `POST /auth/logout` (CR-001). (2) A random,
+non-secret session identity marker (`pulse.auth.session`) sits beside the pair: a sign-in (`setTokens`) writes a new one, a
+rotation keeps it. A request is never retried with, and never adopts, a pair stamped with a different marker, and the new
+module `core/auth/crossTabSessionSync.ts` (installed from `core/services/api.ts`) reloads a tab when another tab changes
+the marker; a `sessionStorage` (staff) session ignores it (M-2). (3) The wait for the Web Lock is capped at 45 s
+(`AbortSignal.timeout`) and falls back to the unlocked path (M-1). (4) Both token keys are read from the one store that
+holds the session (M-3). (5) After a no-answer refresh, a cool-down (`Retry-After` seconds, else 15 s, capped at 120 s)
+makes the next 401s fail without calling refresh (L-1).
+
+**Final-review amendments (orchestrator).** (6) A refusal clears only the store the session lives in (`clearActiveTokens`), so
+a staff tab's refusal never wipes a participant's `localStorage` pair; only an explicit `logout()` / `endSession()` clears
+both (S-3). (7) A refusal is acted on only if the session is still ours (the marker is unchanged), so it can never wipe
+another tab's new sign-in (N-1). (8) `setTokens` removes the target store's old marker before writing the new pair and
+writes the new marker last, so a reader mid-sign-in sees no marker and the identity check rejects (N-2). (9) The cool-down
+is timed on `performance.now()` (falling back to `Date.now()` only without `performance`) (N-3). (10) The cross-tab
+listener acts only on `localStorage` events, and a `localStorage.clear()` elsewhere reloads a page only if it took that
+page's own marker (S-2).
+
+**One browser, one identity (S-1).** The persisted participant session is per origin, not per tab. Signing in as someone
+else in any tab replaces the pair every tab uses and reloads the other tabs so they match (`crossTabSessionSync`). A second
+join link opened in the same browser while another sign-in is still in progress can be interrupted by that reload and has to
+be started again. Staff sessions (`sessionStorage`) are private to their tab and are not affected. Story 08 repeats this for
+testers.
 
 ## Dependencies
 
