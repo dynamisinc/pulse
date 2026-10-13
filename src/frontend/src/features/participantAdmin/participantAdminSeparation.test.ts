@@ -37,6 +37,7 @@ const OWNED_PREFIXES = [
   './services/',
   './hooks/',
   './mocks/',
+  './shared/',
   './types.ts',
   './ParticipantAdminRoute.tsx',
 ]
@@ -81,6 +82,7 @@ describe('participantAdmin (staff roster) — source guards', () => {
     expect(paths).toContain('./pages/RosterPage.tsx')
     expect(paths).toContain('./services/rosterService.ts')
     expect(paths).toContain('./mocks/rosterMocks.ts')
+    expect(paths).toContain('./shared/copyToClipboard.ts')
   })
 
   it('uses FontAwesome, never @mui/icons-material', () => {

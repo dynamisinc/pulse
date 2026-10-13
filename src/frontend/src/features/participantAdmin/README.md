@@ -19,7 +19,9 @@ index.ts                    public barrel: ParticipantAdminSurface
 pages/RosterPage.tsx        the composition point + the three frozen slot props
 components/people/          RosterTable, RosterRowActions, RosterImportPanel, AddParticipantDialog,
                             ConfirmActionDialog, RosterBadges, and the pure rules they render
-                            (rosterDisplay, rosterActions, rosterValidation, rosterImport, copyToClipboard)
+                            (rosterDisplay, rosterActions, rosterValidation, rosterImport)
+shared/copyToClipboard.ts   the one clipboard helper (gesture-safe write + execCommand fallback), used by the
+                            roster's Copy link and the day-word panel's Copy
 services/rosterService.ts   axios under /staff/roster..., runtime guards, typed RosterError
 hooks/                      useRoster (exercise-keyed query), useRosterMutations (add, import, actions)
 mocks/rosterMocks.ts        stateful mock backend that follows the contract (USE_MOCK_DATA)

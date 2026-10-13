@@ -21,7 +21,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from '@mui/material/styles'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { api } from '@/core/services/api'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
@@ -243,6 +243,82 @@ describe('generate a word', () => {
     await waitFor(() => expect(liveRegionText()).toMatch(/copied/i))
     expect(liveRegionText()).not.toContain(resultWord())
     expect(screen.getByTestId('day-word-copied')).toHaveTextContent('Copied')
+  })
+
+  describe('Copy falls back to execCommand (Gate-2 S-5), like the roster\'s Copy link', () => {
+    const stubClipboard = (value: unknown) =>
+      Object.defineProperty(navigator, 'clipboard', { value, configurable: true })
+    const stubExecCommand = (impl: ((command: string) => boolean) | undefined) =>
+      Object.defineProperty(document, 'execCommand', {
+        value: impl,
+        configurable: true,
+        writable: true,
+      })
+
+    afterEach(() => stubExecCommand(undefined))
+
+    async function openResult(user: ReturnType<typeof userEvent.setup>) {
+      await renderLoaded()
+      await user.click(screen.getByRole('button', { name: 'Generate a word' }))
+      await screen.findByTestId('day-word-result')
+    }
+
+    it('with NO Clipboard API at all (an insecure origin), copies via a transient textarea', async () => {
+      const user = userEvent.setup()
+      await openResult(user)
+      stubClipboard(undefined)
+      let copiedValue: string | undefined
+      let textContentAtCopy: string | null | undefined
+      const execCommand = vi.fn((command: string) => {
+        const active = document.activeElement
+        if (active instanceof HTMLTextAreaElement) {
+          copiedValue = active.value
+          textContentAtCopy = active.textContent
+        }
+        return command === 'copy'
+      })
+      stubExecCommand(execCommand)
+
+      await user.click(screen.getByRole('button', { name: 'Copy' }))
+
+      expect(execCommand).toHaveBeenCalledWith('copy')
+      expect(copiedValue).toBe(resultWord())
+      // The word went in as the textarea's VALUE, never as DOM text, and is gone again.
+      expect(textContentAtCopy).toBe('')
+      expect(document.querySelector('textarea')).toBeNull()
+      expect(await screen.findByTestId('day-word-copied')).toHaveTextContent('Copied')
+      await waitFor(() => expect(liveRegionText()).toMatch(/copied/i))
+      expect(liveRegionText()).not.toContain(resultWord())
+      expect(screen.queryByText(/Could not copy automatically/)).not.toBeInTheDocument()
+    })
+
+    it('when writeText is REFUSED, it falls back and reports success if that works', async () => {
+      const user = userEvent.setup()
+      await openResult(user)
+      vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'))
+      const execCommand = vi.fn(() => true)
+      stubExecCommand(execCommand)
+
+      await user.click(screen.getByRole('button', { name: 'Copy' }))
+
+      expect(await screen.findByTestId('day-word-copied')).toBeInTheDocument()
+      expect(execCommand).toHaveBeenCalledWith('copy')
+      expect(screen.queryByText(/Could not copy automatically/)).not.toBeInTheDocument()
+    })
+
+    it('still says so, once, when the fallback fails too', async () => {
+      const user = userEvent.setup()
+      await openResult(user)
+      stubClipboard(undefined)
+      stubExecCommand(() => false)
+
+      await user.click(screen.getByRole('button', { name: 'Copy' }))
+
+      const alerts = await screen.findAllByRole('alert')
+      expect(alerts.filter(el => /Could not copy/.test(el.textContent ?? ''))).toHaveLength(1)
+      expect(screen.queryByTestId('day-word-copied')).not.toBeInTheDocument()
+      expect(screen.getByTestId('day-word-value')).toBeInTheDocument()
+    })
   })
 
   it('tells staff when the clipboard is refused, and keeps the word on screen', async () => {

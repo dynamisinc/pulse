@@ -1,6 +1,7 @@
 /**
- * "Copy link" clipboard path and fallback (easy-login story 10, gotcha 10).
- * The secret must go to the clipboard without ever being rendered as DOM text.
+ * The shared clipboard path and fallback (easy-login story 10, gotcha 10; shared with the
+ * day-word panel by Gate-2 S-5). The secret must go to the clipboard without ever being
+ * rendered as DOM text.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { copyToClipboard } from './copyToClipboard'
