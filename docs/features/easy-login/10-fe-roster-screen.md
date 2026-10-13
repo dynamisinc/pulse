@@ -83,7 +83,7 @@ The day-word panel (11), the print preview and card sheet (12), the email action
 slots only. The orchestrator's registry entry and slot composition (integration seam). Retiring the planner
 "Import accounts" section in `ExerciseSettingsPage` (it still works, but creates people with no persona; retiring
 it is a one-line follow-up and an open question for Tom). Restoring the participant-admin flyout's footer link
-(`staff-shell/03`). Editing a single participant in place (re-import corrects them). Password reset and unlock
+(`staff-shell/03`; done at Gate 2, W2-4). Editing a single participant in place (re-import corrects them). Password reset and unlock
 (`identity-auth-roles/08`). Any client-side role check beyond the registry's `allowedRoles`.
 
 ## Technical Notes

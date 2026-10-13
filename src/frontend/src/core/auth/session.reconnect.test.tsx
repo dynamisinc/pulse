@@ -24,6 +24,7 @@ import { AxiosError } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { SessionProvider, useSession } from './session'
 import { resolveSession, type Session } from './sessionResolver'
+import { SessionExpiredError } from './sessionExpiredError'
 import { clearTokens, setTokens } from './tokenStore'
 
 vi.mock('./sessionResolver', () => ({
@@ -212,6 +213,66 @@ describe('no pair, or a real refusal: /login', () => {
 
     expect(await screen.findByTestId('login-sentinel')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Reconnecting…' })).not.toBeInTheDocument()
+  })
+})
+
+describe('an expired session is a refusal; a malformed body is not (W2-2)', () => {
+  it('a pair is stored and the server confirms the session is EXPIRED -> /login, not Reconnecting', async () => {
+    signedInParticipant()
+    mockResolve.mockRejectedValue(new SessionExpiredError())
+
+    renderProvider()
+
+    expect(await screen.findByTestId('login-sentinel')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Reconnecting…' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('probe')).not.toBeInTheDocument()
+  })
+
+  it('a pair is stored and the body is MALFORMED (a captive portal\'s HTML) -> Reconnecting', async () => {
+    signedInParticipant()
+    mockResolve.mockRejectedValue(
+      new Error('resolveSession: resolution returned an empty or malformed session'),
+    )
+
+    renderProvider()
+
+    expect(await screen.findByRole('heading', { name: 'Reconnecting…' })).toBeInTheDocument()
+    expect(screen.queryByTestId('login-sentinel')).not.toBeInTheDocument()
+    expect(localStorage.getItem('pulse.auth.token')).toBe('access-1')
+  })
+
+  it('a retry that learns the session is expired ends at /login', async () => {
+    const user = userEvent.setup()
+    signedInParticipant()
+    mockResolve.mockRejectedValueOnce(networkError())
+    mockResolve.mockRejectedValueOnce(new SessionExpiredError())
+
+    renderProvider()
+    await user.click(await screen.findByRole('button', { name: 'Try again' }))
+
+    expect(await screen.findByTestId('login-sentinel')).toBeInTheDocument()
+  })
+})
+
+describe('"Sign in again" leads to the sign-in for THIS kind of session (S2-1)', () => {
+  it('a staff tab (sessionStorage) goes to the STAFF sign-in', async () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+    mockResolve.mockRejectedValue(networkError())
+
+    renderProvider()
+
+    expect(await screen.findByRole('link', { name: 'Sign in again' }))
+      .toHaveAttribute('href', '/staff/login')
+  })
+
+  it('a participant (localStorage) goes to the participant sign-in', async () => {
+    signedInParticipant()
+    mockResolve.mockRejectedValue(networkError())
+
+    renderProvider()
+
+    expect(await screen.findByRole('link', { name: 'Sign in again' }))
+      .toHaveAttribute('href', '/login')
   })
 })
 

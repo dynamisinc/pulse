@@ -115,7 +115,7 @@ describe('contrast, WCAG 2.1 AA (NFR-001)', () => {
     expect(contrastRatio(foreground, background)).toBeGreaterThanOrEqual(4.5)
   })
 
-  it('draws the focus rings and the message box border at least 3:1 against the card', () => {
+  it('draws the focus rings and the Try again fill at least 3:1 against the card (1.4.11)', () => {
     const ring = (selector: string): string | undefined => {
       const rule = RULES.find(candidate => candidate.selectors.includes(selector))
       return /outline\s*:\s*\d+px solid (#[0-9a-f]{6})/i.exec(rule?.body ?? '')?.[1]
@@ -125,6 +125,25 @@ describe('contrast, WCAG 2.1 AA (NFR-001)', () => {
       expect(contrastRatio(ring(selector) ?? '#ffffff', CARD), selector).toBeGreaterThanOrEqual(3)
     }
     expect(contrastRatio(colour('.action', 'background'), CARD)).toBeGreaterThanOrEqual(3)
+  })
+
+  it('the message box border is DECORATIVE (words and icon carry it; forced colours add one)', () => {
+    // The resting border is a pale hairline on purpose (it is below 3:1 against the card), so
+    // this test does not pretend otherwise. WCAG 1.4.11 asks for 3:1 only on a boundary that is
+    // NEEDED to identify a component; here the state is carried by the sentence and the icon
+    // (`ReconnectingState.test.tsx` pins both) and the text inside the box clears 4.5:1 (above).
+    const restingRule = RULES.find(rule => rule.selectors.includes('.region'))
+    const border = /border\s*:\s*\d+px solid (#[0-9a-f]{6})/i.exec(restingRule?.body ?? '')?.[1]
+    expect(border).toBeDefined()
+    expect(contrastRatio(border ?? '#ffffff', CARD)).toBeLessThan(3)
+
+    // What a person who needs the boundary DOES get: Windows High Contrast drops author
+    // colours, so the box is given a solid system-colour border there.
+    const forced = new RegExp(
+      '@media\\s*\\(forced-colors:\\s*active\\)\\s*\\{[^@]*'
+      + '\\.region\\s*\\{[^}]*border\\s*:\\s*2px solid CanvasText',
+    )
+    expect(forced.test(CODE)).toBe(true)
   })
 })
 
