@@ -7,9 +7,11 @@ using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.EasyLogin;
@@ -100,7 +102,7 @@ public sealed class PersonalLinkTelemetryTests
         var session = await PersonalLinkSeed.ParticipantSessionAsync(_fixture, exercise.Id, account.Id);
         var staff = await PersonalLinkSeed.StaffAsync(_fixture, exercise.Id);
 
-        var interceptor = new CountingSaveChangesInterceptor();
+        var interceptor = new SaveRecorder();
         var options = new DbContextOptionsBuilder<PulseDbContext>()
             .UseSqlServer(_fixture.ConnectionString)
             .AddInterceptors(interceptor)
@@ -125,7 +127,18 @@ public sealed class PersonalLinkTelemetryTests
         };
 
         result.Outcome.Should().Be(ParticipantAccessOutcome.Ok);
-        interceptor.SaveChangesCallCount.Should().Be(1, "{0}: mutation, session terminations and event commit together (XC-004)", action);
+        if (action == "disable")
+        {
+            // Gate-2 S-2: a first disable commits DisabledAt BEFORE it reads the sessions to end (so a racing sign-in
+            // either re-reads after it or is swept), then the terminations and the one event commit together.
+            interceptor.Saves.Should().HaveCount(2, "disable commits DisabledAt first, then its terminations and event");
+            interceptor.Saves[0].Should().Equal(["Account"], "the first save is the disable alone");
+            interceptor.Saves[1].Should().Equal(["Session", "TelemetryEvent"], "the terminations and the event commit together (XC-004)");
+        }
+        else
+        {
+            interceptor.Saves.Should().ContainSingle("{0}: mutation, session terminations and event commit together (XC-004)", action);
+        }
         (await PersonalLinkSeed.ReadEventsAsync(_fixture, exercise.Id)).Should().ContainSingle();
         (await PersonalLinkSeed.ReadSessionAsync(_fixture, session.Id)).RevokedAt.HasValue.Should().Be(action != "enable");
     }
@@ -236,4 +249,25 @@ public sealed class PersonalLinkTelemetryTests
 
     private static string JoinUrlOf(string staffBody) =>
         JsonDocument.Parse(staffBody).RootElement.GetProperty("link").GetProperty("joinUrl").GetString()!;
+
+    /// <summary>Records, per <c>SaveChanges</c>, the (non-owned) entity types it writes, sorted by name.</summary>
+    private sealed class SaveRecorder : SaveChangesInterceptor
+    {
+        public List<string[]> Saves { get; } = [];
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            Saves.Add(eventData.Context!.ChangeTracker.Entries()
+                .Where(entry => (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                    && !entry.Metadata.IsOwned())
+                .Select(entry => entry.Metadata.ClrType.Name)
+                .Distinct()
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray());
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
 }

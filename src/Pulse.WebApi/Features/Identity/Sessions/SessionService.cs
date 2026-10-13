@@ -43,10 +43,12 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// COR-054 EndEx overlay. Staff and read-only sessions renew exactly as before.
 /// </para>
 /// <para>
-/// <b>A disabled participant cannot renew (easy-login Gate-2 W-001).</b> Disable ends the account's live sessions, but a
-/// sign-in that raced it can mint one the sweep never saw. So a <c>participant</c>-kind session whose account staff have
-/// disabled is refused on refresh, exactly like a revoked one: the same fail-closed 401, no event and no write. A
-/// session that slipped through can therefore outlive the Disable by at most one access-token lifetime.
+/// <b>Only an enabled account renews (easy-login Gate-2 W-001, S-1).</b> A <c>participant</c>-kind session bound to an
+/// account renews only while an ENABLED account with that id exists in the session's OWN exercise. Fail closed: a
+/// disabled account, a missing one and one that belongs to another exercise are all refused exactly like a revoked
+/// session (the same 401, no event, no write). Disable ends the account's live sessions itself, committing before it
+/// sweeps (Gate-2 S-2); this is the defence in depth behind it, so a session that ever outlived a Disable would end
+/// within one access-token lifetime. Staff and read-only sessions carry no account and are not checked.
 /// </para>
 /// </remarks>
 public sealed class SessionService
@@ -148,9 +150,9 @@ public sealed class SessionService
     /// tokens and preserving the exact binding (never re-scoping to a different exercise / account). Emits one
     /// <c>session.refreshed</c> XC-004 event in the same unit of work. Fails closed
     /// (<see cref="RefreshOutcome.Invalid"/> → 401, no event) on an absent/unknown refresh token, or one whose session
-    /// is revoked or whose refresh window has lapsed, or (a participant session) whose account is disabled, or (a capped
-    /// participant session) whose exercise day has ended. In that last case the session is also revoked (still no
-    /// event), because its stored window was still open.
+    /// is revoked or whose refresh window has lapsed, or (a participant session) whose account is not an enabled account
+    /// of the session's own exercise, or (a capped participant session) whose exercise day has ended. In that last case
+    /// the session is also revoked (still no event), because its stored window was still open.
     /// </summary>
     /// <param name="rawRefreshToken">The presented raw refresh token, or <c>null</c> when none.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -178,10 +180,10 @@ public sealed class SessionService
 
         if (session.Kind == ParticipantKind
             && session.AccountId is { } accountId
-            && await IsAccountDisabledAsync(session.ExerciseId, accountId, cancellationToken))
+            && !await IsEnabledAccountOfExerciseAsync(session.ExerciseId, accountId, cancellationToken))
         {
-            // easy-login Gate-2 W-001: staff disabled this participant (a sign-in that raced the Disable can hold a
-            // session its sweep never saw). Refused exactly as a revoked session is: 401, no event, nothing written.
+            // easy-login Gate-2 W-001 / S-1, fail closed: the bound account is disabled, gone, or not this exercise's.
+            // Refused exactly as a revoked session is: 401, no event, nothing written.
             return RefreshResult.Invalid();
         }
 
@@ -267,16 +269,18 @@ public sealed class SessionService
     }
 
     /// <summary>
-    /// Whether the participant account a session is bound to has been disabled by staff. The read ignores the central
-    /// filter on purpose and carries BOTH ids explicitly instead: the refresh request's own resolved scope may be unset or
-    /// another exercise, and a filtered read would then see no account and fail OPEN (renew). The ids are the
-    /// server-issued session's own binding, never caller input, so the read cannot reach another exercise's account.
+    /// Whether an ENABLED account with <paramref name="accountId"/> exists in <paramref name="exerciseId"/>, the
+    /// session's own exercise. The read ignores the central filter on purpose and carries BOTH ids explicitly instead:
+    /// the filter is keyed on the refresh REQUEST's resolved scope, which is not the session's binding (it may be unset,
+    /// or another exercise). The explicit <c>ExerciseId</c> predicate is what keeps the check inside the session's own
+    /// exercise: an account of exercise A never satisfies a session bound to exercise B, whatever its state. The ids are
+    /// the server-issued session's own binding, never caller input.
     /// </summary>
-    private Task<bool> IsAccountDisabledAsync(Guid exerciseId, Guid accountId, CancellationToken cancellationToken) =>
+    private Task<bool> IsEnabledAccountOfExerciseAsync(Guid exerciseId, Guid accountId, CancellationToken cancellationToken) =>
         _dbContext.Accounts
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .AnyAsync(a => a.ExerciseId == exerciseId && a.Id == accountId && a.DisabledAt != null, cancellationToken);
+            .AnyAsync(a => a.ExerciseId == exerciseId && a.Id == accountId && a.DisabledAt == null, cancellationToken);
 
     /// <summary>
     /// Adds one XC-004 session-lifecycle event against the locked v0 envelope and persists it together with the

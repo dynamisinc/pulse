@@ -34,10 +34,11 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// </para>
 /// <para>
 /// <b>A Disable racing the sign-in (easy-login Gate-2 W-001, story 03's join pattern).</b> The session is minted FIRST
-/// and the account re-read, untracked, after it exists: a Disable committed in between ends the fresh session at once
-/// and the attempt is the ordinary <see cref="ParticipantLoginOutcome.RejectedCredential"/> with the wrong-password
-/// failure event; a Disable that commits later finds and ends the session itself. <c>LastLoginAt</c> and the success
-/// event are written only once the re-read passes. Every <c>login</c> event carries <c>"method":"password"</c>
+/// and the account re-read, untracked, after it exists: a Disable committed before the re-read ends the fresh session at
+/// once and the attempt is the ordinary <see cref="ParticipantLoginOutcome.RejectedCredential"/> with the wrong-password
+/// failure event. A Disable that commits after the re-read reads the sessions to end only AFTER that commit (Gate-2
+/// S-2), and this session was committed before the re-read, so the Disable's own sweep ends it. <c>LastLoginAt</c> and
+/// the success event are written only once the re-read passes. Every <c>login</c> event carries <c>"method":"password"</c>
 /// (easy-login Gate-2 S-1), an additive payload field matching the link and word sign-ins; its clock is unchanged.
 /// </para>
 /// </remarks>
@@ -195,9 +196,9 @@ public sealed class ParticipantLoginService
             },
             cancellationToken);
 
-        // 7. easy-login Gate-2 W-001: re-read the account, untracked, now that the session exists. A Disable that
-        //    committed while the session was being minted fails this check (its sweep could not see the session); one
-        //    that commits after it will find (and end) the session.
+        // 7. easy-login Gate-2 W-001: re-read the account, untracked, now that the session exists. A Disable committed
+        //    before this read fails the check (its sweep may have run before the session existed). One that commits
+        //    after it sweeps only after committing (Gate-2 S-2), when this session already exists, so it ends it.
         var accountId = account.Id;
         var stillEnabled = await _dbContext.Accounts
             .AsNoTracking()

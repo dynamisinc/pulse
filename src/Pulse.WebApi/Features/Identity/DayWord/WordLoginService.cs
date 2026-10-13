@@ -53,9 +53,11 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// the name lookup and the session being minted, and the Disable's session sweep cannot see a session that does not
 /// exist yet. So the session is minted FIRST and the account is re-read, untracked, AFTER it exists: a Disable committed
 /// before the re-read ends the fresh session at once and the attempt is the uniform refusal (the same redaction check,
-/// so it still costs the two KDF calls every refusal costs, and the same identity-less failure event); a Disable that
-/// commits after it finds and ends the session. <see cref="Account.LastLoginAt"/> and the success event are written
-/// only once the re-read passes, so a failed issue or a raced attempt never leaves a success event behind.
+/// so it still costs the two KDF calls every refusal costs, and the same identity-less failure event). A Disable that
+/// commits after the re-read reads the sessions to end only AFTER that commit (Gate-2 S-2), and this session was
+/// committed before the re-read, so the Disable's own sweep ends it. <see cref="Account.LastLoginAt"/> and the success
+/// event are written only once the re-read passes, so a failed issue or a raced attempt never leaves a success event
+/// behind.
 /// </para>
 /// <para>
 /// <b>Never creates or changes an account (COR-011)</b> beyond recording <see cref="Account.LastLoginAt"/> on success.
@@ -233,8 +235,9 @@ public sealed class WordLoginService
         //    about the sign-in is recorded yet: nothing is pending on the context, so the issuer saves only the session.
         var issued = await _sessionIssuer.IssueAsync(ParticipantSessionRequests.For(account, exerciseId), cancellationToken);
 
-        // 8. Gate-2 W-001: re-read the account, untracked, now that the session exists. A Disable that committed while
-        //    the session was being minted fails this check; one that commits after it will find (and end) the session.
+        // 8. Gate-2 W-001: re-read the account, untracked, now that the session exists. A Disable committed before this
+        //    read fails the check (its sweep may have run before the session existed). One that commits after it sweeps
+        //    only after committing (Gate-2 S-2), when this session already exists, so it ends it.
         var accountId = account.Id;
         var stillEnabled = await _dbContext.Accounts
             .AsNoTracking()

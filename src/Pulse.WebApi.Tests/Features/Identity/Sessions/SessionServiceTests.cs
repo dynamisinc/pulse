@@ -339,9 +339,12 @@ public sealed class SessionServiceTests
     public async Task Refresh_PreservesAccountIdAndPersonaId_ForParticipantSession()
     {
         var exerciseId = Guid.NewGuid();
-        var accountId = Guid.NewGuid();
         var personaId = Guid.NewGuid();
         await SeedExerciseAsync(exerciseId);
+
+        // A real, enabled account: refresh renews a participant session only while one exists in its exercise
+        // (easy-login Gate-2 S-1, fail closed).
+        var accountId = (await SeedAccountAsync(exerciseId, disabledAt: null)).Id;
         var original = await SeedSessionAsync(
             exerciseId,
             kind: "participant",
@@ -544,6 +547,81 @@ public sealed class SessionServiceTests
         var stored = await verify.Sessions.AsNoTracking().SingleAsync(x => x.Id == disabledSession.Id);
         stored.Should().BeEquivalentTo(disabledSession, "the refusal writes nothing: no rotation, no new window, no RevokedAt");
         (await CountEventsAsync(exerciseId, "session.refreshed")).Should().Be(1, "only the enabled account's refresh emits an event");
+    }
+
+    [RequiresDockerFact]
+    public async Task Refresh_ParticipantWhoseAccountDoesNotExist_IsRefused_FailClosed()
+    {
+        // easy-login Gate-2 S-1: the check is "an ENABLED account with this id exists in the session's exercise", not
+        // "the account is not disabled", so an account that is gone (or was never there) cannot keep a session renewing.
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId);
+        var ghost = Guid.NewGuid();
+        var refresh = $"ghost-refresh-{Guid.NewGuid():N}";
+        await SeedSessionAsync(exerciseId, rawRefreshToken: refresh, accountId: ghost, principalId: ghost.ToString());
+
+        await using var context = _fixture.CreateContext();
+        (await ServiceFor(context).RefreshAsync(refresh)).Outcome.Should().Be(
+            RefreshOutcome.Invalid, "no enabled account with the session's AccountId exists in its exercise");
+        (await CountEventsAsync(exerciseId, "session.refreshed")).Should().Be(0);
+    }
+
+    [RequiresDockerFact]
+    public async Task Refresh_AnotherExercisesAccount_NeverDecidesThisExercisesRefresh()
+    {
+        // easy-login Gate-2 W-1 (isolation, always-Critical): the account check ignores the central filter and relies on an
+        // explicit ExerciseId predicate instead. Pin it: a participant session bound to exercise B whose AccountId names
+        // an account of exercise A is refused whatever that account's state, and whatever exercise the refresh REQUEST
+        // resolved to (unset, A or B). A's own session on the same account renews, so the zero is the predicate, not a
+        // missing row.
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseA);
+        await SeedExerciseAsync(exerciseB);
+        var accountInA = await SeedAccountAsync(exerciseA, disabledAt: null);
+        var refreshB = $"cross-b-refresh-{Guid.NewGuid():N}";
+        var refreshA = $"cross-a-refresh-{Guid.NewGuid():N}";
+        var sessionB = await SeedSessionAsync(
+            exerciseB, rawRefreshToken: refreshB, accountId: accountInA.Id, principalId: accountInA.Id.ToString());
+        await SeedSessionAsync(exerciseA, rawRefreshToken: refreshA, accountId: accountInA.Id, principalId: accountInA.Id.ToString());
+
+        async Task<RefreshOutcome> RefreshAsync(string token, Guid? requestScope)
+        {
+            await using var context = requestScope is { } scope
+                ? _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = scope })
+                : _fixture.CreateContext();
+            return (await ServiceFor(context).RefreshAsync(token)).Outcome;
+        }
+
+        foreach (var requestScope in new Guid?[] { null, exerciseA, exerciseB })
+        {
+            (await RefreshAsync(refreshB, requestScope)).Should().Be(
+                RefreshOutcome.Invalid,
+                "B's session naming A's ENABLED account is refused (request scope {0}): A's account is not B's",
+                requestScope?.ToString() ?? "unset");
+        }
+
+        // A's account state never decides B's refresh: disable it, then enable it again; B stays refused throughout.
+        foreach (var disabledAt in new DateTimeOffset?[] { DateTimeOffset.UtcNow, null })
+        {
+            await using (var staff = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exerciseA }))
+            {
+                (await staff.Accounts.SingleAsync(a => a.Id == accountInA.Id)).DisabledAt = disabledAt;
+                await staff.SaveChangesAsync();
+            }
+
+            (await RefreshAsync(refreshB, exerciseA)).Should().Be(
+                RefreshOutcome.Invalid, "B's refresh does not follow A's account (DisabledAt {0})", disabledAt?.ToString("O") ?? "null");
+        }
+
+        (await RefreshAsync(refreshA, requestScope: null)).Should().Be(
+            RefreshOutcome.Refreshed, "anti-vacuity: the account is real and enabled, and its OWN exercise's session renews");
+
+        await using var verify = _fixture.CreateContext();
+        (await verify.Sessions.AsNoTracking().SingleAsync(s => s.Id == sessionB.Id)).Should().BeEquivalentTo(
+            sessionB, "every refusal of B's session wrote nothing");
+        (await CountEventsAsync(exerciseB, "session.refreshed")).Should().Be(0, "B's session never refreshed");
+        (await CountEventsAsync(exerciseA, "session.refreshed")).Should().Be(1);
     }
 
     // ---- Story 06: day-long participant sessions on refresh (EL-10, EL-11) ------------------------------------

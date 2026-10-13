@@ -33,11 +33,14 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// <b>A staff action racing the join (Gate-1 W-001).</b> Staff can revoke, reissue or disable between the lookup and
 /// the session being minted, and the staff action's session sweep cannot see a session that does not exist yet. So the
 /// session is minted FIRST and the link and account are re-read AFTER it exists: a staff change committed before the
-/// re-read is caught here (the fresh session is revoked and the attempt is the uniform refusal), and a staff action that
-/// starts after the session exists finds it and ends it. What remains is a window of milliseconds (a staff sweep that
-/// read the sessions just before this one was committed and saved just after the re-read); pressing Disable or Reissue
-/// again ends such a lingering session. The use is recorded, and the one <c>login</c> event written, only once the
-/// re-read passes, so a raced attempt emits exactly one identity-less failure event and no success event.
+/// re-read is caught here (the fresh session is revoked and the attempt is the uniform refusal). A Disable that commits
+/// after the re-read reads the sessions to end only AFTER that commit (Gate-2 S-2), when this session already exists, so
+/// its own sweep ends it: no window is left for Disable. A revoke or reissue saves its link change and its sweep
+/// together, so one that read the sessions just before this one was committed and saves just after the re-read can
+/// still miss it: a window of milliseconds, narrowed by the conditional use-counter <c>UPDATE</c> below (which refuses if
+/// the link changed before it), and pressing Reissue or Revoke again ends such a lingering session. The use is recorded,
+/// and the one <c>login</c> event written, only once the re-read passes, so a raced attempt emits exactly one
+/// identity-less failure event and no success event.
 /// </para>
 /// <para>
 /// <b>The use counter (Gate-2 S-4).</b> <c>UseCount</c> and <c>LastUsedAt</c> are bumped with one conditional
@@ -156,8 +159,10 @@ public sealed class JoinLoginService
         var issued = await _sessionIssuer.IssueAsync(
             ParticipantSessionRequests.For(match.Account, scope.Value), cancellationToken);
 
-        // 6. W-001: re-read, untracked, now that the session exists. A revoke, reissue or disable that committed while we
-        //    were minting it fails this check; one that commits after it will find (and end) the session.
+        // 6. W-001: re-read, untracked, now that the session exists. A revoke, reissue or disable committed before this
+        //    read fails the check. A Disable that commits after it sweeps only after committing (Gate-2 S-2), so it ends
+        //    this session; a revoke or reissue that commits after it is caught by the conditional use-counter UPDATE in
+        //    step 7 when it lands first, and otherwise leaves the narrow window described on the class.
         var linkId = match.Link.Id;
         var accountId = match.Account.Id;
         var stillAdmitted = await (

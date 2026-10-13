@@ -2,12 +2,14 @@ namespace Pulse.WebApi.Tests.Features.Identity.EasyLogin;
 
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -75,11 +77,13 @@ using Xunit;
 /// </list>
 /// </para>
 /// <para>
-/// <b>Racing a Disable (Gate-2 W-001).</b> The word and password sign-ins take story 03's join pattern: mint, re-read the
-/// account untracked, and revoke and refuse if it was disabled meanwhile. The racing issuer runs the REAL staff Disable
-/// on its own connection just before the session is minted, so the Disable's session sweep cannot see it; the sign-in
-/// must notice by itself. A session the sweep missed in the remaining window cannot renew: refresh refuses a disabled
-/// participant's session.
+/// <b>Racing a Disable (Gate-2 W-001, S-2).</b> The word and password sign-ins take story 03's join pattern: mint, re-read
+/// the account untracked, and revoke and refuse if it was disabled meanwhile. The racing issuer runs the REAL staff
+/// Disable on its own connection just before the session is minted, so the Disable's session sweep cannot see it; the
+/// sign-in must notice by itself. The other interleaving, the one that used to leave a live session (the Disable's sweep
+/// reads BEFORE the session is minted, and the sign-in re-reads BEFORE the Disable saves), is closed at its source: a
+/// Disable commits <c>DisabledAt</c> before it sweeps, so that sign-in's re-read already sees the Disable. As defence
+/// in depth, refresh refuses a session whose account is not an enabled account of its exercise.
 /// </para>
 /// </remarks>
 [Collection(MsSqlCollection.Name)]
@@ -290,10 +294,66 @@ public sealed class EasyLoginSeamTests
     }
 
     [RequiresDockerFact]
-    public async Task ASessionTheDisableSweepMissed_CannotRenew()
+    public async Task ASignInMintingAfterTheDisableSweep_IsRefused_BecauseTheDisableCommittedFirst()
     {
-        // The window W-001 leaves: a Disable whose sweep read the sessions just BEFORE this one was committed and saved
-        // just AFTER the sign-in's re-read. Simulated by setting DisabledAt directly, with no sweep. The session's access
+        // Gate-2 S-2, the window that USED to be left: the sign-in admits the account, then the Disable reads the sessions
+        // to end (none yet), then the sign-in mints and re-reads, then the Disable saves. Before the fold the Disable
+        // committed DisabledAt only in that last save, so the re-read saw an enabled account and a disabled person kept a
+        // live session the sweep never saw. Now the Disable commits DisabledAt BEFORE it sweeps, so the re-read sees it.
+        // Driven deterministically: the sign-in is paused just before minting; the Disable is paused just before its
+        // event save (after its commit and its sweep); the sign-in then mints and re-reads; then the Disable finishes.
+        var exercise = await PersonalLinkSeed.ExerciseAsync(_fixture, timeZone: TimeZone);
+        var staff = await PersonalLinkSeed.StaffAsync(_fixture, exercise.Id, role: "controller");
+        var account = await PersonalLinkSeed.AccountAsync(_fixture, exercise.Id, withPassword: true);
+        var timeout = TimeSpan.FromSeconds(60);
+
+        var signInAtMint = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var mint = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var disableAtEventSave = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finishDisable = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var participantSide = Compose(new RequestContext { ExerciseId = exercise.Id }, race: async _ =>
+        {
+            signInAtMint.TrySetResult();
+            await mint.Task;
+        });
+        await using var staffSide = Compose(
+            new RequestContext { ExerciseId = exercise.Id, Staff = staff.Current },
+            interceptor: new PauseBeforeTheEventSave(disableAtEventSave, finishDisable.Task));
+
+        var signIn = InScope(participantSide, s => s.GetRequiredService<ParticipantLoginService>().LoginAsync(
+            new ParticipantLoginRequest { Username = account.Username, Password = PersonalLinkSeed.Password }));
+        await signInAtMint.Task.WaitAsync(timeout);
+
+        var disable = InScope(staffSide, s => s.GetRequiredService<ParticipantAccessService>().DisableAsync(account.Id));
+        await disableAtEventSave.Task.WaitAsync(timeout);
+
+        mint.TrySetResult();
+        var login = await signIn.WaitAsync(timeout);
+
+        finishDisable.TrySetResult();
+        var disabled = await disable.WaitAsync(timeout);
+
+        login.Outcome.Should().Be(
+            ParticipantLoginOutcome.RejectedCredential, "the re-read ran after the Disable's commit, so it saw the Disable");
+        login.Issued.Should().BeNull();
+        disabled.Outcome.Should().Be(ParticipantAccessOutcome.Ok);
+        disabled.Body!.SessionsEnded.Should().Be(0, "precondition: the Disable swept BEFORE the session was minted");
+        await AssertTheRaceLeftNothingLiveAsync(
+            staffSide, exercise.Id, account.Id, "{\"outcome\":\"failure\",\"method\":\"password\"}");
+
+        var disables = (await PersonalLinkSeed.ReadEventsAsync(_fixture, exercise.Id))
+            .Where(e => e.EventType == EasyLoginTelemetry.ParticipantDisabledEventType)
+            .ToList();
+        disables.Should().ContainSingle("one Disable, one participant.disabled event")
+            .Which.Payload.Should().Be("{\"sessionsEnded\":0}", "the count is exactly the sessions this Disable ended");
+    }
+
+    [RequiresDockerFact]
+    public async Task ASessionOfADisabledAccount_CannotRenew_EvenWhenNoSweepEndedIt()
+    {
+        // Defence in depth behind Disable's own sweep (which since Gate-2 S-2 cannot miss a session): an account whose
+        // DisabledAt is set with NO sweep at all (written directly here) cannot keep its session renewing. The access
         // token stays live until it expires, but refresh refuses it, so it ends within one access-token lifetime.
         var exercise = await PersonalLinkSeed.ExerciseAsync(_fixture, timeZone: TimeZone);
         var account = await PersonalLinkSeed.AccountAsync(_fixture, exercise.Id, withPassword: true);
@@ -366,9 +426,13 @@ public sealed class EasyLoginSeamTests
     /// <summary>
     /// Stories 01 to 06 registered as <c>Program.cs</c> registers them, over real SQL. The request context (the
     /// host-resolved exercise and the staff caller) comes from <paramref name="request"/>; Data Protection uses an
-    /// ephemeral key ring. With <paramref name="race"/>, the session issuer runs it just before minting.
+    /// ephemeral key ring. With <paramref name="race"/>, the session issuer runs it just before minting; with
+    /// <paramref name="interceptor"/>, every context of this container runs it.
     /// </summary>
-    private ServiceProvider Compose(RequestContext request, Func<IServiceProvider, Task>? race = null)
+    private ServiceProvider Compose(
+        RequestContext request,
+        Func<IServiceProvider, Task>? race = null,
+        IInterceptor? interceptor = null)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -379,7 +443,14 @@ public sealed class EasyLoginSeamTests
         services.AddSingleton<IConfiguration>(configuration);
         services.AddLogging();
         services.AddHttpContextAccessor();
-        services.AddDbContext<PulseDbContext>(options => options.UseSqlServer(_fixture.ConnectionString));
+        services.AddDbContext<PulseDbContext>(options =>
+        {
+            options.UseSqlServer(_fixture.ConnectionString);
+            if (interceptor is not null)
+            {
+                options.AddInterceptors(interceptor);
+            }
+        });
         services.AddExerciseScoping();
         services.AddExerciseClock();
         services.AddStaffIdentity(configuration);
@@ -423,6 +494,47 @@ public sealed class EasyLoginSeamTests
         public Guid? ExerciseId { get; init; }
 
         public CurrentStaffSession? Staff { get; init; }
+    }
+
+    /// <summary>
+    /// Pauses the first command that inserts a telemetry event (a Disable's last save, after its commit and its sweep)
+    /// until <c>proceed</c> completes, signalling <c>reached</c> first.
+    /// </summary>
+    private sealed class PauseBeforeTheEventSave(TaskCompletionSource reached, Task proceed) : DbCommandInterceptor
+    {
+        private int _paused;
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            await PauseAsync(command);
+            return result;
+        }
+
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            await PauseAsync(command);
+            return result;
+        }
+
+        private async Task PauseAsync(DbCommand command)
+        {
+            if (!command.CommandText.Contains("INSERT INTO [TelemetryEvents]", StringComparison.Ordinal)
+                || Interlocked.Exchange(ref _paused, 1) == 1)
+            {
+                return;
+            }
+
+            reached.TrySetResult();
+            await proceed;
+        }
     }
 
     private sealed class FixedStaffSessionAccessor(CurrentStaffSession? staff) : ICurrentStaffSessionAccessor
