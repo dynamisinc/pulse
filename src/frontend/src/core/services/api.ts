@@ -27,8 +27,12 @@
  *     request once on success, with the rotated token attached. Only a
  *     REFUSAL ends the session: when `/auth/refresh` itself answers 401 or 403
  *     (the server says the refresh token is unknown, spent, revoked or past
- *     its window; `SessionEndpoints` answers 401 for all of those) both token
- *     stores are cleared and the original 401 propagates, with no retry loop.
+ *     its window; `SessionEndpoints` answers 401 for all of those) the token store
+ *     this page's session lives in is cleared (never the other one: a staff tab
+ *     must not wipe a participant's `localStorage` pair, and an explicit
+ *     `logout()` is what clears both) and the original 401 propagates, with no
+ *     retry loop. A refusal is only acted on if the session is still OURS: if
+ *     another tab signed in as someone else meanwhile, their pair is left alone.
  *     A refresh that gets NO ANSWER, or an answer that is not a refusal (no
  *     response at all, a network error, the 20 s timeout, a 5xx, a 429, a 2xx
  *     with no tokens in it) does NOT sign anyone out, staff or participant:
@@ -56,7 +60,7 @@
  *     is no longer the one its request was rejected with, and ADOPTS the pair
  *     the first tab already rotated instead of presenting a spent refresh
  *     token (which the server would refuse, and which used to sign BOTH tabs
- *     out via `clearTokens()`). A waiter gives up on the lock after 45 s (a
+ *     out via a blanket clear). A waiter gives up on the lock after 45 s (a
  *     tab that was suspended while holding it, say iOS) and carries on without
  *     it, via the path below;
  *   - where the Locks API is absent (jsdom, very old browsers) it still adopts
@@ -91,7 +95,9 @@
  *     `Retry-After` seconds, else 15 s, never more than 120 s) before the next
  *     401 may call the refresh again; during it a 401 is rejected with its own
  *     error. Without it a down server would be hit by a refresh per 401, per tab,
- *     per poll. A new sign-in or sign-out in this tab ends the cool-down.
+ *     per poll. It is timed on `performance.now()` (a monotonic clock a changed wall
+ *     clock cannot skip), not `Date.now()`. A new sign-in or sign-out in this tab
+ *     ends the cool-down.
  *
  * KNOWN TRADE-OFF WITHOUT THE LOCKS API. Two tabs then refresh concurrently with
  * the same refresh token. The server accepts one and refuses the other, and the
@@ -123,7 +129,7 @@ import {
   getRefreshToken,
   getSessionMarker,
   rotateTokens,
-  clearTokens,
+  clearActiveTokens,
   getTokenGeneration,
 } from '../auth/tokenStore'
 import { installCrossTabSessionSync } from '../auth/crossTabSessionSync'
@@ -324,6 +330,17 @@ function retryAfterSecondsOf(error: unknown): number | undefined {
   return raw !== '' && Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined
 }
 
+/**
+ * A clock for the cool-down that the user (or an NTP step, or a suspended phone
+ * waking up) cannot move: `performance.now()`, falling back to `Date.now()` only
+ * where there is no `performance`. Read at call time, never cached.
+ */
+function monotonicNowMs(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now()
+}
+
 /** When (and for which sign-in state) a no-answer refresh told this tab to back off. */
 let refreshCooldown: { readonly until: number; readonly generation: number } | null = null
 
@@ -332,14 +349,14 @@ function startRefreshCooldown(retryAfterSeconds: number | undefined): void {
     retryAfterSeconds ?? DEFAULT_REFRESH_COOLDOWN_SECONDS,
     MAX_REFRESH_COOLDOWN_SECONDS,
   )
-  refreshCooldown = { until: Date.now() + seconds * 1000, generation: getTokenGeneration() }
+  refreshCooldown = { until: monotonicNowMs() + seconds * 1000, generation: getTokenGeneration() }
 }
 
 /** `true` while a no-answer refresh's cool-down runs. A sign-in/out in this tab ends it. */
 function isRefreshCoolingDown(): boolean {
   return refreshCooldown !== null &&
     refreshCooldown.generation === getTokenGeneration() &&
-    Date.now() < refreshCooldown.until
+    monotonicNowMs() < refreshCooldown.until
 }
 
 /**
@@ -428,9 +445,12 @@ async function rotate(refreshToken: string): Promise<RotationResult> {
  *     it CHANGED since the attempt began and it is still the same sign-in
  *     (another tab rotated it without our noticing: the no-Locks path), retry
  *     ONCE with the new value instead of clearing.
- *  5. A refusal that stands clears BOTH stores and returns `null` (fail-closed),
+ *  5. A refusal that stands, and still concerns OUR session (the marker is
+ *     unchanged), clears this page's own store and returns `null` (fail-closed),
  *     and so does having no refresh token to present at all (no network call is
- *     made then). Any OTHER failure (no answer, timeout, 5xx, ...) returns
+ *     made then). Only the ACTIVE store is cleared: a staff tab's refusal never
+ *     wipes a participant's `localStorage` pair. Explicit sign-out (`logout()`)
+ *     is what clears both. Any OTHER failure (no answer, timeout, 5xx, ...) returns
  *     `null`, starts the cool-down and leaves the stored pair alone: the
  *     caller's original request is rejected with its own error and a later 401
  *     tries again.
@@ -450,7 +470,7 @@ async function performSilentRefresh(
 
   const refreshToken = getRefreshToken()
   if (!refreshToken) {
-    clearTokens()
+    clearActiveTokens()
     return null
   }
 
@@ -474,7 +494,11 @@ async function performSilentRefresh(
     if (second.kind !== 'refused') return null
   }
 
-  clearTokens()
+  // The refusal is about OUR session. If another tab replaced it while the call
+  // was out (signed in as someone else, even with a pair that has no refresh
+  // token), what is stored now is theirs and is none of this refusal's business.
+  if (getSessionMarker() !== sentMarker) return null
+  clearActiveTokens()
   return null
 }
 

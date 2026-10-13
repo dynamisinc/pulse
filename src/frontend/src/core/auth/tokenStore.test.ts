@@ -13,6 +13,10 @@
  *   - storage that throws (Safari private mode, quota, blocked by policy):
  *     none of the functions throw and the app works from an in-memory copy;
  *   - M-3: both keys are read from ONE store, never one key from each;
+ *   - N-2: a sign-in removes the old marker BEFORE writing the new pair, so a
+ *     reader landing mid-sign-in sees the new pair under no marker;
+ *   - S-3: `clearActiveTokens` (the automatic clear) touches only the store the
+ *     session lives in, `clearTokens` (explicit sign-out) clears both;
  *   - M-2: a sign-in stamps a fresh session identity marker, a refresh rotation
  *     keeps it, a sign-out removes it; `rotateTokens` is a compare-and-swap on
  *     the refresh token (CR-001).
@@ -30,6 +34,8 @@ import {
   clearTokens,
   isPersistentSession,
   isSessionScoped,
+  clearActiveTokens,
+  getPageSessionMarker,
   getTokenGeneration,
   getSessionMarker,
   rotateTokens,
@@ -375,6 +381,125 @@ describe('tokenStore — session identity marker (M-2)', () => {
     clearTokens()
     const localRemovals = order.filter(entry => entry.startsWith('remove'))
     expect(localRemovals.at(-1)).toBe(`remove ${SESSION_MARKER_KEY}`)
+  })
+})
+
+describe('tokenStore — a sign-in is not half-visible to other tabs (N-2)', () => {
+  it('between the writes a reader sees the new pair under NO marker, never under the old one', () => {
+    setTokens({ token: 'x-access', refreshToken: 'x-refresh' }, { persist: true })
+    const oldMarker = getSessionMarker()
+    expect(oldMarker).toBeTruthy()
+
+    // Another tab reads the store at the moment each token is written.
+    const readSeenMidWrite: Array<{ key: string; marker: string | null }> = []
+    const realSet = Storage.prototype.setItem
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      realSet.call(this, key, value)
+      if (this === window.localStorage && key !== SESSION_MARKER_KEY) {
+        readSeenMidWrite.push({ key, marker: getSessionMarker() })
+      }
+    })
+
+    setTokens({ token: 'y-access', refreshToken: 'y-refresh' }, { persist: true })
+
+    // After each pair write the marker was already gone: Y's tokens never sit under X's marker.
+    expect(readSeenMidWrite.map(entry => entry.key)).toEqual([ACCESS_KEY, REFRESH_KEY])
+    expect(readSeenMidWrite.map(entry => entry.marker)).toEqual([null, null])
+    // And once complete there is a NEW marker.
+    expect(getSessionMarker()).toBeTruthy()
+    expect(getSessionMarker()).not.toBe(oldMarker)
+  })
+
+  it('the same holds when the sign-in targets sessionStorage', () => {
+    setTokens({ token: 'x-access', refreshToken: 'x-refresh' })
+    const seen: Array<string | null> = []
+    const realSet = Storage.prototype.setItem
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      realSet.call(this, key, value)
+      if (this === window.sessionStorage && key === ACCESS_KEY) seen.push(getSessionMarker())
+    })
+
+    setTokens({ token: 'y-access', refreshToken: 'y-refresh' })
+
+    expect(seen).toEqual([null])
+  })
+})
+
+describe('tokenStore — automatic vs explicit clears (S-3)', () => {
+  it('clearActiveTokens clears only the store holding this page\'s session (sessionStorage)', () => {
+    setTokens({ token: 'staff', refreshToken: 'staff-refresh' })
+    localStorage.setItem(ACCESS_KEY, 'p-access')
+    localStorage.setItem(REFRESH_KEY, 'p-refresh')
+    localStorage.setItem(SESSION_MARKER_KEY, 'p-marker')
+
+    clearActiveTokens()
+
+    expect(sessionStorage.length).toBe(0)
+    expect(localStorage.getItem(ACCESS_KEY)).toBe('p-access')
+    expect(localStorage.getItem(REFRESH_KEY)).toBe('p-refresh')
+    expect(localStorage.getItem(SESSION_MARKER_KEY)).toBe('p-marker')
+  })
+
+  it('clearActiveTokens on a participant page clears the localStorage pair and its marker', () => {
+    setTokens({ token: 'a', refreshToken: 'r' }, { persist: true })
+
+    clearActiveTokens()
+
+    expect(localStorage.length).toBe(0)
+    expect(getAccessToken()).toBeNull()
+    expect(getSessionMarker()).toBeNull()
+  })
+
+  it('clearTokens (explicit sign-out) still clears BOTH stores', () => {
+    setTokens({ token: 'staff', refreshToken: 'staff-refresh' })
+    localStorage.setItem(ACCESS_KEY, 'p-access')
+    localStorage.setItem(SESSION_MARKER_KEY, 'p-marker')
+
+    clearTokens()
+
+    expect(sessionStorage.length).toBe(0)
+    expect(localStorage.length).toBe(0)
+  })
+
+  it('clearActiveTokens is safe when nothing is stored', () => {
+    expect(() => clearActiveTokens()).not.toThrow()
+  })
+})
+
+describe('tokenStore — the marker this PAGE signed in as (S-2)', () => {
+  it('follows the page\'s own sign-ins and sign-outs, not the store', () => {
+    clearTokens()
+    expect(getPageSessionMarker()).toBeNull()
+
+    setTokens({ token: 'a', refreshToken: 'r' }, { persist: true })
+    const mine = getPageSessionMarker()
+    expect(mine).toBeTruthy()
+    expect(mine).toBe(getSessionMarker())
+
+    // Another tab wipes the store: the store has no marker, the page still remembers its own.
+    localStorage.clear()
+    expect(getSessionMarker()).toBeNull()
+    expect(getPageSessionMarker()).toBe(mine)
+
+    clearTokens()
+    expect(getPageSessionMarker()).toBeNull()
+  })
+
+  it('a refresh rotation keeps it', () => {
+    setTokens({ token: 'a', refreshToken: 'r' }, { persist: true })
+    const mine = getPageSessionMarker()
+
+    rotateTokens('r', { token: 'a2', refreshToken: 'r2' })
+
+    expect(getPageSessionMarker()).toBe(mine)
   })
 })
 

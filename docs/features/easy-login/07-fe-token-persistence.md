@@ -86,6 +86,21 @@ the marker; a `sessionStorage` (staff) session ignores it (M-2). (3) The wait fo
 holds the session (M-3). (5) After a no-answer refresh, a cool-down (`Retry-After` seconds, else 15 s, capped at 120 s)
 makes the next 401s fail without calling refresh (L-1).
 
+**Final-review amendments (orchestrator).** (6) A refusal clears only the store the session lives in (`clearActiveTokens`), so
+a staff tab's refusal never wipes a participant's `localStorage` pair; only an explicit `logout()` / `endSession()` clears
+both (S-3). (7) A refusal is acted on only if the session is still ours (the marker is unchanged), so it can never wipe
+another tab's new sign-in (N-1). (8) `setTokens` removes the target store's old marker before writing the new pair and
+writes the new marker last, so a reader mid-sign-in sees no marker and the identity check rejects (N-2). (9) The cool-down
+is timed on `performance.now()` (falling back to `Date.now()` only without `performance`) (N-3). (10) The cross-tab
+listener acts only on `localStorage` events, and a `localStorage.clear()` elsewhere reloads a page only if it took that
+page's own marker (S-2).
+
+**One browser, one identity (S-1).** The persisted participant session is per origin, not per tab. Signing in as someone
+else in any tab replaces the pair every tab uses and reloads the other tabs so they match (`crossTabSessionSync`). A second
+join link opened in the same browser while another sign-in is still in progress can be interrupted by that reload and has to
+be started again. Staff sessions (`sessionStorage`) are private to their tab and are not affected. Story 08 repeats this for
+testers.
+
 ## Dependencies
 
 None (contract only). Blocks 08 and 09. Pairs with backend 06.

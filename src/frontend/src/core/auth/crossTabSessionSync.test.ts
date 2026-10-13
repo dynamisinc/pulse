@@ -6,6 +6,10 @@
  * a sign-out), but not on a same-sign-in refresh rotation, not for a staff
  * (`sessionStorage`) session, and not for unrelated keys.
  *
+ * `localStorage` is the only source it acts on (`event.storageArea`), and a bare
+ * `localStorage.clear()` elsewhere (key `null`) reloads a page only if that wipe
+ * actually took THIS page's marker.
+ *
  * The listener is installed on a stand-in `EventTarget` with a spy for `reload`,
  * so no real navigation happens. (A real `localStorage` write in the SAME window
  * never fires a `storage` event, which is also what makes it a faithful model of
@@ -20,8 +24,9 @@ const target = new EventTarget()
 let uninstall: () => void = () => undefined
 const reload = vi.fn()
 
+/** A `storage` event as a browser raises it in OTHER tabs: from `localStorage` by default. */
 function storageEvent(init: StorageEventInit): void {
-  target.dispatchEvent(new StorageEvent('storage', init))
+  target.dispatchEvent(new StorageEvent('storage', { storageArea: localStorage, ...init }))
 }
 
 beforeEach(() => {
@@ -61,10 +66,57 @@ describe('installCrossTabSessionSync — a participant tab (localStorage)', () =
     expect(reload).toHaveBeenCalledTimes(1)
   })
 
-  it('reloads when another tab wipes localStorage (key null)', () => {
+  it('reloads when another tab wipes localStorage and that took THIS page\'s marker (key null)', () => {
+    localStorage.clear() // what the other tab did
     storageEvent({ key: null })
 
     expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('does NOT reload on a wipe elsewhere that left this page\'s marker in place', () => {
+    // A `clear()` event, but the store still holds our identity (e.g. it was rewritten).
+    storageEvent({ key: null })
+
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('does NOT reload for an event from sessionStorage, even for the marker key', () => {
+    storageEvent({
+      key: SESSION_MARKER_KEY,
+      oldValue: 'marker-1',
+      newValue: 'marker-2',
+      storageArea: sessionStorage,
+    })
+
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('does NOT reload for an event that names no storage area', () => {
+    storageEvent({
+      key: SESSION_MARKER_KEY,
+      oldValue: 'marker-1',
+      newValue: 'marker-2',
+      storageArea: null,
+    })
+
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('ignores the event (and does not throw) if localStorage cannot even be touched', () => {
+    const event = new StorageEvent('storage', {
+      key: SESSION_MARKER_KEY,
+      oldValue: 'marker-1',
+      newValue: 'marker-2',
+      storageArea: localStorage,
+    })
+    vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError')
+    })
+
+    expect(() => target.dispatchEvent(event)).not.toThrow()
+    vi.restoreAllMocks()
+
+    expect(reload).not.toHaveBeenCalled()
   })
 
   it('does NOT reload on a same-sign-in rotation: only the token keys change', () => {
@@ -112,6 +164,21 @@ describe('installCrossTabSessionSync — a tab with no session of its own', () =
     storageEvent({ key: SESSION_MARKER_KEY, oldValue: null, newValue: 'marker-1' })
 
     expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('does NOT reload on a localStorage wipe: it had no marker for the wipe to take', () => {
+    storageEvent({ key: null })
+
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('does NOT reload on a wipe after its own sign-out either (nothing of its left to lose)', () => {
+    setTokens({ token: 'mine', refreshToken: 'mine-refresh' }, { persist: true })
+    clearTokens() // this page signed out itself
+
+    storageEvent({ key: null })
+
+    expect(reload).not.toHaveBeenCalled()
   })
 })
 

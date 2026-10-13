@@ -29,7 +29,10 @@
  * AT MOST ONE STORE HOLDS A SESSION. `setTokens` writes the target store and
  * REMOVES the other store's copy, so a staff sign-in after a participant one
  * (or vice versa) can never leave a stale pair behind. `clearTokens` clears
- * BOTH, so `logout()` / `endSession()` leave nothing in either. A page's
+ * BOTH, so `logout()` / `endSession()` (an EXPLICIT sign-out) leave nothing in
+ * either; an AUTOMATIC clear (the refresh path, after the server refused the
+ * session) uses `clearActiveTokens` and touches only this page's own store, so a
+ * staff tab's refusal can never wipe a participant's `localStorage` pair. A page's
  * session is whichever store holds tokens, `sessionStorage` first; BOTH keys
  * are always read from that ONE store, never one key from each, so a read can
  * never combine one user's access token (say a shared read-only session in
@@ -47,8 +50,24 @@
  * "a different sign-in (or a sign-out) happened in some tab": `core/services/
  * api.ts` uses it to refuse to retry one user's request with another user's
  * freshly-stored token, and `core/auth/crossTabSessionSync` reloads the other
- * tabs so their UI matches the store. Written LAST on sign-in and removed LAST
- * on clear, so a tab woken by its change always finds a complete pair.
+ * tabs so their UI matches the store.
+ *
+ * WRITE ORDER (a sign-in is several synchronous writes, and another tab can read
+ * between them): `setTokens` first REMOVES the target store's old marker, then
+ * writes the pair, then writes the new marker LAST. So a reader that lands
+ * mid-sign-in sees the new pair under NO marker, and a request that was sent
+ * under any earlier marker fails the identity check instead of being retried with
+ * a half-written, different user's pair; and a tab woken by the new marker's
+ * `storage` event finds a complete pair. `clearTokens` removes the pair first and
+ * the marker last for the same reason.
+ *
+ * ONE BROWSER, ONE IDENTITY (S-1). The persisted session is per ORIGIN, not per
+ * tab. Signing in as someone else in any tab replaces the pair every tab uses and
+ * reloads the others (`core/auth/crossTabSessionSync`). That is the intended
+ * behaviour for "two join links opened in one browser", but a second sign-in
+ * started while another is still in progress (e.g. two join links tapped one
+ * after the other) can interrupt the first when it reloads. Staff sessions
+ * (`sessionStorage`) are private to their tab and are not part of this.
  *
  * `rotateTokens(expectedRefreshToken, pair)` is the refresh path's compare-and-
  * swap: it stores the rotated pair in the store that currently holds the
@@ -191,6 +210,21 @@ function activeArea(): Area {
   return holdsTokens('session') ? 'session' : 'persistent'
 }
 
+/**
+ * The identity marker THIS PAGE believes it is signed in as: what it booted with,
+ * then whatever its own sign-ins and sign-outs made it. Another tab's sign-in or
+ * sign-out reloads this page (so this never goes stale), but a bare
+ * `localStorage.clear()` elsewhere is announced without saying whose marker it
+ * took; this is how `crossTabSessionSync` tells "my marker disappeared" from "a
+ * page with no session saw a wipe".
+ */
+let pageMarker: string | null = initialPageMarker()
+
+function initialPageMarker(): string | null {
+  const area = activeArea()
+  return holdsTokens(area) ? readItem(area, SESSION_MARKER_KEY) : null
+}
+
 /** A fresh, unguessable-enough, NON-secret id for one sign-in. */
 function newSessionMarker(): string {
   const cryptoApi: Crypto | undefined = globalThis.crypto
@@ -218,6 +252,15 @@ export function getRefreshToken(): string | null {
 export function getSessionMarker(): string | null {
   const area = activeArea()
   return holdsTokens(area) ? readItem(area, SESSION_MARKER_KEY) : null
+}
+
+/**
+ * The identity marker this PAGE signed in as (see `pageMarker`), or `null` if it
+ * has no persisted identity. Unlike `getSessionMarker` this does not look at the
+ * store now, so it still names the marker after another tab wiped the store.
+ */
+export function getPageSessionMarker(): string | null {
+  return pageMarker
 }
 
 function writePair(area: Area, { token, refreshToken }: TokenPair): void {
@@ -248,12 +291,17 @@ export function setTokens(pair: TokenPair, options?: SetTokensOptions): void {
   const other: Area = target === 'persistent' ? 'session' : 'persistent'
 
   generation++
+  // Old marker out FIRST: between here and the new marker below, a reader sees
+  // the new pair under no marker, so a request sent under the old identity
+  // fails its identity check rather than adopting a half-written pair.
+  removeItem(target, SESSION_MARKER_KEY)
   writePair(target, pair)
   removeItem(other, ACCESS_TOKEN_KEY)
   removeItem(other, REFRESH_TOKEN_KEY)
   removeItem(other, SESSION_MARKER_KEY)
   // Last, so a tab woken by the marker's `storage` event reads a complete pair.
-  writeItem(target, SESSION_MARKER_KEY, newSessionMarker())
+  pageMarker = newSessionMarker()
+  writeItem(target, SESSION_MARKER_KEY, pageMarker)
 }
 
 /**
@@ -275,15 +323,34 @@ export function rotateTokens(expectedRefreshToken: string, pair: TokenPair): boo
   return true
 }
 
-/** Clears the tokens (and the identity marker) from BOTH stores. Safe when nothing is stored. */
+function clearArea(area: Area): void {
+  removeItem(area, ACCESS_TOKEN_KEY)
+  removeItem(area, REFRESH_TOKEN_KEY)
+  // Last, so a tab woken by the marker's `storage` event finds the pair gone.
+  removeItem(area, SESSION_MARKER_KEY)
+}
+
+/**
+ * EXPLICIT sign-out (`logout()`, `endSession()`): clears the tokens and the
+ * identity marker from BOTH stores. Safe when nothing is stored.
+ */
 export function clearTokens(): void {
   generation++
-  for (const area of AREAS) {
-    removeItem(area, ACCESS_TOKEN_KEY)
-    removeItem(area, REFRESH_TOKEN_KEY)
-    // Last, so a tab woken by the marker's `storage` event finds the pair gone.
-    removeItem(area, SESSION_MARKER_KEY)
-  }
+  pageMarker = null
+  for (const area of AREAS) clearArea(area)
+}
+
+/**
+ * AUTOMATIC clear (the silent refresh, after the server refused this page's
+ * session): clears only the store that holds THIS page's session. A staff tab
+ * (`sessionStorage`) whose refresh token is refused must never wipe the pair a
+ * participant signed in with in another tab (`localStorage`). Safe when nothing
+ * is stored.
+ */
+export function clearActiveTokens(): void {
+  generation++
+  pageMarker = null
+  clearArea(activeArea())
 }
 
 /**

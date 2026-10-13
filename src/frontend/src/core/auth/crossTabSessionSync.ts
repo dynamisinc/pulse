@@ -13,8 +13,11 @@
  * `tokenStore`), this tab RELOADS: the app boots again from whatever the store
  * holds now (the new user, or the login page after a sign-out).
  *
- * WHAT TRIGGERS A RELOAD. Only a `storage` event for the marker key (a new
- * sign-in, or a sign-out removing it) or a `localStorage.clear()` (key `null`).
+ * WHAT TRIGGERS A RELOAD. Only a `storage` event FROM `localStorage` (a
+ * `sessionStorage` event is never ours to act on) for the marker key (a new
+ * sign-in, or a sign-out removing it), or for a `localStorage.clear()` (key
+ * `null`) that actually took THIS page's marker (a page with no persisted
+ * identity has nothing to resync, so a wipe elsewhere does not reload it).
  * NOT a refresh rotation: that rewrites the two token keys and leaves the marker
  * alone, so a participant's own silent refresh in one tab never reloads their
  * other tabs. Browsers deliver `storage` events to OTHER tabs only, so the tab
@@ -25,6 +28,14 @@
  * identity is private to its tab, so a participant link opened in the same
  * browser must not reload a staff console.
  *
+ * ONE BROWSER, ONE IDENTITY (S-1). The persisted session is per origin, not per
+ * tab, so there is exactly one participant identity in a browser at a time. The
+ * deliberate consequence: a second sign-in (say a second join link opened in
+ * another tab) replaces the first and reloads the first tab to match. If that
+ * second sign-in begins while another is still in progress in a tab, the
+ * in-progress one can be interrupted by the reload and must be started again
+ * (story 08's join page repeats this for testers who open two links at once).
+ *
  * WHERE IT IS INSTALLED. `core/services/api.ts` calls
  * `installCrossTabSessionSync()` once at module load. `api.ts` is imported by
  * every surface that can hold or acquire a session, so no component has to mount
@@ -33,12 +44,26 @@
  *
  * World: platform/foundation. No UI, no COBRA, no participant skin. Logs nothing.
  */
-import { SESSION_MARKER_KEY, isSessionScoped } from './tokenStore'
+import {
+  SESSION_MARKER_KEY,
+  isSessionScoped,
+  getSessionMarker,
+  getPageSessionMarker,
+} from './tokenStore'
 
 /** The slice of `Window` this module needs (so a test can hand it any `EventTarget`). */
 export interface StorageEventTarget {
   addEventListener(type: 'storage', listener: (event: Event) => void): void
   removeEventListener(type: 'storage', listener: (event: Event) => void): void
+}
+
+/** `true` for a `storage` event raised by `localStorage` (never `sessionStorage`). */
+function isLocalStorageEvent(event: StorageEvent): boolean {
+  try {
+    return event.storageArea === globalThis.localStorage
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -57,13 +82,18 @@ export function installCrossTabSessionSync(
 
   const onStorage = (event: Event): void => {
     if (!(event instanceof StorageEvent)) return
-    // `key === null` is `localStorage.clear()` in another tab.
-    const markerChanged =
-      event.key === null ||
-      (event.key === SESSION_MARKER_KEY && event.oldValue !== event.newValue)
-    if (!markerChanged) return
+    if (!isLocalStorageEvent(event)) return
     if (isSessionScoped()) return
-    reload()
+
+    if (event.key === SESSION_MARKER_KEY) {
+      if (event.oldValue !== event.newValue) reload()
+      return
+    }
+    // `key === null` is `localStorage.clear()` in another tab: it tells us nothing
+    // about WHICH marker went, so reload only if this page had one and it is gone.
+    if (event.key === null && getPageSessionMarker() !== null && getSessionMarker() === null) {
+      reload()
+    }
   }
 
   target.addEventListener('storage', onStorage)

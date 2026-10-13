@@ -411,10 +411,8 @@ describe('silent refresh keeps the token store the current pair lives in (EL-10)
     expect(localStorage.length).toBe(0)
   })
 
-  it('a REFUSED refresh clears BOTH stores and the original 401 propagates (persistent pair)', async () => {
+  it('a REFUSED refresh clears the persistent pair and the original 401 propagates', async () => {
     setTokens({ token: 'expired', refreshToken: 'stale' }, { persist: true })
-    // Belt and braces: a stray copy in the other store must go too.
-    sessionStorage.setItem('pulse.auth.token', 'stray')
     api.defaults.adapter = config => reject401(config)
 
     await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
@@ -458,11 +456,11 @@ describe('only a REFUSED refresh ends the session; no answer keeps the pair', ()
     }
   }
 
-  // The cool-down after a no-answer refresh reads `Date.now()`; drive it by hand.
+  // The cool-down after a no-answer refresh is timed on `performance.now()`; drive it by hand.
   let now = 1_000_000
   beforeEach(() => {
     now = 1_000_000
-    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
   })
 
   describe.each([
@@ -530,9 +528,8 @@ describe('only a REFUSED refresh ends the session; no answer keeps the pair', ()
     expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('refresh-1')
   })
 
-  it.each([401, 403])('a %i from the refresh endpoint is a refusal: both stores are cleared', async status => {
+  it.each([401, 403])('a %i from the refresh endpoint is a refusal: the session is cleared', async status => {
     setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
-    sessionStorage.setItem('pulse.auth.token', 'stray')
     api.defaults.adapter = config =>
       config.url === '/auth/refresh' ? rejectStatus(config, status) : reject401(config)
 
@@ -1191,7 +1188,7 @@ describe('L-1: a cool-down after a no-answer refresh', () => {
   let now = 5_000_000
   beforeEach(() => {
     now = 5_000_000
-    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
   })
 
   /** Counts refresh calls; every refresh answers with `failure`, every other call 401s. */
@@ -1313,6 +1310,149 @@ describe('L-1: a cool-down after a no-answer refresh', () => {
     now += 2_000
     await expect(api.get('/c')).rejects.toBeTruthy()
     expect(calls).toBe(2)
+  })
+
+  it('is timed on a monotonic clock: moving the wall clock neither extends nor ends it', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const calls = failingRefresh(rejectNetworkError)
+    await expect(api.get('/a')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(1)
+
+    // The user (or an NTP step) moves the wall clock an hour forward: still cooling down.
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3_600_000)
+    await expect(api.get('/b')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(1)
+
+    now += 16_000 // real (monotonic) time passes
+    await expect(api.get('/c')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(2)
+  })
+
+  it('falls back to Date.now() only where performance is unavailable', async () => {
+    vi.stubGlobal('performance', undefined)
+    try {
+      let wall = 9_000_000
+      vi.spyOn(Date, 'now').mockImplementation(() => wall)
+      setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+      const calls = failingRefresh(rejectNetworkError)
+
+      await expect(api.get('/a')).rejects.toBeTruthy()
+      wall += 14_000
+      await expect(api.get('/b')).rejects.toBeTruthy()
+      expect(calls.refresh).toBe(1)
+
+      wall += 2_000
+      await expect(api.get('/c')).rejects.toBeTruthy()
+      expect(calls.refresh).toBe(2)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Final fold: N-1, N-2, S-3
+// ---------------------------------------------------------------------------
+
+describe('N-1: a refusal only ever applies to OUR session', () => {
+  it('a refused refresh does not wipe a pair another tab just signed in with, refresh token or not', async () => {
+    let signInInTabB: () => void = () => undefined
+    const adapter: AxiosAdapter = config => {
+      if (config.url === '/auth/refresh') {
+        signInInTabB() // tab B: a shared read-only sign-in (persisted, NO refresh token)
+        return reject401(config) // X's refresh is refused (say, end of day)
+      }
+      return reject401(config)
+    }
+    const server = createFakeServer('unused')
+    const a = await openTab(server)
+    const b = await openTab(server)
+    a.api.defaults.adapter = adapter
+    a.store.setTokens({ token: 'x-access', refreshToken: 'x-refresh' }, { persist: true })
+    signInInTabB = () => b.store.setTokens({ token: 'shared-access' }, { persist: true })
+
+    await expect(a.api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(localStorage.getItem('pulse.auth.token')).toBe('shared-access')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBeNull()
+    expect(localStorage.getItem('pulse.auth.session')).toBe(b.store.getSessionMarker())
+  })
+
+  it('a refusal that is still about our own session does clear it', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    api.defaults.adapter = config => reject401(config)
+
+    await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(localStorage.length).toBe(0)
+  })
+})
+
+describe('N-2: a sign-in is not half-adopted while another tab is mid-write', () => {
+  it('a request sent under the old identity is rejected, not retried, in the in-between state', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = config => {
+      if (config.url === '/auth/refresh') throw new Error('no refresh expected')
+      seen.push(String(config.headers.get('Authorization')))
+      if (seen.length === 1) {
+        // Another tab's setTokens(Y), caught between its writes: the old marker is
+        // already out (it goes FIRST), Y's pair is in, Y's new marker is not written yet.
+        localStorage.removeItem('pulse.auth.session')
+        localStorage.setItem('pulse.auth.token', 'y-access')
+        localStorage.setItem('pulse.auth.refreshToken', 'y-refresh')
+      }
+      return reject401(config)
+    }
+    setTokens({ token: 'x-access', refreshToken: 'x-refresh' }, { persist: true })
+
+    await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(seen).toEqual(['Bearer x-access']) // never retried as Y
+    expect(localStorage.getItem('pulse.auth.token')).toBe('y-access')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('y-refresh')
+  })
+})
+
+describe('S-3: an automatic clear touches only the store the session lives in', () => {
+  /** What a participant's sign-in in another tab leaves in the shared localStorage. */
+  function participantPairInOtherTab(): void {
+    localStorage.setItem('pulse.auth.token', 'p-access')
+    localStorage.setItem('pulse.auth.refreshToken', 'p-refresh')
+    localStorage.setItem('pulse.auth.session', 'participant-marker')
+  }
+
+  it('a staff tab whose refresh is refused clears sessionStorage and leaves the participant pair', async () => {
+    setTokens({ token: 'expired-staff', refreshToken: 'staff-refresh' }) // session-only
+    participantPairInOtherTab()
+    api.defaults.adapter = config => reject401(config)
+
+    await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(sessionStorage.length).toBe(0)
+    expect(localStorage.getItem('pulse.auth.token')).toBe('p-access')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('p-refresh')
+    expect(localStorage.getItem('pulse.auth.session')).toBe('participant-marker')
+  })
+
+  it('a staff tab with no refresh token to present also clears only its own store', async () => {
+    setTokens({ token: 'shared-readonly-access' }) // session-only, no refresh token
+    participantPairInOtherTab()
+    api.defaults.adapter = config => reject401(config)
+
+    await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(sessionStorage.length).toBe(0)
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('p-refresh')
+  })
+
+  it('a participant tab whose refresh is refused clears its localStorage pair', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    api.defaults.adapter = config => reject401(config)
+
+    await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
   })
 })
 
