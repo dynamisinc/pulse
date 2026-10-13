@@ -1,9 +1,21 @@
 /*
  * features/login/pages/ParticipantSignInPage.module.css
  * ---------------------------------------------------------------------------
- * Scoped styles for the participant sign-in page (feature: login, story 02).
- * CSS Module — every class is locally scoped by the build; this file carries
- * NO COBRA / MUI dependency (participant world, D0 §2 two-worlds rule).
+ * Scoped styles for the participant sign-in page (feature: login, story 02;
+ * extended by easy-login story 09 — "Today's word" — with the three-way method
+ * toggle). CSS Module — every class is locally scoped by the build; this file
+ * carries NO COBRA / MUI dependency (participant world, D0 §2 two-worlds rule).
+ *
+ * MOBILE-FIRST (easy-login 09): the Today's-word form is mostly filled in on a
+ * phone, so every input is 16 px (anything smaller makes iOS Safari zoom the
+ * viewport on focus), every tappable control (toggle buttons, inputs, submit)
+ * is at least 44 px tall, and nothing may scroll horizontally down to a 320 px
+ * viewport (long words wrap with `overflow-wrap: anywhere`, the three toggle
+ * labels wrap rather than overflow). A source-scan test
+ * (`ParticipantSignInPage.boundary.test.ts`) pins these numbers.
+ *
+ * STORY 08 reads this module too (the join page reuses `.page`, `.card`, ...),
+ * so classes here are only ever ADDED to or tuned — never renamed or removed.
  *
  * Deliberately BRAND-NEUTRAL: this page renders before any exercise brand is
  * confirmed (AC5's lookup is non-blocking and may never resolve), so the
@@ -19,6 +31,7 @@
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 24px;
   background: linear-gradient(180deg, #eef3f8 0%, #dfe7ee 100%);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -30,6 +43,7 @@
   flex-direction: column;
   gap: 16px;
   width: 100%;
+  min-width: 0;
   max-width: 400px;
   padding: 32px;
   border-radius: 16px;
@@ -71,9 +85,13 @@
   background: #f0f3f6;
 }
 
+/* Three methods (Today's word / Password / View-only code). Equal-width cells
+   that may wrap their label onto two lines at 320 px instead of overflowing. */
 .toggleButton {
-  flex: 1;
-  padding: 8px 12px;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 6px;
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -81,13 +99,19 @@
   font: inherit;
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
   cursor: pointer;
 }
 
+/* The active method is NOT shown by colour alone (NFR-001 / WCAG 1.4.1): a
+   raised white cell, a heavier weight AND a 3 px bar under the label. */
 .toggleButton[aria-pressed='true'] {
   background: #ffffff;
   color: #10202e;
-  box-shadow: 0 1px 3px rgba(15, 32, 51, 0.18);
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(15, 32, 51, 0.18), inset 0 -3px 0 #2b5f75;
 }
 
 .toggleButton:focus-visible {
@@ -105,6 +129,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
 .label {
@@ -115,13 +140,16 @@
 
 .input {
   box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
   padding: 10px 12px;
   border: 1px solid #cdd7de;
   border-radius: 8px;
   background: #fbfcfd;
   color: #10202e;
   font: inherit;
-  font-size: 15px;
+  /* 16 px: below this iOS Safari zooms the page when the field is focused. */
+  font-size: 16px;
 }
 
 .input:focus-visible {
@@ -131,13 +159,14 @@
 }
 
 .submitButton {
+  min-height: 44px;
   padding: 10px 16px;
   border: none;
   border-radius: 8px;
   background: #2b5f75;
   color: #ffffff;
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -163,6 +192,7 @@
   background: #fdeeee;
   color: #8a2a2a;
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .status {
@@ -197,5 +227,17 @@
 @media (max-width: 420px) {
   .card {
     padding: 24px;
+  }
+}
+
+/* Down to a 320 px phone: claw back the gutters so the three toggle cells keep
+   a usable width and the page never scrolls sideways. */
+@media (max-width: 360px) {
+  .page {
+    padding: 12px;
+  }
+
+  .card {
+    padding: 20px;
   }
 }

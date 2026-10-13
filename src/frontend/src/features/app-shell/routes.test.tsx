@@ -135,8 +135,10 @@ describe('createRoleAwareRoutes', () => {
 
     // The real page's form, present synchronously regardless of the
     // exercise-context lookup's outcome (ParticipantSignInPage.tsx AC5).
-    expect(screen.getByLabelText('Handle')).toBeInTheDocument()
-    expect(screen.getByLabelText('Password')).toBeInTheDocument()
+    // Easy-login 09: "Today's word" is now the default method, so that is the
+    // form on screen (the Password form is one toggle away).
+    expect(screen.getByLabelText('Sign-in name')).toBeInTheDocument()
+    expect(screen.getByLabelText("Today's word")).toBeInTheDocument()
     // The deleted placeholder's own copy must never appear.
     expect(screen.queryByText(/sign-in required/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/your session could not be resolved/i)).not.toBeInTheDocument()

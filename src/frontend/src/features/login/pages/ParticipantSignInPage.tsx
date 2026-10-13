@@ -7,28 +7,64 @@
  * `@/theme/styledComponents`, NO themed/default MUI (D0 §2 two-worlds rule) —
  * plain semantic HTML + a CSS Module, FontAwesome icons only.
  *
- * ONE page, TWO sign-in kinds, toggled by a real, keyboard-operable button
- * pair (never a `div onClick`):
- *   - "Account sign-in" (primary/default) — handle + password ->
+ * ONE page, THREE sign-in methods, chosen with a real, keyboard-operable
+ * button group (never a `div onClick`) — easy-login story 09 added the first
+ * and renamed the other two so they cannot be confused:
+ *   - "Today's word" (the DEFAULT) — sign-in name + the word staff read out
+ *     today -> `signInWithDayWord()` -> `POST /auth/word`. Signs in AS YOURSELF
+ *     (a named participant); typed on a phone, so both fields are plain
+ *     `type="text"` (a masked field only causes typos), 16 px, with
+ *     autocapitalize/autocorrect/spellcheck off.
+ *   - "Password" (was "Account sign-in") — handle + password ->
  *     `signInWithPassword()` -> `POST /auth/login`.
- *   - "Exercise code" — a single shared-password field ->
- *     `signInWithSharedCode()` -> `POST /auth/shared`.
- * Both endpoints return the SAME success envelope
+ *   - "View-only code" (was "Exercise code") — a single shared-password field ->
+ *     `signInWithSharedCode()` -> `POST /auth/shared`. A SHARED, read-only
+ *     session, which is why it is named for what it gives you and never
+ *     sounds like "Today's word".
+ * Each form keeps its OWN typed values (they live in page state, so switching
+ * methods and coming back loses nothing) and switching clears any error. All
+ * three endpoints return the SAME success envelope
  * (`../services/participantSignInService.ts`'s `LoginEnvelope`); on success
- * this page calls `setTokens()` (`@/core/auth`) and navigates to `/` — the
- * role-aware entry (mounted elsewhere, story 04) decides the participant's
- * actual landing surface. This page never re-decides that routing itself,
- * and never special-cases the shared/read-only path beyond what the backend
- * already encodes in the envelope.
+ * this page calls `setTokens(pair, { persist: true })` (`@/core/auth`) and
+ * navigates to `/` — the role-aware entry (mounted elsewhere, story 04)
+ * decides the participant's actual landing surface. This page never
+ * re-decides that routing itself, and never special-cases the shared/read-only
+ * path beyond what the backend already encodes in the envelope.
  *
- * ANTI-ENUMERATION (NFR-009): a 401 from EITHER endpoint renders exactly one
+ * PERSISTENCE (easy-login EL-10): EVERY participant method stores its tokens
+ * with `{ persist: true }` (`localStorage`), so a participant stays signed in
+ * for the exercise day however they got in — including the view-only shared
+ * code (story 09 AC "existing forms ... now store the pair with persist").
+ * The STAFF sign-in page never opts in (`StaffSignInPage`).
+ *
+ * ANTI-ENUMERATION (NFR-009): a 401 from ANY endpoint renders exactly one
  * generic, form-specific message ("That handle or password wasn't
- * recognized." / "That exercise code wasn't recognized.") — this page never
- * distinguishes "no such handle" from "wrong password" (it only branches on
- * HTTP status via `isUnauthorizedSignInError()`, never on server-supplied
- * reason text). Only the PASSWORD field of the form that was submitted is
- * cleared; the handle field is left untouched so the participant doesn't have
- * to retype it.
+ * recognized." / "That exercise code wasn't recognized." / "That name or word
+ * wasn't recognized. Check today's word with your controller.") — this page
+ * never distinguishes "no such handle" from "wrong password", or a wrong name
+ * from a wrong word (it only branches on HTTP status via
+ * `isUnauthorizedSignInError()`, never on server-supplied reason text). Only
+ * the SECRET field of the form that was submitted is cleared (password / code
+ * / word); the handle or sign-in name is left untouched so the participant
+ * doesn't have to retype it.
+ *
+ * TODAY'S-WORD FORM SPECIFICS (story 09):
+ *   - The page TRIMS surrounding whitespace from the name and the word (a
+ *     phone keyboard's autocomplete likes to append a space) and does nothing
+ *     else: day-word normalisation (case, accents, punctuation — EL-9) is the
+ *     server's job, so no case-folding or stripping happens here. The word is
+ *     never logged, never put in a URL and never echoed back into the DOM.
+ *   - A `429` ("Too many tries. Wait a minute and try again.") and any other
+ *     failure (network, 5xx, 400, malformed body: "Could not sign in. Please
+ *     try again.") are distinct from the 401 copy. The other two forms keep
+ *     their existing generic copy for non-401 failures.
+ *   - FOCUS after a failed attempt: the submit button is disabled while the
+ *     request is in flight, and a browser drops focus from a control that is
+ *     disabled under it, so focus is put back deliberately once the request
+ *     settles — on the (just-cleared) WORD field after a 401, ready to retype,
+ *     and on the SIGN IN button after a 429 / other failure (nothing was
+ *     cleared; the participant simply tries again). The error itself is
+ *     announced by its own `role="alert"`, so focus never has to move to it.
  *
  * AC5 (exercise-name branding, non-blocking) — CHOSEN APPROACH: the
  * ACCEPTABLE ALTERNATIVE from the story spec, NOT the fail-closed
@@ -46,9 +82,11 @@
  * ACCESSIBILITY (NFR-001, WCAG 2.1 AA):
  *  - Both forms use real `<label htmlFor>` associations — never
  *    placeholder-as-label.
- *  - The sign-in-kind toggle is a real `<button type="button">` pair
- *    (`aria-pressed` reflects the active one) — reachable by Tab, activatable
- *    with Enter/Space, never a `div onClick`.
+ *  - The sign-in-method toggle is a real group of three `<button
+ *    type="button">`s (`aria-pressed` reflects the active one; the active one
+ *    also differs by weight and an underline bar, not colour alone) —
+ *    reachable by Tab, activatable with Enter/Space, never a `div onClick`.
+ *    Touch targets are at least 44 px (see the CSS Module).
  *  - The 401/failure message is `role="alert"` and PAIRS a FontAwesome icon
  *    with text — never color alone (mirrors
  *    `features/staff/components/ExerciseSwitcher.tsx`'s `SwitcherAlert`
@@ -59,8 +97,14 @@
  * CONTENT SECURITY (NFR-004): the resolved exercise name renders as a plain
  * React text node inside the heading (`{...}`), which React escapes by
  * construction — no `dangerouslySetInnerHTML` anywhere in this file. Field
- * values are sent to the backend as-is; sanitization/hashing of credentials
- * is the backend's concern.
+ * values are sent to the backend as typed (the day-word form additionally
+ * trims surrounding whitespace); sanitization/hashing of credentials is the
+ * backend's concern. Nothing from a request is ever echoed into the page, and
+ * the page has no console output.
+ *
+ * TWO-WORLDS GUARD: `ParticipantSignInPage.boundary.test.ts` source-scans this
+ * file, its service and its CSS Module for any `@mui/*`, `@/theme/*` or COBRA
+ * import and for the mobile-first numbers (16 px inputs, 44 px targets).
  *
  * SCENARIO TIME (COR-053): not applicable — no participant-visible
  * timestamps on this page.
@@ -76,7 +120,7 @@
  * established precedent, not a new layering smell.
  */
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
@@ -85,15 +129,27 @@ import { setTokens } from '@/core/auth'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import { STAFF_LOGIN_PATH } from '@/features/app-shell/constants'
 import {
+  signInWithDayWord,
   signInWithPassword,
   signInWithSharedCode,
+  isRateLimitedSignInError,
   isUnauthorizedSignInError,
   type LoginEnvelope,
 } from '../services/participantSignInService'
 import styles from './ParticipantSignInPage.module.css'
 
-type SignInMode = 'named' | 'shared'
+type SignInMode = 'word' | 'named' | 'shared'
 
+/** The three methods, in display order. `word` is the default (first). */
+const SIGN_IN_METHODS: readonly { readonly mode: SignInMode; readonly label: string }[] = [
+  { mode: 'word', label: "Today's word" },
+  { mode: 'named', label: 'Password' },
+  { mode: 'shared', label: 'View-only code' },
+]
+
+const WORD_UNAUTHORIZED_MESSAGE =
+  "That name or word wasn't recognized. Check today's word with your controller."
+const WORD_RATE_LIMITED_MESSAGE = 'Too many tries. Wait a minute and try again.'
 const NAMED_UNAUTHORIZED_MESSAGE = "That handle or password wasn't recognized."
 const SHARED_UNAUTHORIZED_MESSAGE = "That exercise code wasn't recognized."
 const GENERIC_FAILURE_MESSAGE = 'Could not sign in. Please try again.'
@@ -125,7 +181,9 @@ export function ParticipantSignInPage() {
   const navigate = useNavigate()
   const exerciseName = useResolvedExerciseName()
 
-  const [mode, setMode] = useState<SignInMode>('named')
+  const [mode, setMode] = useState<SignInMode>('word')
+  const [signInName, setSignInName] = useState('')
+  const [word, setWord] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [sharedPassword, setSharedPassword] = useState('')
@@ -134,15 +192,67 @@ export function ParticipantSignInPage() {
 
   const activeError = error && error.mode === mode ? error : null
 
+  // Where focus should land once the in-flight day-word request settles (see
+  // the module header's FOCUS note). A ref, not state: it is read once by the
+  // effect below and never drives a render itself.
+  const wordInputRef = useRef<HTMLInputElement>(null)
+  const wordSubmitRef = useRef<HTMLButtonElement>(null)
+  const focusAfterSubmitRef = useRef<'word' | 'submit' | null>(null)
+
+  useEffect(() => {
+    if (isSubmitting) return
+    const target = focusAfterSubmitRef.current
+    if (target === null) return
+    focusAfterSubmitRef.current = null
+    // Both controls are enabled again by now; the ref is null if the day-word
+    // form was switched away from while the request was in flight.
+    const element = target === 'word' ? wordInputRef.current : wordSubmitRef.current
+    element?.focus()
+  }, [isSubmitting])
+
   function selectMode(nextMode: SignInMode) {
     setMode(nextMode)
     setError(null)
   }
 
-  /** Common completion for either sign-in kind: store tokens, then hand off. */
+  /**
+   * Common completion for every sign-in method: store the tokens in the
+   * PERSISTENT store (EL-10 — all participant methods persist), then hand off.
+   */
   function completeSignIn(envelope: LoginEnvelope) {
-    setTokens({ token: envelope.token, refreshToken: envelope.refreshToken })
+    setTokens(
+      { token: envelope.token, refreshToken: envelope.refreshToken },
+      { persist: true },
+    )
     navigate('/')
+  }
+
+  async function handleWordSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError(null)
+    setIsSubmitting(true)
+    try {
+      // Trim only: day-word normalisation is the server's job (EL-9).
+      const envelope = await signInWithDayWord({
+        signInName: signInName.trim(),
+        word: word.trim(),
+      })
+      completeSignIn(envelope)
+    } catch (caught) {
+      if (isUnauthorizedSignInError(caught)) {
+        setError({ mode: 'word', message: WORD_UNAUTHORIZED_MESSAGE })
+        setWord('')
+        focusAfterSubmitRef.current = 'word'
+      } else if (isRateLimitedSignInError(caught)) {
+        setError({ mode: 'word', message: WORD_RATE_LIMITED_MESSAGE })
+        focusAfterSubmitRef.current = 'submit'
+      } else {
+        setError({ mode: 'word', message: GENERIC_FAILURE_MESSAGE })
+        focusAfterSubmitRef.current = 'submit'
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   async function handleNamedSubmit(event: FormEvent<HTMLFormElement>) {
@@ -196,25 +306,74 @@ export function ParticipantSignInPage() {
         </h1>
 
         <div className={styles.toggleGroup} role="group" aria-label="Sign-in method">
-          <button
-            type="button"
-            className={styles.toggleButton}
-            aria-pressed={mode === 'named'}
-            onClick={() => selectMode('named')}
-          >
-            Account sign-in
-          </button>
-          <button
-            type="button"
-            className={styles.toggleButton}
-            aria-pressed={mode === 'shared'}
-            onClick={() => selectMode('shared')}
-          >
-            Exercise code
-          </button>
+          {SIGN_IN_METHODS.map(method => (
+            <button
+              key={method.mode}
+              type="button"
+              className={styles.toggleButton}
+              aria-pressed={mode === method.mode}
+              onClick={() => selectMode(method.mode)}
+            >
+              {method.label}
+            </button>
+          ))}
         </div>
 
-        {mode === 'named' ? (
+        {mode === 'word' ? (
+          <form
+            className={styles.form}
+            aria-label="Sign in with today's word"
+            onSubmit={handleWordSubmit}
+          >
+            <div className={styles.field}>
+              <label htmlFor="participant-signin-word-name" className={styles.label}>
+                Sign-in name
+              </label>
+              <input
+                id="participant-signin-word-name"
+                name="signInName"
+                type="text"
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                className={styles.input}
+                value={signInName}
+                onChange={event => setSignInName(event.target.value)}
+                required
+              />
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="participant-signin-word" className={styles.label}>
+                Today&apos;s word
+              </label>
+              {/* type="text", NOT "password": the word is read off a screen and
+                  typed on a phone, where a masked field only causes typos. */}
+              <input
+                id="participant-signin-word"
+                ref={wordInputRef}
+                name="word"
+                type="text"
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                className={styles.input}
+                value={word}
+                onChange={event => setWord(event.target.value)}
+                required
+              />
+            </div>
+            <button
+              ref={wordSubmitRef}
+              type="submit"
+              className={styles.submitButton}
+              disabled={isSubmitting}
+            >
+              Sign in
+            </button>
+          </form>
+        ) : mode === 'named' ? (
           <form
             className={styles.form}
             aria-label="Sign in with your account"
