@@ -1,6 +1,6 @@
 # Story: Printable card sheet (staff)
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** COR-017 (part: handing out credentials at StartEx), NFR-001  ·  **Design decisions:** none (EL-12, EL-15)  ·  **Issue:** #477
 **Stack:** frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** M
 

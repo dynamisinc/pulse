@@ -37,18 +37,18 @@ The epics have no requirement text for personal links, day words or card sheets 
 
 | # | Story | Stack | Priority | Wave | Depends on | Status | Issue |
 |---|-------|-------|----------|------|------------|--------|-------|
-| 01 | [Foundation: schema, shared kernel, frozen contract](01-foundation-schema-and-seams.md) | backend | Must | 0 | none | Not Started | #466 |
+| 01 | [Foundation: schema, shared kernel, frozen contract](01-foundation-schema-and-seams.md) | backend | Must | 0 | none | In Progress | #466 |
 | 02 | [Roster provisioning: CSV, add one, list, personas](02-roster-provisioning.md) | backend | Must | 1 | 01 | Not Started | #467 |
 | 03 | [Personal links: join, revoke, reissue, disable](03-personal-links.md) | backend | Must | 1 | 01 | Not Started | #468 |
 | 04 | [Link cards and QR codes](04-link-cards-and-qr.md) | backend | Must | 1 | 01 | Not Started | #469 |
 | 05 | [Day word: staff controls and word sign-in](05-day-word.md) | backend | Must | 1 | 01 | Not Started | #470 |
 | 06 | [Day-long participant sessions](06-day-long-sessions.md) | backend | Must | 1 | 01 | Not Started | #471 |
-| 07 | [Participant tokens survive a closed tab](07-fe-token-persistence.md) | frontend | Must | 1 | contract | Not Started | #472 |
+| 07 | [Participant tokens survive a closed tab](07-fe-token-persistence.md) | frontend | Must | 1 | contract | In Progress | #472 |
 | 08 | [Join page: tap the link, you are in](08-fe-join-page.md) | frontend | Must | 2 | 07 | Not Started | #473 |
 | 09 | [Sign-in page: Today's word](09-fe-todays-word-sign-in.md) | frontend | Must | 2 | 07 | Not Started | #474 |
-| 10 | [Roster screen (staff)](10-fe-roster-screen.md) | frontend | Must | 1 | contract | Not Started | #475 |
-| 11 | [Today's word panel (staff)](11-fe-day-word-panel.md) | frontend | Must | 1 | contract | Not Started | #476 |
-| 12 | [Printable card sheet (staff)](12-fe-card-sheet.md) | frontend | Must | 1 | contract | Not Started | #477 |
+| 10 | [Roster screen (staff)](10-fe-roster-screen.md) | frontend | Must | 1 | contract | In Progress | #475 |
+| 11 | [Today's word panel (staff)](11-fe-day-word-panel.md) | frontend | Must | 1 | contract | In Progress | #476 |
+| 12 | [Printable card sheet (staff)](12-fe-card-sheet.md) | frontend | Must | 1 | contract | In Progress | #477 |
 | 13 | [Email the personal link (Azure Communication Services)](13-email-delivery.md) | backend + infra | **Could** | 3 | 02, 03, 10 | Not Started | #478 |
 | 14 | [UAT tester provisioning script](14-uat-roster-script.md) | script | Could | 2 | backend deployed | Not Started | #479 |
 
