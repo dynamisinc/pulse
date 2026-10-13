@@ -1,6 +1,6 @@
 # Story: Day word: staff controls and word sign-in
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-011, COR-012, COR-017 (part: credential reset), NFR-009  ·  **Design decisions:** none (EL-9, EL-11, EL-13, EL-16)  ·  **Issue:** #470
 **Stack:** backend  ·  **Review:** Tier-2 (a new anonymous, guessable-secret sign-in path; always-Critical class)  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** M
 
@@ -46,8 +46,10 @@ the **real date in the exercise time zone**, never scenario time.
 - [ ] **Given** any other outcome, **then** the answer is the **same bodyless `401`**: wrong word, wrong or unknown
       sign-in name, no word set for today, **yesterday's** word, a disabled account, an account from another
       exercise, a staff or read-only identity, an exercise that is Build/Completed/Archived, an unresolved host.
-      Exactly one slow-KDF verification runs on every path (the real hash, or `VerifyDecoy` when no word is set), and
-      it runs **before** the account lookup, so response time does not distinguish the cases. A missing or oversized
+      One slow-KDF word verification runs on every path (the real hash, or `VerifyDecoy` when no word is set), and
+      it runs **before** the account lookup; every refusal then runs one more (the check that keeps a word typed into
+      the name box out of telemetry), and every resolved path runs the same account lookup, so response time does not
+      distinguish the refusal cases. A success costs one KDF. *(Amended 2026-10-13, Gate-1 W-1/W-2.)* A missing or oversized
       field is `400`. The route has its own `easy-login-word` rate-limit policy (default 10 per minute per IP,
       `429` beyond it, from `EasyLoginOptions`) and `WithLoginBodyLimit()`.
 - [ ] **Given** the day boundary, **then** a word set for date D works until the exercise-zone rollover that ends
@@ -102,3 +104,58 @@ plaintext never persisted), `WordLoginServiceTests` (success, the full uniform-4
 word, name case-insensitivity, lifecycle refusal), `DayWordBoundaryTests` (fake clock, DST, zones),
 `DayWordEndpointsHttpTests` (200/204/400/401/403/429, `no-store`, body limit), `DayWordIsolationTests`
 (`[RequiresDockerFact]`), `DayWordTelemetryTests` (events valid, the word appears nowhere).
+
+### Linked tests (builder)
+
+AC numbering: AC1 set/generate/replace, AC2 status/clear, AC3 word sign-in success, AC4 uniform 401 / 400 / limiter,
+AC5 day boundary; XC-ISO isolation, XC-TEL telemetry, XC-SEC content security and abuse, XC-AUTH authorization.
+
+- `DayWordNormalizerTests.Normalize_MatchesTheClientsVectors` (shared vectors with `dayWordNormalize.test.ts`),
+  `.Normalize_SpellingsOfOneWord_AreTheSameWord`, `.Normalize_AppliesCompatibilityDecomposition`,
+  `.Normalize_ALoneSurrogate_IsDroppedNotThrown`, `.IsAcceptableLength_BoundsAre6And64`,
+  `.TheClientNormaliser_IsStillTheChainThisServerMirrors` (AC1, AC3)
+- `DayWordGeneratorTests.Generate_HasTheReadAloudShape_FromTheCuratedLists`, `.Generate_TwoCallsDiffer`,
+  `.TheCuratedLists_AreLowerCaseAsciiLetters_Unique_AndReadable`, `.Generate_IsAlwaysAnAcceptableWord_AndNormalisesToItsLettersAndDigits` (AC1)
+- `DayWordServiceTests.Set_ASuppliedWord_DefaultsToToday_ReturnsThePlaintextOnce_AndStoresOnlyTheHash`,
+  `.Set_WithNoWord_GeneratesOne`, `.Set_ADateThatHasAWord_ReplacesItInPlace`,
+  `.Set_UpTo14DaysAhead_IsAPreset_AndTheFifteenthDayIsNot`, `.Set_ABadDate_Is400`,
+  `.Set_AWordShorterThanSixOnceNormalised_Is400_AndTheReasonNeverQuotesIt`,
+  `.Set_AWordLongerThan64OnceNormalised_OrOverTheRawBound_Is400`, `.Set_AnAccentedWord_IsAcceptedOnItsFoldedLength` (AC1)
+- `DayWordServiceTests.Status_WithNoWord_ReportsTheZoneTodayAndItsEnd`,
+  `.Status_WithWords_ReportsWhoWhenHowOftenAndThePresetDates_NeverAWord`,
+  `.Status_ASetterOutsideTheExercisesTenant_IsNotNamed`, `.Status_InAnUnknownZone_FallsBackToUtcAndSaysSo`,
+  `.Clear_RemovesThatDatesWord_AndIsIdempotent`, `.Clear_ABadOrOutOfRangeDate_Is400` (AC2);
+  `.NoStaffSession_OrNoScope_IsUnauthorized`, `.AStaffUserWithoutControllerOrPlanner_IsForbidden`,
+  `.APlanner_MayManageTheWord` (XC-AUTH)
+- `WordLoginServiceTests.Success_IssuesTheLoginSession_RecordsLastLoginAt_AndRunsExactlyOneKdf`,
+  `.TheName_IsMatchedCaseInsensitively_AndTrimmed`, `.TheWord_IsNormalisedOnBothSides`,
+  `.ParticipantAccessibleLifecycleStates_Admit` (AC3)
+- `WordLoginServiceTests.WrongWord_IsRefused_AfterTheRealWordCheck`, `.UnknownName_IsRefused_AfterTheRealWordCheck`,
+  `.NoWordSetToday_IsRefused_AfterTheDecoy`, `.YesterdaysWord_AndTomorrowsPresetWord_AreRefused`,
+  `.ADisabledAccount_IsRefused_EvenWithTheRightWord`, `.AnAccountOutsideTheParticipantWorld_IsRefused`,
+  `.AnExerciseOutsideStagedLivePaused_IsRefused`, `.AnUnresolvedOrEmptyHost_IsRefused_AfterTheDecoy_WithNoTelemetry`,
+  `.AWordThatCannotBeValid_StillPaysTheDecoy`, `.TheWord_IsVerifiedBeforeTheNameIsLookedUp_AndAWrongWordNeverReadsAccounts`,
+  `.AMissingField_IsInvalid_BeforeAnyWork`, `.AnOversizedField_IsInvalid_AndTheReasonNeverQuotesIt` (AC4);
+  `.TheRoute_NeverCreatesOrChangesAnAccount` (XC-SEC)
+- `DayWordBoundaryTests.NewYork_RolloverZero_TheWordEndsAtLocalMidnight_ToTheSecond`,
+  `.NewYork_FallBack_The25HourDayEndsAtTheNextLocalMidnight`, `.NewYork_SpringForward_The23HourDayEndsAtTheNextLocalMidnight`,
+  `.Kolkata_AHalfHourOffsetZone_RollsOverAt1830Utc`, `.RolloverHourThree_TheDayEndsAtThreeLocal`,
+  `.TheStaffSide_FlipsTodayAndThePastAtTheSameInstant`, `.TheStaffSide_HonoursTheRolloverHour` (AC5)
+- `DayWordEndpointsHttpTests.StaffRoutes_WithNoStaffSession_Are401_AndNoStore`, `.AnEvaluator_Is403_AndNoStore`,
+  `.AParticipantSession_OrAnAnonymousCaller_NeverReachesTheStaffRoutes` (XC-AUTH);
+  `.AController_GetsPutsAndDeletes_AndEveryResponseIsNoStore`, `.ABadDate_Is400ProblemDetails_WithAReadableDetail` (AC1, AC2);
+  `.WordSignIn_EndToEnd_AnswersTheLoginEnvelope_AndARotationTakesEffectOnTheNextAttempt` (AC1, AC3);
+  `.WordSignIn_NullBody_Is400ProblemDetails`, `.WordSignIn_AMissingField_Is400ProblemDetails`,
+  `.WordSignIn_AnOversizedField_Is400_AndNeverEchoesIt`, `.WordSignIn_OnAnUnresolvedHost_IsTheBodyless401`,
+  `.WordSignIn_IsRateLimitedPerIp_TenAMinuteByDefault`, `.WordSignIn_RateLimit_ComesFromEasyLoginOptions`,
+  `.TheRoutes_AreMappedOnce_WithTheirMetadata` (AC4, XC-SEC); `.AddDayWord_SharesTheHasherWithTheViewOnlyCredential`,
+  `.AddDayWord_ComposesIntoTheRealProgramHost` (composition)
+- `DayWordIsolationTests.ExerciseBsWord_NeverOpensA`, `.ABAccountNamedOnAsHost_WithAsWord_IsTheUniformRefusal`,
+  `.AsStaff_CannotSeeSetOrClearBsWord`, `.StaffAssignedOnlyToB_AreForbiddenOnA`,
+  `.AnUnsetOrEmptyScope_SeesZeroRows_WhileTheRowsExist_AndAByIdReadAcrossExercisesIsNull`,
+  `.OverHttp_TheHostDecidesTheExercise_AndBsWordIsRefusedOnAsHost` (XC-ISO)
+- `DayWordTelemetryTests.ASuccess_EmitsOneLoginEvent_WithTheParticipantActor`,
+  `.AWrongWord_KeepsThePlainSanitizedSignInName_AsTheTarget`, `.A_ANameEqualToTheAttemptedWord_IsNotRecorded`,
+  `.B_TodaysWordTypedIntoTheNameBox_IsNotRecorded`, `.WithNoWordSet_TheNameIsStillChecked_AgainstTheDecoy_AndKept`,
+  `.SetAndReplace_EmitCredentialRotated_WithFirstGeneratedAndDate`, `.Clear_EmitsCredentialRevoked_AndANoOpClearEmitsNothing`,
+  `.TheWord_SetOrAttempted_AppearsInNoEventLogLineOrResponseBody_ButTheOneTimeSetResult` (XC-TEL)
