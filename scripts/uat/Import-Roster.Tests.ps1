@@ -573,6 +573,37 @@ Describe 'Import-Roster.ps1' {
         Get-Content -LiteralPath (Join-Path $folder 'nested/deep.txt') | Should -Be 'also precious'
     }
 
+    It 'a trailing separator (''newdir/'') names a folder: refused, and the folder is not created (W-2)' {
+        $csv = New-RosterCsv $script:GoodRows
+        Push-Location -LiteralPath $TestDrive
+        try { $run = Invoke-ImportRoster @{ CsvPath = $csv; OutFile = 'newdir/' } }
+        finally { Pop-Location }
+        $run.Code | Should -Be 1
+        $global:ImportRosterFake.Calls.Count | Should -Be 0
+        $run.Red -join "`n" | Should -Match "is a folder\. Name a file in it instead, e\.g\. -OutFile \(Join-Path '.+newdir' 'roster-links\.csv'\)\. Nothing was sent\."
+        Test-Path -LiteralPath (Join-Path $TestDrive 'newdir') | Should -BeFalse
+    }
+
+    It 'the writer''s own backstop: a folder that appeared after the checks (<Name>) is never replaced (W-1)' -ForEach @(
+        @{ Name = 'the folder itself'; Link = $false }
+        @{ Name = 'a symbolic link to it'; Link = $true }
+    ) {
+        if ($Link -and $IsWindows) { Set-ItResult -Skipped -Because 'symbolic links need elevation on Windows' }
+        $folder = Join-Path $TestDrive "appeared-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $folder 'nested') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $folder 'notes.txt') -Value 'precious'
+        Set-Content -LiteralPath (Join-Path $folder 'nested/deep.txt') -Value 'also precious'
+        $target = $folder
+        if ($Link) {
+            $target = Join-Path $TestDrive "link-$([guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType SymbolicLink -Path $target -Target $folder | Out-Null
+        }
+        { Write-PrivateTextFile -Path $target -Text 'name,signInName,joinUrl' } | Should -Throw '*is not a regular file*'
+        Get-Content -LiteralPath (Join-Path $folder 'notes.txt') | Should -Be 'precious'
+        Get-Content -LiteralPath (Join-Path $folder 'nested/deep.txt') | Should -Be 'also precious'
+        if ($Link) { (Get-Item -LiteralPath $target -Force).LinkType | Should -Be 'SymbolicLink' }
+    }
+
     It 'the CSV itself is refused: <Name>' -ForEach @(
         @{ Name = 'the same path'; Spell = { param($Csv) $Csv } }
         @{ Name = 'another spelling of it'; Spell = { param($Csv) Join-Path (Split-Path -Parent $Csv) '.' (Split-Path -Leaf $Csv) } }
@@ -678,7 +709,17 @@ Describe '-DryRun' {
             (Get-CallSequence)[-1] | Should -Be 'POST /api/auth/logout'
         }
 
-        It '-ReplaceWord replaces it, and says the earlier word stopped working' {
+        It 'with -Word, it says the word you passed was NOT set, and never prints it (S-4)' {
+    $global:ImportRosterFake.WordSet = $true
+    $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile; Word = 'Harbor Lantern' }
+    $run.Code | Should -Be 0
+    (Get-FakeCall PUT '/api/staff/day-word').Count | Should -Be 0
+    $run.Text | Should -Match 'was already set by Casey Controller at .+, so the word you passed with -Word was NOT set'
+    $run.Text | Should -Not -Match 'Harbor Lantern'
+    Should -Invoke Set-Clipboard -Times 0 -Exactly
+}
+
+It '-ReplaceWord replaces it, and says the earlier word stopped working' {
             $global:ImportRosterFake.WordSet = $true
             $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile; Word = 'Harbor Lantern'; ReplaceWord = $true }
             $run.Code | Should -Be 0

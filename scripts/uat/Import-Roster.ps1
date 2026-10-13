@@ -68,7 +68,9 @@
     Set-Clipboard -Value $null. Each cell is quoted and formula-safe, like the file. On Windows, clipboard
     history (Win+V) and cloud clipboard sync keep their own copy of the links, which Set-Clipboard does not
     clear: turn them off first, clear them afterwards, or leave out -CopyLinks. On Linux this needs xclip;
-    without it, nothing is copied and the links are in the file only.
+    without it, nothing is copied and the links are in the file only. Even with xclip, Set-Clipboard can
+    report success without copying anything (for example over SSH with no display to reach), so check the
+    paste; the file always has the links.
 
 .PARAMETER GenerateWord
     After the import, have the server generate today's word. The word is printed once, so it can be read
@@ -334,8 +336,10 @@ function Resolve-LinksFilePath {
     $path = if ($OutFile) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutFile) }
     else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'out' ("roster-links-{0}.csv" -f (Get-Date -Format 'yyyyMMdd-HHmmss')))) }
 
-    if (Test-Path -LiteralPath $path -PathType Container) {
-        throw "-OutFile '$path' is a folder. Name a file in it instead, e.g. -OutFile (Join-Path '$path' 'roster-links.csv'). Nothing was sent."
+    # A trailing separator ('newdir/') names a folder too, even one that does not exist yet.
+    if ([IO.Path]::EndsInDirectorySeparator($OutFile) -or [IO.Path]::EndsInDirectorySeparator($path) -or (Test-Path -LiteralPath $path -PathType Container)) {
+        $folder = $path.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+        throw "-OutFile '$path' is a folder. Name a file in it instead, e.g. -OutFile (Join-Path '$folder' 'roster-links.csv'). Nothing was sent."
     }
     $comparison = if ($IsLinux) { [StringComparison]::Ordinal } else { [StringComparison]::OrdinalIgnoreCase }
     if ([string]::Equals((Resolve-RealPath $path), (Resolve-RealPath $CsvFile.FullName), $comparison)) {
@@ -699,7 +703,7 @@ function New-PrivateFileStream {
     if ($existing) {
         $special = $existing.UnixStat -and [string] $existing.UnixStat.ItemType -notin 'File', 'SymbolicLink'
         if ($existing -isnot [System.IO.FileInfo] -or $special -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "'$Path' is not a regular file, so it was not replaced." }
-        Remove-Item -LiteralPath $Path -Force
+        [System.IO.File]::Delete($Path)     # unlinks a file or a link (never its target); it cannot delete a folder
     }
 
     if ($IsWindows) {
@@ -716,7 +720,7 @@ function New-PrivateFileStream {
         catch {
             Write-Warning "Could not create the links file with an owner-only ACL ($(Get-FileFailureReason $_.Exception $Path)); it gets its folder's permissions. Delete it when you are done."
             $left = Get-Item -LiteralPath $Path -Force -ErrorAction Ignore     # an empty file the failed attempt may have left
-            if ($left -is [System.IO.FileInfo] -and $left.Length -eq 0) { Remove-Item -LiteralPath $Path -Force }
+            if ($left -is [System.IO.FileInfo] -and $left.Length -eq 0) { [System.IO.File]::Delete($Path) }
             return [System.IO.FileStream]::new($Path, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
         }
     }
@@ -748,7 +752,9 @@ function Write-PrivateTextFile {
         if ($stream) { $stream.Dispose() }
         [Array]::Clear($bytes, 0, $bytes.Length)
         # Never leave a partial links file behind.
-        if (-not $written -and $stream -and (Test-Path -LiteralPath $Path -PathType Leaf)) { Remove-Item -LiteralPath $Path -Force -ErrorAction Ignore }
+        if (-not $written -and $stream -and (Test-Path -LiteralPath $Path -PathType Leaf)) {
+            try { [System.IO.File]::Delete($Path) } catch { Write-Warning "A partial links file may be left at $Path; delete it." }
+        }
     }
 }
 
@@ -800,7 +806,8 @@ function Set-TodaysWord {
         $by = if ($check.Json['setByName']) { " by $(Get-PrintableText $check.Json['setByName'] -Max 60)" } else { '' }
         $at = if ($check.Json['setAt']) { " at $(Format-Instant $check.Json['setAt'])" } else { '' }
         Write-Host ''
-        Write-Host "Today's word for $(Get-PrintableText $check.Json['today']) was already set$by$at, so it was NOT changed (a word is shown only once, so it is not printed)." -ForegroundColor Yellow
+        $outcome = if ($Word) { 'the word you passed with -Word was NOT set' } else { 'it was NOT changed' }
+        Write-Host "Today's word for $(Get-PrintableText $check.Json['today']) was already set$by$at, so $outcome (a word is shown only once, so the current one is not printed)." -ForegroundColor Yellow
         Write-Host '  Keep using the word you announced. To replace it, run again with -ReplaceWord: the current word then stops working at once.'
         return
     }

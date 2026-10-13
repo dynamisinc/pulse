@@ -29,8 +29,11 @@ console (and the same authorization), rather than the ops bootstrap route. It ne
       every participant in the file to `-OutFile` (default `scripts/uat/out/roster-links-<yyyyMMdd-HHmmss>.csv`) and
       prints only that **path**, never a link. `scripts/uat/out/` is added to `.gitignore` so a link file cannot be
       committed. With `-CopyLinks` the links are also placed on the clipboard (never echoed).
-- [ ] **Given** `-GenerateWord` or `-Word <text>`, **then** after the import it sets today's word through
-      `PUT /api/staff/day-word` and prints the word once (it is meant to be read out), copying it to the clipboard.
+- [ ] **Given** `-GenerateWord` or `-Word <text>`, **then** after the import it first checks today's word
+      (`GET /api/staff/day-word`). If none is set, it sets it through `PUT /api/staff/day-word` and prints the word once
+      (it is meant to be read out), copying it to the clipboard. If today's word is **already set**, it is not changed,
+      not printed and not copied: the script says so (naming the word passed with `-Word` as not set) and the exit code
+      is unaffected (`0` when no row failed). `-ReplaceWord` replaces it anyway; the earlier word then stops working.
       Neither the staff secret, a session token, nor a join link is ever written to the console, a transcript or a log.
 - [ ] **Given** an error (bad secret, `401`/`403`, no active exercise, `400` from a malformed CSV), **then** it prints
       the server's readable reason and exits `1` without a stack trace; a `404`/connection failure explains how to check
@@ -75,4 +78,6 @@ failure, readable errors, and no secret, token or join link in any output stream
 
 Manual, recorded in the PR: `-DryRun` with a CSV containing a bad persona handle (the row fails, nothing
 is created); a real import (five rows created, file written, no link on screen); the same file again (five
-`unchanged`); `-GenerateWord`; a wrong staff secret (clean error, exit 1). Record the run in the PR.
+`unchanged`); `-GenerateWord`; `-GenerateWord` twice (the second run leaves the word alone and says so, exit 0); a
+wrong staff secret (clean error, exit 1); on Windows, the links file's ACL lists only the current user (`Get-Acl`).
+Record the run in the PR.
