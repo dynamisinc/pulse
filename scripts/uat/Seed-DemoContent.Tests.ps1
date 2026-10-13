@@ -556,6 +556,9 @@ Describe 'Pack validation (implementation.md §1.10 rules, one case per rule)' {
         @{ Name = 'handle with a trailing newline'; Code = 'handle-format'; Mutate = { param($p) $p['posts'][0]['persona'] = "Newsline7`n" } }
         @{ Name = 'handle with a U+FEFF'; Code = 'handle-format'; Mutate = { param($p) $p['posts'][0]['persona'] = "News`u{FEFF}line7" } }
         @{ Name = 'media alt that is only U+FEFF'; Code = 'alt-missing'; Mutate = { param($p) $p['media'][0]['alt'] = "`u{FEFF}" } }
+        # Gate-1 S1b L-3: the consumer is .NET now, so blank to .NET's Trim() is blank too (U+0085 is not JS whitespace)
+        @{ Name = 'media alt that is only U+0085'; Code = 'alt-missing'; Mutate = { param($p) $p['media'][0]['alt'] = "`u{0085}" } }
+        @{ Name = 'run-sheet alt override that is only U+0085'; Code = 'inject-alt'; Mutate = { param($p) $p['runSheet']['items'][0]['posts'][0]['media'][0]['alt'] = " `u{0085} " } }
         # Gate-1 L-3: keys collide ignoring case (the manifest and the id maps are case-insensitive)
         @{ Name = 'post keys differing only in case'; Code = 'duplicate-key'; Mutate = { param($p) $p['posts'] += [ordered]@{ key = 'P01'; persona = 'FulcoEM'; text = 'A different post'; minutesBeforeAnchor = 10 } } }
         @{ Name = 'media keys differing only in case'; Code = 'duplicate-key'; Mutate = { param($p) $p['media'] += [ordered]@{ key = 'Harbor-Photo'; file = 'avatars/fulcoem.png'; kind = 'image'; alt = 'x' } } }
@@ -1043,16 +1046,17 @@ Describe 'Run sheet: inject items for POST /api/injects (pure)' {
         $plan.Items[1].PostCount | Should -Be 3
     }
 
-    It 'plan online: a manifest id still in the queue is skipped (any status); a deleted one is created again; a lost manifest adopts' {
+    It 'plan online: a manifest id still in the queue is skipped; a deleted one is created again; a lost manifest adopts' {
         $pack = Get-FixturePack
-        $i01 = New-QueueRow $pack['runSheet']['items'][0] -Id 'item-1' -Status 'fired'
+        $i01 = New-QueueRow $pack['runSheet']['items'][0] -Id 'item-1' -Status 'held'
         $i02 = New-QueueRow $pack['runSheet']['items'][1] -Id 'item-2'
         $manifest = New-SeedManifest
         $manifest['injects']['i01'] = [ordered]@{ itemId = 'item-1' }
         $manifest['injects']['i02'] = [ordered]@{ itemId = 'item-gone' }
         $plan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue @($i01) -PersonaIds $script:Ids.Personas
         @($plan.Items | ForEach-Object { "$($_.Key)=$($_.Action)" }) | Should -Be @('i01=skip', 'i02=create')
-        $plan.Items[0].Reason | Should -Be 'in the run sheet (fired)'
+        $plan.Items[0].Reason | Should -Be 'in the run sheet (held)'
+        $plan.Items[0].Armable | Should -BeTrue
         $plan.Items[1].Reason | Should -Match 'deleted in the console'
 
         $lost = Get-InjectPlan -Pack $pack -Manifest (New-SeedManifest) -Queue @($i01, $i02) -PersonaIds $script:Ids.Personas
@@ -1381,7 +1385,7 @@ Describe 'Run-sheet load end to end (in-memory fake that enforces the server''s 
         $again.Code | Should -Be 0 -Because $again.Text
         (Get-FakeCalls POST '/api/posts').Count | Should -Be 4        # p02 posted again
         (Get-FakeCalls POST '/api/injects').Count | Should -Be 2      # nothing loaded twice
-        $again.Text | Should -Match '\[WARN\] i01 still replies to the earlier copy of p02 \(archived and posted again since it was loaded\)'
+        $again.Text | Should -Match '\[WARN\] i01 still replies to the earlier copy of p02 \(archived and posted again since\), not the current one: at fire it would fail or answer the old post'
         $again.Text | Should -Not -Match 'i02 still replies'
     }
 
@@ -1509,6 +1513,284 @@ Describe 'Run-sheet load end to end (in-memory fake that enforces the server''s 
         $run.Code | Should -Be 0 -Because $run.Text
         @($script:Fake.Calls | Where-Object { $_.Path -like '/api/injects*' }).Count | Should -Be 0
         $run.Text | Should -Match 'the pack has no run-sheet items'
+    }
+}
+
+Describe 'Spent run sheet (rehearsals) and -ReloadFiredRunSheet (Gate-1 S1b M-1)' {
+    BeforeAll {
+        $script:Personas = @{ Newsline7 = 'a0000000-0000-4000-8000-0000000000a7'; FulcoEM = 'a0000000-0000-4000-8000-0000000000ae'; mvega_fh = 'a0000000-0000-4000-8000-0000000000a3' }
+        function New-SpentRow {
+            <# A GET /api/injects item for a pack item, in a given state ('held part-way' = a burst held after its first post). #>
+            param($PackItem, [string] $Id = ([guid]::NewGuid().ToString()), [string] $Status = 'pending')
+            $k = 0
+            $row = [ordered]@{
+                id = $Id; kind = $PackItem['kind']; title = $PackItem['title']; status = $Status; firedCount = 0
+                posts = @($PackItem['posts'] | ForEach-Object { $k++; [ordered]@{ id = "$Id-p$k"; sequence = $k; status = 'pending'; personaId = $script:Personas[$_['persona']]; text = $_['text'] } })
+            }
+            Set-RowState $row $Status
+            return $row
+        }
+        function Set-RowState {
+            <# What the server's transitions leave behind for each state. #>
+            param($Row, [string] $Status)
+            $posts = @($Row['posts'])
+            switch ($Status) {
+                'fired' { $Row['status'] = 'fired'; foreach ($p in $posts) { $p['status'] = 'fired' }; $Row['firedCount'] = $posts.Count }
+                'firing' { $Row['status'] = 'firing'; $posts[0]['status'] = 'fired'; $Row['firedCount'] = 1 }
+                'skipped' { $Row['status'] = 'skipped'; foreach ($p in $posts) { $p['status'] = 'skipped' } }
+                'failed' { $Row['status'] = 'failed'; $posts[0]['status'] = 'failed'; $Row['error'] = 'The persona was removed.' }
+                'held part-way' { $Row['status'] = 'held'; $posts[0]['status'] = 'fired'; $Row['firedCount'] = 1 }
+                default { $Row['status'] = $Status }
+            }
+        }
+        function Get-InjectManifestFor { (ConvertFrom-SeedJson (Get-Content -LiteralPath (Join-Path $TestDrive 'manifests' "$($script:Fake.ExerciseId).json") -Raw))['injects'] }
+        function Get-InjectWrites { @($script:Fake.Calls | Where-Object { $_.Path -like '/api/injects*' -and $_.Method -ne 'GET' }) }
+    }
+
+    Context 'pure rules' {
+        It 'armable = pending, or held with nothing out (<Status> -> <Armable>)' -ForEach @(
+            @{ Status = 'pending'; Armable = $true }
+            @{ Status = 'held'; Armable = $true }
+            @{ Status = 'held part-way'; Armable = $false }
+            @{ Status = 'firing'; Armable = $false }
+            @{ Status = 'fired'; Armable = $false }
+            @{ Status = 'skipped'; Armable = $false }
+            @{ Status = 'failed'; Armable = $false }
+        ) {
+            $row = New-SpentRow (Get-FixturePack)['runSheet']['items'][1] -Status $Status
+            Test-InjectArmable -Row $row | Should -Be $Armable
+        }
+
+        It 'plan without the switch: a <Status> item is skipped, flagged NOT armable, and the warning names -ReloadFiredRunSheet' -ForEach @(
+            @{ Status = 'fired'; Text = 'fired' }
+            @{ Status = 'skipped'; Text = 'skipped' }
+            @{ Status = 'failed'; Text = 'failed' }
+            @{ Status = 'held part-way'; Text = 'held part-way \(1/3 posts out\)' }
+        ) {
+            $pack = Get-FixturePack
+            $manifest = New-SeedManifest; $manifest['injects']['i02'] = [ordered]@{ itemId = 'item-2' }
+            $plan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue @(New-SpentRow $pack['runSheet']['items'][1] -Id 'item-2' -Status $Status) -PersonaIds $script:Personas
+            $plan.Items[1].Action | Should -Be 'skip'
+            $plan.Items[1].Armable | Should -BeFalse
+            @($plan.NotArmable | ForEach-Object Key) | Should -Be @('i02')
+            $plan.Items[1].Reason | Should -Match "in the run sheet \($Text\)"
+            $plan.Warnings | Should -Match "i02 is $Text \(rehearsal\?\): the console has nothing to fire\. Run again with -ReloadFiredRunSheet"
+            $plan.ToCreate | Should -Be 1                                     # i01 only (not in the manifest)
+        }
+
+        It 'plan with the switch: a spent item is reloaded (Replaces = the old id); a firing one is refused; an armable one is skipped' {
+            $pack = Get-FixturePack
+            $manifest = New-SeedManifest
+            $manifest['injects']['i01'] = [ordered]@{ itemId = 'item-1' }
+            $manifest['injects']['i02'] = [ordered]@{ itemId = 'item-2' }
+            $queue = @((New-SpentRow $pack['runSheet']['items'][0] -Id 'item-1' -Status 'fired'), (New-SpentRow $pack['runSheet']['items'][1] -Id 'item-2' -Status 'pending'))
+            $plan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $queue -PersonaIds $script:Personas -ReloadFired
+            @($plan.Items | ForEach-Object { "$($_.Key)=$($_.Action)" }) | Should -Be @('i01=reload', 'i02=skip')
+            $plan.Items[0].Replaces | Should -Be 'item-1'
+            $plan.Items[0].ItemId | Should -BeNullOrEmpty
+            $plan.ToCreate | Should -Be 1
+            $plan.NotArmable | Should -BeNullOrEmpty
+
+            Set-RowState $queue[0] 'pending'; Set-RowState $queue[1] 'firing'
+            $plan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $queue -PersonaIds $script:Personas -ReloadFired
+            @($plan.Items | ForEach-Object { "$($_.Key)=$($_.Action)" }) | Should -Be @('i01=skip', 'i02=refuse')
+            @($plan.Refused | ForEach-Object Key) | Should -Be @('i02')
+            $plan.Items[1].Reason | Should -Match 'is firing .*wait for it to finish, or Hold it in the console'
+        }
+
+        It 'adopt-by-match never takes a spent copy: a lost manifest creates a fresh one and says why; an armable copy wins over a fired one' {
+            $pack = Get-FixturePack
+            $fired = New-SpentRow $pack['runSheet']['items'][0] -Id 'item-fired' -Status 'fired'
+            $plan = Get-InjectPlan -Pack $pack -Manifest (New-SeedManifest) -Queue @($fired) -PersonaIds $script:Personas
+            $plan.Items[0].Action | Should -Be 'create'
+            $plan.Items[0].Reason | Should -Be 'new; the copy already in the run sheet is fired, so a fresh one is created'
+            $armed = New-SpentRow $pack['runSheet']['items'][0] -Id 'item-armed' -Status 'pending'
+            $plan = Get-InjectPlan -Pack $pack -Manifest (New-SeedManifest) -Queue @($fired, $armed) -PersonaIds $script:Personas
+            "$($plan.Items[0].Action):$($plan.Items[0].ItemId)" | Should -Be 'adopt:item-armed'
+            @(Find-InjectItemMatches -PackItem $pack['runSheet']['items'][0] -Rows @($fired, $armed) -PersonaIds $script:Personas -Claimed $null | ForEach-Object id) | Should -Be @('item-armed')
+        }
+
+        It 'a spent manifest item with an armable copy already in the queue adopts that copy (no switch, nothing created)' {
+            # e.g. a reload whose create landed but whose answer was lost, then a plain re-run
+            $pack = Get-FixturePack
+            $manifest = New-SeedManifest; $manifest['injects']['i01'] = [ordered]@{ itemId = 'item-old' }
+            $queue = @((New-SpentRow $pack['runSheet']['items'][0] -Id 'item-old' -Status 'fired'), (New-SpentRow $pack['runSheet']['items'][0] -Id 'item-new'))
+            $plan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $queue -PersonaIds $script:Personas
+            "$($plan.Items[0].Action):$($plan.Items[0].ItemId):$($plan.Items[0].Replaces)" | Should -Be 'adopt:item-new:item-old'
+            $plan.Items[0].Armable | Should -BeTrue
+        }
+
+        It 'a superseded id is never adopted again, even when it is armable once more (unskipped)' {
+            $pack = Get-FixturePack
+            $manifest = New-SeedManifest
+            $manifest['injects']['i01'] = [ordered]@{ itemId = 'item-deleted'; superseded = @('item-old') }
+            $plan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue @(New-SpentRow $pack['runSheet']['items'][0] -Id 'item-old' -Status 'pending') -PersonaIds $script:Personas
+            $plan.Items[0].Action | Should -Be 'create'
+            $plan.Claimed.Contains('item-old') | Should -BeTrue
+        }
+
+        It 'S-2: two armable copies in the queue: the first is adopted and the duplicate is reported' {
+            $pack = Get-FixturePack
+            $queue = @((New-SpentRow $pack['runSheet']['items'][0] -Id 'item-a'), (New-SpentRow $pack['runSheet']['items'][0] -Id 'item-b'))
+            $plan = Get-InjectPlan -Pack $pack -Manifest (New-SeedManifest) -Queue $queue -PersonaIds $script:Personas
+            $plan.Items[0].ItemId | Should -Be 'item-a'
+            $plan.Warnings | Should -Match 'i01 matches 2 items in the run sheet \(item-a, item-b\): a duplicate is already in the queue'
+        }
+
+        It 'L-1: "me" must itself be on the assignee list' {
+            $roster = [ordered]@{ me = 'id-me'; assignees = @([ordered]@{ id = 'id-eve'; displayName = 'Eve Evaluator'; role = 'evaluator' }) }
+            $result = Resolve-InjectAssignees -Items @([ordered]@{ key = 'a'; assignee = 'me' }) -Roster $roster
+            $result.Unknown | Should -Be @('me')
+            $result.Ids.Count | Should -Be 0
+        }
+
+        It 'L-2: a reply to a post of an earlier item that was loaded again is stale; a sibling reply never is' {
+            $pack = Get-FixturePack
+            $row = New-SpentRow $pack['runSheet']['items'][1] -Id 'item-2'
+            $row['posts'][1]['replyTo'] = [ordered]@{ injectPostId = 'item-2-p1' }           # { sequence: 1 }, as stored
+            $row['posts'][2]['replyTo'] = [ordered]@{ injectPostId = 'old-i01-p1' }          # { item: i01, sequence: 1 }
+            @(Get-InjectStaleReplies -PackItem $pack['runSheet']['items'][1] -Row $row -PostIds @{} -InjectPostIds @{ i01 = @('new-i01-p1') }) |
+                Should -Be @('post 1 of i01 (i01 was loaded again since)')
+            @(Get-InjectStaleReplies -PackItem $pack['runSheet']['items'][1] -Row $row -PostIds @{} -InjectPostIds @{ i01 = @('old-i01-p1') }) | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'end to end' {
+        BeforeEach {
+            $script:Fake = New-FakePulse
+            $env:PULSE_STAFF_SECRET = $script:Fake.Secret
+            Mock Invoke-WebRequest { Invoke-FakePulse -Fake $script:Fake -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType }
+            Mock Invoke-MediaRangeRequest { 206 }
+            Mock Start-Sleep { }
+            Remove-Item -Recurse -Force (Join-Path $TestDrive 'manifests') -ErrorAction SilentlyContinue
+        }
+        AfterEach { $env:PULSE_STAFF_SECRET = $null }
+
+        It 'a <Status> item (a rehearsal''s) is reported in the plan and fails the self-check (exit 1, ❌, names -ReloadFiredRunSheet)' -ForEach @(
+            @{ Status = 'fired'; Text = 'fired' }
+            @{ Status = 'skipped'; Text = 'skipped' }
+            @{ Status = 'failed'; Text = 'failed' }
+            @{ Status = 'held part-way'; Text = 'held part-way \(1/3 posts out\)' }
+        ) {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Set-RowState $script:Fake.Injects[1] $Status                    # i02, the burst
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match "! i02  in the run sheet \($Text\) — NOT armable: the console has nothing to fire"
+            $run.Text | Should -Match "\[WARN\] i02 is $Text \(rehearsal\?\): the console has nothing to fire\. Run again with -ReloadFiredRunSheet"
+            $run.Text | Should -Match "❌ run-sheet items the console cannot fire: i02 \($Text\)\. After a rehearsal, run again with -ReloadFiredRunSheet"
+            $run.Text | Should -Match 'NOT READY'
+            Get-InjectWrites | Should -BeNullOrEmpty                          # nothing created without the switch
+        }
+
+        It 'a firing item fails the self-check too' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Set-RowState $script:Fake.Injects[1] 'firing'
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match '❌ run-sheet items the console cannot fire: i02 \(firing\)'
+            $run.Text | Should -Match 'i02 is firing \(a burst still releasing its posts, or suspended by PAUSE INJECTS or FREEZE\)'
+        }
+
+        It '-ReloadFiredRunSheet creates exactly one fresh copy per spent item, never touches the old ones, and creates zero on a second run' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $old = @($script:Fake.Injects | ForEach-Object { $_.id })
+            Set-RowState $script:Fake.Injects[0] 'fired'
+            Set-RowState $script:Fake.Injects[1] 'skipped'
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
+            $run.Code | Should -Be 0 -Because $run.Text
+            (Get-FakeCalls POST '/api/injects').Count | Should -Be 2
+            @(Get-InjectWrites | Where-Object { $_.Path -ne '/api/injects' }) | Should -BeNullOrEmpty   # no fire, delete, reorder, hold…
+            $script:Fake.Injects.Count | Should -Be 4
+            @($script:Fake.Injects[0, 1] | ForEach-Object status) | Should -Be @('fired', 'skipped')   # the old ones, untouched
+            $manifest = Get-InjectManifestFor
+            $manifest['i01']['itemId'] | Should -Be $script:Fake.Injects[2].id
+            $manifest['i02']['itemId'] | Should -Be $script:Fake.Injects[3].id
+            @($manifest['i01']['superseded']) | Should -Be @($old[0])
+            @($manifest['i02']['superseded']) | Should -Be @($old[1])
+            # i02's fresh copy replies to i01's FRESH post, not the fired one.
+            (ConvertFrom-SeedJson (Get-FakeCalls POST '/api/injects')[1].Body)['posts'][2]['replyTo']['injectPostId'] | Should -Be $script:Fake.Injects[2].posts[0].id
+            $run.Text | Should -Match "i01  post  .* -> $($script:Fake.Injects[2].id) \(a fresh copy; the fired $($old[0]) stays in the console as it is\)"
+            $run.Text | Should -Match '✅ every run-sheet item is armable'
+
+            $script:Fake.Calls.Clear()
+            $again = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
+            $again.Code | Should -Be 0 -Because $again.Text
+            Get-InjectWrites | Should -BeNullOrEmpty
+            $script:Fake.Injects.Count | Should -Be 4
+        }
+
+        It '-ReloadFiredRunSheet leaves armable items alone, and warns that one still replies to the reloaded item''s old post (L-2)' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Set-RowState $script:Fake.Injects[0] 'fired'                    # i01 fired in a rehearsal; i02 still pending
+            $run = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
+            $run.Code | Should -Be 0 -Because $run.Text
+            (Get-FakeCalls POST '/api/injects').Count | Should -Be 3        # 2 on the first run + i01's fresh copy
+            $run.Text | Should -Match '\[WARN\] i02 still replies to the earlier copy of post 1 of i01 \(i01 was loaded again since\), not the current one: at fire it would fail or answer the old post\. Delete i02 in the console and run again'
+        }
+
+        It 'an uncertain create during a reload adopts the fresh copy (never the fired one), once' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $old = $script:Fake.Injects[0].id
+            Set-RowState $script:Fake.Injects[0] 'fired'
+            $script:Fake.InjectFaults[3] = 'lost-after-write'
+            $run = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
+            $run.Code | Should -Be 0 -Because $run.Text
+            (Get-FakeCalls POST '/api/injects').Count | Should -Be 3
+            $script:Fake.Injects.Count | Should -Be 3
+            $manifest = Get-InjectManifestFor
+            $manifest['i01']['itemId'] | Should -Be $script:Fake.Injects[2].id
+            $manifest['i01']['adoptedAt'] | Should -Not -BeNullOrEmpty
+            @($manifest['i01']['superseded']) | Should -Be @($old)
+            $run.Text | Should -Match 'adopted, not sent again'
+        }
+
+        It 'an uncertain reload that did not land stops (wait a minute; no -Resume needed); the next reload creates it once' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Set-RowState $script:Fake.Injects[0] 'fired'
+            $script:Fake.InjectFaults[3] = 'lost-before-write'
+            $stopped = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
+            $stopped.Code | Should -Be 1
+            $stopped.Text | Should -Match 'Wait about a minute'
+            $stopped.Text | Should -Match 'run the same command again \(no -Resume needed: the posts are all in\)'
+            $again = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
+            $again.Code | Should -Be 0 -Because $again.Text
+            (Get-FakeCalls POST '/api/injects').Count | Should -Be 4        # 2 + the lost one + the real one
+            $script:Fake.Injects.Count | Should -Be 3
+        }
+
+        It '-ReloadFiredRunSheet refuses an item that is still firing, before any write' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Set-RowState $script:Fake.Injects[1] 'firing'
+            Set-RowState $script:Fake.Injects[0] 'fired'
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match '\[FAIL\] i02 is firing .*Hold it in the console, then run again\. Nothing was written\.'
+            @($script:Fake.Calls | Where-Object { $_.Method -ne 'GET' -and $_.Path -ne '/api/auth/staff/login' }) | Should -BeNullOrEmpty
+        }
+
+        It '-WhatIf -ReloadFiredRunSheet sends nothing and says a live run decides' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Set-RowState $script:Fake.Injects[0] 'fired'
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed @{ WhatIf = $true; ReloadFiredRunSheet = $true }
+            $run.Code | Should -Be 0
+            @($script:Fake.Calls | ForEach-Object { "$($_.Method) $($_.Path)" }) | Should -Be @('GET /api/exercise-context')
+            $run.Text | Should -Match '= i01  in the manifest; a live run checks it can still be fired'
+            $run.Text | Should -Match '-WhatIf cannot see statuses: a live run decides which items are spent'
+        }
+
+        It 'L-1: "me" not on the exercise''s assignee list stops before any write' {
+            $script:Fake.Roster = @($script:Fake.Roster | Where-Object { $_.id -ne $script:Fake.StaffId })
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match 'unknown run-sheet assignee\(s\): me\. Nothing was written\.'
+            $run.Text | Should -Match '"me" is controller1, who is not on this exercise''s assignee list'
+            @($script:Fake.Calls | Where-Object { $_.Method -ne 'GET' -and $_.Path -ne '/api/auth/staff/login' }) | Should -BeNullOrEmpty
+        }
     }
 }
 
@@ -1701,9 +1983,11 @@ Describe 'Secrets never leave memory' {
 
 Describe 'Public APIs only' {
     BeforeAll {
-        # The story's list, written out here independently of the script's own allowlist.
-        $script:Allowed = @('/api/exercise-context', '/api/auth/staff/login', '/api/steering/pause-tier', '/api/staff/media', '/api/media',
-            '/api/personas', '/api/staff/personas/{id}', '/api/posts', '/api/feed', '/api/injects', '/api/injects/assignees')
+        # The story's list, read from the "Public APIs only" criterion of 24-seed-script.md itself (every backticked
+        # /api/ path in it), independently of the script's own allowlist.
+        $story = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../../docs/features/demo-polish/24-seed-script.md') -Raw
+        $criterion = [regex]::Match($story, '(?s)\*\*Public APIs only\.\*\*(.*?)(?=\r?\n- \[)').Groups[1].Value
+        $script:Allowed = @([regex]::Matches($criterion, '`(/api/[^`]+)`') | ForEach-Object { $_.Groups[1].Value })
         function Get-ApiPathsIn([string] $Text) {
             [regex]::Matches($Text, '/api/[A-Za-z0-9_\-/{}.]*') | ForEach-Object {
                 $path = $_.Value.TrimEnd('/', '.')
@@ -1733,7 +2017,9 @@ Describe 'Public APIs only' {
         $script:ScriptText | Should -Not -Match 'Invoke-Az\b|\baz\s+(webapp|account)'
     }
 
-    It 'its own allowlist matches the story' {
+    It 'its own allowlist matches the story''s list exactly (read from 24-seed-script.md)' {
+        $script:Allowed | Should -Be @('/api/exercise-context', '/api/auth/staff/login', '/api/steering/pause-tier', '/api/staff/media', '/api/media',
+            '/api/personas', '/api/staff/personas/{id}', '/api/posts', '/api/feed', '/api/injects', '/api/injects/assignees')
         Get-SeedApiAllowlist | Should -Be $script:Allowed
     }
 

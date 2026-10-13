@@ -457,7 +457,8 @@ violation, never partially applies. `import(export(x))` deep-equals `x`.
 ### 1.10 Seed-pack schema (S1/S2) — `docs/demo/pack/pack.json`, `pulse.demopack.v1`
 
 Media files live next to it under `docs/demo/pack/media/**`. Media references are pack-local `key`s; S1 resolves
-them to uploaded `MediaAsset` ids and rewrites them when it exports the run sheet.
+them to uploaded `MediaAsset` ids, and rewrites the run sheet's references the same way when it loads it through
+`POST /api/injects`.
 
 ```jsonc
 {
@@ -474,8 +475,9 @@ them to uploaded `MediaAsset` ids and rewrites them when it exports the run shee
               "replyTo": "p00",                                       // post key; parent must appear earlier in the array
               "baseline": { "like": 290, "repost": 150, "reply": 64 } }],
   "runSheet": { "items": [ /* InjectItemWrite shape (inject-queue implementation.md § Demo slice) plus a pack `key`;
-                            posts name `persona` by handle, media[].ref (pack key), replyTo = {postKey} | {sequence}
-                            | {item, sequence}; S1 rewrites them to ids and POSTs each to /api/injects */ ] }
+                            `assignee` ("me" or a staff display name) replaces assigneeId; posts name `persona` by
+                            handle, media[].ref (pack key), replyTo = {postKey} | {sequence} | {item, sequence};
+                            S1 rewrites them to ids and POSTs each to /api/injects */ ] }
 }
 ```
 

@@ -41,15 +41,16 @@
          A 201 is recorded in the manifest at once. On a 429 it waits the Retry-After and retries. A 400
          stops the run and prints the server's reason as it is. A create is not idempotent, so after an
          uncertain outcome (no response, 408, a 5xx or an unreadable 2xx) it never simply sends it again:
-         it re-reads GET /api/injects and adopts an item with the same kind, title and posts, or stops and
-         says so (run again with -Resume).
+         it re-reads GET /api/injects and adopts an armable item with the same kind, title and posts, or
+         stops and says so (wait about a minute and run the same command again; no -Resume needed).
      11. Checks the pause tier again (same rule) and reports what it found or set. The tier lives in
          memory, and every reset or restart sets it back to "running". After any reset, run this script
          again or pause from the console.
      12. Self-check. GET /api/feed must show at least the seeded top-level posts. Every media URL (post
          media, posters, avatars, banners) must answer a ranged GET (Range: bytes=0-1) with 206. Every
-         run-sheet item must be in GET /api/injects with the pack's post count. It prints a ✅/❌ summary
-         and exits 1 if any check failed.
+         run-sheet item must be in GET /api/injects with the pack's post count, and armable: pending, or
+         held with nothing out (see AFTER A REHEARSAL). It prints a ✅/❌ summary and exits 1 if any check
+         failed.
 
     RE-RUNNING IS SAFE. A manifest records what has been seeded, at
     %LOCALAPPDATA%\Pulse\demo-seed\<exerciseId>.json on Windows or $HOME/.local/share/Pulse/demo-seed on
@@ -63,10 +64,21 @@
       - The feed only returns its 200 newest posts. When it is full and this machine's manifest does not know a
         post, an earlier copy could be hidden beyond the window, so the run stops before writing anything
         unless -AcceptUnverifiableFeed is passed. Run from the machine that holds the manifest instead.
-      - A run-sheet item whose id is still in the queue is skipped, whatever its status (an item fired in a
-        rehearsal is not loaded again). One that was deleted in the console is created again. An item the
-        manifest does not know is first matched against the queue by kind, title and posts (persona and
-        text), so a lost manifest does not duplicate the run sheet either.
+      - A run-sheet item whose id is still in the queue is skipped. One that was deleted in the console is
+        created again. An item the manifest does not know is first matched against the queue by kind, title
+        and posts (persona and text), so a lost manifest does not duplicate the run sheet either. Only an
+        ARMABLE item is ever adopted: pending, or held with nothing out yet.
+
+    AFTER A REHEARSAL. Firing a run-sheet item in a rehearsal spends it: the console cannot fire it again, the
+    server refuses to delete a fired item, and neither Reset-DemoState.ps1 nor Clear-DemoContent.ps1 touches
+    the inject queue. So every run checks each loaded item's status. The plan lists any item that is fired,
+    firing, skipped, failed or held part-way, and the self-check FAILS on it. Re-arm the run sheet with
+    -ReloadFiredRunSheet: each spent item gets a fresh copy (POST /api/injects, with the same uncertain-create
+    rules), the manifest records the new id and keeps the old one as superseded (never adopted again), and the
+    old item is never touched (no fire, delete or reorder). An item still firing is refused, and nothing is
+    written: wait for the burst to finish, or Hold it in the console, then run again. The old items stay in
+    the console; its run-sheet filter "Open" hides fired and skipped ones, and failed or skipped ones can be
+    deleted there (fired ones cannot).
 
     -Resume continues a partial run on its ORIGINAL scenario anchor. Without it, the script refuses to add
     posts next to ones already seeded, because their times would not line up. It says so and writes nothing.
@@ -108,9 +120,14 @@
     create (kind, title, post count). No sign-in and no writes.
 
 .PARAMETER Resume
-    Continue a partial run (or add posts to an earlier one) on the earlier run's scenario anchor. It also
-    finishes loading a run sheet that stopped part-way: items already in the queue are skipped or adopted,
-    never created twice.
+    Continue a partial run (or add posts to an earlier one) on the earlier run's scenario anchor. A run that
+    stopped while loading the run sheet needs no -Resume (the posts are all in by then): run the same command
+    again, and items already in the queue are skipped or adopted, never created twice.
+
+.PARAMETER ReloadFiredRunSheet
+    After a rehearsal that fired the run sheet: load a fresh copy of every loaded run-sheet item that is fired,
+    skipped, failed or held part-way, so the console has it to fire again. The old items stay as they are. An
+    item that is still firing stops the run before any write.
 
 .PARAMETER LeaveEngineRunning
     Do not touch the pause tier (the engine stays as it is, normally "running").
@@ -132,6 +149,11 @@
     pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1 -Resume
 
 .EXAMPLE
+    pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1 -ReloadFiredRunSheet
+
+    After a rehearsal that fired the run sheet: fresh copies of the spent items, so the console can fire them.
+
+.EXAMPLE
     pwsh scripts/uat/Seed-DemoContent.ps1 -PackPath scripts/uat/test-fixtures/demo-pack/pack.json -WhatIf
 #>
 [CmdletBinding()]
@@ -143,6 +165,7 @@ param(
     [DateTimeOffset] $ScenarioAnchor,
     [switch] $WhatIf,
     [switch] $Resume,
+    [switch] $ReloadFiredRunSheet,
     [switch] $LeaveEngineRunning,
     [switch] $AcceptUnverifiableFeed,
     [string] $ManifestDirectory
@@ -604,7 +627,8 @@ function Test-DemoPack {
     }
     $checkAlt = {
         param($Value, [string] $Where, [string] $MissingCode, [string] $LengthCode)
-        if ((Get-JsonKind $Value) -ne 'string' -or (Test-JsBlank $Value)) {
+        # Blank to EITHER trim: JavaScript's (U+FEFF) or .NET's, which the server uses (U+0085). Gate-1 S1b L-3.
+        if ((Get-JsonKind $Value) -ne 'string' -or (Test-JsBlank $Value) -or $Value.Trim().Length -eq 0) {
             & $add $MissingCode $Where 'alt text is required on every media item (NFR-001).'
             return
         }
@@ -1367,128 +1391,246 @@ function Test-InjectItemMatch {
     return $true
 }
 
-function Find-InjectItemMatch {
-    <# The first queue item that matches the run-sheet item and no other pack item has claimed, or $null. #>
+function Test-InjectArmable {
+    <#
+    .SYNOPSIS
+        True when the console can still fire this queue item as scripted: it is 'pending', or 'held' with
+        nothing published yet. Only pending and held items fire (InjectTransitions.WhyNotFireable). A fired,
+        firing, skipped or failed item (a rehearsal's) is not armable, and neither is a burst held part-way: Fire
+        would release only its remaining posts.
+    #>
+    param([AllowNull()] [System.Collections.IDictionary] $Row)
+    if (-not $Row) { return $false }
+    $status = [string] $Row['status']
+    if ($status -ceq 'pending') { return $true }
+    if ($status -cne 'held') { return $false }
+    if ([long] $Row['firedCount'] -gt 0) { return $false }
+    return @(@(Get-SeedList $Row 'posts') | Where-Object { [string] $_['status'] -ceq 'fired' }).Count -eq 0
+}
+
+function Get-InjectStatusText {
+    <# A queue item's status for messages: "fired", "skipped", or "held part-way (2/5 posts out)". #>
+    param([AllowNull()] [System.Collections.IDictionary] $Row)
+    if (-not $Row) { return 'missing' }
+    $status = [string] $Row['status']
+    if ($status -ceq 'held' -and -not (Test-InjectArmable -Row $Row)) {
+        $out = [math]::Max([long] $Row['firedCount'], @(@(Get-SeedList $Row 'posts') | Where-Object { [string] $_['status'] -ceq 'fired' }).Count)
+        return "held part-way ($out/$(@(Get-SeedList $Row 'posts').Count) posts out)"
+    }
+    return $status
+}
+
+function Find-InjectItemMatches {
+    <#
+    .SYNOPSIS
+        The queue items, in queue order, that match the run-sheet item (Test-InjectItemMatch) and that no pack
+        item has claimed. Only ARMABLE ones (pending, or held with nothing out): a fired, firing, skipped or
+        failed copy is never adopted, because the console could not fire it. -Unarmable returns the matching
+        copies the console can no longer fire instead (for messages only). The caller adopts the first; more
+        than one means a duplicate is already in the queue.
+    #>
     param(
         [Parameter(Mandatory)] [System.Collections.IDictionary] $PackItem,
         [AllowNull()] [AllowEmptyCollection()] [object[]] $Rows,
         [AllowNull()] [hashtable] $PersonaIds,
-        [AllowNull()] [System.Collections.Generic.HashSet[string]] $Claimed
+        [AllowNull()] [System.Collections.Generic.HashSet[string]] $Claimed,
+        [switch] $Unarmable
     )
     foreach ($row in @($Rows)) {
         if ($row -isnot [System.Collections.IDictionary]) { continue }
         $id = [string] $row['id']
         if (-not $id -or ($Claimed -and $Claimed.Contains($id))) { continue }
-        if (Test-InjectItemMatch -PackItem $PackItem -Row $row -PersonaIds $PersonaIds) { return $row }
+        if ((Test-InjectArmable -Row $row) -eq [bool] $Unarmable) { continue }
+        if (Test-InjectItemMatch -PackItem $PackItem -Row $row -PersonaIds $PersonaIds) { $row }
     }
-    return $null
 }
 
 function Get-InjectPlan {
     <#
     .SYNOPSIS
-        Per run-sheet item, in pack order: 'skip' (its id from the manifest is still in the queue, whatever its
-        status), 'adopt' (an unclaimed queue item with the same kind, title and posts: recorded, not created
-        again) or 'create' (new, or deleted in the console since it was loaded).
+        Per run-sheet item, in pack order, one Action:
+          skip    its id from the manifest is still in the queue. Armable says whether the console can still
+                  fire it; one that is not (fired, firing, skipped, failed: a rehearsal's) is listed in
+                  NotArmable and warned about, and the self-check fails on it.
+          adopt   an unclaimed, armable queue item with the same kind, title and posts: recorded, not created
+                  again. Replaces names the manifest's spent item it takes over from, if any.
+          create  new, or deleted in the console since it was loaded.
+          reload  -ReloadFired only: the manifest's item is fired, skipped, failed or held part-way, so a
+                  fresh copy is created; the old item is never touched and its id goes to the manifest's
+                  superseded list (Replaces).
+          refuse  -ReloadFired only: the manifest's item is still firing (a burst releasing its posts). The run
+                  stops before any write.
     .PARAMETER Queue
-        The items of GET /api/injects, or $null offline (-WhatIf: then the manifest alone decides).
+        The items of GET /api/injects, or $null offline (-WhatIf: then the manifest alone decides, and nothing
+        is known about statuses).
     #>
     param(
         [Parameter(Mandatory)] [System.Collections.IDictionary] $Pack,
         [Parameter(Mandatory)] [System.Collections.IDictionary] $Manifest,
         [AllowNull()] [AllowEmptyCollection()] [object[]] $Queue,
-        [AllowNull()] [hashtable] $PersonaIds
+        [AllowNull()] [hashtable] $PersonaIds,
+        [switch] $ReloadFired
     )
     $manifestItems = $Manifest['injects']
     $entryFor = { param($Key) if ($manifestItems -is [System.Collections.IDictionary] -and $manifestItems.Contains($Key)) { $manifestItems[$Key] } else { $null } }
     $online = $null -ne $Queue
     $rowsById = [hashtable]::new([StringComparer]::OrdinalIgnoreCase)
     if ($online) { foreach ($row in $Queue) { if ($row -is [System.Collections.IDictionary]) { $rowsById[[string] $row['id']] = $row } } }
-    # Ids the manifest already accounts for can never be adopted by another pack item.
+    # Ids the manifest accounts for can never be adopted by another pack item: the current ones, and every
+    # superseded one (a skipped copy that someone unskips must not come back as the pack's item).
     $claimed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    if ($online -and $manifestItems -is [System.Collections.IDictionary]) {
+    if ($manifestItems -is [System.Collections.IDictionary]) {
         foreach ($key in @($manifestItems.Keys)) {
             $id = [string] $manifestItems[$key]['itemId']
             if ($id -and $rowsById.Contains($id)) { [void] $claimed.Add($id) }
+            foreach ($old in @(Get-SeedList $manifestItems[$key] 'superseded')) { if ($old) { [void] $claimed.Add([string] $old) } }
         }
     }
     $items = [System.Collections.Generic.List[object]]::new()
     $warnings = [System.Collections.Generic.List[string]]::new()
+    $adoptFrom = {
+        param($Found)
+        if ($Found.Count -gt 1) {
+            $warnings.Add(("{0} matches {1} items in the run sheet ({2}): a duplicate is already in the queue. The first is used; delete the others in the console." -f
+                    $key, $Found.Count, (@($Found | ForEach-Object { [string] $_['id'] }) -join ', ')))
+        }
+        $Found[0]
+    }
 
     foreach ($item in @(Get-RunSheetItems -Pack $Pack)) {
         $key = [string] $item['key']
         $entry = & $entryFor $key
         $manifestId = if ($entry) { [string] $entry['itemId'] } else { '' }
-        $action = 'create'; $itemId = $null; $row = $null; $reason = 'new'
+        $action = 'create'; $itemId = $null; $row = $null; $reason = 'new'; $status = $null; $armable = $null; $replaces = $null
 
         if (-not $online) {
-            if ($manifestId) { $action = 'skip'; $itemId = $manifestId; $reason = 'in the manifest' }
+            if ($manifestId) { $action = 'skip'; $itemId = $manifestId; $reason = 'in the manifest; a live run checks it can still be fired' }
         }
         elseif ($manifestId -and $rowsById.Contains($manifestId)) {
             $row = $rowsById[$manifestId]
-            $action = 'skip'; $itemId = $manifestId; $reason = "in the run sheet ($([string] $row['status']))"
-            if (-not (Test-InjectItemMatch -PackItem $item -Row $row -PersonaIds $PersonaIds)) {
-                $warnings.Add("$key differs from the pack (edited in the console, or the pack changed after it was loaded); the queue's version stays. To load the pack's version, delete the item in the console and run again.")
+            $status = Get-InjectStatusText -Row $row
+            $armable = Test-InjectArmable -Row $row
+            $action = 'skip'; $itemId = $manifestId; $reason = "in the run sheet ($status)"
+            if ($armable) {
+                if (-not (Test-InjectItemMatch -PackItem $item -Row $row -PersonaIds $PersonaIds)) {
+                    $warnings.Add("$key differs from the pack (edited in the console, or the pack changed after it was loaded); the queue's version stays. To load the pack's version, delete the item in the console and run again.")
+                }
+            }
+            else {
+                # Spent (a rehearsal fired it, or it was skipped or failed). An armable identical copy already in
+                # the queue (an earlier reload that stopped part-way) takes over; nothing is created for that.
+                $found = @(Find-InjectItemMatches -PackItem $item -Rows $Queue -PersonaIds $PersonaIds -Claimed $claimed)
+                if ($found.Count -gt 0) {
+                    $reason = "the loaded copy is $status; adopting the armable copy already in the run sheet"
+                    $row = & $adoptFrom $found
+                    $action = 'adopt'; $itemId = [string] $row['id']; [void] $claimed.Add($itemId); $replaces = $manifestId
+                    $armable = $true; $status = Get-InjectStatusText -Row $row
+                }
+                elseif ([string] $row['status'] -ceq 'firing') {
+                    if ($ReloadFired) {
+                        $action = 'refuse'
+                        $reason = 'is firing (a burst still releasing its posts, or suspended by PAUSE INJECTS or FREEZE). -ReloadFiredRunSheet does not reload an item that is still firing: wait for it to finish, or Hold it in the console, then run again'
+                    }
+                    else {
+                        $warnings.Add("$key is firing (a burst still releasing its posts, or suspended by PAUSE INJECTS or FREEZE): the console has nothing left to fire. When it has finished (or after Hold in the console), run again with -ReloadFiredRunSheet to load a fresh copy.")
+                    }
+                }
+                elseif ($ReloadFired) {
+                    $action = 'reload'; $itemId = $null; $replaces = $manifestId
+                    $reason = "reload: the loaded copy is $status (rehearsal?); it stays in the console, untouched"
+                }
+                else {
+                    $warnings.Add("$key is $status (rehearsal?): the console has nothing to fire. Run again with -ReloadFiredRunSheet to load a fresh copy (the $([string] $row['status']) one stays in the console, untouched).")
+                }
             }
         }
         else {
-            $match = Find-InjectItemMatch -PackItem $item -Rows $Queue -PersonaIds $PersonaIds -Claimed $claimed
-            if ($match) {
-                $action = 'adopt'; $row = $match; $itemId = [string] $match['id']; [void] $claimed.Add($itemId)
+            $found = @(Find-InjectItemMatches -PackItem $item -Rows $Queue -PersonaIds $PersonaIds -Claimed $claimed)
+            if ($found.Count -gt 0) {
+                $row = & $adoptFrom $found
+                $action = 'adopt'; $itemId = [string] $row['id']; [void] $claimed.Add($itemId); $armable = $true; $status = Get-InjectStatusText -Row $row
                 $reason = 'already in the run sheet (same kind, title and posts)'
             }
-            elseif ($manifestId) { $reason = 'loaded before, but no longer in the run sheet (deleted in the console)' }
+            else {
+                if ($manifestId) { $reason = 'loaded before, but no longer in the run sheet (deleted in the console)' }
+                $spent = @(Find-InjectItemMatches -PackItem $item -Rows $Queue -PersonaIds $PersonaIds -Claimed $claimed -Unarmable)
+                if ($spent.Count -gt 0) { $reason += "; the copy already in the run sheet is $(Get-InjectStatusText -Row $spent[0]), so a fresh one is created" }
+            }
         }
         $items.Add([pscustomobject]@{
-                Key = $key; Item = $item; Action = $action; ItemId = $itemId; Row = $row; Reason = $reason
+                Key = $key; Item = $item; Action = $action; ItemId = $itemId; Row = $row; Reason = $reason; Status = $status; Armable = $armable
+                Replaces = $replaces; Superseded = @(if ($entry) { Get-SeedList $entry 'superseded' })
                 Kind = [string] $item['kind']; Title = [string] $item['title']; PostCount = @(Get-SeedList $item 'posts').Count
             })
     }
     [pscustomobject]@{
-        Items = $items.ToArray(); Warnings = $warnings.ToArray(); Online = $online
-        ToCreate = @($items | Where-Object Action -eq 'create').Count; Done = @($items | Where-Object Action -ne 'create').Count
+        Items = $items.ToArray(); Warnings = $warnings.ToArray(); Online = $online; Claimed = $claimed
+        ToCreate = @($items | Where-Object Action -in 'create', 'reload').Count
+        Done = @($items | Where-Object Action -in 'skip', 'adopt').Count
+        NotArmable = @($items | Where-Object { $_.Action -eq 'skip' -and $_.Armable -eq $false })
+        Refused = @($items | Where-Object Action -eq 'refuse')
     }
 }
 
 function Get-InjectStaleReplies {
     <#
     .SYNOPSIS
-        The pack post keys a queue item still replies to by an OLD post id: the post was archived (for example by
-        Clear-DemoContent.ps1) and posted again since the item was loaded, so the item would fail at fire.
+        What a queue item (skipped or adopted, so loaded earlier) still replies to by an OLD id, so at fire it
+        would fail or answer the wrong post: a pack post that was archived (for example by Clear-DemoContent.ps1) and posted again, or a post
+        of an earlier run-sheet item that was loaded again (-ReloadFiredRunSheet, or deleted and re-created).
+        The current ids are known by then: posts are made before the run sheet, and a reply names an EARLIER item.
+    .PARAMETER InjectPostIds
+        Run-sheet item key → the CURRENT ids of its posts in sequence order.
     #>
     param(
         [Parameter(Mandatory)] [System.Collections.IDictionary] $PackItem,
         [AllowNull()] [System.Collections.IDictionary] $Row,
-        [Parameter(Mandatory)] [hashtable] $PostIds
+        [Parameter(Mandatory)] [hashtable] $PostIds,
+        [hashtable] $InjectPostIds = @{}
     )
     if (-not $Row) { return }
+    $key = [string] $PackItem['key']
     $want = @(Get-SeedList $PackItem 'posts')
     $have = @(@(Get-SeedList $Row 'posts') | Sort-Object { [long] $_['sequence'] })
     for ($k = 0; $k -lt [math]::Min($want.Count, $have.Count); $k++) {
         $reply = $want[$k]['replyTo']
-        if ($reply -isnot [System.Collections.IDictionary] -or -not $reply.Contains('postKey')) { continue }
-        $current = [string] $PostIds[[string] $reply['postKey']]
-        $loaded = if ($have[$k]['replyTo'] -is [System.Collections.IDictionary]) { [string] $have[$k]['replyTo']['postId'] } else { '' }
-        if ($current -and $loaded -and $loaded -ne $current) { [string] $reply['postKey'] }
+        if ($reply -isnot [System.Collections.IDictionary]) { continue }
+        $loadedReply = $have[$k]['replyTo']
+        if ($reply.Contains('postKey')) {
+            $current = [string] $PostIds[[string] $reply['postKey']]
+            $loaded = if ($loadedReply -is [System.Collections.IDictionary]) { [string] $loadedReply['postId'] } else { '' }
+            if ($current -and $loaded -and $loaded -ne $current) { "$($reply['postKey']) (archived and posted again since)" }
+        }
+        elseif ($reply.Contains('item') -and [string] $reply['item'] -cne $key) {
+            $target = [string] $reply['item']
+            $children = @($InjectPostIds[$target])
+            $index = [long] $reply['sequence'] - 1
+            $current = if ($index -ge 0 -and $index -lt $children.Count) { [string] $children[$index] } else { '' }
+            $loaded = if ($loadedReply -is [System.Collections.IDictionary]) { [string] $loadedReply['injectPostId'] } else { '' }
+            if ($current -and $loaded -and $loaded -ne $current) { "post $($reply['sequence']) of $target ($target was loaded again since)" }
+        }
     }
 }
 
 function Resolve-InjectAssignees {
     <#
     .SYNOPSIS
-        Pack assignees → staff ids, from GET /api/injects/assignees: "me" is the signed-in staff user; anything
-        else must be exactly one assignee's displayName, ignoring case. Returns @{ Ids (assignee → id);
-        Unknown; Ambiguous; Known (the display names) }.
+        Pack assignees → staff ids, from GET /api/injects/assignees: "me" is the signed-in staff user, and must
+        itself be on the exercise's assignee list; anything else must be exactly one assignee's displayName,
+        ignoring case. Returns @{ Ids (assignee → id); Unknown; Ambiguous; Known (the display names) }.
     #>
     param(
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Items,
         [Parameter(Mandatory)] [System.Collections.IDictionary] $Roster
     )
     $byName = [hashtable]::new([StringComparer]::OrdinalIgnoreCase)
+    $rosterIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($row in @(Get-SeedList $Roster 'assignees')) {
         $name = ([string] $row['displayName']).Trim()
         $id = [string] $row['id']
-        if (-not $name -or -not $id) { continue }
+        if (-not $id) { continue }
+        [void] $rosterIds.Add($id)
+        if (-not $name) { continue }
         if (-not $byName.Contains($name)) { $byName[$name] = [System.Collections.Generic.List[string]]::new() }
         if (-not $byName[$name].Contains($id)) { $byName[$name].Add($id) }
     }
@@ -1500,7 +1642,10 @@ function Resolve-InjectAssignees {
         $want = $item['assignee'].Trim()
         if ($ids.Contains($want) -or $unknown -contains $want -or $ambiguous -contains $want) { continue }
         if ($want -ieq 'me') {
-            if ($Roster['me']) { $ids[$want] = [string] $Roster['me'] } else { $unknown.Add($want) }
+            # The server's assigneeId rule is the roster, so "me" must be on it too (a staff user can sign in to
+            # an exercise without being an assignee the queue accepts).
+            $me = [string] $Roster['me']
+            if ($me -and $rosterIds.Contains($me)) { $ids[$want] = $me } else { $unknown.Add($want) }
         }
         elseif ($byName.Contains($want) -and $byName[$want].Count -eq 1) { $ids[$want] = $byName[$want][0] }
         elseif ($byName.Contains($want)) { $ambiguous.Add($want) }
@@ -1798,9 +1943,9 @@ function Add-InjectItem {
     .DESCRIPTION
         A create is NOT idempotent: sending it again after an uncertain outcome could put the item in the queue
         twice. So no response (a network failure), a 408, a 5xx or a 2xx without a readable item never leads
-        to a second POST. GET /api/injects is re-read instead, and an item with the same kind, title and posts
-        that no other pack item has claimed is adopted. If there is none, the outcome stays 'uncertain' and the
-        run stops: the next run (-Resume) re-reads the queue and adopts or creates it then. A 429 has already
+        to a second POST. GET /api/injects is re-read instead, and an armable item (pending, or held with nothing
+        out) with the same kind, title and posts that no pack item has claimed is adopted. If there is none, the
+        outcome stays 'uncertain' and the run stops: the next run re-reads the queue and adopts or creates it. A 429 has already
         been waited out and retried by Invoke-PulseApi (the server refused it, so nothing was created).
     #>
     param(
@@ -1831,8 +1976,11 @@ function Add-InjectItem {
     if ($reread.Status -ne 200 -or $reread.Json -isnot [System.Collections.IDictionary]) {
         return & $result 'uncertain' $null 0 "$why; re-reading the run sheet answered $($reread.Status)"
     }
-    $match = Find-InjectItemMatch -PackItem $PackItem -Rows @(Get-SeedList $reread.Json 'items') -PersonaIds $PersonaIds -Claimed $Claimed
-    if ($match) { return & $result 'adopted' $match 0 $why }
+    # Only an armable, unclaimed copy can be the one just created (a fresh item is pending); a rehearsal's fired
+    # copy, or a superseded one, never is.
+    $found = @(Find-InjectItemMatches -PackItem $PackItem -Rows @(Get-SeedList $reread.Json 'items') -PersonaIds $PersonaIds -Claimed $Claimed)
+    if ($found.Count -gt 1) { $why += " ($($found.Count) matching items are in the run sheet: delete the extras in the console)" }
+    if ($found.Count -gt 0) { return & $result 'adopted' $found[0] 0 $why }
     return & $result 'uncertain' $null 0 "$why; it is not in the run sheet now"
 }
 
@@ -1917,7 +2065,7 @@ function Format-Bytes {
 function Write-SeedPlan {
     param(
         [object[]] $UploadPlan, [object[]] $PersonaPlan, [object] $PostPlan, [object] $Anchor,
-        [object] $InjectPlan, [switch] $LeaveEngineRunning, [int] $TopLevel, [switch] $Offline
+        [object] $InjectPlan, [switch] $ReloadFired, [switch] $LeaveEngineRunning, [int] $TopLevel, [switch] $Offline
     )
     $uploads = @($UploadPlan | Where-Object Action -eq 'upload')
     $images = @($uploads | Where-Object { $_.Unit.Kind -eq 'image' }).Count
@@ -1946,18 +2094,31 @@ function Write-SeedPlan {
     $sheetItems = @(if ($InjectPlan) { $InjectPlan.Items })
     if ($sheetItems.Count -eq 0) { Write-Host '  Run sheet       none in the pack (nothing to load)' }
     else {
-        $creating = @($sheetItems | Where-Object Action -eq 'create')
+        $creating = @($sheetItems | Where-Object Action -in 'create', 'reload')
         $scripted = [long] ($creating | Measure-Object -Property PostCount -Sum).Sum
-        Write-Host ("  Run sheet       {0} item(s) to create ({1} scripted post(s), each item pending in the console's queue); {2} already loaded" -f $creating.Count, $scripted, $InjectPlan.Done)
+        $reloading = @($creating | Where-Object Action -eq 'reload').Count
+        $spent = @($InjectPlan.NotArmable).Count
+        Write-Host ("  Run sheet       {0} item(s) to create ({1} scripted post(s), each pending in the console's queue{2}); {3} already loaded{4}" -f
+            $creating.Count, $scripted, $(if ($reloading) { "; $reloading fresh cop$(if ($reloading -eq 1) { 'y' } else { 'ies' }) of spent items" }), $InjectPlan.Done,
+            $(if ($spent) { ", $spent of them NOT armable (the console has nothing to fire)" }))
         foreach ($item in $creating) {
             $why = if ($item.Reason -ne 'new') { "; $($item.Reason)" } else { '' }
             Write-Host ("                    + {0}  {1,-5}  ""{2}"" ({3} post{4}){5}" -f $item.Key, $item.Kind, $item.Title, $item.PostCount, $(if ($item.PostCount -eq 1) { '' } else { 's' }), $why) -ForegroundColor DarkGray
         }
-        foreach ($item in $sheetItems | Where-Object Action -ne 'create') { Write-Host ("                    = {0}  {1}" -f $item.Key, $item.Reason) -ForegroundColor DarkGray }
+        foreach ($item in $sheetItems | Where-Object Action -notin 'create', 'reload') {
+            # = loaded and armable; ! loaded but spent (a rehearsal's); x refused (-ReloadFiredRunSheet on a firing item)
+            $mark = if ($item.Action -eq 'refuse') { 'x' } elseif ($item.Armable -eq $false) { '!' } else { '=' }
+            $note = if ($mark -eq '!') { ' — NOT armable: the console has nothing to fire (rehearsal?)' } else { '' }
+            Write-Host ("                    {0} {1}  {2}{3}" -f $mark, $item.Key, $item.Reason, $note) -ForegroundColor $(if ($mark -eq '=') { 'DarkGray' } else { 'Yellow' })
+        }
+    }
+    if ($ReloadFired) {
+        $when = if ($Offline) { ' (-WhatIf cannot see statuses: a live run decides which items are spent)' } else { '' }
+        Write-Host "  Reload          -ReloadFiredRunSheet: each loaded item that is fired, skipped, failed or held part-way gets a fresh copy; the old one is never touched$when"
     }
     if ($LeaveEngineRunning) { Write-Host '  Engine          left as it is (-LeaveEngineRunning)' }
     else { Write-Host '  Engine          pause tier: at least "engine" before the posts and again after seeding (a stricter tier is left as it is)' }
-    $sheetCheck = if ($sheetItems.Count -gt 0) { "; every run-sheet item in GET /api/injects with its posts" } else { '' }
+    $sheetCheck = if ($sheetItems.Count -gt 0) { "; every run-sheet item in GET /api/injects with its posts, and armable (pending, or held with nothing out)" } else { '' }
     Write-Host ("  Self-check      GET /api/feed shows >= {0} top-level post(s); Range bytes=0-1 -> 206 on every media URL{1}" -f $TopLevel, $sheetCheck)
     if ($Offline) { Write-Host '  (Offline plan from the pack and the manifest. A live run first re-checks the feed, the media library, the personas and the run sheet.)' -ForegroundColor DarkGray }
 }
@@ -1977,6 +2138,7 @@ function Invoke-DemoSeed {
         [Nullable[DateTimeOffset]] $ScenarioAnchor,
         [switch] $WhatIf,
         [switch] $Resume,
+        [switch] $ReloadFiredRunSheet,
         [switch] $LeaveEngineRunning,
         [switch] $AcceptUnverifiableFeed,
         [string] $ManifestDirectory
@@ -2047,9 +2209,9 @@ function Invoke-DemoSeed {
                 $fields = @($persona.Keys | Where-Object { $_ -ne 'handle' } | ForEach-Object { if ($_ -in 'avatar', 'banner') { "${_}MediaId" } else { $_ } })
                 [pscustomobject]@{ Handle = $persona['handle']; Fields = $fields }
             })
-        $injectPlan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $null -PersonaIds $null
+        $injectPlan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $null -PersonaIds $null -ReloadFired:$ReloadFiredRunSheet
         Write-SeedPlan -UploadPlan $uploadPlan -PersonaPlan $personaPlan -PostPlan $postPlan -Anchor $anchor -InjectPlan $injectPlan `
-            -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel -Offline
+            -ReloadFired:$ReloadFiredRunSheet -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel -Offline
         if ($anchor.Error) { Write-SeedLine WARN "A live run would stop here: $($anchor.Error)" }
         elseif ($anchor.Anchor) { foreach ($problem in @(Test-SeedReplyTimes -PostPlan $postPlan -Anchor $anchor.Anchor)) { Write-SeedLine WARN "A live run would stop here: $problem" } }
         Write-Host "`nWhatIf: nothing was sent or written. Sign-in, uploads, edits, posts, the run sheet and the pause tier were all skipped." -ForegroundColor Cyan
@@ -2157,6 +2319,7 @@ function Invoke-DemoSeed {
                     if ($assignees.Unknown.Count -gt 0) { Write-SeedLine FAIL ("unknown run-sheet assignee(s): {0}. Nothing was written." -f ($assignees.Unknown -join ', ')) }
                     if ($assignees.Ambiguous.Count -gt 0) { Write-SeedLine FAIL ("run-sheet assignee(s) matching more than one staff member: {0}. Nothing was written." -f ($assignees.Ambiguous -join ', ')) }
                     Write-Host ("  Staff assigned to this exercise: {0} (or ""me"" for {1})" -f ($assignees.Known -join ', '), $StaffUsername)
+                    if ($assignees.Unknown -icontains 'me') { Write-Host "  ""me"" is $StaffUsername, who is not on this exercise's assignee list: assign them in the console, or name another assignee." -ForegroundColor Yellow }
                     return 1
                 }
                 $assigneeIds = $assignees.Ids
@@ -2178,12 +2341,16 @@ function Invoke-DemoSeed {
                 $patch = Get-PersonaPatch -PackPersona $persona -Current $personaByHandle[$handle] -AvatarAssetId $avatar -BannerAssetId $banner -Applied $applied
                 [pscustomobject]@{ Handle = $handle; Fields = @($patch.Keys) }
             })
-        $injectPlan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $injectQueue -PersonaIds $personaIds
+        $injectPlan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $injectQueue -PersonaIds $personaIds -ReloadFired:$ReloadFiredRunSheet
         Write-Host "`nPlan" -ForegroundColor Cyan
         Write-SeedPlan -UploadPlan $uploadPlan -PersonaPlan $personaPlan -PostPlan $postPlan -Anchor $anchor -InjectPlan $injectPlan `
-            -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel
+            -ReloadFired:$ReloadFiredRunSheet -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel
         foreach ($warning in @($postPlan.Warnings) + @($injectPlan.Warnings)) { Write-SeedLine WARN $warning }
         if ($anchor.Error) { Write-SeedLine FAIL "$($anchor.Error) Nothing was written."; return 1 }
+        if ($injectPlan.Refused.Count -gt 0) {
+            foreach ($entry in $injectPlan.Refused) { Write-SeedLine FAIL "$($entry.Key) $($entry.Reason). Nothing was written." }
+            return 1
+        }
         $unverifiable = @($postPlan.Items | Where-Object Unverifiable)
         if ($unverifiable.Count -gt 0 -and -not $AcceptUnverifiableFeed) {
             Write-SeedLine FAIL ("the feed returned its full {0}-post window, so {1} post(s) cannot be checked against an earlier seed: {2}. The manifest on this machine does not know them, and an older copy may sit beyond the window. Nothing was written." -f
@@ -2348,32 +2515,48 @@ function Invoke-DemoSeed {
         Write-Host "`n9. Load the run sheet (the console's inject queue)" -ForegroundColor Cyan
         $injectIds = @{}            # run-sheet item key → inject item id
         $injectPostIds = @{}        # run-sheet item key → its post ids in sequence order (for replies from later items)
-        $claimedItems = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-        foreach ($entry in $injectPlan.Items) { if ($entry.ItemId) { [void] $claimedItems.Add($entry.ItemId) } }
+        # Every id the manifest accounts for (current and superseded), plus each one adopted or created below.
+        $claimedItems = $injectPlan.Claimed
         if ($injectPlan.Items.Count -eq 0) { Write-SeedLine SKIP 'the pack has no run-sheet items' }
         if ($injectPlan.ToCreate -gt 0) {
             $manifest['completedAt'] = $null
             Save-SeedManifest -Manifest $manifest -Path $manifestPath
         }
+        $recordItem = {
+            # The manifest entry for one item: its current id, and every id it replaced (superseded: never adopted again).
+            param($Entry, [string] $ItemId, [string] $Stamp)
+            $superseded = [System.Collections.Generic.List[string]]::new()
+            foreach ($old in @($Entry.Superseded) + @($Entry.Replaces)) {
+                if ($old -and [string] $old -ne $ItemId -and -not $superseded.Contains([string] $old)) { $superseded.Add([string] $old) }
+            }
+            $record = [ordered]@{ itemId = $ItemId; kind = $Entry.Kind; title = $Entry.Title; posts = $Entry.PostCount }
+            $record[$Stamp] = Format-SeedInstant ([DateTimeOffset]::UtcNow)
+            if ($superseded.Count -gt 0) { $record['superseded'] = $superseded.ToArray() }
+            $manifest['injects'][$Entry.Key] = $record
+            Save-SeedManifest -Manifest $manifest -Path $manifestPath
+        }
+        $rerun = 'run the same command again (no -Resume needed: the posts are all in)'
         foreach ($entry in $injectPlan.Items) {
             $item = $entry.Item
-            if ($entry.Action -ne 'create') {
+            if ($entry.Action -in 'skip', 'adopt') {
                 $injectIds[$entry.Key] = $entry.ItemId
                 $injectPostIds[$entry.Key] = @(Get-InjectChildIds -Row $entry.Row)
-                if ($entry.Action -eq 'adopt') {
-                    $manifest['injects'][$entry.Key] = [ordered]@{
-                        itemId = $entry.ItemId; kind = $entry.Kind; title = $entry.Title; posts = $entry.PostCount; adoptedAt = Format-SeedInstant ([DateTimeOffset]::UtcNow)
-                    }
-                    Save-SeedManifest -Manifest $manifest -Path $manifestPath
+                if ($entry.Action -eq 'adopt') { & $recordItem $entry $entry.ItemId 'adoptedAt' }
+                if ($entry.Armable -eq $false) {
+                    Write-SeedLine WARN "$($entry.Key) — $($entry.Reason) ($($entry.ItemId)): NOT armable, the console has nothing to fire"
+                    continue
                 }
                 Write-SeedLine SKIP "$($entry.Key) — $($entry.Reason) ($($entry.ItemId))"
-                $stale = @(Get-InjectStaleReplies -PackItem $item -Row $entry.Row -PostIds $postIds)
+                $stale = @(Get-InjectStaleReplies -PackItem $item -Row $entry.Row -PostIds $postIds -InjectPostIds $injectPostIds)
                 if ($stale.Count -gt 0) {
-                    Write-SeedLine WARN ("{0} still replies to the earlier copy of {1} (archived and posted again since it was loaded), so it would fail at fire. Delete {0} in the console and run again to load it against the current post." -f
+                    # An archived parent post fails at fire; a reloaded item's old post would get the reply instead
+                    # (or a 409 "reply parent not fired" if that copy never fired). Either way it is not the script.
+                    Write-SeedLine WARN ("{0} still replies to the earlier copy of {1}, not the current one: at fire it would fail or answer the old post. Delete {0} in the console and run again to load it against the current one." -f
                         $entry.Key, ($stale -join ', '))
                 }
                 continue
             }
+            # create, or reload (a fresh copy of a spent item; the old one is never touched)
             $assigneeId = if ($item['assignee'] -is [string]) { [string] $assigneeIds[$item['assignee'].Trim()] } else { $null }
             $body = New-InjectRequestBody -Item $item -PersonaIds $personaIds -MediaIds $mediaIds -MediaAlt $mediaAlt -PostIds $postIds `
                 -InjectPostIds $injectPostIds -AssigneeId $assigneeId
@@ -2382,12 +2565,12 @@ function Invoke-DemoSeed {
                 'refused' {
                     # The server's own reason, as it wrote it (a ProblemDetails "detail").
                     Write-SeedLine FAIL "$($entry.Key) refused (400): $($outcome.Detail)"
-                    Write-Host '  Nothing was created for it. Fix the pack (or the exercise) and run again with -Resume: items already loaded are skipped.' -ForegroundColor Yellow
+                    Write-Host "  Nothing was created for it. Fix the pack (or the exercise), then $rerun; items already loaded are skipped." -ForegroundColor Yellow
                     return 1
                 }
                 'failed' {
                     $why = switch ($outcome.Status) {
-                        429 { '429: still rate-limited after retries; wait a minute and run again with -Resume' }
+                        429 { "429: still rate-limited after retries; wait a minute, then $rerun" }
                         404 { '404: this API has no inject queue (deploy inject-queue 06 first)' }
                         { $_ -in 401, 403 } { "$_ — loading the run sheet needs a CONTROLLER assigned to this exercise" }
                         default { "$_ $($outcome.Detail)" }
@@ -2397,8 +2580,9 @@ function Invoke-DemoSeed {
                 }
                 'uncertain' {
                     Write-SeedLine FAIL "$($entry.Key): $($outcome.Detail)."
-                    Write-Host '  It may or may not have been created, so it was NOT sent again (that could duplicate it). Run again with -Resume:' -ForegroundColor Yellow
-                    Write-Host '  the run sheet is re-read first, and an item with the same kind, title and posts is adopted instead of created.' -ForegroundColor Yellow
+                    Write-Host '  It may or may not have been created, so it was NOT sent again (that could duplicate it). Wait about a minute (the' -ForegroundColor Yellow
+                    Write-Host "  server may still be finishing it), then $rerun. The run sheet is re-read first," -ForegroundColor Yellow
+                    Write-Host '  and an item with the same kind, title and posts is adopted instead of created.' -ForegroundColor Yellow
                     return 1
                 }
             }
@@ -2406,17 +2590,14 @@ function Invoke-DemoSeed {
             [void] $claimedItems.Add($itemId)
             $injectIds[$entry.Key] = $itemId
             $injectPostIds[$entry.Key] = @(Get-InjectChildIds -Row $outcome.Item)
-            $stamp = if ($outcome.Outcome -eq 'adopted') { 'adoptedAt' } else { 'createdAt' }
-            $manifest['injects'][$entry.Key] = [ordered]@{
-                itemId = $itemId; kind = $entry.Kind; title = $entry.Title; posts = $entry.PostCount; $stamp = Format-SeedInstant ([DateTimeOffset]::UtcNow)
-            }
-            Save-SeedManifest -Manifest $manifest -Path $manifestPath
+            & $recordItem $entry $itemId $(if ($outcome.Outcome -eq 'adopted') { 'adoptedAt' } else { 'createdAt' })
             $assigned = if ($assigneeId) { ", assigned to $($item['assignee'].Trim())" } else { '' }
             $summary = "{0}  {1}  ""{2}"" ({3} post{4}{5})" -f $entry.Key, $entry.Kind, $entry.Title, $entry.PostCount, $(if ($entry.PostCount -eq 1) { '' } else { 's' }), $assigned
+            $fresh = if ($entry.Action -eq 'reload') { " (a fresh copy; the $($entry.Status) $($entry.Replaces) stays in the console as it is)" } else { '' }
             if ($outcome.Outcome -eq 'adopted') {
-                Write-SeedLine WARN "$summary — $($outcome.Detail); the matching item was found in the run sheet and adopted, not sent again -> $itemId"
+                Write-SeedLine WARN "$summary — $($outcome.Detail); the matching item was found in the run sheet and adopted, not sent again -> $itemId$fresh"
             }
-            else { Write-SeedLine PASS "$summary -> $itemId" }
+            else { Write-SeedLine PASS "$summary -> $itemId$fresh" }
         }
         if ($injectPlan.ToCreate -gt 0) {
             $manifest['completedAt'] = Format-SeedInstant ([DateTimeOffset]::UtcNow)
@@ -2497,14 +2678,21 @@ function Invoke-DemoSeed {
                 $queueById = @{}
                 foreach ($row in @(Get-SeedList $response.Json 'items')) { $queueById[[string] $row['id']] = $row }
                 $sheetShort = [System.Collections.Generic.List[string]]::new()
+                $sheetSpent = [System.Collections.Generic.List[string]]::new()
                 foreach ($entry in $injectPlan.Items) {
                     $id = [string] $injectIds[$entry.Key]
                     $row = if ($id) { $queueById[$id] } else { $null }
                     if (-not $row) { $sheetShort.Add("$($entry.Key) (not in the run sheet)"); continue }
                     $have = @(Get-SeedList $row 'posts').Count
                     if ($have -ne $entry.PostCount) { $sheetShort.Add("$($entry.Key) ($have/$($entry.PostCount) posts)") }
+                    # M-1: present is not enough; the console must be able to fire it (a rehearsal may have).
+                    if (-not (Test-InjectArmable -Row $row)) { $sheetSpent.Add("$($entry.Key) ($(Get-InjectStatusText -Row $row))") }
                 }
                 & $check ($sheetShort.Count -eq 0) $(if ($sheetShort.Count) { "run-sheet items missing or changed: $($sheetShort -join ', ')" } else { "all $($injectPlan.Items.Count) run-sheet item(s) are in the console's queue with their posts" })
+                & $check ($sheetSpent.Count -eq 0) $(if ($sheetSpent.Count) {
+                        "run-sheet items the console cannot fire: $($sheetSpent -join ', '). After a rehearsal, run again with -ReloadFiredRunSheet to load fresh copies"
+                    }
+                    else { 'every run-sheet item is armable (pending, or held with nothing out)' })
             }
         }
 
@@ -2553,6 +2741,7 @@ $seedArguments = @{
     StaffUsername      = $StaffUsername
     WhatIf             = $WhatIf
     Resume             = $Resume
+    ReloadFiredRunSheet = $ReloadFiredRunSheet
     LeaveEngineRunning = $LeaveEngineRunning
     AcceptUnverifiableFeed = $AcceptUnverifiableFeed
     ManifestDirectory  = $ManifestDirectory

@@ -57,7 +57,10 @@ localisation, authoring more than the demo storyline needs.
   (`{ ref, alt? }`, ≤ 4 images or 1 video), and `replyTo` is one of `{ "postKey": "p07" }` (an opening-feed
   post), `{ "sequence": 1 }` (an earlier post of the same item) or `{ "item": "rs03", "sequence": 1 }` (a post of
   an earlier item). The pile-on replies fit a `burst`. The schema in `docs/demo/pack/schema/` and S1's
-  `-WhatIf` check all of it; `scripts/uat/test-fixtures/demo-pack/pack.json` has one item of each kind.
+  `-WhatIf` check all of it; `scripts/uat/test-fixtures/demo-pack/pack.json` has one item of each kind. S1 is
+  deliberately stricter than the server in two places: `burstWindowSeconds` on a `post` item is refused (the
+  server ignores it), and so is an explicit `null` for an optional field (the server reads it as absent);
+  only `"assignee": null` is accepted, meaning unassigned.
 
 ## Dependencies
 P3 (clips), the names decision (10/14), S1's schema (for validation). Blocks the final seed run Mon 10/19.
