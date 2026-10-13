@@ -46,7 +46,12 @@
  *     `POST /auth/refresh`, neither tab signed out. Without the Locks API: a
  *     failed refresh re-reads the stored refresh token and retries once with
  *     the new value instead of clearing;
- *   - a sign-out / sign-in this tab performs mid-refresh is not overwritten.
+ *   - a sign-out / sign-in this tab performs mid-refresh is not overwritten;
+ *   - only a REFUSAL (401/403 from `/auth/refresh`) clears the stores. A network
+ *     error, a timeout, a 5xx/429 or a token-less 2xx keeps the stored pair (the
+ *     user stays signed in, the original request fails with its own error, and
+ *     the next 401 tries the refresh again); the refresh call alone carries a
+ *     20 s timeout, never the shared instance.
  */
 import axios, {
   type AxiosAdapter,
@@ -76,15 +81,39 @@ function respond(
  * `validateStatus` rejects a status. A custom test adapter must do this
  * itself (see the module header) to reproduce a REAL 401 rejection.
  */
-function reject401(config: InternalAxiosRequestConfig): Promise<never> {
-  const response = respond(config, 401, {})
+function rejectStatus(config: InternalAxiosRequestConfig, status: number): Promise<never> {
+  const response = respond(config, status, {})
   return Promise.reject(
     new axios.AxiosError(
-      'Request failed with status code 401',
-      axios.AxiosError.ERR_BAD_REQUEST,
+      `Request failed with status code ${status}`,
+      status >= 500 ? axios.AxiosError.ERR_BAD_RESPONSE : axios.AxiosError.ERR_BAD_REQUEST,
       config,
       undefined,
       response,
+    ),
+  )
+}
+
+function reject401(config: InternalAxiosRequestConfig): Promise<never> {
+  return rejectStatus(config, 401)
+}
+
+/** What a built-in adapter rejects with when a request never got an answer (offline, reset). */
+function rejectNetworkError(config: InternalAxiosRequestConfig): Promise<never> {
+  return Promise.reject(
+    new axios.AxiosError('Network Error', axios.AxiosError.ERR_NETWORK, config, undefined, undefined),
+  )
+}
+
+/** What the built-in xhr/fetch adapters reject with when `config.timeout` elapses. */
+function rejectTimeout(config: InternalAxiosRequestConfig): Promise<never> {
+  return Promise.reject(
+    new axios.AxiosError(
+      `timeout of ${String(config.timeout)}ms exceeded`,
+      axios.AxiosError.ECONNABORTED,
+      config,
+      undefined,
+      undefined,
     ),
   )
 }
@@ -372,7 +401,7 @@ describe('silent refresh keeps the token store the current pair lives in (EL-10)
     expect(getAccessToken()).toBeNull()
   })
 
-  it('a malformed refresh response also clears both stores', async () => {
+  it('a 2xx refresh response with no tokens in it is not a refusal: the pair is kept', async () => {
     setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
     api.defaults.adapter = config =>
       config.url === '/auth/refresh'
@@ -381,8 +410,151 @@ describe('silent refresh keeps the token store the current pair lives in (EL-10)
 
     await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
 
+    expect(localStorage.getItem('pulse.auth.token')).toBe('expired')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('refresh-1')
+  })
+})
+
+describe('only a REFUSED refresh ends the session; no answer keeps the pair', () => {
+  /** An adapter whose refresh call fails with `refreshFailure` `failures` times, then rotates. */
+  function flakyRefreshAdapter(
+    refreshFailure: (config: InternalAxiosRequestConfig) => Promise<never>,
+    refreshCalls: string[],
+    failures = 1,
+  ): AxiosAdapter {
+    return config => {
+      if (config.url === '/auth/refresh') {
+        const sent = (JSON.parse(String(config.data)) as { refreshToken: string }).refreshToken
+        refreshCalls.push(sent)
+        if (refreshCalls.length <= failures) return refreshFailure(config)
+        return Promise.resolve(respond(config, 200, { token: 'new', refreshToken: 'refresh-2' }))
+      }
+      return config.headers.get('Authorization') === 'Bearer new'
+        ? Promise.resolve(respond(config, 200, { ok: true }))
+        : reject401(config)
+    }
+  }
+
+  describe.each([
+    ['persistent (participant)', { persist: true }, () => localStorage],
+    ['session-only (staff)', {}, () => sessionStorage],
+  ])('%s pair', (_label, options, storeOf) => {
+    it('a network error during refresh keeps both stores and the user stays signed in', async () => {
+      setTokens({ token: 'expired', refreshToken: 'refresh-1' }, options)
+      const refreshCalls: string[] = []
+      api.defaults.adapter = flakyRefreshAdapter(rejectNetworkError, refreshCalls)
+
+      // The caller sees an ordinary failure: the original request's own error.
+      await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+      expect(refreshCalls).toEqual(['refresh-1']) // no re-read retry for a non-refusal
+      expect(storeOf().getItem('pulse.auth.token')).toBe('expired')
+      expect(storeOf().getItem('pulse.auth.refreshToken')).toBe('refresh-1')
+      expect(getAccessToken()).toBe('expired')
+      expect(getRefreshToken()).toBe('refresh-1')
+
+      // The next 401 simply tries the refresh again, and it works.
+      const response = await api.get('/protected')
+      expect(response.status).toBe(200)
+      expect(refreshCalls).toEqual(['refresh-1', 'refresh-1'])
+      expect(storeOf().getItem('pulse.auth.token')).toBe('new')
+      expect(storeOf().getItem('pulse.auth.refreshToken')).toBe('refresh-2')
+    })
+
+    it('a 503 from the refresh endpoint does the same', async () => {
+      setTokens({ token: 'expired', refreshToken: 'refresh-1' }, options)
+      const refreshCalls: string[] = []
+      api.defaults.adapter = flakyRefreshAdapter(config => rejectStatus(config, 503), refreshCalls)
+
+      await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+      expect(storeOf().getItem('pulse.auth.token')).toBe('expired')
+      expect(storeOf().getItem('pulse.auth.refreshToken')).toBe('refresh-1')
+
+      await expect(api.get('/protected')).resolves.toMatchObject({ status: 200 })
+      expect(refreshCalls).toHaveLength(2)
+    })
+  })
+
+  it.each([500, 502, 429])('a %i from the refresh endpoint keeps the pair', async status => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    api.defaults.adapter = config =>
+      config.url === '/auth/refresh' ? rejectStatus(config, status) : reject401(config)
+
+    await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(localStorage.getItem('pulse.auth.token')).toBe('expired')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('refresh-1')
+  })
+
+  it('a refresh that times out is "no answer": nothing is cleared', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    api.defaults.adapter = config =>
+      config.url === '/auth/refresh' ? rejectTimeout(config) : reject401(config)
+
+    await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(localStorage.getItem('pulse.auth.token')).toBe('expired')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('refresh-1')
+  })
+
+  it.each([401, 403])('a %i from the refresh endpoint is a refusal: both stores are cleared', async status => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    sessionStorage.setItem('pulse.auth.token', 'stray')
+    api.defaults.adapter = config =>
+      config.url === '/auth/refresh' ? rejectStatus(config, status) : reject401(config)
+
+    await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
+  })
+
+  it('the re-read retry also keeps the pair when its own call gets no answer', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const refreshSent: string[] = []
+    api.defaults.adapter = config => {
+      if (config.url === '/auth/refresh') {
+        refreshSent.push((JSON.parse(String(config.data)) as { refreshToken: string }).refreshToken)
+        if (refreshSent.length === 1) {
+          // Refused, but another tab has meanwhile stored a rotated pair...
+          localStorage.setItem('pulse.auth.token', 'other-tab-access')
+          localStorage.setItem('pulse.auth.refreshToken', 'other-tab-refresh')
+          return reject401(config)
+        }
+        return rejectNetworkError(config) // ...and the retry then drops.
+      }
+      return reject401(config)
+    }
+
+    await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(refreshSent).toEqual(['refresh-1', 'other-tab-refresh'])
+    expect(localStorage.getItem('pulse.auth.token')).toBe('other-tab-access')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('other-tab-refresh')
+  })
+})
+
+describe('the refresh call carries a ~20 s timeout (that call only)', () => {
+  it('sets timeout: 20000 on POST /auth/refresh and on nothing else', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const timeouts = new Map<string, unknown>()
+    api.defaults.adapter = config => {
+      timeouts.set(String(config.url), config.timeout)
+      if (config.url === '/auth/refresh') {
+        return Promise.resolve(respond(config, 200, { token: 'new', refreshToken: 'refresh-2' }))
+      }
+      return config.headers.get('Authorization') === 'Bearer new'
+        ? Promise.resolve(respond(config, 200, { ok: true }))
+        : reject401(config)
+    }
+
+    await api.get('/protected')
+
+    expect(timeouts.get('/auth/refresh')).toBe(20_000)
+    // Not on the original request, and not a shared default.
+    expect(timeouts.get('/protected')).toBeFalsy()
+    expect(api.defaults.timeout).toBeFalsy()
   })
 })
 

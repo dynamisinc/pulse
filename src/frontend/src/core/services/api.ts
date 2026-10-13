@@ -24,9 +24,19 @@
  *     unnecessary token-exposure surface.
  *   - RESPONSE interceptor: on a 401, with a stored refresh token, attempts
  *     EXACTLY ONE silent `POST /auth/refresh` and retries the ORIGINAL
- *     request once on success, with the rotated token attached. A refresh
- *     failure (401 or a network error) clears BOTH token stores and the
- *     original 401 propagates — no retry loop. `/auth/refresh`, `/auth/logout`,
+ *     request once on success, with the rotated token attached. Only a
+ *     REFUSAL ends the session: when `/auth/refresh` itself answers 401 or 403
+ *     (the server says the refresh token is unknown, spent, revoked or past
+ *     its window; `SessionEndpoints` answers 401 for all of those) both token
+ *     stores are cleared and the original 401 propagates, with no retry loop.
+ *     A refresh that gets NO ANSWER, or an answer that is not a refusal (no
+ *     response at all, a network error, the 20 s timeout, a 5xx, a 429, a 2xx
+ *     with no tokens in it) does NOT sign anyone out, staff or participant:
+ *     the stored pair is kept, the original request is rejected with its own
+ *     error so the caller sees an ordinary failure, and the NEXT 401 simply
+ *     tries the refresh again. (Easy-login 07, amended: with day-long
+ *     participant sessions, one dropped request on a phone must never log
+ *     someone out of the exercise.) `/auth/refresh`, `/auth/logout`,
  *     the three login endpoints and the two participant easy-login endpoints
  *     (`/auth/join`, `/auth/word`) are excluded from ever TRIGGERING this
  *     path, so a failing refresh can't recursively retrigger itself, a logout
@@ -51,7 +61,10 @@
  *     before giving up: if another tab changed it since this attempt began,
  *     it retries ONCE with the new value instead of clearing;
  *   - never writes over, or clears, a sign-in/sign-out this tab performed while
- *     its refresh call was in flight (`getTokenGeneration()`).
+ *     its refresh call was in flight (`getTokenGeneration()`);
+ *   - gives the refresh call (that call only, never the shared instance) a 20 s
+ *     timeout, so a hung request cannot hold the Web Lock and stall every other
+ *     tab's refresh. A timeout counts as "no answer" (above): nothing is cleared.
  *
  * DELIBERATELY depends on `core/auth/tokenStore` ONLY — a dependency-free
  * leaf module — never on `core/auth/sessionResolver` or `session.tsx`, so
@@ -162,6 +175,14 @@ let refreshInFlight: Promise<string | null> | null = null
 const REFRESH_LOCK_NAME = 'pulse.auth.refresh'
 
 /**
+ * How long the `POST /auth/refresh` call may take before it is abandoned. Set on
+ * THAT call only (never `api.defaults`): the refresh runs while holding the
+ * origin-wide Web Lock, so a hung request would otherwise block every other
+ * tab's refresh. An abandoned call is "no answer", which clears nothing.
+ */
+const REFRESH_TIMEOUT_MS = 20_000
+
+/**
  * Runs `work` under the origin-wide refresh Web Lock, so tabs sharing
  * `localStorage` refresh ONE AT A TIME. Feature-detects `navigator.locks`
  * (absent in jsdom and older browsers) and degrades to running `work`
@@ -191,46 +212,62 @@ async function runUnderRefreshLock<T>(work: () => Promise<T>): Promise<T> {
 /** The outcome of one `POST /auth/refresh` attempt. */
 type RotationResult =
   | { readonly kind: 'rotated'; readonly token: string }
-  /** Refused, network error, or a malformed response: fail closed. */
-  | { readonly kind: 'failed' }
+  /** The server answered 401 or 403: the refresh token is no good (ends the session). */
+  | { readonly kind: 'refused' }
+  /**
+   * No usable answer: no response, a network error, the timeout, a 5xx or 429,
+   * or a 2xx without tokens. Says nothing about the session, so nothing is cleared.
+   */
+  | { readonly kind: 'unavailable' }
   /** This tab signed in or out while the call was in flight; its result is stale. */
   | { readonly kind: 'superseded' }
+
+/** `true` when the server itself refused the refresh token (401 or 403). */
+function isRefusal(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) return false
+  const status = error.response?.status
+  return status === 401 || status === 403
+}
 
 /**
  * One `POST /auth/refresh` with `refreshToken`. On success stores the rotated
  * pair in the SAME store the current pair lives in (never chosen by a caller).
- * Never throws and never clears anything: the caller decides what a failure
- * means.
+ * Never throws and never clears anything: the caller decides what a refusal
+ * means (and an `unavailable` result means nothing at all).
  */
 async function rotate(refreshToken: string): Promise<RotationResult> {
   const persist = isPersistentSession()
   const generation = getTokenGeneration()
-  let rotated: RefreshResponseBody | null
+  let body: RefreshResponseBody | null | undefined
+  let refused = false
   try {
     // `_pulseSkipAuthAttach`: the backend reads the refresh token from the
     // BODY, never the Authorization header — presenting the (possibly
     // expired) access token here is pointless and unnecessary exposure.
+    // `timeout`: this call only; see REFRESH_TIMEOUT_MS.
     const refreshRequestConfig: AxiosRequestConfig & PulseRequestFlags = {
       _pulseSkipAuthAttach: true,
+      timeout: REFRESH_TIMEOUT_MS,
     }
     const response = await api.post<RefreshResponseBody>(
       '/auth/refresh',
       { refreshToken },
       refreshRequestConfig,
     )
-    rotated = response.data
-  } catch {
-    rotated = null
+    body = response.data
+  } catch (error) {
+    refused = isRefusal(error)
   }
 
   // Signed out (or in as someone else) in THIS tab while the call was in
   // flight: writing the rotated pair would resurrect the old session, and
-  // clearing on a failure would wipe the new one. Leave the store alone.
+  // clearing after a refusal would wipe the new one. Leave the store alone.
   if (getTokenGeneration() !== generation) return { kind: 'superseded' }
 
-  const token = rotated?.token
-  const rotatedRefreshToken = rotated?.refreshToken
-  if (!token || !rotatedRefreshToken) return { kind: 'failed' }
+  if (refused) return { kind: 'refused' }
+  const token = body?.token
+  const rotatedRefreshToken = body?.refreshToken
+  if (!token || !rotatedRefreshToken) return { kind: 'unavailable' }
   setTokens({ token, refreshToken: rotatedRefreshToken }, { persist })
   return { kind: 'rotated', token }
 }
@@ -245,12 +282,15 @@ async function rotate(refreshToken: string): Promise<RotationResult> {
  *     back the stored token without calling the server.
  *  2. Otherwise `POST /auth/refresh` with the stored refresh token and store
  *     the rotated pair in the same store (see `rotate`).
- *  3. On a failure, re-read the stored refresh token. If it CHANGED since the
- *     attempt began (another tab rotated it without our noticing: the no-Locks
- *     path), retry ONCE with the new value instead of clearing.
- *  4. Any remaining failure (no refresh token, a refused/failed call, a
- *     malformed response) clears BOTH stores and returns `null` — fail-closed.
- *     No network call is made at all when there is no refresh token to present.
+ *  3. If the server REFUSED it (401/403), re-read the stored refresh token. If
+ *     it CHANGED since the attempt began (another tab rotated it without our
+ *     noticing: the no-Locks path), retry ONCE with the new value instead of
+ *     clearing.
+ *  4. A refusal that stands clears BOTH stores and returns `null` (fail-closed),
+ *     and so does having no refresh token to present at all (no network call is
+ *     made then). Any OTHER failure (no answer, timeout, 5xx, ...) returns
+ *     `null` and leaves the stored pair alone: the caller's original request
+ *     is rejected with its own error and the next 401 tries again.
  */
 async function performSilentRefresh(rejectedToken: string | null): Promise<string | null> {
   const current = getAccessToken()
@@ -266,13 +306,13 @@ async function performSilentRefresh(rejectedToken: string | null): Promise<strin
 
   const first = await rotate(refreshToken)
   if (first.kind === 'rotated') return first.token
-  if (first.kind === 'superseded') return null
+  if (first.kind !== 'refused') return null
 
   const latest = getRefreshToken()
   if (latest !== null && latest !== refreshToken) {
     const second = await rotate(latest)
     if (second.kind === 'rotated') return second.token
-    if (second.kind === 'superseded') return null
+    if (second.kind !== 'refused') return null
   }
 
   clearTokens()

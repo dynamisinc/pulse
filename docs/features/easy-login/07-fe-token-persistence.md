@@ -33,8 +33,15 @@ that race.
       test proves a signed-out browser has nothing in `localStorage`.
 - [ ] **Given** a silent refresh (`performSilentRefresh` in `core/services/api.ts`), **then** the rotated pair is
       stored **in the same store the current pair lives in** (a participant stays persistent, a staff user stays
-      session-only), without the caller passing an option. A refresh failure still clears both stores and the
-      original `401` propagates.
+      session-only), without the caller passing an option. A refresh the server **refuses** (`/auth/refresh`
+      answering `401` or `403`) clears both stores and the original `401` propagates. A refresh that gets **no
+      answer** (no response, a network error, the timeout, a `5xx` or `429`) clears **nothing**, for staff and
+      participants alike: the stored pair is kept, the original request is rejected with its own error, and the
+      next `401` tries the refresh again. The refresh call (that call only, not the shared axios instance) has a
+      20 s timeout, so a hung refresh cannot hold the Web Lock and block every other tab; a timeout counts as "no
+      answer". *(Amended by the orchestrator: the original wording cleared both stores on any refresh failure.
+      With day-long sessions, a dropped request must not log a participant out. The backend answers a bad refresh
+      token with `401` only, see `SessionEndpoints.RefreshAsync`.)*
 - [ ] **Given** `/auth/join` and `/auth/word`, **then** they are added to `NO_REFRESH_RETRY_PATHS` so a rejected link
       or word is never mistaken for an expired session and never triggers a refresh.
 - [ ] **Given** two tabs that receive a `401` at the same moment, **then** exactly one `POST /auth/refresh` is made
